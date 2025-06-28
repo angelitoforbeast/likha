@@ -9,19 +9,19 @@ use Google_Service_Sheets_ValueRange;
 use Google_Service_Sheets_BatchUpdateValuesRequest;
 
 use App\Models\LikhaOrder;
-use App\Models\GsheetSetting; // or LikhaOrderSetting if you're using a separate table
+use App\Models\LikhaOrderSetting; // or LikhaOrderSetting if you're using a separate table
 
 class LikhaOrderImportController extends Controller
 {
     public function import(Request $request)
     {
         if ($request->isMethod('get')) {
-            $setting = GsheetSetting::first();
+            $setting = LikhaOrderSetting::first();
             return view('likha_order.import', compact('setting'));
         }
 
         try {
-            $setting = GsheetSetting::first(); // Replace with LikhaOrderSetting::first() if separated
+            $setting = LikhaOrderSetting::first(); // Replace with LikhaOrderSetting::first() if separated
 
             if (!$setting || !$setting->sheet_id || !$setting->range) {
                 return redirect('/likha_order_import')->with('status', '❌ Missing sheet ID or range in settings.');
