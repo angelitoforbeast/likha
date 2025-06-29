@@ -13,7 +13,8 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-\Log::info("🚀 ImportLikhaFromGoogleSheet job started.");
+use App\Models\ImportStatus;
+
 class ImportLikhaFromGoogleSheet implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -46,7 +47,11 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
         $importedCount = 0;
         $skippedCount = 0;
         $firstImportedRow = null;
-
+        // Before the loop
+$status = ImportStatus::updateOrCreate(
+    ['job_name' => 'LikhaImport'],
+    ['is_complete' => false]
+);
         foreach ($values as $index => $row) {
             $rawDone = $row[8] ?? '';
             $doneFlag = strtolower(preg_replace('/\s+/', '', $rawDone));
@@ -54,7 +59,7 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             \Log::info("Row {$index} raw DONE value: [" . $rawDone . "] → cleaned: [" . $doneFlag . "]");
 
             if ($doneFlag === 'done') {
-                \Log::info("⏭️ Skipping row {$index} — marked as DONE.");
+               
                 $skippedCount++;
                 continue;
             }
@@ -83,6 +88,8 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             \Log::info("✅ Imported row {$rowNumber}");
             $importedCount++;
         }
+        // After the loop
+$status->update(['is_complete' => true]);
 
         if (!empty($updates)) {
             $batchBody = new Google_Service_Sheets_BatchUpdateValuesRequest([
@@ -97,7 +104,7 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
         if ($firstImportedRow !== null) {
             \Log::info("📌 First imported row: Row {$firstImportedRow}");
         } else {
-            \Log::info("ℹ️ No new rows were imported.");
+          
         }
     }
 }

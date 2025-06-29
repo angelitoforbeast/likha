@@ -3,33 +3,49 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Google_Client;
-use Google_Service_Sheets;
-use Google_Service_Sheets_ValueRange;
-use Google_Service_Sheets_BatchUpdateValuesRequest;
 use App\Jobs\ImportLikhaFromGoogleSheet;
-
 use App\Models\LikhaOrder;
-use App\Models\LikhaOrderSetting; // or LikhaOrderSetting if you're using a separate table
+use App\Models\LikhaOrderSetting;
+use App\Models\ImportStatus;
 
 class LikhaOrderImportController extends Controller
 {
+    public function import(Request $request)
+    {
+        if ($request->isMethod('get')) {
+            // If AJAX request, return JSON status
+            if ($request->ajax()) {
+                $status = ImportStatus::where('job_name', 'LikhaImport')->latest()->first();
+                return response()->json([
+                    'is_complete' => $status?->is_complete ?? false,
+                ]);
+            }
 
+            // Otherwise, return the Blade view
+            $setting = LikhaOrderSetting::first();
+            $status = ImportStatus::where('job_name', 'LikhaImport')->latest()->first();
 
-public function import(Request $request)
-{
-    if ($request->isMethod('get')) {
-        $setting = LikhaOrderSetting::first();
-        return view('likha_order.import', compact('setting'));
+            return view('likha_order.import', compact('setting', 'status'));
+        }
+
+        // Reset status before dispatching
+        ImportStatus::updateOrCreate(
+            ['job_name' => 'LikhaImport'],
+            ['is_complete' => false]
+        );
+
+        ImportLikhaFromGoogleSheet::dispatch();
+
+        return redirect('/likha_order_import');
     }
-
-    ImportLikhaFromGoogleSheet::dispatch();
-
-    return redirect('/likha_order_import')->with('status', '⏳ Import started in background. Please refresh later to see results.');
-}
 
 public function view(Request $request)
 {
+    if ($request->isMethod('delete')) {
+        \App\Models\LikhaOrder::truncate();
+        return redirect('/likha_order/view')->with('status', '🗑️ All records deleted.');
+    }
+
     $query = \App\Models\LikhaOrder::query();
 
     if ($request->filled('search')) {
@@ -54,7 +70,4 @@ public function view(Request $request)
 
     return view('likha_order.view', compact('orders', 'pages'));
 }
-
-
-
 }

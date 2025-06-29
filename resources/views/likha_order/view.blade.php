@@ -1,36 +1,57 @@
 <x-layout>
     <x-slot name="heading">Likha Order Records</x-slot>
 
-    <form method="GET" class="mb-4 flex flex-wrap gap-2 items-center">
-        <input type="text" name="search" value="{{ request('search') }}"
-            placeholder="Search name, phone, page..."
-            class="border rounded px-3 py-1 text-sm" />
+    {{-- Flash message --}}
+    @if(session('status'))
+        <div class="mb-4 p-3 rounded bg-green-100 text-green-800 text-sm">
+            {{ session('status') }}
+        </div>
+    @endif
 
-        <input type="date" name="date" value="{{ request('date') }}"
-            class="border rounded px-3 py-1 text-sm" />
+    {{-- Filter + Delete All --}}
+    <div class="mb-4 flex flex-wrap gap-2 items-center">
+        <form method="GET" class="flex flex-wrap gap-2 items-center">
+            <input type="text" name="search" value="{{ request('search') }}"
+                placeholder="Search name, phone, page..."
+                class="border rounded px-3 py-1 text-sm" />
 
-        <select name="page_name" class="border rounded px-3 py-1 text-sm">
-            <option value="">All Pages</option>
-            @foreach($pages as $page)
-                <option value="{{ $page }}" {{ request('page_name') == $page ? 'selected' : '' }}>
-                    {{ $page }}
-                </option>
-            @endforeach
-        </select>
+            <input type="date" name="date" value="{{ request('date') }}"
+                class="border rounded px-3 py-1 text-sm" />
 
-        <button type="submit"
-            class="bg-blue-600 text-white text-sm px-3 py-1 rounded hover:bg-blue-700">
-            🔍 Filter
-        </button>
+            <select name="page_name" class="border rounded px-3 py-1 text-sm">
+                <option value="">All Pages</option>
+                @foreach($pages as $page)
+                    <option value="{{ $page }}" {{ request('page_name') == $page ? 'selected' : '' }}>
+                        {{ $page }}
+                    </option>
+                @endforeach
+            </select>
 
-        <a href="{{ url('/likha_order/view') }}"
-            class="text-sm text-gray-500 underline ml-2">Reset</a>
-    </form>
-    
+            <button type="submit"
+                class="bg-blue-600 text-white text-sm px-3 py-1 rounded hover:bg-blue-700">
+                🔍 Filter
+            </button>
+
+            <a href="{{ url('/likha_order/view') }}"
+                class="text-sm text-gray-500 underline ml-2">Reset</a>
+        </form>
+
+        <form method="POST" action="{{ url('/likha_order/view') }}" onsubmit="return confirm('Are you sure you want to delete all records?')">
+            @csrf
+            @method('DELETE')
+            <button type="submit"
+                class="bg-red-600 text-white text-sm px-3 py-1 rounded hover:bg-red-700">
+                🗑️ Delete All
+            </button>
+        </form>
+    </div>
+
     {{-- Pagination --}}
     <div class="mt-4">
         {{ $orders->withQueryString()->links() }}
     </div>
+
+    {{-- Table --}}
     <div class="overflow-auto">
         <table class="min-w-full border text-sm">
             <thead class="bg-gray-200">
@@ -67,5 +88,4 @@
             </tbody>
         </table>
     </div>
-
 </x-layout>

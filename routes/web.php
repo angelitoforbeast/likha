@@ -19,8 +19,7 @@ Route::get('/fb_ads_data', [FacebookAdsController::class, 'fetch'])->name('fb_ad
 
 Route::get('/cpp', [CPPReportController::class, 'index']);
 
-
-Route::get('/likha_order/view', [LikhaOrderImportController::class, 'view']);
+Route::match(['get', 'delete'], '/likha_order/view', [LikhaOrderImportController::class, 'view']);
 Route::get('/likha_order_import/settings', [LikhaOrderSettingController::class, 'edit']);
 Route::post('/likha_order_import/settings', [LikhaOrderSettingController::class, 'update']);
 
