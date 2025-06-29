@@ -1,7 +1,4 @@
-<pre>
-Matrix: {{ count($matrix) }} pages
-Dates: {{ count($allDates) }} days
-</pre>
+
 <x-layout>
   <x-slot name="heading">CPP Summary</x-slot>
 
