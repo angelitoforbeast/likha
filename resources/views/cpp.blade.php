@@ -1,4 +1,3 @@
-
 <x-layout>
   <x-slot name="heading">CPP Summary</x-slot>
 
