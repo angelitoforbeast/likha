@@ -12,6 +12,8 @@ use App\Http\Controllers\CPPReportController;
 use App\Http\Controllers\FacebookAdsController;
 use App\Http\Controllers\AdsViewController;
 
+Route::view('/encoded_vs_upload', 'encoded_vs_upload')->name('encoded_vs_upload');
+
 Route::get('/ads_manager/ads', [AdsViewController::class, 'index']);
 
 

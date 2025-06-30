@@ -36,6 +36,7 @@
               <x-navlink href="/ads_manager/index" :active="request()->is('ads_manager/index')">ADS</x-navlink>
               <x-navlink href="/likha_order_import" :active="request()->is('likha order import')">LIKHA IMPORT</x-navlink>
               <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
+              <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
             </div>
           </div>
         </div>
