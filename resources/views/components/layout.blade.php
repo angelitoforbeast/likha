@@ -19,8 +19,7 @@
           </div>
           <div class="hidden md:block">
             <div class="ml-10 flex items-baseline space-x-4">
-              <x-navlink href="/" :active="request()->is('/')">Home</x-navlink>
-              <x-navlink href="/botcake" :active="request()->is('botcake')">Botcake</x-navlink>
+              <x-navlink href="/" :active="request()->is('/dashboard')">Home</x-navlink>
               <x-navlink href="/from_jnt_view" :active="request()->is('from_jnt_view')">JNT VIEW</x-navlink>
               <x-navlink href="/jnt_update" :active="request()->is('jnt_update')">JNT UPDATE</x-navlink>
               <x-navlink href="/jnt_rts" :active="request()->is('jnt_rts')">JNT RTS</x-navlink>
