@@ -3,9 +3,9 @@
 
     <div class="max-w-6xl mx-auto mt-6 bg-white shadow-md rounded-lg p-6 space-y-6">
         <p class="text-gray-600 text-lg">
-            Step 1: Upload the <strong>MES FILE</strong> Excel file (with <code>"Parcel Name (*)"</code> column).<br>
-            Step 2: Upload the <strong>ORDER MANAGEMENT</strong> Excel file (with <code>"Item Name"</code> column).<br>
-            Step 3: Upload one or more <strong>PDF files</strong> (STICKER) to compare item counts.
+            Step 1: Upload the <strong>MES FILE</strong> Excel file.<br>
+            Step 2: Upload the <strong>ORDER MANAGEMENT</strong> Excel file.<br>
+            Step 3: Upload one or more <strong>PDF files</strong> (STICKER).
         </p>
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
