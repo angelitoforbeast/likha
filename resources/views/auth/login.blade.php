@@ -45,7 +45,7 @@
 
         <p class="mt-4 text-center text-sm">
             Don't have an account?
-            <a href="{{ route('register') }}" class="text-blue-600 hover:underline">Register here</a>
+            <a href="{{ route('login') }}" class="text-blue-600 hover:underline">Register here</a>
         </p>
     </div>
 </body>
