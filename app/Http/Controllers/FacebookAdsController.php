@@ -12,7 +12,7 @@ public function fetch(Request $request)
     $start = $request->start_date;
     $end = $request->end_date;
     $token = env('FB_ACCESS_TOKEN'); // store token in .env
-    $adAccountId = 'act_9485468058152165'; // or make dynamic later
+    $adAccountId = env('FB_AD_ACCOUNT_ID');
 
     $response = Http::get("https://graph.facebook.com/v19.0/{$adAccountId}/insights", [
         'fields' => 'campaign_name,spend,cost_per_action_type',
