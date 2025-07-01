@@ -112,7 +112,7 @@
         singlePageLayout.classList.remove('hidden');
 
         const data = rawData[pageFilter] || {};
-        html += `<h2 class="font-bold text-lg mb-2">${pageFilter} - Performance Table</h2>`;
+        html += `<h2 class="font-bold text-lg mb-2">${pageFilter} – Performance Table</h2>`;
         html += `<table class="min-w-full border text-sm"><thead class="bg-gray-200"><tr>
                   <th class="border px-2 py-1">Date</th>
                   <th class="border px-2 py-1">Amount Spent</th>
@@ -121,6 +121,7 @@
                   <th class="border px-2 py-1">CPM</th>
                 </tr></thead><tbody>`;
 
+        // per-date rows
         filteredDates.forEach(date => {
           const row = data[date] || {};
           html += `<tr>
@@ -131,6 +132,36 @@
             <td class="border px-2 py-1 text-center">${row.cpm != null ? `₱${row.cpm.toFixed(2)}` : '—'}</td>
           </tr>`;
         });
+
+        // compute totals
+        let totalSpent = 0;
+        let totalOrders = 0;
+        let sumWeightedCPM = 0;
+
+        filteredDates.forEach(date => {
+          const r = data[date] || {};
+          if (r.spent   != null) totalSpent  += r.spent;
+          if (r.orders  != null) totalOrders += r.orders;
+          if (r.spent   != null && r.cpm != null && r.cpm > 0) {
+            sumWeightedCPM += (r.spent / r.cpm);
+          }
+        });
+
+        const totalCPP = totalOrders > 0
+          ? totalSpent / totalOrders
+          : null;
+
+        const totalCPM = sumWeightedCPM > 0
+          ? totalSpent / sumWeightedCPM
+          : null;
+
+        html += `<tr class="bg-gray-100 font-bold">
+          <td class="border px-2 py-1 text-center">TOTAL</td>
+          <td class="border px-2 py-1 text-center">₱${totalSpent.toFixed(2)}</td>
+          <td class="border px-2 py-1 text-center">${totalOrders}</td>
+          <td class="border px-2 py-1 text-center">${totalCPP != null ? `₱${totalCPP.toFixed(2)}` : '—'}</td>
+          <td class="border px-2 py-1 text-center">${totalCPM != null ? `₱${totalCPM.toFixed(2)}` : '—'}</td>
+        </tr>`;
 
         html += `</tbody></table>`;
         tableRight.innerHTML = html;
@@ -146,29 +177,14 @@
           datasets: [{
             label: 'CPP',
             data: cppData,
-            borderColor: 'rgba(75, 192, 192, 1)',
-            backgroundColor: 'rgba(75, 192, 192, 0.2)',
             tension: 0.3,
             spanGaps: true,
           }]
         },
         options: {
           responsive: true,
-          plugins: {
-            datalabels: {
-              display: true,
-              formatter: value => value ? `₱${value.toFixed(0)}` : '',
-              anchor: 'end',
-              align: 'top',
-              font: { weight: 'bold' }
-            }
-          },
-          scales: {
-            y: {
-              beginAtZero: true,
-              title: { display: true, text: 'CPP' }
-            }
-          }
+          plugins: { datalabels: { display: true, formatter: v => v ? `₱${v.toFixed(0)}` : '' } },
+          scales: { y: { beginAtZero: true, title: { display: true, text: 'CPP' } } }
         },
         plugins: [ChartDataLabels]
       });
@@ -180,32 +196,12 @@
         type: 'line',
         data: {
           labels: filteredDates,
-          datasets: [{
-            label: 'CPM',
-            data: cpmData,
-            borderColor: 'rgba(255, 99, 132, 1)',
-            backgroundColor: 'rgba(255, 99, 132, 0.2)',
-            tension: 0.3,
-            spanGaps: true
-          }]
+          datasets: [{ label: 'CPM', data: cpmData, tension: 0.3, spanGaps: true }]
         },
         options: {
           responsive: true,
-          plugins: {
-            datalabels: {
-              display: true,
-              formatter: value => value ? `₱${value.toFixed(0)}` : '',
-              anchor: 'end',
-              align: 'top',
-              font: { weight: 'bold' }
-            }
-          },
-          scales: {
-            y: {
-              beginAtZero: true,
-              title: { display: true, text: 'CPM' }
-            }
-          }
+          plugins: { datalabels: { display: true, formatter: v => v ? `₱${v.toFixed(0)}` : '' } },
+          scales: { y: { beginAtZero: true, title: { display: true, text: 'CPM' } } }
         },
         plugins: [ChartDataLabels]
       });
@@ -219,25 +215,25 @@
 
       if (page === 'all') {
         filteredDates.forEach(date => {
-          let cppSum = 0, cppCount = 0, cpmSum = 0, cpmCount = 0;
-          Object.values(rawData).forEach(pageData => {
-            if (pageData[date]) {
-              if (pageData[date].cpp != null) { cppSum += pageData[date].cpp; cppCount++; }
-              if (pageData[date].cpm != null) { cpmSum += pageData[date].cpm; cpmCount++; }
+          let sumCpp = 0, cntCpp = 0, sumCpm = 0, cntCpm = 0;
+          Object.values(rawData).forEach(pData => {
+            if (pData[date]) {
+              if (pData[date].cpp != null) { sumCpp += pData[date].cpp; cntCpp++; }
+              if (pData[date].cpm != null) { sumCpm += pData[date].cpm; cntCpm++; }
             }
           });
-          cppData.push(cppCount ? cppSum / cppCount : null);
-          cpmData.push(cpmCount ? cpmSum / cpmCount : null);
+          cppData.push(cntCpp ? sumCpp / cntCpp : null);
+          cpmData.push(cntCpm ? sumCpm / cntCpm : null);
         });
       } else {
-        const selected = rawData[page] || {};
-        cppData = filteredDates.map(date => selected[date]?.cpp ?? null);
-        cpmData = filteredDates.map(date => selected[date]?.cpm ?? null);
+        const sel = rawData[page] || {};
+        cppData = filteredDates.map(d => sel[d]?.cpp ?? null);
+        cpmData = filteredDates.map(d => sel[d]?.cpm ?? null);
       }
 
       renderCPPChart(filteredDates, cppData);
       renderCPMChart(filteredDates, cpmData);
-      renderTables(filteredDates, page);
+      renderTables(filteredDates, pageSelect.value);
     }
 
     pageSelect.addEventListener('change', refreshAll);
@@ -246,9 +242,9 @@
 
     window.onload = () => {
       const last7 = getLast7Days();
-      if (last7.length > 0) {
+      if (last7.length) {
         startDateInput.value = last7[0];
-        endDateInput.value = last7[last7.length - 1];
+        endDateInput.value   = last7[last7.length - 1];
       }
       refreshAll();
     };
