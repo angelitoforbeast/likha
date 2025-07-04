@@ -14,6 +14,9 @@ use App\Http\Controllers\FacebookAdsController;
 use App\Http\Controllers\AdsViewController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\RegisterController;
+use App\Http\Controllers\OfflineAdController;
+use App\Http\Controllers\AdsManagerController;
+
 
 // ✅ Public routes (accessible to guests)
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
@@ -42,11 +45,19 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/likha_order_import/settings', [LikhaOrderSettingController::class, 'update']);
     Route::match(['get', 'post'], '/likha_order_import', [LikhaOrderImportController::class, 'import']);
 
+    Route::view('/ads_manager/campaign', 'ads_manager.campaign');
     Route::view('/ads_manager/index', 'ads_manager.index');
     Route::post('/ads_manager/index', [FromAdsManagerController::class, 'store']);
     Route::get('/ads_manager/view', [FromAdsManagerController::class, 'view'])->name('ads_manager.view');
     Route::post('/ads_manager/update_field', [FromAdsManagerController::class, 'updateField']);
     Route::post('/ads_manager/delete_row', [FromAdsManagerController::class, 'deleteRow']);
+    Route::post('/ads_manager/campaign', [OfflineAdController::class, 'store'])->name('offline_ads.campaign');
+    Route::get('/ads_manager/campaign_view', [OfflineAdController::class, 'index'])->name('offline_ads.campaign_view');
+    Route::delete('/ads_manager/campaign', [OfflineAdController::class, 'deleteAll'])->name('offline_ads.delete_all');
+    Route::get('/ads_manager/ads_manager', [AdsManagerController::class, 'index'])->name('ads_manager.index');
+    Route::get('/ads_manager/adsets', [AdsManagerController::class, 'adsets'])->name('ads_manager.adsets');
+    
+
 
     Route::get('/import_gsheet/settings', [GsheetSettingController::class, 'edit']);
     Route::post('/import_gsheet/settings', [GsheetSettingController::class, 'update']);
