@@ -72,71 +72,65 @@
     }
 
     function renderTables(filteredDates, pageFilter) {
-      let html = '';
+  if (pageFilter === 'all') {
+    // Show the single-page layout
+    multiPageTables.classList.add('hidden');
+    singlePageLayout.classList.remove('hidden');
 
-      if (pageFilter === 'all') {
-        singlePageLayout.classList.add('hidden');
-        multiPageTables.classList.remove('hidden');
+    // Build aggregated performance table on the right
+    let rightHtml = `<h2 class="font-bold text-lg mb-2">All Pages – Performance Table</h2>`;
+    rightHtml += `<table class="min-w-full border text-sm mb-6"><thead class="bg-gray-200"><tr>
+                    <th class="border px-2 py-1">Date</th>
+                    <th class="border px-2 py-1">Amount Spent</th>
+                    <th class="border px-2 py-1">Orders</th>
+                    <th class="border px-2 py-1">CPP</th>
+                    <th class="border px-2 py-1">CPM</th>
+                  </tr></thead><tbody>`;
 
-        // Aggregate Performance Table first
-        html += `<h2 class="font-bold text-lg mb-2">Performance Table</h2>`;
-        html += `<table class="min-w-full border text-sm mb-6"><thead class="bg-gray-200"><tr>
-                   <th class="border px-2 py-1">Date</th>
-                   <th class="border px-2 py-1">Amount Spent</th>
-                   <th class="border px-2 py-1">Orders</th>
-                   <th class="border px-2 py-1">CPP</th>
-                   <th class="border px-2 py-1">CPM</th>
-                 </tr></thead><tbody>`;
-        filteredDates.forEach(date => {
-          let sumSpent = 0, sumOrders = 0, sumWeightedImps = 0;
-          Object.values(rawData).forEach(data => {
-            const r = data[date] || {};
-            if (r.spent   != null) sumSpent  += r.spent;
-            if (r.orders  != null) sumOrders += r.orders;
-            if (r.spent   != null && r.cpm != null && r.cpm > 0) {
-              sumWeightedImps += r.spent / r.cpm;
-            }
-          });
-          const cpp = sumOrders > 0 ? sumSpent / sumOrders : null;
-          const cpm = sumWeightedImps > 0 ? sumSpent / sumWeightedImps : null;
-          html += `<tr>
-                     <td class="border px-2 py-1 text-center">${date}</td>
-                     <td class="border px-2 py-1 text-center">₱${sumSpent.toFixed(2)}</td>
-                     <td class="border px-2 py-1 text-center">${sumOrders}</td>
-                     <td class="border px-2 py-1 text-center">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
-                     <td class="border px-2 py-1 text-center">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
-                   </tr>`;
-        });
-        html += `</tbody></table>`;
+    // Per-day aggregates
+    filteredDates.forEach(date => {
+      let sumSpent = 0, sumOrders = 0, sumWeightedImps = 0;
+      Object.values(rawData).forEach(data => {
+        const r = data[date] || {};
+        if (r.spent)  sumSpent    += r.spent;
+        if (r.orders) sumOrders   += r.orders;
+        if (r.spent && r.cpm) sumWeightedImps += r.spent / r.cpm;
+      });
+      const cpp = sumOrders  > 0 ? sumSpent  / sumOrders    : null;
+      const cpm = sumWeightedImps > 0 ? sumSpent / sumWeightedImps : null;
 
-        const buildTable = (type, title) => {
-          let tbl = `<h2 class="font-bold text-lg mb-2">${title}</h2>`;
-          tbl += `<table class="min-w-full border text-sm mb-6"><thead class="bg-gray-200"><tr><th class="border px-2 py-1">Page</th>`;
-          filteredDates.forEach(date => {
-            tbl += `<th class="border px-2 py-1">${date}</th>`;
-          });
-          tbl += `</tr></thead><tbody>`;
-          Object.entries(rawData).forEach(([page, data]) => {
-            tbl += `<tr><td class="border px-2 py-1 font-bold">${page}</td>`;
-            filteredDates.forEach(date => {
-              const val = data[date] ?? {};
-              let content = '—';
-              if (type === 'cpp'    && val.cpp    != null) content = `₱${val.cpp.toFixed(2)}`;
-              if (type === 'orders' && val.orders != null) content = val.orders;
-              if (type === 'cpm'    && val.cpm    != null) content = `₱${val.cpm.toFixed(2)}`;
-              tbl += `<td class="border px-2 py-1 text-center">${content}</td>`;
-            });
-            tbl += `</tr>`;
-          });
-          tbl += `</tbody></table>`;
-          return tbl;
-        };
+      rightHtml += `<tr>
+                      <td class="border px-2 py-1 text-center">${date}</td>
+                      <td class="border px-2 py-1 text-center">₱${sumSpent.toFixed(2)}</td>
+                      <td class="border px-2 py-1 text-center">${sumOrders}</td>
+                      <td class="border px-2 py-1 text-center">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
+                      <td class="border px-2 py-1 text-center">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
+                    </tr>`;
+    });
 
-        html += buildTable('cpp', 'CPP Table');
-        html += buildTable('orders', 'Orders Table');
-        html += buildTable('cpm', 'CPM Table');
+    // TOTAL row
+    let totalSpent = 0, totalOrders = 0, totalWeighted = 0;
+    filteredDates.forEach(date => {
+      Object.values(rawData).forEach(data => {
+        const r = data[date] || {};
+        if (r.spent)  totalSpent  += r.spent;
+        if (r.orders) totalOrders += r.orders;
+        if (r.spent && r.cpm) totalWeighted += r.spent / r.cpm;
+      });
+    });
+    const totalCPP = totalOrders > 0 ? totalSpent / totalOrders           : null;
+    const totalCPM = totalWeighted > 0 ? totalSpent / totalWeighted       : null;
 
-        multiPageTables.innerHTML = html;
+    rightHtml += `<tr class="bg-gray-100 font-bold">
+                    <td class="border px-2 py-1 text-center">TOTAL</td>
+                    <td class="border px-2 py-1 text-center">₱${totalSpent.toFixed(2)}</td>
+                    <td class="border px-2 py-1 text-center">${totalOrders}</td>
+                    <td class="border px-2 py-1 text-center">${totalCPP != null ? `₱${totalCPP.toFixed(2)}` : '—'}</td>
+                    <td class="border px-2 py-1 text-center">${totalCPM != null ? `₱${totalCPM.toFixed(2)}` : '—'}</td>
+                  </tr>`;
+
+    rightHtml += `</tbody></table>`;
+    tableRight.innerHTML = rightHtml;
       } else {
         multiPageTables.classList.add('hidden');
         singlePageLayout.classList.remove('hidden');
