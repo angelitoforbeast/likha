@@ -10,7 +10,7 @@
         </div>
     @else
         <div class="bg-yellow-100 text-yellow-800 px-4 py-2 rounded">
-            ⚠️ You are NOT the CEO
+            ✅ You are Great!
         </div>
     @endif
   </div>
