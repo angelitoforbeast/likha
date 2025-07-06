@@ -35,7 +35,6 @@
           <div class="text-gray-300 text-sm text-right leading-tight">
             <div>{{ Auth::user()->name ?? 'User' }}</div>
             <div class="text-xs text-gray-400">
-              ID: {{ Auth::user()->id ?? 'N/A' }} |
               {{ Auth::user()?->getRoleNames()->first() ?? 'No Role' }}
             </div>
           </div>
