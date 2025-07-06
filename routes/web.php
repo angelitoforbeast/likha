@@ -38,7 +38,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/fb_ads_data', [FacebookAdsController::class, 'fetch'])->name('fb_ads.fetch');
 
     //Route::get('/cpp', [CPPReportController::class, 'index']);
-Route::get('/cpp', function () {$user = auth()->user();$role = $user->roles->first();if (!$role || !in_array($role->name, ['Marketing', 'CEO'])) {abort(403);}
+Route::get('/cpp', function () {$user = auth()->user();$role = $user->roles->first();if (!$role || !in_array($role->name, ['Marketing', 'CEO','Marketing - OIC'])) {abort(403);}
 return app(App\Http\Controllers\CPPReportController::class)->index();
 })->middleware('auth');
 
