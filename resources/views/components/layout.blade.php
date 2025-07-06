@@ -32,9 +32,13 @@
         </div>
 
         <div class="hidden md:flex items-center space-x-4">
-          <span class="text-gray-300 text-sm">
-            {{ Auth::user()->name ?? 'User' }}
-          </span>
+          <div class="text-gray-300 text-sm text-right leading-tight">
+            <div>{{ Auth::user()->name ?? 'User' }}</div>
+            <div class="text-xs text-gray-400">
+              ID: {{ Auth::user()->id ?? 'N/A' }} |
+              {{ Auth::user()?->getRoleNames()->first() ?? 'No Role' }}
+            </div>
+          </div>
 
           <form method="POST" action="{{ route('logout') }}">
             @csrf

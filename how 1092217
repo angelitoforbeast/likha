@@ -1,0 +1,44 @@
+[33m99166df[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31mheroku/main[m[33m, [m[1;31mheroku/HEAD[m[33m)[m HEAD@{2025-07-05 12:13:54 +0800}: reset: moving to HEAD
+[33m99166df[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31mheroku/main[m[33m, [m[1;31mheroku/HEAD[m[33m)[m HEAD@{2025-07-05 11:58:34 +0800}: reset: moving to 99166df
+[33m0cba891[m[33m ([m[1;32mheroku-main[m[33m)[m HEAD@{2025-07-05 11:58:07 +0800}: checkout: moving from main to main
+[33m0cba891[m[33m ([m[1;32mheroku-main[m[33m)[m HEAD@{2025-07-05 11:31:51 +0800}: reset: moving to 0cba8914
+[33md81d2ff[m HEAD@{2025-07-05 11:31:39 +0800}: checkout: moving from heroku-main to main
+[33m0cba891[m[33m ([m[1;32mheroku-main[m[33m)[m HEAD@{2025-07-05 11:22:09 +0800}: checkout: moving from main to heroku-main
+[33md81d2ff[m HEAD@{2025-07-04 18:58:43 +0800}: commit: :star: Remove creds in commit files
+[33m0cba891[m[33m ([m[1;32mheroku-main[m[33m)[m HEAD@{2025-07-04 18:42:57 +0800}: checkout: moving from b2fb017c4f67a40a201ff463efc0fc3049a01447 to main
+[33mb2fb017[m HEAD@{2025-07-04 18:42:29 +0800}: checkout: moving from fbd6e35d0577620ff5626beb95db426d39a52763 to b2fb017c4f67a40a201ff463efc0fc3049a01447
+[33mfbd6e35[m HEAD@{2025-07-04 18:40:16 +0800}: checkout: moving from main to fbd6e35d0577620ff5626beb95db426d39a52763
+[33m0cba891[m[33m ([m[1;32mheroku-main[m[33m)[m HEAD@{2025-07-04 18:03:03 +0800}: reset: moving to heroku/main
+[33m99166df[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31mheroku/main[m[33m, [m[1;31mheroku/HEAD[m[33m)[m HEAD@{2025-07-04 15:01:55 +0800}: reset: moving to HEAD~2
+[33m0cba891[m[33m ([m[1;32mheroku-main[m[33m)[m HEAD@{2025-07-04 15:01:27 +0800}: reset: moving to HEAD
+[33m0cba891[m[33m ([m[1;32mheroku-main[m[33m)[m HEAD@{2025-07-04 14:59:53 +0800}: reset: moving to HEAD
+[33m0cba891[m[33m ([m[1;32mheroku-main[m[33m)[m HEAD@{2025-07-04 14:30:36 +0800}: commit: before updating Account
+[33m1092217[m HEAD@{2025-07-04 14:29:31 +0800}: commit: before updating Account
+[33m99166df[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31mheroku/main[m[33m, [m[1;31mheroku/HEAD[m[33m)[m HEAD@{2025-07-01 23:50:34 +0800}: commit: Update layout: fixed navbar and layout stability
+[33m13f0aa8[m HEAD@{2025-07-01 11:11:41 +0800}: commit: Use env vars for FB token and account ID
+[33m153f40d[m HEAD@{2025-07-01 11:04:12 +0800}: reset: moving to HEAD
+[33m153f40d[m HEAD@{2025-06-30 23:15:29 +0800}: reset: moving to HEAD
+[33m153f40d[m HEAD@{2025-06-30 21:46:29 +0800}: commit: Protect all routes with auth middleware and clean up web.php
+[33m40224ac[m HEAD@{2025-06-30 21:42:12 +0800}: commit: Protect all routes with auth middleware and clean up web.php
+[33mefe10d1[m HEAD@{2025-06-30 21:35:31 +0800}: commit: Protect all routes with auth middleware and clean up web.php
+[33mdaec744[m HEAD@{2025-06-30 21:33:13 +0800}: commit: Protect all routes with auth middleware and clean up web.php
+[33m5bd061a[m HEAD@{2025-06-30 21:27:30 +0800}: commit: Protect all routes with auth middleware and clean up web.php
+[33m5f58d94[m HEAD@{2025-06-30 20:44:31 +0800}: reset: moving to HEAD
+[33m5f58d94[m HEAD@{2025-06-30 20:04:11 +0800}: commit: Checkpoint before installing Breeze
+[33me75dcb4[m HEAD@{2025-06-30 19:55:55 +0800}: commit: 💄 UI Update: added totals row and darker red highlight for sticker mismatches
+[33m0c2ca26[m HEAD@{2025-06-29 14:45:54 +0800}: commit: 🚀 Add live import status and delete-all functionality
+[33mdd32e69[m HEAD@{2025-06-29 14:18:29 +0800}: commit: 🛠️ Fix malformed Procfile web command
+[33m75132fd[m HEAD@{2025-06-29 14:15:38 +0800}: commit: ✅ Add worker process to Procfile
+[33m0bc052d[m HEAD@{2025-06-29 12:25:18 +0800}: commit: ✅ Working Google Sheets import with DONE check
+[33m8fc318e[m HEAD@{2025-06-29 11:00:17 +0800}: commit: Update layout: fixed navbar and layout stability
+[33mdf72687[m HEAD@{2025-06-29 10:49:29 +0800}: commit: Update layout: cleaned up HTML and fixed rendering issue
+[33m1650ce3[m HEAD@{2025-06-29 10:44:59 +0800}: commit: Update CPP Blade view layout or logic
+[33m5b7dcb0[m HEAD@{2025-06-29 10:41:03 +0800}: commit: Fix: rename controller to match class name (case-sensitive)
+[33m119334b[m HEAD@{2025-06-29 10:37:42 +0800}: commit: Add CPPReportController and debug CPP view
+[33mfbd6e35[m HEAD@{2025-06-28 23:50:40 +0800}: commit: Add Google API credentials
+[33m6d78479[m HEAD@{2025-06-28 23:48:17 +0800}: commit: Fix: use LikhaOrderSetting instead of GsheetSetting
+[33mb2fb017[m HEAD@{2025-06-28 23:24:13 +0800}: commit: Force HTTPS in production
+[33m4ceeaf9[m HEAD@{2025-06-28 23:19:09 +0800}: commit: Fix: use DATABASE_URL for pgsql connection
+[33m332b88d[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m HEAD@{2025-06-28 18:39:47 +0800}: commit: Add Procfile for Heroku
+[33mf1aca48[m HEAD@{2025-06-28 18:21:20 +0800}: Branch: renamed refs/heads/master to refs/heads/main
+[33mf1aca48[m HEAD@{2025-06-28 18:19:08 +0800}: commit (initial): Initial commit for Laravel project
