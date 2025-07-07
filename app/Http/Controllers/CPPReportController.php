@@ -48,7 +48,7 @@ class CPPReportController extends Controller
                 'orders' => $orderCount,
                 'cpp' => $cpp,
                 'cpm' => $cpm,
-                'cpi' => $cpi,
+                'cpi' => $weightedCPI,
             ];
         }
 
