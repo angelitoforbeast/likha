@@ -71,170 +71,219 @@
       return allDates.filter(d => (!start || d >= start) && (!end || d <= end));
     }
 
-    function renderTables(filteredDates, pageFilter) {
-     if (pageFilter === 'all') {
-  // Compute a dynamic title based on the first and last filtered date
- const start = filteredDates[0];
-const end = filteredDates[filteredDates.length - 1];
+      function renderTables(filteredDates, pageFilter) {
+  if (pageFilter === 'all') {
+																	  
+    const start = filteredDates[0];
+    const end = filteredDates[filteredDates.length - 1];
 
-const formattedStart = new Date(start).toLocaleDateString('en-US', {
-  year: 'numeric',
-  month: 'long',
-  day: 'numeric'
-});
+    const formattedStart = new Date(start).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
 
-const formattedEnd = new Date(end).toLocaleDateString('en-US', {
-  year: 'numeric',
-  month: 'long',
-  day: 'numeric'
-});
+    const formattedEnd = new Date(end).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
 
-const title = filteredDates.length > 1
-  ? `SUMMARY OF ADS - ${formattedStart} to ${formattedEnd}`
-  : `SUMMARY OF ADS - ${formattedStart}`;
+    const title = filteredDates.length > 1
+      ? `SUMMARY OF ADS - ${formattedStart} to ${formattedEnd}`
+      : `SUMMARY OF ADS - ${formattedStart}`;
 
-  // 1) Summary by Page — use our dynamic title here
-  let summaryHtml = `
-  <div class="flex justify-between items-center mb-2">
-    <h2 class="font-bold text-lg">${title}</h2>
-    <button onclick="copySummaryOfAds()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">Copy Table</button>
-  </div>
-  <table id="summaryOfAdsTable" class="min-w-full border text-sm mb-6">
-      <thead class="bg-gray-200"><tr>
-        <th class="border px-2 py-1">Page Name</th>
+    // 1) Summary by Page
+    let summaryHtml = `
+    <div class="flex justify-between items-center mb-2">
+      <h2 class="font-bold text-lg">${title}</h2>
+      <button onclick="copySummaryOfAds()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">Copy Table</button>
+    </div>
+    <table id="summaryOfAdsTable" class="min-w-full border text-sm mb-6">
+        <thead class="bg-gray-200"><tr>
+          <th class="border px-2 py-1">Page Name</th>
+          <th class="border px-2 py-1">Amount Spent</th>
+          <th class="border px-2 py-1">Orders</th>
+          <th class="border px-2 py-1">CPP</th>
+          <th class="border px-2 py-1">CPI</th>
+          <th class="border px-2 py-1">CPM</th>
+        </tr></thead>
+        <tbody>
+    `;
+								   
+
+    Object.entries(rawData).forEach(([page, data]) => {
+      let sumSpent = 0, sumOrders = 0, sumWeightedImps = 0, sumWeightedCPI = 0;
+      filteredDates.forEach(date => {
+        const r = data[date] || {};
+        if (r.spent)  sumSpent    += r.spent;
+        if (r.orders) sumOrders   += r.orders;
+        if (r.spent && r.cpm) sumWeightedImps += r.spent / r.cpm;
+        if (r.spent && r.cpi) sumWeightedCPI  += r.spent / r.cpi;
+      });
+
+      if (sumSpent > 0) {
+        const cpp = sumOrders > 0 ? sumSpent / sumOrders : null;
+        const cpi = sumWeightedCPI > 0 ? sumSpent / sumWeightedCPI : null;
+        const cpm = sumWeightedImps > 0 ? sumSpent / sumWeightedImps : null;
+												 
+												  
+																	 
+			 
+
+        summaryHtml += `
+          <tr>
+            <td class="border px-2 py-1">${page}</td>
+            <td class="border px-2 py-1">₱${sumSpent.toFixed(2)}</td>
+            <td class="border px-2 py-1">${sumOrders}</td>
+            <td class="border px-2 py-1">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
+            <td class="border px-2 py-1">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
+            <td class="border px-2 py-1">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
+          </tr>
+        `;
+      }
+    });
+
+    summaryHtml += `</tbody></table>`;
+				  
+														 
+																		   
+															  
+																								 
+																								 
+				   
+			  
+		   
+		   
+
+    // 2) Performance by Date
+    let dateHtml = `
+      <h2 class="font-bold text-lg mb-2">All Pages – Performance by Date</h2>
+      <table class="min-w-full border text-sm"><thead class="bg-gray-200"><tr>
+        <th class="border px-2 py-1">Date</th>
         <th class="border px-2 py-1">Amount Spent</th>
         <th class="border px-2 py-1">Orders</th>
         <th class="border px-2 py-1">CPP</th>
+        <th class="border px-2 py-1">CPI</th>
         <th class="border px-2 py-1">CPM</th>
-      </tr></thead>
-      <tbody>
-  `;
-  // …the rest stays the samse…
+      </tr></thead><tbody>
+    `;
 
+    filteredDates.forEach(date => {
+      let sumSpent = 0, sumOrders = 0, sumWeightedImps = 0, sumWeightedCPI = 0;
+      Object.values(rawData).forEach(data => {
+        const r = data[date] || {};
+        if (r.spent)  sumSpent    += r.spent;
+        if (r.orders) sumOrders   += r.orders;
+        if (r.spent && r.cpm) sumWeightedImps += r.spent / r.cpm;
+        if (r.spent && r.cpi) sumWeightedCPI  += r.spent / r.cpi;
+      });
+      const cpp = sumOrders > 0 ? sumSpent / sumOrders : null;
+      const cpi = sumWeightedCPI > 0 ? sumSpent / sumWeightedCPI : null;
+      const cpm = sumWeightedImps > 0 ? sumSpent / sumWeightedImps : null;
 
-        Object.entries(rawData).forEach(([page, data]) => {
-          let sumSpent = 0, sumOrders = 0, sumWeightedImps = 0;
-          filteredDates.forEach(date => {
-            const r = data[date] || {};
-            if (r.spent)  sumSpent    += r.spent;
-            if (r.orders) sumOrders   += r.orders;
-            if (r.spent && r.cpm) sumWeightedImps += r.spent / r.cpm;
-          });
+      dateHtml += `
+        <tr>
+          <td class="border px-2 py-1 text-center">${date}</td>
+          <td class="border px-2 py-1 text-center">₱${sumSpent.toFixed(2)}</td>
+          <td class="border px-2 py-1 text-center">${sumOrders}</td>
+          <td class="border px-2 py-1 text-center">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
+          <td class="border px-2 py-1 text-center">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
+          <td class="border px-2 py-1 text-center">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
+        </tr>
+      `;
+    });
 
-          // only include pages with spent > 0
-          if (sumSpent > 0) {
-            const cpp = sumOrders  > 0 ? sumSpent  / sumOrders      : null;
-            const cpm = sumWeightedImps > 0 ? sumSpent / sumWeightedImps : null;
+    dateHtml += `</tbody></table>`;
+				
+																   
+																					 
+																		
+																										   
+																										   
+				 
+			
+		   
 
-            summaryHtml += `
-              <tr>
-                <td class="border px-2 py-1">${page}</td>
-                <td class="border px-2 py-1">₱${sumSpent.toFixed(2)}</td>
-                <td class="border px-2 py-1">${sumOrders}</td>
-                <td class="border px-2 py-1">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
-                <td class="border px-2 py-1">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
-              </tr>
-            `;
-          }
-        });
+    tableRight.innerHTML = summaryHtml + dateHtml;
 
-        summaryHtml += `</tbody></table>`;
+  } else {
+    // Single Page (no changes needed for CPI here, unless you want to add it too)
+    multiPageTables.classList.add('hidden');
+    singlePageLayout.classList.remove('hidden');
+    const data = rawData[pageFilter] || {};
+    let html = `
+      <h2 class="font-bold text-lg mb-2">${pageFilter} – Performance by Date</h2>
+      <table class="min-w-full border text-sm mb-6">
+        <thead class="bg-gray-200"><tr>
+          <th class="border px-2 py-1">Date</th>
+          <th class="border px-2 py-1">Amount Spent</th>
+          <th class="border px-2 py-1">Orders</th>
+          <th class="border px-2 py-1">CPP</th>
+          <th class="border px-2 py-1">CPM</th>
+        </tr></thead>
+        <tbody>
+    `;
 
-        // 2) Performance by Date
-        let dateHtml = `
-          <h2 class="font-bold text-lg mb-2">All Pages – Performance by Date</h2>
-          <table class="min-w-full border text-sm"><thead class="bg-gray-200"><tr>
-            <th class="border px-2 py-1">Date</th>
-            <th class="border px-2 py-1">Amount Spent</th>
-            <th class="border px-2 py-1">Orders</th>
-            <th class="border px-2 py-1">CPP</th>
-            <th class="border px-2 py-1">CPM</th>
-          </tr></thead><tbody>
-        `;
+    filteredDates.forEach(date => {
+								   
+												
+													
+      const r = data[date] || {};
+      html += `
+        <tr>
+          <td class="border px-2 py-1 text-center">${date}</td>
+          <td class="border px-2 py-1 text-center">${r.spent != null ? `₱${r.spent.toFixed(2)}` : '—'}</td>
+          <td class="border px-2 py-1 text-center">${r.orders != null ? r.orders : '—'}</td>
+          <td class="border px-2 py-1 text-center">${r.cpp != null ? `₱${r.cpp.toFixed(2)}` : '—'}</td>
+          <td class="border px-2 py-1 text-center">${r.cpm != null ? `₱${r.cpm.toFixed(2)}` : '—'}</td>
+												   
+												   
+        </tr>
+				   
+      `;
+    });
 
-        filteredDates.forEach(date => {
-          let sumSpent = 0, sumOrders = 0, sumWeightedImps = 0;
-          Object.values(rawData).forEach(data => {
-            const r = data[date] || {};
-            if (r.spent)  sumSpent    += r.spent;
-            if (r.orders) sumOrders   += r.orders;
-            if (r.spent && r.cpm) sumWeightedImps += r.spent / r.cpm;
-          });
-          const cpp = sumOrders  > 0 ? sumSpent  / sumOrders      : null;
-          const cpm = sumWeightedImps > 0 ? sumSpent / sumWeightedImps : null;
+    // Totals
+    let totalSpent = 0, totalOrders = 0, sumWeighted = 0;
+    filteredDates.forEach(date => {
+      const r = data[date] || {};
+      if (r.spent)  totalSpent  += r.spent;
+      if (r.orders) totalOrders += r.orders;
+      if (r.spent && r.cpm) sumWeighted += r.spent / r.cpm;
+    });
+    const totalCPP = totalOrders > 0 ? totalSpent / totalOrders : null;
+    const totalCPM = sumWeighted > 0  ? totalSpent / sumWeighted   : null;
+																											   
+				 
+			
+		   
 
-          dateHtml += `
-            <tr>
-              <td class="border px-2 py-1 text-center">${date}</td>
-              <td class="border px-2 py-1 text-center">₱${sumSpent.toFixed(2)}</td>
-              <td class="border px-2 py-1 text-center">${sumOrders}</td>
-              <td class="border px-2 py-1 text-center">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
-              <td class="border px-2 py-1 text-center">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
-            </tr>
-          `;
-        });
+    html += `
+        <tr class="bg-gray-100 font-bold">
+          <td class="border px-2 py-1 text-center">TOTAL</td>
+          <td class="border px-2 py-1 text-center">₱${totalSpent.toFixed(2)}</td>
+          <td class="border px-2 py-1 text-center">${totalOrders}</td>
+          <td class="border px-2 py-1 text-center">${totalCPP != null ? `₱${totalCPP.toFixed(2)}` : '—'}</td>
+          <td class="border px-2 py-1 text-center">${totalCPM != null ? `₱${totalCPM.toFixed(2)}` : '—'}</td>
+        </tr>
+    `;
+																			  
 
-        dateHtml += `</tbody></table>`;
+    html += `</tbody></table>`;
+    tableRight.innerHTML = html;
+  }
+}
+																		  
+																													 
+																													 
+				 
+		  
 
-        // 3) render both
-        tableRight.innerHTML = summaryHtml + dateHtml;
-
-      } else {
-        // Single-page for one page
-        multiPageTables.classList.add('hidden');
-        singlePageLayout.classList.remove('hidden');
-        const data = rawData[pageFilter] || {};
-        let html = `
-          <h2 class="font-bold text-lg mb-2">${pageFilter} – Performance by Date</h2>
-          <table class="min-w-full border text-sm mb-6">
-            <thead class="bg-gray-200"><tr>
-              <th class="border px-2 py-1">Date</th>
-              <th class="border px-2 py-1">Amount Spent</th>
-              <th class="border px-2 py-1">Orders</th>
-              <th class="border px-2 py-1">CPP</th>
-              <th class="border px-2 py-1">CPM</th>
-            </tr></thead>
-            <tbody>
-        `;
-
-        filteredDates.forEach(date => {
-          const r = data[date] || {};
-          html += `
-            <tr>
-              <td class="border px-2 py-1 text-center">${date}</td>
-              <td class="border px-2 py-1 text-center">${r.spent != null ? `₱${r.spent.toFixed(2)}` : '—'}</td>
-              <td class="border px-2 py-1 text-center">${r.orders != null ? r.orders : '—'}</td>
-              <td class="border px-2 py-1 text-center">${r.cpp != null ? `₱${r.cpp.toFixed(2)}` : '—'}</td>
-              <td class="border px-2 py-1 text-center">${r.cpm != null ? `₱${r.cpm.toFixed(2)}` : '—'}</td>
-            </tr>
-          `;
-        });
-
-        // Totals for single page
-        let totalSpent = 0, totalOrders = 0, sumWeighted = 0;
-        filteredDates.forEach(date => {
-          const r = data[date] || {};
-          if (r.spent)  totalSpent  += r.spent;
-          if (r.orders) totalOrders += r.orders;
-          if (r.spent && r.cpm) sumWeighted += r.spent / r.cpm;
-        });
-        const totalCPP = totalOrders > 0 ? totalSpent / totalOrders : null;
-        const totalCPM = sumWeighted > 0  ? totalSpent / sumWeighted   : null;
-
-        html += `
-            <tr class="bg-gray-100 font-bold">
-              <td class="border px-2 py-1 text-center">TOTAL</td>
-              <td class="border px-2 py-1 text-center">₱${totalSpent.toFixed(2)}</td>
-              <td class="border px-2 py-1 text-center">${totalOrders}</td>
-              <td class="border px-2 py-1 text-center">${totalCPP != null ? `₱${totalCPP.toFixed(2)}` : '—'}</td>
-              <td class="border px-2 py-1 text-center">${totalCPM != null ? `₱${totalCPM.toFixed(2)}` : '—'}</td>
-            </tr>
-        `;
-
-        html += `</tbody></table>`;
-        tableRight.innerHTML = html;
-      }
-    }
+								   
+									
+	   
+	 
 
     // Chart rendering unchanged...
 
