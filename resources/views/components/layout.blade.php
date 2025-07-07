@@ -32,12 +32,18 @@
         </div>
 
         <div class="hidden md:flex items-center space-x-4">
-          <div class="text-gray-300 text-sm text-right leading-tight">
-            <div>{{ Auth::user()->name ?? 'User' }}</div>
-            <div class="text-xs text-gray-400">
-              {{ Auth::user()?->getRoleNames()->first() ?? 'No Role' }}
+          @if(Auth::check())
+            <div class="text-gray-300 text-sm text-right leading-tight">
+              <div>{{ Auth::user()->name }}</div>
+              <div class="text-xs text-gray-400">
+                {{ Auth::user()->getRoleNames()->first() ?? 'No Role' }}
+              </div>
             </div>
-          </div>
+
+            <img src="{{ Auth::user()->profile_picture ?? 'https://ui-avatars.com/api/?name=' . urlencode(Auth::user()->name) }}"
+                 class="w-10 h-10 rounded-full object-cover border border-gray-500"
+                 alt="Profile Picture">
+          @endif
 
           <form method="POST" action="{{ route('logout') }}">
             @csrf
