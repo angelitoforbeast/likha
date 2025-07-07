@@ -95,8 +95,11 @@ const title = filteredDates.length > 1
 
   // 1) Summary by Page — use our dynamic title here
   let summaryHtml = `
-    <h2 class="font-bold text-lg mb-2">${title}</h2>
-    <table class="min-w-full border text-sm mb-6">
+  <div class="flex justify-between items-center mb-2">
+    <h2 class="font-bold text-lg">${title}</h2>
+    <button onclick="copySummaryOfAds()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">Copy Table</button>
+  </div>
+  <table id="summaryOfAdsTable" class="min-w-full border text-sm mb-6">
       <thead class="bg-gray-200"><tr>
         <th class="border px-2 py-1">Page Name</th>
         <th class="border px-2 py-1">Amount Spent</th>
@@ -286,6 +289,21 @@ const title = filteredDates.length > 1
       renderCPMChart(dates, cpmData);
       renderTables(dates, page);
     }
+    function copySummaryOfAds() {
+  const table = document.getElementById('summaryOfAdsTable');
+  if (!table) return;
+
+  const rows = Array.from(table.querySelectorAll('tr'));
+  const copiedText = rows.map(row => {
+    return Array.from(row.querySelectorAll('th, td'))
+      .map(cell => cell.textContent.replace(/₱/g, '').trim())
+      .join('\t');
+  }).join('\n');
+
+  navigator.clipboard.writeText(copiedText)
+    .then(() => alert('SUMMARY OF ADS table copied!'))
+    .catch(err => console.error('Copy failed:', err));
+}
 
     pageSelect.addEventListener('change', refreshAll);
     startDateInput.addEventListener('change', refreshAll);
@@ -299,5 +317,6 @@ const title = filteredDates.length > 1
       }
       refreshAll();
     };
+    
   </script>
 </x-layout>
