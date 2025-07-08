@@ -6,7 +6,6 @@ use Illuminate\Http\Request;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use ZipArchive;
 
@@ -15,6 +14,17 @@ class MesSegregatorController extends Controller
     public function index()
     {
         return view('data_encoder.index');
+    }
+
+    public function download($filename)
+    {
+        $path = storage_path("app/public/{$filename}");
+
+        if (!file_exists($path)) {
+            abort(404, 'File not found.');
+        }
+
+        return response()->download($path, $filename);
     }
 
     public function segregate(Request $request)
@@ -44,14 +54,17 @@ class MesSegregatorController extends Controller
         $downloads = [];
         $savedFiles = [];
 
+        $timestamp = now()->setTimezone('Asia/Manila')->format('F-d-Y-h_ia'); // Ex: July-08-2025-03_15pm
+
         foreach ($groups as $key => $rows) {
             $newSpreadsheet = new Spreadsheet();
             $newSheet = $newSpreadsheet->getActiveSheet();
             $newSheet->fromArray($headers, null, 'A1');
             $newSheet->fromArray($rows->values()->all(), null, 'A9');
 
-            $filename = 'segregated_' . Str::slug($key) . '_' . uniqid() . '.xlsx';
-            $tempPath = storage_path('app/public/' . $filename);
+            $safeName = Str::slug($key);
+            $filename = "{$timestamp}-{$safeName}.xlsx";
+            $tempPath = storage_path("app/public/{$filename}");
 
             $writer = new Xlsx($newSpreadsheet);
             $writer->save($tempPath);
@@ -60,13 +73,13 @@ class MesSegregatorController extends Controller
 
             $downloads[] = [
                 'label' => "Download: {$key} – " . $rows->count(),
-                'url' => asset('storage/' . $filename)
+                'url' => route('mes.download', ['filename' => $filename])
             ];
         }
 
         // Create ZIP of all files
-        $zipName = 'segregated_all_' . time() . '.zip';
-        $zipPath = storage_path('app/public/' . $zipName);
+        $zipName = "{$timestamp}-All.zip";
+        $zipPath = storage_path("app/public/{$zipName}");
         $zip = new ZipArchive;
 
         if ($zip->open($zipPath, ZipArchive::CREATE) === TRUE) {
@@ -77,7 +90,7 @@ class MesSegregatorController extends Controller
 
             array_unshift($downloads, [
                 'label' => '📦 Download All as ZIP',
-                'url' => asset('storage/' . $zipName)
+                'url' => route('mes.download', ['filename' => $zipName])
             ]);
         }
 

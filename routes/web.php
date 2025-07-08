@@ -36,6 +36,8 @@ Route::middleware(['auth'])->group(function () {
 
 Route::get('/data_encoder/mes-segregator', [MesSegregatorController::class, 'index'])->name('mes.index');
 Route::post('/data_encoder/mes-segregator', [MesSegregatorController::class, 'segregate'])->name('mes.segregate');
+Route::get('/mes-download/{filename}', [MesSegregatorController::class, 'download'])->name('mes.download');
+
 
     Route::get('/', fn () => view('dashboard', ['heading' => 'Home']));
 
