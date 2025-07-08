@@ -17,6 +17,7 @@ use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\OfflineAdController;
 use App\Http\Controllers\AdsManagerController;
 use App\Http\Controllers\RoleAssignmentController;
+use App\Http\Controllers\MesSegregatorController;
 use App\Models\Role;
 
 // ✅ Public routes (accessible to guests)
@@ -31,6 +32,11 @@ Route::get('/assign-roles', [RoleAssignmentController::class, 'index']);
 Route::post('/assign-roles/{id}', [RoleAssignmentController::class, 'update']);
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
+    
+
+Route::get('/data_encoder/mes-segregator', [MesSegregatorController::class, 'index'])->name('mes.index');
+Route::post('/data_encoder/mes-segregator', [MesSegregatorController::class, 'segregate'])->name('mes.segregate');
+
     Route::get('/', fn () => view('dashboard', ['heading' => 'Home']));
 
     Route::view('/encoded_vs_upload', 'encoded_vs_upload')->name('encoded_vs_upload');

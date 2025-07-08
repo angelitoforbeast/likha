@@ -9,24 +9,33 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="h-full">
+
+@php
+  $role = Auth::user()?->getRoleNames()->first() ?? null;
+@endphp
 <div class="min-h-full">
   <nav class="bg-gray-800 fixed top-0 inset-x-0 z-50">
     <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
       <div class="flex h-16 items-center justify-between">
         <div class="flex items-center">
           <div class="shrink-0">
-            <img class="size-8" src="https://tailwindcss.com/plus-assets/img/logos/mark.svg?color=indigo&shade=500" alt="Logo" />
+            <img class="size-8" src="https://static.vecteezy.com/system/resources/previews/018/930/698/original/facebook-logo-facebook-icon-transparent-free-png.png" alt="Logo" />
           </div>
           <div class="hidden md:block">
             <div class="ml-10 flex items-baseline space-x-4">
+              @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC']))
               <x-navlink href="/" :active="request()->is('/dashboard')">Home</x-navlink>
-              <x-navlink href="/from_jnt_view" :active="request()->is('from_jnt_view')">JNT VIEW</x-navlink>
+              {{-- <x-navlink href="/from_jnt_view" :active="request()->is('from_jnt_view')">JNT VIEW</x-navlink> --}}
               <x-navlink href="/jnt_update" :active="request()->is('jnt_update')">JNT UPDATE</x-navlink>
               <x-navlink href="/jnt_rts" :active="request()->is('jnt_rts')">JNT RTS</x-navlink>
               <x-navlink href="/ads_manager/index" :active="request()->is('ads_manager/index')">ADS</x-navlink>
               <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">LIKHA IMPORT</x-navlink>
               <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
               <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
+              @endif
+              @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC', 'Data Encoder']))
+              <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEGREGATOR</x-navlink>
+              @endif
             </div>
           </div>
         </div>
