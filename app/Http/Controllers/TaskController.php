@@ -44,7 +44,9 @@ class TaskController extends Controller
             'name' => 'required|string|max:255',
             'type' => 'required|string',
             'role_target' => 'required|array',
-            'priority_level' => 'required|in:P1,P2,P3,P4,P5',
+            'priority_score' => 'required|integer|min:1|max:100',
+            'due_date' => 'required|date',
+            'due_time' => 'nullable|date_format:H:i', // expecting string like "13:00"
         ]);
 
         $roles = $request->role_target;
@@ -59,14 +61,18 @@ class TaskController extends Controller
                 'name' => $employee->name,
                 'task_name' => $request->name,
                 'role_target' => implode(', ', $roles),
+                'collaborators' => $request->collaborators ?? null,
                 'description' => $request->description,
                 'type' => $request->type,
                 'is_repeating' => $request->has('is_repeating'),
                 'due_date' => $request->due_date,
+                'due_time' => $request->due_time,
+                'reminder_at' => $request->reminder_at ?? null,
                 'status' => $request->status ?? 'pending',
                 'created_by' => auth()->id(),
                 'remarks' => $request->remarks,
-                'priority_level' => $request->priority_level,
+                'priority_score' => $request->priority_score,
+                'parent_task_id' => $request->parent_task_id ?? null,
             ]);
         }
 
@@ -74,46 +80,43 @@ class TaskController extends Controller
     }
 
     public function myTasks()
-{
-    $statusOrder = ['pending', 'in_progress', 'completed'];
-    $priorityOrder = ['P1', 'P2', 'P3', 'P4', 'P5'];
+    {
+        $statusOrder = ['pending', 'in_progress', 'completed'];
 
-    $tasks = Task::where('user_id', auth()->id())
-        ->get()
-        ->sortBy([
-            fn($a, $b) => array_search($a->status, $statusOrder) <=> array_search($b->status, $statusOrder),
-            fn($a, $b) => array_search($a->priority_level, $priorityOrder) <=> array_search($b->priority_level, $priorityOrder),
-            fn($a, $b) => strtotime($a->due_date) <=> strtotime($b->due_date),
-        ]);
+        $tasks = Task::where('user_id', auth()->id())
+            ->get()
+            ->sortBy([
+                fn($a, $b) => array_search($a->status, $statusOrder) <=> array_search($b->status, $statusOrder),
+                fn($a, $b) => $a->priority_score <=> $b->priority_score,
+                fn($a, $b) => strtotime($a->due_date . ' ' . $a->due_time) <=> strtotime($b->due_date . ' ' . $b->due_time),
+            ]);
 
-    return view('tasks.my_tasks', compact('tasks'));
-}
-
+        return view('tasks.my_tasks', compact('tasks'));
+    }
 
     public function updateStatus(Request $request)
-{
-    $request->validate([
-        'task_id' => 'required|exists:tasks,id',
-        'status' => 'required|string',
-        'assignee_remarks' => 'nullable|string',
-    ]);
+    {
+        $request->validate([
+            'task_id' => 'required|exists:tasks,id',
+            'status' => 'required|string',
+            'assignee_remarks' => 'nullable|string',
+        ]);
 
-    $task = Task::findOrFail($request->task_id);
+        $task = Task::findOrFail($request->task_id);
 
-    if ($task->user_id !== auth()->id()) {
-        abort(403);
+        if ($task->user_id !== auth()->id()) {
+            abort(403);
+        }
+
+        $task->status = $request->status;
+        $task->assignee_remarks = $request->assignee_remarks;
+
+        if ($request->status === 'completed' && !$task->completed_at) {
+            $task->completed_at = now('Asia/Manila');
+        }
+
+        $task->save();
+
+        return back()->with('success', 'Task updated successfully.');
     }
-
-    $task->status = $request->status;
-    $task->assignee_remarks = $request->assignee_remarks;
-
-    if ($request->status === 'completed' && !$task->completed_at) {
-        $task->completed_at = now('Asia/Manila'); // ✅ Set PH timezone
-    }
-
-    $task->save();
-
-    return back()->with('success', 'Task updated successfully.');
-}
-
 }

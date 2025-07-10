@@ -19,19 +19,19 @@
         </div>
 
         <div>
-            <label class="font-semibold">Priority Level</label>
-            <select name="priority_level" required class="w-full border p-2 rounded">
-                <option value="P1">P1</option>
-                <option value="P2">P2</option>
-                <option value="P3">P3</option>
-                <option value="P4">P4</option>
-                <option value="P5">P5</option>
-            </select>
-        </div>
+    <label class="font-semibold">Priority Score</label>
+    <select name="priority_score" class="w-full border p-2 rounded" required>
+        <option value="1" selected>P1</option>
+        <option value="2">P2</option>
+        <option value="3">P3</option>
+        <option value="4">P4</option>
+        <option value="5">P5</option>
+    </select>
+</div>
+
 
         <div>
             <label for="role_target" class="block font-semibold mb-1">Target Roles:</label>
-
             <div x-data="{ open: false, selected: [] }" class="relative">
                 <button type="button" @click="open = !open"
                     class="w-full border px-4 py-2 text-left rounded bg-white shadow">
@@ -56,10 +56,26 @@
             </div>
         </div>
 
-        <div>
-            <label class="font-semibold">Due Date</label>
-            <input type="date" name="due_date" value="{{ date('Y-m-d') }}" class="w-full border p-2 rounded" />
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="font-semibold">Due Date</label>
+                <input type="date" name="due_date" value="{{ date('Y-m-d') }}" class="w-full border p-2 rounded" />
+            </div>
 
+            <div>
+                <label class="font-semibold">Due Time</label>
+                <input type="time" name="due_time"  class="w-full border p-2 rounded" />
+            </div>
+        </div>
+
+        <div>
+            <label class="font-semibold">Reminder At (optional)</label>
+            <input type="datetime-local" name="reminder_at" class="w-full border p-2 rounded" />
+        </div>
+
+        <div>
+            <label class="font-semibold">Collaborators (optional)</label>
+            <input type="text" name="collaborators" placeholder="Comma-separated user IDs or names" class="w-full border p-2 rounded" />
         </div>
 
         <div>

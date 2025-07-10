@@ -7,22 +7,28 @@ use Illuminate\Database\Eloquent\Model;
 class Task extends Model
 {
     protected $fillable = [
-    'user_id',
-    'name',
-    'role_target',
-    'task_name',
-    'description',
-    'type',
-    'is_repeating',
-    'priority_level',
-    'due_date',
-    'status',
-    'is_notified',
-    'completed_at',
-    'remarks_assigned',
-    'remarks_created_by',
-    'created_by',
-];
-
+        'user_id',
+        'name',
+        'role_target',
+        'collaborators',
+        'task_name',
+        'description',
+        'type',
+        'is_repeating',
+        'priority_score',
+        'due_date',
+        'due_time',
+        'reminder_at',
+        'status',
+        'completed_at',
+        'is_notified',
+        'review_status',
+        'reviewed_at',
+        'creator_remarks',
+        'remarks_created_by',
+        'assignee_remarks',
+        'remarks',
+        'created_by',
+        'parent_task_id',
+    ];
 }
-

@@ -12,8 +12,8 @@
       <tr>
         <th class="border px-2 py-1">Created At</th>
         <th class="border px-2 py-1">Task Name</th>
-        <th class="border px-2 py-1">Priority Level</th>
-        <th class="border px-2 py-1">Due Date</th>
+        <th class="border px-2 py-1">Priority Score</th>
+        <th class="border px-2 py-1">Due Date & Time</th>
         <th class="border px-2 py-1">Status</th>
         <th class="border px-2 py-1">Assignee Remarks</th>
         <th class="border px-2 py-1">Creator Remarks</th>
@@ -29,11 +29,16 @@
             <input type="hidden" name="task_id" value="{{ $task->id }}">
 
             <td class="border px-2 py-1">
-              {{ \Carbon\Carbon::parse($task->created_at)->format('Y-m-d H:i') }}
+              {{ \Carbon\Carbon::parse($task->created_at)->timezone('Asia/Manila')->format('Y-m-d H:i') }}
             </td>
             <td class="border px-2 py-1">{{ $task->task_name }}</td>
-            <td class="border px-2 py-1">{{ $task->priority_level ?? '-' }}</td>
-            <td class="border px-2 py-1">{{ $task->due_date }}</td>
+            <td class="border px-2 py-1">{{ $task->priority_score ?? '-' }}</td>
+            <td class="border px-2 py-1">
+              {{ $task->due_date }}
+              @if ($task->due_time)
+                <span class="text-gray-500 text-xs">({{ \Carbon\Carbon::parse($task->due_time)->format('H:i') }})</span>
+              @endif
+            </td>
 
             <td class="border px-2 py-1">
               <select name="status" class="border px-1 py-1 rounded w-full">
