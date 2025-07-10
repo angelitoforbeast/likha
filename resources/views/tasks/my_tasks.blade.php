@@ -12,25 +12,26 @@
       <tr>
         <th class="border px-2 py-1">Created At</th>
         <th class="border px-2 py-1">Task Name</th>
-        
         <th class="border px-2 py-1">Priority Level</th>
         <th class="border px-2 py-1">Due Date</th>
         <th class="border px-2 py-1">Status</th>
         <th class="border px-2 py-1">Assignee Remarks</th>
         <th class="border px-2 py-1">Creator Remarks</th>
+        <th class="border px-2 py-1">Completed At</th>
         <th class="border px-2 py-1">Action</th>
       </tr>
     </thead>
     <tbody>
       @foreach ($tasks as $task)
-        <tr>
+        <tr @if($task->status === 'completed') class="bg-green-50" @endif>
           <form method="POST" action="{{ route('task.updateStatus') }}">
             @csrf
             <input type="hidden" name="task_id" value="{{ $task->id }}">
 
-            <td class="border px-2 py-1">{{ $task->created_at }}</td>
+            <td class="border px-2 py-1">
+              {{ \Carbon\Carbon::parse($task->created_at)->format('Y-m-d H:i') }}
+            </td>
             <td class="border px-2 py-1">{{ $task->task_name }}</td>
-            
             <td class="border px-2 py-1">{{ $task->priority_level ?? '-' }}</td>
             <td class="border px-2 py-1">{{ $task->due_date }}</td>
 
@@ -47,6 +48,10 @@
             </td>
 
             <td class="border px-2 py-1">{{ $task->creator_remarks }}</td>
+
+            <td class="border px-2 py-1">
+              {{ $task->completed_at ? \Carbon\Carbon::parse($task->completed_at)->timezone('Asia/Manila')->format('Y-m-d H:i') : '-' }}
+            </td>
 
             <td class="border px-2 py-1 text-center">
               <button type="submit" class="bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600">

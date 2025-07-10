@@ -5,13 +5,17 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Models\EmployeeProfile;
 use Illuminate\Http\Request;
+use Spatie\Permission\Models\Role; // ← idagdag sa taas ng file
 
 class RoleAssignmentController extends Controller
 {
     public function index()
     {
         $users = User::with('employeeProfile')->get();
-        $roles = ['CEO', 'Marketing', 'Marketing - OIC', 'Encoder', 'Packer', 'Admin']; // Static roles list
+        
+
+$roles = Role::pluck('name'); // Dynamic list from roles table
+
 
         return view('assign_roles', compact('users', 'roles'));
     }

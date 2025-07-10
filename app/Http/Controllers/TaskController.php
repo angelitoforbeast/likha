@@ -91,23 +91,29 @@ class TaskController extends Controller
 
 
     public function updateStatus(Request $request)
-    {
-        $request->validate([
-            'task_id' => 'required|exists:tasks,id',
-            'status' => 'required|string',
-            'assignee_remarks' => 'nullable|string',
-        ]);
+{
+    $request->validate([
+        'task_id' => 'required|exists:tasks,id',
+        'status' => 'required|string',
+        'assignee_remarks' => 'nullable|string',
+    ]);
 
-        $task = Task::findOrFail($request->task_id);
+    $task = Task::findOrFail($request->task_id);
 
-        if ($task->user_id !== auth()->id()) {
-            abort(403);
-        }
-
-        $task->status = $request->status;
-        $task->assignee_remarks = $request->assignee_remarks;
-        $task->save();
-
-        return back()->with('success', 'Task updated successfully.');
+    if ($task->user_id !== auth()->id()) {
+        abort(403);
     }
+
+    $task->status = $request->status;
+    $task->assignee_remarks = $request->assignee_remarks;
+
+    if ($request->status === 'completed' && !$task->completed_at) {
+        $task->completed_at = now('Asia/Manila'); // ✅ Set PH timezone
+    }
+
+    $task->save();
+
+    return back()->with('success', 'Task updated successfully.');
+}
+
 }
