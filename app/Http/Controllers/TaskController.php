@@ -44,6 +44,7 @@ class TaskController extends Controller
             'name' => 'required|string|max:255',
             'type' => 'required|string',
             'role_target' => 'required|array',
+            'priority_level' => 'required|in:P1,P2,P3,P4,P5',
         ]);
 
         $roles = $request->role_target;
@@ -65,6 +66,7 @@ class TaskController extends Controller
                 'status' => $request->status ?? 'pending',
                 'created_by' => auth()->id(),
                 'remarks' => $request->remarks,
+                'priority_level' => $request->priority_level,
             ]);
         }
 
@@ -72,10 +74,21 @@ class TaskController extends Controller
     }
 
     public function myTasks()
-    {
-        $tasks = Task::where('user_id', auth()->id())->latest()->get();
-        return view('tasks.my_tasks', compact('tasks'));
-    }
+{
+    $statusOrder = ['pending', 'in_progress', 'completed'];
+    $priorityOrder = ['P1', 'P2', 'P3', 'P4', 'P5'];
+
+    $tasks = Task::where('user_id', auth()->id())
+        ->get()
+        ->sortBy([
+            fn($a, $b) => array_search($a->status, $statusOrder) <=> array_search($b->status, $statusOrder),
+            fn($a, $b) => array_search($a->priority_level, $priorityOrder) <=> array_search($b->priority_level, $priorityOrder),
+            fn($a, $b) => strtotime($a->due_date) <=> strtotime($b->due_date),
+        ]);
+
+    return view('tasks.my_tasks', compact('tasks'));
+}
+
 
     public function updateStatus(Request $request)
     {

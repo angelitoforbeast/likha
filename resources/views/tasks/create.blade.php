@@ -19,41 +19,47 @@
         </div>
 
         <div>
-    <label for="role_target">Target Roles:</label>
-<label for="role_target" class="block font-semibold mb-1">Target Roles:</label>
+            <label class="font-semibold">Priority Level</label>
+            <select name="priority_level" required class="w-full border p-2 rounded">
+                <option value="P1">P1</option>
+                <option value="P2">P2</option>
+                <option value="P3">P3</option>
+                <option value="P4">P4</option>
+                <option value="P5">P5</option>
+            </select>
+        </div>
 
-<div x-data="{ open: false, selected: [] }" class="relative">
-  <button type="button" @click="open = !open"
-    class="w-full border px-4 py-2 text-left rounded bg-white shadow">
-    <template x-if="selected.length === 0">
-      <span class="text-gray-400">Select roles...</span>
-    </template>
-    <template x-if="selected.length > 0">
-      <span x-text="selected.join(', ')"></span>
-    </template>
-  </button>
+        <div>
+            <label for="role_target" class="block font-semibold mb-1">Target Roles:</label>
 
-  <div x-show="open" @click.outside="open = false" class="absolute mt-1 w-full bg-white border shadow rounded z-10 max-h-60 overflow-y-auto">
-    @foreach ($roles as $role)
-      <label class="block px-4 py-2 hover:bg-gray-100">
-        <input type="checkbox" value="{{ $role }}"
-          x-model="selected"
-          name="role_target[]"
-          class="mr-2">
-        {{ $role }}
-      </label>
-    @endforeach
-  </div>
-</div>
+            <div x-data="{ open: false, selected: [] }" class="relative">
+                <button type="button" @click="open = !open"
+                    class="w-full border px-4 py-2 text-left rounded bg-white shadow">
+                    <template x-if="selected.length === 0">
+                        <span class="text-gray-400">Select roles...</span>
+                    </template>
+                    <template x-if="selected.length > 0">
+                        <span x-text="selected.join(', ')"></span>
+                    </template>
+                </button>
 
-
-
-</div>
-
+                <div x-show="open" @click.outside="open = false"
+                    class="absolute mt-1 w-full bg-white border shadow rounded z-10 max-h-60 overflow-y-auto">
+                    @foreach ($roles as $role)
+                        <label class="block px-4 py-2 hover:bg-gray-100">
+                            <input type="checkbox" value="{{ $role }}" x-model="selected" name="role_target[]"
+                                class="mr-2">
+                            {{ $role }}
+                        </label>
+                    @endforeach
+                </div>
+            </div>
+        </div>
 
         <div>
             <label class="font-semibold">Due Date</label>
-            <input type="date" name="due_date" class="w-full border p-2 rounded" />
+            <input type="date" name="due_date" value="{{ date('Y-m-d') }}" class="w-full border p-2 rounded" />
+
         </div>
 
         <div>
