@@ -44,10 +44,12 @@ class User extends Authenticatable
     static::created(function ($user) {
         \App\Models\EmployeeProfile::create([
             'user_id' => $user->id,
+            'name' => $user->name, // ← eto ang crucial na dagdag
             'employee_code' => 'EMP-' . str_pad($user->id, 3, '0', STR_PAD_LEFT),
             'status' => 'Active',
         ]);
     });
 }
+
 
 }
