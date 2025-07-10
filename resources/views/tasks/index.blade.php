@@ -37,42 +37,41 @@
         <th class="border px-2 py-1">Creator Remarks</th>
         <th class="border px-2 py-1">Remarks</th>
         <th class="border px-2 py-1">Updated At</th>
-        <th class="border px-2 py-1">Action</th>
       </tr>
     </thead>
     <tbody>
       @foreach ($tasks as $task)
         <tr>
-          <form method="POST" action="{{ route('task.updateCreatorRemarks') }}">
-            @csrf
-            <input type="hidden" name="task_id" value="{{ $task->id }}">
+          <td class="border px-2 py-1">{{ $task->created_at }}</td>
+          <td class="border px-2 py-1 text-center">{{ $task->id }}</td>
+          <td class="border px-2 py-1 text-center">{{ $task->user_id }}</td>
+          <td class="border px-2 py-1">{{ $task->name }}</td>
+          <td class="border px-2 py-1">{{ $task->role_target }}</td>
+          <td class="border px-2 py-1">{{ $task->task_name }}</td>
+          <td class="border px-2 py-1">{{ $task->description }}</td>
+          <td class="border px-2 py-1">{{ $task->type }}</td>
+          <td class="border px-2 py-1">{{ $task->is_repeating ? 'Yes' : 'No' }}</td>
+          <td class="border px-2 py-1">P{{ $task->priority_score }}</td>
+          <td class="border px-2 py-1">{{ $task->due_date }}</td>
+          <td class="border px-2 py-1">{{ $task->status }}</td>
+          <td class="border px-2 py-1">{{ $task->is_notified ? 'Yes' : 'No' }}</td>
+          <td class="border px-2 py-1">{{ $task->completed_at ?? '-' }}</td>
+          <td class="border px-2 py-1">{{ $task->assignee_remarks }}</td>
+          <td class="border px-2 py-1">{{ $task->remarks_created_by }}</td>
+          <td class="border px-2 py-1">
+    @if ($task->creator)
+        {{ $task->creator->name }}
+        @if ($task->creator->employeeProfile && $task->creator->employeeProfile->role)
+            ({{ $task->creator->employeeProfile->role }})
+        @endif
+    @else
+        Unknown
+    @endif
+</td>
 
-            <td class="border px-2 py-1">{{ $task->created_at }}</td>
-            <td class="border px-2 py-1 text-center">{{ $task->id }}</td>
-            <td class="border px-2 py-1 text-center">{{ $task->user_id }}</td>
-            <td class="border px-2 py-1">{{ $task->name }}</td>
-            <td class="border px-2 py-1">{{ $task->role_target }}</td>
-            <td class="border px-2 py-1">{{ $task->task_name }}</td>
-            <td class="border px-2 py-1">{{ $task->description }}</td>
-            <td class="border px-2 py-1">{{ $task->type }}</td>
-            <td class="border px-2 py-1">{{ $task->is_repeating ? 'Yes' : 'No' }}</td>
-            <td class="border px-2 py-1">{{ $task->priority_level ?? '-' }}</td>
-            <td class="border px-2 py-1">{{ $task->due_date }}</td>
-            <td class="border px-2 py-1">{{ $task->status }}</td>
-            <td class="border px-2 py-1">{{ $task->is_notified ? 'Yes' : 'No' }}</td>
-            <td class="border px-2 py-1">{{ $task->completed_at ?? '-' }}</td>
-            <td class="border px-2 py-1">{{ $task->assignee_remarks }}</td>
-            <td class="border px-2 py-1">{{ $task->remarks_created_by }}</td>
-            <td class="border px-2 py-1">{{ $task->created_by }}</td>
-            <td class="border px-2 py-1">
-              <textarea name="creator_remarks" class="w-full border rounded px-1 py-1 text-xs">{{ $task->creator_remarks }}</textarea>
-            </td>
-            <td class="border px-2 py-1">{{ $task->remarks }}</td>
-            <td class="border px-2 py-1">{{ $task->updated_at }}</td>
-            <td class="border px-2 py-1 text-center">
-              <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white text-xs px-2 py-1 rounded">Save</button>
-            </td>
-          </form>
+          <td class="border px-2 py-1">{{ $task->creator_remarks }}</td>
+          <td class="border px-2 py-1">{{ $task->remarks }}</td>
+          <td class="border px-2 py-1">{{ $task->updated_at }}</td>
         </tr>
       @endforeach
     </tbody>

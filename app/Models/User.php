@@ -34,6 +34,10 @@ class User extends Authenticatable
     {
         return $this->hasOne(\App\Models\UserRole::class, 'user_id');
     }
+    public function profile()
+{
+    return $this->hasOne(EmployeeProfile::class);
+}
 
     public function employeeProfile()
     {

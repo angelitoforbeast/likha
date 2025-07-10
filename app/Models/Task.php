@@ -31,4 +31,10 @@ class Task extends Model
         'created_by',
         'parent_task_id',
     ];
+
+    public function creator()
+{
+    return $this->belongsTo(User::class, 'created_by');
+}
+
 }

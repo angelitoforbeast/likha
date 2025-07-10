@@ -9,10 +9,11 @@ use Illuminate\Support\Facades\DB;
 class TaskController extends Controller
 {
     public function index()
-    {
-        $tasks = Task::latest()->get();
-        return view('tasks.index', compact('tasks'));
-    }
+{
+    $tasks = Task::with(['creator.employeeProfile'])->latest()->get();
+    return view('tasks.index', compact('tasks'));
+}
+
 
     public function updateCreatorRemarks(Request $request)
     {
@@ -80,19 +81,21 @@ class TaskController extends Controller
     }
 
     public function myTasks()
-    {
-        $statusOrder = ['pending', 'in_progress', 'completed'];
+{
+    $statusOrder = ['pending', 'in_progress', 'completed'];
 
-        $tasks = Task::where('user_id', auth()->id())
-            ->get()
-            ->sortBy([
-                fn($a, $b) => array_search($a->status, $statusOrder) <=> array_search($b->status, $statusOrder),
-                fn($a, $b) => $a->priority_score <=> $b->priority_score,
-                fn($a, $b) => strtotime($a->due_date . ' ' . $a->due_time) <=> strtotime($b->due_date . ' ' . $b->due_time),
-            ]);
+    $tasks = Task::with(['creator.employeeProfile']) // ← add this
+        ->where('user_id', auth()->id())
+        ->get()
+        ->sortBy([
+            fn($a, $b) => array_search($a->status, $statusOrder) <=> array_search($b->status, $statusOrder),
+            fn($a, $b) => $a->priority_score <=> $b->priority_score,
+            fn($a, $b) => strtotime($a->due_date . ' ' . $a->due_time) <=> strtotime($b->due_date . ' ' . $b->due_time),
+        ]);
 
-        return view('tasks.my_tasks', compact('tasks'));
-    }
+    return view('tasks.my_tasks', compact('tasks'));
+}
+
 
     public function updateStatus(Request $request)
     {

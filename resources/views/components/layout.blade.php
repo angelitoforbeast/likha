@@ -2,8 +2,7 @@
 <html lang="en" class="h-full bg-gray-100">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="ie=edge">
   <title>Home Page</title>
   <script src="https://cdn.tailwindcss.com"></script>
@@ -27,16 +26,23 @@
             <div class="ml-10 flex items-baseline space-x-4">
               @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC']))
               <x-navlink href="/" :active="request()->is('/dashboard')">Home</x-navlink>
-              <x-navlink href="/task/my-tasks" :active="request()->is('encoded_vs_upload')">TASK</x-navlink>
-              {{-- <x-navlink href="/from_jnt_view" :active="request()->is('from_jnt_view')">JNT VIEW</x-navlink> --}}
-              {{--<x-navlink href="/jnt_update" :active="request()->is('jnt_update')">JNT UPDATE</x-navlink>--}}
-              {{--<x-navlink href="/jnt_rts" :active="request()->is('jnt_rts')">JNT RTS</x-navlink>--}}
+
+              {{-- TASK link with pending badge --}}
+              <div class="relative">
+                <x-navlink href="/task/my-tasks" :active="request()->is('task/my-tasks')">TASK</x-navlink>
+                @if(!empty($pendingTaskCount) && $pendingTaskCount > 0)
+                  <span class="absolute -top-1 -right-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold leading-none text-white bg-red-600 rounded-full">
+                    {{ $pendingTaskCount }}
+                  </span>
+                @endif
+              </div>
+
               <x-navlink href="/ads_manager/index" :active="request()->is('ads_manager/index')">ADS</x-navlink>
               <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">LIKHA IMPORT</x-navlink>
               <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
               <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
-              
               @endif
+
               @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC', 'Data Encoder','Data Encoder - OIC']))
               <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEGREGATOR</x-navlink>
               @endif
@@ -79,9 +85,15 @@
   </header>
 
   <main>
-    <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-      {{ $slot }}
-    </div>
+    @if (request()->is('task/my-tasks'))
+      <div class="w-full px-0">
+        {{ $slot }}
+      </div>
+    @else
+      <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        {{ $slot }}
+      </div>
+    @endif
   </main>
 </div>
 </body>
