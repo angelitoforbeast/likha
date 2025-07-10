@@ -12,8 +12,9 @@
 <body class="h-full">
 
 @php
-  $role = Auth::user()?->getRoleNames()->first() ?? null;
+  $role = Auth::user()?->employeeProfile?->role ?? null;
 @endphp
+
 <div class="min-h-full">
   <nav class="bg-gray-800 fixed top-0 inset-x-0 z-50">
     <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -48,7 +49,7 @@
             <div class="text-gray-300 text-sm text-right leading-tight">
               <div>{{ Auth::user()->name }}</div>
               <div class="text-xs text-gray-400">
-                {{ Auth::user()->getRoleNames()->first() ?? 'No Role' }}
+                {{ Auth::user()?->employeeProfile?->role ?? 'No Role' }}
               </div>
             </div>
 
