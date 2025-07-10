@@ -37,7 +37,7 @@
               <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
               
               @endif
-              @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC', 'Data Encoder']))
+              @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC', 'Data Encoder','Data Encoder - OIC']))
               <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEGREGATOR</x-navlink>
               @endif
             </div>
