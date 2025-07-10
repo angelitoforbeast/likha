@@ -59,6 +59,9 @@ Route::get('/cpp', function () {$user = auth()->user();$role = $user->roles->fir
 return app(App\Http\Controllers\CPPReportController::class)->index();
 })->middleware('auth');
 
+    Route::get('/roles/index', [\App\Http\Controllers\RoleController::class, 'index']);
+Route::post('/roles/store', [\App\Http\Controllers\RoleController::class, 'store'])->name('roles.store');
+Route::post('/roles/update/{id}', [\App\Http\Controllers\RoleController::class, 'update'])->name('roles.update');
 
 
     Route::match(['get', 'delete'], '/likha_order/view', [LikhaOrderImportController::class, 'view']);
