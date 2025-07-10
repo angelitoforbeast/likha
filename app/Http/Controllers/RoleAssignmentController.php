@@ -3,15 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Models\EmployeeProfile;
 use Illuminate\Http\Request;
-use Spatie\Permission\Models\Role;
 
 class RoleAssignmentController extends Controller
 {
     public function index()
     {
-        $users = User::with('roles')->get();
-        $roles = Role::orderBy('access_level', 'desc')->get(); // Make sure 'access_level' exists in roles table
+        $users = User::with('employeeProfile')->get();
+        $roles = ['CEO', 'Marketing', 'Marketing - OIC', 'Encoder', 'Packer', 'Admin']; // Static roles list
+
         return view('assign_roles', compact('users', 'roles'));
     }
 
@@ -19,20 +20,22 @@ class RoleAssignmentController extends Controller
     {
         $request->validate([
             'user_id' => 'required|exists:users,id',
-            'role_name' => 'required|exists:roles,name',
+            'role_name' => 'required|string|max:255',
         ]);
 
-        $user = User::findOrFail($request->input('user_id'));
-        $roleName = $request->input('role_name');
+        $profile = EmployeeProfile::where('user_id', $request->user_id)->first();
 
-        $role = Role::where('name', $roleName)->first();
+        if (!$profile) {
+            return response()->json(['success' => false, 'error' => 'Employee profile not found.']);
+        }
 
-        $user->syncRoles([$role->name]);
+        $profile->role = $request->role_name;
+        $profile->save();
 
         return response()->json([
             'success' => true,
-            'role' => $role->name,
-            'access_level' => $role->access_level,
+            'role' => $profile->role,
+            'access_level' => '-', // Optional if no access level in employee_profiles
         ]);
     }
 }

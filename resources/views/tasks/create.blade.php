@@ -1,0 +1,78 @@
+<x-layout>
+    <x-slot name="heading">📝 Create New Task</x-slot>
+
+    <form method="POST" action="{{ route('task.create') }}" class="max-w-xl mx-auto space-y-4">
+        @csrf
+
+        <div>
+            <label class="font-semibold">Task Name</label>
+            <input type="text" name="name" required class="w-full border p-2 rounded" />
+        </div>
+
+        <div>
+            <label class="font-semibold">Task Type</label>
+            <select name="type" required class="w-full border p-2 rounded">
+                <option value="everyday">Everyday</option>
+                <option value="manual">Manual</option>
+                <option value="scheduled">Scheduled</option>
+            </select>
+        </div>
+
+        <div>
+    <label for="role_target">Target Roles:</label>
+<label for="role_target" class="block font-semibold mb-1">Target Roles:</label>
+
+<div x-data="{ open: false, selected: [] }" class="relative">
+  <button type="button" @click="open = !open"
+    class="w-full border px-4 py-2 text-left rounded bg-white shadow">
+    <template x-if="selected.length === 0">
+      <span class="text-gray-400">Select roles...</span>
+    </template>
+    <template x-if="selected.length > 0">
+      <span x-text="selected.join(', ')"></span>
+    </template>
+  </button>
+
+  <div x-show="open" @click.outside="open = false" class="absolute mt-1 w-full bg-white border shadow rounded z-10 max-h-60 overflow-y-auto">
+    @foreach ($roles as $role)
+      <label class="block px-4 py-2 hover:bg-gray-100">
+        <input type="checkbox" value="{{ $role }}"
+          x-model="selected"
+          name="role_target[]"
+          class="mr-2">
+        {{ $role }}
+      </label>
+    @endforeach
+  </div>
+</div>
+
+
+
+</div>
+
+
+        <div>
+            <label class="font-semibold">Due Date</label>
+            <input type="date" name="due_date" class="w-full border p-2 rounded" />
+        </div>
+
+        <div>
+            <label class="font-semibold">Description</label>
+            <textarea name="description" class="w-full border p-2 rounded" rows="3"></textarea>
+        </div>
+
+        <div>
+            <label class="font-semibold">Remarks</label>
+            <textarea name="remarks" class="w-full border p-2 rounded" rows="2"></textarea>
+        </div>
+
+        <div class="flex items-center space-x-2">
+            <input type="checkbox" name="is_repeating" id="repeat" />
+            <label for="repeat">This task repeats every day</label>
+        </div>
+
+        <div class="text-center">
+            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">Save Task</button>
+        </div>
+    </form>
+</x-layout>

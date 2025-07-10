@@ -9,15 +9,13 @@
           <th class="border px-4 py-2">Name</th>
           <th class="border px-4 py-2">Email</th>
           <th class="border px-4 py-2">Role</th>
-          <th class="border px-4 py-2">Access Level</th>
         </tr>
       </thead>
       <tbody>
         @foreach ($users as $user)
           @php
-            $currentRole = $user->roles->first();
-            $roleName = $currentRole?->name ?? '';
-            $roleLevel = $currentRole?->access_level ?? '';
+            $profile = $user->employeeProfile;
+            $role = $profile?->role ?? '';
           @endphp
           <tr>
             <td class="border px-4 py-2 text-center">{{ $user->id }}</td>
@@ -26,15 +24,10 @@
             <td class="border px-4 py-2 text-center">
               <select class="border px-2 py-1 rounded role-select" data-user-id="{{ $user->id }}">
                 <option value="">— Select Role —</option>
-                @foreach ($roles as $role)
-                  <option value="{{ $role->name }}" {{ $role->name === $roleName ? 'selected' : '' }}>
-                    {{ $role->name }} ({{ $role->access_level }})
-                  </option>
+                @foreach ($roles as $r)
+                  <option value="{{ $r }}" {{ $r === $role ? 'selected' : '' }}>{{ $r }}</option>
                 @endforeach
               </select>
-            </td>
-            <td class="border px-4 py-2 text-center access-level-display">
-              {{ $roleLevel }}
             </td>
           </tr>
         @endforeach
@@ -61,10 +54,7 @@
         })
         .then(response => response.json())
         .then(data => {
-          if (data.success) {
-            const row = this.closest('tr');
-            row.querySelector('.access-level-display').textContent = data.access_level;
-          } else {
+          if (!data.success) {
             alert(data.error || 'Failed to update role.');
           }
         })

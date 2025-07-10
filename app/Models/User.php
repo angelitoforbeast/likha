@@ -29,10 +29,25 @@ class User extends Authenticatable
             'password' => 'hashed',
         ];
     }
-    public function userRole()
-{
-    return $this->hasOne(\App\Models\UserRole::class, 'user_id');
-}
 
+    public function userRole()
+    {
+        return $this->hasOne(\App\Models\UserRole::class, 'user_id');
+    }
+
+    public function employeeProfile()
+    {
+        return $this->hasOne(\App\Models\EmployeeProfile::class, 'user_id');
+    }
+    protected static function booted()
+{
+    static::created(function ($user) {
+        \App\Models\EmployeeProfile::create([
+            'user_id' => $user->id,
+            'employee_code' => 'EMP-' . str_pad($user->id, 3, '0', STR_PAD_LEFT),
+            'status' => 'Active',
+        ]);
+    });
+}
 
 }

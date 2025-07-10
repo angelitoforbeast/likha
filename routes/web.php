@@ -18,6 +18,7 @@ use App\Http\Controllers\OfflineAdController;
 use App\Http\Controllers\AdsManagerController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\MesSegregatorController;
+use App\Http\Controllers\TaskController;
 use App\Models\Role;
 
 // ✅ Public routes (accessible to guests)
@@ -33,6 +34,14 @@ Route::post('/assign-roles/{id}', [RoleAssignmentController::class, 'update']);
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
     
+
+
+Route::get('/task/index', [TaskController::class, 'index'])->name('task.index');            // View tasks
+Route::get('/task/create', [TaskController::class, 'showCreateForm'])->name('task.create.form');  // Show form
+Route::post('/task/create', [TaskController::class, 'create'])->name('task.create');  
+Route::get('/task/my-tasks', [TaskController::class, 'myTasks'])->name('task.my-tasks');
+Route::post('/task/update-status', [TaskController::class, 'updateStatus'])->name('task.updateStatus');
+Route::post('/task/update-creator-remarks', [TaskController::class, 'updateCreatorRemarks'])->name('task.updateCreatorRemarks');
 
 Route::get('/data_encoder/mes-segregator', [MesSegregatorController::class, 'index'])->name('mes.index');
 Route::post('/data_encoder/mes-segregator', [MesSegregatorController::class, 'segregate'])->name('mes.segregate');
