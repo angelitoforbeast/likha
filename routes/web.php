@@ -19,6 +19,7 @@ use App\Http\Controllers\AdsManagerController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\MesSegregatorController;
 use App\Http\Controllers\TaskController;
+use App\Http\Controllers\MacroGsheetController;
 use App\Models\Role;
 
 // ✅ Public routes (accessible to guests)
@@ -34,6 +35,22 @@ Route::post('/assign-roles/{id}', [RoleAssignmentController::class, 'update']);
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
     
+
+
+Route::get('/macro/gsheet/settings', [MacroGsheetController::class, 'settings'])->name('macro.settings');
+Route::post('/macro/gsheet/settings', [MacroGsheetController::class, 'storeSetting'])->name('macro.settings.store');
+Route::delete('/macro/gsheet/settings/{id}', [MacroGsheetController::class, 'deleteSetting'])->name('macro.settings.delete');
+Route::post('/macro/gsheet/import', [MacroGsheetController::class, 'import'])->name('macro.import');
+Route::get('/macro/gsheet/index', [MacroGsheetController::class, 'index'])->name('macro.index');
+Route::delete('/macro/gsheet/delete-all', [MacroGsheetController::class, 'deleteAll'])->name('macro.deleteAll');
+Route::post('/macro/gsheet/import', [MacroGsheetController::class, 'import'])->name('macro.import');
+Route::get('/macro/gsheet/import', function () {
+    $settings = \App\Models\MacroGsheetSetting::all();
+    return view('macro.gsheet.import', compact('settings'));
+})->name('macro.import.view');
+
+
+
 
 
 Route::get('/task/index', [TaskController::class, 'index'])->name('task.index');            // View tasks

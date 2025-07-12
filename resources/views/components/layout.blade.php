@@ -85,7 +85,7 @@
   </header>
 
   <main>
-    @if (request()->is('task/my-tasks'))
+    @if (request()->is('task/my-tasks') || request()->is('macro/gsheet/index'))
       <div class="w-full px-0">
         {{ $slot }}
       </div>
