@@ -112,10 +112,10 @@ class OrderTallyController extends Controller
 
         // Step 5: date dropdown values
         $availableDates = DB::table('likha_orders')
-            ->select('DATE')
+            ->select('date')
             ->distinct()
-            ->orderByDesc('DATE')
-            ->pluck('DATE');
+            ->orderByDesc('date')
+            ->pluck('date');
 
         // Step 6: total summary
         $totals = [
