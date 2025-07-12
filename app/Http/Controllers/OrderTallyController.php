@@ -13,8 +13,9 @@ class OrderTallyController extends Controller
 
     // Step 1: likha_orders query
     $likhaQuery = DB::table('likha_orders')
-        ->select('DATE as date', 'page_name', DB::raw('COUNT(*) as likha_count'))
-        ->groupBy('DATE', 'page_name');
+        ->select('date as date', 'page_name', DB::raw('COUNT(*) as likha_count'))
+->groupBy('date', 'page_name');
+
 
     if ($filterDate) {
         $likhaQuery->where('DATE', $filterDate);
