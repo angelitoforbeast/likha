@@ -21,90 +21,59 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
 
     public function handle()
     {
-        $setting = LikhaOrderSetting::first();
-
-        if (!$setting || !$setting->sheet_id || !$setting->range) {
-            throw new \Exception('Missing sheet ID or range in settings.');
-        }
-
-        $sheetId = $setting->sheet_id;
-        $range = $setting->range;
-        $sheetName = explode('!', $range)[0];
-
         $client = new Google_Client();
         $client->setAuthConfig(storage_path('app/credentials.json'));
         $client->addScope(Google_Service_Sheets::SPREADSHEETS);
         $service = new Google_Service_Sheets($client);
 
-        $response = $service->spreadsheets_values->get($sheetId, $range);
-        $values = $response->getValues();
+        ImportStatus::updateOrCreate(['job_name' => 'LikhaImport'], ['is_complete' => false]);
 
-        \Log::info("📥 Fetched " . count($values) . " rows from Google Sheet.");
+        $settings = LikhaOrderSetting::all();
+        foreach ($settings as $setting) {
+            if (!$setting->sheet_id || !$setting->range) continue;
 
-        if (empty($values)) return;
+            $sheetId = $setting->sheet_id;
+            $range = $setting->range;
+            $sheetName = explode('!', $range)[0];
 
-        $updates = [];
-        $importedCount = 0;
-        $skippedCount = 0;
-        $firstImportedRow = null;
-        // Before the loop
-$status = ImportStatus::updateOrCreate(
-    ['job_name' => 'LikhaImport'],
-    ['is_complete' => false]
-);
-        foreach ($values as $index => $row) {
-            $rawDone = $row[8] ?? '';
-            $doneFlag = strtolower(preg_replace('/\s+/', '', $rawDone));
+            $response = $service->spreadsheets_values->get($sheetId, $range);
+            $values = $response->getValues();
+            if (empty($values)) continue;
 
-            \Log::info("Row {$index} raw DONE value: [" . $rawDone . "] → cleaned: [" . $doneFlag . "]");
+            \Log::info("📥 [$sheetId] Fetched " . count($values) . " rows");
 
-            if ($doneFlag === 'done') {
-               
-                $skippedCount++;
-                continue;
+            $updates = [];
+            foreach ($values as $index => $row) {
+                $doneFlag = strtolower(preg_replace('/\s+/', '', $row[8] ?? ''));
+                if ($doneFlag === 'done') continue;
+
+                LikhaOrder::create([
+                    'date' => isset($row[0]) ? date('Y-m-d', strtotime($row[0])) : null,
+                    'page_name' => $row[1] ?? null,
+                    'name' => $row[2] ?? null,
+                    'phone_number' => $row[3] ?? null,
+                    'all_user_input' => $row[4] ?? null,
+                    'shop_details' => $row[5] ?? null,
+                    'extracted_details' => $row[6] ?? null,
+                    'price' => $row[7] ?? null,
+                ]);
+
+                $rowNumber = $index + 2;
+                $updates[] = [
+                    'range' => "{$sheetName}!I{$rowNumber}",
+                    'values' => [['DONE']],
+                ];
             }
 
-            LikhaOrder::create([
-                'date' => isset($row[0]) ? date('Y-m-d', strtotime($row[0])) : null,
-                'page_name' => $row[1] ?? null,
-                'name' => $row[2] ?? null,
-                'phone_number' => $row[3] ?? null,
-                'all_user_input' => $row[4] ?? null,
-                'shop_details' => $row[5] ?? null,
-                'extracted_details' => $row[6] ?? null,
-                'price' => $row[7] ?? null,
-            ]);
-
-            $rowNumber = $index + 2;
-            $updates[] = [
-                'range' => "{$sheetName}!I{$rowNumber}",
-                'values' => [['DONE']],
-            ];
-
-            if ($firstImportedRow === null) {
-                $firstImportedRow = $rowNumber;
+            if (!empty($updates)) {
+                $batchBody = new Google_Service_Sheets_BatchUpdateValuesRequest([
+                    'valueInputOption' => 'RAW',
+                    'data' => array_map(fn($data) => new Google_Service_Sheets_ValueRange($data), $updates),
+                ]);
+                $service->spreadsheets_values->batchUpdate($sheetId, $batchBody);
             }
-
-            \Log::info("✅ Imported row {$rowNumber}");
-            $importedCount++;
-        }
-        // After the loop
-$status->update(['is_complete' => true]);
-
-        if (!empty($updates)) {
-            $batchBody = new Google_Service_Sheets_BatchUpdateValuesRequest([
-                'valueInputOption' => 'RAW',
-                'data' => array_map(fn($data) => new Google_Service_Sheets_ValueRange($data), $updates),
-            ]);
-
-            $service->spreadsheets_values->batchUpdate($sheetId, $batchBody);
         }
 
-        \Log::info("✅ Import complete: {$importedCount} imported, {$skippedCount} skipped.");
-        if ($firstImportedRow !== null) {
-            \Log::info("📌 First imported row: Row {$firstImportedRow}");
-        } else {
-          
-        }
+        ImportStatus::where('job_name', 'LikhaImport')->update(['is_complete' => true]);
     }
 }
