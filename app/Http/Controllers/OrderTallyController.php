@@ -12,7 +12,6 @@ class OrderTallyController extends Controller
     {
         $filterDate = $request->input('date');
 
-        // Step 1: likha_orders query
         $likhaQuery = DB::table('likha_orders')
             ->select('date as date', 'page_name', DB::raw('COUNT(*) as likha_count'))
             ->groupBy('date', 'page_name');
@@ -23,7 +22,6 @@ class OrderTallyController extends Controller
 
         $likhaOrders = $likhaQuery->get();
 
-        // Step 2: macro_output raw data, parse TIMESTAMP in PHP
         $macroRaw = DB::table('macro_output')->select('TIMESTAMP', 'PAGE')->get();
 
         $macroGrouped = [];
@@ -54,15 +52,12 @@ class OrderTallyController extends Controller
             $macroGrouped[$key]['macro_count']++;
         }
 
-        // Convert to collection
         $macroOutput = collect(array_values($macroGrouped));
 
-        // ✅ Apply filter if date is selected
         if ($filterDate) {
             $macroOutput = $macroOutput->filter(fn ($row) => $row['date'] === $filterDate)->values();
         }
 
-        // Step 3: combine results manually
         $combined = collect();
 
         foreach ($likhaOrders as $lo) {
@@ -104,26 +99,22 @@ class OrderTallyController extends Controller
             }
         }
 
-        // Step 4: compute difference
         $combined = $combined->map(function ($row) {
             $row['difference'] = $row['likha_count'] - $row['macro_count'];
             return $row;
         })->sortByDesc('date')->values();
 
-        // Step 5: date dropdown values
         $availableDates = DB::table('likha_orders')
             ->select('date')
             ->distinct()
             ->orderByDesc('date')
             ->pluck('date');
 
-        // Step 6: total summary
         $totals = [
             'likha_orders' => DB::table('likha_orders')->count(),
             'macro_output' => DB::table('macro_output')->count(),
         ];
 
-        // Step 7: filtered daily total
         $dailyTotal = [
             'likha_orders' => $combined->sum('likha_count'),
             'macro_output' => $combined->sum('macro_count'),
@@ -137,5 +128,92 @@ class OrderTallyController extends Controller
             'filterDate',
             'dailyTotal'
         ));
+    }
+
+    public function show($date)
+    {
+        $formattedDate = Carbon::parse($date)->format('Y-m-d');
+
+        $likhaOrders = DB::table('likha_orders')
+            ->where('date', $formattedDate)
+            ->select('date', 'page_name', 'name')
+            ->get();
+
+        $rawMacro = DB::table('macro_output')
+            ->select('TIMESTAMP', 'PAGE', DB::raw('`ALL USER INPUT` as ALL_USER_INPUT'))
+            ->get();
+
+        $macroFiltered = [];
+
+        foreach ($rawMacro as $row) {
+            $parts = explode(' ', $row->TIMESTAMP);
+            $rawDate = $parts[1] ?? null;
+
+            if (!$rawDate) continue;
+
+            try {
+                $convertedDate = Carbon::createFromFormat('d-m-Y', $rawDate)->format('Y-m-d');
+            } catch (\Exception $e) {
+                continue;
+            }
+
+            if ($convertedDate !== $formattedDate) continue;
+
+            preg_match('/FB NAME:\s*(.+?)(\r?\n|$)/i', $row->ALL_USER_INPUT, $matches);
+            $fbName = isset($matches[1]) ? trim($matches[1]) : null;
+
+            if (!$fbName) continue;
+
+            $macroFiltered[] = [
+                'date' => $convertedDate,
+                'page' => trim($row->PAGE),
+                'fb_name' => $fbName,
+            ];
+        }
+
+        $macroCollection = collect($macroFiltered);
+
+        $results = collect();
+
+        foreach ($likhaOrders as $lo) {
+            $matches = $macroCollection->filter(function ($m) use ($lo) {
+                return strtolower(trim($m['page'])) === strtolower(trim($lo->page_name))
+                    && strtolower(trim($m['fb_name'])) === strtolower(trim($lo->name));
+            });
+
+            $status = '✅ Matched';
+            if ($matches->count() === 0) {
+                $status = '❌ Missing';
+            } elseif ($matches->count() > 1) {
+                $status = '❗ Duplicated';
+            }
+
+            $results->push([
+                'date' => $lo->date,
+                'page_name' => $lo->page_name,
+                'likha_name' => $lo->name,
+                'matched_names' => $matches->pluck('fb_name')->implode(', '),
+                'status' => $status,
+            ]);
+        }
+
+        return view('orders.mismatch', [
+    'results' => $results->sortByDesc(function ($row) {
+        return match ($row['status']) {
+            '❌ Missing' => 3,
+            '❗ Duplicated' => 2,
+            '✅ Matched' => 1,
+            default => 0,
+        };
+    })->values(),
+
+            'date' => $formattedDate,
+            'summary' => [
+                'total' => $results->count(),
+                'matched' => $results->where('status', '✅ Matched')->count(),
+                'missing' => $results->where('status', '❌ Missing')->count(),
+                'duplicated' => $results->where('status', '❗ Duplicated')->count(),
+            ],
+        ]);
     }
 }

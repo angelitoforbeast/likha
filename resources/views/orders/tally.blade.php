@@ -6,9 +6,7 @@
     <select name="date" onchange="this.form.submit()" class="border rounded px-2 py-1 text-sm">
       <option value="">-- All Dates --</option>
       @foreach ($availableDates as $date)
-        <option value="{{ $date }}" {{ $filterDate === $date ? 'selected' : '' }}>
-          {{ $date }}
-        </option>
+        <option value="{{ $date }}" {{ $filterDate === $date ? 'selected' : '' }}>{{ $date }}</option>
       @endforeach
     </select>
   </form>
@@ -17,7 +15,8 @@
     <div class="bg-green-100 text-green-800 px-4 py-2 rounded">Likha Orders Total: {{ number_format($totals['likha_orders']) }}</div>
     <div class="bg-blue-100 text-blue-800 px-4 py-2 rounded">Macro Output Total: {{ number_format($totals['macro_output']) }}</div>
   </div>
-@if ($filterDate)
+
+  @if ($filterDate)
     <div class="w-full text-sm mb-2 overflow-x-auto">
         <table class="table-auto border w-full text-center font-semibold">
             <thead class="bg-gray-100">
@@ -33,15 +32,12 @@
                     <td class="border px-2 py-1 text-left">Grand Total</td>
                     <td class="border px-2 py-1">{{ number_format($dailyTotal['likha_orders']) }}</td>
                     <td class="border px-2 py-1">{{ number_format($dailyTotal['macro_output']) }}</td>
-                    <td class="border px-2 py-1 font-bold text-red-600">
-                        {{ number_format($dailyTotal['difference']) }}
-                    </td>
+                    <td class="border px-2 py-1 font-bold text-red-600">{{ number_format($dailyTotal['difference']) }}</td>
                 </tr>
             </tbody>
         </table>
     </div>
-@endif
-
+  @endif
 
   <div class="overflow-x-auto">
     <table class="table-auto w-full text-sm border">

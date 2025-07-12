@@ -41,7 +41,8 @@ Route::middleware(['auth'])->group(function () {
 
 
     Route::get('/orders/tally', [OrderTallyController::class, 'index'])->name('orders.tally');
-    
+    Route::get('/orders/tally/{date}', [OrderTallyController::class, 'show'])->name('orders.tally.show');
+
     // ✅ Likha Order (multi-sheet support)
     Route::get('/likha_order_import/settings', [LikhaOrderSettingController::class, 'settings'])->name('likha.settings');
     Route::post('/likha_order_import/settings', [LikhaOrderSettingController::class, 'store'])->name('likha.settings.store');
