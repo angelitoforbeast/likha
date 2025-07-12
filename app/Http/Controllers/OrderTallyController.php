@@ -18,7 +18,7 @@ class OrderTallyController extends Controller
 
 
     if ($filterDate) {
-        $likhaQuery->where('DATE', $filterDate);
+        $likhaQuery->where('date', $filterDate);
     }
 
     $likhaOrders = $likhaQuery->get();
