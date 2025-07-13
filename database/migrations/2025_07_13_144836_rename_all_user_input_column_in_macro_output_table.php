@@ -11,16 +11,21 @@ return new class extends Migration
      */
     public function up()
 {
-    Schema::table('macro_output', function (Blueprint $table) {
-        $table->renameColumn('ALL USER INPUT', 'all_user_input');
-    });
+    if (DB::getDriverName() === 'mysql') {
+        DB::statement('ALTER TABLE macro_output RENAME COLUMN `ALL USER INPUT` TO all_user_input');
+    } elseif (DB::getDriverName() === 'pgsql') {
+        DB::statement('ALTER TABLE macro_output RENAME COLUMN "ALL USER INPUT" TO all_user_input');
+    }
 }
 
 public function down()
 {
-    Schema::table('macro_output', function (Blueprint $table) {
-        $table->renameColumn('all_user_input', 'ALL USER INPUT');
-    });
+    if (DB::getDriverName() === 'mysql') {
+        DB::statement('ALTER TABLE macro_output RENAME COLUMN all_user_input TO `ALL USER INPUT`');
+    } elseif (DB::getDriverName() === 'pgsql') {
+        DB::statement('ALTER TABLE macro_output RENAME COLUMN all_user_input TO "ALL USER INPUT"');
+    }
 }
+
 
 };
