@@ -45,6 +45,7 @@
 
               @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC', 'Data Encoder','Data Encoder - OIC']))
               <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEGREGATOR</x-navlink>
+              <x-navlink href="/orders/tally" :active="request()->is('/orders/tally')">MISSING ORDERS</x-navlink>
               @endif
             </div>
           </div>
