@@ -131,96 +131,94 @@ class OrderTallyController extends Controller
     }
 
     public function show($date)
-{
-    $formattedDate = Carbon::parse($date)->format('Y-m-d');
+    {
+        $formattedDate = Carbon::parse($date)->format('Y-m-d');
 
-    $likhaOrders = DB::table('likha_orders')
-        ->where('date', $formattedDate)
-        ->select('date', 'page_name', 'name')
-        ->get();
+        $likhaOrders = DB::table('likha_orders')
+            ->where('date', $formattedDate)
+            ->select('date', 'page_name', 'name')
+            ->get();
 
-    $rawMacro = DB::table('macro_output')
-        ->select('TIMESTAMP', 'PAGE', DB::raw('`ALL USER INPUT` as ALL_USER_INPUT'))
-        ->get();
+        $rawMacro = DB::table('macro_output')
+            ->select('TIMESTAMP', 'PAGE', 'all_user_input')
+            ->get();
 
-    $macroFiltered = [];
+        $macroFiltered = [];
 
-    foreach ($rawMacro as $row) {
-        $parts = explode(' ', $row->TIMESTAMP);
-        $rawDate = $parts[1] ?? null;
+        foreach ($rawMacro as $row) {
+            $parts = explode(' ', $row->TIMESTAMP);
+            $rawDate = $parts[1] ?? null;
 
-        if (!$rawDate) continue;
+            if (!$rawDate) continue;
 
-        try {
-            $convertedDate = Carbon::createFromFormat('d-m-Y', $rawDate)->format('Y-m-d');
-        } catch (\Exception $e) {
-            continue;
+            try {
+                $convertedDate = Carbon::createFromFormat('d-m-Y', $rawDate)->format('Y-m-d');
+            } catch (\Exception $e) {
+                continue;
+            }
+
+            if ($convertedDate !== $formattedDate) continue;
+
+            preg_match('/FB NAME:\s*(.+?)(\r?\n|$)/i', $row->all_user_input, $matches);
+            $fbName = isset($matches[1]) ? trim($matches[1]) : null;
+
+            if (!$fbName) continue;
+
+            $macroFiltered[] = [
+                'date' => $convertedDate,
+                'page' => trim($row->PAGE),
+                'fb_name' => $fbName,
+            ];
         }
 
-        if ($convertedDate !== $formattedDate) continue;
+        $macroCollection = collect($macroFiltered);
+        $results = collect();
 
-        preg_match('/FB NAME:\s*(.+?)(\r?\n|$)/i', $row->ALL_USER_INPUT, $matches);
-        $fbName = isset($matches[1]) ? trim($matches[1]) : null;
+        foreach ($likhaOrders as $lo) {
+            $matches = $macroCollection->filter(function ($m) use ($lo) {
+                return strtolower(trim($m['page'])) === strtolower(trim($lo->page_name))
+                    && strtolower(trim($m['fb_name'])) === strtolower(trim($lo->name));
+            });
 
-        if (!$fbName) continue;
+            $status = '✅ Matched';
+            if ($matches->count() === 0) {
+                $status = '❌ Missing';
+            } elseif ($matches->count() > 1) {
+                $status = '❗ Duplicated';
+            }
 
-        $macroFiltered[] = [
-            'date' => $convertedDate,
-            'page' => trim($row->PAGE),
-            'fb_name' => $fbName,
-        ];
-    }
-
-    $macroCollection = collect($macroFiltered);
-    $results = collect();
-
-    foreach ($likhaOrders as $lo) {
-        $matches = $macroCollection->filter(function ($m) use ($lo) {
-            return strtolower(trim($m['page'])) === strtolower(trim($lo->page_name))
-                && strtolower(trim($m['fb_name'])) === strtolower(trim($lo->name));
-        });
-
-        $status = '✅ Matched';
-        if ($matches->count() === 0) {
-            $status = '❌ Missing';
-        } elseif ($matches->count() > 1) {
-            $status = '❗ Duplicated';
+            $results->push([
+                'date' => $lo->date,
+                'page_name' => $lo->page_name,
+                'likha_name' => $lo->name,
+                'matched_names' => $matches->pluck('fb_name')->implode(', '),
+                'status' => $status,
+            ]);
         }
 
-        $results->push([
-            'date' => $lo->date,
-            'page_name' => $lo->page_name,
-            'likha_name' => $lo->name,
-            'matched_names' => $matches->pluck('fb_name')->implode(', '),
-            'status' => $status,
+        $availableDates = DB::table('likha_orders')
+            ->select('date')
+            ->distinct()
+            ->orderByDesc('date')
+            ->pluck('date');
+
+        return view('orders.mismatch', [
+            'results' => $results->sortByDesc(function ($row) {
+                return match ($row['status']) {
+                    '❌ Missing' => 3,
+                    '❗ Duplicated' => 2,
+                    '✅ Matched' => 1,
+                    default => 0,
+                };
+            })->values(),
+            'date' => $formattedDate,
+            'availableDates' => $availableDates,
+            'summary' => [
+                'total' => $results->count(),
+                'matched' => $results->where('status', '✅ Matched')->count(),
+                'missing' => $results->where('status', '❌ Missing')->count(),
+                'duplicated' => $results->where('status', '❗ Duplicated')->count(),
+            ],
         ]);
     }
-
-    // ✅ Add this to provide date filter options
-    $availableDates = DB::table('likha_orders')
-        ->select('date')
-        ->distinct()
-        ->orderByDesc('date')
-        ->pluck('date');
-
-    return view('orders.mismatch', [
-        'results' => $results->sortByDesc(function ($row) {
-            return match ($row['status']) {
-                '❌ Missing' => 3,
-                '❗ Duplicated' => 2,
-                '✅ Matched' => 1,
-                default => 0,
-            };
-        })->values(),
-        'date' => $formattedDate,
-        'availableDates' => $availableDates,
-        'summary' => [
-            'total' => $results->count(),
-            'matched' => $results->where('status', '✅ Matched')->count(),
-            'missing' => $results->where('status', '❌ Missing')->count(),
-            'duplicated' => $results->where('status', '❗ Duplicated')->count(),
-        ],
-    ]);
-}
-
 }
