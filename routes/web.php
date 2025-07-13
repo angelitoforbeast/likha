@@ -52,6 +52,7 @@ Route::middleware(['auth'])->group(function () {
     Route::match(['get', 'delete'], '/likha_order/view', [LikhaOrderImportController::class, 'view'])->name('likha.view');
 
     // ✅ Macro GSheet
+    Route::put('/macro/settings/{id}', [MacroGsheetController::class, 'update'])->name('macro.settings.update');
     Route::get('/macro/gsheet/settings', [MacroGsheetController::class, 'settings'])->name('macro.settings');
     Route::post('/macro/gsheet/settings', [MacroGsheetController::class, 'storeSetting'])->name('macro.settings.store');
     Route::delete('/macro/gsheet/settings/{id}', [MacroGsheetController::class, 'deleteSetting'])->name('macro.settings.delete');

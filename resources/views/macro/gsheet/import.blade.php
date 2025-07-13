@@ -19,7 +19,7 @@
       <thead class="bg-gray-100">
         <tr>
           <th class="border px-4 py-2">ID</th>
-          <th class="border px-4 py-2">Sheet URL</th>
+          <th class="border px-4 py-2">Gsheet Name</th>
           <th class="border px-4 py-2">Range</th>
         </tr>
       </thead>
@@ -27,7 +27,7 @@
         @forelse ($settings as $setting)
           <tr>
             <td class="border px-4 py-1 text-center">{{ $setting->id }}</td>
-            <td class="border px-4 py-1">{{ $setting->sheet_url }}</td>
+            <td class="border px-4 py-1">{{ $setting->gsheet_name ?? 'N/A' }}</td>
             <td class="border px-4 py-1">{{ $setting->sheet_range }}</td>
           </tr>
         @empty
@@ -40,7 +40,7 @@
   </div>
 
   {{-- Import button --}}
-  <form method="POST" action="{{ route('macro.import') }}" onsubmit="return confirm('Are you sure you want to import?')">
+  <form method="POST" action="{{ url('/macro/gsheet/import') }}" onsubmit="return confirm('Are you sure you want to import?')">
     @csrf
     <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">IMPORT NOW</button>
   </form>

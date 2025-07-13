@@ -6,5 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 
 class MacroGsheetSetting extends Model
 {
-    protected $fillable = ['sheet_url', 'sheet_range'];
+    protected $fillable = [
+        'gsheet_name',
+        'sheet_url',
+        'sheet_range',
+    ];
 }
