@@ -111,12 +111,16 @@ class TaskController extends Controller
     }
 
     $tasks = $query->get()
-        ->sortBy([
-            fn($a, $b) => array_search($a->status, $statusOrder) <=> array_search($b->status, $statusOrder),
-            fn($a, $b) => $a->priority_score <=> $b->priority_score,
-            fn($a, $b) => strtotime($a->due_date . ' ' . $a->due_time) <=> strtotime($b->due_date . ' ' . $b->due_time),
-        ])
-        ->values();
+    ->sortBy(function ($task) use ($statusOrder) {
+        return [
+            array_search($task->status, $statusOrder),
+            $task->status === 'completed' ? -strtotime($task->completed_at ?? '1970-01-01') : null,
+            $task->priority_score,
+            strtotime($task->due_date . ' ' . $task->due_time),
+        ];
+    })
+    ->values();
+
 
     // Paginate manually
     $perPage = 10;
@@ -143,8 +147,6 @@ class TaskController extends Controller
         $end = now()->format('Y-m-d');
     }
 
-    $statusOrder = ['pending', 'in_progress', 'completed'];
-
     $query = Task::with(['creator.employeeProfile', 'creator']);
 
     if ($start && $end) {
@@ -155,15 +157,9 @@ class TaskController extends Controller
         $query->whereDate('due_date', '<=', $end);
     }
 
-    $tasks = $query->get()
-        ->sortBy([
-            fn($a, $b) => array_search($a->status, $statusOrder) <=> array_search($b->status, $statusOrder),
-            fn($a, $b) => $a->priority_score <=> $b->priority_score,
-            fn($a, $b) => strtotime($a->due_date . ' ' . $a->due_time) <=> strtotime($b->due_date . ' ' . $b->due_time),
-        ])
-        ->values();
+    $tasks = $query->get();
 
-    // Group by combined task fields
+    // Group tasks by task identity
     $grouped = $tasks->groupBy(function ($task) {
         return implode('|', [
             $task->created_at,
@@ -172,9 +168,35 @@ class TaskController extends Controller
             $task->priority_score,
             $task->due_date,
             $task->due_time,
-            
             $task->creator_id,
         ]);
+    });
+
+    // Internal sorting per group (status order inside the group)
+    $statusOrder = ['pending', 'in_progress', 'completed'];
+    $grouped = $grouped->map(function ($group) use ($statusOrder) {
+        return $group->sortBy(function ($task) use ($statusOrder) {
+            return array_search($task->status, $statusOrder);
+        })->values();
+    });
+
+    // Rank groups based on presence of status
+    $grouped = $grouped->sortBy(function ($group) {
+        $statuses = $group->pluck('status')->unique();
+
+        if ($statuses->contains('pending')) {
+            return 1;
+        } elseif ($statuses->contains('in_progress')) {
+            return 2;
+        } elseif ($statuses->count() === 1 && $statuses->contains('completed')) {
+            // For completed-only groups, use negative max(completed_at) timestamp (newest first)
+            $latestCompletedAt = $group->max(function ($task) {
+                return strtotime($task->completed_at ?? '1970-01-01');
+            });
+            return 3 - ($latestCompletedAt / 100000000000); // subtract small fraction to sort newest first
+        } else {
+            return 4; // fallback for unexpected combinations
+        }
     });
 
     return view('tasks.team_tasks', [
@@ -183,6 +205,7 @@ class TaskController extends Controller
         'end' => $end,
     ]);
 }
+
 
     public function updateTeamTask(Request $request)
 {
