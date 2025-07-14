@@ -7,15 +7,24 @@
     </div>
   @endif
 
-  <form method="GET" action="{{ route('task.team-tasks') }}" class="mb-4 flex gap-2 items-center">
-    <label class="text-sm font-medium">Filter by Due Date Range:</label>
-    <input type="date" name="start_date" value="{{ request('start_date', $start) }}" class="border px-2 py-1 text-sm rounded">
-    <span class="text-sm">to</span>
-    <input type="date" name="end_date" value="{{ request('end_date', $end) }}" class="border px-2 py-1 text-sm rounded">
-    <button type="submit" class="bg-blue-500 text-white px-3 py-1 rounded text-sm">Filter</button>
-  </form>
+  {{-- Filter and Create Button --}}
+  <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+    <form method="GET" action="{{ route('task.team-tasks') }}" class="flex items-center gap-2 flex-wrap">
+      <label class="text-sm font-medium">Filter by Due Date Range:</label>
+      <input type="date" name="start_date" value="{{ request('start_date', $start) }}" class="border px-2 py-1 text-sm rounded">
+      <span class="text-sm">to</span>
+      <input type="date" name="end_date" value="{{ request('end_date', $end) }}" class="border px-2 py-1 text-sm rounded">
+      <button type="submit" class="bg-blue-500 text-white px-3 py-1 rounded text-sm">Filter</button>
+    </form>
 
-  <div class="w-full px-2 overflow-x-auto">
+    <a href="{{ route('task.create') }}"
+       class="inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded">
+      ➕ Create Task
+    </a>
+  </div>
+
+  {{-- Scrollable Table Only --}}
+  <div class="overflow-auto max-h-[70vh] w-full border rounded">
     <table class="table-fixed w-full text-sm border-collapse">
       <thead class="bg-gray-100 sticky top-0 z-10">
         <tr>
@@ -46,15 +55,14 @@
 
             @foreach ($group as $i => $task)
               @php
-  $statusColor = match($task->status) {
-    'pending' => 'bg-yellow-100',
-    'in_progress' => 'bg-blue-100',
-    'completed' => 'bg-green-100',
-    default => ''
-  };
-@endphp
-<tr class="border-t border-gray-300 {{ $statusColor }}">
-
+                $statusColor = match($task->status) {
+                  'pending' => 'bg-yellow-100',
+                  'in_progress' => 'bg-blue-100',
+                  'completed' => 'bg-green-100',
+                  default => ''
+                };
+              @endphp
+              <tr class="border-t border-gray-300 {{ $statusColor }}">
                 @if ($i === 0)
                   <td rowspan="{{ $rowspan }}" class="border px-2 py-2 align-top">
                     {{ \Carbon\Carbon::parse($task->created_at)->format('Y-m-d H:i') }}
@@ -79,7 +87,6 @@
                 @endif
 
                 <td class="border px-2 py-2">{{ $task->name ?? '-' }}</td>
-
                 <td class="border px-2 py-2">
                   <select name="statuses[{{ $task->id }}]" class="w-full border rounded text-xs px-1 py-1">
                     @foreach(['pending', 'in_progress', 'completed'] as $status)
@@ -89,14 +96,10 @@
                     @endforeach
                   </select>
                 </td>
-
                 <td class="border px-2 py-2">{{ $task->assignee_remarks }}</td>
-
                 <td class="border px-2 py-2">
                   {{ $task->completed_at ? \Carbon\Carbon::parse($task->completed_at)->format('Y-m-d H:i') : '' }}
                 </td>
-
-                {{-- ✅ Creator Remarks (per row) --}}
                 <td class="border px-2 py-2">
                   <textarea name="creator_remarks[{{ $task->id }}]" class="w-full border rounded px-1 py-1 text-xs auto-expand"
                     oninput="autoResize(this)">{{ $task->creator_remarks }}</textarea>
@@ -109,16 +112,14 @@
                       <br><span class="text-xs text-gray-500">({{ $task->creator->employeeProfile->role }})</span>
                     @endif
                   </td>
-
                   <td rowspan="{{ $rowspan }}" class="border px-2 py-2 text-center align-middle">
-  <div class="flex items-center justify-center h-full">
-    <button type="submit"
-      class="bg-lime-600 hover:bg-lime-700 text-white font-bold text-xs px-4 py-1 rounded shadow w-full max-w-[100px]">
-      ✅ UPDATE
-    </button>
-  </div>
-</td>
-
+                    <div class="flex items-center justify-center h-full">
+                      <button type="submit"
+                        class="bg-lime-600 hover:bg-lime-700 text-white font-bold text-xs px-4 py-1 rounded shadow w-full max-w-[100px]">
+                        ✅ UPDATE
+                      </button>
+                    </div>
+                  </td>
                 @endif
               </tr>
             @endforeach
