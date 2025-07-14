@@ -7,6 +7,17 @@
     </div>
   @endif
 
+  <form method="GET" action="{{ route('task.my-tasks') }}" class="mb-4 flex gap-2 items-center">
+  <label class="text-sm font-medium">Filter by Due Date Range:</label>
+  
+  <input type="date" name="start_date" value="{{ request('start_date') ?? '' }}" class="border px-2 py-1 text-sm rounded">
+  <span class="text-sm">to</span>
+  <input type="date" name="end_date" value="{{ request('end_date') ?? '' }}" class="border px-2 py-1 text-sm rounded">
+
+  <button type="submit" class="bg-blue-500 text-white px-3 py-1 rounded text-sm">Filter</button>
+</form>
+
+
   <div class="w-full px-2 overflow-x-auto">
     <table class="table-fixed w-full text-sm border-collapse">
       <thead class="bg-gray-100 sticky top-0 z-10">
@@ -26,7 +37,7 @@
         </tr>
       </thead>
       <tbody>
-        @foreach ($tasks as $task)
+        @forelse ($tasks as $task)
           @php
             $rowClass = match($task->status) {
               'pending' => '',
@@ -38,7 +49,6 @@
 
           <tr class="{{ $rowClass }} h-14 align-middle text-center">
             <form method="POST" action="{{ route('task.updateStatus') }}" onsubmit="return confirm('Are you sure you want to update this task?')">
-
               @csrf
               <input type="hidden" name="task_id" value="{{ $task->id }}">
 
@@ -94,8 +104,16 @@
               </td>
             </form>
           </tr>
-        @endforeach
+        @empty
+          <tr>
+            <td colspan="11" class="text-center py-4 text-gray-500">No tasks found for selected date.</td>
+          </tr>
+        @endforelse
       </tbody>
     </table>
+  </div>
+
+  <div class="mt-4">
+    {{ $tasks->links() }}
   </div>
 </x-layout>

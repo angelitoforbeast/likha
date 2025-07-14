@@ -5,6 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\Task;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
+use Carbon\Carbon;
 
 class TaskController extends Controller
 {
@@ -80,21 +83,98 @@ class TaskController extends Controller
         return redirect()->route('task.index')->with('success', 'Tasks created for selected roles.');
     }
 
-    public function myTasks()
+    public function myTasks(Request $request)
 {
+    $start = $request->input('start_date');
+    $end = $request->input('end_date');
+
     $statusOrder = ['pending', 'in_progress', 'completed'];
 
-    $tasks = Task::with(['creator.employeeProfile']) // ← add this
-        ->where('user_id', auth()->id())
-        ->get()
+    $query = Task::with(['creator.employeeProfile'])
+        ->where('user_id', auth()->id());
+
+    if ($start && $end) {
+        $query->whereBetween('due_date', [$start, $end]);
+    } elseif ($start) {
+        $query->whereDate('due_date', '>=', $start);
+    } elseif ($end) {
+        $query->whereDate('due_date', '<=', $end);
+    } else {
+        $today = now()->format('Y-m-d');
+        $query->whereDate('due_date', $today); // Default to today
+    }
+
+    $tasks = $query->get()
         ->sortBy([
             fn($a, $b) => array_search($a->status, $statusOrder) <=> array_search($b->status, $statusOrder),
             fn($a, $b) => $a->priority_score <=> $b->priority_score,
             fn($a, $b) => strtotime($a->due_date . ' ' . $a->due_time) <=> strtotime($b->due_date . ' ' . $b->due_time),
-        ]);
+        ])
+        ->values();
 
-    return view('tasks.my_tasks', compact('tasks'));
+    // Paginate manually
+    $perPage = 10;
+    $page = LengthAwarePaginator::resolveCurrentPage();
+    $paginated = new LengthAwarePaginator(
+        $tasks->forPage($page, $perPage),
+        $tasks->count(),
+        $perPage,
+        $page,
+        ['path' => $request->url(), 'query' => $request->query()]
+    );
+
+    return view('tasks.my_tasks', [
+        'tasks' => $paginated,
+    ]);
 }
+    public function teamTasks(Request $request)
+{
+    $start = $request->input('start_date');
+    $end = $request->input('end_date');
+
+    // Default range: last 7 days including today
+    if (!$start && !$end) {
+        $start = now()->subDays(6)->format('Y-m-d');
+        $end = now()->format('Y-m-d');
+    }
+
+    $statusOrder = ['pending', 'in_progress', 'completed'];
+
+    $query = Task::with(['creator.employeeProfile', 'creator']);
+
+    if ($start && $end) {
+        $query->whereBetween('due_date', [$start, $end]);
+    } elseif ($start) {
+        $query->whereDate('due_date', '>=', $start);
+    } elseif ($end) {
+        $query->whereDate('due_date', '<=', $end);
+    }
+
+    $tasks = $query->get()
+        ->sortBy([
+            fn($a, $b) => array_search($a->status, $statusOrder) <=> array_search($b->status, $statusOrder),
+            fn($a, $b) => $a->priority_score <=> $b->priority_score,
+            fn($a, $b) => strtotime($a->due_date . ' ' . $a->due_time) <=> strtotime($b->due_date . ' ' . $b->due_time),
+        ])
+        ->values();
+
+    $perPage = 10;
+    $page = LengthAwarePaginator::resolveCurrentPage();
+    $paginated = new LengthAwarePaginator(
+        $tasks->forPage($page, $perPage),
+        $tasks->count(),
+        $perPage,
+        $page,
+        ['path' => $request->url(), 'query' => $request->query()]
+    );
+
+    return view('tasks.team_tasks', [
+        'tasks' => $paginated,
+        'start' => $start,
+        'end' => $end,
+    ]);
+}
+
 
 
     public function updateStatus(Request $request)
