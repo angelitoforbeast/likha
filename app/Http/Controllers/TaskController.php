@@ -172,7 +172,7 @@ class TaskController extends Controller
             $task->priority_score,
             $task->due_date,
             $task->due_time,
-            $task->status,
+            
             $task->creator_id,
         ]);
     });
