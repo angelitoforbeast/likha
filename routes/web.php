@@ -72,6 +72,8 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/task/update-status', [TaskController::class, 'updateStatus'])->name('task.updateStatus');
     Route::post('/task/update-creator-remarks', [TaskController::class, 'updateCreatorRemarks'])->name('task.updateCreatorRemarks');
     Route::get('/task/team-tasks', [TaskController::class, 'teamTasks'])->name('task.team-tasks');
+    Route::post('/task/update-team-task', [TaskController::class, 'updateTeamTask'])->name('task.updateTeamTask');
+
 
     // ✅ MES Segregator
     Route::get('/data_encoder/mes-segregator', [MesSegregatorController::class, 'index'])->name('mes.index');

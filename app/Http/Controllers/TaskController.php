@@ -184,6 +184,40 @@ class TaskController extends Controller
     ]);
 }
 
+    public function updateTeamTask(Request $request)
+{
+    $request->validate([
+        'task_id' => 'required|exists:tasks,id',
+        'task_name' => 'required|string|max:255',
+        'description' => 'nullable|string',
+        'creator_remarks' => 'nullable|string',
+        'statuses' => 'required|array',
+    ]);
+
+    $mainTask = Task::findOrFail($request->task_id);
+
+    // Get all tasks in the group (same created_at, task name, description)
+    $group = Task::where('task_name', $mainTask->task_name)
+        ->where('description', $mainTask->description)
+        ->whereDate('created_at', $mainTask->created_at->format('Y-m-d'))
+        ->get();
+
+    foreach ($group as $task) {
+        $task->task_name = $request->task_name;
+        $task->description = $request->description;
+        $task->creator_remarks = $request->creator_remarks;
+        $task->status = $request->statuses[$task->id] ?? $task->status;
+
+        if ($task->status === 'completed' && !$task->completed_at) {
+            $task->completed_at = now('Asia/Manila');
+        }
+
+        $task->save();
+    }
+
+    return back()->with('success', 'Task group updated successfully.');
+}
+
 
 
 
