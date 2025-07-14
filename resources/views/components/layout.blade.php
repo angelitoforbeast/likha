@@ -25,7 +25,7 @@
           <div class="hidden md:block">
             <div class="ml-10 flex items-baseline space-x-4">
               @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC']))
-              <x-navlink href="/" :active="request()->is('/dashboard')">Home</x-navlink>
+              
 
               {{-- TASK link with pending badge --}}
 <div class="relative">
@@ -52,7 +52,7 @@
               @endif
 
               @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC', 'Data Encoder','Data Encoder - OIC']))
-              <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEGREGATOR</x-navlink>
+              <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEG</x-navlink>
               <x-navlink href="/orders/tally" :active="request()->is('/orders/tally')">MISSING ORDERS</x-navlink>
               @endif
               @if(in_array($role, ['Data Encoder - OIC','CEO']))

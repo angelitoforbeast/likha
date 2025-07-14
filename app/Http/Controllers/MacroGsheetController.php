@@ -44,7 +44,7 @@ class MacroGsheetController extends Controller
             $columnMap = [
                 'TIMESTAMP', 'FULL NAME', 'PHONE NUMBER', 'ADDRESS',
                 'PROVINCE', 'CITY', 'BARANGAY', 'ITEM_NAME',
-                'COD', 'PAGE', 'ALL USER INPUT', 'SHOP DETAILS',
+                'COD', 'PAGE', 'all_user_input', 'SHOP DETAILS',
                 'CXD', 'AI ANALYZE', 'HUMAN CHECKER STATUS', 'RESERVE COLUMN',
                 'STATUS'
             ];
