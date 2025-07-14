@@ -19,42 +19,99 @@
         </div>
 
         <div>
-    <label class="font-semibold">Priority Score</label>
-    <select name="priority_score" class="w-full border p-2 rounded" required>
-        <option value="1" selected>P1</option>
-        <option value="2">P2</option>
-        <option value="3">P3</option>
-        <option value="4">P4</option>
-        <option value="5">P5</option>
-    </select>
+            <label class="font-semibold">Priority Score</label>
+            <select name="priority_score" class="w-full border p-2 rounded" required>
+                <option value="1" selected>P1</option>
+                <option value="2">P2</option>
+                <option value="3">P3</option>
+                <option value="4">P4</option>
+                <option value="5">P5</option>
+            </select>
+        </div>
+
+        {{-- Target Roles and Users --}}
+        <div x-data="{
+    open: false,
+    roles: {{ Js::from($usersByRole) }},
+    selectedUsers: [],
+    toggleUser(id) {
+        if (this.selectedUsers.includes(id)) {
+            this.selectedUsers = this.selectedUsers.filter(uid => uid !== id);
+        } else {
+            this.selectedUsers.push(id);
+        }
+    },
+    toggleAll(role) {
+        const ids = this.roles[role].map(u => u.id);
+        const allSelected = ids.every(id => this.selectedUsers.includes(id));
+        if (allSelected) {
+            this.selectedUsers = this.selectedUsers.filter(id => !ids.includes(id));
+        } else {
+            this.selectedUsers = [...new Set([...this.selectedUsers, ...ids])];
+        }
+    },
+    isChecked(id) {
+        return this.selectedUsers.includes(id);
+    },
+    getSelectedNames() {
+        let names = [];
+        for (const role in this.roles) {
+            for (const user of this.roles[role]) {
+                if (this.selectedUsers.includes(user.id)) {
+                    names.push(user.name);
+                }
+            }
+        }
+        return names.join(', ');
+    }
+}" class="relative">
+    <label class="font-semibold block mb-1">Target Users</label>
+
+    <!-- Trigger -->
+    <button type="button" @click="open = !open"
+        class="w-full border px-4 py-2 text-left rounded bg-white shadow text-sm">
+        <template x-if="selectedUsers.length === 0">
+            <span class="text-gray-400">Select roles & users...</span>
+        </template>
+        <template x-if="selectedUsers.length > 0">
+            <span x-text="getSelectedNames()"></span>
+        </template>
+    </button>
+
+    <!-- Dropdown -->
+    <div x-show="open" @click.outside="open = false"
+        class="absolute z-10 mt-1 w-full bg-white border rounded shadow max-h-64 overflow-y-auto text-sm">
+
+        <template x-for="(users, role) in roles" :key="role">
+            <div class="border-b px-4 py-2">
+                <label class="font-semibold flex items-center">
+                    <input type="checkbox"
+                           @change="toggleAll(role)"
+                           :checked="roles[role].every(u => selectedUsers.includes(u.id))"
+                           class="mr-2">
+                    <span x-text="role"></span>
+                </label>
+
+                <div class="ml-5 mt-1 space-y-1">
+                    <template x-for="user in users" :key="user.id">
+                        <label class="flex items-center">
+                            <input type="checkbox"
+                                   :value="user.id"
+                                   name="target_users[]"
+                                   @change="toggleUser(user.id)"
+                                   :checked="isChecked(user.id)"
+                                   class="mr-2">
+                            <span x-text="user.name"></span>
+                        </label>
+                    </template>
+                </div>
+            </div>
+        </template>
+    </div>
 </div>
 
 
-        <div>
-            <label for="role_target" class="block font-semibold mb-1">Target Roles:</label>
-            <div x-data="{ open: false, selected: [] }" class="relative">
-                <button type="button" @click="open = !open"
-                    class="w-full border px-4 py-2 text-left rounded bg-white shadow">
-                    <template x-if="selected.length === 0">
-                        <span class="text-gray-400">Select roles...</span>
-                    </template>
-                    <template x-if="selected.length > 0">
-                        <span x-text="selected.join(', ')"></span>
-                    </template>
-                </button>
 
-                <div x-show="open" @click.outside="open = false"
-                    class="absolute mt-1 w-full bg-white border shadow rounded z-10 max-h-60 overflow-y-auto">
-                    @foreach ($roles as $role)
-                        <label class="block px-4 py-2 hover:bg-gray-100">
-                            <input type="checkbox" value="{{ $role }}" x-model="selected" name="role_target[]"
-                                class="mr-2">
-                            {{ $role }}
-                        </label>
-                    @endforeach
-                </div>
-            </div>
-        </div>
 
         <div class="grid grid-cols-2 gap-4">
             <div>
@@ -64,7 +121,7 @@
 
             <div>
                 <label class="font-semibold">Due Time</label>
-                <input type="time" name="due_time"  class="w-full border p-2 rounded" />
+                <input type="time" name="due_time" class="w-full border p-2 rounded" />
             </div>
         </div>
 
@@ -75,7 +132,8 @@
 
         <div>
             <label class="font-semibold">Collaborators (optional)</label>
-            <input type="text" name="collaborators" placeholder="Comma-separated user IDs or names" class="w-full border p-2 rounded" />
+            <input type="text" name="collaborators" placeholder="Comma-separated user IDs or names"
+                class="w-full border p-2 rounded" />
         </div>
 
         <div>

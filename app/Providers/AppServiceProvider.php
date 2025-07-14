@@ -30,16 +30,23 @@ class AppServiceProvider extends ServiceProvider
 
         // Make per-user pending task count available in all views
         View::composer('*', function ($view) {
-            $user = Auth::user();
-            $pendingTaskCount = 0;
+    $user = Auth::user();
+    $pendingTaskCount = 0;
+    $inProgressTaskCount = 0;
 
-            if ($user) {
-                $pendingTaskCount = Task::where('status', 'pending')
-                    ->where('user_id', $user->id) // ✅ Use correct column
-                    ->count();
-            }
+    if ($user) {
+        $pendingTaskCount = Task::where('status', 'pending')
+            ->where('user_id', $user->id)
+            ->count();
 
-            $view->with('pendingTaskCount', $pendingTaskCount);
-        });
+        $inProgressTaskCount = Task::where('status', 'in_progress')
+            ->where('user_id', $user->id)
+            ->count();
+    }
+
+    $view->with('pendingTaskCount', $pendingTaskCount)
+         ->with('inProgressTaskCount', $inProgressTaskCount);
+});
+
     }
 }

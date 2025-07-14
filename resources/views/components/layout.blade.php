@@ -28,14 +28,22 @@
               <x-navlink href="/" :active="request()->is('/dashboard')">Home</x-navlink>
 
               {{-- TASK link with pending badge --}}
-              <div class="relative">
-                <x-navlink href="/task/my-tasks" :active="request()->is('task/my-tasks')">TASK</x-navlink>
-                @if(!empty($pendingTaskCount) && $pendingTaskCount > 0)
-                  <span class="absolute -top-1 -right-2 inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold leading-none text-white bg-red-600 rounded-full">
-                    {{ $pendingTaskCount }}
-                  </span>
-                @endif
-              </div>
+<div class="relative">
+  <x-navlink href="/task/my-tasks" :active="request()->is('task/my-tasks')">
+    <span class="relative">
+      TASK
+      @if(($pendingTaskCount ?? 0) > 0)
+        <span class="absolute -top-1.5 -right-3 w-4 h-4 bg-red-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
+          {{ $pendingTaskCount }}
+        </span>
+      @elseif(($inProgressTaskCount ?? 0) > 0)
+        <span class="absolute -top-1.5 -right-3 w-4 h-4 bg-blue-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
+          {{ $inProgressTaskCount }}
+        </span>
+      @endif
+    </span>
+  </x-navlink>
+</div>
 
               <x-navlink href="/ads_manager/index" :active="request()->is('ads_manager/index')">ADS</x-navlink>
               <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">LIKHA IMPORT</x-navlink>

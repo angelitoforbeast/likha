@@ -33,55 +33,61 @@ class TaskController extends Controller
     }
 
     public function showCreateForm()
-    {
-        $roles = DB::table('employee_profiles')
-            ->whereNotNull('role')
-            ->distinct()
-            ->pluck('role');
+{
+    $roles = DB::table('employee_profiles')
+        ->whereNotNull('role')
+        ->distinct()
+        ->pluck('role');
 
-        return view('tasks.create', compact('roles'));
-    }
+    $usersByRole = DB::table('employee_profiles')
+        ->whereNotNull('role')
+        ->join('users', 'employee_profiles.user_id', '=', 'users.id')
+        ->select('employee_profiles.role', 'employee_profiles.name', 'users.id')
+        ->get()
+        ->groupBy('role');
+
+    return view('tasks.create', compact('roles', 'usersByRole'));
+}
+
 
     public function create(Request $request)
-    {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'type' => 'required|string',
-            'role_target' => 'required|array',
-            'priority_score' => 'required|integer|min:1|max:100',
-            'due_date' => 'required|date',
-            'due_time' => 'nullable|date_format:H:i', // expecting string like "13:00"
+{
+    $request->validate([
+        'name' => 'required|string|max:255',
+        'type' => 'required|string',
+        'priority_score' => 'required|integer|min:1|max:100',
+        'due_date' => 'required|date',
+        'due_time' => 'nullable|date_format:H:i',
+        'target_users' => 'required|array|min:1',
+    ]);
+
+    foreach ($request->target_users as $userId) {
+        $employee = DB::table('employee_profiles')->where('user_id', $userId)->first();
+        if (!$employee) continue;
+
+        Task::create([
+            'user_id' => $userId,
+            'name' => $employee->name,
+            'task_name' => $request->name,
+            'role_target' => $employee->role,
+            'collaborators' => $request->collaborators ?? null,
+            'description' => $request->description,
+            'type' => $request->type,
+            'is_repeating' => $request->has('is_repeating'),
+            'due_date' => $request->due_date,
+            'due_time' => $request->due_time,
+            'reminder_at' => $request->reminder_at ?? null,
+            'status' => 'pending',
+            'created_by' => auth()->id(),
+            'remarks' => $request->remarks,
+            'priority_score' => $request->priority_score,
+            'parent_task_id' => $request->parent_task_id ?? null,
         ]);
-
-        $roles = $request->role_target;
-
-        $employees = DB::table('employee_profiles')
-            ->whereIn('role', $roles)
-            ->get();
-
-        foreach ($employees as $employee) {
-            Task::create([
-                'user_id' => $employee->user_id,
-                'name' => $employee->name,
-                'task_name' => $request->name,
-                'role_target' => implode(', ', $roles),
-                'collaborators' => $request->collaborators ?? null,
-                'description' => $request->description,
-                'type' => $request->type,
-                'is_repeating' => $request->has('is_repeating'),
-                'due_date' => $request->due_date,
-                'due_time' => $request->due_time,
-                'reminder_at' => $request->reminder_at ?? null,
-                'status' => $request->status ?? 'pending',
-                'created_by' => auth()->id(),
-                'remarks' => $request->remarks,
-                'priority_score' => $request->priority_score,
-                'parent_task_id' => $request->parent_task_id ?? null,
-            ]);
-        }
-
-        return redirect()->route('task.index')->with('success', 'Tasks created for selected roles.');
     }
+
+    return redirect()->route('task.index')->with('success', 'Tasks created for selected users.');
+}
+
 
     public function myTasks(Request $request)
 {
