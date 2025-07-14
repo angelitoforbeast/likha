@@ -138,7 +138,6 @@ class TaskController extends Controller
     $start = $request->input('start_date');
     $end = $request->input('end_date');
 
-    // Default range: last 7 days including today
     if (!$start && !$end) {
         $start = now()->subDays(6)->format('Y-m-d');
         $end = now()->format('Y-m-d');
@@ -164,22 +163,27 @@ class TaskController extends Controller
         ])
         ->values();
 
-    $perPage = 10;
-    $page = LengthAwarePaginator::resolveCurrentPage();
-    $paginated = new LengthAwarePaginator(
-        $tasks->forPage($page, $perPage),
-        $tasks->count(),
-        $perPage,
-        $page,
-        ['path' => $request->url(), 'query' => $request->query()]
-    );
+    // Group by combined task fields
+    $grouped = $tasks->groupBy(function ($task) {
+        return implode('|', [
+            $task->created_at,
+            $task->task_name,
+            $task->description,
+            $task->priority_score,
+            $task->due_date,
+            $task->due_time,
+            $task->status,
+            $task->creator_id,
+        ]);
+    });
 
     return view('tasks.team_tasks', [
-        'tasks' => $paginated,
+        'groupedTasks' => $grouped,
         'start' => $start,
         'end' => $end,
     ]);
 }
+
 
 
 
