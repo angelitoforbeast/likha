@@ -55,6 +55,9 @@
               <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEGREGATOR</x-navlink>
               <x-navlink href="/orders/tally" :active="request()->is('/orders/tally')">MISSING ORDERS</x-navlink>
               @endif
+              @if(in_array($role, ['Data Encoder - OIC','CEO']))
+              <x-navlink href="/macro/gsheet/import" :active="request()->is('/macro/gsheet/import')">IMPORT MACRO</x-navlink>
+              @endif
             </div>
           </div>
         </div>
