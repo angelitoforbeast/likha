@@ -45,7 +45,16 @@
             <input type="hidden" name="task_id" value="{{ $first->id }}">
 
             @foreach ($group as $i => $task)
-              <tr class="border-t border-gray-300">
+              @php
+  $statusColor = match($task->status) {
+    'pending' => 'bg-yellow-100',
+    'in_progress' => 'bg-blue-100',
+    'completed' => 'bg-green-100',
+    default => ''
+  };
+@endphp
+<tr class="border-t border-gray-300 {{ $statusColor }}">
+
                 @if ($i === 0)
                   <td rowspan="{{ $rowspan }}" class="border px-2 py-2 align-top">
                     {{ \Carbon\Carbon::parse($task->created_at)->format('Y-m-d H:i') }}
