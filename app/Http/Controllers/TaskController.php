@@ -85,7 +85,7 @@ class TaskController extends Controller
         ]);
     }
 
-    return redirect()->route('task.index')->with('success', 'Tasks created for selected users.');
+    return redirect()->route('task.team-tasks')->with('success', 'Tasks created for selected users.');
 }
 
 

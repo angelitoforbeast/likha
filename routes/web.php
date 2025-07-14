@@ -66,13 +66,23 @@ Route::middleware(['auth'])->group(function () {
 
     // ✅ Tasks
     Route::get('/task/index', [TaskController::class, 'index'])->name('task.index');
-    Route::get('/task/create', [TaskController::class, 'showCreateForm'])->name('task.create.form');
-    Route::post('/task/create', [TaskController::class, 'create'])->name('task.create');
+    Route::get('/task/create', function () {
+    $role = auth()->user()->employeeProfile?->role;
+    if (!$role || !in_array($role, ['CEO', 'Marketing - OIC'])) abort(403);
+    return app(\App\Http\Controllers\TaskController::class)->showCreateForm();
+})->name('task.create.form');
+Route::post('/task/create', [TaskController::class, 'create'])->name('task.create');
     Route::get('/task/my-tasks', [TaskController::class, 'myTasks'])->name('task.my-tasks');
     Route::post('/task/update-status', [TaskController::class, 'updateStatus'])->name('task.updateStatus');
     Route::post('/task/update-creator-remarks', [TaskController::class, 'updateCreatorRemarks'])->name('task.updateCreatorRemarks');
-    Route::get('/task/team-tasks', [TaskController::class, 'teamTasks'])->name('task.team-tasks');
-    Route::post('/task/update-team-task', [TaskController::class, 'updateTeamTask'])->name('task.updateTeamTask');
+    Route::get('/task/team-tasks', function () {
+    $role = auth()->user()->employeeProfile?->role;
+    if (!$role || !in_array($role, ['CEO', 'Marketing - OIC'])) abort(403);
+    return app(\App\Http\Controllers\TaskController::class)->teamTasks(request());
+})->name('task.team-tasks');
+
+
+Route::post('/task/update-team-task', [TaskController::class, 'updateTeamTask'])->name('task.updateTeamTask');
 
 
     // ✅ MES Segregator
@@ -89,13 +99,11 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/fb_ads_data', [FacebookAdsController::class, 'fetch'])->name('fb_ads.fetch');
 
     Route::get('/cpp', function () {
-        $user = auth()->user();
-        $role = $user->roles->first();
-        if (!$role || !in_array($role->name, ['Marketing', 'CEO', 'Marketing - OIC'])) {
-            abort(403);
-        }
-        return app(CPPReportController::class)->index();
-    });
+    $role = auth()->user()->employeeProfile?->role;
+    if (!$role || !in_array($role, ['Marketing', 'CEO', 'Marketing - OIC'])) abort(403);
+    return app(\App\Http\Controllers\CPPReportController::class)->index();
+});
+
 
     // ✅ Role Management
     Route::get('/roles/index', [\App\Http\Controllers\RoleController::class, 'index']);
