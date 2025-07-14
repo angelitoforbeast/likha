@@ -97,10 +97,10 @@
   </header>
 
   <main>
-    @if (request()->is('task/my-tasks') || request()->is('macro/gsheet/index'))
-      <div class="w-full px-0">
-        {{ $slot }}
-      </div>
+    @if (request()->is(['task/my-tasks', 'macro/gsheet/index', 'task/team-tasks']))
+  <div class="w-full px-0">
+    {{ $slot }}
+  </div>
     @else
       <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         {{ $slot }}
