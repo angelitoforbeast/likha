@@ -21,6 +21,7 @@ use App\Http\Controllers\MesSegregatorController;
 use App\Http\Controllers\TaskController;
 use App\Http\Controllers\MacroGsheetController;
 use App\Http\Controllers\OrderTallyController;
+use App\Http\Controllers\EverydayTaskController;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -38,7 +39,12 @@ Route::post('/assign-roles/{id}', [RoleAssignmentController::class, 'update']);
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
 
-
+    Route::get('/task/my-everyday-task', [EverydayTaskController::class, 'index'])->name('everyday-tasks.index');
+    Route::post('/task/my-everyday-task', [EverydayTaskController::class, 'store'])->name('everyday-tasks.store');
+    Route::put('/task/my-everyday-task/{id}', [EverydayTaskController::class, 'update'])->name('everyday-tasks.update');
+    Route::delete('/task/my-everyday-task/{id}', [EverydayTaskController::class, 'destroy'])->name('everyday-tasks.destroy');
+    Route::get('/task/create-everyday-task', [EverydayTaskController::class, 'showCreateForm'])->name('everyday-task.create-form');
+Route::post('/task/create-everyday-task', [EverydayTaskController::class, 'store'])->name('everyday-task.store');
 
     Route::get('/orders/tally', [OrderTallyController::class, 'index'])->name('orders.tally');
     Route::get('/orders/tally/{date}', [OrderTallyController::class, 'show'])->name('orders.tally.show');

@@ -15,6 +15,7 @@
 @endphp
 
 <div class="min-h-full">
+  {{-- Top Navigation --}}
   <nav class="bg-gray-800 fixed top-0 inset-x-0 z-50">
     <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
       <div class="flex h-16 items-center justify-between">
@@ -25,25 +26,43 @@
           <div class="hidden md:block">
             <div class="ml-10 flex items-baseline space-x-4">
               @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC']))
-              
 
-              {{-- TASK link with pending badge --}}
-<div class="relative">
-  <x-navlink href="/task/my-tasks" :active="request()->is('task/my-tasks')">
+              {{-- 📂 Tasks Dropdown --}}
+              <div x-data="{ open: false }" class="relative">
+  <button @click="open = !open"
+          class="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium relative">
     <span class="relative">
-      TASK
+      TASKS
       @if(($pendingTaskCount ?? 0) > 0)
-        <span class="absolute -top-1.5 -right-3 w-4 h-4 bg-red-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
+        <span class="absolute -top-1.5 -right-4 w-4 h-4 bg-red-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
           {{ $pendingTaskCount }}
         </span>
       @elseif(($inProgressTaskCount ?? 0) > 0)
-        <span class="absolute -top-1.5 -right-3 w-4 h-4 bg-blue-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
+        <span class="absolute -top-1.5 -right-4 w-4 h-4 bg-blue-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
           {{ $inProgressTaskCount }}
         </span>
       @endif
     </span>
-  </x-navlink>
+  </button>
+
+
+  <div x-show="open" @click.outside="open = false"
+       class="absolute left-0 mt-2 w-56 bg-white shadow-lg rounded-md z-50 py-1 text-sm">
+    <a href="{{ route('task.my-tasks') }}"
+       class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/my-tasks') ? 'font-semibold text-blue-700' : '' }}">
+      📋 My Tasks
+    </a>
+    <a href="{{ route('everyday-tasks.index') }}"
+       class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/my-everyday-task') ? 'font-semibold text-blue-700' : '' }}">
+      🗓 Everyday Tasks
+    </a>
+    <a href="{{ route('task.team-tasks') }}"
+       class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/create-everyday-task') ? 'font-semibold text-blue-700' : '' }}">
+      🧑‍🤝‍🧑 Team Tasks
+    </a>
+  </div>
 </div>
+
 
               <x-navlink href="/ads_manager/index" :active="request()->is('ads_manager/index')">ADS</x-navlink>
               <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">LIKHA IMPORT</x-navlink>
@@ -53,10 +72,11 @@
 
               @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC', 'Data Encoder','Data Encoder - OIC']))
               <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEG</x-navlink>
-              <x-navlink href="/orders/tally" :active="request()->is('/orders/tally')">MISSING ORDERS</x-navlink>
+              <x-navlink href="/orders/tally" :active="request()->is('orders/tally')">MISSING ORDERS</x-navlink>
               @endif
+
               @if(in_array($role, ['Data Encoder - OIC','CEO']))
-              <x-navlink href="/macro/gsheet/import" :active="request()->is('/macro/gsheet/import')">IMPORT MACRO</x-navlink>
+              <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">IMPORT MACRO</x-navlink>
               @endif
             </div>
           </div>
@@ -88,6 +108,7 @@
     </div>
   </nav>
 
+  {{-- Page heading --}}
   <header class="bg-white shadow-sm mt-16">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <h1 class="text-3xl font-bold tracking-tight text-gray-900">
@@ -96,11 +117,12 @@
     </div>
   </header>
 
+  {{-- Page content --}}
   <main>
     @if (request()->is(['task/my-tasks', 'macro/gsheet/index', 'task/team-tasks']))
-  <div class="w-full px-0">
-    {{ $slot }}
-  </div>
+      <div class="w-full px-0">
+        {{ $slot }}
+      </div>
     @else
       <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         {{ $slot }}
