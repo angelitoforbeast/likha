@@ -33,7 +33,7 @@ class CopyEverydayTasksOnLogin
     'priority_score' => $task->priority_score,
     'due_date' => $today,
     'due_time' => $task->due_time,
-    'status' => 'Pending',
+    'status' => 'pending',
     'created_by' => $task->created_by ?? $user->id,
     'is_repeating' => $task->is_repeating,
     'role_target' => $task->role_target ?? 'default_value',  // <-- dagdag dito, palitan ng tamang value o default
