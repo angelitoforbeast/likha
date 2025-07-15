@@ -51,7 +51,7 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
                     'date' => isset($row[0]) ? date('Y-m-d', strtotime($row[0])) : null,
                     'page_name' => $row[1] ?? null,
                     'name' => $row[2] ?? null,
-                    'phone_number' => $row[3] ?? null,
+                    'phone_number' => isset($row[3]) ? substr(preg_replace('/[^\d+]/', '', $row[3]), 0, 50) : null,
                     'all_user_input' => $row[4] ?? null,
                     'shop_details' => $row[5] ?? null,
                     'extracted_details' => $row[6] ?? null,
