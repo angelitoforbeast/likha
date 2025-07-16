@@ -22,6 +22,8 @@ use App\Http\Controllers\TaskController;
 use App\Http\Controllers\MacroGsheetController;
 use App\Http\Controllers\OrderTallyController;
 use App\Http\Controllers\EverydayTaskController;
+use App\Http\Controllers\AdsManagerReportController;
+
 use App\Models\Role;
 
 // ✅ Public routes
@@ -36,9 +38,19 @@ Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->midd
 Route::get('/assign-roles', [RoleAssignmentController::class, 'index']);
 Route::post('/assign-roles/{id}', [RoleAssignmentController::class, 'update']);
 
+Route::post('/api/generate-gpt-summary', [\App\Http\Controllers\GPTAdGeneratorController::class, 'generate']);
+Route::get('/gpt-ad-generator', [\App\Http\Controllers\GPTAdGeneratorController::class, 'showGeneratorForm']);
+
+
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
 
+Route::get('/ads-manager/import-form', [AdsManagerReportController::class, 'showImportForm'])->name('ads-manager.import-form');
+Route::post('/ads-manager/import', [AdsManagerReportController::class, 'import'])->name('ads-manager.import');
+
+
+
+    
     Route::get('/task/my-everyday-task', [EverydayTaskController::class, 'index'])->name('everyday-tasks.index');
     Route::post('/task/my-everyday-task', [EverydayTaskController::class, 'store'])->name('everyday-tasks.store');
     Route::put('/task/my-everyday-task/{id}', [EverydayTaskController::class, 'update'])->name('everyday-tasks.update');

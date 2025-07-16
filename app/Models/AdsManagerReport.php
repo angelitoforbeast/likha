@@ -1,0 +1,39 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+
+class AdsManagerReport extends Model
+{
+    use HasFactory;
+
+    protected $table = 'ads_manager_reports';
+
+    protected $fillable = [
+        'day',
+        'page_name',
+        'campaign_name',
+        'ad_set_id',
+        'ad_set_name',
+        'campaign_id',
+        'campaign_delivery',
+        'ad_set_delivery',
+        'reach',
+        'impressions',
+        'ad_set_budget',
+        'ad_set_budget_type',
+        'attribution_setting',
+        'result_type',
+        'results',
+        'amount_spent_php',
+        'cost_per_result',
+        'starts',
+        'ends',
+        'messaging_conversations_started',
+        'purchases',
+        'reporting_starts',
+        'reporting_ends',
+    ];
+}
