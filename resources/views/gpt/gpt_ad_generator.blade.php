@@ -1,5 +1,5 @@
 <x-layout>
-  <x-slot name="heading">🧠 AD COPY Generator</x-slot>
+  <x-slot name="heading">Ad Copy Generator</x-slot>
 
   <div class="max-w-5xl mx-auto space-y-6">
     {{-- Input Section --}}
