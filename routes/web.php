@@ -23,6 +23,7 @@ use App\Http\Controllers\MacroGsheetController;
 use App\Http\Controllers\OrderTallyController;
 use App\Http\Controllers\EverydayTaskController;
 use App\Http\Controllers\AdsManagerReportController;
+use App\Http\Controllers\AdCopyController;
 
 use App\Models\Role;
 
@@ -47,6 +48,7 @@ Route::middleware(['auth'])->group(function () {
 
 Route::get('/ads-manager/import-form', [AdsManagerReportController::class, 'showImportForm'])->name('ads-manager.import-form');
 Route::post('/ads-manager/import', [AdsManagerReportController::class, 'import'])->name('ads-manager.import');
+Route::get('/ad-copy-suggestions', [AdCopyController::class, 'suggestions']);
 
 
 

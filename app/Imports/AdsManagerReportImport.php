@@ -16,6 +16,9 @@ class AdsManagerReportImport implements ToCollection, WithHeadingRow
     public function collection(Collection $rows)
     {
         foreach ($rows as $row) {
+            // ✅ DEBUG: Check the actual keys and values from Excel
+            //dd($row->toArray());
+
             $existing = AdsManagerReport::where('day', $this->cast($row['day'] ?? null, 'date'))
                 ->where('campaign_id', $row['campaign_id'] ?? null)
                 ->where('ad_set_id', $row['ad_set_id'] ?? null)
@@ -42,6 +45,11 @@ class AdsManagerReportImport implements ToCollection, WithHeadingRow
                 'purchases' => $this->cast($row['purchases'] ?? null, 'int'),
                 'reporting_starts' => $this->cast($row['reporting_starts'] ?? null, 'datetime'),
                 'reporting_ends' => $this->cast($row['reporting_ends'] ?? null, 'datetime'),
+
+                // ✅ Added columns
+                'headline' => $row['headline'] ?? null,
+                'body_ad_settings' => $row['body_ad_settings'] ?? null,
+                'ad_id' => $row['ad_id'] ?? null,
             ];
 
             if ($existing) {

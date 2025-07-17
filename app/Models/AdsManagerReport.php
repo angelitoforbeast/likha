@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
+// app/Models/AdsManagerReport.php
 class AdsManagerReport extends Model
 {
     use HasFactory;
@@ -35,5 +36,10 @@ class AdsManagerReport extends Model
         'purchases',
         'reporting_starts',
         'reporting_ends',
+        // 🔽 NEW COLUMNS
+        'headline',
+        'body_ad_settings',
+        'ad_id',
     ];
 }
+

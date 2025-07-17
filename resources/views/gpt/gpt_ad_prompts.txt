@@ -9,3 +9,6 @@ Item <tab> Primary Text <tab> Headline <tab> Messaging Template <tab> Quick Repl
 Use a fun and sales-focused Taglish tone (80% Tagalog + 20% English), include emojis, and avoid repeating the product name unless needed for clarity.
 
 DO NOT add any headers, explanations, labels, or formatting. Just return a single line of tab-separated values in the order specified.
+
+Analyze the following top- and worst-performing ads based on Cost per Message (CPM). Use this as inspiration to generate new ad copy ideas with similar tones and styles as the top-performers.
+

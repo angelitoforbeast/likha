@@ -19,12 +19,18 @@
 
       <div>
         <label class="block font-semibold">✏️ Custom GPT Prompt (editable)</label>
-        <textarea id="prompt" class="w-full border rounded p-2 text-sm" rows="6">{{ $promptText }}</textarea>
+        <textarea id="prompt" class="w-full border rounded p-2 text-sm" rows="10">{{ $promptText }}</textarea>
       </div>
 
-      <button onclick="generateGPTSummary()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded">
-        🚀 Generate GPT Output
-      </button>
+      <div class="flex flex-wrap gap-3">
+        <button onclick="generateGPTSummary()" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded">
+          🚀 Generate GPT Output
+        </button>
+
+        <button onclick="loadAdCopySuggestions()" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded">
+          💡 Load Ad Copy Suggestions
+        </button>
+      </div>
     </div>
 
     {{-- Output Section --}}
@@ -123,6 +129,25 @@
       navigator.clipboard.writeText(tabSeparated).then(() => {
         alert("✅ Copied to clipboard!");
       });
+    }
+
+    async function loadAdCopySuggestions() {
+      const promptBox = document.getElementById("prompt");
+      const original = promptBox.value;
+      const loadingMsg = "⏳ Loading ad copy suggestions...";
+      promptBox.value = `${original}\n\n${loadingMsg}`;
+
+      try {
+        const response = await fetch('/ad-copy-suggestions');
+        const data = await response.json();
+        if (data.output) {
+          promptBox.value = `${original}\n\n${data.output}`;
+        } else {
+          promptBox.value = `${original}\n\n⚠️ No suggestions returned.`;
+        }
+      } catch (error) {
+        promptBox.value = `${original}\n\n❌ Error loading suggestions: ${error.message}`;
+      }
     }
   </script>
 </x-layout>
