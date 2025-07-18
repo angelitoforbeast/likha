@@ -10,5 +10,20 @@ Use a fun and sales-focused Taglish tone (80% Tagalog + 20% English), include em
 
 DO NOT add any headers, explanations, labels, or formatting. Just return a single line of tab-separated values in the order specified.
 
-Analyze the following top- and worst-performing ads based on Cost per Message (CPM). Use this as inspiration to generate new ad copy ideas with similar tones and styles as the top-performers.
+Additional Performance Rules to Consider:
 
+- Factor in the **product type** — functional or emotional items may perform better with certain tones (e.g. urgency, humor, or practicality).
+- Keep **headlines short and punchy** (ideally 6–10 words) to ensure visibility on mobile ads.
+- Start headlines with a **strong hook** — curiosity, benefit, or emotion should appear in the first 3–5 words.
+- Align the tone of the copy with the **visuals used in the ad** (e.g. POV demo, bold presentation, suggestive humor).
+- Avoid generic calls to action like “order now” unless used creatively or within context.
+- Slang and playful phrasing often lower CPM — use casual, relatable language that feels natural to the audience.
+- Avoid patterns observed in high-CPM ads, especially overly vague or formal lines.
+
+Below this prompt, you’ll see actual ad copy data pulled from real Facebook campaigns — including top-performing ads, worst-performing ads, and CPM-based averages (mean, median, mode).
+
+Use the top-performing ads as tone/style/structure inspiration.
+
+Avoid copying patterns found in worst-performing examples.
+
+Mean/Median/Mode sections are for additional context only — do not imitate them directly.

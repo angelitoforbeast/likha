@@ -41,14 +41,14 @@ Route::post('/assign-roles/{id}', [RoleAssignmentController::class, 'update']);
 
 Route::post('/api/generate-gpt-summary', [\App\Http\Controllers\GPTAdGeneratorController::class, 'generate']);
 Route::get('/gpt-ad-generator', [\App\Http\Controllers\GPTAdGeneratorController::class, 'showGeneratorForm']);
-
+Route::get('/ad-copy-suggestions', [AdCopyController::class, 'suggestions']);
 
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
 
 Route::get('/ads-manager/import-form', [AdsManagerReportController::class, 'showImportForm'])->name('ads-manager.import-form');
 Route::post('/ads-manager/import', [AdsManagerReportController::class, 'import'])->name('ads-manager.import');
-Route::get('/ad-copy-suggestions', [AdCopyController::class, 'suggestions']);
+
 
 
 
