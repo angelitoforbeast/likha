@@ -65,7 +65,8 @@ class AdsManagerReportImport implements ToCollection, WithHeadingRow
             // ✅ Sync creative data (headline + body_ad_settings) by campaign_id
             if (!empty($row['campaign_id'])) {
                 $hasActive = AdsManagerReport::where('campaign_id', $row['campaign_id'])
-        ->where('ad_set_delivery', 'Active')
+        ->whereRaw("LOWER(ad_set_delivery) = 'active'")
+
         ->exists();
                 AdCampaignCreative::updateOrCreate(
     ['campaign_id' => $row['campaign_id']],
