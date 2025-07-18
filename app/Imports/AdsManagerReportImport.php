@@ -62,24 +62,32 @@ class AdsManagerReportImport implements ToCollection, WithHeadingRow
                 $this->inserted++;
             }
 
-            // ✅ Sync creative data (headline + body_ad_settings) by campaign_id
+            // ✅ Sync creative data without overwriting existing headline
             if (!empty($row['campaign_id'])) {
                 $hasActive = AdsManagerReport::where('campaign_id', $row['campaign_id'])
-        ->whereRaw("LOWER(ad_set_delivery) = 'active'")
+                    ->whereRaw("LOWER(ad_set_delivery) = 'active'")
+                    ->exists();
 
-        ->exists();
-                AdCampaignCreative::updateOrCreate(
-    ['campaign_id' => $row['campaign_id']],
-    [
-        'campaign_name' => $row['campaign_name'] ?? null,
-        'page_name' => $row['page_name'] ?? null,
-        'headline' => $row['headline'] ?? null,
-        'body_ad_settings' => $row['body_ad_settings'] ?? null,
-        'ad_set_delivery' => $hasActive ? 'Active' : 'Inactive',
-    ]
-);
+                $creative = AdCampaignCreative::where('campaign_id', $row['campaign_id'])->first();
 
-
+                if (!$creative) {
+                    // First time insert, include headline
+                    AdCampaignCreative::create([
+                        'campaign_id' => $row['campaign_id'],
+                        'campaign_name' => $row['campaign_name'] ?? null,
+                        'page_name' => $row['page_name'] ?? null,
+                        'headline' => $row['headline'] ?? null,
+                        'body_ad_settings' => $row['body_ad_settings'] ?? null,
+                        'ad_set_delivery' => $hasActive ? 'Active' : 'Inactive',
+                    ]);
+                } else {
+                    // Update other fields only, preserve existing headline
+                    $creative->campaign_name = $row['campaign_name'] ?? $creative->campaign_name;
+                    $creative->page_name = $row['page_name'] ?? $creative->page_name;
+                    $creative->body_ad_settings = $row['body_ad_settings'] ?? $creative->body_ad_settings;
+                    $creative->ad_set_delivery = $hasActive ? 'Active' : 'Inactive';
+                    $creative->save();
+                }
             }
         }
     }

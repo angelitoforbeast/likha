@@ -20,6 +20,7 @@ class AdCampaignCreativeController extends Controller
         $creative = AdCampaignCreative::findOrFail($id);
 
         $creative->update([
+            'headline' => $request->input('headline'),
             'welcome_message' => $request->input('welcome_message'),
             'quick_reply_1' => $request->input('quick_reply_1'),
             'quick_reply_2' => $request->input('quick_reply_2'),

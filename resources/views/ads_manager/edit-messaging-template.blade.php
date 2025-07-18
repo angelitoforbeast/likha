@@ -42,7 +42,9 @@
             <td class="border px-2 py-1 align-top">{{ $creative->page_name }}</td>
             <td class="border px-2 py-1 align-top">{{ $creative->campaign_name }}</td>
             <td class="border px-2 py-1 align-top whitespace-pre-wrap">{{ $creative->body_ad_settings }}</td>
-            <td class="border px-2 py-1 align-top whitespace-pre-wrap">{{ $creative->headline }}</td>
+            <td class="border px-2 py-1 align-top">
+              <textarea name="headline" rows="1" class="auto-resize w-full border rounded p-1 text-sm leading-snug overflow-hidden resize-none">{{ $creative->headline }}</textarea>
+            </td>
 
             <td class="border px-2 py-1 align-top">
               <textarea name="welcome_message" rows="1" class="auto-resize w-full border rounded p-1 text-sm leading-snug overflow-hidden resize-none">{{ $creative->welcome_message }}</textarea>
