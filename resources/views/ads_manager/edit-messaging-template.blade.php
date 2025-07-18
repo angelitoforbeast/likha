@@ -39,26 +39,28 @@
             @csrf
             @method('PUT')
 
-            <td class="border px-2 py-1 min-w-[140px]">{{ $creative->page_name }}</td>
-            <td class="border px-2 py-1 min-w-[220px]">{{ $creative->campaign_name }}</td>
-            <td class="border px-2 py-1 min-w-[240px]">{{ $creative->body_ad_settings }}</td>
-            <td class="border px-2 py-1 min-w-[180px]">{{ $creative->headline }}</td>
+            <td class="border px-2 py-1 align-top">{{ $creative->page_name }}</td>
+            <td class="border px-2 py-1 align-top">{{ $creative->campaign_name }}</td>
+            <td class="border px-2 py-1 align-top whitespace-pre-wrap">{{ $creative->body_ad_settings }}</td>
+            <td class="border px-2 py-1 align-top whitespace-pre-wrap">{{ $creative->headline }}</td>
 
-            <td class="border px-2 py-1 min-w-[180px]">
-              <textarea name="welcome_message" class="w-full border rounded p-1">{{ $creative->welcome_message }}</textarea>
+            <td class="border px-2 py-1 align-top">
+              <textarea name="welcome_message" rows="1" class="auto-resize w-full border rounded p-1 text-sm leading-snug overflow-hidden resize-none">{{ $creative->welcome_message }}</textarea>
             </td>
-            <td class="border px-2 py-1 min-w-[130px]">
-              <input type="text" name="quick_reply_1" class="w-full border rounded p-1" value="{{ $creative->quick_reply_1 }}">
-            </td>
-            <td class="border px-2 py-1 min-w-[130px]">
-              <input type="text" name="quick_reply_2" class="w-full border rounded p-1" value="{{ $creative->quick_reply_2 }}">
-            </td>
-            <td class="border px-2 py-1 min-w-[130px]">
-              <input type="text" name="quick_reply_3" class="w-full border rounded p-1" value="{{ $creative->quick_reply_3 }}">
-            </td>
-            <td class="border px-2 py-1 min-w-[110px]">{{ $creative->ad_set_delivery }}</td>
+            <td class="border px-2 py-1 align-top">
+  <textarea name="quick_reply_1" rows="1" class="auto-resize w-full border rounded p-1 text-sm leading-snug overflow-hidden resize-none">{{ $creative->quick_reply_1 }}</textarea>
+</td>
+<td class="border px-2 py-1 align-top">
+  <textarea name="quick_reply_2" rows="1" class="auto-resize w-full border rounded p-1 text-sm leading-snug overflow-hidden resize-none">{{ $creative->quick_reply_2 }}</textarea>
+</td>
+<td class="border px-2 py-1 align-top">
+  <textarea name="quick_reply_3" rows="1" class="auto-resize w-full border rounded p-1 text-sm leading-snug overflow-hidden resize-none">{{ $creative->quick_reply_3 }}</textarea>
+</td>
 
-            <td class="border px-2 py-1 min-w-[80px] text-center">
+            <td class="border px-2 py-1 text-center align-top">
+              {{ $creative->ad_set_delivery }}
+            </td>
+            <td class="border px-2 py-1 text-center align-top">
               <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">Save</button>
             </td>
           </form>
@@ -66,4 +68,18 @@
       @endforeach
     </tbody>
   </table>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('.auto-resize').forEach(function (el) {
+        function resize() {
+          el.style.height = 'auto';
+          el.style.height = (el.scrollHeight) + 'px';
+        }
+
+        resize();
+        el.addEventListener('input', resize);
+      });
+    });
+  </script>
 </x-layout>
