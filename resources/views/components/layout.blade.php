@@ -25,44 +25,42 @@
           </div>
           <div class="hidden md:block">
             <div class="ml-10 flex items-baseline space-x-4">
-              @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC']))
+              @if(in_array($role, ['Marketing', 'Marketing - OIC']))
 
               {{-- 📂 Tasks Dropdown --}}
               <div x-data="{ open: false }" class="relative">
-  <button @click="open = !open"
-          class="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium relative">
-    <span class="relative">
-      TASKS
-      @if(($pendingTaskCount ?? 0) > 0)
-        <span class="absolute -top-1.5 -right-4 w-4 h-4 bg-red-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
-          {{ $pendingTaskCount }}
-        </span>
-      @elseif(($inProgressTaskCount ?? 0) > 0)
-        <span class="absolute -top-1.5 -right-4 w-4 h-4 bg-blue-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
-          {{ $inProgressTaskCount }}
-        </span>
-      @endif
-    </span>
-  </button>
+                <button @click="open = !open"
+                        class="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium relative">
+                  <span class="relative">
+                    TASKS
+                    @if(($pendingTaskCount ?? 0) > 0)
+                      <span class="absolute -top-1.5 -right-4 w-4 h-4 bg-red-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
+                        {{ $pendingTaskCount }}
+                      </span>
+                    @elseif(($inProgressTaskCount ?? 0) > 0)
+                      <span class="absolute -top-1.5 -right-4 w-4 h-4 bg-blue-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
+                        {{ $inProgressTaskCount }}
+                      </span>
+                    @endif
+                  </span>
+                </button>
 
-
-  <div x-show="open" @click.outside="open = false"
-       class="absolute left-0 mt-2 w-56 bg-white shadow-lg rounded-md z-50 py-1 text-sm">
-    <a href="{{ route('task.my-tasks') }}"
-       class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/my-tasks') ? 'font-semibold text-blue-700' : '' }}">
-      📋 My Tasks
-    </a>
-    <a href="{{ route('everyday-tasks.index') }}"
-       class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/my-everyday-task') ? 'font-semibold text-blue-700' : '' }}">
-      🗓 Everyday Tasks
-    </a>
-    <a href="{{ route('task.team-tasks') }}"
-       class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/create-everyday-task') ? 'font-semibold text-blue-700' : '' }}">
-      🧑‍🤝‍🧑 Team Tasks
-    </a>
-  </div>
-</div>
-
+                <div x-show="open" @click.outside="open = false"
+                     class="absolute left-0 mt-2 w-56 bg-white shadow-lg rounded-md z-50 py-1 text-sm">
+                  <a href="{{ route('task.my-tasks') }}"
+                     class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/my-tasks') ? 'font-semibold text-blue-700' : '' }}">
+                    📋 My Tasks
+                  </a>
+                  <a href="{{ route('everyday-tasks.index') }}"
+                     class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/my-everyday-task') ? 'font-semibold text-blue-700' : '' }}">
+                    🗓 Everyday Tasks
+                  </a>
+                  <a href="{{ route('task.team-tasks') }}"
+                     class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/create-everyday-task') ? 'font-semibold text-blue-700' : '' }}">
+                    🧑‍🤝‍🧑 Team Tasks
+                  </a>
+                </div>
+              </div>
 
               <x-navlink href="/ads_manager/index" :active="request()->is('ads_manager/index')">ADS</x-navlink>
               <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">LIKHA IMPORT</x-navlink>
@@ -70,12 +68,20 @@
               <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
               @endif
 
-              @if(in_array($role, ['CEO', 'Marketing', 'Marketing - OIC', 'Data Encoder','Data Encoder - OIC']))
+              @if(in_array($role, ['Marketing', 'Marketing - OIC', 'Data Encoder','Data Encoder - OIC']))
               <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEG</x-navlink>
               <x-navlink href="/orders/tally" :active="request()->is('orders/tally')">MISSING ORDERS</x-navlink>
               @endif
 
-              @if(in_array($role, ['Data Encoder - OIC','CEO']))
+              @if(in_array($role, ['CEO']))
+              <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">IMPORT MACRO</x-navlink>
+              <x-navlink href="/orders/tally" :active="request()->is('orders/tally')">MISSING ORDERS</x-navlink>
+              <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
+              <x-navlink href="/ads-manager/import-form" :active="request()->is('import-form')">ADS IMPORT</x-navlink>
+              <x-navlink href="/ads-manager/edit-messaging-template" :active="request()->is('edit-messaging-template')">CREATIVES</x-navlink>
+              @endif
+
+              @if(in_array($role, ['Data Encoder - OIC']))
               <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">IMPORT MACRO</x-navlink>
               @endif
             </div>
