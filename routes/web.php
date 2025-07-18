@@ -24,6 +24,7 @@ use App\Http\Controllers\OrderTallyController;
 use App\Http\Controllers\EverydayTaskController;
 use App\Http\Controllers\AdsManagerReportController;
 use App\Http\Controllers\AdCopyController;
+use App\Http\Controllers\AdCampaignCreativeController;
 
 use App\Models\Role;
 
@@ -49,6 +50,9 @@ Route::middleware(['auth'])->group(function () {
 Route::get('/ads-manager/import-form', [AdsManagerReportController::class, 'showImportForm'])->name('ads-manager.import-form');
 Route::post('/ads-manager/import', [AdsManagerReportController::class, 'import'])->name('ads-manager.import');
 
+Route::get('/ads-manager/edit-messaging-template', [AdCampaignCreativeController::class, 'editMessagingTemplate'])->name('ads_manager_creatives.edit');
+Route::post('/ads-manager/edit-messaging-template', [AdCampaignCreativeController::class, 'bulkUpdate'])->name('ads_manager_creatives.bulk_update');
+Route::put('/ads-manager/edit-messaging-template/{id}', [AdCampaignCreativeController::class, 'update'])->name('ads_manager_creatives.update');
 
 
 

@@ -3,6 +3,7 @@
 namespace App\Imports;
 
 use App\Models\AdsManagerReport;
+use App\Models\AdCampaignCreative;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\ToCollection;
 use Maatwebsite\Excel\Concerns\WithHeadingRow;
@@ -16,9 +17,6 @@ class AdsManagerReportImport implements ToCollection, WithHeadingRow
     public function collection(Collection $rows)
     {
         foreach ($rows as $row) {
-            // ✅ DEBUG: Check the actual keys and values from Excel
-            //dd($row->toArray());
-
             $existing = AdsManagerReport::where('day', $this->cast($row['day'] ?? null, 'date'))
                 ->where('campaign_id', $row['campaign_id'] ?? null)
                 ->where('ad_set_id', $row['ad_set_id'] ?? null)
@@ -46,7 +44,7 @@ class AdsManagerReportImport implements ToCollection, WithHeadingRow
                 'reporting_starts' => $this->cast($row['reporting_starts'] ?? null, 'datetime'),
                 'reporting_ends' => $this->cast($row['reporting_ends'] ?? null, 'datetime'),
 
-                // ✅ Added columns
+                // Deprecated fields — moved to creatives
                 'headline' => $row['headline'] ?? null,
                 'body_ad_settings' => $row['body_ad_settings'] ?? null,
                 'ad_id' => $row['ad_id'] ?? null,
@@ -62,6 +60,25 @@ class AdsManagerReportImport implements ToCollection, WithHeadingRow
                     'ad_set_id' => $row['ad_set_id'] ?? null,
                 ], $data));
                 $this->inserted++;
+            }
+
+            // ✅ Sync creative data (headline + body_ad_settings) by campaign_id
+            if (!empty($row['campaign_id'])) {
+                $hasActive = AdsManagerReport::where('campaign_id', $row['campaign_id'])
+        ->where('ad_set_delivery', 'Active')
+        ->exists();
+                AdCampaignCreative::updateOrCreate(
+    ['campaign_id' => $row['campaign_id']],
+    [
+        'campaign_name' => $row['campaign_name'] ?? null,
+        'page_name' => $row['page_name'] ?? null,
+        'headline' => $row['headline'] ?? null,
+        'body_ad_settings' => $row['body_ad_settings'] ?? null,
+        'ad_set_delivery' => $hasActive ? 'Active' : 'Inactive',
+    ]
+);
+
+
             }
         }
     }

@@ -40,6 +40,19 @@ class AdsManagerReport extends Model
         'headline',
         'body_ad_settings',
         'ad_id',
+        'welcome_message',
+'quick_reply_1',
+'quick_reply_2',
+'quick_reply_3',
+'item_name',
+
+
     ];
+
+    public function creative()
+{
+    return $this->hasOne(AdCampaignCreative::class, 'campaign_id', 'campaign_id');
+}
+
 }
 
