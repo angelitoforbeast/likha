@@ -119,7 +119,7 @@
 
   {{-- Page content --}}
   <main>
-    @if (request()->is(['task/my-tasks', 'macro/gsheet/index', 'task/team-tasks']))
+    @if (request()->is(['task/my-tasks', 'macro/gsheet/index', 'task/team-tasks','ads-manager/edit-messaging-template']))
       <div class="w-full px-0">
         {{ $slot }}
       </div>
