@@ -25,6 +25,9 @@ use App\Http\Controllers\EverydayTaskController;
 use App\Http\Controllers\AdsManagerReportController;
 use App\Http\Controllers\AdCopyController;
 use App\Http\Controllers\AdCampaignCreativeController;
+use App\Http\Controllers\Checker2GsheetController;
+
+
 
 use App\Models\Role;
 
@@ -46,6 +49,15 @@ Route::get('/ad-copy-suggestions', [AdCopyController::class, 'suggestions']);
 
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
+
+    // Checker 2 GSheet Settings Routes
+Route::get('checker_2/gsheet/settings', [Checker2GsheetController::class, 'index'])->name('checker2.settings.index');
+    Route::post('checker_2/gsheet/settings', [Checker2GsheetController::class, 'store'])->name('checker2.settings.store');
+    Route::put('checker_2/gsheet/settings/{id}', [Checker2GsheetController::class, 'update'])->name('checker2.settings.update');
+    Route::delete('checker_2/gsheet/settings/{id}', [Checker2GsheetController::class, 'destroy'])->name('checker2.settings.delete');
+    Route::get('/checker_2/gsheet/import', [Checker2GsheetController::class, 'showImportPage']);
+Route::post('/checker_2/gsheet/import', [Checker2GsheetController::class, 'import']);
+
 
 Route::get('/ads-manager/import-form', [AdsManagerReportController::class, 'showImportForm'])->name('ads-manager.import-form');
 Route::post('/ads-manager/import', [AdsManagerReportController::class, 'import'])->name('ads-manager.import');

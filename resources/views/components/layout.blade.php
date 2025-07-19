@@ -79,6 +79,7 @@
               <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
               <x-navlink href="/ads-manager/import-form" :active="request()->is('import-form')">ADS IMPORT</x-navlink>
               <x-navlink href="/ads-manager/edit-messaging-template" :active="request()->is('edit-messaging-template')">CREATIVES</x-navlink>
+              <x-navlink href="/gpt-ad-generator" :active="request()->is('gpt-ad-generatorm')">AD COPY</x-navlink>
               @endif
 
               @if(in_array($role, ['Data Encoder - OIC']))
