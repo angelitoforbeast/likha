@@ -48,8 +48,8 @@
   </style>
 
   {{-- Filters + Table Head --}}
-  <div class="fixed top-[64px] left-0 right-0 z-40 bg-white px-4 pt-4 pb-2 shadow">
-    {{-- Filters --}}
+  <div id="fixed-header" class="fixed top-[64px] left-0 right-0 z-40 bg-white px-4 pt-4 pb-2 shadow">
+ {{-- Filters --}}
     <form method="GET" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-4 flex-wrap">
       <div>
         <label class="text-sm font-medium">Date</label>
@@ -70,6 +70,7 @@
     </form>
 
     {{-- Table Head --}}
+    
     <table class="table-fixed w-full border text-sm">
       <thead class="bg-gray-100 text-left">
         <tr>
@@ -89,10 +90,11 @@
   </div>
 
   {{-- Spacer to prevent overlap --}}
-  <div class="h-[5px]"></div>
+  <div class="h-[0px]"></div>
 
   {{-- Scrollable Table Body --}}
-  <div class="px-4">
+  <div id="table-body-wrapper" class="px-4">
+
     <table class="table-fixed w-full border text-sm" id="table-body">
       <tbody>
         @foreach($records as $record)
@@ -230,4 +232,20 @@ if ($editFlag) {
       }
     }
   </script>
+  <script>
+  function adjustTableBodyMargin() {
+    const header = document.getElementById('fixed-header');
+    const bodyWrapper = document.getElementById('table-body-wrapper');
+
+    if (header && bodyWrapper) {
+      const rect = header.getBoundingClientRect();
+      const totalHeight = rect.height;
+ // full height from top of page
+      bodyWrapper.style.marginTop = totalHeight + 'px';
+    }
+  }
+
+  window.addEventListener('load', adjustTableBodyMargin);
+  window.addEventListener('resize', adjustTableBodyMargin);
+</script>
 </x-layout>
