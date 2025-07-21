@@ -53,29 +53,36 @@
     
       <form method="GET" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-4 flex-wrap w-full">
   <div>
-    <label class="text-sm font-medium">Date</label>
-    <input type="date" name="date" value="{{ request('date') }}" class="border rounded px-2 py-1" />
-  </div>
-  <div>
-    <label class="text-sm font-medium">Page</label>
-    <select name="PAGE" class="border rounded px-2 py-1">
-      <option value="">All</option>
-      @foreach($pages as $page)
-        <option value="{{ $page }}" @selected(request('PAGE') == $page)> {{ $page }} </option>
-      @endforeach
-    </select>
-     <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Filter</button>
-  </div>
+  <label class="text-sm font-medium">Date</label>
+  <input type="date" name="date" value="{{ request('date') }}" class="border rounded px-2 py-1" onchange="this.form.submit()" />
+</div>
+<div>
+  <label class="text-sm font-medium">Page</label>
+  <select name="PAGE" class="border rounded px-2 py-1" onchange="this.form.submit()">
+    <option value="">All</option>
+    @foreach($pages as $page)
+      <option value="{{ $page }}" @selected(request('PAGE') == $page)> {{ $page }} </option>
+    @endforeach
+  </select>
+</div>
+
   <div class="ml-auto flex gap-2 items-center">
  
   <button type="button" id="validate-btn" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800">Validate</button>
   <span id="validate-status" class="text-sm text-gray-600"></span>
+  @php
+  $role = Auth::user()?->employeeProfile?->role ?? null;
+@endphp
+
+@if($role !== 'Data Encoder')
   <a
-  href="{{ route('macro_output.download', ['date' => request('date'), 'PAGE' => request('PAGE')]) }}"
-  class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800"
->
-  Download
-</a>
+    href="{{ route('macro_output.download', ['date' => request('date'), 'PAGE' => request('PAGE')]) }}"
+    class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800"
+  >
+    Download
+  </a>
+@endif
+
 @if(session('error'))
   <div class="bg-red-100 text-red-700 border border-red-400 p-3 rounded mb-4">
     {{ session('error') }}
