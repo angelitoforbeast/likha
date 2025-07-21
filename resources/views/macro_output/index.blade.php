@@ -15,11 +15,9 @@
       text-overflow: initial;
       max-height: none;
     }
-    .auto-resize {
-      height: auto;
-      overflow-y: hidden;
-      resize: none;
-      min-height: 2.5em;
+    table td,
+    table th {
+      word-break: break-word;
     }
   </style>
 
@@ -45,63 +43,70 @@
 
   {{-- Editable Table --}}
   <div class="overflow-auto">
-    <table class="table-auto w-full border text-sm">
+    <table class="table-fixed w-full border text-sm">
       <thead>
         <tr class="bg-gray-100 text-left">
-          <th class="border p-2">TIMESTAMP</th>
-          @foreach(['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY', 'STATUS'] as $col)
-            <th class="border p-2">{{ $col }}</th>
-          @endforeach
-          <th class="border p-2">AI CHECK</th>
-          <th class="border p-2">ALL USER INPUT</th>
-          <th class="border p-2">HISTORICAL LOGS</th>
+          <th class="border p-2" style="width: 10%">TIMESTAMP</th>
+          <th class="border p-2" style="width: 10%">FULL NAME</th>
+          <th class="border p-2" style="width: 10%">PHONE NUMBER</th>
+          <th class="border p-2" style="width: 10%">ADDRESS</th>
+          <th class="border p-2" style="width: 8%">PROVINCE</th>
+          <th class="border p-2" style="width: 8%">CITY</th>
+          <th class="border p-2" style="width: 8%">BARANGAY</th>
+          <th class="border p-2" style="width: 8%">STATUS</th>
+          <th class="border p-2" style="width: 8%">AI CHECK</th>
+          <th class="border p-2" style="width: 10%">ALL USER INPUT</th>
+          <th class="border p-2" style="width: 10%">HISTORICAL LOGS</th>
         </tr>
       </thead>
       <tbody>
         @foreach($records as $record)
           @php
-  $checker = strtolower($record['APP SCRIPT CHECKER'] ?? '');
-  $shouldHighlight = fn($field) => match($field) {
-    'PROVINCE' => str_contains($checker, 'province'),
-    'CITY' => str_contains($checker, 'city'),
-    'BARANGAY' => str_contains($checker, 'barangay'),
-    default => false,
-  };
-@endphp
-
+            $checker = strtolower($record['APP SCRIPT CHECKER'] ?? '');
+            $shouldHighlight = function($field) use ($checker) {
+              if (str_contains($checker, 'full address')) {
+                return in_array($field, ['PROVINCE', 'CITY', 'BARANGAY']);
+              }
+              return match($field) {
+                'PROVINCE' => str_contains($checker, 'province'),
+                'CITY' => str_contains($checker, 'city'),
+                'BARANGAY' => str_contains($checker, 'barangay'),
+                default => false,
+              };
+            };
+          @endphp
           <tr>
-            <td class="border p-2 text-gray-700">{{ $record->TIMESTAMP }}</td>
+            <td class="border p-2 text-gray-700" style="width: 10%">{{ $record->TIMESTAMP }}</td>
             @foreach(['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY', 'STATUS'] as $field)
-  <td class="border p-1 align-top">
-    @if($field === 'STATUS')
-      <select
-        data-id="{{ $record->id }}"
-        data-field="{{ $field }}"
-        class="editable-input w-full px-2 py-1 border rounded text-sm"
-      >
-        <option value="">—</option>
-        @foreach(['PROCEED', 'CANNOT PROCEED', 'ODZ'] as $option)
-          <option value="{{ $option }}" @selected(($record[$field] ?? '') === $option)>
-            {{ $option }}
-          </option>
-        @endforeach
-      </select>
-    @else
-      <textarea
-        data-id="{{ $record->id }}"
-        data-field="{{ $field }}"
-        class="editable-input auto-resize w-full px-2 py-1 border rounded text-sm {{ $shouldHighlight($field) ? 'bg-red-200' : '' }}"
-        oninput="autoResize(this)"
-      >{{ $record[$field] ?? '' }}</textarea>
-    @endif
-  </td>
-@endforeach
-
-            <td class="border p-2 text-gray-700">{{ $record['APP SCRIPT CHECKER'] ?? '' }}</td>
-            <td class="border p-2 text-gray-700 cursor-pointer all-user-input max-w-xs" onclick="expandOnlyOnce(this)" title="Click to expand">
+              <td class="border p-1 align-top" style="width: {{ in_array($field, ['PROVINCE','CITY','BARANGAY']) ? '8%' : ($field === 'STATUS' ? '8%' : '10%') }}">
+                @if($field === 'STATUS')
+                  <select
+                    data-id="{{ $record->id }}"
+                    data-field="{{ $field }}"
+                    class="editable-input w-full px-2 py-1 border rounded text-sm"
+                  >
+                    <option value="">—</option>
+                    @foreach(['PROCEED', 'CANNOT PROCEED', 'ODZ'] as $option)
+                      <option value="{{ $option }}" @selected(($record[$field] ?? '') === $option)>
+                        {{ $option }}
+                      </option>
+                    @endforeach
+                  </select>
+                @else
+                  <textarea
+                    data-id="{{ $record->id }}"
+                    data-field="{{ $field }}"
+                    class="editable-input auto-resize w-full px-2 py-1 border rounded text-sm {{ $shouldHighlight($field) ? 'bg-red-200' : '' }}"
+                    oninput="autoResize(this)"
+                  >{{ $record[$field] ?? '' }}</textarea>
+                @endif
+              </td>
+            @endforeach
+            <td class="border p-2 text-gray-700" style="width: 8%">{{ $record['APP SCRIPT CHECKER'] ?? '' }}</td>
+            <td class="border p-2 text-gray-700 cursor-pointer all-user-input" style="width: 10%" onclick="expandOnlyOnce(this)">
               {{ $record['all_user_input'] }}
             </td>
-            <td class="border p-2 text-gray-700 cursor-pointer all-user-input max-w-xs" onclick="expandOnlyOnce(this)" title="Click to expand">
+            <td class="border p-2 text-gray-700 cursor-pointer all-user-input" style="width: 10%" onclick="expandOnlyOnce(this)">
               {{ $record['HISTORICAL LOGS'] ?? '' }}
             </td>
           </tr>
