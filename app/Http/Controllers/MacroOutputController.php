@@ -12,6 +12,63 @@ class MacroOutputController extends Controller
         $record = MacroOutput::findOrFail($id);
         return view('macro_output.edit', compact('record'));
     }
+ public function validateAddresses(Request $request)
+{
+    $filePath = resource_path('views/macro_output/jnt_address.txt');
+
+    $validMap = [];
+    $validProvinces = [];
+    $validCities = [];
+    $validBarangays = [];
+
+    if (file_exists($filePath)) {
+        $lines = file($filePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $line) {
+            $parts = array_map('trim', explode('|', $line));
+            if (count($parts) !== 3 || strtolower($parts[0]) === 'province') continue;
+            [$prov, $city, $brgy] = $parts;
+
+            $key = strtolower("$prov|$city|$brgy");
+            $validMap[$key] = true;
+            $validProvinces[] = strtolower($prov);
+            $validCities[] = strtolower($city);
+            $validBarangays[] = strtolower($brgy);
+        }
+    }
+
+    $validProvinces = array_unique($validProvinces);
+    $validCities = array_unique($validCities);
+    $validBarangays = array_unique($validBarangays);
+
+    // ✅ Limit validation to provided IDs
+    $ids = $request->input('ids', []);
+    $records = MacroOutput::whereIn('id', $ids)->get(['id', 'PROVINCE', 'CITY', 'BARANGAY']);
+
+    $results = [];
+
+    foreach ($records as $record) {
+        $prov = strtolower(trim($record->PROVINCE));
+        $city = strtolower(trim($record->CITY));
+        $brgy = strtolower(trim($record->BARANGAY));
+        $fullKey = "$prov|$city|$brgy";
+
+        $isValid = isset($validMap[$fullKey]);
+
+        $results[] = [
+            'id' => $record->id,
+            'invalid_fields' => $isValid ? [] : [
+                'PROVINCE' => !in_array($prov, $validProvinces),
+                'CITY' => !in_array($city, $validCities),
+                'BARANGAY' => !in_array($brgy, $validBarangays),
+            ],
+        ];
+    }
+
+    return response()->json($results);
+}
+
+
+
 
     public function update(Request $request, $id)
     {

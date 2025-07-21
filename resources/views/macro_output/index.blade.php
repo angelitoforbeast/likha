@@ -1,7 +1,7 @@
 <x-layout>
   <x-slot name="heading">
     <div class="sticky-header">
-      📋 Macro Output Editor (Checker 1)
+      CHECKER 1
     </div>
   </x-slot>
 
@@ -50,23 +50,35 @@
   {{-- Filters + Table Head --}}
   <div id="fixed-header" class="fixed top-[64px] left-0 right-0 z-40 bg-white px-4 pt-4 pb-2 shadow">
  {{-- Filters --}}
-    <form method="GET" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-4 flex-wrap">
-      <div>
-        <label class="text-sm font-medium">Date</label>
-        <input type="date" name="date" value="{{ request('date') }}" class="border rounded px-2 py-1" />
-      </div>
-      <div>
-        <label class="text-sm font-medium">Page</label>
-        <select name="PAGE" class="border rounded px-2 py-1">
-          <option value="">All</option>
-          @foreach($pages as $page)
-            <option value="{{ $page }}" @selected(request('PAGE') == $page)> {{ $page }} </option>
-          @endforeach
-        </select>
-      </div>
-      <div>
-        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Filter</button>
-      </div>
+    
+      <form method="GET" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-4 flex-wrap w-full">
+  <div>
+    <label class="text-sm font-medium">Date</label>
+    <input type="date" name="date" value="{{ request('date') }}" class="border rounded px-2 py-1" />
+  </div>
+  <div>
+    <label class="text-sm font-medium">Page</label>
+    <select name="PAGE" class="border rounded px-2 py-1">
+      <option value="">All</option>
+      @foreach($pages as $page)
+        <option value="{{ $page }}" @selected(request('PAGE') == $page)> {{ $page }} </option>
+      @endforeach
+    </select>
+     <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Filter</button>
+  </div>
+  <div class="ml-auto flex gap-2 items-center">
+ 
+  <button type="button" id="validate-btn" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800">Validate</button>
+  <span id="validate-status" class="text-sm text-gray-600"></span>
+  <button type="button" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800">Download</button>
+</div>
+
+
+
+
+
+</form>
+
     </form>
 
     {{-- Table Head --}}
@@ -82,7 +94,7 @@
           <th class="border p-2" style="width: 8%">CITY</th>
           <th class="border p-2" style="width: 8%">BARANGAY</th>
           <th class="border p-2" style="width: 8%">STATUS</th>
-          <th class="border p-2" style="width: 20%">ALL USER INPUT</th>
+          <th class="border p-2" style="width: 20%">CUSTOMER DETAILS</th>
           <th class="border p-2" style="width: 10%">HISTORICAL LOGS</th>
         </tr>
       </thead>
@@ -248,4 +260,62 @@ if ($editFlag) {
   window.addEventListener('load', adjustTableBodyMargin);
   window.addEventListener('resize', adjustTableBodyMargin);
 </script>
+<script>
+  document.getElementById('validate-btn').addEventListener('click', function () {
+    const statusEl = document.getElementById('validate-status');
+    statusEl.textContent = 'Validating...';
+    statusEl.classList.remove('text-green-600');
+    statusEl.classList.add('text-gray-600');
+
+    // Reset all background colors before validating
+    document.querySelectorAll('[data-id][data-field]').forEach(input => {
+      input.style.backgroundColor = '';
+    });
+
+    // Collect only visible IDs
+    const ids = Array.from(document.querySelectorAll('[data-id]'))
+      .map(el => el.dataset.id)
+      .filter((v, i, a) => a.indexOf(v) === i); // unique only
+
+    fetch("{{ route('macro_output.validate') }}", {
+      method: 'POST',
+      headers: {
+        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ ids })
+    })
+    .then(res => res.json())
+    .then(results => {
+      let errorCount = 0;
+      results.forEach(result => {
+        if (result.invalid_fields) {
+          Object.keys(result.invalid_fields).forEach(field => {
+            if (result.invalid_fields[field]) {
+              errorCount++;
+              const input = document.querySelector(`[data-id="${result.id}"][data-field="${field}"]`);
+              if (input) {
+                input.style.backgroundColor = '#ff0000';
+              }
+            }
+          });
+        }
+      });
+
+      statusEl.textContent = errorCount > 0 
+        ? `${errorCount} cell(s) with issues`
+        : 'All good! ✅';
+      statusEl.classList.remove('text-gray-600');
+      statusEl.classList.add(errorCount > 0 ? 'text-red-600' : 'text-green-600');
+    })
+    .catch(() => {
+      statusEl.textContent = 'Validation failed.';
+      statusEl.classList.remove('text-gray-600');
+      statusEl.classList.add('text-red-600');
+    });
+  });
+</script>
+
+
+
 </x-layout>
