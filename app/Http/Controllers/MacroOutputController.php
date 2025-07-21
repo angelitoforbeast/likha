@@ -92,19 +92,17 @@ class MacroOutputController extends Controller
 {
     $query = MacroOutput::query();
 
-    // Filter by TIMESTAMP (string match based on formatted date)
-    $formattedDate = null;
-    if ($request->filled('date')) {
-        $formattedDate = \Carbon\Carbon::parse($request->date)->format('d-m-Y');
-        $query->where('TIMESTAMP', 'LIKE', "%$formattedDate");
-    }
+    // Default to yesterday if no date is provided
+    $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
+    $formattedDate = \Carbon\Carbon::parse($date)->format('d-m-Y');
+    $query->where('TIMESTAMP', 'LIKE', "%$formattedDate");
 
     // Filter by PAGE
     if ($request->filled('PAGE')) {
         $query->where('PAGE', $request->PAGE);
     }
 
-    // Fetch required columns including 'all_user_input'
+    // Fetch records
     $records = $query->select(
         'id',
         'FULL NAME',
@@ -120,27 +118,23 @@ class MacroOutputController extends Controller
         'HISTORICAL LOGS',
         'APP SCRIPT CHECKER',
         'edited_full_name',
-    'edited_phone_number',
-    'edited_address',
-    'edited_province',
-    'edited_city',
-    'edited_barangay'
-    )
-    ->orderByDesc('id')
-    ->paginate(100);
+        'edited_phone_number',
+        'edited_address',
+        'edited_province',
+        'edited_city',
+        'edited_barangay'
+    )->orderByDesc('id')->paginate(100);
 
-    // Populate page options based on selected date
-    $pages = collect();
-    if ($formattedDate) {
-        $pages = MacroOutput::where('TIMESTAMP', 'LIKE', "%$formattedDate")
-            ->select('PAGE')
-            ->distinct()
-            ->orderBy('PAGE')
-            ->pluck('PAGE');
-    }
+    // Populate page options
+    $pages = MacroOutput::where('TIMESTAMP', 'LIKE', "%$formattedDate")
+        ->select('PAGE')
+        ->distinct()
+        ->orderBy('PAGE')
+        ->pluck('PAGE');
 
-    return view('macro_output.index', compact('records', 'pages'));
+    return view('macro_output.index', compact('records', 'pages', 'date'));
 }
+
 
     public function updateField(Request $request)
 {
