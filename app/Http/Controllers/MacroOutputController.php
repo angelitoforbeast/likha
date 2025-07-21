@@ -13,16 +13,28 @@ class MacroOutputController extends Controller
 {
     $query = DB::table('macro_output');
 
+    // Step 1: Apply filters
     if ($request->has('date') && $request->date) {
-    $formatted = date('d-m-Y', strtotime($request->date)); // Convert 2025-07-06 → 06-07-2025
-    $query->where('TIMESTAMP', 'like', "%$formatted");
-}
-
+        $formatted = date('d-m-Y', strtotime($request->date));
+        $query->where('TIMESTAMP', 'like', "%$formatted");
+    }
 
     if ($request->has('PAGE') && $request->PAGE) {
         $query->where('PAGE', $request->PAGE);
     }
 
+    // Step 2: Block download if any STATUS is blank
+    $incomplete = (clone $query)
+        ->where(function ($q) {
+            $q->whereNull('STATUS')->orWhere('STATUS', '');
+        })
+        ->exists();
+
+    if ($incomplete) {
+        return back()->with('error', 'Download FAILED: Some entries in the filtered results are missing a STATUS.');
+    }
+
+    // Step 3: Fetch data
     $records = $query->select(
         'FULL NAME',
         'PHONE NUMBER',
@@ -34,27 +46,26 @@ class MacroOutputController extends Controller
         'COD'
     )->get();
 
-    $csvHeader = [
-        'FULL NAME',
-        'PHONE NUMBER',
-        'ADDRESS',
-        'PROVINCE',
-        'CITY',
-        'BARANGAY',
-        'ITEM_NAME',
-        'COD'
-    ];
-
+    // Step 4: Generate filename
     $pagePart = $request->PAGE ? preg_replace('/[^a-zA-Z0-9_]/', '_', $request->PAGE) : 'AllPages';
-$datePart = $request->date ?? now()->format('Y-m-d');
-$timePart = now()->format('H-i-s');
+    $datePart = $request->date ?? now()->format('Y-m-d');
+    $timePart = now()->format('H-i-s');
+    $filename = "{$pagePart}_{$datePart}_{$timePart}.csv";
 
-$filename = "{$pagePart}_{$datePart}_{$timePart}.csv";
-
-
+    // Step 5: Prepare CSV content
     $handle = fopen('php://temp', 'w+');
-    fputcsv($handle, $csvHeader);
 
+    // Load first 7 rows from template Excel
+    $templatePath = storage_path('app/exptemplete.xls'); // <-- upload your Excel here
+    $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($templatePath);
+    $sheet = $spreadsheet->getActiveSheet();
+    $templateData = $sheet->rangeToArray('A1:N8', null, true, true, false);
+
+    foreach ($templateData as $row) {
+        fputcsv($handle, $row);
+    }
+
+    // Step 6: Append actual data rows
     foreach ($records as $row) {
         fputcsv($handle, [
             $row->{'FULL NAME'},
@@ -63,20 +74,28 @@ $filename = "{$pagePart}_{$datePart}_{$timePart}.csv";
             $row->PROVINCE,
             $row->CITY,
             $row->BARANGAY,
+            'EZ',
             $row->ITEM_NAME,
-            $row->COD
+            '0.5', // Weight (kg)
+            explode(' ', trim($row->ITEM_NAME))[0] ?? null, // Total parcels(*)
+            '549', // Parcel Value
+            $row->COD,
+            null  // Remarks
         ]);
     }
 
+    // Step 7: Download as CSV
     rewind($handle);
     $content = stream_get_contents($handle);
     fclose($handle);
 
-    return Response::make($content, 200, [
+    return response($content, 200, [
         'Content-Type' => 'text/csv',
         'Content-Disposition' => "attachment; filename={$filename}",
     ]);
 }
+
+
     public function edit($id)
     {
         $record = MacroOutput::findOrFail($id);

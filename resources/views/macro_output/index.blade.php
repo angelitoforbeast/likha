@@ -76,9 +76,15 @@
 >
   Download
 </a>
-
+@if(session('error'))
+  <div class="bg-red-100 text-red-700 border border-red-400 p-3 rounded mb-4">
+    {{ session('error') }}
+  </div>
+@endif
 
 </div>
+
+
 
 
 
