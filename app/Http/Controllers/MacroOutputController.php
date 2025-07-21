@@ -61,7 +61,13 @@ class MacroOutputController extends Controller
         'TIMESTAMP',
         'all_user_input',
         'HISTORICAL LOGS',
-        'APP SCRIPT CHECKER'
+        'APP SCRIPT CHECKER',
+        'edited_full_name',
+    'edited_phone_number',
+    'edited_address',
+    'edited_province',
+    'edited_city',
+    'edited_barangay'
     )
     ->orderByDesc('id')
     ->paginate(100);
@@ -99,18 +105,36 @@ class MacroOutputController extends Controller
         $timestamp = now()->format('Y-m-d H:i:s');
 
         if ($field !== 'STATUS') {
-    $logEntry = "[{$timestamp}] {$user} updated {$field}: \"{$oldValue}\" → \"{$newValue}\"\n";
-    $record->{'HISTORICAL LOGS'} = trim($logEntry . ($record->{'HISTORICAL LOGS'} ?? ''));
-}
+            $logEntry = "[{$timestamp}] {$user} updated {$field}: \"{$oldValue}\" → \"{$newValue}\"\n";
+            $record->{'HISTORICAL LOGS'} = trim($logEntry . ($record->{'HISTORICAL LOGS'} ?? ''));
+        }
 
-
-        // Save updated field and logs
+        // Save updated field
         $record->{$field} = $newValue;
+
+        // Mark as edited once (only if not already true)
+        $editFlags = [
+            'FULL NAME' => 'edited_full_name',
+            'PHONE NUMBER' => 'edited_phone_number',
+            'ADDRESS' => 'edited_address',
+            'PROVINCE' => 'edited_province',
+            'CITY' => 'edited_city',
+            'BARANGAY' => 'edited_barangay',
+        ];
+
+        if (array_key_exists($field, $editFlags)) {
+            $flag = $editFlags[$field];
+            if (!$record->{$flag}) {
+                $record->{$flag} = true;
+            }
+        }
+
         $record->save();
     }
 
     return response()->json(['status' => 'success']);
 }
+
 
 
 

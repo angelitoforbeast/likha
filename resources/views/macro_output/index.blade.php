@@ -1,7 +1,24 @@
 <x-layout>
-  <x-slot name="heading">📋 Macro Output Editor (Checker 1)</x-slot>
+  <x-slot name="heading">
+    <div class="sticky-header">
+      📋 Macro Output Editor (Checker 1)
+    </div>
+  </x-slot>
 
   <style>
+    .sticky-header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      width: 100vw;
+      background-color: white;
+      z-index: 100;
+      padding: 1rem;
+      margin: 0;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+
     .all-user-input {
       transition: all 0.3s ease;
       max-height: 4.5em;
@@ -9,16 +26,19 @@
       white-space: nowrap;
       text-overflow: ellipsis;
     }
+
     .all-user-input.expanded {
       white-space: normal;
       overflow: visible;
       text-overflow: initial;
       max-height: none;
     }
+
     table td,
     table th {
       word-break: break-word;
     }
+
     textarea {
       overflow: hidden !important;
       resize: none;
@@ -27,31 +47,32 @@
     }
   </style>
 
-  {{-- Filters --}}
-  <form method="GET" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-4 flex-wrap">
-    <div>
-      <label class="text-sm font-medium">Date</label>
-      <input type="date" name="date" value="{{ request('date') }}" class="border rounded px-2 py-1" />
-    </div>
-    <div>
-      <label class="text-sm font-medium">Page</label>
-      <select name="PAGE" class="border rounded px-2 py-1">
-        <option value="">All</option>
-        @foreach($pages as $page)
-          <option value="{{ $page }}" @selected(request('PAGE') == $page)> {{ $page }} </option>
-        @endforeach
-      </select>
-    </div>
-    <div>
-      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Filter</button>
-    </div>
-  </form>
+  {{-- Filters + Table Head --}}
+  <div class="fixed top-[64px] left-0 right-0 z-40 bg-white px-4 pt-4 pb-2 shadow">
+    {{-- Filters --}}
+    <form method="GET" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-4 flex-wrap">
+      <div>
+        <label class="text-sm font-medium">Date</label>
+        <input type="date" name="date" value="{{ request('date') }}" class="border rounded px-2 py-1" />
+      </div>
+      <div>
+        <label class="text-sm font-medium">Page</label>
+        <select name="PAGE" class="border rounded px-2 py-1">
+          <option value="">All</option>
+          @foreach($pages as $page)
+            <option value="{{ $page }}" @selected(request('PAGE') == $page)> {{ $page }} </option>
+          @endforeach
+        </select>
+      </div>
+      <div>
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Filter</button>
+      </div>
+    </form>
 
-  {{-- Editable Table --}}
-  <div class="overflow-auto">
+    {{-- Table Head --}}
     <table class="table-fixed w-full border text-sm">
-      <thead>
-        <tr class="bg-gray-100 text-left">
+      <thead class="bg-gray-100 text-left">
+        <tr>
           <th class="border p-2" style="width: 10%">TIMESTAMP</th>
           <th class="border p-2" style="width: 10%">FULL NAME</th>
           <th class="border p-2" style="width: 10%">PHONE NUMBER</th>
@@ -60,11 +81,19 @@
           <th class="border p-2" style="width: 8%">CITY</th>
           <th class="border p-2" style="width: 8%">BARANGAY</th>
           <th class="border p-2" style="width: 8%">STATUS</th>
-          {{--<th class="border p-2" style="width: 8%">AI CHECK</th>--}}
           <th class="border p-2" style="width: 20%">ALL USER INPUT</th>
           <th class="border p-2" style="width: 10%">HISTORICAL LOGS</th>
         </tr>
       </thead>
+    </table>
+  </div>
+
+  {{-- Spacer to prevent overlap --}}
+  <div class="h-[5px]"></div>
+
+  {{-- Scrollable Table Body --}}
+  <div class="px-4">
+    <table class="table-fixed w-full border text-sm" id="table-body">
       <tbody>
         @foreach($records as $record)
           @php
@@ -83,8 +112,32 @@
           @endphp
           <tr>
             <td class="border p-2 text-gray-700" style="width: 10%">{{ $record->TIMESTAMP }}</td>
+
             @foreach(['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY', 'STATUS'] as $field)
-              <td class="border p-1 align-top" style="width: {{ in_array($field, ['PROVINCE','CITY','BARANGAY']) ? '8%' : ($field === 'STATUS' ? '8%' : '10%') }}">
+              @php
+                $editFlag = match($field) {
+                  'FULL NAME' => $record->edited_full_name ?? false,
+                  'PHONE NUMBER' => $record->edited_phone_number ?? false,
+                  'ADDRESS' => $record->edited_address ?? false,
+                  'PROVINCE' => $record->edited_province ?? false,
+                  'CITY' => $record->edited_city ?? false,
+                  'BARANGAY' => $record->edited_barangay ?? false,
+                  default => false
+                };
+
+                $finalClass = 'editable-input auto-resize w-full px-2 py-1 border rounded text-sm';
+                if ($editFlag) {
+                  $finalClass .= ' bg-green-100';
+                } elseif ($shouldHighlight($field)) {
+                  $finalClass .= ' bg-red-200';
+                }
+                $columnWidth = match($field) {
+                  'PROVINCE', 'CITY', 'BARANGAY', 'STATUS' => '8%',
+                  default => '10%',
+                };
+              @endphp
+
+              <td class="border p-1 align-top" style="width: {{ $columnWidth }}">
                 @if($field === 'STATUS')
                   <select
                     data-id="{{ $record->id }}"
@@ -102,13 +155,13 @@
                   <textarea
                     data-id="{{ $record->id }}"
                     data-field="{{ $field }}"
-                    class="editable-input auto-resize w-full px-2 py-1 border rounded text-sm {{ $shouldHighlight($field) ? 'bg-red-200' : '' }}"
+                    class="{{ $finalClass }}"
                     oninput="autoResize(this)"
                   >{{ $record[$field] ?? '' }}</textarea>
                 @endif
               </td>
             @endforeach
-            {{--<td class="border p-2 text-gray-700" style="width: 8%">{{ $record['APP SCRIPT CHECKER'] ?? '' }}</td>--}}
+
             <td class="border p-2 text-gray-700 cursor-pointer all-user-input" style="width: 20%" onclick="expandOnlyOnce(this)">
               {{ $record['all_user_input'] }}
             </td>
@@ -121,11 +174,10 @@
     </table>
   </div>
 
-  <div class="mt-6">
+  <div class="mt-6 px-4">
     {{ $records->withQueryString()->links() }}
   </div>
 
-  {{-- Scripts --}}
   <script>
     function autoResize(el) {
       el.style.height = 'auto';
@@ -151,8 +203,8 @@
         .then(res => res.json())
         .then(data => {
           if (data.status === 'success') {
-            this.style.backgroundColor = '#d1fae5';
-            setTimeout(() => this.style.backgroundColor = '', 800);
+            this.classList.remove('bg-red-200');
+            this.classList.add('bg-green-100');
           } else {
             this.style.backgroundColor = '#fee2e2';
           }
