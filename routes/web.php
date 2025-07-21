@@ -56,6 +56,7 @@ Route::middleware(['auth'])->group(function () {
 Route::post('/encoder/checker_1/update', [MacroOutputController::class, 'bulkUpdate'])->name('macro_output.bulk_update');
 Route::post('/encoder/checker_1/update-field', [MacroOutputController::class, 'updateField'])->name('macro_output.update_field');
 Route::post('/macro_output/validate', [MacroOutputController::class, 'validateAddresses'])->name('macro_output.validate');
+Route::get('/macro_output/download', [MacroOutputController::class, 'download'])->name('macro_output.download');
 
 
 // Checker 2 GSheet Settings Routes

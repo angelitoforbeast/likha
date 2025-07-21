@@ -70,7 +70,14 @@
  
   <button type="button" id="validate-btn" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800">Validate</button>
   <span id="validate-status" class="text-sm text-gray-600"></span>
-  <button type="button" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800">Download</button>
+  <a
+  href="{{ route('macro_output.download', ['date' => request('date'), 'PAGE' => request('PAGE')]) }}"
+  class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800"
+>
+  Download
+</a>
+
+
 </div>
 
 

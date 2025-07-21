@@ -4,9 +4,74 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\MacroOutput;
-
+use Illuminate\Support\Facades\Response;
+use Illuminate\Support\Facades\DB;
 class MacroOutputController extends Controller
 {
+
+    public function download(Request $request)
+{
+    $query = DB::table('macro_output');
+
+    if ($request->has('date') && $request->date) {
+    $formatted = date('d-m-Y', strtotime($request->date)); // Convert 2025-07-06 → 06-07-2025
+    $query->where('TIMESTAMP', 'like', "%$formatted");
+}
+
+
+    if ($request->has('PAGE') && $request->PAGE) {
+        $query->where('PAGE', $request->PAGE);
+    }
+
+    $records = $query->select(
+        'FULL NAME',
+        'PHONE NUMBER',
+        'ADDRESS',
+        'PROVINCE',
+        'CITY',
+        'BARANGAY',
+        'ITEM_NAME',
+        'COD'
+    )->get();
+
+    $csvHeader = [
+        'FULL NAME',
+        'PHONE NUMBER',
+        'ADDRESS',
+        'PROVINCE',
+        'CITY',
+        'BARANGAY',
+        'ITEM_NAME',
+        'COD'
+    ];
+
+    $filename = 'macro_output_export_' . now()->format('Ymd_His') . '.csv';
+
+    $handle = fopen('php://temp', 'w+');
+    fputcsv($handle, $csvHeader);
+
+    foreach ($records as $row) {
+        fputcsv($handle, [
+            $row->{'FULL NAME'},
+            $row->{'PHONE NUMBER'},
+            $row->ADDRESS,
+            $row->PROVINCE,
+            $row->CITY,
+            $row->BARANGAY,
+            $row->ITEM_NAME,
+            $row->COD
+        ]);
+    }
+
+    rewind($handle);
+    $content = stream_get_contents($handle);
+    fclose($handle);
+
+    return Response::make($content, 200, [
+        'Content-Type' => 'text/csv',
+        'Content-Disposition' => "attachment; filename={$filename}",
+    ]);
+}
     public function edit($id)
     {
         $record = MacroOutput::findOrFail($id);
