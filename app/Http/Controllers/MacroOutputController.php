@@ -45,7 +45,12 @@ class MacroOutputController extends Controller
         'COD'
     ];
 
-    $filename = 'macro_output_export_' . now()->format('Ymd_His') . '.csv';
+    $pagePart = $request->PAGE ? preg_replace('/[^a-zA-Z0-9_]/', '_', $request->PAGE) : 'AllPages';
+$datePart = $request->date ?? now()->format('Y-m-d');
+$timePart = now()->format('H-i-s');
+
+$filename = "{$pagePart}_{$datePart}_{$timePart}.csv";
+
 
     $handle = fopen('php://temp', 'w+');
     fputcsv($handle, $csvHeader);
