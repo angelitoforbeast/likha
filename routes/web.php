@@ -26,6 +26,7 @@ use App\Http\Controllers\AdsManagerReportController;
 use App\Http\Controllers\AdCopyController;
 use App\Http\Controllers\AdCampaignCreativeController;
 use App\Http\Controllers\Checker2GsheetController;
+use App\Http\Controllers\MacroOutputController;
 
 
 
@@ -50,7 +51,13 @@ Route::get('/ad-copy-suggestions', [AdCopyController::class, 'suggestions']);
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
 
-    // Checker 2 GSheet Settings Routes
+
+    Route::get('/encoder/checker_1', [MacroOutputController::class, 'index'])->name('macro_output.index');
+Route::post('/encoder/checker_1/update', [MacroOutputController::class, 'bulkUpdate'])->name('macro_output.bulk_update');
+Route::post('/encoder/checker_1/update-field', [MacroOutputController::class, 'updateField'])->name('macro_output.update_field');
+
+
+// Checker 2 GSheet Settings Routes
 Route::get('checker_2/gsheet/settings', [Checker2GsheetController::class, 'index'])->name('checker2.settings.index');
     Route::post('checker_2/gsheet/settings', [Checker2GsheetController::class, 'store'])->name('checker2.settings.store');
     Route::put('checker_2/gsheet/settings/{id}', [Checker2GsheetController::class, 'update'])->name('checker2.settings.update');
