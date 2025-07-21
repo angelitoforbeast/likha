@@ -126,9 +126,13 @@
                 };
 
                 $finalClass = 'editable-input auto-resize w-full px-2 py-1 border rounded text-sm';
-                if ($editFlag) {
-                  $finalClass .= ' bg-green-100';
-                } elseif ($shouldHighlight($field)) {
+                $customStyle = '';
+if ($editFlag) {
+  $customStyle = 'background-color: #00ff00;';
+} elseif ($shouldHighlight($field)) {
+  $finalClass .= ' bg-red-200';
+}
+ elseif ($shouldHighlight($field)) {
                   $finalClass .= ' bg-red-200';
                 }
                 $columnWidth = match($field) {
@@ -153,11 +157,13 @@
                   </select>
                 @else
                   <textarea
-                    data-id="{{ $record->id }}"
-                    data-field="{{ $field }}"
-                    class="{{ $finalClass }}"
-                    oninput="autoResize(this)"
-                  >{{ $record[$field] ?? '' }}</textarea>
+  data-id="{{ $record->id }}"
+  data-field="{{ $field }}"
+  class="{{ $finalClass }}"
+  style="{{ $customStyle }}"
+  oninput="autoResize(this)"
+>{{ $record[$field] ?? '' }}</textarea>
+
                 @endif
               </td>
             @endforeach
