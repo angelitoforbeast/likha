@@ -19,6 +19,12 @@
     table th {
       word-break: break-word;
     }
+    textarea {
+      overflow: hidden !important;
+      resize: none;
+      min-height: 3em;
+      line-height: 1.2em;
+    }
   </style>
 
   {{-- Filters --}}
