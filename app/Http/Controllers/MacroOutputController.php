@@ -23,19 +23,21 @@ class MacroOutputController extends Controller
         $query->where('PAGE', $request->PAGE);
     }
 
-    // Step 2: Block download if any STATUS is blank
-    $incomplete = (clone $query)
+    // Step 2: Only allow download if all filtered rows have STATUS filled
+    $hasBlankStatus = (clone $query)
         ->where(function ($q) {
             $q->whereNull('STATUS')->orWhere('STATUS', '');
         })
         ->exists();
 
-    if ($incomplete) {
+    if ($hasBlankStatus) {
         return back()->with('error', 'Download FAILED: Some entries in the filtered results are missing a STATUS.');
     }
 
-    // Step 3: Fetch data
-    $records = $query->select(
+    // Step 3: Restrict to only rows marked as "PROCEED"
+    $proceedQuery = (clone $query)->where('STATUS', 'PROCEED');
+
+    $records = $proceedQuery->select(
         'FULL NAME',
         'PHONE NUMBER',
         'ADDRESS',
@@ -46,6 +48,10 @@ class MacroOutputController extends Controller
         'COD'
     )->get();
 
+    if ($records->isEmpty()) {
+        return back()->with('error', 'Download FAILED: No entries marked as "PROCEED" in the filtered results.');
+    }
+
     // Step 4: Generate filename
     $pagePart = $request->PAGE ? preg_replace('/[^a-zA-Z0-9_]/', '_', $request->PAGE) : 'AllPages';
     $datePart = $request->date ?? now()->format('Y-m-d');
@@ -55,8 +61,8 @@ class MacroOutputController extends Controller
     // Step 5: Prepare CSV content
     $handle = fopen('php://temp', 'w+');
 
-    // Load first 7 rows from template Excel
-    $templatePath = resource_path('templates/exptemplete.xls'); // <-- upload your Excel here
+    // Load first 7 rows from Excel template
+    $templatePath = resource_path('templates/exptemplete.xls');
     $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($templatePath);
     $sheet = $spreadsheet->getActiveSheet();
     $templateData = $sheet->rangeToArray('A1:N8', null, true, true, false);
@@ -75,16 +81,16 @@ class MacroOutputController extends Controller
             $row->CITY,
             $row->BARANGAY,
             'EZ',
-            $row->ITEM_NAME,
+             $row->{'ITEM_NAME'},
             '0.5', // Weight (kg)
-            explode(' ', trim($row->ITEM_NAME))[0] ?? null, // Total parcels(*)
+            strtok($row->ITEM_NAME, ' '), // First word only// Total parcels(*)
             '549', // Parcel Value
             $row->COD,
             null  // Remarks
         ]);
     }
 
-    // Step 7: Download as CSV
+    // Step 7: Output CSV
     rewind($handle);
     $content = stream_get_contents($handle);
     fclose($handle);
@@ -94,6 +100,7 @@ class MacroOutputController extends Controller
         'Content-Disposition' => "attachment; filename={$filename}",
     ]);
 }
+
 
 
     public function edit($id)
