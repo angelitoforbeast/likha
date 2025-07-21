@@ -60,8 +60,8 @@
           <th class="border p-2" style="width: 8%">CITY</th>
           <th class="border p-2" style="width: 8%">BARANGAY</th>
           <th class="border p-2" style="width: 8%">STATUS</th>
-          <th class="border p-2" style="width: 8%">AI CHECK</th>
-          <th class="border p-2" style="width: 10%">ALL USER INPUT</th>
+          {{--<th class="border p-2" style="width: 8%">AI CHECK</th>--}}
+          <th class="border p-2" style="width: 20%">ALL USER INPUT</th>
           <th class="border p-2" style="width: 10%">HISTORICAL LOGS</th>
         </tr>
       </thead>
@@ -108,8 +108,8 @@
                 @endif
               </td>
             @endforeach
-            <td class="border p-2 text-gray-700" style="width: 8%">{{ $record['APP SCRIPT CHECKER'] ?? '' }}</td>
-            <td class="border p-2 text-gray-700 cursor-pointer all-user-input" style="width: 10%" onclick="expandOnlyOnce(this)">
+            {{--<td class="border p-2 text-gray-700" style="width: 8%">{{ $record['APP SCRIPT CHECKER'] ?? '' }}</td>--}}
+            <td class="border p-2 text-gray-700 cursor-pointer all-user-input" style="width: 20%" onclick="expandOnlyOnce(this)">
               {{ $record['all_user_input'] }}
             </td>
             <td class="border p-2 text-gray-700 cursor-pointer all-user-input" style="width: 10%" onclick="expandOnlyOnce(this)">
