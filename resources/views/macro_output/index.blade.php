@@ -1,17 +1,27 @@
 <x-layout>
   <x-slot name="heading">📋 Macro Output Editor (Checker 1)</x-slot>
+
   <style>
-  .all-user-input {
-    transition: all 0.3s ease;
-    max-height: 2.5em; /* approx 2 lines */
-  }
-  .all-user-input.expanded {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: initial;
-    max-height: none;
-  }
-</style>
+    .all-user-input {
+      transition: all 0.3s ease;
+      max-height: 4.5em; /* approx 3 lines */
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .all-user-input.expanded {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: initial;
+      max-height: none;
+    }
+    .auto-resize {
+      height: auto;
+      overflow-y: hidden;
+      resize: none;
+      min-height: 2.5em;
+    }
+  </style>
 
   {{-- Filters --}}
   <form method="GET" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-4 flex-wrap">
@@ -25,7 +35,7 @@
       <select name="PAGE" class="border rounded px-2 py-1">
         <option value="">All</option>
         @foreach($pages as $page)
-          <option value="{{ $page }}" @selected(request('PAGE') == $page)>{{ $page }}</option>
+          <option value="{{ $page }}" @selected(request('PAGE') == $page)> {{ $page }} </option>
         @endforeach
       </select>
     </div>
@@ -40,9 +50,7 @@
     <table class="table-auto w-full border text-sm">
       <thead>
         <tr class="bg-gray-100 text-left">
-          
           <th class="border p-2">TIMESTAMP</th>
-          
           @foreach(['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY', 'STATUS'] as $col)
             <th class="border p-2">{{ $col }}</th>
           @endforeach
@@ -52,12 +60,10 @@
       <tbody>
         @foreach($records as $record)
           <tr>
-            
             <td class="border p-2 text-gray-700">{{ $record->TIMESTAMP }}</td>
-            
 
             @foreach(['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY', 'STATUS'] as $field)
-              <td class="border p-1">
+              <td class="border p-1 align-top">
                 @if($field === 'STATUS')
                   <select
                     data-id="{{ $record->id }}"
@@ -72,26 +78,23 @@
                     @endforeach
                   </select>
                 @else
-                  <input
-                    type="text"
+                  <textarea
                     data-id="{{ $record->id }}"
                     data-field="{{ $field }}"
-                    value="{{ $record[$field] ?? '' }}"
-                    class="editable-input w-full px-2 py-1 border rounded text-sm"
-                  />
+                    class="editable-input auto-resize w-full px-2 py-1 border rounded text-sm"
+                    oninput="autoResize(this)"
+                  >{{ $record[$field] ?? '' }}</textarea>
                 @endif
               </td>
             @endforeach
 
-            <td 
-  class="border p-2 text-gray-700 cursor-pointer all-user-input max-w-xs overflow-hidden whitespace-nowrap text-ellipsis"
-  onclick="this.classList.toggle('expanded')"
-  title="Click to expand/collapse"
->
-  {{ $record['all_user_input'] }}
-</td>
-
-
+            <td
+              class="border p-2 text-gray-700 cursor-pointer all-user-input max-w-xs"
+              onclick="expandOnlyOnce(this)"
+              title="Click to expand"
+            >
+              {{ $record['all_user_input'] }}
+            </td>
           </tr>
         @endforeach
       </tbody>
@@ -102,9 +105,16 @@
     {{ $records->withQueryString()->links() }}
   </div>
 
-  {{-- Auto-Save Script --}}
+  {{-- Scripts --}}
   <script>
+    function autoResize(el) {
+      el.style.height = 'auto';
+      el.style.height = el.scrollHeight + 'px';
+    }
+
     document.querySelectorAll('.editable-input').forEach(input => {
+      if (input.tagName.toLowerCase() === 'textarea') autoResize(input);
+
       const handler = function () {
         const id = this.dataset.id;
         const field = this.dataset.field;
@@ -135,5 +145,11 @@
       input.addEventListener('blur', handler);
       input.addEventListener('change', handler);
     });
+
+    function expandOnlyOnce(cell) {
+      if (!cell.classList.contains('expanded')) {
+        cell.classList.add('expanded');
+      }
+    }
   </script>
 </x-layout>
