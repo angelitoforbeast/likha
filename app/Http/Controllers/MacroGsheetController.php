@@ -45,7 +45,7 @@ class MacroGsheetController extends Controller
                 'TIMESTAMP', 'FULL NAME', 'PHONE NUMBER', 'ADDRESS',
                 'PROVINCE', 'CITY', 'BARANGAY', 'ITEM_NAME',
                 'COD', 'PAGE', 'all_user_input', 'SHOP DETAILS',
-                'CXD', 'AI ANALYZE', 'HUMAN CHECKER STATUS', 'RESERVE COLUMN',
+                'CXD', 'AI ANALYZE', 'APP SCRIPT CHECKER', 'RESERVE COLUMN',
                 'STATUS'
             ];
 

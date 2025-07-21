@@ -59,7 +59,9 @@ class MacroOutputController extends Controller
         'STATUS',
         'PAGE',
         'TIMESTAMP',
-        'all_user_input'
+        'all_user_input',
+        'HISTORICAL LOGS',
+        'APP SCRIPT CHECKER'
     )
     ->orderByDesc('id')
     ->paginate(100);
@@ -86,10 +88,30 @@ class MacroOutputController extends Controller
     ]);
 
     $record = \App\Models\MacroOutput::findOrFail($request->id);
-    $record->update([$request->field => $request->value]);
+
+    $field = $request->field;
+    $newValue = $request->value;
+    $oldValue = $record->{$field};
+
+    // Only log if there's an actual change
+    if ($newValue !== $oldValue) {
+        $user = auth()->user()?->name ?? 'Unknown User';
+        $timestamp = now()->format('Y-m-d H:i:s');
+
+        if ($field !== 'STATUS') {
+    $logEntry = "[{$timestamp}] {$user} updated {$field}: \"{$oldValue}\" → \"{$newValue}\"\n";
+    $record->{'HISTORICAL LOGS'} = trim($logEntry . ($record->{'HISTORICAL LOGS'} ?? ''));
+}
+
+
+        // Save updated field and logs
+        $record->{$field} = $newValue;
+        $record->save();
+    }
 
     return response()->json(['status' => 'success']);
 }
+
 
 
 
