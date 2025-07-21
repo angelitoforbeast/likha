@@ -68,9 +68,10 @@
               <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
               @endif
 
-              @if(in_array($role, ['Marketing', 'Marketing - OIC', 'Data Encoder','Data Encoder - OIC']))
+              @if(in_array($role, ['Marketing', 'Marketing - OIC','Data Encoder - OIC']))
               <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEG</x-navlink>
               <x-navlink href="/orders/tally" :active="request()->is('orders/tally')">MISSING ORDERS</x-navlink>
+              <x-navlink href="/encoder/checker_1" :active="request()->is('macro_output/index')">CHECKER 1</x-navlink>
               @endif
 
               @if(in_array($role, ['CEO']))
@@ -84,6 +85,9 @@
 
               @if(in_array($role, ['Data Encoder - OIC']))
               <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">IMPORT MACRO</x-navlink>
+              @endif
+              @if(in_array($role, ['Data Encoder']))
+              <x-navlink href="/encoder/checker_1" :active="request()->is('macro_output/index')">CHECKER 1</x-navlink>
               @endif
             </div>
           </div>
