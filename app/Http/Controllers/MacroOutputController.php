@@ -56,7 +56,7 @@ class MacroOutputController extends Controller
     $handle = fopen('php://temp', 'w+');
 
     // Load first 7 rows from template Excel
-    $templatePath = storage_path('app/exptemplete.xls'); // <-- upload your Excel here
+    $templatePath = resource_path('templates/exptemplete.xls'); // <-- upload your Excel here
     $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($templatePath);
     $sheet = $spreadsheet->getActiveSheet();
     $templateData = $sheet->rangeToArray('A1:N8', null, true, true, false);
