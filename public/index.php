@@ -6,9 +6,12 @@ use Illuminate\Http\Request;
 define('LARAVEL_START', microtime(true));
 
 // Determine if the application is in maintenance mode...
-if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php')) {
-    require $maintenance;
+if (file_exists(__DIR__.'/../storage/framework/down')) {
+    http_response_code(503);
+    echo '<h1>🚧 System Under Maintenance</h1><p>Please try again later.</p>';
+    exit();
 }
+
 
 // Register the Composer autoloader...
 require __DIR__.'/../vendor/autoload.php';
