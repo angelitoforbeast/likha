@@ -144,7 +144,11 @@
               };
             };
           @endphp
-          <tr>
+          @php
+  $rowClass = ($record->STATUS === 'CANNOT PROCEED') ? 'bg-red-500' : '';
+@endphp
+<tr class="{{ $rowClass }}">
+
             <td class="border p-2 text-gray-700" style="width: 10%">{{ $record->TIMESTAMP }}</td>
 
             @foreach(['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY', 'STATUS'] as $field)
