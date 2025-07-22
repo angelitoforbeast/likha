@@ -8,7 +8,7 @@
   <style>
     .sticky-header {
       position: fixed;
-      top: 0;
+      top: 64px;
       left: 0;
       right: 0;
       width: 100vw;
@@ -48,7 +48,7 @@
   </style>
 
   {{-- Filters + Table Head --}}
-  <div id="fixed-header" class="fixed top-[64px] left-0 right-0 z-40 bg-white px-4 pt-4 pb-2 shadow">
+  <div id="fixed-header" class="fixed top-[128px] left-0 right-0 z-40 bg-white px-4 pt-4 pb-2 shadow">
  {{-- Filters --}}
     
       <form method="GET" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-4 flex-wrap w-full">
@@ -301,16 +301,19 @@ if ($editFlag) {
   </script>
   <script>
   function adjustTableBodyMargin() {
-    const header = document.getElementById('fixed-header');
-    const bodyWrapper = document.getElementById('table-body-wrapper');
+  const sticky = document.querySelector('.sticky-header');
+  const fixed = document.getElementById('fixed-header');
+  const bodyWrapper = document.getElementById('table-body-wrapper');
 
-    if (header && bodyWrapper) {
-      const rect = header.getBoundingClientRect();
-      const totalHeight = rect.height;
- // full height from top of page
-      bodyWrapper.style.marginTop = totalHeight + 'px';
-    }
+  if (sticky && fixed && bodyWrapper) {
+    const stickyHeight = sticky.offsetHeight;
+    const fixedHeight = fixed.offsetHeight;
+    const totalOffset = stickyHeight + fixedHeight;
+
+    bodyWrapper.style.marginTop = totalOffset + 'px';
   }
+}
+
 
   window.addEventListener('load', adjustTableBodyMargin);
   window.addEventListener('resize', adjustTableBodyMargin);
