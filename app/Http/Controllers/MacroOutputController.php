@@ -198,27 +198,29 @@ class MacroOutputController extends Controller
         $query->where('PAGE', $request->PAGE);
     }
 
-    // Fetch records
+// 1. Filtered full data (no pagination)
+$filteredRecords = (clone $query)->get();
+
+// 2. Status counts based only on filtered data
+$statusCounts = [
+    'TOTAL'           => $filteredRecords->count(),
+    'PROCEED'         => $filteredRecords->where('STATUS', 'PROCEED')->count(),
+    'CANNOT PROCEED'  => $filteredRecords->where('STATUS', 'CANNOT PROCEED')->count(),
+    'ODZ'             => $filteredRecords->where('STATUS', 'ODZ')->count(),
+    'BLANK'           => $filteredRecords->filter(function ($rec) {
+        return trim((string) $rec->STATUS) === '';
+    })->count(),
+];
+
+
+    // Paginated records
     $records = $query->select(
-        'id',
-        'FULL NAME',
-        'PHONE NUMBER',
-        'ADDRESS',
-        'PROVINCE',
-        'CITY',
-        'BARANGAY',
-        'STATUS',
-        'PAGE',
-        'TIMESTAMP',
-        'all_user_input',
-        'HISTORICAL LOGS',
-        'APP SCRIPT CHECKER',
-        'edited_full_name',
-        'edited_phone_number',
-        'edited_address',
-        'edited_province',
-        'edited_city',
-        'edited_barangay'
+        'id', 'FULL NAME', 'PHONE NUMBER', 'ADDRESS',
+        'PROVINCE', 'CITY', 'BARANGAY', 'STATUS',
+        'PAGE', 'TIMESTAMP', 'all_user_input',
+        'HISTORICAL LOGS', 'APP SCRIPT CHECKER',
+        'edited_full_name', 'edited_phone_number', 'edited_address',
+        'edited_province', 'edited_city', 'edited_barangay'
     )->orderByDesc('id')->paginate(100);
 
     // Populate page options
@@ -228,8 +230,10 @@ class MacroOutputController extends Controller
         ->orderBy('PAGE')
         ->pluck('PAGE');
 
-    return view('macro_output.index', compact('records', 'pages', 'date'));
+    return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts'));
 }
+
+
 
 
     public function updateField(Request $request)

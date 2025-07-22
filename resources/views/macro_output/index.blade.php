@@ -65,6 +65,26 @@
     @endforeach
   </select>
 </div>
+@php
+  $statusColors = [
+    'TOTAL' => 'bg-gray-300',
+    'PROCEED' => 'bg-green-200',
+    'CANNOT PROCEED' => 'bg-red-200',
+    'ODZ' => 'bg-yellow-200',
+    'BLANK' => 'bg-blue-200',
+  ];
+@endphp
+
+<div class="mb-4 text-sm space-x-4 flex flex-wrap gap-2">
+  @foreach ($statusCounts as $status => $count)
+    <span class="inline-block px-3 py-1 rounded {{ $statusColors[$status] ?? 'bg-gray-200' }}">
+      <strong>{{ $status }}:</strong> {{ $count }}
+    </span>
+  @endforeach
+</div>
+
+
+
 
   <div class="ml-auto flex gap-2 items-center">
  
