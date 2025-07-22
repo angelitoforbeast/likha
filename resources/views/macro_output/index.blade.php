@@ -242,13 +242,24 @@ if ($editFlag) {
         })
         .then(res => res.json())
         .then(data => {
-          if (data.status === 'success') {
-            this.classList.remove('bg-red-200');
-            this.classList.add('bg-green-100');
-          } else {
-            this.style.backgroundColor = '#fee2e2';
-          }
-        })
+  if (data.status === 'success') {
+    this.classList.remove('bg-red-200');
+    this.classList.add('bg-green-100');
+
+    // ✅ Collapse .all-user-input after status is updated
+    if (this.dataset.field === 'STATUS') {
+      const row = this.closest('tr');
+      const userInputCell = row?.querySelector('.all-user-input.expanded');
+      if (userInputCell) {
+        userInputCell.classList.remove('expanded');
+      }
+    }
+
+  } else {
+    this.style.backgroundColor = '#fee2e2';
+  }
+})
+
         .catch(() => {
           this.style.backgroundColor = '#fee2e2';
         });
