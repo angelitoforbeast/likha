@@ -167,32 +167,17 @@ class MacroOutputController extends Controller
     $start = $request->start_date;
     $end = $request->end_date;
 
-    $query = MacroOutput::selectRaw("
-        DATE_FORMAT(STR_TO_DATE(SUBSTRING_INDEX(TIMESTAMP, ' ', -1), '%d-%m-%Y'), '%Y-%m-%d') as date,
-        PAGE,
-        STATUS,
-        COUNT(*) as count
-    ")
-    ->whereNotNull('PAGE');
+    // Step 1: Get all records (filtered by PAGE if needed)
+    $query = MacroOutput::query()->whereNotNull('PAGE');
 
-    if ($start) {
-        $query->having('date', '>=', $start);
+    if ($request->filled('PAGE')) {
+        $query->where('PAGE', $request->PAGE);
     }
 
-    if ($end) {
-        $query->having('date', '<=', $end);
-    }
+    $records = $query->select('TIMESTAMP', 'PAGE', 'STATUS')->get();
 
-    $grouped = $query
-        ->groupBy('date', 'PAGE', 'STATUS')
-        ->orderByDesc('date')
-        ->orderBy('PAGE')
-        ->get();
-
-    // Prepare final summary structure
+    // Step 2: Group and format in PHP
     $summary = [];
-
-    // Prepare overall totals
     $totalCounts = [
         'PROCEED' => 0,
         'CANNOT PROCEED' => 0,
@@ -201,16 +186,28 @@ class MacroOutputController extends Controller
         'TOTAL' => 0,
     ];
 
-    foreach ($grouped as $row) {
-        $date = $row->date;
-        $page = $row->PAGE;
-        $status = $row->STATUS ?: 'BLANK';
+    foreach ($records as $record) {
+        // Extract date part from "00:03 01-07-2025"
+        $parts = explode(' ', $record->TIMESTAMP);
+        $datePart = $parts[1] ?? null;
 
-        if (!isset($summary[$date])) {
-            $summary[$date] = [];
+        if (!$datePart) continue;
+
+        $formattedDate = \Carbon\Carbon::createFromFormat('d-m-Y', $datePart)->format('Y-m-d');
+
+        // Filter by start/end date if provided
+        if ($start && $formattedDate < $start) continue;
+        if ($end && $formattedDate > $end) continue;
+
+        $status = $record->STATUS ?: 'BLANK';
+        $page = $record->PAGE;
+
+        if (!isset($summary[$formattedDate])) {
+            $summary[$formattedDate] = [];
         }
-        if (!isset($summary[$date][$page])) {
-            $summary[$date][$page] = [
+
+        if (!isset($summary[$formattedDate][$page])) {
+            $summary[$formattedDate][$page] = [
                 'PROCEED' => 0,
                 'CANNOT PROCEED' => 0,
                 'ODZ' => 0,
@@ -219,15 +216,16 @@ class MacroOutputController extends Controller
             ];
         }
 
-        $summary[$date][$page][$status] += $row->count;
-        $summary[$date][$page]['TOTAL'] += $row->count;
+        $summary[$formattedDate][$page][$status]++;
+        $summary[$formattedDate][$page]['TOTAL']++;
 
-        $totalCounts[$status] += $row->count;
-        $totalCounts['TOTAL'] += $row->count;
+        $totalCounts[$status]++;
+        $totalCounts['TOTAL']++;
     }
 
     return view('macro_output.summary', compact('summary', 'totalCounts'));
 }
+
 
 
     
