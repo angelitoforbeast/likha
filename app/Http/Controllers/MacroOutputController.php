@@ -162,10 +162,75 @@ class MacroOutputController extends Controller
 
     return response()->json($results);
 }
+    public function summary(Request $request)
+{
+    $start = $request->start_date;
+    $end = $request->end_date;
+
+    $query = MacroOutput::selectRaw("
+        DATE_FORMAT(STR_TO_DATE(SUBSTRING_INDEX(TIMESTAMP, ' ', -1), '%d-%m-%Y'), '%Y-%m-%d') as date,
+        PAGE,
+        STATUS,
+        COUNT(*) as count
+    ")
+    ->whereNotNull('PAGE');
+
+    if ($start) {
+        $query->having('date', '>=', $start);
+    }
+
+    if ($end) {
+        $query->having('date', '<=', $end);
+    }
+
+    $grouped = $query
+        ->groupBy('date', 'PAGE', 'STATUS')
+        ->orderByDesc('date')
+        ->orderBy('PAGE')
+        ->get();
+
+    // Prepare final summary structure
+    $summary = [];
+
+    // Prepare overall totals
+    $totalCounts = [
+        'PROCEED' => 0,
+        'CANNOT PROCEED' => 0,
+        'ODZ' => 0,
+        'BLANK' => 0,
+        'TOTAL' => 0,
+    ];
+
+    foreach ($grouped as $row) {
+        $date = $row->date;
+        $page = $row->PAGE;
+        $status = $row->STATUS ?: 'BLANK';
+
+        if (!isset($summary[$date])) {
+            $summary[$date] = [];
+        }
+        if (!isset($summary[$date][$page])) {
+            $summary[$date][$page] = [
+                'PROCEED' => 0,
+                'CANNOT PROCEED' => 0,
+                'ODZ' => 0,
+                'BLANK' => 0,
+                'TOTAL' => 0,
+            ];
+        }
+
+        $summary[$date][$page][$status] += $row->count;
+        $summary[$date][$page]['TOTAL'] += $row->count;
+
+        $totalCounts[$status] += $row->count;
+        $totalCounts['TOTAL'] += $row->count;
+    }
+
+    return view('macro_output.summary', compact('summary', 'totalCounts'));
+}
 
 
-
-
+    
     public function update(Request $request, $id)
     {
         $validated = $request->validate([

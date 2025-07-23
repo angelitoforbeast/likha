@@ -51,7 +51,7 @@ Route::get('/ad-copy-suggestions', [AdCopyController::class, 'suggestions']);
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
 
-
+Route::get('/encoder/summary', [App\Http\Controllers\MacroOutputController::class, 'summary'])->name('macro_output.summary');
     Route::get('/encoder/checker_1', [MacroOutputController::class, 'index'])->name('macro_output.index');
 Route::post('/encoder/checker_1/update', [MacroOutputController::class, 'bulkUpdate'])->name('macro_output.bulk_update');
 Route::post('/encoder/checker_1/update-field', [MacroOutputController::class, 'updateField'])->name('macro_output.update_field');
