@@ -223,7 +223,14 @@ class MacroOutputController extends Controller
         $totalCounts['TOTAL']++;
     }
 
-    return view('macro_output.summary', compact('summary', 'totalCounts'));
+// Sort page names alphabetically inside each date group
+foreach ($summary as &$pages) {
+    ksort($pages);
+}
+unset($pages);
+
+return view('macro_output.summary', compact('summary', 'totalCounts'));
+
 }
 
 
