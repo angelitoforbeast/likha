@@ -6,34 +6,48 @@ use Illuminate\Http\Request;
 use App\Jobs\ImportLikhaFromGoogleSheet;
 use App\Models\LikhaOrder;
 use App\Models\LikhaOrderSetting;
-use App\Models\ImportStatus;
+use Illuminate\Support\Facades\DB;
+use App\Services\GoogleSheetService;
+use App\Jobs\ClearLikhaOrders;
 
 class LikhaOrderImportController extends Controller
-{
+{   
+
+    
+
+public function clearAll() {
+    DB::table('macro_output')->truncate();
+    dispatch(new ClearLikhaOrders());
+    return back()->with('success', 'Data cleared successfully!');
+}
+
+
     public function import(Request $request)
-    {
-        if ($request->isMethod('get')) {
-            if ($request->ajax()) {
-                $status = ImportStatus::where('job_name', 'LikhaImport')->latest()->first();
-                return response()->json([
-                    'is_complete' => $status?->is_complete ?? false,
-                ]);
-            }
+{
+    if ($request->isMethod('get')) {
+        $settings = LikhaOrderSetting::all();
 
-            $settings = LikhaOrderSetting::all();
-            $status = ImportStatus::where('job_name', 'LikhaImport')->latest()->first();
-
-            return view('likha_order.import', compact('settings', 'status'));
+        if ($request->ajax()) {
+            return response()->json([
+                'is_complete'     => cache()->has('likha_import_result'),
+                'import_message'  => cache()->get('likha_import_result'),
+            ]);
         }
 
-        ImportStatus::updateOrCreate(
-            ['job_name' => 'LikhaImport'],
-            ['is_complete' => false]
-        );
-
-        ImportLikhaFromGoogleSheet::dispatch(); // This now supports multiple sheets
-        return redirect('/likha_order_import');
+        return view('likha_order.import', compact('settings'));
     }
+
+    // POST method: trigger import
+    ImportLikhaFromGoogleSheet::dispatch();
+    session()->flash('import_status', '⏳ Importing rows... Please wait.');
+
+    if (cache()->has('likha_import_result')) {
+        session()->flash('import_message', cache()->pull('likha_import_result'));
+    }
+
+    return redirect()->back();
+}
+
 
     public function view(Request $request)
     {

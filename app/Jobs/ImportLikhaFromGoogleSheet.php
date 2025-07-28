@@ -2,8 +2,9 @@
 
 namespace App\Jobs;
 
-use App\Models\LikhaOrder;
+use App\Models\MacroOutput;
 use App\Models\LikhaOrderSetting;
+use App\Models\ImportStatus;
 use Google_Client;
 use Google_Service_Sheets;
 use Google_Service_Sheets_ValueRange;
@@ -13,7 +14,6 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use App\Models\ImportStatus;
 
 class ImportLikhaFromGoogleSheet implements ShouldQueue
 {
@@ -21,59 +21,144 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
 
     public function handle()
     {
-        $client = new Google_Client();
-        $client->setAuthConfig(storage_path('app/credentials.json'));
-        $client->addScope(Google_Service_Sheets::SPREADSHEETS);
-        $service = new Google_Service_Sheets($client);
+        try {
+            $updatedCount = 0;
+            $insertedCount = 0;
+            $client = new Google_Client();
+            $client->setAuthConfig(storage_path('app/credentials.json'));
+            $client->addScope(Google_Service_Sheets::SPREADSHEETS);
+            $service = new Google_Service_Sheets($client);
 
-        ImportStatus::updateOrCreate(['job_name' => 'LikhaImport'], ['is_complete' => false]);
 
-        $settings = LikhaOrderSetting::all();
-        foreach ($settings as $setting) {
-            if (!$setting->sheet_id || !$setting->range) continue;
 
-            $sheetId = $setting->sheet_id;
-            $range = $setting->range;
-            $sheetName = explode('!', $range)[0];
+            $settings = LikhaOrderSetting::all();
+            foreach ($settings as $setting) {
+                if (!$setting->sheet_id || !$setting->range) continue;
 
-            $response = $service->spreadsheets_values->get($sheetId, $range);
-            $values = $response->getValues();
-            if (empty($values)) continue;
+                $sheetId = $setting->sheet_id;
+                $range = $setting->range;
+                $sheetName = explode('!', $range)[0];
 
-            \Log::info("📥 [$sheetId] Fetched " . count($values) . " rows");
+                $response = $service->spreadsheets_values->get($sheetId, $range);
+                $values = $response->getValues();
+                if (empty($values)) continue;
 
-            $updates = [];
-            foreach ($values as $index => $row) {
-                $doneFlag = strtolower(preg_replace('/\s+/', '', $row[8] ?? ''));
-                if ($doneFlag === 'done') continue;
+                \Log::info("📥 [$sheetId] Fetched " . count($values) . " rows");
 
-                LikhaOrder::create([
-                    'date' => isset($row[0]) ? date('Y-m-d', strtotime($row[0])) : null,
-                    'page_name' => $row[1] ?? null,
-                    'name' => $row[2] ?? null,
-                    'phone_number' => isset($row[3]) ? substr(preg_replace('/[^\d+]/', '', $row[3]), 0, 50) : null,
-                    'all_user_input' => $row[4] ?? null,
-                    'shop_details' => $row[5] ?? null,
-                    'extracted_details' => $row[6] ?? null,
-                    'price' => $row[7] ?? null,
-                ]);
+                $updates = [];
+                foreach ($values as $index => $row) {
+    $doneFlag = strtolower(preg_replace('/\s+/', '', $row[8] ?? ''));
+    if ($doneFlag === 'done') continue;
 
-                $rowNumber = $index + 2;
-                $updates[] = [
-                    'range' => "{$sheetName}!I{$rowNumber}",
-                    'values' => [['DONE']],
-                ];
+    // ✅ Parse and normalize TIMESTAMP to Y-m-d H:i:s
+    $rawTimestamp = trim($row[0] ?? '');
+$timestamp = null;
+
+if (!empty($rawTimestamp)) {
+    // Format 1: Already correct → use as is
+    if (preg_match('/^\d{2}:\d{2} \d{2}-\d{2}-\d{4}$/', $rawTimestamp)) {
+        $timestamp = $rawTimestamp;
+    }
+    // Format 2: From Y-m-d H:i or Y-m-d H:i:s → convert to H:i d-m-Y
+    elseif ($parsed = \DateTime::createFromFormat('Y-m-d H:i:s', $rawTimestamp)) {
+        $timestamp = $parsed->format('H:i d-m-Y');
+    } elseif ($parsed = \DateTime::createFromFormat('Y-m-d H:i', $rawTimestamp)) {
+        $timestamp = $parsed->format('H:i d-m-Y');
+    }
+    // Format 3: From H:i d-m-Y (single-digit hour) → pad hour
+    elseif ($parsed = \DateTime::createFromFormat('G:i d-m-Y', $rawTimestamp)) {
+        $timestamp = $parsed->format('H:i d-m-Y');
+    }
+
+    elseif ($parsed = \DateTime::createFromFormat('H:i:s d-m-Y', $rawTimestamp)) {
+    $timestamp = $parsed->format('H:i d-m-Y');
+}
+
+}
+
+
+
+    $page = $row[1] ?? null;
+
+if (empty($page) && !empty($row[5])) {
+    if (preg_match('/PAGE:\s*(.*?)\s*(?:\n|$)/i', $row[5], $matches)) {
+        $page = trim($matches[1]);
+    }
+}
+
+
+    // ✅ Extract fb_name from "FB NAME: ___" in all_user_input
+    $fbName = $row[2] ?? '';
+
+    // ✅ Match existing entry by normalized TIMESTAMP + PAGE + fb_name
+        $existing = MacroOutput::where([
+    ['TIMESTAMP', '=', $timestamp],
+    ['PAGE', '=', $page],
+    ['fb_name', '=', $fbName],
+])->first();
+
+    if ($existing) {
+        $updateData = [
+    'shop_details'      => $row[5] ?? null,
+    'extracted_details' => $row[6] ?? null,
+];
+
+if (empty($existing->{'all_user_input'})) {
+    $updateData['all_user_input'] = "FB NAME: " . ($row[2] ?? '') . "\n" . ($row[4] ?? '');
+}
+
+if (empty($existing->{'PHONE NUMBER'})) {
+    $updateData['PHONE NUMBER'] = preg_match('/09\d{9}/', $row[3] ?? '', $matches) ? $matches[0] : null;
+}
+
+
+        $updatedCount++;
+        $existing->update($updateData);
+    } else {
+        MacroOutput::create([
+            'TIMESTAMP'          => $timestamp,
+            'PAGE'               => $page,
+            'FULL NAME'          => $row[2] ?? null,
+            'fb_name'            => $row[2] ?? null,
+            'PHONE NUMBER' => preg_match('/09\d{9}/', $row[3] ?? '', $matches) ? $matches[0] : null,
+            'all_user_input'     => 'FB NAME: ' . ($row[2] ?? '') . "\n" . ($row[4] ?? ''),
+            'shop_details'       => $row[5] ?? null,
+            'extracted_details'  => $row[6] ?? null,
+        ]);
+        $insertedCount++;
+    }
+
+    // ✅ Mark as DONE in Google Sheet
+    $rowNumber = $index + 2;
+    $updates[] = [
+        'range' => "{$sheetName}!I{$rowNumber}",
+        'values' => [['DONE']],
+    ];
+}
+
+
+
+
+                if (!empty($updates)) {
+                    $batchBody = new Google_Service_Sheets_BatchUpdateValuesRequest([
+                        'valueInputOption' => 'RAW',
+                        'data' => array_map(fn($data) => new Google_Service_Sheets_ValueRange($data), $updates),
+                    ]);
+                    $service->spreadsheets_values->batchUpdate($sheetId, $batchBody);
+                }
             }
 
-            if (!empty($updates)) {
-                $batchBody = new Google_Service_Sheets_BatchUpdateValuesRequest([
-                    'valueInputOption' => 'RAW',
-                    'data' => array_map(fn($data) => new Google_Service_Sheets_ValueRange($data), $updates),
-                ]);
-                $service->spreadsheets_values->batchUpdate($sheetId, $batchBody);
-            }
+            \Cache::put('likha_import_result', "✅ Import complete! Inserted: $insertedCount, Updated: $updatedCount", now()->addMinutes(10));
+
+
+
+\Log::info("✅ ImportLikhaFromGoogleSheet Done: Inserted={$insertedCount}, Updated={$updatedCount}");
+
+
+
+        } catch (\Exception $e) {
+            \Log::error('❌ ImportLikhaFromGoogleSheet failed: ' . $e->getMessage());
+            \Log::error($e->getTraceAsString());
         }
-
-        ImportStatus::where('job_name', 'LikhaImport')->update(['is_complete' => true]);
     }
 }

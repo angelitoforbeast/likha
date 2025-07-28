@@ -76,6 +76,7 @@
 
               @if(in_array($role, ['CEO']))
               <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">IMPORT MACRO</x-navlink>
+              <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">LIKHA IMPORT</x-navlink>
               <x-navlink href="/orders/tally" :active="request()->is('orders/tally')">MISSING ORDERS</x-navlink>
               <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
               <x-navlink href="/ads-manager/import-form" :active="request()->is('import-form')">ADS IMPORT</x-navlink>

@@ -2,6 +2,18 @@
     <x-slot name="heading">Likha Order Import</x-slot>
 
     <div class="bg-white p-6 rounded shadow-md w-full max-w-5xl mx-auto mt-6">
+        @if (session('import_message'))
+    <div class="mb-4 p-3 rounded bg-green-100 text-green-800 font-semibold text-center">
+        {{ session('import_message') }}
+    </div>
+@endif
+@if (session('import_status'))
+    <div class="my-2 text-sm text-blue-600 font-semibold">
+        {{ session('import_status') }}
+    </div>
+@endif
+
+
         <p class="text-gray-700 text-center mb-6">
             Click the button below to import data from <strong>ALL configured sheets</strong>.
         </p>
@@ -36,14 +48,6 @@
             </button>
         </form>
 
-        <div id="statusMessage" class="mt-4 hidden p-3 rounded bg-yellow-100 text-yellow-800 font-medium text-center">
-            ⏳ Importing rows... Please wait.
-        </div>
-
-        <div id="doneMessage" class="mt-4 hidden p-3 rounded bg-green-100 text-green-800 font-medium text-center">
-            ✅ Import complete!
-        </div>
-
         <div class="mt-6 flex justify-center gap-6">
             <a href="/likha_order_import/settings"
                class="text-sm text-blue-600 underline hover:text-blue-800">
@@ -54,36 +58,25 @@
                class="text-sm text-green-600 underline hover:text-green-800">
                 📄 View Imported Data
             </a>
+            
         </div>
     </div>
+    <form action="{{ url('/likha_order_import/delete') }}" method="POST" onsubmit="return confirm('Are you sure?')">
+    @csrf
+    <button type="submit"
+        class="bg-red-600 text-white font-semibold px-6 py-3 rounded hover:bg-red-700 transition w-full mt-3">
+        🗑️ Clear Data (Table + GSheet Column I)
+    </button>
+</form>
+
+
 
     <script>
         function startImport() {
-            document.getElementById('statusMessage').classList.remove('hidden');
-            document.getElementById('doneMessage').classList.add('hidden');
-            return true;
-        }
+    // Optional: Magpakita agad ng message habang naglo-load
+    document.querySelector('form button[type="submit"]').disabled = true;
+    return true;
+}
 
-        function checkImportStatus() {
-            fetch('{{ url("/likha_order_import") }}', {
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
-            })
-            .then(res => res.json())
-            .then(data => {
-                const statusDiv = document.getElementById('statusMessage');
-                const doneDiv = document.getElementById('doneMessage');
-
-                if (data.is_complete) {
-                    statusDiv.classList.add('hidden');
-                    doneDiv.classList.remove('hidden');
-                } else {
-                    statusDiv.classList.remove('hidden');
-                    doneDiv.classList.add('hidden');
-                }
-            });
-        }
-
-        setInterval(checkImportStatus, 5000);
-        checkImportStatus();
     </script>
 </x-layout>

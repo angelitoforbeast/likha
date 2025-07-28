@@ -89,6 +89,7 @@ Route::post('/task/create-everyday-task', [EverydayTaskController::class, 'store
     Route::get('/orders/tally/{date}', [OrderTallyController::class, 'show'])->name('orders.tally.show');
 
     // ✅ Likha Order (multi-sheet support)
+    Route::post('/likha_order_import/delete', [LikhaOrderImportController::class, 'clearAll']);
     Route::get('/likha_order_import/settings', [LikhaOrderSettingController::class, 'settings'])->name('likha.settings');
     Route::post('/likha_order_import/settings', [LikhaOrderSettingController::class, 'store'])->name('likha.settings.store');
     Route::put('/likha_order_import/settings/{id}', [LikhaOrderSettingController::class, 'update'])->name('likha.settings.update');

@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\AdsManager;
-use App\Models\LikhaOrder;
+use App\Models\MacroOutput;
 
 class CPPReportController extends Controller
 {
@@ -19,9 +19,18 @@ class CPPReportController extends Controller
         });
 
         // Group Likha Orders by date + normalized page
-        $orderData = LikhaOrder::all()->groupBy(function ($item) use ($normalize) {
-            return $item->date . '__' . $normalize($item->page_name);
-        });
+        $orderData = MacroOutput::select('TIMESTAMP', 'PAGE')
+    ->get()
+    ->groupBy(function ($item) use ($normalize) {
+        try {
+            $date = \Carbon\Carbon::createFromFormat('H:i d-m-Y', $item->TIMESTAMP)->format('Y-m-d');
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        return $date . '__' . $normalize($item->PAGE);
+    });
+
 
         $summary = [];
 
