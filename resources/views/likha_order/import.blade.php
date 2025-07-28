@@ -61,13 +61,7 @@
             
         </div>
     </div>
-    <form action="{{ url('/likha_order_import/delete') }}" method="POST" onsubmit="return confirm('Are you sure?')">
-    @csrf
-    <button type="submit"
-        class="bg-red-600 text-white font-semibold px-6 py-3 rounded hover:bg-red-700 transition w-full mt-3">
-        🗑️ Clear Data (Table + GSheet Column I)
-    </button>
-</form>
+
 
 
 
