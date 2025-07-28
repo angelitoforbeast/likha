@@ -70,7 +70,7 @@
 
               @if(in_array($role, ['Marketing', 'Marketing - OIC','Data Encoder - OIC']))
               <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEG</x-navlink>
-              <x-navlink href="/orders/tally" :active="request()->is('orders/tally')">MISSING ORDERS</x-navlink>
+              <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">IMPORT MACRO</x-navlink>
               <x-navlink href="/encoder/checker_1" :active="request()->is('macro_output/index')">CHECKER 1</x-navlink>
               @endif
 
