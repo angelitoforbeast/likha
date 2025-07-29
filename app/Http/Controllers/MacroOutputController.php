@@ -18,7 +18,7 @@ class MacroOutputController extends Controller
 {
 
     DownloadedMacroOutputLog::create([
-        'timestamp' => now()->format('H:i d-m-Y'),
+        'timestamp' => $request->input('date'),
         'page' => $request->input('PAGE'),
         'downloaded_by' => Auth::user()?->name ?? 'Unknown',
         'downloaded_at' => Carbon::now(),
