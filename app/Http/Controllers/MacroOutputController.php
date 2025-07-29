@@ -36,14 +36,14 @@ class MacroOutputController extends Controller
     }
 
     // Step 2: Only allow download if all filtered rows have STATUS filled
-    $hasBlankStatus = (clone $query)
-        ->where(function ($q) {
-            $q->whereNull('STATUS')->orWhere('STATUS', '');
-        })
-        ->exists();
+     $hasMissingFields = (clone $query)->where(function ($q) {
+        $q->whereNull('STATUS')->orWhere('STATUS', '')
+          ->orWhereNull('ITEM_NAME')->orWhere('ITEM_NAME', '')
+          ->orWhereNull('COD')->orWhere('COD', '');
+    })->exists();
 
-    if ($hasBlankStatus) {
-        return back()->with('error', 'Download FAILED: Some entries in the filtered results are missing a STATUS.');
+    if ($hasMissingFields) {
+        return back()->with('error', 'Download FAILED: Some entries are missing STATUS, ITEM NAME, or COD.');
     }
 
     // Step 3: Restrict to only rows marked as "PROCEED"
@@ -120,6 +120,33 @@ class MacroOutputController extends Controller
         $record = MacroOutput::findOrFail($id);
         return view('macro_output.edit', compact('record'));
     }
+    public function validateItems(Request $request)
+{
+    $ids = $request->input('ids', []);
+    $records = MacroOutput::whereIn('id', $ids)->get(['id', 'ITEM_NAME', 'COD']);
+
+    $results = [];
+
+    foreach ($records as $record) {
+        $invalids = [];
+
+        if (is_null($record->ITEM_NAME) || trim($record->ITEM_NAME) === '') {
+            $invalids['ITEM_NAME'] = true;
+        }
+
+        if (is_null($record->COD) || trim($record->COD) === '') {
+            $invalids['COD'] = true;
+        }
+
+        $results[] = [
+            'id' => $record->id,
+            'invalid_fields' => $invalids,
+        ];
+    }
+
+    return response()->json($results);
+}
+
  public function validateAddresses(Request $request)
 {
     $filePath = resource_path('views/macro_output/jnt_address.txt');
@@ -150,7 +177,18 @@ class MacroOutputController extends Controller
 
     // ✅ Limit validation to provided IDs
     $ids = $request->input('ids', []);
-    $records = MacroOutput::whereIn('id', $ids)->get(['id', 'PROVINCE', 'CITY', 'BARANGAY']);
+    $records = MacroOutput::whereIn('id', $ids)->get([
+        'id', 'PROVINCE', 'CITY', 'BARANGAY', 'PHONE NUMBER'
+    ]);
+
+    // Collect all phone numbers to check for duplicates
+    $phoneCounts = [];
+    foreach ($records as $record) {
+        $phone = trim($record->{'PHONE NUMBER'});
+        if ($phone !== '') {
+            $phoneCounts[$phone] = ($phoneCounts[$phone] ?? 0) + 1;
+        }
+    }
 
     $results = [];
 
@@ -158,22 +196,36 @@ class MacroOutputController extends Controller
         $prov = strtolower(trim($record->PROVINCE));
         $city = strtolower(trim($record->CITY));
         $brgy = strtolower(trim($record->BARANGAY));
+        $phone = trim($record->{'PHONE NUMBER'});
         $fullKey = "$prov|$city|$brgy";
 
         $isValid = isset($validMap[$fullKey]);
 
+        // PHONE NUMBER validation
+        $phoneInvalid = false;
+        if ($phone === '' || is_null($phone)) {
+            $phoneInvalid = true;
+        } elseif (!preg_match('/^9\d{9}$/', $phone)) {
+            $phoneInvalid = true;
+        } elseif ($phoneCounts[$phone] > 1) {
+            $phoneInvalid = true;
+        }
+
         $results[] = [
             'id' => $record->id,
-            'invalid_fields' => $isValid ? [] : [
-                'PROVINCE' => !in_array($prov, $validProvinces),
-                'CITY' => !in_array($city, $validCities),
-                'BARANGAY' => !in_array($brgy, $validBarangays),
-            ],
+            'invalid_fields' => array_filter([
+                'PROVINCE' => !$isValid && !in_array($prov, $validProvinces),
+                'CITY' => !$isValid && !in_array($city, $validCities),
+                'BARANGAY' => !$isValid && !in_array($brgy, $validBarangays),
+                'PHONE NUMBER' => $phoneInvalid,
+            ]),
         ];
     }
 
     return response()->json($results);
 }
+
+
     public function summary(Request $request)
 {
     $start = $request->start_date;
@@ -324,7 +376,7 @@ return view('macro_output.summary', compact('summary', 'totalCounts'));
         'PAGE', 'TIMESTAMP', 'all_user_input',
         'HISTORICAL LOGS', 'APP SCRIPT CHECKER',
         'edited_full_name', 'edited_phone_number', 'edited_address',
-        'edited_province', 'edited_city', 'edited_barangay'
+        'edited_province', 'edited_city', 'edited_barangay', 'ITEM_NAME', 'COD', 'edited_item_name','edited_cod' 
     )->orderByDesc('id')->paginate(100);
 
     // PAGE options
@@ -373,6 +425,8 @@ return view('macro_output.summary', compact('summary', 'totalCounts'));
             'PROVINCE' => 'edited_province',
             'CITY' => 'edited_city',
             'BARANGAY' => 'edited_barangay',
+            'ITEM_NAME' => 'edited_item_name',
+            'COD' => 'edited_cod',
         ];
 
         if (array_key_exists($field, $editFlags)) {

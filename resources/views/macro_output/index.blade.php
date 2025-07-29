@@ -46,7 +46,10 @@
       line-height: 1.2em;
     }
   </style>
-
+@php
+  $role = Auth::user()?->employeeProfile?->role ?? null;
+  $canEditItemAndCod = in_array($role, ['CEO', 'Marketing - OIC', 'Data Encoder - OIC']);
+@endphp
   {{-- Filters + Table Head --}}
   <div id="fixed-header" class="fixed top-[128px] left-0 right-0 z-40 bg-white px-4 pt-4 pb-2 shadow">
  {{-- Filters --}}
@@ -95,12 +98,16 @@
 
 
   <div class="ml-auto flex gap-2 items-center">
- 
+ @if($canEditItemAndCod)
+  <button type="button" id="itemCheckerBtn" class="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700">
+    ITEM CHECKER
+  </button>
+  <span id="item-checker-status" class="text-sm text-gray-600"></span>
+@endif
+
   <button type="button" id="validate-btn" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800">Validate</button>
   <span id="validate-status" class="text-sm text-gray-600"></span>
-  @php
-  $role = Auth::user()?->employeeProfile?->role ?? null;
-@endphp
+  
 
 @if($role !== 'Data Encoder')
   <a
@@ -134,7 +141,7 @@
     <table class="table-fixed w-full border text-sm">
       <thead class="bg-gray-100 text-left">
         <tr>
-          <th class="border p-2" style="width: 10%">TIMESTAMP</th>
+          {{--<th class="border p-2" style="width: 10%">TIMESTAMP</th>--}}
           <th class="border p-2" style="width: 10%">FULL NAME</th>
           <th class="border p-2" style="width: 10%">PHONE NUMBER</th>
           <th class="border p-2" style="width: 10%">ADDRESS</th>
@@ -142,6 +149,11 @@
           <th class="border p-2" style="width: 8%">CITY</th>
           <th class="border p-2" style="width: 8%">BARANGAY</th>
           <th class="border p-2" style="width: 8%">STATUS</th>
+          @if($canEditItemAndCod)
+  <th class="border p-2" style="width: 8%">ITEM NAME</th>
+  <th class="border p-2" style="width: 8%">COD</th>
+@endif
+
           <th class="border p-2" style="width: 20%">CUSTOMER DETAILS</th>
           <th class="border p-2" style="width: 10%">HISTORICAL LOGS</th>
         </tr>
@@ -175,11 +187,15 @@
           @php
   $rowClass = ($record->STATUS === 'CANNOT PROCEED') ? 'bg-red-500' : '';
 @endphp
-<tr class="{{ $rowClass }}">
+<tr class="{{ $rowClass }}" data-id="{{ $record->id }}">
 
-            <td class="border p-2 text-gray-700" style="width: 10%">{{ $record->TIMESTAMP }}</td>
 
-            @foreach(['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY', 'STATUS'] as $field)
+           {{-- <td class="border p-2 text-gray-700" style="width: 10%">{{ $record->TIMESTAMP }}</td>--}}
+
+            @foreach(['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY', 'STATUS', 'ITEM_NAME','COD'] as $field)
+  @if (in_array($field, ['ITEM_NAME', 'COD']) && !$canEditItemAndCod)
+    @continue
+  @endif
               @php
                 $editFlag = match($field) {
                   'FULL NAME' => $record->edited_full_name ?? false,
@@ -188,6 +204,8 @@
                   'PROVINCE' => $record->edited_province ?? false,
                   'CITY' => $record->edited_city ?? false,
                   'BARANGAY' => $record->edited_barangay ?? false,
+                  'ITEM_NAME' => $record->edited_item_name ?? false,
+                  'COD' => $record->edited_cod ?? false,
                   default => false
                 };
 
@@ -202,7 +220,7 @@ if ($editFlag) {
                   $finalClass .= ' bg-red-200';
                 }
                 $columnWidth = match($field) {
-                  'PROVINCE', 'CITY', 'BARANGAY', 'STATUS' => '8%',
+                  'PROVINCE', 'CITY', 'BARANGAY', 'STATUS','ITEM_NAME','COD' => '8%',
                   default => '10%',
                 };
               @endphp
@@ -381,6 +399,47 @@ if ($editFlag) {
     });
   });
 </script>
+<script>
+document.getElementById('itemCheckerBtn')?.addEventListener('click', async function () {
+    const rows = document.querySelectorAll('table tbody tr');
+    const ids = Array.from(rows).map(row => row.getAttribute('data-id')).filter(id => !!id);
+
+    const response = await fetch('/macro_output/validate-items', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+        },
+        body: JSON.stringify({ ids }),
+    });
+
+    const results = await response.json();
+    console.log('ITEM CHECKER RESULTS:', results); // ✅ DEBUG
+
+    // Clear old highlights
+    document.querySelectorAll('[data-field="ITEM_NAME"], [data-field="COD"]').forEach(input => {
+        input.style.removeProperty('background-color');
+    });
+
+    // Highlight mismatches
+    results.forEach(result => {
+        const { id, invalid_fields } = result;
+
+        if (invalid_fields?.ITEM_NAME) {
+            const input = document.querySelector(`[data-id="${id}"][data-field="ITEM_NAME"]`);
+            if (input) input.style.setProperty('background-color', '#ff0000', 'important');
+        }
+
+        if (invalid_fields?.COD) {
+            const input = document.querySelector(`[data-id="${id}"][data-field="COD"]`);
+            if (input) input.style.setProperty('background-color', '#ff0000', 'important');
+        }
+    });
+});
+
+
+</script>
+
 
 
 

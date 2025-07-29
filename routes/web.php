@@ -57,6 +57,7 @@ Route::post('/encoder/checker_1/update', [MacroOutputController::class, 'bulkUpd
 Route::post('/encoder/checker_1/update-field', [MacroOutputController::class, 'updateField'])->name('macro_output.update_field');
 Route::post('/macro_output/validate', [MacroOutputController::class, 'validateAddresses'])->name('macro_output.validate');
 Route::get('/macro_output/download', [MacroOutputController::class, 'download'])->name('macro_output.download');
+Route::post('/macro_output/validate-items', [MacroOutputController::class, 'validateItems']);
 
 
 // Checker 2 GSheet Settings Routes
