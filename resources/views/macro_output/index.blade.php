@@ -401,6 +401,11 @@ if ($editFlag) {
 </script>
 <script>
 document.getElementById('itemCheckerBtn')?.addEventListener('click', async function () {
+    const statusEl = document.getElementById('item-checker-status');
+    statusEl.textContent = 'Checking...';
+    statusEl.classList.remove('text-green-600', 'text-red-600');
+    statusEl.classList.add('text-gray-600');
+
     const rows = document.querySelectorAll('table tbody tr');
     const ids = Array.from(rows).map(row => row.getAttribute('data-id')).filter(id => !!id);
 
@@ -414,29 +419,37 @@ document.getElementById('itemCheckerBtn')?.addEventListener('click', async funct
     });
 
     const results = await response.json();
-    console.log('ITEM CHECKER RESULTS:', results); // ✅ DEBUG
 
     // Clear old highlights
     document.querySelectorAll('[data-field="ITEM_NAME"], [data-field="COD"]').forEach(input => {
         input.style.removeProperty('background-color');
     });
 
-    // Highlight mismatches
+    let errorCount = 0;
+
+    // Highlight mismatches and count them
     results.forEach(result => {
         const { id, invalid_fields } = result;
 
         if (invalid_fields?.ITEM_NAME) {
             const input = document.querySelector(`[data-id="${id}"][data-field="ITEM_NAME"]`);
             if (input) input.style.setProperty('background-color', '#ff0000', 'important');
+            errorCount++;
         }
 
         if (invalid_fields?.COD) {
             const input = document.querySelector(`[data-id="${id}"][data-field="COD"]`);
             if (input) input.style.setProperty('background-color', '#ff0000', 'important');
+            errorCount++;
         }
     });
-});
 
+    statusEl.textContent = errorCount > 0
+      ? `${errorCount} item(s) need fixing`
+      : 'All good! ✅';
+    statusEl.classList.remove('text-gray-600');
+    statusEl.classList.add(errorCount > 0 ? 'text-red-600' : 'text-green-600');
+});
 
 </script>
 
