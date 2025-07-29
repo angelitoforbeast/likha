@@ -77,10 +77,18 @@
 
 <div class="mb-4 text-sm space-x-4 flex flex-wrap gap-2">
   @foreach ($statusCounts as $status => $count)
-    <span class="inline-block px-3 py-1 rounded {{ $statusColors[$status] ?? 'bg-gray-200' }}">
-      <strong>{{ $status }}:</strong> {{ $count }}
-    </span>
-  @endforeach
+  <a 
+    href="{{ $status === 'TOTAL' 
+      ? route('macro_output.index', request()->except('status_filter')) 
+      : route('macro_output.index', array_merge(request()->all(), ['status_filter' => $status])) 
+    }}"
+    class="inline-block px-3 py-1 rounded {{ $statusColors[$status] ?? 'bg-gray-200' }} hover:bg-opacity-80"
+  >
+    <strong>{{ $status }}:</strong> {{ $count }}
+  </a>
+@endforeach
+
+
 </div>
 
 

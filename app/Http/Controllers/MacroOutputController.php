@@ -284,35 +284,41 @@ return view('macro_output.summary', compact('summary', 'totalCounts'));
 
     public function index(Request $request)
 {
-    $query = MacroOutput::query();
-
-    // Default to yesterday if no date is provided
+    // STEP 1: Setup base query (date + page lang)
     $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
     $formattedDate = \Carbon\Carbon::parse($date)->format('d-m-Y');
-    $query->where('TIMESTAMP', 'LIKE', "%$formattedDate");
 
-    // Filter by PAGE
+    $baseQuery = MacroOutput::query()->where('TIMESTAMP', 'LIKE', "%$formattedDate");
+
     if ($request->filled('PAGE')) {
-        $query->where('PAGE', $request->PAGE);
+        $baseQuery->where('PAGE', $request->PAGE);
     }
 
-// 1. Filtered full data (no pagination)
-$filteredRecords = (clone $query)->get();
+    // STEP 2: Compute status counts (using base query only)
+    $filteredRecords = (clone $baseQuery)->get();
 
-// 2. Status counts based only on filtered data
-$statusCounts = [
-    'TOTAL'           => $filteredRecords->count(),
-    'PROCEED'         => $filteredRecords->where('STATUS', 'PROCEED')->count(),
-    'CANNOT PROCEED'  => $filteredRecords->where('STATUS', 'CANNOT PROCEED')->count(),
-    'ODZ'             => $filteredRecords->where('STATUS', 'ODZ')->count(),
-    'BLANK'           => $filteredRecords->filter(function ($rec) {
-        return trim((string) $rec->STATUS) === '';
-    })->count(),
-];
+    $statusCounts = [
+        'TOTAL'           => $filteredRecords->count(),
+        'PROCEED'         => $filteredRecords->where('STATUS', 'PROCEED')->count(),
+        'CANNOT PROCEED'  => $filteredRecords->where('STATUS', 'CANNOT PROCEED')->count(),
+        'ODZ'             => $filteredRecords->where('STATUS', 'ODZ')->count(),
+        'BLANK'           => $filteredRecords->filter(fn($rec) => trim((string) $rec->STATUS) === '')->count(),
+    ];
 
+    // STEP 3: Apply status_filter to paginated records only
+    $recordQuery = (clone $baseQuery);
 
-    // Paginated records
-    $records = $query->select(
+    if ($request->filled('status_filter')) {
+        if ($request->status_filter === 'BLANK') {
+            $recordQuery->where(function ($q) {
+                $q->whereNull('STATUS')->orWhere('STATUS', '');
+            });
+        } else {
+            $recordQuery->where('STATUS', $request->status_filter);
+        }
+    }
+
+    $records = $recordQuery->select(
         'id', 'FULL NAME', 'PHONE NUMBER', 'ADDRESS',
         'PROVINCE', 'CITY', 'BARANGAY', 'STATUS',
         'PAGE', 'TIMESTAMP', 'all_user_input',
@@ -321,15 +327,13 @@ $statusCounts = [
         'edited_province', 'edited_city', 'edited_barangay'
     )->orderByDesc('id')->paginate(100);
 
-    // Populate page options
+    // PAGE options
     $pages = MacroOutput::where('TIMESTAMP', 'LIKE', "%$formattedDate")
-        ->select('PAGE')
-        ->distinct()
-        ->orderBy('PAGE')
-        ->pluck('PAGE');
+        ->select('PAGE')->distinct()->orderBy('PAGE')->pluck('PAGE');
 
     return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts'));
 }
+
 
 
 
