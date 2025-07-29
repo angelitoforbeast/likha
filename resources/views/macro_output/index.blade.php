@@ -357,9 +357,13 @@ if ($editFlag) {
     });
 
     // Collect only visible IDs
-    const ids = Array.from(document.querySelectorAll('[data-id]'))
-      .map(el => el.dataset.id)
-      .filter((v, i, a) => a.indexOf(v) === i); // unique only
+    const ids = Array.from(document.querySelectorAll('tr[data-id]'))
+  .filter(row => {
+    const status = row.querySelector('[data-field="STATUS"]')?.value;
+    return status !== 'CANNOT PROCEED';
+  })
+  .map(row => row.dataset.id);
+
 
     fetch("{{ route('macro_output.validate') }}", {
       method: 'POST',
@@ -407,7 +411,13 @@ document.getElementById('itemCheckerBtn')?.addEventListener('click', async funct
     statusEl.classList.add('text-gray-600');
 
     const rows = document.querySelectorAll('table tbody tr');
-    const ids = Array.from(rows).map(row => row.getAttribute('data-id')).filter(id => !!id);
+    const ids = Array.from(rows)
+  .filter(row => {
+    const status = row.querySelector('[data-field="STATUS"]')?.value;
+    return status !== 'CANNOT PROCEED';
+  })
+  .map(row => row.getAttribute('data-id'))
+  .filter(id => !!id);
 
     const response = await fetch('/macro_output/validate-items', {
         method: 'POST',
