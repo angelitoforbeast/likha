@@ -37,10 +37,18 @@ class MacroOutputController extends Controller
 
     // Step 2: Only allow download if all filtered rows have STATUS filled
      $hasMissingFields = (clone $query)->where(function ($q) {
-        $q->whereNull('STATUS')->orWhere('STATUS', '')
-          ->orWhereNull('ITEM_NAME')->orWhere('ITEM_NAME', '')
-          ->orWhereNull('COD')->orWhere('COD', '');
-    })->exists();
+    $q->where(function ($subQ) {
+        // ✅ Kung hindi "CANNOT PROCEED", kailangan valid lahat ng fields
+        $subQ->whereNotIn('STATUS', ['CANNOT PROCEED'])
+            ->where(function ($innerQ) {
+                $innerQ->whereNull('STATUS')->orWhere('STATUS', '')
+                    ->orWhereNull('ITEM_NAME')->orWhere('ITEM_NAME', '')
+                    ->orWhereRaw('CHAR_LENGTH(ITEM_NAME) > 20')
+                    ->orWhereNull('COD')->orWhere('COD', '');
+            });
+    });
+})->exists();
+
 
     if ($hasMissingFields) {
         return back()->with('error', 'Download FAILED: Some entries are missing STATUS, ITEM NAME, or COD.');
@@ -130,7 +138,7 @@ class MacroOutputController extends Controller
     foreach ($records as $record) {
         $invalids = [];
 
-        if (is_null($record->ITEM_NAME) || trim($record->ITEM_NAME) === '') {
+        if (is_null($record->ITEM_NAME) || trim($record->ITEM_NAME) === ''|| mb_strlen($record->ITEM_NAME) > 20) {
             $invalids['ITEM_NAME'] = true;
         }
 
