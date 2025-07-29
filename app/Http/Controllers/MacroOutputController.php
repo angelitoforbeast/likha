@@ -203,13 +203,20 @@ class MacroOutputController extends Controller
 
         // PHONE NUMBER validation
         $phoneInvalid = false;
-        if ($phone === '' || is_null($phone)) {
-            $phoneInvalid = true;
-        } elseif (!preg_match('/^9\d{9}$/', $phone)) {
-            $phoneInvalid = true;
-        } elseif ($phoneCounts[$phone] > 1) {
-            $phoneInvalid = true;
-        }
+
+if ($phone === '' || is_null($phone)) {
+    $phoneInvalid = true;
+
+} elseif (!preg_match('/^9\d{9}$/', $phone)) {
+    $phoneInvalid = true;
+
+} elseif ($phone === '9123456789') {
+    $phoneInvalid = true;
+
+} elseif ($phoneCounts[$phone] > 1) {
+    $phoneInvalid = true;
+}
+
 
         $results[] = [
             'id' => $record->id,
