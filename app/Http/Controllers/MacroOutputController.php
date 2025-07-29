@@ -239,6 +239,22 @@ class MacroOutputController extends Controller
 foreach ($summary as &$pages) {
     ksort($pages);
 }
+// Get logs grouped by date and page
+$logs = DownloadedMacroOutputLog::query()
+    ->select('timestamp', 'page', 'downloaded_by', 'downloaded_at')
+    ->get()
+    ->groupBy(fn($log) => $log->timestamp . '|' . $log->page);
+
+// Attach downloaded_by and downloaded_at to each summary entry
+foreach ($summary as $date => &$pages) {
+    foreach ($pages as $page => &$counts) {
+        $key = $date . '|' . $page;
+        $latestLog = $logs->has($key) ? $logs[$key]->sortByDesc('downloaded_at')->first() : null;
+
+        $counts['downloaded_by'] = $latestLog->downloaded_by ?? null;
+        $counts['downloaded_at'] = $latestLog->downloaded_at ?? null;
+    }
+}
 unset($pages);
 
 return view('macro_output.summary', compact('summary', 'totalCounts'));
