@@ -6,11 +6,23 @@ use Illuminate\Http\Request;
 use App\Models\MacroOutput;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
+use Carbon\Carbon;
+use App\Models\DownloadedMacroOutputLog;
+
+
 class MacroOutputController extends Controller
 {
 
     public function download(Request $request)
 {
+
+    DownloadedMacroOutputLog::create([
+        'timestamp' => now()->format('H:i d-m-Y'),
+        'page' => $request->input('PAGE'),
+        'downloaded_by' => Auth::user()?->name ?? 'Unknown',
+        'downloaded_at' => Carbon::now(),
+    ]);
     $query = DB::table('macro_output');
 
     // Step 1: Apply filters
