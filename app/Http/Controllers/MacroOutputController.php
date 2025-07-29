@@ -43,7 +43,7 @@ class MacroOutputController extends Controller
             ->where(function ($innerQ) {
                 $innerQ->whereNull('STATUS')->orWhere('STATUS', '')
                     ->orWhereNull('ITEM_NAME')->orWhere('ITEM_NAME', '')
-                    ->orWhereRaw('CHAR_LENGTH(ITEM_NAME) > 20')
+                    ->orWhereRaw('CHAR_LENGTH("ITEM_NAME") > 20')
                     ->orWhereNull('COD')->orWhere('COD', '');
             });
     });
