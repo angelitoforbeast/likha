@@ -41,7 +41,7 @@ class JntCheckerController extends Controller
         $rawCod = preg_replace('/[^0-9.]/', '', $row['M'] ?? '0');
         $cod = floatval($rawCod);
 
-        $mappedPage = normalizeText(trim(PageSenderMapping::where('sender_name', $sender)->value('PAGE') ?? ''));
+        $mappedPage = normalizeText(trim(PageSenderMapping::where('SENDER_NAME', $sender)->value('PAGE') ?? ''));
 
         $key = strtolower($mappedPage . '|' . $receiver . '|' . $item . '|' . $cod);
         $lookupKeys[] = $key;
