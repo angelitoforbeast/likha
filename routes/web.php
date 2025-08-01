@@ -27,7 +27,8 @@ use App\Http\Controllers\AdCopyController;
 use App\Http\Controllers\AdCampaignCreativeController;
 use App\Http\Controllers\Checker2GsheetController;
 use App\Http\Controllers\MacroOutputController;
-
+use App\Http\Controllers\PageSenderMappingController;
+use App\Http\Controllers\JntCheckerController;
 
 
 use App\Models\Role;
@@ -50,6 +51,15 @@ Route::get('/ad-copy-suggestions', [AdCopyController::class, 'suggestions']);
 
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
+
+   Route::get('/jnt/sender-name', [PageSenderMappingController::class, 'index']);
+Route::post('/jnt/sender-name', [PageSenderMappingController::class, 'save']);
+Route::post('/jnt/sender-name/delete/{id}', [\App\Http\Controllers\PageSenderMappingController::class, 'delete']);
+Route::get('/jnt/checker', [JntCheckerController::class, 'index'])->name('jnt.checker');
+Route::post('/jnt/checker/upload', [JntCheckerController::class, 'upload'])->name('jnt.checker.upload');
+
+
+
 
 Route::get('/encoder/summary', [App\Http\Controllers\MacroOutputController::class, 'summary'])->name('macro_output.summary');
     Route::get('/encoder/checker_1', [MacroOutputController::class, 'index'])->name('macro_output.index');
