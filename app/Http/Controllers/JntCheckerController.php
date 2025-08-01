@@ -25,7 +25,7 @@ class JntCheckerController extends Controller
     }
 
     $path = $request->file('excel_file')->getRealPath();
-    $spreadsheet = IOFactory::load($path);
+    $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($path);
     $sheet = $spreadsheet->getActiveSheet();
     $data = $sheet->toArray(null, true, true, true);
 
@@ -33,7 +33,7 @@ class JntCheckerController extends Controller
     $results = [];
     $lookupKeys = [];
 
-    // Step 1: Build normalized keys and collect mapping info
+    // Step 1: Prepare results and lookup keys
     foreach ($rows as $row) {
         $sender = normalizeText(trim($row['S'] ?? ''));
         $receiver = normalizeText(trim($row['F'] ?? ''));
@@ -53,26 +53,38 @@ class JntCheckerController extends Controller
             'item' => $item,
             'cod' => $cod,
             'key' => $key,
-            'matched' => false, // temporary
+            'matched' => false,
         ];
     }
 
-    // Step 2: Fetch all matches from DB in one query
-    $matches = MacroOutput::select('PAGE', 'FULL NAME', 'ITEM_NAME', 'COD')
+    // Step 2: Batch query for all possible matches
+    $matches = \App\Models\MacroOutput::select('PAGE', 'FULL NAME', 'ITEM_NAME', 'COD')
         ->get()
         ->map(function ($row) {
             return strtolower($row->PAGE . '|' . $row->{'FULL NAME'} . '|' . $row->ITEM_NAME . '|' . floatval($row->COD));
         })->toArray();
 
-    // Step 3: Match each result in PHP
+    // Step 3: Match each one
     foreach ($results as &$res) {
         if (in_array($res['key'], $matches)) {
             $res['matched'] = true;
         }
-        unset($res['key']); // cleanup
+        unset($res['key']);
     }
 
-    return view('jnt.checker', ['results' => $results]);
+    // Step 4: Count summary
+    $matchedCount = collect($results)->where('matched', true)->count();
+    $notMatchedCount = collect($results)->where('matched', false)->count();
+
+    // Step 5: Sort so unmatched first
+    $results = collect($results)->sortBy('matched')->values()->all();
+
+    return view('jnt.checker', [
+        'results' => $results,
+        'matchedCount' => $matchedCount,
+        'notMatchedCount' => $notMatchedCount,
+    ]);
 }
+
 
 }

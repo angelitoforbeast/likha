@@ -11,6 +11,12 @@
             Check Orders
         </button>
     </form>
+    @if(isset($matchedCount))
+    <div class="mb-4 text-sm bg-gray-100 p-3 rounded border">
+        ✅ Matched: <strong>{{ $matchedCount }}</strong> &nbsp;&nbsp;
+        ❌ Not Matched: <strong>{{ $notMatchedCount }}</strong>
+    </div>
+@endif
 
     @if(isset($results))
     <div class="mt-6">
