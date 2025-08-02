@@ -66,6 +66,7 @@
               <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">LIKHA</x-navlink>
               <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">MACRO</x-navlink>
               <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
+              <x-navlink href="/jnt/checker" :active="request()->is('jnt/checker')">JNT CHECKER</x-navlink>
               <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
               <x-navlink href="/encoder/summary" :active="request()->is('macro_output/index')">ORDER SUMMARY</x-navlink>
               @endif
@@ -77,13 +78,11 @@
               @endif
 
               @if(in_array($role, ['CEO']))
-              <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">IMPORT MACRO</x-navlink>
-              <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">LIKHA IMPORT</x-navlink>
-              <x-navlink href="/orders/tally" :active="request()->is('orders/tally')">MISSING ORDERS</x-navlink>
               <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
               <x-navlink href="/ads-manager/import-form" :active="request()->is('import-form')">ADS IMPORT</x-navlink>
               <x-navlink href="/ads-manager/edit-messaging-template" :active="request()->is('edit-messaging-template')">CREATIVES</x-navlink>
-              <x-navlink href="/gpt-ad-generator" :active="request()->is('gpt-ad-generatorm')">AD COPY</x-navlink>
+              <x-navlink href="/gpt-ad-generator" :active="request()->is('gpt-ad-generator')">AD COPY</x-navlink>
+              <x-navlink href="/jnt/checker" :active="request()->is('jnt/checker')">JNT CHECKER</x-navlink>
               @endif
 
               @if(in_array($role, ['Data Encoder - OIC']))
