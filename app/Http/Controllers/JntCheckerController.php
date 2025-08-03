@@ -105,26 +105,43 @@ $end = $request->input('filter_date_end');
 $query = \App\Models\MacroOutput::select('PAGE', 'PHONE NUMBER', 'ITEM_NAME', 'COD', 'TIMESTAMP')
     ->where('STATUS', 'PROCEED');
 
+    $driver = \DB::getDriverName();
+
 if ($start && $end) {
     try {
-        $query->whereBetween(
-            \DB::raw("STR_TO_DATE(RIGHT(`TIMESTAMP`, 10), '%d-%m-%Y')"),
-            [date('Y-m-d', strtotime($start)), date('Y-m-d', strtotime($end))]
-        );
+        if ($driver === 'pgsql') {
+            $query->whereRaw(
+                "to_date(substring(\"TIMESTAMP\" from '.{10}$'), 'DD-MM-YYYY') BETWEEN ? AND ?",
+                [$start, $end]
+            );
+        } else {
+            $query->whereBetween(
+                \DB::raw("STR_TO_DATE(RIGHT(`TIMESTAMP`, 10), '%d-%m-%Y')"),
+                [date('Y-m-d', strtotime($start)), date('Y-m-d', strtotime($end))]
+            );
+        }
     } catch (\Throwable $e) {
         \Log::warning('⚠️ Invalid date range.');
     }
 } elseif ($start) {
     try {
-        $query->where(
-            \DB::raw("STR_TO_DATE(RIGHT(`TIMESTAMP`, 10), '%d-%m-%Y')"),
-            '=',
-            date('Y-m-d', strtotime($start))
-        );
+        if ($driver === 'pgsql') {
+            $query->whereRaw(
+                "to_date(substring(\"TIMESTAMP\" from '.{10}$'), 'DD-MM-YYYY') = ?",
+                [$start]
+            );
+        } else {
+            $query->where(
+                \DB::raw("STR_TO_DATE(RIGHT(`TIMESTAMP`, 10), '%d-%m-%Y')"),
+                '=',
+                date('Y-m-d', strtotime($start))
+            );
+        }
     } catch (\Throwable $e) {
         \Log::warning('⚠️ Invalid single date.');
     }
 }
+
 
 
 
