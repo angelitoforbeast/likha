@@ -264,9 +264,11 @@ if ($editFlag) {
     </table>
   </div>
 
-  <div class="mt-6 px-4">
+ <div class="mt-6 px-4">
+  @if(!empty($paginateOnlyWhenAll) && $paginateOnlyWhenAll)
     {{ $records->withQueryString()->links() }}
-  </div>
+  @endif
+</div>
 
   <script>
     function autoResize(el) {

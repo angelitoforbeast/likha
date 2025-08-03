@@ -351,7 +351,7 @@ return view('macro_output.summary', compact('summary', 'totalCounts'));
 
     public function index(Request $request)
 {
-    // STEP 1: Setup base query (date + page lang)
+    // STEP 1
     $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
     $formattedDate = \Carbon\Carbon::parse($date)->format('d-m-Y');
 
@@ -361,7 +361,7 @@ return view('macro_output.summary', compact('summary', 'totalCounts'));
         $baseQuery->where('PAGE', $request->PAGE);
     }
 
-    // STEP 2: Compute status counts (using base query only)
+    // STEP 2: status counts
     $filteredRecords = (clone $baseQuery)->get();
 
     $statusCounts = [
@@ -372,7 +372,7 @@ return view('macro_output.summary', compact('summary', 'totalCounts'));
         'BLANK'           => $filteredRecords->filter(fn($rec) => trim((string) $rec->STATUS) === '')->count(),
     ];
 
-    // STEP 3: Apply status_filter to paginated records only
+    // STEP 3: records + conditional pagination
     $recordQuery = (clone $baseQuery);
 
     if ($request->filled('status_filter')) {
@@ -385,21 +385,33 @@ return view('macro_output.summary', compact('summary', 'totalCounts'));
         }
     }
 
-    $records = $recordQuery->select(
+    $selectCols = [
         'id', 'FULL NAME', 'PHONE NUMBER', 'ADDRESS',
         'PROVINCE', 'CITY', 'BARANGAY', 'STATUS',
         'PAGE', 'TIMESTAMP', 'all_user_input',
         'HISTORICAL LOGS', 'APP SCRIPT CHECKER',
         'edited_full_name', 'edited_phone_number', 'edited_address',
-        'edited_province', 'edited_city', 'edited_barangay', 'ITEM_NAME', 'COD', 'edited_item_name','edited_cod' 
-    )->orderByDesc('id')->paginate(100);
+        'edited_province', 'edited_city', 'edited_barangay',
+        'ITEM_NAME','COD','edited_item_name','edited_cod'
+    ];
+
+    // ✅ paginateOnlyWhenAll = true kung walang PAGE filter (ibig sabihin "All")
+    $paginateOnlyWhenAll = !$request->filled('PAGE');
+
+    if ($paginateOnlyWhenAll) {
+        $records = $recordQuery->select($selectCols)->orderByDesc('id')->paginate(100);
+    } else {
+        // No pagination kapag may PAGE na pinili
+        $records = $recordQuery->select($selectCols)->orderByDesc('id')->get();
+    }
 
     // PAGE options
     $pages = MacroOutput::where('TIMESTAMP', 'LIKE', "%$formattedDate")
         ->select('PAGE')->distinct()->orderBy('PAGE')->pluck('PAGE');
 
-    return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts'));
+    return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'));
 }
+
 
 
 
