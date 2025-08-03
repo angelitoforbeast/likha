@@ -102,7 +102,7 @@ class JntCheckerController extends Controller
    $start = $request->input('filter_date_start');
 $end = $request->input('filter_date_end');
 
-$query = \App\Models\MacroOutput::select('PAGE', 'PHONE NUMBER', 'ITEM_NAME', 'COD', 'TIMESTAMP')
+$query = \App\Models\MacroOutput::select('PAGE', 'PHONE NUMBER', 'ITEM_NAME', 'COD', 'TIMESTAMP', 'FULL NAME')
     ->where('STATUS', 'PROCEED');
 
     $driver = \DB::getDriverName();

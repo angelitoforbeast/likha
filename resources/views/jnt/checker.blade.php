@@ -47,6 +47,7 @@
     <thead class="bg-red-100">
         <tr>
             <th class="border px-2 py-1">Page</th>
+            <th class="border px-2 py-1">Full Name</th>
             <th class="border px-2 py-1">Phone Number</th>
             <th class="border px-2 py-1">Item Name</th>
             <th class="border px-2 py-1">COD</th>
@@ -57,6 +58,7 @@
         @foreach($notInExcelRows as $row)
             <tr>
                 <td class="border px-2 py-1">{{ $row->PAGE }}</td>
+                <td class="border px-2 py-1">{{ $row->{'FULL NAME'} }}</td>
                 <td class="border px-2 py-1">{{ $row->{'PHONE NUMBER'} }}</td>
                 <td class="border px-2 py-1">{{ $row->ITEM_NAME }}</td>
                 <td class="border px-2 py-1">{{ $row->COD }}</td>
