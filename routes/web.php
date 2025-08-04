@@ -57,6 +57,10 @@ Route::post('/jnt/sender-name', [PageSenderMappingController::class, 'save']);
 Route::post('/jnt/sender-name/delete/{id}', [\App\Http\Controllers\PageSenderMappingController::class, 'delete']);
 Route::get('/jnt/checker', [JntCheckerController::class, 'index'])->name('jnt.checker');
 Route::post('/jnt/checker/upload', [JntCheckerController::class, 'upload'])->name('jnt.checker.upload');
+Route::get('/jnt/checker/upload', fn () => redirect()->route('jnt.checker'));
+Route::post('/jnt/checker/update', [\App\Http\Controllers\JntCheckerController::class, 'update'])
+    ->name('jnt.checker.update');
+
 
 
 

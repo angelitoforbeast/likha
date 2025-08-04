@@ -29,17 +29,41 @@
         ❌ Not Matched: <strong>{{ $notMatchedCount }}</strong>
     </div>
 
-    @if(!empty($filter_date))
-        <div class="mb-2 text-sm text-gray-600">
-            📅 Filtered by date: <strong>{{ \Carbon\Carbon::parse($filter_date)->format('F d, Y') }}</strong>
-        </div>
-    @endif
+    @if(!empty($filter_date_start) || !empty($filter_date_end))
+  <div class="mb-2 text-sm text-gray-600">
+    📅 Filtered by date:
+    <strong>
+      @if(!empty($filter_date_start) && !empty($filter_date_end))
+        {{ \Carbon\Carbon::parse($filter_date_start)->format('F d, Y') }}
+        —
+        {{ \Carbon\Carbon::parse($filter_date_end)->format('F d, Y') }}
+      @elseif(!empty($filter_date_start))
+        {{ \Carbon\Carbon::parse($filter_date_start)->format('F d, Y') }}
+      @elseif(!empty($filter_date_end))
+        {{ \Carbon\Carbon::parse($filter_date_end)->format('F d, Y') }}
+      @endif
+    </strong>
+  </div>
+@endif
+
 @endif
 @if(isset($notInExcelCount))
     <div class="mb-2 text-sm text-red-600">
         📦 MacroOutput entries with no match in uploaded Excel: <strong>{{ $notInExcelCount }}</strong>
     </div>
 @endif
+@if(isset($updatableCount) && $updatableCount > 0)
+    <form method="POST" action="{{ route('jnt.checker.update') }}" class="mt-4">
+        @csrf
+        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded">
+            UPDATE ORDERS (set WAYBILL)
+        </button>
+        <div class="text-xs text-gray-600 mt-1">
+            Will update <strong>{{ $updatableCount }}</strong> matched MacroOutput row(s) with WAYBILL from Excel.
+        </div>
+    </form>
+@endif
+
     @if(isset($notInExcelCount) && $notInExcelCount > 0)
     <div class="mt-6">
         <h2 class="font-semibold text-sm mb-2 text-red-700">📦 Entries in MacroOutput with no match in uploaded Excel ({{ $notInExcelCount }})</h2>
