@@ -156,6 +156,10 @@
 
           <th class="border p-2" style="width: 20%">CUSTOMER DETAILS</th>
           <th class="border p-2" style="width: 10%">HISTORICAL LOGS</th>
+          @if($role !== 'Data Encoder')
+  <th class="border p-2" style="width: 10%">STATUS LOGS</th>
+@endif
+
         </tr>
       </thead>
     </table>
@@ -258,6 +262,12 @@ if ($editFlag) {
             <td class="border p-2 text-gray-700 cursor-pointer all-user-input" style="width: 10%" onclick="expandOnlyOnce(this)">
               {{ $record['HISTORICAL LOGS'] ?? '' }}
             </td>
+            @if($role !== 'Data Encoder')
+  <td class="border p-2 text-gray-700 cursor-pointer all-user-input" style="width: 10%" onclick="expandOnlyOnce(this)">
+    {{ $record->status_logs ?? '' }}
+  </td>
+@endif
+
           </tr>
         @endforeach
       </tbody>

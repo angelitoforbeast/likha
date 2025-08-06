@@ -392,7 +392,7 @@ return view('macro_output.summary', compact('summary', 'totalCounts'));
         'HISTORICAL LOGS', 'APP SCRIPT CHECKER',
         'edited_full_name', 'edited_phone_number', 'edited_address',
         'edited_province', 'edited_city', 'edited_barangay',
-        'ITEM_NAME','COD','edited_item_name','edited_cod'
+        'ITEM_NAME','COD','edited_item_name','edited_cod','status_logs'
     ];
 
     // ✅ paginateOnlyWhenAll = true kung walang PAGE filter (ibig sabihin "All")
@@ -436,10 +436,14 @@ return view('macro_output.summary', compact('summary', 'totalCounts'));
         $user = auth()->user()?->name ?? 'Unknown User';
         $timestamp = now()->format('Y-m-d H:i:s');
 
-        if ($field !== 'STATUS') {
-            $logEntry = "[{$timestamp}] {$user} updated {$field}: \"{$oldValue}\" → \"{$newValue}\"\n";
-            $record->{'HISTORICAL LOGS'} = trim($logEntry . ($record->{'HISTORICAL LOGS'} ?? ''));
-        }
+        if ($field === 'STATUS') {
+    $logEntry = "[{$timestamp}] {$user} changed STATUS: \"{$oldValue}\" → \"{$newValue}\"\n";
+    $record->status_logs = trim($logEntry . ($record->status_logs ?? ''));
+} else {
+    $logEntry = "[{$timestamp}] {$user} updated {$field}: \"{$oldValue}\" → \"{$newValue}\"\n";
+    $record->{'HISTORICAL LOGS'} = trim($logEntry . ($record->{'HISTORICAL LOGS'} ?? ''));
+}
+
 
         // Save updated field
         $record->{$field} = $newValue;
