@@ -16,12 +16,15 @@ class PageSenderMappingController extends Controller
 
     $query = DB::table('page_sender_mappings')->orderBy('created_at', 'desc');
 
-    if ($search) {
-        $query->where(function ($q) use ($search) {
-            $q->where('PAGE', 'like', '%' . $search . '%')
-              ->orWhere('SENDER_NAME', 'like', '%' . $search . '%');
-        });
-    }
+    $likeOperator = DB::getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+
+if ($search) {
+    $query->where(function ($q) use ($search, $likeOperator) {
+        $q->where('PAGE', $likeOperator, '%' . $search . '%')
+          ->orWhere('SENDER_NAME', $likeOperator, '%' . $search . '%');
+    });
+}
+
 
     $mappings = $query->paginate(100);
 
