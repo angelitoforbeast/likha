@@ -257,7 +257,7 @@ $uniqueIdCount = count(array_unique(array_column($updatable, 'id')));
         // chunked updates to avoid overly long IN(...) clauses
         foreach (array_chunk($ids, 200) as $chunk) {
             $affected = \App\Models\MacroOutput::whereIn('id', $chunk)
-                ->update(['WAYBILL' => $waybill]);
+                ->update(['waybill' => $waybill]);
 
             $updated += $affected;
         }
