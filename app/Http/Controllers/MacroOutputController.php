@@ -253,7 +253,7 @@ if ($phone === '' || is_null($phone)) {
         $query->where('PAGE', $request->PAGE);
     }
 
-    $records = $query->select('TIMESTAMP', 'PAGE', 'STATUS')->get();
+    $records = $query->select('TIMESTAMP', 'PAGE', 'STATUS', 'WAYBILL')->get();
 
     // Step 2: Group and format in PHP
     $summary = [];
@@ -263,6 +263,7 @@ if ($phone === '' || is_null($phone)) {
         'ODZ' => 0,
         'BLANK' => 0,
         'TOTAL' => 0,
+        'MATCHED_WAYBILLS' => 0,
     ];
 
     foreach ($records as $record) {
@@ -292,41 +293,57 @@ if ($phone === '' || is_null($phone)) {
                 'ODZ' => 0,
                 'BLANK' => 0,
                 'TOTAL' => 0,
+                'WAYBILLS' => [],
             ];
         }
 
         $summary[$formattedDate][$page][$status]++;
         $summary[$formattedDate][$page]['TOTAL']++;
+        if ($record->WAYBILL) {
+            $summary[$formattedDate][$page]['WAYBILLS'][] = (string) $record->WAYBILL;
+        }
 
         $totalCounts[$status]++;
         $totalCounts['TOTAL']++;
     }
 
-// Sort page names alphabetically inside each date group
-foreach ($summary as &$pages) {
-    ksort($pages);
-}
-// Get logs grouped by date and page
-$logs = DownloadedMacroOutputLog::query()
-    ->select('timestamp', 'page', 'downloaded_by', 'downloaded_at')
-    ->get()
-    ->groupBy(fn($log) => $log->timestamp . '|' . $log->page);
-
-// Attach downloaded_by and downloaded_at to each summary entry
-foreach ($summary as $date => &$pages) {
-    foreach ($pages as $page => &$counts) {
-        $key = $date . '|' . $page;
-        $latestLog = $logs->has($key) ? $logs[$key]->sortByDesc('downloaded_at')->first() : null;
-
-        $counts['downloaded_by'] = $latestLog->downloaded_by ?? null;
-        $counts['downloaded_at'] = $latestLog->downloaded_at ?? null;
+    // Sort page names alphabetically inside each date group
+    foreach ($summary as &$pages) {
+        ksort($pages);
     }
-}
-unset($pages);
 
-return view('macro_output.summary', compact('summary', 'totalCounts'));
+    // Get logs grouped by date and page
+    $logs = DownloadedMacroOutputLog::query()
+        ->select('timestamp', 'page', 'downloaded_by', 'downloaded_at')
+        ->get()
+        ->groupBy(fn($log) => $log->timestamp . '|' . $log->page);
 
+    // Get all existing waybill_numbers from from_jnts
+    $existingWaybills = DB::table('from_jnts')->pluck('waybill_number')->map('strval')->toArray();
+    $existingWaybillSet = array_flip($existingWaybills); // for fast lookup
+
+    // Attach downloaded_by, downloaded_at, and match count to each summary entry
+    foreach ($summary as $date => &$pages) {
+        foreach ($pages as $page => &$counts) {
+            $key = $date . '|' . $page;
+            $latestLog = $logs->has($key) ? $logs[$key]->sortByDesc('downloaded_at')->first() : null;
+
+            $counts['downloaded_by'] = $latestLog->downloaded_by ?? null;
+            $counts['downloaded_at'] = $latestLog->downloaded_at ?? null;
+
+            // Count matched waybills
+            $waybills = $counts['WAYBILLS'] ?? [];
+            $matched = collect($waybills)->filter(fn($wb) => isset($existingWaybillSet[$wb]))->count();
+$counts['MATCHED_WAYBILLS'] = $matched;
+$totalCounts['MATCHED_WAYBILLS'] += $matched; // ✅ FIX HERE
+
+        }
+    }
+    unset($pages);
+
+    return view('macro_output.summary', compact('summary', 'totalCounts'));
 }
+
 
 
 

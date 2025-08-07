@@ -31,6 +31,7 @@
     <th class="border px-3 py-2 text-center">BLANK</th>
     <th class="border px-3 py-2 text-center">Downloaded By</th>
     <th class="border px-3 py-2 text-center">Downloaded At</th>
+    <th class="border px-3 py-2 text-center">Matched Waybills</th>
   </tr>
 </thead>
 <tbody>
@@ -43,6 +44,7 @@
       <td class="border px-3 py-2 text-center">{{ $totalCounts['ODZ'] }}</td>
       <td class="border px-3 py-2 text-center">{{ $totalCounts['BLANK'] }}</td>
       <td colspan="2" class="border px-3 py-2 text-center text-gray-400">N/A</td>
+      <td class="border px-3 py-2 text-center">{{ $totalCounts['MATCHED_WAYBILLS'] }}</td>
     </tr>
   @endif
 
@@ -60,6 +62,7 @@
         <td class="border px-3 py-2 text-center">
           {{ $counts['downloaded_at'] ? \Carbon\Carbon::parse($counts['downloaded_at'])->format('Y-m-d H:i') : '-' }}
         </td>
+        <td class="border px-3 py-2 text-center">{{ $counts['MATCHED_WAYBILLS'] ?? 0 }}</td>
       </tr>
     @endforeach
   @empty
