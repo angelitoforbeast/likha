@@ -253,7 +253,7 @@ if ($phone === '' || is_null($phone)) {
         $query->where('PAGE', $request->PAGE);
     }
 
-    $records = $query->select('TIMESTAMP', 'PAGE', 'STATUS', 'WAYBILL')->get();
+    $records = $query->select('TIMESTAMP', 'PAGE', 'STATUS', 'waybill')->get();
 
     // Step 2: Group and format in PHP
     $summary = [];
@@ -299,8 +299,8 @@ if ($phone === '' || is_null($phone)) {
 
         $summary[$formattedDate][$page][$status]++;
         $summary[$formattedDate][$page]['TOTAL']++;
-        if ($record->WAYBILL) {
-            $summary[$formattedDate][$page]['WAYBILLS'][] = (string) $record->WAYBILL;
+        if ($record->waybill) {
+            $summary[$formattedDate][$page]['WAYBILLS'][] = (string) $record->waybill;
         }
 
         $totalCounts[$status]++;
