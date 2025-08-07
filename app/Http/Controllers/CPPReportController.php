@@ -19,7 +19,8 @@ class CPPReportController extends Controller
         });
 
         // Group Likha Orders by date + normalized page
-        $orderData = MacroOutput::select('TIMESTAMP', 'PAGE')
+        $orderData = MacroOutput::select('TIMESTAMP', 'PAGE', 'ITEM_NAME', 'COD')
+
     ->get()
     ->groupBy(function ($item) use ($normalize) {
         try {
@@ -47,18 +48,26 @@ class CPPReportController extends Controller
 
     $weightedCPI = $cpiDenominator > 0 ? round($amountSpent / $cpiDenominator, 2) : null;
 
-            $orderCount = isset($orderData[$key]) ? $orderData[$key]->count() : 0;
-            $cpp = $orderCount > 0 ? round($amountSpent / $orderCount, 2) : null;
+            $orders = $orderData[$key] ?? collect();
+$orderCount = $orders->count();
+$cpp = $orderCount > 0 ? round($amountSpent / $orderCount, 2) : null;
 
-            $summary[] = [
-                'date' => $date,
-                'page' => $adsGroup->first()->page,
-                'amount_spent' => $amountSpent,
-                'orders' => $orderCount,
-                'cpp' => $cpp,
-                'cpm' => $cpm,
-                'cpi' => $weightedCPI,
-            ];
+// Extract unique ITEM_NAME and COD from this group
+$uniqueItems = $orders->pluck('ITEM_NAME')->filter()->unique()->values()->all();
+$uniqueCODs = $orders->pluck('COD')->filter()->unique()->values()->all();
+
+$summary[] = [
+    'date' => $date,
+    'page' => $adsGroup->first()->page,
+    'amount_spent' => $amountSpent,
+    'orders' => $orderCount,
+    'cpp' => $cpp,
+    'cpm' => $cpm,
+    'cpi' => $weightedCPI,
+    'item_names' => $uniqueItems,
+    'cods' => $uniqueCODs,
+];
+
         }
 
         // Sort by date ASC
@@ -76,12 +85,15 @@ class CPPReportController extends Controller
             }
 
             $matrix[$page][$date] = [
-                'cpp' => $row['cpp'],
-                'orders' => $row['orders'],
-                'cpm' => $row['cpm'],
-                'cpi' => $row['cpi'],  // ✅ ADD THIS LINE
-                'spent' => $row['amount_spent'],
-            ];
+    'cpp' => $row['cpp'],
+    'orders' => $row['orders'],
+    'cpm' => $row['cpm'],
+    'cpi' => $row['cpi'],
+    'spent' => $row['amount_spent'],
+    'item_names' => $row['item_names'], // ✅ new
+    'cods' => $row['cods'],             // ✅ new
+];
+
         }
 
 $matrix = collect($matrix)->sortKeys()->toArray();
