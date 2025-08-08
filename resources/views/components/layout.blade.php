@@ -132,15 +132,30 @@
 
   {{-- Page content --}}
   <main>
-    @if (request()->is(['task/my-tasks', 'macro/gsheet/index', 'task/team-tasks','ads-manager/edit-messaging-template','encoder/checker_1','/cpp']))
-      <div class="w-full px-0">
-        {{ $slot }}
-      </div>
-    @else
-      <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        {{ $slot }}
-      </div>
-    @endif
+    @if (request()->is([
+    'task/my-tasks',
+    'macro/gsheet/index',
+    'task/team-tasks',
+    'ads-manager/edit-messaging-template',
+    'encoder/checker_1'
+]))
+  {{-- 1) SAGAD: full width, no padding --}}
+  <div class="w-full px-0">
+    {{ $slot }}
+  </div>
+
+@elseif (request()->is('cpp') || request()->is('cpp/*'))
+  {{-- 2) HINDI SAGAD: full width pero may horizontal padding --}}
+  <div class="w-full px-4 md:px-6 lg:px-8">
+    {{ $slot }}
+  </div>
+
+@else
+  {{-- 3) DEFAULT: centered container with max width --}}
+  <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+    {{ $slot }}
+  </div>
+@endif
   </main>
 </div>
 </body>

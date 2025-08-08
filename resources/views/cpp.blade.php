@@ -159,7 +159,7 @@
     // 2) Performance by Date
     let dateHtml = `
       <h2 class="font-bold text-lg mb-2">All Pages – Performance by Date</h2>
-      <table class="min-w-full border text-sm"><thead class="bg-gray-200"><tr>
+      <table class="w-full table-auto border text-sm"><thead class="bg-gray-200"><tr>
         <th class="border px-2 py-1">Date</th>
         <th class="border px-2 py-1">Amount Spent</th>
         <th class="border px-2 py-1">Orders</th>
@@ -215,7 +215,7 @@
     // Inside: else { ... }  → single page view logic
 let html = `
   <h2 class="font-bold text-lg mb-2">${pageFilter} – Performance by Date</h2>
-  <table class="min-w-full border text-sm mb-6">
+  <table class="w-full border text-sm mb-6">
     <thead class="bg-gray-200"><tr>
       <th class="border px-2 py-1">Date</th>
       <th class="border px-2 py-1">Amount Spent</th>
@@ -232,7 +232,11 @@ let html = `
 
     filteredDates.forEach(date => {
   const r = data[date] || {};
-  const itemNames = (r.item_names || []).join(', ');
+  const itemNames = (r.item_names || []);
+const itemContent = itemNames.length <= 1
+  ? itemNames.join('')
+  : itemNames.join('\n');
+
   const cods = (r.cods || []).join(', ');
 
   html += `
@@ -242,7 +246,11 @@ let html = `
       <td class="border px-2 py-1 text-center">${r.orders != null ? r.orders : '—'}</td>
       <td class="border px-2 py-1 text-center">${r.cpp != null ? `₱${r.cpp.toFixed(2)}` : '—'}</td>
       <td class="border px-2 py-1 text-center">${r.cpm != null ? `₱${r.cpm.toFixed(2)}` : '—'}</td>
-      <td class="border px-2 py-1 text-left whitespace-nowrap overflow-hidden text-ellipsis max-w-[300px]" title="${itemNames}">${itemNames || '—'}</td>
+      <td class="border px-2 py-1 text-left whitespace-pre-line">
+  ${itemContent || '—'}
+</td>
+
+
 <td class="border px-2 py-1 text-left whitespace-nowrap overflow-hidden text-ellipsis max-w-[300px]" title="${cods}">${cods || '—'}</td>
     </tr>
   `;
@@ -373,4 +381,5 @@ let html = `
     };
     
   </script>
+  
 </x-layout>
