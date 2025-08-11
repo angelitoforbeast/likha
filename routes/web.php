@@ -29,6 +29,7 @@ use App\Http\Controllers\Checker2GsheetController;
 use App\Http\Controllers\MacroOutputController;
 use App\Http\Controllers\PageSenderMappingController;
 use App\Http\Controllers\JntCheckerController;
+use App\Http\Controllers\JntUploadController;
 
 
 use App\Models\Role;
@@ -195,6 +196,9 @@ Route::post('/task/update-team-task', [TaskController::class, 'updateTeamTask'])
     Route::post('/from_jnt', [FromJntController::class, 'store']);
     Route::get('/from_jnt_view', [FromJntController::class, 'index']);
 
+    Route::get('/jnt_upload', [JntUploadController::class, 'index'])->name('jnt.upload.index');
+    Route::post('/jnt_upload', [JntUploadController::class, 'store'])->name('jnt.upload.store');
+    Route::get('/jnt_upload/status/{uploadLog}', [JntUploadController::class, 'status'])->name('jnt.upload.status');
     Route::view('/jnt_update', 'jnt_update');
     Route::post('/jnt_update', [FromJntController::class, 'updateOrInsert']);
     Route::get('/jnt_rts', [FromJntController::class, 'rtsView']);

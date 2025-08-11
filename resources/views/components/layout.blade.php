@@ -65,7 +65,7 @@
               <x-navlink href="/ads_manager/index" :active="request()->is('ads_manager/index')">ADS</x-navlink>
               <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">LIKHA</x-navlink>
               <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">MACRO</x-navlink>
-              <x-navlink href="/jnt_update" :active="request()->is('jnt_update')">WAYBILL</x-navlink>
+              <x-navlink href="/jnt_upload" :active="request()->is('jnt_upload')">WAYBILL</x-navlink>
               <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
               <x-navlink href="/jnt/checker" :active="request()->is('jnt/checker')">JNT CHECKER</x-navlink>
               <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
