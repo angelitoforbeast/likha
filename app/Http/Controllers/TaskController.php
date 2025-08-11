@@ -92,40 +92,51 @@ class TaskController extends Controller
     public function myTasks(Request $request)
 {
     $start = $request->input('start_date');
-    $end = $request->input('end_date');
+    $end   = $request->input('end_date');
 
+    $today = now('Asia/Manila')->toDateString();
     $statusOrder = ['pending', 'in_progress', 'completed'];
 
-    $query = Task::with(['creator.employeeProfile'])
-        ->where('user_id', auth()->id());
+    // Build a reusable date condition closure
+    $dateFilter = function ($q) use ($start, $end, $today) {
+        if ($start && $end) {
+            $q->whereBetween('due_date', [$start, $end]);
+        } elseif ($start) {
+            $q->whereDate('due_date', '>=', $start);
+        } elseif ($end) {
+            $q->whereDate('due_date', '<=', $end);
+        } else {
+            // default: today
+            $q->whereDate('due_date', $today);
+        }
+    };
 
-    if ($start && $end) {
-        $query->whereBetween('due_date', [$start, $end]);
-    } elseif ($start) {
-        $query->whereDate('due_date', '>=', $start);
-    } elseif ($end) {
-        $query->whereDate('due_date', '<=', $end);
-    } else {
-        $today = now()->format('Y-m-d');
-        $query->whereDate('due_date', $today); // Default to today
-    }
+    $query = Task::with(['creator.employeeProfile'])
+        ->where('user_id', auth()->id())
+        ->where(function ($q) use ($dateFilter) {
+            // (in date range/today)
+            $q->where($dateFilter)
+              // OR any non-completed regardless of date
+              ->orWhereIn('status', ['pending', 'in_progress']);
+        });
 
     $tasks = $query->get()
-    ->sortBy(function ($task) use ($statusOrder) {
-        return [
-            array_search($task->status, $statusOrder),
-            $task->status === 'completed' ? -strtotime($task->completed_at ?? '1970-01-01') : null,
-            $task->priority_score,
-            strtotime($task->due_date . ' ' . $task->due_time),
-        ];
-    })
-    ->values();
+        ->sortBy(function ($task) use ($statusOrder) {
+            return [
+                array_search($task->status, $statusOrder),
+                $task->status === 'completed'
+                    ? -strtotime($task->completed_at ?? '1970-01-01')
+                    : 0,
+                -((int)($task->priority_score ?? 0)),
+                strtotime(trim(($task->due_date ?? '') . ' ' . ($task->due_time ?? '00:00'))),
+            ];
+        })
+        ->values();
 
-
-    // Paginate manually
+    // Manual pagination
     $perPage = 10;
-    $page = LengthAwarePaginator::resolveCurrentPage();
-    $paginated = new LengthAwarePaginator(
+    $page = \Illuminate\Pagination\LengthAwarePaginator::resolveCurrentPage();
+    $paginated = new \Illuminate\Pagination\LengthAwarePaginator(
         $tasks->forPage($page, $perPage),
         $tasks->count(),
         $perPage,
@@ -133,10 +144,19 @@ class TaskController extends Controller
         ['path' => $request->url(), 'query' => $request->query()]
     );
 
+    // Pass start/end so the inputs can show the current filter (or today's defaults)
+    if (!$start && !$end) {
+        $start = $today;
+        $end   = $today;
+    }
+
     return view('tasks.my_tasks', [
         'tasks' => $paginated,
+        'start' => $start,
+        'end'   => $end,
     ]);
 }
+
     public function teamTasks(Request $request)
 {
     $start = $request->input('start_date');
