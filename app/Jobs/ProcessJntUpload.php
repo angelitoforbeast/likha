@@ -224,38 +224,81 @@ class ProcessJntUpload implements ShouldQueue
     }
 
     /** Map header names (case-insensitive, fuzzy) to canonical keys */
-    private function buildHeaderMap(array $headers): array
-    {
-        $norm = fn ($s) => trim(mb_strtolower((string) $s));
+    /** Map header names with strict token/phrase matching (no loose substrings). */
+private function buildHeaderMap(array $headers): array
+{
+    $norm = fn ($s) => trim(mb_strtolower((string) $s));
 
-        $aliases = [
-            'waybill_number' => ['waybill', 'waybill number', 'awb', 'tracking no', 'tracking number'],
-            'status'         => ['status'],
-            'item_name'      => ['item name', 'item', 'product', 'product name'],
-            'sender'         => ['sender', 'shipper', 'from'],
-            'receiver'       => ['receiver', 'consignee', 'to'],
-            'receiver_cellphone' => ['receiver cellphone', 'receiver phone', 'consignee phone', 'phone', 'mobile'],
-            'cod'            => ['cod', 'cod amt', 'cod amount'],
-            'submission_time'=> ['submission time', 'pu time', 'pickup time', 'created time'],
-            'signingtime'    => ['signingtime', 'signing time', 'delivered time'],
-            'remarks'        => ['remarks', 'remark', 'note', 'notes'],
-        ];
+    $aliases = [
+        'waybill_number' => ['waybill', 'waybill number', 'awb', 'tracking no', 'tracking number'],
+        'status'         => ['status'],
+        'item_name'      => ['item name', 'item', 'product', 'product name'],
+        'sender'         => ['sender', 'shipper', 'from'],
+        // "to" allowed only if the whole header is exactly "to"
+        'receiver'       => ['receiver', 'consignee', 'to'],
+        // keep generic terms as fallback only (later guarded)
+        'receiver_cellphone' => ['receiver cellphone', 'receiver phone', 'consignee phone', 'phone', 'mobile'],
+        // protect from matching "code" columns
+        'cod'            => ['cod', 'c.o.d', 'cod amt', 'cod amount', 'collect on delivery'],
+        'submission_time'=> ['submission time', 'pu time', 'pickup time', 'created time'],
+        'signingtime'    => ['signingtime', 'signing time', 'delivered time'],
+        'remarks'        => ['remarks', 'remark', 'note', 'notes'],
+    ];
 
-        $map = [];
-        foreach ($headers as $idx => $label) {
-            $h = $norm($label);
-            foreach ($aliases as $canon => $cands) {
-                foreach ($cands as $cand) {
-                    if (strpos($h, $cand) !== false || $h === $cand) {
-                        if (!isset($map[$canon])) {
-                            $map[$canon] = $idx;
-                        }
+    $map = [];
+
+    foreach ($headers as $idx => $label) {
+        $h = $norm($label);
+        // tokenize words: "Creator Code" -> ["creator","code"]
+        $tokens = preg_split('/[^a-z0-9]+/u', $h, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        foreach ($aliases as $canon => $cands) {
+            // keep first match per canon key
+            if (isset($map[$canon])) continue;
+
+            foreach ($cands as $cand) {
+                $c = $norm($cand);
+                $matched = false;
+
+                if ($h === $c) {
+                    // exact full-header match
+                    $matched = true;
+                } elseif (str_contains($c, ' ')) {
+                    // phrase match with word boundaries
+                    $pattern = '/\b' . preg_quote($c, '/') . '\b/u';
+                    $matched = (bool) preg_match($pattern, $h);
+                } else {
+                    // single-token alias must match as a whole token (not substring)
+                    $matched = in_array($c, $tokens, true);
+                }
+
+                // Guards against common false-positives
+                if ($matched) {
+                    if ($canon === 'receiver' && $c === 'to' && $h !== 'to') {
+                        // only match if header is literally "to"
+                        $matched = false;
                     }
+                    if ($canon === 'cod' && in_array('code', $tokens, true)) {
+                        // prevent "creator code", "product code", etc.
+                        $matched = false;
+                    }
+                    if ($canon === 'receiver_cellphone' && in_array('sender', $tokens, true)) {
+                        // don't steal "sender phone"
+                        $matched = false;
+                    }
+                }
+
+                if ($matched) {
+                    $map[$canon] = $idx;
+                    break;
                 }
             }
         }
-        return $map;
     }
+
+    return $map;
+}
+
 
     private function hasRequiredHeaders(array $map): bool
     {
