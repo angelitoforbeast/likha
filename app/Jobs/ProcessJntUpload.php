@@ -186,7 +186,7 @@ class ProcessJntUpload implements ShouldQueue
                 if ($headerMap === null) {
                     $headerMap = $this->buildHeaderMap($cells);
                     if (!$this->hasRequiredHeaders($headerMap)) {
-                        throw new \RuntimeException('Missing required headers (Waybill & Status at least).');
+                        throw new \RuntimeException('Wrong File Uploaded');
                     }
                     continue; // next row (data)
                 }
