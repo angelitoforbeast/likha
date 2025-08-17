@@ -17,14 +17,14 @@
 <div class="min-h-full">
   {{-- Top Navigation --}}
   <nav class="bg-gray-800 fixed top-0 inset-x-0 z-50">
-    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <div class="w-full px-4 sm:px-6 lg:px-8">
       <div class="flex h-16 items-center justify-between">
-        <div class="flex items-center">
+        <div class="flex items-center flex-1 min-w-0">
           <div class="shrink-0">
             <img class="size-8" src="https://static.vecteezy.com/system/resources/previews/018/930/698/original/facebook-logo-facebook-icon-transparent-free-png.png" alt="Logo" />
           </div>
-          <div class="hidden md:block">
-            <div class="ml-10 flex items-baseline space-x-4">
+          <div class="hidden md:flex md:flex-1 overflow-x-auto">
+            <div class="ml-10 flex items-center gap-x-4 gap-y-2 flex-1 flex-wrap">
               @if(in_array($role, ['Marketing', 'Marketing - OIC']))
 
               {{-- 📂 Tasks Dropdown --}}
@@ -67,6 +67,7 @@
               <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">MACRO</x-navlink>
               <x-navlink href="/jnt_upload" :active="request()->is('jnt_upload')">WAYBILL</x-navlink>
               <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
+              <x-navlink href="/jnt_rts" :active="request()->is('jnt_rts')">RTS</x-navlink>
               <x-navlink href="/jnt/checker" :active="request()->is('jnt/checker')">JNT CHECKER</x-navlink>
               <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
               <x-navlink href="/encoder/summary" :active="request()->is('macro_output/index')">ORDER SUMMARY</x-navlink>

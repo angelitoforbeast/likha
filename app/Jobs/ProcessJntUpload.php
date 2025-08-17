@@ -302,9 +302,9 @@ private function buildHeaderMap(array $headers): array
 
     private function hasRequiredHeaders(array $map): bool
     {
-        return isset($map['waybill_number'], $map['status']);
+        return isset($map['waybill_number'], $map['status'], $map['signingtime']);
     }
-
+    
     private function normalizeRow(array $cells, array $map): array
     {
         $get = function (string $key) use ($cells, $map) {
