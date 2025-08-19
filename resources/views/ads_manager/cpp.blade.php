@@ -24,14 +24,18 @@
 
   {{-- Display Area --}}
   <div id="singlePageLayout" class="hidden lg:flex gap-6 mb-10">
-    <div class="flex-1">
-      <h2 class="font-bold text-lg mb-2">CPP Chart</h2>
-      <canvas id="cppChart" height="100" class="mb-8"></canvas>
-      <h2 class="font-bold text-lg mb-2">CPM Chart</h2>
-      <canvas id="cpmChart" height="100"></canvas>
-    </div>
-    <div class="flex-1 overflow-auto" id="rightTableContainer"></div>
+  <!-- Left: charts = 1/3 -->
+  <div class="basis-full lg:basis-1/3 lg:shrink-0">
+    <h2 class="font-bold text-lg mb-2">CPP Chart</h2>
+    <canvas id="cppChart" height="100" class="mb-8"></canvas>
+    <h2 class="font-bold text-lg mb-2">CPM Chart</h2>
+    <canvas id="cpmChart" height="100"></canvas>
   </div>
+
+  <!-- Right: table = 2/3 -->
+  <div class="basis-full lg:basis-2/3 lg:shrink-0 min-w-0 overflow-auto" id="rightTableContainer"></div>
+</div>
+
 
   {{-- Multi Page Tables (default) --}}
   <div id="multiPageTables" class="overflow-auto mb-10"></div>
