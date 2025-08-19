@@ -30,6 +30,7 @@ use App\Http\Controllers\MacroOutputController;
 use App\Http\Controllers\PageSenderMappingController;
 use App\Http\Controllers\JntCheckerController;
 use App\Http\Controllers\JntUploadController;
+use App\Http\Controllers\PancakeSubscriptionCheckerController;
 
 
 use App\Models\Role;
@@ -103,7 +104,10 @@ Route::get('/ads_manager/report/status', [\App\Http\Controllers\AdsManagerReport
     ->name('ads_manager.report.status');
 
     Route::get('/ads_manager/cpp', [\App\Http\Controllers\CPPController::class, 'index'])->name('ads_manager.cpp');
-
+Route::get(
+    '/ads_manager/pancake-subscription-checker',
+    [PancakeSubscriptionCheckerController::class, 'index']
+)->name('ads_manager.pancake_subscription_checker');
 
 
 
