@@ -91,6 +91,18 @@ Route::get('/ads-manager/edit-messaging-template', [AdCampaignCreativeController
 Route::post('/ads-manager/edit-messaging-template', [AdCampaignCreativeController::class, 'bulkUpdate'])->name('ads_manager_creatives.bulk_update');
 Route::put('/ads-manager/edit-messaging-template/{id}', [AdCampaignCreativeController::class, 'update'])->name('ads_manager_creatives.update');
 
+// Ads Manager Reports - Import (simple status)
+Route::get('/ads_manager/report', [\App\Http\Controllers\AdsManagerReportController::class, 'index'])
+    ->name('ads_manager.report');
+
+Route::post('/ads_manager/report', [\App\Http\Controllers\AdsManagerReportController::class, 'store'])
+    ->name('ads_manager.report.store');
+
+// JSON status endpoint for polling (no full reload)
+Route::get('/ads_manager/report/status', [\App\Http\Controllers\AdsManagerReportController::class, 'status'])
+    ->name('ads_manager.report.status');
+
+
 
 
     
