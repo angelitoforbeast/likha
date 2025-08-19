@@ -62,15 +62,16 @@
                 </div>
               </div>
 
-              <x-navlink href="/ads_manager/index" :active="request()->is('ads_manager/index')">ADS</x-navlink>
+              <x-navlink href="/ads_manager/report" :active="request()->is('ads_manager/report')">ADS</x-navlink>
               <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">LIKHA</x-navlink>
               <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">MACRO</x-navlink>
               <x-navlink href="/jnt_upload" :active="request()->is('jnt_upload')">WAYBILL</x-navlink>
-              <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
+              <x-navlink href="/ads_manager/cpp" :active="request()->is('ads_manager/cpp')">CPP</x-navlink>
               <x-navlink href="/jnt_rts" :active="request()->is('jnt_rts')">RTS</x-navlink>
               <x-navlink href="/jnt/checker" :active="request()->is('jnt/checker')">JNT CHECKER</x-navlink>
               <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
               <x-navlink href="/encoder/summary" :active="request()->is('macro_output/index')">ORDER SUMMARY</x-navlink>
+              <x-navlink href="/ads_manager/pancake-subscription-checker" :active="request()->is('ads_manager/pancake-subscription-checker')">PURCHASES</x-navlink>
               @endif
 
               @if(in_array($role, ['Data Encoder','Data Encoder - OIC']))
@@ -138,8 +139,9 @@
     'task/my-tasks',
     'macro/gsheet/index',
     'task/team-tasks',
-    'ads-manager/edit-messaging-template',
-    'encoder/checker_1'
+    'ads_manager/edit-messaging-template',
+    'encoder/checker_1',
+    'ads_manager/cpp'
 ]))
   {{-- 1) SAGAD: full width, no padding --}}
   <div class="w-full px-0">
