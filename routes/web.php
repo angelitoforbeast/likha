@@ -102,6 +102,8 @@ Route::post('/ads_manager/report', [\App\Http\Controllers\AdsManagerReportContro
 Route::get('/ads_manager/report/status', [\App\Http\Controllers\AdsManagerReportController::class, 'status'])
     ->name('ads_manager.report.status');
 
+    Route::get('/ads_manager/cpp', [\App\Http\Controllers\CPPController::class, 'index'])->name('ads_manager.cpp');
+
 
 
 

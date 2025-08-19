@@ -250,9 +250,16 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             if (array_key_exists($intCol, $row)) $row[$intCol] = $this->toInt($row[$intCol]);
         }
         // decimals
-        foreach (['amount_spent_php','cost_per_result','ad_set_budget'] as $decCol) {
-            if (array_key_exists($decCol, $row)) $row[$decCol] = $this->toDecimal($row[$decCol]);
-        }
+        // decimals
+foreach (['amount_spent_php','cost_per_result','ad_set_budget'] as $decCol) {
+    if (array_key_exists($decCol, $row)) $row[$decCol] = $this->toDecimal($row[$decCol]);
+}
+
+/** 🔧 Apply 12% multiplier to amount_spent_php BEFORE saving */
+if (array_key_exists('amount_spent_php', $row) && $row['amount_spent_php'] !== null) {
+    $row['amount_spent_php'] = round($row['amount_spent_php'] * 1.12, 2); // fits decimal(12,2)
+}
+
 
         // datetimes (full)
         foreach (['reporting_starts','reporting_ends'] as $dtCol) {
