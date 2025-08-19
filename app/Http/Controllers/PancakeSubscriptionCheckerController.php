@@ -6,67 +6,78 @@ use Illuminate\Http\Request;
 use App\Models\AdsManagerReport;
 use App\Models\MacroOutput;
 use Carbon\Carbon;
+use Carbon\CarbonPeriod;
 
 class PancakeSubscriptionCheckerController extends Controller
 {
     public function index(Request $request)
     {
-        // Single date filter (default: today, Y-m-d)
-        $date = $request->input('date', now()->toDateString());
-        $dateDMY = Carbon::parse($date)->format('d-m-Y');
+        // Range inputs; default both = today
+        $from = $request->input('from');
+        $to   = $request->input('to');
 
-        // Normalization helper for joining by page
+        if (!$from || !$to) {
+            $from = now()->toDateString(); // Y-m-d
+            $to   = $from;
+        }
+
+        // Build list of days in 'd-m-Y' for macro_output TIMESTAMP LIKE filters
+        $period   = CarbonPeriod::create(Carbon::parse($from), Carbon::parse($to));
+        $datesDMY = [];
+        foreach ($period as $d) {
+            $datesDMY[] = $d->format('d-m-Y');
+        }
+
         $normalize = fn($v) => strtolower(str_replace(' ', '', (string) $v));
 
         /**
          * 1) ADS SIDE (ads_manager_report)
-         * Required fields: day, page_name, purchases
+         * Required fields: day (Y-m-d), page_name, purchases
+         * Sum purchases per page within [from, to]
          */
         $adsRows = AdsManagerReport::query()
             ->select(['day', 'page_name', 'purchases'])
-            ->where('day', $date) // use exact match on the 'day' column
+            ->whereBetween('day', [$from, $to])
             ->get();
 
-        // Aggregate purchases per normalized page
         $adsByPage = [];
         foreach ($adsRows as $r) {
             $key = $normalize($r->page_name);
             if (!isset($adsByPage[$key])) {
-                $adsByPage[$key] = [
-                    'page'      => (string) $r->page_name,
-                    'purchases' => 0,
-                ];
+                $adsByPage[$key] = ['page' => (string) $r->page_name, 'purchases' => 0];
             }
             $adsByPage[$key]['purchases'] += (int) ($r->purchases ?? 0);
         }
 
         /**
          * 2) ORDERS SIDE (macro_output)
-         * Count orders per page for the same day
-         * TIMESTAMP format is "H:i d-m-Y" → filter via LIKE on " d-m-Y"
+         * TIMESTAMP format: "H:i d-m-Y"
+         * OR-like per day sa period
          */
         $ordersRows = MacroOutput::query()
             ->select(['TIMESTAMP', 'PAGE'])
-            ->where('TIMESTAMP', 'like', '% ' . $dateDMY)
+            ->when(count($datesDMY) > 0, function ($q) use ($datesDMY) {
+                $q->where(function ($qq) use ($datesDMY) {
+                    foreach ($datesDMY as $dmy) {
+                        $qq->orWhere('TIMESTAMP', 'like', '% ' . $dmy);
+                    }
+                });
+            })
             ->get();
 
         $ordersByPage = [];
         foreach ($ordersRows as $r) {
             $key = $normalize($r->PAGE);
             if (!isset($ordersByPage[$key])) {
-                $ordersByPage[$key] = [
-                    'page'   => (string) $r->PAGE,
-                    'orders' => 0,
-                ];
+                $ordersByPage[$key] = ['page' => (string) $r->PAGE, 'orders' => 0];
             }
             $ordersByPage[$key]['orders']++;
         }
 
         /**
-         * 3) UNION + MERGE (by page)
+         * 3) Merge pages + totals
          */
-        $allKeys = collect(array_unique(array_merge(array_keys($adsByPage), array_keys($ordersByPage))))
-            ->values();
+        $allKeys = collect(array_unique(array_merge(array_keys($adsByPage), array_keys($ordersByPage))))->values();
 
         $rows = [];
         $totalPurchases = 0;
@@ -77,24 +88,21 @@ class PancakeSubscriptionCheckerController extends Controller
             $purchases = $adsByPage[$k]['purchases'] ?? 0;
             $orders    = $ordersByPage[$k]['orders'] ?? 0;
 
-            $rows[] = [
-                'page'      => $pageName,
-                'purchases' => $purchases, // from ads_manager_report
-                'orders'    => $orders,    // from macro_output
-            ];
+            $rows[] = ['page' => $pageName, 'purchases' => $purchases, 'orders' => $orders];
 
             $totalPurchases += $purchases;
             $totalOrders    += $orders;
         }
 
-        // Sort rows alphabetically by page
         usort($rows, fn($a, $b) => strcasecmp($a['page'], $b['page']));
 
-        $totals = [
-            'purchases' => $totalPurchases,
-            'orders'    => $totalOrders,
-        ];
+        $totals = ['purchases' => $totalPurchases, 'orders' => $totalOrders];
 
-        return view('ads_manager.pancake-subscription-checker', compact('date', 'rows', 'totals'));
+        return view('ads_manager.pancake-subscription-checker', [
+            'from'   => $from,
+            'to'     => $to,
+            'rows'   => $rows,
+            'totals' => $totals,
+        ]);
     }
 }
