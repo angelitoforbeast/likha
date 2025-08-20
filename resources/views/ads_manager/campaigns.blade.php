@@ -54,16 +54,20 @@
         <input type="date" class="border rounded px-2 py-2 text-sm" x-model="filters.end_date" @change="reload()">
         <select class="border rounded px-2 py-2 text-sm" x-model="filters.page_name" @change="reload()">
           <option value="all">All Pages</option>
-          <!-- Optional: you can server-render your pages; or fetch and cache -->
+          @foreach ($pages as $p)
+            <option value="{{ $p }}">{{ $p }}</option>
+          @endforeach
         </select>
       </div>
     </div>
 
     <!-- Table Card -->
     <section class="bg-white border rounded-lg shadow-sm">
-      <div class="overflow-x-auto">
+      <!-- Scroll container so sticky works -->
+      <div class="overflow-auto max-h-[70vh]">
         <table class="min-w-[1000px] w-full text-sm">
-          <thead class="bg-gray-50 sticky top-16 z-30">
+          <!-- Sticky HEADER -->
+          <thead class="bg-gray-50 sticky top-0 z-30">
             <tr class="text-left text-gray-600">
               <th class="w-16 px-4 py-3">Off / On</th>
               <th class="px-4 py-3">
@@ -91,12 +95,12 @@
               <th class="px-4 py-3">Purchases</th>
             </tr>
           </thead>
+
           <tbody>
             <template x-for="row in rows" :key="rowKey(row)">
               <tr class="border-t hover:bg-gray-50"
                   @click="rowClick(row)"
                   :class="{'cursor-pointer': tab!=='ads'}">
-                <!-- Off / On -->
                 <td class="px-4 py-3">
                   <span class="inline-flex items-center gap-2">
                     <span class="inline-block w-2.5 h-2.5 rounded-full" :class="row.on ? 'bg-emerald-600' : 'bg-gray-400'"></span>
@@ -104,7 +108,6 @@
                   </span>
                 </td>
 
-                <!-- Name -->
                 <td class="px-4 py-3">
                   <template x-if="tab==='campaigns'">
                     <div class="font-medium text-blue-700 hover:underline" x-text="row.campaign_name"></div>
@@ -119,30 +122,20 @@
                   <div class="text-[11px] text-gray-500" x-text="row.page_name"></div>
                 </td>
 
-                <!-- Spend -->
                 <td class="px-4 py-3" x-text="money(row.spend)"></td>
-
-                <!-- CPM per 1,000 -->
                 <td class="px-4 py-3" x-text="row.cpm_1000 != null ? money(row.cpm_1000) : '—'"></td>
-
-                <!-- Cost per message -->
                 <td class="px-4 py-3" x-text="row.cpm_msg != null ? money(row.cpm_msg) : '—'"></td>
-
-                <!-- Cost per result -->
                 <td class="px-4 py-3" x-text="row.cpr != null ? money(row.cpr) : '—'"></td>
-
-                <!-- Cost per purchase -->
                 <td class="px-4 py-3" x-text="row.cpp != null ? money(row.cpp) : '—'"></td>
 
-                <!-- Impressions / Messages / Purchases -->
                 <td class="px-4 py-3" x-text="num(row.impressions)"></td>
                 <td class="px-4 py-3" x-text="num(row.messages)"></td>
                 <td class="px-4 py-3" x-text="num(row.purchases)"></td>
               </tr>
             </template>
 
-            <!-- Footer summary -->
-            <tr class="bg-gray-50 border-t">
+            <!-- Sticky FOOTER totals -->
+            <tr class="bg-gray-50 border-t sticky bottom-0 z-20">
               <td class="px-4 py-3"></td>
               <td class="px-4 py-3 text-gray-600">
                 <span x-text="`Results from ${rows.length} ${tabLabel()}`"></span>
@@ -181,82 +174,34 @@
           limit: 200,
         },
 
-        // UI helpers
-        titleForTab() {
-          if (this.tab === 'campaigns') return 'Campaigns';
-          if (this.tab === 'adsets') return 'Ad sets';
-          return 'Ads';
-        },
-        tabLabel() { return this.tab === 'ads' ? 'ads' : (this.tab === 'adsets' ? 'ad sets' : 'campaigns'); },
-        rowKey(r) { return (r.ad_id || r.ad_set_id || r.campaign_id); },
+        titleForTab() { return this.tab === 'campaigns' ? 'Campaigns' : (this.tab === 'adsets' ? 'Ad sets' : 'Ads'); },
+        tabLabel()    { return this.tab === 'ads' ? 'ads' : (this.tab === 'adsets' ? 'ad sets' : 'campaigns'); },
+        rowKey(r)     { return (r.ad_id || r.ad_set_id || r.campaign_id); },
         money(v){ return `₱${Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})}`; },
         num(v){ return Number(v||0).toLocaleString('en-PH'); },
 
-        // Sorting
         toggleSort(k){
-          if (this.sortBy === k) {
-            this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
-          } else {
-            this.sortBy = k;
-            this.sortDir = 'desc';
-          }
+          if (this.sortBy === k) this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+          else { this.sortBy = k; this.sortDir = 'desc'; }
           this.reload();
         },
 
-        // Tab switching
         switchTab(t){
           this.tab = t;
-          if (t === 'adsets' && !this.currentCampaignId) {
-            // show all ad sets unless user clicked a campaign
-          }
-          if (t === 'ads' && !this.currentAdSetId) {
-            // show all ads unless user clicked an ad set
-          }
           this.reload();
         },
 
-        // Row click drilldown
         rowClick(row){
           if (this.tab === 'campaigns') {
-            this.currentCampaignId = row.campaign_id;
-            this.tab = 'adsets';
-            this.reload();
+            this.currentCampaignId = row.campaign_id; this.tab = 'adsets'; this.reload();
           } else if (this.tab === 'adsets') {
-            this.currentAdSetId = row.ad_set_id;
-            this.tab = 'ads';
-            this.reload();
+            this.currentAdSetId = row.ad_set_id; this.tab = 'ads'; this.reload();
           }
         },
 
-        // Data loading
         async reload(){
           const params = new URLSearchParams({
-            level: this.tab === 'campaigns' ? 'campaigns' : (this.tab === 'adsets' ? 'adsets' : 'ads'),
-            start_date: this.filters.start_date || '',
-            end_date: this.filters.end_date || '',
-            page_name: this.filters.page_name || 'all',
-            q: this.filters.q || '',
-            sort_by: this.sortBy,
-            sort_dir: this.sortDir,
-            limit: this.filters.limit
-          });
-          if (this.currentCampaignId && this.tab !== 'campaigns') {
-            params.set('campaign_id', this.currentCampaignId);
-          }
-          if (this.currentAdSetId && this.tab === 'ads') {
-            params.set('ad_set_id', this.currentAdSetId);
-          }
-
-          const res  = await fetch('{{ route('ads_manager.campaigns.data') }}?'+params.toString());
-          const json = await res.json();
-          this.rows   = json.rows || [];
-          this.totals = json.totals || {};
-        },
-
-        exportCsv(){
-          // Quick open with current params + export=csv at campaign level
-          const params = new URLSearchParams({
-            level: this.tab === 'campaigns' ? 'campaigns' : (this.tab === 'adsets' ? 'adsets' : 'ads'),
+            level: this.tab,
             start_date: this.filters.start_date || '',
             end_date: this.filters.end_date || '',
             page_name: this.filters.page_name || 'all',
@@ -267,12 +212,31 @@
           });
           if (this.currentCampaignId && this.tab !== 'campaigns') params.set('campaign_id', this.currentCampaignId);
           if (this.currentAdSetId && this.tab === 'ads') params.set('ad_set_id', this.currentAdSetId);
-          params.set('export', 'csv');
+
+          const res  = await fetch('{{ route('ads_manager.campaigns.data') }}?'+params.toString());
+          const json = await res.json();
+          this.rows   = json.rows || [];
+          this.totals = json.totals || {};
+        },
+
+        exportCsv(){
+          const params = new URLSearchParams({
+            level: this.tab,
+            start_date: this.filters.start_date || '',
+            end_date: this.filters.end_date || '',
+            page_name: this.filters.page_name || 'all',
+            q: this.filters.q || '',
+            sort_by: this.sortBy,
+            sort_dir: this.sortDir,
+            limit: this.filters.limit,
+            export: 'csv'
+          });
+          if (this.currentCampaignId && this.tab !== 'campaigns') params.set('campaign_id', this.currentCampaignId);
+          if (this.currentAdSetId && this.tab === 'ads') params.set('ad_set_id', this.currentAdSetId);
           window.location = '{{ route('ads_manager.campaigns.data') }}?'+params.toString();
         },
 
         async init(){
-          // Optional: set default date range (e.g., this month)
           const now   = new Date();
           const start = new Date(now.getFullYear(), now.getMonth(), 1);
           this.filters.start_date = start.toISOString().slice(0,10);

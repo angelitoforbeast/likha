@@ -141,6 +141,7 @@
     'task/team-tasks',
     'ads_manager/edit-messaging-template',
     'encoder/checker_1',
+    'ads_manager/campaigns',
     'ads_manager/cpp'
 ]))
   {{-- 1) SAGAD: full width, no padding --}}

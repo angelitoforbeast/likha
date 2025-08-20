@@ -4,90 +4,95 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdsManagerCampaignsController extends Controller
 {
-    public function index(Request $request)
+    public function index()
     {
-        // Render UI only; data is fetched via /ads_manager/campaigns/data
-        return view('ads_manager.campaigns');
+        $pages = DB::table('ads_manager_reports')
+            ->whereNotNull('page_name')
+            ->selectRaw('TRIM(page_name) AS page_name')
+            ->distinct()
+            ->orderBy('page_name')
+            ->pluck('page_name')
+            ->toArray();
+
+        return view('ads_manager.campaigns', compact('pages'));
     }
 
     public function data(Request $request)
     {
-        // Inputs
         $level       = $request->input('level', 'campaigns'); // campaigns|adsets|ads
-        $start       = $request->input('start_date');         // YYYY-MM-DD
-        $end         = $request->input('end_date');           // YYYY-MM-DD
-        $pageName    = $request->input('page_name');          // optional
-        $q           = $request->input('q');                  // search text
+        $start       = $request->input('start_date');
+        $end         = $request->input('end_date');
+        $pageName    = $request->input('page_name');
+        $q           = $request->input('q');
         $sortBy      = $request->input('sort_by', 'spend');
         $sortDir     = strtolower($request->input('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
         $limit       = max(1, min((int) $request->input('limit', 200), 1000));
+        $export      = $request->input('export'); // 'csv' to export
 
-        // Drilldown params
         $campaignId  = $request->input('campaign_id');
         $adSetId     = $request->input('ad_set_id');
 
-        $driver = DB::getDriverName(); // "pgsql" or "mysql"
-if ($driver === 'pgsql') {
-    $dayExpr = 'COALESCE(day, DATE(reporting_starts))';
-} else {
-    $dayExpr = 'COALESCE(`day`, DATE(`reporting_starts`))';
-}
+        $driver = DB::getDriverName(); // 'pgsql' | 'mysql' | etc.
+        $dayExpr = $driver === 'pgsql'
+            ? 'COALESCE(day, DATE(reporting_starts))'
+            : 'COALESCE(`day`, DATE(`reporting_starts`))';
 
-$base = DB::table('ads_manager_reports');
+        $base = DB::table('ads_manager_reports');
 
-
-        // Filters
+        // Date range
         if ($start) $base->whereRaw("$dayExpr >= ?", [$start]);
         if ($end)   $base->whereRaw("$dayExpr <= ?", [$end]);
-        if ($pageName && $pageName !== 'all') $base->where('page_name', $pageName);
 
+        // Page filter (trim + case-insensitive)
+        if ($pageName && $pageName !== 'all') {
+            $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
+        }
+
+        // Search (case-insensitive, safe for NULLs)
         if ($q) {
-            $base->where(function ($qq) use ($q) {
-                $qq->where('campaign_name', 'like', "%{$q}%")
-                   ->orWhere('ad_set_name', 'like', "%{$q}%")
-                   ->orWhere('headline', 'like', "%{$q}%")
-                   ->orWhere('body_ad_settings', 'like', "%{$q}%")
-                   ->orWhere('item_name', 'like', "%{$q}%");
+            $like = '%'.trim($q).'%';
+            $base->where(function ($qq) use ($like) {
+                $qq->whereRaw('LOWER(COALESCE(campaign_name, \'\')) LIKE LOWER(?)', [$like])
+                   ->orWhereRaw('LOWER(COALESCE(ad_set_name, \'\')) LIKE LOWER(?)', [$like])
+                   ->orWhereRaw('LOWER(COALESCE(headline, \'\')) LIKE LOWER(?)', [$like])
+                   ->orWhereRaw('LOWER(COALESCE(body_ad_settings, \'\')) LIKE LOWER(?)', [$like])
+                   ->orWhereRaw('LOWER(COALESCE(item_name, \'\')) LIKE LOWER(?)', [$like]);
             });
         }
 
-        // Level-specific grouping
+        // ---- Level: Campaigns ------------------------------------------------
         if ($level === 'campaigns') {
-            $query = (clone $base)
-                ->selectRaw('
-                    campaign_id,
-                    MAX(campaign_name) AS campaign_name,
-                    MAX(page_name)     AS page_name,
-                    MAX(campaign_delivery) AS delivery_raw,
+            if ($campaignId) $base->where('campaign_id', $campaignId);
 
-                    SUM(amount_spent_php) AS spend,
-                    SUM(messaging_conversations_started) AS messages,
-                    SUM(purchases) AS purchases,
-                    SUM(impressions) AS impressions,
-                    SUM(reach) AS reach,
+            $query = (clone $base)->selectRaw('
+                campaign_id,
+                MAX(campaign_name) AS campaign_name,
+                MAX(page_name)     AS page_name,
+                MAX(campaign_delivery) AS delivery_raw,
 
-                    CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
-                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
-                    CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
-                    CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr
-                ')
-                ->groupBy('campaign_id');
+                SUM(amount_spent_php) AS spend,
+                SUM(messaging_conversations_started) AS messages,
+                SUM(purchases) AS purchases,
+                SUM(impressions) AS impressions,
+                SUM(reach) AS reach,
 
-            if ($campaignId) $query->where('campaign_id', $campaignId); // optional hard filter
+                CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
+                CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
+                CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
+                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr
+            ')->groupBy('campaign_id');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','campaign_name','page_name'];
             if (!in_array($sortBy, $sortable)) $sortBy = 'spend';
-            $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get();
 
-            $rows = $rows->map(function ($r) {
+            $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get()->map(function ($r) {
                 $on = null;
-                if (isset($r->delivery_raw) && is_string($r->delivery_raw)) {
-                    $on = str_starts_with(strtolower($r->delivery_raw), 'active') ? true : null;
-                }
-                if ($on === null) $on = ($r->spend ?? 0) > 0; // fallback
+                if (is_string($r->delivery_raw)) $on = str_starts_with(strtolower($r->delivery_raw), 'active') ? true : null;
+                if ($on === null) $on = ($r->spend ?? 0) > 0;
                 return [
                     'level'           => 'campaign',
                     'campaign_id'     => $r->campaign_id,
@@ -107,40 +112,36 @@ $base = DB::table('ads_manager_reports');
                 ];
             });
 
+        // ---- Level: Ad sets --------------------------------------------------
         } elseif ($level === 'adsets') {
             if ($campaignId) $base->where('campaign_id', $campaignId);
 
-            $query = (clone $base)
-                ->selectRaw('
-                    ad_set_id,
-                    MAX(ad_set_name)   AS ad_set_name,
-                    MAX(campaign_id)   AS campaign_id,
-                    MAX(campaign_name) AS campaign_name,
-                    MAX(page_name)     AS page_name,
-                    MAX(ad_set_delivery) AS delivery_raw,
+            $query = (clone $base)->selectRaw('
+                ad_set_id,
+                MAX(ad_set_name)   AS ad_set_name,
+                MAX(campaign_id)   AS campaign_id,
+                MAX(campaign_name) AS campaign_name,
+                MAX(page_name)     AS page_name,
+                MAX(ad_set_delivery) AS delivery_raw,
 
-                    SUM(amount_spent_php) AS spend,
-                    SUM(messaging_conversations_started) AS messages,
-                    SUM(purchases) AS purchases,
-                    SUM(impressions) AS impressions,
-                    SUM(reach) AS reach,
+                SUM(amount_spent_php) AS spend,
+                SUM(messaging_conversations_started) AS messages,
+                SUM(purchases) AS purchases,
+                SUM(impressions) AS impressions,
+                SUM(reach) AS reach,
 
-                    CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
-                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
-                    CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
-                    CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr
-                ')
-                ->groupBy('ad_set_id');
+                CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
+                CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
+                CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
+                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr
+            ')->groupBy('ad_set_id');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','ad_set_name','campaign_name','page_name'];
             if (!in_array($sortBy, $sortable)) $sortBy = 'spend';
-            $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get();
 
-            $rows = $rows->map(function ($r) {
+            $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get()->map(function ($r) {
                 $on = null;
-                if (isset($r->delivery_raw) && is_string($r->delivery_raw)) {
-                    $on = str_starts_with(strtolower($r->delivery_raw), 'active') ? true : null;
-                }
+                if (is_string($r->delivery_raw)) $on = str_starts_with(strtolower($r->delivery_raw), 'active') ? true : null;
                 if ($on === null) $on = ($r->spend ?? 0) > 0;
                 return [
                     'level'           => 'adset',
@@ -163,38 +164,36 @@ $base = DB::table('ads_manager_reports');
                 ];
             });
 
-        } else { // ads
+        // ---- Level: Ads ------------------------------------------------------
+        } else {
             if ($adSetId) $base->where('ad_set_id', $adSetId);
 
-            $query = (clone $base)
-                ->selectRaw('
-                    ad_id,
-                    MAX(headline)      AS headline,
-                    MAX(item_name)     AS item_name,
-                    MAX(ad_set_id)     AS ad_set_id,
-                    MAX(ad_set_name)   AS ad_set_name,
-                    MAX(campaign_id)   AS campaign_id,
-                    MAX(campaign_name) AS campaign_name,
-                    MAX(page_name)     AS page_name,
+            $query = (clone $base)->selectRaw('
+                ad_id,
+                MAX(headline)      AS headline,
+                MAX(item_name)     AS item_name,
+                MAX(ad_set_id)     AS ad_set_id,
+                MAX(ad_set_name)   AS ad_set_name,
+                MAX(campaign_id)   AS campaign_id,
+                MAX(campaign_name) AS campaign_name,
+                MAX(page_name)     AS page_name,
 
-                    SUM(amount_spent_php) AS spend,
-                    SUM(messaging_conversations_started) AS messages,
-                    SUM(purchases) AS purchases,
-                    SUM(impressions) AS impressions,
-                    SUM(reach) AS reach,
+                SUM(amount_spent_php) AS spend,
+                SUM(messaging_conversations_started) AS messages,
+                SUM(purchases) AS purchases,
+                SUM(impressions) AS impressions,
+                SUM(reach) AS reach,
 
-                    CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
-                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
-                    CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
-                    CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr
-                ')
-                ->groupBy('ad_id');
+                CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
+                CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
+                CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
+                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr
+            ')->groupBy('ad_id');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','headline','item_name'];
             if (!in_array($sortBy, $sortable)) $sortBy = 'spend';
-            $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get();
 
-            $rows = $rows->map(function ($r) {
+            $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get()->map(function ($r) {
                 return [
                     'level'           => 'ad',
                     'campaign_id'     => $r->campaign_id,
@@ -219,7 +218,7 @@ $base = DB::table('ads_manager_reports');
             });
         }
 
-        // Totals for current filter (no group)
+        // Totals for current filter
         $tot = (clone $base)->selectRaw('
             COALESCE(SUM(amount_spent_php),0) AS spend,
             COALESCE(SUM(messaging_conversations_started),0) AS messages,
@@ -241,10 +240,44 @@ $base = DB::table('ads_manager_reports');
             'cpr'         => ($tot->results ?? 0)     > 0 ? (float) ($tot->spend / $tot->results) : null,
         ];
 
+        // CSV export (optional)
+        if ($export === 'csv') {
+            return $this->exportCsv($rows, $level);
+        }
+
         return response()->json([
-            'level'   => $level,
-            'rows'    => $rows,
-            'totals'  => $totals,
+            'level'  => $level,
+            'rows'   => $rows,
+            'totals' => $totals,
         ]);
+    }
+
+    private function exportCsv($rows, string $level): StreamedResponse
+    {
+        $filename = 'ads_manager_' . $level . '_' . now()->format('Ymd_His') . '.csv';
+        $headers = ['Content-Type' => 'text/csv; charset=UTF-8', 'Content-Disposition' => "attachment; filename=\"$filename\""];
+
+        return response()->stream(function () use ($rows, $level) {
+            $out = fopen('php://output', 'w');
+            fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // BOM
+
+            if ($level === 'campaigns') {
+                fputcsv($out, ['Campaign','Page','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                foreach ($rows as $r) {
+                    fputcsv($out, [$r['campaign_name'],$r['page_name'],$r['spend'],$r['cpm_1000'],$r['cpm_msg'],$r['cpr'],$r['cpp'],$r['impressions'],$r['messages'],$r['purchases']]);
+                }
+            } elseif ($level === 'adsets') {
+                fputcsv($out, ['Ad set','Campaign','Page','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                foreach ($rows as $r) {
+                    fputcsv($out, [$r['ad_set_name'],$r['campaign_name'],$r['page_name'],$r['spend'],$r['cpm_1000'],$r['cpm_msg'],$r['cpr'],$r['cpp'],$r['impressions'],$r['messages'],$r['purchases']]);
+                }
+            } else {
+                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                foreach ($rows as $r) {
+                    fputcsv($out, [($r['headline'] ?? 'Ad '.$r['ad_id']),$r['ad_set_name'],$r['campaign_name'],$r['page_name'],$r['spend'],$r['cpm_1000'],$r['cpm_msg'],$r['cpr'],$r['cpp'],$r['impressions'],$r['messages'],$r['purchases']]);
+                }
+            }
+            fclose($out);
+        }, 200, $headers);
     }
 }
