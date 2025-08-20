@@ -29,8 +29,15 @@ class AdsManagerCampaignsController extends Controller
         $campaignId  = $request->input('campaign_id');
         $adSetId     = $request->input('ad_set_id');
 
-        $dayExpr = 'COALESCE(`day`, DATE(`reporting_starts`))';
-        $base = DB::table('ads_manager_reports');
+        $driver = DB::getDriverName(); // "pgsql" or "mysql"
+if ($driver === 'pgsql') {
+    $dayExpr = 'COALESCE(day, DATE(reporting_starts))';
+} else {
+    $dayExpr = 'COALESCE(`day`, DATE(`reporting_starts`))';
+}
+
+$base = DB::table('ads_manager_reports');
+
 
         // Filters
         if ($start) $base->whereRaw("$dayExpr >= ?", [$start]);
