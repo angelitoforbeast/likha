@@ -163,8 +163,8 @@
         currentAdSetId: null,
         rows: [],
         totals: {},
-        sortBy: 'spend',
-        sortDir: 'desc',
+        sortBy: 'default',
+sortDir: 'desc',
         dateLabel: 'This month',
         filters: {
           start_date: '',

@@ -23,27 +23,30 @@ class AdsManagerCampaignsController extends Controller
 
     public function data(Request $request)
     {
+        // Inputs
         $level       = $request->input('level', 'campaigns'); // campaigns|adsets|ads
-        $start       = $request->input('start_date');
-        $end         = $request->input('end_date');
-        $pageName    = $request->input('page_name');
-        $q           = $request->input('q');
-        $sortBy      = $request->input('sort_by', 'spend');
+        $start       = $request->input('start_date');         // YYYY-MM-DD
+        $end         = $request->input('end_date');           // YYYY-MM-DD
+        $pageName    = $request->input('page_name');          // optional
+        $q           = $request->input('q');                  // search text
+        $sortBy      = $request->input('sort_by', 'default'); // <-- default composite sort
         $sortDir     = strtolower($request->input('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
         $limit       = max(1, min((int) $request->input('limit', 200), 1000));
-        $export      = $request->input('export'); // 'csv' to export
+        $export      = $request->input('export');             // 'csv' to export
 
+        // Drilldown params
         $campaignId  = $request->input('campaign_id');
         $adSetId     = $request->input('ad_set_id');
 
-        $driver = DB::getDriverName(); // 'pgsql' | 'mysql' | etc.
+        // Date expression (portable)
+        $driver = DB::getDriverName(); // "pgsql" or "mysql" or others
         $dayExpr = $driver === 'pgsql'
             ? 'COALESCE(day, DATE(reporting_starts))'
             : 'COALESCE(`day`, DATE(`reporting_starts`))';
 
         $base = DB::table('ads_manager_reports');
 
-        // Date range
+        // Filters: date range
         if ($start) $base->whereRaw("$dayExpr >= ?", [$start]);
         if ($end)   $base->whereRaw("$dayExpr <= ?", [$end]);
 
@@ -52,7 +55,7 @@ class AdsManagerCampaignsController extends Controller
             $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
         }
 
-        // Search (case-insensitive, safe for NULLs)
+        // Search (case-insensitive; safe for NULLs)
         if ($q) {
             $like = '%'.trim($q).'%';
             $base->where(function ($qq) use ($like) {
@@ -64,7 +67,9 @@ class AdsManagerCampaignsController extends Controller
             });
         }
 
-        // ---- Level: Campaigns ------------------------------------------------
+        // =========================
+        // Level: CAMPAIGNS
+        // =========================
         if ($level === 'campaigns') {
             if ($campaignId) $base->where('campaign_id', $campaignId);
 
@@ -83,16 +88,36 @@ class AdsManagerCampaignsController extends Controller
                 CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
                 CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
                 CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
-                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr
+                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
+
+                CASE
+                    WHEN LOWER(MAX(campaign_delivery)) LIKE \'active%\' THEN 1
+                    WHEN SUM(amount_spent_php) > 0 THEN 1
+                    ELSE 0
+                END AS is_on
             ')->groupBy('campaign_id');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','campaign_name','page_name'];
-            if (!in_array($sortBy, $sortable)) $sortBy = 'spend';
 
-            $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get()->map(function ($r) {
-                $on = null;
-                if (is_string($r->delivery_raw)) $on = str_starts_with(strtolower($r->delivery_raw), 'active') ? true : null;
+            if ($sortBy === 'default') {
+                // Off/On (active first) → Campaign name ASC → Spend DESC
+                $rows = $query->orderByDesc('is_on')
+                              ->orderBy('campaign_name', 'asc')
+                              ->orderBy('spend', 'desc')
+                              ->limit($limit)
+                              ->get();
+            } else {
+                if (!in_array($sortBy, $sortable)) $sortBy = 'spend';
+                $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get();
+            }
+
+            $rows = $rows->map(function ($r) {
+                $on = isset($r->is_on) ? (bool) $r->is_on : null;
+                if ($on === null && isset($r->delivery_raw) && is_string($r->delivery_raw)) {
+                    $on = str_starts_with(strtolower($r->delivery_raw), 'active');
+                }
                 if ($on === null) $on = ($r->spend ?? 0) > 0;
+
                 return [
                     'level'           => 'campaign',
                     'campaign_id'     => $r->campaign_id,
@@ -112,7 +137,9 @@ class AdsManagerCampaignsController extends Controller
                 ];
             });
 
-        // ---- Level: Ad sets --------------------------------------------------
+        // =========================
+        // Level: AD SETS
+        // =========================
         } elseif ($level === 'adsets') {
             if ($campaignId) $base->where('campaign_id', $campaignId);
 
@@ -133,16 +160,36 @@ class AdsManagerCampaignsController extends Controller
                 CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
                 CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
                 CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
-                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr
+                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
+
+                CASE
+                    WHEN LOWER(MAX(ad_set_delivery)) LIKE \'active%\' THEN 1
+                    WHEN SUM(amount_spent_php) > 0 THEN 1
+                    ELSE 0
+                END AS is_on
             ')->groupBy('ad_set_id');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','ad_set_name','campaign_name','page_name'];
-            if (!in_array($sortBy, $sortable)) $sortBy = 'spend';
 
-            $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get()->map(function ($r) {
-                $on = null;
-                if (is_string($r->delivery_raw)) $on = str_starts_with(strtolower($r->delivery_raw), 'active') ? true : null;
+            if ($sortBy === 'default') {
+                // Off/On → Ad set name ASC → Spend DESC
+                $rows = $query->orderByDesc('is_on')
+                              ->orderBy('ad_set_name', 'asc')
+                              ->orderBy('spend', 'desc')
+                              ->limit($limit)
+                              ->get();
+            } else {
+                if (!in_array($sortBy, $sortable)) $sortBy = 'spend';
+                $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get();
+            }
+
+            $rows = $rows->map(function ($r) {
+                $on = isset($r->is_on) ? (bool) $r->is_on : null;
+                if ($on === null && is_string($r->delivery_raw)) {
+                    $on = str_starts_with(strtolower($r->delivery_raw), 'active');
+                }
                 if ($on === null) $on = ($r->spend ?? 0) > 0;
+
                 return [
                     'level'           => 'adset',
                     'campaign_id'     => $r->campaign_id,
@@ -164,7 +211,9 @@ class AdsManagerCampaignsController extends Controller
                 ];
             });
 
-        // ---- Level: Ads ------------------------------------------------------
+        // =========================
+        // Level: ADS
+        // =========================
         } else {
             if ($adSetId) $base->where('ad_set_id', $adSetId);
 
@@ -187,13 +236,26 @@ class AdsManagerCampaignsController extends Controller
                 CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
                 CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
                 CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
-                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr
+                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
+
+                CASE WHEN SUM(amount_spent_php) > 0 THEN 1 ELSE 0 END AS is_on
             ')->groupBy('ad_id');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','headline','item_name'];
-            if (!in_array($sortBy, $sortable)) $sortBy = 'spend';
 
-            $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get()->map(function ($r) {
+            if ($sortBy === 'default') {
+                // Off/On → Headline ASC → Spend DESC
+                $rows = $query->orderByDesc('is_on')
+                              ->orderBy('headline', 'asc')
+                              ->orderBy('spend', 'desc')
+                              ->limit($limit)
+                              ->get();
+            } else {
+                if (!in_array($sortBy, $sortable)) $sortBy = 'spend';
+                $rows = $query->orderBy($sortBy, $sortDir)->limit($limit)->get();
+            }
+
+            $rows = $rows->map(function ($r) {
                 return [
                     'level'           => 'ad',
                     'campaign_id'     => $r->campaign_id,
@@ -204,6 +266,7 @@ class AdsManagerCampaignsController extends Controller
                     'headline'        => $r->headline,
                     'item_name'       => $r->item_name,
                     'page_name'       => $r->page_name,
+                    'on'              => (bool) ($r->is_on ?? (($r->spend ?? 0) > 0)),
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -218,7 +281,7 @@ class AdsManagerCampaignsController extends Controller
             });
         }
 
-        // Totals for current filter
+        // Totals for current filter (no group)
         $tot = (clone $base)->selectRaw('
             COALESCE(SUM(amount_spent_php),0) AS spend,
             COALESCE(SUM(messaging_conversations_started),0) AS messages,
@@ -246,35 +309,50 @@ class AdsManagerCampaignsController extends Controller
         }
 
         return response()->json([
-            'level'  => $level,
-            'rows'   => $rows,
-            'totals' => $totals,
+            'level'   => $level,
+            'rows'    => $rows,
+            'totals'  => $totals,
         ]);
     }
 
     private function exportCsv($rows, string $level): StreamedResponse
     {
         $filename = 'ads_manager_' . $level . '_' . now()->format('Ymd_His') . '.csv';
-        $headers = ['Content-Type' => 'text/csv; charset=UTF-8', 'Content-Disposition' => "attachment; filename=\"$filename\""];
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"$filename\""
+        ];
 
         return response()->stream(function () use ($rows, $level) {
             $out = fopen('php://output', 'w');
-            fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // BOM
+            fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
 
             if ($level === 'campaigns') {
-                fputcsv($out, ['Campaign','Page','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Campaign','Page','Active','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
-                    fputcsv($out, [$r['campaign_name'],$r['page_name'],$r['spend'],$r['cpm_1000'],$r['cpm_msg'],$r['cpr'],$r['cpp'],$r['impressions'],$r['messages'],$r['purchases']]);
+                    fputcsv($out, [
+                        $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
+                        $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
+                        $r['impressions'], $r['messages'], $r['purchases']
+                    ]);
                 }
             } elseif ($level === 'adsets') {
-                fputcsv($out, ['Ad set','Campaign','Page','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Ad set','Campaign','Page','Active','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
-                    fputcsv($out, [$r['ad_set_name'],$r['campaign_name'],$r['page_name'],$r['spend'],$r['cpm_1000'],$r['cpm_msg'],$r['cpr'],$r['cpp'],$r['impressions'],$r['messages'],$r['purchases']]);
+                    fputcsv($out, [
+                        $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
+                        $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
+                        $r['impressions'], $r['messages'], $r['purchases']
+                    ]);
                 }
             } else {
-                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
-                    fputcsv($out, [($r['headline'] ?? 'Ad '.$r['ad_id']),$r['ad_set_name'],$r['campaign_name'],$r['page_name'],$r['spend'],$r['cpm_1000'],$r['cpm_msg'],$r['cpr'],$r['cpp'],$r['impressions'],$r['messages'],$r['purchases']]);
+                    fputcsv($out, [
+                        ($r['headline'] ?? 'Ad '.$r['ad_id']), $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
+                        $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
+                        $r['impressions'], $r['messages'], $r['purchases']
+                    ]);
                 }
             }
             fclose($out);
