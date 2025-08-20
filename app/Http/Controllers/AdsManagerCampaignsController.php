@@ -29,7 +29,7 @@ class AdsManagerCampaignsController extends Controller
         $end         = $request->input('end_date');           // YYYY-MM-DD
         $pageName    = $request->input('page_name');          // optional
         $q           = $request->input('q');                  // search text
-        $sortBy      = $request->input('sort_by', 'default'); // <-- default composite sort
+        $sortBy      = $request->input('sort_by', 'default'); // default composite sort
         $sortDir     = strtolower($request->input('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
         $limit       = max(1, min((int) $request->input('limit', 200), 1000));
         $export      = $request->input('export');             // 'csv' to export
@@ -79,16 +79,16 @@ class AdsManagerCampaignsController extends Controller
                 MAX(page_name)     AS page_name,
                 MAX(campaign_delivery) AS delivery_raw,
 
-                SUM(amount_spent_php) AS spend,
+                (SUM(amount_spent_php) / 1.12) AS spend,
                 SUM(messaging_conversations_started) AS messages,
                 SUM(purchases) AS purchases,
                 SUM(impressions) AS impressions,
                 SUM(reach) AS reach,
 
-                CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
-                CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
-                CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
-                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
+                CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
+                CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
+                CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
+                CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
                 CASE
                     WHEN LOWER(MAX(campaign_delivery)) LIKE \'active%\' THEN 1
@@ -151,16 +151,16 @@ class AdsManagerCampaignsController extends Controller
                 MAX(page_name)     AS page_name,
                 MAX(ad_set_delivery) AS delivery_raw,
 
-                SUM(amount_spent_php) AS spend,
+                (SUM(amount_spent_php) / 1.12) AS spend,
                 SUM(messaging_conversations_started) AS messages,
                 SUM(purchases) AS purchases,
                 SUM(impressions) AS impressions,
                 SUM(reach) AS reach,
 
-                CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
-                CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
-                CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
-                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
+                CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
+                CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
+                CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
+                CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
                 CASE
                     WHEN LOWER(MAX(ad_set_delivery)) LIKE \'active%\' THEN 1
@@ -227,16 +227,16 @@ class AdsManagerCampaignsController extends Controller
                 MAX(campaign_name) AS campaign_name,
                 MAX(page_name)     AS page_name,
 
-                SUM(amount_spent_php) AS spend,
+                (SUM(amount_spent_php) / 1.12) AS spend,
                 SUM(messaging_conversations_started) AS messages,
                 SUM(purchases) AS purchases,
                 SUM(impressions) AS impressions,
                 SUM(reach) AS reach,
 
-                CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
-                CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
-                CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
-                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
+                CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
+                CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
+                CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
+                CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
                 CASE WHEN SUM(amount_spent_php) > 0 THEN 1 ELSE 0 END AS is_on
             ')->groupBy('ad_id');
@@ -283,7 +283,7 @@ class AdsManagerCampaignsController extends Controller
 
         // Totals for current filter (no group)
         $tot = (clone $base)->selectRaw('
-            COALESCE(SUM(amount_spent_php),0) AS spend,
+            (COALESCE(SUM(amount_spent_php),0) / 1.12) AS spend,
             COALESCE(SUM(messaging_conversations_started),0) AS messages,
             COALESCE(SUM(purchases),0) AS purchases,
             COALESCE(SUM(impressions),0) AS impressions,
