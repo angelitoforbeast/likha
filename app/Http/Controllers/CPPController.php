@@ -37,10 +37,10 @@ class CPPController extends Controller
 
         /**
          * 2) ORDERS DATA (from macro_output)
-         * - actual orders per (date, page)
+         * - include STATUS for TCPR
          */
         $orderData = MacroOutput::query()
-            ->select(['TIMESTAMP', 'PAGE', 'ITEM_NAME', 'COD'])
+            ->select(['TIMESTAMP', 'PAGE', 'ITEM_NAME', 'COD', 'STATUS']) // <-- added STATUS
             ->get()
             ->groupBy(function ($row) use ($normalize) {
                 try {
@@ -73,23 +73,35 @@ class CPPController extends Controller
             $cpi = $totalImpressions > 0 ? round(($totalSpent * 1000) / $totalImpressions, 2) : null;
 
             // Actual orders from macro_output
-            $orders      = $orderData->get($key, collect());
-            $orderCount  = $orders->count();
-            $cpp         = $orderCount > 0 ? round($totalSpent / $orderCount, 2) : null;
+            $orders     = $orderData->get($key, collect());
+            $orderCount = $orders->count();
+            $cpp        = $orderCount > 0 ? round($totalSpent / $orderCount, 2) : null;
+
+            // TCPR numerator: count STATUS == "CANNOT PROCEED"
+            $cannotProceed = $orders->filter(function ($o) {
+                $status = strtoupper(trim((string)($o->STATUS ?? '')));
+                return $status === 'CANNOT PROCEED';
+            })->count();
+            $proceedCount = $orders->filter(fn($o) =>
+    strtoupper(trim((string)($o->STATUS ?? ''))) === 'PROCEED'
+)->count();
+
 
             $uniqueItems = $orders->pluck('ITEM_NAME')->filter()->unique()->values()->all();
             $uniqueCODs  = $orders->pluck('COD')->filter()->unique()->values()->all();
 
             $summary[] = [
-                'date'         => $date,
-                'page'         => $group->first()->page_name,
-                'amount_spent' => $totalSpent,
-                'orders'       => $orderCount,
-                'cpp'          => $cpp,
-                'cpm'          => $cpm,
-                'cpi'          => $cpi,
-                'item_names'   => $uniqueItems,
-                'cods'         => $uniqueCODs,
+                'date'             => $date,
+                'page'             => $group->first()->page_name,
+                'amount_spent'     => $totalSpent,
+                'orders'           => $orderCount,
+                'cpp'              => $cpp,
+                'cpm'              => $cpm,
+                'cpi'              => $cpi,
+                'item_names'       => $uniqueItems,
+                'cods'             => $uniqueCODs,
+                'cannot_proceed'   => $cannotProceed, // <-- add numerator for TCPR
+                'proceed'       => $proceedCount,   // 👈 add here
             ];
         }
 
@@ -114,6 +126,8 @@ class CPPController extends Controller
                 'spent'      => $row['amount_spent'],
                 'item_names' => $row['item_names'],
                 'cods'       => $row['cods'],
+                'tcpr_fail'  => $row['cannot_proceed'], // <-- per-day fail count
+                'proceed'    => $row['proceed'],    // 👈 add here
             ];
         }
 

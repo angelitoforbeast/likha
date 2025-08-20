@@ -31,6 +31,7 @@ use App\Http\Controllers\PageSenderMappingController;
 use App\Http\Controllers\JntCheckerController;
 use App\Http\Controllers\JntUploadController;
 use App\Http\Controllers\PancakeSubscriptionCheckerController;
+use App\Http\Controllers\AdsManagerCampaignsController;
 
 
 use App\Models\Role;
@@ -109,6 +110,11 @@ Route::get(
     [PancakeSubscriptionCheckerController::class, 'index']
 )->name('ads_manager.pancake_subscription_checker');
 
+Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'index'])
+     ->name('ads_manager.campaigns');
+
+     Route::get('/ads_manager/campaigns/data', [AdsManagerCampaignsController::class, 'data'])
+        ->name('ads_manager.campaigns.data');
 
 
     
