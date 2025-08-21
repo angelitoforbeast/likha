@@ -55,72 +55,46 @@ class AdsManagerCampaignsController extends Controller
             ? 'COALESCE(a.day, DATE(a.reporting_starts))'
             : 'COALESCE(a.`day`, DATE(a.`reporting_starts`))';
 
-        // --------- Global latest-status subqueries (independent of filters) ---------
-        if ($driver === 'mysql') {
-            // MySQL/MariaDB
-            $latestCampaignStatusSql = "
-              SELECT a.campaign_id,
-                     SUBSTRING_INDEX(
-                       GROUP_CONCAT(LOWER(a.campaign_delivery) ORDER BY a.reporting_starts DESC SEPARATOR ','),
-                       ',', 1
-                     ) AS latest_delivery
-              FROM ads_manager_reports a
-              JOIN (
-                SELECT campaign_id, MAX({$dayExpr}) AS latest_day
-                FROM ads_manager_reports
-                GROUP BY campaign_id
-              ) t ON a.campaign_id = t.campaign_id AND {$dayExprA} = t.latest_day
-              GROUP BY a.campaign_id
-            ";
+        // --------------------------------------------------------------------
+        // LATEST-DAY STATUS (GLOBAL, NOT FILTERED BY DATE RANGE)
+        // Rule: on the latest day per entity, Active if ANY row is "active%".
+        // --------------------------------------------------------------------
 
-            $latestAdSetStatusSql = "
-              SELECT a.ad_set_id,
-                     SUBSTRING_INDEX(
-                       GROUP_CONCAT(LOWER(a.ad_set_delivery) ORDER BY a.reporting_starts DESC SEPARATOR ','),
-                       ',', 1
-                     ) AS latest_delivery
-              FROM ads_manager_reports a
-              JOIN (
-                SELECT ad_set_id, MAX({$dayExpr}) AS latest_day
-                FROM ads_manager_reports
-                GROUP BY ad_set_id
-              ) t ON a.ad_set_id = t.ad_set_id AND {$dayExprA} = t.latest_day
-              GROUP BY a.ad_set_id
-            ";
-        } else {
-            // Postgres (or engines with window functions)
-            $latestCampaignStatusSql = "
-              SELECT campaign_id, LOWER(campaign_delivery) AS latest_delivery
-              FROM (
-                SELECT
-                  campaign_id,
-                  campaign_delivery,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY campaign_id
-                    ORDER BY {$dayExpr} DESC, reporting_starts DESC
-                  ) AS rn
-                FROM ads_manager_reports
-              ) x
-              WHERE rn = 1
-            ";
+        // Latest day per campaign
+        $latestCampaignDay = DB::table('ads_manager_reports')
+            ->selectRaw("campaign_id, MAX($dayExpr) AS latest_day")
+            ->groupBy('campaign_id');
 
-            $latestAdSetStatusSql = "
-              SELECT ad_set_id, LOWER(ad_set_delivery) AS latest_delivery
-              FROM (
-                SELECT
-                  ad_set_id,
-                  ad_set_delivery,
-                  ROW_NUMBER() OVER (
-                    PARTITION BY ad_set_id
-                    ORDER BY {$dayExpr} DESC, reporting_starts DESC
-                  ) AS rn
-                FROM ads_manager_reports
-              ) x
-              WHERE rn = 1
-            ";
-        }
+        // Campaign status on latest day (1 row per campaign_id)
+        $campaignLatestStatus = DB::table(DB::raw('ads_manager_reports a'))
+            ->joinSub($latestCampaignDay, 't', function ($j) use ($dayExprA) {
+                $j->on('a.campaign_id', '=', 't.campaign_id')
+                  ->whereRaw("$dayExprA = t.latest_day");
+            })
+            ->selectRaw("
+                a.campaign_id,
+                MAX(CASE WHEN LOWER(TRIM(a.campaign_delivery)) LIKE 'active%' THEN 1 ELSE 0 END) AS is_on_latest
+            ")
+            ->groupBy('a.campaign_id');
 
-        // Base (filtered) query for METRICS (hindi kasama ang status logic)
+        // Latest day per ad set
+        $latestAdSetDay = DB::table('ads_manager_reports')
+            ->selectRaw("ad_set_id, MAX($dayExpr) AS latest_day")
+            ->groupBy('ad_set_id');
+
+        // Ad set status on latest day (1 row per ad_set_id)
+        $adSetLatestStatus = DB::table(DB::raw('ads_manager_reports a'))
+            ->joinSub($latestAdSetDay, 't', function ($j) use ($dayExprA) {
+                $j->on('a.ad_set_id', '=', 't.ad_set_id')
+                  ->whereRaw("$dayExprA = t.latest_day");
+            })
+            ->selectRaw("
+                a.ad_set_id,
+                MAX(CASE WHEN LOWER(TRIM(a.ad_set_delivery)) LIKE 'active%' THEN 1 ELSE 0 END) AS is_on_latest
+            ")
+            ->groupBy('a.ad_set_id');
+
+        // Base (filtered) query for METRICS (date/page/search filters only)
         $base = DB::table('ads_manager_reports');
 
         // Filters: date range
@@ -159,14 +133,13 @@ class AdsManagerCampaignsController extends Controller
             if ($campaignId) $base->where('campaign_id', $campaignId);
 
             $query = (clone $base)
-                ->leftJoinSub($latestCampaignStatusSql, 'ls', function ($j) {
+                ->leftJoinSub($campaignLatestStatus, 'ls', function ($j) {
                     $j->on('ads_manager_reports.campaign_id', '=', 'ls.campaign_id');
                 })
                 ->selectRaw('
                     ads_manager_reports.campaign_id,
                     MAX(campaign_name) AS campaign_name,
                     MAX(page_name)     AS page_name,
-                    MAX(ls.latest_delivery) AS delivery_raw,
 
                     (SUM(amount_spent_php) / 1.12) AS spend,
                     SUM(messaging_conversations_started) AS messages,
@@ -179,7 +152,7 @@ class AdsManagerCampaignsController extends Controller
                     CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
                     CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
-                    CASE WHEN MAX(ls.latest_delivery) LIKE \'active%\' THEN 1 ELSE 0 END AS is_on
+                    COALESCE(MAX(ls.is_on_latest), 0) AS is_on
                 ')
                 ->groupBy('ads_manager_reports.campaign_id');
 
@@ -220,11 +193,10 @@ class AdsManagerCampaignsController extends Controller
         // Level: AD SETS
         // =========================
         } elseif ($level === 'adsets') {
-            // precedence: multi-select over single id
             if (empty($campaignIds) && $campaignId) $base->where('campaign_id', $campaignId);
 
             $query = (clone $base)
-                ->leftJoinSub($latestAdSetStatusSql, 'ls', function ($j) {
+                ->leftJoinSub($adSetLatestStatus, 'ls', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
                 })
                 ->selectRaw('
@@ -233,7 +205,6 @@ class AdsManagerCampaignsController extends Controller
                     MAX(campaign_id)   AS campaign_id,
                     MAX(campaign_name) AS campaign_name,
                     MAX(page_name)     AS page_name,
-                    MAX(ls.latest_delivery) AS delivery_raw,
 
                     (SUM(amount_spent_php) / 1.12) AS spend,
                     SUM(messaging_conversations_started) AS messages,
@@ -246,7 +217,7 @@ class AdsManagerCampaignsController extends Controller
                     CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
                     CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
-                    CASE WHEN MAX(ls.latest_delivery) LIKE \'active%\' THEN 1 ELSE 0 END AS is_on
+                    COALESCE(MAX(ls.is_on_latest), 0) AS is_on
                 ')
                 ->groupBy('ads_manager_reports.ad_set_id');
 
@@ -289,11 +260,11 @@ class AdsManagerCampaignsController extends Controller
         // Level: ADS
         // =========================
         } else {
-            // precedence: multi-select first, else single drill id
             if (empty($adSetIds) && $adSetId) $base->where('ad_set_id', $adSetId);
 
+            // Ads inherit status from latest-day Ad Set status
             $query = (clone $base)
-                ->leftJoinSub($latestAdSetStatusSql, 'ls', function ($j) {
+                ->leftJoinSub($adSetLatestStatus, 'ls', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
                 })
                 ->selectRaw('
@@ -305,7 +276,6 @@ class AdsManagerCampaignsController extends Controller
                     MAX(campaign_id)   AS campaign_id,
                     MAX(campaign_name) AS campaign_name,
                     MAX(page_name)     AS page_name,
-                    MAX(ls.latest_delivery) AS delivery_raw,
 
                     (SUM(amount_spent_php) / 1.12) AS spend,
                     SUM(messaging_conversations_started) AS messages,
@@ -318,7 +288,7 @@ class AdsManagerCampaignsController extends Controller
                     CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
                     CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
-                    CASE WHEN MAX(ls.latest_delivery) LIKE \'active%\' THEN 1 ELSE 0 END AS is_on
+                    COALESCE(MAX(ls.is_on_latest), 0) AS is_on
                 ')
                 ->groupBy('ads_manager_reports.ad_id');
 
