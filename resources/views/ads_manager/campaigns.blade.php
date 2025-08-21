@@ -1,12 +1,20 @@
 <!doctype html>
-<html lang="en" x-data="campaignsUI()">
+<html lang="en" x-data="campaignsUI()" x-cloak>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Ads Manager–style Campaigns</title>
+
+  {{-- Tailwind & Alpine --}}
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <style>[x-cloak]{display:none!important}</style>
+
+  {{-- Flatpickr styles --}}
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <style>
+    [x-cloak]{display:none!important}
+    .flatpickr-calendar{z-index:9999!important}
+  </style>
 </head>
 <body class="bg-gray-100 text-gray-900">
   <!-- Top bar -->
@@ -51,8 +59,13 @@
       </div>
 
       <div class="flex items-center gap-2">
-        <input type="date" class="border rounded px-2 py-2 text-sm" x-model="filters.start_date" @change="reload()">
-        <input type="date" class="border rounded px-2 py-2 text-sm" x-model="filters.end_date" @change="reload()">
+        {{-- Unified single input (one day or range) --}}
+        <div class="min-w-[260px]">
+          <label class="block text-sm font-semibold mb-1">Date range</label>
+          <input id="dateRange" type="text" placeholder="Select date range"
+                 class="w-full border border-gray-300 p-2 rounded-md shadow-sm cursor-pointer bg-white" readonly>
+        </div>
+
         <select class="border rounded px-2 py-2 text-sm" x-model="filters.page_name" @change="reload()">
           <option value="all">All Pages</option>
           @foreach(($pages ?? []) as $p)
@@ -171,6 +184,9 @@
     </section>
   </main>
 
+  {{-- Flatpickr script --}}
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
+
   <script>
     function campaignsUI() {
       return {
@@ -179,7 +195,7 @@
         currentAdSetId: null,
         rows: [],
         totals: {},
-        // DEFAULT composite sort (Off/On → Name → Spend)
+        // DEFAULT composite sort (Off/On → Name → Spend) handled server-side when sortBy==='default'
         sortBy: 'default',
         sortDir: 'desc',
         dateLabel: 'This month',
@@ -191,7 +207,7 @@
           limit: 200,
         },
 
-        // UI helpers
+        // Helpers
         titleForTab() {
           if (this.tab === 'campaigns') return 'Campaigns';
           if (this.tab === 'adsets') return 'Ad sets';
@@ -201,10 +217,25 @@
         rowKey(r) { return (r.ad_id || r.ad_set_id || r.campaign_id); },
         money(v){ return `₱${Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})}`; },
         num(v){ return Number(v||0).toLocaleString('en-PH'); },
+        ymd(d){ const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); },
+        monthName(i){ return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i]; },
+        setDateLabel(){
+          if (!this.filters.start_date || !this.filters.end_date) { this.dateLabel = 'Select dates'; return; }
+          const s = new Date(this.filters.start_date+'T00:00:00');
+          const e = new Date(this.filters.end_date+'T00:00:00');
+          const sameDay = s.getTime() === e.getTime();
+          const sM = this.monthName(s.getMonth()), eM = this.monthName(e.getMonth());
+          if (sameDay) {
+            this.dateLabel = `${sM} ${s.getDate()}, ${s.getFullYear()}`;
+          } else if (s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth()) {
+            this.dateLabel = `${sM} ${s.getDate()}–${e.getDate()}, ${s.getFullYear()}`;
+          } else {
+            this.dateLabel = `${sM} ${s.getDate()}, ${s.getFullYear()} – ${eM} ${e.getDate()}, ${e.getFullYear()}`;
+          }
+        },
 
         // Sorting
         toggleSort(k){
-          // When user clicks a column, switch to single-column sorting
           if (this.sortBy === k) {
             this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
           } else {
@@ -217,12 +248,8 @@
         // Tab switching
         switchTab(t){
           this.tab = t;
-          if (t === 'adsets' && !this.currentCampaignId) {
-            // show all ad sets unless user clicked a campaign
-          }
-          if (t === 'ads' && !this.currentAdSetId) {
-            // show all ads unless user clicked an ad set
-          }
+          if (t === 'adsets' && !this.currentCampaignId) {}
+          if (t === 'ads' && !this.currentAdSetId) {}
           this.reload();
         },
 
@@ -282,11 +309,44 @@
         },
 
         async init(){
-          // Default to this month
+          // Default to this month (from 1st day to today)
           const now   = new Date();
           const start = new Date(now.getFullYear(), now.getMonth(), 1);
-          this.filters.start_date = start.toISOString().slice(0,10);
-          this.filters.end_date   = now.toISOString().slice(0,10);
+          this.filters.start_date = this.ymd(start);
+          this.filters.end_date   = this.ymd(now);
+          this.setDateLabel();
+
+          // Init Flatpickr after Alpine renders
+          this.$nextTick(() => {
+            const fp = window.flatpickr || null;
+            if (!fp) return;
+            fp('#dateRange', {
+              mode: 'range',
+              dateFormat: 'Y-m-d',
+              defaultDate: [this.filters.start_date, this.filters.end_date],
+              onClose: (selectedDates, dateStr, instance) => {
+                if (selectedDates.length === 2) {
+                  const [from, to] = selectedDates;
+                  this.filters.start_date = this.ymd(from);
+                  this.filters.end_date   = this.ymd(to);
+                } else if (selectedDates.length === 1) {
+                  const d = selectedDates[0];
+                  this.filters.start_date = this.ymd(d);
+                  this.filters.end_date   = this.ymd(d);
+                } else {
+                  // no selection change
+                  return;
+                }
+                this.setDateLabel();
+                this.reload();
+              },
+              onReady: (selectedDates, dateStr, instance) => {
+                // Reflect the default label inside the input visually
+                instance.input.value = `${this.filters.start_date} to ${this.filters.end_date}`;
+              }
+            });
+          });
+
           await this.reload();
         }
       }
