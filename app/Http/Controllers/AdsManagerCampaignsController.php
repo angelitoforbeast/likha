@@ -39,11 +39,82 @@ class AdsManagerCampaignsController extends Controller
         $adSetId     = $request->input('ad_set_id');
 
         // Date expression (portable)
-        $driver = DB::getDriverName(); // "pgsql" or "mysql" or others
+        $driver = DB::getDriverName(); // "pgsql" or "mysql"
         $dayExpr = $driver === 'pgsql'
             ? 'COALESCE(day, DATE(reporting_starts))'
             : 'COALESCE(`day`, DATE(`reporting_starts`))';
 
+        // Alias-aware expr for joined table "a"
+        $dayExprA = $driver === 'pgsql'
+            ? 'COALESCE(a.day, DATE(a.reporting_starts))'
+            : 'COALESCE(a.`day`, DATE(a.`reporting_starts`))';
+
+        // --------- Global latest-status subqueries (independent of filters) ---------
+        if ($driver === 'mysql') {
+            // MySQL/MariaDB: no window functions → use GROUP_CONCAT trick
+            $latestCampaignStatusSql = "
+              SELECT a.campaign_id,
+                     SUBSTRING_INDEX(
+                       GROUP_CONCAT(LOWER(a.campaign_delivery) ORDER BY a.reporting_starts DESC SEPARATOR ','),
+                       ',', 1
+                     ) AS latest_delivery
+              FROM ads_manager_reports a
+              JOIN (
+                SELECT campaign_id, MAX({$dayExpr}) AS latest_day
+                FROM ads_manager_reports
+                GROUP BY campaign_id
+              ) t ON a.campaign_id = t.campaign_id AND {$dayExprA} = t.latest_day
+              GROUP BY a.campaign_id
+            ";
+
+            $latestAdSetStatusSql = "
+              SELECT a.ad_set_id,
+                     SUBSTRING_INDEX(
+                       GROUP_CONCAT(LOWER(a.ad_set_delivery) ORDER BY a.reporting_starts DESC SEPARATOR ','),
+                       ',', 1
+                     ) AS latest_delivery
+              FROM ads_manager_reports a
+              JOIN (
+                SELECT ad_set_id, MAX({$dayExpr}) AS latest_day
+                FROM ads_manager_reports
+                GROUP BY ad_set_id
+              ) t ON a.ad_set_id = t.ad_set_id AND {$dayExprA} = t.latest_day
+              GROUP BY a.ad_set_id
+            ";
+        } else {
+            // Postgres (or engines w/ window functions)
+            $latestCampaignStatusSql = "
+              SELECT campaign_id, LOWER(campaign_delivery) AS latest_delivery
+              FROM (
+                SELECT
+                  campaign_id,
+                  campaign_delivery,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY campaign_id
+                    ORDER BY {$dayExpr} DESC, reporting_starts DESC
+                  ) AS rn
+                FROM ads_manager_reports
+              ) x
+              WHERE rn = 1
+            ";
+
+            $latestAdSetStatusSql = "
+              SELECT ad_set_id, LOWER(ad_set_delivery) AS latest_delivery
+              FROM (
+                SELECT
+                  ad_set_id,
+                  ad_set_delivery,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY ad_set_id
+                    ORDER BY {$dayExpr} DESC, reporting_starts DESC
+                  ) AS rn
+                FROM ads_manager_reports
+              ) x
+              WHERE rn = 1
+            ";
+        }
+
+        // Base (filtered) query for METRICS (hindi kasama ang status logic)
         $base = DB::table('ads_manager_reports');
 
         // Filters: date range
@@ -55,7 +126,7 @@ class AdsManagerCampaignsController extends Controller
             $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
         }
 
-        // Search (case-insensitive; safe for NULLs)
+        // Search (case-insensitive)
         if ($q) {
             $like = '%'.trim($q).'%';
             $base->where(function ($qq) use ($like) {
@@ -73,34 +144,35 @@ class AdsManagerCampaignsController extends Controller
         if ($level === 'campaigns') {
             if ($campaignId) $base->where('campaign_id', $campaignId);
 
-            $query = (clone $base)->selectRaw('
-                campaign_id,
-                MAX(campaign_name) AS campaign_name,
-                MAX(page_name)     AS page_name,
-                MAX(campaign_delivery) AS delivery_raw,
+            $query = (clone $base)
+                // IMPORTANT: pass the SQL string directly (NOT DB::raw)
+                ->leftJoinSub($latestCampaignStatusSql, 'ls', function ($j) {
+                    $j->on('ads_manager_reports.campaign_id', '=', 'ls.campaign_id');
+                })
+                ->selectRaw('
+                    ads_manager_reports.campaign_id,
+                    MAX(campaign_name) AS campaign_name,
+                    MAX(page_name)     AS page_name,
+                    MAX(ls.latest_delivery) AS delivery_raw,
 
-                (SUM(amount_spent_php) / 1.12) AS spend,
-                SUM(messaging_conversations_started) AS messages,
-                SUM(purchases) AS purchases,
-                SUM(impressions) AS impressions,
-                SUM(reach) AS reach,
+                    (SUM(amount_spent_php) / 1.12) AS spend,
+                    SUM(messaging_conversations_started) AS messages,
+                    SUM(purchases) AS purchases,
+                    SUM(impressions) AS impressions,
+                    SUM(reach) AS reach,
 
-                CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
-                CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
-                CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
-                CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
+                    CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
+                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
+                    CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
+                    CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
-                CASE
-                    WHEN LOWER(MAX(campaign_delivery)) LIKE \'active%\' THEN 1
-                    WHEN SUM(amount_spent_php) > 0 THEN 1
-                    ELSE 0
-                END AS is_on
-            ')->groupBy('campaign_id');
+                    CASE WHEN MAX(ls.latest_delivery) LIKE \'active%\' THEN 1 ELSE 0 END AS is_on
+                ')
+                ->groupBy('ads_manager_reports.campaign_id');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','campaign_name','page_name'];
 
             if ($sortBy === 'default') {
-                // Off/On (active first) → Campaign name ASC → Spend DESC
                 $rows = $query->orderByDesc('is_on')
                               ->orderBy('campaign_name', 'asc')
                               ->orderBy('spend', 'desc')
@@ -112,18 +184,12 @@ class AdsManagerCampaignsController extends Controller
             }
 
             $rows = $rows->map(function ($r) {
-                $on = isset($r->is_on) ? (bool) $r->is_on : null;
-                if ($on === null && isset($r->delivery_raw) && is_string($r->delivery_raw)) {
-                    $on = str_starts_with(strtolower($r->delivery_raw), 'active');
-                }
-                if ($on === null) $on = ($r->spend ?? 0) > 0;
-
                 return [
                     'level'           => 'campaign',
                     'campaign_id'     => $r->campaign_id,
                     'campaign_name'   => $r->campaign_name,
                     'page_name'       => $r->page_name,
-                    'on'              => (bool) $on,
+                    'on'              => (bool) ($r->is_on ?? 0),
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -143,36 +209,36 @@ class AdsManagerCampaignsController extends Controller
         } elseif ($level === 'adsets') {
             if ($campaignId) $base->where('campaign_id', $campaignId);
 
-            $query = (clone $base)->selectRaw('
-                ad_set_id,
-                MAX(ad_set_name)   AS ad_set_name,
-                MAX(campaign_id)   AS campaign_id,
-                MAX(campaign_name) AS campaign_name,
-                MAX(page_name)     AS page_name,
-                MAX(ad_set_delivery) AS delivery_raw,
+            $query = (clone $base)
+                ->leftJoinSub($latestAdSetStatusSql, 'ls', function ($j) {
+                    $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
+                })
+                ->selectRaw('
+                    ads_manager_reports.ad_set_id,
+                    MAX(ad_set_name)   AS ad_set_name,
+                    MAX(campaign_id)   AS campaign_id,
+                    MAX(campaign_name) AS campaign_name,
+                    MAX(page_name)     AS page_name,
+                    MAX(ls.latest_delivery) AS delivery_raw,
 
-                (SUM(amount_spent_php) / 1.12) AS spend,
-                SUM(messaging_conversations_started) AS messages,
-                SUM(purchases) AS purchases,
-                SUM(impressions) AS impressions,
-                SUM(reach) AS reach,
+                    (SUM(amount_spent_php) / 1.12) AS spend,
+                    SUM(messaging_conversations_started) AS messages,
+                    SUM(purchases) AS purchases,
+                    SUM(impressions) AS impressions,
+                    SUM(reach) AS reach,
 
-                CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
-                CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
-                CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
-                CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
+                    CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
+                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
+                    CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
+                    CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
-                CASE
-                    WHEN LOWER(MAX(ad_set_delivery)) LIKE \'active%\' THEN 1
-                    WHEN SUM(amount_spent_php) > 0 THEN 1
-                    ELSE 0
-                END AS is_on
-            ')->groupBy('ad_set_id');
+                    CASE WHEN MAX(ls.latest_delivery) LIKE \'active%\' THEN 1 ELSE 0 END AS is_on
+                ')
+                ->groupBy('ads_manager_reports.ad_set_id');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','ad_set_name','campaign_name','page_name'];
 
             if ($sortBy === 'default') {
-                // Off/On → Ad set name ASC → Spend DESC
                 $rows = $query->orderByDesc('is_on')
                               ->orderBy('ad_set_name', 'asc')
                               ->orderBy('spend', 'desc')
@@ -184,12 +250,6 @@ class AdsManagerCampaignsController extends Controller
             }
 
             $rows = $rows->map(function ($r) {
-                $on = isset($r->is_on) ? (bool) $r->is_on : null;
-                if ($on === null && is_string($r->delivery_raw)) {
-                    $on = str_starts_with(strtolower($r->delivery_raw), 'active');
-                }
-                if ($on === null) $on = ($r->spend ?? 0) > 0;
-
                 return [
                     'level'           => 'adset',
                     'campaign_id'     => $r->campaign_id,
@@ -197,7 +257,7 @@ class AdsManagerCampaignsController extends Controller
                     'ad_set_id'       => $r->ad_set_id,
                     'ad_set_name'     => $r->ad_set_name,
                     'page_name'       => $r->page_name,
-                    'on'              => (bool) $on,
+                    'on'              => (bool) ($r->is_on ?? 0),
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -217,34 +277,39 @@ class AdsManagerCampaignsController extends Controller
         } else {
             if ($adSetId) $base->where('ad_set_id', $adSetId);
 
-            $query = (clone $base)->selectRaw('
-                ad_id,
-                MAX(headline)      AS headline,
-                MAX(item_name)     AS item_name,
-                MAX(ad_set_id)     AS ad_set_id,
-                MAX(ad_set_name)   AS ad_set_name,
-                MAX(campaign_id)   AS campaign_id,
-                MAX(campaign_name) AS campaign_name,
-                MAX(page_name)     AS page_name,
+            $query = (clone $base)
+                ->leftJoinSub($latestAdSetStatusSql, 'ls', function ($j) {
+                    $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
+                })
+                ->selectRaw('
+                    ads_manager_reports.ad_id,
+                    MAX(headline)      AS headline,
+                    MAX(item_name)     AS item_name,
+                    MAX(ad_set_id)     AS ad_set_id,
+                    MAX(ad_set_name)   AS ad_set_name,
+                    MAX(campaign_id)   AS campaign_id,
+                    MAX(campaign_name) AS campaign_name,
+                    MAX(page_name)     AS page_name,
+                    MAX(ls.latest_delivery) AS delivery_raw,
 
-                (SUM(amount_spent_php) / 1.12) AS spend,
-                SUM(messaging_conversations_started) AS messages,
-                SUM(purchases) AS purchases,
-                SUM(impressions) AS impressions,
-                SUM(reach) AS reach,
+                    (SUM(amount_spent_php) / 1.12) AS spend,
+                    SUM(messaging_conversations_started) AS messages,
+                    SUM(purchases) AS purchases,
+                    SUM(impressions) AS impressions,
+                    SUM(reach) AS reach,
 
-                CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
-                CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
-                CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
-                CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
+                    CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
+                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
+                    CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
+                    CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
-                CASE WHEN SUM(amount_spent_php) > 0 THEN 1 ELSE 0 END AS is_on
-            ')->groupBy('ad_id');
+                    CASE WHEN MAX(ls.latest_delivery) LIKE \'active%\' THEN 1 ELSE 0 END AS is_on
+                ')
+                ->groupBy('ads_manager_reports.ad_id');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','headline','item_name'];
 
             if ($sortBy === 'default') {
-                // Off/On → Headline ASC → Spend DESC
                 $rows = $query->orderByDesc('is_on')
                               ->orderBy('headline', 'asc')
                               ->orderBy('spend', 'desc')
@@ -266,7 +331,7 @@ class AdsManagerCampaignsController extends Controller
                     'headline'        => $r->headline,
                     'item_name'       => $r->item_name,
                     'page_name'       => $r->page_name,
-                    'on'              => (bool) ($r->is_on ?? (($r->spend ?? 0) > 0)),
+                    'on'              => (bool) ($r->is_on ?? 0),
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
