@@ -23,6 +23,12 @@
       <div class="h-16 flex items-center justify-between gap-4">
         <div class="flex items-center gap-2 min-w-0">
           <div class="font-semibold text-lg truncate" x-text="titleForTab()"></div>
+          <template x-if="selectedCount() > 0">
+            <div class="text-xs flex items-center gap-2 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+              <span x-text="`${selectedCount()} selected`"></span>
+              <button class="underline" @click="clearSelection(tab); reload()">Clear</button>
+            </div>
+          </template>
           <div class="text-xs text-gray-500 px-2 py-0.5 rounded-full bg-gray-100">Opportunity score: 100</div>
         </div>
         <div class="flex items-center gap-2">
@@ -75,16 +81,21 @@
       </div>
     </div>
 
-    <!-- Table Card (edge-to-edge section) -->
-    <section
-      class="relative left-1/2 right-1/2 -mx-[50vw] w-screen bg-white shadow-sm border-y rounded-none">
+    <!-- Table Card -->
+    <section class="relative left-1/2 right-1/2 -mx-[50vw] w-screen bg-white shadow-sm border-y rounded-none">
       <div class="px-2 sm:px-3 lg:px-4">
-        <!-- IMPORTANT: separate scroll container so sticky header/footer work -->
         <div class="overflow-auto max-h-[70vh]">
           <table class="w-full min-w-[1100px] text-sm">
             <!-- Sticky HEADER -->
             <thead class="bg-gray-50 sticky top-0 z-30">
               <tr class="text-left text-gray-600">
+                <!-- NEW: Select-all checkbox -->
+                <th class="w-10 px-4 py-3">
+                  <input type="checkbox"
+                         :checked="allChecked()"
+                         @change="toggleCheckAll($event)"
+                         class="h-4 w-4 rounded border-gray-300">
+                </th>
                 <th class="w-24 px-4 py-3">Off / On</th>
                 <th class="px-4 py-3">
                   <span x-show="tab==='campaigns'">Campaign</span>
@@ -117,6 +128,14 @@
                 <tr class="border-t hover:bg-gray-50"
                     @click="rowClick(row)"
                     :class="{'cursor-pointer': tab!=='ads'}">
+                  <!-- NEW: row checkbox -->
+                  <td class="px-4 py-3" @click.stop>
+                    <input type="checkbox"
+                           :checked="isChecked(row)"
+                           @change="onCheck(row, $event.target.checked)"
+                           class="h-4 w-4 rounded border-gray-300">
+                  </td>
+
                   <!-- Off / On -->
                   <td class="px-4 py-3">
                     <span class="inline-flex items-center gap-2">
@@ -165,6 +184,7 @@
               <!-- Sticky FOOTER totals -->
               <tr class="bg-gray-50 border-t sticky bottom-0 z-20">
                 <td class="px-4 py-3"></td>
+                <td class="px-4 py-3"></td>
                 <td class="px-4 py-3 text-gray-600">
                   <span x-text="`Results from ${rows.length} ${tabLabel()}`"></span>
                 </td>
@@ -195,7 +215,6 @@
         currentAdSetId: null,
         rows: [],
         totals: {},
-        // DEFAULT composite sort (Off/On → Name → Spend) handled server-side when sortBy==='default'
         sortBy: 'default',
         sortDir: 'desc',
         dateLabel: 'This month',
@@ -207,11 +226,30 @@
           limit: 200,
         },
 
+        // NEW: selections
+        selectedCampaignIds: new Set(),
+        selectedAdSetIds: new Set(),
+
         // Helpers
         titleForTab() {
           if (this.tab === 'campaigns') return 'Campaigns';
-          if (this.tab === 'adsets') return 'Ad sets';
-          return 'Ads';
+          if (this.tab === 'adsets') {
+            if (this.selectedCampaignIds.size > 0) {
+              const n = this.selectedCampaignIds.size;
+              return `Ad sets for ${n} Campaign${n>1?'s':''}`;
+            }
+            if (this.currentCampaignId) return 'Ad sets for 1 Campaign';
+            return 'Ad sets';
+          }
+          if (this.tab === 'ads') {
+            if (this.selectedAdSetIds.size > 0) {
+              const n = this.selectedAdSetIds.size;
+              return `Ads for ${n} Ad set${n>1?'s':''}`;
+            }
+            if (this.currentAdSetId) return 'Ads for 1 Ad set';
+            return 'Ads';
+          }
+          return 'Ads Manager';
         },
         tabLabel() { return this.tab === 'ads' ? 'ads' : (this.tab === 'adsets' ? 'ad sets' : 'campaigns'); },
         rowKey(r) { return (r.ad_id || r.ad_set_id || r.campaign_id); },
@@ -234,6 +272,45 @@
           }
         },
 
+        // NEW: selection helpers
+        selectedCount(){
+          return this.tab === 'campaigns'
+            ? this.selectedCampaignIds.size
+            : this.tab === 'adsets'
+              ? this.selectedAdSetIds.size
+              : 0;
+        },
+        clearSelection(which = this.tab){
+          if (which === 'campaigns') this.selectedCampaignIds = new Set();
+          if (which === 'adsets') this.selectedAdSetIds = new Set();
+        },
+        isChecked(row){
+          if (this.tab==='campaigns') return this.selectedCampaignIds.has(row.campaign_id);
+          if (this.tab==='adsets')    return this.selectedAdSetIds.has(row.ad_set_id);
+          return false;
+        },
+        onCheck(row, checked){
+          const set = this.tab==='campaigns' ? this.selectedCampaignIds : this.selectedAdSetIds;
+          const key = this.tab==='campaigns' ? row.campaign_id : row.ad_set_id;
+          if (checked) set.add(key); else set.delete(key);
+        },
+        allChecked(){
+          if (!this.rows.length) return false;
+          if (this.tab==='campaigns') return this.rows.every(r => this.selectedCampaignIds.has(r.campaign_id));
+          if (this.tab==='adsets')    return this.rows.every(r => this.selectedAdSetIds.has(r.ad_set_id));
+          return false;
+        },
+        toggleCheckAll(e){
+          const checked = e.target.checked;
+          if (this.tab==='campaigns') {
+            if (checked) this.rows.forEach(r => this.selectedCampaignIds.add(r.campaign_id));
+            else         this.rows.forEach(r => this.selectedCampaignIds.delete(r.campaign_id));
+          } else if (this.tab==='adsets') {
+            if (checked) this.rows.forEach(r => this.selectedAdSetIds.add(r.ad_set_id));
+            else         this.rows.forEach(r => this.selectedAdSetIds.delete(r.ad_set_id));
+          }
+        },
+
         // Sorting
         toggleSort(k){
           if (this.sortBy === k) {
@@ -245,31 +322,52 @@
           this.reload();
         },
 
-        // Tab switching
+        // Tab switching (respect selections)
         switchTab(t){
           this.tab = t;
-          if (t === 'adsets' && !this.currentCampaignId) {}
-          if (t === 'ads' && !this.currentAdSetId) {}
+
+          // if going to Ad sets & there are selected campaigns, ignore single-drill id
+          if (t==='adsets' && this.selectedCampaignIds.size > 0) {
+            this.currentCampaignId = null;
+          }
+          // if going to Ads & there are selected ad sets, ignore single-drill id
+          if (t==='ads' && this.selectedAdSetIds.size > 0) {
+            this.currentAdSetId = null;
+          }
           this.reload();
         },
 
         // Row click drilldown
         rowClick(row){
           if (this.tab === 'campaigns') {
-            this.currentCampaignId = row.campaign_id;
-            this.tab = 'adsets';
-            this.reload();
+            // if there’s a selection, just go to Ad sets for selection
+            if (this.selectedCampaignIds.size > 0) {
+              this.currentCampaignId = null;
+              this.tab = 'adsets';
+              this.reload();
+            } else {
+              this.currentCampaignId = row.campaign_id;
+              this.tab = 'adsets';
+              this.reload();
+            }
           } else if (this.tab === 'adsets') {
-            this.currentAdSetId = row.ad_set_id;
-            this.tab = 'ads';
-            this.reload();
+            if (this.selectedAdSetIds.size > 0) {
+              this.currentAdSetId = null;
+              this.tab = 'ads';
+              this.reload();
+            } else {
+              this.currentAdSetId = row.ad_set_id;
+              this.tab = 'ads';
+              this.reload();
+            }
           }
         },
 
         // Data loading
         async reload(){
+          const level = this.tab === 'campaigns' ? 'campaigns' : (this.tab === 'adsets' ? 'adsets' : 'ads');
           const params = new URLSearchParams({
-            level: this.tab === 'campaigns' ? 'campaigns' : (this.tab === 'adsets' ? 'adsets' : 'ads'),
+            level,
             start_date: this.filters.start_date || '',
             end_date: this.filters.end_date || '',
             page_name: this.filters.page_name || 'all',
@@ -278,11 +376,26 @@
             sort_dir: this.sortDir,
             limit: this.filters.limit
           });
-          if (this.currentCampaignId && this.tab !== 'campaigns') {
+
+          // single-drill ids (only when no multi-select)
+          if (this.currentCampaignId && level !== 'campaigns' && this.selectedCampaignIds.size === 0) {
             params.set('campaign_id', this.currentCampaignId);
           }
-          if (this.currentAdSetId && this.tab === 'ads') {
+          if (this.currentAdSetId && level === 'ads' && this.selectedAdSetIds.size === 0) {
             params.set('ad_set_id', this.currentAdSetId);
+          }
+
+          // multi-select filters (affect child tabs)
+          if (level === 'adsets' && this.selectedCampaignIds.size > 0) {
+            params.set('campaign_ids', Array.from(this.selectedCampaignIds).join(','));
+          }
+          if (level === 'ads') {
+            if (this.selectedAdSetIds.size > 0) {
+              params.set('ad_set_ids', Array.from(this.selectedAdSetIds).join(','));
+            } else if (this.selectedCampaignIds.size > 0) {
+              // allow jumping Campaigns → Ads directly if needed
+              params.set('campaign_ids', Array.from(this.selectedCampaignIds).join(','));
+            }
           }
 
           const res  = await fetch('{{ route('ads_manager.campaigns.data') }}?'+params.toString());
@@ -292,8 +405,9 @@
         },
 
         exportCsv(){
+          const level = this.tab === 'campaigns' ? 'campaigns' : (this.tab === 'adsets' ? 'adsets' : 'ads');
           const params = new URLSearchParams({
-            level: this.tab === 'campaigns' ? 'campaigns' : (this.tab === 'adsets' ? 'adsets' : 'ads'),
+            level,
             start_date: this.filters.start_date || '',
             end_date: this.filters.end_date || '',
             page_name: this.filters.page_name || 'all',
@@ -302,8 +416,21 @@
             sort_dir: this.sortDir,
             limit: this.filters.limit
           });
-          if (this.currentCampaignId && this.tab !== 'campaigns') params.set('campaign_id', this.currentCampaignId);
-          if (this.currentAdSetId && this.tab === 'ads') params.set('ad_set_id', this.currentAdSetId);
+
+          if (this.currentCampaignId && level !== 'campaigns' && this.selectedCampaignIds.size === 0) params.set('campaign_id', this.currentCampaignId);
+          if (this.currentAdSetId && level === 'ads' && this.selectedAdSetIds.size === 0) params.set('ad_set_id', this.currentAdSetId);
+
+          if (level === 'adsets' && this.selectedCampaignIds.size > 0) {
+            params.set('campaign_ids', Array.from(this.selectedCampaignIds).join(','));
+          }
+          if (level === 'ads') {
+            if (this.selectedAdSetIds.size > 0) {
+              params.set('ad_set_ids', Array.from(this.selectedAdSetIds).join(','));
+            } else if (this.selectedCampaignIds.size > 0) {
+              params.set('campaign_ids', Array.from(this.selectedCampaignIds).join(','));
+            }
+          }
+
           params.set('export', 'csv');
           window.location = '{{ route('ads_manager.campaigns.data') }}?'+params.toString();
         },
@@ -334,14 +461,12 @@
                   this.filters.start_date = this.ymd(d);
                   this.filters.end_date   = this.ymd(d);
                 } else {
-                  // no selection change
                   return;
                 }
                 this.setDateLabel();
                 this.reload();
               },
               onReady: (selectedDates, dateStr, instance) => {
-                // Reflect the default label inside the input visually
                 instance.input.value = `${this.filters.start_date} to ${this.filters.end_date}`;
               }
             });

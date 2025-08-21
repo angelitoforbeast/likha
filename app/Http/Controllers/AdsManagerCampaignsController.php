@@ -34,9 +34,15 @@ class AdsManagerCampaignsController extends Controller
         $limit       = max(1, min((int) $request->input('limit', 200), 1000));
         $export      = $request->input('export');             // 'csv' to export
 
-        // Drilldown params
+        // Drilldown params (single selection)
         $campaignId  = $request->input('campaign_id');
         $adSetId     = $request->input('ad_set_id');
+
+        // Multi-select params (CSV)
+        $campaignIdsCsv = $request->input('campaign_ids'); // e.g. "123,456"
+        $adSetIdsCsv    = $request->input('ad_set_ids');   // e.g. "789,1011"
+        $campaignIds    = $campaignIdsCsv ? array_values(array_filter(array_map('trim', explode(',', $campaignIdsCsv)))) : [];
+        $adSetIds       = $adSetIdsCsv    ? array_values(array_filter(array_map('trim', explode(',', $adSetIdsCsv))))    : [];
 
         // Date expression (portable)
         $driver = DB::getDriverName(); // "pgsql" or "mysql"
@@ -44,14 +50,14 @@ class AdsManagerCampaignsController extends Controller
             ? 'COALESCE(day, DATE(reporting_starts))'
             : 'COALESCE(`day`, DATE(`reporting_starts`))';
 
-        // Alias-aware expr for joined table "a"
+        // Alias-aware for joined table "a"
         $dayExprA = $driver === 'pgsql'
             ? 'COALESCE(a.day, DATE(a.reporting_starts))'
             : 'COALESCE(a.`day`, DATE(a.`reporting_starts`))';
 
         // --------- Global latest-status subqueries (independent of filters) ---------
         if ($driver === 'mysql') {
-            // MySQL/MariaDB: no window functions → use GROUP_CONCAT trick
+            // MySQL/MariaDB
             $latestCampaignStatusSql = "
               SELECT a.campaign_id,
                      SUBSTRING_INDEX(
@@ -82,7 +88,7 @@ class AdsManagerCampaignsController extends Controller
               GROUP BY a.ad_set_id
             ";
         } else {
-            // Postgres (or engines w/ window functions)
+            // Postgres (or engines with window functions)
             $latestCampaignStatusSql = "
               SELECT campaign_id, LOWER(campaign_delivery) AS latest_delivery
               FROM (
@@ -138,6 +144,14 @@ class AdsManagerCampaignsController extends Controller
             });
         }
 
+        // Apply multi-select filters to child levels
+        if ($level !== 'campaigns' && !empty($campaignIds)) {
+            $base->whereIn('campaign_id', $campaignIds);
+        }
+        if ($level === 'ads' && !empty($adSetIds)) {
+            $base->whereIn('ad_set_id', $adSetIds);
+        }
+
         // =========================
         // Level: CAMPAIGNS
         // =========================
@@ -145,7 +159,6 @@ class AdsManagerCampaignsController extends Controller
             if ($campaignId) $base->where('campaign_id', $campaignId);
 
             $query = (clone $base)
-                // IMPORTANT: pass the SQL string directly (NOT DB::raw)
                 ->leftJoinSub($latestCampaignStatusSql, 'ls', function ($j) {
                     $j->on('ads_manager_reports.campaign_id', '=', 'ls.campaign_id');
                 })
@@ -207,7 +220,8 @@ class AdsManagerCampaignsController extends Controller
         // Level: AD SETS
         // =========================
         } elseif ($level === 'adsets') {
-            if ($campaignId) $base->where('campaign_id', $campaignId);
+            // precedence: multi-select over single id
+            if (empty($campaignIds) && $campaignId) $base->where('campaign_id', $campaignId);
 
             $query = (clone $base)
                 ->leftJoinSub($latestAdSetStatusSql, 'ls', function ($j) {
@@ -275,7 +289,8 @@ class AdsManagerCampaignsController extends Controller
         // Level: ADS
         // =========================
         } else {
-            if ($adSetId) $base->where('ad_set_id', $adSetId);
+            // precedence: multi-select first, else single drill id
+            if (empty($adSetIds) && $adSetId) $base->where('ad_set_id', $adSetId);
 
             $query = (clone $base)
                 ->leftJoinSub($latestAdSetStatusSql, 'ls', function ($j) {
