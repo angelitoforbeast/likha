@@ -127,7 +127,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 ]);
             }
 
-            Log::info("[AdsMgr Import] Done. processed={$this->processed}, inserted={$this->inserted}, updated={$this->updated}, skipped={$this->skipped}, file={$this->storedPath}, user={$this->userId}]");
+            Log::info("[AdsMgr Import] Done. processed={$this->processed}, inserted={$this->inserted}, updated={$this->updated}, skipped={$this->skipped}, file={$this->storedPath}, user={$this->userId}");
         } catch (\Throwable $e) {
             if ($log) {
                 $log->update([
@@ -190,38 +190,38 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
     private function mappedHeaders(): array
     {
         $map = [
-            'Day'                              => 'day',
-            'Page Name'                        => 'page_name',
-            'Campaign name'                    => 'campaign_name',
-            'Ad Set Name'                      => 'ad_set_name',
-            'Ad ID'                            => 'ad_id',
-            'Delivery status'                  => 'campaign_delivery',
-            'Amount spent (PHP)'               => 'amount_spent_php',
-            'Purchases'                        => 'purchases',
-            'Attribution setting'              => 'attribution_setting',
-            'Result type'                      => 'result_type',
-            'Results'                          => 'results',
-            'Reach'                            => 'reach',
-            'Impressions'                      => 'impressions',
-            'Cost per result'                  => 'cost_per_result',
-            'Ad Set Delivery'                  => 'ad_set_delivery',
-            'Messaging conversations started'  => 'messaging_conversations_started',
-            'Campaign ID'                      => 'campaign_id',
-            'Ad set ID'                        => 'ad_set_id',
-            'Ad Set Budget'                    => 'ad_set_budget',
-            'Ad Set Budget Type'               => 'ad_set_budget_type',
-            'Reporting starts'                 => 'reporting_starts',
-            'Reporting ends'                   => 'reporting_ends',
+            'day'                             => 'day',
+            'page name'                       => 'page_name',
+            'campaign name'                   => 'campaign_name',
+            'ad set name'                     => 'ad_set_name',
+            'ad id'                           => 'ad_id',
+            'delivery status'                 => 'campaign_delivery',
+            'amount spent (php)'              => 'amount_spent_php',
+            'purchases'                       => 'purchases',
+            'attribution setting'             => 'attribution_setting',
+            'result type'                     => 'result_type',
+            'results'                         => 'results',
+            'reach'                           => 'reach',
+            'impressions'                     => 'impressions',
+            'cost per result'                 => 'cost_per_result',
+            'ad set delivery'                 => 'ad_set_delivery',
+            'messaging conversations started' => 'messaging_conversations_started',
+            'campaign id'                     => 'campaign_id',
+            'ad set id'                       => 'ad_set_id',
+            'ad set budget'                   => 'ad_set_budget',
+            'ad set budget type'              => 'ad_set_budget_type',
+            'reporting starts'                => 'reporting_starts',
+            'reporting ends'                  => 'reporting_ends',
 
-            // Creatives (ad-level headers)
-            'Body (ad settings)'               => 'body_ad_settings',
-            'headline'                         => 'headline',
+            // Creatives
+            'body (ad settings)'              => 'body_ad_settings',
+            'headline'                        => 'headline',
 
-            // OPTIONAL: Messenger templates (if present)
-            'Welcome message'                  => 'welcome_message',
-            'Quick reply 1'                    => 'quick_reply_1',
-            'Quick reply 2'                    => 'quick_reply_2',
-            'Quick reply 3'                    => 'quick_reply_3',
+            // OPTIONAL: Messenger templates
+            'welcome message'                 => 'welcome_message',
+            'quick reply 1'                   => 'quick_reply_1',
+            'quick reply 2'                   => 'quick_reply_2',
+            'quick reply 3'                   => 'quick_reply_3',
         ];
         $norm = fn($s)=> strtolower(trim(preg_replace('/\s+/', ' ', (string)$s)));
         $out = [];
@@ -376,18 +376,18 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         try {
             $now = now()->toDateTimeString();
 
-            // 1) Populate ad_campaign_creatives (once per ad_id; safe with unique campaign_id)
+            // 1) Upsert creatives in a PG-safe way (no exceptions on conflicts)
             $this->upsertCreativesForChunk($rows, $now);
 
-            // 2) Upsert facts into ads_manager_reports (current behavior, keeps creatives for now)
+            // 2) Upsert facts into ads_manager_reports (keep creatives fields for now)
             foreach ($rows as $r) {
                 $updateData = ['updated_at' => $now];
 
-                // keep current fields (including ad_id)
+                // Core fields
                 $this->putIfExists($updateData, $r, 'page_name');
                 $this->putIfExists($updateData, $r, 'campaign_name');
                 $this->putIfExists($updateData, $r, 'ad_set_name');
-                $this->putIfExists($updateData, $r, 'ad_id'); // important for JOINs later
+                $this->putIfExists($updateData, $r, 'ad_id');
                 $this->putIfExists($updateData, $r, 'campaign_delivery');
                 $this->putIfExists($updateData, $r, 'amount_spent_php');
                 $this->putIfExists($updateData, $r, 'purchases');
@@ -405,7 +405,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'reporting_starts');
                 $this->putIfExists($updateData, $r, 'reporting_ends');
 
-                // Creatives (still saved here for now)
+                // Creatives (still mirrored here for now)
                 $this->putIfExists($updateData, $r, 'body_ad_settings');
                 $this->putIfExists($updateData, $r, 'headline');
                 $this->putIfExists($updateData, $r, 'welcome_message');
@@ -441,12 +441,13 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
     }
 
     /**
-     * Batch upsert creatives into ad_campaign_creatives.
-     * Safe with unique campaign_id (updates ad_id if NULL), and prefers ad_id anchoring going forward.
+     * Batch upsert creatives into ad_campaign_creatives in a Postgres-safe way:
+     *  - Uses insertOrIgnore to avoid unique-violation exceptions.
+     *  - When attaching ad_id to an existing campaign_id row, we first check
+     *    if some row already has that ad_id, to avoid conflicts.
      */
     private function upsertCreativesForChunk(array $rows, string $now): void
     {
-        // Collect payloads keyed by ad_id (or campaign_id if ad_id missing)
         $payloads = [];
         $adIds = [];
         $campaignIds = [];
@@ -455,9 +456,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             $adId       = !empty($r['ad_id']) ? (string)$r['ad_id'] : null;
             $campaignId = !empty($r['campaign_id']) ? (string)$r['campaign_id'] : null;
 
-            if (!$adId && !$campaignId) {
-                continue; // nothing to anchor
-            }
+            if (!$adId && !$campaignId) continue;
 
             $p = [
                 'ad_id'            => $adId,
@@ -479,7 +478,6 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $payloads["ad:{$adId}"] = $p;
                 $adIds[] = $adId;
             } elseif ($campaignId) {
-                // fallback key when ad_id isn't present
                 $payloads["cmp:{$campaignId}"] = $p;
             }
 
@@ -488,7 +486,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
         if (empty($payloads)) return;
 
-        // Fetch existing by ad_id and by campaign_id to avoid unique violations on campaign_id
+        // Existing rows (to avoid unnecessary writes)
         $existingByAdId = [];
         if (!empty($adIds)) {
             $existingByAdId = DB::table('ad_campaign_creatives')
@@ -508,18 +506,16 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         }
 
         $toInsert = [];
-        $toUpdateAdId = []; // [id => ad_id] only set ad_id if currently NULL
+        $toUpdateAdId = []; // [id => ad_id] fill only if current is NULL
 
         foreach ($payloads as $key => $p) {
             $adId       = $p['ad_id'] ?? null;
             $campaignId = $p['campaign_id'] ?? null;
 
-            // Case A: ad_id already exists -> nothing to do
             if ($adId && isset($existingByAdId[$adId])) {
                 continue;
             }
 
-            // Case B: campaign_id exists (unique), attach ad_id if missing; else skip
             if ($campaignId && isset($existingByCampaignId[$campaignId])) {
                 $row = $existingByCampaignId[$campaignId];
                 if ($adId && empty($row->ad_id)) {
@@ -528,39 +524,26 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 continue;
             }
 
-            // Case C: brand-new creative row
             $toInsert[] = $p;
         }
 
+        // IMPORTANT: avoid exceptions on unique conflicts in Postgres
         if (!empty($toInsert)) {
-            try {
-                DB::table('ad_campaign_creatives')->insert($toInsert);
-            } catch (\Throwable $e) {
-                // In case of unique races, retry one-by-one
-                Log::warning('[AdsMgr Import] ad_campaign_creatives bulk insert had conflicts; retrying individually', ['err' => $e->getMessage()]);
-                foreach ($toInsert as $row) {
-                    try {
-                        DB::table('ad_campaign_creatives')->insert($row);
-                    } catch (\Throwable $e2) {
-                        // swallow unique violation
-                    }
-                }
-            }
+            DB::table('ad_campaign_creatives')->insertOrIgnore($toInsert);
         }
 
-        // Update ad_id where the row (by campaign_id) exists but ad_id is still NULL
+        // Fill ad_id on existing campaign rows, but only if nobody else already owns that ad_id
         foreach ($toUpdateAdId as $id => $adId) {
-            try {
-                DB::table('ad_campaign_creatives')
-                    ->where('id', $id)
-                    ->whereNull('ad_id')
-                    ->update([
-                        'ad_id'      => $adId,
-                        'updated_at' => $now,
-                    ]);
-            } catch (\Throwable $e) {
-                // swallow unique issues in case ad_id was set by a parallel worker
-            }
+            $taken = DB::table('ad_campaign_creatives')->where('ad_id', $adId)->exists();
+            if ($taken) continue;
+
+            DB::table('ad_campaign_creatives')
+                ->where('id', $id)
+                ->whereNull('ad_id')
+                ->update([
+                    'ad_id'      => $adId,
+                    'updated_at' => $now,
+                ]);
         }
     }
 
