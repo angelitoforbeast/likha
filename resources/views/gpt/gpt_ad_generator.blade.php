@@ -17,6 +17,18 @@
                   placeholder="e.g., Rechargeable, heavy duty, super liwanag, waterproof">Rechargeable, Heavy Duty, Super liwanag, Waterproof, Pang emergency</textarea>
       </div>
 
+      {{-- NEW: Page filter for suggestions --}}
+      <div>
+        <label class="block font-semibold">📄 Page (for suggestions)</label>
+        <select id="pageSelect" class="w-full border rounded p-2">
+          <option value="all">All Pages</option>
+          @foreach ($pages as $p)
+            <option value="{{ $p }}">{{ $p }}</option>
+          @endforeach
+        </select>
+        <p class="text-xs text-gray-500 mt-1">This only affects “Load Ad Copy Suggestions.”</p>
+      </div>
+
       <div>
         <label class="block font-semibold">✏️ Custom GPT Prompt (editable)</label>
         <textarea id="prompt" class="w-full border rounded p-2 text-sm" rows="10">{{ $promptText }}</textarea>
@@ -27,7 +39,7 @@
           🚀 Generate GPT Output
         </button>
 
-        <button onclick="loadAdCopySuggestions()" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded">
+        <button id="btnLoadSuggestions" onclick="loadAdCopySuggestions()" class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded">
           💡 Load Ad Copy Suggestions
         </button>
       </div>
@@ -53,9 +65,7 @@
               <th class="border px-3 py-2">Quick Reply 3</th>
             </tr>
           </thead>
-          <tbody id="gptOutputBody">
-            <!-- GPT Output will be inserted here -->
-          </tbody>
+          <tbody id="gptOutputBody"></tbody>
         </table>
       </div>
     </div>
@@ -96,7 +106,10 @@
         const data = await response.json();
 
         if (data.output) {
-          const [item, primary, headline, message, q1, q2, q3] = data.output.split("\t");
+          const parts = data.output.split("\t");
+          const [item, primary, headline, message, q1, q2, q3] = [
+            parts[0] ?? "", parts[1] ?? "", parts[2] ?? "", parts[3] ?? "", parts[4] ?? "", parts[5] ?? "", parts[6] ?? ""
+          ];
           outputBody.innerHTML = `
             <tr class="hover:bg-blue-50">
               <td class="border px-3 py-2">${item}</td>
@@ -132,21 +145,29 @@
     }
 
     async function loadAdCopySuggestions() {
+      const btn = document.getElementById('btnLoadSuggestions');
       const promptBox = document.getElementById("prompt");
       const original = promptBox.value;
-      const loadingMsg = "⏳ Loading ad copy suggestions...";
+      const page = document.getElementById("pageSelect").value;
+      const loadingMsg = `⏳ Loading ad copy suggestions${page && page !== 'all' ? ' for page: ' + page : ''}...`;
+
+      btn.disabled = true;
       promptBox.value = `${original}\n\n${loadingMsg}`;
 
       try {
-        const response = await fetch('/ad-copy-suggestions');
+        const qs = new URLSearchParams({ page });
+        const response = await fetch(`/ad-copy-suggestions?${qs.toString()}`);
         const data = await response.json();
         if (data.output) {
-          promptBox.value = `${original}\n\n${data.output}`;
+          const header = (page && page !== 'all') ? `\n\n=== Suggestions (Page: ${page}) ===\n` : `\n\n=== Suggestions (All Pages) ===\n`;
+          promptBox.value = `${original}${header}${data.output}`;
         } else {
           promptBox.value = `${original}\n\n⚠️ No suggestions returned.`;
         }
       } catch (error) {
         promptBox.value = `${original}\n\n❌ Error loading suggestions: ${error.message}`;
+      } finally {
+        btn.disabled = false;
       }
     }
   </script>
