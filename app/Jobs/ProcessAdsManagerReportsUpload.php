@@ -83,7 +83,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
                     $normRow = $this->normalizeRow($cells, $headerIndex, $mapNorm, $ext);
 
-                    // REQUIRED: page_name not null; KEY: day + ad_set_id
+                    // REQUIRED: page_name not null; KEY: day + ad_set_id (current behavior)
                     if (empty($normRow['page_name']) || empty($normRow['ad_set_id'])) {
                         $this->skipped++;
                         continue;
@@ -127,7 +127,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 ]);
             }
 
-            Log::info("[AdsMgr Import] Done. processed={$this->processed}, inserted={$this->inserted}, updated={$this->updated}, skipped={$this->skipped}, file={$this->storedPath}, user={$this->userId}");
+            Log::info("[AdsMgr Import] Done. processed={$this->processed}, inserted={$this->inserted}, updated={$this->updated}, skipped={$this->skipped}, file={$this->storedPath}, user={$this->userId}]");
         } catch (\Throwable $e) {
             if ($log) {
                 $log->update([
@@ -212,6 +212,16 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             'Ad Set Budget Type'               => 'ad_set_budget_type',
             'Reporting starts'                 => 'reporting_starts',
             'Reporting ends'                   => 'reporting_ends',
+
+            // Creatives (ad-level headers)
+            'Body (ad settings)'               => 'body_ad_settings',
+            'headline'                         => 'headline',
+
+            // OPTIONAL: Messenger templates (if present)
+            'Welcome message'                  => 'welcome_message',
+            'Quick reply 1'                    => 'quick_reply_1',
+            'Quick reply 2'                    => 'quick_reply_2',
+            'Quick reply 3'                    => 'quick_reply_3',
         ];
         $norm = fn($s)=> strtolower(trim(preg_replace('/\s+/', ' ', (string)$s)));
         $out = [];
@@ -249,17 +259,16 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         foreach (['reach','impressions','results','purchases','messaging_conversations_started'] as $intCol) {
             if (array_key_exists($intCol, $row)) $row[$intCol] = $this->toInt($row[$intCol]);
         }
-        // decimals
-        // decimals
-foreach (['amount_spent_php','cost_per_result','ad_set_budget'] as $decCol) {
-    if (array_key_exists($decCol, $row)) $row[$decCol] = $this->toDecimal($row[$decCol]);
-}
 
-/** 🔧 Apply 12% multiplier to amount_spent_php BEFORE saving */
-if (array_key_exists('amount_spent_php', $row) && $row['amount_spent_php'] !== null) {
-    $row['amount_spent_php'] = round($row['amount_spent_php'] * 1.12, 2); // fits decimal(12,2)
-}
+        // decimals
+        foreach (['amount_spent_php','cost_per_result','ad_set_budget'] as $decCol) {
+            if (array_key_exists($decCol, $row)) $row[$decCol] = $this->toDecimal($row[$decCol]);
+        }
 
+        /** Apply 12% multiplier to amount_spent_php BEFORE saving */
+        if (array_key_exists('amount_spent_php', $row) && $row['amount_spent_php'] !== null) {
+            $row['amount_spent_php'] = round($row['amount_spent_php'] * 1.12, 2); // fits decimal(12,2)
+        }
 
         // datetimes (full)
         foreach (['reporting_starts','reporting_ends'] as $dtCol) {
@@ -367,31 +376,42 @@ if (array_key_exists('amount_spent_php', $row) && $row['amount_spent_php'] !== n
         try {
             $now = now()->toDateTimeString();
 
+            // 1) Populate ad_campaign_creatives (once per ad_id; safe with unique campaign_id)
+            $this->upsertCreativesForChunk($rows, $now);
+
+            // 2) Upsert facts into ads_manager_reports (current behavior, keeps creatives for now)
             foreach ($rows as $r) {
-                // UPDATE first (for accurate updated count)
-                $updateData = [
-                    'page_name'                       => $r['page_name'] ?? null,
-                    'campaign_name'                   => $r['campaign_name'] ?? null,
-                    'ad_set_name'                     => $r['ad_set_name'] ?? null,
-                    'ad_id'                           => $r['ad_id'] ?? null,
-                    'campaign_delivery'               => $r['campaign_delivery'] ?? null,
-                    'amount_spent_php'                => $r['amount_spent_php'] ?? null,
-                    'purchases'                       => $r['purchases'] ?? null,
-                    'attribution_setting'             => $r['attribution_setting'] ?? null,
-                    'result_type'                     => $r['result_type'] ?? null,
-                    'results'                         => $r['results'] ?? null,
-                    'reach'                           => $r['reach'] ?? null,
-                    'impressions'                     => $r['impressions'] ?? null,
-                    'cost_per_result'                 => $r['cost_per_result'] ?? null,
-                    'ad_set_delivery'                 => $r['ad_set_delivery'] ?? null,
-                    'messaging_conversations_started' => $r['messaging_conversations_started'] ?? null,
-                    'campaign_id'                     => $r['campaign_id'] ?? null,
-                    'ad_set_budget'                   => $r['ad_set_budget'] ?? null,
-                    'ad_set_budget_type'              => $r['ad_set_budget_type'] ?? null,
-                    'reporting_starts'                => $r['reporting_starts'] ?? null,
-                    'reporting_ends'                  => $r['reporting_ends'] ?? null,
-                    'updated_at'                      => $now,
-                ];
+                $updateData = ['updated_at' => $now];
+
+                // keep current fields (including ad_id)
+                $this->putIfExists($updateData, $r, 'page_name');
+                $this->putIfExists($updateData, $r, 'campaign_name');
+                $this->putIfExists($updateData, $r, 'ad_set_name');
+                $this->putIfExists($updateData, $r, 'ad_id'); // important for JOINs later
+                $this->putIfExists($updateData, $r, 'campaign_delivery');
+                $this->putIfExists($updateData, $r, 'amount_spent_php');
+                $this->putIfExists($updateData, $r, 'purchases');
+                $this->putIfExists($updateData, $r, 'attribution_setting');
+                $this->putIfExists($updateData, $r, 'result_type');
+                $this->putIfExists($updateData, $r, 'results');
+                $this->putIfExists($updateData, $r, 'reach');
+                $this->putIfExists($updateData, $r, 'impressions');
+                $this->putIfExists($updateData, $r, 'cost_per_result');
+                $this->putIfExists($updateData, $r, 'ad_set_delivery');
+                $this->putIfExists($updateData, $r, 'messaging_conversations_started');
+                $this->putIfExists($updateData, $r, 'campaign_id');
+                $this->putIfExists($updateData, $r, 'ad_set_budget');
+                $this->putIfExists($updateData, $r, 'ad_set_budget_type');
+                $this->putIfExists($updateData, $r, 'reporting_starts');
+                $this->putIfExists($updateData, $r, 'reporting_ends');
+
+                // Creatives (still saved here for now)
+                $this->putIfExists($updateData, $r, 'body_ad_settings');
+                $this->putIfExists($updateData, $r, 'headline');
+                $this->putIfExists($updateData, $r, 'welcome_message');
+                $this->putIfExists($updateData, $r, 'quick_reply_1');
+                $this->putIfExists($updateData, $r, 'quick_reply_2');
+                $this->putIfExists($updateData, $r, 'quick_reply_3');
 
                 $affected = DB::table('ads_manager_reports')
                     ->where('day', $r['day'])
@@ -399,12 +419,13 @@ if (array_key_exists('amount_spent_php', $row) && $row['amount_spent_php'] !== n
                     ->update($updateData);
 
                 if ($affected === 0) {
-                    // INSERT
-                    DB::table('ads_manager_reports')->insert(array_merge([
+                    $insertData = array_merge([
                         'day'        => $r['day'],
                         'ad_set_id'  => $r['ad_set_id'],
                         'created_at' => $now,
-                    ], $updateData));
+                    ], $updateData);
+
+                    DB::table('ads_manager_reports')->insert($insertData);
                     $this->inserted++;
                 } else {
                     $this->updated++;
@@ -416,6 +437,141 @@ if (array_key_exists('amount_spent_php', $row) && $row['amount_spent_php'] !== n
             DB::rollBack();
             Log::error('[AdsMgr Import] upsertChunk failed: '.$e->getMessage(), ['trace' => $e->getTraceAsString()]);
             throw $e;
+        }
+    }
+
+    /**
+     * Batch upsert creatives into ad_campaign_creatives.
+     * Safe with unique campaign_id (updates ad_id if NULL), and prefers ad_id anchoring going forward.
+     */
+    private function upsertCreativesForChunk(array $rows, string $now): void
+    {
+        // Collect payloads keyed by ad_id (or campaign_id if ad_id missing)
+        $payloads = [];
+        $adIds = [];
+        $campaignIds = [];
+
+        foreach ($rows as $r) {
+            $adId       = !empty($r['ad_id']) ? (string)$r['ad_id'] : null;
+            $campaignId = !empty($r['campaign_id']) ? (string)$r['campaign_id'] : null;
+
+            if (!$adId && !$campaignId) {
+                continue; // nothing to anchor
+            }
+
+            $p = [
+                'ad_id'            => $adId,
+                'campaign_id'      => $campaignId,
+                'campaign_name'    => $r['campaign_name'] ?? null,
+                'page_name'        => $r['page_name'] ?? null,
+                'ad_set_delivery'  => $r['ad_set_delivery'] ?? null,
+                'headline'         => $r['headline'] ?? null,
+                'body_ad_settings' => $r['body_ad_settings'] ?? null,
+                'welcome_message'  => $r['welcome_message'] ?? null,
+                'quick_reply_1'    => $r['quick_reply_1'] ?? null,
+                'quick_reply_2'    => $r['quick_reply_2'] ?? null,
+                'quick_reply_3'    => $r['quick_reply_3'] ?? null,
+                'created_at'       => $now,
+                'updated_at'       => $now,
+            ];
+
+            if ($adId) {
+                $payloads["ad:{$adId}"] = $p;
+                $adIds[] = $adId;
+            } elseif ($campaignId) {
+                // fallback key when ad_id isn't present
+                $payloads["cmp:{$campaignId}"] = $p;
+            }
+
+            if ($campaignId) $campaignIds[] = $campaignId;
+        }
+
+        if (empty($payloads)) return;
+
+        // Fetch existing by ad_id and by campaign_id to avoid unique violations on campaign_id
+        $existingByAdId = [];
+        if (!empty($adIds)) {
+            $existingByAdId = DB::table('ad_campaign_creatives')
+                ->whereIn('ad_id', array_values(array_unique($adIds)))
+                ->get(['id','ad_id','campaign_id'])
+                ->keyBy('ad_id')
+                ->all();
+        }
+
+        $existingByCampaignId = [];
+        if (!empty($campaignIds)) {
+            $existingByCampaignId = DB::table('ad_campaign_creatives')
+                ->whereIn('campaign_id', array_values(array_unique($campaignIds)))
+                ->get(['id','ad_id','campaign_id'])
+                ->keyBy('campaign_id')
+                ->all();
+        }
+
+        $toInsert = [];
+        $toUpdateAdId = []; // [id => ad_id] only set ad_id if currently NULL
+
+        foreach ($payloads as $key => $p) {
+            $adId       = $p['ad_id'] ?? null;
+            $campaignId = $p['campaign_id'] ?? null;
+
+            // Case A: ad_id already exists -> nothing to do
+            if ($adId && isset($existingByAdId[$adId])) {
+                continue;
+            }
+
+            // Case B: campaign_id exists (unique), attach ad_id if missing; else skip
+            if ($campaignId && isset($existingByCampaignId[$campaignId])) {
+                $row = $existingByCampaignId[$campaignId];
+                if ($adId && empty($row->ad_id)) {
+                    $toUpdateAdId[(int)$row->id] = $adId;
+                }
+                continue;
+            }
+
+            // Case C: brand-new creative row
+            $toInsert[] = $p;
+        }
+
+        if (!empty($toInsert)) {
+            try {
+                DB::table('ad_campaign_creatives')->insert($toInsert);
+            } catch (\Throwable $e) {
+                // In case of unique races, retry one-by-one
+                Log::warning('[AdsMgr Import] ad_campaign_creatives bulk insert had conflicts; retrying individually', ['err' => $e->getMessage()]);
+                foreach ($toInsert as $row) {
+                    try {
+                        DB::table('ad_campaign_creatives')->insert($row);
+                    } catch (\Throwable $e2) {
+                        // swallow unique violation
+                    }
+                }
+            }
+        }
+
+        // Update ad_id where the row (by campaign_id) exists but ad_id is still NULL
+        foreach ($toUpdateAdId as $id => $adId) {
+            try {
+                DB::table('ad_campaign_creatives')
+                    ->where('id', $id)
+                    ->whereNull('ad_id')
+                    ->update([
+                        'ad_id'      => $adId,
+                        'updated_at' => $now,
+                    ]);
+            } catch (\Throwable $e) {
+                // swallow unique issues in case ad_id was set by a parallel worker
+            }
+        }
+    }
+
+    /**
+     * Add $key => $source[$key] into $dest only if key exists AND value !== null.
+     * This prevents overwriting existing DB values to NULL when the Excel column is absent/blank.
+     */
+    private function putIfExists(array &$dest, array $source, string $key): void
+    {
+        if (array_key_exists($key, $source) && $source[$key] !== null) {
+            $dest[$key] = $source[$key];
         }
     }
 }

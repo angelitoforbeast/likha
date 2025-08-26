@@ -139,7 +139,7 @@
     'task/my-tasks',
     'macro/gsheet/index',
     'task/team-tasks',
-    'ads_manager/edit-messaging-template',
+    'ads-manager/edit-messaging-template',
     'encoder/checker_1',
     'ads_manager/campaigns',
     'ads_manager/cpp'

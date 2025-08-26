@@ -22,6 +22,7 @@ class AdCampaignCreative extends Model
         'ad_set_delivery',
 
     ];
+    protected $casts = ['feedback' => 'boolean'];
 
     public function reports()
     {

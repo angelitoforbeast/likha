@@ -32,6 +32,7 @@ use App\Http\Controllers\JntCheckerController;
 use App\Http\Controllers\JntUploadController;
 use App\Http\Controllers\PancakeSubscriptionCheckerController;
 use App\Http\Controllers\AdsManagerCampaignsController;
+use App\Http\Controllers\AdsInsightsController;
 
 
 use App\Models\Role;
@@ -116,6 +117,11 @@ Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'ind
      Route::get('/ads_manager/campaigns/data', [AdsManagerCampaignsController::class, 'data'])
         ->name('ads_manager.campaigns.data');
 
+    Route::get('/ads_manager/insights', [AdsInsightsController::class, 'index'])->name('ads.insights.index');
+    Route::post('/ads_manager/insights/analyze',
+    [\App\Http\Controllers\AdsInsightsController::class, 'analyze']
+)->name('ads.insights.analyze')->middleware('throttle:20,1'); // 20 req / minute
+    Route::get('/ads_manager/insights/preview', [AdsInsightsController::class, 'preview'])->name('ads.insights.preview');
 
     
     Route::get('/task/my-everyday-task', [EverydayTaskController::class, 'index'])->name('everyday-tasks.index');
