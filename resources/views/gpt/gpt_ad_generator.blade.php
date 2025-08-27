@@ -58,7 +58,7 @@
           </div>
         </div>
 
-        <div class="pt-3 flex flex-wrap gap-3">
+        <div class="pt-3 flex flex-wrap gap-3 items-center">
           <button
             onclick="generateGPTSummary()"
             class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded text-sm"
@@ -82,6 +82,12 @@
             Generating summary…
           </div>
         </div>
+
+        <!-- Prompt Preview (debug) -->
+        <details class="mt-2 text-sm">
+          <summary class="cursor-pointer text-gray-600">👁 Preview final prompt (debug)</summary>
+          <textarea id="finalPromptPreview" class="mt-2 w-full h-32 border rounded p-2 text-xs overflow-auto" readonly></textarea>
+        </details>
       </div>
 
       <!-- RIGHT: Suggestions (same height as left; scroll only inside) -->
@@ -152,6 +158,17 @@
   </div>
 
   <script>
+    // ===== Strict rules injected into the final prompt so GPT follows Suggestions only =====
+    const STRICT_RULES = `
+[SUGGESTION-STRICT MODE]
+- Use ONLY themes/messages that appear in the "=== Suggestions" block or in the Product Description.
+- Do NOT mention colors, sizes, fit, materials, variants, bundles, warranty, COD, promos, or delivery details UNLESS explicitly present in Suggestions or Product Description.
+- Prefer tone/phrasing of TOP-PERFORMING items. Avoid WORST list patterns.
+- If Suggestions include "Welcome Message" and "QR1/QR2/QR3", base your "Messaging Template" and "Quick Reply 1–3" on them (rephrase ok, but keep same intent).
+- Output must be a SINGLE LINE with 7 tab-separated fields, no extra text.
+[/SUGGESTION-STRICT MODE]
+`.trim();
+
     // ===== Height management to fit entire UI inside viewport (no page scrollbars) =====
     function computeLayoutHeights() {
       const root = document.getElementById('viewportFit');
@@ -159,16 +176,14 @@
       const outputWrap = document.getElementById('outputWrap');
       if (!root || !topGrid || !outputWrap) return;
 
-      // Set the wrapper height to the remaining viewport space to avoid body scrollbars
       const topOffset = root.getBoundingClientRect().top;
       const gapFallback = 16; // ~gap-4
       const rootStyles = getComputedStyle(root);
       const rootGap = parseFloat(rootStyles.gap || rootStyles.rowGap || gapFallback) || gapFallback;
 
-      const available = Math.max(480, Math.round(window.innerHeight - topOffset - 8)); // padding safety
+      const available = Math.max(480, Math.round(window.innerHeight - topOffset - 8));
       root.style.height = available + 'px';
 
-      // Allocate vertical space: ~56% top (inputs+suggestions), rest for output table
       const topH = Math.max(260, Math.round(available * 0.56));
       const bottomH = Math.max(220, available - topH - rootGap);
 
@@ -179,7 +194,6 @@
     window.addEventListener('resize', computeLayoutHeights);
     document.addEventListener('DOMContentLoaded', () => {
       computeLayoutHeights();
-      // Recompute after fonts/assets and any dynamic layout changes
       setTimeout(computeLayoutHeights, 0);
       setTimeout(computeLayoutHeights, 200);
     });
@@ -201,10 +215,16 @@
         return;
       }
 
+      // Final Prompt = base prompt + STRICT_RULES + optional suggestions + product info
       const finalPrompt =
         customPrompt +
+        "\n\n" + STRICT_RULES +
         (includeSug && suggestions ? `\n\n${suggestions}` : "") +
         `\n\nProduct Name: ${name}\nProduct Description: ${desc}`;
+
+      // Show preview for verification (debug)
+      const preview = document.getElementById('finalPromptPreview');
+      if (preview) preview.value = finalPrompt;
 
       outputBox.classList.add("hidden");
       loadingBox.classList.remove("hidden");
@@ -233,7 +253,7 @@
             parts[6] ?? "",
           ];
 
-          outputBody.innerHTML = `
+          document.getElementById("gptOutputBody").innerHTML = `
             <tr class="hover:bg-blue-50">
               <td class="border px-3 py-2">${item}</td>
               <td class="border px-3 py-2">${primary}</td>
@@ -247,7 +267,7 @@
 
           outputBox.classList.remove("hidden");
         } else {
-          outputBody.innerHTML = `
+          document.getElementById("gptOutputBody").innerHTML = `
             <tr>
               <td colspan="7" class="text-red-600 px-3 py-2">⚠️ GPT did not return a result.</td>
             </tr>
@@ -255,7 +275,7 @@
           outputBox.classList.remove("hidden");
         }
       } catch (error) {
-        outputBody.innerHTML = `
+        document.getElementById("gptOutputBody").innerHTML = `
           <tr>
             <td colspan="7" class="text-red-600 px-3 py-2">❌ Error occurred: ${error.message}</td>
           </tr>
@@ -263,7 +283,7 @@
         outputBox.classList.remove("hidden");
       } finally {
         loadingBox.classList.add("hidden");
-        computeLayoutHeights(); // keep layout tight after render
+        computeLayoutHeights();
       }
     }
 
@@ -307,7 +327,7 @@
         raw.value = msg;
       } finally {
         btn.disabled = false;
-        computeLayoutHeights(); // ensure layout stays within viewport
+        computeLayoutHeights();
       }
     }
 
