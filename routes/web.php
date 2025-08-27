@@ -33,6 +33,7 @@ use App\Http\Controllers\JntUploadController;
 use App\Http\Controllers\PancakeSubscriptionCheckerController;
 use App\Http\Controllers\AdsManagerCampaignsController;
 use App\Http\Controllers\AdsInsightsController;
+use App\Http\Controllers\GPTAdGeneratorController;
 
 
 use App\Models\Role;
@@ -49,9 +50,9 @@ Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->midd
 Route::get('/assign-roles', [RoleAssignmentController::class, 'index']);
 Route::post('/assign-roles/{id}', [RoleAssignmentController::class, 'update']);
 
-Route::post('/api/generate-gpt-summary', [\App\Http\Controllers\GPTAdGeneratorController::class, 'generate']);
-Route::get('/gpt-ad-generator', [\App\Http\Controllers\GPTAdGeneratorController::class, 'showGeneratorForm']);
-Route::get('/ad-copy-suggestions', [AdCopyController::class, 'suggestions']);
+Route::post('/api/generate-gpt-summary', [GPTAdGeneratorController::class, 'generate']);
+Route::get('/gpt-ad-generator', [GPTAdGeneratorController::class, 'showGeneratorForm']);
+Route::get('/ad-copy-suggestions', [GPTAdGeneratorController::class, 'loadAdCopySuggestions'])->name('gpt.suggestions');
 
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {

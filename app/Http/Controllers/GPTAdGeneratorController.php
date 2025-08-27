@@ -6,28 +6,19 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 class GPTAdGeneratorController extends Controller
 {
-    /**
-     * POST /api/generate-gpt-summary
-     * Body: { prompt: string }
-     */
+    /** POST /api/generate-gpt-summary */
     public function generate(Request $request)
     {
-        $request->validate([
-            'prompt' => 'required|string',
-        ]);
-
+        $request->validate(['prompt' => 'required|string']);
         $prompt = $request->input('prompt');
 
         try {
             $response = Http::withToken(env('OPENAI_API_KEY'))->post('https://api.openai.com/v1/chat/completions', [
                 'model' => 'gpt-4',
-                'messages' => [
-                    ['role' => 'user', 'content' => $prompt]
-                ],
+                'messages' => [['role' => 'user', 'content' => $prompt]],
                 'temperature' => 0.7,
             ]);
 
@@ -36,208 +27,213 @@ class GPTAdGeneratorController extends Controller
             if ($response->successful()) {
                 return response()->json([
                     'output' => $response['choices'][0]['message']['content'] ?? 'No output from GPT.',
-                ]);
+                ], 200, [], JSON_UNESCAPED_UNICODE);
             }
 
             return response()->json([
                 'output' => '❌ GPT request failed.',
                 'error'  => $response->body(),
-            ], 500);
-        } catch (\Exception $e) {
+            ], 500, [], JSON_UNESCAPED_UNICODE);
+        } catch (\Throwable $e) {
             Log::error('GPT Exception: ' . $e->getMessage());
             return response()->json([
                 'output' => '❌ Server error occurred.',
                 'error'  => $e->getMessage(),
-            ], 500);
+            ], 500, [], JSON_UNESCAPED_UNICODE);
         }
     }
 
-    /**
-     * GET /gpt/ad-generator
-     * Shows the Ad Copy Generator with pages dropdown.
-     */
+    /** GET /gpt-ad-generator */
     public function showGeneratorForm()
     {
         $promptText = file_get_contents(resource_path('views/gpt/gpt_ad_prompts.txt'));
 
-        $pages = DB::table('ads_manager_reports')
+        // Get raw page names, normalize in PHP (avoid SQL REPLACE/UNHEX)
+        $rawPages = DB::table('ads_manager_reports')
             ->whereNotNull('page_name')
-            ->selectRaw('TRIM(page_name) AS page_name')
-            ->distinct()
-            ->orderBy('page_name')
-            ->pluck('page_name')
-            ->toArray();
+            ->pluck('page_name');
+
+        $pages = collect($rawPages)->map(fn ($p) => $this->normalizePage($p))
+            ->filter()->unique()->sort()->values()->toArray();
 
         return view('gpt.gpt_ad_generator', compact('promptText', 'pages'));
     }
 
-    /**
-     * GET /ad-copy-suggestions?page={page|all}
-     * Returns text suggestions grouped by performance (Top/Worst/Mean/Median/Mode).
-     * Includes headline, body, welcome message, and quick replies 1–3 when available.
-     *
-     * Notes:
-     * - "CPM" here means Cost per Message = amount_spent_php / messaging_conversations_started
-     */
+    /** GET /ad-copy-suggestions?page={page|all} */
     public function loadAdCopySuggestions(Request $request)
     {
-        $page  = $request->query('page'); // 'all' or specific page name
-        $table = 'ads_manager_reports';
+        try {
+            $pageParam = $request->query('page');
+            $pageNorm  = $this->normalizePage(is_string($pageParam) ? $pageParam : '');
+            $applyPage = $pageNorm !== '' && mb_strtolower($pageNorm) !== 'all';
 
-        // Detect optional columns safely
-        $hasMsgTpl = Schema::hasColumn($table, 'messaging_template');
-        $hasWelcome = Schema::hasColumn($table, 'welcome_message');
-        $hasQR1 = Schema::hasColumn($table, 'quick_reply_1');
-        $hasQR2 = Schema::hasColumn($table, 'quick_reply_2');
-        $hasQR3 = Schema::hasColumn($table, 'quick_reply_3');
+            // If filtering by page, resolve to the exact RAW page_name variants that normalize to $pageNorm
+            $rawMatches = null;
+            if ($applyPage) {
+                $rawPages = DB::table('ads_manager_reports')
+                    ->whereNotNull('page_name')
+                    ->select('page_name')
+                    ->distinct()
+                    ->pluck('page_name');
 
-        // Build SELECT list
-        $cols = [
-            'headline',
-            'body_ad_settings',
-            'amount_spent_php',
-            'messaging_conversations_started',
-            'page_name',
-        ];
-        if ($hasMsgTpl)   $cols[] = 'messaging_template';
-        if ($hasWelcome)  $cols[] = 'welcome_message';
-        if ($hasQR1)      $cols[] = 'quick_reply_1';
-        if ($hasQR2)      $cols[] = 'quick_reply_2';
-        if ($hasQR3)      $cols[] = 'quick_reply_3';
-
-        // Pull raw ads
-        $ads = DB::table($table)
-            ->select($cols)
-            ->when($page && $page !== 'all', function ($q) use ($page) {
-                $q->whereRaw('TRIM(page_name) = ?', [$page]);
-            })
-            ->whereNotNull('headline')
-            ->whereNotNull('body_ad_settings')
-            ->where('messaging_conversations_started', '>', 0)
-            ->get()
-            ->map(function ($ad) use ($hasMsgTpl, $hasWelcome, $hasQR1, $hasQR2, $hasQR3) {
-                // Compute CPM (Cost per Message)
-                $den   = (float) ($ad->messaging_conversations_started ?? 0);
-                $num   = (float) ($ad->amount_spent_php ?? 0);
-                $ad->cpm = $den > 0 ? ($num / $den) : null;
-
-                // Normalize welcome/message template into one "welcome" field
-                $welcome = null;
-                if ($hasMsgTpl && isset($ad->messaging_template) && $ad->messaging_template !== null) {
-                    $welcome = trim((string) $ad->messaging_template);
-                } elseif ($hasWelcome && isset($ad->welcome_message) && $ad->welcome_message !== null) {
-                    $welcome = trim((string) $ad->welcome_message);
+                $rawMatches = [];
+                foreach ($rawPages as $rp) {
+                    if ($this->normalizePage($rp) === $pageNorm) {
+                        $rawMatches[] = $rp; // exact raw string stored in DB
+                    }
                 }
-                $ad->welcome = $welcome;
 
-                // Normalize quick replies
-                $ad->qr1 = $hasQR1 && isset($ad->quick_reply_1) ? trim((string) $ad->quick_reply_1) : null;
-                $ad->qr2 = $hasQR2 && isset($ad->quick_reply_2) ? trim((string) $ad->quick_reply_2) : null;
-                $ad->qr3 = $hasQR3 && isset($ad->quick_reply_3) ? trim((string) $ad->quick_reply_3) : null;
+                if (empty($rawMatches)) {
+                    return response()->json([
+                        'output' => "⚠️ No matching page found for “{$pageNorm}”."
+                    ], 200, [], JSON_UNESCAPED_UNICODE);
+                }
+            }
 
-                // Trim core texts
-                $ad->headline         = isset($ad->headline) ? trim((string) $ad->headline) : null;
-                $ad->body_ad_settings = isset($ad->body_ad_settings) ? trim((string) $ad->body_ad_settings) : null;
+            // 1) Aggregate reports (NO SQL REPLACE/UNHEX)
+            $reports = DB::table('ads_manager_reports as r')
+                ->when($applyPage, fn ($q) => $q->whereIn('r.page_name', $rawMatches))
+                ->whereNotNull('r.ad_id')
+                ->where('r.ad_id', '<>', '')
+                ->select([
+                    'r.ad_id',
+                    DB::raw('SUM(COALESCE(r.amount_spent_php, 0)) AS spend'),
+                    DB::raw('SUM(COALESCE(r.messaging_conversations_started, 0)) AS msgs'),
+                    DB::raw('MAX(r.page_name) AS page_name'),
+                ])
+                ->groupBy('r.ad_id')
+                ->havingRaw('SUM(COALESCE(r.messaging_conversations_started, 0)) > 0')
+                ->get();
 
-                return $ad;
+            if ($reports->isEmpty()) {
+                $scope = $applyPage ? " for “{$pageNorm}”" : "";
+                return response()->json(['output' => "⚠️ No valid ad reports found{$scope}."], 200, [], JSON_UNESCAPED_UNICODE);
+            }
+
+            // 2) Fetch creatives by ad_id
+            $adIds = $reports->pluck('ad_id')->unique()->values()->all();
+            $creatives = DB::table('ad_campaign_creatives as c')
+                ->whereIn('c.ad_id', $adIds)
+                ->select([
+                    'c.ad_id',
+                    'c.headline',
+                    'c.body_ad_settings',
+                    'c.welcome_message',
+                    'c.quick_reply_1',
+                    'c.quick_reply_2',
+                    'c.quick_reply_3',
+                ])
+                ->get()
+                ->keyBy('ad_id');
+
+            // 3) Merge + compute CPM; normalize page in PHP
+            $rows = $reports->map(function ($r) use ($creatives, $applyPage, $pageNorm) {
+                $c = $creatives->get($r->ad_id);
+                if (!$c) return null;
+
+                $headline = $c->headline ? trim($c->headline) : null;
+                $body     = $c->body_ad_settings ? trim($c->body_ad_settings) : null;
+                if ($headline === null || $body === null) return null;
+
+                $msgs  = (float) $r->msgs;
+                $spend = (float) $r->spend;
+                $cpm   = $msgs > 0 ? ($spend / $msgs) : null;
+
+                $pageOut = $r->page_name ?? ($applyPage ? $pageNorm : 'all');
+                $pageOut = $this->normalizePage($pageOut);
+
+                return (object) [
+                    'ad_id'            => $r->ad_id,
+                    'headline'         => $headline,
+                    'body_ad_settings' => $body,
+                    'welcome_message'  => $c->welcome_message ? trim($c->welcome_message) : null,
+                    'quick_reply_1'    => $c->quick_reply_1 ? trim($c->quick_reply_1) : null,
+                    'quick_reply_2'    => $c->quick_reply_2 ? trim($c->quick_reply_2) : null,
+                    'quick_reply_3'    => $c->quick_reply_3 ? trim($c->quick_reply_3) : null,
+                    'cpm'              => $cpm,
+                    'page_name'        => $pageOut,
+                ];
             })
-            ->filter(fn ($ad) => $ad->cpm !== null);
+            ->filter()
+            ->filter(fn ($row) => $row->cpm !== null)
+            ->values();
 
-        if ($ads->isEmpty()) {
-            $scopeNote = ($page && $page !== 'all') ? " for “{$page}”" : "";
-            return response()->json(['output' => "⚠️ No valid ad copies found{$scopeNote}."], 200);
-        }
+            if ($rows->isEmpty()) {
+                $scope = $applyPage ? " for “{$pageNorm}”" : "";
+                return response()->json(['output' => "⚠️ No valid ad data found{$scope}."], 200, [], JSON_UNESCAPED_UNICODE);
+            }
 
-        // Group by the creative set (headline+body+welcome+qr1+qr2+qr3)
-        $grouped = $ads->groupBy(function ($ad) {
-            return implode('|', [
-                $ad->headline ?? '',
-                $ad->body_ad_settings ?? '',
-                $ad->welcome ?? '',
-                $ad->qr1 ?? '',
-                $ad->qr2 ?? '',
-                $ad->qr3 ?? '',
-            ]);
-        })->map(function ($group) {
-            $first = $group->first();
-            return [
-                'headline' => $first->headline,
-                'body'     => $first->body_ad_settings,
-                'welcome'  => $first->welcome,
-                'qr1'      => $first->qr1,
-                'qr2'      => $first->qr2,
-                'qr3'      => $first->qr3,
-                'cpm'      => $group->avg('cpm'),
+            // 4) Rankings/stats from FILTERED set only
+            $sorted = $rows->sortBy('cpm')->values();
+            $top    = $sorted->take(5);
+            $worst  = $sorted->reverse()->take(5);
+
+            $cpms   = $rows->pluck('cpm')->sort()->values();
+            $count  = $cpms->count();
+            $mean   = $count ? $cpms->avg() : null;
+            $median = $count
+                ? ($count % 2 === 0
+                    ? (($cpms[$count/2 - 1] + $cpms[$count/2]) / 2)
+                    : $cpms[floor($count/2)])
+                : null;
+            $mode   = $count ? $cpms->countBy()->sortDesc()->keys()->first() : null;
+
+            $nearest = function ($value) use ($rows) {
+                if ($value === null) return collect();
+                return $rows->sortBy(fn ($r) => abs($r->cpm - $value))->take(5)->values();
+            };
+
+            $sections = [
+                '🔝 TOP-PERFORMING ADS (Lowest CPM)'     => $top,
+                '🔴 WORST-PERFORMING ADS (Highest CPM)'  => $worst,
+                '🟡 MEAN CPM GROUP'                      => $nearest($mean),
+                '🟣 MEDIAN CPM GROUP'                    => $nearest($median),
+                '🔵 MODE CPM GROUP'                      => $nearest($mode),
             ];
-        })->values();
 
-        // Sort & slice
-        $sorted = $grouped->sortBy('cpm')->values();
-        $top    = $sorted->take(5);
-        $worst  = $sorted->reverse()->take(5);
+            $out = collect($sections)->map(function ($group, $label) {
+                if ($group->isEmpty()) return "{$label}\n  (no data)";
+                $lines = ["{$label}"];
+                foreach ($group as $i => $row) {
+                    $lines[] = $this->formatSuggestionBlock($i + 1, $row);
+                }
+                return implode("\n", $lines);
+            })->values()->implode("\n\n");
 
-        // Stats
-        $cpms   = $grouped->pluck('cpm')->sort()->values();
-        $count  = $cpms->count();
-        $mean   = $count ? $cpms->avg() : null;
-        $median = null;
-        if ($count) {
-            $median = $count % 2 === 0
-                ? (($cpms[$count/2 - 1] + $cpms[$count/2]) / 2)
-                : $cpms[floor($count/2)];
+            return response()->json(['output' => $out], 200, [], JSON_UNESCAPED_UNICODE);
+        } catch (\Throwable $e) {
+            Log::error('loadAdCopySuggestions error', ['msg' => $e->getMessage()]);
+            return response()->json([
+                'output' => '❌ Server error occurred.',
+                'error'  => $e->getMessage(),
+            ], 500, [], JSON_UNESCAPED_UNICODE);
         }
-        $mode = $count ? $cpms->countBy()->sortDesc()->keys()->first() : null;
-
-        $matchByCpm = function ($value) use ($grouped) {
-            if ($value === null) return collect();
-            return $grouped->sortBy(fn ($g) => abs($g['cpm'] - $value))->take(5)->values();
-        };
-
-        // Compose output text
-        $sections = [
-            '🔝 TOP-PERFORMING ADS (Lowest CPM)'  => $top,
-            '🔴 WORST-PERFORMING ADS (Highest CPM)' => $worst,
-            '🟡 MEAN CPM GROUP'                   => $matchByCpm($mean),
-            '🟣 MEDIAN CPM GROUP'                 => $matchByCpm($median),
-            '🔵 MODE CPM GROUP'                   => $matchByCpm($mode),
-        ];
-
-        $out = collect($sections)->map(function ($group, $label) {
-            if ($group->isEmpty()) {
-                return "{$label}\n  (no data)";
-            }
-            $lines = ["{$label}"];
-            foreach ($group as $index => $item) {
-                $i = $index + 1;
-                $lines[] = $this->formatSuggestionLine($i, $item);
-            }
-            return implode("\n", $lines);
-        })->values()->implode("\n\n");
-
-        return response()->json(['output' => $out]);
     }
 
-    /**
-     * Helper: nicely format one suggestion block.
-     */
-    private function formatSuggestionLine(int $index, array $item): string
+    /** Helpers */
+    private function formatSuggestionBlock(int $index, object $row): string
     {
-        $line = $index . '. Headline: "' . ($item['headline'] ?? '') . '"' .
-            "\n   Body: \"" . ($item['body'] ?? '') . "\"";
+        $v = fn ($x) => isset($x) && $x !== '' ? $x : '—';
 
-        if (!empty($item['welcome'])) {
-            $line .= "\n   Welcome Message: \"" . $item['welcome'] . '"';
-        }
+        $line  = $index . '. Headline: "' . $v($row->headline) . '"';
+        $line .= "\n   Body: \"" . $v($row->body_ad_settings) . '"';
+        $line .= "\n   Welcome Message: \"" . $v($row->welcome_message) . '"';
+        $line .= "\n   QR1: " . $v($row->quick_reply_1);
+        $line .= "\n   QR2: " . $v($row->quick_reply_2);
+        $line .= "\n   QR3: " . $v($row->quick_reply_3);
+        $line .= "\n   CPM: ₱" . number_format((float) $row->cpm, 2);
+        $line .= "\n   Page: " . $v($row->page_name);
 
-        $qrParts = [];
-        if (!empty($item['qr1'])) $qrParts[] = $item['qr1'];
-        if (!empty($item['qr2'])) $qrParts[] = $item['qr2'];
-        if (!empty($item['qr3'])) $qrParts[] = $item['qr3'];
-        if (!empty($qrParts)) {
-            $line .= "\n   Quick Replies: " . implode(' | ', array_map(fn ($q) => '"' . $q . '"', $qrParts));
-        }
-
-        $line .= "\n   CPM (Cost per Message): ₱" . number_format((float) $item['cpm'], 2);
         return $line;
+    }
+
+    private function normalizePage($s): string
+    {
+        $s = (string) $s;
+        // Replace UTF-8 NBSP (C2 A0) and single-byte A0 with regular space
+        $s = str_replace(["\xC2\xA0", "\xA0"], ' ', $s);
+        // Collapse multiple spaces
+        $s = preg_replace('/\s+/u', ' ', $s);
+        return trim($s);
     }
 }

@@ -17,7 +17,7 @@
                   placeholder="e.g., Rechargeable, heavy duty, super liwanag, waterproof">Rechargeable, Heavy Duty, Super liwanag, Waterproof, Pang emergency</textarea>
       </div>
 
-      {{-- NEW: Page filter for suggestions --}}
+      {{-- Page filter for suggestions --}}
       <div>
         <label class="block font-semibold">📄 Page (for suggestions)</label>
         <select id="pageSelect" class="w-full border rounded p-2">
@@ -107,10 +107,9 @@
 
         if (data.output) {
           const parts = data.output.split("\t");
-          const [item, primary, headline, message, q1, q2, q3] = [
-            parts[0] ?? "", parts[1] ?? "", parts[2] ?? "", parts[3] ?? "", parts[4] ?? "", parts[5] ?? "", parts[6] ?? ""
-          ];
-          outputBody.innerHTML = `
+          const [item, primary, headline, message, q1, q2, q3] =
+            [parts[0] ?? "", parts[1] ?? "", parts[2] ?? "", parts[3] ?? "", parts[4] ?? "", parts[5] ?? "", parts[6] ?? ""];
+          document.getElementById("gptOutputBody").innerHTML = `
             <tr class="hover:bg-blue-50">
               <td class="border px-3 py-2">${item}</td>
               <td class="border px-3 py-2">${primary}</td>
@@ -123,14 +122,55 @@
           `;
           outputBox.classList.remove("hidden");
         } else {
-          outputBody.innerHTML = `<tr><td colspan="7" class="text-red-600 px-3 py-2">⚠️ GPT did not return a result.</td></tr>`;
+          document.getElementById("gptOutputBody").innerHTML =
+            `<tr><td colspan="7" class="text-red-600 px-3 py-2">⚠️ GPT did not return a result.</td></tr>`;
           outputBox.classList.remove("hidden");
         }
       } catch (error) {
-        outputBody.innerHTML = `<tr><td colspan="7" class="text-red-600 px-3 py-2">❌ Error occurred: ${error.message}</td></tr>`;
+        document.getElementById("gptOutputBody").innerHTML =
+          `<tr><td colspan="7" class="text-red-600 px-3 py-2">❌ Error occurred: ${error.message}</td></tr>`;
         outputBox.classList.remove("hidden");
       } finally {
         loadingBox.classList.add("hidden");
+      }
+    }
+
+    async function loadAdCopySuggestions() {
+      const btn = document.getElementById('btnLoadSuggestions');
+      const promptBox = document.getElementById("prompt");
+      const page = (document.getElementById("pageSelect")?.value || 'all').trim();
+      const header = `=== Suggestions (Page: ${page}) ===`;
+
+      // Remove previous Suggestions block(s)
+      const base = promptBox.value.split(/\n=== Suggestions \(Page:/)[0].trim();
+
+      btn.disabled = true;
+      promptBox.value = `${base}\n\n⏳ Loading ad copy suggestions for page: ${page}...`;
+
+      try {
+        const qs = new URLSearchParams({ page });
+        const res = await fetch(`/ad-copy-suggestions?${qs.toString()}`, {
+          headers: { 'Accept': 'application/json' }
+        });
+
+        const raw = await res.text();
+        let data;
+
+        if (res.ok) {
+          try {
+            data = JSON.parse(raw);
+          } catch (e) {
+            data = { output: `❌ JSON parse error: ${e.message}\n\n${raw.slice(0,800)}` };
+          }
+        } else {
+          data = { output: `❌ HTTP ${res.status}: ${raw.slice(0,800)}` };
+        }
+
+        promptBox.value = `${base}\n\n${header}\n${data.output ?? '⚠️ No output.'}`;
+      } catch (error) {
+        promptBox.value = `${base}\n\n⚠️ Error loading suggestions: ${error.message}`;
+      } finally {
+        btn.disabled = false;
       }
     }
 
@@ -142,33 +182,6 @@
       navigator.clipboard.writeText(tabSeparated).then(() => {
         alert("✅ Copied to clipboard!");
       });
-    }
-
-    async function loadAdCopySuggestions() {
-      const btn = document.getElementById('btnLoadSuggestions');
-      const promptBox = document.getElementById("prompt");
-      const original = promptBox.value;
-      const page = document.getElementById("pageSelect").value;
-      const loadingMsg = `⏳ Loading ad copy suggestions${page && page !== 'all' ? ' for page: ' + page : ''}...`;
-
-      btn.disabled = true;
-      promptBox.value = `${original}\n\n${loadingMsg}`;
-
-      try {
-        const qs = new URLSearchParams({ page });
-        const response = await fetch(`/ad-copy-suggestions?${qs.toString()}`);
-        const data = await response.json();
-        if (data.output) {
-          const header = (page && page !== 'all') ? `\n\n=== Suggestions (Page: ${page}) ===\n` : `\n\n=== Suggestions (All Pages) ===\n`;
-          promptBox.value = `${original}${header}${data.output}`;
-        } else {
-          promptBox.value = `${original}\n\n⚠️ No suggestions returned.`;
-        }
-      } catch (error) {
-        promptBox.value = `${original}\n\n❌ Error loading suggestions: ${error.message}`;
-      } finally {
-        btn.disabled = false;
-      }
     }
   </script>
 </x-layout>
