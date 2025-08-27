@@ -27,17 +27,23 @@ public function generate(Request $request)
                     'role' => 'system',
                     'content' => implode("\n", [
                         'You are a performance-focused Facebook Ads copywriter.',
-                        'Follow SUGGESTION-STRICT MODE over ANY conflicting rule, example, or hint.',
+                        // ✅ REFERENCE MODE, not strict
+                        'Treat the "=== Suggestions" block as style/structure/length REFERENCE only.',
+                        'Prefer tone/phrasing and structural patterns seen in TOP-PERFORMING items; avoid WORST patterns.',
+                        'Mirror the typical length of TOP-PERFORMING samples for Primary Text and Messaging Template.',
+                        'You MAY adapt or create new Quick Replies that reduce friction; keep them short. Do NOT copy QR1–QR3 verbatim unless they are already optimal.',
+                        // ✅ Guardrails
+                        'Do NOT invent details (colors/sizes/fit/materials/variants/bundles/warranty/COD/delivery/promos/price) unless explicitly present in Suggestions or the Product Description.',
+                        // ✅ Output shape
                         'Output EXACTLY one single line with 7 tab-separated fields: Item, Primary Text, Headline, Messaging Template, Quick Reply 1, Quick Reply 2, Quick Reply 3.',
                         'Never add headers, labels, explanations, or extra lines.',
-                        'If a topic (colors/sizes/fit/materials/variants/bundles/warranty/COD/delivery/promos) is NOT present in Suggestions or Product Description, you MUST NOT mention it.',
-                        'If Suggestions include Welcome Message and QR1-QR3, derive the Messaging Template + Quick Replies from them (verbatim or short paraphrase only).',
                     ]),
                 ],
                 ['role' => 'user', 'content' => $prompt],
             ],
-            'temperature' => 0.45,
-            'max_tokens' => 400,
+            // Slightly more creative para hindi paulit-ulit ang QR
+            'temperature' => 0.5,
+            'max_tokens' => 500,
         ]);
 
         if ($response->successful()) {
@@ -58,6 +64,7 @@ public function generate(Request $request)
         ], 500);
     }
 }
+
 
 
     /** GET /gpt-ad-generator */
