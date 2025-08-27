@@ -10,38 +10,55 @@ use Illuminate\Support\Facades\DB;
 class GPTAdGeneratorController extends Controller
 {
     /** POST /api/generate-gpt-summary */
-    public function generate(Request $request)
-    {
-        $request->validate(['prompt' => 'required|string']);
-        $prompt = $request->input('prompt');
+    // app/Http/Controllers/GPTAdGeneratorController.php
+public function generate(Request $request)
+{
+    $request->validate([
+        'prompt' => 'required|string',
+    ]);
 
-        try {
-            $response = Http::withToken(env('OPENAI_API_KEY'))->post('https://api.openai.com/v1/chat/completions', [
-                'model' => 'gpt-4',
-                'messages' => [['role' => 'user', 'content' => $prompt]],
-                'temperature' => 0.7,
+    $prompt = $request->input('prompt');
+
+    try {
+        $response = Http::withToken(env('OPENAI_API_KEY'))->post('https://api.openai.com/v1/chat/completions', [
+            'model' => 'gpt-4',
+            'messages' => [
+                [
+                    'role' => 'system',
+                    'content' => implode("\n", [
+                        'You are a performance-focused Facebook Ads copywriter.',
+                        'Follow SUGGESTION-STRICT MODE over ANY conflicting rule, example, or hint.',
+                        'Output EXACTLY one single line with 7 tab-separated fields: Item, Primary Text, Headline, Messaging Template, Quick Reply 1, Quick Reply 2, Quick Reply 3.',
+                        'Never add headers, labels, explanations, or extra lines.',
+                        'If a topic (colors/sizes/fit/materials/variants/bundles/warranty/COD/delivery/promos) is NOT present in Suggestions or Product Description, you MUST NOT mention it.',
+                        'If Suggestions include Welcome Message and QR1-QR3, derive the Messaging Template + Quick Replies from them (verbatim or short paraphrase only).',
+                    ]),
+                ],
+                ['role' => 'user', 'content' => $prompt],
+            ],
+            'temperature' => 0.45,
+            'max_tokens' => 400,
+        ]);
+
+        if ($response->successful()) {
+            return response()->json([
+                'output' => $response['choices'][0]['message']['content'] ?? 'No output from GPT.',
             ]);
-
-            Log::info('GPT Response', $response->json());
-
-            if ($response->successful()) {
-                return response()->json([
-                    'output' => $response['choices'][0]['message']['content'] ?? 'No output from GPT.',
-                ], 200, [], JSON_UNESCAPED_UNICODE);
-            }
-
+        } else {
             return response()->json([
                 'output' => '❌ GPT request failed.',
-                'error'  => $response->body(),
-            ], 500, [], JSON_UNESCAPED_UNICODE);
-        } catch (\Throwable $e) {
-            Log::error('GPT Exception: ' . $e->getMessage());
-            return response()->json([
-                'output' => '❌ Server error occurred.',
-                'error'  => $e->getMessage(),
-            ], 500, [], JSON_UNESCAPED_UNICODE);
+                'error' => $response->body(),
+            ], 500);
         }
+    } catch (\Exception $e) {
+        \Log::error('GPT Exception: ' . $e->getMessage());
+        return response()->json([
+            'output' => '❌ Server error occurred.',
+            'error' => $e->getMessage(),
+        ], 500);
     }
+}
+
 
     /** GET /gpt-ad-generator */
     public function showGeneratorForm()
