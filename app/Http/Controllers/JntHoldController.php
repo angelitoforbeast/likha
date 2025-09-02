@@ -10,8 +10,8 @@ class JntHoldController extends Controller
 {
     private const MO_TABLE       = 'macro_output';
     private const FJ_TABLE       = 'from_jnts';
-    private const MO_ITEM_COL    = 'item_name';
-    private const MO_WAYBILL_COL = 'waybill';
+    private const MO_ITEM_COL    = 'ITEM_NAME';      // << Uppercase real column name
+    private const MO_WAYBILL_COL = 'waybill';        // lower-case as per your data
     private const FJ_WAYBILL_COL = 'waybill_number'; // from_jnts column
 
     public function index(Request $request)
@@ -59,17 +59,19 @@ class JntHoldController extends Controller
         $mo = self::MO_TABLE . ' as mo';
         $fj = self::FJ_TABLE . ' as fj';
 
-        // Properly-quoted column refs for PG/MySQL
-        $tsCol   = $driver === 'pgsql' ? 'mo."TIMESTAMP"' : 'mo.`TIMESTAMP`';
-        $pageCol = $driver === 'pgsql' ? 'mo."PAGE"'      : 'mo.`PAGE`';
+        // Proper quoting for PG/MySQL
+        $moItemRef    = $driver === 'pgsql' ? 'mo."' . self::MO_ITEM_COL . '"' : 'mo.`' . self::MO_ITEM_COL . '`';
+        $moWaybillRef = $driver === 'pgsql' ? 'mo."' . self::MO_WAYBILL_COL . '"' : 'mo.`' . self::MO_WAYBILL_COL . '`';
+        $moPageRef    = $driver === 'pgsql' ? 'mo."PAGE"' : 'mo.`PAGE`';
+        $moTsCol      = $driver === 'pgsql' ? 'mo."TIMESTAMP"' : 'mo.`TIMESTAMP`';
 
         // Parse mo.TIMESTAMP like "21:44 09-06-2025" (HH:MM DD-MM-YYYY)
         $tsExpr = $driver === 'pgsql'
-            ? "to_timestamp($tsCol, 'HH24:MI DD-MM-YYYY')"
-            : "STR_TO_DATE($tsCol, '%H:%i %d-%m-%Y')";
+            ? "to_timestamp($moTsCol, 'HH24:MI DD-MM-YYYY')"
+            : "STR_TO_DATE($moTsCol, '%H:%i %d-%m-%Y')";
         $dateExpr = $driver === 'pgsql'
-            ? "to_timestamp($tsCol, 'HH24:MI DD-MM-YYYY')::date"
-            : "DATE(STR_TO_DATE($tsCol, '%H:%i %d-%m-%Y'))";
+            ? "to_timestamp($moTsCol, 'HH24:MI DD-MM-YYYY')::date"
+            : "DATE(STR_TO_DATE($moTsCol, '%H:%i %d-%m-%Y'))";
 
         // HOLD base query (waybill missing in from_jnts)
         $base = DB::table($mo)
@@ -77,6 +79,7 @@ class JntHoldController extends Controller
             ->whereNull('fj.' . self::FJ_WAYBILL_COL);
 
         if (!$includeBlank) {
+            // keep lower-case waybill here; it's valid in both engines
             $base->whereRaw("NULLIF(TRIM(mo." . self::MO_WAYBILL_COL . "), '') IS NOT NULL");
         }
 
@@ -85,30 +88,30 @@ class JntHoldController extends Controller
         }
 
         if ($q !== '') {
-            $base->where(function ($w) use ($q, $likeOp, $pageCol) {
-                $w->where('mo.' . self::MO_ITEM_COL, $likeOp, "%{$q}%")
-                  ->orWhere('mo.' . self::MO_WAYBILL_COL, $likeOp, "%{$q}%")
-                  ->orWhereRaw("$pageCol $likeOp ?", ["%{$q}%"]); // search PAGE too
+            $base->where(function ($w) use ($q, $likeOp, $moItemRef, $moWaybillRef, $moPageRef) {
+                $w->whereRaw("$moItemRef $likeOp ?", ["%{$q}%"])
+                  ->orWhereRaw("$moWaybillRef $likeOp ?", ["%{$q}%"])
+                  ->orWhereRaw("$moPageRef $likeOp ?", ["%{$q}%"]);
             });
         }
 
         // Totals (overall)
         $holdsCount = (clone $base)->count('mo.' . self::MO_WAYBILL_COL);
 
-        // Precompute: by item_name (raw)
+        // Precompute: by item_name (raw)  << use quoted refs in select/groupBy
         $byItemName = (clone $base)->select([
-                'mo.' . self::MO_ITEM_COL . ' as item_name',
+                DB::raw("$moItemRef as item_name"),
                 DB::raw('COUNT(*) as hold_count'),
             ])
-            ->groupBy('mo.' . self::MO_ITEM_COL)
+            ->groupBy(DB::raw($moItemRef))
             ->orderByDesc('hold_count')
             ->orderBy('item_name')
             ->get();
 
-        // Precompute: by page
+        // Precompute: by page (raw SQL)
         $byPage = (clone $base)
-            ->selectRaw("$pageCol as page, COUNT(*) as hold_count")
-            ->groupByRaw($pageCol)
+            ->selectRaw("$moPageRef as page, COUNT(*) as hold_count")
+            ->groupByRaw($moPageRef)
             ->orderByDesc('hold_count')
             ->orderBy('page')
             ->get();
@@ -148,11 +151,11 @@ class JntHoldController extends Controller
 
         // ---------- PER-DATE PIVOT (with month/day header) ----------
         $pivotRows   = collect();
-        $dateKeys    = [];   // ['2025-08-01', ...]
-        $colTotals   = [];   // date => total
+        $dateKeys    = [];   // ['YYYY-MM-DD', ...]
+        $colTotals   = [];
         $grandTotal  = 0;
-        $monthGroups = [];   // ['2025-08' => ['label'=>'August 2025','count'=>9], ...]
-        $dayLabels   = [];   // ['2025-08-01' => 1, ...]
+        $monthGroups = [];
+        $dayLabels   = [];
 
         if ($perDate) {
             // Build date keys from range if present
@@ -166,10 +169,10 @@ class JntHoldController extends Controller
             }
 
             if ($group === 'page') {
-                // Query per page per date
+                // Per PAGE per date
                 $rows = (clone $base)
-                    ->selectRaw("$pageCol as label, $dateExpr as d, COUNT(*) as c")
-                    ->groupByRaw("$pageCol, $dateExpr")
+                    ->selectRaw("$moPageRef as label, $dateExpr as d, COUNT(*) as c")
+                    ->groupByRaw("$moPageRef, $dateExpr")
                     ->get();
                 if (!$dateKeys) {
                     $dateKeys = $rows->pluck('d')->map(fn($d)=>Carbon::parse($d)->toDateString())->unique()->sort()->values()->all();
@@ -202,11 +205,10 @@ class JntHoldController extends Controller
                 });
                 $pivotRows = collect($pivot);
             } else {
-                // ITEM NAME basis per date
+                // ITEM_NAME basis per date (quoted)
                 $rows = (clone $base)
-                    ->selectRaw("mo." . self::MO_ITEM_COL . " as item_name, $dateExpr as d, COUNT(*) as c")
-                    ->groupBy('mo.' . self::MO_ITEM_COL)
-                    ->groupBy(DB::raw($dateExpr))
+                    ->selectRaw("$moItemRef as item_name, $dateExpr as d, COUNT(*) as c")
+                    ->groupByRaw("$moItemRef, $dateExpr")
                     ->get();
 
                 if (!$dateKeys) {
