@@ -34,7 +34,7 @@ use App\Http\Controllers\PancakeSubscriptionCheckerController;
 use App\Http\Controllers\AdsManagerCampaignsController;
 use App\Http\Controllers\AdsInsightsController;
 use App\Http\Controllers\GPTAdGeneratorController;
-
+use App\Http\Controllers\JntHoldController;
 
 use App\Models\Role;
 
@@ -234,6 +234,8 @@ Route::post('/task/update-team-task', [TaskController::class, 'updateTeamTask'])
     Route::post('/jnt_update', [FromJntController::class, 'updateOrInsert']);
     Route::get('/jnt_rts', [FromJntController::class, 'rtsView']);
     Route::post('/jnt_rts', [FromJntController::class, 'rtsFiltered']);
+    Route::get('/jnt/hold', [JntHoldController::class, 'index'])->name('jnt.hold');
+
 
     // ✅ Misc
     Route::view('/rts', 'rts');

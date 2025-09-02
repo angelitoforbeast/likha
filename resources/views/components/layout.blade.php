@@ -72,6 +72,7 @@
               <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
               <x-navlink href="/encoder/summary" :active="request()->is('macro_output/index')">ORDER SUMMARY</x-navlink>
               <x-navlink href="/ads_manager/pancake-subscription-checker" :active="request()->is('ads_manager/pancake-subscription-checker')">PURCHASES</x-navlink>
+              <x-navlink href="/jnt/hold" :active="request()->is('jnt/hold')">HOLD</x-navlink>
               @endif
 
               @if(in_array($role, ['Data Encoder','Data Encoder - OIC']))
