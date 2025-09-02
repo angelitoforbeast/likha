@@ -214,33 +214,60 @@
 
   {{-- Auto-apply behavior --}}
   <script>
-    (function() {
-      const form = document.getElementById('filtersForm');
-      const qInput = document.getElementById('q');
-      const includeBlank = document.getElementById('include_blank');
-      const perDate = document.getElementById('per_date');
-      const groupSel = document.getElementById('group');
+  (function() {
+    const form = document.getElementById('filtersForm');
+    const qInput = document.getElementById('q');
+    const includeBlank = document.getElementById('include_blank');
+    const perDate = document.getElementById('per_date');
+    const groupSel = document.getElementById('group');
 
-      let t;
-      const submitDebounced = (ms = 400) => { clearTimeout(t); t = setTimeout(() => form.submit(), ms); };
+    let t;
+    const submitDebounced = (ms = 400) => { clearTimeout(t); t = setTimeout(() => form.submit(), ms); };
 
-      qInput && qInput.addEventListener('input', () => submitDebounced(400));
-      includeBlank && includeBlank.addEventListener('change', () => form.submit());
-      perDate && perDate.addEventListener('change', () => form.submit());
-      groupSel && groupSel.addEventListener('change', () => form.submit());
+    // Auto-apply for non-date controls
+    qInput       && qInput.addEventListener('input', () => submitDebounced(400));
+    includeBlank && includeBlank.addEventListener('change', () => form.submit());
+    perDate      && perDate.addEventListener('change', () => form.submit());
+    groupSel     && groupSel.addEventListener('change', () => form.submit());
 
-      const defaultDates = @json(($rangeSta && $rangeEnd) ? [$rangeSta, $rangeEnd] : ($uiDate ? [$uiDate, $uiDate] : []));
-      flatpickr('#date_range', {
-        mode: 'range',
-        dateFormat: 'Y-m-d',
-        allowInput: true,
-        defaultDate: defaultDates,
-        onClose: function() { form.submit(); }
-      });
+    // Date picker
+    const defaultDates = @json(($rangeSta && $rangeEnd) ? [$rangeSta, $rangeEnd] : ($uiDate ? [$uiDate, $uiDate] : []));
+    flatpickr('#date_range', {
+      mode: 'range',
+      dateFormat: 'Y-m-d',
+      allowInput: true,
+      defaultDate: defaultDates,
+      clickOpens: true,
+      closeOnSelect: true,   // <-- auto-close after second selection
+      disableMobile: true,   // optional: consistent UI on mobile
 
-      const dr = document.getElementById('date_range');
-      dr && dr.addEventListener('change', () => submitDebounced(300));
-      dr && dr.addEventListener('blur',   () => submitDebounced(0));
-    })();
-  </script>
+      // Submit ONLY when:
+      // 1) Range is complete (2 clicks, or double-click same day), OR
+      // 2) User closes the picker with just one date (single-day filter), OR
+      // 3) Cleared field then closed.
+      onChange: function(selectedDates) {
+        if (selectedDates && selectedDates.length === 2) {
+          // Includes the double-click same-day case (start=end)
+          form.submit();
+        }
+      },
+      onClose: function(selectedDates, dateStr, instance) {
+        const val = (instance.input.value || '').trim();
+
+        if (val === '' || !selectedDates || selectedDates.length === 0) {
+          form.submit(); // cleared
+          return;
+        }
+        if (selectedDates.length === 1) {
+          form.submit(); // single-day (user closed manually)
+        }
+      }
+    });
+
+    // NOTE: No 'input/change/blur' listeners on #date_range to avoid early submits.
+  })();
+</script>
+
+
+
 </x-layout>
