@@ -10,9 +10,9 @@ class JntHoldController extends Controller
 {
     private const MO_TABLE       = 'macro_output';
     private const FJ_TABLE       = 'from_jnts';
-    private const MO_ITEM_COL    = 'ITEM_NAME';      // << Uppercase real column name
-    private const MO_WAYBILL_COL = 'waybill';        // lower-case as per your data
-    private const FJ_WAYBILL_COL = 'waybill_number'; // from_jnts column
+    private const MO_ITEM_COL    = 'ITEM_NAME';      // uppercase, quoted per-engine
+    private const MO_WAYBILL_COL = 'waybill';
+    private const FJ_WAYBILL_COL = 'waybill_number';
 
     public function index(Request $request)
     {
@@ -25,15 +25,14 @@ class JntHoldController extends Controller
         // View toggle: item_name (raw) | item (units) | page
         $group = $request->input('group');
         if (!in_array($group, ['item_name', 'item', 'page'], true)) {
-            $group = 'item_name'; // default
+            $group = 'item_name';
         }
 
-        // Date inputs
+        // Date filters (main)
         $dateRange = trim((string) $request->input('date_range', ''));
         $uiDate    = $request->input('date');
         $rangeSta  = $request->input('start');
         $rangeEnd  = $request->input('end');
-
         $startAt = $endAt = null;
 
         if ($dateRange !== '') {
@@ -56,16 +55,25 @@ class JntHoldController extends Controller
             $rangeEnd = $uiDate;
         }
 
+        // "Within N days (as-of)" filter (NEW)
+        $lookbackDays = (int) $request->input('lookback_days', 3);
+        if ($lookbackDays < 1) $lookbackDays = 1;
+        $asOfInput    = trim((string) $request->input('as_of_date', ''));
+        $asOfDate     = $asOfInput !== '' ? Carbon::createFromFormat('Y-m-d', $asOfInput) : Carbon::today();
+        $withinStart  = $asOfDate->copy()->subDays($lookbackDays)->startOfDay(); // as-of - N days
+        $withinEnd    = $asOfDate->copy()->subDay()->endOfDay();                // as-of - 1 day
+        $asOfDateStr  = $asOfDate->toDateString();
+
         $mo = self::MO_TABLE . ' as mo';
         $fj = self::FJ_TABLE . ' as fj';
 
-        // Proper quoting for PG/MySQL
+        // Quoted refs for PG/MySQL
         $moItemRef    = $driver === 'pgsql' ? 'mo."' . self::MO_ITEM_COL . '"' : 'mo.`' . self::MO_ITEM_COL . '`';
         $moWaybillRef = $driver === 'pgsql' ? 'mo."' . self::MO_WAYBILL_COL . '"' : 'mo.`' . self::MO_WAYBILL_COL . '`';
         $moPageRef    = $driver === 'pgsql' ? 'mo."PAGE"' : 'mo.`PAGE`';
         $moTsCol      = $driver === 'pgsql' ? 'mo."TIMESTAMP"' : 'mo.`TIMESTAMP`';
 
-        // Parse mo.TIMESTAMP like "21:44 09-06-2025" (HH:MM DD-MM-YYYY)
+        // Parse TIMESTAMP like "21:44 09-06-2025"
         $tsExpr = $driver === 'pgsql'
             ? "to_timestamp($moTsCol, 'HH24:MI DD-MM-YYYY')"
             : "STR_TO_DATE($moTsCol, '%H:%i %d-%m-%Y')";
@@ -73,20 +81,17 @@ class JntHoldController extends Controller
             ? "to_timestamp($moTsCol, 'HH24:MI DD-MM-YYYY')::date"
             : "DATE(STR_TO_DATE($moTsCol, '%H:%i %d-%m-%Y'))";
 
-        // HOLD base query (waybill missing in from_jnts)
+        // HOLD base query (missing in from_jnts)
         $base = DB::table($mo)
             ->leftJoin($fj, 'fj.' . self::FJ_WAYBILL_COL, '=', 'mo.' . self::MO_WAYBILL_COL)
             ->whereNull('fj.' . self::FJ_WAYBILL_COL);
 
         if (!$includeBlank) {
-            // keep lower-case waybill here; it's valid in both engines
             $base->whereRaw("NULLIF(TRIM(mo." . self::MO_WAYBILL_COL . "), '') IS NOT NULL");
         }
-
         if ($startAt && $endAt) {
             $base->whereBetween(DB::raw($tsExpr), [$startAt, $endAt]);
         }
-
         if ($q !== '') {
             $base->where(function ($w) use ($q, $likeOp, $moItemRef, $moWaybillRef, $moPageRef) {
                 $w->whereRaw("$moItemRef $likeOp ?", ["%{$q}%"])
@@ -98,82 +103,109 @@ class JntHoldController extends Controller
         // Totals (overall)
         $holdsCount = (clone $base)->count('mo.' . self::MO_WAYBILL_COL);
 
-        // Precompute: by item_name (raw)  << use quoted refs in select/groupBy
+        // Aggregations for HOLD view
         $byItemName = (clone $base)->select([
                 DB::raw("$moItemRef as item_name"),
                 DB::raw('COUNT(*) as hold_count'),
             ])
             ->groupBy(DB::raw($moItemRef))
-            ->orderByDesc('hold_count')
-            ->orderBy('item_name')
-            ->get();
+            ->orderByDesc('hold_count')->orderBy('item_name')->get();
 
-        // Precompute: by page (raw SQL)
         $byPage = (clone $base)
             ->selectRaw("$moPageRef as page, COUNT(*) as hold_count")
             ->groupByRaw($moPageRef)
-            ->orderByDesc('hold_count')
-            ->orderBy('page')
-            ->get();
+            ->orderByDesc('hold_count')->orderBy('page')->get();
 
-        // Decide main dataset for non-per-date view
         if ($group === 'item') {
-            // Normalize ITEM NAME to base item and compute needed units
             $agg = [];
             foreach ($byItemName as $row) {
                 $name = trim((string)($row->item_name ?? ''));
-                if ($name === '') {
-                    $baseName = '—';
-                    $qty = 1;
-                } else {
-                    if (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) {
-                        $qty = max(1, (int)$m[1]);
-                        $baseName = trim($m[2]);
-                    } else {
-                        $qty = 1;
-                        $baseName = $name;
-                    }
-                }
+                if ($name === '') { $baseName = '—'; $qty = 1; }
+                else if (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) { $qty = max(1, (int)$m[1]); $baseName = trim($m[2]); }
+                else { $qty = 1; $baseName = $name; }
                 $units = (int)$row->hold_count * $qty;
                 $agg[$baseName] = ($agg[$baseName] ?? 0) + $units;
             }
             $byItem = collect($agg)
                 ->map(fn($units, $item) => (object)['item' => $item, 'need_units' => (int)$units])
-                ->sortBy([['need_units','desc'], ['item','asc']])
-                ->values();
+                ->sortBy([['need_units','desc'], ['item','asc']])->values();
         } elseif ($group === 'page') {
             $byItem = $byPage;
         } else {
             $byItem = $byItemName;
         }
-
         $itemsWithHoldsCount = $byItem->count();
 
-        // ---------- PER-DATE PIVOT (with month/day header) ----------
+        // ---------- NEW: "Within N days" ACTUAL counts (no waybill logic) ----------
+        $recentMap   = [];  // label => count (or units for group=item)
+        $recentGrand = 0;
+
+        $recentBase = DB::table($mo)
+            ->whereBetween(DB::raw($tsExpr), [
+                $withinStart->format('Y-m-d H:i:s'),
+                $withinEnd->format('Y-m-d H:i:s')
+            ]);
+
+        if ($q !== '') {
+            $recentBase->where(function ($w) use ($q, $likeOp, $moItemRef, $moWaybillRef, $moPageRef) {
+                $w->whereRaw("$moItemRef $likeOp ?", ["%{$q}%"])
+                  ->orWhereRaw("$moWaybillRef $likeOp ?", ["%{$q}%"])
+                  ->orWhereRaw("$moPageRef $likeOp ?", ["%{$q}%"]);
+            });
+        }
+
+        if ($group === 'page') {
+            $rows = (clone $recentBase)
+                ->selectRaw("$moPageRef as label, COUNT(*) as c")
+                ->groupByRaw($moPageRef)->get();
+            foreach ($rows as $r) {
+                $label = (string)($r->label ?? '—');
+                $recentMap[$label] = (int)$r->c;
+            }
+        } elseif ($group === 'item_name') {
+            $rows = (clone $recentBase)
+                ->selectRaw("$moItemRef as label, COUNT(*) as c")
+                ->groupByRaw($moItemRef)->get();
+            foreach ($rows as $r) {
+                $label = (string)($r->label ?? '—');
+                $recentMap[$label] = (int)$r->c;
+            }
+        } else { // group === 'item' (units)
+            $rows = (clone $recentBase)
+                ->selectRaw("$moItemRef as item_name, COUNT(*) as c")
+                ->groupByRaw($moItemRef)->get();
+            $agg = [];
+            foreach ($rows as $r) {
+                $name = trim((string)($r->item_name ?? ''));
+                $cnt  = (int)$r->c;
+                if ($name === '') { $baseName = '—'; $qty = 1; }
+                else if (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) { $qty = max(1, (int)$m[1]); $baseName = trim($m[2]); }
+                else { $qty = 1; $baseName = $name; }
+                $agg[$baseName] = ($agg[$baseName] ?? 0) + ($cnt * $qty);
+            }
+            $recentMap = $agg;
+        }
+        $recentGrand = array_sum($recentMap);
+
+        // ---------- PER-DATE PIVOT (existing) ----------
         $pivotRows   = collect();
-        $dateKeys    = [];   // ['YYYY-MM-DD', ...]
+        $dateKeys    = [];
         $colTotals   = [];
         $grandTotal  = 0;
         $monthGroups = [];
         $dayLabels   = [];
 
         if ($perDate) {
-            // Build date keys from range if present
             if ($startAt && $endAt) {
                 $cur = Carbon::parse($startAt)->startOfDay();
                 $end = Carbon::parse($endAt)->endOfDay();
-                while ($cur->lte($end)) {
-                    $dateKeys[] = $cur->toDateString(); // Y-m-d
-                    $cur->addDay();
-                }
+                while ($cur->lte($end)) { $dateKeys[] = $cur->toDateString(); $cur->addDay(); }
             }
 
             if ($group === 'page') {
-                // Per PAGE per date
                 $rows = (clone $base)
                     ->selectRaw("$moPageRef as label, $dateExpr as d, COUNT(*) as c")
-                    ->groupByRaw("$moPageRef, $dateExpr")
-                    ->get();
+                    ->groupByRaw("$moPageRef, $dateExpr")->get();
                 if (!$dateKeys) {
                     $dateKeys = $rows->pluck('d')->map(fn($d)=>Carbon::parse($d)->toDateString())->unique()->sort()->values()->all();
                 }
@@ -187,117 +219,76 @@ class JntHoldController extends Controller
                 }
                 $pivot = [];
                 foreach ($matrix as $item) {
-                    $total = 0;
-                    $row = ['label' => $item['label'], 'dates' => []];
+                    $total = 0; $row = ['label' => $item['label'], 'dates' => []];
                     foreach ($dateKeys as $dk) {
                         $v = (int)($item['dates'][$dk] ?? 0);
-                        $row['dates'][$dk] = $v;
-                        $total += $v;
-                        $colTotals[$dk] = ($colTotals[$dk] ?? 0) + $v;
+                        $row['dates'][$dk] = $v; $total += $v; $colTotals[$dk] = ($colTotals[$dk] ?? 0) + $v;
                     }
-                    $row['total'] = $total;
-                    $grandTotal += $total;
-                    $pivot[] = $row;
+                    $row['total'] = $total; $grandTotal += $total; $pivot[] = $row;
                 }
-                usort($pivot, function($a,$b){
-                    if ($a['total'] === $b['total']) return strcmp($a['label'], $b['label']);
-                    return $b['total'] <=> $a['total'];
-                });
+                usort($pivot, fn($a,$b)=> ($a['total'] === $b['total']) ? strcmp($a['label'],$b['label']) : ($b['total'] <=> $a['total']));
                 $pivotRows = collect($pivot);
             } else {
-                // ITEM_NAME basis per date (quoted)
                 $rows = (clone $base)
                     ->selectRaw("$moItemRef as item_name, $dateExpr as d, COUNT(*) as c")
-                    ->groupByRaw("$moItemRef, $dateExpr")
-                    ->get();
+                    ->groupByRaw("$moItemRef, $dateExpr")->get();
 
                 if (!$dateKeys) {
                     $dateKeys = $rows->pluck('d')->map(fn($d)=>Carbon::parse($d)->toDateString())->unique()->sort()->values()->all();
                 }
 
                 if ($group === 'item_name') {
-                    // Pivot raw item_name
                     $matrix = [];
                     foreach ($rows as $r) {
                         $label = (string)($r->item_name ?? '—');
-                        $dkey  = Carbon::parse($r->d)->toDateString();
-                        $c     = (int)$r->c;
+                        $dkey  = Carbon::parse($r->d)->toDateString(); $c = (int)$r->c;
                         $matrix[$label]['label'] = $label;
                         $matrix[$label]['dates'][$dkey] = ($matrix[$label]['dates'][$dkey] ?? 0) + $c;
                     }
                     $pivot = [];
                     foreach ($matrix as $item) {
-                        $total = 0;
-                        $row = ['label' => $item['label'], 'dates' => []];
+                        $total = 0; $row = ['label' => $item['label'], 'dates' => []];
                         foreach ($dateKeys as $dk) {
                             $v = (int)($item['dates'][$dk] ?? 0);
-                            $row['dates'][$dk] = $v;
-                            $total += $v;
-                            $colTotals[$dk] = ($colTotals[$dk] ?? 0) + $v;
+                            $row['dates'][$dk] = $v; $total += $v; $colTotals[$dk] = ($colTotals[$dk] ?? 0) + $v;
                         }
-                        $row['total'] = $total;
-                        $grandTotal += $total;
-                        $pivot[] = $row;
+                        $row['total'] = $total; $grandTotal += $total; $pivot[] = $row;
                     }
-                    usort($pivot, function($a,$b){
-                        if ($a['total'] === $b['total']) return strcmp($a['label'], $b['label']);
-                        return $b['total'] <=> $a['total'];
-                    });
+                    usort($pivot, fn($a,$b)=> ($a['total'] === $b['total']) ? strcmp($a['label'],$b['label']) : ($b['total'] <=> $a['total']));
                     $pivotRows = collect($pivot);
-                } else { // $group === 'item' (units)
-                    // Transform to base item + units per date
-                    $matrix = []; // [baseItem]['dates'][d] = units
+                } else { // group === 'item'
+                    $matrix = [];
                     foreach ($rows as $r) {
                         $name = trim((string)($r->item_name ?? ''));
                         $dkey = Carbon::parse($r->d)->toDateString();
                         $cnt  = (int)$r->c;
-
-                        if ($name === '') {
-                            $baseName = '—';
-                            $qty = 1;
-                        } else if (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) {
-                            $qty = max(1, (int)$m[1]);
-                            $baseName = trim($m[2]);
-                        } else {
-                            $qty = 1;
-                            $baseName = $name;
-                        }
-
+                        if ($name === '') { $baseName = '—'; $qty = 1; }
+                        else if (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) { $qty = max(1,(int)$m[1]); $baseName = trim($m[2]); }
+                        else { $qty = 1; $baseName = $name; }
                         $units = $cnt * $qty;
                         $matrix[$baseName]['label'] = $baseName;
                         $matrix[$baseName]['dates'][$dkey] = ($matrix[$baseName]['dates'][$dkey] ?? 0) + $units;
                     }
-
                     $pivot = [];
                     foreach ($matrix as $item) {
-                        $total = 0;
-                        $row = ['label' => $item['label'], 'dates' => []];
+                        $total = 0; $row = ['label' => $item['label'], 'dates' => []];
                         foreach ($dateKeys as $dk) {
                             $v = (int)($item['dates'][$dk] ?? 0);
-                            $row['dates'][$dk] = $v;
-                            $total += $v;
-                            $colTotals[$dk] = ($colTotals[$dk] ?? 0) + $v;
+                            $row['dates'][$dk] = $v; $total += $v; $colTotals[$dk] = ($colTotals[$dk] ?? 0) + $v;
                         }
-                        $row['total'] = $total;
-                        $grandTotal += $total;
-                        $pivot[] = $row;
+                        $row['total'] = $total; $grandTotal += $total; $pivot[] = $row;
                     }
-                    usort($pivot, function($a,$b){
-                        if ($a['total'] === $b['total']) return strcmp($a['label'], $b['label']);
-                        return $b['total'] <=> $a['total'];
-                    });
+                    usort($pivot, fn($a,$b)=> ($a['total'] === $b['total']) ? strcmp($a['label'],$b['label']) : ($b['total'] <=> $a['total']));
                     $pivotRows = collect($pivot);
                 }
             }
 
-            // Build month groups + day labels for the 2-row header
             foreach ($dateKeys as $dk) {
                 $c = Carbon::parse($dk);
                 $mKey = $c->format('Y-m');
-                $monthGroups[$mKey] = $monthGroups[$mKey]
-                    ?? ['label' => $c->format('F Y'), 'count' => 0];
+                $monthGroups[$mKey] = $monthGroups[$mKey] ?? ['label' => $c->format('F Y'), 'count' => 0];
                 $monthGroups[$mKey]['count']++;
-                $dayLabels[$dk] = (int)$c->format('j'); // 1..31
+                $dayLabels[$dk] = (int)$c->format('j');
             }
         }
 
@@ -305,7 +296,9 @@ class JntHoldController extends Controller
             'byItem', 'byItemName', 'byPage', 'holdsCount', 'q', 'includeBlank',
             'uiDate', 'rangeSta', 'rangeEnd', 'dateRange', 'group',
             'itemsWithHoldsCount', 'perDate', 'pivotRows', 'dateKeys',
-            'colTotals', 'grandTotal', 'monthGroups', 'dayLabels'
+            'colTotals', 'grandTotal', 'monthGroups', 'dayLabels',
+            // NEW:
+            'lookbackDays', 'asOfDateStr', 'recentMap', 'recentGrand'
         ));
     }
 }

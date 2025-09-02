@@ -143,7 +143,8 @@
     'ads-manager/edit-messaging-template',
     'encoder/checker_1',
     'ads_manager/campaigns',
-    'ads_manager/cpp'
+    'ads_manager/cpp',
+    'jnt/hold'
 ]))
   {{-- 1) SAGAD: full width, no padding --}}
   <div class="w-full px-0">
