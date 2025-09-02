@@ -22,7 +22,7 @@ class JntHoldController extends Controller
         $driver       = DB::getDriverName();                 // 'mysql' or 'pgsql'
         $likeOp       = $driver === 'pgsql' ? 'ILIKE' : 'LIKE';
 
-        // View toggle: item_name (raw) | item (units) | page
+        // View toggle
         $group = $request->input('group');
         if (!in_array($group, ['item_name', 'item', 'page'], true)) {
             $group = 'item_name';
@@ -55,7 +55,7 @@ class JntHoldController extends Controller
             $rangeEnd = $uiDate;
         }
 
-        // "Within N days (as-of)" filter (NEW)
+        // "Within N days (as-of)" filter
         $lookbackDays = (int) $request->input('lookback_days', 3);
         if ($lookbackDays < 1) $lookbackDays = 1;
         $asOfInput    = trim((string) $request->input('as_of_date', ''));
@@ -81,7 +81,9 @@ class JntHoldController extends Controller
             ? "to_timestamp($moTsCol, 'HH24:MI DD-MM-YYYY')::date"
             : "DATE(STR_TO_DATE($moTsCol, '%H:%i %d-%m-%Y'))";
 
-        // HOLD base query (missing in from_jnts)
+        // -----------------------------------------------
+        // 1) HOLD base query (rows considered "hold")
+        // -----------------------------------------------
         $base = DB::table($mo)
             ->leftJoin($fj, 'fj.' . self::FJ_WAYBILL_COL, '=', 'mo.' . self::MO_WAYBILL_COL)
             ->whereNull('fj.' . self::FJ_WAYBILL_COL);
@@ -100,44 +102,118 @@ class JntHoldController extends Controller
             });
         }
 
-        // Totals (overall)
+        // Overall holds count (unchanged)
         $holdsCount = (clone $base)->count('mo.' . self::MO_WAYBILL_COL);
 
-        // Aggregations for HOLD view
+        // -----------------------------------------------
+        // 2) LABEL UNIVERSE (para isama pati zero-hold rows)
+        // -----------------------------------------------
+        $universe = collect(); // labels (page | item_name | item base)
+        if ($group === 'page') {
+            $uv = DB::table($mo)->selectRaw("$moPageRef as label");
+            if ($startAt && $endAt) $uv->whereBetween(DB::raw($tsExpr), [$startAt, $endAt]);
+            if ($q !== '') {
+                $uv->where(function ($w) use ($q, $likeOp, $moItemRef, $moWaybillRef, $moPageRef) {
+                    $w->whereRaw("$moItemRef $likeOp ?", ["%{$q}%"])
+                      ->orWhereRaw("$moWaybillRef $likeOp ?", ["%{$q}%"])
+                      ->orWhereRaw("$moPageRef $likeOp ?", ["%{$q}%"]);
+                });
+            }
+            $universe = $uv->groupByRaw($moPageRef)
+                           ->pluck('label')
+                           ->map(fn($v) => (string) $v)
+                           ->filter(fn($v) => $v !== '')
+                           ->unique()->sort()->values();
+        } else {
+            $uv = DB::table($mo)->selectRaw("$moItemRef as label");
+            if ($startAt && $endAt) $uv->whereBetween(DB::raw($tsExpr), [$startAt, $endAt]);
+            if ($q !== '') {
+                $uv->where(function ($w) use ($q, $likeOp, $moItemRef, $moWaybillRef, $moPageRef) {
+                    $w->whereRaw("$moItemRef $likeOp ?", ["%{$q}%"])
+                      ->orWhereRaw("$moWaybillRef $likeOp ?", ["%{$q}%"])
+                      ->orWhereRaw("$moPageRef $likeOp ?", ["%{$q}%"]);
+                });
+            }
+            $rawNames = $uv->groupByRaw($moItemRef)
+                           ->pluck('label')
+                           ->map(fn($v) => (string) $v);
+
+            if ($group === 'item_name') {
+                $universe = $rawNames->filter(fn($v) => $v !== '')->unique()->sort()->values();
+            } else { // 'item' (units) → strip quantity prefix to base item
+                $baseSet = [];
+                foreach ($rawNames as $name) {
+                    $name = trim($name);
+                    if ($name === '') { $baseName = '—'; }
+                    elseif (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) { $baseName = trim($m[2]); }
+                    else { $baseName = $name; }
+                    $baseSet[$baseName] = true;
+                }
+                $universe = collect(array_keys($baseSet))->sort()->values();
+            }
+        }
+
+        // -----------------------------------------------
+        // 3) HOLD aggregations (existing)
+        // -----------------------------------------------
         $byItemName = (clone $base)->select([
                 DB::raw("$moItemRef as item_name"),
                 DB::raw('COUNT(*) as hold_count'),
             ])
             ->groupBy(DB::raw($moItemRef))
-            ->orderByDesc('hold_count')->orderBy('item_name')->get();
+            ->get();
 
         $byPage = (clone $base)
             ->selectRaw("$moPageRef as page, COUNT(*) as hold_count")
             ->groupByRaw($moPageRef)
-            ->orderByDesc('hold_count')->orderBy('page')->get();
+            ->get();
 
+        // Maps for quick lookup
+        $holdMapByItemName = [];
+        foreach ($byItemName as $r) $holdMapByItemName[(string)($r->item_name ?? '')] = (int)$r->hold_count;
+
+        $holdMapByPage = [];
+        foreach ($byPage as $r) $holdMapByPage[(string)($r->page ?? '')] = (int)$r->hold_count;
+
+        // Prepare $byItem aligned with universe (include zeros) — unsorted here
         if ($group === 'item') {
-            $agg = [];
-            foreach ($byItemName as $row) {
-                $name = trim((string)($row->item_name ?? ''));
+            // Convert item_name-based counts to base item (units)
+            $unitsMap = [];
+            foreach ($byItemName as $r) {
+                $name  = trim((string)($r->item_name ?? ''));
+                $count = (int)$r->hold_count;
                 if ($name === '') { $baseName = '—'; $qty = 1; }
-                else if (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) { $qty = max(1, (int)$m[1]); $baseName = trim($m[2]); }
+                elseif (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) { $qty = max(1, (int)$m[1]); $baseName = trim($m[2]); }
                 else { $qty = 1; $baseName = $name; }
-                $units = (int)$row->hold_count * $qty;
-                $agg[$baseName] = ($agg[$baseName] ?? 0) + $units;
+                $unitsMap[$baseName] = ($unitsMap[$baseName] ?? 0) + ($count * $qty);
             }
-            $byItem = collect($agg)
-                ->map(fn($units, $item) => (object)['item' => $item, 'need_units' => (int)$units])
-                ->sortBy([['need_units','desc'], ['item','asc']])->values();
-        } elseif ($group === 'page') {
-            $byItem = $byPage;
-        } else {
-            $byItem = $byItemName;
-        }
-        $itemsWithHoldsCount = $byItem->count();
 
-        // ---------- NEW: "Within N days" ACTUAL counts (no waybill logic) ----------
-        $recentMap   = [];  // label => count (or units for group=item)
+            $byItem = $universe->map(function ($label) use ($unitsMap) {
+                return (object)[
+                    'item'       => $label,
+                    'need_units' => (int)($unitsMap[$label] ?? 0),
+                ];
+            })->values();
+        } elseif ($group === 'page') {
+            $byItem = $universe->map(function ($label) use ($holdMapByPage) {
+                return (object)[
+                    'page'       => $label,
+                    'hold_count' => (int)($holdMapByPage[$label] ?? 0),
+                ];
+            })->values();
+        } else { // item_name
+            $byItem = $universe->map(function ($label) use ($holdMapByItemName) {
+                return (object)[
+                    'item_name'  => $label,
+                    'hold_count' => (int)($holdMapByItemName[$label] ?? 0),
+                ];
+            })->values();
+        }
+
+        // -----------------------------------------------
+        // 4) "Within N days" (actual counts, no waybill logic)
+        // -----------------------------------------------
+        $recentMap   = [];  // label => count (or units for 'item')
         $recentGrand = 0;
 
         $recentBase = DB::table($mo)
@@ -159,18 +235,16 @@ class JntHoldController extends Controller
                 ->selectRaw("$moPageRef as label, COUNT(*) as c")
                 ->groupByRaw($moPageRef)->get();
             foreach ($rows as $r) {
-                $label = (string)($r->label ?? '—');
-                $recentMap[$label] = (int)$r->c;
+                $recentMap[(string)($r->label ?? '')] = (int)$r->c;
             }
         } elseif ($group === 'item_name') {
             $rows = (clone $recentBase)
                 ->selectRaw("$moItemRef as label, COUNT(*) as c")
                 ->groupByRaw($moItemRef)->get();
             foreach ($rows as $r) {
-                $label = (string)($r->label ?? '—');
-                $recentMap[$label] = (int)$r->c;
+                $recentMap[(string)($r->label ?? '')] = (int)$r->c;
             }
-        } else { // group === 'item' (units)
+        } else { // 'item' (units)
             $rows = (clone $recentBase)
                 ->selectRaw("$moItemRef as item_name, COUNT(*) as c")
                 ->groupByRaw($moItemRef)->get();
@@ -179,7 +253,7 @@ class JntHoldController extends Controller
                 $name = trim((string)($r->item_name ?? ''));
                 $cnt  = (int)$r->c;
                 if ($name === '') { $baseName = '—'; $qty = 1; }
-                else if (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) { $qty = max(1, (int)$m[1]); $baseName = trim($m[2]); }
+                elseif (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) { $qty = max(1, (int)$m[1]); $baseName = trim($m[2]); }
                 else { $qty = 1; $baseName = $name; }
                 $agg[$baseName] = ($agg[$baseName] ?? 0) + ($cnt * $qty);
             }
@@ -187,7 +261,45 @@ class JntHoldController extends Controller
         }
         $recentGrand = array_sum($recentMap);
 
-        // ---------- PER-DATE PIVOT (existing) ----------
+        // -----------------------------------------------
+        // 5) SORT non-per-date view using:
+        //    (Total + WithinNd) desc, then Label asc
+        // -----------------------------------------------
+        if ($group === 'item') {
+            $arr = $byItem->all();
+            usort($arr, function($a, $b) use ($recentMap) {
+                $sa = (int)$a->need_units + (int)($recentMap[$a->item] ?? 0);
+                $sb = (int)$b->need_units + (int)($recentMap[$b->item] ?? 0);
+                if ($sa !== $sb) return $sb <=> $sa;      // sum desc
+                return strcmp($a->item, $b->item);        // tie: label asc
+            });
+            $byItem = collect($arr);
+        } elseif ($group === 'page') {
+            $arr = $byItem->all();
+            usort($arr, function($a, $b) use ($recentMap) {
+                $sa = (int)$a->hold_count + (int)($recentMap[$a->page] ?? 0);
+                $sb = (int)$b->hold_count + (int)($recentMap[$b->page] ?? 0);
+                if ($sa !== $sb) return $sb <=> $sa;      // sum desc
+                return strcmp($a->page, $b->page);        // tie: label asc
+            });
+            $byItem = collect($arr);
+        } else { // item_name
+            $arr = $byItem->all();
+            usort($arr, function($a, $b) use ($recentMap) {
+                $sa = (int)$a->hold_count + (int)($recentMap[$a->item_name] ?? 0);
+                $sb = (int)$b->hold_count + (int)($recentMap[$b->item_name] ?? 0);
+                if ($sa !== $sb) return $sb <=> $sa;          // sum desc
+                return strcmp($a->item_name, $b->item_name);  // tie: label asc
+            });
+            $byItem = collect($arr);
+        }
+
+        $itemsWithHoldsCount = $byItem->count(); // includes zero rows
+
+        // -----------------------------------------------
+        // 6) PER-DATE PIVOT (expand with universe, include zeros)
+        //    + sort with same sum rule
+        // -----------------------------------------------
         $pivotRows   = collect();
         $dateKeys    = [];
         $colTotals   = [];
@@ -217,6 +329,10 @@ class JntHoldController extends Controller
                     $matrix[$label]['label'] = $label;
                     $matrix[$label]['dates'][$dkey] = ($matrix[$label]['dates'][$dkey] ?? 0) + $c;
                 }
+                // ensure zeros for universe labels
+                foreach ($universe as $label) {
+                    if (!isset($matrix[$label])) $matrix[$label] = ['label' => $label, 'dates' => []];
+                }
                 $pivot = [];
                 foreach ($matrix as $item) {
                     $total = 0; $row = ['label' => $item['label'], 'dates' => []];
@@ -226,7 +342,13 @@ class JntHoldController extends Controller
                     }
                     $row['total'] = $total; $grandTotal += $total; $pivot[] = $row;
                 }
-                usort($pivot, fn($a,$b)=> ($a['total'] === $b['total']) ? strcmp($a['label'],$b['label']) : ($b['total'] <=> $a['total']));
+                // apply sum sort
+                usort($pivot, function($a, $b) use ($recentMap) {
+                    $sa = (int)$a['total'] + (int)($recentMap[$a['label']] ?? 0);
+                    $sb = (int)$b['total'] + (int)($recentMap[$b['label']] ?? 0);
+                    if ($sa !== $sb) return $sb <=> $sa;      // sum desc
+                    return strcmp($a['label'], $b['label']);  // tie: label asc
+                });
                 $pivotRows = collect($pivot);
             } else {
                 $rows = (clone $base)
@@ -245,6 +367,10 @@ class JntHoldController extends Controller
                         $matrix[$label]['label'] = $label;
                         $matrix[$label]['dates'][$dkey] = ($matrix[$label]['dates'][$dkey] ?? 0) + $c;
                     }
+                    foreach ($universe as $label) {
+                        if (!isset($matrix[$label])) $matrix[$label] = ['label'=>$label,'dates'=>[]];
+                    }
+
                     $pivot = [];
                     foreach ($matrix as $item) {
                         $total = 0; $row = ['label' => $item['label'], 'dates' => []];
@@ -254,21 +380,30 @@ class JntHoldController extends Controller
                         }
                         $row['total'] = $total; $grandTotal += $total; $pivot[] = $row;
                     }
-                    usort($pivot, fn($a,$b)=> ($a['total'] === $b['total']) ? strcmp($a['label'],$b['label']) : ($b['total'] <=> $a['total']));
+                    usort($pivot, function($a, $b) use ($recentMap) {
+                        $sa = (int)$a['total'] + (int)($recentMap[$a['label']] ?? 0);
+                        $sb = (int)$b['total'] + (int)($recentMap[$b['label']] ?? 0);
+                        if ($sa !== $sb) return $sb <=> $sa;
+                        return strcmp($a['label'], $b['label']);
+                    });
                     $pivotRows = collect($pivot);
-                } else { // group === 'item'
+                } else { // group === 'item' (units)
                     $matrix = [];
                     foreach ($rows as $r) {
                         $name = trim((string)($r->item_name ?? ''));
                         $dkey = Carbon::parse($r->d)->toDateString();
                         $cnt  = (int)$r->c;
                         if ($name === '') { $baseName = '—'; $qty = 1; }
-                        else if (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) { $qty = max(1,(int)$m[1]); $baseName = trim($m[2]); }
+                        elseif (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) { $qty = max(1,(int)$m[1]); $baseName = trim($m[2]); }
                         else { $qty = 1; $baseName = $name; }
                         $units = $cnt * $qty;
                         $matrix[$baseName]['label'] = $baseName;
                         $matrix[$baseName]['dates'][$dkey] = ($matrix[$baseName]['dates'][$dkey] ?? 0) + $units;
                     }
+                    foreach ($universe as $label) {
+                        if (!isset($matrix[$label])) $matrix[$label] = ['label'=>$label,'dates'=>[]];
+                    }
+
                     $pivot = [];
                     foreach ($matrix as $item) {
                         $total = 0; $row = ['label' => $item['label'], 'dates' => []];
@@ -278,11 +413,17 @@ class JntHoldController extends Controller
                         }
                         $row['total'] = $total; $grandTotal += $total; $pivot[] = $row;
                     }
-                    usort($pivot, fn($a,$b)=> ($a['total'] === $b['total']) ? strcmp($a['label'],$b['label']) : ($b['total'] <=> $a['total']));
+                    usort($pivot, function($a, $b) use ($recentMap) {
+                        $sa = (int)$a['total'] + (int)($recentMap[$a['label']] ?? 0);
+                        $sb = (int)$b['total'] + (int)($recentMap[$b['label']] ?? 0);
+                        if ($sa !== $sb) return $sb <=> $sa;
+                        return strcmp($a['label'], $b['label']);
+                    });
                     $pivotRows = collect($pivot);
                 }
             }
 
+            // Header helpers
             foreach ($dateKeys as $dk) {
                 $c = Carbon::parse($dk);
                 $mKey = $c->format('Y-m');
@@ -293,7 +434,7 @@ class JntHoldController extends Controller
         }
 
         return view('jnt.hold', compact(
-            'byItem', 'byItemName', 'byPage', 'holdsCount', 'q', 'includeBlank',
+            'byItem', 'holdsCount', 'q', 'includeBlank',
             'uiDate', 'rangeSta', 'rangeEnd', 'dateRange', 'group',
             'itemsWithHoldsCount', 'perDate', 'pivotRows', 'dateKeys',
             'colTotals', 'grandTotal', 'monthGroups', 'dayLabels',
