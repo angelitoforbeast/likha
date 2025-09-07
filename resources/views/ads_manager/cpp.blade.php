@@ -15,11 +15,11 @@
     </div>
     <div>
       <label for="startDate" class="block font-semibold mb-1">Start Date:</label>
-      <input type="date" id="startDate" class="border px-2 py-1 rounded">
+      <input type="date" id="startDate" class="border px-2 py-1 rounded" value="{{ $start ?? '' }}">
     </div>
     <div>
       <label for="endDate" class="block font-semibold mb-1">End Date:</label>
-      <input type="date" id="endDate" class="border px-2 py-1 rounded">
+      <input type="date" id="endDate" class="border px-2 py-1 rounded" value="{{ $end ?? '' }}">
     </div>
   </div>
 
@@ -45,8 +45,13 @@
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
 
   <script>
-    const rawData          = @json($matrix);
-    const allDates         = @json($allDates);
+    // --- Data from server ---
+    const rawData   = @json($matrix);
+    const allDates  = @json($allDates); // full range galing sa controller (start→end)
+    const srvStart  = @json($start ?? null);
+    const srvEnd    = @json($end ?? null);
+
+    // --- Elements ---
     const pageSelect       = document.getElementById('pageSelect');
     const startDateInput   = document.getElementById('startDate');
     const endDateInput     = document.getElementById('endDate');
@@ -58,40 +63,47 @@
 
     let cppChart, cpmChart;
 
-    function getLast7Days() {
-      const today = new Date();
-      const result = [];
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(today);
-        d.setDate(today.getDate() - i);
-        result.push(d.toISOString().slice(0, 10));
-      }
-      return result.filter(date => allDates.includes(date));
+    // --- Helpers ---
+    function fmtISO(iso) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+      if (!m) return 'Invalid Date';
+      const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      const y = m[1], mm = +m[2], dd = +m[3];
+      return `${months[mm-1]} ${dd}, ${y}`;
     }
 
     function filterDates() {
+      // after server reload, allDates na ang buong piniling range
       const start = startDateInput.value;
       const end   = endDateInput.value;
-      return allDates.filter(d => (!start || d >= start) && (!end || d <= end));
+      // kung walang laman inputs (first load), gamitin server defaults
+      const s = start || srvStart;
+      const e = end   || srvEnd;
+      return allDates.filter(d => (!s || d >= s) && (!e || d <= e));
     }
 
+    // --- Navigate with BOTH start & end (para mag-requery sa DB) ---
+    function navigateWithBothDates() {
+      const s = startDateInput.value;
+      const e = endDateInput.value;
+      if (!s || !e) return; // wait until both are set
+
+      const url = new URL("{{ route('ads_manager.cpp') }}", window.location.origin);
+      url.searchParams.set('start', s);
+      url.searchParams.set('end',   e);
+      url.searchParams.set('ui_page', pageSelect.value || 'all'); // preserve selected page
+      window.location.assign(url.toString());
+    }
+
+    // --- Render tables ---
     function renderTables(filteredDates, pageFilter) {
+      const chosenStart = startDateInput.value || srvStart || filteredDates[0];
+      const chosenEnd   = endDateInput.value   || srvEnd   || filteredDates[filteredDates.length - 1];
+
       if (pageFilter === 'all') {
-        // Show multi-page summary in the right container (as per current layout)
-        const start = filteredDates[0];
-        const end = filteredDates[filteredDates.length - 1];
-
-        const formattedStart = new Date(start).toLocaleDateString('en-US', {
-          year: 'numeric', month: 'long', day: 'numeric'
-        });
-
-        const formattedEnd = new Date(end).toLocaleDateString('en-US', {
-          year: 'numeric', month: 'long', day: 'numeric'
-        });
-
-        const title = filteredDates.length > 1
-          ? `SUMMARY OF ADS - ${formattedStart} to ${formattedEnd}`
-          : `SUMMARY OF ADS - ${formattedStart}`;
+        const title = (chosenStart && chosenEnd && chosenStart !== chosenEnd)
+          ? `SUMMARY OF ADS - ${fmtISO(chosenStart)} to ${fmtISO(chosenEnd)}`
+          : `SUMMARY OF ADS - ${fmtISO(chosenStart)}`;
 
         // 1) Summary by Page (with TCPR)
         let summaryHtml = `
@@ -115,23 +127,21 @@
         `;
 
         Object.entries(rawData).forEach(([page, data]) => {
-          let sumSpent = 0, sumOrders = 0, sumWeightedImps = 0, sumWeightedCPI = 0;
-          let sumTcprFail = 0;
-
+          let sumSpent=0, sumOrders=0, wImps=0, wCPI=0, tcprFail=0;
           filteredDates.forEach(date => {
             const r = data[date] || {};
-            if (r.spent)  sumSpent    += r.spent;
-            if (r.orders) sumOrders   += r.orders;
-            if (r.spent && r.cpm) sumWeightedImps += r.spent / r.cpm;
-            if (r.spent && r.cpi) sumWeightedCPI  += r.spent / r.cpi;
-            if (r.tcpr_fail) sumTcprFail += r.tcpr_fail;
+            if (r.spent)  sumSpent += r.spent;
+            if (r.orders) sumOrders += r.orders;
+            if (r.spent && r.cpm) wImps += r.spent / r.cpm;
+            if (r.spent && r.cpi) wCPI  += r.spent / r.cpi;
+            if (r.tcpr_fail) tcprFail += r.tcpr_fail;
           });
 
-          if (sumSpent > 0) {
+          if (sumSpent>0 || sumOrders>0) {
             const cpp  = sumOrders > 0 ? sumSpent / sumOrders : null;
-            const cpi  = sumWeightedCPI > 0 ? sumSpent / sumWeightedCPI : null;
-            const cpm  = sumWeightedImps > 0 ? sumSpent / sumWeightedImps : null;
-            const tcpr = sumOrders > 0 ? (sumTcprFail / sumOrders) : null;
+            const cpi  = wCPI  > 0 ? sumSpent / wCPI  : null;
+            const cpm  = wImps > 0 ? sumSpent / wImps : null;
+            const tcpr = sumOrders > 0 ? (tcprFail / sumOrders) : null;
 
             summaryHtml += `
               <tr>
@@ -141,7 +151,7 @@
                 <td class="border px-2 py-1">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
-                <td class="border px-2 py-1">${tcpr != null ? `${(tcpr * 100).toFixed(2)}%` : '—'}</td>
+                <td class="border px-2 py-1">${tcpr != null ? `${(tcpr*100).toFixed(2)}%` : '—'}</td>
               </tr>
             `;
           }
@@ -167,17 +177,18 @@
         `;
 
         filteredDates.forEach(date => {
-          let sumSpent = 0, sumOrders = 0, sumWeightedImps = 0, sumWeightedCPI = 0;
+          let sumSpent=0, sumOrders=0, wImps=0, wCPI=0;
           Object.values(rawData).forEach(data => {
             const r = data[date] || {};
-            if (r.spent)  sumSpent    += r.spent;
-            if (r.orders) sumOrders   += r.orders;
-            if (r.spent && r.cpm) sumWeightedImps += r.spent / r.cpm;
-            if (r.spent && r.cpi) sumWeightedCPI  += r.spent / r.cpi;
+            if (r.spent)  sumSpent += r.spent;
+            if (r.orders) sumOrders += r.orders;
+            if (r.spent && r.cpm) wImps += r.spent / r.cpm;
+            if (r.spent && r.cpi) wCPI  += r.spent / r.cpi;
           });
-          const cpp = sumOrders > 0 ? sumSpent / sumOrders : null;
-          const cpi = sumWeightedCPI > 0 ? sumSpent / sumWeightedCPI : null;
-          const cpm = sumWeightedImps > 0 ? sumSpent / sumWeightedImps : null;
+
+          const cpp = sumOrders>0 ? sumSpent/sumOrders : null;
+          const cpi = wCPI>0 ? sumSpent/wCPI : null;
+          const cpm = wImps>0 ? sumSpent/wImps : null;
 
           dateHtml += `
             <tr>
@@ -192,7 +203,6 @@
         });
 
         dateHtml += `</tbody></table>`;
-
         tableRight.innerHTML = summaryHtml + dateHtml;
 
       } else {
@@ -202,7 +212,7 @@
         const data = rawData[pageFilter] || {};
 
         let html = `
-          <h2 class="font-bold text-lg mb-2">${pageFilter} – Performance by Date</h2>
+          <h2 class="font-bold text-lg mb-2">${pageFilter} – Performance by Date (${fmtISO(chosenStart)} to ${fmtISO(chosenEnd)})</h2>
           <table class="w-full border text-sm mb-6">
             <thead class="bg-gray-200">
               <tr>
@@ -274,7 +284,7 @@
         data: { labels: filteredDates, datasets: [{ label: 'CPP', data: cppData, tension: 0.3, spanGaps: true }] },
         options: {
           responsive: true,
-          plugins: { datalabels: { display: true, formatter: v => v ? `₱${v.toFixed(0)}` : '' } },
+          plugins: { datalabels: { display: true, formatter: v => (v || v === 0) ? `₱${Number(v).toFixed(0)}` : '' } },
           scales: { y: { beginAtZero: true, title: { display: true, text: 'CPP' } } }
         },
         plugins: [ChartDataLabels]
@@ -288,7 +298,7 @@
         data: { labels: filteredDates, datasets: [{ label: 'CPM', data: cpmData, tension: 0.3, spanGaps: true }] },
         options: {
           responsive: true,
-          plugins: { datalabels: { display: true, formatter: v => v ? `₱${v.toFixed(0)}` : '' } },
+          plugins: { datalabels: { display: true, formatter: v => (v || v === 0) ? `₱${Number(v).toFixed(0)}` : '' } },
           scales: { y: { beginAtZero: true, title: { display: true, text: 'CPM' } } }
         },
         plugins: [ChartDataLabels]
@@ -335,15 +345,20 @@
         .catch(err => console.error('Copy failed:', err));
     }
 
+    // --- Events ---
+    // IMPORTANT: re-query the server with BOTH dates
+    startDateInput.addEventListener('change', navigateWithBothDates);
+    endDateInput.addEventListener('change',   navigateWithBothDates);
     pageSelect.addEventListener('change', refreshAll);
-    startDateInput.addEventListener('change', refreshAll);
-    endDateInput.addEventListener('change', refreshAll);
 
+    // --- Init ---
     window.onload = () => {
-      const last7 = getLast7Days();
-      if (last7.length) {
-        startDateInput.value = last7[0];
-        endDateInput.value   = last7[last7.length - 1];
+      // If walang ibinigay ang server (first visit), pwede kang mag-default ng last 7 days:
+      if (!startDateInput.value || !endDateInput.value) {
+        if (allDates.length) {
+          startDateInput.value = allDates[0];
+          endDateInput.value   = allDates[allDates.length - 1];
+        }
       }
       refreshAll();
     };

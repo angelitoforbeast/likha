@@ -107,7 +107,9 @@ Route::get('/ads_manager/report/status', [\App\Http\Controllers\AdsManagerReport
     ->name('ads_manager.report.status');
 
     Route::get('/ads_manager/cpp', [\App\Http\Controllers\CPPController::class, 'index'])->name('ads_manager.cpp');
-Route::get(
+    Route::get('/ads_manager/cpp/data', [\App\Http\Controllers\CPPController::class, 'data'])
+    ->name('ads_manager.cpp.data');
+    Route::get(
     '/ads_manager/pancake-subscription-checker',
     [PancakeSubscriptionCheckerController::class, 'index']
 )->name('ads_manager.pancake_subscription_checker');
@@ -190,12 +192,13 @@ Route::post('/task/update-team-task', [TaskController::class, 'updateTeamTask'])
     // ✅ Ads
     Route::get('/ads_manager/ads', [AdsViewController::class, 'index']);
     Route::get('/fb_ads_data', [FacebookAdsController::class, 'fetch'])->name('fb_ads.fetch');
-
+    
     Route::get('/cpp', function () {
     $role = auth()->user()->employeeProfile?->role;
     if (!$role || !in_array($role, ['Marketing', 'CEO', 'Marketing - OIC'])) abort(403);
     return app(\App\Http\Controllers\CPPReportController::class)->index();
 });
+
 
 
     // ✅ Role Management
