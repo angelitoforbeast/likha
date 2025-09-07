@@ -162,8 +162,10 @@
                 <td class="border px-2 py-1">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
-                <td class="border px-2 py-1">${tcpr != null ? `${(tcpr*100).toFixed(2)}%` : '—'}</td>
-              </tr>
+                <td class="border px-2 py-1">
+  ${tcpr != null ? tcprBadge(tcpr * 100) : '—'}
+</td>
+                </tr>
             `;
           }
         });
@@ -397,5 +399,24 @@
       }
       refreshAll();
     };
+    function tcprBadge(pct) {
+  if (pct == null || isNaN(pct)) return '—';
+
+  const base = 'inline-block min-w-[64px] text-center px-2 py-0.5 rounded-md font-semibold shadow-sm';
+
+  if (pct > 7) {
+    return `<span class="${base} bg-red-600 text-white">${pct.toFixed(2)}%</span>`;
+  } else if (pct > 5) {
+    return `<span class="${base} bg-orange-500 text-white">${pct.toFixed(2)}%</span>`;
+  } else if (pct > 3) {
+    return `<span class="${base} bg-yellow-400 text-slate-900">${pct.toFixed(2)}%</span>`;
+  }
+
+  // ≤ 3% → plain text (no styling)
+  return `${pct.toFixed(2)}%`;
+}
+
+
+
   </script>
 </x-layout>
