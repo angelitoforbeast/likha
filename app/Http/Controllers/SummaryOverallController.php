@@ -10,7 +10,6 @@ class SummaryOverallController extends Controller
 {
     public function index()
     {
-        // Page dropdown: distinct page_name from ads_manager_reports
         $pages = DB::table('ads_manager_reports')
             ->whereNotNull('page_name')
             ->selectRaw('TRIM(page_name) AS page_name')
@@ -34,6 +33,15 @@ class SummaryOverallController extends Controller
         $end      = $request->input('end_date');     // YYYY-MM-DD
         $pageName = $request->input('page_name', 'all');
 
+        $driver     = DB::getDriverName(); // 'mysql' or 'pgsql'
+        $trimFn     = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $lowerTrim  = "LOWER($trimFn(%s))";
+
+        // Spend cast per driver
+        $castSpend  = $driver === 'pgsql'
+            ? 'CAST(amount_spent_php AS NUMERIC)'
+            : 'CAST(amount_spent_php AS DECIMAL(18,2))';
+
         // ----------------------
         // ADS: group by day + page_name
         // ----------------------
@@ -48,14 +56,14 @@ class SummaryOverallController extends Controller
         }
 
         if ($pageName && $pageName !== 'all') {
-            $adsBase->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
+            $adsBase->whereRaw(sprintf("$lowerTrim = $lowerTrim", 'page_name', '?'), [$pageName]);
         }
 
         $adsRows = (clone $adsBase)
             ->whereNotNull('day')
-            ->selectRaw('day AS day_key, TRIM(COALESCE(page_name, "")) AS page_name, SUM(amount_spent_php) AS adspent')
+            ->selectRaw("day AS day_key, $trimFn(COALESCE(page_name, '')) AS page_name, SUM($castSpend) AS adspent")
             ->groupBy('day', 'page_name')
-            ->havingRaw('SUM(amount_spent_php) > 0') // only show rows with spend > 0
+            ->havingRaw("SUM($castSpend) > 0") // only rows with spend > 0
             ->orderBy('day', 'asc')
             ->orderBy('page_name', 'asc')
             ->get();
@@ -68,18 +76,30 @@ class SummaryOverallController extends Controller
 
         // ----------------------
         // ORDERS + STATUS buckets (macro_output)
-        // TIMESTAMP sample: "21:44 09-06-2025" → try dd-mm-yyyy and mm-dd-yyyy
+        // TIMESTAMP sample: "21:44 09-06-2025" → support dd-mm-yyyy at mm-dd-yyyy
         // ----------------------
         $hasTs = Schema::hasColumn('macro_output', 'TIMESTAMP');
-        $dateExpr = $hasTs
-            ? "COALESCE(
-                 DATE(STR_TO_DATE(mo.`TIMESTAMP`, '%H:%i %d-%m-%Y')),
-                 DATE(STR_TO_DATE(mo.`TIMESTAMP`, '%H:%i %m-%d-%Y'))
-               )"
-            : "DATE(mo.`created_at`)";
 
-        // Normalize status: lowercased, spaces/underscores removed
-        $statusNorm = "LOWER(REPLACE(REPLACE(TRIM(mo.status),' ',''),'_',''))";
+        if ($hasTs) {
+            if ($driver === 'mysql') {
+                $dateExpr = "COALESCE(
+                    DATE(STR_TO_DATE(mo.`TIMESTAMP`, '%H:%i %d-%m-%Y')),
+                    DATE(STR_TO_DATE(mo.`TIMESTAMP`, '%H:%i %m-%d-%Y'))
+                )";
+            } else { // pgsql
+                $dateExpr = "DATE(COALESCE(
+                    TO_TIMESTAMP(mo.\"TIMESTAMP\", 'HH24:MI DD-MM-YYYY'),
+                    TO_TIMESTAMP(mo.\"TIMESTAMP\", 'HH24:MI MM-DD-YYYY')
+                ))";
+            }
+        } else {
+            $dateExpr = $driver === 'mysql'
+                ? "DATE(mo.`created_at`)"
+                : "DATE(mo.\"created_at\")";
+        }
+
+        // Normalize status: lowercase + strip spaces/underscores
+        $statusNorm = "LOWER(REPLACE(REPLACE($trimFn(mo.status),' ',''),'_',''))";
 
         $mo = DB::table('macro_output as mo');
 
@@ -91,12 +111,12 @@ class SummaryOverallController extends Controller
             $mo->whereRaw("$dateExpr <= ?", [$end]);
         }
         if ($pageName && $pageName !== 'all') {
-            $mo->whereRaw('LOWER(TRIM(mo.page)) = LOWER(TRIM(?))', [$pageName]);
+            $mo->whereRaw(sprintf("$lowerTrim = $lowerTrim", 'mo.page', '?'), [$pageName]);
         }
 
         // All Orders
         $ordersRows = (clone $mo)
-            ->selectRaw("$dateExpr AS day_key, TRIM(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS orders_total")
+            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS orders_total")
             ->groupBy('day_key', 'page_name')
             ->get();
 
@@ -109,7 +129,7 @@ class SummaryOverallController extends Controller
         // Proceed
         $proceedRows = (clone $mo)
             ->whereRaw("$statusNorm = 'proceed'")
-            ->selectRaw("$dateExpr AS day_key, TRIM(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS proceed_total")
+            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS proceed_total")
             ->groupBy('day_key', 'page_name')
             ->get();
 
@@ -122,7 +142,7 @@ class SummaryOverallController extends Controller
         // Cannot Proceed
         $cannotRows = (clone $mo)
             ->whereRaw("$statusNorm = 'cannotproceed'")
-            ->selectRaw("$dateExpr AS day_key, TRIM(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS cannot_total")
+            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS cannot_total")
             ->groupBy('day_key', 'page_name')
             ->get();
 
@@ -135,7 +155,7 @@ class SummaryOverallController extends Controller
         // ODZ
         $odzRows = (clone $mo)
             ->whereRaw("$statusNorm = 'odz'")
-            ->selectRaw("$dateExpr AS day_key, TRIM(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS odz_total")
+            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS odz_total")
             ->groupBy('day_key', 'page_name')
             ->get();
 
@@ -145,16 +165,14 @@ class SummaryOverallController extends Controller
             $odzMap[$key] = (int) ($r->odz_total ?? 0);
         }
 
-        // ----------------------
-        // SHIPPED — count DISTINCT mo.waybill that appear in from_jnts.waybill_number
-        // ----------------------
+        // SHIPPED — count DISTINCT mo.waybill appearing in from_jnts.waybill_number
         $shippedRows = (clone $mo)
             ->whereNotNull('mo.waybill')
-            ->whereRaw("TRIM(mo.waybill) <> ''")
-            ->join('from_jnts as j', function ($join) {
-                $join->on(DB::raw('TRIM(mo.waybill)'), '=', DB::raw('TRIM(j.waybill_number)'));
+            ->whereRaw("$trimFn(mo.waybill) <> ''")
+            ->join('from_jnts as j', function ($join) use ($trimFn) {
+                $join->on(DB::raw("$trimFn(mo.waybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
             })
-            ->selectRaw("$dateExpr AS day_key, TRIM(COALESCE(mo.page,'')) AS page_name, COUNT(DISTINCT TRIM(mo.waybill)) AS shipped_total")
+            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(DISTINCT $trimFn(mo.waybill)) AS shipped_total")
             ->groupBy('day_key', 'page_name')
             ->get();
 
@@ -164,17 +182,15 @@ class SummaryOverallController extends Controller
             $shippedMap[$key] = (int) ($r->shipped_total ?? 0);
         }
 
-        // ----------------------
-        // DELIVERED — like Shipped, but require j.status LIKE 'delivered%'
-        // ----------------------
+        // DELIVERED — shipped but j.status LIKE 'delivered%'
         $deliveredRows = (clone $mo)
             ->whereNotNull('mo.waybill')
-            ->whereRaw("TRIM(mo.waybill) <> ''")
-            ->join('from_jnts as j', function ($join) {
-                $join->on(DB::raw('TRIM(mo.waybill)'), '=', DB::raw('TRIM(j.waybill_number)'));
+            ->whereRaw("$trimFn(mo.waybill) <> ''")
+            ->join('from_jnts as j', function ($join) use ($trimFn) {
+                $join->on(DB::raw("$trimFn(mo.waybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
             })
-            ->whereRaw("LOWER(TRIM(j.status)) LIKE 'delivered%'")
-            ->selectRaw("$dateExpr AS day_key, TRIM(COALESCE(mo.page,'')) AS page_name, COUNT(DISTINCT TRIM(mo.waybill)) AS delivered_total")
+            ->whereRaw("LOWER($trimFn(j.status)) LIKE 'delivered%'")
+            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(DISTINCT $trimFn(mo.waybill)) AS delivered_total")
             ->groupBy('day_key', 'page_name')
             ->get();
 
@@ -223,7 +239,7 @@ class SummaryOverallController extends Controller
                 'odz'             => $odz,
                 'shipped'         => $shipped,
                 'delivered'       => $delivered,
-                'tcpr'            => $tcpr, // numeric percent
+                'tcpr'            => $tcpr,
             ];
         }
 
