@@ -24,16 +24,10 @@ class SummaryOverallController extends Controller
         return view('summary.overall', compact('pages'));
     }
 
-    /**
-     * Bottom table only:
-     * Date | Page | Adspent | Orders | Proceed | Cannot Proceed | ODZ | Shipped | Delivered | TCPR
-     * Filters: start_date, end_date, page_name
-     * Rows shown only when Adspent > 0
-     */
     public function data(Request $request)
     {
-        $start    = $request->input('start_date');   // YYYY-MM-DD
-        $end      = $request->input('end_date');     // YYYY-MM-DD
+        $start    = $request->input('start_date');
+        $end      = $request->input('end_date');
         $pageName = $request->input('page_name', 'all');
 
         $driver = DB::getDriverName(); // 'mysql' or 'pgsql'
@@ -48,23 +42,49 @@ class SummaryOverallController extends Controller
             return null;
         };
 
-        // Choose column names that may differ by casing across DBs
+        // --- Resolve macro_output columns (case/camel tolerant) ---
         $pageColName = $col('macro_output', ['page','Page','PAGE','page_name','Page_Name']);
-        if (!$pageColName) {
-            // Fail fast with a clear message if page column is truly missing
-            throw new \RuntimeException('macro_output has no page/page_name column');
-        }
-        $moPage     = 'mo.' . $quote($pageColName);
-        $pageExpr   = "$trimFn(COALESCE($moPage,''))";
+        if (!$pageColName) throw new \RuntimeException('macro_output has no page/page_name column');
+        $moPage   = 'mo.' . $quote($pageColName);
+        $pageExpr = "$trimFn(COALESCE($moPage,''))";
 
-        $wbColName  = $col('macro_output', ['waybill','Waybill','WAYBILL']);
-        $moWaybill  = $wbColName ? 'mo.' . $quote($wbColName) : 'mo.waybill';
+        $wbColName = $col('macro_output', ['waybill','Waybill','WAYBILL']);
+        $moWaybill = $wbColName ? 'mo.' . $quote($wbColName) : 'mo.waybill';
 
         $statusColName = $col('macro_output', ['status','Status','STATUS']) ?? 'status';
         $statusExpr    = 'mo.' . $quote($statusColName);
         $statusNorm    = "LOWER(REPLACE(REPLACE($trimFn($statusExpr),' ',''),'_',''))";
 
-        // Spend cast per driver (sanitize ₱, commas, spaces, blanks)
+        // --- Build DATE expression using only existing timestamp columns ---
+        $tsCandidates = array_values(array_filter([
+            Schema::hasColumn('macro_output','TIMESTAMP') ? 'TIMESTAMP' : null,
+            Schema::hasColumn('macro_output','timestamp') ? 'timestamp' : null,
+        ]));
+
+        if ($driver === 'mysql') {
+            if (!empty($tsCandidates)) {
+                $ts = 'mo.' . $quote($tsCandidates[0]); // use first found
+                $dateExpr = "COALESCE(
+                    DATE(STR_TO_DATE($ts, '%H:%i %d-%m-%Y')),
+                    DATE(STR_TO_DATE($ts, '%H:%i %m-%d-%Y')),
+                    DATE(mo.`created_at`)
+                )";
+            } else {
+                $dateExpr = "DATE(mo.`created_at`)";
+            }
+        } else { // pgsql
+            $pgParts = [];
+            foreach ($tsCandidates as $c) {
+                $colRef = 'mo.' . $quote($c);
+                $pgParts[] = "TO_TIMESTAMP(NULLIF($colRef, ''), 'HH24:MI DD-MM-YYYY')";
+                $pgParts[] = "TO_TIMESTAMP(NULLIF($colRef, ''), 'HH24:MI MM-DD-YYYY')";
+            }
+            // Always add created_at fallback
+            $pgParts[] = 'mo."created_at"';
+            $dateExpr  = 'DATE(COALESCE(' . implode(', ', $pgParts) . '))';
+        }
+
+        // --- Ad spend cast (sanitize ₱, commas, spaces, blanks) ---
         $castSpend = $driver === 'pgsql'
             ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(amount_spent_php::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
             : "CAST(REPLACE(REPLACE(REPLACE(COALESCE(amount_spent_php,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
@@ -95,43 +115,17 @@ class SummaryOverallController extends Controller
             ->selectRaw("DATE(day) AS day_key, $trimFn(COALESCE(page_name, '')) AS page_key, SUM($castSpend) AS adspent")
             ->groupByRaw("DATE(day), $trimFn(COALESCE(page_name,''))")
             ->havingRaw("SUM($castSpend) > 0")
-            ->orderBy('day_key', 'asc')
-            ->orderBy('page_key', 'asc')
+            ->orderBy('day_key')->orderBy('page_key')
             ->get();
 
         $adsMap = [];
         foreach ($adsRows as $r) {
-            $adsMap["{$r->day_key}|{$r->page_key}"] = (float) ($r->adspent ?? 0);
+            $adsMap["{$r->day_key}|{$r->page_key}"] = (float)($r->adspent ?? 0);
         }
 
         // ----------------------
         // ORDERS + STATUS buckets (macro_output)
-        // TIMESTAMP sample: "21:44 09-06-2025" → support dd-mm-yyyy and mm-dd-yyyy
         // ----------------------
-        $hasTs = Schema::hasColumn('macro_output','TIMESTAMP') || Schema::hasColumn('macro_output','timestamp');
-
-        if ($driver === 'mysql') {
-            if ($hasTs) {
-                $dateExpr = "COALESCE(
-                    DATE(STR_TO_DATE(mo.`TIMESTAMP`, '%H:%i %d-%m-%Y')),
-                    DATE(STR_TO_DATE(mo.`TIMESTAMP`, '%H:%i %m-%d-%Y')),
-                    DATE(mo.`created_at`)
-                )";
-            } else {
-                $dateExpr = "DATE(mo.`created_at`)";
-            }
-        } else { // pgsql
-            $dateExpr = $hasTs
-                ? "DATE(COALESCE(
-                      TO_TIMESTAMP(NULLIF(mo.\"TIMESTAMP\", ''), 'HH24:MI DD-MM-YYYY'),
-                      TO_TIMESTAMP(NULLIF(mo.\"TIMESTAMP\", ''), 'HH24:MI MM-DD-YYYY'),
-                      TO_TIMESTAMP(NULLIF(mo.\"timestamp\", ''), 'HH24:MI DD-MM-YYYY'),
-                      TO_TIMESTAMP(NULLIF(mo.\"timestamp\", ''), 'HH24:MI MM-DD-YYYY'),
-                      mo.\"created_at\"
-                   ))"
-                : "DATE(mo.\"created_at\")";
-        }
-
         $mo = DB::table('macro_output as mo');
 
         if ($start && $end) {
@@ -158,7 +152,7 @@ class SummaryOverallController extends Controller
 
         $ordersMap = [];
         foreach ($ordersRows as $r) {
-            $ordersMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->orders_total ?? 0);
+            $ordersMap["{$r->day_key}|{$r->page_key}"] = (int)($r->orders_total ?? 0);
         }
 
         // Proceed
@@ -170,7 +164,7 @@ class SummaryOverallController extends Controller
 
         $proceedMap = [];
         foreach ($proceedRows as $r) {
-            $proceedMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->proceed_total ?? 0);
+            $proceedMap["{$r->day_key}|{$r->page_key}"] = (int)($r->proceed_total ?? 0);
         }
 
         // Cannot Proceed
@@ -182,7 +176,7 @@ class SummaryOverallController extends Controller
 
         $cannotMap = [];
         foreach ($cannotRows as $r) {
-            $cannotMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->cannot_total ?? 0);
+            $cannotMap["{$r->day_key}|{$r->page_key}"] = (int)($r->cannot_total ?? 0);
         }
 
         // ODZ
@@ -194,10 +188,10 @@ class SummaryOverallController extends Controller
 
         $odzMap = [];
         foreach ($odzRows as $r) {
-            $odzMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->odz_total ?? 0);
+            $odzMap["{$r->day_key}|{$r->page_key}"] = (int)($r->odz_total ?? 0);
         }
 
-        // SHIPPED — count DISTINCT waybill appearing in from_jnts.waybill_number
+        // SHIPPED — DISTINCT waybill present in from_jnts
         $shippedRows = (clone $mo)
             ->whereRaw("$moWaybill IS NOT NULL")
             ->whereRaw("$trimFn($moWaybill) <> ''")
@@ -210,10 +204,10 @@ class SummaryOverallController extends Controller
 
         $shippedMap = [];
         foreach ($shippedRows as $r) {
-            $shippedMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->shipped_total ?? 0);
+            $shippedMap["{$r->day_key}|{$r->page_key}"] = (int)($r->shipped_total ?? 0);
         }
 
-        // DELIVERED — shipped but j.status LIKE 'delivered%'
+        // DELIVERED — shipped & j.status LIKE 'delivered%'
         $deliveredRows = (clone $mo)
             ->whereRaw("$moWaybill IS NOT NULL")
             ->whereRaw("$trimFn($moWaybill) <> ''")
@@ -227,13 +221,10 @@ class SummaryOverallController extends Controller
 
         $deliveredMap = [];
         foreach ($deliveredRows as $r) {
-            $deliveredMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->delivered_total ?? 0);
+            $deliveredMap["{$r->day_key}|{$r->page_key}"] = (int)($r->delivered_total ?? 0);
         }
 
-        // ----------------------
         // Merge — keep only rows with Adspent > 0
-        // TCPR = (1 - Proceed / Orders) * 100 (null if Orders == 0)
-        // ----------------------
         $keys = array_unique(array_merge(
             array_keys($adsMap),
             array_keys($ordersMap),
@@ -250,12 +241,12 @@ class SummaryOverallController extends Controller
             $adspent = $adsMap[$key] ?? 0.0;
             if ($adspent <= 0) continue;
 
-            $orders    = $ordersMap[$key]     ?? 0;
-            $proc      = $proceedMap[$key]    ?? 0;
-            $cannot    = $cannotMap[$key]     ?? 0;
-            $odz       = $odzMap[$key]        ?? 0;
-            $shipped   = $shippedMap[$key]    ?? 0;
-            $delivered = $deliveredMap[$key]  ?? 0;
+            $orders    = $ordersMap[$key]    ?? 0;
+            $proc      = $proceedMap[$key]   ?? 0;
+            $cannot    = $cannotMap[$key]    ?? 0;
+            $odz       = $odzMap[$key]       ?? 0;
+            $shipped   = $shippedMap[$key]   ?? 0;
+            $delivered = $deliveredMap[$key] ?? 0;
 
             $tcpr = $orders > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
@@ -280,8 +271,6 @@ class SummaryOverallController extends Controller
             return strcmp($a['date'], $b['date']);
         });
 
-        return response()->json([
-            'ads_daily' => $rows,
-        ]);
+        return response()->json(['ads_daily' => $rows]);
     }
 }
