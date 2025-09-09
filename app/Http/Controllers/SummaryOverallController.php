@@ -10,9 +10,12 @@ class SummaryOverallController extends Controller
 {
     public function index()
     {
+        $driver = DB::getDriverName(); // 'mysql' or 'pgsql'
+        $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
+
         $pages = DB::table('ads_manager_reports')
             ->whereNotNull('page_name')
-            ->selectRaw('TRIM(page_name) AS page_name')
+            ->selectRaw("$trimFn(page_name) AS page_name")
             ->distinct()
             ->orderBy('page_name')
             ->pluck('page_name')
@@ -33,73 +36,101 @@ class SummaryOverallController extends Controller
         $end      = $request->input('end_date');     // YYYY-MM-DD
         $pageName = $request->input('page_name', 'all');
 
-        $driver     = DB::getDriverName(); // 'mysql' or 'pgsql'
-        $trimFn     = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
-        $lowerTrim  = "LOWER($trimFn(%s))";
+        $driver = DB::getDriverName(); // 'mysql' or 'pgsql'
+        $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
 
-        // Spend cast per driver
-        $castSpend  = $driver === 'pgsql'
-            ? 'CAST(amount_spent_php AS NUMERIC)'
-            : 'CAST(amount_spent_php AS DECIMAL(18,2))';
+        // Helpers
+        $quote = fn($col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
+        $col   = function (string $table, array $candidates) {
+            foreach ($candidates as $c) {
+                if (Schema::hasColumn($table, $c)) return $c;
+            }
+            return null;
+        };
+
+        // Choose column names that may differ by casing across DBs
+        $pageColName = $col('macro_output', ['page','Page','PAGE','page_name','Page_Name']);
+        if (!$pageColName) {
+            // Fail fast with a clear message if page column is truly missing
+            throw new \RuntimeException('macro_output has no page/page_name column');
+        }
+        $moPage     = 'mo.' . $quote($pageColName);
+        $pageExpr   = "$trimFn(COALESCE($moPage,''))";
+
+        $wbColName  = $col('macro_output', ['waybill','Waybill','WAYBILL']);
+        $moWaybill  = $wbColName ? 'mo.' . $quote($wbColName) : 'mo.waybill';
+
+        $statusColName = $col('macro_output', ['status','Status','STATUS']) ?? 'status';
+        $statusExpr    = 'mo.' . $quote($statusColName);
+        $statusNorm    = "LOWER(REPLACE(REPLACE($trimFn($statusExpr),' ',''),'_',''))";
+
+        // Spend cast per driver (sanitize ₱, commas, spaces, blanks)
+        $castSpend = $driver === 'pgsql'
+            ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(amount_spent_php::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
+            : "CAST(REPLACE(REPLACE(REPLACE(COALESCE(amount_spent_php,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
 
         // ----------------------
-        // ADS: group by day + page_name
+        // ADS: group by DATE(day) + page
         // ----------------------
         $adsBase = DB::table('ads_manager_reports');
 
         if ($start && $end) {
-            $adsBase->whereBetween('day', [$start, $end]);
+            $adsBase->whereRaw('DATE(day) BETWEEN ? AND ?', [$start, $end]);
         } elseif ($start) {
-            $adsBase->where('day', '>=', $start);
+            $adsBase->whereRaw('DATE(day) >= ?', [$start]);
         } elseif ($end) {
-            $adsBase->where('day', '<=', $end);
+            $adsBase->whereRaw('DATE(day) <= ?', [$end]);
         }
 
         if ($pageName && $pageName !== 'all') {
-            $adsBase->whereRaw(sprintf("$lowerTrim = $lowerTrim", 'page_name', '?'), [$pageName]);
+            if ($driver === 'pgsql') {
+                $adsBase->whereRaw("$trimFn(page_name) ILIKE $trimFn(?)", [$pageName]);
+            } else {
+                $adsBase->whereRaw("LOWER($trimFn(page_name)) = LOWER($trimFn(?))", [$pageName]);
+            }
         }
 
         $adsRows = (clone $adsBase)
             ->whereNotNull('day')
-            ->selectRaw("day AS day_key, $trimFn(COALESCE(page_name, '')) AS page_name, SUM($castSpend) AS adspent")
-            ->groupBy('day', 'page_name')
-            ->havingRaw("SUM($castSpend) > 0") // only rows with spend > 0
-            ->orderBy('day', 'asc')
-            ->orderBy('page_name', 'asc')
+            ->selectRaw("DATE(day) AS day_key, $trimFn(COALESCE(page_name, '')) AS page_key, SUM($castSpend) AS adspent")
+            ->groupByRaw("DATE(day), $trimFn(COALESCE(page_name,''))")
+            ->havingRaw("SUM($castSpend) > 0")
+            ->orderBy('day_key', 'asc')
+            ->orderBy('page_key', 'asc')
             ->get();
 
         $adsMap = [];
         foreach ($adsRows as $r) {
-            $key = (string)$r->day_key . '|' . (string)$r->page_name;
-            $adsMap[$key] = (float) ($r->adspent ?? 0);
+            $adsMap["{$r->day_key}|{$r->page_key}"] = (float) ($r->adspent ?? 0);
         }
 
         // ----------------------
         // ORDERS + STATUS buckets (macro_output)
-        // TIMESTAMP sample: "21:44 09-06-2025" → support dd-mm-yyyy at mm-dd-yyyy
+        // TIMESTAMP sample: "21:44 09-06-2025" → support dd-mm-yyyy and mm-dd-yyyy
         // ----------------------
-        $hasTs = Schema::hasColumn('macro_output', 'TIMESTAMP');
+        $hasTs = Schema::hasColumn('macro_output','TIMESTAMP') || Schema::hasColumn('macro_output','timestamp');
 
-        if ($hasTs) {
-            if ($driver === 'mysql') {
+        if ($driver === 'mysql') {
+            if ($hasTs) {
                 $dateExpr = "COALESCE(
                     DATE(STR_TO_DATE(mo.`TIMESTAMP`, '%H:%i %d-%m-%Y')),
-                    DATE(STR_TO_DATE(mo.`TIMESTAMP`, '%H:%i %m-%d-%Y'))
+                    DATE(STR_TO_DATE(mo.`TIMESTAMP`, '%H:%i %m-%d-%Y')),
+                    DATE(mo.`created_at`)
                 )";
-            } else { // pgsql
-                $dateExpr = "DATE(COALESCE(
-                    TO_TIMESTAMP(mo.\"TIMESTAMP\", 'HH24:MI DD-MM-YYYY'),
-                    TO_TIMESTAMP(mo.\"TIMESTAMP\", 'HH24:MI MM-DD-YYYY')
-                ))";
+            } else {
+                $dateExpr = "DATE(mo.`created_at`)";
             }
-        } else {
-            $dateExpr = $driver === 'mysql'
-                ? "DATE(mo.`created_at`)"
+        } else { // pgsql
+            $dateExpr = $hasTs
+                ? "DATE(COALESCE(
+                      TO_TIMESTAMP(NULLIF(mo.\"TIMESTAMP\", ''), 'HH24:MI DD-MM-YYYY'),
+                      TO_TIMESTAMP(NULLIF(mo.\"TIMESTAMP\", ''), 'HH24:MI MM-DD-YYYY'),
+                      TO_TIMESTAMP(NULLIF(mo.\"timestamp\", ''), 'HH24:MI DD-MM-YYYY'),
+                      TO_TIMESTAMP(NULLIF(mo.\"timestamp\", ''), 'HH24:MI MM-DD-YYYY'),
+                      mo.\"created_at\"
+                   ))"
                 : "DATE(mo.\"created_at\")";
         }
-
-        // Normalize status: lowercase + strip spaces/underscores
-        $statusNorm = "LOWER(REPLACE(REPLACE($trimFn(mo.status),' ',''),'_',''))";
 
         $mo = DB::table('macro_output as mo');
 
@@ -110,94 +141,93 @@ class SummaryOverallController extends Controller
         } elseif ($end) {
             $mo->whereRaw("$dateExpr <= ?", [$end]);
         }
+
         if ($pageName && $pageName !== 'all') {
-            $mo->whereRaw(sprintf("$lowerTrim = $lowerTrim", 'mo.page', '?'), [$pageName]);
+            if ($driver === 'pgsql') {
+                $mo->whereRaw("$pageExpr ILIKE $trimFn(?)", [$pageName]);
+            } else {
+                $mo->whereRaw("LOWER($pageExpr) = LOWER($trimFn(?))", [$pageName]);
+            }
         }
 
         // All Orders
         $ordersRows = (clone $mo)
-            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS orders_total")
-            ->groupBy('day_key', 'page_name')
+            ->selectRaw("$dateExpr AS day_key, $pageExpr AS page_key, COUNT(*) AS orders_total")
+            ->groupByRaw("$dateExpr, $pageExpr")
             ->get();
 
         $ordersMap = [];
         foreach ($ordersRows as $r) {
-            $key = (string)$r->day_key . '|' . (string)$r->page_name;
-            $ordersMap[$key] = (int) ($r->orders_total ?? 0);
+            $ordersMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->orders_total ?? 0);
         }
 
         // Proceed
         $proceedRows = (clone $mo)
             ->whereRaw("$statusNorm = 'proceed'")
-            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS proceed_total")
-            ->groupBy('day_key', 'page_name')
+            ->selectRaw("$dateExpr AS day_key, $pageExpr AS page_key, COUNT(*) AS proceed_total")
+            ->groupByRaw("$dateExpr, $pageExpr")
             ->get();
 
         $proceedMap = [];
         foreach ($proceedRows as $r) {
-            $key = (string)$r->day_key . '|' . (string)$r->page_name;
-            $proceedMap[$key] = (int) ($r->proceed_total ?? 0);
+            $proceedMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->proceed_total ?? 0);
         }
 
         // Cannot Proceed
         $cannotRows = (clone $mo)
             ->whereRaw("$statusNorm = 'cannotproceed'")
-            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS cannot_total")
-            ->groupBy('day_key', 'page_name')
+            ->selectRaw("$dateExpr AS day_key, $pageExpr AS page_key, COUNT(*) AS cannot_total")
+            ->groupByRaw("$dateExpr, $pageExpr")
             ->get();
 
         $cannotMap = [];
         foreach ($cannotRows as $r) {
-            $key = (string)$r->day_key . '|' . (string)$r->page_name;
-            $cannotMap[$key] = (int) ($r->cannot_total ?? 0);
+            $cannotMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->cannot_total ?? 0);
         }
 
         // ODZ
         $odzRows = (clone $mo)
             ->whereRaw("$statusNorm = 'odz'")
-            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(*) AS odz_total")
-            ->groupBy('day_key', 'page_name')
+            ->selectRaw("$dateExpr AS day_key, $pageExpr AS page_key, COUNT(*) AS odz_total")
+            ->groupByRaw("$dateExpr, $pageExpr")
             ->get();
 
         $odzMap = [];
         foreach ($odzRows as $r) {
-            $key = (string)$r->day_key . '|' . (string)$r->page_name;
-            $odzMap[$key] = (int) ($r->odz_total ?? 0);
+            $odzMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->odz_total ?? 0);
         }
 
-        // SHIPPED — count DISTINCT mo.waybill appearing in from_jnts.waybill_number
+        // SHIPPED — count DISTINCT waybill appearing in from_jnts.waybill_number
         $shippedRows = (clone $mo)
-            ->whereNotNull('mo.waybill')
-            ->whereRaw("$trimFn(mo.waybill) <> ''")
-            ->join('from_jnts as j', function ($join) use ($trimFn) {
-                $join->on(DB::raw("$trimFn(mo.waybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
+            ->whereRaw("$moWaybill IS NOT NULL")
+            ->whereRaw("$trimFn($moWaybill) <> ''")
+            ->join('from_jnts as j', function ($join) use ($trimFn, $moWaybill) {
+                $join->on(DB::raw("$trimFn($moWaybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
             })
-            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(DISTINCT $trimFn(mo.waybill)) AS shipped_total")
-            ->groupBy('day_key', 'page_name')
+            ->selectRaw("$dateExpr AS day_key, $pageExpr AS page_key, COUNT(DISTINCT $trimFn($moWaybill)) AS shipped_total")
+            ->groupByRaw("$dateExpr, $pageExpr")
             ->get();
 
         $shippedMap = [];
         foreach ($shippedRows as $r) {
-            $key = (string)$r->day_key . '|' . (string)$r->page_name;
-            $shippedMap[$key] = (int) ($r->shipped_total ?? 0);
+            $shippedMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->shipped_total ?? 0);
         }
 
         // DELIVERED — shipped but j.status LIKE 'delivered%'
         $deliveredRows = (clone $mo)
-            ->whereNotNull('mo.waybill')
-            ->whereRaw("$trimFn(mo.waybill) <> ''")
-            ->join('from_jnts as j', function ($join) use ($trimFn) {
-                $join->on(DB::raw("$trimFn(mo.waybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
+            ->whereRaw("$moWaybill IS NOT NULL")
+            ->whereRaw("$trimFn($moWaybill) <> ''")
+            ->join('from_jnts as j', function ($join) use ($trimFn, $moWaybill) {
+                $join->on(DB::raw("$trimFn($moWaybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
             })
-            ->whereRaw("LOWER($trimFn(j.status)) LIKE 'delivered%'")
-            ->selectRaw("$dateExpr AS day_key, $trimFn(COALESCE(mo.page,'')) AS page_name, COUNT(DISTINCT $trimFn(mo.waybill)) AS delivered_total")
-            ->groupBy('day_key', 'page_name')
+            ->whereRaw("LOWER($trimFn(COALESCE(j.status,''))) LIKE 'delivered%'")
+            ->selectRaw("$dateExpr AS day_key, $pageExpr AS page_key, COUNT(DISTINCT $trimFn($moWaybill)) AS delivered_total")
+            ->groupByRaw("$dateExpr, $pageExpr")
             ->get();
 
         $deliveredMap = [];
         foreach ($deliveredRows as $r) {
-            $key = (string)$r->day_key . '|' . (string)$r->page_name;
-            $deliveredMap[$key] = (int) ($r->delivered_total ?? 0);
+            $deliveredMap["{$r->day_key}|{$r->page_key}"] = (int) ($r->delivered_total ?? 0);
         }
 
         // ----------------------
