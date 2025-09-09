@@ -8,7 +8,7 @@ use ZipArchive;
 use DateTime;
 use DateTimeZone;
 
-// ✅ OpenSpout v4 imports
+// OpenSpout v4
 use OpenSpout\Reader\Common\Creator\ReaderFactory;
 
 class JntOndelController extends Controller
@@ -23,21 +23,17 @@ class JntOndelController extends Controller
         @ini_set('memory_limit', '512M');
         @set_time_limit(300);
 
-        \Log::info('Upload started: ' . now('Asia/Manila'));
-
         $request->validate([
             'file'           => 'required|file',
             'delivered_date' => 'nullable|date',
         ]);
 
-        $uploaded = $request->file('file');
-        \Log::info('File received: ' . $uploaded->getClientOriginalName());
-
+        $uploaded     = $request->file('file');
         $deliveredYmd = $request->input('delivered_date') ?: now('Asia/Manila')->toDateString();
-        $realPath     = $uploaded->getRealPath();
+        $realPath     = $uploaded->getRealPath();                       // temp path (may .tmp)
         $ext          = strtolower($uploaded->getClientOriginalExtension() ?: '');
 
-        // Unique sets
+        // Unique sets (associative arrays para O(1) membership)
         $sets = [
             'delivering'        => [],
             'in_transit'        => [],
@@ -45,20 +41,18 @@ class JntOndelController extends Controller
             'for_return'        => [],
         ];
 
-        // Decide parser
         if ($ext === 'zip') {
             $this->parseZip($realPath, $deliveredYmd, $sets);
         } elseif (in_array($ext, ['csv', 'xlsx', 'xls'])) {
             $this->parseSingle($realPath, $ext, $deliveredYmd, $sets);
         } else {
-            // sniff magic bytes (ZIP: "PK")
+            // sniff magic (ZIP: PK)
             $sig = '';
             if ($fh = @fopen($realPath, 'rb')) { $sig = fread($fh, 2) ?: ''; fclose($fh); }
             if ($sig === 'PK') $this->parseZip($realPath, $deliveredYmd, $sets);
             else $this->parseCsv($realPath, $deliveredYmd, $sets);
         }
 
-        // Build response
         $dAll  = array_keys($sets['delivering']);
         $itAll = array_keys($sets['in_transit']);
         $dvAll = array_keys($sets['delivered_on_date']);
@@ -78,31 +72,24 @@ class JntOndelController extends Controller
         ]);
     }
 
-    // --- ZIP ---
+    // ---------- ZIP (only CSV/XLSX inside) ----------
     private function parseZip(string $zipPath, string $deliveredYmd, array &$sets): void
     {
         $zip = new ZipArchive();
-        if ($zip->open($zipPath) !== true) {
-            \Log::warning('Unable to open ZIP');
-            return;
-        }
+        if ($zip->open($zipPath) !== true) return;
 
         $tmpDir = storage_path('app/tmp_ondel_' . Str::random(8));
         if (!is_dir($tmpDir)) @mkdir($tmpDir, 0777, true);
 
         for ($i = 0; $i < $zip->numFiles; $i++) {
             $entry = $zip->getNameIndex($i);
-            if ($entry === false) continue;
-            if (Str::endsWith($entry, '/')) continue; // skip folders
+            if ($entry === false || str_ends_with($entry, '/')) continue;
 
             $lower = strtolower($entry);
             if (!preg_match('/\.(csv|xlsx|xls)$/i', $lower)) continue;
 
             $target = $tmpDir . DIRECTORY_SEPARATOR . basename($entry);
-            if (@copy("zip://{$zipPath}#{$entry}", $target) === false) {
-                \Log::warning("Failed to extract {$entry}");
-                continue;
-            }
+            if (@copy("zip://{$zipPath}#{$entry}", $target) === false) continue;
 
             $ext = strtolower(pathinfo($target, PATHINFO_EXTENSION));
             $this->parseSingle($target, $ext, $deliveredYmd, $sets);
@@ -114,29 +101,37 @@ class JntOndelController extends Controller
         @rmdir($tmpDir);
     }
 
-    // --- Switch ---
+    // ---------- Single switch ----------
     private function parseSingle(string $path, string $ext, string $deliveredYmd, array &$sets): void
     {
-        if ($ext === 'csv')       $this->parseCsv($path, $deliveredYmd, $sets);
-        if ($ext === 'xlsx' || $ext === 'xls') $this->parseXlsx($path, $deliveredYmd, $sets);
+        if ($ext === 'csv') {
+            $this->parseCsv($path, $deliveredYmd, $sets);
+        } elseif ($ext === 'xlsx') {
+            $this->parseXlsx($path, 'xlsx', $deliveredYmd, $sets);
+        } elseif ($ext === 'xls') {
+            // Optional: support via PhpSpreadsheet; otherwise suggest CSV/XLSX
+            if (class_exists(\PhpOffice\PhpSpreadsheet\Reader\Xls::class)) {
+                $this->parseXlsViaPhpSpreadsheet($path, $deliveredYmd, $sets);
+            } else {
+                // skip silently or throw; here we skip to keep response OK
+            }
+        }
     }
 
-    // --- CSV (stream) ---
+    // ---------- CSV (stream) – uses only 3 columns ----------
     private function parseCsv(string $path, string $deliveredYmd, array &$sets): void
     {
         $f = new \SplFileObject($path, 'r');
         $f->setFlags(\SplFileObject::READ_CSV | \SplFileObject::SKIP_EMPTY);
         $f->setCsvControl(',');
 
-        // header (detect ';' if needed)
+        // header (detect ;)
         $header = [];
         while (!$f->eof()) {
             $row = $f->fgetcsv();
             if ($row === [null] || $row === false) continue;
             if (count($row) === 1 && strpos((string)$row[0], ';') !== false) {
-                $f->setCsvControl(';');
-                $f->rewind();
-                $row = $f->fgetcsv();
+                $f->setCsvControl(';'); $f->rewind(); $row = $f->fgetcsv();
             }
             $header = $this->normalizeHeader($row);
             break;
@@ -144,45 +139,79 @@ class JntOndelController extends Controller
         if (!$header) return;
 
         $idx = $this->findIndices($header);
+        // Kung wala ang Waybill o Status, walang silbi
+        if ($idx['waybill'] < 0 || $idx['status'] < 0) return;
 
         while (!$f->eof()) {
             $row = $f->fgetcsv();
             if ($row === [null] || $row === false) continue;
-            $this->accumulateRow($row, $idx, $deliveredYmd, $sets);
+
+            // KUNIN LANG ANG KAILANGAN
+            $wb   = $this->safeCell($row, $idx['waybill']);
+            $stat = strtolower(trim($this->safeCell($row, $idx['status'])));
+            $sign = $idx['signing'] >= 0 ? $this->safeCell($row, $idx['signing']) : '';
+
+            if ($wb === '' || !$this->isInterestingStatus($stat)) continue;
+
+            if ($stat === 'delivering') {
+                $sets['delivering'][$wb] = true;
+            } elseif ($stat === 'in transit') {
+                $sets['in_transit'][$wb] = true;
+            } elseif ($stat === 'delivered') {
+                $signYmd = $this->phpYmdFromValue($sign);
+                if ($signYmd && $signYmd === $deliveredYmd) {
+                    $sets['delivered_on_date'][$wb] = true;
+                }
+            } elseif ($stat === 'for return') {
+                $sets['for_return'][$wb] = true;
+            }
         }
     }
 
-    // --- XLSX/XLS (OpenSpout v4) ---
-    private function parseXlsx(string $path, string $deliveredYmd, array &$sets): void
+    // ---------- XLSX (OpenSpout v4) – only read needed cells ----------
+    private function parseXlsx(string $path, string $type, string $deliveredYmd, array &$sets): void
     {
-        // ✅ v4: ReaderFactory::createFromFile()
-        $reader = ReaderFactory::createFromFile($path);
+        // IMPORTANT: use createFromType('xlsx') – temp path may have .tmp
+        $reader = ReaderFactory::createFromType($type);
         $reader->open($path);
 
         foreach ($reader->getSheetIterator() as $sheet) {
             $header = null;
             $idx    = null;
-            $i = 0;
 
             foreach ($sheet->getRowIterator() as $row) {
-                $i++;
-
-                // ✅ v4: getCells() -> getValue()
-                $cells = [];
-                foreach ($row->getCells() as $cell) {
-                    $cells[] = $cell->getValue();
-                }
-
+                // First row = header
                 if ($header === null) {
-                    $header = $this->normalizeHeader($cells);
+                    // Read raw header cell strings only
+                    $cells = $row->getCells();
+                    $h = [];
+                    foreach ($cells as $cell) { $h[] = strtolower(trim((string)$cell->getValue())); }
+                    $header = $h;
                     $idx    = $this->findIndices($header);
+                    if ($idx['waybill'] < 0 || $idx['status'] < 0) break; // skip sheet
                     continue;
                 }
 
-                $this->accumulateRow($cells, $idx, $deliveredYmd, $sets);
+                // DO NOT build values array; pick by index only
+                $cells = $row->getCells();
 
-                if ($i % 10000 === 0) {
-                    \Log::info("OpenSpout processed {$i} rows…");
+                $wb   = ($idx['waybill'] >= 0 && isset($cells[$idx['waybill']])) ? trim((string)$cells[$idx['waybill']]->getValue()) : '';
+                $stat = ($idx['status']  >= 0 && isset($cells[$idx['status'] ])) ? strtolower(trim((string)$cells[$idx['status']]->getValue())) : '';
+                $sign = ($idx['signing'] >= 0 && isset($cells[$idx['signing']])) ? (string)$cells[$idx['signing']]->getValue() : '';
+
+                if ($wb === '' || !$this->isInterestingStatus($stat)) continue;
+
+                if ($stat === 'delivering') {
+                    $sets['delivering'][$wb] = true;
+                } elseif ($stat === 'in transit') {
+                    $sets['in_transit'][$wb] = true;
+                } elseif ($stat === 'delivered') {
+                    $signYmd = $this->phpYmdFromValue($sign);
+                    if ($signYmd && $signYmd === $deliveredYmd) {
+                        $sets['delivered_on_date'][$wb] = true;
+                    }
+                } elseif ($stat === 'for return') {
+                    $sets['for_return'][$wb] = true;
                 }
             }
         }
@@ -190,11 +219,54 @@ class JntOndelController extends Controller
         $reader->close();
     }
 
-    // --- Helpers ---
+    // ---------- Optional XLS (PhpSpreadsheet) ----------
+    private function parseXlsViaPhpSpreadsheet(string $path, string $deliveredYmd, array &$sets): void
+    {
+        $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xls();
+        $reader->setReadDataOnly(true);
+        $spreadsheet = $reader->load($path);
+
+        foreach ($spreadsheet->getWorksheetIterator() as $ws) {
+            $rows = $ws->toArray(null, false, false, false);
+            if (!$rows) continue;
+
+            $header = $this->normalizeHeader($rows[0] ?? []);
+            $idx    = $this->findIndices($header);
+            if ($idx['waybill'] < 0 || $idx['status'] < 0) continue;
+
+            $n = count($rows);
+            for ($i = 1; $i < $n; $i++) {
+                $row  = $rows[$i];
+                $wb   = $this->safeCell($row, $idx['waybill']);
+                $stat = strtolower(trim($this->safeCell($row, $idx['status'])));
+                $sign = $idx['signing'] >= 0 ? $this->safeCell($row, $idx['signing']) : '';
+
+                if ($wb === '' || !$this->isInterestingStatus($stat)) continue;
+
+                if ($stat === 'delivering') {
+                    $sets['delivering'][$wb] = true;
+                } elseif ($stat === 'in transit') {
+                    $sets['in_transit'][$wb] = true;
+                } elseif ($stat === 'delivered') {
+                    $signYmd = $this->phpYmdFromValue($sign);
+                    if ($signYmd && $signYmd === $deliveredYmd) {
+                        $sets['delivered_on_date'][$wb] = true;
+                    }
+                } elseif ($stat === 'for return') {
+                    $sets['for_return'][$wb] = true;
+                }
+            }
+        }
+
+        $spreadsheet->disconnectWorksheets();
+        unset($spreadsheet);
+    }
+
+    // ---------- Helpers ----------
     private function normalizeHeader(array $cells): array
     {
         $h = [];
-        foreach ($cells as $c) $h[] = strtolower(trim((string)$c));
+        foreach ($cells as $c) { $h[] = strtolower(trim((string)$c)); }
         return $h;
     }
 
@@ -215,26 +287,10 @@ class JntOndelController extends Controller
         ];
     }
 
-    private function accumulateRow(array $row, array $idx, string $deliveredYmd, array &$sets): void
+    private function isInterestingStatus(string $stat): bool
     {
-        $wb   = $this->safeCell($row, $idx['waybill']);
-        $stat = strtolower(trim($this->safeCell($row, $idx['status'])));
-        $sign = $this->safeCell($row, $idx['signing']);
-
-        if ($wb === '') return;
-
-        if ($stat === 'delivering') {
-            $sets['delivering'][$wb] = true;
-        } elseif ($stat === 'in transit') {
-            $sets['in_transit'][$wb] = true;
-        } elseif ($stat === 'delivered') {
-            $signYmd = $this->phpYmdFromValue($sign);
-            if ($signYmd && $signYmd === $deliveredYmd) {
-                $sets['delivered_on_date'][$wb] = true;
-            }
-        } elseif ($stat === 'for return') {
-            $sets['for_return'][$wb] = true; // client will intersect with today's delivering
-        }
+        // Para mabilis mag-skip ng ibang status
+        return $stat === 'delivering' || $stat === 'in transit' || $stat === 'delivered' || $stat === 'for return';
     }
 
     private function safeCell(array $row, int $idx): string
@@ -248,15 +304,15 @@ class JntOndelController extends Controller
     {
         if ($val === null || $val === '') return null;
 
-        // Numeric -> Excel serial date
+        // Excel serial number
         if (is_numeric($val)) {
-            $seconds = ($val - 25569) * 86400; // days -> seconds
+            $seconds = ($val - 25569) * 86400;
             $ts = (int) round($seconds);
             $dt = (new DateTime("@$ts"))->setTimezone(new DateTimeZone('Asia/Manila'));
             return $dt->format('Y-m-d');
         }
 
-        // String -> strtotime
+        // String dates
         $ts = strtotime((string)$val);
         if ($ts !== false) {
             return (new DateTime("@$ts"))->setTimezone(new DateTimeZone('Asia/Manila'))->format('Y-m-d');
