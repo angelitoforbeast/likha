@@ -35,6 +35,8 @@ use App\Http\Controllers\AdsManagerCampaignsController;
 use App\Http\Controllers\AdsInsightsController;
 use App\Http\Controllers\GPTAdGeneratorController;
 use App\Http\Controllers\JntHoldController;
+use App\Http\Controllers\ItemCogsController;
+use App\Http\Controllers\SummaryOverallController;
 
 use App\Models\Role;
 
@@ -66,8 +68,13 @@ Route::get('/jnt/checker/upload', fn () => redirect()->route('jnt.checker'));
 Route::post('/jnt/checker/update', [\App\Http\Controllers\JntCheckerController::class, 'update'])
     ->name('jnt.checker.update');
 
+Route::get('/item/cogs', [ItemCogsController::class, 'index'])->name('item.cogs.index');
+Route::get('/item/cogs/grid', [ItemCogsController::class, 'grid'])->name('item.cogs.grid');      // JSON grid for month
+Route::post('/item/cogs/update', [ItemCogsController::class, 'update'])->name('item.cogs.update'); // edit one cell
 
-
+Route::get('/summary/overall', [SummaryOverallController::class, 'index'])->name('summary.overall');
+Route::get('/summary/overall/data', [SummaryOverallController::class, 'data'])->name('summary.overall.data');
+Route::get('/summary/overall/daily', [SummaryOverallController::class, 'daily'])->name('summary.overall.daily');
 
 
 Route::get('/encoder/summary', [App\Http\Controllers\MacroOutputController::class, 'summary'])->name('macro_output.summary');
