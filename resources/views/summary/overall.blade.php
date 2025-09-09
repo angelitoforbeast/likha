@@ -72,7 +72,11 @@
               <th class="px-3 py-2">ODZ</th>
               <th class="px-3 py-2">Shipped</th>
               <th class="px-3 py-2">Delivered</th>
-              <th class="px-3 py-2">TCPR</th>
+<th class="px-3 py-2">Returned</th>
+<th class="px-3 py-2">For Return</th>
+<th class="px-3 py-2">In Transit</th>
+<th class="px-3 py-2">TCPR</th>
+
             </tr>
           </thead>
           <tbody>
@@ -92,6 +96,10 @@
                 <td class="px-3 py-2" x-text="num(row.odz)"></td>
                 <td class="px-3 py-2" x-text="num(row.shipped)"></td>
                 <td class="px-3 py-2" x-text="num(row.delivered)"></td>
+<td class="px-3 py-2" x-text="num(row.returned)"></td>
+<td class="px-3 py-2" x-text="num(row.for_return)"></td>
+<td class="px-3 py-2" x-text="num(row.in_transit)"></td>
+
                 <td class="px-3 py-2">
                   <span
                     class="px-2 py-0.5 rounded text-xs"
