@@ -33,37 +33,65 @@ class SummaryOverallController extends Controller
         $driver = DB::getDriverName(); // 'mysql' or 'pgsql'
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
 
-        // Helpers
-        $quote = fn($col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
-        $col   = function (string $table, array $candidates) {
-            foreach ($candidates as $c) {
-                if (Schema::hasColumn($table, $c)) return $c;
+        // ---------- helpers ----------
+        $quote = fn(string $col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
+
+        $pgColumns = function (string $table): array {
+            // strict, case-sensitive list of column names for PG; lowercase for others
+            if (DB::getDriverName() === 'pgsql') {
+                $rows = DB::select(
+                    "SELECT column_name FROM information_schema.columns
+                     WHERE table_schema = current_schema() AND table_name = ?",
+                    [$table]
+                );
+                return array_map(fn($r) => $r->column_name, $rows);
             }
-            return null;
+            // for MySQL we won't need the full list
+            return [];
         };
 
-        // --- Resolve macro_output columns (case/camel tolerant) ---
-        $pageColName = $col('macro_output', ['page','Page','PAGE','page_name','Page_Name']);
-        if (!$pageColName) throw new \RuntimeException('macro_output has no page/page_name column');
+        $pickCol = function (string $table, array $candidates) use ($pgColumns) {
+            if (DB::getDriverName() === 'pgsql') {
+                $cols = $pgColumns($table);
+                foreach ($candidates as $c) {
+                    if (in_array($c, $cols, true)) return $c;
+                }
+                return null;
+            } else {
+                foreach ($candidates as $c) {
+                    if (Schema::hasColumn($table, $c)) return $c;
+                }
+                return null;
+            }
+        };
+
+        // ---------- resolve macro_output columns ----------
+        // PAGE can be PAGE/page/page_name (sa PG mo: "PAGE")
+        $pageColName = $pickCol('macro_output', ['PAGE','page','page_name','Page','Page_Name']);
+        if (!$pageColName) throw new \RuntimeException('macro_output: page column not found');
         $moPage   = 'mo.' . $quote($pageColName);
         $pageExpr = "$trimFn(COALESCE($moPage,''))";
 
-        $wbColName = $col('macro_output', ['waybill','Waybill','WAYBILL']);
-        $moWaybill = $wbColName ? 'mo.' . $quote($wbColName) : 'mo.waybill';
-
-        $statusColName = $col('macro_output', ['status','Status','STATUS']) ?? 'status';
+        // STATUS can be STATUS/status (sa PG mo: "STATUS")
+        $statusColName = $pickCol('macro_output', ['STATUS','status','Status']) ?? 'status';
         $statusExpr    = 'mo.' . $quote($statusColName);
         $statusNorm    = "LOWER(REPLACE(REPLACE($trimFn($statusExpr),' ',''),'_',''))";
 
-        // --- Build DATE expression using only existing timestamp columns ---
-        $tsCandidates = array_values(array_filter([
-            Schema::hasColumn('macro_output','TIMESTAMP') ? 'TIMESTAMP' : null,
-            Schema::hasColumn('macro_output','timestamp') ? 'timestamp' : null,
-        ]));
+        // WAYBILL can be waybill/Waybill/WAYBILL (sa PG mo: waybill lowercase)
+        $wbColName = $pickCol('macro_output', ['waybill','Waybill','WAYBILL']) ?? 'waybill';
+        $moWaybill = 'mo.' . $quote($wbColName);
 
+        // TIMESTAMP can be TIMESTAMP/timestamp; use only what exists (sa PG mo: "TIMESTAMP")
+        $tsCols = [];
+        $cand   = ['TIMESTAMP','timestamp'];
+        foreach ($cand as $c) {
+            if ($pickCol('macro_output', [$c])) $tsCols[] = $c;
+        }
+
+        // ---------- DATE expression ----------
         if ($driver === 'mysql') {
-            if (!empty($tsCandidates)) {
-                $ts = 'mo.' . $quote($tsCandidates[0]); // use first found
+            if (!empty($tsCols)) {
+                $ts = 'mo.' . $quote($tsCols[0]); // first match
                 $dateExpr = "COALESCE(
                     DATE(STR_TO_DATE($ts, '%H:%i %d-%m-%Y')),
                     DATE(STR_TO_DATE($ts, '%H:%i %m-%d-%Y')),
@@ -74,24 +102,24 @@ class SummaryOverallController extends Controller
             }
         } else { // pgsql
             $pgParts = [];
-            foreach ($tsCandidates as $c) {
-                $colRef = 'mo.' . $quote($c);
-                $pgParts[] = "TO_TIMESTAMP(NULLIF($colRef, ''), 'HH24:MI DD-MM-YYYY')";
-                $pgParts[] = "TO_TIMESTAMP(NULLIF($colRef, ''), 'HH24:MI MM-DD-YYYY')";
+            foreach ($tsCols as $c) {
+                $ref = 'mo.' . $quote($c);
+                $pgParts[] = "TO_TIMESTAMP(NULLIF($ref, ''), 'HH24:MI DD-MM-YYYY')";
+                $pgParts[] = "TO_TIMESTAMP(NULLIF($ref, ''), 'HH24:MI MM-DD-YYYY')";
             }
-            // Always add created_at fallback
+            // add created_at fallback (always exists)
             $pgParts[] = 'mo."created_at"';
             $dateExpr  = 'DATE(COALESCE(' . implode(', ', $pgParts) . '))';
         }
 
-        // --- Ad spend cast (sanitize ₱, commas, spaces, blanks) ---
+        // ---------- Ad spend cast (sanitize ₱, commas, spaces, blanks) ----------
         $castSpend = $driver === 'pgsql'
             ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(amount_spent_php::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
             : "CAST(REPLACE(REPLACE(REPLACE(COALESCE(amount_spent_php,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
 
-        // ----------------------
-        // ADS: group by DATE(day) + page
-        // ----------------------
+        // ======================
+        // ADS (ads_manager_reports)
+        // ======================
         $adsBase = DB::table('ads_manager_reports');
 
         if ($start && $end) {
@@ -123,9 +151,9 @@ class SummaryOverallController extends Controller
             $adsMap["{$r->day_key}|{$r->page_key}"] = (float)($r->adspent ?? 0);
         }
 
-        // ----------------------
-        // ORDERS + STATUS buckets (macro_output)
-        // ----------------------
+        // ======================
+        // ORDERS & STATUS (macro_output)
+        // ======================
         $mo = DB::table('macro_output as mo');
 
         if ($start && $end) {
@@ -191,7 +219,7 @@ class SummaryOverallController extends Controller
             $odzMap["{$r->day_key}|{$r->page_key}"] = (int)($r->odz_total ?? 0);
         }
 
-        // SHIPPED — DISTINCT waybill present in from_jnts
+        // SHIPPED — DISTINCT waybill matched to from_jnts.waybill_number
         $shippedRows = (clone $mo)
             ->whereRaw("$moWaybill IS NOT NULL")
             ->whereRaw("$trimFn($moWaybill) <> ''")
