@@ -37,6 +37,7 @@ use App\Http\Controllers\GPTAdGeneratorController;
 use App\Http\Controllers\JntHoldController;
 use App\Http\Controllers\ItemCogsController;
 use App\Http\Controllers\SummaryOverallController;
+use App\Http\Controllers\JntOndelController;
 
 use App\Models\Role;
 
@@ -55,6 +56,10 @@ Route::post('/assign-roles/{id}', [RoleAssignmentController::class, 'update']);
 Route::post('/api/generate-gpt-summary', [GPTAdGeneratorController::class, 'generate']);
 Route::get('/gpt-ad-generator', [GPTAdGeneratorController::class, 'showGeneratorForm']);
 Route::get('/ad-copy-suggestions', [GPTAdGeneratorController::class, 'loadAdCopySuggestions'])->name('gpt.suggestions');
+
+// ✅ Ondel Counter
+Route::get('/jnt/ondel', [JntOndelController::class, 'index'])->name('jnt.ondel');
+Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name('jnt.ondel.process');
 
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
