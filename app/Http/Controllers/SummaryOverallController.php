@@ -59,7 +59,7 @@ class SummaryOverallController extends Controller
             }
         };
 
-        // resolve macro_output columns (PG mo: "PAGE","STATUS","TIMESTAMP","waybill")
+        // resolve macro_output columns (PG: "PAGE","STATUS","TIMESTAMP","waybill")
         $pageColName = $pickCol('macro_output', ['PAGE','page','page_name','Page','Page_Name']);
         if (!$pageColName) throw new \RuntimeException('macro_output: page column not found');
         $moPage   = 'mo.' . $quote($pageColName);
@@ -292,7 +292,7 @@ class SummaryOverallController extends Controller
             $returnedMap[$k] = (int)($r->returned_total ?? 0);
         }
 
-        // FOR RETURN — status starts with 'forreturn' (handles 'for return', 'for-return', 'for_return')
+        // FOR RETURN — status starts with 'forreturn'
         $forReturnRows = (clone $mo)
             ->whereRaw("$moWaybill IS NOT NULL")
             ->whereRaw("$trimFn($moWaybill) <> ''")
@@ -310,7 +310,7 @@ class SummaryOverallController extends Controller
             $forReturnMap[$k] = (int)($r->for_return_total ?? 0);
         }
 
-        // IN TRANSIT — status starts with 'intransit' (handles 'in transit', 'in-transit', 'in_transit')
+        // IN TRANSIT — status starts with 'intransit'
         $inTransitRows = (clone $mo)
             ->whereRaw("$moWaybill IS NOT NULL")
             ->whereRaw("$trimFn($moWaybill) <> ''")
@@ -329,7 +329,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // Merge
+        // Merge (+ derived metrics)
         // ======================
         $keys = array_unique(array_merge(
             array_keys($adsMap),
@@ -364,11 +364,16 @@ class SummaryOverallController extends Controller
                 $odz       = $odzMap[$key]         ?? 0;
                 $shipped   = $shippedMap[$key]     ?? 0;
                 $delivered = $deliveredMap[$key]   ?? 0;
-                $returned  = $returnedMap[$key]     ?? 0;
-                $forRet    = $forReturnMap[$key]    ?? 0;
-                $inTrans   = $inTransitMap[$key]    ?? 0;
+                $returned  = $returnedMap[$key]    ?? 0;
+                $forRet    = $forReturnMap[$key]   ?? 0;
+                $inTrans   = $inTransitMap[$key]   ?? 0;
 
-                $tcpr = $orders > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
+                // Derived
+                $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
+                $proceed_cpp    = $proc    > 0 ? ($adspent / $proc)   * 1.0 : null;
+                $rts_pct        = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
+                $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
+                $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
                 $rows[] = [
                     'date'            => $rangeLabel,
@@ -383,7 +388,12 @@ class SummaryOverallController extends Controller
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
+                    'cpp'             => $cpp,
+                    'proceed_cpp'     => $proceed_cpp,
+                    'rts_pct'         => $rts_pct,
+                    'in_transit_pct'  => $in_transit_pct,
                     'tcpr'            => $tcpr,
+                    'is_total'        => false,
                 ];
             } else {
                 [$d, $p] = explode('|', $key, 2);
@@ -393,11 +403,16 @@ class SummaryOverallController extends Controller
                 $odz       = $odzMap[$key]         ?? 0;
                 $shipped   = $shippedMap[$key]     ?? 0;
                 $delivered = $deliveredMap[$key]   ?? 0;
-                $returned  = $returnedMap[$key]     ?? 0;
-                $forRet    = $forReturnMap[$key]    ?? 0;
-                $inTrans   = $inTransitMap[$key]    ?? 0;
+                $returned  = $returnedMap[$key]    ?? 0;
+                $forRet    = $forReturnMap[$key]   ?? 0;
+                $inTrans   = $inTransitMap[$key]   ?? 0;
 
-                $tcpr = $orders > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
+                // Derived
+                $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
+                $proceed_cpp    = $proc    > 0 ? ($adspent / $proc)   * 1.0 : null;
+                $rts_pct        = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
+                $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
+                $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
                 $rows[] = [
                     'date'            => $d,
@@ -412,12 +427,17 @@ class SummaryOverallController extends Controller
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
+                    'cpp'             => $cpp,
+                    'proceed_cpp'     => $proceed_cpp,
+                    'rts_pct'         => $rts_pct,
+                    'in_transit_pct'  => $in_transit_pct,
                     'tcpr'            => $tcpr,
+                    'is_total'        => false,
                 ];
             }
         }
 
-        // sort
+        // sort rows
         if ($AGGREGATE_RANGE) {
             usort($rows, fn($a,$b) => strcmp($a['page'] ?? '', $b['page'] ?? ''));
         } else {
@@ -427,6 +447,54 @@ class SummaryOverallController extends Controller
                 }
                 return strcmp($a['date'], $b['date']);
             });
+        }
+
+        // ===== TOTAL ROW (sum of raw metrics, derived recomputed on totals) =====
+        if (!empty($rows)) {
+            $sum = [
+                'adspent' => 0.0,
+                'orders' => 0, 'proceed' => 0, 'cannot_proceed' => 0, 'odz' => 0,
+                'shipped' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0, 'in_transit' => 0,
+            ];
+            foreach ($rows as $r) {
+                $sum['adspent']        += (float)($r['adspent'] ?? 0);
+                $sum['orders']         += (int)  ($r['orders'] ?? 0);
+                $sum['proceed']        += (int)  ($r['proceed'] ?? 0);
+                $sum['cannot_proceed'] += (int)  ($r['cannot_proceed'] ?? 0);
+                $sum['odz']            += (int)  ($r['odz'] ?? 0);
+                $sum['shipped']        += (int)  ($r['shipped'] ?? 0);
+                $sum['delivered']      += (int)  ($r['delivered'] ?? 0);
+                $sum['returned']       += (int)  ($r['returned'] ?? 0);
+                $sum['for_return']     += (int)  ($r['for_return'] ?? 0);
+                $sum['in_transit']     += (int)  ($r['in_transit'] ?? 0);
+            }
+
+            $total_cpp            = $sum['orders']  > 0 ? ($sum['adspent'] / $sum['orders']) * 1.0 : null;
+            $total_proceed_cpp    = $sum['proceed'] > 0 ? ($sum['adspent'] / $sum['proceed']) * 1.0 : null;
+            $total_rts_pct        = $sum['shipped'] > 0 ? (($sum['returned'] + $sum['for_return']) / $sum['shipped']) * 100.0 : null;
+            $total_in_transit_pct = $sum['shipped'] > 0 ? ($sum['in_transit'] / $sum['shipped']) * 100.0 : null;
+            $total_tcpr           = $sum['orders']  > 0 ? (1 - ($sum['proceed'] / $sum['orders'])) * 100.0 : null;
+
+            $rows[] = [
+                'date'            => $AGGREGATE_RANGE ? $rangeLabel : 'Total',
+                'page'            => 'TOTAL',
+                'adspent'         => $sum['adspent'],
+                'orders'          => $sum['orders'],
+                'proceed'         => $sum['proceed'],
+                'cannot_proceed'  => $sum['cannot_proceed'],
+                'odz'             => $sum['odz'],
+                'shipped'         => $sum['shipped'],
+                'delivered'       => $sum['delivered'],
+                'returned'        => $sum['returned'],
+                'for_return'      => $sum['for_return'],
+                'in_transit'      => $sum['in_transit'],
+                'cpp'             => $total_cpp,
+                'proceed_cpp'     => $total_proceed_cpp,
+                'rts_pct'         => $total_rts_pct,
+                'in_transit_pct'  => $total_in_transit_pct,
+                'tcpr'            => $total_tcpr,
+                'is_total'        => true,
+            ];
         }
 
         return response()->json(['ads_daily' => $rows]);
