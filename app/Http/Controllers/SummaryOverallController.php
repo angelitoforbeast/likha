@@ -59,6 +59,13 @@ class SummaryOverallController extends Controller
             }
         };
 
+        // money sanitizer for PG/MySQL
+        $castMoney = function (string $expr) use ($driver) {
+            return $driver === 'pgsql'
+                ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(($expr)::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
+                : "CAST(REPLACE(REPLACE(REPLACE(COALESCE($expr,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
+        };
+
         // resolve macro_output columns (PG: "PAGE","STATUS","TIMESTAMP","waybill")
         $pageColName = $pickCol('macro_output', ['PAGE','page','page_name','Page','Page_Name']);
         if (!$pageColName) throw new \RuntimeException('macro_output: page column not found');
@@ -99,9 +106,12 @@ class SummaryOverallController extends Controller
         }
 
         // Ad spend cast (sanitize ₱, commas, spaces)
-        $castSpend = $driver === 'pgsql'
-            ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(amount_spent_php::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
-            : "CAST(REPLACE(REPLACE(REPLACE(COALESCE(amount_spent_php,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
+        $castSpend = $castMoney('amount_spent_php');
+
+        // from_jnts columns
+        $jCodColName = $pickCol('from_jnts', ['cod','COD','cod_amount','cod_amt','cod_php','Cod','CODAmt']) ?? 'cod';
+        $jCodExpr    = 'j.' . $quote($jCodColName);
+        $castCOD     = $castMoney($jCodExpr);
 
         // aggregate mode: All Pages (one row per page across range)
         $AGGREGATE_RANGE = ($pageName === 'all');
@@ -329,6 +339,46 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
+        // NEW: GROSS SALES (sum of COD for Delivered only, per unique waybill)
+        // ======================
+        // Build base delivered join
+        $deliveredBase = (clone $mo)
+            ->whereRaw("$moWaybill IS NOT NULL")
+            ->whereRaw("$trimFn($moWaybill) <> ''")
+            ->join('from_jnts as j', function ($join) use ($trimFn, $moWaybill) {
+                $join->on(DB::raw("$trimFn($moWaybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
+            })
+            ->whereRaw("$jStatusNorm LIKE 'delivered%'");
+
+        // Inner subquery: DISTINCT per key + waybill to avoid double counting
+        $innerDistinct = (clone $deliveredBase)
+            ->selectRaw("DISTINCT $selectKey, $trimFn($moWaybill) AS wb, $castCOD AS cod_clean");
+
+        // Outer aggregation: sum cod_clean per key
+        if ($AGGREGATE_RANGE) {
+            $grossRows = DB::query()
+                ->fromSub($innerDistinct, 'd')
+                ->selectRaw("page_key, SUM(cod_clean) AS gross_sales")
+                ->groupBy('page_key')
+                ->get();
+        } else {
+            $grossRows = DB::query()
+                ->fromSub($innerDistinct, 'd')
+                ->selectRaw("day_key, page_key, SUM(cod_clean) AS gross_sales")
+                ->groupBy('day_key', 'page_key')
+                ->get();
+        }
+
+        $grossMap = [];
+        foreach ($grossRows as $r) {
+            if ($AGGREGATE_RANGE) {
+                $grossMap[(string)$r->page_key] = (float)($r->gross_sales ?? 0);
+            } else {
+                $grossMap[(string)$r->day_key . '|' . (string)$r->page_key] = (float)($r->gross_sales ?? 0);
+            }
+        }
+
+        // ======================
         // Merge (+ derived metrics)
         // ======================
         $keys = array_unique(array_merge(
@@ -342,6 +392,7 @@ class SummaryOverallController extends Controller
             array_keys($returnedMap),
             array_keys($forReturnMap),
             array_keys($inTransitMap),
+            array_keys($grossMap),
         ));
 
         $rangeLabel = '—';
@@ -367,6 +418,7 @@ class SummaryOverallController extends Controller
                 $returned  = $returnedMap[$key]    ?? 0;
                 $forRet    = $forReturnMap[$key]   ?? 0;
                 $inTrans   = $inTransitMap[$key]   ?? 0;
+                $gross     = $grossMap[$key]       ?? 0.0;
 
                 // Derived
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
@@ -385,6 +437,7 @@ class SummaryOverallController extends Controller
                     'odz'             => $odz,
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
+                    'gross_sales'     => $gross, // NEW
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -406,6 +459,7 @@ class SummaryOverallController extends Controller
                 $returned  = $returnedMap[$key]    ?? 0;
                 $forRet    = $forReturnMap[$key]   ?? 0;
                 $inTrans   = $inTransitMap[$key]   ?? 0;
+                $gross     = $grossMap[$key]       ?? 0.0;
 
                 // Derived
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
@@ -424,6 +478,7 @@ class SummaryOverallController extends Controller
                     'odz'             => $odz,
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
+                    'gross_sales'     => $gross, // NEW
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -455,6 +510,7 @@ class SummaryOverallController extends Controller
                 'adspent' => 0.0,
                 'orders' => 0, 'proceed' => 0, 'cannot_proceed' => 0, 'odz' => 0,
                 'shipped' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0, 'in_transit' => 0,
+                'gross_sales' => 0.0,
             ];
             foreach ($rows as $r) {
                 $sum['adspent']        += (float)($r['adspent'] ?? 0);
@@ -467,6 +523,7 @@ class SummaryOverallController extends Controller
                 $sum['returned']       += (int)  ($r['returned'] ?? 0);
                 $sum['for_return']     += (int)  ($r['for_return'] ?? 0);
                 $sum['in_transit']     += (int)  ($r['in_transit'] ?? 0);
+                $sum['gross_sales']    += (float)($r['gross_sales'] ?? 0);
             }
 
             $total_cpp            = $sum['orders']  > 0 ? ($sum['adspent'] / $sum['orders']) * 1.0 : null;
@@ -485,6 +542,7 @@ class SummaryOverallController extends Controller
                 'odz'             => $sum['odz'],
                 'shipped'         => $sum['shipped'],
                 'delivered'       => $sum['delivered'],
+                'gross_sales'     => $sum['gross_sales'], // NEW
                 'returned'        => $sum['returned'],
                 'for_return'      => $sum['for_return'],
                 'in_transit'      => $sum['in_transit'],
