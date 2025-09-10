@@ -69,7 +69,7 @@ class SummaryOverallController extends Controller
                 : "CAST(REPLACE(REPLACE(REPLACE(COALESCE($expr,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
         };
 
-        // resolve macro_output columns (PG: "PAGE","STATUS","TIMESTAMP","waybill")
+        // resolve macro_output columns (PG: "PAGE","STATUS","TIMESTAMP","waybill","ITEM_NAME")
         $pageColName = $pickCol('macro_output', ['PAGE','page','page_name','Page','Page_Name']);
         if (!$pageColName) throw new \RuntimeException('macro_output: page column not found');
         $moPage   = 'mo.' . $quote($pageColName);
@@ -81,6 +81,11 @@ class SummaryOverallController extends Controller
 
         $wbColName = $pickCol('macro_output', ['waybill','Waybill','WAYBILL']) ?? 'waybill';
         $moWaybill = 'mo.' . $quote($wbColName);
+
+        $itemColName = $pickCol('macro_output', ['ITEM_NAME','item_name','Product','product_name','ITEM','item']);
+        if (!$itemColName) throw new \RuntimeException('macro_output: item column not found');
+        $moItemExpr = 'mo.' . $quote($itemColName);
+        $itemNorm   = "LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE($moItemExpr,'')),' ',''),'-',''),'_',''))";
 
         $tsCols = [];
         foreach (['TIMESTAMP','timestamp'] as $c) if ($pickCol('macro_output', [$c])) $tsCols[] = $c;
@@ -115,6 +120,17 @@ class SummaryOverallController extends Controller
         $jCodColName = $pickCol('from_jnts', ['cod','COD','cod_amount','cod_amt','cod_php','Cod','CODAmt']) ?? 'cod';
         $jCodExpr    = 'j.' . $quote($jCodColName);
         $castCOD     = $castMoney($jCodExpr);
+
+        // cogs columns
+        $cogsItemColName = $pickCol('cogs', ['item_name','ITEM_NAME','product','Product','Product_Name']) ?? 'item_name';
+        $cogsItemExpr    = 'c.' . $quote($cogsItemColName);
+        $cogsItemNorm    = "LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE($cogsItemExpr,'')),' ',''),'-',''),'_',''))";
+
+        $cogsDateColName = $pickCol('cogs', ['effective_date','date','valid_from','cogs_date']) ?? 'effective_date';
+        $cogsDateExpr    = 'c.' . $quote($cogsDateColName);
+
+        $cogsUnitColName = $pickCol('cogs', ['unit_cost','cost','unitprice','unit_price','price']) ?? 'unit_cost';
+        $cogsUnitExpr    = 'c.' . $quote($cogsUnitColName);
 
         // aggregate mode: All Pages (one row per page across range)
         $AGGREGATE_RANGE = ($pageName === 'all');
@@ -379,6 +395,46 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
+        // COGS (Delivered-only) — effective price as of order date, per distinct waybill/item
+        // ======================
+        // Distinct delivered set with item + order_date
+        $innerDeliveredItems = (clone $deliveredBase)
+            ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key");
+
+        // Correlated subquery to get last known unit_cost on/before order_date; default 0 if none
+        $unitCostSub = "COALESCE((
+            SELECT " . $castMoney($cogsUnitExpr) . "
+            FROM cogs c
+            WHERE $cogsItemNorm = d.item_key
+              AND DATE($cogsDateExpr) <= d.order_date
+            ORDER BY DATE($cogsDateExpr) DESC
+            LIMIT 1
+        ), 0)";
+
+        if ($AGGREGATE_RANGE) {
+            $cogsRows = DB::query()
+                ->fromSub($innerDeliveredItems, 'd')
+                ->selectRaw("page_key, SUM($unitCostSub) AS cogs_total")
+                ->groupBy('page_key')
+                ->get();
+        } else {
+            $cogsRows = DB::query()
+                ->fromSub($innerDeliveredItems, 'd')
+                ->selectRaw("day_key, page_key, SUM($unitCostSub) AS cogs_total")
+                ->groupBy('day_key', 'page_key')
+                ->get();
+        }
+
+        $cogsMap = [];
+        foreach ($cogsRows as $r) {
+            if ($AGGREGATE_RANGE) {
+                $cogsMap[(string)$r->page_key] = (float)($r->cogs_total ?? 0);
+            } else {
+                $cogsMap[(string)$r->day_key . '|' . (string)$r->page_key] = (float)($r->cogs_total ?? 0);
+            }
+        }
+
+        // ======================
         // Merge (+ derived metrics)
         // ======================
         $keys = array_unique(array_merge(
@@ -393,6 +449,7 @@ class SummaryOverallController extends Controller
             array_keys($forReturnMap),
             array_keys($inTransitMap),
             array_keys($grossMap),
+            array_keys($cogsMap),
         ));
 
         $rangeLabel = '—';
@@ -419,6 +476,7 @@ class SummaryOverallController extends Controller
                 $forRet    = $forReturnMap[$key]   ?? 0;
                 $inTrans   = $inTransitMap[$key]   ?? 0;
                 $gross     = $grossMap[$key]       ?? 0.0;
+                $cogs      = $cogsMap[$key]        ?? 0.0;
 
                 // Derived
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
@@ -439,7 +497,8 @@ class SummaryOverallController extends Controller
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
                     'gross_sales'     => $gross,
-                    'shipping_fee'    => $shipping_fee, // NEW
+                    'shipping_fee'    => $shipping_fee,
+                    'cogs'            => $cogs, // NEW
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -462,6 +521,7 @@ class SummaryOverallController extends Controller
                 $forRet    = $forReturnMap[$key]   ?? 0;
                 $inTrans   = $inTransitMap[$key]   ?? 0;
                 $gross     = $grossMap[$key]       ?? 0.0;
+                $cogs      = $cogsMap[$key]        ?? 0.0;
 
                 // Derived
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
@@ -482,7 +542,8 @@ class SummaryOverallController extends Controller
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
                     'gross_sales'     => $gross,
-                    'shipping_fee'    => $shipping_fee, // NEW
+                    'shipping_fee'    => $shipping_fee,
+                    'cogs'            => $cogs, // NEW
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -514,7 +575,7 @@ class SummaryOverallController extends Controller
                 'adspent' => 0.0,
                 'orders' => 0, 'proceed' => 0, 'cannot_proceed' => 0, 'odz' => 0,
                 'shipped' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0, 'in_transit' => 0,
-                'gross_sales' => 0.0,
+                'gross_sales' => 0.0, 'cogs' => 0.0,
             ];
             foreach ($rows as $r) {
                 $sum['adspent']        += (float)($r['adspent'] ?? 0);
@@ -528,6 +589,7 @@ class SummaryOverallController extends Controller
                 $sum['for_return']     += (int)  ($r['for_return'] ?? 0);
                 $sum['in_transit']     += (int)  ($r['in_transit'] ?? 0);
                 $sum['gross_sales']    += (float)($r['gross_sales'] ?? 0);
+                $sum['cogs']           += (float)($r['cogs'] ?? 0);
             }
 
             $total_cpp            = $sum['orders']  > 0 ? ($sum['adspent'] / $sum['orders']) * 1.0 : null;
@@ -535,7 +597,7 @@ class SummaryOverallController extends Controller
             $total_rts_pct        = $sum['shipped'] > 0 ? (($sum['returned'] + $sum['for_return']) / $sum['shipped']) * 100.0 : null;
             $total_in_transit_pct = $sum['shipped'] > 0 ? ($sum['in_transit'] / $sum['shipped']) * 100.0 : null;
             $total_tcpr           = $sum['orders']  > 0 ? (1 - ($sum['proceed'] / $sum['orders'])) * 100.0 : null;
-            $total_shipping_fee   = $SHIPPING_PER_SHIPPED * $sum['shipped']; // NEW
+            $total_shipping_fee   = $SHIPPING_PER_SHIPPED * $sum['shipped'];
 
             $rows[] = [
                 'date'            => $AGGREGATE_RANGE ? $rangeLabel : 'Total',
@@ -548,7 +610,8 @@ class SummaryOverallController extends Controller
                 'shipped'         => $sum['shipped'],
                 'delivered'       => $sum['delivered'],
                 'gross_sales'     => $sum['gross_sales'],
-                'shipping_fee'    => $total_shipping_fee, // NEW
+                'shipping_fee'    => $total_shipping_fee,
+                'cogs'            => $sum['cogs'],
                 'returned'        => $sum['returned'],
                 'for_return'      => $sum['for_return'],
                 'in_transit'      => $sum['in_transit'],
