@@ -22,7 +22,7 @@ class SummaryOverallController extends Controller
             ->pluck('page_name')
             ->toArray();
 
-        // Role detection
+        // role detection
         $userRoleRaw    = Auth::user()?->employeeProfile?->role ?? '';
         $roleNorm       = preg_replace('/\s+/u', ' ', trim((string)$userRoleRaw));
         $isMarketingOIC = preg_match('/^marketing\s*[-–—]\s*oic$/iu', $roleNorm) === 1;
@@ -76,7 +76,7 @@ class SummaryOverallController extends Controller
                 : "CAST(REPLACE(REPLACE(REPLACE(COALESCE($expr,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
         };
 
-        // resolve macro_output columns (PG: "PAGE","STATUS","TIMESTAMP","waybill","ITEM_NAME")
+        // resolve macro_output columns
         $pageColName = $pickCol('macro_output', ['PAGE','page','page_name','Page','Page_Name']);
         if (!$pageColName) throw new \RuntimeException('macro_output: page column not found');
         $moPage   = 'mo.' . $quote($pageColName);
@@ -98,7 +98,7 @@ class SummaryOverallController extends Controller
         $tsCols = [];
         foreach (['TIMESTAMP','timestamp'] as $c) if ($pickCol('macro_output', [$c])) $tsCols[] = $c;
 
-        // DATE expression (use only existing timestamp columns)
+        // DATE expression
         if ($driver === 'mysql') {
             if (!empty($tsCols)) {
                 $ts = 'mo.' . $quote($tsCols[0]);
@@ -129,7 +129,6 @@ class SummaryOverallController extends Controller
         $jCodExpr    = 'j.' . $quote($jCodColName);
         $castCOD     = $castMoney($jCodExpr);
 
-        // submission_time column (varchar) for Delay
         $jSubmitColName = $pickCol('from_jnts', ['submission_time','submitted_at','submission_datetime','submissiondate','submission']) ?? 'submission_time';
         $jSubmitExpr    = 'j.' . $quote($jSubmitColName);
 
@@ -144,7 +143,7 @@ class SummaryOverallController extends Controller
         $cogsUnitColName = $pickCol('cogs', ['unit_cost','cost','unitprice','unit_price','price']) ?? 'unit_cost';
         $cogsUnitExpr    = 'c.' . $quote($cogsUnitColName);
 
-        // aggregate mode: All Pages (one row per page across range)
+        // aggregate mode: All Pages
         $AGGREGATE_RANGE = ($pageName === 'all');
 
         // ======================
@@ -161,12 +160,10 @@ class SummaryOverallController extends Controller
         }
 
         if (!$AGGREGATE_RANGE) { // specific page
-            if ($pageName && $pageName !== 'all') {
-                if ($driver === 'pgsql') {
-                    $adsBase->whereRaw("$trimFn(page_name) ILIKE $trimFn(?)", [$pageName]);
-                } else {
-                    $adsBase->whereRaw("LOWER($trimFn(page_name)) = LOWER($trimFn(?))", [$pageName]);
-                }
+            if ($driver === 'pgsql') {
+                $adsBase->whereRaw("$trimFn(page_name) ILIKE $trimFn(?)", [$pageName]);
+            } else {
+                $adsBase->whereRaw("LOWER($trimFn(page_name)) = LOWER($trimFn(?))", [$pageName]);
             }
         }
 
@@ -211,12 +208,10 @@ class SummaryOverallController extends Controller
         }
 
         if (!$AGGREGATE_RANGE) { // only when specific page
-            if ($pageName && $pageName !== 'all') {
-                if ($driver === 'pgsql') {
-                    $mo->whereRaw("$pageExpr ILIKE $trimFn(?)", [$pageName]);
-                } else {
-                    $mo->whereRaw("LOWER($pageExpr) = LOWER($trimFn(?))", [$pageName]);
-                }
+            if ($driver === 'pgsql') {
+                $mo->whereRaw("$pageExpr ILIKE $trimFn(?)", [$pageName]);
+            } else {
+                $mo->whereRaw("LOWER($pageExpr) = LOWER($trimFn(?))", [$pageName]);
             }
         }
 
@@ -347,7 +342,7 @@ class SummaryOverallController extends Controller
         $deliveredBase = (clone $joinedBase)
             ->whereRaw("$jStatusNorm LIKE 'delivered%'");
 
-        // GROSS SALES (Delivered-only, per-unique waybill)
+        // GROSS SALES
         $innerDistinct = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $trimFn($moWaybill) AS wb, $castCOD AS cod_clean");
 
@@ -374,7 +369,7 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // COGS (Delivered-only) — effective unit price on/before order date
+        // COGS (Delivered-only)
         $innerDeliveredItems = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key");
 
@@ -410,7 +405,7 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ITEMS + UNIT COST LISTS for UI (Delivered-only) — per key (day|page or page)
+        // ITEMS + UNIT COST LISTS for UI
         $itemsBase = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
 
@@ -447,7 +442,7 @@ class SummaryOverallController extends Controller
                 ->get();
         }
 
-        $itemsListMap = [];    // key => array of ['label','qty','unit_cost']
+        $itemsListMap = [];
         foreach ($itemsCostRows as $r) {
             $key = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
             $itemsListMap[$key] ??= [];
@@ -459,7 +454,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // DELAY (avg days per unique waybill) — submission_time is varchar
+        // DELAY (avg days per unique waybill)
         // ======================
         if ($driver === 'mysql') {
             $jSubmitTs   = "COALESCE(
@@ -676,52 +671,6 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ===== Build TOTAL-ROW extras for Items/UnitCost when page != 'all' =====
-        $totalItemsDisplay = '—';
-        $totalUnitCostsArr = [];
-        $totalPageLabel    = 'TOTAL';
-
-        if (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') {
-            $totalPageLabel = $pageName;
-
-            // Re-aggregate delivered items across the whole date range by PAGE (ignore day)
-            $itemsBaseTotals = (clone $deliveredBase)
-                ->selectRaw("DISTINCT $pageExpr AS page_key, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
-
-            $groupedTotals = DB::query()
-                ->fromSub($itemsBaseTotals, 'x')
-                ->selectRaw("page_key, item_key, MIN(item_label) AS item_label, COUNT(DISTINCT wb) AS qty, MAX(order_date) AS last_order_date")
-                ->groupBy('page_key','item_key');
-
-            $itemsTotalsWithCost = DB::query()
-                ->fromSub($groupedTotals, 'd')
-                ->selectRaw("page_key, item_key, item_label, qty, $unitCostDispSub AS unit_cost_disp")
-                ->get();
-
-            $acc = [];
-            foreach ($itemsTotalsWithCost as $r) {
-                $acc[] = [
-                    'label'     => (string)($r->item_label ?? ''),
-                    'qty'       => (int)($r->qty ?? 0),
-                    'unit_cost' => (float)($r->unit_cost_disp ?? 0),
-                ];
-            }
-            if (!empty($acc)) {
-                usort($acc, fn($a,$b) => strcmp($a['label'], $b['label']));
-                $many = count($acc) > 1;
-                $labels = [];
-                $costs  = [];
-                foreach ($acc as $it) {
-                    $lbl = $it['label'];
-                    if ($many) $lbl .= '(' . (int)$it['qty'] . ')';
-                    $labels[] = $lbl;
-                    $costs[]  = (float)$it['unit_cost'];
-                }
-                $totalItemsDisplay = implode(' / ', $labels);
-                $totalUnitCostsArr = $costs;
-            }
-        }
-
         // sort rows
         if ($AGGREGATE_RANGE) {
             usort($rows, fn($a,$b) => strcmp($a['page'] ?? '', $b['page'] ?? ''));
@@ -734,7 +683,28 @@ class SummaryOverallController extends Controller
             });
         }
 
-        // ===== TOTAL ROW (sum raw metrics; recompute derived; weighted avg for Delay; Hold) =====
+        // ===== Actual RTS: compute from the SAME rows that are shown in the table
+        // Filter rows with In-Transit% < 3%. Denominator = Delivered + Returned + For Return.
+        $actualRtsPct = null;
+        if (!$AGGREGATE_RANGE) {
+            $num = 0; // Σ(Returned + For Return)
+            $den = 0; // Σ(Delivered + Returned + For Return)
+
+            foreach ($rows as $r) {
+                if (!empty($r['is_total'])) continue; // none yet, but keep for safety
+                $inPct = $r['in_transit_pct'] ?? null;
+                if ($inPct !== null && $inPct < 3.0) {
+                    $ret = (int)($r['returned']   ?? 0);
+                    $fr  = (int)($r['for_return'] ?? 0);
+                    $del = (int)($r['delivered']  ?? 0);
+                    $num += ($ret + $fr);
+                    $den += ($del + $ret + $fr);
+                }
+            }
+            $actualRtsPct = $den > 0 ? ($num / $den) * 100.0 : null;
+        }
+
+        // ===== TOTAL ROW =====
         if (!empty($rows)) {
             $sum = [
                 'adspent' => 0.0,
@@ -777,9 +747,38 @@ class SummaryOverallController extends Controller
 
             $total_avg_delay      = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
 
+            // Build items/costs for total when specific page
+            $totalItemsDisplay = '—'; $totalUnitCostsArr = []; $totalPageLabel = 'TOTAL';
+            if (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') {
+                $totalPageLabel = $pageName;
+                $itemsBaseTotals = (clone $deliveredBase)
+                    ->selectRaw("DISTINCT $pageExpr AS page_key, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
+                $groupedTotals = DB::query()->fromSub($itemsBaseTotals,'x')
+                    ->selectRaw("page_key, item_key, MIN(item_label) AS item_label, COUNT(DISTINCT wb) AS qty, MAX(order_date) AS last_order_date")
+                    ->groupBy('page_key','item_key');
+                $itemsTotalsWithCost = DB::query()->fromSub($groupedTotals,'d')
+                    ->selectRaw("page_key, item_key, item_label, qty, COALESCE((
+                        SELECT " . $castMoney($cogsUnitExpr) . "
+                        FROM cogs c
+                        WHERE $cogsItemNorm = d.item_key
+                          AND DATE($cogsDateExpr) <= d.last_order_date
+                        ORDER BY DATE($cogsDateExpr) DESC
+                        LIMIT 1
+                    ), 0) AS unit_cost_disp")->get();
+
+                $acc = [];
+                foreach ($itemsTotalsWithCost as $r) $acc[] = ['label'=>(string)($r->item_label ?? ''),'qty'=>(int)($r->qty ?? 0),'unit_cost'=>(float)($r->unit_cost_disp ?? 0)];
+                if (!empty($acc)) {
+                    usort($acc, fn($a,$b)=>strcmp($a['label'],$b['label']));
+                    $many = count($acc) > 1; $labels = []; $costs = [];
+                    foreach ($acc as $it) { $lbl=$it['label']; if ($many) $lbl.="(".(int)$it['qty'].")"; $labels[]=$lbl; $costs[]=(float)$it['unit_cost']; }
+                    $totalItemsDisplay = implode(' / ', $labels);
+                    $totalUnitCostsArr = $costs;
+                }
+            }
+
             $rows[] = [
                 'date'            => $AGGREGATE_RANGE ? $rangeLabel : 'Total',
-                // When not "All", show the filtered page name; otherwise keep "TOTAL"
                 'page'            => (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') ? $totalPageLabel : 'TOTAL',
                 'adspent'         => $sum['adspent'],
                 'orders'          => $sum['orders'],
@@ -789,7 +788,6 @@ class SummaryOverallController extends Controller
                 'shipped'         => $sum['shipped'],
                 'delivered'       => $sum['delivered'],
                 'avg_delay_days'  => $total_avg_delay,
-                // Fill Items/Unit Cost only when a single page is selected
                 'items_display'   => (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') ? $totalItemsDisplay : '—',
                 'unit_costs'      => (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') ? $totalUnitCostsArr : [],
                 'gross_sales'     => $sum['gross_sales'],
@@ -810,6 +808,9 @@ class SummaryOverallController extends Controller
             ];
         }
 
-        return response()->json(['ads_daily' => $rows]);
+        return response()->json([
+            'ads_daily'      => $rows,
+            'actual_rts_pct' => $actualRtsPct,
+        ]);
     }
 }

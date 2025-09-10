@@ -46,7 +46,6 @@
                  class="w-full border border-gray-300 p-2 rounded-md shadow-sm cursor-pointer bg-white" readonly>
         </div>
 
-        <!-- CEO-only: toggle to show all columns -->
         <template x-if="isCEO">
           <div class="flex items-center gap-2 mt-6 md:mt-0">
             <input id="showAllColumns" type="checkbox" class="w-4 h-4" x-model="showAllColumns">
@@ -54,7 +53,6 @@
           </div>
         </template>
 
-        <!-- Everyone: toggle to show all rows -->
         <div class="flex items-center gap-2 mt-6 md:mt-0">
           <input id="showAllRows" type="checkbox" class="w-4 h-4" x-model="showAllRows">
           <label for="showAllRows" class="text-sm">Show all rows</label>
@@ -77,7 +75,7 @@
       </div>
 
       <div class="overflow-x-visible">
-        <!-- LIMITED COLUMNS (non-CEO or CEO with showAllColumns=false) -->
+        <!-- LIMITED COLUMNS -->
         <table class="min-w-full w-full text-xs table-fixed" x-show="!isCEO || (isCEO && !showAllColumns)">
           <thead class="bg-gray-50">
             <tr class="text-left text-gray-600">
@@ -134,11 +132,10 @@
           </tbody>
         </table>
 
-        <!-- FULL COLUMNS (CEO with showAllColumns=true) -->
+        <!-- FULL COLUMNS (CEO) -->
         <table class="min-w-full w-full text-xs table-fixed" x-show="isCEO && showAllColumns">
           <thead class="bg-gray-50">
             <tr class="text-left text-gray-600">
-              <!-- FIRST: requested columns in this exact order -->
               <th class="px-2 py-2">Date</th>
               <th class="px-2 py-2">Page</th>
               <th class="px-2 py-2">Items</th>
@@ -153,8 +150,6 @@
               <th class="px-2 py-2 text-right">In Transit%</th>
               <th class="px-2 py-2 text-right">TCPR</th>
               <th class="px-2 py-2 text-right">Net Profit(%)</th>
-
-              <!-- THEN: rest of the metrics -->
               <th class="px-2 py-2 text-right">Proceed</th>
               <th class="px-2 py-2 text-right">Cannot Proceed</th>
               <th class="px-2 py-2 text-right">ODZ</th>
@@ -178,7 +173,6 @@
 
             <template x-for="row in rowsForDisplay(data.ads_daily)" :key="(row.date ?? '') + '|' + (row.page ?? '') + '|' + (row.is_total?'1':'0')">
               <tr class="border-t" :class="row.is_total ? 'bg-gray-50 font-semibold' : 'hover:bg-gray-50'">
-                <!-- FIRST BLOCK -->
                 <td class="px-2 py-2" x-text="row.date"></td>
                 <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
                 <td class="px-2 py-2"><span x-text="row.items_display || '—'"></span></td>
@@ -199,7 +193,6 @@
                         x-text="percent(row.net_profit_pct)"></span>
                 </td>
 
-                <!-- REST -->
                 <td class="px-2 py-2 text-right" x-text="num(row.proceed)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.cannot_proceed)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.odz)"></td>
@@ -218,6 +211,17 @@
         </table>
       </div>
     </section>
+
+    <!-- Actual RTS box (only when page != 'all') -->
+    <section class="bg-white rounded-xl shadow p-4" x-show="filters.page_name !== 'all'">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="font-semibold">Actual RTS</div>
+          <div class="text-xs text-gray-500">Computed only on dates with &lt; 3% In Transit</div>
+        </div>
+        <div class="text-2xl md:text-3xl font-extrabold" x-text="percent(data.actual_rts_pct)"></div>
+      </div>
+    </section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
@@ -229,11 +233,11 @@
         isMarketingOIC,
 
         // toggles
-        showAllColumns: false, // CEO: limited view by default
-        showAllRows: false,    // Everyone: hide all rows except TOTAL by default
+        showAllColumns: false,
+        showAllRows: false,
 
         // data / filters
-        data: { ads_daily: [] },
+        data: { ads_daily: [], actual_rts_pct: null },
         filters: { page_name: 'all', start_date: '', end_date: '' },
         dateLabel: 'Select dates',
 
@@ -280,7 +284,6 @@
           return {};
         },
 
-        // rows filter: show total only (default) or all rows
         rowsForDisplay(rows){
           if (!Array.isArray(rows)) return [];
           return this.showAllRows ? rows : rows.filter(r => r.is_total);
