@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Auth;
 
 class SummaryOverallController extends Controller
 {
@@ -21,7 +22,13 @@ class SummaryOverallController extends Controller
             ->pluck('page_name')
             ->toArray();
 
-        return view('summary.overall', compact('pages'));
+        // ==== Role detection (same pattern as in MacroOutputController::download) ====
+        $userRoleRaw   = Auth::user()?->employeeProfile?->role ?? '';
+        $roleNorm      = preg_replace('/\s+/u', ' ', trim((string)$userRoleRaw));
+        $isMarketingOIC = preg_match('/^marketing\s*[-–—]\s*oic$/iu', $roleNorm) === 1;
+        $isCEO          = preg_match('/^ceo$/iu', $roleNorm) === 1;
+
+        return view('summary.overall', compact('pages', 'isCEO', 'isMarketingOIC'));
     }
 
     public function data(Request $request)
@@ -291,7 +298,7 @@ class SummaryOverallController extends Controller
             $shippedMap[$k] = (int)($r->shipped_total ?? 0);
         }
 
-        // DELIVERED / RETURNED / FOR RETURN / IN TRANSIT — same joined base, different status filters
+        // DELIVERED / RETURNED / FOR RETURN / IN TRANSIT
         $deliveredRows = (clone $joinedBase)
             ->whereRaw("$jStatusNorm LIKE 'delivered%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS delivered_total")
@@ -317,7 +324,6 @@ class SummaryOverallController extends Controller
             ->get();
 
         $deliveredMap = $returnedMap = $forReturnMap = $inTransitMap = [];
-
         foreach ($deliveredRows as $r) {
             $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
             $deliveredMap[$k] = (int)($r->delivered_total ?? 0);
@@ -456,7 +462,6 @@ class SummaryOverallController extends Controller
         // DELAY (avg days per unique waybill) — submission_time is varchar
         // ======================
         if ($driver === 'mysql') {
-            // Parse common formats; fallback to j.created_at
             $jSubmitTs   = "COALESCE(
                 STR_TO_DATE($jSubmitExpr, '%Y-%m-%d %H:%i:%s'),
                 STR_TO_DATE($jSubmitExpr, '%Y/%m/%d %H:%i:%s'),
@@ -464,7 +469,7 @@ class SummaryOverallController extends Controller
                 j.`created_at`
             )";
             $jSubmitDate = "DATE($jSubmitTs)";
-            $delayDays   = "DATEDIFF($jSubmitDate, $dateExpr)"; // integer days
+            $delayDays   = "DATEDIFF($jSubmitDate, $dateExpr)";
         } else { // pgsql
             $jSubmitTs   = "COALESCE(
                 TO_TIMESTAMP(NULLIF($jSubmitExpr,''), 'YYYY-MM-DD HH24:MI:SS'),
@@ -473,14 +478,12 @@ class SummaryOverallController extends Controller
                 j.\"created_at\"
             )";
             $jSubmitDate = "DATE($jSubmitTs)";
-            $delayDays   = "($jSubmitDate - $dateExpr)"; // integer days
+            $delayDays   = "($jSubmitDate - $dateExpr)";
         }
 
-        // Raw per-row delay (no hard filter on submission_time; we already have fallback)
         $delayRaw = (clone $joinedBase)
             ->selectRaw("$selectKey, $trimFn($moWaybill) AS wb, $delayDays AS delay_days");
 
-        // Dedup per waybill then average per group
         if ($AGGREGATE_RANGE) {
             $delayDistinct = DB::query()
                 ->fromSub($delayRaw, 'r')
@@ -512,7 +515,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // Merge (+ derived metrics, including Net Profit & Delay)
+        // Merge (+ derived metrics)
         // ======================
         $keys = array_unique(array_merge(
             array_keys($adsMap),
@@ -582,9 +585,9 @@ class SummaryOverallController extends Controller
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
-                // Net Profit
                 $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
                 $net_profit_pct = $gross > 0 ? ($net_profit / $gross) * 100.0 : null;
+                $hold           = $proc - $shipped;
 
                 $rows[] = [
                     'date'            => $rangeLabel,
@@ -612,6 +615,7 @@ class SummaryOverallController extends Controller
                     'rts_pct'         => $rts_pct,
                     'in_transit_pct'  => $in_transit_pct,
                     'tcpr'            => $tcpr,
+                    'hold'            => $hold,
                     'is_total'        => false,
                 ];
             } else {
@@ -638,6 +642,7 @@ class SummaryOverallController extends Controller
 
                 $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
                 $net_profit_pct = $gross > 0 ? ($net_profit / $gross) * 100.0 : null;
+                $hold           = $proc - $shipped;
 
                 $rows[] = [
                     'date'            => $d,
@@ -665,6 +670,7 @@ class SummaryOverallController extends Controller
                     'rts_pct'         => $rts_pct,
                     'in_transit_pct'  => $in_transit_pct,
                     'tcpr'            => $tcpr,
+                    'hold'            => $hold,
                     'is_total'        => false,
                 ];
             }
@@ -682,7 +688,7 @@ class SummaryOverallController extends Controller
             });
         }
 
-        // ===== TOTAL ROW (sum raw metrics; recompute derived on totals; weighted avg for Delay) =====
+        // ===== TOTAL ROW (sum raw metrics; recompute derived; weighted avg for Delay; Hold) =====
         if (!empty($rows)) {
             $sum = [
                 'adspent' => 0.0,
@@ -751,6 +757,7 @@ class SummaryOverallController extends Controller
                 'rts_pct'         => $total_rts_pct,
                 'in_transit_pct'  => $total_in_transit_pct,
                 'tcpr'            => $total_tcpr,
+                'hold'            => ($sum['proceed'] - $sum['shipped']),
                 'is_total'        => true,
             ];
         }
