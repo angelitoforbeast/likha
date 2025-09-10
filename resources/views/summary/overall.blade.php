@@ -29,7 +29,7 @@
   <main class="w-full mx-auto px-2 sm:px-3 lg:px-4 py-4 space-y-4">
     <!-- Filters -->
     <section class="bg-white rounded-xl shadow p-3">
-      <div class="grid md:grid-cols-5 gap-3 items-end">
+      <div class="grid md:grid-cols-6 gap-3 items-end">
         <div class="md:col-span-2">
           <label class="block text-sm font-semibold mb-1">Page</label>
           <select class="w-full border rounded px-3 py-2" x-model="filters.page_name" @change="reload()">
@@ -39,6 +39,7 @@
             @endforeach
           </select>
         </div>
+
         <div class="md:col-span-2">
           <label class="block text-sm font-semibold mb-1">Date range</label>
           <input id="dateRange" type="text" placeholder="Select date range"
@@ -48,12 +49,18 @@
         <!-- CEO-only: toggle to show all columns -->
         <template x-if="isCEO">
           <div class="flex items-center gap-2 mt-6 md:mt-0">
-            <input id="showAll" type="checkbox" class="w-4 h-4" x-model="showAll">
-            <label for="showAll" class="text-sm">Show all columns</label>
+            <input id="showAllColumns" type="checkbox" class="w-4 h-4" x-model="showAllColumns">
+            <label for="showAllColumns" class="text-sm">Show all columns</label>
           </div>
         </template>
 
-        <div class="flex gap-2 md:col-span-5">
+        <!-- Everyone: toggle to show all rows -->
+        <div class="flex items-center gap-2 mt-6 md:mt-0">
+          <input id="showAllRows" type="checkbox" class="w-4 h-4" x-model="showAllRows">
+          <label for="showAllRows" class="text-sm">Show all rows</label>
+        </div>
+
+        <div class="flex gap-2 md:col-span-6">
           <button class="px-3 py-2 rounded border hover:bg-gray-50" @click="resetToThisMonth()">This month</button>
           <button class="px-3 py-2 rounded border hover:bg-gray-50" @click="reload()">Refresh</button>
         </div>
@@ -70,8 +77,8 @@
       </div>
 
       <div class="overflow-x-visible">
-        <!-- LIMITED COLUMNS (non-CEO or CEO with showAll=false) -->
-        <table class="min-w-full w-full text-xs table-fixed" x-show="!isCEO || (isCEO && !showAll)">
+        <!-- LIMITED COLUMNS (non-CEO or CEO with showAllColumns=false) -->
+        <table class="min-w-full w-full text-xs table-fixed" x-show="!isCEO || (isCEO && !showAllColumns)">
           <thead class="bg-gray-50">
             <tr class="text-left text-gray-600">
               <th class="px-2 py-2">Date</th>
@@ -87,18 +94,17 @@
               <th class="px-2 py-2 text-right">RTS%</th>
               <th class="px-2 py-2 text-right">In Transit%</th>
               <th class="px-2 py-2 text-right">TCPR</th>
-              <!-- NEW -->
               <th class="px-2 py-2 text-right">Net Profit(%)</th>
             </tr>
           </thead>
           <tbody>
-            <template x-if="!data.ads_daily || data.ads_daily.length===0">
+            <template x-if="rowsForDisplay(data.ads_daily).length===0">
               <tr class="border-t">
                 <td class="px-3 py-3 text-gray-500" colspan="14">No data for selected filters.</td>
               </tr>
             </template>
 
-            <template x-for="row in data.ads_daily" :key="(row.date ?? '') + '|' + (row.page ?? '') + '|' + (row.is_total?'1':'0')">
+            <template x-for="row in rowsForDisplay(data.ads_daily)" :key="(row.date ?? '') + '|' + (row.page ?? '') + '|' + (row.is_total?'1':'0')">
               <tr class="border-t" :class="row.is_total ? 'bg-gray-50 font-semibold' : 'hover:bg-gray-50'">
                 <td class="px-2 py-2" x-text="row.date"></td>
                 <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
@@ -117,7 +123,6 @@
                 <td class="px-2 py-2 text-right">
                   <span class="px-2 py-0.5 rounded text-[10px]" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span>
                 </td>
-                <!-- NEW cell after TCPR -->
                 <td class="px-2 py-2 text-right">
                   <span class="px-2 py-0.5 rounded text-[10px]"
                         :class="netClass(row.net_profit_pct)"
@@ -129,8 +134,8 @@
           </tbody>
         </table>
 
-        <!-- FULL COLUMNS (CEO with showAll=true) -->
-        <table class="min-w-full w-full text-xs table-fixed" x-show="isCEO && showAll">
+        <!-- FULL COLUMNS (CEO with showAllColumns=true) -->
+        <table class="min-w-full w-full text-xs table-fixed" x-show="isCEO && showAllColumns">
           <thead class="bg-gray-50">
             <tr class="text-left text-gray-600">
               <!-- FIRST: requested columns in this exact order -->
@@ -147,7 +152,6 @@
               <th class="px-2 py-2 text-right">RTS%</th>
               <th class="px-2 py-2 text-right">In Transit%</th>
               <th class="px-2 py-2 text-right">TCPR</th>
-              <!-- MOVED HERE -->
               <th class="px-2 py-2 text-right">Net Profit(%)</th>
 
               <!-- THEN: rest of the metrics -->
@@ -166,13 +170,13 @@
             </tr>
           </thead>
           <tbody>
-            <template x-if="!data.ads_daily || data.ads_daily.length===0">
+            <template x-if="rowsForDisplay(data.ads_daily).length===0">
               <tr class="border-t">
                 <td class="px-3 py-3 text-gray-500" colspan="26">No data for selected filters.</td>
               </tr>
             </template>
 
-            <template x-for="row in data.ads_daily" :key="(row.date ?? '') + '|' + (row.page ?? '') + '|' + (row.is_total?'1':'0')">
+            <template x-for="row in rowsForDisplay(data.ads_daily)" :key="(row.date ?? '') + '|' + (row.page ?? '') + '|' + (row.is_total?'1':'0')">
               <tr class="border-t" :class="row.is_total ? 'bg-gray-50 font-semibold' : 'hover:bg-gray-50'">
                 <!-- FIRST BLOCK -->
                 <td class="px-2 py-2" x-text="row.date"></td>
@@ -188,7 +192,6 @@
                 <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded text-[10px]" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span></td>
                 <td class="px-2 py-2 text-right" x-text="percent(row.in_transit_pct)"></td>
                 <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded text-[10px]" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span></td>
-                <!-- NEW spot -->
                 <td class="px-2 py-2 text-right">
                   <span class="px-2 py-0.5 rounded text-[10px]"
                         :class="netClass(row.net_profit_pct)"
@@ -221,27 +224,32 @@
   <script>
     function overallUI(isCEO=false, isMarketingOIC=false){
       return {
+        // role/flags
         isCEO,
         isMarketingOIC,
-        showAll: false, // CEO default: limited view
 
+        // toggles
+        showAllColumns: false, // CEO: limited view by default
+        showAllRows: false,    // Everyone: hide all rows except TOTAL by default
+
+        // data / filters
         data: { ads_daily: [] },
         filters: { page_name: 'all', start_date: '', end_date: '' },
         dateLabel: 'Select dates',
 
+        // formatting helpers
         money(v){ return `₱${Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})}`; },
         moneyOrDash(v){ return (v==null || isNaN(v)) ? '—' : this.money(v); },
         num(v){ return Number(v||0).toLocaleString('en-PH'); },
         percent(v){ return (v==null || isNaN(v)) ? '—' : (Number(v).toFixed(2) + '%'); },
         ymd(d){ const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); },
         days(v){ return (v==null || isNaN(v)) ? '—' : Number(v).toFixed(2); },
-
         moneyList(list){
           if (!Array.isArray(list) || list.length===0) return '—';
           return list.map(v => this.money(v)).join(', ');
         },
 
-        // Conditional formatting
+        // conditional formatting
         tcprClass(pct){
           if (pct == null || isNaN(pct)) return '';
           if (pct > 7) return 'bg-red-100 text-red-800';
@@ -256,7 +264,6 @@
           if (pct > 25) return 'bg-yellow-100 text-yellow-800';
           return '';
         },
-        // Net Profit% thresholds:
         netClass(pct){
           if (pct == null || isNaN(pct)) return '';
           if (pct < 0)  return 'bg-red-100 text-red-800';
@@ -271,6 +278,12 @@
             return { backgroundColor: '#00ff00', color: '#052e16' };
           }
           return {};
+        },
+
+        // rows filter: show total only (default) or all rows
+        rowsForDisplay(rows){
+          if (!Array.isArray(rows)) return [];
+          return this.showAllRows ? rows : rows.filter(r => r.is_total);
         },
 
         setDateLabel(){
