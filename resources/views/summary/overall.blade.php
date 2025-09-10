@@ -12,7 +12,7 @@
   <style>
     [x-cloak]{display:none!important}
     .flatpickr-calendar{z-index:9999!important}
-    body { overflow-x: hidden; }
+    body { overflow-x: hidden; } /* ensure no horizontal scroll */
   </style>
 </head>
 <body class="bg-gray-100 text-gray-900">
@@ -58,7 +58,7 @@
         <div class="text-xs text-gray-500">
           Source: ads_manager_reports + macro_output + from_jnts
           (Adspent, Orders, Proceed, Cannot Proceed, ODZ, Shipped,
-          <b>Delivered</b>, <b>Gross Sales</b>, <b>Returned</b>, <b>For Return</b>, <b>In Transit</b>,
+          <b>Delivered</b>, <b>Gross Sales</b>, <b>Shipping Fee</b>, <b>Returned</b>, <b>For Return</b>, <b>In Transit</b>,
           <b>CPP</b>, <b>Proceed CPP</b>, <b>RTS%</b>, <b>In Transit%</b>, TCPR)
         </div>
       </div>
@@ -75,7 +75,8 @@
               <th class="px-2 py-2 text-right">ODZ</th>
               <th class="px-2 py-2 text-right">Shipped</th>
               <th class="px-2 py-2 text-right">Delivered</th>
-              <th class="px-2 py-2 text-right">Gross Sales</th><!-- NEW -->
+              <th class="px-2 py-2 text-right">Gross Sales</th>
+              <th class="px-2 py-2 text-right">Shipping Fee</th><!-- NEW -->
               <th class="px-2 py-2 text-right">Returned</th>
               <th class="px-2 py-2 text-right">For Return</th>
               <th class="px-2 py-2 text-right">In Transit</th>
@@ -89,7 +90,7 @@
           <tbody>
             <template x-if="!data.ads_daily || data.ads_daily.length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="18">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="19">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -104,7 +105,8 @@
                 <td class="px-2 py-2 text-right" x-text="num(row.odz)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.shipped)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.delivered)"></td>
-                <td class="px-2 py-2 text-right" x-text="money(row.gross_sales)"></td><!-- NEW -->
+                <td class="px-2 py-2 text-right" x-text="money(row.gross_sales)"></td>
+                <td class="px-2 py-2 text-right" x-text="money(row.shipping_fee)"></td><!-- NEW -->
                 <td class="px-2 py-2 text-right" x-text="num(row.returned)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.for_return)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.in_transit)"></td>

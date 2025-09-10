@@ -33,6 +33,9 @@ class SummaryOverallController extends Controller
         $driver = DB::getDriverName(); // 'mysql' | 'pgsql'
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
 
+        // === CONSTS ===
+        $SHIPPING_PER_SHIPPED = 37.0;
+
         // helpers
         $quote = fn(string $col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
 
@@ -339,9 +342,8 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // NEW: GROSS SALES (sum of COD for Delivered only, per unique waybill)
+        // GROSS SALES (sum of COD for Delivered only, per unique waybill)
         // ======================
-        // Build base delivered join
         $deliveredBase = (clone $mo)
             ->whereRaw("$moWaybill IS NOT NULL")
             ->whereRaw("$trimFn($moWaybill) <> ''")
@@ -350,11 +352,9 @@ class SummaryOverallController extends Controller
             })
             ->whereRaw("$jStatusNorm LIKE 'delivered%'");
 
-        // Inner subquery: DISTINCT per key + waybill to avoid double counting
         $innerDistinct = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $trimFn($moWaybill) AS wb, $castCOD AS cod_clean");
 
-        // Outer aggregation: sum cod_clean per key
         if ($AGGREGATE_RANGE) {
             $grossRows = DB::query()
                 ->fromSub($innerDistinct, 'd')
@@ -426,6 +426,7 @@ class SummaryOverallController extends Controller
                 $rts_pct        = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
+                $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
 
                 $rows[] = [
                     'date'            => $rangeLabel,
@@ -437,7 +438,8 @@ class SummaryOverallController extends Controller
                     'odz'             => $odz,
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
-                    'gross_sales'     => $gross, // NEW
+                    'gross_sales'     => $gross,
+                    'shipping_fee'    => $shipping_fee, // NEW
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -467,6 +469,7 @@ class SummaryOverallController extends Controller
                 $rts_pct        = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
+                $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
 
                 $rows[] = [
                     'date'            => $d,
@@ -478,7 +481,8 @@ class SummaryOverallController extends Controller
                     'odz'             => $odz,
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
-                    'gross_sales'     => $gross, // NEW
+                    'gross_sales'     => $gross,
+                    'shipping_fee'    => $shipping_fee, // NEW
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -531,6 +535,7 @@ class SummaryOverallController extends Controller
             $total_rts_pct        = $sum['shipped'] > 0 ? (($sum['returned'] + $sum['for_return']) / $sum['shipped']) * 100.0 : null;
             $total_in_transit_pct = $sum['shipped'] > 0 ? ($sum['in_transit'] / $sum['shipped']) * 100.0 : null;
             $total_tcpr           = $sum['orders']  > 0 ? (1 - ($sum['proceed'] / $sum['orders'])) * 100.0 : null;
+            $total_shipping_fee   = $SHIPPING_PER_SHIPPED * $sum['shipped']; // NEW
 
             $rows[] = [
                 'date'            => $AGGREGATE_RANGE ? $rangeLabel : 'Total',
@@ -542,7 +547,8 @@ class SummaryOverallController extends Controller
                 'odz'             => $sum['odz'],
                 'shipped'         => $sum['shipped'],
                 'delivered'       => $sum['delivered'],
-                'gross_sales'     => $sum['gross_sales'], // NEW
+                'gross_sales'     => $sum['gross_sales'],
+                'shipping_fee'    => $total_shipping_fee, // NEW
                 'returned'        => $sum['returned'],
                 'for_return'      => $sum['for_return'],
                 'in_transit'      => $sum['in_transit'],
