@@ -264,17 +264,19 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // SHIPPED / DELIVERED / RETURNED / FOR RETURN / IN TRANSIT
+        // SHIPPING & STATUS COUNTS (join mo <-> j w/o status filter)
         // ======================
         $jStatusNorm = "LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(j.status,'')),' ',''),'-',''),'_',''))";
 
-        // SHIPPED
-        $shippedRows = (clone $mo)
+        $joinedBase = (clone $mo)
             ->whereRaw("$moWaybill IS NOT NULL")
             ->whereRaw("$trimFn($moWaybill) <> ''")
             ->join('from_jnts as j', function ($join) use ($trimFn, $moWaybill) {
                 $join->on(DB::raw("$trimFn($moWaybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
-            })
+            });
+
+        // SHIPPED = count of distinct waybills present in j (any status)
+        $shippedRows = (clone $joinedBase)
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS shipped_total")
             ->groupByRaw($groupByKey)
             ->get();
@@ -285,69 +287,57 @@ class SummaryOverallController extends Controller
             $shippedMap[$k] = (int)($r->shipped_total ?? 0);
         }
 
-        // Base for Delivered-only subset
-        $deliveredBase = (clone $mo)
-            ->whereRaw("$moWaybill IS NOT NULL")
-            ->whereRaw("$trimFn($moWaybill) <> ''")
-            ->join('from_jnts as j', function ($join) use ($trimFn, $moWaybill) {
-                $join->on(DB::raw("$trimFn($moWaybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
-            })
-            ->whereRaw("$jStatusNorm LIKE 'delivered%'");
-
-        // DELIVERED count
-        $deliveredRows = (clone $deliveredBase)
+        // DELIVERED / RETURNED / FOR RETURN / IN TRANSIT — each filtered from the same joined base
+        $deliveredRows = (clone $joinedBase)
+            ->whereRaw("$jStatusNorm LIKE 'delivered%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS delivered_total")
             ->groupByRaw($groupByKey)
             ->get();
 
-        $deliveredMap = [];
-        foreach ($deliveredRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $deliveredMap[$k] = (int)($r->delivered_total ?? 0);
-        }
-
-        // RETURNED
-        $returnedRows = (clone $deliveredBase)
+        $returnedRows = (clone $joinedBase)
             ->whereRaw("$jStatusNorm LIKE 'returned%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS returned_total")
             ->groupByRaw($groupByKey)
             ->get();
 
-        $returnedMap = [];
-        foreach ($returnedRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $returnedMap[$k] = (int)($r->returned_total ?? 0);
-        }
-
-        // FOR RETURN
-        $forReturnRows = (clone $deliveredBase)
+        $forReturnRows = (clone $joinedBase)
             ->whereRaw("$jStatusNorm LIKE 'forreturn%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS for_return_total")
             ->groupByRaw($groupByKey)
             ->get();
 
-        $forReturnMap = [];
-        foreach ($forReturnRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $forReturnMap[$k] = (int)($r->for_return_total ?? 0);
-        }
-
-        // IN TRANSIT
-        $inTransitRows = (clone $deliveredBase)
+        $inTransitRows = (clone $joinedBase)
             ->whereRaw("$jStatusNorm LIKE 'intransit%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS in_transit_total")
             ->groupByRaw($groupByKey)
             ->get();
 
-        $inTransitMap = [];
+        $deliveredMap = $returnedMap = $forReturnMap = $inTransitMap = [];
+
+        foreach ($deliveredRows as $r) {
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $deliveredMap[$k] = (int)($r->delivered_total ?? 0);
+        }
+        foreach ($returnedRows as $r) {
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $returnedMap[$k] = (int)($r->returned_total ?? 0);
+        }
+        foreach ($forReturnRows as $r) {
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $forReturnMap[$k] = (int)($r->for_return_total ?? 0);
+        }
         foreach ($inTransitRows as $r) {
             $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
             $inTransitMap[$k] = (int)($r->in_transit_total ?? 0);
         }
 
         // ======================
-        // GROSS SALES (Delivered-only, per-unique waybill)
+        // DELIVERED-ONLY base for Gross Sales, COGS, Items
         // ======================
+        $deliveredBase = (clone $joinedBase)
+            ->whereRaw("$jStatusNorm LIKE 'delivered%'");
+
+        // GROSS SALES (Delivered-only, per-unique waybill)
         $innerDistinct = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $trimFn($moWaybill) AS wb, $castCOD AS cod_clean");
 
@@ -374,9 +364,7 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ======================
         // COGS (Delivered-only) — effective unit price on/before order date
-        // ======================
         $innerDeliveredItems = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key");
 
@@ -412,9 +400,7 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ======================
         // ITEMS + UNIT COST LISTS for UI (Delivered-only)
-        // ======================
         $itemsBase = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
 
@@ -531,7 +517,7 @@ class SummaryOverallController extends Controller
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
-                // NEW: Net Profit (+ %)
+                // Net Profit
                 $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
                 $net_profit_pct = $gross > 0 ? ($net_profit / $gross) * 100.0 : null;
 
@@ -550,8 +536,8 @@ class SummaryOverallController extends Controller
                     'gross_sales'     => $gross,
                     'shipping_fee'    => $shipping_fee,
                     'cogs'            => $cogs,
-                    'net_profit'      => $net_profit,      // NEW
-                    'net_profit_pct'  => $net_profit_pct,  // NEW
+                    'net_profit'      => $net_profit,
+                    'net_profit_pct'  => $net_profit_pct,
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -583,7 +569,6 @@ class SummaryOverallController extends Controller
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
-                // NEW: Net Profit (+ %)
                 $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
                 $net_profit_pct = $gross > 0 ? ($net_profit / $gross) * 100.0 : null;
 
@@ -602,8 +587,8 @@ class SummaryOverallController extends Controller
                     'gross_sales'     => $gross,
                     'shipping_fee'    => $shipping_fee,
                     'cogs'            => $cogs,
-                    'net_profit'      => $net_profit,      // NEW
-                    'net_profit_pct'  => $net_profit_pct,  // NEW
+                    'net_profit'      => $net_profit,
+                    'net_profit_pct'  => $net_profit_pct,
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -659,7 +644,6 @@ class SummaryOverallController extends Controller
             $total_tcpr           = $sum['orders']  > 0 ? (1 - ($sum['proceed'] / $sum['orders'])) * 100.0 : null;
             $total_shipping_fee   = $SHIPPING_PER_SHIPPED * $sum['shipped'];
 
-            // NEW totals: Net Profit
             $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - $sum['cogs'];
             $total_net_profit_pct = $sum['gross_sales'] > 0 ? ($total_net_profit / $sum['gross_sales']) * 100.0 : null;
 
@@ -678,8 +662,8 @@ class SummaryOverallController extends Controller
                 'gross_sales'     => $sum['gross_sales'],
                 'shipping_fee'    => $total_shipping_fee,
                 'cogs'            => $sum['cogs'],
-                'net_profit'      => $total_net_profit,       // NEW
-                'net_profit_pct'  => $total_net_profit_pct,   // NEW
+                'net_profit'      => $total_net_profit,
+                'net_profit_pct'  => $total_net_profit_pct,
                 'returned'        => $sum['returned'],
                 'for_return'      => $sum['for_return'],
                 'in_transit'      => $sum['in_transit'],
