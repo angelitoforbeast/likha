@@ -58,8 +58,8 @@
         <div class="text-xs text-gray-500">
           Source: ads_manager_reports + macro_output + from_jnts + cogs
           (Adspent, Orders, Proceed, Cannot Proceed, ODZ, Shipped,
-          <b>Delivered</b>, <b>Gross Sales</b>, <b>Shipping Fee</b>, <b>COGS</b>, <b>Returned</b>, <b>For Return</b>, <b>In Transit</b>,
-          <b>CPP</b>, <b>Proceed CPP</b>, <b>RTS%</b>, <b>In Transit%</b>, TCPR)
+          <b>Delivered</b>, <b>Items</b>, <b>Unit Cost</b>, <b>Gross Sales</b>, <b>Shipping Fee</b>, <b>COGS</b>,
+          <b>Returned</b>, <b>For Return</b>, <b>In Transit</b>, <b>CPP</b>, <b>Proceed CPP</b>, <b>RTS%</b>, <b>In Transit%</b>, TCPR)
         </div>
       </div>
       <div class="overflow-x-visible">
@@ -75,6 +75,8 @@
               <th class="px-2 py-2 text-right">ODZ</th>
               <th class="px-2 py-2 text-right">Shipped</th>
               <th class="px-2 py-2 text-right">Delivered</th>
+              <th class="px-2 py-2">Items</th> <!-- NEW -->
+              <th class="px-2 py-2 text-right">Unit Cost</th> <!-- NEW -->
               <th class="px-2 py-2 text-right">Gross Sales</th>
               <th class="px-2 py-2 text-right">Shipping Fee</th>
               <th class="px-2 py-2 text-right">COGS</th>
@@ -91,7 +93,7 @@
           <tbody>
             <template x-if="!data.ads_daily || data.ads_daily.length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="20">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="22">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -106,6 +108,15 @@
                 <td class="px-2 py-2 text-right" x-text="num(row.odz)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.shipped)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.delivered)"></td>
+
+                <td class="px-2 py-2">
+                  <span x-text="row.items_display || '—'"></span>
+                </td>
+
+                <td class="px-2 py-2 text-right">
+                  <span x-text="moneyList(row.unit_costs)"></span>
+                </td>
+
                 <td class="px-2 py-2 text-right" x-text="money(row.gross_sales)"></td>
                 <td class="px-2 py-2 text-right" x-text="money(row.shipping_fee)"></td>
                 <td class="px-2 py-2 text-right" x-text="money(row.cogs)"></td>
@@ -148,6 +159,11 @@
         num(v){ return Number(v||0).toLocaleString('en-PH'); },
         percent(v){ return (v==null || isNaN(v)) ? '—' : (Number(v).toFixed(2) + '%'); },
         ymd(d){ const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); },
+
+        moneyList(list){
+          if (!Array.isArray(list) || list.length===0) return '—';
+          return list.map(v => this.money(v)).join(', ');
+        },
 
         tcprClass(pct){
           if (pct == null || isNaN(pct)) return '';

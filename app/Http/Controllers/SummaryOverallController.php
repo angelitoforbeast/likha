@@ -85,7 +85,8 @@ class SummaryOverallController extends Controller
         $itemColName = $pickCol('macro_output', ['ITEM_NAME','item_name','Product','product_name','ITEM','item']);
         if (!$itemColName) throw new \RuntimeException('macro_output: item column not found');
         $moItemExpr = 'mo.' . $quote($itemColName);
-        $itemNorm   = "LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE($moItemExpr,'')),' ',''),'-',''),'_',''))";
+        $itemLabel  = "$trimFn(COALESCE($moItemExpr,''))";
+        $itemNorm   = "LOWER(REPLACE(REPLACE(REPLACE($itemLabel,' ',''),'-',''),'_',''))";
 
         $tsCols = [];
         foreach (['TIMESTAMP','timestamp'] as $c) if ($pickCol('macro_output', [$c])) $tsCols[] = $c;
@@ -286,13 +287,15 @@ class SummaryOverallController extends Controller
         }
 
         // DELIVERED — status starts with 'delivered'
-        $deliveredRows = (clone $mo)
+        $deliveredBase = (clone $mo)
             ->whereRaw("$moWaybill IS NOT NULL")
             ->whereRaw("$trimFn($moWaybill) <> ''")
             ->join('from_jnts as j', function ($join) use ($trimFn, $moWaybill) {
                 $join->on(DB::raw("$trimFn($moWaybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
             })
-            ->whereRaw("$jStatusNorm LIKE 'delivered%'")
+            ->whereRaw("$jStatusNorm LIKE 'delivered%'");
+
+        $deliveredRows = (clone $deliveredBase)
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS delivered_total")
             ->groupByRaw($groupByKey)
             ->get();
@@ -304,12 +307,7 @@ class SummaryOverallController extends Controller
         }
 
         // RETURNED — status starts with 'returned'
-        $returnedRows = (clone $mo)
-            ->whereRaw("$moWaybill IS NOT NULL")
-            ->whereRaw("$trimFn($moWaybill) <> ''")
-            ->join('from_jnts as j', function ($join) use ($trimFn, $moWaybill) {
-                $join->on(DB::raw("$trimFn($moWaybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
-            })
+        $returnedRows = (clone $deliveredBase)
             ->whereRaw("$jStatusNorm LIKE 'returned%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS returned_total")
             ->groupByRaw($groupByKey)
@@ -322,12 +320,7 @@ class SummaryOverallController extends Controller
         }
 
         // FOR RETURN — status starts with 'forreturn'
-        $forReturnRows = (clone $mo)
-            ->whereRaw("$moWaybill IS NOT NULL")
-            ->whereRaw("$trimFn($moWaybill) <> ''")
-            ->join('from_jnts as j', function ($join) use ($trimFn, $moWaybill) {
-                $join->on(DB::raw("$trimFn($moWaybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
-            })
+        $forReturnRows = (clone $deliveredBase)
             ->whereRaw("$jStatusNorm LIKE 'forreturn%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS for_return_total")
             ->groupByRaw($groupByKey)
@@ -340,12 +333,7 @@ class SummaryOverallController extends Controller
         }
 
         // IN TRANSIT — status starts with 'intransit'
-        $inTransitRows = (clone $mo)
-            ->whereRaw("$moWaybill IS NOT NULL")
-            ->whereRaw("$trimFn($moWaybill) <> ''")
-            ->join('from_jnts as j', function ($join) use ($trimFn, $moWaybill) {
-                $join->on(DB::raw("$trimFn($moWaybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
-            })
+        $inTransitRows = (clone $deliveredBase)
             ->whereRaw("$jStatusNorm LIKE 'intransit%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS in_transit_total")
             ->groupByRaw($groupByKey)
@@ -360,14 +348,6 @@ class SummaryOverallController extends Controller
         // ======================
         // GROSS SALES (sum of COD for Delivered only, per unique waybill)
         // ======================
-        $deliveredBase = (clone $mo)
-            ->whereRaw("$moWaybill IS NOT NULL")
-            ->whereRaw("$trimFn($moWaybill) <> ''")
-            ->join('from_jnts as j', function ($join) use ($trimFn, $moWaybill) {
-                $join->on(DB::raw("$trimFn($moWaybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
-            })
-            ->whereRaw("$jStatusNorm LIKE 'delivered%'");
-
         $innerDistinct = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $trimFn($moWaybill) AS wb, $castCOD AS cod_clean");
 
@@ -435,6 +415,59 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
+        // ITEMS + UNIT COST LISTS for UI (Delivered-only)
+        // ======================
+        // Build base rows including original item label
+        $itemsBase = (clone $deliveredBase)
+            ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
+
+        // Group by key + item to get qty and last order date per item
+        if ($AGGREGATE_RANGE) {
+            $groupedSub = DB::query()
+                ->fromSub($itemsBase, 'x')
+                ->selectRaw("page_key, item_key, MIN(item_label) AS item_label, COUNT(DISTINCT wb) AS qty, MAX(order_date) AS last_order_date")
+                ->groupBy('page_key','item_key');
+        } else {
+            $groupedSub = DB::query()
+                ->fromSub($itemsBase, 'x')
+                ->selectRaw("day_key, page_key, item_key, MIN(item_label) AS item_label, COUNT(DISTINCT wb) AS qty, MAX(order_date) AS last_order_date")
+                ->groupBy('day_key','page_key','item_key');
+        }
+
+        // For each (key,item), fetch display unit cost using last_order_date
+        $unitCostDispSub = "COALESCE((
+            SELECT " . $castMoney($cogsUnitExpr) . "
+            FROM cogs c
+            WHERE $cogsItemNorm = d.item_key
+              AND DATE($cogsDateExpr) <= d.last_order_date
+            ORDER BY DATE($cogsDateExpr) DESC
+            LIMIT 1
+        ), 0)";
+
+        if ($AGGREGATE_RANGE) {
+            $itemsCostRows = DB::query()
+                ->fromSub($groupedSub, 'd')
+                ->selectRaw("page_key, item_key, item_label, qty, $unitCostDispSub AS unit_cost_disp")
+                ->get();
+        } else {
+            $itemsCostRows = DB::query()
+                ->fromSub($groupedSub, 'd')
+                ->selectRaw("day_key, page_key, item_key, item_label, qty, $unitCostDispSub AS unit_cost_disp")
+                ->get();
+        }
+
+        $itemsListMap = [];    // key => array of ['label','qty','unit_cost']
+        foreach ($itemsCostRows as $r) {
+            $key = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $itemsListMap[$key] ??= [];
+            $itemsListMap[$key][] = [
+                'label'     => (string)($r->item_label ?? ''),
+                'qty'       => (int)($r->qty ?? 0),
+                'unit_cost' => (float)($r->unit_cost_disp ?? 0),
+            ];
+        }
+
+        // ======================
         // Merge (+ derived metrics)
         // ======================
         $keys = array_unique(array_merge(
@@ -450,6 +483,7 @@ class SummaryOverallController extends Controller
             array_keys($inTransitMap),
             array_keys($grossMap),
             array_keys($cogsMap),
+            array_keys($itemsListMap),
         ));
 
         $rangeLabel = '—';
@@ -463,6 +497,23 @@ class SummaryOverallController extends Controller
         foreach ($keys as $key) {
             $adspent = $adsMap[$key] ?? 0.0;
             if ($adspent <= 0) continue;
+
+            // build items display + unit costs list (order by label)
+            $itemsDisplay = null;
+            $unitCostsArr = [];
+            if (!empty($itemsListMap[$key])) {
+                $items = $itemsListMap[$key];
+                usort($items, fn($a,$b) => strcmp($a['label'], $b['label']));
+                $many = count($items) > 1;
+                $labels = [];
+                foreach ($items as $it) {
+                    $lbl = $it['label'] ?? '';
+                    if ($many) $lbl .= '(' . (int)$it['qty'] . ')';
+                    $labels[] = $lbl;
+                    $unitCostsArr[] = (float)$it['unit_cost'];
+                }
+                $itemsDisplay = implode(' / ', $labels);
+            }
 
             if ($AGGREGATE_RANGE) {
                 $page      = $key;
@@ -496,9 +547,11 @@ class SummaryOverallController extends Controller
                     'odz'             => $odz,
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
+                    'items_display'   => $itemsDisplay,     // NEW
+                    'unit_costs'      => $unitCostsArr,     // NEW (array of numbers)
                     'gross_sales'     => $gross,
                     'shipping_fee'    => $shipping_fee,
-                    'cogs'            => $cogs, // NEW
+                    'cogs'            => $cogs,
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -541,9 +594,11 @@ class SummaryOverallController extends Controller
                     'odz'             => $odz,
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
+                    'items_display'   => $itemsDisplay,     // NEW
+                    'unit_costs'      => $unitCostsArr,     // NEW
                     'gross_sales'     => $gross,
                     'shipping_fee'    => $shipping_fee,
-                    'cogs'            => $cogs, // NEW
+                    'cogs'            => $cogs,
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -609,6 +664,8 @@ class SummaryOverallController extends Controller
                 'odz'             => $sum['odz'],
                 'shipped'         => $sum['shipped'],
                 'delivered'       => $sum['delivered'],
+                'items_display'   => '—',             // no aggregate list on total
+                'unit_costs'      => [],              // no list on total
                 'gross_sales'     => $sum['gross_sales'],
                 'shipping_fee'    => $total_shipping_fee,
                 'cogs'            => $sum['cogs'],
