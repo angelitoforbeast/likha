@@ -122,6 +122,10 @@ class SummaryOverallController extends Controller
         $jCodExpr    = 'j.' . $quote($jCodColName);
         $castCOD     = $castMoney($jCodExpr);
 
+        // submission_time column (varchar) for Delay
+        $jSubmitColName = $pickCol('from_jnts', ['submission_time','submitted_at','submission_datetime','submissiondate','submission']) ?? 'submission_time';
+        $jSubmitExpr    = 'j.' . $quote($jSubmitColName);
+
         // cogs columns
         $cogsItemColName = $pickCol('cogs', ['item_name','ITEM_NAME','product','Product','Product_Name']) ?? 'item_name';
         $cogsItemExpr    = 'c.' . $quote($cogsItemColName);
@@ -287,7 +291,7 @@ class SummaryOverallController extends Controller
             $shippedMap[$k] = (int)($r->shipped_total ?? 0);
         }
 
-        // DELIVERED / RETURNED / FOR RETURN / IN TRANSIT — each filtered from the same joined base
+        // DELIVERED / RETURNED / FOR RETURN / IN TRANSIT — same joined base, different status filters
         $deliveredRows = (clone $joinedBase)
             ->whereRaw("$jStatusNorm LIKE 'delivered%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS delivered_total")
@@ -449,7 +453,66 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // Merge (+ derived metrics, including Net Profit)
+        // DELAY (avg days per unique waybill) — submission_time is varchar
+        // ======================
+        if ($driver === 'mysql') {
+            // Parse common formats; fallback to j.created_at
+            $jSubmitTs   = "COALESCE(
+                STR_TO_DATE($jSubmitExpr, '%Y-%m-%d %H:%i:%s'),
+                STR_TO_DATE($jSubmitExpr, '%Y/%m/%d %H:%i:%s'),
+                STR_TO_DATE($jSubmitExpr, '%Y-%m-%d'),
+                j.`created_at`
+            )";
+            $jSubmitDate = "DATE($jSubmitTs)";
+            $delayDays   = "DATEDIFF($jSubmitDate, $dateExpr)"; // integer days
+        } else { // pgsql
+            $jSubmitTs   = "COALESCE(
+                TO_TIMESTAMP(NULLIF($jSubmitExpr,''), 'YYYY-MM-DD HH24:MI:SS'),
+                TO_TIMESTAMP(NULLIF($jSubmitExpr,''), 'YYYY/MM/DD HH24:MI:SS'),
+                TO_TIMESTAMP(NULLIF($jSubmitExpr,''), 'YYYY-MM-DD'),
+                j.\"created_at\"
+            )";
+            $jSubmitDate = "DATE($jSubmitTs)";
+            $delayDays   = "($jSubmitDate - $dateExpr)"; // integer days
+        }
+
+        // Raw per-row delay (no hard filter on submission_time; we already have fallback)
+        $delayRaw = (clone $joinedBase)
+            ->selectRaw("$selectKey, $trimFn($moWaybill) AS wb, $delayDays AS delay_days");
+
+        // Dedup per waybill then average per group
+        if ($AGGREGATE_RANGE) {
+            $delayDistinct = DB::query()
+                ->fromSub($delayRaw, 'r')
+                ->selectRaw("page_key, wb, MIN(delay_days) AS delay_days")
+                ->groupBy('page_key','wb');
+
+            $delayAvgRows = DB::query()
+                ->fromSub($delayDistinct, 'd')
+                ->selectRaw("page_key, AVG(delay_days) AS avg_delay_days")
+                ->groupBy('page_key')
+                ->get();
+        } else {
+            $delayDistinct = DB::query()
+                ->fromSub($delayRaw, 'r')
+                ->selectRaw("day_key, page_key, wb, MIN(delay_days) AS delay_days")
+                ->groupBy('day_key','page_key','wb');
+
+            $delayAvgRows = DB::query()
+                ->fromSub($delayDistinct, 'd')
+                ->selectRaw("day_key, page_key, AVG(delay_days) AS avg_delay_days")
+                ->groupBy('day_key','page_key')
+                ->get();
+        }
+
+        $avgDelayMap = [];
+        foreach ($delayAvgRows as $r) {
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $avgDelayMap[$k] = (float)($r->avg_delay_days ?? 0);
+        }
+
+        // ======================
+        // Merge (+ derived metrics, including Net Profit & Delay)
         // ======================
         $keys = array_unique(array_merge(
             array_keys($adsMap),
@@ -465,6 +528,7 @@ class SummaryOverallController extends Controller
             array_keys($grossMap),
             array_keys($cogsMap),
             array_keys($itemsListMap),
+            array_keys($avgDelayMap)
         ));
 
         $rangeLabel = '—';
@@ -509,6 +573,7 @@ class SummaryOverallController extends Controller
                 $inTrans   = $inTransitMap[$key]   ?? 0;
                 $gross     = $grossMap[$key]       ?? 0.0;
                 $cogs      = $cogsMap[$key]        ?? 0.0;
+                $avgDelay  = $avgDelayMap[$key]    ?? null;
 
                 $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
@@ -531,6 +596,7 @@ class SummaryOverallController extends Controller
                     'odz'             => $odz,
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
+                    'avg_delay_days'  => $avgDelay,
                     'items_display'   => $itemsDisplay,
                     'unit_costs'      => $unitCostsArr,
                     'gross_sales'     => $gross,
@@ -561,6 +627,7 @@ class SummaryOverallController extends Controller
                 $inTrans   = $inTransitMap[$key]   ?? 0;
                 $gross     = $grossMap[$key]       ?? 0.0;
                 $cogs      = $cogsMap[$key]        ?? 0.0;
+                $avgDelay  = $avgDelayMap[$key]    ?? null;
 
                 $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
@@ -582,6 +649,7 @@ class SummaryOverallController extends Controller
                     'odz'             => $odz,
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
+                    'avg_delay_days'  => $avgDelay,
                     'items_display'   => $itemsDisplay,
                     'unit_costs'      => $unitCostsArr,
                     'gross_sales'     => $gross,
@@ -614,7 +682,7 @@ class SummaryOverallController extends Controller
             });
         }
 
-        // ===== TOTAL ROW (sum raw metrics; recompute derived on totals) =====
+        // ===== TOTAL ROW (sum raw metrics; recompute derived on totals; weighted avg for Delay) =====
         if (!empty($rows)) {
             $sum = [
                 'adspent' => 0.0,
@@ -622,6 +690,9 @@ class SummaryOverallController extends Controller
                 'shipped' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0, 'in_transit' => 0,
                 'gross_sales' => 0.0, 'cogs' => 0.0,
             ];
+            $delayWeightedSum = 0.0;
+            $delayShipCount   = 0;
+
             foreach ($rows as $r) {
                 $sum['adspent']        += (float)($r['adspent'] ?? 0);
                 $sum['orders']         += (int)  ($r['orders'] ?? 0);
@@ -635,6 +706,11 @@ class SummaryOverallController extends Controller
                 $sum['in_transit']     += (int)  ($r['in_transit'] ?? 0);
                 $sum['gross_sales']    += (float)($r['gross_sales'] ?? 0);
                 $sum['cogs']           += (float)($r['cogs'] ?? 0);
+
+                if (isset($r['avg_delay_days']) && $r['avg_delay_days'] !== null && ($r['shipped'] ?? 0) > 0 && empty($r['is_total'])) {
+                    $delayWeightedSum += (float)$r['avg_delay_days'] * (int)$r['shipped'];
+                    $delayShipCount   += (int)$r['shipped'];
+                }
             }
 
             $total_cpp            = $sum['orders']  > 0 ? ($sum['adspent'] / $sum['orders']) * 1.0 : null;
@@ -647,6 +723,8 @@ class SummaryOverallController extends Controller
             $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - $sum['cogs'];
             $total_net_profit_pct = $sum['gross_sales'] > 0 ? ($total_net_profit / $sum['gross_sales']) * 100.0 : null;
 
+            $total_avg_delay      = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
+
             $rows[] = [
                 'date'            => $AGGREGATE_RANGE ? $rangeLabel : 'Total',
                 'page'            => 'TOTAL',
@@ -657,6 +735,7 @@ class SummaryOverallController extends Controller
                 'odz'             => $sum['odz'],
                 'shipped'         => $sum['shipped'],
                 'delivered'       => $sum['delivered'],
+                'avg_delay_days'  => $total_avg_delay,
                 'items_display'   => '—',
                 'unit_costs'      => [],
                 'gross_sales'     => $sum['gross_sales'],

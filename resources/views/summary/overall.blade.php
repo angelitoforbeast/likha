@@ -58,7 +58,8 @@
         <div class="text-xs text-gray-500">
           Source: ads_manager_reports + macro_output + from_jnts + cogs
           (Adspent, Orders, Proceed, Cannot Proceed, ODZ, Shipped,
-          <b>Delivered</b>, <b>Items</b>, <b>Unit Cost</b>, <b>Gross Sales</b>, <b>Shipping Fee</b>, <b>COGS</b>,
+          <b>Delivered</b>, <b>Delay</b>, <b>Items</b>, <b>Unit Cost</b>,
+          <b>Gross Sales</b>, <b>Shipping Fee</b>, <b>COGS</b>,
           <b>Net Profit</b>, <b>Net Profit(%)</b>,
           <b>Returned</b>, <b>For Return</b>, <b>In Transit</b>, <b>CPP</b>, <b>Proceed CPP</b>, <b>RTS%</b>, <b>In Transit%</b>, TCPR)
         </div>
@@ -76,13 +77,14 @@
               <th class="px-2 py-2 text-right">ODZ</th>
               <th class="px-2 py-2 text-right">Shipped</th>
               <th class="px-2 py-2 text-right">Delivered</th>
+              <th class="px-2 py-2 text-right">Delay</th> <!-- NEW -->
               <th class="px-2 py-2">Items</th>
               <th class="px-2 py-2 text-right">Unit Cost</th>
               <th class="px-2 py-2 text-right">Gross Sales</th>
               <th class="px-2 py-2 text-right">Shipping Fee</th>
               <th class="px-2 py-2 text-right">COGS</th>
-              <th class="px-2 py-2 text-right">Net Profit</th>        <!-- NEW -->
-              <th class="px-2 py-2 text-right">Net Profit(%)</th>     <!-- NEW -->
+              <th class="px-2 py-2 text-right">Net Profit</th>
+              <th class="px-2 py-2 text-right">Net Profit(%)</th>
               <th class="px-2 py-2 text-right">Returned</th>
               <th class="px-2 py-2 text-right">For Return</th>
               <th class="px-2 py-2 text-right">In Transit</th>
@@ -96,7 +98,7 @@
           <tbody>
             <template x-if="!data.ads_daily || data.ads_daily.length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="24">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="25">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -111,6 +113,8 @@
                 <td class="px-2 py-2 text-right" x-text="num(row.odz)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.shipped)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.delivered)"></td>
+
+                <td class="px-2 py-2 text-right" x-text="days(row.avg_delay_days)"></td> <!-- NEW -->
 
                 <td class="px-2 py-2">
                   <span x-text="row.items_display || '—'"></span>
@@ -173,6 +177,9 @@
         percent(v){ return (v==null || isNaN(v)) ? '—' : (Number(v).toFixed(2) + '%'); },
         ymd(d){ const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); },
 
+        // NEW: show days with 2 decimals (avg)
+        days(v){ return (v==null || isNaN(v)) ? '—' : Number(v).toFixed(2); },
+
         moneyList(list){
           if (!Array.isArray(list) || list.length===0) return '—';
           return list.map(v => this.money(v)).join(', ');
@@ -193,7 +200,7 @@
           if (pct > 25) return 'bg-yellow-100 text-yellow-800';
           return '';
         },
-        // NEW: Net Profit% thresholds:
+        // Net Profit% thresholds:
         // <0 red, <5 orange, <10 yellow, <15 blue, >=15 #00ff00
         netClass(pct){
           if (pct == null || isNaN(pct)) return '';
@@ -206,7 +213,7 @@
         netStyle(pct){
           if (pct == null || isNaN(pct)) return {};
           if (pct >= 15) {
-            return { backgroundColor: '#00ff00', color: '#052e16' }; // deep green text for contrast
+            return { backgroundColor: '#00ff00', color: '#052e16' };
           }
           return {};
         },
