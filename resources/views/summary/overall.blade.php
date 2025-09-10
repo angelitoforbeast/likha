@@ -59,6 +59,7 @@
           Source: ads_manager_reports + macro_output + from_jnts + cogs
           (Adspent, Orders, Proceed, Cannot Proceed, ODZ, Shipped,
           <b>Delivered</b>, <b>Items</b>, <b>Unit Cost</b>, <b>Gross Sales</b>, <b>Shipping Fee</b>, <b>COGS</b>,
+          <b>Net Profit</b>, <b>Net Profit(%)</b>,
           <b>Returned</b>, <b>For Return</b>, <b>In Transit</b>, <b>CPP</b>, <b>Proceed CPP</b>, <b>RTS%</b>, <b>In Transit%</b>, TCPR)
         </div>
       </div>
@@ -75,11 +76,13 @@
               <th class="px-2 py-2 text-right">ODZ</th>
               <th class="px-2 py-2 text-right">Shipped</th>
               <th class="px-2 py-2 text-right">Delivered</th>
-              <th class="px-2 py-2">Items</th> <!-- NEW -->
-              <th class="px-2 py-2 text-right">Unit Cost</th> <!-- NEW -->
+              <th class="px-2 py-2">Items</th>
+              <th class="px-2 py-2 text-right">Unit Cost</th>
               <th class="px-2 py-2 text-right">Gross Sales</th>
               <th class="px-2 py-2 text-right">Shipping Fee</th>
               <th class="px-2 py-2 text-right">COGS</th>
+              <th class="px-2 py-2 text-right">Net Profit</th>        <!-- NEW -->
+              <th class="px-2 py-2 text-right">Net Profit(%)</th>     <!-- NEW -->
               <th class="px-2 py-2 text-right">Returned</th>
               <th class="px-2 py-2 text-right">For Return</th>
               <th class="px-2 py-2 text-right">In Transit</th>
@@ -93,7 +96,7 @@
           <tbody>
             <template x-if="!data.ads_daily || data.ads_daily.length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="22">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="24">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -120,6 +123,16 @@
                 <td class="px-2 py-2 text-right" x-text="money(row.gross_sales)"></td>
                 <td class="px-2 py-2 text-right" x-text="money(row.shipping_fee)"></td>
                 <td class="px-2 py-2 text-right" x-text="money(row.cogs)"></td>
+
+                <td class="px-2 py-2 text-right" x-text="money(row.net_profit)"></td>
+                <td class="px-2 py-2 text-right">
+                  <span class="px-2 py-0.5 rounded text-[10px]"
+                        :class="netClass(row.net_profit_pct)"
+                        :style="netStyle(row.net_profit_pct)"
+                        x-text="percent(row.net_profit_pct)">
+                  </span>
+                </td>
+
                 <td class="px-2 py-2 text-right" x-text="num(row.returned)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.for_return)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.in_transit)"></td>
@@ -165,6 +178,7 @@
           return list.map(v => this.money(v)).join(', ');
         },
 
+        // Conditional formatting helpers
         tcprClass(pct){
           if (pct == null || isNaN(pct)) return '';
           if (pct > 7) return 'bg-red-100 text-red-800';
@@ -172,13 +186,29 @@
           if (pct > 3) return 'bg-yellow-100 text-yellow-800';
           return '';
         },
-        // RTS% conditional formatting: >25% yellow, >30% orange, >35% red
         rtsClass(pct){
           if (pct == null || isNaN(pct)) return '';
           if (pct > 35) return 'bg-red-100 text-red-800';
           if (pct > 30) return 'bg-orange-100 text-orange-800';
           if (pct > 25) return 'bg-yellow-100 text-yellow-800';
           return '';
+        },
+        // NEW: Net Profit% thresholds:
+        // <0 red, <5 orange, <10 yellow, <15 blue, >=15 #00ff00
+        netClass(pct){
+          if (pct == null || isNaN(pct)) return '';
+          if (pct < 0)  return 'bg-red-100 text-red-800';
+          if (pct < 5)  return 'bg-orange-100 text-orange-800';
+          if (pct < 10) return 'bg-yellow-100 text-yellow-800';
+          if (pct < 15) return 'bg-blue-100 text-blue-800';
+          return ''; // for >=15 we will apply inline #00ff00 via netStyle
+        },
+        netStyle(pct){
+          if (pct == null || isNaN(pct)) return {};
+          if (pct >= 15) {
+            return { backgroundColor: '#00ff00', color: '#052e16' }; // deep green text for contrast
+          }
+          return {};
         },
 
         setDateLabel(){

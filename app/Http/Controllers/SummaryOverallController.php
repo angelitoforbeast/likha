@@ -266,7 +266,6 @@ class SummaryOverallController extends Controller
         // ======================
         // SHIPPED / DELIVERED / RETURNED / FOR RETURN / IN TRANSIT
         // ======================
-        // Normalize j.status to handle spaces, dashes, underscores
         $jStatusNorm = "LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(j.status,'')),' ',''),'-',''),'_',''))";
 
         // SHIPPED
@@ -286,7 +285,7 @@ class SummaryOverallController extends Controller
             $shippedMap[$k] = (int)($r->shipped_total ?? 0);
         }
 
-        // DELIVERED — status starts with 'delivered'
+        // Base for Delivered-only subset
         $deliveredBase = (clone $mo)
             ->whereRaw("$moWaybill IS NOT NULL")
             ->whereRaw("$trimFn($moWaybill) <> ''")
@@ -295,6 +294,7 @@ class SummaryOverallController extends Controller
             })
             ->whereRaw("$jStatusNorm LIKE 'delivered%'");
 
+        // DELIVERED count
         $deliveredRows = (clone $deliveredBase)
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS delivered_total")
             ->groupByRaw($groupByKey)
@@ -306,7 +306,7 @@ class SummaryOverallController extends Controller
             $deliveredMap[$k] = (int)($r->delivered_total ?? 0);
         }
 
-        // RETURNED — status starts with 'returned'
+        // RETURNED
         $returnedRows = (clone $deliveredBase)
             ->whereRaw("$jStatusNorm LIKE 'returned%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS returned_total")
@@ -319,7 +319,7 @@ class SummaryOverallController extends Controller
             $returnedMap[$k] = (int)($r->returned_total ?? 0);
         }
 
-        // FOR RETURN — status starts with 'forreturn'
+        // FOR RETURN
         $forReturnRows = (clone $deliveredBase)
             ->whereRaw("$jStatusNorm LIKE 'forreturn%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS for_return_total")
@@ -332,7 +332,7 @@ class SummaryOverallController extends Controller
             $forReturnMap[$k] = (int)($r->for_return_total ?? 0);
         }
 
-        // IN TRANSIT — status starts with 'intransit'
+        // IN TRANSIT
         $inTransitRows = (clone $deliveredBase)
             ->whereRaw("$jStatusNorm LIKE 'intransit%'")
             ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS in_transit_total")
@@ -346,7 +346,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // GROSS SALES (sum of COD for Delivered only, per unique waybill)
+        // GROSS SALES (Delivered-only, per-unique waybill)
         // ======================
         $innerDistinct = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $trimFn($moWaybill) AS wb, $castCOD AS cod_clean");
@@ -375,13 +375,11 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // COGS (Delivered-only) — effective price as of order date, per distinct waybill/item
+        // COGS (Delivered-only) — effective unit price on/before order date
         // ======================
-        // Distinct delivered set with item + order_date
         $innerDeliveredItems = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key");
 
-        // Correlated subquery to get last known unit_cost on/before order_date; default 0 if none
         $unitCostSub = "COALESCE((
             SELECT " . $castMoney($cogsUnitExpr) . "
             FROM cogs c
@@ -417,11 +415,9 @@ class SummaryOverallController extends Controller
         // ======================
         // ITEMS + UNIT COST LISTS for UI (Delivered-only)
         // ======================
-        // Build base rows including original item label
         $itemsBase = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
 
-        // Group by key + item to get qty and last order date per item
         if ($AGGREGATE_RANGE) {
             $groupedSub = DB::query()
                 ->fromSub($itemsBase, 'x')
@@ -434,7 +430,6 @@ class SummaryOverallController extends Controller
                 ->groupBy('day_key','page_key','item_key');
         }
 
-        // For each (key,item), fetch display unit cost using last_order_date
         $unitCostDispSub = "COALESCE((
             SELECT " . $castMoney($cogsUnitExpr) . "
             FROM cogs c
@@ -468,7 +463,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // Merge (+ derived metrics)
+        // Merge (+ derived metrics, including Net Profit)
         // ======================
         $keys = array_unique(array_merge(
             array_keys($adsMap),
@@ -498,7 +493,7 @@ class SummaryOverallController extends Controller
             $adspent = $adsMap[$key] ?? 0.0;
             if ($adspent <= 0) continue;
 
-            // build items display + unit costs list (order by label)
+            // Items display + unit costs
             $itemsDisplay = null;
             $unitCostsArr = [];
             if (!empty($itemsListMap[$key])) {
@@ -529,13 +524,16 @@ class SummaryOverallController extends Controller
                 $gross     = $grossMap[$key]       ?? 0.0;
                 $cogs      = $cogsMap[$key]        ?? 0.0;
 
-                // Derived
+                $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
                 $proceed_cpp    = $proc    > 0 ? ($adspent / $proc)   * 1.0 : null;
                 $rts_pct        = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
-                $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
+
+                // NEW: Net Profit (+ %)
+                $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
+                $net_profit_pct = $gross > 0 ? ($net_profit / $gross) * 100.0 : null;
 
                 $rows[] = [
                     'date'            => $rangeLabel,
@@ -547,11 +545,13 @@ class SummaryOverallController extends Controller
                     'odz'             => $odz,
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
-                    'items_display'   => $itemsDisplay,     // NEW
-                    'unit_costs'      => $unitCostsArr,     // NEW (array of numbers)
+                    'items_display'   => $itemsDisplay,
+                    'unit_costs'      => $unitCostsArr,
                     'gross_sales'     => $gross,
                     'shipping_fee'    => $shipping_fee,
                     'cogs'            => $cogs,
+                    'net_profit'      => $net_profit,      // NEW
+                    'net_profit_pct'  => $net_profit_pct,  // NEW
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -576,13 +576,16 @@ class SummaryOverallController extends Controller
                 $gross     = $grossMap[$key]       ?? 0.0;
                 $cogs      = $cogsMap[$key]        ?? 0.0;
 
-                // Derived
+                $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
                 $proceed_cpp    = $proc    > 0 ? ($adspent / $proc)   * 1.0 : null;
                 $rts_pct        = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
-                $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
+
+                // NEW: Net Profit (+ %)
+                $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
+                $net_profit_pct = $gross > 0 ? ($net_profit / $gross) * 100.0 : null;
 
                 $rows[] = [
                     'date'            => $d,
@@ -594,11 +597,13 @@ class SummaryOverallController extends Controller
                     'odz'             => $odz,
                     'shipped'         => $shipped,
                     'delivered'       => $delivered,
-                    'items_display'   => $itemsDisplay,     // NEW
-                    'unit_costs'      => $unitCostsArr,     // NEW
+                    'items_display'   => $itemsDisplay,
+                    'unit_costs'      => $unitCostsArr,
                     'gross_sales'     => $gross,
                     'shipping_fee'    => $shipping_fee,
                     'cogs'            => $cogs,
+                    'net_profit'      => $net_profit,      // NEW
+                    'net_profit_pct'  => $net_profit_pct,  // NEW
                     'returned'        => $returned,
                     'for_return'      => $forRet,
                     'in_transit'      => $inTrans,
@@ -624,7 +629,7 @@ class SummaryOverallController extends Controller
             });
         }
 
-        // ===== TOTAL ROW (sum of raw metrics, derived recomputed on totals) =====
+        // ===== TOTAL ROW (sum raw metrics; recompute derived on totals) =====
         if (!empty($rows)) {
             $sum = [
                 'adspent' => 0.0,
@@ -654,6 +659,10 @@ class SummaryOverallController extends Controller
             $total_tcpr           = $sum['orders']  > 0 ? (1 - ($sum['proceed'] / $sum['orders'])) * 100.0 : null;
             $total_shipping_fee   = $SHIPPING_PER_SHIPPED * $sum['shipped'];
 
+            // NEW totals: Net Profit
+            $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - $sum['cogs'];
+            $total_net_profit_pct = $sum['gross_sales'] > 0 ? ($total_net_profit / $sum['gross_sales']) * 100.0 : null;
+
             $rows[] = [
                 'date'            => $AGGREGATE_RANGE ? $rangeLabel : 'Total',
                 'page'            => 'TOTAL',
@@ -664,11 +673,13 @@ class SummaryOverallController extends Controller
                 'odz'             => $sum['odz'],
                 'shipped'         => $sum['shipped'],
                 'delivered'       => $sum['delivered'],
-                'items_display'   => '—',             // no aggregate list on total
-                'unit_costs'      => [],              // no list on total
+                'items_display'   => '—',
+                'unit_costs'      => [],
                 'gross_sales'     => $sum['gross_sales'],
                 'shipping_fee'    => $total_shipping_fee,
                 'cogs'            => $sum['cogs'],
+                'net_profit'      => $total_net_profit,       // NEW
+                'net_profit_pct'  => $total_net_profit_pct,   // NEW
                 'returned'        => $sum['returned'],
                 'for_return'      => $sum['for_return'],
                 'in_transit'      => $sum['in_transit'],
