@@ -22,9 +22,9 @@ class SummaryOverallController extends Controller
             ->pluck('page_name')
             ->toArray();
 
-        // ==== Role detection (same pattern as in MacroOutputController::download) ====
-        $userRoleRaw   = Auth::user()?->employeeProfile?->role ?? '';
-        $roleNorm      = preg_replace('/\s+/u', ' ', trim((string)$userRoleRaw));
+        // Role detection
+        $userRoleRaw    = Auth::user()?->employeeProfile?->role ?? '';
+        $roleNorm       = preg_replace('/\s+/u', ' ', trim((string)$userRoleRaw));
         $isMarketingOIC = preg_match('/^marketing\s*[-–—]\s*oic$/iu', $roleNorm) === 1;
         $isCEO          = preg_match('/^ceo$/iu', $roleNorm) === 1;
 
@@ -410,7 +410,7 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ITEMS + UNIT COST LISTS for UI (Delivered-only)
+        // ITEMS + UNIT COST LISTS for UI (Delivered-only) — per key (day|page or page)
         $itemsBase = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
 
@@ -676,6 +676,52 @@ class SummaryOverallController extends Controller
             }
         }
 
+        // ===== Build TOTAL-ROW extras for Items/UnitCost when page != 'all' =====
+        $totalItemsDisplay = '—';
+        $totalUnitCostsArr = [];
+        $totalPageLabel    = 'TOTAL';
+
+        if (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') {
+            $totalPageLabel = $pageName;
+
+            // Re-aggregate delivered items across the whole date range by PAGE (ignore day)
+            $itemsBaseTotals = (clone $deliveredBase)
+                ->selectRaw("DISTINCT $pageExpr AS page_key, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
+
+            $groupedTotals = DB::query()
+                ->fromSub($itemsBaseTotals, 'x')
+                ->selectRaw("page_key, item_key, MIN(item_label) AS item_label, COUNT(DISTINCT wb) AS qty, MAX(order_date) AS last_order_date")
+                ->groupBy('page_key','item_key');
+
+            $itemsTotalsWithCost = DB::query()
+                ->fromSub($groupedTotals, 'd')
+                ->selectRaw("page_key, item_key, item_label, qty, $unitCostDispSub AS unit_cost_disp")
+                ->get();
+
+            $acc = [];
+            foreach ($itemsTotalsWithCost as $r) {
+                $acc[] = [
+                    'label'     => (string)($r->item_label ?? ''),
+                    'qty'       => (int)($r->qty ?? 0),
+                    'unit_cost' => (float)($r->unit_cost_disp ?? 0),
+                ];
+            }
+            if (!empty($acc)) {
+                usort($acc, fn($a,$b) => strcmp($a['label'], $b['label']));
+                $many = count($acc) > 1;
+                $labels = [];
+                $costs  = [];
+                foreach ($acc as $it) {
+                    $lbl = $it['label'];
+                    if ($many) $lbl .= '(' . (int)$it['qty'] . ')';
+                    $labels[] = $lbl;
+                    $costs[]  = (float)$it['unit_cost'];
+                }
+                $totalItemsDisplay = implode(' / ', $labels);
+                $totalUnitCostsArr = $costs;
+            }
+        }
+
         // sort rows
         if ($AGGREGATE_RANGE) {
             usort($rows, fn($a,$b) => strcmp($a['page'] ?? '', $b['page'] ?? ''));
@@ -733,7 +779,8 @@ class SummaryOverallController extends Controller
 
             $rows[] = [
                 'date'            => $AGGREGATE_RANGE ? $rangeLabel : 'Total',
-                'page'            => 'TOTAL',
+                // When not "All", show the filtered page name; otherwise keep "TOTAL"
+                'page'            => (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') ? $totalPageLabel : 'TOTAL',
                 'adspent'         => $sum['adspent'],
                 'orders'          => $sum['orders'],
                 'proceed'         => $sum['proceed'],
@@ -742,8 +789,9 @@ class SummaryOverallController extends Controller
                 'shipped'         => $sum['shipped'],
                 'delivered'       => $sum['delivered'],
                 'avg_delay_days'  => $total_avg_delay,
-                'items_display'   => '—',
-                'unit_costs'      => [],
+                // Fill Items/Unit Cost only when a single page is selected
+                'items_display'   => (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') ? $totalItemsDisplay : '—',
+                'unit_costs'      => (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') ? $totalUnitCostsArr : [],
                 'gross_sales'     => $sum['gross_sales'],
                 'shipping_fee'    => $total_shipping_fee,
                 'cogs'            => $sum['cogs'],
