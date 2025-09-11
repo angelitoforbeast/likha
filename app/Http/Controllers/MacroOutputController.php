@@ -257,106 +257,119 @@ $downloadAll = $isMarketingOIC && $dlParam;
     }
 
     public function summary(Request $request)
-    {
-        $start = $request->start_date;
-        $end   = $request->end_date;
+{
+    $start = $request->start_date;
+    $end   = $request->end_date;
 
-        // Step 1: Get all records (filtered by PAGE if needed)
-        $query = MacroOutput::query()->whereNotNull('PAGE');
+    // Step 1: Get all records (filtered by PAGE if needed)
+    $query = MacroOutput::query()->whereNotNull('PAGE');
 
-        if ($request->filled('PAGE')) {
-            $query->where('PAGE', $request->PAGE);
-        }
-
-        $records = $query->select('TIMESTAMP', 'PAGE', 'STATUS', 'waybill')->get();
-
-        // Step 2: Group and format in PHP
-        $summary = [];
-        $totalCounts = [
-            'PROCEED' => 0,
-            'CANNOT PROCEED' => 0,
-            'ODZ' => 0,
-            'BLANK' => 0,
-            'TOTAL' => 0,
-            'MATCHED_WAYBILLS' => 0,
-        ];
-
-        foreach ($records as $record) {
-            // Extract date part from "00:03 01-07-2025"
-            $parts = explode(' ', $record->TIMESTAMP);
-            $datePart = $parts[1] ?? null;
-
-            if (!$datePart) continue;
-
-            $formattedDate = \Carbon\Carbon::createFromFormat('d-m-Y', $datePart)->format('Y-m-d');
-
-            // Filter by start/end date if provided
-            if ($start && $formattedDate < $start) continue;
-            if ($end && $formattedDate > $end) continue;
-
-            $status = $record->STATUS ?: 'BLANK';
-            $page = $record->PAGE;
-
-            if (!isset($summary[$formattedDate])) {
-                $summary[$formattedDate] = [];
-            }
-
-            if (!isset($summary[$formattedDate][$page])) {
-                $summary[$formattedDate][$page] = [
-                    'PROCEED' => 0,
-                    'CANNOT PROCEED' => 0,
-                    'ODZ' => 0,
-                    'BLANK' => 0,
-                    'TOTAL' => 0,
-                    'WAYBILLS' => [],
-                ];
-            }
-
-            $summary[$formattedDate][$page][$status]++;
-            $summary[$formattedDate][$page]['TOTAL']++;
-            if ($record->waybill) {
-                $summary[$formattedDate][$page]['WAYBILLS'][] = (string) $record->waybill;
-            }
-
-            $totalCounts[$status]++;
-            $totalCounts['TOTAL']++;
-        }
-
-        // Sort page names alphabetically inside each date group
-        foreach ($summary as &$pages) {
-            ksort($pages);
-        }
-
-        // Get logs grouped by date and page
-        $logs = DownloadedMacroOutputLog::query()
-            ->select('timestamp', 'page', 'downloaded_by', 'downloaded_at')
-            ->get()
-            ->groupBy(fn($log) => $log->timestamp . '|' . $log->page);
-
-        // Get all existing waybill_numbers from from_jnts
-        $existingWaybills = DB::table('from_jnts')->pluck('waybill_number')->map('strval')->toArray();
-        $existingWaybillSet = array_flip($existingWaybills); // for fast lookup
-
-        // Attach downloaded_by, downloaded_at, and match count to each summary entry
-        foreach ($summary as $date => &$pages) {
-            foreach ($pages as $page => &$counts) {
-                $key = $date . '|' . $page;
-                $latestLog = $logs->has($key) ? $logs[$key]->sortByDesc('downloaded_at')->first() : null;
-
-                $counts['downloaded_by'] = $latestLog->downloaded_by ?? null;
-                $counts['downloaded_at'] = $latestLog->downloaded_at ?? null;
-
-                // Count matched waybills
-                $waybills = $counts['WAYBILLS'] ?? [];
-                $matched = collect($waybills)->filter(fn($wb) => isset($existingWaybillSet[$wb]))->count();
-                $counts['MATCHED_WAYBILLS'] = $matched;
-                $totalCounts['MATCHED_WAYBILLS'] += $matched; // ✅ FIX HERE
-            }
-        }
-        unset($pages);
-
-        return view('macro_output.summary', compact('summary', 'totalCounts'));
+    if ($request->filled('PAGE')) {
+        $query->where('PAGE', $request->PAGE);
     }
+
+    $records = $query->select('TIMESTAMP', 'PAGE', 'STATUS', 'waybill')->get();
+
+    // Step 2: Group and format in PHP
+    $summary = [];
+    $totalCounts = [
+        'PROCEED'           => 0,
+        'CANNOT PROCEED'    => 0,
+        'ODZ'               => 0,
+        'BLANK'             => 0,
+        'TOTAL'             => 0,
+        // New definitions:
+        // - MATCHED_WAYBILLS  = count of macro_output rows that have a waybill (per group)
+        // - SCANNED_WAYBILLS  = count of those waybills found in from_jnts
+        'MATCHED_WAYBILLS'  => 0,
+        'SCANNED_WAYBILLS'  => 0,
+    ];
+
+    foreach ($records as $record) {
+        // Extract date part from "00:03 01-07-2025"
+        $parts = explode(' ', $record->TIMESTAMP);
+        $datePart = $parts[1] ?? null;
+        if (!$datePart) continue;
+
+        $formattedDate = \Carbon\Carbon::createFromFormat('d-m-Y', $datePart)->format('Y-m-d');
+
+        // Filter by start/end date if provided
+        if ($start && $formattedDate < $start) continue;
+        if ($end && $formattedDate > $end) continue;
+
+        $status = $record->STATUS ?: 'BLANK';
+        $page   = $record->PAGE;
+
+        if (!isset($summary[$formattedDate])) {
+            $summary[$formattedDate] = [];
+        }
+
+        if (!isset($summary[$formattedDate][$page])) {
+            $summary[$formattedDate][$page] = [
+                'PROCEED'  => 0,
+                'CANNOT PROCEED' => 0,
+                'ODZ'      => 0,
+                'BLANK'    => 0,
+                'TOTAL'    => 0,
+                'WAYBILLS' => [],
+            ];
+        }
+
+        $summary[$formattedDate][$page][$status]++;
+        $summary[$formattedDate][$page]['TOTAL']++;
+
+        if ($record->waybill) {
+            $summary[$formattedDate][$page]['WAYBILLS'][] = (string) $record->waybill;
+        }
+
+        $totalCounts[$status]++;
+        $totalCounts['TOTAL']++;
+    }
+
+    // Sort page names alphabetically inside each date group
+    foreach ($summary as &$pages) {
+        ksort($pages);
+    }
+    unset($pages);
+
+    // Get logs grouped by date and page
+    $logs = DownloadedMacroOutputLog::query()
+        ->select('timestamp', 'page', 'downloaded_by', 'downloaded_at')
+        ->get()
+        ->groupBy(fn($log) => $log->timestamp . '|' . $log->page);
+
+    // Get all existing waybill_numbers from from_jnts
+    $existingWaybills   = DB::table('from_jnts')->pluck('waybill_number')->map('strval')->toArray();
+    $existingWaybillSet = array_flip($existingWaybills); // for fast lookup
+
+    // Attach downloaded_by, downloaded_at, and the two waybill counts to each summary entry
+    foreach ($summary as $date => &$pages) {
+        foreach ($pages as $page => &$counts) {
+            $key = $date . '|' . $page;
+            $latestLog = $logs->has($key) ? $logs[$key]->sortByDesc('downloaded_at')->first() : null;
+
+            $counts['downloaded_by'] = $latestLog->downloaded_by ?? null;
+            $counts['downloaded_at'] = $latestLog->downloaded_at ?? null;
+
+            // Waybills collected from macro_output rows (per date+page)
+            $waybills = $counts['WAYBILLS'] ?? [];
+
+            // 1) Scanned Waybill = count present in from_jnts (old "matched" logic)
+            $scanned = collect($waybills)->filter(fn($wb) => isset($existingWaybillSet[$wb]))->count();
+            $counts['SCANNED_WAYBILLS'] = $scanned;
+            $totalCounts['SCANNED_WAYBILLS'] += $scanned;
+
+            // 2) Matched Waybills (new meaning) = count of rows that have any waybill in macro_output
+            $matched = count($waybills);
+            $counts['MATCHED_WAYBILLS'] = $matched;
+            $totalCounts['MATCHED_WAYBILLS'] += $matched;
+        }
+    }
+    unset($pages);
+
+    return view('macro_output.summary', compact('summary', 'totalCounts'));
+}
+
 
     public function update(Request $request, $id)
     {
