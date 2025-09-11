@@ -307,7 +307,7 @@ class SummaryOverallController extends Controller
         $innerDeliveredCod = (clone $joinedBase)
             ->whereRaw('ja.is_delivered = 1')
             ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX(ja.cod_clean) AS cod_clean")
-            ->groupByRaw("$groupByKey, wb");
+            ->groupByRaw("$groupByKey, $moWaybillSql");
 
         if ($AGGREGATE_RANGE) {
             $grossRows = DB::query()
@@ -332,7 +332,7 @@ class SummaryOverallController extends Controller
         // ===== Sum of COD for ALL shipped (any status) — dedup by (group, waybill)
         $innerAllCod = (clone $joinedBase)
             ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX(ja.cod_clean) AS cod_clean")
-            ->groupByRaw("$groupByKey, wb");
+            ->groupByRaw("$groupByKey, $moWaybillSql");
 
         if ($AGGREGATE_RANGE) {
             $allCodRows = DB::query()
