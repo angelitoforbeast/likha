@@ -80,15 +80,17 @@ class SummaryOverallController extends Controller
         // resolve macro_output columns
         $pageColName = $pickCol('macro_output', ['PAGE','page','page_name','Page','Page_Name']);
         if (!$pageColName) throw new \RuntimeException('macro_output: page column not found');
-        $moPage   = 'mo.' . $quote($pageColName);
-        $pageExpr = "$trimFn(COALESCE($moPage,''))";
+        $moPageSql = 'mo.' . $quote($pageColName);   // for raw SQL snippets
+        $moPageCol = 'mo.' . $pageColName;           // for QB where/join
+        $pageExpr  = "$trimFn(COALESCE($moPageSql,''))";
 
         $statusColName = $pickCol('macro_output', ['STATUS','status','Status']) ?? 'status';
         $statusExpr    = 'mo.' . $quote($statusColName);
         $statusNorm    = "LOWER(REPLACE(REPLACE($trimFn($statusExpr),' ',''),'_',''))";
 
-        $wbColName = $pickCol('macro_output', ['waybill','Waybill','WAYBILL']) ?? 'waybill';
-        $moWaybill = 'mo.' . $quote($wbColName);
+        $wbColName    = $pickCol('macro_output', ['waybill','Waybill','WAYBILL']) ?? 'waybill';
+        $moWaybillSql = 'mo.' . $quote($wbColName);  // for raw SQL
+        $moWaybillCol = 'mo.' . $wbColName;          // for QB
 
         $itemColName = $pickCol('macro_output', ['ITEM_NAME','item_name','Product','product_name','ITEM','item']);
         if (!$itemColName) throw new \RuntimeException('macro_output: item column not found');
@@ -125,13 +127,9 @@ class SummaryOverallController extends Controller
         // Ad spend cast (sanitize ₱, commas, spaces)
         $castSpend = $castMoney('amount_spent_php');
 
-        // from_jnts columns
-        $jCodColName = $pickCol('from_jnts', ['cod','COD','cod_amount','cod_amt','cod_php','Cod','CODAmt']) ?? 'cod';
-        $jCodExpr    = 'j.' . $quote($jCodColName);
-        $castCOD     = $castMoney($jCodExpr);
-
+        // from_jnts columns (names vary)
+        $jCodColName    = $pickCol('from_jnts', ['cod','COD','cod_amount','cod_amt','cod_php','Cod','CODAmt']) ?? 'cod';
         $jSubmitColName = $pickCol('from_jnts', ['submission_time','submitted_at','submission_datetime','submissiondate','submission']) ?? 'submission_time';
-        $jSubmitExpr    = 'j.' . $quote($jSubmitColName);
 
         // cogs columns
         $cogsItemColName = $pickCol('cogs', ['item_name','ITEM_NAME','product','Product','Product_Name']) ?? 'item_name';
@@ -164,6 +162,7 @@ class SummaryOverallController extends Controller
             if ($driver === 'pgsql') {
                 $adsBase->whereRaw("$trimFn(page_name) ILIKE $trimFn(?)", [$pageName]);
             } else {
+                // case-insensitive compare without wrapping column in fn (ok; collation handles)
                 $adsBase->whereRaw("LOWER($trimFn(page_name)) = LOWER($trimFn(?))", [$pageName]);
             }
         }
@@ -196,7 +195,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // ORDERS & STATUS (macro_output)
+        // ORDERS / PROCEED / CANNOT / ODZ (single pass, no join)
         // ======================
         $mo = DB::table('macro_output as mo');
 
@@ -219,160 +218,121 @@ class SummaryOverallController extends Controller
         $selectKey   = $AGGREGATE_RANGE ? "$pageExpr AS page_key" : "$dateExpr AS day_key, $pageExpr AS page_key";
         $groupByKey  = $AGGREGATE_RANGE ? "$pageExpr" : "$dateExpr, $pageExpr";
 
-        // All Orders
-        $ordersRows = (clone $mo)
-            ->selectRaw("$selectKey, COUNT(*) AS orders_total")
+        // One pass for order-status counts
+        $orderAgg = (clone $mo)
+            ->selectRaw("$selectKey,
+                COUNT(*) AS orders_total,
+                SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_total,
+                SUM(CASE WHEN $statusNorm = 'cannotproceed' THEN 1 ELSE 0 END) AS cannot_total,
+                SUM(CASE WHEN $statusNorm = 'odz' THEN 1 ELSE 0 END) AS odz_total
+            ")
             ->groupByRaw($groupByKey)
             ->get();
 
-        $ordersMap = [];
-        foreach ($ordersRows as $r) {
+        $ordersMap = $proceedMap = $cannotMap = $odzMap = [];
+        foreach ($orderAgg as $r) {
             $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $ordersMap[$k] = (int)($r->orders_total ?? 0);
-        }
-
-        // Proceed
-        $proceedRows = (clone $mo)
-            ->whereRaw("$statusNorm = 'proceed'")
-            ->selectRaw("$selectKey, COUNT(*) AS proceed_total")
-            ->groupByRaw($groupByKey)
-            ->get();
-
-        $proceedMap = [];
-        foreach ($proceedRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $ordersMap[$k]  = (int)($r->orders_total ?? 0);
             $proceedMap[$k] = (int)($r->proceed_total ?? 0);
-        }
-
-        // Cannot Proceed
-        $cannotRows = (clone $mo)
-            ->whereRaw("$statusNorm = 'cannotproceed'")
-            ->selectRaw("$selectKey, COUNT(*) AS cannot_total")
-            ->groupByRaw($groupByKey)
-            ->get();
-
-        $cannotMap = [];
-        foreach ($cannotRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $cannotMap[$k] = (int)($r->cannot_total ?? 0);
-        }
-
-        // ODZ
-        $odzRows = (clone $mo)
-            ->whereRaw("$statusNorm = 'odz'")
-            ->selectRaw("$selectKey, COUNT(*) AS odz_total")
-            ->groupByRaw($groupByKey)
-            ->get();
-
-        $odzMap = [];
-        foreach ($odzRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $odzMap[$k] = (int)($r->odz_total ?? 0);
+            $cannotMap[$k]  = (int)($r->cannot_total ?? 0);
+            $odzMap[$k]     = (int)($r->odz_total ?? 0);
         }
 
         // ======================
-        // SHIPPING & STATUS COUNTS (join mo <-> j w/o status filter)
+        // BUILD from_jnts AGG SUBQUERY (ja): per-waybill flags + cod + min submit ts
         // ======================
-        $jStatusNorm = "LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(j.status,'')),' ',''),'-',''),'_',''))";
+        if ($driver === 'mysql') {
+            $jaMinTs = "MIN(COALESCE(
+                STR_TO_DATE(j.".$quote($jSubmitColName).", '%Y-%m-%d %H:%i:%s'),
+                STR_TO_DATE(j.".$quote($jSubmitColName).", '%Y/%m/%d %H:%i:%s'),
+                STR_TO_DATE(j.".$quote($jSubmitColName).", '%Y-%m-%d'),
+                j.`created_at`
+            )) AS min_submit_ts";
+        } else {
+            $jaMinTs = "MIN(COALESCE(
+                TO_TIMESTAMP(NULLIF(j.".$quote($jSubmitColName).",'') , 'YYYY-MM-DD HH24:MI:SS'),
+                TO_TIMESTAMP(NULLIF(j.".$quote($jSubmitColName).",'') , 'YYYY/MM/DD HH24:MI:SS'),
+                TO_TIMESTAMP(NULLIF(j.".$quote($jSubmitColName).",'') , 'YYYY-MM-DD'),
+                j.\"created_at\"
+            )) AS min_submit_ts";
+        }
 
+        $jaAgg = DB::table('from_jnts as j')
+            ->selectRaw("
+                j.waybill_number AS wb,
+                MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END) AS is_delivered,
+                MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
+                MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END) AS is_for_return,
+                MAX(CASE WHEN j.status LIKE 'In Transit%' OR j.status LIKE 'IN TRANSIT%' THEN 1 ELSE 0 END) AS is_in_transit,
+                MAX(" . $castMoney('j.' . $quote($jCodColName)) . ") AS cod_clean,
+                $jaMinTs
+            ")
+            ->groupBy('j.waybill_number');
+
+        // Base JOIN (no TRIM → magagamit ang index)
         $joinedBase = (clone $mo)
-            ->whereRaw("$moWaybill IS NOT NULL")
-            ->whereRaw("$trimFn($moWaybill) <> ''")
-            ->join('from_jnts as j', function ($join) use ($trimFn, $moWaybill) {
-                $join->on(DB::raw("$trimFn($moWaybill)"), '=', DB::raw("$trimFn(j.waybill_number)"));
+            ->whereNotNull($moWaybillCol)
+            ->where($moWaybillCol, '!=', '')
+            ->joinSub($jaAgg, 'ja', function ($join) use ($moWaybillCol) {
+                $join->on($moWaybillCol, '=', 'ja.wb'); // equality join → index-friendly
             });
 
-        // SHIPPED = count of distinct waybills present in j (any status)
-        $shippedRows = (clone $joinedBase)
-            ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS shipped_total")
+        // ======================
+        // SHIPPED + STATUS COUNTS (single pass with conditional DISTINCT)
+        // ======================
+        $shipAgg = (clone $joinedBase)
+            ->selectRaw("$selectKey,
+                COUNT(DISTINCT $moWaybillSql) AS shipped_total,
+                COUNT(DISTINCT CASE WHEN ja.is_delivered  = 1 THEN $moWaybillSql END) AS delivered_total,
+                COUNT(DISTINCT CASE WHEN ja.is_returned   = 1 THEN $moWaybillSql END) AS returned_total,
+                COUNT(DISTINCT CASE WHEN ja.is_for_return = 1 THEN $moWaybillSql END) AS for_return_total,
+                COUNT(DISTINCT CASE WHEN ja.is_in_transit = 1 THEN $moWaybillSql END) AS in_transit_total
+            ")
             ->groupByRaw($groupByKey)
             ->get();
 
-        $shippedMap = [];
-        foreach ($shippedRows as $r) {
+        $shippedMap = $deliveredMap = $returnedMap = $forReturnMap = $inTransitMap = [];
+        foreach ($shipAgg as $r) {
             $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $shippedMap[$k] = (int)($r->shipped_total ?? 0);
-        }
-
-        // DELIVERED / RETURNED / FOR RETURN / IN TRANSIT
-        $deliveredRows = (clone $joinedBase)
-            ->whereRaw("$jStatusNorm LIKE 'delivered%'")
-            ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS delivered_total")
-            ->groupByRaw($groupByKey)
-            ->get();
-
-        $returnedRows = (clone $joinedBase)
-            ->whereRaw("$jStatusNorm LIKE 'returned%'")
-            ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS returned_total")
-            ->groupByRaw($groupByKey)
-            ->get();
-
-        $forReturnRows = (clone $joinedBase)
-            ->whereRaw("$jStatusNorm LIKE 'forreturn%'")
-            ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS for_return_total")
-            ->groupByRaw($groupByKey)
-            ->get();
-
-        $inTransitRows = (clone $joinedBase)
-            ->whereRaw("$jStatusNorm LIKE 'intransit%'")
-            ->selectRaw("$selectKey, COUNT(DISTINCT $trimFn($moWaybill)) AS in_transit_total")
-            ->groupByRaw($groupByKey)
-            ->get();
-
-        $deliveredMap = $returnedMap = $forReturnMap = $inTransitMap = [];
-        foreach ($deliveredRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $shippedMap[$k]   = (int)($r->shipped_total   ?? 0);
             $deliveredMap[$k] = (int)($r->delivered_total ?? 0);
-        }
-        foreach ($returnedRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $returnedMap[$k] = (int)($r->returned_total ?? 0);
-        }
-        foreach ($forReturnRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $forReturnMap[$k] = (int)($r->for_return_total ?? 0);
-        }
-        foreach ($inTransitRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $inTransitMap[$k] = (int)($r->in_transit_total ?? 0);
+            $returnedMap[$k]  = (int)($r->returned_total  ?? 0);
+            $forReturnMap[$k] = (int)($r->for_return_total?? 0);
+            $inTransitMap[$k] = (int)($r->in_transit_total?? 0);
         }
 
         // ======================
-        // DELIVERED-ONLY base for Gross Sales, COGS, Items
+        // GROSS SALES (Delivered-only) — dedup by (group, waybill) then SUM cod
         // ======================
-        $deliveredBase = (clone $joinedBase)
-            ->whereRaw("$jStatusNorm LIKE 'delivered%'");
-
-        // GROSS SALES (Delivered-only)
-        $innerDistinct = (clone $deliveredBase)
-            ->selectRaw("DISTINCT $selectKey, $trimFn($moWaybill) AS wb, $castCOD AS cod_clean");
+        $innerDeliveredCod = (clone $joinedBase)
+            ->whereRaw('ja.is_delivered = 1')
+            ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX(ja.cod_clean) AS cod_clean")
+            ->groupByRaw("$groupByKey, wb");
 
         if ($AGGREGATE_RANGE) {
             $grossRows = DB::query()
-                ->fromSub($innerDistinct, 'd')
+                ->fromSub($innerDeliveredCod, 'd')
                 ->selectRaw("page_key, SUM(cod_clean) AS gross_sales")
                 ->groupBy('page_key')
                 ->get();
         } else {
             $grossRows = DB::query()
-                ->fromSub($innerDistinct, 'd')
+                ->fromSub($innerDeliveredCod, 'd')
                 ->selectRaw("day_key, page_key, SUM(cod_clean) AS gross_sales")
-                ->groupBy('day_key', 'page_key')
+                ->groupBy('day_key','page_key')
                 ->get();
         }
 
         $grossMap = [];
         foreach ($grossRows as $r) {
-            if ($AGGREGATE_RANGE) {
-                $grossMap[(string)$r->page_key] = (float)($r->gross_sales ?? 0);
-            } else {
-                $grossMap[(string)$r->day_key . '|' . (string)$r->page_key] = (float)($r->gross_sales ?? 0);
-            }
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $grossMap[$k] = (float)($r->gross_sales ?? 0);
         }
 
-        // ===== Sum of COD for ALL shipped (any status) =====
+        // ===== Sum of COD for ALL shipped (any status) — dedup by (group, waybill)
         $innerAllCod = (clone $joinedBase)
-            ->selectRaw("DISTINCT $selectKey, $trimFn($moWaybill) AS wb, $castCOD AS cod_clean");
+            ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX(ja.cod_clean) AS cod_clean")
+            ->groupByRaw("$groupByKey, wb");
 
         if ($AGGREGATE_RANGE) {
             $allCodRows = DB::query()
@@ -390,13 +350,16 @@ class SummaryOverallController extends Controller
 
         $allCodMap = [];
         foreach ($allCodRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key.'|'.(string)$r->page_key);
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
             $allCodMap[$k] = (float)($r->all_cod ?? 0);
         }
 
-        // COGS (Delivered-only)
-        $innerDeliveredItems = (clone $deliveredBase)
-            ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key");
+        // ======================
+        // COGS (Delivered-only) — unit cost at last order date per item
+        // ======================
+        $innerDeliveredItems = (clone $joinedBase)
+            ->whereRaw('ja.is_delivered = 1')
+            ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $moWaybillSql AS wb, $itemNorm AS item_key");
 
         $unitCostSub = "COALESCE((
             SELECT " . $castMoney($cogsUnitExpr) . "
@@ -417,22 +380,19 @@ class SummaryOverallController extends Controller
             $cogsRows = DB::query()
                 ->fromSub($innerDeliveredItems, 'd')
                 ->selectRaw("day_key, page_key, SUM($unitCostSub) AS cogs_total")
-                ->groupBy('day_key', 'page_key')
+                ->groupBy('day_key','page_key')
                 ->get();
         }
 
         $cogsMap = [];
         foreach ($cogsRows as $r) {
-            if ($AGGREGATE_RANGE) {
-                $cogsMap[(string)$r->page_key] = (float)($r->cogs_total ?? 0);
-            } else {
-                $cogsMap[(string)$r->day_key . '|' . (string)$r->page_key] = (float)($r->cogs_total ?? 0);
-            }
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $cogsMap[$k] = (float)($r->cogs_total ?? 0);
         }
 
-        // ==== Total Unit Cost for ALL shipped (for Projected COGS) ====
+        // ==== Total Unit Cost for ALL shipped (Projected COGS) ====
         $innerShippedItems = (clone $joinedBase)
-            ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key");
+            ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $moWaybillSql AS wb, $itemNorm AS item_key");
 
         if ($AGGREGATE_RANGE) {
             $shipUnitRows = DB::query()
@@ -450,13 +410,16 @@ class SummaryOverallController extends Controller
 
         $shipUnitCostMap = [];
         foreach ($shipUnitRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key.'|'.(string)$r->page_key);
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
             $shipUnitCostMap[$k] = (float)($r->unit_cost_sum ?? 0);
         }
 
+        // ======================
         // ITEMS + UNIT COST LISTS for UI (delivered-only)
-        $itemsBase = (clone $deliveredBase)
-            ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
+        // ======================
+        $itemsBase = (clone $joinedBase)
+            ->whereRaw('ja.is_delivered = 1')
+            ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $moWaybillSql AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
 
         if ($AGGREGATE_RANGE) {
             $groupedSub = DB::query()
@@ -503,30 +466,18 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // DELAY (avg days per unique waybill)
+        // DELAY (avg days per unique waybill) via ja.min_submit_ts
         // ======================
         if ($driver === 'mysql') {
-            $jSubmitTs   = "COALESCE(
-                STR_TO_DATE($jSubmitExpr, '%Y-%m-%d %H:%i:%s'),
-                STR_TO_DATE($jSubmitExpr, '%Y/%m/%d %H:%i:%s'),
-                STR_TO_DATE($jSubmitExpr, '%Y-%m-%d'),
-                j.`created_at`
-            )";
-            $jSubmitDate = "DATE($jSubmitTs)";
+            $jSubmitDate = "DATE(ja.min_submit_ts)";
             $delayDays   = "DATEDIFF($jSubmitDate, $dateExpr)";
-        } else { // pgsql
-            $jSubmitTs   = "COALESCE(
-                TO_TIMESTAMP(NULLIF($jSubmitExpr,''), 'YYYY-MM-DD HH24:MI:SS'),
-                TO_TIMESTAMP(NULLIF($jSubmitExpr,''), 'YYYY/MM/DD HH24:MI:SS'),
-                TO_TIMESTAMP(NULLIF($jSubmitExpr,''), 'YYYY-MM-DD'),
-                j.\"created_at\"
-            )";
-            $jSubmitDate = "DATE($jSubmitTs)";
+        } else {
+            $jSubmitDate = "DATE(ja.min_submit_ts)";
             $delayDays   = "($jSubmitDate - $dateExpr)";
         }
 
         $delayRaw = (clone $joinedBase)
-            ->selectRaw("$selectKey, $trimFn($moWaybill) AS wb, $delayDays AS delay_days");
+            ->selectRaw("$selectKey, $moWaybillSql AS wb, $delayDays AS delay_days");
 
         if ($AGGREGATE_RANGE) {
             $delayDistinct = DB::query()
@@ -690,7 +641,7 @@ class SummaryOverallController extends Controller
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
                 $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
-                $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null; // CHANGED
+                $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null;
                 $hold           = $proc - $shipped;
 
                 $rows[] = [
@@ -738,8 +689,7 @@ class SummaryOverallController extends Controller
             });
         }
 
-        // ===== Actual RTS: compute from the SAME rows shown in the table
-        // Filter rows with In-Transit% < 3%. Denominator = Delivered + Returned + For Return.
+        // ===== Actual RTS (same logic) =====
         $actualRtsPct = null;
         if (!$AGGREGATE_RANGE) {
             $num = 0; // Σ(Returned + For Return)
@@ -759,7 +709,7 @@ class SummaryOverallController extends Controller
             $actualRtsPct = $den > 0 ? ($num / $den) * 100.0 : null;
         }
 
-        // ===== Projected Net Profit per day (filtered page only; only when In-Transit% > 3%)
+        // ===== Projected Net Profit per day (filtered page only; when In-Transit% > 3%) =====
         if (!$AGGREGATE_RANGE && $actualRtsPct !== null) {
             $rtsFactor = 1.0 - ($actualRtsPct / 100.0);
             foreach ($rows as &$r) {
@@ -773,7 +723,7 @@ class SummaryOverallController extends Controller
                     $unitSumShipped = (float)($shipUnitCostMap[$rowKey] ?? 0.0);
 
                     $projSales  = $allCod * $rtsFactor;
-                    $projCodFee = $projSales * $COD_FEE_RATE;        // 1.5%
+                    $projCodFee = $projSales * $COD_FEE_RATE;
                     $projCogs   = $unitSumShipped * $rtsFactor;
 
                     $r['projected_net_profit'] = $projSales - $adsp - $shipFee - $projCodFee - $projCogs;
@@ -833,11 +783,15 @@ class SummaryOverallController extends Controller
             $totalItemsDisplay = '—'; $totalUnitCostsArr = []; $totalPageLabel = 'TOTAL';
             if (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') {
                 $totalPageLabel = $pageName;
-                $itemsBaseTotals = (clone $deliveredBase)
-                    ->selectRaw("DISTINCT $pageExpr AS page_key, $dateExpr AS order_date, $trimFn($moWaybill) AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
+
+                $itemsBaseTotals = (clone $joinedBase)
+                    ->whereRaw('ja.is_delivered = 1')
+                    ->selectRaw("DISTINCT $pageExpr AS page_key, $dateExpr AS order_date, $moWaybillSql AS wb, $itemNorm AS item_key, $itemLabel AS item_label");
+
                 $groupedTotals = DB::query()->fromSub($itemsBaseTotals,'x')
                     ->selectRaw("page_key, item_key, MIN(item_label) AS item_label, COUNT(DISTINCT wb) AS qty, MAX(order_date) AS last_order_date")
                     ->groupBy('page_key','item_key');
+
                 $itemsTotalsWithCost = DB::query()->fromSub($groupedTotals,'d')
                     ->selectRaw("page_key, item_key, item_label, qty, COALESCE((
                         SELECT " . $castMoney($cogsUnitExpr) . "
@@ -887,7 +841,7 @@ class SummaryOverallController extends Controller
                 'tcpr'            => $total_tcpr,
                 'hold'            => ($sum['proceed'] - $sum['shipped']),
                 'is_total'        => true,
-                'projected_net_profit' => null, // totals show —
+                'projected_net_profit' => null,
             ];
         }
 
