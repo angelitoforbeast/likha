@@ -342,7 +342,7 @@ class SummaryOverallController extends Controller
         $deliveredBase = (clone $joinedBase)
             ->whereRaw("$jStatusNorm LIKE 'delivered%'");
 
-        // GROSS SALES
+        // GROSS SALES (Delivered-only)
         $innerDistinct = (clone $deliveredBase)
             ->selectRaw("DISTINCT $selectKey, $trimFn($moWaybill) AS wb, $castCOD AS cod_clean");
 
@@ -367,6 +367,30 @@ class SummaryOverallController extends Controller
             } else {
                 $grossMap[(string)$r->day_key . '|' . (string)$r->page_key] = (float)($r->gross_sales ?? 0);
             }
+        }
+
+        // ===== Sum of COD for ALL shipped (any status) =====
+        $innerAllCod = (clone $joinedBase)
+            ->selectRaw("DISTINCT $selectKey, $trimFn($moWaybill) AS wb, $castCOD AS cod_clean");
+
+        if ($AGGREGATE_RANGE) {
+            $allCodRows = DB::query()
+                ->fromSub($innerAllCod, 'd')
+                ->selectRaw("page_key, SUM(cod_clean) AS all_cod")
+                ->groupBy('page_key')
+                ->get();
+        } else {
+            $allCodRows = DB::query()
+                ->fromSub($innerAllCod, 'd')
+                ->selectRaw("day_key, page_key, SUM(cod_clean) AS all_cod")
+                ->groupBy('day_key','page_key')
+                ->get();
+        }
+
+        $allCodMap = [];
+        foreach ($allCodRows as $r) {
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key.'|'.(string)$r->page_key);
+            $allCodMap[$k] = (float)($r->all_cod ?? 0);
         }
 
         // COGS (Delivered-only)
@@ -526,7 +550,8 @@ class SummaryOverallController extends Controller
             array_keys($grossMap),
             array_keys($cogsMap),
             array_keys($itemsListMap),
-            array_keys($avgDelayMap)
+            array_keys($avgDelayMap),
+            array_keys($allCodMap) // include all COD keys
         ));
 
         $rangeLabel = '—';
@@ -539,7 +564,7 @@ class SummaryOverallController extends Controller
         $rows = [];
         foreach ($keys as $key) {
             $adspent = $adsMap[$key] ?? 0.0;
-            if ($adspent <= 0) continue;
+            if ($adspent <= 0) continue; // UI shows only rows with ad spend
 
             // Items display + unit costs
             $itemsDisplay = null;
@@ -569,8 +594,9 @@ class SummaryOverallController extends Controller
                 $returned  = $returnedMap[$key]    ?? 0;
                 $forRet    = $forReturnMap[$key]   ?? 0;
                 $inTrans   = $inTransitMap[$key]   ?? 0;
-                $gross     = $grossMap[$key]       ?? 0.0;
-                $cogs      = $cogsMap[$key]        ?? 0.0;
+                $gross     = $grossMap[$key]       ?? 0.0; // delivered-only
+                $cogs      = $cogsMap[$key]        ?? 0.0; // delivered-only
+                $all_cod   = $allCodMap[$key]      ?? 0.0; // ALL shipped
                 $avgDelay  = $avgDelayMap[$key]    ?? null;
 
                 $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
@@ -581,7 +607,7 @@ class SummaryOverallController extends Controller
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
                 $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
-                $net_profit_pct = $gross > 0 ? ($net_profit / $gross) * 100.0 : null;
+                $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null; // denominator = Σ COD (all shipped)
                 $hold           = $proc - $shipped;
 
                 $rows[] = [
@@ -612,6 +638,7 @@ class SummaryOverallController extends Controller
                     'tcpr'            => $tcpr,
                     'hold'            => $hold,
                     'is_total'        => false,
+                    'all_cod'         => $all_cod, // used in totals
                 ];
             } else {
                 [$d, $p] = explode('|', $key, 2);
@@ -624,8 +651,9 @@ class SummaryOverallController extends Controller
                 $returned  = $returnedMap[$key]    ?? 0;
                 $forRet    = $forReturnMap[$key]   ?? 0;
                 $inTrans   = $inTransitMap[$key]   ?? 0;
-                $gross     = $grossMap[$key]       ?? 0.0;
-                $cogs      = $cogsMap[$key]        ?? 0.0;
+                $gross     = $grossMap[$key]       ?? 0.0; // delivered-only
+                $cogs      = $cogsMap[$key]        ?? 0.0; // delivered-only
+                $all_cod   = $allCodMap[$key]      ?? 0.0; // ALL shipped
                 $avgDelay  = $avgDelayMap[$key]    ?? null;
 
                 $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
@@ -636,7 +664,7 @@ class SummaryOverallController extends Controller
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
                 $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
-                $net_profit_pct = $gross > 0 ? ($net_profit / $gross) * 100.0 : null;
+                $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null; // CHANGED here too
                 $hold           = $proc - $shipped;
 
                 $rows[] = [
@@ -667,6 +695,7 @@ class SummaryOverallController extends Controller
                     'tcpr'            => $tcpr,
                     'hold'            => $hold,
                     'is_total'        => false,
+                    'all_cod'         => $all_cod, // used in totals
                 ];
             }
         }
@@ -691,7 +720,7 @@ class SummaryOverallController extends Controller
             $den = 0; // Σ(Delivered + Returned + For Return)
 
             foreach ($rows as $r) {
-                if (!empty($r['is_total'])) continue; // none yet, but keep for safety
+                if (!empty($r['is_total'])) continue;
                 $inPct = $r['in_transit_pct'] ?? null;
                 if ($inPct !== null && $inPct < 3.0) {
                     $ret = (int)($r['returned']   ?? 0);
@@ -711,6 +740,7 @@ class SummaryOverallController extends Controller
                 'orders' => 0, 'proceed' => 0, 'cannot_proceed' => 0, 'odz' => 0,
                 'shipped' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0, 'in_transit' => 0,
                 'gross_sales' => 0.0, 'cogs' => 0.0,
+                'all_cod' => 0.0, // NEW
             ];
             $delayWeightedSum = 0.0;
             $delayShipCount   = 0;
@@ -728,6 +758,7 @@ class SummaryOverallController extends Controller
                 $sum['in_transit']     += (int)  ($r['in_transit'] ?? 0);
                 $sum['gross_sales']    += (float)($r['gross_sales'] ?? 0);
                 $sum['cogs']           += (float)($r['cogs'] ?? 0);
+                $sum['all_cod']        += (float)($r['all_cod'] ?? 0); // NEW
 
                 if (isset($r['avg_delay_days']) && $r['avg_delay_days'] !== null && ($r['shipped'] ?? 0) > 0 && empty($r['is_total'])) {
                     $delayWeightedSum += (float)$r['avg_delay_days'] * (int)$r['shipped'];
@@ -743,7 +774,7 @@ class SummaryOverallController extends Controller
             $total_shipping_fee   = $SHIPPING_PER_SHIPPED * $sum['shipped'];
 
             $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - $sum['cogs'];
-            $total_net_profit_pct = $sum['gross_sales'] > 0 ? ($total_net_profit / $sum['gross_sales']) * 100.0 : null;
+            $total_net_profit_pct = $sum['all_cod'] > 0 ? ($total_net_profit / $sum['all_cod']) * 100.0 : null; // CHANGED
 
             $total_avg_delay      = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
 
