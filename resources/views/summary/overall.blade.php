@@ -122,10 +122,8 @@
                   <span class="px-2 py-0.5 rounded text-[10px]" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span>
                 </td>
                 <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded text-[10px]"
-                        :class="netClass(row.net_profit_pct)"
-                        :style="netStyle(row.net_profit_pct)"
-                        x-text="percent(row.net_profit_pct)"></span>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold" :class="netClass(row.net_profit_pct)" :style="netStyle(row.net_profit_pct)" x-text="percent(row.net_profit_pct)"></span>
+
                 </td>
               </tr>
             </template>

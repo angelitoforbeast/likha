@@ -42,6 +42,7 @@ class SummaryOverallController extends Controller
 
         // === CONSTS ===
         $SHIPPING_PER_SHIPPED = 37.0;
+        $COD_FEE_RATE         = 0.015; // 1.5%
 
         // helpers
         $quote = fn(string $col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
@@ -265,7 +266,7 @@ class SummaryOverallController extends Controller
 
         $odzMap = [];
         foreach ($odzRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . "|" . (string)$r->page_key);
             $odzMap[$k] = (int)($r->odz_total ?? 0);
         }
 
@@ -600,14 +601,15 @@ class SummaryOverallController extends Controller
                 $avgDelay  = $avgDelayMap[$key]    ?? null;
 
                 $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
+                $cod_fee        = $gross * $COD_FEE_RATE; // NEW
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
                 $proceed_cpp    = $proc    > 0 ? ($adspent / $proc)   * 1.0 : null;
                 $rts_pct        = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
-                $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
-                $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null; // denominator = Σ COD (all shipped)
+                $net_profit     = $gross - $adspent - $shipping_fee - $cogs - $cod_fee; // UPDATED
+                $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null;
                 $hold           = $proc - $shipped;
 
                 $rows[] = [
@@ -626,6 +628,7 @@ class SummaryOverallController extends Controller
                     'gross_sales'     => $gross,
                     'shipping_fee'    => $shipping_fee,
                     'cogs'            => $cogs,
+                    'cod_fee'         => $cod_fee,        // NEW
                     'net_profit'      => $net_profit,
                     'net_profit_pct'  => $net_profit_pct,
                     'returned'        => $returned,
@@ -657,14 +660,15 @@ class SummaryOverallController extends Controller
                 $avgDelay  = $avgDelayMap[$key]    ?? null;
 
                 $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
+                $cod_fee        = $gross * $COD_FEE_RATE; // NEW
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
                 $proceed_cpp    = $proc    > 0 ? ($adspent / $proc)   * 1.0 : null;
                 $rts_pct        = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
-                $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
-                $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null; // CHANGED here too
+                $net_profit     = $gross - $adspent - $shipping_fee - $cogs - $cod_fee; // UPDATED
+                $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null;
                 $hold           = $proc - $shipped;
 
                 $rows[] = [
@@ -683,6 +687,7 @@ class SummaryOverallController extends Controller
                     'gross_sales'     => $gross,
                     'shipping_fee'    => $shipping_fee,
                     'cogs'            => $cogs,
+                    'cod_fee'         => $cod_fee,        // NEW
                     'net_profit'      => $net_profit,
                     'net_profit_pct'  => $net_profit_pct,
                     'returned'        => $returned,
@@ -712,13 +717,11 @@ class SummaryOverallController extends Controller
             });
         }
 
-        // ===== Actual RTS: compute from the SAME rows that are shown in the table
-        // Filter rows with In-Transit% < 3%. Denominator = Delivered + Returned + For Return.
+        // ===== Actual RTS: compute from the SAME rows shown (filter In-Transit% < 3%)
         $actualRtsPct = null;
         if (!$AGGREGATE_RANGE) {
             $num = 0; // Σ(Returned + For Return)
             $den = 0; // Σ(Delivered + Returned + For Return)
-
             foreach ($rows as $r) {
                 if (!empty($r['is_total'])) continue;
                 $inPct = $r['in_transit_pct'] ?? null;
@@ -740,7 +743,8 @@ class SummaryOverallController extends Controller
                 'orders' => 0, 'proceed' => 0, 'cannot_proceed' => 0, 'odz' => 0,
                 'shipped' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0, 'in_transit' => 0,
                 'gross_sales' => 0.0, 'cogs' => 0.0,
-                'all_cod' => 0.0, // NEW
+                'cod_fee' => 0.0, // NEW
+                'all_cod' => 0.0,
             ];
             $delayWeightedSum = 0.0;
             $delayShipCount   = 0;
@@ -758,7 +762,8 @@ class SummaryOverallController extends Controller
                 $sum['in_transit']     += (int)  ($r['in_transit'] ?? 0);
                 $sum['gross_sales']    += (float)($r['gross_sales'] ?? 0);
                 $sum['cogs']           += (float)($r['cogs'] ?? 0);
-                $sum['all_cod']        += (float)($r['all_cod'] ?? 0); // NEW
+                $sum['cod_fee']        += (float)($r['cod_fee'] ?? 0); // NEW
+                $sum['all_cod']        += (float)($r['all_cod'] ?? 0);
 
                 if (isset($r['avg_delay_days']) && $r['avg_delay_days'] !== null && ($r['shipped'] ?? 0) > 0 && empty($r['is_total'])) {
                     $delayWeightedSum += (float)$r['avg_delay_days'] * (int)$r['shipped'];
@@ -773,8 +778,9 @@ class SummaryOverallController extends Controller
             $total_tcpr           = $sum['orders']  > 0 ? (1 - ($sum['proceed'] / $sum['orders'])) * 100.0 : null;
             $total_shipping_fee   = $SHIPPING_PER_SHIPPED * $sum['shipped'];
 
-            $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - $sum['cogs'];
-            $total_net_profit_pct = $sum['all_cod'] > 0 ? ($total_net_profit / $sum['all_cod']) * 100.0 : null; // CHANGED
+            // UPDATED: subtract cod_fee too
+            $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - $sum['cogs'] - $sum['cod_fee'];
+            $total_net_profit_pct = $sum['all_cod'] > 0 ? ($total_net_profit / $sum['all_cod']) * 100.0 : null;
 
             $total_avg_delay      = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
 
@@ -824,6 +830,7 @@ class SummaryOverallController extends Controller
                 'gross_sales'     => $sum['gross_sales'],
                 'shipping_fee'    => $total_shipping_fee,
                 'cogs'            => $sum['cogs'],
+                'cod_fee'         => $sum['cod_fee'],   // NEW (available if you want to show)
                 'net_profit'      => $total_net_profit,
                 'net_profit_pct'  => $total_net_profit_pct,
                 'returned'        => $sum['returned'],
