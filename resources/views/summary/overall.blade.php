@@ -77,7 +77,7 @@
       <div class="overflow-x-visible">
         <!-- LIMITED COLUMNS -->
         <table class="min-w-full w-full text-xs table-fixed" x-show="!isCEO || (isCEO && !showAllColumns)">
-          <thead class="bg-gray-50">
+          <thead class="bg-gray-50 sticky top-16 z-20">
             <tr class="text-left text-gray-600">
               <th class="px-2 py-2">Date</th>
               <th class="px-2 py-2">Page</th>
@@ -93,12 +93,13 @@
               <th class="px-2 py-2 text-right">In Transit%</th>
               <th class="px-2 py-2 text-right">TCPR</th>
               <th class="px-2 py-2 text-right">Net Profit(%)</th>
+              <th class="px-2 py-2 text-right">Projected Net Profit</th>
             </tr>
           </thead>
           <tbody>
             <template x-if="rowsForDisplay(data.ads_daily).length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="14">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="15">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -115,16 +116,19 @@
                 <td class="px-2 py-2 text-right" x-text="days(row.avg_delay_days)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.hold)"></td>
                 <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded text-[10px]" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span>
+                  <span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span>
                 </td>
                 <td class="px-2 py-2 text-right" x-text="percent(row.in_transit_pct)"></td>
                 <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded text-[10px]" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span>
+                  <span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span>
                 </td>
                 <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded text-[10px] font-bold" :class="netClass(row.net_profit_pct)" :style="netStyle(row.net_profit_pct)" x-text="percent(row.net_profit_pct)"></span>
-
+                  <span class="px-2 py-0.5 rounded font-bold"
+                        :class="netClass(row.net_profit_pct)"
+                        :style="netStyle(row.net_profit_pct)"
+                        x-text="percent(row.net_profit_pct)"></span>
                 </td>
+                <td class="px-2 py-2 text-right" x-text="(filters.page_name !== 'all') ? moneyOrDash(row.projected_net_profit) : '—'"></td>
               </tr>
             </template>
           </tbody>
@@ -132,7 +136,7 @@
 
         <!-- FULL COLUMNS (CEO) -->
         <table class="min-w-full w-full text-xs table-fixed" x-show="isCEO && showAllColumns">
-          <thead class="bg-gray-50">
+          <thead class="bg-gray-50 sticky top-16 z-20">
             <tr class="text-left text-gray-600">
               <th class="px-2 py-2">Date</th>
               <th class="px-2 py-2">Page</th>
@@ -160,12 +164,13 @@
               <th class="px-2 py-2 text-right">For Return</th>
               <th class="px-2 py-2 text-right">In Transit</th>
               <th class="px-2 py-2 text-right">CPP</th>
+              <th class="px-2 py-2 text-right">Projected Net Profit</th>
             </tr>
           </thead>
           <tbody>
             <template x-if="rowsForDisplay(data.ads_daily).length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="26">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="27">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -181,11 +186,11 @@
                 <td class="px-2 py-2 text-right" x-text="num(row.shipped)"></td>
                 <td class="px-2 py-2 text-right" x-text="days(row.avg_delay_days)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.hold)"></td>
-                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded text-[10px]" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span></td>
+                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span></td>
                 <td class="px-2 py-2 text-right" x-text="percent(row.in_transit_pct)"></td>
-                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded text-[10px]" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span></td>
+                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span></td>
                 <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded text-[10px]"
+                  <span class="px-2 py-0.5 rounded font-bold"
                         :class="netClass(row.net_profit_pct)"
                         :style="netStyle(row.net_profit_pct)"
                         x-text="percent(row.net_profit_pct)"></span>
@@ -203,6 +208,7 @@
                 <td class="px-2 py-2 text-right" x-text="num(row.for_return)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.in_transit)"></td>
                 <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.cpp)"></td>
+                <td class="px-2 py-2 text-right" x-text="(filters.page_name !== 'all') ? moneyOrDash(row.projected_net_profit) : '—'"></td>
               </tr>
             </template>
           </tbody>
@@ -319,8 +325,10 @@
         },
 
         async init(){
-          const now   = new Date();
-          const start = new Date(now.getFullYear(), now.getMonth(), 1);
+          // Default to last 30 days (including today)
+          const now = new Date();
+          const start = new Date(now);
+          start.setDate(now.getDate() - 29); // last 30 days inclusive
           this.filters.start_date = this.ymd(start);
           this.filters.end_date   = this.ymd(now);
           this.setDateLabel();
