@@ -823,10 +823,11 @@ class SummaryOverallController extends Controller
                 $projCodFee  = $projSales * $COD_FEE_RATE;
 
                 $r['projected_net_profit'] = $projSales - $adsp - $projShipFee - $projCodFee - $projCogs;
-                $den = (float)($r['all_cod'] ?? 0.0);          // same denominator: total COD of this row
-    $r['projected_net_profit_pct'] = ($den > 0)
-        ? ($r['projected_net_profit'] / $den) * 100.0
-        : null;
+                $den = (float)($projSales ?? 0.0);
+$r['projected_net_profit_pct'] = ($den > 0)
+    ? ($r['projected_net_profit'] / $den) * 100.0
+    : null;
+
             }
             unset($r);
         }

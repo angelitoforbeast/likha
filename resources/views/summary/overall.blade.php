@@ -75,66 +75,69 @@
       </div>
 
       <div class="overflow-x-visible">
-        <!-- LIMITED COLUMNS -->
-        <table class="min-w-full w-full text-xs table-fixed" x-show="!isCEO || (isCEO && !showAllColumns)">
-          <thead class="bg-gray-50 sticky top-16 z-20">
-            <tr class="text-left text-gray-600">
-              <th class="px-2 py-2">Date</th>
-              <th class="px-2 py-2">Page</th>
-              <th class="px-2 py-2">Items</th>
-              <th class="px-2 py-2 text-right">Unit Cost</th>
-              <th class="px-2 py-2 text-right">Adspent</th>
-              <th class="px-2 py-2 text-right">Orders</th>
-              <th class="px-2 py-2 text-right">Proceed CPP</th>
-              <th class="px-2 py-2 text-right">Shipped</th>
-              <th class="px-2 py-2 text-right">Delay</th>
-              <th class="px-2 py-2 text-right">Hold</th>
-              <th class="px-2 py-2 text-right">RTS%</th>
-              <th class="px-2 py-2 text-right">In Transit%</th>
-              <th class="px-2 py-2 text-right">TCPR</th>
-              <th class="px-2 py-2 text-right">Net Profit(%)</th>
-              <th class="px-2 py-2 text-right">Projected Net Profit</th>
-              <th class="px-2 py-2 text-right">Projected Net Profit(%)</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template x-if="rowsForDisplay(data.ads_daily).length===0">
-              <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="16">No data for selected filters.</td>
-              </tr>
-            </template>
+        <!-- LIMITED COLUMNS (no Projected columns here) -->
+        <!-- LIMITED COLUMNS (everyone sees this, including non-CEO) -->
+<table class="min-w-full w-full text-xs table-fixed" x-show="!isCEO || (isCEO && !showAllColumns)">
+  <thead class="bg-gray-50 sticky top-16 z-20">
+    <tr class="text-left text-gray-600">
+      <th class="px-2 py-2">Date</th>
+      <th class="px-2 py-2">Page</th>
+      <th class="px-2 py-2">Items</th>
+      <th class="px-2 py-2 text-right">Unit Cost</th>
+      <th class="px-2 py-2 text-right">Adspent</th>
+      <th class="px-2 py-2 text-right">Orders</th>
+      <th class="px-2 py-2 text-right">Proceed CPP</th>
+      <th class="px-2 py-2 text-right">Shipped</th>
+      <th class="px-2 py-2 text-right">Delay</th>
+      <th class="px-2 py-2 text-right">Hold</th>
+      <th class="px-2 py-2 text-right">RTS%</th>
+      <th class="px-2 py-2 text-right">In Transit%</th>
+      <th class="px-2 py-2 text-right">TCPR</th>
+      <th class="px-2 py-2 text-right">Net Profit(%)</th>
+      <!-- NEW: Projected Net Profit(%) visible to all -->
+      <th class="px-2 py-2 text-right">Projected Net Profit(%)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <template x-if="rowsForDisplay(data.ads_daily).length===0">
+      <tr class="border-t">
+        <td class="px-3 py-3 text-gray-500" colspan="15">No data for selected filters.</td>
+      </tr>
+    </template>
 
-            <template x-for="row in rowsForDisplay(data.ads_daily)" :key="(row.date ?? '') + '|' + (row.page ?? '') + '|' + (row.is_total?'1':'0')">
-              <tr class="border-t" :class="row.is_total ? 'bg-gray-50 font-semibold' : 'hover:bg-gray-50'">
-                <td class="px-2 py-2" x-text="row.date"></td>
-                <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
-                <td class="px-2 py-2"><span x-text="row.items_display || '—'"></span></td>
-                <td class="px-2 py-2 text-right"><span x-text="moneyList(row.unit_costs)"></span></td>
-                <td class="px-2 py-2 text-right" x-text="money(row.adspent)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.orders)"></td>
-                <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.proceed_cpp)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.shipped)"></td>
-                <td class="px-2 py-2 text-right" x-text="days(row.avg_delay_days)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.hold)"></td>
-                <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span>
-                </td>
-                <td class="px-2 py-2 text-right" x-text="percent(row.in_transit_pct)"></td>
-                <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span>
-                </td>
-                <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded font-bold"
-                        :class="netClass(row.net_profit_pct)"
-                        :style="netStyle(row.net_profit_pct)"
-                        x-text="percent(row.net_profit_pct)"></span>
-                </td>
-                <td class="px-2 py-2 text-right" x-text="(filters.page_name !== 'all') ? moneyOrDash(row.projected_net_profit) : '—'"></td>
-                <td class="px-2 py-2 text-right" x-text="(filters.page_name !== 'all') ? percent(projectedPct(row)) : '—'"></td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
+    <template x-for="row in rowsForDisplay(data.ads_daily)" :key="(row.date ?? '') + '|' + (row.page ?? '') + '|' + (row.is_total?'1':'0')">
+      <tr class="border-t" :class="row.is_total ? 'bg-gray-50 font-semibold' : 'hover:bg-gray-50'">
+        <td class="px-2 py-2" x-text="row.date"></td>
+        <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
+        <td class="px-2 py-2"><span x-text="row.items_display || '—'"></span></td>
+        <td class="px-2 py-2 text-right"><span x-text="moneyList(row.unit_costs)"></span></td>
+        <td class="px-2 py-2 text-right" x-text="money(row.adspent)"></td>
+        <td class="px-2 py-2 text-right" x-text="num(row.orders)"></td>
+        <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.proceed_cpp)"></td>
+        <td class="px-2 py-2 text-right" x-text="num(row.shipped)"></td>
+        <td class="px-2 py-2 text-right" x-text="days(row.avg_delay_days)"></td>
+        <td class="px-2 py-2 text-right" x-text="num(row.hold)"></td>
+        <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span></td>
+        <td class="px-2 py-2 text-right" x-text="percent(row.in_transit_pct)"></td>
+        <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span></td>
+        <td class="px-2 py-2 text-right">
+          <span class="px-2 py-0.5 rounded font-bold"
+                :class="netClass(row.net_profit_pct)"
+                :style="netStyle(row.net_profit_pct)"
+                x-text="percent(row.net_profit_pct)"></span>
+        </td>
+        <!-- Projected Net Profit(%) with conditional formatting -->
+        <td class="px-2 py-2 text-right">
+          <span class="px-2 py-0.5 rounded font-bold"
+                :class="netClass(projectedPct(row))"
+                :style="netStyle(projectedPct(row))"
+                x-text="percent(projectedPct(row))"></span>
+        </td>
+      </tr>
+    </template>
+  </tbody>
+</table>
+
 
         <!-- FULL COLUMNS (CEO) -->
         <table class="min-w-full w-full text-xs table-fixed" x-show="isCEO && showAllColumns">
@@ -212,7 +215,17 @@
                 <td class="px-2 py-2 text-right" x-text="num(row.in_transit)"></td>
                 <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.cpp)"></td>
                 <td class="px-2 py-2 text-right" x-text="(filters.page_name !== 'all') ? moneyOrDash(row.projected_net_profit) : '—'"></td>
-                <td class="px-2 py-2 text-right" x-text="(filters.page_name !== 'all') ? percent(projectedPct(row)) : '—'"></td>
+
+                <!-- Projected Net Profit(%) with same styling as Net Profit(%) -->
+                <td class="px-2 py-2 text-right">
+                  <template x-if="filters.page_name !== 'all'">
+                    <span class="px-2 py-0.5 rounded font-bold"
+                          :class="netClass(projectedPct(row))"
+                          :style="netStyle(projectedPct(row))"
+                          x-text="percent(projectedPct(row))"></span>
+                  </template>
+                  <template x-if="filters.page_name === 'all'">—</template>
+                </td>
               </tr>
             </template>
           </tbody>
@@ -261,15 +274,15 @@
           return list.map(v => this.money(v)).join(', ');
         },
 
-        // NEW: compute Projected Net Profit (%)
+        // Projected Net Profit (%) — same denominator as Net Profit(%): all_cod
         projectedPct(row){
-          // use precomputed value if backend provided it
+          // 1) use precomputed value from backend if present (e.g., Total row)
           const pre = row?.projected_net_profit_pct;
-          if (pre != null && !isNaN(pre)) return pre;
+          if (pre != null && !isNaN(pre)) return Number(pre);
 
-          // fallback: compute from projected_net_profit / proceed_cod
-          const num = row?.projected_net_profit;
-          const den = row?.proceed_cod;
+          // 2) fallback: (Projected NP OR Net Profit) / all_cod * 100
+          const num = (row?.projected_net_profit ?? row?.net_profit);
+          const den = row?.all_cod;
           if (num == null || isNaN(num)) return null;
           if (den == null || isNaN(den) || Number(den) === 0) return null;
           return (Number(num) / Number(den)) * 100.0;
@@ -326,7 +339,7 @@
           const params = new URLSearchParams({
             page_name: this.filters.page_name || 'all',
             start_date: this.filters.start_date || '',
-            end_date: this.filters.end_date || ''
+            end_date: this.filters.end_date   || ''
           });
           const res  = await fetch('{{ route('summary.overall.data') }}?'+params.toString());
           const json = await res.json();
