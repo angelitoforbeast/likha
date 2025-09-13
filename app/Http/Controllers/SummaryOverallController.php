@@ -758,7 +758,7 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ===== Projected Net Profit per day — always compute (even when shipped = 0)
+        // ===== Projected Net Profit per day — APPLY NEW CONDITIONS =====
         if (!$AGGREGATE_RANGE) {
             $rtsFactor = 1.0;
             if ($effectiveRtsPct !== null) {
@@ -774,6 +774,23 @@ class SummaryOverallController extends Controller
                 $grossRow     = (float)($r['gross_sales'] ?? 0.0);
                 $proc         = (int)($r['proceed'] ?? 0);
                 $adsp         = (float)($r['adspent'] ?? 0.0);
+                $cogsRow      = (float)($r['cogs'] ?? 0.0);
+                $inTransitPct = $r['in_transit_pct'] ?? null; // may be null if shipped = 0
+
+                // === NEW CONDITIONS ===
+                // 1) shipped > 0 AND in_transit_pct > 3%
+                // 2) shipped == 0 AND proceed > 0
+                $compute = false;
+                if ($shippedRow > 0 && $inTransitPct !== null && $inTransitPct > 3.0) {
+                    $compute = true;
+                } elseif ($shippedRow === 0 && $proc > 0) {
+                    $compute = true;
+                }
+
+                if (!$compute) {
+                    $r['projected_net_profit'] = null;
+                    continue;
+                }
 
                 // avg COD per order (row-level → global → default)
                 if ($shippedRow > 0) {
@@ -787,7 +804,6 @@ class SummaryOverallController extends Controller
                 }
 
                 // avg Unit Cost per delivered (row-level → global → default)
-                $cogsRow = (float)($r['cogs'] ?? 0.0);
                 if ($deliveredRow > 0) {
                     $avgUCperDelivered = $cogsRow / $deliveredRow;
                 } elseif ($globalAvgUnitCostPerDelivered !== null) {
