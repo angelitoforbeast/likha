@@ -94,12 +94,13 @@
               <th class="px-2 py-2 text-right">TCPR</th>
               <th class="px-2 py-2 text-right">Net Profit(%)</th>
               <th class="px-2 py-2 text-right">Projected Net Profit</th>
+              <th class="px-2 py-2 text-right">Projected Net Profit(%)</th>
             </tr>
           </thead>
           <tbody>
             <template x-if="rowsForDisplay(data.ads_daily).length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="15">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="16">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -129,6 +130,7 @@
                         x-text="percent(row.net_profit_pct)"></span>
                 </td>
                 <td class="px-2 py-2 text-right" x-text="(filters.page_name !== 'all') ? moneyOrDash(row.projected_net_profit) : '—'"></td>
+                <td class="px-2 py-2 text-right" x-text="(filters.page_name !== 'all') ? percent(projectedPct(row)) : '—'"></td>
               </tr>
             </template>
           </tbody>
@@ -165,12 +167,13 @@
               <th class="px-2 py-2 text-right">In Transit</th>
               <th class="px-2 py-2 text-right">CPP</th>
               <th class="px-2 py-2 text-right">Projected Net Profit</th>
+              <th class="px-2 py-2 text-right">Projected Net Profit(%)</th>
             </tr>
           </thead>
           <tbody>
             <template x-if="rowsForDisplay(data.ads_daily).length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="27">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="28">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -209,6 +212,7 @@
                 <td class="px-2 py-2 text-right" x-text="num(row.in_transit)"></td>
                 <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.cpp)"></td>
                 <td class="px-2 py-2 text-right" x-text="(filters.page_name !== 'all') ? moneyOrDash(row.projected_net_profit) : '—'"></td>
+                <td class="px-2 py-2 text-right" x-text="(filters.page_name !== 'all') ? percent(projectedPct(row)) : '—'"></td>
               </tr>
             </template>
           </tbody>
@@ -255,6 +259,20 @@
         moneyList(list){
           if (!Array.isArray(list) || list.length===0) return '—';
           return list.map(v => this.money(v)).join(', ');
+        },
+
+        // NEW: compute Projected Net Profit (%)
+        projectedPct(row){
+          // use precomputed value if backend provided it
+          const pre = row?.projected_net_profit_pct;
+          if (pre != null && !isNaN(pre)) return pre;
+
+          // fallback: compute from projected_net_profit / proceed_cod
+          const num = row?.projected_net_profit;
+          const den = row?.proceed_cod;
+          if (num == null || isNaN(num)) return null;
+          if (den == null || isNaN(den) || Number(den) === 0) return null;
+          return (Number(num) / Number(den)) * 100.0;
         },
 
         // conditional formatting

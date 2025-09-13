@@ -766,7 +766,7 @@ class SummaryOverallController extends Controller
             }
 
             foreach ($rows as &$r) {
-                if (!empty($r['is_total'])) { $r['projected_net_profit'] = null; continue; }
+                if (!empty($r['is_total'])) { $r['projected_net_profit'] = null;$r['projected_net_profit_pct'] = null; continue; }
 
                 $shippedRow   = (int)($r['shipped'] ?? 0);
                 $deliveredRow = (int)($r['delivered'] ?? 0);
@@ -789,6 +789,7 @@ class SummaryOverallController extends Controller
 
                 if (!$compute) {
                     $r['projected_net_profit'] = null;
+                    $r['projected_net_profit_pct'] = null; 
                     continue;
                 }
 
@@ -822,6 +823,10 @@ class SummaryOverallController extends Controller
                 $projCodFee  = $projSales * $COD_FEE_RATE;
 
                 $r['projected_net_profit'] = $projSales - $adsp - $projShipFee - $projCodFee - $projCogs;
+                $den = (float)($r['all_cod'] ?? 0.0);          // same denominator: total COD of this row
+    $r['projected_net_profit_pct'] = ($den > 0)
+        ? ($r['projected_net_profit'] / $den) * 100.0
+        : null;
             }
             unset($r);
         }
@@ -868,8 +873,28 @@ class SummaryOverallController extends Controller
 
             $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - $sum['cogs'];
             $total_net_profit_pct = $sum['all_cod'] > 0 ? ($total_net_profit / $sum['all_cod']) * 100.0 : null;
+            // Weighted average ng delay (by shipped)
+$total_avg_delay = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
 
-            $total_avg_delay      = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
+            
+
+            // Total Projected Net Profit (%) — uses Projected NP if available else Net Profit; denominator: total COD (all_cod)
+            $total_projected_net_profit_pct = null;
+            if (!$AGGREGATE_RANGE) {
+                $projOrActualNpSum = 0.0;
+                foreach ($rows as $r) {
+                    if (!empty($r['is_total'])) continue;
+                    $best = $r['projected_net_profit'] ?? null;
+                    if ($best === null) {
+                        $best = (float)($r['net_profit'] ?? 0.0);
+                    }
+                    $projOrActualNpSum += (float)$best;
+                }
+                $total_projected_net_profit_pct = ($sum['all_cod'] > 0)
+                    ? ($projOrActualNpSum / $sum['all_cod']) * 100.0
+                    : null;
+            }
+
 
             // Build items/costs for total when specific page — PROCEED-based list
             $totalItemsDisplay = '—'; $totalUnitCostsArr = []; $totalPageLabel = 'TOTAL';
@@ -934,6 +959,7 @@ class SummaryOverallController extends Controller
                 'hold'            => ($sum['proceed'] - $sum['shipped']),
                 'is_total'        => true,
                 'projected_net_profit' => null,
+                'projected_net_profit_pct'  => $total_projected_net_profit_pct,
             ];
         }
 
