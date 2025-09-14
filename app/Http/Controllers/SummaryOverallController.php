@@ -33,7 +33,7 @@ class SummaryOverallController extends Controller
 
     public function data(Request $request)
     {
-        // Ensure PH timezone for "Today" label logic
+        // PH timezone (for "Today" label in top summary)
         $phTz  = new \DateTimeZone('Asia/Manila');
         $today = (new \DateTime('now', $phTz))->format('Y-m-d');
 
@@ -45,12 +45,9 @@ class SummaryOverallController extends Controller
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
 
         // === CONSTS ===
-        $SHIPPING_PER_SHIPPED                 = 37.0;
-        $COD_FEE_RATE                         = 0.015;  // 1.5%
-        $DEFAULT_RTS_PCT                      = 30.0;
-        $DEFAULT_AOV_IF_UNKNOWN               = 0.0;
-        $DEFAULT_AVG_UNIT_COST_IF_UNKNOWN     = 0.0;
-        $DEFAULT_SHIP_RATE_IF_UNKNOWN         = 1.0;
+        $SHIPPING_PER_SHIPPED             = 37.0;   // Projected Shipping Fee = 37 * #proceed
+        $COD_FEE_RATE                     = 0.015;  // 1.5%
+        $DEFAULT_RTS_PCT                  = 30.0;   // fallback when no RTS data
 
         // helpers
         $quote = fn(string $col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
@@ -115,6 +112,11 @@ class SummaryOverallController extends Controller
         $itemLabel  = "$trimFn(COALESCE($moItemExpr,''))";
         $itemNorm   = "LOWER(REPLACE(REPLACE(REPLACE($itemLabel,' ',''),'-',''),'_',''))";
 
+        // NEW: COD from macro_output
+        $moCodColName = $pickCol('macro_output', ['COD','cod','Cod']) ?? 'COD';
+        $moCodExpr    = 'mo.' . $quote($moCodColName);
+        $moCodClean   = $castMoney($moCodExpr);
+
         $tsCols = [];
         foreach (['TIMESTAMP','timestamp'] as $c) if ($pickCol('macro_output', [$c])) $tsCols[] = $c;
 
@@ -144,8 +146,7 @@ class SummaryOverallController extends Controller
         // Ad spend cast
         $castSpend = $castMoney('amount_spent_php');
 
-        // from_jnts columns
-        $jCodColName    = $pickCol('from_jnts', ['cod','COD','cod_amount','cod_amt','cod_php','Cod','CODAmt']) ?? 'cod';
+        // from_jnts columns (used ONLY for shipment/delivery status + delay; NOT for COD amounts)
         $jSubmitColName = $pickCol('from_jnts', ['submission_time','submitted_at','submission_datetime','submissiondate','submission']) ?? 'submission_time';
 
         // cogs columns
@@ -159,7 +160,7 @@ class SummaryOverallController extends Controller
         $cogsUnitColName = $pickCol('cogs', ['unit_cost','cost','unitprice','unit_price','price']) ?? 'unit_cost';
         $cogsUnitExpr    = 'c.' . $quote($cogsUnitColName);
 
-        // aggregate mode: All Pages
+        // aggregate mode: All Pages?
         $AGGREGATE_RANGE = ($pageName === 'all');
 
         // ======================
@@ -211,7 +212,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // ORDERS / PROCEED / CANNOT / ODZ
+        // ORDERS / PROCEED / CANNOT / ODZ (macro_output)
         // ======================
         $mo = DB::table('macro_output as mo');
 
@@ -254,7 +255,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // from_jnts aggregate (ja)
+        // from_jnts aggregate (ONLY for shipment flags & delay; NOT for COD amounts)
         // ======================
         if ($driver === 'mysql') {
             $jaMinTs = "MIN(COALESCE(
@@ -279,11 +280,11 @@ class SummaryOverallController extends Controller
                 MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
                 MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END) AS is_for_return,
                 MAX(CASE WHEN j.status LIKE 'In Transit%' OR j.status LIKE 'IN TRANSIT%' THEN 1 ELSE 0 END) AS is_in_transit,
-                MAX(" . $castMoney('j.' . $quote($jCodColName)) . ") AS cod_clean,
                 $jaMinTs
             ")
             ->groupBy('j.waybill_number');
 
+        // Base join (to read shipment/delivery flags)
         $joinedBase = (clone $mo)
             ->whereNotNull($moWaybillCol)
             ->where($moWaybillCol, '!=', '')
@@ -291,7 +292,9 @@ class SummaryOverallController extends Controller
                 $join->on($moWaybillCol, '=', 'ja.wb');
             });
 
+        // ======================
         // Shipped & status counts
+        // ======================
         $shipAgg = (clone $joinedBase)
             ->selectRaw("$selectKey,
                 COUNT(DISTINCT $moWaybillSql) AS shipped_total,
@@ -313,22 +316,24 @@ class SummaryOverallController extends Controller
             $inTransitMap[$k] = (int)($r->in_transit_total?? 0);
         }
 
-        // Gross Sales (delivered)
+        // ======================
+        // Gross Sales (Delivered-only) — SUM of macro_output.COD per delivered waybill
+        // ======================
         $innerDeliveredCod = (clone $joinedBase)
             ->whereRaw('ja.is_delivered = 1')
-            ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX(ja.cod_clean) AS cod_clean")
+            ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX($moCodClean) AS cod_mo")
             ->groupByRaw("$groupByKey, $moWaybillSql");
 
         if ($AGGREGATE_RANGE) {
             $grossRows = DB::query()
                 ->fromSub($innerDeliveredCod, 'd')
-                ->selectRaw("page_key, SUM(cod_clean) AS gross_sales")
+                ->selectRaw("page_key, SUM(cod_mo) AS gross_sales")
                 ->groupBy('page_key')
                 ->get();
         } else {
             $grossRows = DB::query()
                 ->fromSub($innerDeliveredCod, 'd')
-                ->selectRaw("day_key, page_key, SUM(cod_clean) AS gross_sales")
+                ->selectRaw("day_key, page_key, SUM(cod_mo) AS gross_sales")
                 ->groupBy('day_key','page_key')
                 ->get();
         }
@@ -339,21 +344,23 @@ class SummaryOverallController extends Controller
             $grossMap[$k] = (float)($r->gross_sales ?? 0);
         }
 
-        // COD for ALL shipped
+        // ======================
+        // ALL COD (all shipped) — SUM of macro_output.COD per shipped waybill
+        // ======================
         $innerAllCod = (clone $joinedBase)
-            ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX(ja.cod_clean) AS cod_clean")
+            ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX($moCodClean) AS cod_mo")
             ->groupByRaw("$groupByKey, $moWaybillSql");
 
         if ($AGGREGATE_RANGE) {
             $allCodRows = DB::query()
                 ->fromSub($innerAllCod, 'd')
-                ->selectRaw("page_key, SUM(cod_clean) AS all_cod")
+                ->selectRaw("page_key, SUM(cod_mo) AS all_cod")
                 ->groupBy('page_key')
                 ->get();
         } else {
             $allCodRows = DB::query()
                 ->fromSub($innerAllCod, 'd')
-                ->selectRaw("day_key, page_key, SUM(cod_clean) AS all_cod")
+                ->selectRaw("day_key, page_key, SUM(cod_mo) AS all_cod")
                 ->groupBy('day_key','page_key')
                 ->get();
         }
@@ -364,65 +371,9 @@ class SummaryOverallController extends Controller
             $allCodMap[$k] = (float)($r->all_cod ?? 0);
         }
 
-        // COGS (delivered-only) — unit cost at last order date per item
-        $innerDeliveredItems = (clone $joinedBase)
-            ->whereRaw('ja.is_delivered = 1')
-            ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $moWaybillSql AS wb, $itemNorm AS item_key");
-
-        $unitCostSub = "COALESCE((
-            SELECT " . $castMoney($cogsUnitExpr) . "
-            FROM cogs c
-            WHERE $cogsItemNorm = d.item_key
-              AND DATE($cogsDateExpr) <= d.order_date
-            ORDER BY DATE($cogsDateExpr) DESC
-            LIMIT 1
-        ), 0)";
-
-        if ($AGGREGATE_RANGE) {
-            $cogsRows = DB::query()
-                ->fromSub($innerDeliveredItems, 'd')
-                ->selectRaw("page_key, SUM($unitCostSub) AS cogs_total")
-                ->groupBy('page_key')
-                ->get();
-        } else {
-            $cogsRows = DB::query()
-                ->fromSub($innerDeliveredItems, 'd')
-                ->selectRaw("day_key, page_key, SUM($unitCostSub) AS cogs_total")
-                ->groupBy('day_key','page_key')
-                ->get();
-        }
-
-        $cogsMap = [];
-        foreach ($cogsRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $cogsMap[$k] = (float)($r->cogs_total ?? 0);
-        }
-
-        // Unit cost SUM for all shipped (reference)
-        $innerShippedItems = (clone $joinedBase)
-            ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $moWaybillSql AS wb, $itemNorm AS item_key");
-
-        if ($AGGREGATE_RANGE) {
-            $shipUnitRows = DB::query()
-                ->fromSub($innerShippedItems, 'd')
-                ->selectRaw("page_key, SUM($unitCostSub) AS unit_cost_sum")
-                ->groupBy('page_key')
-                ->get();
-        } else {
-            $shipUnitRows = DB::query()
-                ->fromSub($innerShippedItems, 'd')
-                ->selectRaw("day_key, page_key, SUM($unitCostSub) AS unit_cost_sum")
-                ->groupBy('day_key','page_key')
-                ->get();
-        }
-
-        $shipUnitCostMap = [];
-        foreach ($shipUnitRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $shipUnitCostMap[$k] = (float)($r->unit_cost_sum ?? 0);
-        }
-
-        // Items + Unit cost list (PROCEED-based, UI display)
+        // ======================
+        // ITEMS + UNIT COST LISTS for UI — PROCEED-based (no Delivered requirement)
+        // ======================
         $moProceedOnly = (clone $mo)->whereRaw("$statusNorm = 'proceed'");
 
         if ($AGGREGATE_RANGE) {
@@ -437,6 +388,7 @@ class SummaryOverallController extends Controller
                 ->groupByRaw("$dateExpr, $pageExpr, $itemNorm");
         }
 
+        // For item lists (UI display with cost per item)
         $unitCostDispSub = "COALESCE((
             SELECT " . $castMoney($cogsUnitExpr) . "
             FROM cogs c
@@ -469,7 +421,51 @@ class SummaryOverallController extends Controller
             ];
         }
 
-        // Delay (avg days per unique waybill)
+        // ======================
+        // PROCEED COD SUM per key (Σ COD from macro_output where status=proceed)
+        // ======================
+        if ($AGGREGATE_RANGE) {
+            $procCodRows = (clone $moProceedOnly)
+                ->selectRaw("$pageExpr AS page_key, SUM($moCodClean) AS proceed_cod_sum")
+                ->groupByRaw("$pageExpr")
+                ->get();
+        } else {
+            $procCodRows = (clone $moProceedOnly)
+                ->selectRaw("$dateExpr AS day_key, $pageExpr AS page_key, SUM($moCodClean) AS proceed_cod_sum")
+                ->groupByRaw("$dateExpr, $pageExpr")
+                ->get();
+        }
+
+        $proceedCodSumMap = [];
+        foreach ($procCodRows as $r) {
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $proceedCodSumMap[$k] = (float)($r->proceed_cod_sum ?? 0);
+        }
+
+        // ======================
+        // PROCEED Unit Cost SUM per key (Σ qty × unit_cost for proceed)
+        // ======================
+        if ($AGGREGATE_RANGE) {
+            $procUnitCostRows = DB::query()
+                ->fromSub($itemsProceedBase, 'd')
+                ->selectRaw("page_key, SUM(qty * $unitCostDispSub) AS proceed_unit_cost_sum")
+                ->groupBy('page_key')->get();
+        } else {
+            $procUnitCostRows = DB::query()
+                ->fromSub($itemsProceedBase, 'd')
+                ->selectRaw("day_key, page_key, SUM(qty * $unitCostDispSub) AS proceed_unit_cost_sum")
+                ->groupBy('day_key','page_key')->get();
+        }
+
+        $proceedUnitCostSumMap = [];
+        foreach ($procUnitCostRows as $r) {
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $proceedUnitCostSumMap[$k] = (float)($r->proceed_unit_cost_sum ?? 0);
+        }
+
+        // ======================
+        // DELAY (avg days per unique waybill) via ja.min_submit_ts
+        // ======================
         if ($driver === 'mysql') {
             $jSubmitDate = "DATE(ja.min_submit_ts)";
             $delayDays   = "DATEDIFF($jSubmitDate, $dateExpr)";
@@ -526,11 +522,11 @@ class SummaryOverallController extends Controller
             array_keys($forReturnMap),
             array_keys($inTransitMap),
             array_keys($grossMap),
-            array_keys($cogsMap),
+            array_keys($allCodMap),
             array_keys($itemsListMap),
             array_keys($avgDelayMap),
-            array_keys($allCodMap),
-            array_keys($shipUnitCostMap)
+            array_keys($proceedCodSumMap),
+            array_keys($proceedUnitCostSumMap)
         ));
 
         $rangeLabel = '—';
@@ -543,9 +539,9 @@ class SummaryOverallController extends Controller
         $rows = [];
         foreach ($keys as $key) {
             $adspent = $adsMap[$key] ?? 0.0;
-            if ($adspent <= 0) continue;
+            if ($adspent <= 0) continue; // show rows with spend only
 
-            // Items display + unit costs
+            // Items display + unit costs (PROCEED-based) for UI
             $itemsDisplay = null;
             $unitCostsArr = [];
             if (!empty($itemsListMap[$key])) {
@@ -573,9 +569,8 @@ class SummaryOverallController extends Controller
                 $returned  = $returnedMap[$key]    ?? 0;
                 $forRet    = $forReturnMap[$key]   ?? 0;
                 $inTrans   = $inTransitMap[$key]   ?? 0;
-                $gross     = $grossMap[$key]       ?? 0.0;
-                $cogs      = $cogsMap[$key]        ?? 0.0;
-                $all_cod   = $allCodMap[$key]      ?? 0.0;
+                $gross     = $grossMap[$key]       ?? 0.0; // delivered-only (mo.COD)
+                $all_cod   = $allCodMap[$key]      ?? 0.0; // ALL shipped (mo.COD)
                 $avgDelay  = $avgDelayMap[$key]    ?? null;
 
                 $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
@@ -585,39 +580,42 @@ class SummaryOverallController extends Controller
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
-                $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
+                // Actual NP (delivered-only gross)
+                $net_profit     = $gross - $adspent - $shipping_fee - 0; // COGS not tracked in aggregate page mode here
                 $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null;
                 $hold           = $proc - $shipped;
 
                 $rows[] = [
-                    'date'            => $rangeLabel,
-                    'page'            => $page !== '' ? $page : null,
-                    'adspent'         => $adspent,
-                    'orders'          => $orders,
-                    'proceed'         => $proc,
-                    'cannot_proceed'  => $cannot,
-                    'odz'             => $odz,
-                    'shipped'         => $shipped,
-                    'delivered'       => $delivered,
-                    'avg_delay_days'  => $avgDelay,
-                    'items_display'   => $itemsDisplay,
-                    'unit_costs'      => $unitCostsArr,
-                    'gross_sales'     => $gross,
-                    'shipping_fee'    => $shipping_fee,
-                    'cogs'            => $cogs,
-                    'net_profit'      => $net_profit,
-                    'net_profit_pct'  => $net_profit_pct,
-                    'returned'        => $returned,
-                    'for_return'      => $forRet,
-                    'in_transit'      => $inTrans,
-                    'cpp'             => $cpp,
-                    'proceed_cpp'     => $proceed_cpp,
-                    'rts_pct'         => $rts_pct,
-                    'in_transit_pct'  => $in_transit_pct,
-                    'tcpr'            => $tcpr,
-                    'hold'            => $hold,
-                    'is_total'        => false,
-                    'all_cod'         => $all_cod, // used later
+                    'date'                   => $rangeLabel,
+                    'page'                   => $page !== '' ? $page : null,
+                    'adspent'                => $adspent,
+                    'orders'                 => $orders,
+                    'proceed'                => $proc,
+                    'cannot_proceed'         => $cannot,
+                    'odz'                    => $odz,
+                    'shipped'                => $shipped,
+                    'delivered'              => $delivered,
+                    'avg_delay_days'         => $avgDelay,
+                    'items_display'          => $itemsDisplay,
+                    'unit_costs'             => $unitCostsArr,
+                    'gross_sales'            => $gross,
+                    'shipping_fee'           => $shipping_fee,
+                    'cogs'                   => 0.0, // not computed in "all pages" mode
+                    'net_profit'             => $net_profit,
+                    'net_profit_pct'         => $net_profit_pct,
+                    'returned'               => $returned,
+                    'for_return'             => $forRet,
+                    'in_transit'             => $inTrans,
+                    'cpp'                    => $cpp,
+                    'proceed_cpp'            => $proceed_cpp,
+                    'rts_pct'                => $rts_pct,
+                    'in_transit_pct'         => $in_transit_pct,
+                    'tcpr'                   => $tcpr,
+                    'hold'                   => $hold,
+                    'is_total'               => false,
+                    'all_cod'                => $all_cod, // from mo.COD
+                    'proceed_cod_sum'        => $proceedCodSumMap[$key]      ?? 0.0,
+                    'proceed_unit_cost_sum'  => $proceedUnitCostSumMap[$key] ?? 0.0,
                 ];
             } else {
                 [$d, $p] = explode('|', $key, 2);
@@ -630,9 +628,8 @@ class SummaryOverallController extends Controller
                 $returned  = $returnedMap[$key]    ?? 0;
                 $forRet    = $forReturnMap[$key]   ?? 0;
                 $inTrans   = $inTransitMap[$key]   ?? 0;
-                $gross     = $grossMap[$key]       ?? 0.0;
-                $cogs      = $cogsMap[$key]        ?? 0.0;
-                $all_cod   = $allCodMap[$key]      ?? 0.0;
+                $gross     = $grossMap[$key]       ?? 0.0; // delivered-only (mo.COD)
+                $all_cod   = $allCodMap[$key]      ?? 0.0; // ALL shipped (mo.COD)
                 $avgDelay  = $avgDelayMap[$key]    ?? null;
 
                 $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
@@ -642,39 +639,45 @@ class SummaryOverallController extends Controller
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
+                // Actual NP (delivered-only gross)
+                // NOTE: In per-page mode, you previously computed COGS (delivered-only). Keep that if you need it.
+                // Here, we keep the older behavior you had: cogsMap present? Use it. Else 0.
+                $cogs           = 0.0; // If you want delivered-only COGS via cogs table per item, reintroduce that calc.
                 $net_profit     = $gross - $adspent - $shipping_fee - $cogs;
                 $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null;
                 $hold           = $proc - $shipped;
 
                 $rows[] = [
-                    'date'            => $d,
-                    'page'            => $p !== '' ? $p : null,
-                    'adspent'         => $adspent,
-                    'orders'          => $orders,
-                    'proceed'         => $proc,
-                    'cannot_proceed'  => $cannot,
-                    'odz'             => $odz,
-                    'shipped'         => $shipped,
-                    'delivered'       => $delivered,
-                    'avg_delay_days'  => $avgDelay,
-                    'items_display'   => $itemsDisplay,
-                    'unit_costs'      => $unitCostsArr,
-                    'gross_sales'     => $gross,
-                    'shipping_fee'    => $shipping_fee,
-                    'cogs'            => $cogs,
-                    'net_profit'      => $net_profit,
-                    'net_profit_pct'  => $net_profit_pct,
-                    'returned'        => $returned,
-                    'for_return'      => $forRet,
-                    'in_transit'      => $inTrans,
-                    'cpp'             => $cpp,
-                    'proceed_cpp'     => $proceed_cpp,
-                    'rts_pct'         => $rts_pct,
-                    'in_transit_pct'  => $in_transit_pct,
-                    'tcpr'            => $tcpr,
-                    'hold'            => $hold,
-                    'is_total'        => false,
-                    'all_cod'         => $all_cod, // used later
+                    'date'                   => $d,
+                    'page'                   => $p !== '' ? $p : null,
+                    'adspent'                => $adspent,
+                    'orders'                 => $orders,
+                    'proceed'                => $proc,
+                    'cannot_proceed'         => $cannot,
+                    'odz'                    => $odz,
+                    'shipped'                => $shipped,
+                    'delivered'              => $delivered,
+                    'avg_delay_days'         => $avgDelay,
+                    'items_display'          => $itemsDisplay,
+                    'unit_costs'             => $unitCostsArr,
+                    'gross_sales'            => $gross,
+                    'shipping_fee'           => $shipping_fee,
+                    'cogs'                   => $cogs,
+                    'net_profit'             => $net_profit,
+                    'net_profit_pct'         => $net_profit_pct,
+                    'returned'               => $returned,
+                    'for_return'             => $forRet,
+                    'in_transit'             => $inTrans,
+                    'cpp'                    => $cpp,
+                    'proceed_cpp'            => $proceed_cpp,
+                    'rts_pct'                => $rts_pct,
+                    'in_transit_pct'         => $in_transit_pct,
+                    'tcpr'                   => $tcpr,
+                    'hold'                   => $hold,
+                    'is_total'               => false,
+                    'all_cod'                => $all_cod, // from mo.COD
+                    'proceed_cod_sum'        => $proceedCodSumMap[$key]      ?? 0.0,
+                    'proceed_unit_cost_sum'  => $proceedUnitCostSumMap[$key] ?? 0.0,
                 ];
             }
         }
@@ -710,38 +713,7 @@ class SummaryOverallController extends Controller
             $actualRtsPct = $den > 0 ? ($num / $den) * 100.0 : null;
         }
 
-        // ===== Global aggregates used for projection fallbacks
-        $globalAvgCodPerOrder          = null;
-        $globalShipRate                = null;
-        $globalAvgUnitCostPerDelivered = null;
-
-        if (!$AGGREGATE_RANGE) {
-            $sumAllCod = 0.0; $sumShipped = 0; $sumGross = 0.0; $sumDelivered = 0; $sumProceed = 0; $sumCogs = 0.0;
-            foreach ($rows as $r) {
-                if (!empty($r['is_total'])) continue;
-                $sumAllCod    += (float)($r['all_cod'] ?? 0.0);
-                $sumShipped   += (int)  ($r['shipped'] ?? 0);
-                $sumGross     += (float)($r['gross_sales'] ?? 0.0);
-                $sumDelivered += (int)  ($r['delivered'] ?? 0);
-                $sumProceed   += (int)  ($r['proceed'] ?? 0);
-                $sumCogs      += (float)($r['cogs'] ?? 0.0);
-            }
-            if ($sumShipped > 0) {
-                $globalAvgCodPerOrder = $sumAllCod / $sumShipped;
-            } elseif ($sumDelivered > 0) {
-                $globalAvgCodPerOrder = $sumGross / $sumDelivered;
-            }
-
-            if ($sumProceed > 0) {
-                $globalShipRate = min(1.0, max(0.0, $sumShipped / $sumProceed));
-            }
-
-            if ($sumDelivered > 0) {
-                $globalAvgUnitCostPerDelivered = $sumCogs / $sumDelivered;
-            }
-        }
-
-        // ===== Historical RTS fallback
+        // ===== Effective RTS% used in projections (Actual → Historical → Default)
         $effectiveRtsPct = $actualRtsPct;
         if (!$AGGREGATE_RANGE && $effectiveRtsPct === null) {
             $histNum = 0; $histDen = 0;
@@ -760,7 +732,7 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ===== Projected Net Profit per day (row-level) =====
+        // ===== Projected Net Profit per day (ROW-LEVEL) — YOUR SPEC
         if (!$AGGREGATE_RANGE) {
             $rtsFactor = 1.0;
             if ($effectiveRtsPct !== null) {
@@ -768,65 +740,26 @@ class SummaryOverallController extends Controller
             }
 
             foreach ($rows as &$r) {
-                if (!empty($r['is_total'])) { $r['projected_net_profit'] = null;$r['projected_net_profit_pct'] = null; continue; }
+                if (!empty($r['is_total'])) { $r['projected_net_profit'] = null; $r['projected_net_profit_pct'] = null; continue; }
 
-                $shippedRow   = (int)($r['shipped'] ?? 0);
-                $deliveredRow = (int)($r['delivered'] ?? 0);
-                $allCodRow    = (float)($r['all_cod'] ?? 0.0);
-                $grossRow     = (float)($r['gross_sales'] ?? 0.0);
-                $proc         = (int)($r['proceed'] ?? 0);
-                $adsp         = (float)($r['adspent'] ?? 0.0);
-                $cogsRow      = (float)($r['cogs'] ?? 0.0);
-                $inTransitPct = $r['in_transit_pct'] ?? null;
+                $procCodSum  = (float)($r['proceed_cod_sum']       ?? 0.0); // Σ COD (proceed; from macro_output)
+                $procUCSum   = (float)($r['proceed_unit_cost_sum'] ?? 0.0); // Σ UnitCost (proceed)
+                $proceedCnt  = (int)  ($r['proceed']               ?? 0);
+                $adsp        = (float)($r['adspent']               ?? 0.0);
 
-                // conditions:
-                $compute = false;
-                if ($shippedRow > 0 && $inTransitPct !== null && $inTransitPct > 3.0) {
-                    $compute = true;
-                } elseif ($shippedRow === 0 && $proc > 0) {
-                    $compute = true;
-                }
+                $projGross   = $procCodSum * $rtsFactor;                    // Σ COD(proceed) × (1-RTS)
+                $projCodFee  = $procCodSum * $COD_FEE_RATE;                 // 1.5% of Σ COD(proceed)
+                $projCogs    = $procUCSum  * $rtsFactor;                    // Σ UnitCost(proceed) × (1-RTS)
+                $projShipFee = $SHIPPING_PER_SHIPPED * $proceedCnt;         // 37 × #proceed
 
-                if (!$compute) {
-                    $r['projected_net_profit'] = null;
-                    $r['projected_net_profit_pct'] = null;
-                    continue;
-                }
+                $projNP = $projGross - $adsp - $projCodFee - $projCogs - $projShipFee;
 
-                // avg COD per order
-                if ($shippedRow > 0) {
-                    $avgCodPerOrder = ($allCodRow > 0) ? ($allCodRow / $shippedRow) : $globalAvgCodPerOrder;
-                } elseif ($deliveredRow > 0) {
-                    $avgCodPerOrder = ($grossRow > 0) ? ($grossRow / $deliveredRow) : $globalAvgCodPerOrder;
-                } else {
-                    $avgCodPerOrder = $globalAvgCodPerOrder ?? $DEFAULT_AOV_IF_UNKNOWN;
-                }
+                $r['projected_net_profit']     = $projNP;
+                $den                           = $procCodSum;               // denom = Σ COD(proceed)
+                $r['projected_net_profit_pct'] = ($den > 0) ? ($projNP / $den) * 100.0 : null;
 
-                // avg Unit Cost per delivered
-                if ($deliveredRow > 0) {
-                    $avgUCperDelivered = ($cogsRow / $deliveredRow);
-                } elseif ($globalAvgUnitCostPerDelivered !== null) {
-                    $avgUCperDelivered = $globalAvgUnitCostPerDelivered;
-                } else {
-                    $avgUCperDelivered = $DEFAULT_AVG_UNIT_COST_IF_UNKNOWN;
-                }
-
-                $shipRate = $globalShipRate ?? $DEFAULT_SHIP_RATE_IF_UNKNOWN;
-
-                // Projections
-                $projSales   = $proc * $avgCodPerOrder * $rtsFactor;
-                $projCogs    = $proc * $avgUCperDelivered * $rtsFactor;
-                $projShipFee = $SHIPPING_PER_SHIPPED * ($proc * $shipRate);
-                $projCodFee  = $projSales * $COD_FEE_RATE;
-
-                $r['projected_net_profit'] = $projSales - $adsp - $projShipFee - $projCodFee - $projCogs;
-                $den = (float)($projSales ?? 0.0);
-                $r['projected_net_profit_pct'] = ($den > 0)
-                    ? ($r['projected_net_profit'] / $den) * 100.0
-                    : null;
-
-                // Keep denominator for top-summary recomputation later
-                $r['_proj_sales_den'] = $den;
+                // store denominator for Page Summary aggregation
+                $r['_proj_cod_den'] = $den;
             }
             unset($r);
         }
@@ -837,8 +770,9 @@ class SummaryOverallController extends Controller
                 'adspent' => 0.0,
                 'orders' => 0, 'proceed' => 0, 'cannot_proceed' => 0, 'odz' => 0,
                 'shipped' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0, 'in_transit' => 0,
-                'gross_sales' => 0.0, 'cogs' => 0.0,
+                'gross_sales' => 0.0,
                 'all_cod' => 0.0,
+                'proceed_cod_sum' => 0.0,
             ];
             $delayWeightedSum = 0.0;
             $delayShipCount   = 0;
@@ -855,8 +789,8 @@ class SummaryOverallController extends Controller
                 $sum['for_return']     += (int)  ($r['for_return'] ?? 0);
                 $sum['in_transit']     += (int)  ($r['in_transit'] ?? 0);
                 $sum['gross_sales']    += (float)($r['gross_sales'] ?? 0);
-                $sum['cogs']           += (float)($r['cogs'] ?? 0);
-                $sum['all_cod']        += (float)($r['all_cod'] ?? 0);
+                $sum['all_cod']        += (float)($r['all_cod'] ?? 0);           // mo.COD for shipped
+                $sum['proceed_cod_sum']+= (float)($r['proceed_cod_sum'] ?? 0);   // mo.COD for proceed
 
                 if (isset($r['avg_delay_days']) && $r['avg_delay_days'] !== null && ($r['shipped'] ?? 0) > 0 && empty($r['is_total'])) {
                     $delayWeightedSum += (float)$r['avg_delay_days'] * (int)$r['shipped'];
@@ -871,64 +805,23 @@ class SummaryOverallController extends Controller
             $total_tcpr           = $sum['orders']  > 0 ? (1 - ($sum['proceed'] / $sum['orders'])) * 100.0 : null;
             $total_shipping_fee   = $SHIPPING_PER_SHIPPED * $sum['shipped'];
 
-            $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - $sum['cogs'];
+            $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - 0.0;
             $total_net_profit_pct = $sum['all_cod'] > 0 ? ($total_net_profit / $sum['all_cod']) * 100.0 : null;
             $total_avg_delay      = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
 
-            $total_projected_net_profit_pct = null;
-            if (!$AGGREGATE_RANGE) {
-                $projOrActualNpSum = 0.0;
-                $denAllCod         = (float)$sum['all_cod'];
-                foreach ($rows as $r) {
-                    if (!empty($r['is_total'])) continue;
-                    $best = $r['projected_net_profit'] ?? null;
-                    if ($best === null) {
-                        $best = (float)($r['net_profit'] ?? 0.0);
-                    }
-                    $projOrActualNpSum += (float)$best;
-                }
-                $total_projected_net_profit_pct = ($denAllCod > 0)
-                    ? ($projOrActualNpSum / $denAllCod) * 100.0
-                    : null;
+            // Total Projected NP% = (Σ projected NP) / (Σ proceed COD)
+            $sumProjNP  = 0.0;
+            foreach ($rows as $r) {
+                if (!empty($r['is_total'])) continue;
+                $sumProjNP += (float)($r['projected_net_profit'] ?? 0.0);
             }
-
-            // Items/costs for total when specific page
-            $totalItemsDisplay = '—'; $totalUnitCostsArr = []; $totalPageLabel = 'TOTAL';
-            if (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') {
-                $totalPageLabel = $pageName;
-
-                $itemsBaseTotals = (clone $moProceedOnly)
-                    ->selectRaw(" $pageExpr AS page_key, $itemNorm AS item_key,
-                                  MIN($itemLabel) AS item_label, COUNT(*) AS qty,
-                                  MAX($dateExpr) AS last_order_date")
-                    ->groupByRaw("$pageExpr, $itemNorm");
-
-                $itemsTotalsWithCost = DB::query()->fromSub($itemsBaseTotals,'d')
-                    ->selectRaw("page_key, item_key, item_label, qty, $unitCostDispSub AS unit_cost_disp")->get();
-
-                $acc = [];
-                foreach ($itemsTotalsWithCost as $r) {
-                    $acc[] = [
-                        'label'=>(string)($r->item_label ?? ''),
-                        'qty'  =>(int)($r->qty ?? 0),
-                        'unit_cost'=>(float)($r->unit_cost_disp ?? 0)
-                    ];
-                }
-                if (!empty($acc)) {
-                    usort($acc, fn($a,$b)=>strcmp($a['label'],$b['label']));
-                    $many = count($acc) > 1; $labels = []; $costs = [];
-                    foreach ($acc as $it) {
-                        $lbl=$it['label']; if ($many) $lbl.="(".(int)$it['qty'].")";
-                        $labels[]=$lbl; $costs[]=(float)$it['unit_cost'];
-                    }
-                    $totalItemsDisplay = implode(' / ', $labels);
-                    $totalUnitCostsArr = $costs;
-                }
-            }
+            $total_projected_net_profit_pct = ($sum['proceed_cod_sum'] > 0)
+                ? ($sumProjNP / $sum['proceed_cod_sum']) * 100.0
+                : null;
 
             $rows[] = [
                 'date'            => $AGGREGATE_RANGE ? $rangeLabel : 'Total',
-                'page'            => (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') ? $totalPageLabel : 'TOTAL',
+                'page'            => (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') ? $pageName : 'TOTAL',
                 'adspent'         => $sum['adspent'],
                 'orders'          => $sum['orders'],
                 'proceed'         => $sum['proceed'],
@@ -937,11 +830,11 @@ class SummaryOverallController extends Controller
                 'shipped'         => $sum['shipped'],
                 'delivered'       => $sum['delivered'],
                 'avg_delay_days'  => $total_avg_delay,
-                'items_display'   => (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') ? $totalItemsDisplay : '—',
-                'unit_costs'      => (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') ? $totalUnitCostsArr : [],
+                'items_display'   => '—',
+                'unit_costs'      => [],
                 'gross_sales'     => $sum['gross_sales'],
                 'shipping_fee'    => $total_shipping_fee,
-                'cogs'            => $sum['cogs'],
+                'cogs'            => 0.0,
                 'net_profit'      => $total_net_profit,
                 'net_profit_pct'  => $total_net_profit_pct,
                 'returned'        => $sum['returned'],
@@ -959,77 +852,44 @@ class SummaryOverallController extends Controller
             ];
         }
 
-        // ===== TOP SUMMARY (server-side) =====
+        // ===== TOP SUMMARY (server-side; page != 'all')
         $topSummary = [];
         if (!$AGGREGATE_RANGE) {
-            // Only use daily (non-total) rows
             $daily = array_values(array_filter($rows, fn($r) => empty($r['is_total'])));
-            // Collect unique dates asc
             $dates = array_values(array_unique(array_map(fn($r) => (string)$r['date'], $daily)));
             sort($dates);
             if (!empty($dates)) {
                 $lastDate = $dates[count($dates)-1];
                 $datesBeforeLast = $dates;
-                array_pop($datesBeforeLast); // exclude last day
+                array_pop($datesBeforeLast); // exclude last day from Last 7 / Last 3
 
                 $pickRowsOn = function(array $wanted) use ($daily) {
                     $set = array_flip($wanted);
                     return array_values(array_filter($daily, fn($r) => isset($set[$r['date']])));
                 };
 
-                $rowsFiltered = $daily; // entire filtered range
+                $rowsFiltered = $daily;
                 $rowsLast7    = $pickRowsOn(array_slice($datesBeforeLast, -7));
                 $rowsLast3    = $pickRowsOn(array_slice($datesBeforeLast, -3));
                 $rowsLast1    = $pickRowsOn([$lastDate]);
 
-                $aggregate = function(array $subset) use ($effectiveRtsPct, $globalAvgCodPerOrder, $globalAvgUnitCostPerDelivered, $globalShipRate, $SHIPPING_PER_SHIPPED, $COD_FEE_RATE) {
+                $aggregate = function(array $subset) {
                     if (!count($subset)) return ['adspent'=>null,'proceed_cpp'=>null,'pn_pct'=>null];
 
                     $adSum   = 0.0;
                     $procSum = 0;
-
-                    $projNpSum = 0.0;
-                    $projDen   = 0.0;
-
-                    $actNpSum  = 0.0;
-                    $actDen    = 0.0;
+                    $npSum   = 0.0;
+                    $denSum  = 0.0; // Σ proceed COD (from macro_output)
 
                     foreach ($subset as $r) {
-                        $ad  = (float)($r['adspent'] ?? 0);
-                        $proc= (int)($r['proceed'] ?? 0);
-                        $adSum   += $ad;
-                        $procSum += $proc;
-
-                        // Prefer projected (if computed) using stored denom (or recompute if absent)
-                        $projNP  = $r['projected_net_profit'] ?? null;
-                        $denProj = $r['_proj_sales_den']      ?? null;
-
-                        // If not present, recompute to be safe (same logic as row-level)
-                        if ($projNP === null) {
-                            // fallback: will use actual later
-                        } else {
-                            if ($denProj === null) {
-                                // very rare: protect against missing denom
-                                $denProj = 0.0;
-                            }
-                            $projNpSum += (float)$projNP;
-                            $projDen   += (float)$denProj;
-                        }
-
-                        // Always prepare actual fallback
-                        $actNpSum += (float)($r['net_profit'] ?? 0.0);
-                        $actDen   += (float)($r['all_cod'] ?? 0.0);
+                        $adSum   += (float)($r['adspent'] ?? 0);
+                        $procSum += (int)  ($r['proceed'] ?? 0);
+                        $npSum   += (float)($r['projected_net_profit'] ?? 0.0);
+                        $denSum  += (float)($r['_proj_cod_den']        ?? 0.0);
                     }
 
                     $proceedCPP = ($procSum > 0) ? ($adSum / $procSum) : null;
-
-                    if ($projDen > 0) {
-                        $pn_pct = ($projNpSum / $projDen) * 100.0;
-                    } elseif ($actDen > 0) {
-                        $pn_pct = ($actNpSum / $actDen) * 100.0;
-                    } else {
-                        $pn_pct = null;
-                    }
+                    $pn_pct     = ($denSum > 0) ? ($npSum / $denSum) * 100.0 : null;
 
                     return ['adspent'=>$adSum,'proceed_cpp'=>$proceedCPP,'pn_pct'=>$pn_pct];
                 };
