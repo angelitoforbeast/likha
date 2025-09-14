@@ -33,6 +33,10 @@ class SummaryOverallController extends Controller
 
     public function data(Request $request)
     {
+        // Ensure PH timezone for "Today" label logic
+        $phTz  = new \DateTimeZone('Asia/Manila');
+        $today = (new \DateTime('now', $phTz))->format('Y-m-d');
+
         $start    = $request->input('start_date');
         $end      = $request->input('end_date');
         $pageName = $request->input('page_name', 'all');
@@ -43,13 +47,22 @@ class SummaryOverallController extends Controller
         // === CONSTS ===
         $SHIPPING_PER_SHIPPED                 = 37.0;
         $COD_FEE_RATE                         = 0.015;  // 1.5%
-        $DEFAULT_RTS_PCT                      = 30.0;   // fallback when no RTS data at all
-        $DEFAULT_AOV_IF_UNKNOWN               = 0.0;    // fallback avg COD/order if none derivable
-        $DEFAULT_AVG_UNIT_COST_IF_UNKNOWN     = 0.0;    // fallback unit cost/order if none derivable
-        $DEFAULT_SHIP_RATE_IF_UNKNOWN         = 1.0;    // projected shipped/proceed when unknown
+        $DEFAULT_RTS_PCT                      = 30.0;
+        $DEFAULT_AOV_IF_UNKNOWN               = 0.0;
+        $DEFAULT_AVG_UNIT_COST_IF_UNKNOWN     = 0.0;
+        $DEFAULT_SHIP_RATE_IF_UNKNOWN         = 1.0;
 
         // helpers
         $quote = fn(string $col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
+        $fmtMonthDay = fn(string $d) => date('M j', strtotime($d));
+        $makeFilteredLabel = function($s, $e) use ($fmtMonthDay) {
+            if ($s && $e) {
+                if ($s === $e) return $fmtMonthDay($s);
+                return $fmtMonthDay($s) . ' – ' . $fmtMonthDay($e);
+            } elseif ($s)   { return $fmtMonthDay($s) . ' – …'; }
+              elseif ($e)   { return '… – ' . $fmtMonthDay($e); }
+            return '—';
+        };
 
         $pgColumns = function (string $table): array {
             if (DB::getDriverName() === 'pgsql') {
@@ -74,7 +87,7 @@ class SummaryOverallController extends Controller
             }
         };
 
-        // money sanitizer for PG/MySQL
+        // money sanitizer
         $castMoney = function (string $expr) use ($driver) {
             return $driver === 'pgsql'
                 ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(($expr)::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
@@ -84,8 +97,8 @@ class SummaryOverallController extends Controller
         // resolve macro_output columns
         $pageColName = $pickCol('macro_output', ['PAGE','page','page_name','Page','Page_Name']);
         if (!$pageColName) throw new \RuntimeException('macro_output: page column not found');
-        $moPageSql = 'mo.' . $quote($pageColName);   // for raw SQL snippets
-        $moPageCol = 'mo.' . $pageColName;           // for QB where/join
+        $moPageSql = 'mo.' . $quote($pageColName);
+        $moPageCol = 'mo.' . $pageColName;
         $pageExpr  = "$trimFn(COALESCE($moPageSql,''))";
 
         $statusColName = $pickCol('macro_output', ['STATUS','status','Status']) ?? 'status';
@@ -93,8 +106,8 @@ class SummaryOverallController extends Controller
         $statusNorm    = "LOWER(REPLACE(REPLACE($trimFn($statusExpr),' ',''),'_',''))";
 
         $wbColName    = $pickCol('macro_output', ['waybill','Waybill','WAYBILL']) ?? 'waybill';
-        $moWaybillSql = 'mo.' . $quote($wbColName);  // for raw SQL
-        $moWaybillCol = 'mo.' . $wbColName;          // for QB
+        $moWaybillSql = 'mo.' . $quote($wbColName);
+        $moWaybillCol = 'mo.' . $wbColName;
 
         $itemColName = $pickCol('macro_output', ['ITEM_NAME','item_name','Product','product_name','ITEM','item']);
         if (!$itemColName) throw new \RuntimeException('macro_output: item column not found');
@@ -128,10 +141,10 @@ class SummaryOverallController extends Controller
             $dateExpr  = 'DATE(COALESCE(' . implode(', ', $pgParts) . '))';
         }
 
-        // Ad spend cast (sanitize ₱, commas, spaces)
+        // Ad spend cast
         $castSpend = $castMoney('amount_spent_php');
 
-        // from_jnts columns (names vary)
+        // from_jnts columns
         $jCodColName    = $pickCol('from_jnts', ['cod','COD','cod_amount','cod_amt','cod_php','Cod','CODAmt']) ?? 'cod';
         $jSubmitColName = $pickCol('from_jnts', ['submission_time','submitted_at','submission_datetime','submissiondate','submission']) ?? 'submission_time';
 
@@ -162,7 +175,7 @@ class SummaryOverallController extends Controller
             $adsBase->whereRaw('DATE(day) <= ?', [$end]);
         }
 
-        if (!$AGGREGATE_RANGE) { // specific page
+        if (!$AGGREGATE_RANGE) {
             if ($driver === 'pgsql') {
                 $adsBase->whereRaw("$trimFn(page_name) ILIKE $trimFn(?)", [$pageName]);
             } else {
@@ -198,7 +211,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // ORDERS / PROCEED / CANNOT / ODZ (single pass, no join)
+        // ORDERS / PROCEED / CANNOT / ODZ
         // ======================
         $mo = DB::table('macro_output as mo');
 
@@ -210,7 +223,7 @@ class SummaryOverallController extends Controller
             $mo->whereRaw("$dateExpr <= ?", [$end]);
         }
 
-        if (!$AGGREGATE_RANGE) { // only when specific page
+        if (!$AGGREGATE_RANGE) {
             if ($driver === 'pgsql') {
                 $mo->whereRaw("$pageExpr ILIKE $trimFn(?)", [$pageName]);
             } else {
@@ -241,7 +254,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // BUILD from_jnts AGG SUBQUERY (ja): per-waybill flags + cod + min submit ts
+        // from_jnts aggregate (ja)
         // ======================
         if ($driver === 'mysql') {
             $jaMinTs = "MIN(COALESCE(
@@ -271,7 +284,6 @@ class SummaryOverallController extends Controller
             ")
             ->groupBy('j.waybill_number');
 
-        // Base JOIN (for shipped/delivered metrics & COD sums)
         $joinedBase = (clone $mo)
             ->whereNotNull($moWaybillCol)
             ->where($moWaybillCol, '!=', '')
@@ -279,9 +291,7 @@ class SummaryOverallController extends Controller
                 $join->on($moWaybillCol, '=', 'ja.wb');
             });
 
-        // ======================
-        // SHIPPED + STATUS COUNTS
-        // ======================
+        // Shipped & status counts
         $shipAgg = (clone $joinedBase)
             ->selectRaw("$selectKey,
                 COUNT(DISTINCT $moWaybillSql) AS shipped_total,
@@ -303,9 +313,7 @@ class SummaryOverallController extends Controller
             $inTransitMap[$k] = (int)($r->in_transit_total?? 0);
         }
 
-        // ======================
-        // GROSS SALES (Delivered-only)
-        // ======================
+        // Gross Sales (delivered)
         $innerDeliveredCod = (clone $joinedBase)
             ->whereRaw('ja.is_delivered = 1')
             ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX(ja.cod_clean) AS cod_clean")
@@ -331,7 +339,7 @@ class SummaryOverallController extends Controller
             $grossMap[$k] = (float)($r->gross_sales ?? 0);
         }
 
-        // ===== Sum of COD for ALL shipped (any status)
+        // COD for ALL shipped
         $innerAllCod = (clone $joinedBase)
             ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX(ja.cod_clean) AS cod_clean")
             ->groupByRaw("$groupByKey, $moWaybillSql");
@@ -356,9 +364,7 @@ class SummaryOverallController extends Controller
             $allCodMap[$k] = (float)($r->all_cod ?? 0);
         }
 
-        // ======================
-        // COGS (Delivered-only) — unit cost at last order date per item (SUM over delivered)
-        // ======================
+        // COGS (delivered-only) — unit cost at last order date per item
         $innerDeliveredItems = (clone $joinedBase)
             ->whereRaw('ja.is_delivered = 1')
             ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $moWaybillSql AS wb, $itemNorm AS item_key");
@@ -392,7 +398,7 @@ class SummaryOverallController extends Controller
             $cogsMap[$k] = (float)($r->cogs_total ?? 0);
         }
 
-        // ==== Total Unit Cost for ALL shipped (kept for reference; not used in projection)
+        // Unit cost SUM for all shipped (reference)
         $innerShippedItems = (clone $joinedBase)
             ->selectRaw("DISTINCT $selectKey, $dateExpr AS order_date, $moWaybillSql AS wb, $itemNorm AS item_key");
 
@@ -416,9 +422,7 @@ class SummaryOverallController extends Controller
             $shipUnitCostMap[$k] = (float)($r->unit_cost_sum ?? 0);
         }
 
-        // ======================
-        // ITEMS + UNIT COST LISTS for UI — PROCEED-based (no Delivered requirement)
-        // ======================
+        // Items + Unit cost list (PROCEED-based, UI display)
         $moProceedOnly = (clone $mo)->whereRaw("$statusNorm = 'proceed'");
 
         if ($AGGREGATE_RANGE) {
@@ -465,9 +469,7 @@ class SummaryOverallController extends Controller
             ];
         }
 
-        // ======================
-        // DELAY (avg days per unique waybill) via ja.min_submit_ts
-        // ======================
+        // Delay (avg days per unique waybill)
         if ($driver === 'mysql') {
             $jSubmitDate = "DATE(ja.min_submit_ts)";
             $delayDays   = "DATEDIFF($jSubmitDate, $dateExpr)";
@@ -541,9 +543,9 @@ class SummaryOverallController extends Controller
         $rows = [];
         foreach ($keys as $key) {
             $adspent = $adsMap[$key] ?? 0.0;
-            if ($adspent <= 0) continue; // UI shows only rows with ad spend
+            if ($adspent <= 0) continue;
 
-            // Items display + unit costs (PROCEED-based)
+            // Items display + unit costs
             $itemsDisplay = null;
             $unitCostsArr = [];
             if (!empty($itemsListMap[$key])) {
@@ -571,9 +573,9 @@ class SummaryOverallController extends Controller
                 $returned  = $returnedMap[$key]    ?? 0;
                 $forRet    = $forReturnMap[$key]   ?? 0;
                 $inTrans   = $inTransitMap[$key]   ?? 0;
-                $gross     = $grossMap[$key]       ?? 0.0; // delivered-only
-                $cogs      = $cogsMap[$key]        ?? 0.0; // delivered-only
-                $all_cod   = $allCodMap[$key]      ?? 0.0; // ALL shipped
+                $gross     = $grossMap[$key]       ?? 0.0;
+                $cogs      = $cogsMap[$key]        ?? 0.0;
+                $all_cod   = $allCodMap[$key]      ?? 0.0;
                 $avgDelay  = $avgDelayMap[$key]    ?? null;
 
                 $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
@@ -628,9 +630,9 @@ class SummaryOverallController extends Controller
                 $returned  = $returnedMap[$key]    ?? 0;
                 $forRet    = $forReturnMap[$key]   ?? 0;
                 $inTrans   = $inTransitMap[$key]   ?? 0;
-                $gross     = $grossMap[$key]       ?? 0.0; // delivered-only
-                $cogs      = $cogsMap[$key]        ?? 0.0; // delivered-only
-                $all_cod   = $allCodMap[$key]      ?? 0.0; // ALL shipped
+                $gross     = $grossMap[$key]       ?? 0.0;
+                $cogs      = $cogsMap[$key]        ?? 0.0;
+                $all_cod   = $allCodMap[$key]      ?? 0.0;
                 $avgDelay  = $avgDelayMap[$key]    ?? null;
 
                 $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
@@ -739,7 +741,7 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ===== Historical RTS fallback (when actualRtsPct is null)
+        // ===== Historical RTS fallback
         $effectiveRtsPct = $actualRtsPct;
         if (!$AGGREGATE_RANGE && $effectiveRtsPct === null) {
             $histNum = 0; $histDen = 0;
@@ -758,7 +760,7 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ===== Projected Net Profit per day — APPLY NEW CONDITIONS =====
+        // ===== Projected Net Profit per day (row-level) =====
         if (!$AGGREGATE_RANGE) {
             $rtsFactor = 1.0;
             if ($effectiveRtsPct !== null) {
@@ -775,11 +777,9 @@ class SummaryOverallController extends Controller
                 $proc         = (int)($r['proceed'] ?? 0);
                 $adsp         = (float)($r['adspent'] ?? 0.0);
                 $cogsRow      = (float)($r['cogs'] ?? 0.0);
-                $inTransitPct = $r['in_transit_pct'] ?? null; // may be null if shipped = 0
+                $inTransitPct = $r['in_transit_pct'] ?? null;
 
-                // === NEW CONDITIONS ===
-                // 1) shipped > 0 AND in_transit_pct > 3%
-                // 2) shipped == 0 AND proceed > 0
+                // conditions:
                 $compute = false;
                 if ($shippedRow > 0 && $inTransitPct !== null && $inTransitPct > 3.0) {
                     $compute = true;
@@ -789,34 +789,31 @@ class SummaryOverallController extends Controller
 
                 if (!$compute) {
                     $r['projected_net_profit'] = null;
-                    $r['projected_net_profit_pct'] = null; 
+                    $r['projected_net_profit_pct'] = null;
                     continue;
                 }
 
-                // avg COD per order (row-level → global → default)
+                // avg COD per order
                 if ($shippedRow > 0) {
-                    $avgCodPerOrder = $allCodRow / $shippedRow;
+                    $avgCodPerOrder = ($allCodRow > 0) ? ($allCodRow / $shippedRow) : $globalAvgCodPerOrder;
                 } elseif ($deliveredRow > 0) {
-                    $avgCodPerOrder = $grossRow / $deliveredRow;
-                } elseif ($globalAvgCodPerOrder !== null) {
-                    $avgCodPerOrder = $globalAvgCodPerOrder;
+                    $avgCodPerOrder = ($grossRow > 0) ? ($grossRow / $deliveredRow) : $globalAvgCodPerOrder;
                 } else {
-                    $avgCodPerOrder = $DEFAULT_AOV_IF_UNKNOWN;
+                    $avgCodPerOrder = $globalAvgCodPerOrder ?? $DEFAULT_AOV_IF_UNKNOWN;
                 }
 
-                // avg Unit Cost per delivered (row-level → global → default)
+                // avg Unit Cost per delivered
                 if ($deliveredRow > 0) {
-                    $avgUCperDelivered = $cogsRow / $deliveredRow;
+                    $avgUCperDelivered = ($cogsRow / $deliveredRow);
                 } elseif ($globalAvgUnitCostPerDelivered !== null) {
                     $avgUCperDelivered = $globalAvgUnitCostPerDelivered;
                 } else {
                     $avgUCperDelivered = $DEFAULT_AVG_UNIT_COST_IF_UNKNOWN;
                 }
 
-                // shipping rate (global → default)
                 $shipRate = $globalShipRate ?? $DEFAULT_SHIP_RATE_IF_UNKNOWN;
 
-                // Projections based on PROCEED
+                // Projections
                 $projSales   = $proc * $avgCodPerOrder * $rtsFactor;
                 $projCogs    = $proc * $avgUCperDelivered * $rtsFactor;
                 $projShipFee = $SHIPPING_PER_SHIPPED * ($proc * $shipRate);
@@ -824,10 +821,12 @@ class SummaryOverallController extends Controller
 
                 $r['projected_net_profit'] = $projSales - $adsp - $projShipFee - $projCodFee - $projCogs;
                 $den = (float)($projSales ?? 0.0);
-$r['projected_net_profit_pct'] = ($den > 0)
-    ? ($r['projected_net_profit'] / $den) * 100.0
-    : null;
+                $r['projected_net_profit_pct'] = ($den > 0)
+                    ? ($r['projected_net_profit'] / $den) * 100.0
+                    : null;
 
+                // Keep denominator for top-summary recomputation later
+                $r['_proj_sales_den'] = $den;
             }
             unset($r);
         }
@@ -874,15 +873,12 @@ $r['projected_net_profit_pct'] = ($den > 0)
 
             $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - $sum['cogs'];
             $total_net_profit_pct = $sum['all_cod'] > 0 ? ($total_net_profit / $sum['all_cod']) * 100.0 : null;
-            // Weighted average ng delay (by shipped)
-$total_avg_delay = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
+            $total_avg_delay      = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
 
-            
-
-            // Total Projected Net Profit (%) — uses Projected NP if available else Net Profit; denominator: total COD (all_cod)
             $total_projected_net_profit_pct = null;
             if (!$AGGREGATE_RANGE) {
                 $projOrActualNpSum = 0.0;
+                $denAllCod         = (float)$sum['all_cod'];
                 foreach ($rows as $r) {
                     if (!empty($r['is_total'])) continue;
                     $best = $r['projected_net_profit'] ?? null;
@@ -891,13 +887,12 @@ $total_avg_delay = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) :
                     }
                     $projOrActualNpSum += (float)$best;
                 }
-                $total_projected_net_profit_pct = ($sum['all_cod'] > 0)
-                    ? ($projOrActualNpSum / $sum['all_cod']) * 100.0
+                $total_projected_net_profit_pct = ($denAllCod > 0)
+                    ? ($projOrActualNpSum / $denAllCod) * 100.0
                     : null;
             }
 
-
-            // Build items/costs for total when specific page — PROCEED-based list
+            // Items/costs for total when specific page
             $totalItemsDisplay = '—'; $totalUnitCostsArr = []; $totalPageLabel = 'TOTAL';
             if (!$AGGREGATE_RANGE && $pageName && strtolower($pageName) !== 'all') {
                 $totalPageLabel = $pageName;
@@ -964,9 +959,97 @@ $total_avg_delay = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) :
             ];
         }
 
+        // ===== TOP SUMMARY (server-side) =====
+        $topSummary = [];
+        if (!$AGGREGATE_RANGE) {
+            // Only use daily (non-total) rows
+            $daily = array_values(array_filter($rows, fn($r) => empty($r['is_total'])));
+            // Collect unique dates asc
+            $dates = array_values(array_unique(array_map(fn($r) => (string)$r['date'], $daily)));
+            sort($dates);
+            if (!empty($dates)) {
+                $lastDate = $dates[count($dates)-1];
+                $datesBeforeLast = $dates;
+                array_pop($datesBeforeLast); // exclude last day
+
+                $pickRowsOn = function(array $wanted) use ($daily) {
+                    $set = array_flip($wanted);
+                    return array_values(array_filter($daily, fn($r) => isset($set[$r['date']])));
+                };
+
+                $rowsFiltered = $daily; // entire filtered range
+                $rowsLast7    = $pickRowsOn(array_slice($datesBeforeLast, -7));
+                $rowsLast3    = $pickRowsOn(array_slice($datesBeforeLast, -3));
+                $rowsLast1    = $pickRowsOn([$lastDate]);
+
+                $aggregate = function(array $subset) use ($effectiveRtsPct, $globalAvgCodPerOrder, $globalAvgUnitCostPerDelivered, $globalShipRate, $SHIPPING_PER_SHIPPED, $COD_FEE_RATE) {
+                    if (!count($subset)) return ['adspent'=>null,'proceed_cpp'=>null,'pn_pct'=>null];
+
+                    $adSum   = 0.0;
+                    $procSum = 0;
+
+                    $projNpSum = 0.0;
+                    $projDen   = 0.0;
+
+                    $actNpSum  = 0.0;
+                    $actDen    = 0.0;
+
+                    foreach ($subset as $r) {
+                        $ad  = (float)($r['adspent'] ?? 0);
+                        $proc= (int)($r['proceed'] ?? 0);
+                        $adSum   += $ad;
+                        $procSum += $proc;
+
+                        // Prefer projected (if computed) using stored denom (or recompute if absent)
+                        $projNP  = $r['projected_net_profit'] ?? null;
+                        $denProj = $r['_proj_sales_den']      ?? null;
+
+                        // If not present, recompute to be safe (same logic as row-level)
+                        if ($projNP === null) {
+                            // fallback: will use actual later
+                        } else {
+                            if ($denProj === null) {
+                                // very rare: protect against missing denom
+                                $denProj = 0.0;
+                            }
+                            $projNpSum += (float)$projNP;
+                            $projDen   += (float)$denProj;
+                        }
+
+                        // Always prepare actual fallback
+                        $actNpSum += (float)($r['net_profit'] ?? 0.0);
+                        $actDen   += (float)($r['all_cod'] ?? 0.0);
+                    }
+
+                    $proceedCPP = ($procSum > 0) ? ($adSum / $procSum) : null;
+
+                    if ($projDen > 0) {
+                        $pn_pct = ($projNpSum / $projDen) * 100.0;
+                    } elseif ($actDen > 0) {
+                        $pn_pct = ($actNpSum / $actDen) * 100.0;
+                    } else {
+                        $pn_pct = null;
+                    }
+
+                    return ['adspent'=>$adSum,'proceed_cpp'=>$proceedCPP,'pn_pct'=>$pn_pct];
+                };
+
+                $filteredLabel = $makeFilteredLabel($start, $end);
+                $last1Label    = ($lastDate === $today) ? 'Today' : ('Last Day (' . $fmtMonthDay($lastDate) . ')');
+
+                $topSummary = [
+                    ['key'=>'filtered','rangeLabel'=>$filteredLabel, ...$aggregate($rowsFiltered)],
+                    ['key'=>'last7',   'rangeLabel'=>'Last 7 Days', ...$aggregate($rowsLast7)],
+                    ['key'=>'last3',   'rangeLabel'=>'Last 3 Days', ...$aggregate($rowsLast3)],
+                    ['key'=>'last1',   'rangeLabel'=>$last1Label, ...$aggregate($rowsLast1)],
+                ];
+            }
+        }
+
         return response()->json([
             'ads_daily'      => $rows,
             'actual_rts_pct' => $actualRtsPct,
+            'top_summary'    => $topSummary,
         ]);
     }
 }
