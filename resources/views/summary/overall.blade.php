@@ -65,11 +65,39 @@
       </div>
     </section>
 
-    <!-- ===== NEW: Page Summary (visible only when Page != 'All') ===== -->
+    <!-- KPI row: Actual RTS + Target CPP + Breakeven CPP (top, single line) -->
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-3" x-show="filters.page_name !== 'all'">
+      <!-- Actual RTS -->
+      <div class="bg-white rounded-xl shadow p-4 flex items-center justify-between">
+        <div>
+          <div class="font-semibold">Actual RTS</div>
+          <div class="text-xs text-gray-500">Computed only on dates with &lt; 3% In Transit</div>
+        </div>
+        <div class="text-2xl md:text-3xl font-extrabold" x-text="percent(data.actual_rts_pct)"></div>
+      </div>
+      <!-- Target CPP -->
+      <div class="bg-white rounded-xl shadow p-4 flex items-center justify-between">
+        <div>
+          <div class="font-semibold">Target CPP</div>
+          <div class="text-xs text-gray-500">(1−RTS)·(0.985·COD − Unit) − 0.2·COD − 37</div>
+        </div>
+        <div class="text-2xl md:text-3xl font-extrabold" x-text="moneyOrDash(data.target_cpp)"></div>
+      </div>
+      <!-- Breakeven CPP -->
+      <div class="bg-white rounded-xl shadow p-4 flex items-center justify-between">
+        <div>
+          <div class="font-semibold">Breakeven CPP</div>
+          <div class="text-xs text-gray-500">(1−RTS)·(0.985·COD − Unit) − 0.05·COD − 37</div>
+        </div>
+        <div class="text-2xl md:text-3xl font-extrabold" x-text="moneyOrDash(data.breakeven_cpp)"></div>
+      </div>
+    </section>
+
+    <!-- ===== Page Summary (server-side) ===== -->
     <section class="bg-white rounded-xl shadow p-3" x-show="filters.page_name !== 'all'">
       <div class="flex items-center justify-between mb-2">
         <div class="font-semibold">Page Summary</div>
-        <div class="text-xs text-gray-500">Computed on the client from the daily rows</div>
+        <div class="text-xs text-gray-500">Computed on the server</div>
       </div>
 
       <div class="overflow-x-auto">
@@ -85,7 +113,7 @@
             </tr>
           </thead>
           <tbody>
-            <template x-for="row in topSummaryRows()" :key="row.key">
+            <template x-for="row in (data.top_summary || [])" :key="row.key">
               <tr class="border-t hover:bg-gray-50">
                 <td class="px-2 py-2" x-text="row.rangeLabel"></td>
                 <td class="px-2 py-2" x-text="filters.page_name"></td>
@@ -100,7 +128,7 @@
                 </td>
               </tr>
             </template>
-            <template x-if="topSummaryRows().length===0">
+            <template x-if="!(data.top_summary && data.top_summary.length)">
               <tr class="border-t"><td class="px-2 py-2 text-gray-500" colspan="6">No data.</td></tr>
             </template>
           </tbody>
@@ -118,7 +146,7 @@
       </div>
 
       <div class="overflow-x-visible">
-        <!-- LIMITED COLUMNS (everyone sees this) -->
+        <!-- LIMITED COLUMNS -->
         <table class="min-w-full w-full text-xs table-fixed" x-show="!isCEO || (isCEO && !showAllColumns)">
           <thead class="bg-gray-50 sticky top-16 z-20">
             <tr class="text-left text-gray-600">
@@ -271,16 +299,7 @@
       </div>
     </section>
 
-    <!-- Actual RTS box (only when page != 'all') -->
-    <section class="bg-white rounded-xl shadow p-4" x-show="filters.page_name !== 'all'">
-      <div class="flex items-center justify-between">
-        <div>
-          <div class="font-semibold">Actual RTS</div>
-          <div class="text-xs text-gray-500">Computed only on dates with &lt; 3% In Transit</div>
-        </div>
-        <div class="text-2xl md:text-3xl font-extrabold" x-text="percent(data.actual_rts_pct)"></div>
-      </div>
-    </section>
+    <!-- (Removed the old bottom “Actual RTS” box; now shown above as part of KPI row) -->
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
@@ -296,7 +315,7 @@
         showAllRows: false,
 
         // data / filters
-        data: { ads_daily: [], actual_rts_pct: null },
+        data: { ads_daily: [], actual_rts_pct: null, top_summary: [], target_cpp: null, breakeven_cpp: null },
         filters: { page_name: 'all', start_date: '', end_date: '' },
         dateLabel: 'Select dates',
 
@@ -312,117 +331,10 @@
           return list.map(v => this.money(v)).join(', ');
         },
 
-        // === Daily Projected Net Profit (%) for the row ===
-        // Use server-provided pct if present; else derive from available numerators/denominators.
+        // Projected % now purely from server
         projectedPct(row){
           const pre = row?.projected_net_profit_pct;
-          if (pre != null && !isNaN(pre)) return Number(pre);
-
-          const npProj = row?.projected_net_profit;
-          if (npProj != null && !isNaN(npProj)) {
-            // Prefer a matching denominator for "projected" if available on the row:
-            if (row?.proceed_cod != null && !isNaN(row.proceed_cod) && Number(row.proceed_cod) !== 0) {
-              return (Number(npProj) / Number(row.proceed_cod)) * 100.0;
-            }
-            // Fallback: if we have a displayed percentage on the row (rare), keep consistency:
-            if (row?.net_profit_pct != null && !isNaN(row.net_profit_pct)) {
-              // If only actual NP% exists, we can't mix with projected NP directly; skip.
-            }
-          }
-
-          // Last resort: use actual NP ratio if projected not available,
-          // to avoid blanks (still consistent for weighted agg below).
-          const npActual = row?.net_profit;
-          if (npActual != null && !isNaN(npActual)) {
-            if (row?.all_cod != null && !isNaN(row.all_cod) && Number(row.all_cod) !== 0) {
-              return (Number(npActual) / Number(row.all_cod)) * 100.0;
-            }
-          }
-          return null;
-        },
-
-        // ===== NEW: TOP SUMMARY (client-side only) =====
-        topSummaryRows(){
-          if (this.filters.page_name === 'all') return [];
-          const rows = (this.data?.ads_daily ?? []).filter(r => !r.is_total);
-
-          if (!rows.length) return [];
-
-          // Collect unique dates and sort asc
-          const dates = Array.from(new Set(rows.map(r => r.date))).sort();
-          const lastDate = dates[dates.length - 1];
-
-          // Helpers to pick subsets
-          const lastNDates = (n) => dates.slice(-n);
-          const rowsOnDates = (dset) => rows.filter(r => dset.includes(r.date));
-          const allRows = rows;
-
-          // Labels
-          const fmt = (s) => {
-            const d = new Date(s+'T00:00:00');
-            const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
-            return `${M} ${d.getDate()}`;
-          };
-          const isToday = (() => {
-            const t = new Date();
-            const ld = new Date(lastDate+'T00:00:00');
-            return t.getFullYear()===ld.getFullYear() && t.getMonth()===ld.getMonth() && t.getDate()===ld.getDate();
-          })();
-
-          const filteredLabel = this.dateLabel; // already like “Aug 14, 2024 – Sep 13, 2024”
-          const last7Label = 'Last 7 Days';
-          const last3Label = 'Last 3 Days';
-          const last1Label = isToday ? 'Today' : `Last Day (${fmt(lastDate)})`;
-
-          // Aggregator: sums + weighted PN% using consistent weights
-          const aggregate = (subset) => {
-            if (!subset.length) return { adspent: null, proceed_cpp: null, pn_pct: null };
-
-            // sums
-            const adSum = subset.reduce((s,r)=>s + (Number(r.adspent)||0), 0);
-            const procSum = subset.reduce((s,r)=>s + (Number(r.proceed)||0), 0);
-            const proceedCPP = (procSum>0) ? (adSum / procSum) : null;
-
-            // Weighted PN%
-            // numerator: use projected NP if present, else actual NP (to avoid blanks)
-            // weight: prefer proceed_cod; else implied denom from row-level % shown; else implied from actual
-            let num = 0, den = 0;
-            subset.forEach(r => {
-              const np = (r.projected_net_profit!=null && !isNaN(r.projected_net_profit))
-                         ? Number(r.projected_net_profit)
-                         : (r.net_profit!=null && !isNaN(r.net_profit) ? Number(r.net_profit) : null);
-              if (np==null) return;
-
-              // Weight detection
-              let w = null;
-              if (r.proceed_cod!=null && !isNaN(r.proceed_cod) && Number(r.proceed_cod)>0) {
-                w = Number(r.proceed_cod);
-              } else {
-                // Try implied denom from projected % shown in UI (consistent with daily)
-                const p = this.projectedPct(r);
-                if (p!=null && !isNaN(p) && Number(p)!==0) {
-                  w = np / (Number(p)/100.0);
-                } else if (r.net_profit_pct!=null && !isNaN(r.net_profit_pct) && Number(r.net_profit_pct)!==0) {
-                  w = Number(r.net_profit) / (Number(r.net_profit_pct)/100.0);
-                }
-              }
-              if (w!=null && !isNaN(w) && w>0) { num += np; den += w; }
-            });
-            const pnPct = (den>0) ? (num/den)*100.0 : null;
-
-            return { adspent: adSum, proceed_cpp: proceedCPP, pn_pct: pnPct };
-          };
-
-          const rowsLast7 = rowsOnDates(lastNDates(7));
-          const rowsLast3 = rowsOnDates(lastNDates(3));
-          const rowsLast1 = rowsOnDates([lastDate]);
-
-          return [
-            { key:'filtered', rangeLabel: filteredLabel.replace(/, \d{4}/g,'').replaceAll(',', ''), ...aggregate(allRows) },
-            { key:'last7',   rangeLabel: last7Label, ...aggregate(rowsLast7) },
-            { key:'last3',   rangeLabel: last3Label, ...aggregate(rowsLast3) },
-            { key:'last1',   rangeLabel: last1Label, ...aggregate(rowsLast1) },
-          ];
+          return (pre==null || isNaN(pre)) ? null : Number(pre);
         },
 
         // conditional formatting
