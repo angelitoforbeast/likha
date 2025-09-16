@@ -88,7 +88,12 @@ class JntRemittanceController extends Controller
             $codSum       = (float) ($vals['cod_sum']   ?? 0);
             $pickedCnt    = (int)   ($vals['picked']    ?? 0);
 
-            $codFee   = round($codSum * 0.015, 2);      // 1.5%
+            $codFee   = // OLD:
+// $codFee   = round($codSum * 0.015, 2);      // 1.5%
+
+// NEW:
+$codFee   = round($codSum * 0.815 * 0.0112, 2);  // 81.5% × 1.12%
+
             $shipCost = round($pickedCnt * 37, 2);      // ₱37 per picked-up parcel
             $remit    = round($codSum - $codFee - $shipCost, 2);
 
