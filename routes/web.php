@@ -42,6 +42,7 @@ use App\Http\Controllers\JntRemittanceController;
 use App\Http\Controllers\JntShippedController;
 use App\Http\Controllers\JntReturnScannedController;
 use App\Http\Controllers\JntReturnReconciliationController;
+use App\Http\Controllers\JntReturnInventoryController;
 
 use App\Models\Role;
 
@@ -78,6 +79,9 @@ Route::prefix('jnt/return')->group(function () {
 });
 Route::get('/jnt/return/reconciliation', [JntReturnReconciliationController::class, 'index'])
     ->name('jnt.return.reconciliation');
+
+Route::get('/jnt/return/inventory', [JntReturnInventoryController::class, 'index'])
+        ->name('jnt.return.inventory');
 
    Route::get('/jnt/sender-name', [PageSenderMappingController::class, 'index']);
 Route::post('/jnt/sender-name', [PageSenderMappingController::class, 'save']);
