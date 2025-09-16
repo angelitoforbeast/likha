@@ -40,6 +40,8 @@ use App\Http\Controllers\SummaryOverallController;
 use App\Http\Controllers\JntOndelController;
 use App\Http\Controllers\JntRemittanceController;
 use App\Http\Controllers\JntShippedController;
+use App\Http\Controllers\JntReturnScannedController;
+
 
 use App\Models\Role;
 
@@ -69,7 +71,11 @@ Route::middleware(['auth'])->group(function () {
 Route::get('/jnt/remittance', [JntRemittanceController::class, 'index'])
     ->name('jnt.remittance');
 Route::get('/jnt/shipped', [\App\Http\Controllers\JntShippedController::class, 'index'])->name('jnt.shipped');
-
+Route::prefix('jnt/return')->group(function () {
+    Route::get('scanned', [JntReturnScannedController::class, 'index'])->name('jnt.return.scanned');
+    Route::post('scanned/upload', [JntReturnScannedController::class, 'upload'])->name('jnt.return.scanned.upload');
+    Route::delete('scanned/{id}', [JntReturnScannedController::class, 'destroy'])->name('jnt.return.scanned.delete');
+});
 
    Route::get('/jnt/sender-name', [PageSenderMappingController::class, 'index']);
 Route::post('/jnt/sender-name', [PageSenderMappingController::class, 'save']);
