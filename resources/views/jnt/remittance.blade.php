@@ -1,6 +1,5 @@
 {{-- resources/views/jnt/remittance.blade.php --}}
 <x-layout>
-  {{-- Set the browser tab title (works if your layout yields this slot) --}}
   <x-slot name="title">Remittance • Likha</x-slot>
 
   <x-slot name="heading">
@@ -64,15 +63,42 @@
               </tr>
             @endforelse
           </tbody>
-          <tfoot class="bg-gray-50">
+
+          {{-- ====== TOTALS ROW (COD Fee editable; Remittance recalculates) ====== --}}
+          <tfoot class="bg-gray-50"
+                 x-data="codFeeTotals({
+                   codSum: {{ json_encode($totals['cod_sum']) }},
+                   codFee: {{ json_encode($totals['cod_fee']) }},
+                   shipCost: {{ json_encode($totals['ship_cost']) }}
+                 })">
             <tr>
               <th class="px-3 py-2 border-t text-right">TOTAL</th>
               <th class="px-3 py-2 border-t text-right">{{ number_format($totals['delivered']) }}</th>
               <th class="px-3 py-2 border-t text-right">{{ number_format($totals['cod_sum'], 2) }}</th>
-              <th class="px-3 py-2 border-t text-right">{{ number_format($totals['cod_fee'], 2) }}</th>
+
+              {{-- Editable COD Fee (TOTAL) --}}
+              <th class="px-3 py-2 border-t text-right">
+                <div class="flex items-center justify-end gap-2">
+                  <input type="number" step="0.01"
+                         class="w-32 border rounded px-2 py-1 text-right"
+                         :value="codFeeEffective.toFixed(2)"
+                         @input="onInput($event)"
+                         @blur="sanitize()">
+                  <button type="button"
+                          class="text-xs px-2 py-1 border rounded hover:bg-gray-100"
+                          @click="reset()">Reset</button>
+                </div>
+                <div class="text-[10px] text-gray-500 mt-1" x-show="isOverridden()">
+                  overridden (was <span x-text="money(codFeeDefault)"></span>)
+                </div>
+              </th>
+
               <th class="px-3 py-2 border-t text-right">{{ number_format($totals['picked']) }}</th>
               <th class="px-3 py-2 border-t text-right">{{ number_format($totals['ship_cost'], 2) }}</th>
-              <th class="px-3 py-2 border-t text-right font-semibold">{{ number_format($totals['remittance'], 2) }}</th>
+
+              {{-- Remittance (TOTAL) reacts to COD Fee override --}}
+              <th class="px-3 py-2 border-t text-right font-semibold"
+                  x-text="money(remittanceEffective)"></th>
             </tr>
           </tfoot>
         </table>
@@ -80,7 +106,6 @@
     </section>
   </div>
 
-  {{-- If your <x-layout> doesn't wire a title slot, keep this as a fallback --}}
   <script>document.title = 'Remittance • Likha';</script>
 
   {{-- flatpickr --}}
@@ -94,7 +119,6 @@
         dateLabel: 'Select dates',
 
         ymd(d){ const p = n => String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); },
-
         setDateLabel(){
           if (!this.filters.start_date || !this.filters.end_date) { this.dateLabel = 'Select dates'; return; }
           const s = new Date(this.filters.start_date + 'T00:00:00');
@@ -105,40 +129,28 @@
             ? `${M(s.getMonth())} ${s.getDate()}, ${s.getFullYear()}`
             : `${M(s.getMonth())} ${s.getDate()}, ${s.getFullYear()} – ${M(e.getMonth())} ${e.getDate()}, ${e.getFullYear()}`;
         },
-
         go(){
           const params = new URLSearchParams({
             start_date: this.filters.start_date || '',
             end_date:   this.filters.end_date   || ''
           });
-          // Reload page with GET params (no Filter button needed)
           window.location = '{{ route('jnt.remittance') }}?' + params.toString();
         },
-
         thisMonth(){
           const now = new Date();
           const start = new Date(now.getFullYear(), now.getMonth(), 1);
           this.filters.start_date = this.ymd(start);
           this.filters.end_date   = this.ymd(now);
-          this.setDateLabel();
-          this.go();
+          this.setDateLabel(); this.go();
         },
-
         yesterday(){
-          const now = new Date();
-          now.setDate(now.getDate() - 1);
+          const now = new Date(); now.setDate(now.getDate() - 1);
           const y = this.ymd(now);
-          this.filters.start_date = y;
-          this.filters.end_date   = y;
-          this.setDateLabel();
-          this.go();
+          this.filters.start_date = y; this.filters.end_date = y;
+          this.setDateLabel(); this.go();
         },
-
         init(){
-          // Initialize label
           this.setDateLabel();
-
-          // Init flatpickr with current values
           window.flatpickr('#remitRange', {
             mode: 'range',
             dateFormat: 'Y-m-d',
@@ -151,8 +163,7 @@
                 this.filters.start_date = this.ymd(sel[0]);
                 this.filters.end_date   = this.ymd(sel[0]);
               } else { return; }
-              this.setDateLabel();
-              this.go(); // AUTO apply on close
+              this.setDateLabel(); this.go();
             },
             onReady: (_sd, _ds, inst) => {
               if (this.filters.start_date && this.filters.end_date) {
@@ -161,6 +172,36 @@
             }
           });
         }
+      }
+    }
+
+    // Mini Alpine component for editable COD Fee (TOTAL)
+    function codFeeTotals(init){
+      return {
+        // server totals
+        codSum: Number(init.codSum || 0),
+        codFeeDefault: Number(init.codFee || 0),
+        shipCost: Number(init.shipCost || 0),
+
+        // user override (null = not overridden)
+        codFeeOverride: null,
+
+        get codFeeEffective(){ return this.codFeeOverride ?? this.codFeeDefault; },
+        get remittanceEffective(){ return +(this.codSum - this.codFeeEffective - this.shipCost).toFixed(2); },
+
+        onInput(e){
+          const v = parseFloat(e.target.value);
+          this.codFeeOverride = isNaN(v) ? null : v;
+        },
+        sanitize(){
+          if (this.codFeeOverride === null) return; // keep null if empty
+          if (!isFinite(this.codFeeOverride)) this.codFeeOverride = this.codFeeDefault;
+          if (this.codFeeOverride < 0) this.codFeeOverride = 0;
+        },
+        reset(){ this.codFeeOverride = null; },
+        isOverridden(){ return this.codFeeOverride !== null && this.codFeeOverride.toFixed(2) !== this.codFeeDefault.toFixed(2); },
+
+        money(v){ return '₱' + Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); },
       }
     }
   </script>
