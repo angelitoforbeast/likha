@@ -93,7 +93,7 @@ class JntRemittanceController extends Controller
 
             // ✅ Correct formulas
             $codFee     = round($codSum * 0.015, 2);     // COD Fee = 1.5% × COD Sum
-            $codFeeVat  = round($codFee * 1.12, 2);      // COD Fee VAT = 1.12 × COD Fee
+            $codFeeVat  = round($codFee * 0.12, 2);      // COD Fee VAT = 0.12 × COD Fee
             $shipCost   = round($pickedCnt * 37, 2);     // ₱37 per picked-up parcel
             $remit      = round($codSum - $codFee - $codFeeVat - $shipCost, 2);
 

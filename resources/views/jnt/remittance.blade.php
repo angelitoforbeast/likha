@@ -6,6 +6,13 @@
     <div class="text-xl font-bold">📦 J&T Remittance</div>
   </x-slot>
 
+  <style>
+    /* Optional: keep spinner-hiding in case inputs are changed to number later */
+    input.no-spin::-webkit-outer-spin-button,
+    input.no-spin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input.no-spin[type=number] { -moz-appearance: textfield; appearance: textfield; }
+  </style>
+
   <div x-data="remitUI('{{ $start }}','{{ $end }}')" x-init="init()">
     <!-- Filters -->
     <section class="bg-white rounded-xl shadow p-3">
@@ -66,26 +73,29 @@
             @endforelse
           </tbody>
 
-          {{-- TOTALS (editable COD Fee & COD Fee VAT; TOTAL Remittance recalculates) --}}
+          {{-- TOTALS (easy-edit COD Fee & COD Fee VAT as plain text inputs; TOTAL Remittance recalculates on blur/Enter) --}}
           <tfoot class="bg-gray-50"
                  x-data="codFeeTotals({
                    codSum: {{ json_encode($totals['cod_sum']) }},
                    codFee: {{ json_encode($totals['cod_fee']) }},
                    codFeeVat: {{ json_encode($totals['cod_fee_vat']) }},
                    shipCost: {{ json_encode($totals['ship_cost']) }}
-                 })">
+                 })"
+                 x-init="init()">
             <tr>
               <th class="px-3 py-2 border-t text-right">TOTAL</th>
               <th class="px-3 py-2 border-t text-right">{{ number_format($totals['delivered']) }}</th>
               <th class="px-3 py-2 border-t text-right">₱{{ number_format($totals['cod_sum'], 2) }}</th>
 
-              {{-- Editable TOTAL COD Fee --}}
+              {{-- Editable TOTAL COD Fee (text input; no spinners; no auto-format while typing) --}}
               <th class="px-3 py-2 border-t text-right">
                 <div class="flex items-center justify-end gap-2">
-                  <input type="number" step="0.01"
-                         class="w-32 border rounded px-2 py-1 text-right"
-                         :value="codFeeEffective.toFixed(2)"
-                         @input="onInputFee($event)" @blur="sanitizeFee()">
+                  <input
+                    type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
+                    class="no-spin w-32 border rounded px-2 py-1 text-right"
+                    x-model="codFeeInput"
+                    @blur="formatFee()"
+                    @keydown.enter.prevent="formatFee()">
                   <button type="button" class="text-xs px-2 py-1 border rounded hover:bg-gray-100" @click="resetFee()">Reset</button>
                 </div>
                 <div class="text-[10px] text-gray-500 mt-1" x-show="isFeeOverridden()">
@@ -93,13 +103,15 @@
                 </div>
               </th>
 
-              {{-- Editable TOTAL COD Fee VAT --}}
+              {{-- Editable TOTAL COD Fee VAT (text input; no spinners; no auto-format while typing) --}}
               <th class="px-3 py-2 border-t text-right">
                 <div class="flex items-center justify-end gap-2">
-                  <input type="number" step="0.01"
-                         class="w-32 border rounded px-2 py-1 text-right"
-                         :value="codFeeVatEffective.toFixed(2)"
-                         @input="onInputVat($event)" @blur="sanitizeVat()">
+                  <input
+                    type="text" inputmode="decimal" pattern="[0-9]*[.,]?[0-9]*"
+                    class="no-spin w-32 border rounded px-2 py-1 text-right"
+                    x-model="codFeeVatInput"
+                    @blur="formatVat()"
+                    @keydown.enter.prevent="formatVat()">
                   <button type="button" class="text-xs px-2 py-1 border rounded hover:bg-gray-100" @click="resetVat()">Reset</button>
                 </div>
                 <div class="text-[10px] text-gray-500 mt-1" x-show="isVatOverridden()">
@@ -116,6 +128,14 @@
             </tr>
           </tfoot>
         </table>
+      </div>
+
+      <div class="text-[11px] text-gray-500 mt-3">
+        <span class="font-semibold">Formulas:</span>
+        COD Fee = <code>1.5% × COD sum</code> •
+        COD Fee VAT = <code>1.12 × COD Fee</code> •
+        Shipping = <code>₱37 × picked</code> •
+        Remittance = <code>COD sum − COD Fee − COD Fee VAT − Shipping</code>
       </div>
     </section>
   </div>
@@ -190,7 +210,7 @@
       }
     }
 
-    // Editable TOTAL COD Fee & COD Fee VAT (affects TOTAL remittance only)
+    // Easier editing: keep input as string (x-model), parse & format only on blur/Enter
     function codFeeTotals(init){
       return {
         codSum: Number(init.codSum || 0),
@@ -198,34 +218,81 @@
         codFeeVatDefault: Number(init.codFeeVat || 0),
         shipCost: Number(init.shipCost || 0),
 
-        codFeeOverride: null,     // null = not overridden
-        codFeeVatOverride: null,  // null = not overridden
+        // overrides (numbers) + inputs (strings)
+        codFeeOverride: null,
+        codFeeVatOverride: null,
+        codFeeInput: '',
+        codFeeVatInput: '',
 
+        init(){
+          this.codFeeInput    = this.toFixed2(this.codFeeDefault);
+          this.codFeeVatInput = this.toFixed2(this.codFeeVatDefault);
+        },
+
+        // computed effective values
         get codFeeEffective(){ return this.codFeeOverride ?? this.codFeeDefault; },
         get codFeeVatEffective(){ return this.codFeeVatOverride ?? this.codFeeVatDefault; },
         get remittanceEffective(){
           return +(this.codSum - this.codFeeEffective - this.codFeeVatEffective - this.shipCost).toFixed(2);
         },
 
-        onInputFee(e){ const v = parseFloat(e.target.value); this.codFeeOverride = isNaN(v) ? null : v; },
-        onInputVat(e){ const v = parseFloat(e.target.value); this.codFeeVatOverride = isNaN(v) ? null : v; },
-
-        sanitizeFee(){
-          if (this.codFeeOverride === null) return;
-          if (!isFinite(this.codFeeOverride) || this.codFeeOverride < 0) this.codFeeOverride = this.codFeeDefault;
-        },
-        sanitizeVat(){
-          if (this.codFeeVatOverride === null) return;
-          if (!isFinite(this.codFeeVatOverride) || this.codFeeVatOverride < 0) this.codFeeVatOverride = this.codFeeVatDefault;
-        },
-
-        resetFee(){ this.codFeeOverride = null; },
-        resetVat(){ this.codFeeVatOverride = null; },
-
-        isFeeOverridden(){ return this.codFeeOverride !== null && this.codFeeOverride.toFixed(2) !== this.codFeeDefault.toFixed(2); },
-        isVatOverridden(){ return this.codFeeVatOverride !== null && this.codFeeVatOverride.toFixed(2) !== this.codFeeVatDefault.toFixed(2); },
-
+        // helpers
+        toFixed2(v){ return (Number(v||0)).toFixed(2); },
         money(v){ return '₱' + Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); },
+        // smart parse: supports "₱1,234.56" or "1234,56"
+        parseNum(s){
+          if (s == null) return null;
+          let str = String(s).trim().replace(/₱/g,'').replace(/\s/g,'');
+          if (!str) return null;
+          if (str.includes(',') && !str.includes('.')) {
+            // Treat comma as decimal if no dot present
+            str = str.replace(/,/g, '.');
+          } else {
+            // Remove thousands commas
+            str = str.replace(/,/g, '');
+          }
+          const v = parseFloat(str);
+          return isNaN(v) ? null : v;
+        },
+
+        // formatting actions
+        formatFee(){
+          const v = this.parseNum(this.codFeeInput);
+          if (v === null || !isFinite(v) || v < 0) {
+            // revert to default if invalid
+            this.codFeeOverride = null;
+            this.codFeeInput = this.toFixed2(this.codFeeDefault);
+            return;
+          }
+          // set override if different enough from default (epsilon)
+          const eps = 0.005;
+          this.codFeeOverride = (Math.abs(v - this.codFeeDefault) > eps) ? +v.toFixed(2) : null;
+          this.codFeeInput = this.toFixed2(this.codFeeOverride ?? this.codFeeDefault);
+        },
+
+        formatVat(){
+          const v = this.parseNum(this.codFeeVatInput);
+          if (v === null || !isFinite(v) || v < 0) {
+            this.codFeeVatOverride = null;
+            this.codFeeVatInput = this.toFixed2(this.codFeeVatDefault);
+            return;
+          }
+          const eps = 0.005;
+          this.codFeeVatOverride = (Math.abs(v - this.codFeeVatDefault) > eps) ? +v.toFixed(2) : null;
+          this.codFeeVatInput = this.toFixed2(this.codFeeVatOverride ?? this.codFeeVatDefault);
+        },
+
+        resetFee(){
+          this.codFeeOverride = null;
+          this.codFeeInput = this.toFixed2(this.codFeeDefault);
+        },
+        resetVat(){
+          this.codFeeVatOverride = null;
+          this.codFeeVatInput = this.toFixed2(this.codFeeVatDefault);
+        },
+
+        isFeeOverridden(){ return this.codFeeOverride !== null; },
+        isVatOverridden(){ return this.codFeeVatOverride !== null; },
       }
     }
   </script>
