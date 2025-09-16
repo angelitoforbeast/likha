@@ -1,11 +1,14 @@
 {{-- resources/views/jnt/remittance.blade.php --}}
 <x-layout>
+  {{-- Set the browser tab title (works if your layout yields this slot) --}}
+  <x-slot name="title">Remittance • Likha</x-slot>
+
   <x-slot name="heading">
     <div class="text-xl font-bold">📦 J&T Remittance</div>
   </x-slot>
 
   <div x-data="remitUI('{{ $start }}','{{ $end }}')" x-init="init()">
-    <!-- Filters -->
+    <!-- Filters (auto-apply on close, no Filter button) -->
     <section class="bg-white rounded-xl shadow p-3">
       <div class="grid md:grid-cols-3 gap-3 items-end">
         <div class="md:col-span-2">
@@ -26,7 +29,9 @@
     <section class="bg-white rounded-xl shadow p-3 mt-3">
       <div class="flex items-center justify-between mb-2">
         <div class="font-semibold">Summary</div>
-        <div class="text-xs text-gray-500">Source: from_jnts (Delivered by signingtime; Pickups by submission_time)</div>
+        <div class="text-xs text-gray-500">
+          Source: from_jnts — Delivered by <em>signingtime</em>; Pickups by <em>submission_time</em>
+        </div>
       </div>
 
       <div class="overflow-x-auto">
@@ -74,6 +79,9 @@
       </div>
     </section>
   </div>
+
+  {{-- If your <x-layout> doesn't wire a title slot, keep this as a fallback --}}
+  <script>document.title = 'Remittance • Likha';</script>
 
   {{-- flatpickr --}}
   <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
