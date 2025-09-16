@@ -39,6 +39,7 @@ use App\Http\Controllers\ItemCogsController;
 use App\Http\Controllers\SummaryOverallController;
 use App\Http\Controllers\JntOndelController;
 use App\Http\Controllers\JntRemittanceController;
+use App\Http\Controllers\JntShippedController;
 
 use App\Models\Role;
 
@@ -67,6 +68,8 @@ Route::middleware(['auth'])->group(function () {
 
 Route::get('/jnt/remittance', [JntRemittanceController::class, 'index'])
     ->name('jnt.remittance');
+Route::get('/jnt/shipped', [\App\Http\Controllers\JntShippedController::class, 'index'])->name('jnt.shipped');
+
 
    Route::get('/jnt/sender-name', [PageSenderMappingController::class, 'index']);
 Route::post('/jnt/sender-name', [PageSenderMappingController::class, 'save']);
