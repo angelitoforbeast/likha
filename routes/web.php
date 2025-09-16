@@ -41,7 +41,7 @@ use App\Http\Controllers\JntOndelController;
 use App\Http\Controllers\JntRemittanceController;
 use App\Http\Controllers\JntShippedController;
 use App\Http\Controllers\JntReturnScannedController;
-
+use App\Http\Controllers\JntReturnReconciliationController;
 
 use App\Models\Role;
 
@@ -76,6 +76,8 @@ Route::prefix('jnt/return')->group(function () {
     Route::post('scanned/upload', [JntReturnScannedController::class, 'upload'])->name('jnt.return.scanned.upload');
     Route::delete('scanned/{id}', [JntReturnScannedController::class, 'destroy'])->name('jnt.return.scanned.delete');
 });
+Route::get('/jnt/return/reconciliation', [JntReturnReconciliationController::class, 'index'])
+    ->name('jnt.return.reconciliation');
 
    Route::get('/jnt/sender-name', [PageSenderMappingController::class, 'index']);
 Route::post('/jnt/sender-name', [PageSenderMappingController::class, 'save']);
