@@ -38,6 +38,7 @@ use App\Http\Controllers\JntHoldController;
 use App\Http\Controllers\ItemCogsController;
 use App\Http\Controllers\SummaryOverallController;
 use App\Http\Controllers\JntOndelController;
+use App\Http\Controllers\JntRemittanceController;
 
 use App\Models\Role;
 
@@ -63,6 +64,9 @@ Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name(
 
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
+
+Route::get('/jnt/remittance', [JntRemittanceController::class, 'index'])
+    ->name('jnt.remittance');
 
    Route::get('/jnt/sender-name', [PageSenderMappingController::class, 'index']);
 Route::post('/jnt/sender-name', [PageSenderMappingController::class, 'save']);
