@@ -96,7 +96,10 @@ class SummaryOverallController extends Controller
         if (!$pageColName) throw new \RuntimeException('macro_output: page column not found');
         $moPageSql = 'mo.' . $quote($pageColName);
         $moPageCol = 'mo.' . $pageColName;
-        $pageExpr  = "$trimFn(COALESCE($moPageSql,''))";
+
+        // IMPORTANT: display label + normalized key
+        $pageLabelExpr = "$trimFn(COALESCE($moPageSql,''))"; // UI label
+        $pageKeyExpr   = "LOWER($pageLabelExpr)";            // merge key
 
         $statusColName = $pickCol('macro_output', ['STATUS','status','Status']) ?? 'status';
         $statusExpr    = 'mo.' . $quote($statusColName);
@@ -164,9 +167,15 @@ class SummaryOverallController extends Controller
         // aggregate mode: All Pages?
         $AGGREGATE_RANGE = ($pageName === 'all');
 
+        // normalize requested page for filters (LOWER + TRIM)
+        $pageNameNorm = $AGGREGATE_RANGE ? null : mb_strtolower(trim((string)$pageName));
+
         // ======================
         // ADS (ads_manager_reports)
         // ======================
+        $adsPageLabelExpr = "$trimFn(COALESCE(page_name,''))";
+        $adsPageKeyExpr   = "LOWER($adsPageLabelExpr)";
+
         $adsBase = DB::table('ads_manager_reports');
 
         if ($start && $end) {
@@ -177,38 +186,39 @@ class SummaryOverallController extends Controller
             $adsBase->whereRaw('DATE(day) <= ?', [$end]);
         }
 
-        if (!$AGGREGATE_RANGE) {
-            if ($driver === 'pgsql') {
-                $adsBase->whereRaw("$trimFn(page_name) ILIKE $trimFn(?)", [$pageName]);
-            } else {
-                $adsBase->whereRaw("LOWER($trimFn(page_name)) = LOWER($trimFn(?))", [$pageName]);
-            }
+        if (!$AGGREGATE_RANGE && $pageNameNorm !== null && $pageNameNorm !== '') {
+            $adsBase->whereRaw("$adsPageKeyExpr = ?", [$pageNameNorm]);
         }
 
         if ($AGGREGATE_RANGE) {
             $adsRows = (clone $adsBase)
-                ->selectRaw("$trimFn(COALESCE(page_name, '')) AS page_key, SUM($castSpend) AS adspent")
-                ->groupByRaw("$trimFn(COALESCE(page_name,''))")
+                ->selectRaw("$adsPageKeyExpr AS page_key, MIN($adsPageLabelExpr) AS page_label, SUM($castSpend) AS adspent")
+                ->groupByRaw("$adsPageKeyExpr")
                 ->havingRaw("SUM($castSpend) > 0")
                 ->orderBy('page_key')
                 ->get();
         } else {
             $adsRows = (clone $adsBase)
                 ->whereNotNull('day')
-                ->selectRaw("DATE(day) AS day_key, $trimFn(COALESCE(page_name, '')) AS page_key, SUM($castSpend) AS adspent")
-                ->groupByRaw("DATE(day), $trimFn(COALESCE(page_name,''))")
+                ->selectRaw("DATE(day) AS day_key, $adsPageKeyExpr AS page_key, MIN($adsPageLabelExpr) AS page_label, SUM($castSpend) AS adspent")
+                ->groupByRaw("DATE(day), $adsPageKeyExpr")
                 ->havingRaw("SUM($castSpend) > 0")
                 ->orderBy('day_key', 'asc')
                 ->orderBy('page_key', 'asc')
                 ->get();
         }
 
-        $adsMap = [];
+        $adsMap   = [];
+        $labelMap = []; // key => page_label (human display)
         foreach ($adsRows as $r) {
             if ($AGGREGATE_RANGE) {
-                $adsMap[(string)$r->page_key] = (float)($r->adspent ?? 0);
+                $k = (string)$r->page_key;
+                $adsMap[$k] = (float)($r->adspent ?? 0);
+                if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
             } else {
-                $adsMap[(string)$r->day_key . '|' . (string)$r->page_key] = (float)($r->adspent ?? 0);
+                $k = (string)$r->day_key . '|' . (string)$r->page_key;
+                $adsMap[$k] = (float)($r->adspent ?? 0);
+                if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
             }
         }
 
@@ -225,19 +235,24 @@ class SummaryOverallController extends Controller
             $mo->whereRaw("$dateExpr <= ?", [$end]);
         }
 
-        if (!$AGGREGATE_RANGE) {
-            if ($driver === 'pgsql') {
-                $mo->whereRaw("$pageExpr ILIKE $trimFn(?)", [$pageName]);
-            } else {
-                $mo->whereRaw("LOWER($pageExpr) = LOWER($trimFn(?))", [$pageName]);
-            }
+        if (!$AGGREGATE_RANGE && $pageNameNorm !== null && $pageNameNorm !== '') {
+            $mo->whereRaw("$pageKeyExpr = ?", [$pageNameNorm]);
         }
 
-        $selectKey   = $AGGREGATE_RANGE ? "$pageExpr AS page_key" : "$dateExpr AS day_key, $pageExpr AS page_key";
-        $groupByKey  = $AGGREGATE_RANGE ? "$pageExpr" : "$dateExpr, $pageExpr";
+        // ==== KEY VARIANTS (Agg vs Base) ====
+        if ($AGGREGATE_RANGE) {
+            $selectKeyAgg  = "$pageKeyExpr AS page_key, MIN($pageLabelExpr) AS page_label";
+            $groupByKey    = "$pageKeyExpr";
+            $selectKeyBase = "$pageKeyExpr AS page_key, $pageLabelExpr AS page_label";
+        } else {
+            $selectKeyAgg  = "$dateExpr AS day_key, $pageKeyExpr AS page_key, MIN($pageLabelExpr) AS page_label";
+            $groupByKey    = "$dateExpr, $pageKeyExpr";
+            $selectKeyBase = "$dateExpr AS day_key, $pageKeyExpr AS page_key, $pageLabelExpr AS page_label";
+        }
 
+        // Orders agg
         $orderAgg = (clone $mo)
-            ->selectRaw("$selectKey,
+            ->selectRaw("$selectKeyAgg,
                 COUNT(*) AS orders_total,
                 SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_total,
                 SUM(CASE WHEN $statusNorm = 'cannotproceed' THEN 1 ELSE 0 END) AS cannot_total,
@@ -253,6 +268,7 @@ class SummaryOverallController extends Controller
             $proceedMap[$k] = (int)($r->proceed_total ?? 0);
             $cannotMap[$k]  = (int)($r->cannot_total ?? 0);
             $odzMap[$k]     = (int)($r->odz_total ?? 0);
+            if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
         }
 
         // ======================
@@ -294,10 +310,10 @@ class SummaryOverallController extends Controller
             });
 
         // ======================
-        // Shipped & status counts
+        // Shipped & status counts (GROUPED → Agg key)
         // ======================
         $shipAgg = (clone $joinedBase)
-            ->selectRaw("$selectKey,
+            ->selectRaw("$selectKeyAgg,
                 COUNT(DISTINCT $moWaybillSql) AS shipped_total,
                 COUNT(DISTINCT CASE WHEN ja.is_delivered  = 1 THEN $moWaybillSql END) AS delivered_total,
                 COUNT(DISTINCT CASE WHEN ja.is_returned   = 1 THEN $moWaybillSql END) AS returned_total,
@@ -315,14 +331,15 @@ class SummaryOverallController extends Controller
             $returnedMap[$k]  = (int)($r->returned_total  ?? 0);
             $forReturnMap[$k] = (int)($r->for_return_total?? 0);
             $inTransitMap[$k] = (int)($r->in_transit_total?? 0);
+            if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
         }
 
         // ======================
-        // Gross Sales (Delivered-only) — SUM of macro_output.COD per delivered waybill
+        // Gross Sales (Delivered-only) — GROUPED → Agg key
         // ======================
         $innerDeliveredCod = (clone $joinedBase)
             ->whereRaw('ja.is_delivered = 1')
-            ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX($moCodClean) AS cod_mo")
+            ->selectRaw("$selectKeyAgg, $moWaybillSql AS wb, MAX($moCodClean) AS cod_mo")
             ->groupByRaw("$groupByKey, $moWaybillSql");
 
         if ($AGGREGATE_RANGE) {
@@ -346,10 +363,10 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // ALL COD (all shipped) — SUM of macro_output.COD per shipped waybill
+        // ALL COD (all shipped) — GROUPED → Agg key
         // ======================
         $innerAllCod = (clone $joinedBase)
-            ->selectRaw("$selectKey, $moWaybillSql AS wb, MAX($moCodClean) AS cod_mo")
+            ->selectRaw("$selectKeyAgg, $moWaybillSql AS wb, MAX($moCodClean) AS cod_mo")
             ->groupByRaw("$groupByKey, $moWaybillSql");
 
         if ($AGGREGATE_RANGE) {
@@ -373,20 +390,20 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // ITEMS + UNIT COST LISTS for UI — PROCEED-based
+        // ITEMS + UNIT COST LISTS — GROUPED → Agg key
         // ======================
         $moProceedOnly = (clone $mo)->whereRaw("$statusNorm = 'proceed'");
 
         if ($AGGREGATE_RANGE) {
             $itemsProceedBase = (clone $moProceedOnly)
-                ->selectRaw(" $pageExpr AS page_key, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
+                ->selectRaw(" $selectKeyAgg, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
                               COUNT(*) AS qty, MAX($dateExpr) AS last_order_date")
-                ->groupByRaw("$pageExpr, $itemNorm");
+                ->groupByRaw("$groupByKey, $itemNorm");
         } else {
             $itemsProceedBase = (clone $moProceedOnly)
-                ->selectRaw(" $dateExpr AS day_key, $pageExpr AS page_key, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
+                ->selectRaw(" $selectKeyAgg, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
                               COUNT(*) AS qty, MAX($dateExpr) AS last_order_date")
-                ->groupByRaw("$dateExpr, $pageExpr, $itemNorm");
+                ->groupByRaw("$groupByKey, $itemNorm");
         }
 
         $unitCostDispSub = "COALESCE((
@@ -401,38 +418,39 @@ class SummaryOverallController extends Controller
         if ($AGGREGATE_RANGE) {
             $itemsCostRows = DB::query()
                 ->fromSub($itemsProceedBase, 'd')
-                ->selectRaw("page_key, item_key, item_label, qty, $unitCostDispSub AS unit_cost_disp")
+                ->selectRaw("page_key, page_label, item_key, item_label, qty, $unitCostDispSub AS unit_cost_disp")
                 ->get();
         } else {
             $itemsCostRows = DB::query()
                 ->fromSub($itemsProceedBase, 'd')
-                ->selectRaw("day_key, page_key, item_key, item_label, qty, $unitCostDispSub AS unit_cost_disp")
+                ->selectRaw("day_key, page_key, page_label, item_key, item_label, qty, $unitCostDispSub AS unit_cost_disp")
                 ->get();
         }
 
         $itemsListMap = [];
         foreach ($itemsCostRows as $r) {
-            $key = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $key = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)($r->day_key ?? '') . '|' . (string)$r->page_key);
             $itemsListMap[$key] ??= [];
             $itemsListMap[$key][] = [
                 'label'     => (string)($r->item_label ?? ''),
                 'qty'       => (int)($r->qty ?? 0),
                 'unit_cost' => (float)($r->unit_cost_disp ?? 0),
             ];
+            if (!empty($r->page_label)) $labelMap[$key] = (string)$r->page_label;
         }
 
         // ======================
-        // PROCEED COD SUM per key
+        // PROCEED COD SUM — GROUPED → Agg key
         // ======================
         if ($AGGREGATE_RANGE) {
             $procCodRows = (clone $moProceedOnly)
-                ->selectRaw("$pageExpr AS page_key, SUM($moCodClean) AS proceed_cod_sum")
-                ->groupByRaw("$pageExpr")
+                ->selectRaw("$selectKeyAgg, SUM($moCodClean) AS proceed_cod_sum")
+                ->groupByRaw("$groupByKey")
                 ->get();
         } else {
             $procCodRows = (clone $moProceedOnly)
-                ->selectRaw("$dateExpr AS day_key, $pageExpr AS page_key, SUM($moCodClean) AS proceed_cod_sum")
-                ->groupByRaw("$dateExpr, $pageExpr")
+                ->selectRaw("$selectKeyAgg, SUM($moCodClean) AS proceed_cod_sum")
+                ->groupByRaw("$groupByKey")
                 ->get();
         }
 
@@ -440,27 +458,29 @@ class SummaryOverallController extends Controller
         foreach ($procCodRows as $r) {
             $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
             $proceedCodSumMap[$k] = (float)($r->proceed_cod_sum ?? 0);
+            if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
         }
 
         // ======================
-        // PROCEED Unit Cost SUM per key
+        // PROCEED Unit Cost SUM — GROUPED → Agg key
         // ======================
         if ($AGGREGATE_RANGE) {
             $procUnitCostRows = DB::query()
                 ->fromSub($itemsProceedBase, 'd')
-                ->selectRaw("page_key, SUM(qty * $unitCostDispSub) AS proceed_unit_cost_sum")
-                ->groupBy('page_key')->get();
+                ->selectRaw("page_key, page_label, SUM(qty * $unitCostDispSub) AS proceed_unit_cost_sum")
+                ->groupBy('page_key','page_label')->get();
         } else {
             $procUnitCostRows = DB::query()
                 ->fromSub($itemsProceedBase, 'd')
-                ->selectRaw("day_key, page_key, SUM(qty * $unitCostDispSub) AS proceed_unit_cost_sum")
-                ->groupBy('day_key','page_key')->get();
+                ->selectRaw("day_key, page_key, page_label, SUM(qty * $unitCostDispSub) AS proceed_unit_cost_sum")
+                ->groupBy('day_key','page_key','page_label')->get();
         }
 
         $proceedUnitCostSumMap = [];
         foreach ($procUnitCostRows as $r) {
             $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
             $proceedUnitCostSumMap[$k] = (float)($r->proceed_unit_cost_sum ?? 0);
+            if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
         }
 
         // ======================
@@ -474,29 +494,30 @@ class SummaryOverallController extends Controller
             $delayDays   = "($jSubmitDate - $dateExpr)";
         }
 
+        // IMPORTANT: inner-most select uses BASE key (no MIN(page_label) yet)
         $delayRaw = (clone $joinedBase)
-            ->selectRaw("$selectKey, $moWaybillSql AS wb, $delayDays AS delay_days");
+            ->selectRaw("$selectKeyBase, $moWaybillSql AS wb, $delayDays AS delay_days");
 
         if ($AGGREGATE_RANGE) {
             $delayDistinct = DB::query()
                 ->fromSub($delayRaw, 'r')
-                ->selectRaw("page_key, wb, MIN(delay_days) AS delay_days")
+                ->selectRaw("page_key, MIN(page_label) AS page_label, wb, MIN(delay_days) AS delay_days")
                 ->groupBy('page_key','wb');
 
             $delayAvgRows = DB::query()
                 ->fromSub($delayDistinct, 'd')
-                ->selectRaw("page_key, AVG(delay_days) AS avg_delay_days")
+                ->selectRaw("page_key, MIN(page_label) AS page_label, AVG(delay_days) AS avg_delay_days")
                 ->groupBy('page_key')
                 ->get();
         } else {
             $delayDistinct = DB::query()
                 ->fromSub($delayRaw, 'r')
-                ->selectRaw("day_key, page_key, wb, MIN(delay_days) AS delay_days")
+                ->selectRaw("day_key, page_key, MIN(page_label) AS page_label, wb, MIN(delay_days) AS delay_days")
                 ->groupBy('day_key','page_key','wb');
 
             $delayAvgRows = DB::query()
                 ->fromSub($delayDistinct, 'd')
-                ->selectRaw("day_key, page_key, AVG(delay_days) AS avg_delay_days")
+                ->selectRaw("day_key, page_key, MIN(page_label) AS page_label, AVG(delay_days) AS avg_delay_days")
                 ->groupBy('day_key','page_key')
                 ->get();
         }
@@ -505,23 +526,24 @@ class SummaryOverallController extends Controller
         foreach ($delayAvgRows as $r) {
             $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
             $avgDelayMap[$k] = (float)($r->avg_delay_days ?? 0);
+            if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
         }
 
         // ======================
-        // COGS (Delivered-only)
+        // COGS (Delivered-only) — GROUPED → Agg key
         // ======================
         if ($AGGREGATE_RANGE) {
             $deliveredItemsBase = (clone $joinedBase)
                 ->whereRaw('ja.is_delivered = 1')
-                ->selectRaw("$pageExpr AS page_key, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
+                ->selectRaw("$selectKeyAgg, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
                              COUNT(DISTINCT $moWaybillSql) AS qty, MAX($dateExpr) AS last_order_date")
-                ->groupByRaw("$pageExpr, $itemNorm");
+                ->groupByRaw("$groupByKey, $itemNorm");
         } else {
             $deliveredItemsBase = (clone $joinedBase)
                 ->whereRaw('ja.is_delivered = 1')
-                ->selectRaw("$dateExpr AS day_key, $pageExpr AS page_key, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
+                ->selectRaw("$selectKeyAgg, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
                              COUNT(DISTINCT $moWaybillSql) AS qty, MAX($dateExpr) AS last_order_date")
-                ->groupByRaw("$dateExpr, $pageExpr, $itemNorm");
+                ->groupByRaw("$groupByKey, $itemNorm");
         }
 
         $unitCostForDeliveredSub = "COALESCE((
@@ -586,7 +608,7 @@ class SummaryOverallController extends Controller
             $adspent = $adsMap[$key] ?? 0.0;
             if ($adspent <= 0) continue; // show rows with spend only
 
-            // Items display + unit costs (PROCEED-based) for UI
+            // Items display + unit costs
             $itemsDisplay = null;
             $unitCostsArr = [];
             if (!empty($itemsListMap[$key])) {
@@ -603,8 +625,9 @@ class SummaryOverallController extends Controller
                 $itemsDisplay = implode(' / ', $labels);
             }
 
+            $pageLabelResolved = $labelMap[$key] ?? null;
+
             if ($AGGREGATE_RANGE) {
-                $page      = $key;
                 $orders    = $ordersMap[$key]      ?? 0;
                 $proc      = $proceedMap[$key]     ?? 0;
                 $cannot    = $cannotMap[$key]      ?? 0;
@@ -628,14 +651,13 @@ class SummaryOverallController extends Controller
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
-                // Actual NP (delivered-only)
                 $net_profit     = $gross - $adspent - $shipping_fee - $cod_fee_actual - $cogs;
                 $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null;
                 $hold           = $proc - $shipped;
 
                 $rows[] = [
                     'date'                   => $rangeLabel,
-                    'page'                   => $page !== '' ? $page : null,
+                    'page'                   => $pageLabelResolved ?: null,
                     'adspent'                => $adspent,
                     'orders'                 => $orders,
                     'proceed'                => $proc,
@@ -667,7 +689,7 @@ class SummaryOverallController extends Controller
                     'proceed_unit_cost_sum'  => $proceedUnitCostSumMap[$key] ?? 0.0,
                 ];
             } else {
-                [$d, $p] = explode('|', $key, 2);
+                [$d, $pKey] = explode('|', $key, 2);
                 $orders    = $ordersMap[$key]      ?? 0;
                 $proc      = $proceedMap[$key]     ?? 0;
                 $cannot    = $cannotMap[$key]      ?? 0;
@@ -691,14 +713,13 @@ class SummaryOverallController extends Controller
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
-                // Actual NP
                 $net_profit     = $gross - $adspent - $shipping_fee - $cod_fee_actual - $cogs;
                 $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null;
                 $hold           = $proc - $shipped;
 
                 $rows[] = [
                     'date'                   => $d,
-                    'page'                   => $p !== '' ? $p : null,
+                    'page'                   => $pageLabelResolved ?: null,
                     'adspent'                => $adspent,
                     'orders'                 => $orders,
                     'proceed'                => $proc,
