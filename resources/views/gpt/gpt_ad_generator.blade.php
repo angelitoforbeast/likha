@@ -1,5 +1,5 @@
 <x-layout>
-  <x-slot name="title">AD CAPTIONS</x-slot>
+  <x-slot name="title">Ad Captions</x-slot>
   <x-slot name="heading">Ad Copy Generator</x-slot>
 
   <!-- Viewport-fitting wrapper: height set via JS to avoid page scrollbars -->

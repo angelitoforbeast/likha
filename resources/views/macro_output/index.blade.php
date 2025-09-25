@@ -1,5 +1,5 @@
 <x-layout>
-  <x-slot name="title">ENCODER</x-slot>
+  <x-slot name="title">Encoder</x-slot>
   <x-slot name="heading">
     <div class="sticky-header">
       CHECKER 1

@@ -1,5 +1,5 @@
 <x-layout>
-  <x-slot name="title">HOLD</x-slot>
+  <x-slot name="title">Hold</x-slot>
   <x-slot name="heading">JNT Hold Items</x-slot>
 
   @once
