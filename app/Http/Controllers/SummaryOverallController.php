@@ -296,6 +296,7 @@ class SummaryOverallController extends Controller
                 MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END) AS is_delivered,
                 MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
                 MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END) AS is_for_return,
+                /* Any OTHER status = in-transit */
                 MAX(CASE 
                     WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
                     WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
@@ -395,22 +396,19 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // ITEMS + UNIT COST LISTS — GROUPED → Agg key
+        // ITEMS + UNIT COST LISTS — GROUPED → Agg key (PROCEED ONLY)
         // ======================
         $moProceedOnly = (clone $mo)->whereRaw("$statusNorm = 'proceed'");
 
-        if ($AGGREGATE_RANGE) {
-            $itemsProceedBase = (clone $moProceedOnly)
-                ->selectRaw(" $selectKeyAgg, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
-                              COUNT(*) AS qty, MAX($dateExpr) AS last_order_date")
-                ->groupByRaw("$groupByKey, $itemNorm");
-        } else {
-            $itemsProceedBase = (clone $moProceedOnly)
-                ->selectRaw(" $selectKeyAgg, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
-                              COUNT(*) AS qty, MAX($dateExpr) AS last_order_date")
-                ->groupByRaw("$groupByKey, $itemNorm");
-        }
+        $itemsProceedBase = (clone $moProceedOnly)
+            ->selectRaw(" $selectKeyAgg,
+                          $itemNorm AS item_key,
+                          MIN($itemLabel) AS item_label,
+                          COUNT(*) AS qty,
+                          MAX($dateExpr) AS last_order_date")
+            ->groupByRaw("$groupByKey, $itemNorm");
 
+        // unit cost lookup at the time of last order date
         $unitCostDispSub = "COALESCE((
             SELECT " . $castMoney($cogsUnitExpr) . "
             FROM cogs c
@@ -444,20 +442,11 @@ class SummaryOverallController extends Controller
             if (!empty($r->page_label)) $labelMap[$key] = (string)$r->page_label;
         }
 
-        // ======================
         // PROCEED COD SUM — GROUPED → Agg key
-        // ======================
-        if ($AGGREGATE_RANGE) {
-            $procCodRows = (clone $moProceedOnly)
-                ->selectRaw("$selectKeyAgg, SUM($moCodClean) AS proceed_cod_sum")
-                ->groupByRaw("$groupByKey")
-                ->get();
-        } else {
-            $procCodRows = (clone $moProceedOnly)
-                ->selectRaw("$selectKeyAgg, SUM($moCodClean) AS proceed_cod_sum")
-                ->groupByRaw("$groupByKey")
-                ->get();
-        }
+        $procCodRows = (clone $moProceedOnly)
+            ->selectRaw("$selectKeyAgg, SUM($moCodClean) AS proceed_cod_sum")
+            ->groupByRaw("$groupByKey")
+            ->get();
 
         $proceedCodSumMap = [];
         foreach ($procCodRows as $r) {
@@ -466,9 +455,7 @@ class SummaryOverallController extends Controller
             if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
         }
 
-        // ======================
-        // PROCEED Unit Cost SUM — GROUPED → Agg key
-        // ======================
+        // PROCEED Unit Cost SUM — GROUPED → Agg key (this drives Projected COGS)
         if ($AGGREGATE_RANGE) {
             $procUnitCostRows = DB::query()
                 ->fromSub($itemsProceedBase, 'd')
@@ -535,7 +522,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // COGS (Delivered-only) — GROUPED → Agg key
+        // COGS (Delivered-only) — GROUPED → Agg key (for actual NP)
         // ======================
         if ($AGGREGATE_RANGE) {
             $deliveredItemsBase = (clone $joinedBase)
@@ -823,15 +810,15 @@ class SummaryOverallController extends Controller
                 $proceedCnt  = (int)  ($r['proceed']               ?? 0);
                 $adsp        = (float)($r['adspent']               ?? 0.0);
 
-                $projGross   = $procCodSum * $rtsFactor;                    // Σ COD(proceed) × (1-RTS)
-                $projCodFee  = $procCodSum * $COD_FEE_RATE;                 // 1.5% of Σ COD(proceed)
-                $projCogs    = $procUCSum  * $rtsFactor;                    // Σ UnitCost(proceed) × (1-RTS)
-                $projShipFee = $SHIPPING_PER_SHIPPED * $proceedCnt;         // 37 × #proceed
+                $projGross   = $procCodSum * $rtsFactor;            // Σ COD(proceed) × (1-RTS)
+                $projCodFee  = $procCodSum * $COD_FEE_RATE;         // 1.5% of Σ COD(proceed)
+                $projCogs    = $procUCSum  * $rtsFactor;            // Σ UnitCost(proceed) × (1-RTS)
+                $projShipFee = $SHIPPING_PER_SHIPPED * $proceedCnt; // 37 × #proceed
 
                 $projNP = $projGross - $adsp - $projCodFee - $projCogs - $projShipFee;
 
                 $r['projected_net_profit']     = $projNP;
-                $den                           = $procCodSum;               // denom = Σ COD(proceed)
+                $den                           = $procCodSum;       // denom = Σ COD(proceed)
                 $r['projected_net_profit_pct'] = ($den > 0) ? ($projNP / $den) * 100.0 : null;
 
                 // store denominator for Page Summary aggregation
