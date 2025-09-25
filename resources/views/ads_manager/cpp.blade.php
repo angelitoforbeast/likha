@@ -1,5 +1,6 @@
 {{-- resources/views/ads_manager/cpp.blade.php --}}
 <x-layout>
+  <x-slot name="title">CPP</x-slot>
   <x-slot name="heading">CPP Summary</x-slot>
 
   {{-- Filter Controls --}}

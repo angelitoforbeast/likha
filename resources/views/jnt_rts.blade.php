@@ -1,4 +1,5 @@
 <x-layout>
+  <x-slot name="title">RTS</x-slot>
   <x-slot name="heading">RTS Monitoring</x-slot>
 
   {{-- Styles (inline) --}}
