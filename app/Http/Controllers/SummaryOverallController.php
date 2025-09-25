@@ -296,7 +296,12 @@ class SummaryOverallController extends Controller
                 MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END) AS is_delivered,
                 MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
                 MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END) AS is_for_return,
-                MAX(CASE WHEN j.status LIKE 'In Transit%' OR j.status LIKE 'IN TRANSIT%' THEN 1 ELSE 0 END) AS is_in_transit,
+                MAX(CASE 
+                    WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
+                    WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
+                    WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
+                    ELSE 1
+                END) AS is_in_transit,
                 $jaMinTs
             ")
             ->groupBy('j.waybill_number');
