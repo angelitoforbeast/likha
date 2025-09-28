@@ -1,4 +1,5 @@
 <x-layout>
+  <x-slot name="title">Jnt Upload</x-slot>
   <x-slot name="heading">UPDATE FROM JNT</x-slot>
 
   <div class="space-y-4 max-w-3xl">
