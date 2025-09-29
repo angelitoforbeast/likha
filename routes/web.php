@@ -43,6 +43,7 @@ use App\Http\Controllers\JntShippedController;
 use App\Http\Controllers\JntReturnScannedController;
 use App\Http\Controllers\JntReturnReconciliationController;
 use App\Http\Controllers\JntReturnInventoryController;
+use App\Http\Controllers\Encoder\Checker1SummaryController;
 
 use App\Models\Role;
 
@@ -100,7 +101,8 @@ Route::get('/summary/overall', [SummaryOverallController::class, 'index'])->name
 Route::get('/summary/overall/data', [SummaryOverallController::class, 'data'])->name('summary.overall.data');
 Route::get('/summary/overall/daily', [SummaryOverallController::class, 'daily'])->name('summary.overall.daily');
 
-
+Route::get('/encoder/checker_1/summary', [Checker1SummaryController::class, 'index'])
+     ->name('encoder.checker1.summary');
 Route::get('/encoder/summary', [App\Http\Controllers\MacroOutputController::class, 'summary'])->name('macro_output.summary');
     Route::get('/encoder/checker_1', [MacroOutputController::class, 'index'])->name('macro_output.index');
 Route::post('/encoder/checker_1/update', [MacroOutputController::class, 'bulkUpdate'])->name('macro_output.bulk_update');
