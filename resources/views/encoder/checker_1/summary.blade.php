@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Checker 1 – Status Last-Editor Summary</title>
+  <title>Checker 1 – Summary</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -10,14 +10,16 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <style>
     .flatpickr-calendar{ z-index:9999 !important; }
+    body { background: #f3f4f6; }
   </style>
 </head>
-<body class="bg-gray-100 text-gray-900">
+<body class="text-gray-900">
+  <!-- Top bar -->
   <nav class="bg-white border-b sticky top-0 z-40">
     <div class="max-w-7xl mx-auto px-4">
       <div class="h-14 flex items-center justify-between">
-        <div class="font-semibold text-lg">Checker 1 – Status Summary</div>
-        <div class="text-sm text-gray-500">Users × Dates (last status editor per row)</div>
+        <div class="font-semibold text-lg">Checker 1 – Summary</div>
+        <div class="text-sm text-gray-500">Date range: {{ $start }} → {{ $end }}</div>
       </div>
     </div>
   </nav>
@@ -41,16 +43,20 @@
         <div class="md:col-span-3 flex gap-2 pt-6">
           <button class="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700">Apply</button>
           <a href="{{ route('encoder.checker1.summary') }}"
-             class="px-3 py-2 rounded border hover:bg-gray-50">Reset (Today)</a>
+             class="px-3 py-2 rounded border hover:bg-gray-50">Reset (Last 7 Days)</a>
         </div>
       </form>
     </section>
 
-    <!-- Matrix Table -->
+    <!-- A) STATUS: Users × Dates (Last Status Editor per Row) -->
     <section class="bg-white rounded-xl shadow p-4 overflow-x-auto">
+      <div class="flex items-center justify-between mb-2">
+        <div class="font-semibold">Status Last-Editor Matrix</div>
+        <div class="text-xs text-gray-500">Counts rows where the <em>latest</em> STATUS change (by timestamp) was made by the user on that date.</div>
+      </div>
+
       @php
         $dateCount = count($dates ?? []);
-        // Build per-date totals
         $colTotals = array_fill(0, $dateCount, 0);
         $grandTotal = 0;
       @endphp
@@ -70,8 +76,6 @@
             @php
               $rowTotal = array_sum($row['counts'] ?? []);
               $grandTotal += $rowTotal;
-
-              // accumulate column totals
               foreach (($dates ?? []) as $i => $d) {
                   $colTotals[$i] += ($row['counts'][$d] ?? 0);
               }
@@ -104,26 +108,82 @@
           </tfoot>
         @endif
       </table>
+    </section>
 
-      <div class="text-xs text-gray-500 mt-3">
-        Note: Each cell counts rows where the <em>last</em> status change (per row) was edited by that user on that date.
+    <!-- B) HISTORICAL LOGS: Users × Dates (Distinct Rows Edited) -->
+    <section class="bg-white rounded-xl shadow p-4 overflow-x-auto">
+      <div class="flex items-center justify-between mb-2">
+        <div class="font-semibold">Historical Edits Matrix (Distinct Rows per User × Date)</div>
+        <div class="text-xs text-gray-500">
+          Each cell counts how many <em>distinct rows</em> had at least one historical edit by the user on that date.
+        </div>
       </div>
+
+      @php
+        $dateCount2 = count($dates ?? []);
+        $colTotals2 = array_fill(0, $dateCount2, 0);
+        $grandTotal2 = 0;
+      @endphp
+
+      <table class="min-w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50">
+            <th class="px-3 py-2 text-left border">User</th>
+            @foreach ($prettyDates as $label)
+              <th class="px-3 py-2 text-center border whitespace-nowrap">{{ $label }}</th>
+            @endforeach
+            <th class="px-3 py-2 text-center border">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          @forelse ($histMatrix as $row)
+            @php
+              $rowTotal2 = array_sum($row['counts'] ?? []);
+              $grandTotal2 += $rowTotal2;
+              foreach (($dates ?? []) as $i => $d) {
+                  $colTotals2[$i] += ($row['counts'][$d] ?? 0);
+              }
+            @endphp
+            <tr class="hover:bg-gray-50">
+              <td class="px-3 py-2 border font-medium whitespace-nowrap">{{ $row['user'] }}</td>
+              @foreach ($dates as $d)
+                <td class="px-3 py-2 text-center border">{{ $row['counts'][$d] ?? 0 }}</td>
+              @endforeach
+              <td class="px-3 py-2 text-center border font-semibold">{{ $rowTotal2 }}</td>
+            </tr>
+          @empty
+            <tr>
+              <td class="px-3 py-4 text-center text-gray-500 border" colspan="{{ ($dateCount2 + 2) }}">
+                No historical edits for the selected date range.
+              </td>
+            </tr>
+          @endforelse
+        </tbody>
+
+        @if (!empty($histMatrix))
+          <tfoot>
+            <tr class="bg-gray-50 font-semibold">
+              <td class="px-3 py-2 border text-right">Total</td>
+              @foreach ($colTotals2 as $ct)
+                <td class="px-3 py-2 border text-center">{{ $ct }}</td>
+              @endforeach
+              <td class="px-3 py-2 border text-center">{{ $grandTotal2 }}</td>
+            </tr>
+          </tfoot>
+        @endif
+      </table>
     </section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script>
     (function(){
-      const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
       const startEl = document.getElementById('start');
       const endEl   = document.getElementById('end');
 
-      // Default to today if empty (server already sets, but this guards blank states)
-      if (!startEl.value) startEl.value = today;
-      if (!endEl.value) endEl.value = today;
-
-      flatpickr("#start", { dateFormat: "Y-m-d", defaultDate: startEl.value });
-      flatpickr("#end",   { dateFormat: "Y-m-d", defaultDate: endEl.value });
+      // Initialize Flatpickr (controller already sets defaults to last 7 days)
+      flatpickr("#start", { dateFormat: "Y-m-d", defaultDate: startEl.value || null });
+      flatpickr("#end",   { dateFormat: "Y-m-d", defaultDate: endEl.value   || null });
     })();
   </script>
 </body>
