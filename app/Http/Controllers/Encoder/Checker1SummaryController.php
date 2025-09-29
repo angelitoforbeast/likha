@@ -14,6 +14,10 @@ class Checker1SummaryController extends Controller
     {
         $tz = 'Asia/Manila';
 
+        // Driver-aware identifier quoting for column with space: HISTORICAL LOGS
+        $driver = DB::connection()->getDriverName(); // 'mysql' | 'pgsql' | ...
+        $histIdent = $driver === 'pgsql' ? '"HISTORICAL LOGS"' : '`HISTORICAL LOGS`';
+
         // --- Default to LAST 7 DAYS (including today) ---
         $start = $request->query('start');
         $end   = $request->query('end');
@@ -27,20 +31,22 @@ class Checker1SummaryController extends Controller
             $endDate   = $today->copy()->endOfDay();
         }
 
-        // Pull needed columns
-        // NOTE: DB column is literally `HISTORICAL LOGS` (with a space); alias to historical_logs
+        // Pull needed columns (alias HISTORICAL LOGS -> historical_logs)
         $rows = DB::table('macro_output')
             ->select([
                 'id',
                 'status_logs',
-                DB::raw('`HISTORICAL LOGS` as historical_logs'),
             ])
+            ->selectRaw($histIdent.' as historical_logs')
             ->where(function($q){
-                $q->whereNotNull('status_logs')->where('status_logs', '!=', '');
+                // safely check non-empty status_logs
+                $q->whereNotNull('status_logs')
+                  ->whereRaw("COALESCE(status_logs, '') <> ''");
             })
-            ->orWhere(function($q){
-                $q->whereRaw('`HISTORICAL LOGS` is not null')
-                  ->whereRaw('`HISTORICAL LOGS` != ""');
+            ->orWhere(function($q) use ($histIdent){
+                // safely check non-empty HISTORICAL LOGS (with space)
+                $q->whereRaw($histIdent.' is not null')
+                  ->whereRaw('COALESCE('.$histIdent.", '') <> ''");
             })
             ->get();
 
@@ -56,7 +62,7 @@ class Checker1SummaryController extends Controller
         $allUsersStatus = [];
 
         foreach ($rows as $r) {
-            if (!$r->status_logs) continue;
+            if (empty($r->status_logs)) continue;
 
             $latest = self::extractLatestStatusByTimestamp($r->status_logs);
             if (!$latest) continue;
@@ -93,18 +99,17 @@ class Checker1SummaryController extends Controller
         foreach ($rows as $r) {
             if (empty($r->historical_logs)) continue;
 
-            // For this single row, get a set of user=>dates they edited (within range)
+            // Per row, get set of user=>dates they edited (within range)
             $userDates = self::extractHistoricalUserDatesInRange($r->historical_logs, $startDate, $endDate, $tz);
             if (empty($userDates)) continue;
 
-            // Each (user,date) pair counts this row once
             foreach ($userDates as $user => $dateSet) {
                 $allUsersHist[$user] = true;
                 foreach (array_keys($dateSet) as $dateKey) {
                     if (!isset($histUserDateCounts[$user][$dateKey])) {
                         $histUserDateCounts[$user][$dateKey] = 0;
                     }
-                    $histUserDateCounts[$user][$dateKey] += 1;
+                    $histUserDateCounts[$user][$dateKey] += 1; // 1 per row per (user,date)
                 }
             }
         }
@@ -121,7 +126,7 @@ class Checker1SummaryController extends Controller
             $historicalMatrix[] = $row;
         }
 
-        // ---------- Pretty labels (e.g., "Sep 1") ----------
+        // ---------- Pretty labels ----------
         $prettyDates = array_map(function ($d) use ($tz) {
             return Carbon::parse($d, $tz)->format('M j');
         }, $dates);
@@ -170,12 +175,9 @@ class Checker1SummaryController extends Controller
     }
 
     /**
-     * HISTORICAL logs: for a single row, return an associative array:
+     * HISTORICAL logs: for a single row, return:
      * [ user => [ 'YYYY-MM-DD' => true, ... ], ... ]
-     * meaning: user edited this row on those dates (within range).
-     *
      * Accepts verbs "updated" or "changed" (case-insensitive).
-     * Example: [2025-07-21 16:59:57] Vanesa Lopez updated BARANGAY: "A" → "B"
      */
     private static function extractHistoricalUserDatesInRange(?string $logs, Carbon $startDate, Carbon $endDate, string $tz = 'Asia/Manila'): array
     {
@@ -185,7 +187,8 @@ class Checker1SummaryController extends Controller
         $lines = array_filter(array_map('trim', explode("\n", $logs)), fn($l) => $l !== '');
         if (empty($lines)) return [];
 
-        $pattern = '/^\[(?<ts>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\]\s+(?<user>.*?)\s+(?:updated|changed)\s+[A-Z_ ]+/i';
+        // Allow A-Z field names incl. spaces/underscores/numbers
+        $pattern = '/^\[(?<ts>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\]\s+(?<user>.*?)\s+(?:updated|changed)\s+[A-Z0-9_ ]+/i';
 
         $result = []; // [user][date]=true
         foreach ($lines as $line) {
@@ -195,7 +198,7 @@ class Checker1SummaryController extends Controller
                     $user = trim($m['user']);
                     $dateKey = $ts->format('Y-m-d');
                     if (!isset($result[$user])) $result[$user] = [];
-                    $result[$user][$dateKey] = true; // de-duplicate per row per user per date
+                    $result[$user][$dateKey] = true;
                 }
             }
         }
