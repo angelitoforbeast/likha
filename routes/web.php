@@ -44,6 +44,7 @@ use App\Http\Controllers\JntReturnScannedController;
 use App\Http\Controllers\JntReturnReconciliationController;
 use App\Http\Controllers\JntReturnInventoryController;
 use App\Http\Controllers\Encoder\Checker1SummaryController;
+use App\Http\Controllers\ProfileController;
 
 use App\Models\Role;
 
@@ -69,6 +70,9 @@ Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name(
 
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
+
+Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::post('/profile', [ProfileController::class, 'update'])->name('profile.update');
 
 Route::get('/jnt/remittance', [JntRemittanceController::class, 'index'])
     ->name('jnt.remittance');

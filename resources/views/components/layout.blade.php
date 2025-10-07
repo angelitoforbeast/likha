@@ -100,27 +100,33 @@
         </div>
 
         <div class="hidden md:flex items-center space-x-4">
-          @if(Auth::check())
-            <div class="text-gray-300 text-sm text-right leading-tight">
-              <div>{{ Auth::user()->name }}</div>
-              <div class="text-xs text-gray-400">
-                {{ Auth::user()?->employeeProfile?->role ?? 'No Role' }}
-              </div>
-            </div>
-
-            <img src="{{ Auth::user()->profile_picture ?? 'https://ui-avatars.com/api/?name=' . urlencode(Auth::user()->name) }}"
-                 class="w-10 h-10 rounded-full object-cover border border-gray-500"
-                 alt="Profile Picture">
-          @endif
-
-          <form method="POST" action="{{ route('logout') }}">
-            @csrf
-            <button type="submit"
-              class="bg-red-600 hover:bg-red-700 text-white text-sm px-4 py-2 rounded transition">
-              Logout
-            </button>
-          </form>
+  @if(Auth::check())
+    {{-- Make the whole profile area a link --}}
+    <a href="{{ url('/profile') }}" class="flex items-center gap-3 group">
+      <div class="text-gray-300 text-sm text-right leading-tight group-hover:text-white">
+        <div>{{ Auth::user()->name }}</div>
+        <div class="text-xs text-gray-400">
+          {{ Auth::user()?->employeeProfile?->role ?? 'No Role' }}
         </div>
+      </div>
+
+      <img
+        src="{{ Auth::user()->profile_picture ?? 'https://ui-avatars.com/api/?name=' . urlencode(Auth::user()->name) }}"
+        class="w-10 h-10 rounded-full object-cover border border-gray-500 group-hover:ring-2 group-hover:ring-white/40 transition"
+        alt="Profile Picture">
+    </a>
+  @endif
+
+  <form method="POST" action="{{ route('logout') }}">
+    @csrf
+    <button
+      type="submit"
+      class="bg-red-600 hover:bg-red-700 text-white text-sm px-4 py-2 rounded transition">
+      Logout
+    </button>
+  </form>
+</div>
+
       </div>
     </div>
   </nav>
