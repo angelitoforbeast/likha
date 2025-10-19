@@ -61,18 +61,18 @@
                   </a>
                 </div>
               </div>
-
-              <x-navlink href="/ads_manager/report" :active="request()->is('ads_manager/report')">ADS</x-navlink>
-              <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">LIKHA</x-navlink>
-              <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">MACRO</x-navlink>
-              <x-navlink href="/jnt_upload" :active="request()->is('jnt_upload')">WAYBILL</x-navlink>
+              <x-navlink href="/ads_manager/payment/" :active="request()->is('ads_manager/ad?account')">Ad Payment</x-navlink>
+              <x-navlink href="/ads_manager/report" :active="request()->is('ads_manager/report')">Ads</x-navlink>
+              <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">Likha</x-navlink>
+              <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">Macro</x-navlink>
+              <x-navlink href="/jnt_upload" :active="request()->is('jnt_upload')">Waybill</x-navlink>
               <x-navlink href="/ads_manager/cpp" :active="request()->is('ads_manager/cpp')">CPP</x-navlink>
               <x-navlink href="/jnt_rts" :active="request()->is('jnt_rts')">RTS</x-navlink>
-              <x-navlink href="/jnt/checker" :active="request()->is('jnt/checker')">JNT CHECKER</x-navlink>
-              <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">TALLY STICKER</x-navlink>
-              <x-navlink href="/encoder/summary" :active="request()->is('macro_output/index')">ORDER SUMMARY</x-navlink>
-              <x-navlink href="/ads_manager/pancake-subscription-checker" :active="request()->is('ads_manager/pancake-subscription-checker')">PURCHASES</x-navlink>
-              <x-navlink href="/jnt/hold" :active="request()->is('jnt/hold')">HOLD</x-navlink>
+              <x-navlink href="/jnt/checker" :active="request()->is('jnt/checker')">JNT Checker</x-navlink>
+              <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">Tally Sticker</x-navlink>
+              <x-navlink href="/encoder/summary" :active="request()->is('macro_output/index')">Order Summary</x-navlink>
+              <x-navlink href="/ads_manager/pancake-subscription-checker" :active="request()->is('ads_manager/pancake-subscription-checker')">Purchases</x-navlink>
+              <x-navlink href="/jnt/hold" :active="request()->is('jnt/hold')">Hold</x-navlink>
               @endif
 
               @if(in_array($role, ['Data Encoder','Data Encoder - OIC']))

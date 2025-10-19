@@ -45,6 +45,8 @@ use App\Http\Controllers\JntReturnReconciliationController;
 use App\Http\Controllers\JntReturnInventoryController;
 use App\Http\Controllers\Encoder\Checker1SummaryController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\PaymentActivityController;
+use App\Http\Controllers\AdAccountController;
 
 use App\Models\Role;
 
@@ -70,6 +72,32 @@ Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name(
 
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
+
+
+Route::get('/ads_manager/ad_account', [AdAccountController::class, 'index'])
+    ->name('ad_accounts.index');
+
+Route::get('/ads_manager/ad_account/{ad_account_id}', [AdAccountController::class, 'index'])
+    ->name('ad_accounts.edit');
+
+Route::post('/ads_manager/ad_account', [AdAccountController::class, 'store'])
+    ->name('ad_accounts.store');
+
+Route::delete('/ads_manager/ad_account/{ad_account_id}', [AdAccountController::class, 'destroy'])
+    ->name('ad_accounts.destroy');
+
+Route::get('/ads_manager/payment/upload', [PaymentActivityController::class, 'create'])
+    ->name('ads_payment.upload.form');
+
+Route::post('/ads_manager/payment/upload', [PaymentActivityController::class, 'store'])
+    ->name('ads_payment.upload.store');
+
+// View-only (simple table of saved rows)
+Route::get('/ads_manager/payment/records', [PaymentActivityController::class, 'records'])
+    ->name('ads_payment.records.index');
+
+    Route::delete('/ads_manager/payment/records', [PaymentActivityController::class, 'destroyAll'])
+    ->name('ads_payment.records.delete_all');
 
 Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::post('/profile', [ProfileController::class, 'update'])->name('profile.update');
