@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
-// OpenSpout (compat for v3 or v4)
+// OpenSpout (compat v3/v4)
 use OpenSpout\Reader\Common\Creator\ReaderEntityFactory; // v3
 use OpenSpout\Reader\CSV\Reader as CsvReaderV4;           // v4
 use OpenSpout\Reader\XLSX\Reader as XlsxReaderV4;         // v4
@@ -227,7 +227,7 @@ class ProcessPaymentActivityUpload implements ShouldQueue
         $hasDate = in_array('date', $norm, true);
         $hasTxn  = in_array('transaction id', $norm, true) || in_array('transaction_id', $norm, true);
         $hasAmt  = in_array('amount', $norm, true);
-        // payment method can be absent in some exports → optional
+        // "payment method" can be absent → optional
         return $hasDate && $hasTxn && $hasAmt;
     }
 
@@ -283,8 +283,8 @@ class ProcessPaymentActivityUpload implements ShouldQueue
         $txn     = $assoc['transaction id'] ?? ($assoc['transaction_id'] ?? null);
         $amtStr  = $assoc['amount'] ?? null;
 
-        // NEW: prefer per-row Payment Method column if present; else fall back to pre-header context
-        $pmCol = $assoc['payment method'] ?? null; // header could be "Payment Method"
+        // Prefer per-row Payment Method column if present; else fall back to pre-header context
+        $pmCol = $assoc['payment method'] ?? null; // exact header text after normalization
         $pm    = $pmCol !== null && trim((string)$pmCol) !== ''
                  ? $this->normalizePaymentMethod($pmCol)
                  : $this->normalizePaymentMethod($ctx['payment_method'] ?? null);
@@ -343,19 +343,19 @@ class ProcessPaymentActivityUpload implements ShouldQueue
 
         // Replace non-breaking spaces with regular spaces
         $s = str_replace("\xC2\xA0", ' ', $s); // NBSP
-        // Collapse all horizontal whitespace to a single space
+        // Collapse horizontal whitespace
         $s = preg_replace('/[ \t]+/u', ' ', $s);
         // Trim
         $s = trim($s);
 
-        // Safety: if somehow it's an empty string, return null
         return $s !== '' ? $s : null;
     }
 
     /**
-     * Write a batch to DB using INSERT IGNORE semantics.
-     * Requires UNIQUE index on `transaction_id`.
-     * Duplicates will be silently ignored by MySQL.
+     * Write a batch to DB using "ignore duplicates":
+     * - MySQL: INSERT IGNORE
+     * - Postgres: INSERT ... ON CONFLICT DO NOTHING
+     * (Handled by Laravel's insertOrIgnore)
      */
     private function writeBatch(array $rows): void
     {
