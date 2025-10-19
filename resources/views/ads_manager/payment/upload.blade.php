@@ -1,5 +1,5 @@
 <x-layout>
-    <x-slot name="title">Upload Ad Payment</x-slot>
+  <x-slot name="title">Upload Ad Payment</x-slot>
   <x-slot name="heading">Upload Payment Activity (CSV/XLSX)</x-slot>
 
   @if (session('status'))
@@ -27,17 +27,19 @@
 
       <div>
         <label class="block font-medium mb-1">Files</label>
-        <input type="file"
-               name="files[]"
-               multiple
-               accept=".csv,.xlsx,.txt"
-               class="border rounded px-3 py-2 w-full">
+        <input
+          type="file"
+          name="files[]"
+          multiple
+          accept=".csv,.xlsx,.txt"
+          class="border rounded px-3 py-2 w-full"
+        >
         <p class="text-sm text-gray-500 mt-1">
           You can select multiple files (CSV/XLSX/TXT). Max 20MB each.
         </p>
       </div>
 
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <button class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
           Queue Upload
         </button>
@@ -45,6 +47,12 @@
         <a class="text-gray-700 underline"
            href="{{ route('ads_payment.records.index') }}">
           View Records
+        </a>
+
+        {{-- NEW: Ad Account ID button --}}
+        <a href="{{ url('/ads_manager/ad_account') }}"
+           class="px-4 py-2 rounded border border-gray-300 text-gray-800 hover:bg-gray-100">
+          Ad Account ID
         </a>
       </div>
     </form>
