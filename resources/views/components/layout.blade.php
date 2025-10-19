@@ -27,40 +27,7 @@
             <div class="ml-10 flex items-center gap-x-4 gap-y-2 flex-1 flex-wrap">
               @if(in_array($role, ['Marketing', 'Marketing - OIC']))
 
-              {{-- 📂 Tasks Dropdown --}}
-              <div x-data="{ open: false }" class="relative">
-                <button @click="open = !open"
-                        class="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium relative">
-                  <span class="relative">
-                    TASKS
-                    @if(($pendingTaskCount ?? 0) > 0)
-                      <span class="absolute -top-1.5 -right-4 w-4 h-4 bg-red-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
-                        {{ $pendingTaskCount }}
-                      </span>
-                    @elseif(($inProgressTaskCount ?? 0) > 0)
-                      <span class="absolute -top-1.5 -right-4 w-4 h-4 bg-blue-600 text-white text-[9px] rounded-full flex items-center justify-center font-bold leading-none">
-                        {{ $inProgressTaskCount }}
-                      </span>
-                    @endif
-                  </span>
-                </button>
-
-                <div x-show="open" @click.outside="open = false"
-                     class="absolute left-0 mt-2 w-56 bg-white shadow-lg rounded-md z-50 py-1 text-sm">
-                  <a href="{{ route('task.my-tasks') }}"
-                     class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/my-tasks') ? 'font-semibold text-blue-700' : '' }}">
-                    📋 My Tasks
-                  </a>
-                  <a href="{{ route('everyday-tasks.index') }}"
-                     class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/my-everyday-task') ? 'font-semibold text-blue-700' : '' }}">
-                    🗓 Everyday Tasks
-                  </a>
-                  <a href="{{ route('task.team-tasks') }}"
-                     class="block px-4 py-2 text-gray-700 hover:bg-gray-100 {{ request()->is('task/create-everyday-task') ? 'font-semibold text-blue-700' : '' }}">
-                    🧑‍🤝‍🧑 Team Tasks
-                  </a>
-                </div>
-              </div>
+              {{-- (TASKS dropdown removed) --}}
               <x-navlink href="/ads_manager/payment/upload" :active="request()->is('ads_manager/payment')">Ad Payment</x-navlink>
               <x-navlink href="/ads_manager/report" :active="request()->is('ads_manager/report')">Ads</x-navlink>
               <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">Likha</x-navlink>
