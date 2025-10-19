@@ -61,7 +61,7 @@
                   </a>
                 </div>
               </div>
-              <x-navlink href="/ads_manager/payment/upload" :active="request()->is('ads_manager/ad?account')">Ad Payment</x-navlink>
+              <x-navlink href="/ads_manager/payment/upload" :active="request()->is('ads_manager/payment')">Ad Payment</x-navlink>
               <x-navlink href="/ads_manager/report" :active="request()->is('ads_manager/report')">Ads</x-navlink>
               <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import')">Likha</x-navlink>
               <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/import')">Macro</x-navlink>
