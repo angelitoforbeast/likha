@@ -83,20 +83,23 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
                     $normRow = $this->normalizeRow($cells, $headerIndex, $mapNorm, $ext);
 
-                    // REQUIRED: page_name not null; KEY: day + ad_set_id (current behavior)
-                    if (empty($normRow['page_name']) || empty($normRow['ad_set_id'])) {
+                    // REQUIRED KEYS: day + ad_id
+                    $day  = $normRow['day']   ?? null;
+                    $adId = isset($normRow['ad_id']) ? trim((string)$normRow['ad_id']) : null;
+
+                    // derive day from reporting_starts (date-only) if missing
+                    if (empty($day) && !empty($normRow['reporting_starts'])) {
+                        $day = substr($normRow['reporting_starts'], 0, 10);
+                        $normRow['day'] = $day;
+                    }
+
+                    if (empty($day) || $adId === null || $adId === '') {
                         $this->skipped++;
                         continue;
                     }
 
-                    // derive day from reporting_starts (date-only) if missing
-                    if (empty($normRow['day']) && !empty($normRow['reporting_starts'])) {
-                        $normRow['day'] = substr($normRow['reporting_starts'], 0, 10);
-                    }
-                    if (empty($normRow['day'])) {
-                        $this->skipped++;
-                        continue;
-                    }
+                    // ensure ad_id normalized as string
+                    $normRow['ad_id'] = $adId;
 
                     $buffer[] = $normRow;
                     $this->processed++;
@@ -127,7 +130,18 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 ]);
             }
 
-            Log::info("[AdsMgr Import] Done. processed={$this->processed}, inserted={$this->inserted}, updated={$this->updated}, skipped={$this->skipped}, file={$this->storedPath}, user={$this->userId}");
+            // NOTE: no noisy summary log here (as requested)
+            // If you ever want it back, uncomment the block below:
+            /*
+            Log::info("[AdsMgr Import] Done.", [
+                'processed' => $this->processed,
+                'inserted'  => $this->inserted,
+                'updated'   => $this->updated,
+                'skipped'   => $this->skipped,
+                'file'      => $this->storedPath,
+                'user'      => $this->userId,
+            ]);
+            */
         } catch (\Throwable $e) {
             if ($log) {
                 $log->update([
@@ -379,15 +393,23 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             // 1) Upsert creatives in a PG-safe way (no exceptions on conflicts)
             $this->upsertCreativesForChunk($rows, $now);
 
-            // 2) Upsert facts into ads_manager_reports (keep creatives fields for now)
+            // 2) Upsert facts into ads_manager_reports keyed by (day + ad_id)
             foreach ($rows as $r) {
+                $day  = $r['day']   ?? null;
+                $adId = isset($r['ad_id']) ? trim((string)$r['ad_id']) : null;
+
+                if (empty($day) || $adId === null || $adId === '') {
+                    $this->skipped++;
+                    continue;
+                }
+
                 $updateData = ['updated_at' => $now];
 
                 // Core fields
                 $this->putIfExists($updateData, $r, 'page_name');
                 $this->putIfExists($updateData, $r, 'campaign_name');
                 $this->putIfExists($updateData, $r, 'ad_set_name');
-                $this->putIfExists($updateData, $r, 'ad_id');
+                $this->putIfExists($updateData, $r, 'ad_id'); // keep normalized
                 $this->putIfExists($updateData, $r, 'campaign_delivery');
                 $this->putIfExists($updateData, $r, 'amount_spent_php');
                 $this->putIfExists($updateData, $r, 'purchases');
@@ -400,12 +422,13 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'ad_set_delivery');
                 $this->putIfExists($updateData, $r, 'messaging_conversations_started');
                 $this->putIfExists($updateData, $r, 'campaign_id');
+                $this->putIfExists($updateData, $r, 'ad_set_id');
                 $this->putIfExists($updateData, $r, 'ad_set_budget');
                 $this->putIfExists($updateData, $r, 'ad_set_budget_type');
                 $this->putIfExists($updateData, $r, 'reporting_starts');
                 $this->putIfExists($updateData, $r, 'reporting_ends');
 
-                // Creatives (still mirrored here for now)
+                // Creatives mirrored here (optional)
                 $this->putIfExists($updateData, $r, 'body_ad_settings');
                 $this->putIfExists($updateData, $r, 'headline');
                 $this->putIfExists($updateData, $r, 'welcome_message');
@@ -414,21 +437,23 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'quick_reply_3');
 
                 $affected = DB::table('ads_manager_reports')
-                    ->where('day', $r['day'])
-                    ->where('ad_set_id', $r['ad_set_id'])
+                    ->where('day', $day)
+                    ->where('ad_id', $adId)
                     ->update($updateData);
 
                 if ($affected === 0) {
                     $insertData = array_merge([
-                        'day'        => $r['day'],
-                        'ad_set_id'  => $r['ad_set_id'],
+                        'day'        => $day,
+                        'ad_id'      => $adId,
                         'created_at' => $now,
                     ], $updateData);
 
                     DB::table('ads_manager_reports')->insert($insertData);
                     $this->inserted++;
+                    Log::info('AMR INSERT', ['day' => $day, 'ad_id' => $adId]); // per-row insert
                 } else {
                     $this->updated++;
+                    Log::info('AMR UPDATE', ['day' => $day, 'ad_id' => $adId]); // per-row update
                 }
             }
 
