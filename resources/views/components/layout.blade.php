@@ -40,6 +40,7 @@
               <x-navlink href="/encoder/summary" :active="request()->is('macro_output/index')">Order Summary</x-navlink>
               <x-navlink href="/ads_manager/pancake-subscription-checker" :active="request()->is('ads_manager/pancake-subscription-checker')">Purchases</x-navlink>
               <x-navlink href="/jnt/hold" :active="request()->is('jnt/hold')">Hold</x-navlink>
+              <x-navlink href="/pancake/retrieve-orders" :active="request()->is('pancake/retrieve-orders')">Retrieve</x-navlink>
               @endif
 
               @if(in_array($role, ['Data Encoder','Data Encoder - OIC']))
@@ -117,7 +118,8 @@
     'encoder/checker_1',
     'ads_manager/campaigns',
     'ads_manager/cpp',
-    'jnt/hold'
+    'jnt/hold',
+    'pancake/retrieve-orders'
 ]))
   {{-- 1) SAGAD: full width, no padding --}}
   <div class="w-full px-0">

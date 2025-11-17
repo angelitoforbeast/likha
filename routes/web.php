@@ -47,6 +47,7 @@ use App\Http\Controllers\Encoder\Checker1SummaryController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PaymentActivityController;
 use App\Http\Controllers\AdAccountController;
+use App\Http\Controllers\Pancake\RetrieveOrdersController;
 
 use App\Models\Role;
 
@@ -72,6 +73,12 @@ Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name(
 
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
+
+Route::get('/pancake/retrieve-orders', [RetrieveOrdersController::class, 'index'])
+    ->name('pancake.retrieve-orders.index');
+
+Route::post('/pancake/retrieve-orders/check', [RetrieveOrdersController::class, 'check'])
+    ->name('pancake.retrieve-orders.check');
 
 
 Route::get('/ads_manager/ad_account', [AdAccountController::class, 'index'])
