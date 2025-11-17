@@ -4,73 +4,75 @@ namespace App\Http\Controllers\Pancake;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\MacroOutput;
+use Illuminate\Support\Facades\DB;
 
 class RetrieveOrdersController extends Controller
 {
     public function index()
     {
-        // Blade lang, Excel parsing nasa JS
+        // ito lang, front-end na nagbabasa ng Excel
         return view('pancake.retrieve-orders');
     }
 
-    /**
-     * Body (JSON):
-     * { "senders": ["Name 1", "Name 2", ...] }
-     *
-     * Response:
-     * { "existing": ["Name 1", "Name X", ...] }
-     */
     public function check(Request $request)
-{
-    $data = $request->validate([
-        'senders'   => ['required', 'array'],
-        'senders.*' => ['string'],
-    ]);
+    {
+        // validate input galing sa JS fetch
+        $data = $request->validate([
+            'senders'   => 'required|array',
+            'senders.*' => 'string|max:255',
+        ]);
 
-    $senderNames = $data['senders'];
+        $senders = $data['senders'];
 
-    // fb_name + PAGE + SHOP_DETAILS sa macro_output
-    $rows = MacroOutput::whereIn('fb_name', $senderNames)
-        ->select('fb_name', 'PAGE', 'SHOP_DETAILS') // make sure column name is exactly this in DB
-        ->get();
+        if (empty($senders)) {
+            return response()->json([
+                'existing' => [],
+                'pages'    => [],
+                'shops'    => [],
+            ]);
+        }
 
-    // List ng existing fb_name
-    $existing = $rows->pluck('fb_name')
-        ->unique()
-        ->values()
-        ->all();
+        // IMPORTANT:
+        //  - walang schema prefix dito, assume na config mo sa DB ang bahala (search_path / db name)
+        //  - "SHOP DETAILS" diretsong string, si Laravel na mag-quote per driver (MySQL/Postgres)
+        $rows = DB::table('macro_output')
+            ->select('fb_name', 'PAGE', 'SHOP DETAILS')
+            ->whereIn('fb_name', $senders)
+            ->get();
 
-    // Mapping: fb_name => [unique pages...]
-    $pagesByName = $rows
-        ->groupBy('fb_name')
-        ->map(function ($group) {
-            return $group->pluck('PAGE')
-                ->filter()       // tanggal null/empty
-                ->unique()
-                ->values()
-                ->all();
-        })
-        ->toArray();
+        $existing = [];
+        $pages    = [];
+        $shops    = [];
 
-    // Mapping: fb_name => [unique shop details...]
-    $shopsByName = $rows
-        ->groupBy('fb_name')
-        ->map(function ($group) {
-            return $group->pluck('SHOP_DETAILS')
-                ->filter()
-                ->unique()
-                ->values()
-                ->all();
-        })
-        ->toArray();
+        foreach ($rows as $row) {
+            $name = $row->fb_name;
 
-    return response()->json([
-        'existing' => $existing,
-        'pages'    => $pagesByName,
-        'shops'    => $shopsByName,
-    ]);
-}
+            // mark as existing
+            $existing[$name] = true;
 
+            if (!isset($pages[$name])) {
+                $pages[$name] = [];
+            }
+            if (!isset($shops[$name])) {
+                $shops[$name] = [];
+            }
 
+            // PAGE column
+            if (isset($row->PAGE) && $row->PAGE !== '') {
+                $pages[$name][] = $row->PAGE;
+            }
+
+            // SHOP DETAILS column (may space, kaya object property style)
+            $shopVal = $row->{'SHOP DETAILS'} ?? null;
+            if (!is_null($shopVal) && $shopVal !== '') {
+                $shops[$name][] = $shopVal;
+            }
+        }
+
+        return response()->json([
+            'existing' => array_keys($existing),
+            'pages'    => $pages,
+            'shops'    => $shops,
+        ]);
+    }
 }
