@@ -4,22 +4,66 @@
     <div class="text-xl font-bold">📊 Encoder Summary (Grouped by Date and Page)</div>
   </x-slot>
 
-  <form method="GET" action="{{ route('macro_output.summary') }}" class="mt-4 mb-6 px-4 flex gap-4 flex-wrap items-end">
+  <form id="filterForm" method="GET" action="{{ route('macro_output.summary') }}" class="mt-4 mb-6 px-4 flex gap-4 flex-wrap items-end">
     <div>
       <label class="text-sm font-medium">Start Date</label>
-      <input type="date" name="start_date" value="{{ request('start_date') }}" class="border rounded px-2 py-1" />
+      <input
+        id="start_date"
+        type="date"
+        name="start_date"
+        value="{{ request('start_date') }}"
+        class="border rounded px-2 py-1"
+      />
     </div>
     <div>
       <label class="text-sm font-medium">End Date</label>
-      <input type="date" name="end_date" value="{{ request('end_date') }}" class="border rounded px-2 py-1" />
+      <input
+        id="end_date"
+        type="date"
+        name="end_date"
+        value="{{ request('end_date') }}"
+        class="border rounded px-2 py-1"
+      />
     </div>
-    <div>
-      <button type="submit" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800">Filter</button>
+    <div class="flex gap-2">
+      <button type="submit" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800">
+        Filter
+      </button>
+
+      {{-- TODAY button --}}
+      <button
+        type="button"
+        id="btnToday"
+        class="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 text-xs"
+      >
+        Today
+      </button>
+
+      {{-- YESTERDAY button --}}
+      <button
+        type="button"
+        id="btnYesterday"
+        class="bg-indigo-600 text-white px-3 py-2 rounded hover:bg-indigo-700 text-xs"
+      >
+        Yesterday
+      </button>
     </div>
   </form>
 
-  <div class="overflow-x-auto mt-6 px-4">
-    <table class="min-w-full text-sm border">
+  {{-- Copy button (above table) --}}
+  <div class="px-4 mb-2 flex justify-end">
+    <button
+      type="button"
+      id="copyTableBtn"
+      class="px-4 py-2 rounded text-sm font-semibold"
+      style="background-color:#00ff00; color:#000;"
+    >
+      Copy Table
+    </button>
+  </div>
+
+  <div class="overflow-x-auto mt-2 px-4">
+    <table class="min-w-full text-sm border" id="summaryTable">
       <thead class="bg-gray-200">
         <tr>
           <th class="border px-3 py-2 text-left">Date</th>
@@ -91,4 +135,87 @@
       </tbody>
     </table>
   </div>
+
+  <script>
+    // Helper: format JS Date to YYYY-MM-DD
+    function formatDateToYMD(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    // TODAY / YESTERDAY buttons
+    (function () {
+      const form = document.getElementById('filterForm');
+      const startInput = document.getElementById('start_date');
+      const endInput = document.getElementById('end_date');
+      const btnToday = document.getElementById('btnToday');
+      const btnYesterday = document.getElementById('btnYesterday');
+
+      if (btnToday) {
+        btnToday.addEventListener('click', function () {
+          const today = new Date();
+          const formatted = formatDateToYMD(today);
+          startInput.value = formatted;
+          endInput.value = formatted;
+          form.submit();
+        });
+      }
+
+      if (btnYesterday) {
+        btnYesterday.addEventListener('click', function () {
+          const d = new Date();
+          d.setDate(d.getDate() - 1);
+          const formatted = formatDateToYMD(d);
+          startInput.value = formatted;
+          endInput.value = formatted;
+          form.submit();
+        });
+      }
+    })();
+
+    // COPY TABLE button
+    (function () {
+      const copyBtn = document.getElementById('copyTableBtn');
+      const table = document.getElementById('summaryTable');
+
+      if (!copyBtn || !table) return;
+
+      copyBtn.addEventListener('click', async function () {
+        let text = '';
+        const rows = table.querySelectorAll('tr');
+
+        rows.forEach(row => {
+          const cols = row.querySelectorAll('th, td');
+          const rowData = [];
+          cols.forEach(col => {
+            // Replace newlines to keep it clean when pasting
+            const cellText = col.innerText.replace(/\s+/g, ' ').trim();
+            rowData.push(cellText);
+          });
+          text += rowData.join('\t') + '\n';
+        });
+
+        // Try modern clipboard API first
+        try {
+          await navigator.clipboard.writeText(text);
+          alert('Table copied to clipboard.');
+        } catch (err) {
+          // Fallback using execCommand
+          const textarea = document.createElement('textarea');
+          textarea.value = text;
+          document.body.appendChild(textarea);
+          textarea.select();
+          try {
+            document.execCommand('copy');
+            alert('Table copied to clipboard.');
+          } catch (err2) {
+            alert('Failed to copy table.');
+          }
+          document.body.removeChild(textarea);
+        }
+      });
+    })();
+  </script>
 </x-layout>
