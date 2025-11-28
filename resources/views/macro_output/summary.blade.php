@@ -1,5 +1,6 @@
 {{-- resources/views/macro_output/summary.blade.php --}}
 <x-layout>
+  <x-slot name="title">Summary Encoder</x-slot>
   <x-slot name="heading">
     <div class="text-xl font-bold">📊 Encoder Summary (Grouped by Date and Page)</div>
   </x-slot>
