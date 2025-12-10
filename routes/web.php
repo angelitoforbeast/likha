@@ -301,6 +301,8 @@ Route::post('/task/update-team-task', [TaskController::class, 'updateTeamTask'])
     Route::view('/from_jnt', 'from_jnt');
     Route::post('/from_jnt', [FromJntController::class, 'store']);
     Route::get('/from_jnt_view', [FromJntController::class, 'index']);
+    Route::get('/jnt/status-summary', [FromJntController::class, 'statusSummary'])
+    ->name('jnt.status-summary');
 
     Route::get('/jnt_upload', [JntUploadController::class, 'index'])->name('jnt.upload.index');
     Route::post('/jnt_upload', [JntUploadController::class, 'store'])->name('jnt.upload.store');

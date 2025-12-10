@@ -37,6 +37,18 @@
 
       <div id="errorNote" class="text-sm text-red-600 mt-2 hidden"></div>
     </div>
+
+    {{-- ✅ Pinaka-babang part: optional upload date/time --}}
+    <div class="space-y-1">
+      <label for="batch_at" class="block text-sm font-medium text-gray-700">
+        Optional Upload Date/Time
+      </label>
+      <input id="batch_at" name="batch_at" type="datetime-local"
+             class="block border border-gray-300 rounded p-2 w-full max-w-xs" />
+      <p class="text-xs text-gray-500">
+        Kapag empty, current date &amp; time ang gagamitin.
+      </p>
+    </div>
   </div>
 
   <script>
@@ -55,6 +67,8 @@
     const skippedRows = document.getElementById('skippedRows');
     const errorRows = document.getElementById('errorRows');
     const errorNote = document.getElementById('errorNote');
+
+    const batchAtInput = document.getElementById('batch_at'); // ✅ bagong field
 
     let pollTimer = null;
     let currentId = null;
@@ -97,6 +111,11 @@
 
       const fd = new FormData();
       fd.append('file', fileInput.files[0]);
+
+      // ✅ isama optional batch_at
+      if (batchAtInput && batchAtInput.value) {
+        fd.append('batch_at', batchAtInput.value);
+      }
 
       try {
         // Relative URL to stay same-origin

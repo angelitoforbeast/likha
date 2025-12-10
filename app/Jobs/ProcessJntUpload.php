@@ -7,18 +7,14 @@ use App\Models\FromJnt;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Database\Query\Expression;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use ZipArchive;
 
-// OpenSpout v3 style factory (most common). If you installed v4, we’ll fallback to direct readers below.
 use OpenSpout\Reader\Common\Creator\ReaderEntityFactory;
-// If you are on v4, these classes exist:
 use OpenSpout\Reader\CSV\Reader as CsvReaderV4;
 use OpenSpout\Reader\XLSX\Reader as XlsxReaderV4;
 
@@ -26,37 +22,57 @@ class ProcessJntUpload implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $timeout = 1800; // 30 minutes (adjust)
-    public int $tries = 3;
+    public $timeout = 1800; // 30 minutes
+    public $tries   = 3;
 
-    private int $uploadLogId;
+    private $uploadLogId;
 
-    // Tunable chunk sizes
-    private const CHUNK_SIZE = 2000;      // rows to accumulate before DB write
-    private const UPDATE_SUBCHUNK = 800;  // how many rows per bulk UPDATE
+    const CHUNK_SIZE      = 2000;
+    const UPDATE_SUBCHUNK = 800;
 
-    private array $errors = [];
-    private int $processed = 0;
-    private int $inserted = 0;
-    private int $updated = 0;
-    private int $skipped = 0;
+    private $errors    = [];
+    private $processed = 0;
+    private $inserted  = 0;
+    private $updated   = 0;
+    private $skipped   = 0;
 
-    public function __construct(int $uploadLogId)
+    /**
+     * iisang batch timestamp per upload (string: 'Y-m-d H:i:s')
+     * galing sa UploadLog->batch_at kung meron, else now()
+     */
+    protected $batchAt = null;
+
+    public function __construct($uploadLogId)
     {
-        $this->uploadLogId = $uploadLogId;
+        $this->uploadLogId = (int) $uploadLogId;
     }
 
-    public function handle(): void
+    public function handle()
     {
         /** @var UploadLog $log */
         $log = UploadLog::findOrFail($this->uploadLogId);
 
+        // ✅ Piliin batch_at: unahin yung nasa UploadLog (backdated), fallback = now()
+        $batchCarbon = null;
+        if (!empty($log->batch_at)) {
+            try {
+                $batchCarbon = Carbon::parse($log->batch_at, 'Asia/Manila');
+            } catch (\Throwable $e) {
+                $batchCarbon = null;
+            }
+        }
+        if (!$batchCarbon) {
+            $batchCarbon = Carbon::now('Asia/Manila');
+        }
+        $this->batchAt = $batchCarbon->format('Y-m-d H:i:s');
+
+        // started_at = actual processing time (hindi batch_at)
         $log->update([
             'status'     => 'processing',
-            'started_at' => now(),
+            'started_at' => Carbon::now('Asia/Manila'),
         ]);
 
-        $path = $log->path; // storage-relative path (disk=local)
+        $path = $log->path;
         $ext  = strtolower(pathinfo($path, PATHINFO_EXTENSION));
 
         try {
@@ -70,7 +86,6 @@ class ProcessJntUpload implements ShouldQueue
                 throw new \RuntimeException('Unsupported file type: ' . $ext);
             }
 
-            // Save errors (if any)
             if (!empty($this->errors)) {
                 $errorsPath = 'uploads/jnt/errors/upload_' . $log->id . '_' . date('Ymd_His') . '.csv';
                 $this->writeErrorsCsv(Storage::path($errorsPath), $this->errors);
@@ -83,19 +98,18 @@ class ProcessJntUpload implements ShouldQueue
             $log->updated        = $this->updated;
             $log->skipped        = $this->skipped;
             $log->status         = 'done';
-            $log->finished_at    = now();
+            $log->finished_at    = Carbon::now('Asia/Manila');
             $log->save();
         } catch (\Throwable $e) {
-            $log->status = 'failed';
-            $log->finished_at = now();
+            $log->status      = 'failed';
+            $log->finished_at = Carbon::now('Asia/Manila');
             $log->save();
 
-            // Bubble up para ma-record sa failed_jobs
             throw $e;
         }
     }
 
-    private function processZip(UploadLog $log): void
+    private function processZip(UploadLog $log)
     {
         $zipPath = Storage::path($log->path);
         $zip = new ZipArchive();
@@ -103,7 +117,6 @@ class ProcessJntUpload implements ShouldQueue
             throw new \RuntimeException('Cannot open ZIP: ' . $zipPath);
         }
 
-        // Extract-to-temp per entry to process with streaming reader
         $tmpRoot = Storage::path('uploads/jnt/tmp/' . $log->id . '_' . uniqid());
         if (!is_dir($tmpRoot)) {
             @mkdir($tmpRoot, 0777, true);
@@ -115,13 +128,11 @@ class ProcessJntUpload implements ShouldQueue
                 $name = $stat['name'];
                 $ext  = strtolower(pathinfo($name, PATHINFO_EXTENSION));
                 if (!in_array($ext, ['csv', 'xlsx'])) {
-                    // Skip unknown files/folders
                     continue;
                 }
                 $target = $tmpRoot . DIRECTORY_SEPARATOR . basename($name);
                 $stream = $zip->getStream($name);
                 if (!$stream) {
-                    // log error and continue
                     $this->errors[] = ['File' => $name, 'Error' => 'Cannot read stream from ZIP.'];
                     continue;
                 }
@@ -134,18 +145,15 @@ class ProcessJntUpload implements ShouldQueue
             }
         } finally {
             $zip->close();
-            // Clean tmp
             $this->rrmdir($tmpRoot);
         }
     }
 
-    private function processSingleFile(string $absPath, string $ext, UploadLog $log): void
+    private function processSingleFile($absPath, $ext, UploadLog $log)
     {
-        // Choose reader: prefer OpenSpout. V3 uses ReaderEntityFactory; v4 has concrete reader classes.
         $reader = null;
 
         if (class_exists(ReaderEntityFactory::class)) {
-            // v3 style
             if ($ext === 'xlsx') {
                 $reader = ReaderEntityFactory::createXLSXReader();
             } elseif ($ext === 'csv') {
@@ -156,7 +164,6 @@ class ProcessJntUpload implements ShouldQueue
                 $reader->setEncoding('UTF-8');
             }
         } else {
-            // v4 style fallback
             if ($ext === 'xlsx' && class_exists(XlsxReaderV4::class)) {
                 $reader = new XlsxReaderV4();
             } elseif ($ext === 'csv' && class_exists(CsvReaderV4::class)) {
@@ -174,13 +181,11 @@ class ProcessJntUpload implements ShouldQueue
 
         $reader->open($absPath);
 
-        $buffer = [];
+        $buffer    = [];
         $headerMap = null;
 
         foreach ($reader->getSheetIterator() as $sheet) {
             foreach ($sheet->getRowIterator() as $row) {
-                // OpenSpout v3: $row->toArray() returns array of scalar values
-                // v4: $row->toArray() also available
                 $cells = $row->toArray();
 
                 if ($headerMap === null) {
@@ -188,22 +193,22 @@ class ProcessJntUpload implements ShouldQueue
                     if (!$this->hasRequiredHeaders($headerMap)) {
                         throw new \RuntimeException('Wrong File Uploaded');
                     }
-                    continue; // next row (data)
+                    continue;
                 }
 
                 $norm = $this->normalizeRow($cells, $headerMap);
 
-                // Validate minimal fields
                 if ($norm['waybill_number'] === '' || $norm['status'] === '') {
                     $this->errors[] = [
-                        'Waybill Number' => $norm['waybill_number'] ?? '',
-                        'Status'         => $norm['status'] ?? '',
+                        'Waybill Number' => isset($norm['waybill_number']) ? $norm['waybill_number'] : '',
+                        'Status'         => isset($norm['status']) ? $norm['status'] : '',
                         'Error'          => 'Missing required fields',
                     ];
                     continue;
                 }
 
-                $buffer[$norm['waybill_number']] = $norm; // dedupe within file by WB
+                // Deduplicate inside this batch by waybill
+                $buffer[$norm['waybill_number']] = $norm;
                 $this->processed++;
 
                 if (count($buffer) >= self::CHUNK_SIZE) {
@@ -223,110 +228,115 @@ class ProcessJntUpload implements ShouldQueue
         $reader->close();
     }
 
-    /** Map header names (case-insensitive, fuzzy) to canonical keys */
-    /** Map header names with strict token/phrase matching (no loose substrings). */
-private function buildHeaderMap(array $headers): array
-{
-    $norm = fn ($s) => trim(mb_strtolower((string) $s));
+    private function buildHeaderMap(array $headers)
+    {
+        $norm = function ($s) {
+            return trim(mb_strtolower((string) $s));
+        };
 
-    $aliases = [
-        'waybill_number' => ['waybill', 'waybill number', 'awb', 'tracking no', 'tracking number'],
-        'status'         => ['status'],
-        'item_name'      => ['item name', 'item', 'product', 'product name'],
-        'sender'         => ['sender', 'shipper', 'from'],
-        // "to" allowed only if the whole header is exactly "to"
-        'receiver'       => ['receiver', 'consignee', 'to'],
-        // keep generic terms as fallback only (later guarded)
-        'receiver_cellphone' => ['receiver cellphone', 'receiver phone', 'consignee phone', 'phone', 'mobile'],
-        // protect from matching "code" columns
-        'cod'            => ['cod', 'c.o.d', 'cod amt', 'cod amount', 'collect on delivery'],
-        'submission_time'=> ['submission time', 'pu time', 'pickup time', 'created time'],
-        'signingtime'    => ['signingtime', 'signing time', 'delivered time'],
-        'remarks'        => ['remarks', 'remark', 'note', 'notes'],
-    ];
+        $aliases = [
+            'waybill_number' => ['waybill', 'waybill number', 'awb', 'tracking no', 'tracking number'],
 
-    $map = [];
+            // IMPORTANT: tanggapin ang "Order Status"
+            'status'         => ['status', 'order status', 'order_status', 'orderstatus'],
 
-    foreach ($headers as $idx => $label) {
-        $h = $norm($label);
-        // tokenize words: "Creator Code" -> ["creator","code"]
-        $tokens = preg_split('/[^a-z0-9]+/u', $h, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            'item_name'      => ['item name', 'item', 'product', 'product name'],
+            'sender'         => ['sender', 'shipper', 'from'],
+            'receiver'       => ['receiver', 'consignee', 'to'],
+            'receiver_cellphone' => ['receiver cellphone', 'receiver phone', 'consignee phone', 'phone', 'mobile'],
+            'cod'            => ['cod', 'c.o.d', 'cod amt', 'cod amount', 'collect on delivery'],
+            'submission_time'=> ['submission time', 'pu time', 'pickup time', 'created time'],
+            'signingtime'    => ['signingtime', 'signing time', 'delivered time'],
+            'remarks'        => ['remarks', 'remark', 'note', 'notes'],
 
-        foreach ($aliases as $canon => $cands) {
-            // keep first match per canon key
-            if (isset($map[$canon])) continue;
+            // NEW columns
+            'province'           => ['province', 'prov'],
+            'city'               => ['city', 'municipality', 'city/municipality'],
+            'barangay'           => ['barangay', 'brgy', 'barangay name'],
+            'total_shipping_cost'=> ['total shipping cost', 'shipping cost', 'total freight'],
+            'rts_reason'         => ['rts reason', 'rts_reason', 'return reason', 'reason for rts'],
+        ];
 
-            foreach ($cands as $cand) {
-                $c = $norm($cand);
-                $matched = false;
+        $map = [];
 
-                if ($h === $c) {
-                    // exact full-header match
-                    $matched = true;
-                } elseif (str_contains($c, ' ')) {
-                    // phrase match with word boundaries
-                    $pattern = '/\b' . preg_quote($c, '/') . '\b/u';
-                    $matched = (bool) preg_match($pattern, $h);
-                } else {
-                    // single-token alias must match as a whole token (not substring)
-                    $matched = in_array($c, $tokens, true);
+        foreach ($headers as $idx => $label) {
+            $h = $norm($label);
+            $tokens = preg_split('/[^a-z0-9]+/u', $h, -1, PREG_SPLIT_NO_EMPTY);
+            if (!$tokens) {
+                $tokens = [];
+            }
+
+            foreach ($aliases as $canon => $cands) {
+                if (isset($map[$canon])) {
+                    continue;
                 }
 
-                // Guards against common false-positives
-                if ($matched) {
-                    if ($canon === 'receiver' && $c === 'to' && $h !== 'to') {
-                        // only match if header is literally "to"
-                        $matched = false;
-                    }
-                    if ($canon === 'cod' && in_array('code', $tokens, true)) {
-                        // prevent "creator code", "product code", etc.
-                        $matched = false;
-                    }
-                    if ($canon === 'receiver_cellphone' && in_array('sender', $tokens, true)) {
-                        // don't steal "sender phone"
-                        $matched = false;
-                    }
-                }
+                foreach ($cands as $cand) {
+                    $c = $norm($cand);
+                    $matched = false;
 
-                if ($matched) {
-                    $map[$canon] = $idx;
-                    break;
+                    if ($h === $c) {
+                        $matched = true;
+                    } elseif (mb_strpos($c, ' ') !== false) {
+                        // phrase match
+                        if (preg_match('/\b' . preg_quote($c, '/') . '\b/u', $h)) {
+                            $matched = true;
+                        }
+                    } else {
+                        // token match
+                        if (in_array($c, $tokens, true)) {
+                            $matched = true;
+                        }
+                    }
+
+                    if ($matched) {
+                        if ($canon === 'receiver' && $c === 'to' && $h !== 'to') {
+                            $matched = false;
+                        }
+                        if ($canon === 'cod' && in_array('code', $tokens, true)) {
+                            $matched = false;
+                        }
+                        if ($canon === 'receiver_cellphone' && in_array('sender', $tokens, true)) {
+                            $matched = false;
+                        }
+                    }
+
+                    if ($matched) {
+                        $map[$canon] = $idx;
+                        break;
+                    }
                 }
             }
         }
+
+        return $map;
     }
 
-    return $map;
-}
-
-
-    private function hasRequiredHeaders(array $map): bool
+    private function hasRequiredHeaders(array $map)
     {
+        // required lang talaga: waybill_number, status, signingtime
         return isset($map['waybill_number'], $map['status'], $map['signingtime']);
     }
-    
-    private function normalizeRow(array $cells, array $map): array
+
+    private function normalizeRow(array $cells, array $map)
     {
-        $get = function (string $key) use ($cells, $map) {
+        $get = function ($key) use ($cells, $map) {
             if (!isset($map[$key])) return '';
-            $val = $cells[$map[$key]] ?? '';
+            $val = isset($cells[$map[$key]]) ? $cells[$map[$key]] : '';
             $val = is_scalar($val) ? (string) $val : '';
             return trim(preg_replace('/\s+/u', ' ', $val));
         };
 
-        $parseDate = function (string $v): ?string {
-            $v = trim($v);
+        $parseDate = function ($v) {
+            $v = trim((string) $v);
             if ($v === '') return null;
 
-            // Excel numeric date?
             if (is_numeric($v)) {
                 try {
-                    // Excel epoch: 1899-12-30
                     $base = Carbon::create(1899, 12, 30, 0, 0, 0, 'Asia/Manila');
                     $dt = $base->copy()->addDays((int) $v);
                     return $dt->format('Y-m-d H:i:s');
                 } catch (\Throwable $e) {
-                    // fall through
                 }
             }
 
@@ -338,7 +348,8 @@ private function buildHeaderMap(array $headers): array
             foreach ($formats as $fmt) {
                 try {
                     return Carbon::createFromFormat($fmt, $v, 'Asia/Manila')->format('Y-m-d H:i:s');
-                } catch (\Throwable $e) { /* try next */ }
+                } catch (\Throwable $e) {
+                }
             }
 
             try {
@@ -348,60 +359,110 @@ private function buildHeaderMap(array $headers): array
             }
         };
 
+        $parseMoney = function ($v) {
+            $v = (string) $v;
+            // alisin currency symbol, comma, etc; iwan digits, dot, minus
+            $clean = preg_replace('/[^\d\.\-]/', '', $v);
+            $clean = trim($clean);
+            return $clean === '' ? null : $clean;
+        };
+
+        $now = Carbon::now('Asia/Manila')->format('Y-m-d H:i:s');
+
         return [
-            'waybill_number'    => $get('waybill_number'),
-            'status'            => $get('status'),
-            'item_name'         => $get('item_name'),
-            'sender'            => $get('sender'),
-            'receiver'          => $get('receiver'),
-            'receiver_cellphone'=> $get('receiver_cellphone'),
-            'cod'               => $get('cod'),
-            'submission_time'   => $parseDate($get('submission_time')),
-            'signingtime'       => $parseDate($get('signingtime')),
-            'remarks'           => $get('remarks'),
-            'created_at'        => now()->toDateTimeString(),
-            'updated_at'        => now()->toDateTimeString(),
+            'waybill_number'     => $get('waybill_number'),
+            'status'             => $get('status'),
+            'item_name'          => $get('item_name'),
+            'sender'             => $get('sender'),
+            'receiver'           => $get('receiver'),
+            'receiver_cellphone' => $get('receiver_cellphone'),
+            'cod'                => $get('cod'),
+            'submission_time'    => $parseDate($get('submission_time')),
+            'signingtime'        => $parseDate($get('signingtime')),
+            'remarks'            => $get('remarks'),
+
+            // NEW FIELDS FROM EXCEL
+            'province'           => $get('province'),
+            'city'               => $get('city'),
+            'barangay'           => $get('barangay'),
+            'total_shipping_cost'=> $parseMoney($get('total_shipping_cost')),
+            'rts_reason'         => $get('rts_reason'),
+
+            'created_at'         => $now,
+            'updated_at'         => $now,
         ];
     }
 
-    private function persistChunk(array $rows): void
+    /**
+     * INSERT + UPDATE (status only) + status_logs
+     */
+    private function persistChunk(array $rows)
     {
         if (empty($rows)) return;
 
-        // dedupe by waybill in chunk
+        // De-dup inside chunk by waybill (last one wins)
         $byWb = [];
         foreach ($rows as $r) {
-            $wb = $r['waybill_number'];
-            $byWb[$wb] = $r; // last one wins
+            $byWb[$r['waybill_number']] = $r;
         }
         $rows = array_values($byWb);
 
         $waybills = array_column($rows, 'waybill_number');
 
-        // Fetch existing (status only)
         $existing = FromJnt::query()
-            ->select(['waybill_number','status'])
+            ->select(['waybill_number','status','status_logs'])
             ->whereIn('waybill_number', $waybills)
             ->get()
             ->keyBy('waybill_number');
 
-        $toInsert = [];
-        $toUpdate = []; // waybill => ['status' => ..., 'signingtime' => ..., 'updated_at' => now()]
+        $toInsert   = [];
+        $toUpdate   = [];
+        $statusInfo = []; // wb => ['from'=>..., 'to'=>...]
+
+        // ✅ Carbon version ng batch_at para sa logs
+        $batchAtStr    = $this->batchAt ?: Carbon::now('Asia/Manila')->format('Y-m-d H:i:s');
+        $batchAtCarbon = Carbon::parse($batchAtStr, 'Asia/Manila');
 
         foreach ($rows as $r) {
             $wb = $r['waybill_number'];
+
             if (isset($existing[$wb])) {
-                $cur = strtolower((string) $existing[$wb]->status);
-                if (in_array($cur, ['delivered','returned'], true)) {
+                // === UPDATE PATH ===
+                $oldStatusRaw = (string) ($existing[$wb]->status ?: '');
+                $cur          = strtolower($oldStatusRaw);
+
+                // kapag delivered/returned na dati, skip (no update, no logs)
+                if (in_array($cur, ['delivered', 'returned'], true)) {
                     $this->skipped++;
                     continue;
                 }
+
+                $newStatusRaw = (string) $r['status'];
+
                 $toUpdate[$wb] = [
-                    'status'      => $r['status'],
+                    'status'      => $newStatusRaw,
                     'signingtime' => $r['signingtime'],
-                    'updated_at'  => now()->toDateTimeString(),
+                    'updated_at'  => Carbon::now('Asia/Manila')->format('Y-m-d H:i:s'),
+                ];
+
+                // ✅ i-store lahat ng updates para mag-decide later kung maglo-log
+                $statusInfo[$wb] = [
+                    'from' => $oldStatusRaw,
+                    'to'   => $newStatusRaw,
                 ];
             } else {
+                // === INSERT PATH ===
+
+                // Initial status_logs: from = null, to = current status
+                $initialLogs = [
+                    [
+                        'batch_at'      => $batchAtCarbon->format('Y-m-d H:i:s'),
+                        'upload_log_id' => $this->uploadLogId,
+                        'from'          => null,
+                        'to'            => (string) $r['status'],
+                    ],
+                ];
+
                 $toInsert[] = [
                     'waybill_number'     => $r['waybill_number'],
                     'sender'             => $r['sender'],
@@ -413,37 +474,48 @@ private function buildHeaderMap(array $headers): array
                     'receiver_cellphone' => $r['receiver_cellphone'],
                     'signingtime'        => $r['signingtime'],
                     'remarks'            => $r['remarks'],
+                    'province'           => $r['province'],
+                    'city'               => $r['city'],
+                    'barangay'           => $r['barangay'],
+                    'total_shipping_cost'=> $r['total_shipping_cost'],
+                    'rts_reason'         => $r['rts_reason'],
+                    'status_logs'        => json_encode($initialLogs),
                     'created_at'         => $r['created_at'],
                     'updated_at'         => $r['updated_at'],
                 ];
             }
         }
 
-        DB::transaction(function () use ($toInsert, $toUpdate) {
+        DB::transaction(function () use ($toInsert, $toUpdate, $statusInfo, $batchAtCarbon) {
             if (!empty($toInsert)) {
-                // bulk insert
                 FromJnt::insert($toInsert);
                 $this->inserted += count($toInsert);
             }
 
             if (!empty($toUpdate)) {
                 $keys = array_keys($toUpdate);
-                // Bulk update with CASE (status + signingtime)
+
+                // bulk SQL update for status + signingtime
                 foreach (array_chunk($keys, self::UPDATE_SUBCHUNK) as $chunkKeys) {
                     $statusCase = "CASE waybill_number\n";
                     $timeCase   = "CASE waybill_number\n";
+
                     foreach ($chunkKeys as $wb) {
                         $s = str_replace("'", "''", (string) $toUpdate[$wb]['status']);
                         $t = $toUpdate[$wb]['signingtime'];
-                        $tSql = $t ? ("'" . str_replace("'", "''", $t) . "'") : "NULL";
+                        $tSql  = $t ? ("'" . str_replace("'", "''", $t) . "'") : "NULL";
                         $wbSql = "'" . str_replace("'", "''", $wb) . "'";
                         $statusCase .= "WHEN {$wbSql} THEN '{$s}'\n";
                         $timeCase   .= "WHEN {$wbSql} THEN {$tSql}\n";
                     }
+
                     $statusCase .= "ELSE status END";
                     $timeCase   .= "ELSE signingtime END";
 
-                    $inList = implode(',', array_map(fn($wb) => "'" . str_replace("'", "''", $wb) . "'", $chunkKeys));
+                    $inList = implode(',', array_map(function ($wb) {
+                        return "'" . str_replace("'", "''", $wb) . "'";
+                    }, $chunkKeys));
+
                     $sql = "
                         UPDATE " . DB::getTablePrefix() . (new FromJnt)->getTable() . "
                         SET status = {$statusCase},
@@ -455,13 +527,134 @@ private function buildHeaderMap(array $headers): array
                     DB::statement($sql);
                     $this->updated += count($chunkKeys);
                 }
+
+                // ✅ Append status_logs per row, gamit special In Transit logic
+                if (!empty($statusInfo)) {
+                    $wbKeys = array_keys($statusInfo);
+
+                    $rowsForLogs = FromJnt::whereIn('waybill_number', $wbKeys)
+                        ->select(['id', 'waybill_number', 'status_logs'])
+                        ->get();
+
+                    foreach ($rowsForLogs as $row) {
+                        $wb = $row->waybill_number;
+                        if (!isset($statusInfo[$wb])) {
+                            continue;
+                        }
+
+                        $oldStatus = $statusInfo[$wb]['from'];
+                        $newStatus = $statusInfo[$wb]['to'];
+
+                        $logs = $row->status_logs ?: [];
+                        if (!is_array($logs)) {
+                            $decoded = json_decode($logs, true);
+                            $logs = is_array($decoded) ? $decoded : [];
+                        }
+
+                        $newLogs = $this->appendStatusLogForJob(
+                            $logs,
+                            $oldStatus,
+                            $newStatus,
+                            $batchAtCarbon
+                        );
+
+                        // kung walang nadagdag, huwag na mag-save
+                        if ($newLogs !== $logs) {
+                            $row->status_logs = $newLogs;
+                            $row->save();
+                        }
+                    }
+                }
             }
         });
     }
 
-    private function touchProgress(UploadLog $log): void
+    /**
+     * Helper para sa status_logs sa Job:
+     *
+     * - Mag-aappend ng log if:
+     *   1) oldStatus = null at may newStatus
+     *   2) oldStatus != newStatus
+     *   3) pareho silang "In Transit" pero ibang araw na si batchAt
+     */
+    protected function appendStatusLogForJob(
+        $currentLogs,
+        ?string $oldStatusRaw,
+        ?string $newStatusRaw,
+        Carbon $batchAt
+    ): array {
+        // i-normalize logs → array
+        if (is_array($currentLogs)) {
+            $logs = $currentLogs;
+        } elseif (is_string($currentLogs) && $currentLogs !== '') {
+            $decoded = json_decode($currentLogs, true);
+            $logs = is_array($decoded) ? $decoded : [];
+        } else {
+            $logs = [];
+        }
+
+        $oldStatus = $oldStatusRaw !== null && trim($oldStatusRaw) !== '' ? trim($oldStatusRaw) : null;
+        $newStatus = $newStatusRaw !== null && trim($newStatusRaw) !== '' ? trim($newStatusRaw) : null;
+
+        $shouldAdd = false;
+
+        // 1) First time ever (from null → something)
+        if ($oldStatus === null && $newStatus !== null) {
+            $shouldAdd = true;
+
+        // 2) Normal transition (nagbago status)
+        } elseif ($oldStatus !== null && $newStatus !== null && $oldStatus !== $newStatus) {
+            $shouldAdd = true;
+
+        // 3) Same status, special rule for "In Transit"
+        } elseif ($newStatus !== null && strcasecmp($newStatus, 'In Transit') === 0) {
+            $lastInTransitLog = null;
+
+            for ($i = count($logs) - 1; $i >= 0; $i--) {
+                $log = $logs[$i] ?? null;
+                if (!is_array($log)) {
+                    continue;
+                }
+
+                if (isset($log['to']) && strcasecmp((string)$log['to'], 'In Transit') === 0) {
+                    $lastInTransitLog = $log;
+                    break;
+                }
+            }
+
+            if ($lastInTransitLog) {
+                try {
+                    $lastDate    = Carbon::parse($lastInTransitLog['batch_at'])->toDateString();
+                    $currentDate = $batchAt->toDateString();
+
+                    // ✅ ibang araw na pero In Transit pa rin → log ulit
+                    if ($lastDate !== $currentDate) {
+                        $shouldAdd = true;
+                    }
+                } catch (\Throwable $e) {
+                    // pag di ma-parse, safe side: log
+                    $shouldAdd = true;
+                }
+            } else {
+                // wala pang In Transit log dati → log
+                $shouldAdd = true;
+            }
+        }
+
+        if ($shouldAdd && $newStatus !== null) {
+            $logs[] = [
+                'batch_at'      => $batchAt->format('Y-m-d H:i:s'),
+                'upload_log_id' => $this->uploadLogId,
+                'from'          => $oldStatus,
+                'to'            => $newStatus,
+            ];
+        }
+
+        return $logs;
+    }
+
+    private function touchProgress(UploadLog $log)
     {
-        // Minimize writes: update only key counters
         $log->processed_rows = $this->processed;
         $log->inserted       = $this->inserted;
         $log->updated        = $this->updated;
@@ -469,13 +662,12 @@ private function buildHeaderMap(array $headers): array
         $log->save();
     }
 
-    private function writeErrorsCsv(string $absPath, array $rows): void
+    private function writeErrorsCsv($absPath, array $rows)
     {
         @mkdir(dirname($absPath), 0777, true);
         $fp = fopen($absPath, 'w');
         if (!$fp) return;
 
-        // header
         fputcsv($fp, array_keys($rows[0]));
         foreach ($rows as $r) {
             fputcsv($fp, $r);
@@ -483,7 +675,7 @@ private function buildHeaderMap(array $headers): array
         fclose($fp);
     }
 
-    private function rrmdir(string $dir): void
+    private function rrmdir($dir)
     {
         if (!is_dir($dir)) return;
         $files = scandir($dir) ?: [];

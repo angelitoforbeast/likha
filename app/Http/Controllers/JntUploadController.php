@@ -7,61 +7,81 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use App\Models\UploadLog;
 use App\Jobs\ProcessJntUpload;
+use Carbon\Carbon;
 
 class JntUploadController extends Controller
 {
     public function store(Request $request)
     {
-        // 1) Validate file
         try {
-        $request->validate([
-            'file' => 'required|file|mimes:zip,csv,xlsx,xls|max:204800', // ~200MB (adjust as needed)
-        ]);
+            // 1) Validate file + optional batch_at
+            $request->validate([
+                'file'     => 'required|file|mimes:zip,csv,xlsx,xls|max:204800', // ~200MB (adjust as needed)
+                'batch_at' => 'nullable|string', // datetime-local galing UI
+            ]);
 
-        $file = $request->file('file');
+            $file = $request->file('file');
 
-        // 2) Persist file to storage (local disk)
-        $folder   = 'uploads/jnt/' . now()->format('Y-m-d');
-        $basename = Str::slug(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME));
-        $filename = $basename . '__' . now()->format('His') . '.' . $file->getClientOriginalExtension();
+            // 2) Parse optional batch_at (datetime-local: "2025-12-10T02:00")
+            $rawBatchAt = $request->input('batch_at');
+            $batchAt    = null;
 
-        $path = $file->storeAs($folder, $filename, 'local');
+            if (!empty($rawBatchAt)) {
+                try {
+                    // kung datetime-local, ito na safe:
+                    // Y-m-d\TH:i  (ex: 2025-12-10T02:00)
+                    $batchAt = Carbon::createFromFormat('Y-m-d\TH:i', $rawBatchAt, 'Asia/Manila');
+                } catch (\Throwable $e) {
+                    // fallback generic parse; kung di pa rin kaya, mananatiling null
+                    try {
+                        $batchAt = Carbon::parse($rawBatchAt, 'Asia/Manila');
+                    } catch (\Throwable $e2) {
+                        $batchAt = null;
+                    }
+                }
+            }
 
-        // 3) Create UploadLog (status: queued)
-        $log = UploadLog::create([
-            'type'          => 'jnt',
-            'disk'          => 'local',
-            'path'          => $path,
-            'original_name' => $file->getClientOriginalName(),
-            'mime_type'     => $file->getMimeType(),
-            'size'          => $file->getSize(),
-            'status'        => 'queued',
-        ]);
+            // 3) Persist file to storage (local disk)
+            $folder   = 'uploads/jnt/' . now()->format('Y-m-d');
+            $basename = Str::slug(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME));
+            $filename = $basename . '__' . now()->format('His') . '.' . $file->getClientOriginalExtension();
 
-        // 4) Dispatch background job
-        ProcessJntUpload::dispatch($log->id);
+            $path = $file->storeAs($folder, $filename, 'local');
 
-        // 5) Return JSON (front-end can poll /status)
-        return response()->json([
-            'id'     => $log->id,
-            'status' => $log->status,
-            'path'   => $log->path,
-        ], 201);
+            // 4) Create UploadLog (status: queued) + ✅ save batch_at
+            $log = UploadLog::create([
+                'type'          => 'jnt',
+                'disk'          => 'local',
+                'path'          => $path,
+                'original_name' => $file->getClientOriginalName(),
+                'mime_type'     => $file->getMimeType(),
+                'size'          => $file->getSize(),
+                'status'        => 'queued',
+                'batch_at'      => $batchAt ? $batchAt->format('Y-m-d H:i:s') : null,
+            ]);
+
+            // 5) Dispatch background job
+            ProcessJntUpload::dispatch($log->id);
+
+            // 6) Return JSON (front-end can poll /status)
+            return response()->json([
+                'id'     => $log->id,
+                'status' => $log->status,
+                'path'   => $log->path,
+            ], 201);
         } catch (\Throwable $e) {
-        \Log::error('Upload error: '.$e->getMessage(), ['trace' => $e->getTraceAsString()]);
-        return response()->json([
-            'error' => true,
-            'message' => $e->getMessage()
-        ], 500);
+            \Log::error('Upload error: '.$e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'error'   => true,
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
-    }
-
 
     public function index()
-{
-    return view('jnt_upload'); // resources/views/jnt_upload.blade.php
-}
-
+    {
+        return view('jnt_upload'); // resources/views/jnt_upload.blade.php
+    }
 
     public function status(UploadLog $uploadLog)
     {

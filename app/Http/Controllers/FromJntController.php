@@ -8,6 +8,112 @@ use Carbon\Carbon;
 
 class FromJntController extends Controller
 {
+    public function statusSummary(Request $request)
+    {
+        // Piliin date, default = today (Asia/Manila)
+        $date = $request->input('date');
+        if (empty($date)) {
+            $date = Carbon::now('Asia/Manila')->toDateString();
+        }
+
+        // ✅ Kunin lahat ng rows na may status_logs (wag nang i-filter sa updated_at para gumana backdated batch_at)
+        $rows = FromJnt::whereNotNull('status_logs')
+            ->get(['id', 'status_logs', 'signingtime']);
+
+        $batches = [];
+
+        foreach ($rows as $row) {
+            // dahil naka-cast na as array sa model, usually array na ito
+            $logs = $row->status_logs;
+            if (!is_array($logs)) {
+                $decoded = json_decode($logs, true);
+                $logs = is_array($decoded) ? $decoded : [];
+            }
+
+            foreach ($logs as $entry) {
+                $batchAt = isset($entry['batch_at']) ? $entry['batch_at'] : null;
+                if (!$batchAt) {
+                    continue;
+                }
+
+                // filter lang logs para sa piniling date (gamit batch_at)
+                $entryDate = substr($batchAt, 0, 10);
+                if ($entryDate !== $date) {
+                    continue;
+                }
+
+                $key = $batchAt; // per upload / batch (exact datetime)
+
+                if (!isset($batches[$key])) {
+                    $batches[$key] = [
+                        'batch_at'   => $batchAt,
+                        'delivering' => 0,
+                        'in_transit' => 0,
+                        'delivered'  => 0,
+                        'for_return' => 0,
+                    ];
+                }
+
+                $to   = strtolower((string) ($entry['to'] ?? ''));
+                $from = strtolower((string) ($entry['from'] ?? ''));
+
+                // 1) Delivering (new since last) – gamit status_logs "to"
+                if (strpos($to, 'delivering') !== false) {
+                    $batches[$key]['delivering']++;
+                }
+
+                // 2) In Transit (new since last) – base sa status (to)
+                if (strpos($to, 'transit') !== false) {
+                    $batches[$key]['in_transit']++;
+                }
+
+                // 3) Delivered – base sa SigningTime date + log na "to = delivered"
+                if (strpos($to, 'delivered') !== false && !empty($row->signingtime)) {
+                    try {
+                        $signDate = Carbon::parse($row->signingtime)->toDateString();
+                        if ($signDate === $date) {
+                            $batches[$key]['delivered']++;
+                        }
+                    } catch (\Throwable $e) {
+                        // ignore parse error
+                    }
+                }
+
+                // 4) For Return (new, must have been Delivering today)
+                if (
+                    (strpos($to, 'return') !== false || strpos($to, 'rts') !== false) &&
+                    strpos($from, 'deliver') !== false
+                ) {
+                    $batches[$key]['for_return']++;
+                }
+            }
+        }
+
+        // sort rows by upload datetime
+        ksort($batches);
+
+        // compute TOTAL row
+        $totals = [
+            'delivering' => 0,
+            'in_transit' => 0,
+            'delivered'  => 0,
+            'for_return' => 0,
+        ];
+
+        foreach ($batches as $batch) {
+            $totals['delivering'] += $batch['delivering'];
+            $totals['in_transit'] += $batch['in_transit'];
+            $totals['delivered']  += $batch['delivered'];
+            $totals['for_return'] += $batch['for_return'];
+        }
+
+        return view('jnt_status_summary', [
+            'date'    => $date,
+            'batches' => $batches,
+            'totals'  => $totals,
+        ]);
+    }
+
     // FROM_JNT: always insert
     public function store(Request $request)
     {
@@ -38,9 +144,21 @@ class FromJntController extends Controller
     }
 
     // JNT_UPDATE: update if exists, else insert
+    // ✅ may optional batch_at + status_logs logic
     public function updateOrInsert(Request $request)
     {
         $data = json_decode($request->jsonData, true);
+
+        // ✅ Optional batch_at galing UI / caller
+        $batchAtInput = $request->input('batch_at');
+        try {
+            $batchAt = $batchAtInput
+                ? Carbon::parse($batchAtInput, 'Asia/Manila')
+                : Carbon::now('Asia/Manila');
+        } catch (\Throwable $e) {
+            $batchAt = Carbon::now('Asia/Manila');
+        }
+
         $batches = array_chunk($data, 1000);
 
         foreach ($batches as $batch) {
@@ -57,17 +175,38 @@ class FromJntController extends Controller
                 $newStatus      = $row['Status'] ?? '';
                 $newSigningTime = $row['SigningTime'] ?? '';
 
-                if (isset($existingRecords[$waybill])) {
-                    $existing = $existingRecords[$waybill];
+                if (!$waybill) {
+                    continue;
+                }
 
-                    if (!in_array(strtolower($existing->status), ['delivered', 'returned'])) {
-                        FromJnt::where('waybill_number', $waybill)->update([
-                            'status'      => $newStatus,
-                            'signingtime' => $newSigningTime,
-                            'updated_at'  => now(),
-                        ]);
+                if (isset($existingRecords[$waybill])) {
+                    $existing   = $existingRecords[$waybill];
+                    $oldStatus  = $existing->status;
+
+                    // wag nang galawin pag Delivered/Returned na
+                    if (!in_array(strtolower((string)$oldStatus), ['delivered', 'returned'])) {
+                        $logsArray = $this->appendStatusLog(
+                            $existing->status_logs,
+                            $oldStatus,
+                            $newStatus,
+                            $batchAt
+                        );
+
+                        $existing->status      = $newStatus;
+                        $existing->signingtime = $newSigningTime;
+                        $existing->status_logs = json_encode($logsArray, JSON_UNESCAPED_UNICODE);
+                        $existing->updated_at  = now();
+                        $existing->save();
                     }
                 } else {
+                    // 🔰 Bagong waybill: treat as from = null → to = $newStatus
+                    $logsArray = $this->appendStatusLog(
+                        null,
+                        null,
+                        $newStatus,
+                        $batchAt
+                    );
+
                     $insertRows[] = [
                         'waybill_number'     => $waybill,
                         'sender'             => $row['Sender'] ?? '',
@@ -79,6 +218,7 @@ class FromJntController extends Controller
                         'receiver_cellphone' => $row['Receiver Cellphone'] ?? '',
                         'signingtime'        => $newSigningTime,
                         'remarks'            => $row['Remarks'] ?? '',
+                        'status_logs'        => json_encode($logsArray, JSON_UNESCAPED_UNICODE),
                         'created_at'         => now(),
                         'updated_at'         => now(),
                     ];
@@ -211,5 +351,89 @@ class FromJntController extends Controller
             'from'    => $from,
             'to'      => $to,
         ]);
+    }
+
+    /**
+     * Helper para sa status_logs (controller route / JNT_UPDATE):
+     *
+     * - Mag-aappend ng log if:
+     *   1) oldStatus = null at may newStatus
+     *   2) oldStatus != newStatus
+     *   3) pareho silang "In Transit" pero ibang araw na si batchAt
+     */
+    protected function appendStatusLog(
+        $currentLogs,
+        ?string $oldStatusRaw,
+        ?string $newStatusRaw,
+        Carbon $batchAt
+    ): array {
+        // i-normalize logs → array
+        if (is_array($currentLogs)) {
+            $logs = $currentLogs;
+        } elseif (is_string($currentLogs) && $currentLogs !== '') {
+            $decoded = json_decode($currentLogs, true);
+            $logs = is_array($decoded) ? $decoded : [];
+        } else {
+            $logs = [];
+        }
+
+        $oldStatus = $oldStatusRaw !== null && trim($oldStatusRaw) !== '' ? trim($oldStatusRaw) : null;
+        $newStatus = $newStatusRaw !== null && trim($newStatusRaw) !== '' ? trim($newStatusRaw) : null;
+
+        $shouldAdd = false;
+
+        // 1) First time ever (from null → something)
+        if ($oldStatus === null && $newStatus !== null) {
+            $shouldAdd = true;
+
+        // 2) Normal transition (nagbago status)
+        } elseif ($oldStatus !== null && $newStatus !== null && $oldStatus !== $newStatus) {
+            $shouldAdd = true;
+
+        // 3) Same status, special rule for "In Transit"
+        } elseif ($newStatus !== null && strcasecmp($newStatus, 'In Transit') === 0) {
+            $lastInTransitLog = null;
+
+            for ($i = count($logs) - 1; $i >= 0; $i--) {
+                $log = $logs[$i] ?? null;
+                if (!is_array($log)) {
+                    continue;
+                }
+
+                if (isset($log['to']) && strcasecmp((string)$log['to'], 'In Transit') === 0) {
+                    $lastInTransitLog = $log;
+                    break;
+                }
+            }
+
+            if ($lastInTransitLog) {
+                try {
+                    $lastDate    = Carbon::parse($lastInTransitLog['batch_at'])->toDateString();
+                    $currentDate = $batchAt->toDateString();
+
+                    // ✅ ibang araw na pero In Transit pa rin → log ulit
+                    if ($lastDate !== $currentDate) {
+                        $shouldAdd = true;
+                    }
+                } catch (\Throwable $e) {
+                    // pag di ma-parse, safe side: log
+                    $shouldAdd = true;
+                }
+            } else {
+                // wala pang In Transit log dati → log
+                $shouldAdd = true;
+            }
+        }
+
+        if ($shouldAdd && $newStatus !== null) {
+            $logs[] = [
+                'batch_at'      => $batchAt->format('Y-m-d H:i:s'),
+                'upload_log_id' => null,  // dito wala tayong upload_log_id (controller path)
+                'from'          => $oldStatus,
+                'to'            => $newStatus,
+            ];
+        }
+
+        return $logs;
     }
 }
