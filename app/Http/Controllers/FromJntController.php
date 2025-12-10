@@ -129,7 +129,7 @@ class FromJntController extends Controller
                 'receiver'           => $row['Receiver'] ?? '',
                 'receiver_cellphone' => $row['Receiver Cellphone'] ?? '',
                 'waybill_number'     => $row['Waybill Number'] ?? '',
-                'signingtime'        => $row['SigningTime'] ?? '',
+                'signingtime'        => $row['signingtime'] ?? '',
                 'remarks'            => $row['Remarks'] ?? '',
             ]);
         }
@@ -173,7 +173,7 @@ class FromJntController extends Controller
             foreach ($batch as $row) {
                 $waybill        = $row['Waybill Number'] ?? '';
                 $newStatus      = $row['Status'] ?? '';
-                $newSigningTime = $row['SigningTime'] ?? '';
+                $newsigningtime = $row['signingtime'] ?? '';
 
                 if (!$waybill) {
                     continue;
@@ -193,7 +193,7 @@ class FromJntController extends Controller
                         );
 
                         $existing->status      = $newStatus;
-                        $existing->signingtime = $newSigningTime;
+                        $existing->signingtime = $newsigningtime;
                         $existing->status_logs = json_encode($logsArray, JSON_UNESCAPED_UNICODE);
                         $existing->updated_at  = now();
                         $existing->save();
@@ -216,7 +216,7 @@ class FromJntController extends Controller
                         'submission_time'    => $row['Submission Time'] ?? '',
                         'receiver'           => $row['Receiver'] ?? '',
                         'receiver_cellphone' => $row['Receiver Cellphone'] ?? '',
-                        'signingtime'        => $newSigningTime,
+                        'signingtime'        => $newsigningtime,
                         'remarks'            => $row['Remarks'] ?? '',
                         'status_logs'        => json_encode($logsArray, JSON_UNESCAPED_UNICODE),
                         'created_at'         => now(),
