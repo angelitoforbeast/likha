@@ -9,110 +9,118 @@ use Carbon\Carbon;
 class FromJntController extends Controller
 {
     public function statusSummary(Request $request)
-    {
-        // Piliin date, default = today (Asia/Manila)
-        $date = $request->input('date');
-        if (empty($date)) {
-            $date = Carbon::now('Asia/Manila')->toDateString();
-        }
-
-        // ✅ Kunin lahat ng rows na may status_logs (wag nang i-filter sa updated_at para gumana backdated batch_at)
-        $rows = FromJnt::whereNotNull('status_logs')
-            ->get(['id', 'status_logs', 'signingtime']);
-
-        $batches = [];
-
-        foreach ($rows as $row) {
-            // dahil naka-cast na as array sa model, usually array na ito
-            $logs = $row->status_logs;
-            if (!is_array($logs)) {
-                $decoded = json_decode($logs, true);
-                $logs = is_array($decoded) ? $decoded : [];
-            }
-
-            foreach ($logs as $entry) {
-                $batchAt = isset($entry['batch_at']) ? $entry['batch_at'] : null;
-                if (!$batchAt) {
-                    continue;
-                }
-
-                // filter lang logs para sa piniling date (gamit batch_at)
-                $entryDate = substr($batchAt, 0, 10);
-                if ($entryDate !== $date) {
-                    continue;
-                }
-
-                $key = $batchAt; // per upload / batch (exact datetime)
-
-                if (!isset($batches[$key])) {
-                    $batches[$key] = [
-                        'batch_at'   => $batchAt,
-                        'delivering' => 0,
-                        'in_transit' => 0,
-                        'delivered'  => 0,
-                        'for_return' => 0,
-                    ];
-                }
-
-                $to   = strtolower((string) ($entry['to'] ?? ''));
-                $from = strtolower((string) ($entry['from'] ?? ''));
-
-                // 1) Delivering (new since last) – gamit status_logs "to"
-                if (strpos($to, 'delivering') !== false) {
-                    $batches[$key]['delivering']++;
-                }
-
-                // 2) In Transit (new since last) – base sa status (to)
-                if (strpos($to, 'transit') !== false) {
-                    $batches[$key]['in_transit']++;
-                }
-
-                // 3) Delivered – base sa SigningTime date + log na "to = delivered"
-                if (strpos($to, 'delivered') !== false && !empty($row->signingtime)) {
-                    try {
-                        $signDate = Carbon::parse($row->signingtime)->toDateString();
-                        if ($signDate === $date) {
-                            $batches[$key]['delivered']++;
-                        }
-                    } catch (\Throwable $e) {
-                        // ignore parse error
-                    }
-                }
-
-                // 4) For Return (new, must have been Delivering today)
-                if (
-                    (strpos($to, 'return') !== false || strpos($to, 'rts') !== false) &&
-                    strpos($from, 'deliver') !== false
-                ) {
-                    $batches[$key]['for_return']++;
-                }
-            }
-        }
-
-        // sort rows by upload datetime
-        ksort($batches);
-
-        // compute TOTAL row
-        $totals = [
-            'delivering' => 0,
-            'in_transit' => 0,
-            'delivered'  => 0,
-            'for_return' => 0,
-        ];
-
-        foreach ($batches as $batch) {
-            $totals['delivering'] += $batch['delivering'];
-            $totals['in_transit'] += $batch['in_transit'];
-            $totals['delivered']  += $batch['delivered'];
-            $totals['for_return'] += $batch['for_return'];
-        }
-
-        return view('jnt_status_summary', [
-            'date'    => $date,
-            'batches' => $batches,
-            'totals'  => $totals,
-        ]);
+{
+    // Piliin date, default = today (Asia/Manila)
+    $date = $request->input('date');
+    if (empty($date)) {
+        $date = Carbon::now('Asia/Manila')->toDateString();
     }
+
+    // ✅ Kukunin lahat ng may status_logs
+    //    kasama na ang current status para sa Delivered logic
+    $rows = FromJnt::whereNotNull('status_logs')
+        ->get(['id', 'status_logs', 'signingtime', 'status']);
+
+    $batches = [];
+
+    foreach ($rows as $row) {
+        // normalize logs → array
+        $logs = $row->status_logs;
+        if (!is_array($logs)) {
+            $decoded = json_decode($logs, true);
+            $logs = is_array($decoded) ? $decoded : [];
+        }
+
+        // lowercase ng current status (for Delivered logic)
+        $currentStatus = strtolower((string)($row->status ?? ''));
+
+        foreach ($logs as $entry) {
+            $batchAt = $entry['batch_at'] ?? null;
+            if (!$batchAt) {
+                continue;
+            }
+
+            // ✅ filter lang logs para sa piniling date (gamit batch_at)
+            $entryDate = substr($batchAt, 0, 10);
+            if ($entryDate !== $date) {
+                continue;
+            }
+
+            // 👉 Ibig sabihin: may “paki” yung waybill na ‘to sa date na pinili,
+            // kaya kasama siya sa computation for that batch.
+            $key = $batchAt; // per upload / batch (exact datetime)
+
+            if (!isset($batches[$key])) {
+                $batches[$key] = [
+                    'batch_at'   => $batchAt,
+                    'delivering' => 0,
+                    'in_transit' => 0,
+                    'delivered'  => 0,
+                    'for_return' => 0,
+                ];
+            }
+
+            $to   = strtolower((string)($entry['to'] ?? ''));
+            $from = strtolower((string)($entry['from'] ?? ''));
+
+            // 1) Delivering (new since last) – gamit status_logs "to"
+            if (str_contains($to, 'delivering')) {
+                $batches[$key]['delivering']++;
+            }
+
+            // 2) In Transit (new since last) – base sa status (to)
+            if (str_contains($to, 'transit')) {
+                $batches[$key]['in_transit']++;
+            }
+
+            // 3) Delivered – ✅ base lang sa current status + signingtime date
+            //    (pero counted lang kung may log sa date na 'to, dahil nandito tayo sa loop na yun)
+            if (!empty($row->signingtime) && str_contains($currentStatus, 'deliver')) {
+                try {
+                    $signDate = Carbon::parse($row->signingtime)->toDateString();
+                    if ($signDate === $date) {
+                        $batches[$key]['delivered']++;
+                    }
+                } catch (\Throwable $e) {
+                    // ignore parse error
+                }
+            }
+
+            // 4) For Return (new, must have been Delivering before)
+            if (
+                (str_contains($to, 'return') || str_contains($to, 'rts')) &&
+                str_contains($from, 'deliver')
+            ) {
+                $batches[$key]['for_return']++;
+            }
+        }
+    }
+
+    // sort rows by upload datetime
+    ksort($batches);
+
+    // compute TOTAL row
+    $totals = [
+        'delivering' => 0,
+        'in_transit' => 0,
+        'delivered'  => 0,
+        'for_return' => 0,
+    ];
+
+    foreach ($batches as $batch) {
+        $totals['delivering'] += $batch['delivering'];
+        $totals['in_transit'] += $batch['in_transit'];
+        $totals['delivered']  += $batch['delivered'];
+        $totals['for_return'] += $batch['for_return'];
+    }
+
+    return view('jnt_status_summary', [
+        'date'    => $date,
+        'batches' => $batches,
+        'totals'  => $totals,
+    ]);
+}
+
 
     // FROM_JNT: always insert
     public function store(Request $request)
