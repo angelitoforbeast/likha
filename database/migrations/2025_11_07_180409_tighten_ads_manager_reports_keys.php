@@ -8,47 +8,56 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
-        // Ensure no NULLs before making ad_id NOT NULL
-        DB::table('ads_manager_reports')->whereNull('ad_id')->update(['ad_id' => DB::raw("''")]);
-        // Optional cleanup
-        DB::statement("UPDATE ads_manager_reports SET ad_id = TRIM(ad_id)");
+        if (! Schema::hasTable('ads_manager_reports')) {
+            return;
+        }
 
-        // NOTE: changing existing columns needs doctrine/dbal
-        Schema::table('ads_manager_reports', function (Blueprint $table) {
-            // FB-style IDs fit in 50 chars; keep campaign/adset nullable, ad_id required
-            $table->string('campaign_id', 50)->nullable()->change();
-            $table->string('ad_set_id',   50)->nullable()->change();
-            $table->string('ad_id',       50)->default('')->change();
-        });
+        // OPTIONAL: kung kailangan mo talaga yung change() part, pwede mong ibalik dito sa taas.
+        // For now, focus tayo sa UNIQUE + INDEX na nag-e-error.
 
-        // Add composite unique + helper indexes
-        Schema::table('ads_manager_reports', function (Blueprint $table) {
-            // If you previously created a different unique, drop it first (uncomment and adjust name):
-            // $table->dropUnique('ads_report_day_campaign_adset_unique');
+        // 🔒 UNIQUE CONSTRAINT (safe kung existing na)
+        DB::statement("
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'ads_report_day_campaign_adset_ad_unique'
+                ) THEN
+                    ALTER TABLE ads_manager_reports
+                    ADD CONSTRAINT ads_report_day_campaign_adset_ad_unique
+                    UNIQUE (day, campaign_id, ad_set_id, ad_id);
+                END IF;
+            END
+            $$;
+        ");
 
-            $table->unique(
-                ['day', 'campaign_id', 'ad_set_id', 'ad_id'],
-                'ads_report_day_campaign_adset_ad_unique'
-            );
+        // 📌 INDEX ON ad_id
+        DB::statement("
+            CREATE INDEX IF NOT EXISTS ads_report_adid_idx
+            ON ads_manager_reports (ad_id);
+        ");
 
-            $table->index(['ad_id'], 'ads_report_adid_idx');
-            $table->index(['campaign_id','ad_set_id','day'], 'ads_report_lookup_idx');
-        });
+        // 📌 Helper lookup index
+        DB::statement("
+            CREATE INDEX IF NOT EXISTS ads_report_lookup_idx
+            ON ads_manager_reports (campaign_id, ad_set_id, day);
+        ");
     }
 
     public function down(): void
     {
-        Schema::table('ads_manager_reports', function (Blueprint $table) {
-            // Drop the indexes we added
-        
-            $table->dropUnique('ads_report_day_campaign_adset_ad_unique');
-            $table->dropIndex('ads_report_adid_idx');
-            $table->dropIndex('ads_report_lookup_idx');
+        if (! Schema::hasTable('ads_manager_reports')) {
+            return;
+        }
 
-            // Revert column definitions (back to 255 + nullable ad_id)
-            $table->string('campaign_id', 255)->nullable()->change();
-            $table->string('ad_set_id',   255)->nullable()->change();
-            $table->string('ad_id',       255)->nullable()->default(null)->change();
-        });
+        // Safe DROP (hindi mag-e-error kahit wala)
+        DB::statement("
+            ALTER TABLE ads_manager_reports
+            DROP CONSTRAINT IF EXISTS ads_report_day_campaign_adset_ad_unique;
+        ");
+
+        DB::statement("DROP INDEX IF EXISTS ads_report_adid_idx;");
+        DB::statement("DROP INDEX IF EXISTS ads_report_lookup_idx;");
     }
 };
