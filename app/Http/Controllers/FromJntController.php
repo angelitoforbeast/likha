@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 
 class FromJntController extends Controller
 {
-    public function statusSummary(Request $request)
+   public function statusSummary(Request $request)
 {
     // Selected date, default = today (Asia/Manila)
     $date = $request->input('date');
@@ -35,7 +35,8 @@ class FromJntController extends Controller
             $windowStart->toDateTimeString(),
             $windowEnd->toDateTimeString(),
         ])
-        ->select('id', 'status_logs') // logs lang kailangan
+        // ➕ kunin na rin ang rts_reason para magamit sa delivering filter
+        ->select('id', 'status_logs', 'rts_reason')
         ->orderBy('id')
         ->chunk(1000, function ($rows) use (&$batches, $date) {
 
@@ -69,6 +70,10 @@ class FromJntController extends Controller
                     continue;
                 }
 
+                // Check kung may RTS reason na itong waybill
+                $rtsRaw  = $row->rts_reason ?? null;
+                $hasRts  = !is_null($rtsRaw) && trim((string) $rtsRaw) !== '';
+
                 // Helper para siguradong may entry sa $batches kapag may data sa batch na 'yan
                 $ensureBatch = function ($batchAt) use (&$batches) {
                     if (!isset($batches[$batchAt])) {
@@ -95,11 +100,12 @@ class FromJntController extends Controller
                     $from = strtolower((string)($entry['from'] ?? ''));
 
                     // ✅ Delivering (new since last) – base sa "to"
-                    if (str_contains($to, 'delivering')) {
+                    //    ➕ dagdag condition: WALANG laman ang rts_reason
+                    if (str_contains($to, 'delivering') && !$hasRts) {
                         $batches[$batchAt]['delivering']++;
                     }
 
-                    // ✅ In Transit (new since last) – base sa "to"
+                    // ✅ In Transit (new since last) – base sa "to" (walang pake sa rts_reason)
                     if (str_contains($to, 'transit')) {
                         $batches[$batchAt]['in_transit']++;
                     }
@@ -193,6 +199,7 @@ class FromJntController extends Controller
     ]);
 }
 
+
     // FROM_JNT: always insert
     public function store(Request $request)
     {
@@ -216,10 +223,168 @@ class FromJntController extends Controller
         return redirect()->back()->with('success', 'Data saved to FROM_JNT.');
     }
 
-    public function index()
+    public function index(Request $request)
     {
-        $data = FromJnt::paginate(10);
-        return view('from_jnt_view', compact('data'));
+        $dateFrom = $request->input('date_from');
+        $dateTo   = $request->input('date_to');
+
+        // --- BASE QUERY: submission_time lang ang gamit dito ---
+        $baseDateQuery = FromJnt::query();
+
+        if ($dateFrom) {
+            $baseDateQuery->whereDate('submission_time', '>=', $dateFrom);
+        }
+
+        if ($dateTo) {
+            $baseDateQuery->whereDate('submission_time', '<=', $dateTo);
+        }
+
+        // --- COLUMN FILTERS (galing sa popup) ---
+        $currentFilters = $request->input('filters', []);
+        $filterableCols = [
+            'submission_time',
+            'waybill_number',
+            'receiver',
+            'receiver_cellphone',
+            'sender',
+            'item_name',
+            'cod',
+            'remarks',
+            'province',
+            'city',
+            'barangay',
+            'total_shipping_cost',
+            'rts_reason',
+            'status',
+            'signingtime',
+            'created_at',
+            'updated_at',
+        ];
+
+        $dataQuery = clone $baseDateQuery;
+
+        foreach ($currentFilters as $col => $values) {
+            if (!in_array($col, $filterableCols, true)) {
+                continue;
+            }
+
+            if (!is_array($values)) {
+                $values = [$values];
+            }
+
+            $values = array_values(array_filter($values, fn ($v) => $v !== '' && $v !== null));
+
+            if (empty($values)) {
+                continue;
+            }
+
+            // date/time columns
+            if (in_array($col, ['submission_time', 'signingtime', 'created_at', 'updated_at'], true)) {
+                $dataQuery->whereIn(\DB::raw("DATE($col)"), $values);
+            } else {
+                $dataQuery->whereIn($col, $values);
+            }
+        }
+
+        // --- SORTING (server-side) ---
+        $allowedSortCols = [
+            'submission_time',
+            'waybill_number',
+            'receiver',
+            'receiver_cellphone',
+            'sender',
+            'item_name',
+            'cod',
+            'status',
+            'signingtime',
+            'created_at',
+            'updated_at',
+        ];
+
+        $sortCol = $request->input('sort_col');
+        $sortDir = $request->input('sort_dir', 'desc');
+
+        if (!in_array($sortCol, $allowedSortCols, true)) {
+            $sortCol = 'submission_time';
+            $sortDir = 'desc';
+        }
+
+        $data = (clone $dataQuery)
+            ->orderBy($sortCol, $sortDir)
+            ->paginate(100)
+            ->withQueryString();
+
+        // --- FILTER OPTIONS (pang-popup) ---
+        // IMPORTANT: base lang siya sa date range, HINDI sa column filters
+        $filterBase = clone $baseDateQuery;
+        $filterOptions = [];
+
+        // submission_time (date lang)
+        $filterOptions['submission_time'] = (clone $filterBase)
+            ->selectRaw('DATE(submission_time) as value')
+            ->distinct()
+            ->orderBy('value')
+            ->pluck('value')
+            ->map(fn ($v) => $v ? Carbon::parse($v)->format('Y-m-d') : '')
+            ->values()
+            ->toArray();
+
+        // text / numeric columns
+        $distinctCols = [
+            'waybill_number',
+            'receiver',
+            'receiver_cellphone',
+            'sender',
+            'item_name',
+            'cod',
+            'remarks',
+            'province',
+            'city',
+            'barangay',
+            'total_shipping_cost',
+            'rts_reason',
+            'status',
+        ];
+
+        foreach ($distinctCols as $col) {
+            $filterOptions[$col] = (clone $filterBase)
+                ->select($col . ' as value')
+                ->distinct()
+                ->orderBy('value')
+                ->pluck('value')
+                ->map(function ($v) {
+                    if (is_array($v) || is_object($v)) {
+                        return json_encode($v, JSON_UNESCAPED_UNICODE);
+                    }
+                    return (string)($v ?? '');
+                })
+                ->values()
+                ->toArray();
+        }
+
+        // time columns
+        foreach (['signingtime', 'created_at', 'updated_at'] as $timeCol) {
+            $filterOptions[$timeCol] = (clone $filterBase)
+                ->select($timeCol . ' as value')
+                ->distinct()
+                ->orderBy('value')
+                ->pluck('value')
+                ->map(function ($v) {
+                    return $v ? Carbon::parse($v)->format('Y-m-d\TH:i:s') : '';
+                })
+                ->values()
+                ->toArray();
+        }
+
+        return view('jnt.dashboard', [
+            'data'          => $data,
+            'dateFrom'      => $dateFrom,
+            'dateTo'        => $dateTo,
+            'filterOptions' => $filterOptions,
+            'currentFilters'=> $currentFilters,
+            'sortCol'       => $sortCol,
+            'sortDir'       => $sortDir,
+        ]);
     }
 
     // JNT_UPDATE: update if exists, else insert
