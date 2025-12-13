@@ -48,6 +48,7 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\PaymentActivityController;
 use App\Http\Controllers\AdAccountController;
 use App\Http\Controllers\Pancake\RetrieveOrdersController;
+use App\Http\Controllers\BotcakePsidGsheetController;
 
 use App\Models\Role;
 
@@ -73,6 +74,24 @@ Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name(
 
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
+
+Route::prefix('botcake/psid')->group(function () {
+    Route::get('/settings', [BotcakePsidGsheetController::class, 'settings'])
+        ->name('botcake.psid.settings');
+    Route::post('/settings', [BotcakePsidGsheetController::class, 'storeSetting'])
+        ->name('botcake.psid.settings.store');
+    Route::post('/settings/{id}', [BotcakePsidGsheetController::class, 'update'])
+        ->name('botcake.psid.settings.update');
+    Route::delete('/settings/{id}', [BotcakePsidGsheetController::class, 'deleteSetting'])
+        ->name('botcake.psid.settings.delete');
+
+    Route::get('/import', [BotcakePsidGsheetController::class, 'showImport'])
+        ->name('botcake.psid.import');
+    Route::post('/import', [BotcakePsidGsheetController::class, 'import'])
+        ->name('botcake.psid.import.run');
+});
+
+
 
 Route::get('/pancake/retrieve-orders', [RetrieveOrdersController::class, 'index'])
     ->name('pancake.retrieve-orders.index');
