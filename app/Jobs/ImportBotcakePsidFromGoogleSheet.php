@@ -20,10 +20,10 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    /**
-     * Cutoff datetime galing sa form (datetime-local string o null)
-     * Example: "2025-12-08T18:55"
-     */
+    private const BATCH_SIZE = 1000;
+
+    public int $timeout = 1200; // 20 minutes
+
     protected ?string $cutoffDateTime;
 
     public function __construct(?string $cutoffDateTime = null)
@@ -39,11 +39,9 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
             return;
         }
 
-        // Google client
         $client = new GoogleClient();
         $client->setApplicationName('Laravel Botcake PSID Import');
-        // need write access
-        $client->setScopes([Sheets::SPREADSHEETS]);
+        $client->setScopes([Sheets::SPREADSHEETS]); // read/write
         $client->setAuthConfig(storage_path('app/credentials.json'));
         $client->setAccessType('offline');
 
@@ -51,11 +49,10 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
 
         foreach ($settings as $setting) {
             try {
-                $this->processSetting($service, $setting);
+                $this->processSettingInBatches($service, $setting);
             } catch (\Throwable $e) {
                 Log::error(
-                    'ImportBotcakePsid: error processing setting ID '
-                    . $setting->id . ' - ' . $e->getMessage(),
+                    'ImportBotcakePsid: error processing setting ID ' . $setting->id . ' - ' . $e->getMessage(),
                     ['trace' => $e->getTraceAsString()]
                 );
             }
@@ -70,7 +67,7 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
         return null;
     }
 
-    protected function processSetting(Sheets $service, BotcakePsidSetting $setting): void
+    protected function processSettingInBatches(Sheets $service, BotcakePsidSetting $setting): void
     {
         $spreadsheetId = $this->extractSpreadsheetId($setting->sheet_url);
         if (!$spreadsheetId) {
@@ -78,139 +75,163 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
             return;
         }
 
-        // Kunin sheet name from range, e.g. "PSID!A:J" -> "PSID"
         $range     = $setting->sheet_range;
         $sheetName = strpos($range, '!') !== false ? explode('!', $range)[0] : $range;
 
-        /**
-         * Cutoff Carbon (optional)
-         */
+        // ✅ Cutoff (optional)
         $cutoff = null;
         if (!empty($this->cutoffDateTime)) {
             try {
-                // galing sa datetime-local → 2025-12-08T18:55
                 $cutoff = Carbon::parse($this->cutoffDateTime, 'Asia/Manila');
             } catch (\Throwable $e) {
                 Log::warning('ImportBotcakePsid: invalid cutoff datetime, ignoring.', [
                     'cutoff' => $this->cutoffDateTime,
                     'error'  => $e->getMessage(),
                 ]);
+                $cutoff = null;
             }
         }
 
         /**
-         * 1) Basahin ang K1 = starting row
+         * ✅ START ROW SOURCE:
+         * 1) L1 = progress cursor (job writes here)
+         * 2) else K1 = reference (ex: first blank count)
+         * 3) else 2
          */
-        $startRow = 2; // default
+        $startRow = 2;
         try {
-            $k1Resp = $service->spreadsheets_values->get($spreadsheetId, $sheetName . '!K1');
-            $valK1  = $k1Resp->getValues()[0][0] ?? null;
-            if (!empty($valK1) && is_numeric($valK1) && (int) $valK1 >= 2) {
-                $startRow = (int) $valK1;
+            // L1 first
+            $l1Resp = $service->spreadsheets_values->get($spreadsheetId, $sheetName . '!L1');
+            $valL1  = $l1Resp->getValues()[0][0] ?? null;
+
+            if (!empty($valL1) && is_numeric($valL1) && (int)$valL1 >= 2) {
+                $startRow = (int)$valL1;
+            } else {
+                // fallback to K1 (reference)
+                $k1Resp = $service->spreadsheets_values->get($spreadsheetId, $sheetName . '!K1');
+                $valK1  = $k1Resp->getValues()[0][0] ?? null;
+                if (!empty($valK1) && is_numeric($valK1) && (int)$valK1 >= 2) {
+                    $startRow = (int)$valK1;
+                }
             }
         } catch (\Throwable $e) {
-            Log::warning(
-                'ImportBotcakePsid: cannot read K1, using default startRow=2. ' . $e->getMessage()
-            );
+            Log::warning('ImportBotcakePsid: cannot read L1/K1, using default startRow=2. ' . $e->getMessage());
         }
 
-        /**
-         * 2) Basahin A:J simula startRow
-         */
-        $dataRange = $sheetName . '!A' . $startRow . ':J';
-        $resp      = $service->spreadsheets_values->get($spreadsheetId, $dataRange);
-        $rows      = $resp->getValues() ?? [];
+        $totalUpdated = 0;
+        $totalNotExisting = 0;
+        $batchNo = 0;
 
-        if (empty($rows)) {
-            Log::info('ImportBotcakePsid: no rows to process (startRow=' . $startRow . ')');
-            return;
-        }
+        while (true) {
+            $batchNo++;
 
-        $rowNumber      = $startRow;
-        $updatedCount   = 0;
-        $notExistingCnt = 0;
+            $endRow = $startRow + self::BATCH_SIZE - 1;
 
-        // iipunin lahat ng updates para sa column J
-        $updates = [];
+            // Read A:J for this batch window only
+            $dataRange = $sheetName . '!A' . $startRow . ':J' . $endRow;
 
-        foreach ($rows as $row) {
-            // kung totally walang laman yung row (lahat blank/null) → skip lang
-            if (empty(array_filter($row, fn ($v) => $v !== null && $v !== ''))) {
-                $rowNumber++;
-                continue;
+            $resp = $service->spreadsheets_values->get($spreadsheetId, $dataRange);
+            $rows = $resp->getValues() ?? [];
+
+            if (empty($rows)) {
+                Log::info('ImportBotcakePsid: no rows returned, stopping.', [
+                    'setting_id' => $setting->id,
+                    'start_row'  => $startRow,
+                    'range'      => $dataRange,
+                    'cutoff'     => $this->cutoffDateTime,
+                ]);
+                break;
             }
 
-            /**
-             * FILTER BY DATE (Column D) – On or Before cutoff
-             * Col D index = 3
-             */
-            if ($cutoff) {
-                $dateStr  = trim($row[3] ?? ''); // DATE column
-                $cellDate = null;
+            $rowCount     = count($rows);
+            $batchEndRow  = $startRow + $rowCount - 1;
 
-                if ($dateStr !== '') {
-                    // support H:i:s d-m-Y, H:i d-m-Y, G:i d-m-Y
-                    $formats = ['H:i:s d-m-Y', 'H:i d-m-Y', 'G:i d-m-Y'];
-                    foreach ($formats as $fmt) {
-                        $dt = \DateTime::createFromFormat($fmt, $dateStr);
-                        if ($dt !== false) {
-                            $cellDate = Carbon::instance($dt);
-                            break;
-                        }
+            $statuses     = []; // values for J{startRow}:J{batchEndRow}
+
+            $updatedCount = 0;
+            $notExistingCnt = 0;
+
+            foreach ($rows as $row) {
+                // Ensure indexes up to J exist (A..J = 10 cols)
+                $row = array_pad($row, 10, '');
+
+                // Preserve existing J by default
+                $existingStatus = trim((string)($row[9] ?? '')); // J
+                $statusToWrite  = $existingStatus;
+
+                // Skip totally blank row (do not overwrite J)
+                $hasAny = false;
+                foreach ($row as $v) {
+                    if ($v !== null && $v !== '') { $hasAny = true; break; }
+                }
+                if (!$hasAny) {
+                    $statuses[] = [$statusToWrite];
+                    continue;
+                }
+
+                // Date filter (Column D index=3) ON/BEFORE cutoff
+                if ($cutoff) {
+                    $dateStr  = trim((string)($row[3] ?? '')); // D
+                    $cellDate = null;
+
+                    if ($dateStr !== '') {
+                        $cellDate = $this->parseCellDateTime($dateStr);
+                    }
+
+                    // If parsed and later than cutoff -> SKIP & keep J unchanged
+                    if ($cellDate && $cellDate->gt($cutoff)) {
+                        $statuses[] = [$statusToWrite];
+                        continue;
+                    }
+
+                    // If non-empty date but unparseable -> SKIP & keep J unchanged
+                    if ($dateStr !== '' && !$cellDate) {
+                        $statuses[] = [$statusToWrite];
+                        continue;
                     }
                 }
 
-                // kung may cutoff at may parsed date at mas LATE kaysa cutoff → SKIP (wag pa i-import)
-                if ($cellDate && $cellDate->gt($cutoff)) {
-                    $rowNumber++;
-                    continue;
-                }
-                // kung hindi ma-parse yung date, pwede rin natin i-skip
-                if ($dateStr !== '' && !$cellDate) {
-                    // di ma-parse, treat as skip para ma-review mo manually later
-                    $rowNumber++;
-                    continue;
-                }
-            }
+                // Data columns
+                $pageName = trim((string)($row[0] ?? '')); // A = PAGE NAME
+                $fullName = trim((string)($row[1] ?? '')); // B = FULL NAME
+                $psid     = trim((string)($row[2] ?? '')); // C = PSID
 
-            $pageName = trim($row[0] ?? ''); // Col A = PAGE NAME
-            $fullName = trim($row[1] ?? ''); // Col B = FULL NAME
-            $psid     = trim($row[2] ?? ''); // Col C = PSID
+                $statusText = 'not existing';
 
-            // default status
-            $statusText = 'not existing';
+                if ($pageName !== '' && $fullName !== '' && $psid !== '') {
+                    // ✅ Single query update (no exists()+update())
+                    $affected = MacroOutput::where('PAGE', $pageName)
+                        ->where('fb_name', $fullName)
+                        ->update(['botcake_psid' => $psid]);
 
-            if ($pageName !== '' && $fullName !== '' && $psid !== '') {
-                // hanapin sa macro_output by PAGE + fb_name
-                $query = MacroOutput::where('PAGE', $pageName)
-                    ->where('fb_name', $fullName);
-
-                if ($query->exists()) {
-                    $query->update(['botcake_psid' => $psid]);
-                    $statusText = 'imported';
-                    $updatedCount++;
+                    if ($affected > 0) {
+                        $statusText = 'imported';
+                        $updatedCount++;
+                    } else {
+                        $notExistingCnt++;
+                    }
                 } else {
                     $notExistingCnt++;
                 }
-            } else {
-                // kulang data
-                $notExistingCnt++;
+
+                $statuses[] = [$statusText];
             }
 
-            // queue write sa J{rowNumber}
-            $updates[] = new ValueRange([
-                'range'  => $sheetName . '!J' . $rowNumber,
-                'values' => [[$statusText]],
-            ]);
-
-            $rowNumber++;
-        }
-
-        /**
-         * 3) Isang batchUpdate lang para sa lahat ng J cells
-         */
-        if (!empty($updates)) {
+            // Batch write:
+            // - J range values for this batch
+            // - update L1 cursor to next start row (K1 is untouched reference)
             try {
+                $updates = [
+                    new ValueRange([
+                        'range'  => $sheetName . '!J' . $startRow . ':J' . $batchEndRow,
+                        'values' => $statuses,
+                    ]),
+                    new ValueRange([
+                        'range'  => $sheetName . '!L1',
+                        'values' => [[(string)($batchEndRow + 1)]],
+                    ]),
+                ];
+
                 $batchBody = new BatchUpdateValuesRequest([
                     'valueInputOption' => 'RAW',
                     'data'             => $updates,
@@ -218,18 +239,89 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
 
                 $service->spreadsheets_values->batchUpdate($spreadsheetId, $batchBody);
             } catch (\Throwable $e) {
-                Log::error(
-                    'ImportBotcakePsid: batchUpdate failed - ' . $e->getMessage(),
-                    ['trace' => $e->getTraceAsString()]
-                );
+                Log::error('ImportBotcakePsid: batchUpdate failed - ' . $e->getMessage(), [
+                    'setting_id' => $setting->id,
+                    'start_row'  => $startRow,
+                    'end_row'    => $batchEndRow,
+                    'trace'      => $e->getTraceAsString(),
+                ]);
+                break;
+            }
+
+            $totalUpdated     += $updatedCount;
+            $totalNotExisting += $notExistingCnt;
+
+            Log::info('ImportBotcakePsid: batch done', [
+                'setting_id'     => $setting->id,
+                'batch_no'       => $batchNo,
+                'start_row'      => $startRow,
+                'end_row'        => $batchEndRow,
+                'rows_in_batch'  => $rowCount,
+                'updated'        => $updatedCount,
+                'not_existing'   => $notExistingCnt,
+                'cutoff'         => $this->cutoffDateTime,
+            ]);
+
+            // Move to next batch (cursor already written to L1)
+            $startRow = $batchEndRow + 1;
+
+            // If returned fewer than batch size, likely end
+            if ($rowCount < self::BATCH_SIZE) {
+                break;
             }
         }
 
-        Log::info('ImportBotcakePsid: done for setting ID ' . $setting->id, [
-            'updated'      => $updatedCount,
-            'not_existing' => $notExistingCnt,
-            'start_row'    => $startRow,
-            'cutoff'       => $this->cutoffDateTime,
+        Log::info('ImportBotcakePsid: finished setting', [
+            'setting_id'         => $setting->id,
+            'total_updated'      => $totalUpdated,
+            'total_not_existing' => $totalNotExisting,
+            'cutoff'             => $this->cutoffDateTime,
         ]);
+    }
+
+    /**
+     * Parse Column D datetime string into Carbon (Asia/Manila).
+     * Supports:
+     *  - H:i:s d-m-Y, H:i d-m-Y, G:i d-m-Y, G:i:s d-m-Y
+     *  - Y-m-d, Y-m-d H:i, Y-m-d H:i:s, Y-m-d G:i, Y-m-d G:i:s
+     *  - numeric serial like 45683 or 45683.75 (Sheets date serial)
+     */
+    protected function parseCellDateTime(string $dateStr): ?Carbon
+    {
+        $dateStr = trim($dateStr);
+        if ($dateStr === '') return null;
+
+        // numeric date serial (Sheets/Excel)
+        if (is_numeric($dateStr)) {
+            $n = (float)$dateStr;
+            if ($n > 20000 && $n < 80000) {
+                $unixSeconds = (int)round(($n - 25569) * 86400);
+                return Carbon::createFromTimestamp($unixSeconds, 'Asia/Manila');
+            }
+        }
+
+        $formats = [
+            // d-m-Y with time
+            'H:i:s d-m-Y',
+            'H:i d-m-Y',
+            'G:i d-m-Y',
+            'G:i:s d-m-Y',
+
+            // Y-m-d variants
+            'Y-m-d',
+            'Y-m-d H:i',
+            'Y-m-d G:i',
+            'Y-m-d H:i:s',
+            'Y-m-d G:i:s',
+        ];
+
+        foreach ($formats as $fmt) {
+            $dt = \DateTime::createFromFormat($fmt, $dateStr);
+            if ($dt !== false) {
+                return Carbon::instance($dt)->setTimezone('Asia/Manila');
+            }
+        }
+
+        return null;
     }
 }

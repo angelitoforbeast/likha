@@ -49,6 +49,7 @@ use App\Http\Controllers\PaymentActivityController;
 use App\Http\Controllers\AdAccountController;
 use App\Http\Controllers\Pancake\RetrieveOrdersController;
 use App\Http\Controllers\BotcakePsidGsheetController;
+use App\Http\Controllers\JntStatusController;
 
 use App\Models\Role;
 
@@ -324,6 +325,7 @@ Route::post('/task/update-team-task', [TaskController::class, 'updateTeamTask'])
     ->name('jnt.status-summary');
     Route::get('/jnt/dashboard', [FromJntController::class, 'index'])
     ->name('jnt.dashboard');
+    Route::get('/jnt/status', [JntStatusController::class, 'index'])->name('jnt.status');
 
     Route::get('/jnt_upload', [JntUploadController::class, 'index'])->name('jnt.upload.index');
     Route::post('/jnt_upload', [JntUploadController::class, 'store'])->name('jnt.upload.store');
