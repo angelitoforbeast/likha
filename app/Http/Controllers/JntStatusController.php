@@ -45,8 +45,9 @@ class JntStatusController extends Controller
                 'j.sender',
                 'j.cod',
                 'j.status',
-                'j.signingtime', // ✅ added
+                'j.signingtime',
                 'j.item_name',
+                'j.rts_reason', // ✅ added (for logic + optional display/copy)
                 'mo.botcake_psid as botcake_psid',
                 'psm.page as page',
             ]);
@@ -80,10 +81,26 @@ class JntStatusController extends Controller
         // ===== Date filter =====
         $q->whereBetween('j.submission_time', [$startAt->toDateTimeString(), $endAt->toDateTimeString()]);
 
-        // ===== Status filter =====
+        // ===== Status filter + Delivering RTS exclusion =====
         if ($status !== 'All') {
             if ($status === 'In Transit + Delivering') {
-                $q->whereIn('j.status', ['In Transit', 'Delivering']);
+                $q->where(function ($w) {
+                    $w->where('j.status', 'In Transit')
+                      ->orWhere(function ($d) {
+                          $d->where('j.status', 'Delivering')
+                            ->where(function ($rr) {
+                                // exclude Delivering rows with rts_reason not empty
+                                $rr->whereNull('j.rts_reason')
+                                   ->orWhere(DB::raw("TRIM(COALESCE(j.rts_reason,''))"), '=', '');
+                            });
+                      });
+                });
+            } elseif ($status === 'Delivering') {
+                $q->where('j.status', 'Delivering')
+                  ->where(function ($rr) {
+                      $rr->whereNull('j.rts_reason')
+                         ->orWhere(DB::raw("TRIM(COALESCE(j.rts_reason,''))"), '=', '');
+                  });
             } else {
                 $q->where('j.status', '=', $status);
             }
@@ -116,7 +133,7 @@ class JntStatusController extends Controller
             $prevUrl     = $rows->previousPageUrl();
             $nextUrl     = $rows->nextPageUrl();
         } else {
-            // ✅ show ALL rows in UI when not All
+            // show ALL rows when not All
             $rows = $q->get();
 
             $totalCount  = $rows->count();
@@ -175,6 +192,7 @@ class JntStatusController extends Controller
             'signingtime',
             'item_name',
             'botcake_psid',
+            'rts_reason', // ✅ included in copy (optional but useful)
         ];
 
         $lines = [];
@@ -192,13 +210,12 @@ class JntStatusController extends Controller
                 $r->signingtime ?? '',
                 $r->item_name ?? '',
                 $r->botcake_psid ?? '',
+                $r->rts_reason ?? '',
             ];
 
-            // sanitize tabs/newlines to keep TSV valid
             $vals = array_map(function ($v) {
                 $v = (string)$v;
-                $v = str_replace(["\t", "\r", "\n"], [' ', ' ', ' '], $v);
-                return $v;
+                return str_replace(["\t", "\r", "\n"], [' ', ' ', ' '], $v);
             }, $vals);
 
             $lines[] = implode("\t", $vals);

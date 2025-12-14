@@ -28,8 +28,17 @@
 
     {{-- Inventory by Item (per day) --}}
     <section class="bg-white rounded-xl shadow p-4">
-      <div class="font-semibold mb-2">
-        Existing by Item (counts parsed from item_name {{ $mode === 'raw' ? 'RAW' : 'MODIFIED' }})
+      {{-- Header + Copy Button --}}
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <div class="font-semibold">
+          Existing by Item (counts parsed from item_name {{ $mode === 'raw' ? 'RAW' : 'MODIFIED' }})
+        </div>
+
+        <button
+          class="px-3 py-2 rounded border hover:bg-gray-50 text-sm"
+          @click="copyInventory()"
+          x-text="copied ? 'Copied ✅' : 'Copy (TSV)'"
+        ></button>
       </div>
 
       <div class="overflow-x-auto">
@@ -82,6 +91,10 @@
         raw: (modeDefault === 'raw'),
         dateLabel: 'Select dates',
 
+        // ✅ for copy function
+        dates: @json($dates),
+        copied: false,
+
         ymd(d){ const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); },
         setDateLabel(){
           if (!this.filters.start_date || !this.filters.end_date) { this.dateLabel='Select dates'; return; }
@@ -93,6 +106,54 @@
             ? `${M(s.getMonth())} ${s.getDate()}, ${s.getFullYear()}`
             : `${M(s.getMonth())} ${s.getDate()}, ${s.getFullYear()} – ${M(e.getMonth())} ${e.getDate()}, ${e.getFullYear()}`;
         },
+
+        // ✅ copy table as TSV (paste-ready for Google Sheets)
+        copyInventory(){
+          // safest: scope to THIS section's table
+          const table = document.querySelector('section.bg-white.rounded-xl.shadow.p-4 table');
+          if (!table) return;
+
+          const header = ['Item Name', ...this.dates, 'Total'];
+          const lines = [header.join('\t')];
+
+          table.querySelectorAll('tbody tr').forEach(tr => {
+            const tds = Array.from(tr.querySelectorAll('td'));
+            // skip "No scanned returns..." row
+            if (tds.length < 2) return;
+
+            const row = tds.map(td => td.textContent.trim().replace(/\s+/g,' '));
+            lines.push(row.join('\t'));
+          });
+
+          const text = lines.join('\n');
+
+          const done = () => {
+            this.copied = true;
+            setTimeout(() => this.copied = false, 1200);
+          };
+
+          // clipboard with fallback
+          if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(done).catch(() => {
+              const ta = document.createElement('textarea');
+              ta.value = text;
+              document.body.appendChild(ta);
+              ta.select();
+              document.execCommand('copy');
+              document.body.removeChild(ta);
+              done();
+            });
+          } else {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            done();
+          }
+        },
+
         apply(){
           const params = new URLSearchParams({
             start_date: this.filters.start_date || '',
