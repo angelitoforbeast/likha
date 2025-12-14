@@ -35,7 +35,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
     private const CHUNK_SIZE = 2000;
 
     public function __construct(
-        public string $storedPath,  // storage-relative path (disk=local)
+        public string $storedPath,  // storage-relative path (disk can be local OR s3)
         public ?int   $userId = null,
         ?int          $uploadLogId = null
     ) {
@@ -48,17 +48,29 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
         $log = $this->uploadLogId ? UploadLog::find($this->uploadLogId) : null;
 
+        $reader  = null;
+        $cleanup = [];
+
         try {
             if ($log) $log->update(['status' => 'processing', 'started_at' => now()]);
 
-            $fullPath = Storage::disk('local')->path($this->storedPath);
+            // ✅ disk detection (offline/local vs heroku/s3)
+            $diskName = $this->resolveDiskName($log);
+
+            // ✅ S3 -> download to temp path; Local -> use real path
+            $fullPath = $this->localizeToTempPath($diskName, $this->storedPath, $cleanup);
+
             if (!file_exists($fullPath)) {
-                Log::error("[AdsMgr Import] File not found: {$fullPath}");
+                Log::error("[AdsMgr Import] File not found after localize: {$fullPath}", [
+                    'disk' => $diskName,
+                    'path' => $this->storedPath,
+                ]);
                 if ($log) $log->update(['status' => 'failed', 'finished_at' => now()]);
                 return;
             }
 
-            $ext    = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
+            $ext = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
+
             $reader = $this->createReader($ext);
             if (!$reader) {
                 Log::error("[AdsMgr Import] No compatible reader for .$ext (Install OpenSpout v3/v4).");
@@ -84,7 +96,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                     $normRow = $this->normalizeRow($cells, $headerIndex, $mapNorm, $ext);
 
                     // REQUIRED KEYS: day + ad_id
-                    $day  = $normRow['day']   ?? null;
+                    $day  = $normRow['day'] ?? null;
                     $adId = isset($normRow['ad_id']) ? trim((string)$normRow['ad_id']) : null;
 
                     // derive day from reporting_starts (date-only) if missing
@@ -98,7 +110,6 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                         continue;
                     }
 
-                    // ensure ad_id normalized as string
                     $normRow['ad_id'] = $adId;
 
                     $buffer[] = $normRow;
@@ -117,8 +128,6 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->touchProgress($log);
             }
 
-            $reader->close();
-
             if ($log) {
                 $log->update([
                     'status'         => 'done',
@@ -129,19 +138,6 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                     'finished_at'    => now(),
                 ]);
             }
-
-            // NOTE: no noisy summary log here (as requested)
-            // If you ever want it back, uncomment the block below:
-            /*
-            Log::info("[AdsMgr Import] Done.", [
-                'processed' => $this->processed,
-                'inserted'  => $this->inserted,
-                'updated'   => $this->updated,
-                'skipped'   => $this->skipped,
-                'file'      => $this->storedPath,
-                'user'      => $this->userId,
-            ]);
-            */
         } catch (\Throwable $e) {
             if ($log) {
                 $log->update([
@@ -154,12 +150,76 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 ]);
             }
             throw $e;
+        } finally {
+            try {
+                if ($reader) {
+                    $reader->close();
+                }
+            } catch (\Throwable $e) {
+                // ignore close errors
+            }
+
+            foreach ($cleanup as $p) {
+                if (is_string($p) && file_exists($p)) {
+                    @unlink($p);
+                }
+            }
         }
+    }
+
+    private function resolveDiskName(?UploadLog $log): string
+    {
+        // if UploadLog has disk column, use it; else fall back to default
+        $d = $log && isset($log->disk) ? (string)($log->disk ?? '') : '';
+        $d = trim($d);
+        return $d !== '' ? $d : (string) config('filesystems.default', 'local');
+    }
+
+    /**
+     * ✅ If disk=local -> returns real local path
+     * ✅ If disk=s3 (or any remote) -> downloads to temp, returns temp path
+     */
+    private function localizeToTempPath(string $diskName, string $relPath, array &$cleanup): string
+    {
+        // Local disk has a real path
+        if ($diskName === 'local') {
+            return Storage::disk('local')->path($relPath);
+        }
+
+        if (!Storage::disk($diskName)->exists($relPath)) {
+            throw new \RuntimeException("File not found on disk={$diskName}: {$relPath}");
+        }
+
+        $tmpDir = storage_path('app/ads_tmp');
+        @mkdir($tmpDir, 0777, true);
+
+        $ext = pathinfo($relPath, PATHINFO_EXTENSION);
+        $tmp = $tmpDir . '/src_' . md5($relPath . microtime(true)) . ($ext ? '.' . $ext : '');
+
+        $in = Storage::disk($diskName)->readStream($relPath);
+        if (!$in) {
+            throw new \RuntimeException("Cannot read stream from disk={$diskName}: {$relPath}");
+        }
+
+        $out = fopen($tmp, 'wb');
+        if (!$out) {
+            if (is_resource($in)) fclose($in);
+            throw new \RuntimeException("Cannot write temp file: {$tmp}");
+        }
+
+        stream_copy_to_stream($in, $out);
+
+        if (is_resource($in)) fclose($in);
+        fclose($out);
+
+        $cleanup[] = $tmp;
+        return $tmp;
     }
 
     private function touchProgress(?UploadLog $log): void
     {
         if (!$log) return;
+
         $log->update([
             'processed_rows' => $this->processed,
             'inserted'       => $this->inserted,
@@ -174,7 +234,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         if (class_exists(ReaderEntityFactory::class)) {
             if ($ext === 'xlsx') {
                 return ReaderEntityFactory::createXLSXReader();
-            } elseif (in_array($ext, ['csv','txt'])) {
+            } elseif (in_array($ext, ['csv', 'txt'])) {
                 $r = ReaderEntityFactory::createCSVReader();
                 $r->setFieldDelimiter(',');
                 $r->setFieldEnclosure('"');
@@ -188,7 +248,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         // v4 fallback
         if ($ext === 'xlsx' && class_exists(XlsxReaderV4::class)) {
             return new XlsxReaderV4();
-        } elseif (in_array($ext, ['csv','txt']) && class_exists(CsvReaderV4::class)) {
+        } elseif (in_array($ext, ['csv', 'txt']) && class_exists(CsvReaderV4::class)) {
             $r = new CsvReaderV4();
             $r->setFieldDelimiter(',');
             $r->setFieldEnclosure('"');
@@ -237,7 +297,8 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             'quick reply 2'                   => 'quick_reply_2',
             'quick reply 3'                   => 'quick_reply_3',
         ];
-        $norm = fn($s)=> strtolower(trim(preg_replace('/\s+/', ' ', (string)$s)));
+
+        $norm = fn($s) => strtolower(trim(preg_replace('/\s+/', ' ', (string)$s)));
         $out = [];
         foreach ($map as $excelHeader => $dbCol) {
             $out[$norm($excelHeader)] = $dbCol;
@@ -248,7 +309,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
     /** Build normalized header index: headerLabel(norm) => columnIndex */
     private function buildHeaderIndex(array $headers): array
     {
-        $norm = fn($s)=> strtolower(trim(preg_replace('/\s+/', ' ', (string)$s)));
+        $norm = fn($s) => strtolower(trim(preg_replace('/\s+/', ' ', (string)$s)));
         $idx  = [];
         foreach ($headers as $i => $label) {
             $idx[$norm($label)] = $i;
@@ -395,7 +456,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
             // 2) Upsert facts into ads_manager_reports keyed by (day + ad_id)
             foreach ($rows as $r) {
-                $day  = $r['day']   ?? null;
+                $day  = $r['day'] ?? null;
                 $adId = isset($r['ad_id']) ? trim((string)$r['ad_id']) : null;
 
                 if (empty($day) || $adId === null || $adId === '') {
@@ -409,7 +470,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'page_name');
                 $this->putIfExists($updateData, $r, 'campaign_name');
                 $this->putIfExists($updateData, $r, 'ad_set_name');
-                $this->putIfExists($updateData, $r, 'ad_id'); // keep normalized
+                $this->putIfExists($updateData, $r, 'ad_id');
                 $this->putIfExists($updateData, $r, 'campaign_delivery');
                 $this->putIfExists($updateData, $r, 'amount_spent_php');
                 $this->putIfExists($updateData, $r, 'purchases');
@@ -450,10 +511,8 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
                     DB::table('ads_manager_reports')->insert($insertData);
                     $this->inserted++;
-                    Log::info('AMR INSERT', ['day' => $day, 'ad_id' => $adId]); // per-row insert
                 } else {
                     $this->updated++;
-                    Log::info('AMR UPDATE', ['day' => $day, 'ad_id' => $adId]); // per-row update
                 }
             }
 
@@ -511,7 +570,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
         if (empty($payloads)) return;
 
-        // Existing rows (to avoid unnecessary writes)
+        // Existing rows
         $existingByAdId = [];
         if (!empty($adIds)) {
             $existingByAdId = DB::table('ad_campaign_creatives')
@@ -533,7 +592,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         $toInsert = [];
         $toUpdateAdId = []; // [id => ad_id] fill only if current is NULL
 
-        foreach ($payloads as $key => $p) {
+        foreach ($payloads as $p) {
             $adId       = $p['ad_id'] ?? null;
             $campaignId = $p['campaign_id'] ?? null;
 
@@ -552,12 +611,10 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             $toInsert[] = $p;
         }
 
-        // IMPORTANT: avoid exceptions on unique conflicts in Postgres
         if (!empty($toInsert)) {
             DB::table('ad_campaign_creatives')->insertOrIgnore($toInsert);
         }
 
-        // Fill ad_id on existing campaign rows, but only if nobody else already owns that ad_id
         foreach ($toUpdateAdId as $id => $adId) {
             $taken = DB::table('ad_campaign_creatives')->where('ad_id', $adId)->exists();
             if ($taken) continue;
