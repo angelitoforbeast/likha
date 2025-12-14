@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Jobs\ProcessPaymentActivityUpload;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 
@@ -29,20 +28,28 @@ class PaymentActivityController extends Controller
         $userName = auth()->user()?->name ?? 'system';
         $batchId  = (string) Str::uuid();
 
+        // ✅ Use default filesystem disk (local offline, s3 on heroku)
+        $disk = (string) config('filesystems.default', 'local');
+
         foreach ($request->file('files') as $file) {
             $original = $file->getClientOriginalName();
             $stamp    = now()->format('Ymd_His');
-            $stored   = $file->storeAs(
+
+            // safer filename
+            $safeOriginal = preg_replace('/[^A-Za-z0-9_\.\-]+/', '_', $original);
+
+            $stored = $file->storeAs(
                 'uploads/payment_activity',
-                "{$stamp}__{$original}",
-                'local'
+                "{$stamp}__{$safeOriginal}",
+                $disk
             );
 
             ProcessPaymentActivityUpload::dispatch(
                 storedPath:   $stored,
                 originalName: $original,
                 batchId:      $batchId,
-                uploadedBy:   $userName
+                uploadedBy:   $userName,
+                diskName:     $disk
             )->onQueue('default');
         }
 
@@ -66,11 +73,9 @@ class PaymentActivityController extends Controller
         $adAccountSel     = trim((string) $request->input('ad_account', ''));
         $paymentMethodSel = trim((string) $request->input('payment_method', ''));
 
-        // Base query
-        $base = DB::table('payment_activity_ads_manager as pa')
+        $base = \DB::table('payment_activity_ads_manager as pa')
             ->leftJoin('ad_accounts as aa', 'aa.ad_account_id', '=', 'pa.ad_account');
 
-        // Filters (date always applied)
         $applyFilters = function ($q) use ($start, $end, $adAccountSel, $paymentMethodSel) {
             $q->whereBetween('pa.date', [$start, $end]);
             if ($adAccountSel !== '') {
@@ -81,7 +86,6 @@ class PaymentActivityController extends Controller
             }
         };
 
-        // Rows
         $rowsQuery = (clone $base)->select([
             'pa.id',
             'pa.date',
@@ -91,28 +95,21 @@ class PaymentActivityController extends Controller
             'pa.payment_method',
             'pa.source_filename',
             'pa.import_batch_id',
-            DB::raw('COALESCE(aa.name, pa.ad_account) as ad_account_name'),
+            \DB::raw('COALESCE(aa.name, pa.ad_account) as ad_account_name'),
         ]);
         $applyFilters($rowsQuery);
 
         $rows = $rowsQuery
-            ->orderBy('pa.date', 'desc') // recent first
+            ->orderBy('pa.date', 'desc')
             ->paginate($perPage)
             ->withQueryString();
 
-        // Total for same filters
         $totalQuery = (clone $base)->selectRaw('COALESCE(SUM(pa.amount),0) as total_amount');
         $applyFilters($totalQuery);
         $totalAmount = (float) ($totalQuery->value('total_amount') ?? 0);
 
-        /**
-         * Dropdown options (Postgres-safe):
-         *  - SELECT DISTINCT <alias>, <order by alias>
-         *  - Order by aliases that appear in the select list.
-         */
-
-        // Ad Account dropdown (limited by date + chosen payment method)
-        $adOptionsQuery = DB::table('payment_activity_ads_manager as pa')
+        // Ad Account dropdown
+        $adOptionsQuery = \DB::table('payment_activity_ads_manager as pa')
             ->leftJoin('ad_accounts as aa', 'aa.ad_account_id', '=', 'pa.ad_account')
             ->whereBetween('pa.date', [$start, $end]);
 
@@ -127,8 +124,8 @@ class PaymentActivityController extends Controller
             ->orderBy('name', 'asc')
             ->get();
 
-        // Payment Method dropdown (limited by date + chosen ad account)
-        $pmOptionsQuery = DB::table('payment_activity_ads_manager as pa')
+        // Payment Method dropdown
+        $pmOptionsQuery = \DB::table('payment_activity_ads_manager as pa')
             ->whereBetween('pa.date', [$start, $end]);
 
         if ($adAccountSel !== '') {
@@ -147,18 +144,17 @@ class PaymentActivityController extends Controller
             'start'                => $start,
             'end'                  => $end,
             'totalAmount'          => $totalAmount,
-            // dropdowns + current selections (names match your Blade)
-            'adAccountOptions'     => $adAccountOptions,     // [{id, name}]
-            'paymentMethodOptions' => $paymentMethodOptions, // [{method}]
+            'adAccountOptions'     => $adAccountOptions,
+            'paymentMethodOptions' => $paymentMethodOptions,
             'adAccountSel'         => $adAccountSel,
             'paymentMethodSel'     => $paymentMethodSel,
         ]);
     }
 
-    /** Optional: Delete All (add route if you want to use it). */
+    /** Optional: Delete All */
     public function truncate()
     {
-        DB::table('payment_activity_ads_manager')->truncate();
+        \DB::table('payment_activity_ads_manager')->truncate();
 
         return redirect()
             ->route('ads_payment.records.index')
