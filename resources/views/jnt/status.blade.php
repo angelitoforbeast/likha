@@ -149,6 +149,7 @@
         <th class="nowrap">PAGE</th>
         <th class="nowrap">COD</th>
         <th class="nowrap">Status</th>
+        <th class="nowrap">RTS Reason</th> {{-- ✅ NEW (after Status) --}}
         <th class="nowrap">Signing Time</th>
         <th>Item</th>
         <th class="nowrap">Botcake PSID</th>
@@ -164,13 +165,14 @@
           <td class="nowrap">{{ $r->page }}</td>
           <td class="nowrap">{{ $r->cod }}</td>
           <td class="nowrap"><span class="badge-status">{{ $r->status }}</span></td>
+          <td class="nowrap">{{ $r->rts_reason }}</td> {{-- ✅ NEW (after Status) --}}
           <td class="nowrap">{{ $r->signingtime }}</td>
           <td>{{ $r->item_name }}</td>
           <td class="nowrap">{{ $r->botcake_psid }}</td>
         </tr>
       @empty
         <tr>
-          <td colspan="10" style="text-align:center; padding: 30px; color:#666;">
+          <td colspan="11" style="text-align:center; padding: 30px; color:#666;">
             No results for this filter/date range.
           </td>
         </tr>
