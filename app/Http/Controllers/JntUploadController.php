@@ -46,12 +46,14 @@ class JntUploadController extends Controller
             $basename = Str::slug(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME));
             $filename = $basename . '__' . now()->format('His') . '.' . $file->getClientOriginalExtension();
 
-            $path = $file->storeAs($folder, $filename, 'local');
+            $disk = config('filesystems.default'); // uses FILESYSTEM_DISK
+$path = $file->storeAs($folder, $filename, $disk);
+
 
             // 4) Create UploadLog (status: queued) + ✅ save batch_at
             $log = UploadLog::create([
                 'type'          => 'jnt',
-                'disk'          => 'local',
+                'disk'          => $disk,
                 'path'          => $path,
                 'original_name' => $file->getClientOriginalName(),
                 'mime_type'     => $file->getMimeType(),

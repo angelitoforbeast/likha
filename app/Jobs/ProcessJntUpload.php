@@ -36,10 +36,6 @@ class ProcessJntUpload implements ShouldQueue
     private $updated   = 0;
     private $skipped   = 0;
 
-    /**
-     * iisang batch timestamp per upload (string: 'Y-m-d H:i:s')
-     * galing sa UploadLog->batch_at kung meron, else now()
-     */
     protected $batchAt = null;
 
     public function __construct($uploadLogId)
@@ -72,14 +68,22 @@ class ProcessJntUpload implements ShouldQueue
             'started_at' => Carbon::now('Asia/Manila'),
         ]);
 
+        $disk = $this->resolveDisk($log);
+
         $path = $log->path;
         $ext  = strtolower(pathinfo($path, PATHINFO_EXTENSION));
 
         try {
             if ($ext === 'zip') {
-                $this->processZip($log);
-            } elseif (in_array($ext, ['csv', 'xlsx'])) {
-                $this->processSingleFile(Storage::path($path), $ext, $log);
+                $this->processZip($log, $disk);
+            } elseif (in_array($ext, ['csv', 'xlsx'], true)) {
+                // ✅ If S3, download to temp; if local, use real path
+                [$localPath, $cleanup] = $this->localizeFile($disk, $path, $ext);
+                try {
+                    $this->processSingleFile($localPath, $ext, $log);
+                } finally {
+                    if ($cleanup && file_exists($cleanup)) @unlink($cleanup);
+                }
             } elseif ($ext === 'xls') {
                 throw new \RuntimeException('XLS (legacy) is not supported for streaming. Please re-save as XLSX or CSV.');
             } else {
@@ -88,7 +92,16 @@ class ProcessJntUpload implements ShouldQueue
 
             if (!empty($this->errors)) {
                 $errorsPath = 'uploads/jnt/errors/upload_' . $log->id . '_' . date('Ymd_His') . '.csv';
-                $this->writeErrorsCsv(Storage::path($errorsPath), $this->errors);
+
+                // ✅ write errors CSV to local temp, then upload to same disk
+                $tmpErr = $this->makeTmpPath('errors_' . $log->id, 'csv');
+                $this->writeErrorsCsv($tmpErr, $this->errors);
+
+                $stream = fopen($tmpErr, 'rb');
+                Storage::disk($disk)->put($errorsPath, $stream);
+                if (is_resource($stream)) fclose($stream);
+                @unlink($tmpErr);
+
                 $log->errors_path = $errorsPath;
                 $log->error_rows  = count($this->errors);
             }
@@ -109,33 +122,38 @@ class ProcessJntUpload implements ShouldQueue
         }
     }
 
-    private function processZip(UploadLog $log)
+    private function processZip(UploadLog $log, string $disk)
     {
-        $zipPath = Storage::path($log->path);
+        // ✅ Ensure ZIP is local path (download if S3)
+        [$zipPath, $zipCleanup] = $this->localizeFile($disk, $log->path, 'zip');
+
         $zip = new ZipArchive();
         if ($zip->open($zipPath) !== true) {
+            if ($zipCleanup && file_exists($zipCleanup)) @unlink($zipCleanup);
             throw new \RuntimeException('Cannot open ZIP: ' . $zipPath);
         }
 
-        $tmpRoot = Storage::path('uploads/jnt/tmp/' . $log->id . '_' . uniqid());
-        if (!is_dir($tmpRoot)) {
-            @mkdir($tmpRoot, 0777, true);
-        }
+        // ✅ local temp root (wag Storage::path kasi baka s3 default)
+        $tmpRoot = $this->makeTmpDir('jnt_zip_' . $log->id . '_' . uniqid());
 
         try {
             for ($i = 0; $i < $zip->numFiles; $i++) {
                 $stat = $zip->statIndex($i);
-                $name = $stat['name'];
+                $name = $stat['name'] ?? '';
                 $ext  = strtolower(pathinfo($name, PATHINFO_EXTENSION));
-                if (!in_array($ext, ['csv', 'xlsx'])) {
+
+                if (!in_array($ext, ['csv', 'xlsx'], true)) {
                     continue;
                 }
+
                 $target = $tmpRoot . DIRECTORY_SEPARATOR . basename($name);
+
                 $stream = $zip->getStream($name);
                 if (!$stream) {
                     $this->errors[] = ['File' => $name, 'Error' => 'Cannot read stream from ZIP.'];
                     continue;
                 }
+
                 $out = fopen($target, 'wb');
                 stream_copy_to_stream($stream, $out);
                 fclose($stream);
@@ -146,6 +164,7 @@ class ProcessJntUpload implements ShouldQueue
         } finally {
             $zip->close();
             $this->rrmdir($tmpRoot);
+            if ($zipCleanup && file_exists($zipCleanup)) @unlink($zipCleanup);
         }
     }
 
@@ -236,10 +255,7 @@ class ProcessJntUpload implements ShouldQueue
 
         $aliases = [
             'waybill_number' => ['waybill', 'waybill number', 'awb', 'tracking no', 'tracking number'],
-
-            // IMPORTANT: tanggapin ang "Order Status"
             'status'         => ['status', 'order status', 'order_status', 'orderstatus'],
-
             'item_name'      => ['item name', 'item', 'product', 'product name'],
             'sender'         => ['sender', 'shipper', 'from'],
             'receiver'       => ['receiver', 'consignee', 'to'],
@@ -249,7 +265,6 @@ class ProcessJntUpload implements ShouldQueue
             'signingtime'    => ['signingtime', 'signing time', 'delivered time'],
             'remarks'        => ['remarks', 'remark', 'note', 'notes'],
 
-            // NEW columns
             'province'           => ['province', 'prov'],
             'city'               => ['city', 'municipality', 'city/municipality'],
             'barangay'           => ['barangay', 'brgy', 'barangay name'],
@@ -261,15 +276,10 @@ class ProcessJntUpload implements ShouldQueue
 
         foreach ($headers as $idx => $label) {
             $h = $norm($label);
-            $tokens = preg_split('/[^a-z0-9]+/u', $h, -1, PREG_SPLIT_NO_EMPTY);
-            if (!$tokens) {
-                $tokens = [];
-            }
+            $tokens = preg_split('/[^a-z0-9]+/u', $h, -1, PREG_SPLIT_NO_EMPTY) ?: [];
 
             foreach ($aliases as $canon => $cands) {
-                if (isset($map[$canon])) {
-                    continue;
-                }
+                if (isset($map[$canon])) continue;
 
                 foreach ($cands as $cand) {
                     $c = $norm($cand);
@@ -278,27 +288,15 @@ class ProcessJntUpload implements ShouldQueue
                     if ($h === $c) {
                         $matched = true;
                     } elseif (mb_strpos($c, ' ') !== false) {
-                        // phrase match
-                        if (preg_match('/\b' . preg_quote($c, '/') . '\b/u', $h)) {
-                            $matched = true;
-                        }
+                        if (preg_match('/\b' . preg_quote($c, '/') . '\b/u', $h)) $matched = true;
                     } else {
-                        // token match
-                        if (in_array($c, $tokens, true)) {
-                            $matched = true;
-                        }
+                        if (in_array($c, $tokens, true)) $matched = true;
                     }
 
                     if ($matched) {
-                        if ($canon === 'receiver' && $c === 'to' && $h !== 'to') {
-                            $matched = false;
-                        }
-                        if ($canon === 'cod' && in_array('code', $tokens, true)) {
-                            $matched = false;
-                        }
-                        if ($canon === 'receiver_cellphone' && in_array('sender', $tokens, true)) {
-                            $matched = false;
-                        }
+                        if ($canon === 'receiver' && $c === 'to' && $h !== 'to') $matched = false;
+                        if ($canon === 'cod' && in_array('code', $tokens, true)) $matched = false;
+                        if ($canon === 'receiver_cellphone' && in_array('sender', $tokens, true)) $matched = false;
                     }
 
                     if ($matched) {
@@ -314,7 +312,6 @@ class ProcessJntUpload implements ShouldQueue
 
     private function hasRequiredHeaders(array $map)
     {
-        // required lang talaga: waybill_number, status, signingtime
         return isset($map['waybill_number'], $map['status'], $map['signingtime']);
     }
 
@@ -322,7 +319,7 @@ class ProcessJntUpload implements ShouldQueue
     {
         $get = function ($key) use ($cells, $map) {
             if (!isset($map[$key])) return '';
-            $val = isset($cells[$map[$key]]) ? $cells[$map[$key]] : '';
+            $val = $cells[$map[$key]] ?? '';
             $val = is_scalar($val) ? (string) $val : '';
             return trim(preg_replace('/\s+/u', ' ', $val));
         };
@@ -336,8 +333,7 @@ class ProcessJntUpload implements ShouldQueue
                     $base = Carbon::create(1899, 12, 30, 0, 0, 0, 'Asia/Manila');
                     $dt = $base->copy()->addDays((int) $v);
                     return $dt->format('Y-m-d H:i:s');
-                } catch (\Throwable $e) {
-                }
+                } catch (\Throwable $e) {}
             }
 
             $formats = [
@@ -348,8 +344,7 @@ class ProcessJntUpload implements ShouldQueue
             foreach ($formats as $fmt) {
                 try {
                     return Carbon::createFromFormat($fmt, $v, 'Asia/Manila')->format('Y-m-d H:i:s');
-                } catch (\Throwable $e) {
-                }
+                } catch (\Throwable $e) {}
             }
 
             try {
@@ -380,7 +375,6 @@ class ProcessJntUpload implements ShouldQueue
             'signingtime'        => $parseDate($get('signingtime')),
             'remarks'            => $get('remarks'),
 
-            // NEW FIELDS FROM EXCEL
             'province'           => $get('province'),
             'city'               => $get('city'),
             'barangay'           => $get('barangay'),
@@ -394,12 +388,12 @@ class ProcessJntUpload implements ShouldQueue
 
     /**
      * INSERT + UPDATE (status + signingtime + rts_reason) + status_logs
+     * ✅ CASE SQL logic untouched
      */
     private function persistChunk(array $rows)
     {
         if (empty($rows)) return;
 
-        // De-dup inside chunk by waybill (last one wins)
         $byWb = [];
         foreach ($rows as $r) {
             $byWb[$r['waybill_number']] = $r;
@@ -416,9 +410,8 @@ class ProcessJntUpload implements ShouldQueue
 
         $toInsert   = [];
         $toUpdate   = [];
-        $statusInfo = []; // wb => ['from'=>..., 'to'=>...]
+        $statusInfo = [];
 
-        // ✅ Carbon version ng batch_at para sa logs
         $batchAtStr    = $this->batchAt ?: Carbon::now('Asia/Manila')->format('Y-m-d H:i:s');
         $batchAtCarbon = Carbon::parse($batchAtStr, 'Asia/Manila');
 
@@ -426,11 +419,9 @@ class ProcessJntUpload implements ShouldQueue
             $wb = $r['waybill_number'];
 
             if (isset($existing[$wb])) {
-                // === UPDATE PATH ===
                 $oldStatusRaw = (string) ($existing[$wb]->status ?: '');
                 $cur          = strtolower($oldStatusRaw);
 
-                // kapag delivered/returned na dati, skip (no update, no logs)
                 if (in_array($cur, ['delivered', 'returned'], true)) {
                     $this->skipped++;
                     continue;
@@ -444,21 +435,16 @@ class ProcessJntUpload implements ShouldQueue
                     'updated_at'  => Carbon::now('Asia/Manila')->format('Y-m-d H:i:s'),
                 ];
 
-                // ✅ update rts_reason only if may value sa file (avoid wiping existing)
                 $newRts = trim((string)($r['rts_reason'] ?? ''));
                 if ($newRts !== '') {
                     $toUpdate[$wb]['rts_reason'] = $newRts;
                 }
 
-                // ✅ i-store lahat ng updates para mag-decide later kung maglo-log
                 $statusInfo[$wb] = [
                     'from' => $oldStatusRaw,
                     'to'   => $newStatusRaw,
                 ];
             } else {
-                // === INSERT PATH ===
-
-                // Initial status_logs: from = null, to = current status
                 $initialLogs = [
                     [
                         'batch_at'      => $batchAtCarbon->format('Y-m-d H:i:s'),
@@ -500,7 +486,6 @@ class ProcessJntUpload implements ShouldQueue
             if (!empty($toUpdate)) {
                 $keys = array_keys($toUpdate);
 
-                // bulk SQL update for status + signingtime + (optional) rts_reason
                 foreach (array_chunk($keys, self::UPDATE_SUBCHUNK) as $chunkKeys) {
                     $statusCase = "CASE waybill_number\n";
                     $timeCase   = "CASE waybill_number\n";
@@ -517,7 +502,6 @@ class ProcessJntUpload implements ShouldQueue
                         $statusCase .= "WHEN {$wbSql} THEN '{$s}'\n";
                         $timeCase   .= "WHEN {$wbSql} THEN {$tSql}\n";
 
-                        // ✅ RTS reason CASE (only if present in toUpdate)
                         if (isset($toUpdate[$wb]['rts_reason'])) {
                             $hasRts = true;
                             $rr = str_replace("'", "''", (string) $toUpdate[$wb]['rts_reason']);
@@ -554,7 +538,6 @@ class ProcessJntUpload implements ShouldQueue
                     $this->updated += count($chunkKeys);
                 }
 
-                // ✅ Append status_logs per row, gamit special In Transit logic
                 if (!empty($statusInfo)) {
                     $wbKeys = array_keys($statusInfo);
 
@@ -564,9 +547,7 @@ class ProcessJntUpload implements ShouldQueue
 
                     foreach ($rowsForLogs as $row) {
                         $wb = $row->waybill_number;
-                        if (!isset($statusInfo[$wb])) {
-                            continue;
-                        }
+                        if (!isset($statusInfo[$wb])) continue;
 
                         $oldStatus = $statusInfo[$wb]['from'];
                         $newStatus = $statusInfo[$wb]['to'];
@@ -584,9 +565,8 @@ class ProcessJntUpload implements ShouldQueue
                             $batchAtCarbon
                         );
 
-                        // kung walang nadagdag, huwag na mag-save
                         if ($newLogs !== $logs) {
-                            $row->status_logs = $newLogs; // ok if casted; else you can json_encode
+                            $row->status_logs = $newLogs;
                             $row->save();
                         }
                     }
@@ -595,21 +575,8 @@ class ProcessJntUpload implements ShouldQueue
         });
     }
 
-    /**
-     * Helper para sa status_logs sa Job:
-     *
-     * - Mag-aappend ng log if:
-     *   1) oldStatus = null at may newStatus
-     *   2) oldStatus != newStatus
-     *   3) pareho silang "In Transit" pero ibang araw na si batchAt
-     */
-    protected function appendStatusLogForJob(
-        $currentLogs,
-        ?string $oldStatusRaw,
-        ?string $newStatusRaw,
-        Carbon $batchAt
-    ): array {
-        // i-normalize logs → array
+    protected function appendStatusLogForJob($currentLogs, ?string $oldStatusRaw, ?string $newStatusRaw, Carbon $batchAt): array
+    {
         if (is_array($currentLogs)) {
             $logs = $currentLogs;
         } elseif (is_string($currentLogs) && $currentLogs !== '') {
@@ -624,23 +591,16 @@ class ProcessJntUpload implements ShouldQueue
 
         $shouldAdd = false;
 
-        // 1) First time ever (from null → something)
         if ($oldStatus === null && $newStatus !== null) {
             $shouldAdd = true;
-
-        // 2) Normal transition (nagbago status)
         } elseif ($oldStatus !== null && $newStatus !== null && $oldStatus !== $newStatus) {
             $shouldAdd = true;
-
-        // 3) Same status, special rule for "In Transit"
         } elseif ($newStatus !== null && strcasecmp($newStatus, 'In Transit') === 0) {
             $lastInTransitLog = null;
 
             for ($i = count($logs) - 1; $i >= 0; $i--) {
                 $log = $logs[$i] ?? null;
-                if (!is_array($log)) {
-                    continue;
-                }
+                if (!is_array($log)) continue;
 
                 if (isset($log['to']) && strcasecmp((string)$log['to'], 'In Transit') === 0) {
                     $lastInTransitLog = $log;
@@ -652,17 +612,11 @@ class ProcessJntUpload implements ShouldQueue
                 try {
                     $lastDate    = Carbon::parse($lastInTransitLog['batch_at'])->toDateString();
                     $currentDate = $batchAt->toDateString();
-
-                    // ✅ ibang araw na pero In Transit pa rin → log ulit
-                    if ($lastDate !== $currentDate) {
-                        $shouldAdd = true;
-                    }
+                    if ($lastDate !== $currentDate) $shouldAdd = true;
                 } catch (\Throwable $e) {
-                    // pag di ma-parse, safe side: log
                     $shouldAdd = true;
                 }
             } else {
-                // wala pang In Transit log dati → log
                 $shouldAdd = true;
             }
         }
@@ -712,5 +666,68 @@ class ProcessJntUpload implements ShouldQueue
             else @unlink($p);
         }
         @rmdir($dir);
+    }
+
+    // ==========================
+    // ✅ NEW helper methods (storage-safe for local+s3)
+    // ==========================
+
+    private function resolveDisk(UploadLog $log): string
+    {
+        $disk = (string)($log->disk ?? '');
+        $disk = trim($disk);
+        if ($disk !== '') return $disk;
+
+        $def = (string)config('filesystems.default');
+        return $def !== '' ? $def : 'local';
+    }
+
+    /**
+     * Returns: [localPath, cleanupPath|null]
+     * - local disk => cleanup null
+     * - s3 disk => downloads to temp, cleanup = temp file
+     */
+    private function localizeFile(string $disk, string $path, string $ext): array
+    {
+        // local/public => real local file path
+        if (in_array($disk, ['local', 'public'], true)) {
+            return [Storage::disk($disk)->path($path), null];
+        }
+
+        // s3/others => download to temp file
+        $tmp = $this->makeTmpPath('jnt_' . uniqid(), $ext);
+
+        $in = Storage::disk($disk)->readStream($path);
+        if (!$in) {
+            throw new \RuntimeException("Cannot read file from disk={$disk}: {$path}");
+        }
+
+        $out = fopen($tmp, 'wb');
+        stream_copy_to_stream($in, $out);
+
+        if (is_resource($out)) fclose($out);
+        if (is_resource($in)) fclose($in);
+
+        return [$tmp, $tmp];
+    }
+
+    private function makeTmpDir(string $name): string
+    {
+        $root = storage_path('app/tmp');
+        if (!is_dir($root)) @mkdir($root, 0777, true);
+
+        $dir = $root . DIRECTORY_SEPARATOR . $name;
+        if (!is_dir($dir)) @mkdir($dir, 0777, true);
+
+        return $dir;
+    }
+
+    private function makeTmpPath(string $name, string $ext): string
+    {
+        $root = storage_path('app/tmp');
+        if (!is_dir($root)) @mkdir($root, 0777, true);
+
+        $ext = ltrim((string)$ext, '.');
+        return $root . DIRECTORY_SEPARATOR . $name . '.' . $ext;
     }
 }
