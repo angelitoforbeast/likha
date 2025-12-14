@@ -47,7 +47,7 @@ class JntStatusController extends Controller
                 'j.status',
                 'j.signingtime',
                 'j.item_name',
-                'j.rts_reason', // ✅ added
+                'j.rts_reason',
                 'mo.botcake_psid as botcake_psid',
                 'psm.page as page',
             ]);
@@ -61,7 +61,6 @@ class JntStatusController extends Controller
 
         // ✅ page_sender_mappings: safe 1 row per sender
         if ($driver === 'mysql') {
-            // MySQL version (kept, in case you run locally on mysql)
             $q->leftJoin(DB::raw("
                 (SELECT sender_name, MAX(page) AS page
                  FROM page_sender_mappings
@@ -70,10 +69,10 @@ class JntStatusController extends Controller
                 $join->on(DB::raw('BINARY psm.sender_name'), '=', DB::raw('BINARY j.sender'));
             });
         } else {
-            // ✅ Postgres fix: your column is "SENDER_NAME" (case-sensitive)
+            // ✅ Postgres: columns are case-sensitive if created as "SENDER_NAME", "PAGE"
             $q->leftJoin(DB::raw('
                 (
-                  SELECT "SENDER_NAME" AS sender_name, MAX(page) AS page
+                  SELECT "SENDER_NAME" AS sender_name, MAX("PAGE") AS page
                   FROM page_sender_mappings
                   GROUP BY "SENDER_NAME"
                 ) psm
@@ -93,7 +92,6 @@ class JntStatusController extends Controller
                       ->orWhere(function ($d) {
                           $d->where('j.status', 'Delivering')
                             ->where(function ($rr) {
-                                // exclude Delivering rows with rts_reason not empty
                                 $rr->whereNull('j.rts_reason')
                                    ->orWhere(DB::raw("TRIM(COALESCE(j.rts_reason,''))"), '=', '');
                             });
@@ -137,7 +135,6 @@ class JntStatusController extends Controller
             $prevUrl     = $rows->previousPageUrl();
             $nextUrl     = $rows->nextPageUrl();
         } else {
-            // show ALL rows when not All
             $rows = $q->get();
 
             $totalCount  = $rows->count();
@@ -218,7 +215,7 @@ class JntStatusController extends Controller
             ];
 
             $vals = array_map(function ($v) {
-                $v = (string)$v;
+                $v = (string) $v;
                 return str_replace(["\t", "\r", "\n"], [' ', ' ', ' '], $v);
             }, $vals);
 
