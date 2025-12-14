@@ -361,7 +361,6 @@ class ProcessJntUpload implements ShouldQueue
 
         $parseMoney = function ($v) {
             $v = (string) $v;
-            // alisin currency symbol, comma, etc; iwan digits, dot, minus
             $clean = preg_replace('/[^\d\.\-]/', '', $v);
             $clean = trim($clean);
             return $clean === '' ? null : $clean;
@@ -394,7 +393,7 @@ class ProcessJntUpload implements ShouldQueue
     }
 
     /**
-     * INSERT + UPDATE (status only) + status_logs
+     * INSERT + UPDATE (status + signingtime + rts_reason) + status_logs
      */
     private function persistChunk(array $rows)
     {
@@ -410,7 +409,7 @@ class ProcessJntUpload implements ShouldQueue
         $waybills = array_column($rows, 'waybill_number');
 
         $existing = FromJnt::query()
-            ->select(['waybill_number','status','status_logs'])
+            ->select(['waybill_number','status','status_logs','rts_reason'])
             ->whereIn('waybill_number', $waybills)
             ->get()
             ->keyBy('waybill_number');
@@ -444,6 +443,12 @@ class ProcessJntUpload implements ShouldQueue
                     'signingtime' => $r['signingtime'],
                     'updated_at'  => Carbon::now('Asia/Manila')->format('Y-m-d H:i:s'),
                 ];
+
+                // ✅ update rts_reason only if may value sa file (avoid wiping existing)
+                $newRts = trim((string)($r['rts_reason'] ?? ''));
+                if ($newRts !== '') {
+                    $toUpdate[$wb]['rts_reason'] = $newRts;
+                }
 
                 // ✅ i-store lahat ng updates para mag-decide later kung maglo-log
                 $statusInfo[$wb] = [
@@ -495,35 +500,56 @@ class ProcessJntUpload implements ShouldQueue
             if (!empty($toUpdate)) {
                 $keys = array_keys($toUpdate);
 
-                // bulk SQL update for status + signingtime
+                // bulk SQL update for status + signingtime + (optional) rts_reason
                 foreach (array_chunk($keys, self::UPDATE_SUBCHUNK) as $chunkKeys) {
                     $statusCase = "CASE waybill_number\n";
                     $timeCase   = "CASE waybill_number\n";
+
+                    $rtsCase = "CASE waybill_number\n";
+                    $hasRts  = false;
 
                     foreach ($chunkKeys as $wb) {
                         $s = str_replace("'", "''", (string) $toUpdate[$wb]['status']);
                         $t = $toUpdate[$wb]['signingtime'];
                         $tSql  = $t ? ("'" . str_replace("'", "''", $t) . "'") : "NULL";
                         $wbSql = "'" . str_replace("'", "''", $wb) . "'";
+
                         $statusCase .= "WHEN {$wbSql} THEN '{$s}'\n";
                         $timeCase   .= "WHEN {$wbSql} THEN {$tSql}\n";
+
+                        // ✅ RTS reason CASE (only if present in toUpdate)
+                        if (isset($toUpdate[$wb]['rts_reason'])) {
+                            $hasRts = true;
+                            $rr = str_replace("'", "''", (string) $toUpdate[$wb]['rts_reason']);
+                            $rtsCase .= "WHEN {$wbSql} THEN '{$rr}'\n";
+                        }
                     }
 
                     $statusCase .= "ELSE status END";
                     $timeCase   .= "ELSE signingtime END";
+                    $rtsCase    .= "ELSE rts_reason END";
 
                     $inList = implode(',', array_map(function ($wb) {
                         return "'" . str_replace("'", "''", $wb) . "'";
                     }, $chunkKeys));
 
+                    $setParts = [
+                        "status = {$statusCase}",
+                        "signingtime = {$timeCase}",
+                        "updated_at = NOW()",
+                    ];
+
+                    if ($hasRts) {
+                        $setParts[] = "rts_reason = {$rtsCase}";
+                    }
+
                     $sql = "
                         UPDATE " . DB::getTablePrefix() . (new FromJnt)->getTable() . "
-                        SET status = {$statusCase},
-                            signingtime = {$timeCase},
-                            updated_at = NOW()
+                        SET " . implode(",\n                            ", $setParts) . "
                         WHERE waybill_number IN ({$inList})
                           AND LOWER(status) NOT IN ('delivered','returned')
                     ";
+
                     DB::statement($sql);
                     $this->updated += count($chunkKeys);
                 }
@@ -560,7 +586,7 @@ class ProcessJntUpload implements ShouldQueue
 
                         // kung walang nadagdag, huwag na mag-save
                         if ($newLogs !== $logs) {
-                            $row->status_logs = $newLogs;
+                            $row->status_logs = $newLogs; // ok if casted; else you can json_encode
                             $row->save();
                         }
                     }
