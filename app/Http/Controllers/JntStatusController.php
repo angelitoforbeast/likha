@@ -47,7 +47,7 @@ class JntStatusController extends Controller
                 'j.status',
                 'j.signingtime',
                 'j.item_name',
-                'j.rts_reason', // ✅ added (for logic + optional display/copy)
+                'j.rts_reason', // ✅ added
                 'mo.botcake_psid as botcake_psid',
                 'psm.page as page',
             ]);
@@ -59,8 +59,9 @@ class JntStatusController extends Controller
              GROUP BY waybill) mo
         "), 'mo.waybill', '=', 'j.waybill_number');
 
-        // ✅ page_sender_mappings: safe 1 row per sender_name
+        // ✅ page_sender_mappings: safe 1 row per sender
         if ($driver === 'mysql') {
+            // MySQL version (kept, in case you run locally on mysql)
             $q->leftJoin(DB::raw("
                 (SELECT sender_name, MAX(page) AS page
                  FROM page_sender_mappings
@@ -69,11 +70,14 @@ class JntStatusController extends Controller
                 $join->on(DB::raw('BINARY psm.sender_name'), '=', DB::raw('BINARY j.sender'));
             });
         } else {
-            $q->leftJoin(DB::raw("
-                (SELECT sender_name, MAX(page) AS page
-                 FROM page_sender_mappings
-                 GROUP BY sender_name) psm
-            "), function ($join) {
+            // ✅ Postgres fix: your column is "SENDER_NAME" (case-sensitive)
+            $q->leftJoin(DB::raw('
+                (
+                  SELECT "SENDER_NAME" AS sender_name, MAX(page) AS page
+                  FROM page_sender_mappings
+                  GROUP BY "SENDER_NAME"
+                ) psm
+            '), function ($join) {
                 $join->on('psm.sender_name', '=', 'j.sender');
             });
         }
@@ -192,7 +196,7 @@ class JntStatusController extends Controller
             'signingtime',
             'item_name',
             'botcake_psid',
-            'rts_reason', // ✅ included in copy (optional but useful)
+            'rts_reason',
         ];
 
         $lines = [];
