@@ -40,7 +40,10 @@ class BotcakePsidGsheetController extends Controller
 
         try {
             // Job na may optional cutoff (On or Before yung Column D)
-            dispatch(new ImportBotcakePsidFromGoogleSheet($cutoff));
+            dispatch((new ImportBotcakePsidFromGoogleSheet($cutoff))
+    ->onConnection('database')
+    ->onQueue('default')); // optional
+
 
             return back()->with(
                 'success',
