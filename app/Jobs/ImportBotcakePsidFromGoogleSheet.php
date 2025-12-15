@@ -67,6 +67,19 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
         return null;
     }
 
+    /** normalize spaces + trim */
+    protected function norm(?string $s): string
+    {
+        $s = (string)($s ?? '');
+        $s = preg_replace('/\s+/', ' ', trim($s));
+        return $s;
+    }
+
+    protected function lower(string $s): string
+    {
+        return mb_strtolower($s, 'UTF-8');
+    }
+
     protected function processSettingInBatches(Sheets $service, BotcakePsidSetting $setting): void
     {
         $spreadsheetId = $this->extractSpreadsheetId($setting->sheet_url);
@@ -192,17 +205,25 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
                 }
 
                 // Data columns
-                $pageName = trim((string)($row[0] ?? '')); // A = PAGE NAME
-                $fullName = trim((string)($row[1] ?? '')); // B = FULL NAME
-                $psid     = trim((string)($row[2] ?? '')); // C = PSID
+                $pageName = $this->norm((string)($row[0] ?? '')); // A = PAGE NAME
+                $fullName = $this->norm((string)($row[1] ?? '')); // B = FULL NAME
+                $psid     = $this->norm((string)($row[2] ?? '')); // C = PSID
 
                 $statusText = 'not existing';
 
                 if ($pageName !== '' && $fullName !== '' && $psid !== '') {
-                    // ✅ Single query update (no exists()+update())
+
+                    // ✅ 1) FAST PATH (uses your existing index PAGE + fb_name)
                     $affected = MacroOutput::where('PAGE', $pageName)
                         ->where('fb_name', $fullName)
                         ->update(['botcake_psid' => $psid]);
+
+                    // ✅ 2) FALLBACK only if not existing (case-insensitive)
+                    if ($affected === 0) {
+                        $affected = MacroOutput::whereRaw('LOWER("PAGE") = ?', [$this->lower($pageName)])
+                            ->whereRaw('LOWER("fb_name") = ?', [$this->lower($fullName)])
+                            ->update(['botcake_psid' => $psid]);
+                    }
 
                     if ($affected > 0) {
                         $statusText = 'imported';

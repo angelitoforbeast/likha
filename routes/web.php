@@ -56,8 +56,8 @@ use App\Models\Role;
 // ✅ Public routes
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
 Route::post('/login', [LoginController::class, 'login']);
-Route::get('/register', [RegisterController::class, 'showRegistrationForm'])->name('register');
-Route::post('/register', [RegisterController::class, 'register']);
+Route::get('/registerlogin', [RegisterController::class, 'showRegistrationForm'])->name('register');
+Route::post('/registerlogin', [RegisterController::class, 'register']);
 
 // ✅ Logout
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->middleware('auth');
@@ -143,6 +143,7 @@ Route::get('/jnt/return/reconciliation', [JntReturnReconciliationController::cla
 Route::get('/jnt/return/inventory', [JntReturnInventoryController::class, 'index'])
         ->name('jnt.return.inventory');
 
+    
    Route::get('/jnt/sender-name', [PageSenderMappingController::class, 'index']);
 Route::post('/jnt/sender-name', [PageSenderMappingController::class, 'save']);
 Route::post('/jnt/sender-name/delete/{id}', [\App\Http\Controllers\PageSenderMappingController::class, 'delete']);
