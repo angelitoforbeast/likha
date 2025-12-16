@@ -50,6 +50,7 @@ use App\Http\Controllers\AdAccountController;
 use App\Http\Controllers\Pancake\RetrieveOrdersController;
 use App\Http\Controllers\BotcakePsidGsheetController;
 use App\Http\Controllers\JntStatusController;
+use App\Http\Controllers\Encoder\Tools\AiController;
 
 use App\Models\Role;
 
@@ -76,21 +77,42 @@ Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name(
 // ✅ Protected routes
 Route::middleware(['auth'])->group(function () {
 
+Route::get('/encoder/tools/ai', [AiController::class, 'index'])->name('encoder.tools.ai');
+Route::post('/encoder/tools/ai/run', [AiController::class, 'run'])->name('encoder.tools.ai.run');
+Route::get('/encoder/tools/ai/health', [AiController::class, 'health'])->middleware('auth');
+
+
 Route::prefix('botcake/psid')->group(function () {
+
+    // ===== SETTINGS =====
     Route::get('/settings', [BotcakePsidGsheetController::class, 'settings'])
         ->name('botcake.psid.settings');
+
     Route::post('/settings', [BotcakePsidGsheetController::class, 'storeSetting'])
         ->name('botcake.psid.settings.store');
+
     Route::post('/settings/{id}', [BotcakePsidGsheetController::class, 'update'])
         ->name('botcake.psid.settings.update');
+
+    // NOTE: If you want to keep DELETE method, keep this.
+    // Make sure your form uses method spoofing: @method('DELETE')
     Route::delete('/settings/{id}', [BotcakePsidGsheetController::class, 'deleteSetting'])
         ->name('botcake.psid.settings.delete');
 
+
+    // ===== IMPORT UI =====
     Route::get('/import', [BotcakePsidGsheetController::class, 'showImport'])
         ->name('botcake.psid.import');
+
+    // POST /botcake/psid/import (start job)
     Route::post('/import', [BotcakePsidGsheetController::class, 'import'])
         ->name('botcake.psid.import.run');
+
+    // ✅ ADD THIS: Live status polling endpoint (UI will call this)
+    Route::get('/import/status/{runId}', [BotcakePsidGsheetController::class, 'status'])
+        ->name('botcake.psid.import.status');
 });
+
 
 
 

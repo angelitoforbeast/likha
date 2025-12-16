@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\OfflineAd;
 
-class OfflineAdController extends Controller
+class FacebookAdsController extends Controller
 {
     public function store(Request $request)
     {

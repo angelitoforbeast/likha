@@ -385,7 +385,7 @@ class FromJntController extends Controller
             'sortCol'       => $sortCol,
             'sortDir'       => $sortDir,
         ]);
-    }
+}
 
     // JNT_UPDATE: update if exists, else insert
     // ✅ may optional batch_at + status_logs logic
