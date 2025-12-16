@@ -23,8 +23,8 @@ class ImportBotcakePsidFromGoogleSheet implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    private const BATCH_SIZE      = 100;
-    private const SCAN_CHUNK_SIZE = 100;
+    private const BATCH_SIZE      = 500;
+    private const SCAN_CHUNK_SIZE = 500;
 
     public int $timeout = 1200; // 20 minutes
 
