@@ -396,7 +396,12 @@
       const text = textNode.nodeValue;
       if (!text || !text.trim()) return false;
 
-      const re = new RegExp(`(^|[^\\p{L}\\p{N}])(${escapeRegExp(token)})(?=[^\\p{L}\\p{N}]|$)`, 'giu');
+      // allow highlight if token is followed by a boundary OR a digit (e.g., "poblacion4a")
+const re = new RegExp(
+  `(^|[^\\p{L}\\p{N}])(${escapeRegExp(token)})(?=[^\\p{L}\\p{N}]|\\p{N}|$)`,
+  'giu'
+);
+
       const matches = [...text.matchAll(re)];
       if (!matches.length) return false;
 
