@@ -509,12 +509,22 @@ $downloadAll = $isMarketingOIC && $dlParam;
         // ✅ paginateOnlyWhenAll = true kung walang PAGE filter (ibig sabihin "All")
         $paginateOnlyWhenAll = !$request->filled('PAGE');
 
-        if ($paginateOnlyWhenAll) {
-            $records = $recordQuery->select($selectCols)->orderByDesc('id')->paginate(100);
-        } else {
-            // No pagination kapag may PAGE na pinili
-            $records = $recordQuery->select($selectCols)->orderByDesc('id')->get();
-        }
+       if ($paginateOnlyWhenAll) {
+    $records = $recordQuery->select($selectCols)->orderByDesc('id')->paginate(100);
+
+    // ✅ add tokens per row (for highlight)
+    $records->through(function ($r) {
+        return $this->attachHighlightTokens($r);
+    });
+} else {
+    $records = $recordQuery->select($selectCols)->orderByDesc('id')->get();
+
+    // ✅ add tokens per row (for highlight)
+    $records = $records->map(function ($r) {
+        return $this->attachHighlightTokens($r);
+    });
+}
+
 
         // PAGE options
         $pages = MacroOutput::where('TIMESTAMP', 'LIKE', "%$formattedDate")
@@ -522,6 +532,65 @@ $downloadAll = $isMarketingOIC && $dlParam;
 
         return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'));
     }
+private function tokenizeLocation($raw, string $type): array
+{
+    $s = trim((string) $raw);
+    if ($s === '') return [];
+
+    // normalize spaces + remove common wrappers
+    $s = str_replace("\xC2\xA0", ' ', $s); // nbsp
+    $s = preg_replace('/[(){}\[\]"“”\'`]+/u', ' ', $s);
+
+    // remove prefixes depende sa type
+    if ($type === 'brgy') {
+        $s = preg_replace('/^(brgy\.?|barangay|bgy|brg)\s*/iu', '', $s);
+    } elseif ($type === 'city') {
+        $s = preg_replace('/^(city\s+of|city|municipality\s+of|municipality|mun\.?)\s*/iu', '', $s);
+    } elseif ($type === 'prov') {
+        $s = preg_replace('/^(province\s+of|prov\.?)\s*/iu', '', $s);
+    }
+
+    $stop = [
+        'brgy'=>true,'barangay'=>true,'bgy'=>true,'brg'=>true,
+        'city'=>true,'of'=>true,'province'=>true,'prov'=>true,
+        'municipality'=>true,'mun'=>true,
+    ];
+
+    // split into tokens (unicode letters/digits incl ñ)
+    $parts = preg_split('/[^\p{L}\p{N}]+/u', $s, -1, PREG_SPLIT_NO_EMPTY);
+
+    $uniq = [];
+    foreach ($parts as $p) {
+        $t = trim($p);
+        if ($t === '') continue;
+
+        $low = mb_strtolower($t, 'UTF-8');
+        if (isset($stop[$low])) continue;
+
+        // skip single-digit tokens
+        if (mb_strlen($t, 'UTF-8') === 1 && preg_match('/^\d$/u', $t)) continue;
+
+        // keep token if length>=2 OR is number length>=2
+        if (mb_strlen($t, 'UTF-8') < 2 && !preg_match('/^\d{2,}$/u', $t)) continue;
+
+        $uniq[$low] = $t; // keep original token but unique by lowercase
+    }
+
+    $tokens = array_values($uniq);
+
+    // longest-first para mas okay yung highlight
+    usort($tokens, fn($a,$b) => mb_strlen($b,'UTF-8') <=> mb_strlen($a,'UTF-8'));
+
+    return $tokens;
+}
+
+private function attachHighlightTokens($r)
+{
+    $r->brgy_tokens = $this->tokenizeLocation($r->{'BARANGAY'} ?? '', 'brgy');
+    $r->city_tokens = $this->tokenizeLocation($r->{'CITY'} ?? '', 'city');
+    $r->prov_tokens = $this->tokenizeLocation($r->{'PROVINCE'} ?? '', 'prov');
+    return $r;
+}
 
     public function updateField(Request $request)
     {
