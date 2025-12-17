@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
 use App\Models\DownloadedMacroOutputLog;
+use Illuminate\Support\Facades\Schema;
 
 class MacroOutputController extends Controller
 {
@@ -460,67 +461,151 @@ $downloadAll = $isMarketingOIC && $dlParam;
     }
 
     public function index(Request $request)
-    {
-        // STEP 1
-        $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
-        $formattedDate = \Carbon\Carbon::parse($date)->format('d-m-Y');
+{
+    // ✅ default date: kahapon (same as before)
+    $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString(); // Y-m-d
+    $dateObj = Carbon::parse($date);
+    $formattedDMY = $dateObj->format('d-m-Y'); // for legacy TIMESTAMP LIKE
 
-        $baseQuery = MacroOutput::query()->where('TIMESTAMP', 'LIKE', "%$formattedDate");
+    // ✅ Use ts_date if column exists (fast), else fallback LIKE (slow)
+    $hasTsDate = Schema::hasColumn('macro_output', 'ts_date');
 
-        if ($request->filled('PAGE')) {
-            $baseQuery->where('PAGE', $request->PAGE);
-        }
+    $baseQuery = MacroOutput::query();
 
-        // STEP 2: status counts
-        $filteredRecords = (clone $baseQuery)->get();
-
-        $statusCounts = [
-            'TOTAL'           => $filteredRecords->count(),
-            'PROCEED'         => $filteredRecords->where('STATUS', 'PROCEED')->count(),
-            'CANNOT PROCEED'  => $filteredRecords->where('STATUS', 'CANNOT PROCEED')->count(),
-            'ODZ'             => $filteredRecords->where('STATUS', 'ODZ')->count(),
-            'BLANK'           => $filteredRecords->filter(fn($rec) => trim((string) $rec->STATUS) === '')->count(),
-        ];
-
-        // STEP 3: records + conditional pagination
-        $recordQuery = (clone $baseQuery);
-
-        if ($request->filled('status_filter')) {
-            if ($request->status_filter === 'BLANK') {
-                $recordQuery->where(function ($q) {
-                    $q->whereNull('STATUS')->orWhere('STATUS', '');
-                });
-            } else {
-                $recordQuery->where('STATUS', $request->status_filter);
-            }
-        }
-
-        $selectCols = [
-            'id', 'FULL NAME', 'PHONE NUMBER', 'ADDRESS',
-            'PROVINCE', 'CITY', 'BARANGAY', 'STATUS',
-            'PAGE', 'TIMESTAMP', 'all_user_input',
-            'HISTORICAL LOGS', 'APP SCRIPT CHECKER',
-            'edited_full_name', 'edited_phone_number', 'edited_address',
-            'edited_province', 'edited_city', 'edited_barangay',
-            'ITEM_NAME','COD','edited_item_name','edited_cod','status_logs'
-        ];
-
-        // ✅ paginateOnlyWhenAll = true kung walang PAGE filter (ibig sabihin "All")
-        $paginateOnlyWhenAll = !$request->filled('PAGE');
-
-        if ($paginateOnlyWhenAll) {
-            $records = $recordQuery->select($selectCols)->orderByDesc('id')->paginate(100);
-        } else {
-            // No pagination kapag may PAGE na pinili
-            $records = $recordQuery->select($selectCols)->orderByDesc('id')->get();
-        }
-
-        // PAGE options
-        $pages = MacroOutput::where('TIMESTAMP', 'LIKE', "%$formattedDate")
-            ->select('PAGE')->distinct()->orderBy('PAGE')->pluck('PAGE');
-
-        return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'));
+    if ($hasTsDate) {
+        $baseQuery->whereDate('ts_date', $dateObj->toDateString());
+    } else {
+        $baseQuery->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}");
     }
+
+    if ($request->filled('PAGE')) {
+        $baseQuery->where('PAGE', $request->PAGE);
+    }
+
+    // ✅ STATUS COUNTS (SQL-based, no big get())
+    $countsRow = (clone $baseQuery)->selectRaw("
+        COUNT(*) AS total,
+        SUM(CASE WHEN STATUS = 'PROCEED' THEN 1 ELSE 0 END) AS proceed,
+        SUM(CASE WHEN STATUS = 'CANNOT PROCEED' THEN 1 ELSE 0 END) AS cannot_proceed,
+        SUM(CASE WHEN STATUS = 'ODZ' THEN 1 ELSE 0 END) AS odz,
+        SUM(CASE WHEN STATUS IS NULL OR STATUS = '' THEN 1 ELSE 0 END) AS blank
+    ")->first();
+
+    $statusCounts = [
+        'TOTAL'          => (int) ($countsRow->total ?? 0),
+        'PROCEED'        => (int) ($countsRow->proceed ?? 0),
+        'CANNOT PROCEED' => (int) ($countsRow->cannot_proceed ?? 0),
+        'ODZ'            => (int) ($countsRow->odz ?? 0),
+        'BLANK'          => (int) ($countsRow->blank ?? 0),
+    ];
+
+    // ✅ records + conditional pagination
+    $recordQuery = (clone $baseQuery);
+
+    if ($request->filled('status_filter')) {
+        if ($request->status_filter === 'BLANK') {
+            $recordQuery->where(function ($q) {
+                $q->whereNull('STATUS')->orWhere('STATUS', '');
+            });
+        } elseif ($request->status_filter !== 'TOTAL') {
+            $recordQuery->where('STATUS', $request->status_filter);
+        }
+    }
+
+    $selectCols = [
+        'id', 'FULL NAME', 'PHONE NUMBER', 'ADDRESS',
+        'PROVINCE', 'CITY', 'BARANGAY', 'STATUS',
+        'PAGE', 'TIMESTAMP', 'all_user_input',
+        'HISTORICAL LOGS', 'APP SCRIPT CHECKER',
+        'edited_full_name', 'edited_phone_number', 'edited_address',
+        'edited_province', 'edited_city', 'edited_barangay',
+        'ITEM_NAME','COD','edited_item_name','edited_cod','status_logs'
+    ];
+
+    $paginateOnlyWhenAll = !$request->filled('PAGE');
+
+    if ($paginateOnlyWhenAll) {
+        $records = $recordQuery->select($selectCols)->orderByDesc('id')->paginate(100);
+        $records->through(function ($r) {
+            $r->brgy_tokens = $this->tokenizeLocation($r['BARANGAY'] ?? '', 'brgy');
+            $r->city_tokens = $this->tokenizeLocation($r['CITY'] ?? '', 'city');
+            $r->prov_tokens = $this->tokenizeLocation($r['PROVINCE'] ?? '', 'prov');
+            return $r;
+        });
+    } else {
+        $records = $recordQuery->select($selectCols)->orderByDesc('id')->get();
+        $records = $records->map(function ($r) {
+            $r->brgy_tokens = $this->tokenizeLocation($r['BARANGAY'] ?? '', 'brgy');
+            $r->city_tokens = $this->tokenizeLocation($r['CITY'] ?? '', 'city');
+            $r->prov_tokens = $this->tokenizeLocation($r['PROVINCE'] ?? '', 'prov');
+            return $r;
+        });
+    }
+
+    // ✅ PAGE options
+    $pageQuery = MacroOutput::query();
+    if ($hasTsDate) {
+        $pageQuery->whereDate('ts_date', $dateObj->toDateString());
+    } else {
+        $pageQuery->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}");
+    }
+
+    $pages = $pageQuery->select('PAGE')->whereNotNull('PAGE')->distinct()->orderBy('PAGE')->pluck('PAGE');
+
+    return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'));
+}
+
+
+private function tokenizeLocation(?string $raw, string $type): array
+{
+    $s = trim((string) $raw);
+    if ($s === '') return [];
+
+    // normalize spaces / remove some punctuation
+    $s = str_replace("\u{00A0}", ' ', $s);
+    $s = preg_replace('/[(){}\[\]"“”\'`]+/u', ' ', $s);
+
+    if ($type === 'brgy') {
+        $s = preg_replace('/^(brgy\.?|barangay|bgy|brg)\s*/iu', '', $s);
+    } elseif ($type === 'city') {
+        $s = preg_replace('/^(city\s+of|city|municipality\s+of|municipality|mun\.?)\s*/iu', '', $s);
+    } elseif ($type === 'prov') {
+        $s = preg_replace('/^(province\s+of|prov\.?)\s*/iu', '', $s);
+    }
+
+    $parts = preg_split('/[^\pL\pN]+/u', $s, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+    $stop = [
+        'brgy','barangay','bgy','brg',
+        'city','of',
+        'province','prov',
+        'municipality','mun'
+    ];
+
+    $uniq = [];
+    foreach ($parts as $p) {
+        $p = trim($p);
+        if ($p === '') continue;
+
+        $low = mb_strtolower($p);
+        if (in_array($low, $stop, true)) continue;
+
+        // skip super-noisy single digit
+        if (strlen($p) === 1 && preg_match('/^\d$/', $p)) continue;
+
+        // keep >=2 chars OR >=2 digits
+        if (mb_strlen($p) < 2 && !preg_match('/^\d{2,}$/', $p)) continue;
+
+        $uniq[$p] = true;
+    }
+
+    $tokens = array_keys($uniq);
+
+    // longer first (helps avoid partial-looking matches)
+    usort($tokens, fn($a, $b) => mb_strlen($b) <=> mb_strlen($a));
+
+    return $tokens;
+}
 
     public function updateField(Request $request)
     {

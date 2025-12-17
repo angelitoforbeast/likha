@@ -40,6 +40,11 @@
           </select>
         </div>
 
+        <label class="flex items-center gap-2 text-sm">
+          <input id="useDb" type="checkbox" class="h-4 w-4" checked>
+          Use DB learning (macro_output, STATUS=PROCEED)
+        </label>
+
         <button id="runBtn" class="ml-auto bg-black text-white px-4 py-2 rounded-lg">
           Run
         </button>
@@ -56,6 +61,11 @@
       <pre id="output" class="whitespace-pre-wrap text-sm bg-gray-50 border rounded-lg p-3 min-h-[120px]"></pre>
 
       <details class="text-sm">
+        <summary class="cursor-pointer text-gray-700">Similar past cases used (macro_output)</summary>
+        <pre id="matches" class="whitespace-pre-wrap text-xs bg-gray-50 border rounded-lg p-3 mt-2"></pre>
+      </details>
+
+      <details class="text-sm">
         <summary class="cursor-pointer text-gray-700">Raw JSON (debug)</summary>
         <pre id="raw" class="whitespace-pre-wrap text-xs bg-gray-50 border rounded-lg p-3 mt-2"></pre>
       </details>
@@ -64,13 +74,15 @@
   </div>
 
 <script>
-const runBtn  = document.getElementById('runBtn');
-const inputEl = document.getElementById('input');
-const effortEl= document.getElementById('effort');
-const statusEl= document.getElementById('status');
-const outEl   = document.getElementById('output');
-const rawEl   = document.getElementById('raw');
-const copyBtn = document.getElementById('copyBtn');
+const runBtn   = document.getElementById('runBtn');
+const inputEl  = document.getElementById('input');
+const effortEl = document.getElementById('effort');
+const useDbEl  = document.getElementById('useDb');
+const statusEl = document.getElementById('status');
+const outEl    = document.getElementById('output');
+const rawEl    = document.getElementById('raw');
+const matchEl  = document.getElementById('matches');
+const copyBtn  = document.getElementById('copyBtn');
 
 copyBtn.addEventListener('click', async () => {
   await navigator.clipboard.writeText(outEl.textContent || '');
@@ -90,6 +102,7 @@ runBtn.addEventListener('click', async () => {
   statusEl.textContent = 'Calling API...';
   outEl.textContent = '';
   rawEl.textContent = '';
+  matchEl.textContent = '';
 
   try {
     const res = await fetch("{{ route('encoder.tools.ai.run') }}", {
@@ -102,6 +115,7 @@ runBtn.addEventListener('click', async () => {
       body: JSON.stringify({
         input,
         effort: effortEl.value || null,
+        use_db: !!useDbEl.checked,
       }),
     });
 
@@ -116,6 +130,7 @@ runBtn.addEventListener('click', async () => {
 
     statusEl.textContent = 'Done.';
     outEl.textContent = data.text || '(no text)';
+    matchEl.textContent = JSON.stringify(data.matches || [], null, 2);
     rawEl.textContent = JSON.stringify(data.raw, null, 2);
 
   } catch (e) {
