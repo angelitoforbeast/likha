@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Jobs\ExportJntStatusToGsheet;
 
 class JntStatusController extends Controller
 {
@@ -224,4 +225,23 @@ class JntStatusController extends Controller
 
         return implode("\n", $lines);
     }
+    
+
+public function exportToGsheet(Request $request)
+{
+    $status = (string) $request->input('status', 'All');
+    $dateRange = (string) $request->input('date_range', '');
+
+    dispatch(
+        (new ExportJntStatusToGsheet($status, $dateRange))
+            ->onConnection('database')
+            ->onQueue('default')
+    );
+
+    return response()->json([
+        'ok'  => true,
+        'msg' => '✅ Export queued. (It will append to your configured Google Sheet.)',
+    ]);
+}
+
 }

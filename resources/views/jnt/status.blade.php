@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+
   <title>JNT Status</title>
 
   <!-- Flatpickr (CDN) -->
@@ -52,6 +54,7 @@
       border:1px solid #ddd; border-radius:10px;
       background:#111; color:#fff; font-size:13px;
       cursor:pointer; user-select:none;
+      text-decoration:none;
     }
     .btn:disabled{ opacity:.6; cursor:not-allowed; }
     .btn-secondary{
@@ -99,7 +102,9 @@
       <h2 style="margin:0;">JNT Status</h2>
 
       <div class="row">
+        <a class="btn btn-secondary" href="{{ route('jnt.chatblast.gsheet.settings') }}">GSheet Settings</a>
         <button type="button" class="btn btn-secondary" id="copyBtn">Copy Filtered Data</button>
+        <button type="button" class="btn" id="exportBtn">Export to GSheet</button>
       </div>
     </div>
 
@@ -149,7 +154,7 @@
         <th class="nowrap">PAGE</th>
         <th class="nowrap">COD</th>
         <th class="nowrap">Status</th>
-        <th class="nowrap">RTS Reason</th> {{-- ✅ NEW (after Status) --}}
+        <th class="nowrap">RTS Reason</th>
         <th class="nowrap">Signing Time</th>
         <th>Item</th>
         <th class="nowrap">Botcake PSID</th>
@@ -165,7 +170,7 @@
           <td class="nowrap">{{ $r->page }}</td>
           <td class="nowrap">{{ $r->cod }}</td>
           <td class="nowrap"><span class="badge-status">{{ $r->status }}</span></td>
-          <td class="nowrap">{{ $r->rts_reason }}</td> {{-- ✅ NEW (after Status) --}}
+          <td class="nowrap">{{ $r->rts_reason }}</td>
           <td class="nowrap">{{ $r->signingtime }}</td>
           <td>{{ $r->item_name }}</td>
           <td class="nowrap">{{ $r->botcake_psid }}</td>
@@ -228,15 +233,16 @@
     window.addEventListener('load', applyTopbarHeight);
     window.addEventListener('resize', applyTopbarHeight);
 
-    // ✅ Copy ALL filtered data (ignores pagination)
-    const copyBtn = document.getElementById('copyBtn');
+    // ✅ toast
     const toast = document.getElementById('toast');
-
     function showToast(msg){
       toast.textContent = msg;
       toast.classList.add('show');
       setTimeout(() => toast.classList.remove('show'), 1300);
     }
+
+    // ✅ Copy ALL filtered data (ignores pagination)
+    const copyBtn = document.getElementById('copyBtn');
 
     copyBtn.addEventListener('click', async () => {
       try {
@@ -263,6 +269,40 @@
       } finally {
         copyBtn.disabled = false;
         copyBtn.textContent = 'Copy Filtered Data';
+      }
+    });
+
+    // ✅ Export to Google Sheet (append all filtered rows)
+    const exportBtn = document.getElementById('exportBtn');
+
+    exportBtn.addEventListener('click', async () => {
+      try {
+        exportBtn.disabled = true;
+        exportBtn.textContent = 'Exporting...';
+
+        const params = new URLSearchParams(window.location.search);
+        const status = params.get('status') || 'All';
+        const date_range = params.get('date_range') || '';
+
+        const res = await fetch(`{{ route('jnt.status.export_to_gsheet') }}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({ status, date_range }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.msg || 'Export failed');
+
+        showToast(data.msg || 'Export queued ✅');
+      } catch (e) {
+        showToast(e.message || 'Export failed');
+      } finally {
+        exportBtn.disabled = false;
+        exportBtn.textContent = 'Export to GSheet';
       }
     });
   </script>

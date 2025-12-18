@@ -51,6 +51,7 @@ use App\Http\Controllers\Pancake\RetrieveOrdersController;
 use App\Http\Controllers\BotcakePsidGsheetController;
 use App\Http\Controllers\JntStatusController;
 use App\Http\Controllers\Encoder\Tools\AiController;
+use App\Http\Controllers\JntChatblastGsheetController;
 
 use App\Models\Role;
 
@@ -349,6 +350,20 @@ Route::post('/task/update-team-task', [TaskController::class, 'updateTeamTask'])
     Route::get('/jnt/dashboard', [FromJntController::class, 'index'])
     ->name('jnt.dashboard');
     Route::get('/jnt/status', [JntStatusController::class, 'index'])->name('jnt.status');
+
+Route::get('/jnt/chatblast/gsheet/settings', [JntChatblastGsheetController::class, 'settings'])
+    ->name('jnt.chatblast.gsheet.settings');
+
+Route::post('/jnt/chatblast/gsheet/settings', [JntChatblastGsheetController::class, 'store'])
+    ->name('jnt.chatblast.gsheet.settings.store');
+
+Route::delete('/jnt/chatblast/gsheet/settings/{id}', [JntChatblastGsheetController::class, 'destroy'])
+    ->name('jnt.chatblast.gsheet.settings.delete');
+
+// ✅ EXPORT endpoint (button from /jnt/status)
+Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'exportToGsheet'])
+    ->name('jnt.status.export_to_gsheet');
+
 
     Route::get('/jnt_upload', [JntUploadController::class, 'index'])->name('jnt.upload.index');
     Route::post('/jnt_upload', [JntUploadController::class, 'store'])->name('jnt.upload.store');
