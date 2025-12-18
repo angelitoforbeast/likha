@@ -11,6 +11,7 @@
     @php
         use Illuminate\Support\Carbon;
         $filters = $currentFilters ?? [];
+        $q = request('q', '');
     @endphp
 
     <style>
@@ -43,13 +44,8 @@
             width: 100%;
         }
 
-        .data-row {
-            cursor: pointer;
-        }
-
-        .data-row:hover {
-            background-color: #f3f4f6;
-        }
+        .data-row { cursor: pointer; }
+        .data-row:hover { background-color: #f3f4f6; }
 
         .data-row.expanded .cell-content {
             white-space: normal;
@@ -65,7 +61,7 @@
         }
 
         .table-wrapper {
-            max-height: calc(100vh - 260px);
+            max-height: calc(100vh - 300px);
             overflow-y: auto;
         }
 
@@ -77,25 +73,17 @@
         .col-sender          { width: 130px; }
         .col-item_name       { width: 150px; }
 
-        .col-cod,
-        .col-total_shipping_cost {
-            width: 45px;
-            text-align: right;
-        }
+        .col-cod, .col-total_shipping_cost { width: 45px; text-align: right; }
 
         .col-status     { width: 90px; }
         .col-rts_reason { width: 110px; }
 
-        .col-province,
-        .col-city,
-        .col-barangay   { width: 110px; }
+        .col-province, .col-city, .col-barangay { width: 110px; }
 
         .col-remarks     { width: 150px; }
         .col-status_logs { width: 320px; }
 
-        .col-signingtime,
-        .col-created_at,
-        .col-updated_at  { width: 130px; }
+        .col-signingtime, .col-created_at, .col-updated_at { width: 130px; }
 
         /* default hidden columns */
         .col-remarks,
@@ -121,8 +109,6 @@
             border-color: #d1d5db;
             background-color: #e5e7eb;
         }
-
-        /* ACTIVE FILTER ICON STYLE */
         .filter-btn.filter-btn-active {
             border-color: #2563eb;
             background-color: #dbeafe;
@@ -130,11 +116,37 @@
             font-weight: 600;
         }
 
-        #columnFilterMenu.hidden {
-            display: none;
+        #columnFilterMenu.hidden { display: none; }
+
+        /* ✅ prettier status_logs display (like your screenshot) */
+        td.col-status_logs .cell-content{
+            white-space: normal !important;
+            overflow: hidden;
+            text-overflow: unset;
+        }
+        .data-row.expanded td.col-status_logs .cell-content{ overflow: visible; }
+
+        .logs-list{
+            list-style: disc;
+            padding-left: 1rem;
+            margin: 0;
+        }
+        .logs-list li{
+            margin: 0 0 0.2rem 0;
+            line-height: 1.2;
+        }
+        .log-time{ color: #6b7280; }
+        .log-status{ font-weight: 700; }
+        .log-meta{ color: #6b7280; font-size: 0.65rem; }
+
+        /* clamp logs when row is NOT expanded */
+        .data-row:not(.expanded) td.col-status_logs .logs-list{
+            max-height: 3.0em;
+            overflow: hidden;
         }
     </style>
 </head>
+
 <body class="bg-gray-50 text-gray-900">
 
 <div class="w-full py-4 px-2">
@@ -142,6 +154,32 @@
 
     {{-- MAIN FILTER FORM --}}
     <form id="mainFilterForm" method="GET" action="{{ route('jnt.dashboard') }}" class="mb-4">
+
+        {{-- 🔎 SEARCH BAR (search is server-side; should be limited by date filter in controller) --}}
+        <div class="flex flex-wrap gap-2 items-center mb-3">
+            <input
+                type="text"
+                name="q"
+                id="q"
+                class="border rounded px-3 py-2 text-sm w-full md:w-[720px]"
+                placeholder="Search waybill, receiver, sender, item, status, remarks, province, city, barangay..."
+                value="{{ old('q', $q) }}"
+                autocomplete="off"
+            >
+            <button
+                type="submit"
+                class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded"
+            >
+                Search
+            </button>
+            <button
+                type="button"
+                id="clearSearchBtn"
+                class="bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm px-4 py-2 rounded"
+            >
+                Clear
+            </button>
+        </div>
 
         <div class="flex flex-wrap gap-3 items-end">
             <div>
@@ -184,7 +222,7 @@
                     href="{{ route('jnt.dashboard') }}"
                     class="bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm px-4 py-2 rounded inline-flex items-center"
                 >
-                    Clear
+                    Clear All
                 </a>
             </div>
         </div>
@@ -243,15 +281,24 @@
         </div>
 
         {{-- filter summary --}}
-        <div class="mb-4 text-xs text-gray-600">
-            @if($dateFrom || $dateTo)
-                Filtered by Submission Time:
-                <strong>{{ $dateFrom ?: 'Any' }}</strong>
-                to
-                <strong>{{ $dateTo ?: 'Any' }}</strong>
-            @else
-                Showing all records (no date filter applied).
-            @endif
+        <div class="mb-4 text-xs text-gray-600 flex flex-wrap gap-4 items-center">
+            <div>
+                @if($dateFrom || $dateTo)
+                    Filtered by Submission Time:
+                    <strong>{{ $dateFrom ?: 'Any' }}</strong>
+                    to
+                    <strong>{{ $dateTo ?: 'Any' }}</strong>
+                @else
+                    Showing all records (no date filter applied).
+                @endif
+            </div>
+
+            <div>
+                @if(!empty($q))
+                    Search:
+                    <strong>{{ $q }}</strong>
+                @endif
+            </div>
         </div>
 
         {{-- table --}}
@@ -282,7 +329,6 @@
                                 $hasFilter_updated_at        = !empty($filters['updated_at'] ?? []);
                             @endphp
 
-                            {{-- submission_time (with filter) --}}
                             <th class="col-submission_time" data-col="submission_time">
                                 <div class="cell-content">
                                     <span>submission_time</span>
@@ -295,21 +341,14 @@
                                 </div>
                             </th>
 
-                            {{-- waybill_number (NO FILTER) --}}
                             <th class="col-waybill_number" data-col="waybill_number">
-                                <div class="cell-content">
-                                    <span>waybill_number</span>
-                                </div>
+                                <div class="cell-content"><span>waybill_number</span></div>
                             </th>
 
-                            {{-- receiver (NO FILTER) --}}
                             <th class="col-receiver" data-col="receiver">
-                                <div class="cell-content">
-                                    <span>receiver</span>
-                                </div>
+                                <div class="cell-content"><span>receiver</span></div>
                             </th>
 
-                            {{-- receiver_cellphone (with filter) --}}
                             <th class="col-receiver_cellphone" data-col="receiver_cellphone">
                                 <div class="cell-content">
                                     <span>receiver_cellphone</span>
@@ -322,7 +361,6 @@
                                 </div>
                             </th>
 
-                            {{-- sender (with filter) --}}
                             <th class="col-sender" data-col="sender">
                                 <div class="cell-content">
                                     <span>sender</span>
@@ -335,7 +373,6 @@
                                 </div>
                             </th>
 
-                            {{-- item_name (with filter) --}}
                             <th class="col-item_name" data-col="item_name">
                                 <div class="cell-content">
                                     <span>item_name</span>
@@ -348,7 +385,6 @@
                                 </div>
                             </th>
 
-                            {{-- cod (with filter) --}}
                             <th class="col-cod" data-col="cod">
                                 <div class="cell-content">
                                     <span>cod</span>
@@ -361,7 +397,6 @@
                                 </div>
                             </th>
 
-                            {{-- remarks (with filter, hidden by default) --}}
                             <th class="col-remarks" data-col="remarks">
                                 <div class="cell-content">
                                     <span>remarks</span>
@@ -374,7 +409,6 @@
                                 </div>
                             </th>
 
-                            {{-- province (with filter, hidden by default) --}}
                             <th class="col-province" data-col="province">
                                 <div class="cell-content">
                                     <span>province</span>
@@ -387,7 +421,6 @@
                                 </div>
                             </th>
 
-                            {{-- city (with filter, hidden by default) --}}
                             <th class="col-city" data-col="city">
                                 <div class="cell-content">
                                     <span>city</span>
@@ -400,7 +433,6 @@
                                 </div>
                             </th>
 
-                            {{-- barangay (with filter, hidden by default) --}}
                             <th class="col-barangay" data-col="barangay">
                                 <div class="cell-content">
                                     <span>barangay</span>
@@ -413,7 +445,6 @@
                                 </div>
                             </th>
 
-                            {{-- total_shipping_cost (with filter, hidden by default) --}}
                             <th class="col-total_shipping_cost" data-col="total_shipping_cost">
                                 <div class="cell-content">
                                     <span>total_shipping_cost</span>
@@ -426,7 +457,6 @@
                                 </div>
                             </th>
 
-                            {{-- rts_reason (with filter, hidden by default) --}}
                             <th class="col-rts_reason" data-col="rts_reason">
                                 <div class="cell-content">
                                     <span>rts_reason</span>
@@ -439,7 +469,6 @@
                                 </div>
                             </th>
 
-                            {{-- status (with filter) --}}
                             <th class="col-status" data-col="status">
                                 <div class="cell-content">
                                     <span>status</span>
@@ -452,21 +481,14 @@
                                 </div>
                             </th>
 
-                            {{-- signingtime (NO FILTER) --}}
                             <th class="col-signingtime" data-col="signingtime">
-                                <div class="cell-content">
-                                    <span>signingtime</span>
-                                </div>
+                                <div class="cell-content"><span>signingtime</span></div>
                             </th>
 
-                            {{-- status_logs (NO FILTER) --}}
                             <th class="col-status_logs" data-col="status_logs">
-                                <div class="cell-content">
-                                    <span>status_logs</span>
-                                </div>
+                                <div class="cell-content"><span>status_logs</span></div>
                             </th>
 
-                            {{-- created_at (with filter, hidden by default) --}}
                             <th class="col-created_at" data-col="created_at">
                                 <div class="cell-content">
                                     <span>created_at</span>
@@ -479,7 +501,6 @@
                                 </div>
                             </th>
 
-                            {{-- updated_at (with filter, hidden by default) --}}
                             <th class="col-updated_at" data-col="updated_at">
                                 <div class="cell-content">
                                     <span>updated_at</span>
@@ -493,6 +514,7 @@
                             </th>
                         </tr>
                         </thead>
+
                         <tbody>
                         @foreach($data as $row)
                             @php
@@ -523,101 +545,129 @@
                                     $rts = json_encode($rts, JSON_UNESCAPED_UNICODE);
                                 }
 
-                                $logs = $row->status_logs;
-                                if (is_array($logs) || is_object($logs)) {
-                                    $logs = json_encode($logs, JSON_UNESCAPED_UNICODE);
+                                // ✅ Pretty status_logs (handles string OR array/object; avoids json_decode error)
+                                $rawStatusLogs = $row->status_logs ?? null;
+
+                                $decodedLogs = [];
+                                if (is_array($rawStatusLogs)) {
+                                    $decodedLogs = $rawStatusLogs;
+                                } elseif (is_object($rawStatusLogs)) {
+                                    $decodedLogs = json_decode(json_encode($rawStatusLogs), true) ?: [];
+                                } elseif (is_string($rawStatusLogs) && trim($rawStatusLogs) !== '') {
+                                    $tmp = json_decode($rawStatusLogs, true);
+                                    if (is_array($tmp)) $decodedLogs = $tmp;
+                                }
+
+                                $logsPlainLines = [];
+                                $logsHtmlItems  = [];
+
+                                if (!empty($decodedLogs)) {
+                                    foreach ($decodedLogs as $lg) {
+                                        $ba   = trim((string)($lg['batch_at'] ?? ''));
+                                        $from = trim((string)($lg['from'] ?? ''));
+                                        $to   = trim((string)($lg['to'] ?? ''));
+                                        $ulid = $lg['upload_log_id'] ?? null;
+
+                                        $fromLabel = $from !== '' ? $from : '(start)';
+                                        $toLabel   = $to   !== '' ? $to   : '(blank)';
+                                        $timeLabel = $ba !== '' ? $ba : '(no time)';
+
+                                        $plain = $timeLabel . " — {$fromLabel} → {$toLabel}";
+                                        if ($ulid !== null && $ulid !== '') {
+                                            $plain .= " (upload_log_id: {$ulid})";
+                                        }
+                                        $logsPlainLines[] = $plain;
+
+                                        $li = '<li>'
+                                            . '<span class="log-time">' . e($timeLabel) . '</span>'
+                                            . ' — '
+                                            . '<span class="log-status">' . e($fromLabel) . '</span>'
+                                            . ' → '
+                                            . '<span class="log-status">' . e($toLabel) . '</span>';
+
+                                        if ($ulid !== null && $ulid !== '') {
+                                            $li .= ' <span class="log-meta">(upload_log_id: ' . e($ulid) . ')</span>';
+                                        }
+
+                                        $li .= '</li>';
+
+                                        $logsHtmlItems[] = $li;
+                                    }
+                                }
+
+                                $logsPlain = implode("\n", $logsPlainLines);
+
+                                if (!empty($logsHtmlItems)) {
+                                    $logsHtml = '<ul class="logs-list">' . implode('', $logsHtmlItems) . '</ul>';
+                                } else {
+                                    $fallback = '';
+                                    if (is_string($rawStatusLogs) && trim($rawStatusLogs) !== '') {
+                                        $fallback = $rawStatusLogs;
+                                    } elseif (is_array($rawStatusLogs) || is_object($rawStatusLogs)) {
+                                        $fallback = json_encode($rawStatusLogs, JSON_UNESCAPED_UNICODE);
+                                    }
+
+                                    $logsPlain = (string)$fallback;
+                                    $logsHtml  = $fallback !== ''
+                                        ? '<div class="logs-fallback">' . nl2br(e($fallback)) . '</div>'
+                                        : '<span class="text-gray-400">(no logs)</span>';
                                 }
                             @endphp
+
                             <tr class="data-row">
                                 <td class="col-submission_time" data-col="submission_time">
-                                    <div class="cell-content" title="{{ $submissionDisplay }}">
-                                        {{ $submissionDisplay }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $submissionDisplay }}">{{ $submissionDisplay }}</div>
                                 </td>
                                 <td class="col-waybill_number" data-col="waybill_number">
-                                    <div class="cell-content" title="{{ $row->waybill_number }}">
-                                        {{ $row->waybill_number }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $row->waybill_number }}">{{ $row->waybill_number }}</div>
                                 </td>
                                 <td class="col-receiver" data-col="receiver">
-                                    <div class="cell-content" title="{{ $row->receiver }}">
-                                        {{ $row->receiver }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $row->receiver }}">{{ $row->receiver }}</div>
                                 </td>
                                 <td class="col-receiver_cellphone" data-col="receiver_cellphone">
-                                    <div class="cell-content" title="{{ $row->receiver_cellphone }}">
-                                        {{ $row->receiver_cellphone }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $row->receiver_cellphone }}">{{ $row->receiver_cellphone }}</div>
                                 </td>
                                 <td class="col-sender" data-col="sender">
-                                    <div class="cell-content" title="{{ $row->sender }}">
-                                        {{ $row->sender }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $row->sender }}">{{ $row->sender }}</div>
                                 </td>
                                 <td class="col-item_name" data-col="item_name">
-                                    <div class="cell-content" title="{{ $row->item_name }}">
-                                        {{ $row->item_name }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $row->item_name }}">{{ $row->item_name }}</div>
                                 </td>
                                 <td class="col-cod" data-col="cod">
-                                    <div class="cell-content" title="{{ $row->cod }}">
-                                        {{ $row->cod }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $row->cod }}">{{ $row->cod }}</div>
                                 </td>
                                 <td class="col-remarks" data-col="remarks">
-                                    <div class="cell-content" title="{{ $remarks }}">
-                                        {{ $remarks }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $remarks }}">{{ $remarks }}</div>
                                 </td>
                                 <td class="col-province" data-col="province">
-                                    <div class="cell-content" title="{{ $row->province }}">
-                                        {{ $row->province }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $row->province }}">{{ $row->province }}</div>
                                 </td>
                                 <td class="col-city" data-col="city">
-                                    <div class="cell-content" title="{{ $row->city }}">
-                                        {{ $row->city }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $row->city }}">{{ $row->city }}</div>
                                 </td>
                                 <td class="col-barangay" data-col="barangay">
-                                    <div class="cell-content" title="{{ $row->barangay }}">
-                                        {{ $row->barangay }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $row->barangay }}">{{ $row->barangay }}</div>
                                 </td>
                                 <td class="col-total_shipping_cost" data-col="total_shipping_cost">
-                                    <div class="cell-content" title="{{ $row->total_shipping_cost }}">
-                                        {{ $row->total_shipping_cost }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $row->total_shipping_cost }}">{{ $row->total_shipping_cost }}</div>
                                 </td>
                                 <td class="col-rts_reason" data-col="rts_reason">
-                                    <div class="cell-content" title="{{ $rts }}">
-                                        {{ $rts }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $rts }}">{{ $rts }}</div>
                                 </td>
                                 <td class="col-status" data-col="status">
-                                    <div class="cell-content" title="{{ $row->status }}">
-                                        {{ $row->status }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $row->status }}">{{ $row->status }}</div>
                                 </td>
                                 <td class="col-signingtime" data-col="signingtime">
-                                    <div class="cell-content" title="{{ $signingDisplay }}">
-                                        {{ $signingDisplay }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $signingDisplay }}">{{ $signingDisplay }}</div>
                                 </td>
                                 <td class="col-status_logs" data-col="status_logs">
-                                    <div class="cell-content" title="{{ $logs }}">
-                                        {{ $logs }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $logsPlain }}">{!! $logsHtml !!}</div>
                                 </td>
                                 <td class="col-created_at" data-col="created_at">
-                                    <div class="cell-content" title="{{ $createdDisplay }}">
-                                        {{ $createdDisplay }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $createdDisplay }}">{{ $createdDisplay }}</div>
                                 </td>
                                 <td class="col-updated_at" data-col="updated_at">
-                                    <div class="cell-content" title="{{ $updatedDisplay }}">
-                                        {{ $updatedDisplay }}
-                                    </div>
+                                    <div class="cell-content" title="{{ $updatedDisplay }}">{{ $updatedDisplay }}</div>
                                 </td>
                             </tr>
                         @endforeach
@@ -628,13 +678,8 @@
                 {{-- pagination --}}
                 <div class="px-4 py-2 border-t flex justify-between items-center text-xs">
                     <div>
-                        Showing
-                        <strong>{{ $data->firstItem() }}</strong>
-                        to
-                        <strong>{{ $data->lastItem() }}</strong>
-                        of
-                        <strong>{{ $data->total() }}</strong>
-                        results
+                        Showing <strong>{{ $data->firstItem() }}</strong> to <strong>{{ $data->lastItem() }}</strong>
+                        of <strong>{{ $data->total() }}</strong> results
                     </div>
                     <div>
                         {{ $data->links() }}
@@ -646,7 +691,7 @@
 </div>
 
 <script>
-    const FILTER_OPTIONS = @json($filterOptions ?? []);
+    const FILTER_OPTIONS  = @json($filterOptions ?? []);
     const CURRENT_FILTERS = @json($currentFilters ?? []);
 </script>
 
@@ -657,13 +702,54 @@
 
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script>
-    flatpickr("#date_from", { dateFormat: "Y-m-d", allowInput: true });
-    flatpickr("#date_to",   { dateFormat: "Y-m-d", allowInput: true });
+    // ✅ reset search when date changes (flatpickr onChange)
+    flatpickr("#date_from", {
+        dateFormat: "Y-m-d",
+        allowInput: true,
+        onChange: function () {
+            const q = document.getElementById('q');
+            if (q) q.value = '';
+        }
+    });
+
+    flatpickr("#date_to", {
+        dateFormat: "Y-m-d",
+        allowInput: true,
+        onChange: function () {
+            const q = document.getElementById('q');
+            if (q) q.value = '';
+        }
+    });
 
     document.addEventListener('DOMContentLoaded', function () {
         const form = document.getElementById('mainFilterForm');
         const filtersContainer = document.getElementById('filtersContainer');
         const menu  = document.getElementById('columnFilterMenu');
+
+        // Clear search only (keep date/filters)
+        const clearSearchBtn = document.getElementById('clearSearchBtn');
+        if (clearSearchBtn) {
+            clearSearchBtn.addEventListener('click', function (e) {
+                e.preventDefault();
+                const q = document.getElementById('q');
+                if (q) q.value = '';
+                form.submit();
+            });
+        }
+
+        // ✅ also clear search when user types/changes date field manually (not via picker)
+        const qInput = document.getElementById('q');
+        const dateFromEl = document.getElementById('date_from');
+        const dateToEl   = document.getElementById('date_to');
+
+        function resetSearchOnly() {
+            if (qInput) qInput.value = '';
+        }
+
+        ['change','input'].forEach(evt => {
+            if (dateFromEl) dateFromEl.addEventListener(evt, resetSearchOnly);
+            if (dateToEl)   dateToEl.addEventListener(evt, resetSearchOnly);
+        });
 
         // expand rows
         document.querySelectorAll('.data-row').forEach(row => {
@@ -672,7 +758,7 @@
             });
         });
 
-        // show/hide columns (FIXED: force table-cell when visible)
+        // show/hide columns (force table-cell when visible)
         document.querySelectorAll('.col-toggle').forEach(chk => {
             chk.addEventListener('change', function (e) {
                 const colKey  = this.getAttribute('data-col');
@@ -772,9 +858,7 @@
             btn.addEventListener('click', function (e) {
                 e.stopPropagation();
                 const colKey = this.getAttribute('data-col');
-                if (!menu.classList.contains('hidden')) {
-                    closeMenu();
-                }
+                if (!menu.classList.contains('hidden')) closeMenu();
                 openFilterMenu(colKey);
             });
         });
@@ -794,9 +878,7 @@
 
             if (target.classList.contains('select-all')) {
                 const checked = target.checked;
-                menu.querySelectorAll('.value-checkbox').forEach(cb => {
-                    cb.checked = checked;
-                });
+                menu.querySelectorAll('.value-checkbox').forEach(cb => cb.checked = checked);
                 return;
             }
 
@@ -806,15 +888,14 @@
                 menu.querySelectorAll('.value-checkbox').forEach(cb => {
                     if (cb.checked) selected.push(cb.value);
                 });
+
                 const selectAllBox = menu.querySelector('.select-all');
                 const selectAll = selectAllBox ? selectAllBox.checked : (selected.length === 0);
 
-                // remove old inputs for this column
                 filtersContainer
                     .querySelectorAll('input[name="filters[' + colKey + '][]"]')
                     .forEach(el => el.remove());
 
-                // kung hindi select all, gawa tayo ng inputs
                 if (!selectAll) {
                     selected.forEach(v => {
                         const input = document.createElement('input');

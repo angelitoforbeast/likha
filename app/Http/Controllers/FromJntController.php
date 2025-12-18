@@ -19,102 +19,110 @@ class FromJntController extends Controller
         $date = Carbon::now('Asia/Manila')->toDateString();
     }
 
-    $day       = Carbon::parse($date, 'Asia/Manila');
-    $dayStart  = $day->copy()->startOfDay();
-    $dayEnd    = $day->copy()->endOfDay();
+    $rtsGroup = $request->input('rts_group', 'sender_item'); // sender_item | sender | item
+
+    $day      = Carbon::parse($date, 'Asia/Manila');
+    $dayStart = $day->copy()->startOfDay();
+    $dayEnd   = $day->copy()->endOfDay();
 
     // 60-day window based on submission_time (including selected date)
     $windowStart = $day->copy()->subDays(60)->startOfDay();
     $windowEnd   = $dayEnd;
 
+    // ---------- Helpers ----------
+    $norm = function ($s) {
+        $s = mb_strtolower((string)$s);
+        return preg_replace('/\s+/u', ' ', trim($s));
+    };
+
+    $isReturnedStatus = function (string $s) use ($norm): bool {
+        $s = $norm($s);
+        // ✅ Returned is NOT For Return
+        return str_contains($s, 'returned');
+    };
+
+    $isForReturnStatus = function (string $s) use ($norm): bool {
+        $s = $norm($s);
+        // ✅ For Return bucket = "For Return" or "RTS" only
+        if (str_contains($s, 'for return')) return true;
+        if (preg_match('/\brts\b/i', $s)) return true;
+        return false;
+    };
+
+    $isDeliveringStatus = function (string $s) use ($norm): bool {
+        $s = $norm($s);
+        return str_contains($s, 'delivering')
+            || (str_contains($s, 'deliver') && !str_contains($s, 'delivered'));
+    };
+
+    $makeGroupKey = function ($sender, $item) use ($rtsGroup) {
+        $sender = trim((string)$sender);
+        $item   = trim((string)$item);
+
+        if ($rtsGroup === 'sender') return $sender;
+        if ($rtsGroup === 'item')   return $item;
+
+        // sender_item
+        return $sender . ' | ' . $item;
+    };
+
+    // ==============================
+    // LEFT TABLE: Status Summary per batch_at
+    // ==============================
     $batches = [];
 
-    // --- Helpers ---
-    $isReturnStatus = function (string $s): bool {
-        $s = strtolower(trim($s));
-        return str_contains($s, 'return') || str_contains($s, 'rts');
-    };
-
-    $isDeliveringStatus = function (string $s): bool {
-        $s = strtolower(trim($s));
-        // delivering only, avoid "delivered"
-        return str_contains($s, 'delivering') || (str_contains($s, 'deliver') && !str_contains($s, 'delivered'));
-    };
-
-    // Helper para siguradong may entry sa $batches kapag may data sa batch na 'yan
     $ensureBatch = function ($batchAt) use (&$batches) {
         if (!isset($batches[$batchAt])) {
             $batches[$batchAt] = [
                 'batch_at'        => $batchAt,
-
-                // sets (unique per waybill)
                 'delivering_set'  => [],
                 'in_transit_set'  => [],
                 'for_return_set'  => [],
-
-                // final counts (filled after sets)
                 'delivering'      => 0,
                 'in_transit'      => 0,
-                'delivered'       => 0, // filled later via signingtime ranges
+                'delivered'       => 0,
                 'for_return'      => 0,
             ];
         }
     };
 
-    // 1) Basahin lahat ng may status_logs, pero limited sa 60 days by submission_time
     DB::table('from_jnts')
         ->whereNotNull('status_logs')
-        ->whereBetween('submission_time', [
-            $windowStart->toDateTimeString(),
-            $windowEnd->toDateTimeString(),
-        ])
-        // ✅ include waybill_number + rts_reason
-        ->select('id', 'waybill_number', 'status_logs', 'rts_reason')
+        ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
+        ->select('id', 'waybill_number', 'status', 'status_logs', 'rts_reason')
         ->orderBy('id')
-        ->chunk(1000, function ($rows) use (&$batches, $date, $ensureBatch, $isReturnStatus, $isDeliveringStatus) {
-
+        ->chunk(1000, function ($rows) use (
+            &$batches,
+            $date,
+            $ensureBatch,
+            $isForReturnStatus,
+            $isDeliveringStatus,
+            $isReturnedStatus
+        ) {
             foreach ($rows as $row) {
                 $waybill = trim((string)($row->waybill_number ?? ''));
-                if ($waybill === '') {
-                    continue;
-                }
+                if ($waybill === '') continue;
 
-                // --- Decode logs ---
                 $logsRaw = $row->status_logs;
-                if ($logsRaw === null || $logsRaw === '') {
-                    continue;
-                }
+                if ($logsRaw === null || $logsRaw === '') continue;
 
                 $logs = json_decode($logsRaw, true);
-                if (!is_array($logs) || empty($logs)) {
-                    continue;
-                }
+                if (!is_array($logs) || empty($logs)) continue;
 
-                // --- Filter logs for the selected date only ---
+                // only logs on selected date
                 $dayLogs = [];
                 foreach ($logs as $entry) {
                     $batchAt = $entry['batch_at'] ?? null;
                     if (!$batchAt) continue;
-
-                    $entryDate = substr((string)$batchAt, 0, 10);
-                    if ($entryDate !== $date) continue;
-
+                    if (substr((string)$batchAt, 0, 10) !== $date) continue;
                     $dayLogs[] = $entry;
                 }
+                if (empty($dayLogs)) continue;
 
-                // Walang log na tumama sa selected date → skip buong waybill
-                if (empty($dayLogs)) {
-                    continue;
-                }
+                usort($dayLogs, fn($a,$b) => strcmp((string)($a['batch_at'] ?? ''), (string)($b['batch_at'] ?? '')));
 
-                // Sort dayLogs by batch_at para ma-detect "deliver earlier today"
-                usort($dayLogs, function ($a, $b) {
-                    return strcmp((string)($a['batch_at'] ?? ''), (string)($b['batch_at'] ?? ''));
-                });
-
-                // Check kung may RTS reason na itong waybill (exclude delivering kapag may rts_reason)
-                $rtsRaw  = $row->rts_reason ?? null;
-                $hasRts  = !is_null($rtsRaw) && trim((string) $rtsRaw) !== '';
+                $currentStatus = (string)($row->status ?? '');
+                $hasRtsReason  = !is_null($row->rts_reason) && trim((string)$row->rts_reason) !== '';
 
                 $wasDeliveringToday = false;
                 $forReturnCounted   = false;
@@ -128,169 +136,483 @@ class FromJntController extends Controller
                     $to   = strtolower(trim((string)($entry['to'] ?? '')));
                     $from = strtolower(trim((string)($entry['from'] ?? '')));
 
-                    // ✅ Delivering (new since last) – base sa "to"
-                    //    ➕ dagdag condition: WALANG laman ang rts_reason
-                    if (str_contains($to, 'delivering') && !$hasRts) {
+                    // Delivering (exclude if may RTS reason)
+                    if (str_contains($to, 'delivering') && !$hasRtsReason) {
                         $batches[$batchAt]['delivering_set'][$waybill] = true;
-                        $wasDeliveringToday = true; // mark na nag-delivering na siya earlier today
+                        $wasDeliveringToday = true;
                     }
 
-                    // ✅ In Transit (new since last) – base sa "to"
+                    // In Transit
                     if (str_contains($to, 'transit')) {
                         $batches[$batchAt]['in_transit_set'][$waybill] = true;
                     }
 
-                    // ✅ For Return (new) – credited sa batch kung kailan siya unang nag Return/RTS TODAY
-                    // Must have been Delivering today (earlier), OR transition itself came from delivering
-                    if (!$forReturnCounted && ($isReturnStatus($to))) {
+                    // ✅ For Return (STRICT) — and MUST NOT be Returned currently
+                    if (!$forReturnCounted && $isForReturnStatus($to)) {
+                        // ✅ important: exclude current status Returned
+                        if ($isReturnedStatus($currentStatus)) {
+                            $forReturnCounted = true; // prevent later double-hit
+                            continue;
+                        }
+
+                        // optional strictness: only count if current status still For Return / RTS
+                        if (!$isForReturnStatus($currentStatus)) {
+                            $forReturnCounted = true;
+                            continue;
+                        }
+
                         if ($wasDeliveringToday || $isDeliveringStatus($from)) {
                             $batches[$batchAt]['for_return_set'][$waybill] = true;
-                            $forReturnCounted = true; // once per waybill
+                            $forReturnCounted = true;
                         }
                     }
                 }
-
-                // NOTE: Wala pang Delivered logic dito — gagawin sa step 2 gamit signingtime
             }
         });
 
-    // Convert sets to counts + cleanup sets
     foreach ($batches as $k => $b) {
         $batches[$k]['delivering'] = count($b['delivering_set'] ?? []);
         $batches[$k]['in_transit'] = count($b['in_transit_set'] ?? []);
         $batches[$k]['for_return'] = count($b['for_return_set'] ?? []);
-
-        unset(
-            $batches[$k]['delivering_set'],
-            $batches[$k]['in_transit_set'],
-            $batches[$k]['for_return_set']
-        );
+        unset($batches[$k]['delivering_set'], $batches[$k]['in_transit_set'], $batches[$k]['for_return_set']);
     }
 
-    // 2) Kung may batches, ayusin order then fill up Delivered gamit signingtime ranges
-    ksort($batches); // sort by upload datetime (key)
-
+    // Delivered per batch range
+    ksort($batches);
     if (!empty($batches)) {
-        $batchKeys  = array_keys($batches);
-        $batchCount = count($batchKeys);
+        $keys = array_keys($batches);
+        $times = array_map(fn($k) => Carbon::parse($k, 'Asia/Manila'), $keys);
 
-        // Carbon versions ng batch times
-        $batchTimes = [];
-        foreach ($batchKeys as $k) {
-            $batchTimes[] = Carbon::parse($k, 'Asia/Manila');
-        }
+        $n = count($keys);
+        for ($i=0; $i<$n; $i++) {
+            $batchKey   = $keys[$i];
+            $rangeStart = ($i === 0) ? $dayStart : $times[$i-1];
 
-        for ($i = 0; $i < $batchCount; $i++) {
-            $batchKey = $batchKeys[$i];
-
-            // Range start = 00:00 for first batch, else previous batch time
-            $rangeStart = ($i === 0) ? $dayStart : $batchTimes[$i - 1];
-
-            // Range end = current batch time (exclusive) for middle batches,
-            // sa last batch hanggang end-of-day (inclusive).
-            if ($i === $batchCount - 1) {
+            if ($i === $n-1) {
                 $rangeEnd = $dayEnd;
-                $query = DB::table('from_jnts')
-                    ->whereNotNull('signingtime')
-                    ->whereBetween('submission_time', [
-                        $windowStart->toDateTimeString(),
-                        $windowEnd->toDateTimeString(),
-                    ])
-                    ->where('signingtime', '>=', $rangeStart->toDateTimeString())
-                    ->where('signingtime', '<=', $rangeEnd->toDateTimeString());
+                $qEndOp = '<=';
             } else {
-                $rangeEnd = $batchTimes[$i];
-                $query = DB::table('from_jnts')
-                    ->whereNotNull('signingtime')
-                    ->whereBetween('submission_time', [
-                        $windowStart->toDateTimeString(),
-                        $windowEnd->toDateTimeString(),
-                    ])
-                    ->where('signingtime', '>=', $rangeStart->toDateTimeString())
-                    ->where('signingtime', '<',  $rangeEnd->toDateTimeString());
+                $rangeEnd = $times[$i];
+                $qEndOp = '<';
             }
 
-            $deliveredCount = $query
-                ->whereRaw("LOWER(status) LIKE '%delivered%'")
-                ->count();
+            $q = DB::table('from_jnts')
+                ->whereNotNull('signingtime')
+                ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
+                ->where('signingtime', '>=', $rangeStart->toDateTimeString())
+                ->where('signingtime', $qEndOp, $rangeEnd->toDateTimeString())
+                ->whereRaw("LOWER(status) LIKE '%delivered%'");
 
-            $batches[$batchKey]['delivered'] = $deliveredCount;
+            $batches[$batchKey]['delivered'] = (int)$q->count();
+            $batches[$batchKey]['range_start'] = $rangeStart->toDateTimeString();
+            $batches[$batchKey]['range_end']   = $rangeEnd->toDateTimeString();
         }
     }
 
-    // 3) TOTAL row
-    $totals = [
-        'delivering' => 0,
-        'in_transit' => 0,
-        'delivered'  => 0,
-        'for_return' => 0,
-    ];
-
-    foreach ($batches as $batch) {
-        $totals['delivering'] += (int)$batch['delivering'];
-        $totals['in_transit'] += (int)$batch['in_transit'];
-        $totals['delivered']  += (int)$batch['delivered'];
-        $totals['for_return'] += (int)$batch['for_return'];
+    // Totals
+    $totals = ['delivering'=>0,'in_transit'=>0,'delivered'=>0,'for_return'=>0];
+    foreach ($batches as $b) {
+        $totals['delivering'] += (int)$b['delivering'];
+        $totals['in_transit'] += (int)$b['in_transit'];
+        $totals['delivered']  += (int)$b['delivered'];
+        $totals['for_return'] += (int)$b['for_return'];
     }
 
+    // ==============================
+    // RIGHT TABLE: RTS Summary (grouped within day)
+    // ==============================
+    $rtsAgg = []; // key => ['label','sender','item_name','delivered','for_return','volume','rts_rate']
+
+    // Delivered rows for day
+    $deliveredRows = DB::table('from_jnts')
+        ->whereNotNull('signingtime')
+        ->whereBetween('signingtime', [$dayStart->toDateTimeString(), $dayEnd->toDateTimeString()])
+        ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
+        ->whereRaw("LOWER(status) LIKE '%delivered%'")
+        ->select('sender','item_name')
+        ->get();
+
+    foreach ($deliveredRows as $r) {
+        $key = $makeGroupKey($r->sender, $r->item_name);
+        if (!isset($rtsAgg[$key])) {
+            $rtsAgg[$key] = [
+                'label'     => $key,
+                'sender'    => trim((string)$r->sender),
+                'item_name' => trim((string)$r->item_name),
+                'delivered' => 0,
+                'for_return'=> 0,
+            ];
+        }
+        $rtsAgg[$key]['delivered']++;
+    }
+
+    // For Return rows (STRICT): must have For Return/RTS transition today, and current status still For Return/RTS, and NOT Returned
+    DB::table('from_jnts')
+        ->whereNotNull('status_logs')
+        ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
+        ->where(function($q){
+            $q->where('status_logs','like','%For Return%')
+              ->orWhere('status_logs','like','%for return%')
+              ->orWhere('status_logs','like','%RTS%')
+              ->orWhere('status_logs','like','%rts%');
+        })
+        ->select('waybill_number','status','status_logs','rts_reason','sender','item_name')
+        ->orderBy('id')
+        ->chunk(1000, function($rows) use (
+            &$rtsAgg,
+            $date,
+            $makeGroupKey,
+            $isForReturnStatus,
+            $isDeliveringStatus,
+            $isReturnedStatus
+        ){
+            foreach ($rows as $row) {
+                $waybill = trim((string)($row->waybill_number ?? ''));
+                if ($waybill === '') continue;
+
+                $currentStatus = (string)($row->status ?? '');
+                if ($isReturnedStatus($currentStatus)) continue;          // ✅ exclude Returned
+                if (!$isForReturnStatus($currentStatus)) continue;        // ✅ must still be For Return/RTS
+
+                $decoded = json_decode((string)($row->status_logs ?? ''), true);
+                if (!is_array($decoded) || empty($decoded)) continue;
+
+                $dayLogs = [];
+                foreach ($decoded as $e) {
+                    $ba = $e['batch_at'] ?? null;
+                    if (!$ba) continue;
+                    if (substr((string)$ba, 0, 10) !== $date) continue;
+                    $dayLogs[] = $e;
+                }
+                if (empty($dayLogs)) continue;
+
+                usort($dayLogs, fn($a,$b) => strcmp((string)($a['batch_at'] ?? ''), (string)($b['batch_at'] ?? '')));
+
+                $hasRtsReason = !is_null($row->rts_reason) && trim((string)$row->rts_reason) !== '';
+
+                $wasDeliveringToday = false;
+                $hit = false;
+
+                foreach ($dayLogs as $e) {
+                    $to   = strtolower(trim((string)($e['to'] ?? '')));
+                    $from = strtolower(trim((string)($e['from'] ?? '')));
+
+                    if (str_contains($to, 'delivering') && !$hasRtsReason) {
+                        $wasDeliveringToday = true;
+                    }
+
+                    if ($isForReturnStatus($to) && ($wasDeliveringToday || $isDeliveringStatus($from))) {
+                        $hit = true;
+                        break;
+                    }
+                }
+
+                if (!$hit) continue;
+
+                $key = $makeGroupKey($row->sender, $row->item_name);
+                if (!isset($rtsAgg[$key])) {
+                    $rtsAgg[$key] = [
+                        'label'     => $key,
+                        'sender'    => trim((string)$row->sender),
+                        'item_name' => trim((string)$row->item_name),
+                        'delivered' => 0,
+                        'for_return'=> 0,
+                    ];
+                }
+                $rtsAgg[$key]['for_return']++;
+            }
+        });
+
+    // finalize rows
+    $rtsRows = [];
+    $rtsTotals = ['delivered'=>0,'for_return'=>0,'rts_rate'=>0];
+
+    foreach ($rtsAgg as $key => $v) {
+        $del = (int)$v['delivered'];
+        $fr  = (int)$v['for_return'];
+        $vol = $del + $fr;
+        $rate = $vol > 0 ? ($fr / $vol) * 100 : 0;
+
+        $rtsRows[] = [
+            'label'     => $v['label'],
+            'sender'    => $v['sender'],
+            'item_name' => $v['item_name'],
+            'delivered' => $del,
+            'for_return'=> $fr,
+            'volume'    => $vol,
+            'rts_rate'  => $rate,
+        ];
+
+        $rtsTotals['delivered']  += $del;
+        $rtsTotals['for_return'] += $fr;
+    }
+
+    $totalVol = $rtsTotals['delivered'] + $rtsTotals['for_return'];
+    $rtsTotals['rts_rate'] = $totalVol > 0 ? ($rtsTotals['for_return'] / $totalVol) * 100 : 0;
+
+    // sort by volume desc
+    usort($rtsRows, function($a,$b){
+        return ($b['volume'] <=> $a['volume']);
+    });
+
     return view('jnt_status_summary', [
-        'date'    => $date,
-        'batches' => $batches,
-        'totals'  => $totals,
+        'date'      => $date,
+        'batches'   => $batches,
+        'totals'    => $totals,
+        'rtsGroup'  => $rtsGroup,
+        'rtsRows'   => $rtsRows,
+        'rtsTotals' => $rtsTotals,
     ]);
 }
+
+
+public function statusSummaryRtsDetails(Request $request)
+{
+    $date     = $request->input('date');
+    $rtsGroup = $request->input('rts_group', 'sender_item'); // sender_item | sender | item
+    $metric   = $request->input('metric'); // delivered | for_return
+
+    if (!$date || !$metric) {
+        return response("Missing params (date/metric).", 422);
+    }
+
+    if (!in_array($rtsGroup, ['sender_item','sender','item'], true)) {
+        return response("Invalid rts_group.", 422);
+    }
+    if (!in_array($metric, ['delivered','for_return'], true)) {
+        return response("Invalid metric.", 422);
+    }
+
+    $sender   = trim((string)$request->input('sender', ''));
+    $itemName = trim((string)$request->input('item_name', ''));
+    $grp      = trim((string)$request->input('grp', ''));
+
+    if ($rtsGroup === 'sender_item' && ($sender === '' || $itemName === '')) {
+        return response("Missing sender/item_name for sender_item.", 422);
+    }
+    if ($rtsGroup !== 'sender_item' && $grp === '') {
+        return response("Missing grp for sender/item.", 422);
+    }
+
+    $day      = Carbon::parse($date, 'Asia/Manila');
+    $dayStart = $day->copy()->startOfDay();
+    $dayEnd   = $day->copy()->endOfDay();
+
+    // window for scanning status_logs (same as main page)
+    $windowStart = $day->copy()->subDays(60)->startOfDay();
+    $windowEnd   = $dayEnd;
+
+    // ✅ STRICT For Return detector (NOT "Returned")
+    $isForReturnStatus = function (string $s): bool {
+        $s = strtolower(trim($s));
+        if (str_contains($s, 'for return')) return true;
+        if (preg_match('/\brts\b/i', $s)) return true;
+        return false;
+    };
+
+    $isDeliveringStatus = function (string $s): bool {
+        $s = strtolower(trim($s));
+        return str_contains($s, 'delivering')
+            || (str_contains($s, 'deliver') && !str_contains($s, 'delivered'));
+    };
+
+    // group matcher
+    $matchGroup = function ($row) use ($rtsGroup, $sender, $itemName, $grp) {
+        $rowSender = trim((string)($row->sender ?? ''));
+        $rowItem   = trim((string)($row->item_name ?? ''));
+
+        if ($rtsGroup === 'sender_item') {
+            return mb_strtolower($rowSender) === mb_strtolower($sender)
+                && mb_strtolower($rowItem)   === mb_strtolower($itemName);
+        }
+
+        if ($rtsGroup === 'sender') {
+            return mb_strtolower($rowSender) === mb_strtolower($grp);
+        }
+
+        // item
+        return mb_strtolower($rowItem) === mb_strtolower($grp);
+    };
+
+    // =========================
+    // ✅ DELIVERED DETAILS
+    // =========================
+    if ($metric === 'delivered') {
+        $rows = DB::table('from_jnts')
+            ->whereNotNull('signingtime')
+            ->whereBetween('signingtime', [$dayStart->toDateTimeString(), $dayEnd->toDateTimeString()])
+            ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
+            ->whereRaw("LOWER(status) LIKE '%delivered%'")
+            ->select('waybill_number','status','province','submission_time','signingtime','status_logs','sender','item_name')
+            ->orderBy('signingtime')
+            ->get();
+
+        $items = [];
+        foreach ($rows as $r) {
+            if (!$matchGroup($r)) continue;
+
+            $logs = [];
+            if (!empty($r->status_logs)) {
+                $d = json_decode($r->status_logs, true);
+                if (is_array($d)) $logs = $d; // FULL logs (all dates)
+            }
+
+            $items[] = [
+                'waybill'         => (string)$r->waybill_number,
+                'status'          => (string)$r->status,
+                'province'        => (string)($r->province ?? ''),
+                'submission_time' => (string)($r->submission_time ?? ''),
+                'signingtime'     => (string)($r->signingtime ?? ''),
+                'logs'            => $logs,
+            ];
+        }
+
+        // ✅ IMPORTANT: use SAME popup blade as status summary (working)
+        return view('jnt_status_summary_details', [
+            'title'   => "DELIVERED • " . ($rtsGroup === 'sender_item' ? "{$sender} | {$itemName}" : $grp),
+            'date'    => $date,
+            'batchAt' => null,
+            'metric'  => 'delivered',
+            'items'   => $items,
+        ]);
+    }
+
+    // =========================
+    // ✅ FOR_RETURN DETAILS (STRICT, NOT Returned)
+    // =========================
+    $itemsByWaybill = []; // unique
+
+    DB::table('from_jnts')
+        ->whereNotNull('status_logs')
+        ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
+        ->where(function($q){
+            $q->where('status_logs','like','%For Return%')
+              ->orWhere('status_logs','like','%for return%')
+              ->orWhere('status_logs','like','%RTS%')
+              ->orWhere('status_logs','like','%rts%');
+        })
+        ->select('waybill_number','status','province','submission_time','signingtime','status_logs','rts_reason','sender','item_name')
+        ->orderBy('id')
+        ->chunk(1000, function($rows) use (
+            &$itemsByWaybill,
+            $matchGroup,
+            $date,
+            $isForReturnStatus,
+            $isDeliveringStatus
+        ) {
+            foreach ($rows as $row) {
+                $waybill = trim((string)($row->waybill_number ?? ''));
+                if ($waybill === '' || isset($itemsByWaybill[$waybill])) continue;
+                if (!$matchGroup($row)) continue;
+
+                $decoded = json_decode((string)($row->status_logs ?? ''), true);
+                if (!is_array($decoded) || empty($decoded)) continue;
+
+                // logs on selected date only (for deciding if For Return today)
+                $dayLogs = [];
+                foreach ($decoded as $e) {
+                    $ba = $e['batch_at'] ?? null;
+                    if (!$ba) continue;
+                    if (substr((string)$ba, 0, 10) !== $date) continue;
+                    $dayLogs[] = $e;
+                }
+                if (empty($dayLogs)) continue;
+
+                usort($dayLogs, fn($a,$b) => strcmp((string)($a['batch_at'] ?? ''), (string)($b['batch_at'] ?? '')));
+
+                $hasRts = !is_null($row->rts_reason) && trim((string)$row->rts_reason) !== '';
+
+                $wasDeliveringToday = false;
+                foreach ($dayLogs as $e) {
+                    $to   = strtolower(trim((string)($e['to'] ?? '')));
+                    $from = strtolower(trim((string)($e['from'] ?? '')));
+
+                    // Delivering (exclude if may RTS reason)
+                    if (str_contains($to, 'delivering') && !$hasRts) {
+                        $wasDeliveringToday = true;
+                    }
+
+                    // ✅ STRICT: For Return / RTS only (NOT Returned)
+                    if ($isForReturnStatus($to) && ($wasDeliveringToday || $isDeliveringStatus($from))) {
+                        $itemsByWaybill[$waybill] = [
+                            'waybill'         => $waybill,
+                            'status'          => (string)($row->status ?? ''),
+                            'province'        => (string)($row->province ?? ''),
+                            'submission_time' => (string)($row->submission_time ?? ''),
+                            'signingtime'     => (string)($row->signingtime ?? ''),
+                            'logs'            => $decoded, // FULL logs
+                        ];
+                        break;
+                    }
+                }
+            }
+        });
+
+    // ✅ IMPORTANT: use SAME popup blade as status summary (working)
+    return view('jnt_status_summary_details', [
+        'title'   => "FOR_RETURN • " . ($rtsGroup === 'sender_item' ? "{$sender} | {$itemName}" : $grp),
+        'date'    => $date,
+        'batchAt' => null,
+        'metric'  => 'for_return',
+        'items'   => array_values($itemsByWaybill),
+    ]);
+}
+
+
+
 public function statusSummaryDetails(Request $request)
 {
     $date    = $request->input('date');
     $batchAt = $request->input('batch_at');
     $metric  = $request->input('metric'); // delivering | in_transit | for_return | delivered
 
-    if (!$date || !$batchAt || !$metric) {
-        return response("Missing params.", 422);
-    }
+    if (!$date || !$batchAt || !$metric) return response("Missing params.", 422);
 
     $allowed = ['delivering', 'in_transit', 'for_return', 'delivered'];
-    if (!in_array($metric, $allowed, true)) {
-        return response("Invalid metric.", 422);
-    }
+    if (!in_array($metric, $allowed, true)) return response("Invalid metric.", 422);
 
-    $day       = Carbon::parse($date, 'Asia/Manila');
-    $dayStart  = $day->copy()->startOfDay();
-    $dayEnd    = $day->copy()->endOfDay();
+    $day      = Carbon::parse($date, 'Asia/Manila');
+    $dayStart = $day->copy()->startOfDay();
+    $dayEnd   = $day->copy()->endOfDay();
 
-    // 60-day window based on submission_time
     $windowStart = $day->copy()->subDays(60)->startOfDay();
     $windowEnd   = $dayEnd;
 
-    $isReturnStatus = function (string $s): bool {
-        $s = strtolower(trim($s));
-        return str_contains($s, 'return') || str_contains($s, 'rts');
+    $norm = function ($s) {
+        $s = mb_strtolower((string)$s);
+        return preg_replace('/\s+/u', ' ', trim($s));
     };
 
-    $isDeliveringStatus = function (string $s): bool {
-        $s = strtolower(trim($s));
-        return str_contains($s, 'delivering') || (str_contains($s, 'deliver') && !str_contains($s, 'delivered'));
+    $isReturnedStatus = function (string $s) use ($norm): bool {
+        return str_contains($norm($s), 'returned');
     };
 
-    // ✅ DELIVERED: list via signingtime range (range passed from UI)
+    $isForReturnStatus = function (string $s) use ($norm): bool {
+        $s = $norm($s);
+        if (str_contains($s, 'for return')) return true;
+        if (preg_match('/\brts\b/i', $s)) return true;
+        return false;
+    };
+
+    $isDeliveringStatus = function (string $s) use ($norm): bool {
+        $s = $norm($s);
+        return str_contains($s, 'delivering')
+            || (str_contains($s, 'deliver') && !str_contains($s, 'delivered'));
+    };
+
+    // ✅ DELIVERED: via signingtime range (range passed from UI)
     if ($metric === 'delivered') {
         $rangeStart = $request->input('range_start');
         $rangeEnd   = $request->input('range_end');
-
-        if (!$rangeStart || !$rangeEnd) {
-            return response("Missing range_start/range_end for delivered.", 422);
-        }
+        if (!$rangeStart || !$rangeEnd) return response("Missing range_start/range_end for delivered.", 422);
 
         $rows = DB::table('from_jnts')
             ->whereNotNull('signingtime')
-            ->whereBetween('submission_time', [
-                $windowStart->toDateTimeString(),
-                $windowEnd->toDateTimeString(),
-            ])
+            ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
             ->whereRaw("LOWER(status) LIKE '%delivered%'")
             ->where('signingtime', '>=', $rangeStart)
             ->where('signingtime', '<=', $rangeEnd)
-            ->select('waybill_number', 'status', 'signingtime', 'submission_time', 'status_logs')
+            ->select('waybill_number', 'status', 'province', 'signingtime', 'submission_time', 'status_logs')
             ->orderBy('signingtime')
             ->get();
 
@@ -299,17 +621,16 @@ public function statusSummaryDetails(Request $request)
             $logs = [];
             if (!empty($r->status_logs)) {
                 $decoded = json_decode($r->status_logs, true);
-                if (is_array($decoded)) {
-                    $logs = $decoded; // ✅ FULL logs
-                }
+                if (is_array($decoded)) $logs = $decoded;
             }
 
             $items[] = [
-                'waybill'          => (string)$r->waybill_number,
-                'status'           => (string)$r->status,
-                'submission_time'  => (string)$r->submission_time,
-                'signingtime'      => (string)$r->signingtime,
-                'logs'             => $logs,
+                'waybill'         => (string)$r->waybill_number,
+                'status'          => (string)$r->status,
+                'province'        => (string)($r->province ?? ''),
+                'submission_time' => (string)($r->submission_time ?? ''),
+                'signingtime'     => (string)($r->signingtime ?? ''),
+                'logs'            => $logs,
             ];
         }
 
@@ -322,16 +643,12 @@ public function statusSummaryDetails(Request $request)
         ]);
     }
 
-    // ✅ For delivering / in_transit / for_return: parse status_logs and match only those that belong to this batchAt (same date)
+    // ✅ delivering / in_transit / for_return: parse status_logs, match exact batchAt
     $candidates = DB::table('from_jnts')
         ->whereNotNull('status_logs')
-        ->whereBetween('submission_time', [
-            $windowStart->toDateTimeString(),
-            $windowEnd->toDateTimeString(),
-        ])
-        // quick narrowing: only rows whose JSON contains this batchAt string
+        ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
         ->where('status_logs', 'like', '%' . $batchAt . '%')
-        ->select('waybill_number', 'status_logs', 'rts_reason', 'status', 'signingtime', 'submission_time')
+        ->select('waybill_number', 'status_logs', 'rts_reason', 'status', 'province', 'signingtime', 'submission_time')
         ->get();
 
     $items = [];
@@ -339,11 +656,9 @@ public function statusSummaryDetails(Request $request)
         $waybill = trim((string)($row->waybill_number ?? ''));
         if ($waybill === '') continue;
 
-        $logsRaw = $row->status_logs ?? '';
-        $decoded = json_decode($logsRaw, true);
+        $decoded = json_decode((string)($row->status_logs ?? ''), true);
         if (!is_array($decoded) || empty($decoded)) continue;
 
-        // ✅ dayLogs = logs on selected date (used for matching logic)
         $dayLogs = [];
         foreach ($decoded as $e) {
             $ba = $e['batch_at'] ?? null;
@@ -355,55 +670,47 @@ public function statusSummaryDetails(Request $request)
 
         usort($dayLogs, fn($a,$b) => strcmp((string)($a['batch_at'] ?? ''), (string)($b['batch_at'] ?? '')));
 
-        $hasRts = !is_null($row->rts_reason) && trim((string)$row->rts_reason) !== '';
+        $hasRtsReason = !is_null($row->rts_reason) && trim((string)$row->rts_reason) !== '';
+        $currentStatus = (string)($row->status ?? '');
 
         $matched = false;
-
         $wasDeliveringToday = false;
+
         foreach ($dayLogs as $e) {
             $ba   = (string)($e['batch_at'] ?? '');
             $to   = strtolower(trim((string)($e['to'] ?? '')));
             $from = strtolower(trim((string)($e['from'] ?? '')));
 
-            // track delivering earlier today
-            if (str_contains($to, 'delivering') && !$hasRts) {
+            if (str_contains($to, 'delivering') && !$hasRtsReason) {
                 $wasDeliveringToday = true;
             }
 
-            // only evaluate the clicked batchAt
-            if ($ba !== $batchAt) {
-                continue;
-            }
+            if ($ba !== $batchAt) continue;
 
             if ($metric === 'delivering') {
-                if (str_contains($to, 'delivering') && !$hasRts) {
-                    $matched = true;
-                    break;
-                }
+                if (str_contains($to, 'delivering') && !$hasRtsReason) { $matched = true; break; }
             } elseif ($metric === 'in_transit') {
-                if (str_contains($to, 'transit')) {
-                    $matched = true;
-                    break;
-                }
+                if (str_contains($to, 'transit')) { $matched = true; break; }
             } elseif ($metric === 'for_return') {
-                if ($isReturnStatus($to) && ($wasDeliveringToday || $isDeliveringStatus($from))) {
-                    $matched = true;
-                    break;
+                // ✅ STRICT + exclude Returned current status + must still be For Return/RTS
+                if ($isForReturnStatus($to) && ($wasDeliveringToday || $isDeliveringStatus($from))) {
+                    if (!$isReturnedStatus($currentStatus) && $isForReturnStatus($currentStatus)) {
+                        $matched = true;
+                        break;
+                    }
                 }
             }
         }
 
         if (!$matched) continue;
 
-        // ✅ show FULL logs (all dates) as requested
-        $fullLogs = $decoded;
-
         $items[] = [
-            'waybill'          => $waybill,
-            'status'           => (string)($row->status ?? ''),
-            'submission_time'  => (string)($row->submission_time ?? ''),
-            'signingtime'      => (string)($row->signingtime ?? ''),
-            'logs'             => $fullLogs,
+            'waybill'         => $waybill,
+            'status'          => $currentStatus,
+            'province'        => (string)($row->province ?? ''),
+            'submission_time' => (string)($row->submission_time ?? ''),
+            'signingtime'     => (string)($row->signingtime ?? ''),
+            'logs'            => $decoded, // FULL logs
         ];
     }
 
@@ -415,6 +722,8 @@ public function statusSummaryDetails(Request $request)
         'items'   => $items,
     ]);
 }
+
+
 
 
 
@@ -441,169 +750,194 @@ public function statusSummaryDetails(Request $request)
         return redirect()->back()->with('success', 'Data saved to FROM_JNT.');
     }
 
-    public function index(Request $request)
-    {
-        $dateFrom = $request->input('date_from');
-        $dateTo   = $request->input('date_to');
+   public function index(Request $request)
+{
+    $dateFrom = $request->input('date_from');
+    $dateTo   = $request->input('date_to');
+    $q        = trim((string)$request->input('q', ''));
 
-        // --- BASE QUERY: submission_time lang ang gamit dito ---
-        $baseDateQuery = FromJnt::query();
+    // --- BASE QUERY: submission_time date filter lang ---
+    $baseDateQuery = FromJnt::query();
 
-        if ($dateFrom) {
-            $baseDateQuery->whereDate('submission_time', '>=', $dateFrom);
+    if ($dateFrom) {
+        $baseDateQuery->whereDate('submission_time', '>=', $dateFrom);
+    }
+
+    if ($dateTo) {
+        $baseDateQuery->whereDate('submission_time', '<=', $dateTo);
+    }
+
+    // --- COLUMN FILTERS (popup) ---
+    $currentFilters = $request->input('filters', []);
+    $filterableCols = [
+        'submission_time',
+        'waybill_number',
+        'receiver',
+        'receiver_cellphone',
+        'sender',
+        'item_name',
+        'cod',
+        'remarks',
+        'province',
+        'city',
+        'barangay',
+        'total_shipping_cost',
+        'rts_reason',
+        'status',
+        'signingtime',
+        'created_at',
+        'updated_at',
+    ];
+
+    $dataQuery = clone $baseDateQuery;
+
+    foreach ($currentFilters as $col => $values) {
+        if (!in_array($col, $filterableCols, true)) {
+            continue;
         }
 
-        if ($dateTo) {
-            $baseDateQuery->whereDate('submission_time', '<=', $dateTo);
+        if (!is_array($values)) {
+            $values = [$values];
         }
 
-        // --- COLUMN FILTERS (galing sa popup) ---
-        $currentFilters = $request->input('filters', []);
-        $filterableCols = [
-            'submission_time',
-            'waybill_number',
-            'receiver',
-            'receiver_cellphone',
-            'sender',
-            'item_name',
-            'cod',
-            'remarks',
-            'province',
-            'city',
-            'barangay',
-            'total_shipping_cost',
-            'rts_reason',
-            'status',
-            'signingtime',
-            'created_at',
-            'updated_at',
-        ];
+        $values = array_values(array_filter($values, fn ($v) => $v !== '' && $v !== null));
 
-        $dataQuery = clone $baseDateQuery;
-
-        foreach ($currentFilters as $col => $values) {
-            if (!in_array($col, $filterableCols, true)) {
-                continue;
-            }
-
-            if (!is_array($values)) {
-                $values = [$values];
-            }
-
-            $values = array_values(array_filter($values, fn ($v) => $v !== '' && $v !== null));
-
-            if (empty($values)) {
-                continue;
-            }
-
-            // date/time columns
-            if (in_array($col, ['submission_time', 'signingtime', 'created_at', 'updated_at'], true)) {
-                $dataQuery->whereIn(\DB::raw("DATE($col)"), $values);
-            } else {
-                $dataQuery->whereIn($col, $values);
-            }
+        if (empty($values)) {
+            continue;
         }
 
-        // --- SORTING (server-side) ---
-        $allowedSortCols = [
-            'submission_time',
-            'waybill_number',
-            'receiver',
-            'receiver_cellphone',
-            'sender',
-            'item_name',
-            'cod',
-            'status',
-            'signingtime',
-            'created_at',
-            'updated_at',
-        ];
-
-        $sortCol = $request->input('sort_col');
-        $sortDir = $request->input('sort_dir', 'desc');
-
-        if (!in_array($sortCol, $allowedSortCols, true)) {
-            $sortCol = 'submission_time';
-            $sortDir = 'desc';
+        // date/time columns
+        if (in_array($col, ['submission_time', 'signingtime', 'created_at', 'updated_at'], true)) {
+            $dataQuery->whereIn(\DB::raw("DATE($col)"), $values);
+        } else {
+            $dataQuery->whereIn($col, $values);
         }
+    }
 
-        $data = (clone $dataQuery)
-            ->orderBy($sortCol, $sortDir)
-            ->paginate(100)
-            ->withQueryString();
+    // ✅ SEARCH (applies AFTER date filter + column filters)
+    // Search scope is automatically limited by dateFrom/dateTo because dataQuery started from baseDateQuery.
+    if ($q !== '') {
+        // optional: escape % and _ so user input is literal
+        $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q);
+        $like = '%' . $escaped . '%';
 
-        // --- FILTER OPTIONS (pang-popup) ---
-        // IMPORTANT: base lang siya sa date range, HINDI sa column filters
-        $filterBase = clone $baseDateQuery;
-        $filterOptions = [];
+        $dataQuery->where(function ($qq) use ($like, $q) {
+            $qq->whereRaw("waybill_number LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("receiver LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("receiver_cellphone LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("sender LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("item_name LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("status LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("remarks LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("province LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("city LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("barangay LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("rts_reason LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("CAST(cod AS CHAR) LIKE ? ESCAPE '\\\\'", [$like])
+               ->orWhereRaw("CAST(total_shipping_cost AS CHAR) LIKE ? ESCAPE '\\\\'", [$like]);
+        });
+    }
 
-        // submission_time (date lang)
-        $filterOptions['submission_time'] = (clone $filterBase)
-            ->selectRaw('DATE(submission_time) as value')
+    // --- SORTING (server-side) ---
+    $allowedSortCols = [
+        'submission_time',
+        'waybill_number',
+        'receiver',
+        'receiver_cellphone',
+        'sender',
+        'item_name',
+        'cod',
+        'status',
+        'signingtime',
+        'created_at',
+        'updated_at',
+    ];
+
+    $sortCol = $request->input('sort_col');
+    $sortDir = $request->input('sort_dir', 'desc');
+
+    if (!in_array($sortCol, $allowedSortCols, true)) {
+        $sortCol = 'submission_time';
+        $sortDir = 'desc';
+    }
+
+    $data = (clone $dataQuery)
+        ->orderBy($sortCol, $sortDir)
+        ->paginate(100)
+        ->withQueryString();
+
+    // --- FILTER OPTIONS (pang-popup) ---
+    // IMPORTANT: base lang sa date range (HINDI kasama search/column filters)
+    $filterBase = clone $baseDateQuery;
+    $filterOptions = [];
+
+    $filterOptions['submission_time'] = (clone $filterBase)
+        ->selectRaw('DATE(submission_time) as value')
+        ->distinct()
+        ->orderBy('value')
+        ->pluck('value')
+        ->map(fn ($v) => $v ? Carbon::parse($v)->format('Y-m-d') : '')
+        ->values()
+        ->toArray();
+
+    $distinctCols = [
+        'waybill_number',
+        'receiver',
+        'receiver_cellphone',
+        'sender',
+        'item_name',
+        'cod',
+        'remarks',
+        'province',
+        'city',
+        'barangay',
+        'total_shipping_cost',
+        'rts_reason',
+        'status',
+    ];
+
+    foreach ($distinctCols as $col) {
+        $filterOptions[$col] = (clone $filterBase)
+            ->select($col . ' as value')
             ->distinct()
             ->orderBy('value')
             ->pluck('value')
-            ->map(fn ($v) => $v ? Carbon::parse($v)->format('Y-m-d') : '')
+            ->map(function ($v) {
+                if (is_array($v) || is_object($v)) {
+                    return json_encode($v, JSON_UNESCAPED_UNICODE);
+                }
+                return (string)($v ?? '');
+            })
             ->values()
             ->toArray();
+    }
 
-        // text / numeric columns
-        $distinctCols = [
-            'waybill_number',
-            'receiver',
-            'receiver_cellphone',
-            'sender',
-            'item_name',
-            'cod',
-            'remarks',
-            'province',
-            'city',
-            'barangay',
-            'total_shipping_cost',
-            'rts_reason',
-            'status',
-        ];
+    foreach (['signingtime', 'created_at', 'updated_at'] as $timeCol) {
+        $filterOptions[$timeCol] = (clone $filterBase)
+            ->select($timeCol . ' as value')
+            ->distinct()
+            ->orderBy('value')
+            ->pluck('value')
+            ->map(function ($v) {
+                return $v ? Carbon::parse($v)->format('Y-m-d\TH:i:s') : '';
+            })
+            ->values()
+            ->toArray();
+    }
 
-        foreach ($distinctCols as $col) {
-            $filterOptions[$col] = (clone $filterBase)
-                ->select($col . ' as value')
-                ->distinct()
-                ->orderBy('value')
-                ->pluck('value')
-                ->map(function ($v) {
-                    if (is_array($v) || is_object($v)) {
-                        return json_encode($v, JSON_UNESCAPED_UNICODE);
-                    }
-                    return (string)($v ?? '');
-                })
-                ->values()
-                ->toArray();
-        }
-
-        // time columns
-        foreach (['signingtime', 'created_at', 'updated_at'] as $timeCol) {
-            $filterOptions[$timeCol] = (clone $filterBase)
-                ->select($timeCol . ' as value')
-                ->distinct()
-                ->orderBy('value')
-                ->pluck('value')
-                ->map(function ($v) {
-                    return $v ? Carbon::parse($v)->format('Y-m-d\TH:i:s') : '';
-                })
-                ->values()
-                ->toArray();
-        }
-
-        return view('jnt.dashboard', [
-            'data'          => $data,
-            'dateFrom'      => $dateFrom,
-            'dateTo'        => $dateTo,
-            'filterOptions' => $filterOptions,
-            'currentFilters'=> $currentFilters,
-            'sortCol'       => $sortCol,
-            'sortDir'       => $sortDir,
-        ]);
+    return view('jnt.dashboard', [
+        'data'          => $data,
+        'dateFrom'      => $dateFrom,
+        'dateTo'        => $dateTo,
+        'filterOptions' => $filterOptions,
+        'currentFilters'=> $currentFilters,
+        'sortCol'       => $sortCol,
+        'sortDir'       => $sortDir,
+    ]);
 }
+
+
+
 
     // JNT_UPDATE: update if exists, else insert
     // ✅ may optional batch_at + status_logs logic

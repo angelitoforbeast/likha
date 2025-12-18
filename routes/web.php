@@ -349,6 +349,9 @@ Route::post('/task/update-team-task', [TaskController::class, 'updateTeamTask'])
     ->name('jnt.status-summary');
     Route::get('/jnt/status-summary/details', [FromJntController::class, 'statusSummaryDetails'])
     ->name('jnt.status-summary.details');
+    Route::get('/jnt/status-summary/rts-details', [FromJntController::class, 'statusSummaryRtsDetails'])
+    ->name('jnt.status-summary.rts-details');
+
     Route::get('/jnt/dashboard', [FromJntController::class, 'index'])
     ->name('jnt.dashboard');
     Route::get('/jnt/status', [JntStatusController::class, 'index'])->name('jnt.status');
