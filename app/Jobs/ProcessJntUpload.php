@@ -576,62 +576,120 @@ class ProcessJntUpload implements ShouldQueue
     }
 
     protected function appendStatusLogForJob($currentLogs, ?string $oldStatusRaw, ?string $newStatusRaw, Carbon $batchAt): array
-    {
-        if (is_array($currentLogs)) {
-            $logs = $currentLogs;
-        } elseif (is_string($currentLogs) && $currentLogs !== '') {
-            $decoded = json_decode($currentLogs, true);
-            $logs = is_array($decoded) ? $decoded : [];
-        } else {
-            $logs = [];
+{
+    // normalize logs → array
+    if (is_array($currentLogs)) {
+        $logs = $currentLogs;
+    } elseif (is_string($currentLogs) && $currentLogs !== '') {
+        $decoded = json_decode($currentLogs, true);
+        $logs = is_array($decoded) ? $decoded : [];
+    } else {
+        $logs = [];
+    }
+
+    $oldStatus = $oldStatusRaw !== null && trim($oldStatusRaw) !== '' ? trim($oldStatusRaw) : null;
+    $newStatus = $newStatusRaw !== null && trim($newStatusRaw) !== '' ? trim($newStatusRaw) : null;
+
+    // helpers
+    $isInTransit = function (?string $s): bool {
+        if ($s === null) return false;
+        return strcasecmp(trim($s), 'In Transit') === 0;
+    };
+
+    // ✅ Delivering matcher (avoid Delivered)
+    $isDelivering = function (?string $s): bool {
+        if ($s === null) return false;
+        $t = strtolower(trim($s));
+        if ($t === '') return false;
+        // "delivering" or "deliver" but not "delivered"
+        return str_contains($t, 'delivering') || (str_contains($t, 'deliver') && !str_contains($t, 'delivered'));
+    };
+
+    $shouldAdd = false;
+
+    // 1) First time ever (from null → something)
+    if ($oldStatus === null && $newStatus !== null) {
+        $shouldAdd = true;
+
+    // 2) Normal transition (nagbago status)
+    } elseif ($oldStatus !== null && $newStatus !== null && $oldStatus !== $newStatus) {
+        $shouldAdd = true;
+
+    // 3) Same status, special rule for "In Transit" (daily checkpoint)
+    } elseif ($newStatus !== null && $isInTransit($newStatus)) {
+        $lastInTransitLog = null;
+
+        for ($i = count($logs) - 1; $i >= 0; $i--) {
+            $log = $logs[$i] ?? null;
+            if (!is_array($log)) continue;
+
+            if (isset($log['to']) && $isInTransit((string)$log['to'])) {
+                $lastInTransitLog = $log;
+                break;
+            }
         }
 
-        $oldStatus = $oldStatusRaw !== null && trim($oldStatusRaw) !== '' ? trim($oldStatusRaw) : null;
-        $newStatus = $newStatusRaw !== null && trim($newStatusRaw) !== '' ? trim($newStatusRaw) : null;
+        if ($lastInTransitLog) {
+            try {
+                $lastDate    = Carbon::parse($lastInTransitLog['batch_at'])->toDateString();
+                $currentDate = $batchAt->toDateString();
 
-        $shouldAdd = false;
-
-        if ($oldStatus === null && $newStatus !== null) {
-            $shouldAdd = true;
-        } elseif ($oldStatus !== null && $newStatus !== null && $oldStatus !== $newStatus) {
-            $shouldAdd = true;
-        } elseif ($newStatus !== null && strcasecmp($newStatus, 'In Transit') === 0) {
-            $lastInTransitLog = null;
-
-            for ($i = count($logs) - 1; $i >= 0; $i--) {
-                $log = $logs[$i] ?? null;
-                if (!is_array($log)) continue;
-
-                if (isset($log['to']) && strcasecmp((string)$log['to'], 'In Transit') === 0) {
-                    $lastInTransitLog = $log;
-                    break;
-                }
-            }
-
-            if ($lastInTransitLog) {
-                try {
-                    $lastDate    = Carbon::parse($lastInTransitLog['batch_at'])->toDateString();
-                    $currentDate = $batchAt->toDateString();
-                    if ($lastDate !== $currentDate) $shouldAdd = true;
-                } catch (\Throwable $e) {
+                // ✅ ibang araw na pero In Transit pa rin → log ulit
+                if ($lastDate !== $currentDate) {
                     $shouldAdd = true;
                 }
-            } else {
+            } catch (\Throwable $e) {
                 $shouldAdd = true;
+            }
+        } else {
+            // wala pang In Transit log dati → log
+            $shouldAdd = true;
+        }
+
+    // 4) ✅ Same status, special rule for "Delivering" (daily checkpoint)
+    } elseif ($newStatus !== null && $isDelivering($newStatus)) {
+        $lastDeliveringLog = null;
+
+        for ($i = count($logs) - 1; $i >= 0; $i--) {
+            $log = $logs[$i] ?? null;
+            if (!is_array($log)) continue;
+
+            if (isset($log['to']) && $isDelivering((string)$log['to'])) {
+                $lastDeliveringLog = $log;
+                break;
             }
         }
 
-        if ($shouldAdd && $newStatus !== null) {
-            $logs[] = [
-                'batch_at'      => $batchAt->format('Y-m-d H:i:s'),
-                'upload_log_id' => $this->uploadLogId,
-                'from'          => $oldStatus,
-                'to'            => $newStatus,
-            ];
-        }
+        if ($lastDeliveringLog) {
+            try {
+                $lastDate    = Carbon::parse($lastDeliveringLog['batch_at'])->toDateString();
+                $currentDate = $batchAt->toDateString();
 
-        return $logs;
+                // ✅ ibang araw na pero Delivering pa rin → log ulit
+                if ($lastDate !== $currentDate) {
+                    $shouldAdd = true;
+                }
+            } catch (\Throwable $e) {
+                $shouldAdd = true;
+            }
+        } else {
+            // wala pang Delivering log dati → log
+            $shouldAdd = true;
+        }
     }
+
+    if ($shouldAdd && $newStatus !== null) {
+        $logs[] = [
+            'batch_at'      => $batchAt->format('Y-m-d H:i:s'),
+            'upload_log_id' => $this->uploadLogId,
+            'from'          => $oldStatus,
+            'to'            => $newStatus,
+        ];
+    }
+
+    return $logs;
+}
+
 
     private function touchProgress(UploadLog $log)
     {
