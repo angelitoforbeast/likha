@@ -460,19 +460,18 @@ $downloadAll = $isMarketingOIC && $dlParam;
         return redirect()->back()->with('success', 'Record updated successfully.');
     }
 
-   public function index(Request $request)
+  public function index(Request $request)
 {
+    // ✅ Date (Y-m-d). Default: yesterday
     $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
     $formattedDMY = \Carbon\Carbon::parse($date)->format('d-m-Y');
 
-    // Quote STATUS correctly per DB (mysql: `STATUS`, pg: "STATUS")
-    $statusCol = DB::getQueryGrammar()->wrap('STATUS');
+    // ✅ Wrapper para cross-db: mysql uses ``, pgsql uses ""
+    $wrap = fn (string $col) => DB::getQueryGrammar()->wrap($col);
 
-    // ✅ BASE FILTER (index-friendly)
     $baseQuery = MacroOutput::query()
         ->where(function ($q) use ($date, $formattedDMY) {
-            // IMPORTANT: direct compare (works best if ts_date is DATE type)
-            $q->where('ts_date', $date)
+            $q->whereDate('ts_date', $date)
               ->orWhere(function ($qq) use ($formattedDMY) {
                   $qq->whereNull('ts_date')
                      ->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}");
@@ -483,27 +482,26 @@ $downloadAll = $isMarketingOIC && $dlParam;
         $baseQuery->where('PAGE', $request->PAGE);
     }
 
-    // ✅ COUNTS (trim-safe + same filter)
-    $c = (clone $baseQuery)
-        ->toBase()
-        ->selectRaw("
-            COUNT(*) as TOTAL,
-            SUM(CASE WHEN TRIM({$statusCol}) = 'PROCEED' THEN 1 ELSE 0 END) as PROCEED,
-            SUM(CASE WHEN TRIM({$statusCol}) = 'CANNOT PROCEED' THEN 1 ELSE 0 END) as CANNOT_PROCEED,
-            SUM(CASE WHEN TRIM({$statusCol}) = 'ODZ' THEN 1 ELSE 0 END) as ODZ,
-            SUM(CASE WHEN {$statusCol} IS NULL OR TRIM({$statusCol}) = '' THEN 1 ELSE 0 END) as BLANK
-        ")
-        ->first();
+    // ✅ Status counts (same filter as records)
+    $STATUS = $wrap('STATUS');
+
+    $c = (clone $baseQuery)->selectRaw("
+        COUNT(*) as total,
+        SUM(CASE WHEN {$STATUS} = 'PROCEED' THEN 1 ELSE 0 END) as proceed,
+        SUM(CASE WHEN {$STATUS} = 'CANNOT PROCEED' THEN 1 ELSE 0 END) as cannot_proceed,
+        SUM(CASE WHEN {$STATUS} = 'ODZ' THEN 1 ELSE 0 END) as odz,
+        SUM(CASE WHEN {$STATUS} IS NULL OR {$STATUS} = '' THEN 1 ELSE 0 END) as blank
+    ")->first();
 
     $statusCounts = [
-        'TOTAL'          => (int) ($c->TOTAL ?? 0),
-        'PROCEED'        => (int) ($c->PROCEED ?? 0),
-        'CANNOT PROCEED' => (int) ($c->CANNOT_PROCEED ?? 0),
-        'ODZ'            => (int) ($c->ODZ ?? 0),
-        'BLANK'          => (int) ($c->BLANK ?? 0),
+        'TOTAL'          => (int) ($c->total ?? 0),
+        'PROCEED'        => (int) ($c->proceed ?? 0),
+        'CANNOT PROCEED' => (int) ($c->cannot_proceed ?? 0),
+        'ODZ'            => (int) ($c->odz ?? 0),
+        'BLANK'          => (int) ($c->blank ?? 0),
     ];
 
-    // ✅ RECORDS (same filter)
+    // ✅ Records query
     $recordQuery = (clone $baseQuery);
 
     if ($request->filled('status_filter')) {
@@ -534,24 +532,27 @@ $downloadAll = $isMarketingOIC && $dlParam;
         ->simplePaginate($perPage)
         ->withQueryString();
 
-    $records->through(fn($r) => $this->attachHighlightTokens($r));
+    $records->through(function ($r) {
+        return $this->attachHighlightTokens($r);
+    });
 
-    // ✅ Pages dropdown (same date filter)
+    // ✅ Pages dropdown (same filter)
     $pages = MacroOutput::query()
         ->where(function ($q) use ($date, $formattedDMY) {
-            $q->where('ts_date', $date)
+            $q->whereDate('ts_date', $date)
               ->orWhere(function ($qq) use ($formattedDMY) {
                   $qq->whereNull('ts_date')
                      ->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}");
               });
         })
-        ->select('PAGE')->distinct()->orderBy('PAGE')->pluck('PAGE');
+        ->select('PAGE')
+        ->distinct()
+        ->orderBy('PAGE')
+        ->pluck('PAGE');
 
     $paginateOnlyWhenAll = true;
 
-    return view('macro_output.index', compact(
-        'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'
-    ));
+    return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'));
 }
 
 private function tokenizeLocation($raw, string $type): array
