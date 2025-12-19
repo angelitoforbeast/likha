@@ -465,16 +465,14 @@ $downloadAll = $isMarketingOIC && $dlParam;
     $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
     $formattedDMY = \Carbon\Carbon::parse($date)->format('d-m-Y');
 
-    // Use correct identifier quoting for current DB
+    // Correct column quoting per DB (mysql => `STATUS`, pgsql => "STATUS")
     $statusCol = DB::getQueryGrammar()->wrap('STATUS');
 
-    // ✅ Base filter (ts_date primary + fallback only if ts_date is null)
+    // ✅ ONE base query for both counts + records
     $baseQuery = MacroOutput::query()
         ->where(function ($q) use ($date, $formattedDMY) {
-
-            // ✅ FAST FILTER: avoid whereDate() para gumana index
+            // ✅ FAST: if ts_date is DATE type, do direct compare (index-friendly)
             $q->where('ts_date', $date)
-
               ->orWhere(function ($qq) use ($formattedDMY) {
                   $qq->whereNull('ts_date')
                      ->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}");
@@ -485,14 +483,20 @@ $downloadAll = $isMarketingOIC && $dlParam;
         $baseQuery->where('PAGE', $request->PAGE);
     }
 
-    // ✅ Counts (works on MySQL + Postgres)
-    $c = (clone $baseQuery)->selectRaw("
-        COUNT(*) as TOTAL,
-        SUM(CASE WHEN {$statusCol} = 'PROCEED' THEN 1 ELSE 0 END) as PROCEED,
-        SUM(CASE WHEN {$statusCol} = 'CANNOT PROCEED' THEN 1 ELSE 0 END) as CANNOT_PROCEED,
-        SUM(CASE WHEN {$statusCol} = 'ODZ' THEN 1 ELSE 0 END) as ODZ,
-        SUM(CASE WHEN {$statusCol} IS NULL OR {$statusCol} = '' THEN 1 ELSE 0 END) as BLANK
-    ")->first();
+    // ✅ DEBUG (optional): eto dapat SAME sa records total
+    // dd((clone $baseQuery)->count());
+
+    // ✅ COUNTS (trim-safe)
+    $c = (clone $baseQuery)
+        ->toBase() // avoid any accidental model selects/scopes issues
+        ->selectRaw("
+            COUNT(*) as TOTAL,
+            SUM(CASE WHEN TRIM({$statusCol}) = 'PROCEED' THEN 1 ELSE 0 END) as PROCEED,
+            SUM(CASE WHEN TRIM({$statusCol}) = 'CANNOT PROCEED' THEN 1 ELSE 0 END) as CANNOT_PROCEED,
+            SUM(CASE WHEN TRIM({$statusCol}) = 'ODZ' THEN 1 ELSE 0 END) as ODZ,
+            SUM(CASE WHEN {$statusCol} IS NULL OR TRIM({$statusCol}) = '' THEN 1 ELSE 0 END) as BLANK
+        ")
+        ->first();
 
     $statusCounts = [
         'TOTAL'          => (int) ($c->TOTAL ?? 0),
@@ -502,7 +506,7 @@ $downloadAll = $isMarketingOIC && $dlParam;
         'BLANK'          => (int) ($c->BLANK ?? 0),
     ];
 
-    // ✅ Records query
+    // ✅ RECORDS (same filter)
     $recordQuery = (clone $baseQuery);
 
     if ($request->filled('status_filter')) {
@@ -537,7 +541,7 @@ $downloadAll = $isMarketingOIC && $dlParam;
         return $this->attachHighlightTokens($r);
     });
 
-    // ✅ Pages dropdown (same base filter)
+    // ✅ Pages dropdown (same date filter)
     $pages = MacroOutput::query()
         ->where(function ($q) use ($date, $formattedDMY) {
             $q->where('ts_date', $date)
@@ -554,6 +558,7 @@ $downloadAll = $isMarketingOIC && $dlParam;
         'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'
     ));
 }
+
 
 
 private function tokenizeLocation($raw, string $type): array
