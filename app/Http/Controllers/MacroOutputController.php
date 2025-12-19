@@ -464,79 +464,46 @@ $downloadAll = $isMarketingOIC && $dlParam;
 {
     $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
     $formattedDMY = \Carbon\Carbon::parse($date)->format('d-m-Y');
-    $nextDate = \Carbon\Carbon::parse($date)->addDay()->toDateString();
 
-    // IMPORTANT: raw page value dapat same sa DB (case-sensitive sa pgsql)
-    $page = $request->filled('PAGE') ? trim((string)$request->PAGE) : null;
+    // Use correct identifier quoting for current DB
+    $statusCol = DB::getQueryGrammar()->wrap('STATUS');
 
-    $applyPage = function ($q) use ($page) {
-        if ($page !== null && $page !== '') {
-            $q->where('PAGE', $page);
-        }
-        return $q;
-    };
+    // ✅ Base filter (ts_date primary + fallback only if ts_date is null)
+    $baseQuery = MacroOutput::query()
+        ->where(function ($q) use ($date, $formattedDMY) {
 
-    // ✅ index-friendly date range (works for DATE or DATETIME)
-    $qTs = $applyPage(
-        MacroOutput::query()
-            ->where('ts_date', '>=', $date)
-            ->where('ts_date', '<', $nextDate)
-    );
+            // ✅ FAST FILTER: avoid whereDate() para gumana index
+            $q->where('ts_date', $date)
 
-    // ✅ fallback for NULL ts_date
-    $qNull = $applyPage(
-        MacroOutput::query()
-            ->whereNull('ts_date')
-            ->where('TIMESTAMP', 'like', "%{$formattedDMY}")
-    );
-
-    // ✅ Driver-safe STATUS identifier
-    $driver = DB::getDriverName();
-    $colStatus = $driver === 'pgsql' ? '"STATUS"' : '`STATUS`';
-
-    $aggSql = "
-        COUNT(*) as TOTAL,
-        SUM(CASE WHEN {$colStatus} = 'PROCEED' THEN 1 ELSE 0 END) as PROCEED,
-        SUM(CASE WHEN {$colStatus} = 'CANNOT PROCEED' THEN 1 ELSE 0 END) as CANNOT_PROCEED,
-        SUM(CASE WHEN {$colStatus} = 'ODZ' THEN 1 ELSE 0 END) as ODZ,
-        SUM(CASE WHEN {$colStatus} IS NULL OR {$colStatus} = '' THEN 1 ELSE 0 END) as BLANK
-    ";
-
-    $a = (clone $qTs)->selectRaw($aggSql)->first();
-    $b = (clone $qNull)->selectRaw($aggSql)->first();
-
-    $TOTAL = (int)(($a->TOTAL ?? 0) + ($b->TOTAL ?? 0));
-    $PROCEED = (int)(($a->PROCEED ?? 0) + ($b->PROCEED ?? 0));
-    $CANNOT_PROCEED = (int)(($a->CANNOT_PROCEED ?? 0) + ($b->CANNOT_PROCEED ?? 0));
-    $ODZ = (int)(($a->ODZ ?? 0) + ($b->ODZ ?? 0));
-    $BLANK = (int)(($a->BLANK ?? 0) + ($b->BLANK ?? 0));
-
-    // ✅ Provide BOTH key styles para kahit ano gamitin ng Blade, hindi 0
-    $statusCounts = [
-        'TOTAL' => $TOTAL,
-        'PROCEED' => $PROCEED,
-        'CANNOT PROCEED' => $CANNOT_PROCEED,
-        'CANNOT_PROCEED' => $CANNOT_PROCEED,
-        'ODZ' => $ODZ,
-        'BLANK' => $BLANK,
-    ];
-
-    // ✅ Records query (same filter)
-    $recordQuery = MacroOutput::query()
-        ->where(function ($q) use ($date, $nextDate, $formattedDMY) {
-            $q->where(function ($qq) use ($date, $nextDate) {
-                $qq->where('ts_date', '>=', $date)
-                   ->where('ts_date', '<', $nextDate);
-            })
-            ->orWhere(function ($qq) use ($formattedDMY) {
-                $qq->whereNull('ts_date')
-                   ->where('TIMESTAMP', 'like', "%{$formattedDMY}");
-            });
+              ->orWhere(function ($qq) use ($formattedDMY) {
+                  $qq->whereNull('ts_date')
+                     ->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}");
+              });
         });
 
-    if ($page !== null && $page !== '') {
-        $recordQuery->where('PAGE', $page);
+    if ($request->filled('PAGE')) {
+        $baseQuery->where('PAGE', $request->PAGE);
     }
+
+    // ✅ Counts (works on MySQL + Postgres)
+    $c = (clone $baseQuery)->selectRaw("
+        COUNT(*) as TOTAL,
+        SUM(CASE WHEN {$statusCol} = 'PROCEED' THEN 1 ELSE 0 END) as PROCEED,
+        SUM(CASE WHEN {$statusCol} = 'CANNOT PROCEED' THEN 1 ELSE 0 END) as CANNOT_PROCEED,
+        SUM(CASE WHEN {$statusCol} = 'ODZ' THEN 1 ELSE 0 END) as ODZ,
+        SUM(CASE WHEN {$statusCol} IS NULL OR {$statusCol} = '' THEN 1 ELSE 0 END) as BLANK
+    ")->first();
+
+    $statusCounts = [
+        'TOTAL'          => (int) ($c->TOTAL ?? 0),
+        'PROCEED'        => (int) ($c->PROCEED ?? 0),
+        'CANNOT PROCEED' => (int) ($c->CANNOT_PROCEED ?? 0),
+        'ODZ'            => (int) ($c->ODZ ?? 0),
+        'BLANK'          => (int) ($c->BLANK ?? 0),
+    ];
+
+    // ✅ Records query
+    $recordQuery = (clone $baseQuery);
 
     if ($request->filled('status_filter')) {
         if ($request->status_filter === 'BLANK') {
@@ -558,7 +525,7 @@ $downloadAll = $isMarketingOIC && $dlParam;
         'ITEM_NAME','COD','edited_item_name','edited_cod','status_logs'
     ];
 
-    $perPage = ($page !== null && $page !== '') ? 200 : 100;
+    $perPage = $request->filled('PAGE') ? 200 : 100;
 
     $records = $recordQuery
         ->select($selectCols)
@@ -566,17 +533,28 @@ $downloadAll = $isMarketingOIC && $dlParam;
         ->simplePaginate($perPage)
         ->withQueryString();
 
-    $records->through(fn ($r) => $this->attachHighlightTokens($r));
+    $records->through(function ($r) {
+        return $this->attachHighlightTokens($r);
+    });
 
-    // ✅ Pages dropdown from both sources (raw values)
-    $pagesA = (clone $qTs)->select('PAGE')->distinct()->orderBy('PAGE')->pluck('PAGE');
-    $pagesB = (clone $qNull)->select('PAGE')->distinct()->orderBy('PAGE')->pluck('PAGE');
-    $pages = $pagesA->merge($pagesB)->filter()->unique()->values();
+    // ✅ Pages dropdown (same base filter)
+    $pages = MacroOutput::query()
+        ->where(function ($q) use ($date, $formattedDMY) {
+            $q->where('ts_date', $date)
+              ->orWhere(function ($qq) use ($formattedDMY) {
+                  $qq->whereNull('ts_date')
+                     ->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}");
+              });
+        })
+        ->select('PAGE')->distinct()->orderBy('PAGE')->pluck('PAGE');
 
     $paginateOnlyWhenAll = true;
 
-    return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'));
+    return view('macro_output.index', compact(
+        'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'
+    ));
 }
+
 
 private function tokenizeLocation($raw, string $type): array
 {
