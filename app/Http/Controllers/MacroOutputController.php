@@ -461,77 +461,84 @@ $downloadAll = $isMarketingOIC && $dlParam;
     }
 
     public function index(Request $request)
-    {
-        // STEP 1
-        $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
-        $formattedDate = \Carbon\Carbon::parse($date)->format('d-m-Y');
+{
+    $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
 
-        $baseQuery = MacroOutput::query()->where('TIMESTAMP', 'LIKE', "%$formattedDate");
+    $baseQuery = MacroOutput::query()->where('ts_date', $date);
 
-        if ($request->filled('PAGE')) {
-            $baseQuery->where('PAGE', $request->PAGE);
+    if ($request->filled('PAGE')) {
+        $baseQuery->where('PAGE', $request->PAGE);
+    }
+
+    // ✅ Cross-DB safe column quoting for raw SQL
+    $driver = DB::connection()->getDriverName();
+    $STATUS = $driver === 'pgsql' ? '"STATUS"' : 'STATUS';
+
+    $c = (clone $baseQuery)->selectRaw("
+        COUNT(*) as TOTAL,
+        SUM(CASE WHEN {$STATUS} = 'PROCEED' THEN 1 ELSE 0 END) as PROCEED,
+        SUM(CASE WHEN {$STATUS} = 'CANNOT PROCEED' THEN 1 ELSE 0 END) as CANNOT_PROCEED,
+        SUM(CASE WHEN {$STATUS} = 'ODZ' THEN 1 ELSE 0 END) as ODZ,
+        SUM(CASE WHEN {$STATUS} IS NULL OR {$STATUS} = '' THEN 1 ELSE 0 END) as BLANK
+    ")->first();
+
+    $statusCounts = [
+        'TOTAL'          => (int) ($c->TOTAL ?? 0),
+        'PROCEED'        => (int) ($c->PROCEED ?? 0),
+        'CANNOT PROCEED' => (int) ($c->CANNOT_PROCEED ?? 0),
+        'ODZ'            => (int) ($c->ODZ ?? 0),
+        'BLANK'          => (int) ($c->BLANK ?? 0),
+    ];
+
+    $recordQuery = (clone $baseQuery);
+
+    if ($request->filled('status_filter')) {
+        if ($request->status_filter === 'BLANK') {
+            $recordQuery->where(function ($q) {
+                $q->whereNull('STATUS')->orWhere('STATUS', '');
+            });
+        } else {
+            $recordQuery->where('STATUS', $request->status_filter);
         }
+    }
 
-        // STEP 2: status counts
-        $filteredRecords = (clone $baseQuery)->get();
+    $selectCols = [
+        'id', 'FULL NAME', 'PHONE NUMBER', 'ADDRESS',
+        'PROVINCE', 'CITY', 'BARANGAY', 'STATUS',
+        'PAGE', 'TIMESTAMP', 'all_user_input',
+        'HISTORICAL LOGS', 'APP SCRIPT CHECKER',
+        'edited_full_name', 'edited_phone_number', 'edited_address',
+        'edited_province', 'edited_city', 'edited_barangay',
+        'ITEM_NAME','COD','edited_item_name','edited_cod','status_logs'
+    ];
 
-        $statusCounts = [
-            'TOTAL'           => $filteredRecords->count(),
-            'PROCEED'         => $filteredRecords->where('STATUS', 'PROCEED')->count(),
-            'CANNOT PROCEED'  => $filteredRecords->where('STATUS', 'CANNOT PROCEED')->count(),
-            'ODZ'             => $filteredRecords->where('STATUS', 'ODZ')->count(),
-            'BLANK'           => $filteredRecords->filter(fn($rec) => trim((string) $rec->STATUS) === '')->count(),
-        ];
+    $perPage = $request->filled('PAGE') ? 200 : 100;
 
-        // STEP 3: records + conditional pagination
-        $recordQuery = (clone $baseQuery);
+    $records = $recordQuery
+        ->select($selectCols)
+        ->orderByDesc('id')
+        ->simplePaginate($perPage)
+        ->withQueryString();
 
-        if ($request->filled('status_filter')) {
-            if ($request->status_filter === 'BLANK') {
-                $recordQuery->where(function ($q) {
-                    $q->whereNull('STATUS')->orWhere('STATUS', '');
-                });
-            } else {
-                $recordQuery->where('STATUS', $request->status_filter);
-            }
-        }
-
-        $selectCols = [
-            'id', 'FULL NAME', 'PHONE NUMBER', 'ADDRESS',
-            'PROVINCE', 'CITY', 'BARANGAY', 'STATUS',
-            'PAGE', 'TIMESTAMP', 'all_user_input',
-            'HISTORICAL LOGS', 'APP SCRIPT CHECKER',
-            'edited_full_name', 'edited_phone_number', 'edited_address',
-            'edited_province', 'edited_city', 'edited_barangay',
-            'ITEM_NAME','COD','edited_item_name','edited_cod','status_logs'
-        ];
-
-        // ✅ paginateOnlyWhenAll = true kung walang PAGE filter (ibig sabihin "All")
-        $paginateOnlyWhenAll = !$request->filled('PAGE');
-
-       if ($paginateOnlyWhenAll) {
-    $records = $recordQuery->select($selectCols)->orderByDesc('id')->paginate(100);
-
-    // ✅ add tokens per row (for highlight)
     $records->through(function ($r) {
         return $this->attachHighlightTokens($r);
     });
-} else {
-    $records = $recordQuery->select($selectCols)->orderByDesc('id')->get();
 
-    // ✅ add tokens per row (for highlight)
-    $records = $records->map(function ($r) {
-        return $this->attachHighlightTokens($r);
-    });
+    // ✅ Pages dropdown uses the composite index (ts_date, PAGE)
+    $pages = MacroOutput::query()
+        ->where('ts_date', $date)
+        ->select('PAGE')
+        ->distinct()
+        ->orderBy('PAGE')
+        ->pluck('PAGE');
+
+    $paginateOnlyWhenAll = true;
+
+    return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'));
 }
 
 
-        // PAGE options
-        $pages = MacroOutput::where('TIMESTAMP', 'LIKE', "%$formattedDate")
-            ->select('PAGE')->distinct()->orderBy('PAGE')->pluck('PAGE');
 
-        return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'));
-    }
 private function tokenizeLocation($raw, string $type): array
 {
     $s = trim((string) $raw);
@@ -593,59 +600,78 @@ private function attachHighlightTokens($r)
 }
 
     public function updateField(Request $request)
-    {
-        $request->validate([
-            'id'    => 'required|integer',
-            'field' => 'required|string',
-            'value' => 'nullable|string',
-        ]);
+{
+    $request->validate([
+        'id'    => 'required|integer',
+        'field' => 'required|string',
+        'value' => 'nullable|string',
+    ]);
 
-        $record = \App\Models\MacroOutput::findOrFail($request->id);
+    $record = \App\Models\MacroOutput::findOrFail($request->id);
 
-        $field = $request->field;
-        $newValue = $request->value;
-        $oldValue = $record->{$field};
+    $field = $request->field;
+    $newValue = (string)($request->value ?? '');
+    $oldValue = (string)($record->{$field} ?? '');
 
-        // Only log if there's an actual change
-        if ($newValue !== $oldValue) {
-            $user = auth()->user()?->name ?? 'Unknown User';
-            $timestamp = now()->format('Y-m-d H:i:s');
+    // sanitize for pipe-based logs (avoid breaking parsing)
+    $safe = function ($v) {
+        $v = (string)$v;
+        $v = str_replace(["\r", "\n"], ' ', $v);
+        $v = str_replace('|', '/', $v);
+        return trim($v);
+    };
 
-            if ($field === 'STATUS') {
-                $logEntry = "[{$timestamp}] {$user} changed STATUS: \"{$oldValue}\" → \"{$newValue}\"\n";
-                $record->status_logs = trim($logEntry . ($record->status_logs ?? ''));
-            } else {
-                $logEntry = "[{$timestamp}] {$user} updated {$field}: \"{$oldValue}\" → \"{$newValue}\"\n";
-                $record->{'HISTORICAL LOGS'} = trim($logEntry . ($record->{'HISTORICAL LOGS'} ?? ''));
-            }
+    // Only log if actual change
+    if ($newValue !== $oldValue) {
+        $user = auth()->user()?->name ?? 'Unknown User';
+        $ts   = now()->format('Y-m-d H:i:s');
 
-            // Save updated field
-            $record->{$field} = $newValue;
+        $userS  = $safe($user);
+        $tsS    = $safe($ts);
+        $fieldS = $safe($field);
+        $oldS   = $safe($oldValue);
+        $newS   = $safe($newValue);
 
-            // Mark as edited once (only if not already true)
-            $editFlags = [
-                'FULL NAME'     => 'edited_full_name',
-                'PHONE NUMBER'  => 'edited_phone_number',
-                'ADDRESS'       => 'edited_address',
-                'PROVINCE'      => 'edited_province',
-                'CITY'          => 'edited_city',
-                'BARANGAY'      => 'edited_barangay',
-                'ITEM_NAME'     => 'edited_item_name',
-                'COD'           => 'edited_cod',
-            ];
+        // Mark as edited once
+        $editFlags = [
+            'FULL NAME'     => 'edited_full_name',
+            'PHONE NUMBER'  => 'edited_phone_number',
+            'ADDRESS'       => 'edited_address',
+            'PROVINCE'      => 'edited_province',
+            'CITY'          => 'edited_city',
+            'BARANGAY'      => 'edited_barangay',
+            'ITEM_NAME'     => 'edited_item_name',
+            'COD'           => 'edited_cod',
+        ];
 
-            if (array_key_exists($field, $editFlags)) {
-                $flag = $editFlags[$field];
-                if (!$record->{$flag}) {
-                    $record->{$flag} = true;
-                }
-            }
-
-            $record->save();
+        if ($field === 'STATUS') {
+            // ✅ STATUS LOGS format: ts|user|NEW_STATUS
+            $logEntry = "{$tsS}|{$userS}|{$newS}\n";
+            $record->status_logs = trim($logEntry . ($record->status_logs ?? ''));
+        } else {
+            // ✅ HIST LOGS format: ts|user|FIELD|OLD|NEW
+            $logEntry = "{$tsS}|{$userS}|{$fieldS}|{$oldS}|{$newS}\n";
+            $record->{'HISTORICAL LOGS'} = trim($logEntry . ($record->{'HISTORICAL LOGS'} ?? ''));
         }
 
-        return response()->json(['status' => 'success']);
+        // Save updated field
+        $record->{$field} = $newValue;
+
+        // set edited flag
+        if (array_key_exists($field, $editFlags)) {
+            $flag = $editFlags[$field];
+            if (!$record->{$flag}) {
+                $record->{$flag} = true;
+            }
+        }
+
+        $record->save();
     }
+
+    return response()->json(['status' => 'success']);
+}
+
+
 
     public function bulkUpdate(Request $request)
     {

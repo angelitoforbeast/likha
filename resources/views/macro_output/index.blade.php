@@ -1,5 +1,6 @@
 <x-layout>
   <x-slot name="title">Encoder</x-slot>
+
   <x-slot name="heading">
     <div class="sticky-header">
       CHECKER 1
@@ -21,7 +22,7 @@
     }
 
     .all-user-input {
-      transition: all 0.3s ease;
+      transition: all 0.25s ease;
       max-height: 4.5em;
       overflow: hidden;
       white-space: nowrap;
@@ -43,33 +44,185 @@
       line-height: 1.2em;
     }
 
-    /* ✅ Highlight colors (priority: brgy > city > province) */
     mark.hl-brgy {
-      background: #fde68a; /* yellow */
+      background: #fde68a;
       padding: 0 2px;
       border-radius: 3px;
     }
     mark.hl-city {
-      background: #bfdbfe; /* blue */
+      background: #bfdbfe;
       padding: 0 2px;
       border-radius: 3px;
     }
     mark.hl-prov {
-      background: #e9d5ff; /* red-ish */
+      background: #e9d5ff;
       padding: 0 2px;
       border-radius: 3px;
     }
+
+    .col-hidden { display: none !important; }
+
+    /* ✅ Logs: collapsed by default (~2 lines), expand on click (expand-only-once) */
+    .log-cell { cursor: pointer; }
+    .log-cell .log-content {
+      overflow: hidden;
+      max-height: 2.6em;       /* ~2 lines */
+      line-height: 1.3em;
+    }
+    .log-cell.expanded .log-content {
+      max-height: none;
+      overflow: visible;
+    }
+
+    .log-content ul {
+      margin: 0;
+      padding-left: 1.05rem;
+    }
+    .log-content li { margin: 0; }
+
+    /* smaller font for historical logs */
+    .hist-log { font-size: 0.72rem; }   /* smaller than text-xs */
+    .status-log { font-size: 0.8rem; }
   </style>
 
   @php
     $role = Auth::user()?->employeeProfile?->role ?? null;
     $canEditItemAndCod = in_array($role, ['CEO', 'Marketing - OIC', 'Data Encoder - OIC']);
     $canSeeDownloadAll = ($role === 'Marketing - OIC');
+
+    /**
+     * ✅ STATUS LOGS renderer
+     * New DB format: ts|user|NEW_STATUS
+     * Display: [ts] → NEW_STATUS - user (bold NEW_STATUS)
+     *
+     * Also supports old legacy:
+     * [ts] Bryan changed STATUS: "" → "PROCEED
+     */
+    if (!function_exists('render_status_logs')) {
+      function render_status_logs($raw) {
+        $raw = trim((string)($raw ?? ''));
+        if ($raw === '') return '';
+
+        $lines = preg_split("/\r\n|\n|\r/", $raw);
+$lines = array_values(array_filter(array_map('trim', $lines))); // remove blanks
+$lines = array_reverse($lines); // ✅ oldest first
+
+$items = [];
+
+foreach ($lines as $line) {
+
+          $line = trim($line);
+          if ($line === '') continue;
+
+          // New pipe format: ts|user|value
+          if (str_contains($line, '|')) {
+            $p = explode('|', $line);
+            if (count($p) >= 3) {
+              $ts   = e(trim($p[0] ?? ''));
+              $user = e(trim($p[1] ?? ''));
+              $val  = e(trim($p[2] ?? ''));
+              $items[] = "<li><span class=\"text-gray-500\">[{$ts}]</span> → <strong>{$val}</strong> <span class=\"text-gray-500\">- {$user}</span></li>";
+              continue;
+            }
+          }
+
+          // Legacy: [ts] User changed STATUS: "old" → "new"  (allow missing end quote)
+          if (preg_match('/^\[(.*?)\]\s*(.*?)\s*changed\s*STATUS:\s*"(.*)"\s*→\s*"(.*)\s*$/u', $line, $m)) {
+            $ts   = e(trim($m[1] ?? ''));
+            $user = e(trim($m[2] ?? ''));
+            $new  = e(trim($m[4] ?? ''));
+            $items[] = "<li><span class=\"text-gray-500\">[{$ts}]</span> → <strong>{$new}</strong> <span class=\"text-gray-500\">- {$user}</span></li>";
+            continue;
+          }
+
+          // fallback
+          $items[] = "<li><span class=\"text-gray-500\">" . e($line) . "</span></li>";
+        }
+
+        return $items ? '<ul class="list-disc space-y-1">'.implode('', $items).'</ul>' : '';
+      }
+    }
+
+    /**
+     * ✅ HISTORICAL LOGS renderer
+     * New DB format: ts|user|FIELD|OLD|NEW
+     * Display: ts — FIELD: OLD → NEW — user (bold OLD/NEW)
+     *
+     * Supports legacy:
+     * [ts] Bryan updated BARANGAY: "OLD" → "NEW
+     */
+    if (!function_exists('render_hist_logs')) {
+      function render_hist_logs($raw) {
+        $raw = trim((string)($raw ?? ''));
+        if ($raw === '') return '';
+
+        $lines = preg_split("/\r\n|\n|\r/", $raw);
+$lines = array_values(array_filter(array_map('trim', $lines))); // remove blanks
+$lines = array_reverse($lines); // ✅ oldest first
+
+$items = [];
+
+foreach ($lines as $line) {
+
+          $line = trim($line);
+          if ($line === '') continue;
+
+          // New pipe format: ts|user|field|old|new
+          if (str_contains($line, '|')) {
+            $p = explode('|', $line);
+            if (count($p) >= 5) {
+              $ts    = e(trim($p[0] ?? ''));
+              $user  = e(trim($p[1] ?? ''));
+              $field = e(trim($p[2] ?? ''));
+              $old   = e(trim($p[3] ?? ''));
+              $new   = e(trim($p[4] ?? ''));
+              $items[] = "<li><span class=\"text-gray-500\">{$ts}</span> — <strong>{$field}</strong>: <strong>{$old}</strong> → <strong>{$new}</strong> <span class=\"text-gray-500\">— {$user}</span></li>";
+              continue;
+            }
+
+            // Older pipe format from previous version (if meron pa): ts|user|FIELD|from|OLD|NEW OR ts|user|FIELD|to|NEW
+            if (count($p) >= 6 && ($p[3] ?? '') === 'from') {
+              $ts    = e(trim($p[0] ?? ''));
+              $user  = e(trim($p[1] ?? ''));
+              $field = e(trim($p[2] ?? ''));
+              $old   = e(trim($p[4] ?? ''));
+              $new   = e(trim($p[5] ?? ''));
+              $items[] = "<li><span class=\"text-gray-500\">{$ts}</span> — <strong>{$field}</strong>: <strong>{$old}</strong> → <strong>{$new}</strong> <span class=\"text-gray-500\">— {$user}</span></li>";
+              continue;
+            }
+            if (count($p) >= 5 && ($p[3] ?? '') === 'to') {
+              $ts    = e(trim($p[0] ?? ''));
+              $user  = e(trim($p[1] ?? ''));
+              $field = e(trim($p[2] ?? ''));
+              $new   = e(trim($p[4] ?? ''));
+              $items[] = "<li><span class=\"text-gray-500\">{$ts}</span> — <strong>{$field}</strong>: → <strong>{$new}</strong> <span class=\"text-gray-500\">— {$user}</span></li>";
+              continue;
+            }
+          }
+
+          // Legacy: [ts] User updated FIELD: "old" → "new" (allow missing end quote)
+          if (preg_match('/^\[(.*?)\]\s*(.*?)\s*updated\s*(.*?):\s*"(.*)"\s*→\s*"(.*)\s*$/u', $line, $m)) {
+            $ts    = e(trim($m[1] ?? ''));
+            $user  = e(trim($m[2] ?? ''));
+            $field = e(trim($m[3] ?? ''));
+            $old   = e(trim($m[4] ?? ''));
+            $new   = e(trim($m[5] ?? ''));
+            $items[] = "<li><span class=\"text-gray-500\">{$ts}</span> — <strong>{$field}</strong>: <strong>{$old}</strong> → <strong>{$new}</strong> <span class=\"text-gray-500\">— {$user}</span></li>";
+            continue;
+          }
+
+          // fallback
+          $items[] = "<li><span class=\"text-gray-500\">" . e($line) . "</span></li>";
+        }
+
+        return $items ? '<ul class="list-disc space-y-1">'.implode('', $items).'</ul>' : '';
+      }
+    }
   @endphp
 
   <div id="fixed-header" class="fixed top-[128px] left-0 right-0 z-40 bg-white px-4 pt-4 pb-2 shadow">
     {{-- Filters --}}
-    <form id="filtersForm" method="get" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-4 flex-wrap w-full">
+    <form id="filtersForm" method="get" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-2 flex-wrap w-full">
       <div>
         <label class="text-sm font-medium">Date</label>
         <input type="date" name="date" value="{{ request('date') }}" class="border rounded px-2 py-1" onchange="this.form.submit()" />
@@ -95,7 +248,7 @@
         ];
       @endphp
 
-      <div class="mb-4 text-sm space-x-4 flex flex-wrap gap-2">
+      <div class="mb-2 text-sm space-x-4 flex flex-wrap gap-2">
         @foreach ($statusCounts as $status => $count)
           <a
             href="{{ $status === 'TOTAL'
@@ -122,7 +275,22 @@
       </div>
     </form>
 
-    {{-- Download toolbar --}}
+    {{-- Column toggles (default unchecked) --}}
+    <div class="flex items-center justify-end gap-4 text-sm mb-3">
+      <label class="inline-flex items-center gap-2">
+        <input type="checkbox" id="toggleHistorical">
+        Show Historical Logs
+      </label>
+
+      @if($role !== 'Data Encoder')
+        <label class="inline-flex items-center gap-2">
+          <input type="checkbox" id="toggleStatusLogs">
+          Show Status Logs
+        </label>
+      @endif
+    </div>
+
+    {{-- Download --}}
     @if($role !== 'Data Encoder')
       <div class="flex items-center justify-end gap-3">
         @if($canSeeDownloadAll)
@@ -161,9 +329,11 @@
           <th class="border p-2" style="width: 8%">COD</th>
         @endif
         <th class="border p-2" style="width: 20%">CUSTOMER DETAILS</th>
-        <th class="border p-2" style="width: 10%">HISTORICAL LOGS</th>
+
+        <th class="border p-2 col-historical" style="width: 10%">HISTORICAL LOGS</th>
+
         @if($role !== 'Data Encoder')
-          <th class="border p-2" style="width: 10%">STATUS LOGS</th>
+          <th class="border p-2 col-statuslogs" style="width: 10%">STATUS LOGS</th>
         @endif
       </tr>
     </thead>
@@ -171,7 +341,6 @@
 
   <div class="h-[0px]"></div>
 
-  {{-- Scrollable body --}}
   <div id="table-body-wrapper" class="px-4">
     <table class="table-fixed w-full border text-sm" id="table-body">
       <tbody>
@@ -246,7 +415,7 @@
               </td>
             @endforeach
 
-            {{-- ✅ CUSTOMER DETAILS: click expands + highlights (tokens from controller) --}}
+            {{-- CUSTOMER DETAILS --}}
             <td
               class="border p-2 text-gray-700 cursor-pointer all-user-input customer-details"
               style="width: 20%"
@@ -258,13 +427,19 @@
               <span class="all-user-input-text">{{ $record['all_user_input'] }}</span>
             </td>
 
-            <td class="border p-2 text-gray-700 cursor-pointer all-user-input" style="width: 10%" onclick="expandOnlyOnce(this)">
-              {{ $record['HISTORICAL LOGS'] ?? '' }}
+            {{-- HIST LOGS: expand-only-once --}}
+            <td class="border p-2 text-gray-700 log-cell col-historical" style="width: 10%" onclick="expandOnlyOnce(this)">
+              <div class="log-content hist-log">
+                {!! render_hist_logs($record['HISTORICAL LOGS'] ?? '') !!}
+              </div>
             </td>
 
+            {{-- STATUS LOGS: expand-only-once --}}
             @if($role !== 'Data Encoder')
-              <td class="border p-2 text-gray-700 cursor-pointer all-user-input" style="width: 10%" onclick="expandOnlyOnce(this)">
-                {{ $record->status_logs ?? '' }}
+              <td class="border p-2 text-gray-700 log-cell col-statuslogs" style="width: 10%" onclick="expandOnlyOnce(this)">
+                <div class="log-content status-log">
+                  {!! render_status_logs($record->status_logs ?? '') !!}
+                </div>
               </td>
             @endif
           </tr>
@@ -274,12 +449,9 @@
   </div>
 
   <div class="mt-6 px-4">
-    @if(!empty($paginateOnlyWhenAll) && $paginateOnlyWhenAll)
-      {{ $records->withQueryString()->links() }}
-    @endif
+    {{ $records->withQueryString()->links() }}
   </div>
 
-  {{-- ✅ Download URL builder --}}
   <script>
     document.getElementById('downloadBtn')?.addEventListener('click', function (e) {
       e.preventDefault();
@@ -296,14 +468,42 @@
     });
   </script>
 
-  {{-- ✅ Editable save --}}
+  {{-- Column toggles (default unchecked) --}}
+  <script>
+    function setColumnHidden(selectorClass, hidden) {
+      document.querySelectorAll('.' + selectorClass).forEach(el => {
+        el.classList.toggle('col-hidden', !!hidden);
+      });
+    }
+
+    function initColumnToggles() {
+      const hist = document.getElementById('toggleHistorical');
+      const stat = document.getElementById('toggleStatusLogs');
+
+      setColumnHidden('col-historical', !hist.checked);
+      if (stat) setColumnHidden('col-statuslogs', !stat.checked);
+
+      hist.addEventListener('change', () => setColumnHidden('col-historical', !hist.checked));
+      stat?.addEventListener('change', () => setColumnHidden('col-statuslogs', !stat.checked));
+    }
+
+    window.addEventListener('load', initColumnToggles);
+  </script>
+
+  {{-- ✅ Expand only once (no collapse on click) --}}
+  <script>
+    function expandOnlyOnce(cell) {
+      if (!cell.classList.contains('expanded')) cell.classList.add('expanded');
+    }
+  </script>
+
+  {{-- Editable save --}}
   <script>
     function autoResize(el) {
       el.style.height = 'auto';
       el.style.height = el.scrollHeight + 'px';
     }
 
-    // quick tokenize client-side (lightweight) so highlights update after edits w/out refresh
     function quickTokens(raw, type) {
       let s = (raw || '').toString().trim();
       if (!s) return [];
@@ -353,7 +553,7 @@
 
             const row = this.closest('tr');
 
-            // ✅ update tokens on client after editing (so highlight uses latest)
+            // update tokens after editing
             if (row && (field === 'BARANGAY' || field === 'CITY' || field === 'PROVINCE')) {
               const cell = row.querySelector('.customer-details');
               if (cell) {
@@ -363,10 +563,12 @@
               }
             }
 
-            // ✅ Collapse customer details when status changed
-            if (field === 'STATUS') {
-              const userInputCell = row?.querySelector('.customer-details.expanded');
+            // ✅ Only when STATUS changed: collapse logs (same row) + customer details
+            if (field === 'STATUS' && row) {
+              const userInputCell = row.querySelector('.customer-details.expanded');
               if (userInputCell) userInputCell.classList.remove('expanded');
+
+              row.querySelectorAll('.log-cell.expanded').forEach(c => c.classList.remove('expanded'));
             }
           } else {
             this.style.backgroundColor = '#fee2e2';
@@ -380,13 +582,9 @@
       input.addEventListener('blur', handler);
       input.addEventListener('change', handler);
     });
-
-    function expandOnlyOnce(cell) {
-      if (!cell.classList.contains('expanded')) cell.classList.add('expanded');
-    }
   </script>
 
-  {{-- ✅ Highlight logic (per word, brgy priority) --}}
+  {{-- Highlight logic --}}
   <script>
     function escapeRegExp(str) {
       return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -396,11 +594,10 @@
       const text = textNode.nodeValue;
       if (!text || !text.trim()) return false;
 
-      // allow highlight if token is followed by a boundary OR a digit (e.g., "poblacion4a")
-const re = new RegExp(
-  `(^|[^\\p{L}\\p{N}])(${escapeRegExp(token)})(?=[^\\p{L}\\p{N}]|\\p{N}|$)`,
-  'giu'
-);
+      const re = new RegExp(
+        `(^|[^\\p{L}\\p{N}])(${escapeRegExp(token)})(?=[^\\p{L}\\p{N}]|\\p{N}|$)`,
+        'giu'
+      );
 
       const matches = [...text.matchAll(re)];
       if (!matches.length) return false;
@@ -466,14 +663,13 @@ const re = new RegExp(
       const cityTokens = JSON.parse(cell.dataset.city || '[]');
       const provTokens = JSON.parse(cell.dataset.prov || '[]');
 
-      // ✅ Priority: BARANGAY then CITY then PROVINCE
       highlightTokens(span, brgyTokens, 'hl-brgy');
       highlightTokens(span, cityTokens, 'hl-city');
       highlightTokens(span, provTokens, 'hl-prov');
     }
   </script>
 
-  {{-- ✅ Sticky offset --}}
+  {{-- Sticky offset --}}
   <script>
     function adjustTableBodyMargin() {
       const sticky = document.querySelector('.sticky-header');
@@ -489,7 +685,7 @@ const re = new RegExp(
     window.addEventListener('resize', adjustTableBodyMargin);
   </script>
 
-  {{-- ✅ Validate --}}
+  {{-- Validate --}}
   <script>
     document.getElementById('validate-btn')?.addEventListener('click', function () {
       const statusEl = document.getElementById('validate-status');
@@ -541,7 +737,7 @@ const re = new RegExp(
     });
   </script>
 
-  {{-- ✅ Item checker --}}
+  {{-- Item checker --}}
   <script>
     document.getElementById('itemCheckerBtn')?.addEventListener('click', async function () {
       const statusEl = document.getElementById('item-checker-status');
