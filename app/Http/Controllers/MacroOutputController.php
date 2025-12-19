@@ -578,7 +578,6 @@ $downloadAll = $isMarketingOIC && $dlParam;
     return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'));
 }
 
-
 private function tokenizeLocation($raw, string $type): array
 {
     $s = trim((string) $raw);
