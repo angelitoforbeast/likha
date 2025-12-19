@@ -460,41 +460,67 @@ $downloadAll = $isMarketingOIC && $dlParam;
         return redirect()->back()->with('success', 'Record updated successfully.');
     }
 
-    public function index(Request $request)
+   public function index(Request $request)
 {
     $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
+    $formattedDMY = \Carbon\Carbon::parse($date)->format('d-m-Y');
 
-    $baseQuery = MacroOutput::query()->where('ts_date', $date);
+    $page = $request->filled('PAGE') ? $request->PAGE : null;
 
-    if ($request->filled('PAGE')) {
-        $baseQuery->where('PAGE', $request->PAGE);
-    }
+    // Helper: apply page filter
+    $applyPage = function ($q) use ($page) {
+        if ($page) $q->where('PAGE', $page);
+        return $q;
+    };
 
-    // ✅ Cross-DB safe column quoting for raw SQL
-    $driver = DB::connection()->getDriverName();
-    $STATUS = $driver === 'pgsql' ? '"STATUS"' : 'STATUS';
+    // ✅ Split queries (FAST):
+    $qTs = $applyPage(MacroOutput::query()->where('ts_date', $date));
+    $qNull = $applyPage(
+        MacroOutput::query()
+            ->whereNull('ts_date')
+            ->where('TIMESTAMP', 'like', "%{$formattedDMY}")
+    );
 
-    $c = (clone $baseQuery)->selectRaw("
+    // ✅ Driver-safe column quoting
+    $driver = DB::getDriverName();
+    $colStatus = $driver === 'pgsql' ? '"STATUS"' : '`STATUS`';
+
+    $aggSql = "
         COUNT(*) as TOTAL,
-        SUM(CASE WHEN {$STATUS} = 'PROCEED' THEN 1 ELSE 0 END) as PROCEED,
-        SUM(CASE WHEN {$STATUS} = 'CANNOT PROCEED' THEN 1 ELSE 0 END) as CANNOT_PROCEED,
-        SUM(CASE WHEN {$STATUS} = 'ODZ' THEN 1 ELSE 0 END) as ODZ,
-        SUM(CASE WHEN {$STATUS} IS NULL OR {$STATUS} = '' THEN 1 ELSE 0 END) as BLANK
-    ")->first();
+        SUM(CASE WHEN {$colStatus} = 'PROCEED' THEN 1 ELSE 0 END) as PROCEED,
+        SUM(CASE WHEN {$colStatus} = 'CANNOT PROCEED' THEN 1 ELSE 0 END) as CANNOT_PROCEED,
+        SUM(CASE WHEN {$colStatus} = 'ODZ' THEN 1 ELSE 0 END) as ODZ,
+        SUM(CASE WHEN {$colStatus} IS NULL OR {$colStatus} = '' THEN 1 ELSE 0 END) as BLANK
+    ";
 
+    $a = (clone $qTs)->selectRaw($aggSql)->first();
+    $b = (clone $qNull)->selectRaw($aggSql)->first();
+
+    // ✅ Combine results
     $statusCounts = [
-        'TOTAL'          => (int) ($c->TOTAL ?? 0),
-        'PROCEED'        => (int) ($c->PROCEED ?? 0),
-        'CANNOT PROCEED' => (int) ($c->CANNOT_PROCEED ?? 0),
-        'ODZ'            => (int) ($c->ODZ ?? 0),
-        'BLANK'          => (int) ($c->BLANK ?? 0),
+        'TOTAL'          => (int) (($a->TOTAL ?? 0) + ($b->TOTAL ?? 0)),
+        'PROCEED'        => (int) (($a->PROCEED ?? 0) + ($b->PROCEED ?? 0)),
+        'CANNOT PROCEED' => (int) (($a->CANNOT_PROCEED ?? 0) + ($b->CANNOT_PROCEED ?? 0)),
+        'ODZ'            => (int) (($a->ODZ ?? 0) + ($b->ODZ ?? 0)),
+        'BLANK'          => (int) (($a->BLANK ?? 0) + ($b->BLANK ?? 0)),
     ];
 
-    $recordQuery = (clone $baseQuery);
+    // ✅ Records query (ok na i-OR dito kasi LIMIT 100 lang; mabilis by id desc)
+    $recordQuery = MacroOutput::query()
+        ->where(function ($q) use ($date, $formattedDMY) {
+            $q->where('ts_date', $date)
+              ->orWhere(function ($qq) use ($formattedDMY) {
+                  $qq->whereNull('ts_date')
+                     ->where('TIMESTAMP', 'like', "%{$formattedDMY}");
+              });
+        });
+
+    if ($page) $recordQuery->where('PAGE', $page);
 
     if ($request->filled('status_filter')) {
         if ($request->status_filter === 'BLANK') {
-            $recordQuery->where(function ($q) {
+            $recordQuery->where(function ($q) use ($driver) {
+                // STATUS column quoting not needed here; builder handles it
                 $q->whereNull('STATUS')->orWhere('STATUS', '');
             });
         } else {
@@ -512,7 +538,7 @@ $downloadAll = $isMarketingOIC && $dlParam;
         'ITEM_NAME','COD','edited_item_name','edited_cod','status_logs'
     ];
 
-    $perPage = $request->filled('PAGE') ? 200 : 100;
+    $perPage = $page ? 200 : 100;
 
     $records = $recordQuery
         ->select($selectCols)
@@ -524,18 +550,19 @@ $downloadAll = $isMarketingOIC && $dlParam;
         return $this->attachHighlightTokens($r);
     });
 
-    // ✅ Pages dropdown uses the composite index (ts_date, PAGE)
-    $pages = MacroOutput::query()
-        ->where('ts_date', $date)
-        ->select('PAGE')
-        ->distinct()
-        ->orderBy('PAGE')
-        ->pluck('PAGE');
+    // ✅ Pages dropdown: merge distinct pages from BOTH sources (ts_date + null fallback)
+    $pagesA = (clone $qTs)->select('PAGE')->distinct()->orderBy('PAGE')->pluck('PAGE');
+    $pagesB = (clone $qNull)->select('PAGE')->distinct()->orderBy('PAGE')->pluck('PAGE');
+
+    $pages = $pagesA->merge($pagesB)->filter()->unique()->values();
 
     $paginateOnlyWhenAll = true;
 
     return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'));
 }
+
+
+
 
 
 
