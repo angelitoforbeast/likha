@@ -8,25 +8,21 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * ✅ PostgreSQL: CREATE INDEX CONCURRENTLY cannot run inside a transaction block.
-     * Laravel migrations are usually wrapped in a transaction, so we disable it here.
+     * ✅ IMPORTANT: For Postgres CONCURRENTLY, must NOT be inside a transaction.
+     * NOTE: Do NOT type this property (no "bool") to avoid PHP/Laravel property type conflicts.
      */
-    public function withinTransaction(): bool
-    {
-        return false;
-    }
+    public $withinTransaction = false;
 
     public function up(): void
     {
-        // ✅ Guard: table must exist
         if (!Schema::hasTable('macro_output')) {
             return;
         }
 
         $driver = DB::getDriverName();
 
-        // ✅ If index already exists, do nothing
         if ($driver === 'pgsql') {
+            // ✅ Skip if already exists
             $exists = DB::selectOne("
                 SELECT 1
                 FROM pg_indexes
@@ -40,8 +36,8 @@ return new class extends Migration
                 return;
             }
 
-            // ✅ Postgres: concurrent + quoting PAGE
-            DB::statement('CREATE INDEX CONCURRENTLY macro_output_ts_date_page_idx ON macro_output (ts_date, "PAGE")');
+            // ✅ Postgres: CONCURRENTLY + IF NOT EXISTS (must be outside transaction)
+            DB::statement('CREATE INDEX CONCURRENTLY IF NOT EXISTS macro_output_ts_date_page_idx ON macro_output (ts_date, "PAGE")');
             return;
         }
 
@@ -50,9 +46,10 @@ return new class extends Migration
             return;
         }
 
-        // Check existing index on MySQL
+        // ✅ Skip if already exists (MySQL)
         try {
             $dbName = DB::getDatabaseName();
+
             $exists = DB::selectOne("
                 SELECT 1
                 FROM information_schema.statistics
@@ -66,7 +63,7 @@ return new class extends Migration
                 return;
             }
         } catch (\Throwable $e) {
-            // if information_schema not accessible, just attempt create safely
+            // If something weird happens, we'll just attempt to create below.
         }
 
         Schema::table('macro_output', function (Blueprint $table) {
@@ -83,18 +80,17 @@ return new class extends Migration
         $driver = DB::getDriverName();
 
         if ($driver === 'pgsql') {
-            // ✅ Safe drop (won't error if missing)
             DB::statement('DROP INDEX CONCURRENTLY IF EXISTS macro_output_ts_date_page_idx');
             return;
         }
 
-        // ✅ MySQL/local dev safe drop
+        // ✅ MySQL safe drop
         try {
             Schema::table('macro_output', function (Blueprint $table) {
                 $table->dropIndex('macro_output_ts_date_page_idx');
             });
         } catch (\Throwable $e) {
-            // ignore if index doesn't exist
+            // ignore
         }
     }
 };
