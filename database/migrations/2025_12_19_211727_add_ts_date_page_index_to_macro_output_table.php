@@ -7,99 +7,94 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    private string $table = 'macro_output';
-    private string $indexName = 'macro_output_ts_date_page_idx';
-
     /**
-     * Laravel 12 way to disable wrapping in a transaction.
-     * Needed for Postgres CREATE INDEX CONCURRENTLY.
+     * ✅ PostgreSQL: CREATE INDEX CONCURRENTLY cannot run inside a transaction block.
+     * Laravel migrations are usually wrapped in a transaction, so we disable it here.
      */
     public function withinTransaction(): bool
     {
         return false;
     }
 
-    private function indexExists(): bool
-    {
-        $driver = DB::connection()->getDriverName();
-
-        if ($driver === 'pgsql') {
-            $row = DB::selectOne("
-                select 1
-                from pg_indexes
-                where schemaname = current_schema()
-                  and tablename = ?
-                  and indexname = ?
-                limit 1
-            ", [$this->table, $this->indexName]);
-
-            return (bool) $row;
-        }
-
-        if ($driver === 'mysql') {
-            $row = DB::selectOne("
-                select 1
-                from information_schema.statistics
-                where table_schema = database()
-                  and table_name = ?
-                  and index_name = ?
-                limit 1
-            ", [$this->table, $this->indexName]);
-
-            return (bool) $row;
-        }
-
-        // other drivers (sqlite, etc.)
-        return false;
-    }
-
     public function up(): void
     {
-        if (!Schema::hasTable($this->table)) return;
-        if (!Schema::hasColumn($this->table, 'ts_date')) return;
-        if (!Schema::hasColumn($this->table, 'PAGE')) return;
-
-        if ($this->indexExists()) {
-            // already created; do nothing
+        // ✅ Guard: table must exist
+        if (!Schema::hasTable('macro_output')) {
             return;
         }
 
-        $driver = DB::connection()->getDriverName();
+        $driver = DB::getDriverName();
 
+        // ✅ If index already exists, do nothing
         if ($driver === 'pgsql') {
-            // IMPORTANT: "PAGE" must be quoted (uppercase column)
-            DB::statement(sprintf(
-                'CREATE INDEX CONCURRENTLY IF NOT EXISTS %s ON %s (ts_date, "PAGE")',
-                $this->indexName,
-                $this->table
-            ));
+            $exists = DB::selectOne("
+                SELECT 1
+                FROM pg_indexes
+                WHERE schemaname = current_schema()
+                  AND tablename  = 'macro_output'
+                  AND indexname  = 'macro_output_ts_date_page_idx'
+                LIMIT 1
+            ");
+
+            if ($exists) {
+                return;
+            }
+
+            // ✅ Postgres: concurrent + quoting PAGE
+            DB::statement('CREATE INDEX CONCURRENTLY macro_output_ts_date_page_idx ON macro_output (ts_date, "PAGE")');
             return;
         }
 
-        // MySQL: use schema builder
-        Schema::table($this->table, function (Blueprint $table) {
-            $table->index(['ts_date', 'PAGE'], $this->indexName);
+        // ✅ MySQL / MariaDB / others
+        if (!Schema::hasColumn('macro_output', 'ts_date') || !Schema::hasColumn('macro_output', 'PAGE')) {
+            return;
+        }
+
+        // Check existing index on MySQL
+        try {
+            $dbName = DB::getDatabaseName();
+            $exists = DB::selectOne("
+                SELECT 1
+                FROM information_schema.statistics
+                WHERE table_schema = ?
+                  AND table_name   = ?
+                  AND index_name   = ?
+                LIMIT 1
+            ", [$dbName, 'macro_output', 'macro_output_ts_date_page_idx']);
+
+            if ($exists) {
+                return;
+            }
+        } catch (\Throwable $e) {
+            // if information_schema not accessible, just attempt create safely
+        }
+
+        Schema::table('macro_output', function (Blueprint $table) {
+            $table->index(['ts_date', 'PAGE'], 'macro_output_ts_date_page_idx');
         });
     }
 
     public function down(): void
     {
-        if (!Schema::hasTable($this->table)) return;
-
-        $driver = DB::connection()->getDriverName();
-
-        if ($driver === 'pgsql') {
-            DB::statement(sprintf(
-                'DROP INDEX CONCURRENTLY IF EXISTS %s',
-                $this->indexName
-            ));
+        if (!Schema::hasTable('macro_output')) {
             return;
         }
 
-        if ($this->indexExists()) {
-            Schema::table($this->table, function (Blueprint $table) {
-                $table->dropIndex($this->indexName);
+        $driver = DB::getDriverName();
+
+        if ($driver === 'pgsql') {
+            // ✅ Safe drop (won't error if missing)
+            DB::statement('DROP INDEX CONCURRENTLY IF EXISTS macro_output_ts_date_page_idx');
+            return;
+        }
+
+        // ✅ MySQL/local dev safe drop
+        try {
+            Schema::table('macro_output', function (Blueprint $table) {
+                $table->dropIndex('macro_output_ts_date_page_idx');
             });
+        } catch (\Throwable $e) {
+            // ignore if index doesn't exist
         }
     }
 };
