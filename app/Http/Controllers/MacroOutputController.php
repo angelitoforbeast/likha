@@ -613,7 +613,7 @@ private function attachHighlightTokens($r)
     $newValue = (string)($request->value ?? '');
     $oldValue = (string)($record->{$field} ?? '');
 
-    // sanitize for pipe-based logs (avoid breaking parsing)
+    // sanitize pipes/newlines (para di masira parsing)
     $safe = function ($v) {
         $v = (string)$v;
         $v = str_replace(["\r", "\n"], ' ', $v);
@@ -621,18 +621,18 @@ private function attachHighlightTokens($r)
         return trim($v);
     };
 
-    // Only log if actual change
-    if ($newValue !== $oldValue) {
+    $changed = ($newValue !== $oldValue);
+
+    if ($changed) {
         $user = auth()->user()?->name ?? 'Unknown User';
-        $ts   = now()->format('Y-m-d H:i:s');
+        $timestamp = now()->format('Y-m-d H:i:s');
 
         $userS  = $safe($user);
-        $tsS    = $safe($ts);
+        $tsS    = $safe($timestamp);
         $fieldS = $safe($field);
         $oldS   = $safe($oldValue);
         $newS   = $safe($newValue);
 
-        // Mark as edited once
         $editFlags = [
             'FULL NAME'     => 'edited_full_name',
             'PHONE NUMBER'  => 'edited_phone_number',
@@ -645,19 +645,23 @@ private function attachHighlightTokens($r)
         ];
 
         if ($field === 'STATUS') {
-            // ✅ STATUS LOGS format: ts|user|NEW_STATUS
-            $logEntry = "{$tsS}|{$userS}|{$newS}\n";
-            $record->status_logs = trim($logEntry . ($record->status_logs ?? ''));
+            // ✅ status: ts|user|VALUE
+            $line = "{$tsS}|{$userS}|{$newS}";
+
+            $existing = trim((string)($record->status_logs ?? ''));
+            $record->status_logs = $existing === '' ? $line : ($existing . "\n" . $line);
         } else {
-            // ✅ HIST LOGS format: ts|user|FIELD|OLD|NEW
-            $logEntry = "{$tsS}|{$userS}|{$fieldS}|{$oldS}|{$newS}\n";
-            $record->{'HISTORICAL LOGS'} = trim($logEntry . ($record->{'HISTORICAL LOGS'} ?? ''));
+            // ✅ history: ts|user|FIELD|OLD|NEW   (no from/to words)
+            $line = "{$tsS}|{$userS}|{$fieldS}|{$oldS}|{$newS}";
+
+            $existing = trim((string)($record->{'HISTORICAL LOGS'} ?? ''));
+            $record->{'HISTORICAL LOGS'} = $existing === '' ? $line : ($existing . "\n" . $line);
         }
 
-        // Save updated field
+        // save updated field
         $record->{$field} = $newValue;
 
-        // set edited flag
+        // mark edited flags
         if (array_key_exists($field, $editFlags)) {
             $flag = $editFlags[$field];
             if (!$record->{$flag}) {
@@ -668,8 +672,12 @@ private function attachHighlightTokens($r)
         $record->save();
     }
 
-    return response()->json(['status' => 'success']);
+    return response()->json([
+        'status'  => 'success',
+        'changed' => $changed,
+    ]);
 }
+
 
 
 
