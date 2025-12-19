@@ -157,13 +157,9 @@ foreach ($lines as $line) {
         if ($raw === '') return '';
 
         $lines = preg_split("/\r\n|\n|\r/", $raw);
-$lines = array_values(array_filter(array_map('trim', $lines))); // remove blanks
-$lines = array_reverse($lines); // ✅ oldest first
+        $items = [];
 
-$items = [];
-
-foreach ($lines as $line) {
-
+        foreach ($lines as $line) {
           $line = trim($line);
           if ($line === '') continue;
 
@@ -225,7 +221,8 @@ foreach ($lines as $line) {
     <form id="filtersForm" method="get" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-2 flex-wrap w-full">
       <div>
         <label class="text-sm font-medium">Date</label>
-        <input type="date" name="date" value="{{ request('date') }}" class="border rounded px-2 py-1" onchange="this.form.submit()" />
+        <input type="date" name="date" value="{{ $date }}"
+ class="border rounded px-2 py-1" onchange="this.form.submit()" />
       </div>
 
       <div>

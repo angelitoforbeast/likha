@@ -465,13 +465,13 @@ $downloadAll = $isMarketingOIC && $dlParam;
     $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
     $formattedDMY = \Carbon\Carbon::parse($date)->format('d-m-Y');
 
-    // Correct column quoting per DB (mysql => `STATUS`, pgsql => "STATUS")
+    // Quote STATUS correctly per DB (mysql: `STATUS`, pg: "STATUS")
     $statusCol = DB::getQueryGrammar()->wrap('STATUS');
 
-    // ✅ ONE base query for both counts + records
+    // ✅ BASE FILTER (index-friendly)
     $baseQuery = MacroOutput::query()
         ->where(function ($q) use ($date, $formattedDMY) {
-            // ✅ FAST: if ts_date is DATE type, do direct compare (index-friendly)
+            // IMPORTANT: direct compare (works best if ts_date is DATE type)
             $q->where('ts_date', $date)
               ->orWhere(function ($qq) use ($formattedDMY) {
                   $qq->whereNull('ts_date')
@@ -483,12 +483,9 @@ $downloadAll = $isMarketingOIC && $dlParam;
         $baseQuery->where('PAGE', $request->PAGE);
     }
 
-    // ✅ DEBUG (optional): eto dapat SAME sa records total
-    // dd((clone $baseQuery)->count());
-
-    // ✅ COUNTS (trim-safe)
+    // ✅ COUNTS (trim-safe + same filter)
     $c = (clone $baseQuery)
-        ->toBase() // avoid any accidental model selects/scopes issues
+        ->toBase()
         ->selectRaw("
             COUNT(*) as TOTAL,
             SUM(CASE WHEN TRIM({$statusCol}) = 'PROCEED' THEN 1 ELSE 0 END) as PROCEED,
@@ -537,9 +534,7 @@ $downloadAll = $isMarketingOIC && $dlParam;
         ->simplePaginate($perPage)
         ->withQueryString();
 
-    $records->through(function ($r) {
-        return $this->attachHighlightTokens($r);
-    });
+    $records->through(fn($r) => $this->attachHighlightTokens($r));
 
     // ✅ Pages dropdown (same date filter)
     $pages = MacroOutput::query()
@@ -558,8 +553,6 @@ $downloadAll = $isMarketingOIC && $dlParam;
         'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'
     ));
 }
-
-
 
 private function tokenizeLocation($raw, string $type): array
 {
