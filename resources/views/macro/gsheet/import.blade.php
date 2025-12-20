@@ -1,4 +1,5 @@
 <x-layout>
+  <x-slot name="title">Import Macro Output</x-slot>
   <x-slot name="heading">Import From Google Sheets</x-slot>
 
   {{-- Flash messages --}}
