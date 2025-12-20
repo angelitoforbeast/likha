@@ -462,20 +462,50 @@ $downloadAll = $isMarketingOIC && $dlParam;
 
   public function index(Request $request)
 {
+    $tz = 'Asia/Manila';
+
     // ✅ Date (Y-m-d). Default: yesterday
-    $date = $request->filled('date') ? $request->date : now()->subDay()->toDateString();
-    $formattedDMY = \Carbon\Carbon::parse($date)->format('d-m-Y');
+    $date = $request->filled('date') ? $request->date : now($tz)->subDay()->toDateString();
+
+    // legacy TIMESTAMP contains "d-m-Y"
+    $formattedDMY = \Carbon\Carbon::parse($date, $tz)->format('d-m-Y');
 
     // ✅ Wrapper para cross-db: mysql uses ``, pgsql uses ""
     $wrap = fn (string $col) => DB::getQueryGrammar()->wrap($col);
 
-    $baseQuery = MacroOutput::query()
-        ->where(function ($q) use ($date, $formattedDMY) {
-            $q->whereDate('ts_date', $date)
-              ->orWhere(function ($qq) use ($formattedDMY) {
-                  $qq->whereNull('ts_date')
-                     ->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}");
-              });
+    // Detect ts_date type (date vs datetime/timestamp)
+    $tsType = null;
+    try {
+        $tsType = \Illuminate\Support\Facades\Schema::getColumnType('macro_output', 'ts_date'); // 'date'|'datetime'|'timestamp'...
+    } catch (\Throwable $e) {
+        $tsType = null;
+    }
+
+    // Build base query (NO whereDate() para di mabagal)
+    $baseQuery = \App\Models\MacroOutput::query()
+        ->where(function ($q) use ($date, $formattedDMY, $tsType, $tz) {
+
+            // A) ✅ Preferred: ts_date not null
+            $q->where(function ($qq) use ($date, $tsType, $tz) {
+                $qq->whereNotNull('ts_date');
+
+                if ($tsType === 'date') {
+                    // ts_date is DATE column
+                    $qq->where('ts_date', '=', $date);
+                } else {
+                    // ts_date is DATETIME/TIMESTAMP (or unknown)
+                    $start = \Carbon\Carbon::parse($date, $tz)->startOfDay()->toDateTimeString();
+                    $end   = \Carbon\Carbon::parse($date, $tz)->endOfDay()->toDateTimeString();
+                    $qq->whereBetween('ts_date', [$start, $end]);
+                }
+            });
+
+            // B) ✅ Legacy fallback: ts_date null -> use TIMESTAMP like "%d-m-Y"
+            $q->orWhere(function ($qq) use ($formattedDMY) {
+                $qq->whereNull('ts_date')
+                   ->whereNotNull('TIMESTAMP')
+                   ->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}%");
+            });
         });
 
     if ($request->filled('PAGE')) {
@@ -521,7 +551,8 @@ $downloadAll = $isMarketingOIC && $dlParam;
         'HISTORICAL LOGS', 'APP SCRIPT CHECKER',
         'edited_full_name', 'edited_phone_number', 'edited_address',
         'edited_province', 'edited_city', 'edited_barangay',
-        'ITEM_NAME','COD','edited_item_name','edited_cod','status_logs'
+        'ITEM_NAME','COD','edited_item_name','edited_cod',
+        'status_logs', 'ts_date',
     ];
 
     $perPage = $request->filled('PAGE') ? 200 : 100;
@@ -537,23 +568,20 @@ $downloadAll = $isMarketingOIC && $dlParam;
     });
 
     // ✅ Pages dropdown (same filter)
-    $pages = MacroOutput::query()
-        ->where(function ($q) use ($date, $formattedDMY) {
-            $q->whereDate('ts_date', $date)
-              ->orWhere(function ($qq) use ($formattedDMY) {
-                  $qq->whereNull('ts_date')
-                     ->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}");
-              });
-        })
+    $pages = (clone $baseQuery)
         ->select('PAGE')
+        ->whereNotNull('PAGE')
         ->distinct()
         ->orderBy('PAGE')
         ->pluck('PAGE');
 
     $paginateOnlyWhenAll = true;
 
-    return view('macro_output.index', compact('records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'));
+    return view('macro_output.index', compact(
+        'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'
+    ));
 }
+
 
 private function tokenizeLocation($raw, string $type): array
 {
