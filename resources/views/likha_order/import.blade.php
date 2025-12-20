@@ -1,5 +1,6 @@
 <x-layout>
     <x-slot name="heading">Likha Order Import</x-slot>
+    <x-slot name="heading">Likha Order Import</x-slot>
 
     <div class="bg-white p-6 rounded shadow-md w-full max-w-5xl mx-auto mt-6">
         @if (session('import_message'))
