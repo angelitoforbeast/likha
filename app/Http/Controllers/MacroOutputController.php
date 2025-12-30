@@ -460,7 +460,7 @@ $downloadAll = $isMarketingOIC && $dlParam;
         return redirect()->back()->with('success', 'Record updated successfully.');
     }
 
-  public function index(Request $request)
+public function index(Request $request)
 {
     $tz = 'Asia/Manila';
 
@@ -508,8 +508,34 @@ $downloadAll = $isMarketingOIC && $dlParam;
             });
         });
 
+    // ✅ Page filter
     if ($request->filled('PAGE')) {
         $baseQuery->where('PAGE', $request->PAGE);
+    }
+
+    // ✅ Checker filter (APP SCRIPT CHECKER) - only 3 options: CHECK / TO_FIX / BLANK
+    $CHECKER = $wrap('APP SCRIPT CHECKER');
+
+    if ($request->filled('checker')) {
+        $checker = $request->checker;
+
+        if ($checker === '__CHECK__') {
+            // ✅ Check only
+            $baseQuery->whereRaw("TRIM({$CHECKER}) = ?", ['✅']);
+
+        } elseif ($checker === '__BLANK__') {
+            // ✅ Blank only (NULL / '' / spaces)
+            $baseQuery->where(function ($q) use ($CHECKER) {
+                $q->whereNull('APP SCRIPT CHECKER')
+                  ->orWhereRaw("TRIM({$CHECKER}) = ''");
+            });
+
+        } elseif ($checker === '__TO_FIX__') {
+            // ✅ To Fix (HAS value, NOT ✅, NOT blank)
+            $baseQuery->whereNotNull('APP SCRIPT CHECKER')
+                ->whereRaw("TRIM({$CHECKER}) <> ''")
+                ->whereRaw("TRIM({$CHECKER}) <> ?", ['✅']);
+        }
     }
 
     // ✅ Status counts (same filter as records)
@@ -567,7 +593,7 @@ $downloadAll = $isMarketingOIC && $dlParam;
         return $this->attachHighlightTokens($r);
     });
 
-    // ✅ Pages dropdown (same filter)
+    // ✅ Pages dropdown (same filter) — keep as-is
     $pages = (clone $baseQuery)
         ->select('PAGE')
         ->whereNotNull('PAGE')
@@ -581,6 +607,9 @@ $downloadAll = $isMarketingOIC && $dlParam;
         'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'
     ));
 }
+
+
+
 
 
 private function tokenizeLocation($raw, string $type): array
