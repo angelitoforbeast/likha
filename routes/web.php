@@ -99,7 +99,8 @@ Route::prefix('botcake/psid')->group(function () {
     // Make sure your form uses method spoofing: @method('DELETE')
     Route::delete('/settings/{id}', [BotcakePsidGsheetController::class, 'deleteSetting'])
         ->name('botcake.psid.settings.delete');
-
+Route::delete('/abc', [BotcakePsidGsheetController::class, 'deleteSetting'])
+        ->name('botcake.psid.settings.delete');
 
     // ===== IMPORT UI =====
     Route::get('/import', [BotcakePsidGsheetController::class, 'showImport'])
