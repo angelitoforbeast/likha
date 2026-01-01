@@ -1,3 +1,4 @@
+{{-- ✅ resources/views/macro_output/index.blade.php (FULL) --}}
 <x-layout>
   <x-slot name="title">Encoder</x-slot>
 
@@ -81,7 +82,7 @@
     .log-content li { margin: 0; }
 
     /* smaller font for historical logs */
-    .hist-log { font-size: 0.72rem; }
+    .hist-log { font-size: 0.72rem; }   /* smaller than text-xs */
     .status-log { font-size: 0.8rem; }
   </style>
 
@@ -92,6 +93,11 @@
 
     /**
      * ✅ STATUS LOGS renderer
+     * New DB format: ts|user|NEW_STATUS
+     * Display: [ts] → NEW_STATUS - user (bold NEW_STATUS)
+     *
+     * Also supports old legacy:
+     * [ts] Bryan changed STATUS: "" → "PROCEED
      */
     if (!function_exists('render_status_logs')) {
       function render_status_logs($raw) {
@@ -99,7 +105,7 @@
         if ($raw === '') return '';
 
         $lines = preg_split("/\r\n|\n|\r/", $raw);
-        $lines = array_values(array_filter(array_map('trim', $lines)));
+        $lines = array_values(array_filter(array_map('trim', $lines))); // remove blanks
         $lines = array_reverse($lines); // ✅ oldest first
 
         $items = [];
@@ -108,6 +114,7 @@
           $line = trim($line);
           if ($line === '') continue;
 
+          // New pipe format: ts|user|value
           if (str_contains($line, '|')) {
             $p = explode('|', $line);
             if (count($p) >= 3) {
@@ -119,6 +126,7 @@
             }
           }
 
+          // Legacy: [ts] User changed STATUS: "old" → "new"  (allow missing end quote)
           if (preg_match('/^\[(.*?)\]\s*(.*?)\s*changed\s*STATUS:\s*"(.*)"\s*→\s*"(.*)\s*$/u', $line, $m)) {
             $ts   = e(trim($m[1] ?? ''));
             $user = e(trim($m[2] ?? ''));
@@ -127,6 +135,7 @@
             continue;
           }
 
+          // fallback
           $items[] = "<li><span class=\"text-gray-500\">" . e($line) . "</span></li>";
         }
 
@@ -136,6 +145,11 @@
 
     /**
      * ✅ HISTORICAL LOGS renderer
+     * New DB format: ts|user|FIELD|OLD|NEW
+     * Display: ts — FIELD: OLD → NEW — user (bold OLD/NEW)
+     *
+     * Supports legacy:
+     * [ts] Bryan updated BARANGAY: "OLD" → "NEW
      */
     if (!function_exists('render_hist_logs')) {
       function render_hist_logs($raw) {
@@ -149,6 +163,7 @@
           $line = trim($line);
           if ($line === '') continue;
 
+          // New pipe format: ts|user|field|old|new
           if (str_contains($line, '|')) {
             $p = explode('|', $line);
             if (count($p) >= 5) {
@@ -161,6 +176,7 @@
               continue;
             }
 
+            // Older pipe format from previous version
             if (count($p) >= 6 && ($p[3] ?? '') === 'from') {
               $ts    = e(trim($p[0] ?? ''));
               $user  = e(trim($p[1] ?? ''));
@@ -180,6 +196,7 @@
             }
           }
 
+          // Legacy: [ts] User updated FIELD: "old" → "new" (allow missing end quote)
           if (preg_match('/^\[(.*?)\]\s*(.*?)\s*updated\s*(.*?):\s*"(.*)"\s*→\s*"(.*)\s*$/u', $line, $m)) {
             $ts    = e(trim($m[1] ?? ''));
             $user  = e(trim($m[2] ?? ''));
@@ -190,6 +207,7 @@
             continue;
           }
 
+          // fallback
           $items[] = "<li><span class=\"text-gray-500\">" . e($line) . "</span></li>";
         }
 
@@ -204,12 +222,13 @@
       <div>
         <label class="text-sm font-medium">Date</label>
         <input type="date" name="date" value="{{ $date }}"
-          class="border rounded px-2 py-1" onchange="this.form.submit()" />
+          class="border rounded px-2 py-1"
+          onchange="resetCheckerAndSubmit(this.form)" />
       </div>
 
       <div>
         <label class="text-sm font-medium">Page</label>
-        <select name="PAGE" class="border rounded px-2 py-1" onchange="this.form.submit()">
+        <select name="PAGE" class="border rounded px-2 py-1" onchange="resetCheckerAndSubmit(this.form)">
           <option value="">All</option>
           @foreach($pages as $page)
             <option value="{{ $page }}" @selected(request('PAGE') == $page)>{{ $page }}</option>
@@ -217,11 +236,11 @@
         </select>
       </div>
 
-      {{-- ✅ Checker dropdown: ONLY Check / To Fix / Blank --}}
+      {{-- ✅ Checker filter dropdown (ONLY: All, Check, To Fix, Blank) --}}
       <div>
         <label class="text-sm font-medium">To Fix</label>
         <select name="checker" class="border rounded px-2 py-1" onchange="this.form.submit()">
-          <option value="">—</option>
+          <option value="" @selected(!request()->filled('checker'))>All</option>
           <option value="__CHECK__"  @selected(request('checker') === '__CHECK__')>Check</option>
           <option value="__TO_FIX__" @selected(request('checker') === '__TO_FIX__')>To Fix</option>
           <option value="__BLANK__"  @selected(request('checker') === '__BLANK__')>Blank</option>
@@ -265,8 +284,13 @@
       </div>
     </form>
 
+    {{-- ✅ Pagination shown UNDER Page dropdown area (inside header) --}}
+    <div class="mt-2">
+      {{ $records->withQueryString()->links() }}
+    </div>
+
     {{-- Column toggles (default unchecked) --}}
-    <div class="flex items-center justify-end gap-4 text-sm mb-3">
+    <div class="flex items-center justify-end gap-4 text-sm mb-3 mt-2">
       <label class="inline-flex items-center gap-2">
         <input type="checkbox" id="toggleHistorical">
         Show Historical Logs
@@ -280,7 +304,7 @@
       @endif
     </div>
 
-    {{-- Download (UNCHANGED) --}}
+    {{-- Download --}}
     @if($role !== 'Data Encoder')
       <div class="flex items-center justify-end gap-3">
         @if($canSeeDownloadAll)
@@ -336,15 +360,15 @@
       <tbody>
         @foreach($records as $record)
           @php
-            $checkerTxt = strtolower($record['APP SCRIPT CHECKER'] ?? '');
-            $shouldHighlight = function($field) use ($checkerTxt) {
-              if (str_contains($checkerTxt, 'full address')) {
+            $checker = strtolower($record['APP SCRIPT CHECKER'] ?? '');
+            $shouldHighlight = function($field) use ($checker) {
+              if (str_contains($checker, 'full address')) {
                 return in_array($field, ['PROVINCE', 'CITY', 'BARANGAY']);
               }
               return match($field) {
-                'PROVINCE' => str_contains($checkerTxt, 'province'),
-                'CITY' => str_contains($checkerTxt, 'city'),
-                'BARANGAY' => str_contains($checkerTxt, 'barangay'),
+                'PROVINCE' => str_contains($checker, 'province'),
+                'CITY' => str_contains($checker, 'city'),
+                'BARANGAY' => str_contains($checker, 'barangay'),
                 default => false,
               };
             };
@@ -438,9 +462,18 @@
     </table>
   </div>
 
+  {{-- ✅ Keep bottom pagination too (optional, but you had it before) --}}
   <div class="mt-6 px-4">
     {{ $records->withQueryString()->links() }}
   </div>
+
+  <script>
+    function resetCheckerAndSubmit(form) {
+      const checker = form.querySelector('select[name="checker"]');
+      if (checker) checker.value = '';
+      form.submit();
+    }
+  </script>
 
   <script>
     document.getElementById('downloadBtn')?.addEventListener('click', function (e) {
@@ -543,6 +576,7 @@
 
             const row = this.closest('tr');
 
+            // update tokens after editing
             if (row && (field === 'BARANGAY' || field === 'CITY' || field === 'PROVINCE')) {
               const cell = row.querySelector('.customer-details');
               if (cell) {
@@ -552,6 +586,7 @@
               }
             }
 
+            // ✅ Only when STATUS changed: collapse logs (same row) + customer details
             if (field === 'STATUS' && row) {
               const userInputCell = row.querySelector('.customer-details.expanded');
               if (userInputCell) userInputCell.classList.remove('expanded');

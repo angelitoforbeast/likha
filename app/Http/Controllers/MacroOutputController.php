@@ -460,8 +460,9 @@ $downloadAll = $isMarketingOIC && $dlParam;
         return redirect()->back()->with('success', 'Record updated successfully.');
     }
 
-public function index(Request $request)
-{
+
+// ✅ MacroOutputController@index (FULL)
+public function index(Request $request){
     $tz = 'Asia/Manila';
 
     // ✅ Date (Y-m-d). Default: yesterday
@@ -513,7 +514,7 @@ public function index(Request $request)
         $baseQuery->where('PAGE', $request->PAGE);
     }
 
-    // ✅ Checker filter (APP SCRIPT CHECKER) - only 3 options: CHECK / TO_FIX / BLANK
+    // ✅ Checker filter (APP SCRIPT CHECKER) - only 4 options in UI: All/Check/To Fix/Blank
     $CHECKER = $wrap('APP SCRIPT CHECKER');
 
     if ($request->filled('checker')) {
@@ -583,17 +584,20 @@ public function index(Request $request)
 
     $perPage = $request->filled('PAGE') ? 200 : 100;
 
+    // ✅ IMPORTANT: use paginate (NOT simplePaginate) to show numbered pagination
     $records = $recordQuery
         ->select($selectCols)
         ->orderByDesc('id')
-        ->simplePaginate($perPage)
+        ->paginate($perPage)
         ->withQueryString();
 
     $records->through(function ($r) {
         return $this->attachHighlightTokens($r);
     });
 
-    // ✅ Pages dropdown (same filter) — keep as-is
+    // ✅ Pages dropdown (same filter)
+    // NOTE: This uses the SAME $baseQuery, so it will also respect checker filter.
+    // If you want pages list to ignore checker filter, tell me and I'll adjust.
     $pages = (clone $baseQuery)
         ->select('PAGE')
         ->whereNotNull('PAGE')
