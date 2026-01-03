@@ -76,7 +76,7 @@ Route::get('/jnt/ondel', [JntOndelController::class, 'index'])->name('jnt.ondel'
 Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name('jnt.ondel.process');
 
 // ✅ Protected routes
-Route::middleware(['auth'])->group(function () {
+Route::middleware(['web','auth','allowed_ip'])->group(function () {
 
 Route::get('/encoder/tools/ai', [AiController::class, 'index'])->name('encoder.tools.ai');
 Route::post('/encoder/tools/ai/run', [AiController::class, 'run'])->name('encoder.tools.ai.run');

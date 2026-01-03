@@ -17,7 +17,7 @@ class Kernel extends HttpKernel
         \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
         \Illuminate\Foundation\Http\Middleware\TrimStrings::class,
         \Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class,
-        \App\Http\Middleware\RestrictIP::class,
+       
 
     ];
 
@@ -56,8 +56,8 @@ class Kernel extends HttpKernel
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
         'role' => \Spatie\Permission\Middlewares\RoleMiddleware::class,
         'role.name' => \App\Http\Middleware\RoleNameCheck::class,
-
+        'allowed_ip' => \App\Http\Middleware\AllowedIpMiddleware::class,
         // ✅ Add your custom middleware here
-        'ip.restrict' => \App\Http\Middleware\RestrictByIp::class,
+
     ];
 }
