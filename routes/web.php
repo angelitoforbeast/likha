@@ -56,6 +56,16 @@ use App\Http\Controllers\JntChatblastGsheetController;
 use App\Models\Role;
 
 // ✅ Public routes
+
+Route::middleware(['web','auth'])->get('/debug/ip', function () {
+    return response()->json([
+        'ip'  => request()->ip(),
+        'ips' => request()->ips(),
+        'xff' => request()->header('x-forwarded-for'),
+        'xri' => request()->header('x-real-ip'),
+    ]);
+});
+
 Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
 Route::post('/login', [LoginController::class, 'login']);
 Route::get('/registerlogin', [RegisterController::class, 'showRegistrationForm'])->name('register');

@@ -11,10 +11,15 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->alias([
-            'allowed_ip' => \App\Http\Middleware\AllowedIpMiddleware::class,
-        ]);
-    })
+    // ✅ Trust proxy headers (Heroku / reverse proxies)
+    $middleware->trustProxies(at: '*');
+
+    // ✅ Ensure alias exists (safe kahit meron na sa Kernel)
+    $middleware->alias([
+        'allowed_ip' => \App\Http\Middleware\AllowedIpMiddleware::class,
+    ]);
+})
+
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })->create();
