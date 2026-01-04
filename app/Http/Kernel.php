@@ -57,6 +57,7 @@ class Kernel extends HttpKernel
         'role' => \Spatie\Permission\Middlewares\RoleMiddleware::class,
         'role.name' => \App\Http\Middleware\RoleNameCheck::class,
         'allowed_ip' => \App\Http\Middleware\AllowedIpMiddleware::class,
+        'ceo' => \App\Http\Middleware\EnsureCeo::class,
         // ✅ Add your custom middleware here
 
     ];

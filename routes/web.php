@@ -52,6 +52,7 @@ use App\Http\Controllers\BotcakePsidGsheetController;
 use App\Http\Controllers\JntStatusController;
 use App\Http\Controllers\Encoder\Tools\AiController;
 use App\Http\Controllers\JntChatblastGsheetController;
+use App\Http\Controllers\Security\AllowedIpController;
 
 use App\Models\Role;
 
@@ -87,6 +88,17 @@ Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name(
 
 // ✅ Protected routes
 Route::middleware(['web','auth','allowed_ip'])->group(function () {
+
+
+
+        Route::get('/allowed-ips', [AllowedIpController::class, 'index'])->name('allowed_ips.index');
+        Route::post('/allowed-ips', [AllowedIpController::class, 'store'])->name('allowed_ips.store');
+        Route::put('/allowed-ips/{allowedIp}', [AllowedIpController::class, 'update'])->name('allowed_ips.update');
+        Route::delete('/allowed-ips/{allowedIp}', [AllowedIpController::class, 'destroy'])->name('allowed_ips.destroy');
+   
+
+
+
 
 Route::get('/encoder/tools/ai', [AiController::class, 'index'])->name('encoder.tools.ai');
 Route::post('/encoder/tools/ai/run', [AiController::class, 'run'])->name('encoder.tools.ai.run');
