@@ -91,10 +91,35 @@ Route::middleware(['web','auth','allowed_ip'])->group(function () {
 
 
 
-        Route::get('/allowed-ips', [AllowedIpController::class, 'index'])->name('allowed_ips.index');
-        Route::post('/allowed-ips', [AllowedIpController::class, 'store'])->name('allowed_ips.store');
-        Route::put('/allowed-ips/{allowedIp}', [AllowedIpController::class, 'update'])->name('allowed_ips.update');
-        Route::delete('/allowed-ips/{allowedIp}', [AllowedIpController::class, 'destroy'])->name('allowed_ips.destroy');
+ // ✅ Allowed IPs (CEO only) - same style as /cpp
+Route::get('/allowed-ips', function () {
+    $role = auth()->user()->employeeProfile?->role;
+    if (!$role || !in_array($role, ['CEO'])) abort(403);
+
+    return app(AllowedIpController::class)->index();
+})->name('allowed_ips.index');
+
+Route::post('/allowed-ips', function () {
+    $role = auth()->user()->employeeProfile?->role;
+    if (!$role || !in_array($role, ['CEO'])) abort(403);
+
+    return app(AllowedIpController::class)->store(request());
+})->name('allowed_ips.store');
+
+Route::put('/allowed-ips/{allowedIp}', function (\App\Models\AllowedIp $allowedIp) {
+    $role = auth()->user()->employeeProfile?->role;
+    if (!$role || !in_array($role, ['CEO'])) abort(403);
+
+    return app(AllowedIpController::class)->update(request(), $allowedIp);
+})->name('allowed_ips.update');
+
+Route::delete('/allowed-ips/{allowedIp}', function (\App\Models\AllowedIp $allowedIp) {
+    $role = auth()->user()->employeeProfile?->role;
+    if (!$role || !in_array($role, ['CEO'])) abort(403);
+
+    return app(AllowedIpController::class)->destroy($allowedIp);
+})->name('allowed_ips.destroy');
+
    
 
 
