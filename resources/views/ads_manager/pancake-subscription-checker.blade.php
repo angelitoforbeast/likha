@@ -1,5 +1,5 @@
 <x-layout>
-  <x-slot name="heading">Pancake Subscription Checkers</x-slot>
+  <x-slot name="heading">Pancake Subscription Checkers 010426 1502</x-slot>
 
   {{-- Flatpickr styles --}}
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
