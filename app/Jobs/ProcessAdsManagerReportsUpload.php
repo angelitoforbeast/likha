@@ -341,9 +341,9 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         }
 
         /** Apply 12% multiplier to amount_spent_php BEFORE saving */
-        if (array_key_exists('amount_spent_php', $row) && $row['amount_spent_php'] !== null) {
-            $row['amount_spent_php'] = round($row['amount_spent_php'] * 1.12, 2); // fits decimal(12,2)
-        }
+        // if (array_key_exists('amount_spent_php', $row) && $row['amount_spent_php'] !== null) {
+        //     $row['amount_spent_php'] = round($row['amount_spent_php'] * 1.12, 2); // fits decimal(12,2)
+        // }
 
         // datetimes (full)
         foreach (['reporting_starts','reporting_ends'] as $dtCol) {
