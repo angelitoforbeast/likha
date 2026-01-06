@@ -25,7 +25,7 @@
           </div>
           <div class="hidden md:flex md:flex-1 overflow-x-auto">
             <div class="ml-10 flex items-center gap-x-4 gap-y-2 flex-1 flex-wrap">
-              @if(in_array($role, ['Marketing', 'Marketing - OIC']))
+              @if(in_array($role, ['Marketing', 'Marketing - OIC', 'CEO']))
 
               {{-- (TASKS dropdown removed) --}}
               <x-navlink href="/ads_manager/payment/upload" :active="request()->is('ads_manager/payment')">Ad Payment</x-navlink>
@@ -50,11 +50,8 @@
               @endif
 
               @if(in_array($role, ['CEO']))
-              <x-navlink href="/cpp" :active="request()->is('cpp')">CPP</x-navlink>
-              <x-navlink href="/ads-manager/import-form" :active="request()->is('import-form')">ADS IMPORT</x-navlink>
-              <x-navlink href="/ads-manager/edit-messaging-template" :active="request()->is('edit-messaging-template')">CREATIVES</x-navlink>
-              <x-navlink href="/gpt-ad-generator" :active="request()->is('gpt-ad-generator')">AD COPY</x-navlink>
-              <x-navlink href="/jnt/checker" :active="request()->is('jnt/checker')">JNT CHECKER</x-navlink>
+              <x-navlink href="/assign-roles" :active="request()->is('assign-roles')">Roles</x-navlink>
+              <x-navlink href="/allowed-ips" :active="request()->is('allowed-ips')">IP</x-navlink>
               @endif
 
               @if(in_array($role, ['Data Encoder - OIC']))
