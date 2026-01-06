@@ -3,87 +3,31 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use App\Jobs\ImportLikhaFromGoogleSheet;
-use App\Models\LikhaOrder;
 use App\Models\LikhaOrderSetting;
-use App\Models\ImportStatus;
+use Google_Client;
+use Google_Service_Sheets;
 
 class LikhaOrderSettingController extends Controller
 {
-    public function import(Request $request)
-    {
-        if ($request->isMethod('get')) {
-            if ($request->ajax()) {
-                $status = ImportStatus::where('job_name', 'LikhaImport')->latest()->first();
-                return response()->json([
-                    'is_complete' => $status?->is_complete ?? false,
-                ]);
-            }
-
-            $setting = LikhaOrderSetting::first();
-            $status = ImportStatus::where('job_name', 'LikhaImport')->latest()->first();
-
-            return view('likha_order.import', compact('setting', 'status'));
-        }
-
-        ImportStatus::updateOrCreate(
-            ['job_name' => 'LikhaImport'],
-            ['is_complete' => false]
-        );
-
-        ImportLikhaFromGoogleSheet::dispatch();
-
-        return redirect('/likha_order_import');
-    }
-
-    public function view(Request $request)
-    {
-        if ($request->isMethod('delete')) {
-            LikhaOrder::truncate();
-            return redirect('/likha_order/view')->with('status', '🗑️ All records deleted.');
-        }
-
-        $query = LikhaOrder::query();
-
-        if ($request->filled('search')) {
-            $search = $request->input('search');
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%$search%")
-                  ->orWhere('phone_number', 'like', "%$search%")
-                  ->orWhere('page_name', 'like', "%$search%");
-            });
-        }
-
-        if ($request->filled('date')) {
-            $query->whereDate('date', $request->input('date'));
-        }
-
-        if ($request->filled('page_name')) {
-            $query->where('page_name', $request->input('page_name'));
-        }
-
-        $orders = $query->latest()->paginate(100);
-        $pages = LikhaOrder::select('page_name')->distinct()->pluck('page_name');
-
-        return view('likha_order.view', compact('orders', 'pages'));
-    }
-
     public function settings()
-{
-    $settings = \App\Models\LikhaOrderSetting::all();
-    return view('likha_order.import_settings', compact('settings'));
-}
-
+    {
+        $settings = LikhaOrderSetting::orderBy('id')->get();
+        return view('likha_order.import_settings', compact('settings'));
+    }
 
     public function store(Request $request)
     {
         $request->validate([
-            'sheet_id' => 'required|string',
+            'sheet_url' => 'required|string',
             'range' => 'required|string',
         ]);
 
+        [$sheetId, $title] = $this->extractAndFetchTitle($request->sheet_url);
+
         LikhaOrderSetting::create([
-            'sheet_id' => $request->sheet_id,
+            'sheet_url' => $request->sheet_url,
+            'sheet_id' => $sheetId,
+            'spreadsheet_title' => $title,
             'range' => $request->range,
         ]);
 
@@ -95,12 +39,16 @@ class LikhaOrderSettingController extends Controller
         $setting = LikhaOrderSetting::findOrFail($id);
 
         $request->validate([
-            'sheet_id' => 'required|string',
+            'sheet_url' => 'required|string',
             'range' => 'required|string',
         ]);
 
+        [$sheetId, $title] = $this->extractAndFetchTitle($request->sheet_url);
+
         $setting->update([
-            'sheet_id' => $request->sheet_id,
+            'sheet_url' => $request->sheet_url,
+            'sheet_id' => $sheetId,
+            'spreadsheet_title' => $title,
             'range' => $request->range,
         ]);
 
@@ -113,5 +61,39 @@ class LikhaOrderSettingController extends Controller
         $setting->delete();
 
         return redirect()->back()->with('status', '🗑️ Sheet setting deleted.');
+    }
+
+    private function extractAndFetchTitle(string $url): array
+    {
+        $sheetId = $this->extractSheetIdFromUrl($url);
+        if (!$sheetId) {
+            // fallback: maybe user pasted the raw id
+            $sheetId = trim($url);
+        }
+
+        $title = null;
+        try {
+            $client = new Google_Client();
+            $client->setAuthConfig(storage_path('app/credentials.json'));
+            $client->addScope(Google_Service_Sheets::SPREADSHEETS_READONLY);
+
+            $service = new Google_Service_Sheets($client);
+            $spreadsheet = $service->spreadsheets->get($sheetId);
+            $title = $spreadsheet->getProperties()->getTitle();
+        } catch (\Throwable $e) {
+            // If title fetch fails, still save the setting; show placeholder
+            $title = 'Unknown Spreadsheet (check API/permissions)';
+        }
+
+        return [$sheetId, $title];
+    }
+
+    private function extractSheetIdFromUrl(string $url): ?string
+    {
+        // Typical format: https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit#gid=0
+        if (preg_match('~/spreadsheets/d/([a-zA-Z0-9-_]+)~', $url, $m)) {
+            return $m[1];
+        }
+        return null;
     }
 }

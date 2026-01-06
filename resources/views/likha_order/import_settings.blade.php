@@ -1,67 +1,64 @@
 <x-layout>
-  <x-slot name="heading">Likha Order GSheet Settings</x-slot>
+  <x-slot name="heading">Likha Order Import Settings</x-slot>
 
-  <div class="max-w-4xl mx-auto mt-6">
+  <div class="bg-white p-6 rounded shadow-md w-full max-w-5xl mx-auto mt-6">
     @if(session('status'))
-      <div class="bg-green-100 text-green-800 p-3 rounded mb-4">{{ session('status') }}</div>
+      <div class="mb-4 p-3 rounded bg-green-100 text-green-800 font-semibold text-center">
+        {{ session('status') }}
+      </div>
     @endif
 
-    {{-- Add New Setting --}}
-    <form method="POST" action="{{ url('/likha_order_import/settings') }}" class="space-y-4 bg-white p-4 rounded shadow mb-6">
+    <form method="POST" action="/likha_order_import/settings" class="grid grid-cols-1 gap-3 mb-6">
       @csrf
-      <div>
-        <label class="text-sm font-medium">Google Sheet ID</label>
-        <input type="text" name="sheet_id" class="w-full border rounded px-3 py-2 mt-1" required>
-      </div>
-      <div>
-        <label class="text-sm font-medium">Range (e.g. Sheet1!A2:H)</label>
-        <input type="text" name="range" class="w-full border rounded px-3 py-2 mt-1" required>
-      </div>
-      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">Add Setting</button>
+      <input name="sheet_url" class="border rounded p-2" placeholder="Google Sheet URL" required>
+      <input
+  name="range"
+  class="border rounded p-2"
+  value="{{ old('range', 'TO WEBSITE!A2:I') }}"
+  placeholder="TO WEBSITE!A2:I"
+  required
+>
+
+      <button class="bg-blue-600 text-white px-4 py-2 rounded">Add Setting</button>
     </form>
 
-    {{-- Settings Table --}}
-    <div class="bg-white p-4 rounded shadow">
-      @if($settings->count())
-        <table class="min-w-full text-sm border border-gray-300">
-          <thead class="bg-gray-100">
+    <div class="overflow-x-auto">
+      <table class="w-full table-auto border text-sm">
+        <thead class="bg-gray-100">
+          <tr>
+            <th class="border px-3 py-2">Title</th>
+            <th class="border px-3 py-2">URL</th>
+            <th class="border px-3 py-2">Sheet ID</th>
+            <th class="border px-3 py-2">Range</th>
+            <th class="border px-3 py-2">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @foreach($settings as $s)
             <tr>
-              <th class="border px-4 py-2 text-left">ID</th>
-              <th class="border px-4 py-2 text-left">Google Sheet ID</th>
-              <th class="border px-4 py-2 text-left">Range</th>
-              <th class="border px-4 py-2 text-center">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            @foreach ($settings as $setting)
-              <tr>
-                <form method="POST" action="{{ url('/likha_order_import/settings/' . $setting->id) }}">
-                  @csrf
-                  @method('PUT')
-                  <td class="border px-4 py-2">{{ $setting->id }}</td>
-                  <td class="border px-4 py-2">
-                    <input type="text" name="sheet_id" value="{{ $setting->sheet_id }}" class="w-full border rounded px-2 py-1">
-                  </td>
-                  <td class="border px-4 py-2">
-                    <input type="text" name="range" value="{{ $setting->range }}" class="w-full border rounded px-2 py-1">
-                  </td>
-                  <td class="border px-4 py-2 text-center space-x-2">
-                    <button type="submit" class="bg-yellow-500 text-white px-3 py-1 rounded">Update</button>
-                </form>
-
-                <form method="POST" action="{{ url('/likha_order_import/settings/' . $setting->id) }}" class="inline-block">
+              <td class="border px-3 py-2">{{ $s->spreadsheet_title ?? '-' }}</td>
+              <td class="border px-3 py-2">
+                @if($s->sheet_url)
+                  <a href="{{ $s->sheet_url }}" target="_blank" class="text-blue-600 underline">Open</a>
+                @else
+                  -
+                @endif
+              </td>
+              <td class="border px-3 py-2">{{ $s->sheet_id }}</td>
+              <td class="border px-3 py-2">{{ $s->range }}</td>
+              <td class="border px-3 py-2">
+                {{-- ikaw bahala UI for edit; important is update route uses PUT --}}
+                <form method="POST" action="/likha_order_import/settings/{{ $s->id }}" onsubmit="return confirm('Delete?')" class="inline">
                   @csrf
                   @method('DELETE')
-                  <button type="submit" onclick="return confirm('Delete this setting?')" class="bg-red-600 text-white px-3 py-1 rounded">Delete</button>
+                  <button class="text-red-600 underline">Delete</button>
                 </form>
-                  </td>
-              </tr>
-            @endforeach
-          </tbody>
-        </table>
-      @else
-        <p class="text-gray-600">No settings found.</p>
-      @endif
+              </td>
+            </tr>
+          @endforeach
+        </tbody>
+      </table>
     </div>
+
   </div>
 </x-layout>

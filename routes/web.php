@@ -302,13 +302,19 @@ Route::post('/task/create-everyday-task', [EverydayTaskController::class, 'store
     Route::get('/orders/tally/{date}', [OrderTallyController::class, 'show'])->name('orders.tally.show');
 
     // ✅ Likha Order (multi-sheet support)
-    Route::post('/likha_order_import/delete', [LikhaOrderImportController::class, 'clearAll']);
-    Route::get('/likha_order_import/settings', [LikhaOrderSettingController::class, 'settings'])->name('likha.settings');
-    Route::post('/likha_order_import/settings', [LikhaOrderSettingController::class, 'store'])->name('likha.settings.store');
-    Route::put('/likha_order_import/settings/{id}', [LikhaOrderSettingController::class, 'update'])->name('likha.settings.update');
-    Route::delete('/likha_order_import/settings/{id}', [LikhaOrderSettingController::class, 'destroy'])->name('likha.settings.delete');
-    Route::match(['get', 'post'], '/likha_order_import', [LikhaOrderImportController::class, 'import'])->name('likha.import');
-    Route::match(['get', 'delete'], '/likha_order/view', [LikhaOrderImportController::class, 'view'])->name('likha.view');
+
+Route::get('/likha_order_import', [LikhaOrderImportController::class, 'index']);
+Route::post('/likha_order_import/start', [LikhaOrderImportController::class, 'start']);
+Route::get('/likha_order_import/status', [LikhaOrderImportController::class, 'status']);
+
+Route::get('/likha_order_import/settings', [LikhaOrderSettingController::class, 'settings']);
+Route::post('/likha_order_import/settings', [LikhaOrderSettingController::class, 'store']);
+Route::put('/likha_order_import/settings/{id}', [LikhaOrderSettingController::class, 'update']);
+Route::delete('/likha_order_import/settings/{id}', [LikhaOrderSettingController::class, 'destroy']);
+
+// Existing view page mo (keep)
+Route::match(['get','delete'], '/likha_order/view', [LikhaOrderImportController::class, 'view']);
+
 
     // ✅ Macro GSheet
     Route::put('/macro/settings/{id}', [MacroGsheetController::class, 'update'])->name('macro.settings.update');

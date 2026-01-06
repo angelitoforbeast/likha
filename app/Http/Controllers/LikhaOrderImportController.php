@@ -6,48 +6,81 @@ use Illuminate\Http\Request;
 use App\Jobs\ImportLikhaFromGoogleSheet;
 use App\Models\LikhaOrder;
 use App\Models\LikhaOrderSetting;
-use Illuminate\Support\Facades\DB;
-use App\Services\GoogleSheetService;
-use App\Jobs\ClearLikhaOrders;
+use App\Models\LikhaImportRun;
+use App\Models\LikhaImportRunSheet;
 
 class LikhaOrderImportController extends Controller
-{   
-
-    
-
-public function clearAll() {
-    DB::table('macro_output')->truncate();
-    dispatch(new ClearLikhaOrders());
-    return back()->with('success', 'Data cleared successfully!');
-}
-
-
-    public function import(Request $request)
 {
-    if ($request->isMethod('get')) {
-        $settings = LikhaOrderSetting::all();
-
-        if ($request->ajax()) {
-            return response()->json([
-                'is_complete'     => cache()->has('likha_import_result'),
-                'import_message'  => cache()->get('likha_import_result'),
-            ]);
-        }
-
+    public function index(Request $request)
+    {
+        $settings = LikhaOrderSetting::orderBy('id')->get();
         return view('likha_order.import', compact('settings'));
     }
 
-    // POST method: trigger import
-    ImportLikhaFromGoogleSheet::dispatch();
-    session()->flash('import_status', '⏳ Importing rows... Please wait.');
+    // AJAX start import
+    public function start(Request $request)
+    {
+        $settings = LikhaOrderSetting::orderBy('id')->get();
 
-    if (cache()->has('likha_import_result')) {
-        session()->flash('import_message', cache()->pull('likha_import_result'));
+        $run = LikhaImportRun::create([
+            'status' => 'running',
+            'total_settings' => $settings->count(),
+            'started_at' => now(),
+        ]);
+
+        foreach ($settings as $s) {
+            LikhaImportRunSheet::create([
+                'run_id' => $run->id,
+                'setting_id' => $s->id,
+                'status' => 'queued',
+            ]);
+        }
+
+        ImportLikhaFromGoogleSheet::dispatch($run->id);
+
+        return response()->json([
+            'ok' => true,
+            'run_id' => $run->id,
+        ]);
     }
 
-    return redirect()->back();
-}
+    // AJAX polling
+    public function status(Request $request)
+    {
+        $runId = (int) $request->query('run_id');
+        $run = LikhaImportRun::with(['sheets.setting'])->findOrFail($runId);
 
+        return response()->json([
+            'run' => [
+                'id' => $run->id,
+                'status' => $run->status,
+                'total_settings' => $run->total_settings,
+                'total_processed' => $run->total_processed,
+                'total_inserted' => $run->total_inserted,
+                'total_updated' => $run->total_updated,
+                'total_skipped' => $run->total_skipped,
+                'total_failed' => $run->total_failed,
+                'message' => $run->message,
+                'started_at' => optional($run->started_at)->toDateTimeString(),
+                'finished_at' => optional($run->finished_at)->toDateTimeString(),
+            ],
+            'sheets' => $run->sheets->map(function ($rs) {
+                return [
+                    'setting_id' => $rs->setting_id,
+                    'status' => $rs->status,
+                    'processed' => $rs->processed_count,
+                    'inserted' => $rs->inserted_count,
+                    'updated' => $rs->updated_count,
+                    'skipped' => $rs->skipped_count,
+                    'message' => $rs->message,
+                    'spreadsheet_title' => $rs->setting?->spreadsheet_title,
+                    'sheet_url' => $rs->setting?->sheet_url,
+                    'sheet_id' => $rs->setting?->sheet_id,
+                    'range' => $rs->setting?->range,
+                ];
+            }),
+        ]);
+    }
 
     public function view(Request $request)
     {

@@ -4,7 +4,8 @@ namespace App\Jobs;
 
 use App\Models\MacroOutput;
 use App\Models\LikhaOrderSetting;
-use App\Models\ImportStatus;
+use App\Models\LikhaImportRun;
+use App\Models\LikhaImportRunSheet;
 use Google_Client;
 use Google_Service_Sheets;
 use Google_Service_Sheets_ValueRange;
@@ -19,37 +20,85 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $runId;
+
+    public function __construct(int $runId)
+    {
+        $this->runId = $runId;
+    }
+
     public function handle()
     {
+        $run = LikhaImportRun::find($this->runId);
+        if (!$run) return;
+
+        $client = new Google_Client();
+        $client->setAuthConfig(storage_path('app/credentials.json'));
+        $client->addScope(Google_Service_Sheets::SPREADSHEETS);
+        $service = new Google_Service_Sheets($client);
+
+        $settings = LikhaOrderSetting::orderBy('id')->get();
+
         try {
-            $updatedCount = 0;
-            $insertedCount = 0;
-
-            $client = new Google_Client();
-            $client->setAuthConfig(storage_path('app/credentials.json'));
-            $client->addScope(Google_Service_Sheets::SPREADSHEETS);
-            $service = new Google_Service_Sheets($client);
-
-            $settings = LikhaOrderSetting::all();
             foreach ($settings as $setting) {
-                if (!$setting->sheet_id || !$setting->range) continue;
+                $runSheet = LikhaImportRunSheet::where('run_id', $run->id)
+                    ->where('setting_id', $setting->id)
+                    ->first();
+
+                if (!$runSheet) continue;
+
+                if (!$setting->sheet_id || !$setting->range) {
+                    $runSheet->update([
+                        'status' => 'failed',
+                        'message' => 'Missing sheet_id or range',
+                        'finished_at' => now(),
+                    ]);
+                    $run->increment('total_failed');
+                    continue;
+                }
+
+                $runSheet->update([
+                    'status' => 'fetching',
+                    'message' => null,
+                    'started_at' => $runSheet->started_at ?? now(),
+                ]);
 
                 $sheetId = $setting->sheet_id;
                 $range = $setting->range;
-                $sheetName = explode('!', $range)[0];
+                $sheetName = explode('!', $range)[0] ?? '';
 
                 $response = $service->spreadsheets_values->get($sheetId, $range);
                 $values = $response->getValues();
-                if (empty($values)) continue;
 
-                \Log::info("📥 [$sheetId] Fetched " . count($values) . " rows");
+                if (empty($values)) {
+                    $runSheet->update([
+                        'status' => 'done',
+                        'message' => 'No rows fetched',
+                        'finished_at' => now(),
+                    ]);
+                    continue;
+                }
+
+                $runSheet->update(['status' => 'processing']);
 
                 $updates = [];
+
+                // Local counters (save to DB in chunks)
+                $processed = 0;
+                $inserted = 0;
+                $updated = 0;
+                $skipped  = 0;
+
                 foreach ($values as $index => $row) {
                     $doneFlag = strtolower(preg_replace('/\s+/', '', $row[8] ?? ''));
-                    if ($doneFlag === 'done') continue;
+                    if ($doneFlag === 'done') {
+                        $skipped++;
+                        continue;
+                    }
 
-                    // ✅ Parse and normalize TIMESTAMP to "H:i d-m-Y"
+                    $processed++;
+
+                    // TIMESTAMP normalize to "H:i d-m-Y"
                     $rawTimestamp = trim($row[0] ?? '');
                     $timestamp = null;
                     if (!empty($rawTimestamp)) {
@@ -66,7 +115,7 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
                         }
                     }
 
-                    // ✅ PAGE (col B) with fallback from col F text ("PAGE: ...")
+                    // PAGE (col B) fallback from col F
                     $page = $row[1] ?? null;
                     if (empty($page) && !empty($row[5])) {
                         if (preg_match('/PAGE:\s*(.*?)\s*(?:\r?\n|$)/i', $row[5], $m)) {
@@ -74,46 +123,39 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
                         }
                     }
 
-                    // ✅ fb_name / FULL NAME (col C)
                     $fbName = $row[2] ?? '';
 
-                    // ✅ Extract from column F (index 5) for ITEM_NAME and COD
-$colF = (string)($row[5] ?? '');
-$extractedItemName = null;
-$extractedCOD = null;
+                    // Extract ITEM_NAME + COD from column F
+                    $colF = (string)($row[5] ?? '');
+                    $extractedItemName = null;
+                    $extractedCOD = null;
 
-if ($colF !== '') {
-    // ITEM: grab text after "ITEM:" until next line
-    $itemText = null;
-    if (preg_match('/ITEM:\s*(.+?)(?:\r?\n|$)/i', $colF, $mItem)) {
-        $itemText = trim(preg_replace('/\s+/', ' ', $mItem[1]));
-    }
+                    if ($colF !== '') {
+                        $itemText = null;
+                        if (preg_match('/ITEM:\s*(.+?)(?:\r?\n|$)/i', $colF, $mItem)) {
+                            $itemText = trim(preg_replace('/\s+/', ' ', $mItem[1]));
+                        }
 
-    // QUANTITY: grab value after "QUANTITY:" (prefer numeric)
-    $qty = null;
-    if (preg_match('/QUANTITY:\s*([^\r\n]+)/i', $colF, $mQty)) {
-        $rawQty = trim($mQty[1]);
-        if (preg_match('/\d+(?:\.\d+)?/', $rawQty, $mNum)) {
-            $qty = $mNum[0]; // e.g., "2" or "2.5"
-        } else {
-            // fallback to the raw (non-numeric) text if any
-            $qty = $rawQty !== '' ? $rawQty : null;
-        }
-    }
+                        $qty = null;
+                        if (preg_match('/QUANTITY:\s*([^\r\n]+)/i', $colF, $mQty)) {
+                            $rawQty = trim($mQty[1]);
+                            if (preg_match('/\d+(?:\.\d+)?/', $rawQty, $mNum)) {
+                                $qty = $mNum[0];
+                            } else {
+                                $qty = $rawQty !== '' ? $rawQty : null;
+                            }
+                        }
 
-    // Build ITEM_NAME: "<qty> x <item>"
-    if ($itemText) {
-        $extractedItemName = $qty ? ($qty . ' x ' . $itemText) : $itemText;
-    }
+                        if ($itemText) {
+                            $extractedItemName = $qty ? ($qty . ' x ' . $itemText) : $itemText;
+                        }
 
-    // COD: number after "PRICE: ₱"
-    if (preg_match('/PRICE:\s*₱\s*([0-9][\d,]*(?:\.\d{1,2})?)/iu', $colF, $mCod)) {
-        $extractedCOD = str_replace(',', '', $mCod[1]);
-    }
-}
+                        if (preg_match('/PRICE:\s*₱\s*([0-9][\d,]*(?:\.\d{1,2})?)/iu', $colF, $mCod)) {
+                            $extractedCOD = str_replace(',', '', $mCod[1]);
+                        }
+                    }
 
-
-                    // ✅ Try match existing row by TIMESTAMP + PAGE + fb_name
+                    // Match existing by TIMESTAMP + PAGE + fb_name
                     $existing = MacroOutput::where([
                         ['TIMESTAMP', '=', $timestamp],
                         ['PAGE', '=', $page],
@@ -126,24 +168,20 @@ if ($colF !== '') {
                             'extracted_details' => $row[6] ?? null,
                         ];
 
-                        // Fill ALL_USER_INPUT if missing
                         if (empty($existing->{'all_user_input'})) {
                             $updateData['all_user_input'] = "FB NAME: " . ($row[2] ?? '') . "\n" . ($row[4] ?? '');
                         }
 
-                        // Fill PHONE NUMBER if missing
                         if ($existing->{'PHONE NUMBER'} === null || $existing->{'PHONE NUMBER'} === '') {
                             $updateData['PHONE NUMBER'] = preg_match('/09\d{9}/', $row[3] ?? '', $m) ? $m[0] : null;
                         }
 
-                        // ✅ Fill ITEM_NAME if missing
                         if (($existing->{'ITEM_NAME'} ?? null) === null || trim((string)$existing->{'ITEM_NAME'}) === '') {
                             if (!empty($extractedItemName)) {
                                 $updateData['ITEM_NAME'] = $extractedItemName;
                             }
                         }
 
-                        // ✅ Fill COD if missing (treat only null/empty as missing; don't overwrite 0)
                         $codCurrent = $existing->{'COD'} ?? null;
                         if ($codCurrent === null || $codCurrent === '') {
                             if (!empty($extractedCOD)) {
@@ -152,7 +190,7 @@ if ($colF !== '') {
                         }
 
                         $existing->update($updateData);
-                        $updatedCount++;
+                        $updated++;
                     } else {
                         MacroOutput::create([
                             'TIMESTAMP'          => $timestamp,
@@ -163,20 +201,31 @@ if ($colF !== '') {
                             'all_user_input'     => 'FB NAME: ' . ($row[2] ?? '') . "\n" . ($row[4] ?? ''),
                             'shop_details'       => $row[5] ?? null,
                             'extracted_details'  => $row[6] ?? null,
-                            // ✅ Also save parsed ITEM_NAME & COD on insert
                             'ITEM_NAME'          => $extractedItemName ?: null,
                             'COD'                => $extractedCOD ?: null,
                         ]);
-                        $insertedCount++;
+                        $inserted++;
                     }
 
-                    // ✅ Mark as DONE in Google Sheet (col I)
-                    $rowNumber = $index + 2; // header at row 1
+                    // Mark DONE in Google Sheet col I
+                    $rowNumber = $index + 2;
                     $updates[] = [
                         'range'  => "{$sheetName}!I{$rowNumber}",
                         'values' => [['DONE']],
                     ];
+
+                    // Save progress every 25 processed rows (lightweight, UI becomes alive)
+                    if (($processed % 25) === 0) {
+                        $runSheet->update([
+                            'processed_count' => $processed,
+                            'inserted_count'  => $inserted,
+                            'updated_count'   => $updated,
+                            'skipped_count'   => $skipped,
+                        ]);
+                    }
                 }
+
+                $runSheet->update(['status' => 'writing']);
 
                 if (!empty($updates)) {
                     $batchBody = new Google_Service_Sheets_BatchUpdateValuesRequest([
@@ -185,13 +234,35 @@ if ($colF !== '') {
                     ]);
                     $service->spreadsheets_values->batchUpdate($sheetId, $batchBody);
                 }
+
+                // Final update for this sheet
+                $runSheet->update([
+                    'status' => 'done',
+                    'processed_count' => $processed,
+                    'inserted_count'  => $inserted,
+                    'updated_count'   => $updated,
+                    'skipped_count'   => $skipped,
+                    'finished_at'     => now(),
+                ]);
+
+                // Add to run totals
+                $run->increment('total_processed', $processed);
+                $run->increment('total_inserted', $inserted);
+                $run->increment('total_updated', $updated);
+                $run->increment('total_skipped', $skipped);
             }
 
-            \Cache::put('likha_import_result', "✅ Import complete! Inserted: $insertedCount, Updated: $updatedCount", now()->addMinutes(10));
-            \Log::info("✅ ImportLikhaFromGoogleSheet Done: Inserted={$insertedCount}, Updated={$updatedCount}");
-        } catch (\Exception $e) {
-            \Log::error('❌ ImportLikhaFromGoogleSheet failed: ' . $e->getMessage());
-            \Log::error($e->getTraceAsString());
+            $run->update([
+                'status' => 'done',
+                'finished_at' => now(),
+            ]);
+
+        } catch (\Throwable $e) {
+            $run->update([
+                'status' => 'failed',
+                'finished_at' => now(),
+                'message' => $e->getMessage(),
+            ]);
         }
     }
 }
