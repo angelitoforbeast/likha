@@ -692,6 +692,15 @@
     }
   </script>
 
+  {{-- ✅ OPTION B: Auto expand + highlight ALL user inputs on page load --}}
+  <script>
+    window.addEventListener('load', () => {
+      document.querySelectorAll('.customer-details').forEach(cell => {
+        expandAndHighlight(cell);
+      });
+    });
+  </script>
+
   {{-- Sticky offset --}}
   <script>
     function adjustTableBodyMargin() {
