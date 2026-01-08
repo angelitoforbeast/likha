@@ -1,6 +1,6 @@
 <x-layout>
-  <x-slot name="title">Import Macro Outputs</x-slot>
-  <x-slot name="heading">Import From Google Sheetss</x-slot>
+  <x-slot name="title">Import Macro Output</x-slot>
+  <x-slot name="heading">Import From Google Sheets</x-slot>
 
   @php
     $runId = request('run_id');
