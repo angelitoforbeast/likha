@@ -317,17 +317,23 @@ Route::match(['get','delete'], '/likha_order/view', [LikhaOrderImportController:
 
 
     // ✅ Macro GSheet
-    Route::put('/macro/settings/{id}', [MacroGsheetController::class, 'update'])->name('macro.settings.update');
-    Route::get('/macro/gsheet/settings', [MacroGsheetController::class, 'settings'])->name('macro.settings');
-    Route::post('/macro/gsheet/settings', [MacroGsheetController::class, 'storeSetting'])->name('macro.settings.store');
-    Route::delete('/macro/gsheet/settings/{id}', [MacroGsheetController::class, 'deleteSetting'])->name('macro.settings.delete');
-    Route::post('/macro/gsheet/import', [MacroGsheetController::class, 'import'])->name('macro.import');
-    Route::get('/macro/gsheet/index', [MacroGsheetController::class, 'index'])->name('macro.index');
-    Route::delete('/macro/gsheet/delete-all', [MacroGsheetController::class, 'deleteAll'])->name('macro.deleteAll');
-    Route::get('/macro/gsheet/import', function () {
-        $settings = \App\Models\MacroGsheetSetting::all();
-        return view('macro.gsheet.import', compact('settings'));
-    })->name('macro.import.view');
+
+Route::put('/macro/settings/{id}', [MacroGsheetController::class, 'update'])->name('macro.settings.update');
+Route::get('/macro/gsheet/settings', [MacroGsheetController::class, 'settings'])->name('macro.settings');
+Route::post('/macro/gsheet/settings', [MacroGsheetController::class, 'storeSetting'])->name('macro.settings.store');
+Route::delete('/macro/gsheet/settings/{id}', [MacroGsheetController::class, 'deleteSetting'])->name('macro.settings.delete');
+// ✅ IMPORT UI (GET)
+Route::get('/macro/gsheet/import', [MacroGsheetController::class, 'showImport'])
+    ->name('macro.import.view');
+// ✅ START IMPORT (POST)  <-- ITO ANG KULANG MO
+Route::post('/macro/gsheet/import', [MacroGsheetController::class, 'import'])
+    ->name('macro.import');
+// ✅ STATUS POLL (GET)
+Route::get('/macro/gsheet/import/status', [MacroGsheetController::class, 'status'])
+    ->name('macro.import.status');
+Route::get('/macro/gsheet/index', [MacroGsheetController::class, 'index'])->name('macro.index');
+Route::delete('/macro/gsheet/delete-all', [MacroGsheetController::class, 'deleteAll'])->name('macro.deleteAll');
+
 
     // ✅ Tasks
     Route::get('/task/index', [TaskController::class, 'index'])->name('task.index');

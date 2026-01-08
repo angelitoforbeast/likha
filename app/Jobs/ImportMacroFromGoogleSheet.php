@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Models\MacroGsheetSetting;
 use App\Models\MacroOutput;
+use App\Models\MacroImportRun;
+use App\Models\MacroImportRunItem;
 use Google_Client;
 use Google\Service\Sheets;
 use Google\Service\Sheets\ValueRange;
@@ -20,11 +22,31 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    public int $timeout = 3600;
+    public int $tries   = 1;
+
+    public function __construct(
+        public int $runId,
+        public ?int $userId = null
+    ) {}
+
     public function handle()
     {
-        set_time_limit(60);
+        set_time_limit(0);
 
-        $settings = MacroGsheetSetting::all();
+        $run = MacroImportRun::find($this->runId);
+        if (!$run) {
+            Log::error("MacroImportRun not found: {$this->runId}");
+            return;
+        }
+
+        $run->update([
+            'status'     => 'running',
+            'started_at' => $run->started_at ?: now(),
+            'message'    => null,
+        ]);
+
+        $settings = MacroGsheetSetting::all()->keyBy('id');
 
         $client = new Google_Client();
         $client->setApplicationName('Laravel GSheet');
@@ -34,21 +56,56 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
 
         $service = new Sheets($client);
 
-        foreach ($settings as $setting) {
+        $items = MacroImportRunItem::where('run_id', $run->id)->orderBy('id')->get();
+
+        $runProcessedSettings = 0;
+        $runProcessed = 0;
+        $runInserted  = 0;
+        $runUpdated   = 0;
+        $runSkipped   = 0;
+
+        foreach ($items as $item) {
+            $setting = $item->setting_id ? ($settings[$item->setting_id] ?? null) : null;
+
+            if (!$setting) {
+                $item->update([
+                    'status'  => 'skipped',
+                    'message' => 'Setting not found (deleted?).',
+                    'finished_at' => now(),
+                ]);
+
+                $runProcessedSettings++;
+                $runSkipped++;
+                $this->updateRunTotals($run, $runProcessedSettings, $runProcessed, $runInserted, $runUpdated, $runSkipped);
+                continue;
+            }
+
+            $item->update([
+                'status'     => 'running',
+                'started_at' => now(),
+                'message'    => null,
+                'processed'  => 0,
+                'inserted'   => 0,
+                'updated'    => 0,
+                'skipped'    => 0,
+            ]);
+
+            $processed = 0;
+            $inserted  = 0;
+            $updated   = 0;
+            $skipped   = 0;
+
             try {
                 $spreadsheetId = $this->extractSpreadsheetId($setting->sheet_url);
                 if (!$spreadsheetId) {
-                    Log::warning("Skipping setting {$setting->id}: invalid sheet_url");
-                    continue;
+                    throw new \RuntimeException("Invalid sheet_url");
                 }
 
                 $range = trim((string) $setting->sheet_range);
                 if ($range === '') {
-                    Log::warning("Skipping setting {$setting->id}: empty sheet_range");
-                    continue;
+                    throw new \RuntimeException("Empty sheet_range");
                 }
 
-                // ✅ Parse range: Sheet!A2:Q (end row optional)
                 $parsed = $this->parseA1Range($range);
 
                 $sheetName = $parsed['sheetName'];
@@ -56,25 +113,28 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
                 $startCol  = $parsed['startCol'];
                 $endCol    = $parsed['endCol'];
 
-                // You said mapping assumes A..P then last col is status/mark
                 if ($startCol !== 'A') {
-                    Log::warning("Skipping setting {$setting->id}: sheet_range must start at A. Given: {$range}");
-                    continue;
+                    throw new \RuntimeException("sheet_range must start at A. Given: {$range}");
                 }
 
-                $totalCols   = $this->colCount($startCol, $endCol); // e.g. A..Q = 17
-                $statusIndex = $totalCols - 1;                      // last column in the returned row
-                $markCol     = $endCol;                             // last column letter = mark column
+                $totalCols   = $this->colCount($startCol, $endCol);
+                $statusIndex = $totalCols - 1;
+                $markCol     = $endCol;
 
-                // Fetch values
                 $response = $service->spreadsheets_values->get($spreadsheetId, $range);
                 $values   = $response->getValues();
 
                 if (empty($values)) {
+                    $item->update([
+                        'status' => 'done',
+                        'message' => 'No rows found in range.',
+                        'finished_at' => now(),
+                    ]);
+                    $runProcessedSettings++;
+                    $this->updateRunTotals($run, $runProcessedSettings, $runProcessed, $runInserted, $runUpdated, $runSkipped);
                     continue;
                 }
 
-                // Map A..P only (first 16 columns)
                 $columnMap = [
                     'TIMESTAMP', 'FULL NAME', 'PHONE NUMBER', 'ADDRESS',
                     'PROVINCE', 'CITY', 'BARANGAY', 'ITEM_NAME',
@@ -87,54 +147,47 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
                 $importCount = 0;
 
                 for ($i = 0; $i < count($values); $i++) {
-                    // Ensure row has up to endCol
                     $row = array_pad($values[$i], $totalCols, null);
 
-                    // ✅ status = last column of range (dynamic)
-                    $status = trim($row[$statusIndex] ?? '');
+                    $status = trim((string)($row[$statusIndex] ?? ''));
 
-                    // ✅ Check kung may kahit anong laman sa A–P (first 16 columns)
+                    // hasData A–P (first 16 cols)
                     $hasData = false;
                     for ($j = 0; $j <= 15; $j++) {
-                        if (!empty(trim($row[$j] ?? ''))) {
+                        if (!empty(trim((string)($row[$j] ?? '')))) {
                             $hasData = true;
                             break;
                         }
                     }
 
-                    // ✅ Additional rule: dapat may value sa Column O (index 14)
-                    $hasColumnO = !empty(trim($row[14] ?? ''));
+                    // Column O index 14 must have value
+                    $hasColumnO = !empty(trim((string)($row[14] ?? '')));
 
-                    // ✅ Final condition: blank status (last col), may laman A–P, at may laman Column O
                     if ($status === '' && $hasData && $hasColumnO) {
                         $data = [];
 
-                        // Only read A..P from the sheet row
                         foreach ($columnMap as $index => $column) {
                             $data[$column] = $row[$index] ?? null;
                         }
 
-                        // Limit phone number length
                         $data['PHONE NUMBER'] = Str::limit((string)($data['PHONE NUMBER'] ?? ''), 50);
 
-                        // Extract fb_name from all_user_input
                         $fbName = null;
                         if (!empty($data['all_user_input'])) {
-                            preg_match('/FB\s*NAME:\s*(.*?)\r?\n/i', $data['all_user_input'], $m);
+                            preg_match('/FB\s*NAME:\s*(.*?)\r?\n/i', (string)$data['all_user_input'], $m);
                             $fbName = $m[1] ?? null;
                         }
                         $data['fb_name'] = $fbName;
 
-                        // Extract fb_page from all_user_input if PAGE is empty
                         if (empty($data['PAGE']) && !empty($data['all_user_input'])) {
-                            preg_match('/PAGE:\s*(.*?)(?:\r?\n|$)/i', $data['all_user_input'], $pm);
+                            preg_match('/PAGE:\s*(.*?)(?:\r?\n|$)/i', (string)$data['all_user_input'], $pm);
                             $extractedPage = $pm[1] ?? null;
                             if ($extractedPage) {
                                 $data['PAGE'] = $extractedPage;
                             }
                         }
 
-                        // ✅ Parse and normalize TIMESTAMP to H:i d-m-Y
+                        // normalize timestamp
                         $rawTimestamp = trim((string)($row[0] ?? ''));
                         $timestamp    = null;
 
@@ -156,7 +209,6 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
                             }
                         }
 
-                        // Check if row already exists in MacroOutput (use normalized timestamp)
                         $existing = MacroOutput::where([
                             ['TIMESTAMP', '=', $timestamp],
                             ['PAGE', '=', $data['PAGE']],
@@ -165,8 +217,8 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
 
                         if (!$existing) {
                             MacroOutput::create($data);
+                            $inserted++;
                         } else {
-                            // Skip updating key address-related fields if they already exist in DB
                             $protectedFields = [
                                 'FULL NAME',
                                 'PHONE NUMBER',
@@ -183,9 +235,11 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
                             }
 
                             $existing->update($data);
+                            $updated++;
                         }
 
-                        // ✅ Mark as IMPORTED in the LAST column of the given range
+                        $processed++;
+
                         $updates[] = new ValueRange([
                             'range'  => "{$sheetName}!{$markCol}" . ($startRow + $i),
                             'values' => [['IMPORTED']],
@@ -195,6 +249,9 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
                         if ($importCount >= $maxImport) {
                             break;
                         }
+                    } else {
+                        // skipped row (either already imported or no data)
+                        // We don't count this as skipped per-row to avoid huge counts.
                     }
                 }
 
@@ -207,14 +264,67 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
                     $service->spreadsheets_values->batchUpdate($spreadsheetId, $batchBody);
                 }
 
+                $item->update([
+                    'status'     => 'done',
+                    'processed'  => $processed,
+                    'inserted'   => $inserted,
+                    'updated'    => $updated,
+                    'skipped'    => $skipped,
+                    'message'    => $processed > 0 ? 'Imported successfully.' : 'No eligible rows (blank status + valid data).',
+                    'finished_at'=> now(),
+                ]);
+
+                $runProcessedSettings++;
+                $runProcessed += $processed;
+                $runInserted  += $inserted;
+                $runUpdated   += $updated;
+                $runSkipped   += $skipped;
+
+                $this->updateRunTotals($run, $runProcessedSettings, $runProcessed, $runInserted, $runUpdated, $runSkipped);
+
             } catch (\Throwable $e) {
-                Log::error("❌ GSheet Import Failed (setting {$setting->id}): " . $e->getMessage(), [
+                Log::error("❌ Macro GSheet Import Failed (setting {$setting->id}): " . $e->getMessage(), [
                     'setting_id' => $setting->id,
                     'sheet_url'  => $setting->sheet_url,
                     'sheet_range'=> $setting->sheet_range,
                 ]);
+
+                $item->update([
+                    'status'      => 'failed',
+                    'message'     => $e->getMessage(),
+                    'finished_at' => now(),
+                ]);
+
+                $runProcessedSettings++;
+                $this->updateRunTotals($run, $runProcessedSettings, $runProcessed, $runInserted, $runUpdated, $runSkipped);
             }
         }
+
+        // finalize run
+        $finalStatus = 'done';
+
+        // if any failed
+        $failedCount = MacroImportRunItem::where('run_id', $run->id)->where('status', 'failed')->count();
+        if ($failedCount > 0) $finalStatus = 'failed';
+
+        $run->update([
+            'status'      => $finalStatus,
+            'finished_at' => now(),
+            'message'     => $finalStatus === 'failed'
+                ? "May {$failedCount} sheet(s) na failed."
+                : 'Import completed.',
+        ]);
+    }
+
+    private function updateRunTotals(MacroImportRun $run, int $processedSettings, int $processed, int $inserted, int $updated, int $skipped): void
+    {
+        $run->update([
+            'processed_settings' => $processedSettings,
+            'total_processed'    => $processed,
+            'total_inserted'     => $inserted,
+            'total_updated'      => $updated,
+            'total_skipped'      => $skipped,
+        ]);
     }
 
     private function extractSpreadsheetId($url)
@@ -225,7 +335,6 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
 
     private function parseA1Range(string $range): array
     {
-        // Supports: Sheet!A2:Q or Sheet!A2:Q9999
         $range = trim($range);
 
         if (!preg_match('/^([^!]+)!([A-Z]+)(\d+):([A-Z]+)(\d+)?$/i', $range, $m)) {
