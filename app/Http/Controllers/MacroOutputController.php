@@ -111,23 +111,26 @@ $downloadAll = $isMarketingOIC && $dlParam;
         // Step 6: Append actual data rows
         // Keep column count consistent with template: add fb_name + remarks
         foreach ($records as $row) {
-            fputcsv($handle, [
-                $row->{'FULL NAME'},          // 1
-                $row->{'PHONE NUMBER'},       // 2
-                $row->ADDRESS,                // 3
-                $row->PROVINCE,               // 4
-                $row->CITY,                   // 5
-                $row->BARANGAY,               // 6
-                'EZ',                         // 7 (Courier code)
-                $row->{'ITEM_NAME'},          // 8
-                '0.5',                        // 9  Weight (kg)
-                strtok($row->ITEM_NAME, ' '), // 10 Total parcels(*) placeholder
-                '549',                        // 11 Parcel Value
-                $row->COD,                    // 12 COD
-                $row->fb_name,                // 13 ✅ FB NAME
-                null                          // 14 Remarks (kept)
-            ]);
-        }
+    $colH = (string) ($row->{'ITEM_NAME'} ?? ''); // Column H (8)
+
+    fputcsv($handle, [
+        $row->{'FULL NAME'},          // 1  A
+        $row->{'PHONE NUMBER'},       // 2  B
+        $row->ADDRESS,                // 3  C
+        $row->PROVINCE,               // 4  D
+        $row->CITY,                   // 5  E
+        $row->BARANGAY,               // 6  F
+        'EZ',                         // 7  G
+        $colH,                        // 8  H  ITEM NAME
+        '0.5',                        // 9  I
+        strtok($colH, ' '),           // 10 J
+        '549',                        // 11 K
+        $row->COD,                    // 12 L
+        $colH,                        // 13 M  ✅ SAME AS COLUMN H
+        $row->fb_name ?? null         // 14 N  (optional: ilipat dito si fb_name para di mawala)
+    ]);
+}
+
 
         // Step 7: Output CSV
         rewind($handle);
