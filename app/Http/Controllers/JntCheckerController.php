@@ -23,8 +23,10 @@ class JntCheckerController extends Controller
             'filter_date_end'      => session('filter_date_end'),
             'updatableCount'       => session('updatableCount'),
 
-            // optional (safe kahit di mo pa ginagamit sa Blade)
+            // diagnostics
             'mappingMissingCount'  => session('mappingMissingCount'),
+            'skippedCancelCount'   => session('skippedCancelCount'),
+            'processedFilesCount'  => session('processedFilesCount'),
             'perfectMatch'         => session('perfectMatch'),
         ]);
     }
@@ -34,82 +36,13 @@ class JntCheckerController extends Controller
         Log::info('📥 Entered upload() function');
 
         $request->validate([
-            'excel_file' => 'required|mimes:xlsx,xls',
+            'excel_file' => 'required|mimes:xlsx,xls,zip',
         ]);
 
-        $path = $request->file('excel_file')->getRealPath();
+        $uploaded = $request->file('excel_file');
+        $ext = strtolower($uploaded->getClientOriginalExtension());
 
-        try {
-            $spreadsheet = IOFactory::load($path);
-            $sheet = $spreadsheet->getActiveSheet();
-            $data = $sheet->toArray(null, true, true, true);
-            Log::info('📊 Successfully loaded Excel and converted to array.');
-        } catch (\Throwable $e) {
-            Log::error('❌ Excel load error: ' . $e->getMessage());
-            return back()->with('error', 'Failed to read the Excel file. Make sure it is a valid XLSX/XLS.');
-        }
-
-        $data = array_values($data); // reindex to 0-based
-        if (empty($data) || !isset($data[0])) {
-            Log::info('⛔ Header row missing or unreadable.');
-            return back()->with('error', 'Excel file has no header row.');
-        }
-
-        Log::info('✅ Header Row:', $data[0]);
-
-        // =========================
-        // Step 1: Build header map
-        // =========================
-        $headers = $data[0];
-        $headerMap = [];
-        foreach ($headers as $col => $value) {
-            $normalized = strtolower(trim(preg_replace('/\s+/', ' ', (string)($value ?? ''))));
-            if ($normalized !== '') {
-                $headerMap[$normalized] = $col;
-            }
-        }
-        Log::info('✅ Detected Headers:', array_keys($headerMap));
-
-        // =========================
-        // Step 2: Resolve required columns (with aliases)
-        // =========================
-        $senderCol   = $this->resolveHeader($headerMap, [
-            'sender name', 'sender', 'shipper', 'sendername',
-        ]);
-
-        $receiverCol = $this->resolveHeader($headerMap, [
-            'receiver cellphone', 'receiver cell phone', 'receiver phone', 'receiver mobile',
-            'consignee phone', 'consignee cellphone', 'phone number', 'contact number', 'receiver number',
-        ]);
-
-        $itemCol     = $this->resolveHeader($headerMap, [
-            'item name', 'item', 'product', 'product name', 'itemname',
-        ]);
-
-        $codCol      = $this->resolveHeader($headerMap, [
-            'cod', 'cod amt', 'cod amount', 'cod value', 'cod amount (php)', 'cod amt (php)',
-        ]);
-
-        $missing = [];
-        if (!$senderCol)   $missing[] = 'Sender Name';
-        if (!$receiverCol) $missing[] = 'Receiver Cellphone';
-        if (!$itemCol)     $missing[] = 'Item Name';
-        if (!$codCol)      $missing[] = 'COD';
-
-        if (count($missing)) {
-            return back()->with('error', 'Missing column(s): ' . implode(', ', $missing));
-        }
-
-        // Waybill/Tracking optional detection (common variants)
-        $waybillCol = $this->resolveHeader($headerMap, [
-            'waybill', 'waybill no', 'waybill number',
-            'tracking no', 'tracking number', 'tracking',
-            'airwaybill', 'awb', 'awb no', 'awb number',
-        ]);
-
-        // =========================
-        // Step 3: Preload Sender -> Page mapping (NO N+1)
-        // =========================
+        // Preload Sender -> Page mapping (NO N+1)
         $senderToPage = PageSenderMapping::select('SENDER_NAME', 'PAGE')->get()
             ->mapWithKeys(function ($m) {
                 $sender = strtolower($this->normText($m->SENDER_NAME));
@@ -119,40 +52,86 @@ class JntCheckerController extends Controller
             ->all();
 
         // =========================
-        // Step 4: Parse Excel rows
+        // Step A: Read Excel(s)
         // =========================
-        $rows = array_slice($data, 1);
-        $results = [];
+        $allResults = [];
+        $skippedCancelCount = 0;
+        $processedFilesCount = 0;
 
-        foreach ($rows as $row) {
-            $sender   = $this->normText($row[$senderCol] ?? '');
-            $receiver = $this->normPhone($row[$receiverCol] ?? '');
-            $item     = $this->normText($row[$itemCol] ?? '');
-            $cod      = $this->normCod($row[$codCol] ?? '0');
-            $waybill  = $waybillCol ? $this->normText($row[$waybillCol] ?? '') : '';
+        if ($ext === 'zip') {
+            $zipPath = $uploaded->getRealPath();
+            $tmpDir = storage_path('app/tmp/jnt_checker_' . uniqid());
+            if (!is_dir($tmpDir)) @mkdir($tmpDir, 0775, true);
 
-            $mappedPage = $senderToPage[strtolower($sender)] ?? '';
+            $zip = new \ZipArchive();
+            if ($zip->open($zipPath) !== true) {
+                return back()->with('error', 'Failed to open ZIP file.');
+            }
 
-            // Strict: key ONLY if may mapped page. Pag wala, treat as mapping-missing.
-            $key = $mappedPage
-                ? $this->makeKey($mappedPage, $receiver, $item, $cod)
-                : null;
+            $zip->extractTo($tmpDir);
+            $zip->close();
 
-            $results[] = [
-                'sender'      => $sender,
-                'page'        => $mappedPage ?: '❌ Not Found in Mapping',
-                'receiver'    => $receiver,
-                'item'        => $item,
-                'cod'         => $cod,      // string like "299.00"
-                'waybill'     => $waybill,
-                'matched'     => false,
-                'matched_id'  => null,      // IMPORTANT for 1-to-1
-                'key'         => $key,      // temp; will unset later
-            ];
+            $excelFiles = $this->findExcelFilesRecursive($tmpDir);
+
+            if (empty($excelFiles)) {
+                $this->rrmdir($tmpDir);
+                return back()->with('error', 'ZIP contains no .xlsx or .xls files.');
+            }
+
+            foreach ($excelFiles as $filePath) {
+                $processedFilesCount++;
+                $label = basename($filePath);
+
+                $parsed = $this->parseExcelFileToResults($filePath, $senderToPage, $label);
+                if ($parsed['error']) {
+                    $this->rrmdir($tmpDir);
+                    return back()->with('error', "File {$label}: " . $parsed['error']);
+                }
+
+                $skippedCancelCount += $parsed['skippedCancelCount'];
+                $allResults = array_merge($allResults, $parsed['results']);
+            }
+
+            // cleanup
+            $this->rrmdir($tmpDir);
+        } else {
+            $processedFilesCount = 1;
+
+            $path = $uploaded->getRealPath();
+            $label = $uploaded->getClientOriginalName();
+
+            $parsed = $this->parseExcelFileToResults($path, $senderToPage, $label);
+            if ($parsed['error']) {
+                return back()->with('error', $parsed['error']);
+            }
+
+            $skippedCancelCount = $parsed['skippedCancelCount'];
+            $allResults = $parsed['results'];
+        }
+
+        // If everything got skipped (e.g., all Cancel Order)
+        if (empty($allResults)) {
+            return redirect()
+                ->route('jnt.checker')
+                ->with([
+                    'results'             => [],
+                    'matchedCount'        => 0,
+                    'notMatchedCount'     => 0,
+                    'notInExcelCount'     => 0,
+                    'notInExcelRows'      => collect([]),
+                    'filter_date_start'   => $request->input('filter_date_start'),
+                    'filter_date_end'     => $request->input('filter_date_end'),
+                    'updatableCount'      => 0,
+                    'mappingMissingCount' => 0,
+                    'skippedCancelCount'  => $skippedCancelCount,
+                    'processedFilesCount' => $processedFilesCount,
+                    'perfectMatch'        => false,
+                ])
+                ->with('success', 'Uploaded successfully, but all rows were filtered out (Cancel Order).');
         }
 
         // =========================
-        // Step 5: Filter MacroOutput by date + status
+        // Step B: Filter MacroOutput by date if provided
         // =========================
         $start = $request->input('filter_date_start');
         $end   = $request->input('filter_date_end');
@@ -204,7 +183,7 @@ class JntCheckerController extends Controller
         $macroOutputRecords = $query->get();
 
         // =========================
-        // Step 6: Build Macro multiset (key -> list of ids)
+        // Step C: Build Macro multiset (key -> list of ids)
         // =========================
         $macroKeyToIds = [];
         foreach ($macroOutputRecords as $mo) {
@@ -217,15 +196,15 @@ class JntCheckerController extends Controller
             $macroKeyToIds[$k][] = (int) $mo->id;
         }
 
-        // Cursor per key = how many ids already assigned
+        // cursor per key
         $keyCursor = [];
 
         // =========================
-        // Step 7: STRICT 1-to-1 match (count-aware allocation)
+        // Step D: STRICT 1-to-1 match (duplicates MUST match)
         // =========================
         $mappingMissingCount = 0;
 
-        foreach ($results as &$res) {
+        foreach ($allResults as &$res) {
             if (!$res['key']) {
                 $mappingMissingCount++;
                 $res['matched'] = false;
@@ -236,7 +215,6 @@ class JntCheckerController extends Controller
             $k = $res['key'];
 
             if (!isset($macroKeyToIds[$k])) {
-                // No such key in Macro at all
                 $res['matched'] = false;
                 $res['matched_id'] = null;
                 continue;
@@ -245,13 +223,12 @@ class JntCheckerController extends Controller
             $i = $keyCursor[$k] ?? 0;
 
             if (!isset($macroKeyToIds[$k][$i])) {
-                // Macro has this key but duplicates are exhausted (Excel duplicates > Macro duplicates)
+                // duplicates exhausted
                 $res['matched'] = false;
                 $res['matched_id'] = null;
                 continue;
             }
 
-            // Assign exactly ONE id for this Excel row
             $res['matched'] = true;
             $res['matched_id'] = $macroKeyToIds[$k][$i];
             $keyCursor[$k] = $i + 1;
@@ -259,7 +236,7 @@ class JntCheckerController extends Controller
         unset($res);
 
         // =========================
-        // Step 8: Not in Excel (EXTRA in Macro) = leftover ids after allocation
+        // Step E: Not in Excel (EXTRA in Macro) = remaining ids after allocation
         // =========================
         $extraMacroIds = [];
         foreach ($macroKeyToIds as $k => $ids) {
@@ -267,39 +244,43 @@ class JntCheckerController extends Controller
             $count = count($ids);
 
             if ($used < $count) {
-                // push remaining ids without array_slice (less memory)
                 for ($i = $used; $i < $count; $i++) {
                     $extraMacroIds[] = $ids[$i];
                 }
             }
         }
 
-        $notInExcelRows = $macroOutputRecords->filter(function ($row) use ($extraMacroIds) {
-            // Using in_array on potentially large arrays is slower;
-            // but extraMacroIds is usually much smaller than macroOutputRecords.
-            return in_array((int)$row->id, $extraMacroIds, true);
+        // faster membership lookup
+        $extraIdSet = [];
+        foreach ($extraMacroIds as $id) $extraIdSet[$id] = true;
+
+        $notInExcelRows = $macroOutputRecords->filter(function ($row) use ($extraIdSet) {
+            return isset($extraIdSet[(int)$row->id]);
         })->values();
 
         $notInExcelCount = $notInExcelRows->count();
 
         // =========================
-        // Step 9: Summary counts + sorting
+        // Step F: Summary counts + sort
         // =========================
-        $matchedCount    = collect($results)->where('matched', true)->count();
-        $notMatchedCount = collect($results)->where('matched', false)->count();
+        $matchedCount    = collect($allResults)->where('matched', true)->count();
+        $notMatchedCount = collect($allResults)->where('matched', false)->count();
 
-        // Sort unmatched first
-        $results = collect($results)->sortBy('matched')->values()->all();
+        // Sort: mapping-missing first, then unmatched, then matched
+        $allResults = collect($allResults)->sortBy(function ($r) {
+            if (($r['page'] ?? '') === '❌ Not Found in Mapping') return 0;
+            return ($r['matched'] ? 2 : 1);
+        })->values()->all();
 
-        // Remove temp key from results before session
-        foreach ($results as &$r) unset($r['key']);
+        // remove temp key
+        foreach ($allResults as &$r) unset($r['key']);
         unset($r);
 
         // =========================
-        // Step 10: Updatable rows (STRICT: only assigned matched_id)
+        // Step G: Updatable rows (STRICT: only assigned matched_id)
         // matched + has waybill + has mapped page
         // =========================
-        $updatable = collect($results)
+        $updatable = collect($allResults)
             ->filter(fn($r) =>
                 !empty($r['matched']) &&
                 !empty($r['matched_id']) &&
@@ -315,16 +296,18 @@ class JntCheckerController extends Controller
             ->all();
 
         session(['jnt_updatable' => $updatable]);
-
         $uniqueUpdatableCount = count(array_unique(array_column($updatable, 'id')));
 
-        // Perfect match definition: no missing in macro, no extra in macro, no missing mapping
+        // Perfect match definition:
+        // - all excel rows matched
+        // - no extra macro rows
+        // - no mapping missing
         $perfectMatch = ($notMatchedCount === 0) && ($notInExcelCount === 0) && ($mappingMissingCount === 0);
 
         return redirect()
             ->route('jnt.checker')
             ->with([
-                'results'              => $results,
+                'results'              => $allResults,
                 'matchedCount'         => $matchedCount,
                 'notMatchedCount'      => $notMatchedCount,
                 'notInExcelCount'      => $notInExcelCount,
@@ -333,8 +316,9 @@ class JntCheckerController extends Controller
                 'filter_date_end'      => $end,
                 'updatableCount'       => $uniqueUpdatableCount,
 
-                // optional diagnostics
                 'mappingMissingCount'  => $mappingMissingCount,
+                'skippedCancelCount'   => $skippedCancelCount,
+                'processedFilesCount'  => $processedFilesCount,
                 'perfectMatch'         => $perfectMatch,
             ]);
     }
@@ -350,9 +334,7 @@ class JntCheckerController extends Controller
         // Group MacroOutput IDs by WAYBILL para isang update per waybill
         $groups = [];
         foreach ($updatable as $u) {
-            if (!isset($u['id'], $u['waybill'])) {
-                continue;
-            }
+            if (!isset($u['id'], $u['waybill'])) continue;
             $groups[$u['waybill']][] = (int) $u['id'];
         }
 
@@ -370,6 +352,144 @@ class JntCheckerController extends Controller
         }
 
         return back()->with('success', "WAYBILL updated for {$updated} row(s).");
+    }
+
+    // ============================================================
+    // Excel parsing (supports Order Status filter != "Cancel Order")
+    // ============================================================
+    private function parseExcelFileToResults(string $path, array $senderToPage, string $fileLabel): array
+    {
+        try {
+            $spreadsheet = IOFactory::load($path);
+            $sheet = $spreadsheet->getActiveSheet();
+            $data = $sheet->toArray(null, true, true, true);
+        } catch (\Throwable $e) {
+            Log::error('❌ Excel load error: ' . $e->getMessage(), ['file' => $fileLabel]);
+            return ['error' => 'Failed to read Excel file.', 'results' => [], 'skippedCancelCount' => 0];
+        }
+
+        $data = array_values($data);
+        if (empty($data) || !isset($data[0])) {
+            return ['error' => 'Excel file has no header row.', 'results' => [], 'skippedCancelCount' => 0];
+        }
+
+        // header map
+        $headers = $data[0];
+        $headerMap = [];
+        foreach ($headers as $col => $value) {
+            $normalized = strtolower(trim(preg_replace('/\s+/', ' ', (string)($value ?? ''))));
+            if ($normalized !== '') $headerMap[$normalized] = $col;
+        }
+
+        // required columns
+        $senderCol = $this->resolveHeader($headerMap, ['sender name', 'sender', 'shipper']);
+        $receiverCol = $this->resolveHeader($headerMap, [
+            'receiver cellphone', 'receiver phone', 'receiver mobile',
+            'consignee phone', 'consignee cellphone', 'phone number', 'contact number',
+        ]);
+        $itemCol = $this->resolveHeader($headerMap, ['item name', 'item', 'product name', 'product']);
+        $codCol = $this->resolveHeader($headerMap, ['cod', 'cod amt', 'cod amount', 'cod value']);
+
+        // order status (required dahil gusto mo i-filter)
+        $statusCol = $this->resolveHeader($headerMap, ['order status', 'status', 'orderstatus', 'order_status']);
+
+        $missing = [];
+        if (!$senderCol)   $missing[] = 'Sender Name';
+        if (!$receiverCol) $missing[] = 'Receiver Cellphone';
+        if (!$itemCol)     $missing[] = 'Item Name';
+        if (!$codCol)      $missing[] = 'COD';
+        if (!$statusCol)   $missing[] = 'Order Status';
+
+        if (count($missing)) {
+            return ['error' => 'Missing column(s): ' . implode(', ', $missing), 'results' => [], 'skippedCancelCount' => 0];
+        }
+
+        // optional waybill
+        $waybillCol = $this->resolveHeader($headerMap, [
+            'waybill', 'waybill no', 'waybill number',
+            'tracking no', 'tracking number', 'tracking',
+            'airwaybill', 'awb', 'awb no', 'awb number',
+        ]);
+
+        $rows = array_slice($data, 1);
+
+        $results = [];
+        $skippedCancelCount = 0;
+
+        foreach ($rows as $row) {
+            $status = strtolower($this->normText($row[$statusCol] ?? ''));
+            // Filter: skip Cancel Order (kahit may trailing spaces / different casing)
+            if ($status === 'cancel order') {
+                $skippedCancelCount++;
+                continue;
+            }
+
+            $sender   = $this->normText($row[$senderCol] ?? '');
+            $receiver = $this->normPhone($row[$receiverCol] ?? '');
+            $item     = $this->normText($row[$itemCol] ?? '');
+            $cod      = $this->normCod($row[$codCol] ?? '0');
+            $waybill  = $waybillCol ? $this->normText($row[$waybillCol] ?? '') : '';
+
+            $mappedPage = $senderToPage[strtolower($sender)] ?? '';
+            $key = $mappedPage ? $this->makeKey($mappedPage, $receiver, $item, $cod) : null;
+
+            $results[] = [
+                'source_file' => $fileLabel,
+                'order_status'=> $this->normText($row[$statusCol] ?? ''),
+
+                'sender'      => $sender,
+                'page'        => $mappedPage ?: '❌ Not Found in Mapping',
+                'receiver'    => $receiver,
+                'item'        => $item,
+                'cod'         => $cod, // "299.00"
+                'waybill'     => $waybill,
+
+                'matched'     => false,
+                'matched_id'  => null,
+                'key'         => $key, // temp
+            ];
+        }
+
+        return ['error' => null, 'results' => $results, 'skippedCancelCount' => $skippedCancelCount];
+    }
+
+    // ============================================================
+    // ZIP helpers
+    // ============================================================
+    private function findExcelFilesRecursive(string $dir): array
+    {
+        $out = [];
+        $it = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS)
+        );
+
+        foreach ($it as $file) {
+            /** @var \SplFileInfo $file */
+            if (!$file->isFile()) continue;
+            $ext = strtolower($file->getExtension());
+            if (in_array($ext, ['xlsx', 'xls'], true)) {
+                $out[] = $file->getPathname();
+            }
+        }
+
+        return $out;
+    }
+
+    private function rrmdir(string $dir): void
+    {
+        if (!is_dir($dir)) return;
+        $it = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($it as $file) {
+            /** @var \SplFileInfo $file */
+            if ($file->isDir()) @rmdir($file->getPathname());
+            else @unlink($file->getPathname());
+        }
+
+        @rmdir($dir);
     }
 
     // ============================================================

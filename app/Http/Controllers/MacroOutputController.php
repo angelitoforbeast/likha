@@ -15,133 +15,154 @@ class MacroOutputController extends Controller
 {
 
     public function download(Request $request)
-    {
-        // ✅ Only Marketing - OIC can actually enable "download_all"
-        // Normalize role (spaces, case, at uri ng dash: -, –, —)
-$userRoleRaw = Auth::user()?->employeeProfile?->role ?? '';
-$roleNorm = preg_replace('/\s+/u', ' ', trim((string)$userRoleRaw));
-$isMarketingOIC = preg_match('/^marketing\s*[-–—]\s*oic$/iu', $roleNorm) === 1;
+{
+    // ✅ Only Marketing - OIC can actually enable "download_all"
+    // Normalize role (spaces, case, at uri ng dash: -, –, —)
+    $userRoleRaw = Auth::user()?->employeeProfile?->role ?? '';
+    $roleNorm = preg_replace('/\s+/u', ' ', trim((string)$userRoleRaw));
+    $isMarketingOIC = preg_match('/^marketing\s*[-–—]\s*oic$/iu', $roleNorm) === 1;
 
-// Tanggapin '1' / on / true / boolean
-$dlRaw = $request->input('download_all');
-$dlParam = $request->boolean('download_all') || in_array($dlRaw, ['1', 1, 'on', 'true'], true);
+    // Tanggapin '1' / on / true / boolean
+    $dlRaw = $request->input('download_all');
+    $dlParam = $request->boolean('download_all') || in_array($dlRaw, ['1', 1, 'on', 'true'], true);
 
-// Final guard
-$downloadAll = $isMarketingOIC && $dlParam;
+    // Final guard
+    $downloadAll = $isMarketingOIC && $dlParam;
 
-        DownloadedMacroOutputLog::create([
-            'timestamp'     => $request->input('date'),
-            'page'          => $request->input('PAGE'),
-            'downloaded_by' => Auth::user()?->name ?? 'Unknown',
-            'downloaded_at' => Carbon::now(),
+    DownloadedMacroOutputLog::create([
+        'timestamp'     => $request->input('date'),
+        'page'          => $request->input('PAGE'),
+        'downloaded_by' => Auth::user()?->name ?? 'Unknown',
+        'downloaded_at' => Carbon::now(),
+    ]);
+
+    $query = DB::table('macro_output');
+
+    // Step 1: Apply filters
+    if ($request->has('date') && $request->date) {
+        $formatted = date('d-m-Y', strtotime($request->date));
+        $query->where('TIMESTAMP', 'like', "%$formatted");
+    }
+
+    if ($request->has('PAGE') && $request->PAGE) {
+        $query->where('PAGE', $request->PAGE);
+    }
+
+    // Step 2: Validation & status restriction (only when NOT download_all)
+    if (!$downloadAll) {
+        // Only allow download if all filtered rows (excluding CANNOT PROCEED) have valid fields
+        $hasMissingFields = (clone $query)->where(function ($q) {
+            $q->where(function ($subQ) {
+                // ✅ Kung hindi "CANNOT PROCEED", kailangan valid lahat ng fields
+                $subQ->whereNotIn('STATUS', ['CANNOT PROCEED'])
+                    ->where(function ($innerQ) {
+                        $innerQ->whereNull('STATUS')->orWhere('STATUS', '')
+                            ->orWhereNull('ITEM_NAME')->orWhere('ITEM_NAME', '')
+                            // ✅ safer for MySQL: no quotes around column name
+                            ->orWhereRaw('CHAR_LENGTH(ITEM_NAME) > 20')
+                            ->orWhereNull('COD')->orWhere('COD', '');
+                    });
+            });
+        })->exists();
+
+        if ($hasMissingFields) {
+            return back()->with('error', 'Download FAILED: Some entries are missing STATUS, ITEM NAME, or COD.');
+        }
+
+        // Step 3: Restrict to only rows marked as "PROCEED"
+        $query->where('STATUS', 'PROCEED');
+    }
+
+    // Step 3.5: Select fields (now including fb_name)
+    $records = $query->select(
+        'FULL NAME',
+        'PHONE NUMBER',
+        'ADDRESS',
+        'PROVINCE',
+        'CITY',
+        'BARANGAY',
+        'ITEM_NAME',
+        'COD',
+        'fb_name'
+    )->get();
+
+    if ($records->isEmpty()) {
+        return back()->with('error', 'Download FAILED: No entries found for the selected filters.');
+    }
+
+    // Step 4: Generate filename
+    $pagePart = $request->PAGE ? preg_replace('/[^a-zA-Z0-9_]/', '_', $request->PAGE) : 'AllPages';
+    $datePart = $request->date ?? now()->format('Y-m-d');
+    $timePart = now()->format('H-i-s');
+    $filename = "{$pagePart}_{$datePart}_{$timePart}.csv";
+
+    // Step 5: Prepare CSV content
+    $handle = fopen('php://temp', 'w+');
+
+    // Load first rows from Excel template (kept as-is)
+    $templatePath = resource_path('templates/exptemplete.xls');
+    $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($templatePath);
+    $sheet = $spreadsheet->getActiveSheet();
+    $templateData = $sheet->rangeToArray('A1:N8', null, true, true, false);
+
+    foreach ($templateData as $row) {
+        fputcsv($handle, $row);
+    }
+
+    // Step 6: Append actual data rows (ROW 9+)
+    // ✅ Uppercase all string data starting row 9 and below
+    $UP = function ($v) {
+        $s = is_null($v) ? '' : (string) $v;
+        $s = trim($s);
+        return $s === '' ? '' : mb_strtoupper($s, 'UTF-8');
+    };
+
+    foreach ($records as $row) {
+        // ✅ uppercase fields (strings)
+        $fullName = $UP($row->{'FULL NAME'} ?? '');
+        $address  = $UP($row->ADDRESS ?? '');
+        $prov     = $UP($row->PROVINCE ?? '');
+        $city     = $UP($row->CITY ?? '');
+        $brgy     = $UP($row->BARANGAY ?? '');
+        $fbName   = $UP($row->fb_name ?? '');
+
+        // keep phone + COD as-is (usually numeric/text digits)
+        $phone = trim((string) ($row->{'PHONE NUMBER'} ?? ''));
+        $cod   = trim((string) ($row->COD ?? ''));
+
+        // Column H (ITEM NAME) -> uppercase too
+        $colH = $UP($row->{'ITEM_NAME'} ?? '');     // Column H (8)
+        $colJ = $colH ? strtok($colH, ' ') : '';    // Column J (10) first word
+
+        fputcsv($handle, [
+            $fullName,   // 1  A ✅
+            $phone,      // 2  B
+            $address,    // 3  C ✅
+            $prov,       // 4  D ✅
+            $city,       // 5  E ✅
+            $brgy,       // 6  F ✅
+            'EZ',        // 7  G
+            $colH,       // 8  H ✅
+            '0.5',       // 9  I
+            $colJ,       // 10 J ✅
+            '549',       // 11 K
+            $cod,        // 12 L
+            $colH,       // 13 M ✅ same as H
+            $fbName      // 14 N ✅
         ]);
+    }
 
-        $query = DB::table('macro_output');
+    // Step 7: Output CSV
+    rewind($handle);
+    $content = stream_get_contents($handle);
+    fclose($handle);
 
-        // Step 1: Apply filters
-        if ($request->has('date') && $request->date) {
-            $formatted = date('d-m-Y', strtotime($request->date));
-            $query->where('TIMESTAMP', 'like', "%$formatted");
-        }
-
-        if ($request->has('PAGE') && $request->PAGE) {
-            $query->where('PAGE', $request->PAGE);
-        }
-
-        // Step 2: Validation & status restriction (only when NOT download_all)
-        if (!$downloadAll) {
-            // Only allow download if all filtered rows (excluding CANNOT PROCEED) have valid fields
-            $hasMissingFields = (clone $query)->where(function ($q) {
-                $q->where(function ($subQ) {
-                    // ✅ Kung hindi "CANNOT PROCEED", kailangan valid lahat ng fields
-                    $subQ->whereNotIn('STATUS', ['CANNOT PROCEED'])
-                        ->where(function ($innerQ) {
-                            $innerQ->whereNull('STATUS')->orWhere('STATUS', '')
-                                ->orWhereNull('ITEM_NAME')->orWhere('ITEM_NAME', '')
-                                ->orWhereRaw('CHAR_LENGTH("ITEM_NAME") > 20')
-                                ->orWhereNull('COD')->orWhere('COD', '');
-                        });
-                });
-            })->exists();
-
-            if ($hasMissingFields) {
-                return back()->with('error', 'Download FAILED: Some entries are missing STATUS, ITEM NAME, or COD.');
-            }
-
-            // Step 3: Restrict to only rows marked as "PROCEED"
-            $query->where('STATUS', 'PROCEED');
-        }
-
-        // Step 3.5: Select fields (now including fb_name)
-        $records = $query->select(
-            'FULL NAME',
-            'PHONE NUMBER',
-            'ADDRESS',
-            'PROVINCE',
-            'CITY',
-            'BARANGAY',
-            'ITEM_NAME',
-            'COD',
-            'fb_name'
-        )->get();
-
-        if ($records->isEmpty()) {
-            return back()->with('error', 'Download FAILED: No entries found for the selected filters.');
-        }
-
-        // Step 4: Generate filename
-        $pagePart = $request->PAGE ? preg_replace('/[^a-zA-Z0-9_]/', '_', $request->PAGE) : 'AllPages';
-        $datePart = $request->date ?? now()->format('Y-m-d');
-        $timePart = now()->format('H-i-s');
-        $filename = "{$pagePart}_{$datePart}_{$timePart}.csv";
-
-        // Step 5: Prepare CSV content
-        $handle = fopen('php://temp', 'w+');
-
-        // Load first rows from Excel template (kept as-is)
-        $templatePath = resource_path('templates/exptemplete.xls');
-        $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($templatePath);
-        $sheet = $spreadsheet->getActiveSheet();
-        $templateData = $sheet->rangeToArray('A1:N8', null, true, true, false);
-
-        foreach ($templateData as $row) {
-            fputcsv($handle, $row);
-        }
-
-        // Step 6: Append actual data rows
-        // Keep column count consistent with template: add fb_name + remarks
-        foreach ($records as $row) {
-    $colH = (string) ($row->{'ITEM_NAME'} ?? ''); // Column H (8)
-
-    fputcsv($handle, [
-        $row->{'FULL NAME'},          // 1  A
-        $row->{'PHONE NUMBER'},       // 2  B
-        $row->ADDRESS,                // 3  C
-        $row->PROVINCE,               // 4  D
-        $row->CITY,                   // 5  E
-        $row->BARANGAY,               // 6  F
-        'EZ',                         // 7  G
-        $colH,                        // 8  H  ITEM NAME
-        '0.5',                        // 9  I
-        strtok($colH, ' '),           // 10 J
-        '549',                        // 11 K
-        $row->COD,                    // 12 L
-        $colH,                        // 13 M  ✅ SAME AS COLUMN H
-        $row->fb_name ?? null         // 14 N  (optional: ilipat dito si fb_name para di mawala)
+    return response($content, 200, [
+        'Content-Type'        => 'text/csv',
+        'Content-Disposition' => "attachment; filename={$filename}",
     ]);
 }
 
-
-        // Step 7: Output CSV
-        rewind($handle);
-        $content = stream_get_contents($handle);
-        fclose($handle);
-
-        return response($content, 200, [
-            'Content-Type'        => 'text/csv',
-            'Content-Disposition' => "attachment; filename={$filename}",
-        ]);
-    }
 
     public function edit($id)
     {
