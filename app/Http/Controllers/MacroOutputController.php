@@ -485,8 +485,10 @@ class MacroOutputController extends Controller
     }
 
 
-// ✅ MacroOutputController@index (FULL)
-public function index(Request $request){
+
+    // ✅ MacroOutputController@index (FULL) — paginate ONLY when PAGE = All
+public function index(Request $request)
+{
     $tz = 'Asia/Manila';
 
     // ✅ Date (Y-m-d). Default: yesterday
@@ -606,22 +608,35 @@ public function index(Request $request){
         'status_logs', 'ts_date',
     ];
 
-    $perPage = $request->filled('PAGE') ? 200 : 100;
+    // ✅ IMPORTANT RULE BACK:
+    // paginate ONLY when PAGE is All (i.e., PAGE not filled)
+    $paginateOnlyWhenAll = !$request->filled('PAGE');
 
-    // ✅ IMPORTANT: use paginate (NOT simplePaginate) to show numbered pagination
-    $records = $recordQuery
-        ->select($selectCols)
-        ->orderByDesc('id')
-        ->paginate($perPage)
-        ->withQueryString();
+    if ($paginateOnlyWhenAll) {
+        // ✅ Paginate mode (All pages)
+        $records = $recordQuery
+            ->select($selectCols)
+            ->orderByDesc('id')
+            ->paginate(100)          // or 100/whatever you want
+            ->withQueryString();
 
-    $records->through(function ($r) {
-        return $this->attachHighlightTokens($r);
-    });
+        $records->through(function ($r) {
+            return $this->attachHighlightTokens($r);
+        });
+    } else {
+        // ✅ No paginate mode (Specific PAGE selected)
+        $records = $recordQuery
+            ->select($selectCols)
+            ->orderByDesc('id')
+            ->get();
+
+        $records->transform(function ($r) {
+            return $this->attachHighlightTokens($r);
+        });
+    }
 
     // ✅ Pages dropdown (same filter)
     // NOTE: This uses the SAME $baseQuery, so it will also respect checker filter.
-    // If you want pages list to ignore checker filter, tell me and I'll adjust.
     $pages = (clone $baseQuery)
         ->select('PAGE')
         ->whereNotNull('PAGE')
@@ -629,12 +644,12 @@ public function index(Request $request){
         ->orderBy('PAGE')
         ->pluck('PAGE');
 
-    $paginateOnlyWhenAll = true;
-
     return view('macro_output.index', compact(
         'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'
     ));
 }
+
+
 
 
 

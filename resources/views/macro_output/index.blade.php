@@ -285,9 +285,11 @@
     </form>
 
     {{-- ✅ Pagination shown UNDER Page dropdown area (inside header) --}}
-    <div class="mt-2">
-      {{ $records->withQueryString()->links() }}
-    </div>
+    @if(!empty($paginateOnlyWhenAll) && $paginateOnlyWhenAll)
+      <div class="mt-2">
+        {{ $records->withQueryString()->links() }}
+      </div>
+    @endif
 
     {{-- Column toggles (default unchecked) --}}
     <div class="flex items-center justify-end gap-4 text-sm mb-3 mt-2">
@@ -462,10 +464,12 @@
     </table>
   </div>
 
-  {{-- ✅ Keep bottom pagination too (optional, but you had it before) --}}
-  <div class="mt-6 px-4">
-    {{ $records->withQueryString()->links() }}
-  </div>
+  {{-- ✅ Bottom pagination (ONLY when All pages) --}}
+  @if(!empty($paginateOnlyWhenAll) && $paginateOnlyWhenAll)
+    <div class="mt-6 px-4">
+      {{ $records->withQueryString()->links() }}
+    </div>
+  @endif
 
   <script>
     function resetCheckerAndSubmit(form) {
