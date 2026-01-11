@@ -58,7 +58,6 @@ class MacroOutputController extends Controller
                     ->where(function ($innerQ) {
                         $innerQ->whereNull('STATUS')->orWhere('STATUS', '')
                             ->orWhereNull('ITEM_NAME')->orWhere('ITEM_NAME', '')
-                            // ✅ safer for MySQL: no quotes around column name
                             ->orWhereRaw('CHAR_LENGTH(ITEM_NAME) > 20')
                             ->orWhereNull('COD')->orWhere('COD', '');
                     });
@@ -72,6 +71,17 @@ class MacroOutputController extends Controller
         // Step 3: Restrict to only rows marked as "PROCEED"
         $query->where('STATUS', 'PROCEED');
     }
+
+    // ✅ Step 3.2: SORTING (ITEM_NAME A–Z; blanks last)
+    $wrap = fn (string $col) => DB::getQueryGrammar()->wrap($col);
+    $ITEM = $wrap('ITEM_NAME');
+    $FULL = $wrap('FULL NAME');
+
+    $query
+        ->orderByRaw("CASE WHEN {$ITEM} IS NULL OR TRIM({$ITEM}) = '' THEN 1 ELSE 0 END ASC")
+        ->orderByRaw("TRIM({$ITEM}) ASC")
+        ->orderByRaw("TRIM({$FULL}) ASC")
+        ->orderByDesc('id');
 
     // Step 3.5: Select fields (now including fb_name)
     $records = $query->select(
