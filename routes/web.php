@@ -53,6 +53,7 @@ use App\Http\Controllers\JntStatusController;
 use App\Http\Controllers\Encoder\Tools\AiController;
 use App\Http\Controllers\JntChatblastGsheetController;
 use App\Http\Controllers\Security\AllowedIpController;
+use App\Http\Controllers\MacroOutputPageNameController;
 
 use App\Models\Role;
 
@@ -241,6 +242,8 @@ Route::post('/encoder/checker_1/update-field', [MacroOutputController::class, 'u
 Route::post('/macro_output/validate', [MacroOutputController::class, 'validateAddresses'])->name('macro_output.validate');
 Route::get('/macro_output/download', [MacroOutputController::class, 'download'])->name('macro_output.download');
 Route::post('/macro_output/validate-items', [MacroOutputController::class, 'validateItems']);
+Route::get('/encoder/page-name', [MacroOutputPageNameController::class, 'index'])
+    ->name('encoder.page-name');
 
 
 // Checker 2 GSheet Settings Routes
