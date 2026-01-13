@@ -54,6 +54,7 @@ use App\Http\Controllers\Encoder\Tools\AiController;
 use App\Http\Controllers\JntChatblastGsheetController;
 use App\Http\Controllers\Security\AllowedIpController;
 use App\Http\Controllers\MacroOutputPageNameController;
+use App\Http\Controllers\PancakeConversationController;
 
 use App\Models\Role;
 
@@ -171,6 +172,16 @@ Route::get('/pancake/retrieve-orders', [RetrieveOrdersController::class, 'index'
 
 Route::post('/pancake/retrieve-orders/check', [RetrieveOrdersController::class, 'check'])
     ->name('pancake.retrieve-orders.check');
+Route::get('/pancake/conversations', [PancakeConversationController::class, 'index'])
+        ->name('pancake.conversations');
+
+    Route::post('/pancake/conversations/upload', [PancakeConversationController::class, 'store'])
+        ->name('pancake.conversations.store');
+
+    Route::get('/pancake/conversations/status', [PancakeConversationController::class, 'status'])
+        ->name('pancake.conversations.status');
+
+
 
 
 Route::get('/ads_manager/ad_account', [AdAccountController::class, 'index'])
@@ -244,6 +255,9 @@ Route::get('/macro_output/download', [MacroOutputController::class, 'download'])
 Route::post('/macro_output/validate-items', [MacroOutputController::class, 'validateItems']);
 Route::get('/encoder/page-name', [MacroOutputPageNameController::class, 'index'])
     ->name('encoder.page-name');
+    Route::post('/macro_output/pancake-more', [MacroOutputController::class, 'pancakeMore'])
+    ->name('macro_output.pancake_more');
+
 
 
 // Checker 2 GSheet Settings Routes

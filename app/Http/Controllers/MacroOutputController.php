@@ -13,6 +13,63 @@ use Illuminate\Support\Facades\Schema;
 
 class MacroOutputController extends Controller
 {
+    // ✅ Replace ENTIRE pancakeMore() with this (returns customers_chat ONLY)
+public function pancakeMore(Request $request)
+{
+    $request->validate([
+        'fb_name' => 'required|string|max:255',
+    ]);
+
+    $fbName = trim((string) $request->fb_name);
+    if ($fbName === '') {
+        return response()->json([
+            'status'  => 'error',
+            'message' => 'fb_name is empty',
+        ], 422);
+    }
+
+    // table exists?
+    if (!Schema::hasTable('pancake_conversations')) {
+        return response()->json([
+            'status' => 'success',
+            'found'  => false,
+            'text'   => '',
+        ]);
+    }
+
+    // ✅ exact match: full_name = fb_name
+    $row = DB::table('pancake_conversations')
+        ->select('id', 'full_name', 'customers_chat', 'created_at')
+        ->where('full_name', '=', $fbName)
+        ->orderByDesc('id')
+        ->first();
+
+    if (!$row) {
+        return response()->json([
+            'status' => 'success',
+            'found'  => false,
+            'text'   => '',
+        ]);
+    }
+
+    $chat = trim((string)($row->customers_chat ?? ''));
+
+    // optional cap to protect UI
+    $max = 8000;
+    if ($chat !== '' && mb_strlen($chat, 'UTF-8') > $max) {
+        $chat = mb_substr($chat, 0, $max, 'UTF-8') . "\n\n[TRUNCATED]";
+    }
+
+    return response()->json([
+        'status' => 'success',
+        'found'  => true,
+        'text'   => $chat, // ✅ customers_chat ONLY
+    ]);
+}
+
+    // ✅ Expecting fb_name from MacroOutput (or passed directly from UI)
+   
+
 
     public function download(Request $request)
 {
@@ -615,7 +672,7 @@ public function index(Request $request)
         'edited_full_name', 'edited_phone_number', 'edited_address',
         'edited_province', 'edited_city', 'edited_barangay',
         'ITEM_NAME','COD','edited_item_name','edited_cod',
-        'status_logs', 'ts_date',
+        'status_logs', 'ts_date','fb_name',
     ];
 
     // ✅ IMPORTANT RULE BACK:
@@ -658,11 +715,6 @@ public function index(Request $request)
         'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'
     ));
 }
-
-
-
-
-
 
 
 private function tokenizeLocation($raw, string $type): array

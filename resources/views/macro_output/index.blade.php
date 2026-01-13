@@ -84,6 +84,22 @@
     /* smaller font for historical logs */
     .hist-log { font-size: 0.72rem; }   /* smaller than text-xs */
     .status-log { font-size: 0.8rem; }
+
+    /* ✅ Pancake extra text formatting */
+    .pancake-extra {
+      margin-top: .5rem;
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+      line-height: 1.25rem;
+    }
+    .see-more-link {
+      display: inline-block;
+      margin-top: .25rem;
+      font-size: 0.75rem;
+      color: #2563eb; /* blue-600 */
+      text-decoration: underline;
+      cursor: pointer;
+    }
   </style>
 
   @php
@@ -439,8 +455,15 @@
               data-brgy='@json($record->brgy_tokens ?? [])'
               data-city='@json($record->city_tokens ?? [])'
               data-prov='@json($record->prov_tokens ?? [])'
+              data-fbname="{{ $record->fb_name ?? '' }}"
             >
               <span class="all-user-input-text">{{ $record['all_user_input'] }}</span>
+
+              {{-- ✅ Pancake extra area (filled by JS) --}}
+              <div class="pancake-extra hidden"></div>
+
+              {{-- ✅ See more link (blue) --}}
+              <a href="#" class="see-more-link">See more</a>
             </td>
 
             {{-- HIST LOGS: expand-only-once --}}
@@ -677,14 +700,20 @@
       }
     }
 
+    // ✅ Updated: rebuild as BASE + EXTRA so we don't lose Pancake appended text
     function expandAndHighlight(cell) {
       if (!cell.classList.contains('expanded')) cell.classList.add('expanded');
 
       const span = cell.querySelector('.all-user-input-text');
       if (!span) return;
 
-      if (!span.dataset.originalText) span.dataset.originalText = span.textContent || '';
-      span.textContent = span.dataset.originalText;
+      // base text (original all_user_input)
+      if (!span.dataset.baseText) span.dataset.baseText = span.textContent || '';
+
+      const extraText = cell.dataset.extraText || '';
+      const combined = extraText ? (span.dataset.baseText + "\n\n" + extraText) : span.dataset.baseText;
+
+      span.textContent = combined;
 
       const brgyTokens = JSON.parse(cell.dataset.brgy || '[]');
       const cityTokens = JSON.parse(cell.dataset.city || '[]');
@@ -704,6 +733,88 @@
       });
     });
   </script>
+
+  {{-- ✅ Pancake: See more loader --}}
+ <script>
+  function getCsrfToken() {
+    return '{{ csrf_token() }}';
+  }
+
+  // ✅ Pancake: See more loader (customers_chat only, NOT appended)
+  async function loadPancakeMore(cell, linkEl) {
+    const fbName = (cell.dataset.fbname || '').trim();
+
+    // ✅ load once guard (NEW FLAG)
+    if (cell.dataset.pancakeLoaded === '1') {
+      linkEl.textContent = 'Loaded';
+      linkEl.style.pointerEvents = 'none';
+      return;
+    }
+
+    linkEl.textContent = 'Loading...';
+    linkEl.style.pointerEvents = 'none';
+
+    try {
+      const res = await fetch("{{ route('macro_output.pancake_more') }}", {
+        method: 'POST',
+        headers: {
+          'X-CSRF-TOKEN': getCsrfToken(),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ fb_name: fbName })
+      });
+
+      const data = await res.json();
+
+      // ✅ Show ONLY customers_chat (controller should return chat-only in data.text)
+      const chatOnly = (data && typeof data.text === 'string') ? data.text : '';
+
+      const extraDiv = cell.querySelector('.pancake-extra');
+      if (extraDiv) {
+        extraDiv.classList.remove('hidden');
+        extraDiv.textContent = chatOnly; // ✅ ONLY customers_chat
+      }
+
+      // ✅ mark loaded
+      cell.dataset.pancakeLoaded = '1';
+
+      linkEl.textContent = 'Loaded';
+    } catch (e) {
+      linkEl.textContent = 'See more';
+      linkEl.style.pointerEvents = 'auto';
+
+      const extraDiv = cell.querySelector('.pancake-extra');
+      if (extraDiv) {
+        extraDiv.classList.remove('hidden');
+        extraDiv.textContent = '(Load failed)';
+      }
+    }
+  }
+
+  // ✅ Attach click handlers
+  window.addEventListener('load', () => {
+    document.querySelectorAll('.customer-details .see-more-link').forEach(link => {
+      link.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const cell = this.closest('.customer-details');
+        if (!cell) return;
+
+        // ✅ only load once (using pancakeLoaded flag)
+        if (cell.dataset.pancakeLoaded === '1') {
+          this.textContent = 'Loaded';
+          this.style.pointerEvents = 'none';
+          return;
+        }
+
+        loadPancakeMore(cell, this);
+      });
+    });
+  });
+</script>
+
+
 
   {{-- Sticky offset --}}
   <script>
