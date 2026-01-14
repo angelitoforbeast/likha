@@ -265,88 +265,110 @@ public function pancakeMore(Request $request)
     }
 
     public function validateAddresses(Request $request)
-    {
-        $filePath = resource_path('views/macro_output/jnt_address.txt');
+{
+    $filePath = resource_path('views/macro_output/jnt_address.txt');
 
-        $validMap = [];
-        $validProvinces = [];
-        $validCities = [];
-        $validBarangays = [];
+    $validMap = [];
+    $validProvinces = [];
+    $validCities = [];
+    $validBarangays = [];
 
-        if (file_exists($filePath)) {
-            $lines = file($filePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-            foreach ($lines as $line) {
-                $parts = array_map('trim', explode('|', $line));
-                if (count($parts) !== 3 || strtolower($parts[0]) === 'province') continue;
-                [$prov, $city, $brgy] = $parts;
+    if (file_exists($filePath)) {
+        $lines = file($filePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $line) {
+            $parts = array_map('trim', explode('|', $line));
+            if (count($parts) !== 3 || strtolower($parts[0]) === 'province') continue;
 
-                $key = strtolower("$prov|$city|$brgy");
-                $validMap[$key] = true;
-                $validProvinces[] = strtolower($prov);
-                $validCities[] = strtolower($city);
-                $validBarangays[] = strtolower($brgy);
-            }
+            [$prov, $city, $brgy] = $parts;
+
+            $key = strtolower("$prov|$city|$brgy");
+            $validMap[$key] = true;
+
+            $validProvinces[] = strtolower($prov);
+            $validCities[]    = strtolower($city);
+            $validBarangays[] = strtolower($brgy);
         }
-
-        $validProvinces = array_unique($validProvinces);
-        $validCities = array_unique($validCities);
-        $validBarangays = array_unique($validBarangays);
-
-        // ✅ Limit validation to provided IDs
-        $ids = $request->input('ids', []);
-        $records = MacroOutput::whereIn('id', $ids)->get([
-            'id', 'PROVINCE', 'CITY', 'BARANGAY', 'PHONE NUMBER'
-        ]);
-
-        // Collect all phone numbers to check for duplicates
-        $phoneCounts = [];
-        foreach ($records as $record) {
-            $phone = trim($record->{'PHONE NUMBER'});
-            if ($phone !== '') {
-                $phoneCounts[$phone] = ($phoneCounts[$phone] ?? 0) + 1;
-            }
-        }
-
-        $results = [];
-
-        foreach ($records as $record) {
-            $prov = strtolower(trim($record->PROVINCE));
-            $city = strtolower(trim($record->CITY));
-            $brgy = strtolower(trim($record->BARANGAY));
-            $phone = trim($record->{'PHONE NUMBER'});
-            $fullKey = "$prov|$city|$brgy";
-
-            $isValid = isset($validMap[$fullKey]);
-
-            // PHONE NUMBER validation
-            $phoneInvalid = false;
-
-            if ($phone === '' || is_null($phone)) {
-                $phoneInvalid = true;
-
-            } elseif (!preg_match('/^9\d{9}$/', $phone)) {
-                $phoneInvalid = true;
-
-            } elseif ($phone === '9123456789') {
-                $phoneInvalid = true;
-
-            } elseif (($phoneCounts[$phone] ?? 0) > 1) {
-                $phoneInvalid = true;
-            }
-
-            $results[] = [
-                'id' => $record->id,
-                'invalid_fields' => array_filter([
-                    'PROVINCE'      => !$isValid && !in_array($prov, $validProvinces),
-                    'CITY'          => !$isValid && !in_array($city, $validCities),
-                    'BARANGAY'      => !$isValid && !in_array($brgy, $validBarangays),
-                    'PHONE NUMBER'  => $phoneInvalid,
-                ]),
-            ];
-        }
-
-        return response()->json($results);
     }
+
+    $validProvinces = array_unique($validProvinces);
+    $validCities    = array_unique($validCities);
+    $validBarangays = array_unique($validBarangays);
+
+    // ✅ Limit validation to provided IDs
+    $ids = $request->input('ids', []);
+
+    $records = MacroOutput::whereIn('id', $ids)->get([
+        'id', 'FULL NAME', 'PROVINCE', 'CITY', 'BARANGAY', 'PHONE NUMBER'
+    ]);
+
+    // ✅ Collect all phone numbers to check for duplicates (within this batch)
+    $phoneCounts = [];
+    foreach ($records as $record) {
+        $phone = trim((string)($record->{'PHONE NUMBER'} ?? ''));
+        if ($phone !== '') {
+            $phoneCounts[$phone] = ($phoneCounts[$phone] ?? 0) + 1;
+        }
+    }
+
+    $results = [];
+
+    foreach ($records as $record) {
+        $prov  = strtolower(trim((string)($record->PROVINCE ?? '')));
+        $city  = strtolower(trim((string)($record->CITY ?? '')));
+        $brgy  = strtolower(trim((string)($record->BARANGAY ?? '')));
+        $phone = trim((string)($record->{'PHONE NUMBER'} ?? ''));
+
+        $fullKey = "$prov|$city|$brgy";
+        $isValid = isset($validMap[$fullKey]);
+
+        // ✅ FULL NAME validation:
+        // Allowed: A-Z, a-z, Ññ, space, dot, comma
+        $fullName = trim((string)($record->{'FULL NAME'} ?? ''));
+        $fullNameInvalid = false;
+
+        if ($fullName === '') {
+            $fullNameInvalid = true;
+        } else {
+            // ✅ STRICT: literal space only (not tabs/newlines)
+            if (!preg_match('/^[A-Za-zÑñ\.\, ]+$/u', $fullName)) {
+                $fullNameInvalid = true;
+            } elseif (!preg_match('/[A-Za-zÑñ]/u', $fullName)) {
+                // must contain at least one letter
+                $fullNameInvalid = true;
+            }
+        }
+
+        // ✅ PHONE NUMBER validation
+        $phoneInvalid = false;
+
+        if ($phone === '') {
+            $phoneInvalid = true;
+        } elseif (!preg_match('/^9\d{9}$/', $phone)) {
+            $phoneInvalid = true;
+        } elseif ($phone === '9123456789') {
+            $phoneInvalid = true;
+        } elseif (($phoneCounts[$phone] ?? 0) > 1) {
+            $phoneInvalid = true;
+        }
+
+        $results[] = [
+            'id' => $record->id,
+            'invalid_fields' => array_filter([
+                'FULL NAME'     => $fullNameInvalid,
+
+                // Location validation
+                'PROVINCE'      => !$isValid && !in_array($prov, $validProvinces, true),
+                'CITY'          => !$isValid && !in_array($city, $validCities, true),
+                'BARANGAY'      => !$isValid && !in_array($brgy, $validBarangays, true),
+
+                'PHONE NUMBER'  => $phoneInvalid,
+            ]),
+        ];
+    }
+
+    return response()->json($results);
+}
+
 
     public function summary(Request $request)
 {
