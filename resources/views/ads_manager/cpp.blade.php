@@ -3,21 +3,107 @@
   <x-slot name="title">CPP</x-slot>
   <x-slot name="heading">CPP Summary</x-slot>
 
+  <style>
+    /* ✅ Custom searchable dropdown (Page) */
+    .page-dd { position: relative; width: 260px; }
+    .page-dd-btn {
+      width: 260px;
+      border: 1px solid #d1d5db;
+      border-radius: 0.375rem;
+      padding: 0.45rem 0.6rem;
+      background: white;
+      text-align: left;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+    }
+    .page-dd-panel {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      width: 260px;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.75rem;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.10);
+      z-index: 9999;
+      padding: 0.6rem;
+      display: none;
+    }
+    .page-dd.open .page-dd-panel { display: block; }
+    .page-dd-search {
+      width: 100%;
+      border: 1px solid #d1d5db;
+      border-radius: 0.5rem;
+      padding: 0.45rem 0.6rem;
+      font-size: 0.875rem;
+    }
+    .page-dd-list {
+      margin-top: 0.55rem;
+      max-height: 280px;
+      overflow: auto;
+      border: 1px solid #f3f4f6;
+      border-radius: 0.5rem;
+    }
+    .page-dd-item {
+      padding: 0.55rem 0.65rem;
+      cursor: pointer;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      border-bottom: 1px solid #f3f4f6;
+      user-select: none;
+    }
+    .page-dd-item:last-child { border-bottom: 0; }
+    .page-dd-item:hover { background: #f9fafb; }
+    .page-dd-item.selected { background: #eef2ff; }
+    .page-dd-empty {
+      padding: 0.65rem;
+      font-size: 0.8rem;
+      color: #6b7280;
+    }
+  </style>
+
   {{-- Filter Controls --}}
   <div class="mt-4 mb-6 flex flex-wrap items-end gap-4">
-    <div>
-      <label for="pageSelect" class="block font-semibold mb-1">Select Page:</label>
-      <select id="pageSelect" class="border px-2 py-1 rounded">
-        <option value="all">All Pages</option>
-        @foreach (array_keys($matrix) as $page)
-          <option value="{{ $page }}">{{ $page }}</option>
-        @endforeach
-      </select>
+    <div class="page-dd" id="pageDd">
+      <label class="block font-semibold mb-1">Select Page:</label>
+
+      {{-- ✅ This is the value you use everywhere in JS --}}
+      <input type="hidden" id="pageHidden" value="{{ request('ui_page', 'all') }}">
+
+      <button type="button" class="page-dd-btn" id="pageDdBtn" aria-haspopup="listbox" aria-expanded="false">
+        <span id="pageDdLabel">
+          {{ request('ui_page', 'all') === 'all' ? 'All Pages' : request('ui_page') }}
+        </span>
+      </button>
+
+      <div class="page-dd-panel" id="pageDdPanel">
+        <input type="text" class="page-dd-search" id="pageDdSearch" placeholder="Type to filter..." autocomplete="off">
+
+        <div class="page-dd-list" id="pageDdList" role="listbox">
+          <div class="page-dd-item {{ request('ui_page', 'all') === 'all' ? 'selected' : '' }}" data-value="all">
+            All Pages
+          </div>
+
+          @foreach (array_keys($matrix) as $page)
+            <div class="page-dd-item {{ request('ui_page') === $page ? 'selected' : '' }}" data-value="{{ $page }}">
+              {{ $page }}
+            </div>
+          @endforeach
+
+          <div class="page-dd-empty hidden" id="pageDdEmpty">No matches.</div>
+        </div>
+
+        <div class="text-[11px] text-gray-500 mt-2">
+          Click dropdown shows all. Type to filter.
+        </div>
+      </div>
     </div>
+
     <div>
       <label for="startDate" class="block font-semibold mb-1">Start Date:</label>
       <input type="date" id="startDate" class="border px-2 py-1 rounded" value="{{ $start ?? '' }}">
     </div>
+
     <div>
       <label for="endDate" class="block font-semibold mb-1">End Date:</label>
       <input type="date" id="endDate" class="border px-2 py-1 rounded" value="{{ $end ?? '' }}">
@@ -48,7 +134,6 @@
     const srvEnd    = @json($end ?? null);
 
     // --- Elements ---
-    const pageSelect       = document.getElementById('pageSelect');
     const startDateInput   = document.getElementById('startDate');
     const endDateInput     = document.getElementById('endDate');
     const cppCanvas        = document.getElementById('cppChart');
@@ -57,9 +142,23 @@
     const multiPageTables  = document.getElementById('multiPageTables');
     const singlePageLayout = document.getElementById('singlePageLayout');
 
+    // ✅ Dropdown elements
+    const pageDd        = document.getElementById('pageDd');
+    const pageDdBtn     = document.getElementById('pageDdBtn');
+    const pageDdPanel   = document.getElementById('pageDdPanel');
+    const pageDdSearch  = document.getElementById('pageDdSearch');
+    const pageDdList    = document.getElementById('pageDdList');
+    const pageDdEmpty   = document.getElementById('pageDdEmpty');
+    const pageHidden    = document.getElementById('pageHidden');
+    const pageDdLabel   = document.getElementById('pageDdLabel');
+
     let cppChart, cpmChart;
 
     // --- Helpers ---
+    function getSelectedPage() {
+      return (pageHidden?.value || 'all').trim() || 'all';
+    }
+
     function fmtISO(iso) {
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
       if (!m) return 'Invalid Date';
@@ -100,13 +199,12 @@
       const url = new URL("{{ route('ads_manager.cpp') }}", window.location.origin);
       url.searchParams.set('start', s);
       url.searchParams.set('end',   e);
-      url.searchParams.set('ui_page', pageSelect.value || 'all');
+      url.searchParams.set('ui_page', getSelectedPage());
       window.location.assign(url.toString());
     }
 
     // --- Render tables ---
     function renderTables(filteredDates, pageFilter) {
-      // Title uses actually shown dates (already spend-filtered in refreshAll)
       const titleStart = filteredDates[0];
       const titleEnd   = filteredDates[filteredDates.length - 1];
 
@@ -141,14 +239,12 @@
           filteredDates.forEach(date => {
             const r = data[date] || {};
             if (typeof r.spent === 'number') sumSpent += r.spent;
-            // count orders only if this page had spend > 0 on that day
             if (r.spent && r.orders) sumOrders += r.orders;
             if (r.spent && r.cpm) wImps += r.spent / r.cpm;
             if (r.spent && r.cpi) wCPI  += r.spent / r.cpi;
             if (r.spent && r.tcpr_fail) tcprFail += r.tcpr_fail;
           });
 
-          // >>> key fix: STRICTLY hide pages with zero total spend
           if (sumSpent > 0) {
             const cpp  = sumOrders > 0 ? sumSpent / sumOrders : null;
             const cpi  = wCPI  > 0 ? sumSpent / wCPI  : null;
@@ -163,17 +259,15 @@
                 <td class="border px-2 py-1">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
-                <td class="border px-2 py-1">
-  ${tcpr != null ? tcprBadge(tcpr * 100) : '—'}
-</td>
-                </tr>
+                <td class="border px-2 py-1">${tcpr != null ? tcprBadge(tcpr * 100) : '—'}</td>
+              </tr>
             `;
           }
         });
 
         summaryHtml += `</tbody></table>`;
 
-        // 2) Performance by Date (all pages) — also ignore orders from zero-spend pages
+        // 2) Performance by Date (all pages)
         let dateHtml = `
           <h2 class="font-bold text-lg mb-2">All Pages – Performance by Date</h2>
           <table class="w-full table-auto border text-sm">
@@ -195,13 +289,12 @@
           Object.values(rawData).forEach(data => {
             const r = data[date] || {};
             if (typeof r.spent === 'number') sumSpent += r.spent;
-            // count orders only when page had spend that day
             if (r.spent && r.orders) sumOrders += r.orders;
             if (r.spent && r.cpm)   wImps += r.spent / r.cpm;
             if (r.spent && r.cpi)   wCPI  += r.spent / r.cpi;
           });
 
-          if (sumSpent <= 0) return; // skip day with zero total spend
+          if (sumSpent <= 0) return;
 
           const cpp = sumOrders>0 ? sumSpent/sumOrders : null;
           const cpi = wCPI>0 ? sumSpent/wCPI : null;
@@ -223,7 +316,6 @@
         tableRight.innerHTML = summaryHtml + dateHtml;
 
       } else {
-        // Single Page layout (unchanged except we skip zero-spend days)
         multiPageTables.classList.add('hidden');
         singlePageLayout.classList.remove('hidden');
         const data = rawData[pageFilter] || {};
@@ -248,7 +340,7 @@
 
         filteredDates.forEach(date => {
           const r = data[date] || {};
-          if (!r.spent || r.spent <= 0) return; // skip rows with zero spend
+          if (!r.spent || r.spent <= 0) return;
 
           const itemNames = (r.item_names || []);
           const itemContent = itemNames.length <= 1 ? itemNames.join('') : itemNames.join('\n');
@@ -268,7 +360,7 @@
           `;
         });
 
-        // Totals: based only on shown rows (spend>0)
+        // Totals
         let totalSpent = 0, totalOrders = 0, sumWeighted = 0;
         filteredDates.forEach(date => {
           const r = data[date] || {};
@@ -327,10 +419,9 @@
     }
 
     function refreshAll() {
-      const page  = pageSelect.value;
+      const page  = getSelectedPage();
       const baseDates = filterDates();
 
-      // Use only dates with spend
       const dates = (page === 'all')
         ? datesWithSpendAllPages(baseDates)
         : datesWithSpendForPage(baseDates, page);
@@ -349,7 +440,6 @@
 
       let cppData = [], cpmData = [];
       if (page === 'all') {
-        // Averages across pages WITH spend only
         dates.forEach(date => {
           let sumCpp = 0, cntCpp = 0, sumCpm = 0, cntCpm = 0;
           Object.values(rawData).forEach(d => {
@@ -387,10 +477,95 @@
         .catch(err => console.error('Copy failed:', err));
     }
 
+    // ✅ Dropdown behavior: click shows ALL, typing filters only
+    (function initPageDropdown(){
+      if (!pageDd) return;
+
+      function norm(s) {
+        return (s || '')
+          .toString()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .trim();
+      }
+
+      function open() {
+        pageDd.classList.add('open');
+        pageDdBtn.setAttribute('aria-expanded', 'true');
+
+        // click open -> show ALL
+        pageDdSearch.value = '';
+        filter('');
+
+        setTimeout(() => pageDdSearch.focus(), 0);
+      }
+
+      function close() {
+        pageDd.classList.remove('open');
+        pageDdBtn.setAttribute('aria-expanded', 'false');
+      }
+
+      function filter(q) {
+        const query = norm(q);
+        let shown = 0;
+
+        const items = Array.from(pageDdList.querySelectorAll('.page-dd-item'));
+        items.forEach(item => {
+          const text = norm(item.textContent);
+          const isMatch = query === '' ? true : text.includes(query);
+          item.style.display = isMatch ? 'block' : 'none';
+          if (isMatch) shown++;
+        });
+
+        pageDdEmpty?.classList.toggle('hidden', shown > 0);
+      }
+
+      function setSelected(val, labelText) {
+        pageHidden.value = val;
+        pageDdLabel.textContent = (val === 'all' ? 'All Pages' : labelText);
+
+        pageDdList.querySelectorAll('.page-dd-item').forEach(i => i.classList.remove('selected'));
+        const selectedEl = Array.from(pageDdList.querySelectorAll('.page-dd-item'))
+          .find(i => (i.dataset.value ?? '') === val);
+        if (selectedEl) selectedEl.classList.add('selected');
+
+        close();
+
+        // ✅ Do NOT navigate server; just refresh client-side
+        refreshAll();
+      }
+
+      pageDdBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (pageDd.classList.contains('open')) close();
+        else open();
+      });
+
+      pageDdSearch.addEventListener('input', () => filter(pageDdSearch.value));
+
+      pageDdList.addEventListener('click', (e) => {
+        const item = e.target.closest('.page-dd-item');
+        if (!item) return;
+        setSelected(item.dataset.value ?? 'all', item.textContent.trim());
+      });
+
+      // close on outside click
+      document.addEventListener('click', (e) => {
+        if (!pageDd.classList.contains('open')) return;
+        if (pageDd.contains(e.target)) return;
+        close();
+      });
+
+      // close on ESC
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && pageDd.classList.contains('open')) close();
+      });
+    })();
+
     // Events
     startDateInput.addEventListener('change', navigateWithBothDates);
     endDateInput.addEventListener('change',   navigateWithBothDates);
-    pageSelect.addEventListener('change', refreshAll);
 
     // Init
     window.onload = () => {
@@ -400,24 +575,21 @@
       }
       refreshAll();
     };
+
     function tcprBadge(pct) {
-  if (pct == null || isNaN(pct)) return '—';
+      if (pct == null || isNaN(pct)) return '—';
 
-  const base = 'inline-block min-w-[64px] text-center px-2 py-0.5 rounded-md font-semibold shadow-sm';
+      const base = 'inline-block min-w-[64px] text-center px-2 py-0.5 rounded-md font-semibold shadow-sm';
 
-  if (pct > 7) {
-    return `<span class="${base} bg-red-600 text-white">${pct.toFixed(2)}%</span>`;
-  } else if (pct > 5) {
-    return `<span class="${base} bg-orange-500 text-white">${pct.toFixed(2)}%</span>`;
-  } else if (pct > 3) {
-    return `<span class="${base} bg-yellow-400 text-slate-900">${pct.toFixed(2)}%</span>`;
-  }
+      if (pct > 7) {
+        return `<span class="${base} bg-red-600 text-white">${pct.toFixed(2)}%</span>`;
+      } else if (pct > 5) {
+        return `<span class="${base} bg-orange-500 text-white">${pct.toFixed(2)}%</span>`;
+      } else if (pct > 3) {
+        return `<span class="${base} bg-yellow-400 text-slate-900">${pct.toFixed(2)}%</span>`;
+      }
 
-  // ≤ 3% → plain text (no styling)
-  return `${pct.toFixed(2)}%`;
-}
-
-
-
+      return `${pct.toFixed(2)}%`;
+    }
   </script>
 </x-layout>
