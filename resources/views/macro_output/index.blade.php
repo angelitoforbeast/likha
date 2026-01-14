@@ -105,6 +105,64 @@
     .validate-invalid {
       background-color: #ff0000 !important;
     }
+
+    /* ✅ Custom searchable dropdown (Page) */
+    .page-dd { position: relative; width: 220px; }
+    .page-dd-btn {
+      width: 220px;
+      border: 1px solid #d1d5db;
+      border-radius: 0.25rem;
+      padding: 0.25rem 0.5rem;
+      background: white;
+      text-align: left;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+    }
+    .page-dd-btn:focus { outline: 2px solid transparent; outline-offset: 2px; }
+    .page-dd-panel {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      width: 220px;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.5rem;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+      z-index: 9999;
+      padding: 0.5rem;
+      display: none;
+    }
+    .page-dd.open .page-dd-panel { display: block; }
+    .page-dd-search {
+      width: 100%;
+      border: 1px solid #d1d5db;
+      border-radius: 0.375rem;
+      padding: 0.35rem 0.5rem;
+      font-size: 0.875rem;
+    }
+    .page-dd-list {
+      margin-top: 0.5rem;
+      max-height: 260px;
+      overflow: auto;
+      border: 1px solid #f3f4f6;
+      border-radius: 0.375rem;
+    }
+    .page-dd-item {
+      padding: 0.45rem 0.6rem;
+      cursor: pointer;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      border-bottom: 1px solid #f3f4f6;
+      user-select: none;
+    }
+    .page-dd-item:last-child { border-bottom: 0; }
+    .page-dd-item:hover { background: #f9fafb; }
+    .page-dd-item.selected { background: #eef2ff; }
+    .page-dd-empty {
+      padding: 0.6rem;
+      font-size: 0.8rem;
+      color: #6b7280;
+    }
   </style>
 
   @php
@@ -235,6 +293,8 @@
         return $items ? '<ul class="list-disc space-y-1">'.implode('', $items).'</ul>' : '';
       }
     }
+
+    $currentPage = request('PAGE') ?? '';
   @endphp
 
   <div id="fixed-header" class="fixed top-[128px] left-0 right-0 z-40 bg-white px-4 pt-4 pb-2 shadow">
@@ -247,19 +307,51 @@
           onchange="resetCheckerAndSubmit(this.form)" />
       </div>
 
-      <div>
+      {{-- ✅ Page: Click shows ALL, typing FILTERS inside dropdown --}}
+      <div class="page-dd" id="pageDd">
         <label class="text-sm font-medium">Page</label>
-        <select name="PAGE" class="border rounded px-2 py-1" onchange="resetCheckerAndSubmit(this.form)">
-          <option value="">All</option>
-          @foreach($pages as $page)
-            <option value="{{ $page }}" @selected(request('PAGE') == $page)>{{ $page }}</option>
-          @endforeach
-        </select>
+
+        {{-- Hidden field submitted to backend --}}
+        <input type="hidden" name="PAGE" id="pageHidden" value="{{ $currentPage }}">
+
+        {{-- Button that opens dropdown --}}
+        <button type="button" class="page-dd-btn" id="pageDdBtn" aria-haspopup="listbox" aria-expanded="false">
+          <span id="pageDdLabel">{{ $currentPage !== '' ? $currentPage : 'All' }}</span>
+        </button>
+
+        {{-- Panel --}}
+        <div class="page-dd-panel" id="pageDdPanel">
+          <input
+            type="text"
+            class="page-dd-search"
+            id="pageDdSearch"
+            placeholder="Type to filter..."
+            autocomplete="off"
+          >
+          <div class="page-dd-list" id="pageDdList" role="listbox">
+            {{-- All option --}}
+            <div class="page-dd-item {{ $currentPage === '' ? 'selected' : '' }}" data-value="">
+              All
+            </div>
+
+            @foreach($pages as $page)
+              <div class="page-dd-item {{ $currentPage == $page ? 'selected' : '' }}" data-value="{{ $page }}">
+                {{ $page }}
+              </div>
+            @endforeach
+
+            <div class="page-dd-empty hidden" id="pageDdEmpty">No matches.</div>
+          </div>
+
+          <div class="text-[11px] text-gray-500 mt-2">
+            Click dropdown shows all. Type here to filter.
+          </div>
+        </div>
       </div>
 
       {{-- ✅ Checker filter dropdown (ONLY: All, Check, To Fix, Blank) --}}
       <div>
-        <label class="text-sm font-medium">To Fix</label>
+        <label class="text-sm font-medium">Filter</label>
         <select name="checker" class="border rounded px-2 py-1" onchange="this.form.submit()">
           <option value="" @selected(!request()->filled('checker'))>All</option>
           <option value="__CHECK__"  @selected(request('checker') === '__CHECK__')>Check</option>
@@ -507,11 +599,112 @@
     }
   </script>
 
+  {{-- ✅ Page dropdown JS (click shows all, typing filters) --}}
+  <script>
+    (function initPageDropdown() {
+      const dd = document.getElementById('pageDd');
+      if (!dd) return;
+
+      const btn = document.getElementById('pageDdBtn');
+      const panel = document.getElementById('pageDdPanel');
+      const search = document.getElementById('pageDdSearch');
+      const list = document.getElementById('pageDdList');
+      const empty = document.getElementById('pageDdEmpty');
+      const hidden = document.getElementById('pageHidden');
+      const label = document.getElementById('pageDdLabel');
+
+      function norm(s) {
+        return (s || '')
+          .toString()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .trim();
+      }
+
+      function open() {
+        dd.classList.add('open');
+        btn.setAttribute('aria-expanded', 'true');
+
+        // IMPORTANT: click open -> show ALL
+        search.value = '';
+        filter('');
+
+        setTimeout(() => search.focus(), 0);
+      }
+
+      function close() {
+        dd.classList.remove('open');
+        btn.setAttribute('aria-expanded', 'false');
+      }
+
+      function filter(q) {
+        const query = norm(q);
+        let shown = 0;
+
+        const items = Array.from(list.querySelectorAll('.page-dd-item'));
+        items.forEach(item => {
+          const text = norm(item.textContent);
+          const isMatch = query === '' ? true : text.includes(query);
+          item.style.display = isMatch ? 'block' : 'none';
+          if (isMatch) shown++;
+        });
+
+        if (empty) {
+          empty.classList.toggle('hidden', shown > 0);
+        }
+      }
+
+      function selectValue(val, text) {
+        hidden.value = val;
+        label.textContent = (val === '' ? 'All' : text);
+
+        // mark selected class
+        list.querySelectorAll('.page-dd-item').forEach(i => i.classList.remove('selected'));
+        const selectedEl = Array.from(list.querySelectorAll('.page-dd-item')).find(i => (i.dataset.value ?? '') === (val ?? ''));
+        if (selectedEl) selectedEl.classList.add('selected');
+
+        close();
+
+        // Submit filters form
+        const form = document.getElementById('filtersForm');
+        if (form) resetCheckerAndSubmit(form);
+      }
+
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (dd.classList.contains('open')) close();
+        else open();
+      });
+
+      search.addEventListener('input', () => filter(search.value));
+
+      list.addEventListener('click', (e) => {
+        const item = e.target.closest('.page-dd-item');
+        if (!item) return;
+        const val = item.dataset.value ?? '';
+        selectValue(val, item.textContent.trim());
+      });
+
+      // close on outside click
+      document.addEventListener('click', (e) => {
+        if (!dd.classList.contains('open')) return;
+        if (dd.contains(e.target)) return;
+        close();
+      });
+
+      // close on ESC
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && dd.classList.contains('open')) close();
+      });
+    })();
+  </script>
+
   <script>
     document.getElementById('downloadBtn')?.addEventListener('click', function (e) {
       e.preventDefault();
       const date = document.querySelector('input[name="date"]')?.value || '';
-      const page = document.querySelector('select[name="PAGE"]')?.value || '';
+      const page = document.getElementById('pageHidden')?.value || '';
       const downloadAll = document.getElementById('downloadAll')?.checked;
 
       const params = new URLSearchParams();
@@ -571,7 +764,7 @@
       const stop = new Set(['brgy','barangay','bgy','brg','city','of','province','prov','municipality','mun']);
       const parts = s.split(/[^0-9A-Za-zñÑ]+/).filter(Boolean);
 
-      const uniq = [];
+      const uniq = {};
       for (const p of parts) {
         const t = (p || '').trim();
         if (!t) continue;
@@ -842,7 +1035,7 @@
     // Disallow other scripts (Chinese etc.) by strict whitelist.
     function isValidFullName(v) {
       const s = (v ?? '').toString();
-      if (s.trim() === '') return true; // keep blanks as "no issue" unless you want required
+      if (s.trim() === '') return true; // blank = allowed
       return /^[A-Za-zñÑ\s\.,]+$/.test(s);
     }
 
@@ -886,7 +1079,7 @@
       statusEl.classList.remove('text-green-600', 'text-red-600');
       statusEl.classList.add('text-gray-600');
 
-      // ✅ clear only validation reds (do not kill edited-green inline styles)
+      // ✅ clear only validation reds
       clearValidateMarks();
 
       const rows = Array.from(document.querySelectorAll('tr[data-id]'));
@@ -910,7 +1103,6 @@
         // 1) server-side invalid fields (province/city/brgy + others if your API adds later)
         results.forEach(result => {
           const id = String(result.id);
-
           if (!result.invalid_fields) return;
 
           let rowHasIssue = false;
@@ -926,7 +1118,7 @@
           if (rowHasIssue) invalidRowIds.add(id);
         });
 
-        // 2) client-side FULL NAME validation (A-Z + ñ + space + dot + comma only)
+        // 2) client-side FULL NAME validation
         rows.forEach(row => {
           const id = String(row.dataset.id || '');
           if (!id) return;
@@ -1024,4 +1216,5 @@
       statusEl.classList.add(errorCount > 0 ? 'text-red-600' : 'text-green-600');
     });
   </script>
+
 </x-layout>
