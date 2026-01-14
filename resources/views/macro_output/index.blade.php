@@ -100,6 +100,11 @@
       text-decoration: underline;
       cursor: pointer;
     }
+
+    /* ✅ Validation highlight (does NOT overwrite edited-green inline styles) */
+    .validate-invalid {
+      background-color: #ff0000 !important;
+    }
   </style>
 
   @php
@@ -599,6 +604,7 @@
         .then(data => {
           if (data.status === 'success') {
             this.classList.remove('bg-red-200');
+            this.classList.remove('validate-invalid');
             this.classList.add('bg-green-100');
 
             const row = this.closest('tr');
@@ -621,11 +627,11 @@
               row.querySelectorAll('.log-cell.expanded').forEach(c => c.classList.remove('expanded'));
             }
           } else {
-            this.style.backgroundColor = '#fee2e2';
+            this.classList.add('validate-invalid');
           }
         })
         .catch(() => {
-          this.style.backgroundColor = '#fee2e2';
+          this.classList.add('validate-invalid');
         });
       };
 
@@ -735,86 +741,84 @@
   </script>
 
   {{-- ✅ Pancake: See more loader --}}
- <script>
-  function getCsrfToken() {
-    return '{{ csrf_token() }}';
-  }
+  <script>
+    function getCsrfToken() {
+      return '{{ csrf_token() }}';
+    }
 
-  // ✅ Pancake: See more loader (customers_chat only, NOT appended)
-  async function loadPancakeMore(cell, linkEl) {
-    const fbName = (cell.dataset.fbname || '').trim();
+    // ✅ Pancake: See more loader (customers_chat only, NOT appended)
+    async function loadPancakeMore(cell, linkEl) {
+      const fbName = (cell.dataset.fbname || '').trim();
 
-    // ✅ load once guard (NEW FLAG)
-    if (cell.dataset.pancakeLoaded === '1') {
-      linkEl.textContent = 'Loaded';
+      // ✅ load once guard (NEW FLAG)
+      if (cell.dataset.pancakeLoaded === '1') {
+        linkEl.textContent = 'Loaded';
+        linkEl.style.pointerEvents = 'none';
+        return;
+      }
+
+      linkEl.textContent = 'Loading...';
       linkEl.style.pointerEvents = 'none';
-      return;
-    }
 
-    linkEl.textContent = 'Loading...';
-    linkEl.style.pointerEvents = 'none';
+      try {
+        const res = await fetch("{{ route('macro_output.pancake_more') }}", {
+          method: 'POST',
+          headers: {
+            'X-CSRF-TOKEN': getCsrfToken(),
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ fb_name: fbName })
+        });
 
-    try {
-      const res = await fetch("{{ route('macro_output.pancake_more') }}", {
-        method: 'POST',
-        headers: {
-          'X-CSRF-TOKEN': getCsrfToken(),
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ fb_name: fbName })
-      });
+        const data = await res.json();
 
-      const data = await res.json();
+        // ✅ Show ONLY customers_chat (controller should return chat-only in data.text)
+        const chatOnly = (data && typeof data.text === 'string') ? data.text : '';
 
-      // ✅ Show ONLY customers_chat (controller should return chat-only in data.text)
-      const chatOnly = (data && typeof data.text === 'string') ? data.text : '';
-
-      const extraDiv = cell.querySelector('.pancake-extra');
-      if (extraDiv) {
-        extraDiv.classList.remove('hidden');
-        extraDiv.textContent = chatOnly; // ✅ ONLY customers_chat
-      }
-
-      // ✅ mark loaded
-      cell.dataset.pancakeLoaded = '1';
-
-      linkEl.textContent = 'Loaded';
-    } catch (e) {
-      linkEl.textContent = 'See more';
-      linkEl.style.pointerEvents = 'auto';
-
-      const extraDiv = cell.querySelector('.pancake-extra');
-      if (extraDiv) {
-        extraDiv.classList.remove('hidden');
-        extraDiv.textContent = '(Load failed)';
-      }
-    }
-  }
-
-  // ✅ Attach click handlers
-  window.addEventListener('load', () => {
-    document.querySelectorAll('.customer-details .see-more-link').forEach(link => {
-      link.addEventListener('click', function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const cell = this.closest('.customer-details');
-        if (!cell) return;
-
-        // ✅ only load once (using pancakeLoaded flag)
-        if (cell.dataset.pancakeLoaded === '1') {
-          this.textContent = 'Loaded';
-          this.style.pointerEvents = 'none';
-          return;
+        const extraDiv = cell.querySelector('.pancake-extra');
+        if (extraDiv) {
+          extraDiv.classList.remove('hidden');
+          extraDiv.textContent = chatOnly; // ✅ ONLY customers_chat
         }
 
-        loadPancakeMore(cell, this);
+        // ✅ mark loaded
+        cell.dataset.pancakeLoaded = '1';
+
+        linkEl.textContent = 'Loaded';
+      } catch (e) {
+        linkEl.textContent = 'See more';
+        linkEl.style.pointerEvents = 'auto';
+
+        const extraDiv = cell.querySelector('.pancake-extra');
+        if (extraDiv) {
+          extraDiv.classList.remove('hidden');
+          extraDiv.textContent = '(Load failed)';
+        }
+      }
+    }
+
+    // ✅ Attach click handlers
+    window.addEventListener('load', () => {
+      document.querySelectorAll('.customer-details .see-more-link').forEach(link => {
+        link.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+
+          const cell = this.closest('.customer-details');
+          if (!cell) return;
+
+          // ✅ only load once (using pancakeLoaded flag)
+          if (cell.dataset.pancakeLoaded === '1') {
+            this.textContent = 'Loaded';
+            this.style.pointerEvents = 'none';
+            return;
+          }
+
+          loadPancakeMore(cell, this);
+        });
       });
     });
-  });
-</script>
-
-
+  </script>
 
   {{-- Sticky offset --}}
   <script>
@@ -832,19 +836,61 @@
     window.addEventListener('resize', adjustTableBodyMargin);
   </script>
 
+  {{-- ✅ Validation helpers (FULL NAME rules + move-to-top) --}}
+  <script>
+    // FULL NAME allowed: A-Z, a-z, ñ/Ñ, space, dot, comma
+    // Disallow other scripts (Chinese etc.) by strict whitelist.
+    function isValidFullName(v) {
+      const s = (v ?? '').toString();
+      if (s.trim() === '') return true; // keep blanks as "no issue" unless you want required
+      return /^[A-Za-zñÑ\s\.,]+$/.test(s);
+    }
+
+    function clearValidateMarks() {
+      document.querySelectorAll('.validate-invalid').forEach(el => el.classList.remove('validate-invalid'));
+    }
+
+    function markInvalid(id, field) {
+      const el = document.querySelector(`[data-id="${id}"][data-field="${field}"]`);
+      if (el) el.classList.add('validate-invalid');
+    }
+
+    function moveRowsWithIssuesToTop(invalidIdsSet) {
+      const tbody = document.querySelector('#table-body tbody');
+      if (!tbody) return;
+
+      const rows = Array.from(tbody.querySelectorAll('tr[data-id]'));
+      if (!rows.length) return;
+
+      const invalidRows = [];
+      const okRows = [];
+
+      rows.forEach(r => {
+        const id = r.getAttribute('data-id');
+        if (invalidIdsSet.has(String(id))) invalidRows.push(r);
+        else okRows.push(r);
+      });
+
+      const frag = document.createDocumentFragment();
+      invalidRows.forEach(r => frag.appendChild(r));
+      okRows.forEach(r => frag.appendChild(r));
+      tbody.appendChild(frag);
+    }
+  </script>
+
   {{-- Validate --}}
   <script>
     document.getElementById('validate-btn')?.addEventListener('click', function () {
       const statusEl = document.getElementById('validate-status');
       statusEl.textContent = 'Validating...';
-      statusEl.classList.remove('text-green-600');
+      statusEl.classList.remove('text-green-600', 'text-red-600');
       statusEl.classList.add('text-gray-600');
 
-      document.querySelectorAll('[data-id][data-field]').forEach(input => {
-        input.style.backgroundColor = '';
-      });
+      // ✅ clear only validation reds (do not kill edited-green inline styles)
+      clearValidateMarks();
 
-      const ids = Array.from(document.querySelectorAll('tr[data-id]'))
+      const rows = Array.from(document.querySelectorAll('tr[data-id]'));
+      const ids = rows
         .filter(row => row.querySelector('[data-field="STATUS"]')?.value !== 'CANNOT PROCEED')
         .map(row => row.dataset.id);
 
@@ -859,18 +905,50 @@
       .then(res => res.json())
       .then(results => {
         let errorCount = 0;
+        const invalidRowIds = new Set();
 
+        // 1) server-side invalid fields (province/city/brgy + others if your API adds later)
         results.forEach(result => {
+          const id = String(result.id);
+
           if (!result.invalid_fields) return;
+
+          let rowHasIssue = false;
 
           Object.keys(result.invalid_fields).forEach(field => {
             if (result.invalid_fields[field]) {
               errorCount++;
-              const input = document.querySelector(`[data-id="${result.id}"][data-field="${field}"]`);
-              if (input) input.style.backgroundColor = '#ff0000';
+              rowHasIssue = true;
+              markInvalid(id, field);
             }
           });
+
+          if (rowHasIssue) invalidRowIds.add(id);
         });
+
+        // 2) client-side FULL NAME validation (A-Z + ñ + space + dot + comma only)
+        rows.forEach(row => {
+          const id = String(row.dataset.id || '');
+          if (!id) return;
+
+          const status = row.querySelector('[data-field="STATUS"]')?.value || '';
+          if (status === 'CANNOT PROCEED') return;
+
+          const fullNameEl = row.querySelector('[data-field="FULL NAME"]');
+          if (!fullNameEl) return;
+
+          const fullNameVal = (fullNameEl.value ?? fullNameEl.textContent ?? '').toString();
+          if (!isValidFullName(fullNameVal)) {
+            errorCount++;
+            invalidRowIds.add(id);
+            markInvalid(id, 'FULL NAME');
+          }
+        });
+
+        // 3) move invalid rows to top
+        if (invalidRowIds.size > 0) {
+          moveRowsWithIssuesToTop(invalidRowIds);
+        }
 
         statusEl.textContent = errorCount > 0 ? `${errorCount} cell(s) with issues` : 'All good! ✅';
         statusEl.classList.remove('text-gray-600');
@@ -892,7 +970,11 @@
       statusEl.classList.remove('text-green-600', 'text-red-600');
       statusEl.classList.add('text-gray-600');
 
-      const ids = Array.from(document.querySelectorAll('tr[data-id]'))
+      // ✅ clear only validation reds
+      clearValidateMarks();
+
+      const rows = Array.from(document.querySelectorAll('tr[data-id]'));
+      const ids = rows
         .filter(row => row.querySelector('[data-field="STATUS"]')?.value !== 'CANNOT PROCEED')
         .map(row => row.getAttribute('data-id'))
         .filter(Boolean);
@@ -908,27 +990,34 @@
 
       const results = await response.json();
 
-      document.querySelectorAll('[data-field="ITEM_NAME"], [data-field="COD"]').forEach(input => {
-        input.style.removeProperty('background-color');
-      });
-
       let errorCount = 0;
+      const invalidRowIds = new Set();
 
       results.forEach(result => {
-        const { id, invalid_fields } = result;
+        const id = String(result.id);
+        const invalid = result.invalid_fields || {};
 
-        if (invalid_fields?.ITEM_NAME) {
-          const input = document.querySelector(`[data-id="${id}"][data-field="ITEM_NAME"]`);
-          if (input) input.style.setProperty('background-color', '#ff0000', 'important');
+        let rowHasIssue = false;
+
+        if (invalid.ITEM_NAME) {
+          markInvalid(id, 'ITEM_NAME');
           errorCount++;
+          rowHasIssue = true;
         }
 
-        if (invalid_fields?.COD) {
-          const input = document.querySelector(`[data-id="${id}"][data-field="COD"]`);
-          if (input) input.style.setProperty('background-color', '#ff0000', 'important');
+        if (invalid.COD) {
+          markInvalid(id, 'COD');
           errorCount++;
+          rowHasIssue = true;
         }
+
+        if (rowHasIssue) invalidRowIds.add(id);
       });
+
+      // move invalid rows to top
+      if (invalidRowIds.size > 0) {
+        moveRowsWithIssuesToTop(invalidRowIds);
+      }
 
       statusEl.textContent = errorCount > 0 ? `${errorCount} item(s) need fixing` : 'All good! ✅';
       statusEl.classList.remove('text-gray-600');
