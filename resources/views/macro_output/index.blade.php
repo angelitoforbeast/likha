@@ -1034,10 +1034,11 @@
     // FULL NAME allowed: A-Z, a-z, ñ/Ñ, space, dot, comma
     // Disallow other scripts (Chinese etc.) by strict whitelist.
     function isValidFullName(v) {
-      const s = (v ?? '').toString();
-      if (s.trim() === '') return true; // blank = allowed
-      return /^[A-Za-zñÑ\s\.,]+$/.test(s);
-    }
+  const s = (v ?? '').toString();
+  if (s.trim() === '') return true; // blank = allowed
+  return /^[\p{L}\s\.,\-']+$/u.test(s);
+}
+
 
     function clearValidateMarks() {
       document.querySelectorAll('.validate-invalid').forEach(el => el.classList.remove('validate-invalid'));

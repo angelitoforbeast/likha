@@ -330,8 +330,10 @@ public function pancakeMore(Request $request)
             $fullNameInvalid = true;
         } else {
             // ✅ STRICT: literal space only (not tabs/newlines)
-            if (!preg_match('/^[A-Za-zÑñ\.\, ]+$/u', $fullName)) {
-                $fullNameInvalid = true;
+            if (!preg_match("/^[\\p{L}\\.,\\-\\' ]+$/u", $fullName)) {
+    $fullNameInvalid = true;
+
+
             } elseif (!preg_match('/[A-Za-zÑñ]/u', $fullName)) {
                 // must contain at least one letter
                 $fullNameInvalid = true;
