@@ -279,38 +279,48 @@
                 <th class="border px-2 py-1">CPP</th>
                 <th class="border px-2 py-1">CPI</th>
                 <th class="border px-2 py-1">CPM</th>
+                <th class="border px-2 py-1">TCPR</th>
               </tr>
             </thead>
             <tbody>
         `;
 
         filteredDates.forEach(date => {
-          let sumSpent=0, sumOrders=0, wImps=0, wCPI=0;
-          Object.values(rawData).forEach(data => {
-            const r = data[date] || {};
-            if (typeof r.spent === 'number') sumSpent += r.spent;
-            if (r.spent && r.orders) sumOrders += r.orders;
-            if (r.spent && r.cpm)   wImps += r.spent / r.cpm;
-            if (r.spent && r.cpi)   wCPI  += r.spent / r.cpi;
-          });
+  let sumSpent=0, sumOrders=0, wImps=0, wCPI=0, tcprFail=0;
 
-          if (sumSpent <= 0) return;
+  Object.values(rawData).forEach(data => {
+    const r = data[date] || {};
+    if (typeof r.spent === 'number') sumSpent += r.spent;
 
-          const cpp = sumOrders>0 ? sumSpent/sumOrders : null;
-          const cpi = wCPI>0 ? sumSpent/wCPI : null;
-          const cpm = wImps>0 ? sumSpent/wImps : null;
+    // keep your current rule: only count orders if spent > 0
+    if (r.spent && r.orders) sumOrders += r.orders;
 
-          dateHtml += `
-            <tr>
-              <td class="border px-2 py-1 text-center">${date}</td>
-              <td class="border px-2 py-1 text-center">₱${sumSpent.toFixed(2)}</td>
-              <td class="border px-2 py-1 text-center">${sumOrders}</td>
-              <td class="border px-2 py-1 text-center">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
-              <td class="border px-2 py-1 text-center">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
-              <td class="border px-2 py-1 text-center">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
-            </tr>
-          `;
-        });
+    if (r.spent && r.cpm)   wImps += r.spent / r.cpm;
+    if (r.spent && r.cpi)   wCPI  += r.spent / r.cpi;
+
+    if (r.spent && r.tcpr_fail) tcprFail += r.tcpr_fail;
+  });
+
+  if (sumSpent <= 0) return;
+
+  const cpp  = sumOrders > 0 ? sumSpent / sumOrders : null;
+  const cpi  = wCPI  > 0 ? sumSpent / wCPI  : null;
+  const cpm  = wImps > 0 ? sumSpent / wImps : null;
+  const tcpr = sumOrders > 0 ? (tcprFail / sumOrders) : null;
+
+  dateHtml += `
+    <tr>
+      <td class="border px-2 py-1 text-center">${date}</td>
+      <td class="border px-2 py-1 text-center">₱${sumSpent.toFixed(2)}</td>
+      <td class="border px-2 py-1 text-center">${sumOrders}</td>
+      <td class="border px-2 py-1 text-center">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
+      <td class="border px-2 py-1 text-center">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
+      <td class="border px-2 py-1 text-center">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
+      <td class="border px-2 py-1 text-center">${tcpr != null ? tcprBadge(tcpr * 100) : '—'}</td>
+    </tr>
+  `;
+});
+
 
         dateHtml += `</tbody></table>`;
         tableRight.innerHTML = summaryHtml + dateHtml;
