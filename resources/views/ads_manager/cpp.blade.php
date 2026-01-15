@@ -209,6 +209,9 @@
       const titleEnd   = filteredDates[filteredDates.length - 1];
 
       if (pageFilter === 'all') {
+        singlePageLayout.classList.add('hidden');
+        multiPageTables.classList.remove('hidden');
+
         const title = (titleStart !== titleEnd)
           ? `SUMMARY OF ADS - ${fmtISO(titleStart)} to ${fmtISO(titleEnd)}`
           : `SUMMARY OF ADS - ${fmtISO(titleStart)}`;
@@ -286,48 +289,50 @@
         `;
 
         filteredDates.forEach(date => {
-  let sumSpent=0, sumOrders=0, wImps=0, wCPI=0, tcprFail=0;
+          let sumSpent=0, sumOrders=0, wImps=0, wCPI=0, tcprFail=0;
 
-  Object.values(rawData).forEach(data => {
-    const r = data[date] || {};
-    if (typeof r.spent === 'number') sumSpent += r.spent;
+          Object.values(rawData).forEach(data => {
+            const r = data[date] || {};
+            if (typeof r.spent === 'number') sumSpent += r.spent;
 
-    // keep your current rule: only count orders if spent > 0
-    if (r.spent && r.orders) sumOrders += r.orders;
+            // keep your current rule: only count orders if spent > 0
+            if (r.spent && r.orders) sumOrders += r.orders;
 
-    if (r.spent && r.cpm)   wImps += r.spent / r.cpm;
-    if (r.spent && r.cpi)   wCPI  += r.spent / r.cpi;
+            if (r.spent && r.cpm)   wImps += r.spent / r.cpm;
+            if (r.spent && r.cpi)   wCPI  += r.spent / r.cpi;
 
-    if (r.spent && r.tcpr_fail) tcprFail += r.tcpr_fail;
-  });
+            if (r.spent && r.tcpr_fail) tcprFail += r.tcpr_fail;
+          });
 
-  if (sumSpent <= 0) return;
+          if (sumSpent <= 0) return;
 
-  const cpp  = sumOrders > 0 ? sumSpent / sumOrders : null;
-  const cpi  = wCPI  > 0 ? sumSpent / wCPI  : null;
-  const cpm  = wImps > 0 ? sumSpent / wImps : null;
-  const tcpr = sumOrders > 0 ? (tcprFail / sumOrders) : null;
+          const cpp  = sumOrders > 0 ? sumSpent / sumOrders : null;
+          const cpi  = wCPI  > 0 ? sumSpent / wCPI  : null;
+          const cpm  = wImps > 0 ? sumSpent / wImps : null;
+          const tcpr = sumOrders > 0 ? (tcprFail / sumOrders) : null;
 
-  dateHtml += `
-    <tr>
-      <td class="border px-2 py-1 text-center">${date}</td>
-      <td class="border px-2 py-1 text-center">₱${sumSpent.toFixed(2)}</td>
-      <td class="border px-2 py-1 text-center">${sumOrders}</td>
-      <td class="border px-2 py-1 text-center">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
-      <td class="border px-2 py-1 text-center">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
-      <td class="border px-2 py-1 text-center">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
-      <td class="border px-2 py-1 text-center">${tcpr != null ? tcprBadge(tcpr * 100) : '—'}</td>
-    </tr>
-  `;
-});
-
+          dateHtml += `
+            <tr>
+              <td class="border px-2 py-1 text-center">${date}</td>
+              <td class="border px-2 py-1 text-center">₱${sumSpent.toFixed(2)}</td>
+              <td class="border px-2 py-1 text-center">${sumOrders}</td>
+              <td class="border px-2 py-1 text-center">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
+              <td class="border px-2 py-1 text-center">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
+              <td class="border px-2 py-1 text-center">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
+              <td class="border px-2 py-1 text-center">${tcpr != null ? tcprBadge(tcpr * 100) : '—'}</td>
+            </tr>
+          `;
+        });
 
         dateHtml += `</tbody></table>`;
+
+        // Render both tables in the same container
         tableRight.innerHTML = summaryHtml + dateHtml;
 
       } else {
         multiPageTables.classList.add('hidden');
         singlePageLayout.classList.remove('hidden');
+
         const data = rawData[pageFilter] || {};
 
         let html = `
@@ -340,6 +345,7 @@
                 <th class="border px-2 py-1">Orders</th>
                 <th class="border px-2 py-1">CPP</th>
                 <th class="border px-2 py-1">CPM</th>
+                <th class="border px-2 py-1">TCPR</th>
                 <th class="border px-2 py-1">Item Names</th>
                 <th class="border px-2 py-1">CODs</th>
                 <th class="border px-2 py-1">PROCEED</th>
@@ -356,6 +362,10 @@
           const itemContent = itemNames.length <= 1 ? itemNames.join('') : itemNames.join('\n');
           const cods = (r.cods || []).join(', ');
 
+          const orders = Number(r.orders || 0);
+          const fail   = Number(r.tcpr_fail || 0);
+          const tcpr   = orders > 0 ? (fail / orders) : null;
+
           html += `
             <tr>
               <td class="border px-2 py-1 text-center">${date}</td>
@@ -363,6 +373,7 @@
               <td class="border px-2 py-1 text-center">${r.orders ?? '—'}</td>
               <td class="border px-2 py-1 text-center">${r.cpp != null ? `₱${r.cpp.toFixed(2)}` : '—'}</td>
               <td class="border px-2 py-1 text-center">${r.cpm != null ? `₱${r.cpm.toFixed(2)}` : '—'}</td>
+              <td class="border px-2 py-1 text-center">${tcpr != null ? tcprBadge(tcpr * 100) : '—'}</td>
               <td class="border px-2 py-1 text-left whitespace-pre-line">${itemContent || '—'}</td>
               <td class="border px-2 py-1 text-left whitespace-nowrap overflow-hidden text-ellipsis max-w-[300px]" title="${cods}">${cods || '—'}</td>
               <td class="border px-2 py-1 text-center">${r.proceed ?? '—'}</td>
@@ -370,18 +381,23 @@
           `;
         });
 
-        // Totals
-        let totalSpent = 0, totalOrders = 0, sumWeighted = 0;
+        // Totals (include TCPR)
+        let totalSpent = 0, totalOrders = 0, sumWeighted = 0, totalFail = 0;
+
         filteredDates.forEach(date => {
           const r = data[date] || {};
           if (r.spent && r.spent > 0) {
             totalSpent  += r.spent;
             if (r.orders) totalOrders += r.orders;
             if (r.cpm) sumWeighted += r.spent / r.cpm;
+
+            totalFail += Number(r.tcpr_fail || 0);
           }
         });
-        const totalCPP = totalOrders > 0 ? totalSpent / totalOrders : null;
-        const totalCPM = sumWeighted > 0  ? totalSpent / sumWeighted   : null;
+
+        const totalCPP  = totalOrders > 0 ? totalSpent / totalOrders : null;
+        const totalCPM  = sumWeighted > 0  ? totalSpent / sumWeighted : null;
+        const totalTCPR = totalOrders > 0 ? (totalFail / totalOrders) : null;
 
         html += `
           <tr class="bg-gray-100 font-bold">
@@ -390,6 +406,7 @@
             <td class="border px-2 py-1 text-center">${totalOrders}</td>
             <td class="border px-2 py-1 text-center">${totalCPP != null ? `₱${totalCPP.toFixed(2)}` : '—'}</td>
             <td class="border px-2 py-1 text-center">${totalCPM != null ? `₱${totalCPM.toFixed(2)}` : '—'}</td>
+            <td class="border px-2 py-1 text-center">${totalTCPR != null ? tcprBadge(totalTCPR * 100) : '—'}</td>
             <td class="border px-2 py-1" colspan="3"></td>
           </tr>
         `;
