@@ -1,4 +1,5 @@
 <x-layout>
+  <x-slot name="title">Import Pancake Conversations</x-slot>
   <x-slot name="heading">Import Pancake Conversations</x-slot>
 
   <div class="max-w-6xl mt-6 space-y-6">
