@@ -55,6 +55,7 @@ use App\Http\Controllers\JntChatblastGsheetController;
 use App\Http\Controllers\Security\AllowedIpController;
 use App\Http\Controllers\MacroOutputPageNameController;
 use App\Http\Controllers\PancakeConversationController;
+use App\Http\Controllers\JntStickerController;
 
 use App\Models\Role;
 
@@ -235,6 +236,16 @@ Route::post('/jnt/checker/upload', [JntCheckerController::class, 'upload'])->nam
 Route::get('/jnt/checker/upload', fn () => redirect()->route('jnt.checker'));
 Route::post('/jnt/checker/update', [\App\Http\Controllers\JntCheckerController::class, 'update'])
     ->name('jnt.checker.update');
+
+Route::get('jnt/stickers', [JntStickerController::class, 'index'])->name('jnt.stickers');
+
+    Route::post('jnt/stickers/upload', [JntStickerController::class, 'upload'])->name('jnt.stickers.upload');
+    Route::post('jnt/stickers/db', [JntStickerController::class, 'loadDb'])->name('jnt.stickers.db');
+    Route::post('jnt/stickers/compare', [JntStickerController::class, 'compare'])->name('jnt.stickers.compare');
+    Route::post('jnt/stickers/reset', [JntStickerController::class, 'reset'])->name('jnt.stickers.reset');
+
+
+
 
 Route::get('/item/cogs', [ItemCogsController::class, 'index'])->name('item.cogs.index');
 Route::get('/item/cogs/grid', [ItemCogsController::class, 'grid'])->name('item.cogs.grid');      // JSON grid for month
