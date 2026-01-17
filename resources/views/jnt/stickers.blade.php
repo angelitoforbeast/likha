@@ -7,51 +7,30 @@
 
   @php
     $filter_date = $filter_date ?? '';
-    $table = $table ?? ['mode'=>'idle','rows'=>[],'summary'=>[]];
-    $rows = $table['rows'] ?? [];
-    $sum = $table['summary'] ?? [];
-
-    $mode = $table['mode'] ?? 'idle';
-
-    $pdfFilesSelected  = (int)($sum['pdf_files_selected'] ?? 0);
-    $pdfFilesReceived  = (int)($sum['pdf_files_received'] ?? 0);
-    $pdfFilesTruncated = (int)($sum['pdf_files_truncated'] ?? 0);
-
-    $pdfPagesTotal = (int)($sum['pdf_pages_total'] ?? 0);
-    $pdfOkPages    = (int)($sum['pdf_pages_ok'] ?? 0);
-    $pdfMissPages  = (int)($sum['pdf_missing_pages'] ?? 0);
-    $pdfAmbPages   = (int)($sum['pdf_ambiguous_pages'] ?? 0);
-
-    $dbDate     = (string)($sum['db_filter_date'] ?? $filter_date);
-    $dbWaybills = (int)($sum['db_waybills'] ?? 0);
-
-    $cmpOk      = (int)($sum['compare_ok'] ?? 0);
-    $dupPdf     = (int)($sum['duplicate_pdf'] ?? 0);
-    $dupDb      = (int)($sum['duplicate_db'] ?? 0);
-    $missInDb   = (int)($sum['missing_in_db'] ?? 0);
-    $missInPdf  = (int)($sum['missing_in_pdf'] ?? 0);
-
-    $hasPdfErr = ($pdfMissPages > 0) || ($pdfAmbPages > 0);
-    $hasCompareErr = ($dupPdf > 0) || ($dupDb > 0) || ($missInDb > 0) || ($missInPdf > 0);
-    $hasUploadTrunc = ($pdfFilesTruncated > 0);
-
-    $summaryBad = $hasPdfErr || $hasCompareErr || $hasUploadTrunc;
+    $limits = $server_limits ?? [
+      'max_file_uploads' => 20,
+      'upload_max_filesize' => '0',
+      'post_max_size' => '0',
+    ];
   @endphp
 
   <style>
-    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; background: #fff; }
-    .btn { border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 12px; font-size: 14px; background: #fff; }
+    .card { border: 1px solid #e5e7eb; border-radius: 14px; padding: 16px; background: #fff; }
+    .btn { border: 1px solid #d1d5db; border-radius: 10px; padding: 8px 12px; font-size: 14px; background: #fff; }
     .btn-primary { border-color: #111827; background: #111827; color: #fff; }
+    .btn-danger { border-color: #ef4444; color: #ef4444; }
     .btn-warn { border-color: #f59e0b; color: #92400e; background:#fffbeb; }
-    .btn-danger { border-color: #ef4444; color: #ef4444; background:#fff; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
     .muted { color: #6b7280; font-size: 13px; }
-    .input { width: 220px; border:1px solid #d1d5db; border-radius:10px; padding:8px 10px; }
 
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid #eee; padding: 10px 10px; text-align: left; vertical-align: top; }
-    th { font-size: 12px; color: #6b7280; font-weight: 600; }
-    .nowrap { white-space: nowrap; }
+    .input { width: 220px; border:1px solid #d1d5db; border-radius:12px; padding:8px 10px; }
+    .pill { display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border-radius:999px; border:1px solid #e5e7eb; font-size:12px; background:#fafafa; }
+    .pill-ok { background:#ecfdf5; border-color:#a7f3d0; color:#065f46; }
+    .pill-bad { background:#fff1f2; border-color:#fecaca; color:#9f1239; }
+    .pill-warn { background:#fffbeb; border-color:#fde68a; color:#92400e; }
+    .pill-info { background:#eff6ff; border-color:#bfdbfe; color:#1e40af; }
 
     .badge { padding:2px 10px; border-radius:999px; font-size:12px; display:inline-block; border:1px solid transparent; }
     .b-ok { background:#ecfdf5; border-color:#a7f3d0; color:#065f46; }
@@ -59,191 +38,80 @@
     .b-miss { background:#eff6ff; border-color:#bfdbfe; color:#1e40af; }
     .b-warn { background:#fffbeb; border-color:#fde68a; color:#92400e; }
 
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #eee; padding: 10px 10px; text-align: left; vertical-align: top; }
+    th { font-size: 12px; color: #6b7280; font-weight: 700; }
+    .nowrap { white-space: nowrap; }
+
     .row-bad td { background:#fff7f7; }
     .row-mid td { background:#fffbeb; }
 
-    /* EMPHASIZED SUMMARY */
-    .sum-banner{
-      border: 1px solid #e5e7eb;
-      border-radius: 14px;
-      padding: 14px 14px 10px;
-      background: #fff;
-    }
-    .sum-good{
-      box-shadow: 0 0 0 2px rgba(16,185,129,0.10);
-    }
-    .sum-bad{
-      border-color: #fecaca;
-      box-shadow: 0 0 0 3px rgba(239,68,68,0.12);
-      background: linear-gradient(0deg, #fff, #fff), linear-gradient(90deg, rgba(239,68,68,0.06), rgba(239,68,68,0));
-    }
-    .sum-title{ font-weight: 800; font-size: 15px; margin-bottom: 10px; }
-    .sum-row{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
-
-    .sum-chip{
-      display:inline-flex; gap:6px; align-items:center;
-      border-radius:999px; padding:6px 10px;
-      font-size:12px; border:1px solid #e5e7eb; background:#f9fafb;
-    }
-    .sum-chip .sum-k{ color:#374151; font-weight:600; }
-    .sum-chip .sum-v{ color:#111827; font-weight:800; }
-    .chip-good{ border-color:#bbf7d0; background:#f0fdf4; }
-    .chip-bad{ border-color:#fecaca; background:#fef2f2; color:#7f1d1d; }
-
-    .sum-alert{
-      border-radius:12px; padding:10px 12px; font-size:13px;
-      border:1px solid #fecaca; background:#fef2f2; color:#7f1d1d;
-    }
-    .sum-alert.ok{
-      border-color:#bbf7d0; background:#f0fdf4; color:#14532d;
-    }
-    .sum-alert-item{
-      display:inline-block; margin-left:8px; padding:2px 8px;
-      border-radius:999px; background: rgba(127,29,29,0.08);
-      border: 1px solid rgba(127,29,29,0.15);
-    }
+    .bar { height: 10px; border-radius: 999px; background: #f3f4f6; overflow: hidden; border: 1px solid #e5e7eb; }
+    .bar > div { height: 100%; width: 0%; background: #111827; transition: width .2s ease; }
   </style>
+
+  {{-- CSRF for fetch --}}
+  <meta name="csrf-token" content="{{ csrf_token() }}">
 
   <div class="p-4 space-y-4">
 
-    {{-- top controls --}}
+    {{-- Controls --}}
     <div class="card space-y-3">
       <div class="flex flex-wrap items-end gap-3">
-
         <div>
           <div class="text-sm font-medium mb-1">Filter Date (DB reference)</div>
           <input id="filter_date" type="date" value="{{ $filter_date }}" class="input" />
           <div class="muted mt-1">
-            DB uses: <span class="mono">DATE(STR_TO_DATE(TIMESTAMP, '%H:%i %d-%m-%Y')) = selected date</span>
+            DB match: <span class="mono">DATE(STR_TO_DATE(TIMESTAMP, '%H:%i %d-%m-%Y'))</span>
           </div>
         </div>
 
-        {{-- UPLOAD FORM --}}
-        <form id="uploadForm" method="POST" action="{{ route('jnt.stickers.upload') }}" enctype="multipart/form-data" class="min-w-[320px]">
-          @csrf
-          <input type="hidden" name="filter_date" id="filter_date_upload" value="{{ $filter_date }}">
-          <input type="hidden" name="selected_files_count" id="selected_files_count" value="0">
-
-          <div class="text-sm font-medium mb-1">Upload PDF file(s)</div>
-          <input id="pdf_files_input" type="file" name="pdf_files[]" accept="application/pdf" multiple required
+        <div class="min-w-[360px]">
+          <div class="text-sm font-medium mb-1">Sticker PDF file(s) (Preview / Extract)</div>
+          <input id="pdfInput" type="file" multiple accept=".pdf"
                  class="block w-full border border-gray-300 rounded-lg p-2" />
-
-          @error('pdf_files') <div class="mono" style="color:#b91c1c;">{{ $message }}</div> @enderror
-          @error('pdf_files.*') <div class="mono" style="color:#b91c1c;">{{ $message }}</div> @enderror
-        </form>
-
-        {{-- DB FORM --}}
-        <form id="dbForm" method="POST" action="{{ route('jnt.stickers.db') }}">
-          @csrf
-          <input type="hidden" name="filter_date" id="filter_date_db" value="{{ $filter_date }}">
-        </form>
-
-        {{-- COMPARE FORM --}}
-        <form id="compareForm" method="POST" action="{{ route('jnt.stickers.compare') }}">
-          @csrf
-          <input type="hidden" name="filter_date" id="filter_date_compare" value="{{ $filter_date }}">
-        </form>
-
-        {{-- RESET FORM --}}
-        <form id="resetForm" method="POST" action="{{ route('jnt.stickers.reset') }}">
-          @csrf
-          <input type="hidden" name="filter_date" id="filter_date_reset" value="{{ $filter_date }}">
-        </form>
+          <div class="muted mt-1">
+            Server limits now: <span class="mono">max_file_uploads={{ (int)$limits['max_file_uploads'] }}</span>,
+            <span class="mono">post_max_size={{ $limits['post_max_size'] }}</span>,
+            <span class="mono">upload_max_filesize={{ $limits['upload_max_filesize'] }}</span>
+          </div>
+          <div id="uploadLimitMsg" class="mono mt-1" style="display:none;"></div>
+        </div>
 
         <div class="flex flex-wrap gap-2">
-          <button type="submit" form="uploadForm" class="btn btn-primary">1) Upload &amp; Extract (PDF)</button>
-          <button type="submit" form="dbForm" class="btn btn-warn">2) Show Waybills from DB</button>
-          <button type="submit" form="compareForm" class="btn btn-primary">3) Compare / Check</button>
-          <button type="submit" form="resetForm" class="btn btn-danger">Reset</button>
+          <button id="btnExtract" class="btn btn-primary" type="button">1) Extract (PDF Preview)</button>
+          <button id="btnDb" class="btn btn-warn" type="button">2) Show Waybills from DB</button>
+          <button id="btnCompare" class="btn btn-primary" type="button">3) Compare / Check</button>
+          <button id="btnCommit" class="btn btn-primary" type="button" disabled>COMMIT (Upload All PDFs)</button>
+          <button id="btnReset" class="btn btn-danger" type="button">Reset</button>
         </div>
       </div>
 
       <div class="muted">
-        Extraction rule: <b>1 page = 1 waybill</b>. Only pages with exactly 1 candidate are accepted.
+        Rule: <b>1 page = 1 waybill</b>. If a page has <b>0</b> JT waybill → Missing. If it has <b>2+</b> → Ambiguous.
       </div>
 
-      @if(session('success'))
-        <div class="mono" style="color:#065f46;">{{ session('success') }}</div>
-      @endif
+      <div class="space-y-2">
+        <div class="text-sm font-medium">Progress</div>
+        <div class="bar"><div id="progressBar"></div></div>
+        <div id="progressText" class="muted">Idle.</div>
+      </div>
     </div>
 
-    {{-- EMPHASIZED SUMMARY --}}
-    @php
-      $chip = function(string $label, $value, bool $bad=false) {
-        $cls = $bad ? 'sum-chip chip-bad' : 'sum-chip chip-good';
-        return '<span class="'.$cls.'"><span class="sum-k">'.$label.':</span> <span class="sum-v">'.$value.'</span></span>';
-      };
-      $bannerClass = $summaryBad ? 'sum-banner sum-bad' : 'sum-banner sum-good';
-    @endphp
-
-    <div class="{{ $bannerClass }}">
-      <div class="sum-title">Summary</div>
-
-      <div class="sum-row">
-        {!! $chip('PDF Files (Selected)', $pdfFilesSelected ?: 0, $pdfFilesSelected > 0 && $pdfFilesTruncated > 0) !!}
-        {!! $chip('PDF Files (Received)', $pdfFilesReceived ?: 0, $pdfFilesSelected > 0 && $pdfFilesTruncated > 0) !!}
-        {!! $chip('PDF Files (Truncated)', $pdfFilesTruncated ?: 0, $pdfFilesTruncated > 0) !!}
-      </div>
-
-      <div class="sum-row">
-        {!! $chip('PDF Pages Total', $pdfPagesTotal, $pdfPagesTotal === 0) !!}
-        {!! $chip('PDF OK Pages', $pdfOkPages, $pdfOkPages === 0) !!}
-        {!! $chip('PDF Missing Pages', $pdfMissPages, $pdfMissPages > 0) !!}
-        {!! $chip('PDF Ambiguous Pages', $pdfAmbPages, $pdfAmbPages > 0) !!}
-      </div>
-
-      <div class="sum-row">
-        {!! $chip('DB Date', $dbDate ?: '-', false) !!}
-        {!! $chip('DB Waybills', $dbWaybills, $dbWaybills === 0) !!}
-        {!! $chip('Mode', strtoupper($mode), false) !!}
-      </div>
-
-      @if($mode === 'compare')
-        <div class="sum-row">
-          {!! $chip('Compare OK', $cmpOk, ($hasCompareErr || $hasPdfErr) && $cmpOk === 0) !!}
-          {!! $chip('Duplicate (PDF)', $dupPdf, $dupPdf > 0) !!}
-          {!! $chip('Duplicate (DB)', $dupDb, $dupDb > 0) !!}
-          {!! $chip('Missing in DB', $missInDb, $missInDb > 0) !!}
-          {!! $chip('Missing in PDF', $missInPdf, $missInPdf > 0) !!}
-        </div>
-      @endif
-
-      @if($summaryBad)
-        <div class="sum-alert">
-          Action needed:
-          @if($pdfFilesTruncated > 0)
-            <span class="sum-alert-item">UPLOAD LIMIT: Selected {{ $pdfFilesSelected }}, Received {{ $pdfFilesReceived }} (missing {{ $pdfFilesTruncated }})</span>
-          @endif
-          @if($pdfMissPages > 0) <span class="sum-alert-item">PDF Missing Pages: {{ $pdfMissPages }}</span> @endif
-          @if($pdfAmbPages > 0) <span class="sum-alert-item">PDF Ambiguous Pages: {{ $pdfAmbPages }}</span> @endif
-
-          @if($mode === 'compare')
-            @if($dupPdf > 0) <span class="sum-alert-item">Duplicate (PDF): {{ $dupPdf }}</span> @endif
-            @if($dupDb > 0) <span class="sum-alert-item">Duplicate (DB): {{ $dupDb }}</span> @endif
-            @if($missInDb > 0) <span class="sum-alert-item">Missing in DB: {{ $missInDb }}</span> @endif
-            @if($missInPdf > 0) <span class="sum-alert-item">Missing in PDF: {{ $missInPdf }}</span> @endif
-          @endif
-        </div>
-      @else
-        <div class="sum-alert ok">
-          ✅ All checks passed. No duplicates, no missing, no PDF errors.
-        </div>
-      @endif
-
-      @if($pdfFilesTruncated > 0)
-        <div class="muted mt-2">
-          Reason: PHP <span class="mono">max_file_uploads</span> is limiting how many files reach Laravel (you currently have 20).
-        </div>
-      @endif
+    {{-- Summary (emphasized, turns red if issues) --}}
+    <div class="card space-y-2">
+      <div class="font-semibold">Summary</div>
+      <div id="summaryPills" class="flex flex-wrap gap-2"></div>
+      <div id="summaryBig" class="mono" style="font-weight:700; font-size:14px;"></div>
     </div>
 
-    {{-- ONE TABLE --}}
+    {{-- One Table Output --}}
     <div class="card">
       <div class="flex items-center justify-between gap-3 mb-3">
         <div class="font-semibold">One Table Output</div>
-        <button class="btn" type="button" onclick="copyAllWaybills()" {{ count($rows) ? '' : 'disabled' }}>
-          Copy ALL (Waybills)
-        </button>
+        <div class="flex gap-2">
+          <button id="btnCopyAll" class="btn" type="button" disabled>Copy ALL (Unique Waybills)</button>
+        </div>
       </div>
 
       <div class="overflow-auto">
@@ -258,120 +126,590 @@
               <th>FILE NAME(S)</th>
             </tr>
           </thead>
-          <tbody>
-            @forelse($rows as $r)
-              @php
-                $status = $r['status'] ?? 'OK';
-                $rowClass = '';
-                if ($status === 'DUPLICATE_PDF') $rowClass = 'row-bad';
-                elseif ($status !== 'OK') $rowClass = 'row-mid';
-
-                $badgeClass = 'b-ok';
-                if ($status === 'PDF' || $status === 'DB') $badgeClass = 'b-warn';
-                elseif ($status === 'DUPLICATE_PDF') $badgeClass = 'b-dup';
-                elseif ($status === 'MISSING_IN_DB' || $status === 'MISSING_IN_PDF') $badgeClass = 'b-miss';
-                elseif ($status === 'DUPLICATE_DB') $badgeClass = 'b-warn';
-              @endphp
-
-              <tr class="{{ $rowClass }}">
-                <td class="mono nowrap">{{ $r['waybill'] ?? '' }}</td>
-                <td class="nowrap"><span class="badge {{ $badgeClass }}">{{ $status }}</span></td>
-                <td class="mono nowrap">{{ $r['pdf_count'] ?? 0 }}</td>
-                <td class="mono nowrap">{{ $r['db_count'] ?? 0 }}</td>
-                <td class="mono nowrap">{{ $r['duplicate_count'] ?? 0 }}</td>
-                <td class="mono">{{ $r['files'] ?? '' }}</td>
-              </tr>
-            @empty
-              <tr>
-                <td colspan="6" class="muted">No rows yet. Use the buttons above (1 → 2 → 3).</td>
-              </tr>
-            @endforelse
+          <tbody id="wbTbody">
+            <tr><td colspan="6" class="muted">No data yet. Use buttons 1 → 2 → 3.</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="muted mt-2">
-        Sorting: problems first (Duplicate PDF → Missing → OK). For PDF-only/DB-only, it lists raw rows.
+        Sorting: duplicates/missing first, then OK.
       </div>
     </div>
   </div>
 
+  {{-- PDF.js --}}
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js"></script>
+
   <script>
-    function syncFilterDate() {
-      const v = document.getElementById('filter_date')?.value || '';
-      const map = {
-        upload: 'filter_date_upload',
-        db: 'filter_date_db',
-        compare: 'filter_date_compare',
-        reset: 'filter_date_reset',
+    const pdfjsLib = window['pdfjs-dist/build/pdf'];
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js';
+
+    const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+    // ===== State =====
+    let selectedFiles = []; // File[]
+    let pdfItems = [];      // {waybill,file,page}
+    let pdfMeta = { files:0, pages_total:0, pages_ok:0, pages_missing:0, pages_ambiguous:0 };
+
+    let dbWaybills = [];    // array of waybills (may include duplicates)
+    let dbMeta = { filter_date:'', count:0 };
+
+    let tableRows = [];     // final rows for display after compare
+    let compareMeta = { ok:0, dup_pdf:0, miss_db:0, miss_pdf:0, dup_db:0 };
+
+    // ===== Elements =====
+    const elPdfInput = document.getElementById('pdfInput');
+    const elFilterDate = document.getElementById('filter_date');
+
+    const btnExtract = document.getElementById('btnExtract');
+    const btnDb = document.getElementById('btnDb');
+    const btnCompare = document.getElementById('btnCompare');
+    const btnCommit = document.getElementById('btnCommit');
+    const btnReset = document.getElementById('btnReset');
+
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+
+    const summaryPills = document.getElementById('summaryPills');
+    const summaryBig = document.getElementById('summaryBig');
+    const uploadLimitMsg = document.getElementById('uploadLimitMsg');
+
+    const wbTbody = document.getElementById('wbTbody');
+
+    const btnCopyAll = document.getElementById('btnCopyAll');
+
+    // ===== Helpers =====
+    function setProgress(pct, text) {
+      progressBar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+      progressText.textContent = text || '';
+    }
+
+    function uniq(arr) {
+      return Array.from(new Set(arr));
+    }
+
+    function statusBadgeClass(status) {
+      if (status === 'DUPLICATE_PDF') return 'b-dup';
+      if (status === 'MISSING_IN_DB' || status === 'MISSING_IN_PDF') return 'b-miss';
+      if (status === 'DUPLICATE_DB') return 'b-warn';
+      if (status === 'PDF_ONLY') return 'b-warn';
+      return 'b-ok';
+    }
+
+    function rowClass(status) {
+      if (status === 'DUPLICATE_PDF') return 'row-bad';
+      if (status !== 'OK') return 'row-mid';
+      return '';
+    }
+
+    function severityOf(status) {
+      if (status === 'DUPLICATE_PDF') return 4;
+      if (status === 'MISSING_IN_DB' || status === 'MISSING_IN_PDF') return 3;
+      if (status === 'DUPLICATE_DB') return 2;
+      if (status === 'PDF_ONLY') return 1;
+      return 0;
+    }
+
+    function renderSummary() {
+      const hasCompare = tableRows.length > 0;
+
+      // Emphasize: red if any missing/dup/errors
+      const hasProblem =
+        (pdfMeta.pages_missing || 0) > 0 ||
+        (pdfMeta.pages_ambiguous || 0) > 0 ||
+        (compareMeta.dup_pdf || 0) > 0 ||
+        (compareMeta.miss_db || 0) > 0 ||
+        (compareMeta.miss_pdf || 0) > 0;
+
+      const pill = (label, value, cls) => `
+        <span class="pill ${cls}">
+          ${label}: <b>${value}</b>
+        </span>
+      `;
+
+      const pdfCls = ((pdfMeta.pages_missing||0) > 0 || (pdfMeta.pages_ambiguous||0) > 0) ? 'pill-bad' : 'pill-info';
+      const dbCls = (dbMeta.count||0) > 0 ? 'pill-info' : 'pill-warn';
+
+      const cmpOkCls = hasCompare ? 'pill-ok' : 'pill';
+      const cmpBadCls = hasCompare ? 'pill-bad' : 'pill';
+
+      summaryPills.innerHTML = [
+        pill('PDF Files', pdfMeta.files || 0, 'pill-info'),
+        pill('PDF Pages Total', pdfMeta.pages_total || 0, 'pill-info'),
+        pill('PDF OK Pages', pdfMeta.pages_ok || 0, 'pill-ok'),
+        pill('PDF Missing Pages', pdfMeta.pages_missing || 0, (pdfMeta.pages_missing||0)>0 ? 'pill-bad' : pdfCls),
+        pill('PDF Ambiguous Pages', pdfMeta.pages_ambiguous || 0, (pdfMeta.pages_ambiguous||0)>0 ? 'pill-bad' : pdfCls),
+
+        pill('DB Date', dbMeta.filter_date || (elFilterDate.value || ''), dbCls),
+        pill('DB Waybills', dbMeta.count || 0, dbCls),
+
+        ...(hasCompare ? [
+          pill('Compare OK', compareMeta.ok || 0, cmpOkCls),
+          pill('Duplicate (PDF)', compareMeta.dup_pdf || 0, (compareMeta.dup_pdf||0)>0 ? 'pill-bad' : 'pill-info'),
+          pill('Missing in DB', compareMeta.miss_db || 0, (compareMeta.miss_db||0)>0 ? 'pill-bad' : 'pill-info'),
+          pill('Missing in PDF', compareMeta.miss_pdf || 0, (compareMeta.miss_pdf||0)>0 ? 'pill-bad' : 'pill-info'),
+        ] : []),
+      ].join('');
+
+      // Big single-line summary you asked to emphasize
+      const big = [
+        `Summary`,
+        `PDF Files: ${pdfMeta.files||0}`,
+        `PDF Pages Total: ${pdfMeta.pages_total||0}`,
+        `PDF OK Pages: ${pdfMeta.pages_ok||0}`,
+        `PDF Missing Pages: ${pdfMeta.pages_missing||0}`,
+        `PDF Ambiguous Pages: ${pdfMeta.pages_ambiguous||0}`,
+        `DB Date: ${dbMeta.filter_date || (elFilterDate.value || '')}`,
+        `DB Waybills: ${dbMeta.count||0}`,
+        ...(hasCompare ? [
+          `Compare OK: ${compareMeta.ok||0}`,
+          `Duplicate (PDF): ${compareMeta.dup_pdf||0}`,
+          `Missing in DB: ${compareMeta.miss_db||0}`,
+          `Missing in PDF: ${compareMeta.miss_pdf||0}`,
+        ] : []),
+      ].join('  •  ');
+
+      summaryBig.textContent = big;
+      summaryBig.style.color = hasProblem ? '#9f1239' : '#111827'; // red if problems
+    }
+
+    function renderTable(rows) {
+      tableRows = rows || [];
+
+      if (!tableRows.length) {
+        wbTbody.innerHTML = `<tr><td colspan="6" class="muted">No rows yet. Use buttons 1 → 2 → 3.</td></tr>`;
+        btnCopyAll.disabled = true;
+        btnCommit.disabled = true;
+        renderSummary();
+        return;
+      }
+
+      // Enable copy. Commit enabled only after compare and user has loaded both sides
+      btnCopyAll.disabled = false;
+
+      wbTbody.innerHTML = tableRows.map(r => {
+        const st = r.status || 'OK';
+        return `
+          <tr class="${rowClass(st)}">
+            <td class="mono nowrap">${escapeHtml(r.waybill || '')}</td>
+            <td class="nowrap"><span class="badge ${statusBadgeClass(st)}">${st}</span></td>
+            <td class="mono nowrap">${r.pdf_count || 0}</td>
+            <td class="mono nowrap">${r.db_count || 0}</td>
+            <td class="mono nowrap">${r.duplicate_count || 0}</td>
+            <td class="mono">${escapeHtml(r.files || '')}</td>
+          </tr>
+        `;
+      }).join('');
+
+      renderSummary();
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function computeCompareRows() {
+      // Build PDF map
+      const pdfMap = {}; // waybill => {count:int, files: {fn:cnt}}
+      for (const it of pdfItems) {
+        const wb = (it.waybill || '').trim();
+        if (!wb) continue;
+        const fn = (it.file || '').trim();
+        if (!pdfMap[wb]) pdfMap[wb] = { count:0, files:{} };
+        pdfMap[wb].count += 1;
+        if (fn) pdfMap[wb].files[fn] = (pdfMap[wb].files[fn] || 0) + 1;
+      }
+
+      // Build DB map (count duplicates too)
+      const dbMap = {};
+      for (const wbRaw of dbWaybills) {
+        const wb = String(wbRaw || '').trim();
+        if (!wb) continue;
+        dbMap[wb] = (dbMap[wb] || 0) + 1;
+      }
+
+      const all = uniq([...Object.keys(pdfMap), ...Object.keys(dbMap)]);
+
+      const rows = [];
+      for (const wb of all) {
+        const pdfCount = (pdfMap[wb]?.count) || 0;
+        const dbCount = dbMap[wb] || 0;
+
+        let fileList = '';
+        if (pdfMap[wb]?.files) {
+          const parts = [];
+          for (const [fn, cnt] of Object.entries(pdfMap[wb].files)) {
+            parts.push(cnt > 1 ? `${fn} ×${cnt}` : fn);
+          }
+          fileList = parts.join('; ');
+        }
+
+        let status = 'OK';
+        if (pdfCount > 1) status = 'DUPLICATE_PDF';
+        else if (pdfCount >= 1 && dbCount === 0) status = 'MISSING_IN_DB';
+        else if (dbCount >= 1 && pdfCount === 0) status = 'MISSING_IN_PDF';
+        else if (dbCount > 1) status = 'DUPLICATE_DB';
+        else if (pdfCount === 1 && dbCount === 1) status = 'OK';
+        else if (pdfCount >= 1 && dbCount >= 1) status = 'OK';
+
+        rows.push({
+          waybill: wb,
+          status,
+          pdf_count: pdfCount,
+          db_count: dbCount,
+          duplicate_count: Math.max(0, pdfCount - 1),
+          files: fileList,
+          severity: severityOf(status),
+        });
+      }
+
+      rows.sort((a,b) => {
+        if (a.severity !== b.severity) return b.severity - a.severity;
+        if (a.pdf_count !== b.pdf_count) return b.pdf_count - a.pdf_count;
+        if (a.db_count !== b.db_count) return b.db_count - a.db_count;
+        return (a.waybill || '').localeCompare(b.waybill || '');
+      });
+
+      // Compare summary
+      compareMeta = {
+        ok: rows.filter(r => r.status === 'OK').length,
+        dup_pdf: rows.filter(r => r.status === 'DUPLICATE_PDF').length,
+        miss_db: rows.filter(r => r.status === 'MISSING_IN_DB').length,
+        miss_pdf: rows.filter(r => r.status === 'MISSING_IN_PDF').length,
+        dup_db: rows.filter(r => r.status === 'DUPLICATE_DB').length,
       };
-      Object.values(map).forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.value = v;
-      });
+
+      return rows;
     }
 
-    function updateSelectedFilesCount() {
-      const inp = document.getElementById('pdf_files_input');
-      const out = document.getElementById('selected_files_count');
-      if (!inp || !out) return;
-      out.value = (inp.files && inp.files.length) ? inp.files.length : 0;
-    }
-
-    function attachPreSubmitSync(formId) {
-      const f = document.getElementById(formId);
-      if (!f) return;
-      f.addEventListener('submit', () => {
-        // critical: ensures date is not lost even if user didn't blur the input
-        syncFilterDate();
-        updateSelectedFilesCount();
-      });
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-      const fd = document.getElementById('filter_date');
-      if (fd) {
-        syncFilterDate();
-        fd.addEventListener('change', syncFilterDate);
-        fd.addEventListener('input', syncFilterDate);
+    function getUniqueWaybillsFromTable() {
+      const wbs = [];
+      for (const r of tableRows) {
+        if (r.waybill) wbs.push(r.waybill);
       }
-
-      const inp = document.getElementById('pdf_files_input');
-      if (inp) {
-        updateSelectedFilesCount();
-        inp.addEventListener('change', updateSelectedFilesCount);
-      }
-
-      attachPreSubmitSync('uploadForm');
-      attachPreSubmitSync('dbForm');
-      attachPreSubmitSync('compareForm');
-      attachPreSubmitSync('resetForm');
-    });
-
-    function getAllWaybillsText() {
-      const trs = Array.from(document.querySelectorAll('#wbTable tbody tr'));
-      const vals = [];
-      for (const tr of trs) {
-        const td = tr.querySelector('td');
-        if (!td) continue;
-        const wb = td.textContent.trim();
-        if (wb) vals.push(wb);
-      }
-      return Array.from(new Set(vals)).join("\n");
+      return uniq(wbs).join('\n');
     }
 
-    function copyAllWaybills() {
-      const text = getAllWaybillsText();
+    async function copyText(text) {
       if (!text) return;
-
-      navigator.clipboard.writeText(text).catch(() => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (e) {
         const ta = document.createElement('textarea');
         ta.value = text;
         document.body.appendChild(ta);
         ta.select();
         document.execCommand('copy');
         document.body.removeChild(ta);
-      });
+      }
     }
+
+    // ===== Events =====
+    elPdfInput.addEventListener('change', () => {
+      selectedFiles = Array.from(elPdfInput.files || []);
+      // Show local warning if selection > typical server max_file_uploads
+      const serverMax = {{ (int)$limits['max_file_uploads'] }};
+      if (selectedFiles.length > serverMax) {
+        uploadLimitMsg.style.display = 'block';
+        uploadLimitMsg.style.color = '#92400e';
+        uploadLimitMsg.textContent = `Note: Selected ${selectedFiles.length}. Server max_file_uploads is ${serverMax}. COMMIT will auto-upload in chunks to avoid missing files.`;
+      } else {
+        uploadLimitMsg.style.display = 'none';
+        uploadLimitMsg.textContent = '';
+      }
+    });
+
+    btnCopyAll.addEventListener('click', async () => {
+      await copyText(getUniqueWaybillsFromTable());
+    });
+
+    btnReset.addEventListener('click', () => {
+      selectedFiles = [];
+      pdfItems = [];
+      dbWaybills = [];
+      pdfMeta = { files:0, pages_total:0, pages_ok:0, pages_missing:0, pages_ambiguous:0 };
+      dbMeta = { filter_date:'', count:0 };
+      compareMeta = { ok:0, dup_pdf:0, miss_db:0, miss_pdf:0, dup_db:0 };
+      tableRows = [];
+
+      elPdfInput.value = '';
+      setProgress(0, 'Idle.');
+      renderTable([]);
+      uploadLimitMsg.style.display = 'none';
+      btnCommit.disabled = true;
+    });
+
+    // 1) Extract PDFs (client-side preview)
+    btnExtract.addEventListener('click', async () => {
+      if (!selectedFiles.length) {
+        alert('Select PDF file(s) first.');
+        return;
+      }
+
+      btnExtract.disabled = true;
+      btnDb.disabled = true;
+      btnCompare.disabled = true;
+      btnCommit.disabled = true;
+
+      pdfItems = [];
+      pdfMeta = { files: selectedFiles.length, pages_total:0, pages_ok:0, pages_missing:0, pages_ambiguous:0 };
+
+      setProgress(0, 'Starting PDF preview extraction...');
+
+      try {
+        let fileIdx = 0;
+        for (const file of selectedFiles) {
+          fileIdx++;
+          setProgress(0, `Loading file ${fileIdx}/${selectedFiles.length}: ${file.name}`);
+
+          const buffer = await file.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+          const totalPages = pdf.numPages;
+
+          for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+            pdfMeta.pages_total++;
+
+            // Update progress with weighted estimate
+            const approx = Math.round((pdfMeta.pages_total / Math.max(1, (pdfMeta.pages_total + (totalPages - pageNum)))) * 100);
+            setProgress(Math.min(99, approx), `Extracting page ${pageNum}/${totalPages} (${file.name})`);
+
+            const page = await pdf.getPage(pageNum);
+            const content = await page.getTextContent();
+
+            // Fast: join all strings, then regex
+            const text = content.items.map(i => i.str).join(' ');
+            const matches = (text.match(/\bJT\d+\b/g) || []).map(s => s.trim());
+            const candidates = uniq(matches);
+
+            if (candidates.length === 0) {
+              pdfMeta.pages_missing++;
+            } else if (candidates.length > 1) {
+              pdfMeta.pages_ambiguous++;
+            } else {
+              pdfMeta.pages_ok++;
+              pdfItems.push({
+                waybill: candidates[0],
+                file: file.name,
+                page: pageNum,
+              });
+            }
+
+            // Yield to UI occasionally
+            if (pageNum % 25 === 0) await new Promise(r => setTimeout(r, 0));
+          }
+        }
+
+        setProgress(100, `Done. Extracted OK pages: ${pdfMeta.pages_ok}/${pdfMeta.pages_total}.`);
+      } catch (e) {
+        console.error(e);
+        alert('PDF extraction error. Check console.');
+        setProgress(0, 'Error during extraction.');
+      } finally {
+        btnExtract.disabled = false;
+        btnDb.disabled = false;
+        btnCompare.disabled = false;
+        renderSummary();
+
+        // Show PDF-only table (optional): we keep table empty until compare; but you asked to show extracted data after upload
+        const rowsPdfOnly = pdfItems.map(it => ({
+          waybill: it.waybill,
+          status: 'PDF_ONLY',
+          pdf_count: 1,
+          db_count: 0,
+          duplicate_count: 0,
+          files: `${it.file} (p${it.page})`,
+          severity: 1,
+        }));
+
+        // Sort by waybill; duplicates will naturally show later after compare
+        rowsPdfOnly.sort((a,b) => (a.waybill||'').localeCompare(b.waybill||''));
+        renderTable(rowsPdfOnly);
+      }
+    });
+
+    // 2) DB fetch
+    btnDb.addEventListener('click', async () => {
+      const d = elFilterDate.value;
+      if (!d) {
+        alert('Select Filter Date first.');
+        return;
+      }
+
+      btnDb.disabled = true;
+      setProgress(10, 'Loading DB waybills...');
+
+      try {
+        const res = await fetch(`{{ route('jnt.stickers.db') }}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': csrf,
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({ filter_date: d }),
+        });
+
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.message || 'DB request failed');
+
+        dbWaybills = json.waybills || [];
+        dbMeta = { filter_date: json.filter_date || d, count: json.count || 0 };
+
+        setProgress(100, `DB loaded: ${dbMeta.count} waybills for ${dbMeta.filter_date}.`);
+        renderSummary();
+
+      } catch (e) {
+        console.error(e);
+        alert('DB load error. Check console.');
+        setProgress(0, 'Error loading DB.');
+      } finally {
+        btnDb.disabled = false;
+      }
+    });
+
+    // 3) Compare
+    btnCompare.addEventListener('click', () => {
+      if (!pdfItems.length) {
+        alert('Run 1) Extract first.');
+        return;
+      }
+      if (!dbWaybills.length) {
+        alert('Run 2) Show Waybills from DB first.');
+        return;
+      }
+
+      const rows = computeCompareRows();
+      renderTable(rows);
+
+      // Enable commit (you can decide to only enable when no problems)
+      btnCommit.disabled = false;
+    });
+
+    // COMMIT: upload all PDFs in chunks, then finalize with audit JSON
+    btnCommit.addEventListener('click', async () => {
+      if (!selectedFiles.length) {
+        alert('No PDF files selected.');
+        return;
+      }
+
+      const filterDate = elFilterDate.value || '';
+
+      // You can enforce “no problems” here if you want:
+      // if ((compareMeta.dup_pdf||0) > 0 || (compareMeta.miss_db||0) > 0 || (compareMeta.miss_pdf||0) > 0) { ... }
+
+      btnCommit.disabled = true;
+      btnExtract.disabled = true;
+      btnDb.disabled = true;
+      btnCompare.disabled = true;
+
+      setProgress(0, 'Starting COMMIT (server upload in chunks)...');
+
+      try {
+        // 1) Init commit
+        const initRes = await fetch(`{{ route('jnt.stickers.commit.init') }}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': csrf,
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            filter_date: filterDate || null,
+            client_summary: pdfMeta,
+            client_compare: compareMeta,
+          }),
+        });
+        const initJson = await initRes.json();
+        if (!initJson.ok) throw new Error(initJson.message || 'Commit init failed');
+
+        const commitId = initJson.commit_id;
+        const serverMax = (initJson.server_limits?.max_file_uploads) || {{ (int)$limits['max_file_uploads'] }} || 20;
+
+        // Use chunk size <= server max_file_uploads (safe)
+        const chunkSize = Math.max(1, Math.min(serverMax, 20)); // cap at 20 for stability
+        const chunks = [];
+        for (let i = 0; i < selectedFiles.length; i += chunkSize) {
+          chunks.push(selectedFiles.slice(i, i + chunkSize));
+        }
+
+        // 2) Upload chunks
+        let uploaded = 0;
+        for (let ci = 0; ci < chunks.length; ci++) {
+          const chunk = chunks[ci];
+          const form = new FormData();
+          form.append('commit_id', commitId);
+          for (const f of chunk) form.append('pdf_files[]', f);
+
+          setProgress(
+            Math.round((uploaded / selectedFiles.length) * 100),
+            `Uploading chunk ${ci + 1}/${chunks.length} (files ${uploaded + 1}-${uploaded + chunk.length} of ${selectedFiles.length})...`
+          );
+
+          const upRes = await fetch(`{{ route('jnt.stickers.commit.upload') }}`, {
+            method: 'POST',
+            headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+            body: form,
+          });
+
+          const upJson = await upRes.json();
+          if (!upJson.ok) throw new Error(upJson.message || 'Chunk upload failed');
+
+          uploaded += chunk.length;
+        }
+
+        // 3) Finalize (write audit.json)
+        setProgress(95, 'Finalizing commit (writing audit.json)...');
+
+        const finRes = await fetch(`{{ route('jnt.stickers.commit.finalize') }}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': csrf,
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            commit_id: commitId,
+            filter_date: filterDate || null,
+            client_summary: pdfMeta,
+            client_compare: compareMeta,
+            table_rows: tableRows.map(r => ({
+              waybill: r.waybill,
+              status: r.status,
+              pdf_count: r.pdf_count,
+              db_count: r.db_count,
+              duplicate_count: r.duplicate_count,
+              files: r.files,
+            })),
+          }),
+        });
+
+        const finJson = await finRes.json();
+        if (!finJson.ok) throw new Error(finJson.message || 'Finalize failed');
+
+        setProgress(100, `COMMIT DONE. Uploaded ${uploaded}/${selectedFiles.length} file(s).`);
+        alert(`COMMIT DONE.\nUploaded: ${uploaded}/${selectedFiles.length}\nCommit ID: ${commitId}`);
+
+      } catch (e) {
+        console.error(e);
+        alert('COMMIT error. Check console.');
+        setProgress(0, 'COMMIT failed.');
+      } finally {
+        btnExtract.disabled = false;
+        btnDb.disabled = false;
+        btnCompare.disabled = false;
+        btnCommit.disabled = false; // keep enabled for retry if needed
+      }
+    });
+
+    // Initial render
+    renderSummary();
+
   </script>
 </x-layout>

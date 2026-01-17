@@ -4,163 +4,33 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Smalot\PdfParser\Parser;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class JntStickerController extends Controller
 {
-    private const SESS_PDF  = 'jnt_stickers_pdf';     // ['items'=>[], 'meta'=>[]]
-    private const SESS_DB   = 'jnt_stickers_db';      // ['waybills'=>[], 'meta'=>[]]
-    private const SESS_UI   = 'jnt_stickers_ui_meta'; // ['selected_files_count'=>int]
-    private const SESS_MODE = 'jnt_stickers_mode';    // 'idle'|'pdf'|'db'|'compare'
+    private const SESS_COMMIT = 'jnt_stickers_commit';
 
     public function index(Request $request)
     {
+        // Optional: allow query prefill (keeps your old behavior if you want)
         $filterDate = (string)($request->query('filter_date') ?? '');
-
-        $pdf = session(self::SESS_PDF, [
-            'items' => [],
-            'meta' => [
-                'files_received' => 0,
-                'pages_total' => 0,
-                'pages_ok' => 0,
-                'pages_missing' => 0,
-                'pages_ambiguous' => 0,
-            ],
-        ]);
-
-        $db = session(self::SESS_DB, [
-            'waybills' => [],
-            'meta' => [
-                'filter_date' => $filterDate,
-                'count' => 0,
-            ],
-        ]);
-
-        $uiMeta = session(self::SESS_UI, [
-            'selected_files_count' => 0,
-        ]);
-
-        $mode = session(self::SESS_MODE, 'idle');
-
-        // Build rows depending on mode
-        $rows = [];
-        if ($mode === 'pdf') {
-            $rows = $this->buildPdfRows($pdf['items'] ?? []);
-        } elseif ($mode === 'db') {
-            $rows = $this->buildDbRows($db['waybills'] ?? []);
-        } elseif ($mode === 'compare') {
-            $rows = $this->buildCompareRows($pdf['items'] ?? [], $db['waybills'] ?? []);
-        }
-
-        $summary = $this->buildSummary($filterDate, $pdf, $db, $rows, $mode, $uiMeta);
 
         return view('jnt.stickers', [
             'filter_date' => $filterDate,
-            'table' => [
-                'mode' => $mode,
-                'rows' => $rows,
-                'summary' => $summary,
+            'server_limits' => [
+                'max_file_uploads' => (int)ini_get('max_file_uploads'),
+                'upload_max_filesize' => (string)ini_get('upload_max_filesize'),
+                'post_max_size' => (string)ini_get('post_max_size'),
             ],
         ]);
     }
 
-    public function upload(Request $request)
-    {
-        $request->validate([
-            'filter_date' => ['nullable', 'date'],
-            'pdf_files'   => ['required', 'array'],
-            'pdf_files.*' => ['required', 'file', 'mimes:pdf', 'max:10240'], // 10MB each
-            'selected_files_count' => ['nullable', 'integer', 'min:0'],
-        ]);
-
-        $filterDate = (string)($request->input('filter_date') ?? '');
-        $selectedCount = (int)($request->input('selected_files_count') ?? 0);
-
-        // Store UI meta (for detecting max_file_uploads truncation)
-        session([self::SESS_UI => ['selected_files_count' => $selectedCount]]);
-
-        $parser = new Parser();
-
-        $items = []; // each OK page -> ['waybill','file','page']
-        $filesReceived = 0;
-        $pagesTotal = 0;
-        $pagesOk = 0;
-        $pagesMissing = 0;
-        $pagesAmbiguous = 0;
-
-        $files = $request->file('pdf_files', []);
-        if (!is_array($files)) $files = [];
-
-        foreach ($files as $file) {
-            $filesReceived++;
-            $fileName = $file->getClientOriginalName();
-
-            $realPath = $file->getRealPath();
-            if (!$realPath || !is_file($realPath)) {
-                continue;
-            }
-
-            try {
-                $pdf = $parser->parseFile($realPath);
-                $pages = $pdf->getPages();
-
-                foreach ($pages as $idx => $page) {
-                    $pagesTotal++;
-                    $pageNo = $idx + 1;
-
-                    $text = (string)$page->getText();
-
-                    // Waybill: JT + digits (adjust if your format changes)
-                    preg_match_all('/\bJT\d+\b/', $text, $m);
-                    $candidates = $m[0] ?? [];
-                    $candidates = array_values(array_filter(array_map('trim', $candidates)));
-                    $candidates = array_values(array_unique($candidates));
-
-                    if (count($candidates) === 0) {
-                        $pagesMissing++;
-                        continue;
-                    }
-
-                    if (count($candidates) > 1) {
-                        $pagesAmbiguous++;
-                        continue;
-                    }
-
-                    $pagesOk++;
-                    $items[] = [
-                        'waybill' => $candidates[0],
-                        'file'    => $fileName,
-                        'page'    => $pageNo,
-                    ];
-                }
-            } catch (\Throwable $e) {
-                // parse fail -> skip file
-                // logger()->error("JNT upload parse failed: {$fileName} - {$e->getMessage()}");
-                continue;
-            }
-        }
-
-        session([
-            self::SESS_PDF => [
-                'items' => $items,
-                'meta' => [
-                    'files_received' => $filesReceived,
-                    'pages_total' => $pagesTotal,
-                    'pages_ok' => $pagesOk,
-                    'pages_missing' => $pagesMissing,
-                    'pages_ambiguous' => $pagesAmbiguous,
-                ],
-            ],
-            self::SESS_MODE => 'pdf',
-        ]);
-
-        // PRG pattern so hindi nawawala state + date
-        return redirect()->route('jnt.stickers', [
-            'filter_date' => $filterDate,
-        ])->with('success', 'PDF uploaded and extracted successfully.');
-    }
-
-    public function loadDb(Request $request)
+    /**
+     * AJAX: Load DB waybills for a given date (YYYY-MM-DD)
+     * macro_output.TIMESTAMP format: "21:44 09-06-2025"
+     */
+    public function dbWaybills(Request $request)
     {
         $request->validate([
             'filter_date' => ['required', 'date'],
@@ -173,239 +43,163 @@ class JntStickerController extends Controller
             ->whereNotNull('waybill')
             ->whereRaw("DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) = ?", [$filterDate])
             ->pluck('waybill')
-            ->map(fn($v) => trim((string)$v))
-            ->filter(fn($v) => $v !== '')
+            ->map(fn ($v) => trim((string)$v))
+            ->filter(fn ($v) => $v !== '')
             ->values()
             ->all();
 
-        session([
-            self::SESS_DB => [
-                'waybills' => $waybills,
-                'meta' => [
-                    'filter_date' => $filterDate,
-                    'count' => count($waybills),
-                ],
-            ],
-            self::SESS_MODE => 'db',
-        ]);
-
-        return redirect()->route('jnt.stickers', [
+        return response()->json([
+            'ok' => true,
             'filter_date' => $filterDate,
-        ])->with('success', 'DB waybills loaded for selected date.');
-    }
-
-    public function compare(Request $request)
-    {
-        $request->validate([
-            'filter_date' => ['required', 'date'],
-        ]);
-
-        $filterDate = (string)$request->input('filter_date');
-
-        $pdf = session(self::SESS_PDF, ['items' => [], 'meta' => []]);
-        $db  = session(self::SESS_DB,  ['waybills' => [], 'meta' => []]);
-
-        // Ensure DB meta date matches current filter (optional)
-        // If user changed date but didn't reload DB, you'll see missing results.
-        // Recommended: require user to click "Show Waybills from DB" after changing date.
-
-        session([self::SESS_MODE => 'compare']);
-
-        return redirect()->route('jnt.stickers', [
-            'filter_date' => $filterDate,
+            'count' => count($waybills),
+            'waybills' => $waybills, // keep raw list (duplicates preserved if present)
         ]);
     }
 
-    public function reset(Request $request)
+    /**
+     * Start a commit session.
+     * Client sends summary counts + chosen date + some metadata.
+     */
+    public function commitInit(Request $request)
     {
         $request->validate([
             'filter_date' => ['nullable', 'date'],
+            'client_summary' => ['nullable', 'array'],
+            'client_compare' => ['nullable', 'array'],
         ]);
 
+        $commitId = (string) Str::uuid();
         $filterDate = (string)($request->input('filter_date') ?? '');
 
-        session()->forget(self::SESS_PDF);
-        session()->forget(self::SESS_DB);
-        session()->forget(self::SESS_UI);
-        session()->put(self::SESS_MODE, 'idle');
-
-        return redirect()->route('jnt.stickers', [
+        $payload = [
+            'commit_id' => $commitId,
             'filter_date' => $filterDate,
-        ])->with('success', 'Cleared extracted data.');
-    }
-
-    // -------------------------
-    // Helpers
-    // -------------------------
-
-    private function buildPdfRows(array $items): array
-    {
-        // one row per page (1 page = 1 waybill)
-        $rows = [];
-        foreach ($items as $it) {
-            $rows[] = [
-                'waybill' => (string)($it['waybill'] ?? ''),
-                'status' => 'PDF',
-                'pdf_count' => 1,
-                'db_count' => 0,
-                'duplicate_count' => 0,
-                'files' => (string)($it['file'] ?? '') . ' (p' . (int)($it['page'] ?? 0) . ')',
-                'severity' => 1,
-            ];
-        }
-        return $rows;
-    }
-
-    private function buildDbRows(array $waybills): array
-    {
-        // one row per DB waybill occurrence
-        // (If you want unique DB only, change here.)
-        $rows = [];
-        foreach ($waybills as $wb) {
-            $wb = trim((string)$wb);
-            if ($wb === '') continue;
-            $rows[] = [
-                'waybill' => $wb,
-                'status' => 'DB',
-                'pdf_count' => 0,
-                'db_count' => 1,
-                'duplicate_count' => 0,
-                'files' => '',
-                'severity' => 1,
-            ];
-        }
-        return $rows;
-    }
-
-    private function buildCompareRows(array $pdfItems, array $dbWaybills): array
-    {
-        // PDF map: waybill => ['count'=>int, 'files'=>[file=>cnt]]
-        $pdfMap = [];
-        foreach ($pdfItems as $it) {
-            $wb = trim((string)($it['waybill'] ?? ''));
-            $fn = trim((string)($it['file'] ?? ''));
-            if ($wb === '') continue;
-
-            if (!isset($pdfMap[$wb])) $pdfMap[$wb] = ['count' => 0, 'files' => []];
-            $pdfMap[$wb]['count']++;
-
-            if ($fn !== '') {
-                $pdfMap[$wb]['files'][$fn] = ($pdfMap[$wb]['files'][$fn] ?? 0) + 1;
-            }
-        }
-
-        // DB map: waybill => count
-        $dbMap = [];
-        foreach ($dbWaybills as $wb) {
-            $wb = trim((string)$wb);
-            if ($wb === '') continue;
-            $dbMap[$wb] = ($dbMap[$wb] ?? 0) + 1;
-        }
-
-        $allWaybills = array_unique(array_merge(array_keys($pdfMap), array_keys($dbMap)));
-
-        $rows = [];
-        foreach ($allWaybills as $wb) {
-            $pdfCount = (int)($pdfMap[$wb]['count'] ?? 0);
-            $dbCount  = (int)($dbMap[$wb] ?? 0);
-
-            $fileList = '';
-            if (isset($pdfMap[$wb]['files'])) {
-                $parts = [];
-                foreach ($pdfMap[$wb]['files'] as $fn => $cnt) {
-                    $parts[] = $cnt > 1 ? "{$fn} ×{$cnt}" : $fn;
-                }
-                $fileList = implode('; ', $parts);
-            }
-
-            // Status priority
-            $status = 'OK';
-            $severity = 0;
-
-            if ($pdfCount > 1) { $status = 'DUPLICATE_PDF'; $severity = 3; }
-            else if ($dbCount > 1) { $status = 'DUPLICATE_DB'; $severity = 2; }
-            else if ($pdfCount >= 1 && $dbCount === 0) { $status = 'MISSING_IN_DB'; $severity = 2; }
-            else if ($dbCount >= 1 && $pdfCount === 0) { $status = 'MISSING_IN_PDF'; $severity = 2; }
-            else { $status = 'OK'; $severity = 0; }
-
-            $rows[] = [
-                'waybill' => $wb,
-                'status' => $status,
-                'pdf_count' => $pdfCount,
-                'db_count' => $dbCount,
-                'duplicate_count' => max(0, $pdfCount - 1),
-                'files' => $fileList,
-                'severity' => $severity,
-            ];
-        }
-
-        // Sort: problems first
-        usort($rows, function($a, $b) {
-            if (($a['severity'] ?? 0) !== ($b['severity'] ?? 0)) return ($b['severity'] ?? 0) <=> ($a['severity'] ?? 0);
-            if (($a['pdf_count'] ?? 0) !== ($b['pdf_count'] ?? 0)) return ($b['pdf_count'] ?? 0) <=> ($a['pdf_count'] ?? 0);
-            if (($a['db_count'] ?? 0) !== ($b['db_count'] ?? 0)) return ($b['db_count'] ?? 0) <=> ($a['db_count'] ?? 0);
-            return strcmp((string)($a['waybill'] ?? ''), (string)($b['waybill'] ?? ''));
-        });
-
-        return $rows;
-    }
-
-    private function buildSummary(string $filterDate, array $pdf, array $db, array $rows, string $mode, array $uiMeta): array
-    {
-        $pdfMeta = $pdf['meta'] ?? [];
-        $dbMeta = $db['meta'] ?? [];
-
-        $pdfFilesReceived = (int)($pdfMeta['files_received'] ?? 0);
-        $pdfPagesTotal    = (int)($pdfMeta['pages_total'] ?? 0);
-        $pdfOkPages       = (int)($pdfMeta['pages_ok'] ?? 0);
-        $pdfMissingPages  = (int)($pdfMeta['pages_missing'] ?? 0);
-        $pdfAmbPages      = (int)($pdfMeta['pages_ambiguous'] ?? 0);
-
-        $dbCount = (int)($dbMeta['count'] ?? 0);
-        $dbFilterDate = (string)($dbMeta['filter_date'] ?? $filterDate);
-
-        // Compare summary counts (only meaningful in compare)
-        $compareOk = 0;
-        $dupPdf = 0;
-        $missDb = 0;
-        $missPdf = 0;
-        $dupDb = 0;
-
-        if ($mode === 'compare') {
-            foreach ($rows as $r) {
-                $st = (string)($r['status'] ?? '');
-                if ($st === 'OK') $compareOk++;
-                if ($st === 'DUPLICATE_PDF') $dupPdf++;
-                if ($st === 'DUPLICATE_DB') $dupDb++;
-                if ($st === 'MISSING_IN_DB') $missDb++;
-                if ($st === 'MISSING_IN_PDF') $missPdf++;
-            }
-        }
-
-        // File truncation detection (max_file_uploads)
-        $selectedFiles = (int)($uiMeta['selected_files_count'] ?? 0);
-        $filesTruncated = ($selectedFiles > 0 && $pdfFilesReceived > 0 && $pdfFilesReceived < $selectedFiles)
-            ? ($selectedFiles - $pdfFilesReceived)
-            : 0;
-
-        return [
-            'pdf_files_selected' => $selectedFiles,
-            'pdf_files_received' => $pdfFilesReceived,
-            'pdf_files_truncated' => $filesTruncated,
-
-            'pdf_pages_total' => $pdfPagesTotal,
-            'pdf_pages_ok' => $pdfOkPages,
-            'pdf_missing_pages' => $pdfMissingPages,
-            'pdf_ambiguous_pages' => $pdfAmbPages,
-
-            'db_filter_date' => $dbFilterDate,
-            'db_waybills' => $dbCount,
-
-            'compare_ok' => $compareOk,
-            'duplicate_pdf' => $dupPdf,
-            'duplicate_db' => $dupDb,
-            'missing_in_db' => $missDb,
-            'missing_in_pdf' => $missPdf,
+            'started_at' => now()->toDateTimeString(),
+            'received_files' => 0,
+            'received_bytes' => 0,
+            'client_summary' => $request->input('client_summary', []),
+            'client_compare' => $request->input('client_compare', []),
         ];
+
+        session([self::SESS_COMMIT => $payload]);
+
+        // Directory for this commit
+        Storage::disk('local')->makeDirectory("jnt_stickers/commits/{$commitId}/pdf");
+
+        return response()->json([
+            'ok' => true,
+            'commit_id' => $commitId,
+            'server_limits' => [
+                'max_file_uploads' => (int)ini_get('max_file_uploads'),
+                'upload_max_filesize' => (string)ini_get('upload_max_filesize'),
+                'post_max_size' => (string)ini_get('post_max_size'),
+            ],
+        ]);
+    }
+
+    /**
+     * Upload one chunk of files (<= max_file_uploads).
+     * Stores files to storage/app/jnt_stickers/commits/{commitId}/pdf
+     */
+    public function commitUploadChunk(Request $request)
+    {
+        $request->validate([
+            'commit_id' => ['required', 'string'],
+            'pdf_files' => ['required', 'array'],
+            'pdf_files.*' => ['required', 'file', 'mimes:pdf', 'max:51200'], // 50MB each (adjust)
+        ]);
+
+        $commitId = (string)$request->input('commit_id');
+
+        $sess = session(self::SESS_COMMIT);
+        if (!is_array($sess) || ($sess['commit_id'] ?? null) !== $commitId) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Invalid or expired commit session.',
+            ], 422);
+        }
+
+        $stored = 0;
+        $bytes = 0;
+        $filesMeta = [];
+
+        foreach ($request->file('pdf_files') as $file) {
+            $orig = $file->getClientOriginalName();
+
+            // Prevent overwrite: prefix with short uuid
+            $safeName = Str::uuid()->toString() . '-' . $orig;
+
+            $path = $file->storeAs("jnt_stickers/commits/{$commitId}/pdf", $safeName, 'local');
+
+            $stored++;
+            $bytes += (int)$file->getSize();
+
+            $filesMeta[] = [
+                'original' => $orig,
+                'stored_as' => $safeName,
+                'path' => $path,
+                'size' => (int)$file->getSize(),
+            ];
+        }
+
+        $sess['received_files'] = (int)($sess['received_files'] ?? 0) + $stored;
+        $sess['received_bytes'] = (int)($sess['received_bytes'] ?? 0) + $bytes;
+
+        // Append chunk files list for audit
+        $sess['uploaded_files'] = array_merge($sess['uploaded_files'] ?? [], $filesMeta);
+
+        session([self::SESS_COMMIT => $sess]);
+
+        return response()->json([
+            'ok' => true,
+            'stored' => $stored,
+            'total_received_files' => (int)$sess['received_files'],
+            'total_received_bytes' => (int)$sess['received_bytes'],
+        ]);
+    }
+
+    /**
+     * Finalize commit: store JSON audit file (summary + compare rows).
+     * This is your “commit = save on disk” checkpoint.
+     */
+    public function commitFinalize(Request $request)
+    {
+        $request->validate([
+            'commit_id' => ['required', 'string'],
+            'filter_date' => ['nullable', 'date'],
+            'client_summary' => ['nullable', 'array'],
+            'client_compare' => ['nullable', 'array'],
+            'table_rows' => ['nullable', 'array'],
+        ]);
+
+        $commitId = (string)$request->input('commit_id');
+
+        $sess = session(self::SESS_COMMIT);
+        if (!is_array($sess) || ($sess['commit_id'] ?? null) !== $commitId) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Invalid or expired commit session.',
+            ], 422);
+        }
+
+        $sess['filter_date'] = (string)($request->input('filter_date') ?? ($sess['filter_date'] ?? ''));
+        $sess['client_summary'] = $request->input('client_summary', $sess['client_summary'] ?? []);
+        $sess['client_compare'] = $request->input('client_compare', $sess['client_compare'] ?? []);
+        $sess['table_rows'] = $request->input('table_rows', []);
+        $sess['finalized_at'] = now()->toDateTimeString();
+
+        // Write audit JSON
+        $jsonPath = "jnt_stickers/commits/{$commitId}/audit.json";
+        Storage::disk('local')->put($jsonPath, json_encode($sess, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+        // Keep session (optional) or clear it
+        // session()->forget(self::SESS_COMMIT);
+
+        return response()->json([
+            'ok' => true,
+            'commit_id' => $commitId,
+            'received_files' => (int)($sess['received_files'] ?? 0),
+            'audit_json' => $jsonPath,
+        ]);
     }
 }

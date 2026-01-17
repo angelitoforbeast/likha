@@ -37,6 +37,7 @@
               <x-navlink href="/jnt_rts" :active="request()->is('jnt_rts')">RTS</x-navlink>
               <x-navlink href="/jnt/checker" :active="request()->is('jnt/checker')">JNT Checker</x-navlink>
               <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload')">Tally Sticker</x-navlink>
+              <x-navlink href="/jnt/stickers" :active="request()->is('jnt/stickers')">Tally Sticker 2</x-navlink>
               <x-navlink href="/encoder/checker_1" :active="request()->is('macro_output/index')">Checker 1</x-navlink>
               <x-navlink href="/encoder/summary" :active="request()->is('macro_output/index')">Order Summary</x-navlink>
               <x-navlink href="/ads_manager/pancake-subscription-checker" :active="request()->is('ads_manager/pancake-subscription-checker')">Purchases</x-navlink>

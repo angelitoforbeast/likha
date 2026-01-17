@@ -237,12 +237,15 @@ Route::get('/jnt/checker/upload', fn () => redirect()->route('jnt.checker'));
 Route::post('/jnt/checker/update', [\App\Http\Controllers\JntCheckerController::class, 'update'])
     ->name('jnt.checker.update');
 
-Route::get('jnt/stickers', [JntStickerController::class, 'index'])->name('jnt.stickers');
+Route::get('/jnt/stickers', [JntStickerController::class, 'index'])->name('jnt.stickers');
 
-    Route::post('jnt/stickers/upload', [JntStickerController::class, 'upload'])->name('jnt.stickers.upload');
-    Route::post('jnt/stickers/db', [JntStickerController::class, 'loadDb'])->name('jnt.stickers.db');
-    Route::post('jnt/stickers/compare', [JntStickerController::class, 'compare'])->name('jnt.stickers.compare');
-    Route::post('jnt/stickers/reset', [JntStickerController::class, 'reset'])->name('jnt.stickers.reset');
+// AJAX: get DB waybills for date
+Route::post('/jnt/stickers/db', [JntStickerController::class, 'dbWaybills'])->name('jnt.stickers.db');
+
+// Commit flow (chunked uploads)
+Route::post('/jnt/stickers/commit/init', [JntStickerController::class, 'commitInit'])->name('jnt.stickers.commit.init');
+Route::post('/jnt/stickers/commit/upload', [JntStickerController::class, 'commitUploadChunk'])->name('jnt.stickers.commit.upload');
+Route::post('/jnt/stickers/commit/finalize', [JntStickerController::class, 'commitFinalize'])->name('jnt.stickers.commit.finalize');
 
 
 
