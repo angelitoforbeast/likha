@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use App\Jobs\ImportLikhaFromGoogleSheet;
 use App\Models\LikhaOrder;
 use App\Models\LikhaOrderSetting;
@@ -14,7 +15,29 @@ class LikhaOrderImportController extends Controller
     public function index(Request $request)
     {
         $settings = LikhaOrderSetting::orderBy('id')->get();
-        return view('likha_order.import', compact('settings'));
+
+        // ✅ Global: last attempt + last successful
+        $lastAttemptRun = LikhaImportRun::orderByDesc('id')->first();
+
+        $lastSuccessRun = LikhaImportRun::where('status', 'done')
+            ->orderByDesc('finished_at')
+            ->first();
+
+        // ✅ Per setting: last successful finished_at (map by setting_id)
+        $lastImportedMap = LikhaImportRunSheet::query()
+            ->where('status', 'done')
+            ->whereNotNull('finished_at')
+            ->select('setting_id', DB::raw('MAX(finished_at) as last_success_at'))
+            ->groupBy('setting_id')
+            ->pluck('last_success_at', 'setting_id')
+            ->toArray();
+
+        return view('likha_order.import', compact(
+            'settings',
+            'lastAttemptRun',
+            'lastSuccessRun',
+            'lastImportedMap'
+        ));
     }
 
     // AJAX start import
@@ -73,6 +96,10 @@ class LikhaOrderImportController extends Controller
                     'updated' => $rs->updated_count,
                     'skipped' => $rs->skipped_count,
                     'message' => $rs->message,
+
+                    // ✅ needed for real-time "Last Imported" update in UI
+                    'finished_at' => optional($rs->finished_at)->toDateTimeString(),
+
                     'spreadsheet_title' => $rs->setting?->spreadsheet_title,
                     'sheet_url' => $rs->setting?->sheet_url,
                     'sheet_id' => $rs->setting?->sheet_id,

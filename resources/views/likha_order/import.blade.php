@@ -3,6 +3,49 @@
 
     <div class="bg-white p-6 rounded shadow-md w-full max-w-6xl mx-auto mt-6">
 
+        {{-- ✅ Global last import always visible --}}
+        <div class="mb-5 rounded border bg-gray-50 p-4 text-sm">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div class="text-gray-700">
+                    <div>
+                        <span class="font-semibold">Last attempt:</span>
+                        <span id="lastAttemptText">
+                            @if(!empty($lastAttemptRun))
+                                {{ optional($lastAttemptRun->started_at)->toDateTimeString() }}
+                                <span class="ml-2 px-2 py-0.5 rounded bg-gray-200 text-gray-700 text-xs">
+                                    {{ strtoupper($lastAttemptRun->status ?? 'UNKNOWN') }}
+                                </span>
+                            @else
+                                -
+                            @endif
+                        </span>
+                    </div>
+
+                    <div class="mt-1">
+                        <span class="font-semibold">Last successful:</span>
+                        <span id="lastSuccessText">
+                            @if(!empty($lastSuccessRun))
+                                {{ optional($lastSuccessRun->finished_at)->toDateTimeString() }}
+                            @else
+                                -
+                            @endif
+                        </span>
+                    </div>
+                </div>
+
+                <div class="text-xs text-gray-600">
+                    <div class="font-semibold text-gray-700 mb-1">Run message</div>
+                    <div id="runStatusText">
+                        @if(!empty($lastAttemptRun) && $lastAttemptRun->message)
+                            {{ $lastAttemptRun->message }}
+                        @else
+                            -
+                        @endif
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <p class="text-gray-700 text-center mb-6">
             Click the button below to import data from <strong>ALL configured sheets</strong>.
         </p>
@@ -14,8 +57,11 @@
                         <th class="border px-3 py-2 text-left">#</th>
                         <th class="border px-3 py-2 text-left">Spreadsheet Title</th>
                         <th class="border px-3 py-2 text-left">Sheet URL</th>
-                        <!-- <th class="border px-3 py-2 text-left">Sheet ID</th> -->
                         <th class="border px-3 py-2 text-left">Range</th>
+
+                        {{-- ✅ new column --}}
+                        <th class="border px-3 py-2 text-left">Last Imported</th>
+
                         <th class="border px-3 py-2 text-left">Status</th>
                         <th class="border px-3 py-2 text-left">Processed</th>
                         <th class="border px-3 py-2 text-left">Inserted</th>
@@ -24,11 +70,13 @@
                         <th class="border px-3 py-2 text-left">Message</th>
                     </tr>
                 </thead>
+
                 <tbody>
                     @foreach($settings as $index => $s)
                         <tr data-setting-id="{{ $s->id }}">
                             <td class="border px-3 py-2">{{ $index + 1 }}</td>
                             <td class="border px-3 py-2 titleCell">{{ $s->spreadsheet_title ?? '-' }}</td>
+
                             <td class="border px-3 py-2 urlCell">
                                 @if($s->sheet_url)
                                     <a href="{{ $s->sheet_url }}" target="_blank" class="text-blue-600 underline">
@@ -38,8 +86,18 @@
                                     -
                                 @endif
                             </td>
-                            <!-- <td class="border px-3 py-2 idCell">{{ $s->sheet_id }}</td> -->
+
                             <td class="border px-3 py-2 rangeCell">{{ $s->range }}</td>
+
+                            {{-- ✅ last imported from DB (won’t disappear on refresh) --}}
+                            <td class="border px-3 py-2 lastImportedCell text-xs text-gray-700">
+                                @php $ts = $lastImportedMap[$s->id] ?? null; @endphp
+                                @if($ts)
+                                    {{ \Carbon\Carbon::parse($ts)->toDateTimeString() }}
+                                @else
+                                    -
+                                @endif
+                            </td>
 
                             <td class="border px-3 py-2 statusCell">
                                 <span class="px-2 py-1 rounded bg-gray-100 text-gray-700">Idle</span>
@@ -92,6 +150,29 @@
             return `<span class="px-2 py-1 rounded ${v[1]}">${v[0]}</span>`;
         }
 
+        function updateGlobal(run) {
+            if (!run) return;
+
+            const lastAttemptText = document.getElementById('lastAttemptText');
+            const lastSuccessText = document.getElementById('lastSuccessText');
+            const runStatusText   = document.getElementById('runStatusText');
+
+            if (run.started_at) {
+                lastAttemptText.innerHTML = `
+                    ${run.started_at}
+                    <span class="ml-2 px-2 py-0.5 rounded bg-gray-200 text-gray-700 text-xs">
+                        ${(run.status || 'UNKNOWN').toUpperCase()}
+                    </span>
+                `;
+            }
+
+            runStatusText.textContent = run.message ? run.message : '-';
+
+            if (run.status === 'done' && run.finished_at) {
+                lastSuccessText.textContent = run.finished_at;
+            }
+        }
+
         function updateRow(item) {
             const tr = document.querySelector(`tr[data-setting-id="${item.setting_id}"]`);
             if (!tr) return;
@@ -101,12 +182,15 @@
             tr.querySelector('.insertedCell').textContent = item.inserted ?? 0;
             tr.querySelector('.updatedCell').textContent = item.updated ?? 0;
             tr.querySelector('.skippedCell').textContent = item.skipped ?? 0;
-
             tr.querySelector('.messageCell').textContent = item.message ? item.message : '-';
 
-            // Optional: keep title fresh
             if (item.spreadsheet_title) {
                 tr.querySelector('.titleCell').textContent = item.spreadsheet_title;
+            }
+
+            // ✅ update last imported real-time when done
+            if (item.status === 'done' && item.finished_at) {
+                tr.querySelector('.lastImportedCell').textContent = item.finished_at;
             }
         }
 
@@ -118,6 +202,7 @@
             });
             const data = await res.json();
 
+            if (data.run) updateGlobal(data.run);
             (data.sheets || []).forEach(updateRow);
 
             if (data.run && (data.run.status === 'done' || data.run.status === 'failed')) {
@@ -133,7 +218,7 @@
             btn.disabled = true;
             btn.textContent = '⏳ Starting import...';
 
-            // set all rows to queued UI
+            // reset run UI (✅ DO NOT reset lastImportedCell)
             document.querySelectorAll('#settingsTable tbody tr').forEach(tr => {
                 tr.querySelector('.statusCell').innerHTML = badge('queued');
                 tr.querySelector('.processedCell').textContent = '0';
@@ -164,7 +249,6 @@
             currentRunId = data.run_id;
             btn.textContent = '⏳ Import running...';
 
-            // poll every 1.2s
             await pollStatus();
             pollTimer = setInterval(pollStatus, 1200);
         }
