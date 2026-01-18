@@ -3,8 +3,16 @@
   <x-slot name="heading">Import From Google Sheets</x-slot>
 
   @php
-    $runId = request('run_id');
-  @endphp
+  $runId = request('run_id');
+
+  // ✅ Fallback in case controller didn't pass these (duplicate route / wrong view / etc.)
+  $lastAttemptRun = $lastAttemptRun ?? \App\Models\MacroImportRun::orderByDesc('id')->first();
+
+  $lastSuccessRun = $lastSuccessRun ?? \App\Models\MacroImportRun::where('status', 'done')
+      ->orderByDesc('finished_at')
+      ->first();
+@endphp
+
 
   {{-- Flash messages --}}
   @if (session('success'))
@@ -30,10 +38,7 @@
           Settings
         </a>
 
-        {{-- NOTE: your current form posts to /macro/gsheet/import
-           If you truly start via AJAX start endpoint, convert this to a button + JS.
-           For now, keep your existing UI behavior. --}}
-        <form method="POST" action="{{ url('/macro/gsheet/import') }}" onsubmit="return confirm('Are you sure you want to import?')">
+        <form method="POST" action="{{ route('macro.import') }}" onsubmit="return confirm('Are you sure you want to import?')">
           @csrf
           <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
             Run Import Now
@@ -50,7 +55,7 @@
             <span class="font-semibold">Last attempt:</span>
             <span id="lastAttemptText">
               @if(!empty($lastAttemptRun))
-                {{ $lastAttemptRun->started_at ?? $lastAttemptRun->created_at }}
+                {{ $lastAttemptRun->started_at ? \Carbon\Carbon::parse($lastAttemptRun->started_at)->format('Y-m-d H:i:s') : \Carbon\Carbon::parse($lastAttemptRun->created_at)->format('Y-m-d H:i:s') }}
                 <span class="ml-2 px-2 py-0.5 rounded bg-gray-200 text-gray-700 text-xs">
                   {{ strtoupper($lastAttemptRun->status ?? 'UNKNOWN') }}
                 </span>
@@ -64,7 +69,7 @@
             <span class="font-semibold">Last successful:</span>
             <span id="lastSuccessText">
               @if(!empty($lastSuccessRun))
-                {{ $lastSuccessRun->finished_at ?? $lastSuccessRun->updated_at ?? $lastSuccessRun->created_at }}
+                {{ $lastSuccessRun->finished_at ? \Carbon\Carbon::parse($lastSuccessRun->finished_at)->format('Y-m-d H:i:s') : \Carbon\Carbon::parse($lastSuccessRun->updated_at ?? $lastSuccessRun->created_at)->format('Y-m-d H:i:s') }}
               @else
                 -
               @endif
@@ -131,10 +136,7 @@
             <th class="border px-3 py-2 text-left">Spreadsheet Title</th>
             <th class="border px-3 py-2 text-left">Sheet URL</th>
             <th class="border px-3 py-2 text-left">Range</th>
-
-            {{-- ✅ optional but useful --}}
             <th class="border px-3 py-2 text-left">Last Imported</th>
-
             <th class="border px-3 py-2 text-left">Status</th>
             <th class="border px-3 py-2 text-right">Processed</th>
             <th class="border px-3 py-2 text-right">Inserted</th>
@@ -154,7 +156,7 @@
               </td>
               <td class="border px-3 py-2 rangeCell">{{ $setting->sheet_range }}</td>
 
-              {{-- ✅ from server map so it persists on refresh --}}
+              {{-- Persisted on refresh --}}
               <td class="border px-3 py-2 lastImportedCell text-xs text-gray-700">
                 @php $ts = $lastImportedMap[$setting->id] ?? null; @endphp
                 @if($ts) {{ $ts }} @else - @endif
@@ -197,7 +199,6 @@
     function updateGlobalLastImport(run) {
       if (!run) return;
 
-      // keep "Last attempt" live
       const lastAttempt = document.getElementById('lastAttemptText');
       const lastSuccess = document.getElementById('lastSuccessText');
       const lastMsg     = document.getElementById('lastMessageText');
@@ -212,8 +213,7 @@
       }
       if (lastMsg) lastMsg.textContent = run.message || '-';
 
-      // only update lastSuccess when run done and has finished_at
-      if (run.status === 'done' && run.finished_at && lastSuccess) {
+      if ((run.status || '').toLowerCase() === 'done' && run.finished_at && lastSuccess) {
         lastSuccess.textContent = run.finished_at;
       }
     }
@@ -245,7 +245,6 @@
 
         updateGlobalLastImport(run);
 
-        // Update rows if items exist
         const items = json.items || [];
         for (const it of items) {
           const tr = document.querySelector(`tr[data-setting-id="${it.setting_id}"]`);
@@ -258,13 +257,13 @@
           tr.querySelector('.skippedCell').textContent = it.skipped ?? 0;
           tr.querySelector('.messageCell').textContent = it.message ?? '-';
 
-          // ✅ update last imported real-time when sheet done
           if ((it.status || '').toLowerCase() === 'done' && it.finished_at) {
             tr.querySelector('.lastImportedCell').textContent = it.finished_at;
           }
         }
 
-        if (run.status === 'done' || run.status === 'failed') {
+        const rs = (run.status || '').toLowerCase();
+        if (rs === 'done' || rs === 'failed') {
           clearInterval(polling);
           polling = null;
         }
