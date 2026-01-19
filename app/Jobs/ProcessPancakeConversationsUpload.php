@@ -29,7 +29,7 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
     private int $processed = 0;  // raw rows processed
     private int $skipped   = 0;  // raw rows skipped (missing key) + aggregates filtered (no phone)
     private int $inserted  = 0;  // new unique key inserted
-    private int $updated   = 0;  // existing key appended
+    private int $updated   = 0;  // existing key updated
 
     private const ROW_CHUNK_SIZE = 4000;
 
@@ -240,7 +240,7 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
 
         DB::beginTransaction();
         try {
-            $driver = DB::getDriverName();
+            
             $now    = now()->toDateTimeString();
 
             foreach ($agg as $item) {
@@ -260,7 +260,7 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
                 }
 
                 // 1) Update (append) if exists
-                $affected = $this->appendChatIfExists($driver, $pageId, $name, $chat, $now);
+                $affected = $this->updateChatIfExists($pageId, $name, $chat, $now);
                 if ($affected > 0) {
                     $this->updated++;
                     continue;
@@ -288,32 +288,15 @@ class ProcessPancakeConversationsUpload implements ShouldQueue
         }
     }
 
-    private function appendChatIfExists(string $driver, string $pageId, string $name, string $chat, string $now): int
-    {
-        if ($driver === 'pgsql') {
-            return DB::update(
-                "UPDATE pancake_conversations
-                 SET customers_chat = CASE
-                        WHEN customers_chat IS NULL OR customers_chat = '' THEN ?
-                        ELSE customers_chat || E'\n' || ?
-                     END,
-                     updated_at = ?
-                 WHERE pancake_page_id = ? AND full_name = ?",
-                [$chat, $chat, $now, $pageId, $name]
-            );
-        }
-
-        return DB::update(
-            "UPDATE pancake_conversations
-             SET customers_chat = CASE
-                    WHEN customers_chat IS NULL OR customers_chat = '' THEN ?
-                    ELSE CONCAT(customers_chat, '\n', ?)
-                 END,
-                 updated_at = ?
-             WHERE pancake_page_id = ? AND full_name = ?",
-            [$chat, $chat, $now, $pageId, $name]
-        );
-    }
+    private function updateChatIfExists(string $pageId, string $name, string $chat, string $now): int
+{
+    return DB::update(
+        "UPDATE pancake_conversations
+         SET customers_chat = ?, updated_at = ?
+         WHERE pancake_page_id = ? AND full_name = ?",
+        [$chat, $now, $pageId, $name]
+    );
+}
 
     /**
      * ✅ Blade-aligned + robust PH mobile detection.
