@@ -43,6 +43,7 @@
               <x-navlink href="/ads_manager/pancake-subscription-checker" :active="request()->is('ads_manager/pancake-subscription-checker')">Purchases</x-navlink>
               <x-navlink href="/jnt/hold" :active="request()->is('jnt/hold')">Hold</x-navlink>
               <x-navlink href="/pancake/retrieve-orders" :active="request()->is('pancake/retrieve-orders')">Retrieve</x-navlink>
+              <x-navlink href="/pancake/page-id-mapping" :active="request()->is('pancake/page-id-mapping')">Pancake ID</x-navlink>
               @endif
 
               @if(in_array($role, ['Data Encoder','Data Encoder - OIC']))
