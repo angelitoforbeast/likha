@@ -38,8 +38,8 @@
             <th class="text-right px-3 py-2 border-b">ODZ</th>
             <th class="text-right px-3 py-2 border-b">Blank</th>
             <th class="text-right px-3 py-2 border-b">Total</th>
-            <th class="text-right px-3 py-2 border-b">Pending Rate (Cannot Proceed)</th>
-            <th class="text-right px-3 py-2 border-b">Total Pending Rate (Cannot Proceed + ODZ)</th>
+            <th class="text-right px-3 py-2 border-b">TCPR (Cannot Proceed)</th>
+            <th class="text-right px-3 py-2 border-b">TCPR 2 (Cannot Proceed + ODZ)</th>
           </tr>
         </thead>
 
