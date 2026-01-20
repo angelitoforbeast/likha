@@ -56,7 +56,7 @@ use App\Http\Controllers\Security\AllowedIpController;
 use App\Http\Controllers\MacroOutputPageNameController;
 use App\Http\Controllers\PancakeConversationController;
 use App\Http\Controllers\JntStickerController;
-
+use App\Http\Controllers\EncoderPendingRateController;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -269,6 +269,7 @@ Route::get('/macro_output/download', [MacroOutputController::class, 'download'])
 Route::post('/macro_output/validate-items', [MacroOutputController::class, 'validateItems']);
 Route::get('/encoder/page-name', [MacroOutputPageNameController::class, 'index'])
     ->name('encoder.page-name');
+    Route::get('/encoder/pending-rate', [EncoderPendingRateController::class, 'index'])->name('encoder.pending-rate');
     Route::post('/macro_output/pancake-more', [MacroOutputController::class, 'pancakeMore'])
     ->name('macro_output.pancake_more');
 
