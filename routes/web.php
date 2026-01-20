@@ -57,6 +57,7 @@ use App\Http\Controllers\MacroOutputPageNameController;
 use App\Http\Controllers\PancakeConversationController;
 use App\Http\Controllers\JntStickerController;
 use App\Http\Controllers\EncoderPendingRateController;
+use App\Http\Controllers\PancakePageIdMappingController;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -182,6 +183,19 @@ Route::get('/pancake/conversations', [PancakeConversationController::class, 'ind
     Route::get('/pancake/conversations/status', [PancakeConversationController::class, 'status'])
         ->name('pancake.conversations.status');
 
+
+        
+    Route::get('/pancake/page-id-mapping', [PancakePageIdMappingController::class, 'index'])
+    ->name('pancake.page_id_mapping.index');
+
+Route::post('/pancake/page-id-mapping', [PancakePageIdMappingController::class, 'store'])
+    ->name('pancake.page_id_mapping.store');
+
+Route::put('/pancake/page-id-mapping/{id}', [PancakePageIdMappingController::class, 'update'])
+    ->name('pancake.page_id_mapping.update');
+
+Route::delete('/pancake/page-id-mapping/{id}', [PancakePageIdMappingController::class, 'destroy'])
+    ->name('pancake.page_id_mapping.destroy');
 
 
 
