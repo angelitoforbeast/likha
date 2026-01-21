@@ -153,6 +153,7 @@
           @if(empty($run['outputs']))
             <div class="text-sm text-gray-500">No outputs generated.</div>
           @else
+
             <div class="overflow-auto">
               <table class="min-w-full text-sm">
                 <thead class="text-xs text-gray-500">
@@ -183,6 +184,28 @@
                 </tbody>
               </table>
             </div>
+
+            @php
+              $totalOutputFiles = is_array($run['outputs'] ?? null) ? count($run['outputs']) : 0;
+              $totalPages = 0;
+              foreach (($run['outputs'] ?? []) as $o) {
+                $totalPages += (int)($o['page_count'] ?? 0);
+              }
+            @endphp
+
+            <div class="mt-4 flex flex-wrap gap-3 items-center justify-between">
+  <div class="text-gray-900 text-base md:text-lg font-extrabold">
+    Total Output PDFs:
+    <span class="font-mono">{{ $totalOutputFiles }}</span>
+  </div>
+
+  <div class="text-gray-900 text-base md:text-lg font-extrabold">
+    Total Pages:
+    <span class="font-mono">{{ $totalPages }}</span>
+  </div>
+</div>
+
+
           @endif
         @endif
 
