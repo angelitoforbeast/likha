@@ -189,7 +189,8 @@ class SegregateJntStickersJob implements ShouldQueue
     }
 
     /**
-     * Generate output PDFs (one per goods group) using qpdf ranges.
+     * Generate output PDFs (one per goods group) using qpdf page-spec tokens.
+     * IMPORTANT: For multiple non-contiguous ranges in the same file, qpdf expects ONE token like "1-44,90-100".
      *
      * @param  array<string, array{label:string, selections: array<int, array{file:string, page:int}>}>  $groups
      * @return array<int, array{goods:string, filename:string, page_count:int}>
@@ -202,8 +203,7 @@ class SegregateJntStickersJob implements ShouldQueue
         $qpdf = $this->qpdfBin();
 
         $outputs = [];
-        $groupKeys = array_keys($groups);
-        $totalGroups = count($groupKeys);
+        $totalGroups = count($groups);
         $groupIndex = 0;
 
         foreach ($groups as $goodsKey => $group) {
@@ -234,18 +234,18 @@ class SegregateJntStickersJob implements ShouldQueue
             $outRel = $outputsDirRel . '/' . $filename;
             $outAbs = Storage::path($outRel);
 
-            // qpdf --empty --pages <file> <ranges...> <file2> <ranges...> -- <out.pdf>
+            // qpdf --empty --pages <file> <page-spec> <file2> <page-spec> -- <out.pdf>
             $args = [$qpdf, '--empty', '--pages'];
 
             foreach ($byFile as $filePath => $pages) {
                 sort($pages);
                 $pages = array_values(array_unique($pages));
 
-                $args[] = $filePath;
+                $pageSpec = $this->pagesToPageSpecToken($pages); // ✅ ONE TOKEN e.g. "1-44,90-100"
+                if ($pageSpec === '') continue;
 
-                foreach ($this->pagesToRanges($pages) as $token) {
-                    $args[] = $token; // e.g. "7-100" or "5"
-                }
+                $args[] = $filePath;
+                $args[] = $pageSpec;
             }
 
             $args[] = '--';
@@ -271,34 +271,39 @@ class SegregateJntStickersJob implements ShouldQueue
     }
 
     /**
-     * Convert sorted unique pages to range tokens for qpdf.
-     * Example: [1,2,3,5,7,8] => ["1-3", "5", "7-8"]
+     * Convert sorted unique pages to ONE qpdf page-spec token.
+     * Example: [1,2,3,5,7,8] => "1-3,5,7-8"
      *
      * @param  array<int,int> $pages
-     * @return array<int,string>
+     * @return string
      */
-    private function pagesToRanges(array $pages): array
+    private function pagesToPageSpecToken(array $pages): string
     {
-        if (empty($pages)) return [];
+        if (empty($pages)) return '';
 
-        $ranges = [];
+        sort($pages);
+        $pages = array_values(array_unique($pages));
+
+        $parts = [];
         $start = $pages[0];
         $prev  = $pages[0];
 
         for ($i = 1; $i < count($pages); $i++) {
             $p = $pages[$i];
+
             if ($p === $prev + 1) {
                 $prev = $p;
                 continue;
             }
 
-            $ranges[] = ($start === $prev) ? (string)$start : ($start . '-' . $prev);
+            $parts[] = ($start === $prev) ? (string)$start : ($start . '-' . $prev);
             $start = $p;
             $prev  = $p;
         }
 
-        $ranges[] = ($start === $prev) ? (string)$start : ($start . '-' . $prev);
-        return $ranges;
+        $parts[] = ($start === $prev) ? (string)$start : ($start . '-' . $prev);
+
+        return implode(',', $parts);
     }
 
     private function getPdfPageCount(string $absPdf): int
@@ -376,11 +381,8 @@ class SegregateJntStickersJob implements ShouldQueue
     private function updateProgress(array $fields, bool $force = false): void
     {
         $now = microtime(true);
-        if (!$force) {
-            // throttle writes
-            if (($now - $this->lastProgressWrite) < 0.6) {
-                return;
-            }
+        if (!$force && ($now - $this->lastProgressWrite) < 0.6) {
+            return;
         }
         $this->lastProgressWrite = $now;
 
@@ -398,7 +400,7 @@ class SegregateJntStickersJob implements ShouldQueue
         if ($total > 0) {
             $pct = (int) floor(($processed / $total) * 100);
             if ($pct < 0) $pct = 0;
-            if ($pct > 99 && ($meta['status'] ?? '') !== 'done') $pct = 99; // keep 100 for done
+            if ($pct > 99 && ($meta['status'] ?? '') !== 'done') $pct = 99;
             $meta['progress']['percent'] = $pct;
         } else {
             $meta['progress']['percent'] = (int)($meta['progress']['percent'] ?? 0);
@@ -426,6 +428,7 @@ class SegregateJntStickersJob implements ShouldQueue
         $exit = (int)$p->getExitCode();
 
         if (!$p->isSuccessful()) {
+            // Process::getCommandLine may render with quotes; ok for debugging
             $cmd = $p->getCommandLine();
             $msg = "The command \"{$cmd}\" failed. Exit Code: {$exit}\n"
                 . "Working directory: " . getcwd() . "\n"
