@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\ProcessJntStickerSegregation;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 class JntStickerController extends Controller
 {
@@ -13,7 +15,6 @@ class JntStickerController extends Controller
 
     public function index(Request $request)
     {
-        // Optional: allow query prefill (keeps your old behavior if you want)
         $filterDate = (string)($request->query('filter_date') ?? '');
 
         return view('jnt.stickers', [
@@ -52,13 +53,12 @@ class JntStickerController extends Controller
             'ok' => true,
             'filter_date' => $filterDate,
             'count' => count($waybills),
-            'waybills' => $waybills, // keep raw list (duplicates preserved if present)
+            'waybills' => $waybills, // duplicates preserved
         ]);
     }
 
     /**
      * Start a commit session.
-     * Client sends summary counts + chosen date + some metadata.
      */
     public function commitInit(Request $request)
     {
@@ -79,12 +79,26 @@ class JntStickerController extends Controller
             'received_bytes' => 0,
             'client_summary' => $request->input('client_summary', []),
             'client_compare' => $request->input('client_compare', []),
+            'uploaded_files' => [],   // will append during uploads
+            'pdf_items' => [],        // will be stored on finalize
         ];
 
         session([self::SESS_COMMIT => $payload]);
 
-        // Directory for this commit
         Storage::disk('local')->makeDirectory("jnt_stickers/commits/{$commitId}/pdf");
+        Storage::disk('local')->makeDirectory("jnt_stickers/commits/{$commitId}/segregated");
+
+        // Initialize status file so UI polling can show immediately
+        Storage::disk('local')->put(
+            "jnt_stickers/commits/{$commitId}/status.json",
+            json_encode([
+                'status' => 'queued',
+                'progress' => 0,
+                'message' => 'Commit started.',
+                'files' => [],
+                'zip' => null,
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+        );
 
         return response()->json([
             'ok' => true,
@@ -98,15 +112,21 @@ class JntStickerController extends Controller
     }
 
     /**
-     * Upload one chunk of files (<= max_file_uploads).
-     * Stores files to storage/app/jnt_stickers/commits/{commitId}/pdf
+     * Upload one chunk of files.
+     * Stores to storage/app/jnt_stickers/commits/{commitId}/pdf
+     *
+     * IMPORTANT:
+     * - We accept file_indexes[] aligned with pdf_files[]
+     * - This provides reliable mapping for later segregation
      */
     public function commitUploadChunk(Request $request)
     {
         $request->validate([
             'commit_id' => ['required', 'string'],
             'pdf_files' => ['required', 'array'],
-            'pdf_files.*' => ['required', 'file', 'mimes:pdf', 'max:51200'], // 50MB each (adjust)
+            'pdf_files.*' => ['required', 'file', 'mimes:pdf', 'max:51200'], // 50MB each
+            'file_indexes' => ['required', 'array'],
+            'file_indexes.*' => ['required', 'integer', 'min:1'],
         ]);
 
         $commitId = (string)$request->input('commit_id');
@@ -123,10 +143,14 @@ class JntStickerController extends Controller
         $bytes = 0;
         $filesMeta = [];
 
-        foreach ($request->file('pdf_files') as $file) {
-            $orig = $file->getClientOriginalName();
+        $files = $request->file('pdf_files');
+        $idxs  = $request->input('file_indexes', []);
 
-            // Prevent overwrite: prefix with short uuid
+        foreach ($files as $i => $file) {
+            $orig = $file->getClientOriginalName();
+            $clientIndex = (int)($idxs[$i] ?? 0);
+
+            // Prevent overwrite: prefix with uuid
             $safeName = Str::uuid()->toString() . '-' . $orig;
 
             $path = $file->storeAs("jnt_stickers/commits/{$commitId}/pdf", $safeName, 'local');
@@ -135,6 +159,7 @@ class JntStickerController extends Controller
             $bytes += (int)$file->getSize();
 
             $filesMeta[] = [
+                'client_index' => $clientIndex,
                 'original' => $orig,
                 'stored_as' => $safeName,
                 'path' => $path,
@@ -144,11 +169,20 @@ class JntStickerController extends Controller
 
         $sess['received_files'] = (int)($sess['received_files'] ?? 0) + $stored;
         $sess['received_bytes'] = (int)($sess['received_bytes'] ?? 0) + $bytes;
-
-        // Append chunk files list for audit
         $sess['uploaded_files'] = array_merge($sess['uploaded_files'] ?? [], $filesMeta);
 
         session([self::SESS_COMMIT => $sess]);
+
+        // Update status.json (upload progress)
+        $statusPath = "jnt_stickers/commits/{$commitId}/status.json";
+        $status = [
+            'status' => 'uploading',
+            'progress' => 10,
+            'message' => "Uploaded {$sess['received_files']} file(s).",
+            'files' => [],
+            'zip' => null,
+        ];
+        Storage::disk('local')->put($statusPath, json_encode($status, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         return response()->json([
             'ok' => true,
@@ -159,8 +193,9 @@ class JntStickerController extends Controller
     }
 
     /**
-     * Finalize commit: store JSON audit file (summary + compare rows).
-     * This is your “commit = save on disk” checkpoint.
+     * Finalize commit:
+     * - store audit.json
+     * - DISPATCH Job immediately to segregate by ITEM NAME
      */
     public function commitFinalize(Request $request)
     {
@@ -170,6 +205,7 @@ class JntStickerController extends Controller
             'client_summary' => ['nullable', 'array'],
             'client_compare' => ['nullable', 'array'],
             'table_rows' => ['nullable', 'array'],
+            'pdf_items' => ['nullable', 'array'], // ✅ page map for segregation
         ]);
 
         $commitId = (string)$request->input('commit_id');
@@ -186,20 +222,116 @@ class JntStickerController extends Controller
         $sess['client_summary'] = $request->input('client_summary', $sess['client_summary'] ?? []);
         $sess['client_compare'] = $request->input('client_compare', $sess['client_compare'] ?? []);
         $sess['table_rows'] = $request->input('table_rows', []);
+        $sess['pdf_items'] = $request->input('pdf_items', []); // ✅
         $sess['finalized_at'] = now()->toDateTimeString();
 
         // Write audit JSON
         $jsonPath = "jnt_stickers/commits/{$commitId}/audit.json";
         Storage::disk('local')->put($jsonPath, json_encode($sess, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
-        // Keep session (optional) or clear it
-        // session()->forget(self::SESS_COMMIT);
+        // Update status to queued processing
+        Storage::disk('local')->put(
+            "jnt_stickers/commits/{$commitId}/status.json",
+            json_encode([
+                'status' => 'queued',
+                'progress' => 15,
+                'message' => 'Queued for segregation...',
+                'files' => [],
+                'zip' => null,
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+        );
+
+        // ✅ Dispatch Job immediately
+        try {
+            ProcessJntStickerSegregation::dispatch($commitId);
+        } catch (\Throwable $e) {
+            Log::error("Failed dispatch segregation job for commit {$commitId}: ".$e->getMessage());
+
+            Storage::disk('local')->put(
+                "jnt_stickers/commits/{$commitId}/status.json",
+                json_encode([
+                    'status' => 'failed',
+                    'progress' => 0,
+                    'message' => 'Failed to dispatch segregation job: '.$e->getMessage(),
+                    'files' => [],
+                    'zip' => null,
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
+            );
+
+            return response()->json([
+                'ok' => false,
+                'message' => 'Commit finalized but segregation job failed to dispatch.',
+            ], 500);
+        }
 
         return response()->json([
             'ok' => true,
             'commit_id' => $commitId,
             'received_files' => (int)($sess['received_files'] ?? 0),
             'audit_json' => $jsonPath,
+            'segregation' => 'queued',
         ]);
+    }
+
+    /**
+     * Poll status for UI to show downloadable outputs when ready.
+     */
+    public function commitStatus(Request $request)
+    {
+        $request->validate([
+            'commit_id' => ['required', 'string'],
+        ]);
+
+        $commitId = (string)$request->input('commit_id');
+
+        $statusPath = "jnt_stickers/commits/{$commitId}/status.json";
+        if (!Storage::disk('local')->exists($statusPath)) {
+            return response()->json([
+                'ok' => true,
+                'status' => 'queued',
+                'progress' => 0,
+                'message' => 'Waiting for status...',
+                'files' => [],
+                'zip' => null,
+            ]);
+        }
+
+        $json = json_decode(Storage::disk('local')->get($statusPath), true) ?: [];
+
+        return response()->json([
+            'ok' => true,
+            'status' => $json['status'] ?? 'processing',
+            'progress' => (int)($json['progress'] ?? 0),
+            'message' => $json['message'] ?? null,
+            'files' => $json['files'] ?? [],
+            'zip' => $json['zip'] ?? null,
+        ]);
+    }
+
+    /**
+     * Download generated output file safely.
+     * Usage:
+     * /jnt/stickers/commit/download?commit_id=...&file=jnt_stickers/commits/<id>/segregated/outputs.zip
+     */
+    public function commitDownload(Request $request)
+    {
+        $request->validate([
+            'commit_id' => ['required', 'string'],
+            'file' => ['required', 'string'],
+        ]);
+
+        $commitId = (string)$request->input('commit_id');
+        $file = (string)$request->input('file');
+
+        $base = "jnt_stickers/commits/{$commitId}/";
+        if (!str_starts_with($file, $base)) {
+            abort(403);
+        }
+
+        if (!Storage::disk('local')->exists($file)) {
+            abort(404);
+        }
+
+        return Storage::disk('local')->download($file);
     }
 }

@@ -50,12 +50,10 @@
     .bar > div { height: 100%; width: 0%; background: #111827; transition: width .2s ease; }
   </style>
 
-  {{-- CSRF for fetch --}}
   <meta name="csrf-token" content="{{ csrf_token() }}">
 
   <div class="p-4 space-y-4">
 
-    {{-- Controls --}}
     <div class="card space-y-3">
       <div class="flex flex-wrap items-end gap-3">
         <div>
@@ -98,14 +96,15 @@
       </div>
     </div>
 
-    {{-- Summary (emphasized, turns red if issues) --}}
     <div class="card space-y-2">
       <div class="font-semibold">Summary</div>
       <div id="summaryPills" class="flex flex-wrap gap-2"></div>
       <div id="summaryBig" class="mono" style="font-weight:700; font-size:14px;"></div>
+
+      {{-- ✅ Downloads area (appears after commit; auto-updates via polling) --}}
+      <div id="downloads" class="mt-3" style="display:none;"></div>
     </div>
 
-    {{-- One Table Output --}}
     <div class="card">
       <div class="flex items-center justify-between gap-3 mb-3">
         <div class="font-semibold">One Table Output</div>
@@ -138,7 +137,6 @@
     </div>
   </div>
 
-  {{-- PDF.js --}}
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js"></script>
 
@@ -150,13 +148,13 @@
 
     // ===== State =====
     let selectedFiles = []; // File[]
-    let pdfItems = [];      // {waybill,file,page}
+    let pdfItems = [];      // {waybill,file,file_index,page}
     let pdfMeta = { files:0, pages_total:0, pages_ok:0, pages_missing:0, pages_ambiguous:0 };
 
-    let dbWaybills = [];    // array of waybills (may include duplicates)
+    let dbWaybills = [];
     let dbMeta = { filter_date:'', count:0 };
 
-    let tableRows = [];     // final rows for display after compare
+    let tableRows = [];
     let compareMeta = { ok:0, dup_pdf:0, miss_db:0, miss_pdf:0, dup_db:0 };
 
     // ===== Elements =====
@@ -179,6 +177,8 @@
     const wbTbody = document.getElementById('wbTbody');
 
     const btnCopyAll = document.getElementById('btnCopyAll');
+
+    const downloadsBox = document.getElementById('downloads');
 
     // ===== Helpers =====
     function setProgress(pct, text) {
@@ -212,10 +212,18 @@
       return 0;
     }
 
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
     function renderSummary() {
       const hasCompare = tableRows.length > 0;
 
-      // Emphasize: red if any missing/dup/errors
       const hasProblem =
         (pdfMeta.pages_missing || 0) > 0 ||
         (pdfMeta.pages_ambiguous || 0) > 0 ||
@@ -253,7 +261,6 @@
         ] : []),
       ].join('');
 
-      // Big single-line summary you asked to emphasize
       const big = [
         `Summary`,
         `PDF Files: ${pdfMeta.files||0}`,
@@ -272,7 +279,7 @@
       ].join('  •  ');
 
       summaryBig.textContent = big;
-      summaryBig.style.color = hasProblem ? '#9f1239' : '#111827'; // red if problems
+      summaryBig.style.color = hasProblem ? '#9f1239' : '#111827';
     }
 
     function renderTable(rows) {
@@ -286,7 +293,6 @@
         return;
       }
 
-      // Enable copy. Commit enabled only after compare and user has loaded both sides
       btnCopyAll.disabled = false;
 
       wbTbody.innerHTML = tableRows.map(r => {
@@ -306,18 +312,8 @@
       renderSummary();
     }
 
-    function escapeHtml(s) {
-      return String(s)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-    }
-
     function computeCompareRows() {
-      // Build PDF map
-      const pdfMap = {}; // waybill => {count:int, files: {fn:cnt}}
+      const pdfMap = {};
       for (const it of pdfItems) {
         const wb = (it.waybill || '').trim();
         if (!wb) continue;
@@ -327,7 +323,6 @@
         if (fn) pdfMap[wb].files[fn] = (pdfMap[wb].files[fn] || 0) + 1;
       }
 
-      // Build DB map (count duplicates too)
       const dbMap = {};
       for (const wbRaw of dbWaybills) {
         const wb = String(wbRaw || '').trim();
@@ -377,7 +372,6 @@
         return (a.waybill || '').localeCompare(b.waybill || '');
       });
 
-      // Compare summary
       compareMeta = {
         ok: rows.filter(r => r.status === 'OK').length,
         dup_pdf: rows.filter(r => r.status === 'DUPLICATE_PDF').length,
@@ -391,9 +385,7 @@
 
     function getUniqueWaybillsFromTable() {
       const wbs = [];
-      for (const r of tableRows) {
-        if (r.waybill) wbs.push(r.waybill);
-      }
+      for (const r of tableRows) if (r.waybill) wbs.push(r.waybill);
       return uniq(wbs).join('\n');
     }
 
@@ -411,15 +403,75 @@
       }
     }
 
+    // ✅ Poll status and show download links when ready
+    async function startSegregationPoll(commitId) {
+      downloadsBox.style.display = 'block';
+      downloadsBox.innerHTML = `<div class="mono">Segregating by ITEM NAME… <b>0%</b></div>`;
+
+      let tries = 0;
+
+      const tick = async () => {
+        tries++;
+        try {
+          const res = await fetch(`{{ route('jnt.stickers.commit.status') }}?commit_id=${encodeURIComponent(commitId)}`, {
+            headers: { 'Accept': 'application/json' }
+          });
+          const json = await res.json();
+
+          const st = json.status || 'processing';
+          const pct = json.progress ?? 0;
+          const msg = json.message || '';
+
+          downloadsBox.innerHTML = `
+            <div class="mono">Segregating by ITEM NAME… <b>${pct}%</b> (${escapeHtml(st)})</div>
+            <div class="muted">${escapeHtml(msg)}</div>
+          `;
+
+          if (st === 'done') {
+            const links = [];
+
+            if (json.zip) {
+              const url = `{{ route('jnt.stickers.commit.download') }}?commit_id=${encodeURIComponent(commitId)}&file=${encodeURIComponent(json.zip)}`;
+              links.push(`<a class="btn btn-primary" href="${url}">Download outputs.zip</a>`);
+            }
+
+            const files = json.files || [];
+            for (const f of files) {
+              const url = `{{ route('jnt.stickers.commit.download') }}?commit_id=${encodeURIComponent(commitId)}&file=${encodeURIComponent(f)}`;
+              const name = f.split('/').pop();
+              links.push(`<a class="btn" href="${url}">${escapeHtml(name)}</a>`);
+            }
+
+            downloadsBox.innerHTML = `
+              <div class="font-semibold mb-2">Downloads</div>
+              <div class="flex flex-wrap gap-2">${links.join('')}</div>
+            `;
+            return;
+          }
+
+          if (st === 'failed') {
+            downloadsBox.innerHTML += `<div class="mono" style="color:#9f1239;">Segregation failed.</div>`;
+            return;
+          }
+
+          setTimeout(tick, 1200);
+        } catch (e) {
+          if (tries < 250) setTimeout(tick, 1500);
+          else downloadsBox.innerHTML += `<div class="mono" style="color:#9f1239;">Polling stopped.</div>`;
+        }
+      };
+
+      tick();
+    }
+
     // ===== Events =====
     elPdfInput.addEventListener('change', () => {
       selectedFiles = Array.from(elPdfInput.files || []);
-      // Show local warning if selection > typical server max_file_uploads
       const serverMax = {{ (int)$limits['max_file_uploads'] }};
       if (selectedFiles.length > serverMax) {
         uploadLimitMsg.style.display = 'block';
         uploadLimitMsg.style.color = '#92400e';
-        uploadLimitMsg.textContent = `Note: Selected ${selectedFiles.length}. Server max_file_uploads is ${serverMax}. COMMIT will auto-upload in chunks to avoid missing files.`;
+        uploadLimitMsg.textContent = `Note: Selected ${selectedFiles.length}. Server max_file_uploads is ${serverMax}. COMMIT will auto-upload in chunks.`;
       } else {
         uploadLimitMsg.style.display = 'none';
         uploadLimitMsg.textContent = '';
@@ -444,6 +496,9 @@
       renderTable([]);
       uploadLimitMsg.style.display = 'none';
       btnCommit.disabled = true;
+
+      downloadsBox.style.display = 'none';
+      downloadsBox.innerHTML = '';
     });
 
     // 1) Extract PDFs (client-side preview)
@@ -466,7 +521,7 @@
       try {
         let fileIdx = 0;
         for (const file of selectedFiles) {
-          fileIdx++;
+          fileIdx++; // ✅ 1-based index
           setProgress(0, `Loading file ${fileIdx}/${selectedFiles.length}: ${file.name}`);
 
           const buffer = await file.arrayBuffer();
@@ -476,14 +531,12 @@
           for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
             pdfMeta.pages_total++;
 
-            // Update progress with weighted estimate
-            const approx = Math.round((pdfMeta.pages_total / Math.max(1, (pdfMeta.pages_total + (totalPages - pageNum)))) * 100);
-            setProgress(Math.min(99, approx), `Extracting page ${pageNum}/${totalPages} (${file.name})`);
+            setProgress(Math.min(99, Math.round((pdfMeta.pages_total / Math.max(1, (pdfMeta.pages_total + (totalPages - pageNum)))) * 100)),
+              `Extracting page ${pageNum}/${totalPages} (${file.name})`);
 
             const page = await pdf.getPage(pageNum);
             const content = await page.getTextContent();
 
-            // Fast: join all strings, then regex
             const text = content.items.map(i => i.str).join(' ');
             const matches = (text.match(/\bJT\d+\b/g) || []).map(s => s.trim());
             const candidates = uniq(matches);
@@ -497,11 +550,11 @@
               pdfItems.push({
                 waybill: candidates[0],
                 file: file.name,
+                file_index: fileIdx, // ✅ used later by server mapping
                 page: pageNum,
               });
             }
 
-            // Yield to UI occasionally
             if (pageNum % 25 === 0) await new Promise(r => setTimeout(r, 0));
           }
         }
@@ -517,7 +570,6 @@
         btnCompare.disabled = false;
         renderSummary();
 
-        // Show PDF-only table (optional): we keep table empty until compare; but you asked to show extracted data after upload
         const rowsPdfOnly = pdfItems.map(it => ({
           waybill: it.waybill,
           status: 'PDF_ONLY',
@@ -527,8 +579,6 @@
           files: `${it.file} (p${it.page})`,
           severity: 1,
         }));
-
-        // Sort by waybill; duplicates will naturally show later after compare
         rowsPdfOnly.sort((a,b) => (a.waybill||'').localeCompare(b.waybill||''));
         renderTable(rowsPdfOnly);
       }
@@ -588,11 +638,10 @@
       const rows = computeCompareRows();
       renderTable(rows);
 
-      // Enable commit (you can decide to only enable when no problems)
       btnCommit.disabled = false;
     });
 
-    // COMMIT: upload all PDFs in chunks, then finalize with audit JSON
+    // COMMIT: upload all PDFs in chunks; finalize triggers Job; UI polls status and shows download
     btnCommit.addEventListener('click', async () => {
       if (!selectedFiles.length) {
         alert('No PDF files selected.');
@@ -600,9 +649,6 @@
       }
 
       const filterDate = elFilterDate.value || '';
-
-      // You can enforce “no problems” here if you want:
-      // if ((compareMeta.dup_pdf||0) > 0 || (compareMeta.miss_db||0) > 0 || (compareMeta.miss_pdf||0) > 0) { ... }
 
       btnCommit.disabled = true;
       btnExtract.disabled = true;
@@ -612,7 +658,7 @@
       setProgress(0, 'Starting COMMIT (server upload in chunks)...');
 
       try {
-        // 1) Init commit
+        // 1) Init
         const initRes = await fetch(`{{ route('jnt.stickers.commit.init') }}`, {
           method: 'POST',
           headers: {
@@ -632,20 +678,28 @@
         const commitId = initJson.commit_id;
         const serverMax = (initJson.server_limits?.max_file_uploads) || {{ (int)$limits['max_file_uploads'] }} || 20;
 
-        // Use chunk size <= server max_file_uploads (safe)
-        const chunkSize = Math.max(1, Math.min(serverMax, 20)); // cap at 20 for stability
+        const chunkSize = Math.max(1, Math.min(serverMax, 20));
+
+        // ✅ Keep index mapping for server
+        const indexed = selectedFiles.map((f, idx) => ({ f, idx: idx + 1 })); // 1-based
         const chunks = [];
-        for (let i = 0; i < selectedFiles.length; i += chunkSize) {
-          chunks.push(selectedFiles.slice(i, i + chunkSize));
+        for (let i = 0; i < indexed.length; i += chunkSize) {
+          chunks.push(indexed.slice(i, i + chunkSize));
         }
 
         // 2) Upload chunks
         let uploaded = 0;
         for (let ci = 0; ci < chunks.length; ci++) {
           const chunk = chunks[ci];
+
           const form = new FormData();
           form.append('commit_id', commitId);
-          for (const f of chunk) form.append('pdf_files[]', f);
+
+          // ✅ aligned arrays: pdf_files[] and file_indexes[]
+          for (const it of chunk) {
+            form.append('pdf_files[]', it.f);
+            form.append('file_indexes[]', it.idx);
+          }
 
           setProgress(
             Math.round((uploaded / selectedFiles.length) * 100),
@@ -664,8 +718,8 @@
           uploaded += chunk.length;
         }
 
-        // 3) Finalize (write audit.json)
-        setProgress(95, 'Finalizing commit (writing audit.json)...');
+        // 3) Finalize (this also dispatches the Job)
+        setProgress(95, 'Finalizing commit (writing audit.json + queue segregation job)...');
 
         const finRes = await fetch(`{{ route('jnt.stickers.commit.finalize') }}`, {
           method: 'POST',
@@ -687,6 +741,7 @@
               duplicate_count: r.duplicate_count,
               files: r.files,
             })),
+            pdf_items: pdfItems, // ✅ critical for segregation
           }),
         });
 
@@ -694,7 +749,10 @@
         if (!finJson.ok) throw new Error(finJson.message || 'Finalize failed');
 
         setProgress(100, `COMMIT DONE. Uploaded ${uploaded}/${selectedFiles.length} file(s).`);
-        alert(`COMMIT DONE.\nUploaded: ${uploaded}/${selectedFiles.length}\nCommit ID: ${commitId}`);
+        alert(`COMMIT DONE.\nUploaded: ${uploaded}/${selectedFiles.length}\nCommit ID: ${commitId}\nSegregation: queued`);
+
+        // ✅ Auto show downloadable links when ready
+        startSegregationPoll(commitId);
 
       } catch (e) {
         console.error(e);
@@ -704,12 +762,11 @@
         btnExtract.disabled = false;
         btnDb.disabled = false;
         btnCompare.disabled = false;
-        btnCommit.disabled = false; // keep enabled for retry if needed
+        btnCommit.disabled = false;
       }
     });
 
     // Initial render
     renderSummary();
-
   </script>
 </x-layout>

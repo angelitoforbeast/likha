@@ -58,6 +58,7 @@ use App\Http\Controllers\PancakeConversationController;
 use App\Http\Controllers\JntStickerController;
 use App\Http\Controllers\EncoderPendingRateController;
 use App\Http\Controllers\PancakePageIdMappingController;
+use App\Http\Controllers\JntStickerSegregatorController;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -184,7 +185,7 @@ Route::get('/pancake/conversations', [PancakeConversationController::class, 'ind
         ->name('pancake.conversations.status');
 
 
-        
+
     Route::get('/pancake/page-id-mapping', [PancakePageIdMappingController::class, 'index'])
     ->name('pancake.page_id_mapping.index');
 
@@ -260,6 +261,39 @@ Route::post('/jnt/stickers/db', [JntStickerController::class, 'dbWaybills'])->na
 Route::post('/jnt/stickers/commit/init', [JntStickerController::class, 'commitInit'])->name('jnt.stickers.commit.init');
 Route::post('/jnt/stickers/commit/upload', [JntStickerController::class, 'commitUploadChunk'])->name('jnt.stickers.commit.upload');
 Route::post('/jnt/stickers/commit/finalize', [JntStickerController::class, 'commitFinalize'])->name('jnt.stickers.commit.finalize');
+// ✅ COMMIT status + download (for auto-poll + downloadable outputs)
+Route::get('/jnt/stickers/commit/status', [JntStickerController::class, 'commitStatus'])
+    ->name('jnt.stickers.commit.status');
+
+Route::get('/jnt/stickers/commit/download', [JntStickerController::class, 'commitDownload'])
+    ->name('jnt.stickers.commit.download');
+   
+
+
+
+   Route::prefix('jnt')->group(function () {
+
+    Route::get('/segregate-stickers', [JntStickerSegregatorController::class, 'show'])
+        ->name('jnt.stickers.form');
+
+    Route::post('/segregate-stickers', [JntStickerSegregatorController::class, 'submit'])
+        ->name('jnt.stickers.submit');
+
+    Route::get('/segregate-stickers/{runId}', [JntStickerSegregatorController::class, 'status'])
+        ->where('runId', '[A-Za-z0-9\-_]+')
+        ->name('jnt.stickers.status');
+
+    Route::get('/segregate-stickers/{runId}/download/{file}', [JntStickerSegregatorController::class, 'download'])
+        ->where([
+            'runId' => '[A-Za-z0-9\-_]+',
+            'file' => '[A-Za-z0-9\-\_\.]+',
+        ])
+        ->name('jnt.stickers.download');
+
+    Route::get('/segregate-stickers/{runId}/download-zip', [JntStickerSegregatorController::class, 'downloadZip'])
+        ->where('runId', '[A-Za-z0-9\-_]+')
+        ->name('jnt.stickers.downloadZip');
+});
 
 
 
