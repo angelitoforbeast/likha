@@ -22,9 +22,12 @@ class SegregateJntStickersJob implements ShouldQueue
 
     private const RUN_BASE_DIR = 'jnt-sticker-runs';
 
+    /** Throttle meta writes */
+    private float $lastProgressWrite = 0.0;
+
     /**
      * @param  string  $runId
-     * @param  array<int,string>  $inputStoragePaths  Storage relative paths (e.g. jnt-sticker-runs/{runId}/inputs/xxx.pdf)
+     * @param  array<int,string>  $inputStoragePaths  storage-relative paths
      */
     public function __construct(
         public string $runId,
@@ -36,11 +39,38 @@ class SegregateJntStickersJob implements ShouldQueue
         $meta = $this->readMeta() ?? [];
         $meta['status'] = 'processing';
         $meta['error'] = null;
-        $meta['outputs'] = $meta['outputs'] ?? [];
+
+        // Precompute pages per file for better progress %
+        $fileAbsList = [];
+        $pagesPerFile = [];
+        $totalPagesEstimate = 0;
+
+        foreach ($this->inputStoragePaths as $storagePath) {
+            $abs = Storage::path($storagePath);
+            if (!is_file($abs)) continue;
+            $fileAbsList[] = $abs;
+
+            $pc = $this->getPdfPageCount($abs);
+            $pagesPerFile[$abs] = $pc;
+            $totalPagesEstimate += $pc;
+        }
+
+        $meta['progress'] = [
+            'stage' => 'extracting',
+            'current_file' => 0,
+            'total_files' => count($fileAbsList),
+            'current_page' => 0,
+            'pages_in_current_file' => 0,
+            'processed_pages_total' => 0,
+            'total_pages_estimate' => $totalPagesEstimate,
+            'percent' => 0,
+            'message' => 'Queued…',
+        ];
+
         $this->writeMeta($meta);
 
         try {
-            $groups = $this->buildGroupsFromInputs();
+            $groups = $this->buildGroupsFromInputs($fileAbsList, $pagesPerFile);
 
             $outputs = $this->generateOutputs($groups);
 
@@ -48,12 +78,23 @@ class SegregateJntStickersJob implements ShouldQueue
             $meta['status'] = 'done';
             $meta['error'] = null;
             $meta['outputs'] = $outputs;
+
+            $meta['progress'] = $meta['progress'] ?? [];
+            $meta['progress']['stage'] = 'done';
+            $meta['progress']['percent'] = 100;
+            $meta['progress']['message'] = 'Done.';
             $this->writeMeta($meta);
+
         } catch (Throwable $e) {
             $meta = $this->readMeta() ?? $meta;
             $meta['status'] = 'failed';
             $meta['error'] = $e->getMessage();
+
+            $meta['progress'] = $meta['progress'] ?? [];
+            $meta['progress']['stage'] = 'failed';
+            $meta['progress']['message'] = 'Failed.';
             $this->writeMeta($meta);
+
             throw $e;
         }
     }
@@ -61,19 +102,33 @@ class SegregateJntStickersJob implements ShouldQueue
     /**
      * Build grouping: goods_key => selections (file,page)
      *
+     * @param  array<int,string> $fileAbsList
+     * @param  array<string,int> $pagesPerFile
      * @return array<string, array{label:string, selections: array<int, array{file:string, page:int}>}>
      */
-    private function buildGroupsFromInputs(): array
+    private function buildGroupsFromInputs(array $fileAbsList, array $pagesPerFile): array
     {
         $groups = [];
+        $processedTotal = 0;
 
-        foreach ($this->inputStoragePaths as $storagePath) {
-            $absPdf = Storage::path($storagePath);
-            if (!is_file($absPdf)) {
-                continue;
-            }
+        $totalFiles = count($fileAbsList);
 
-            $pageCount = $this->getPdfPageCount($absPdf);
+        for ($i = 0; $i < $totalFiles; $i++) {
+            $absPdf = $fileAbsList[$i];
+            $currentFileIndex = $i + 1;
+
+            $pageCount = (int)($pagesPerFile[$absPdf] ?? $this->getPdfPageCount($absPdf));
+
+            // progress: file start
+            $this->updateProgress([
+                'stage' => 'extracting',
+                'current_file' => $currentFileIndex,
+                'total_files' => $totalFiles,
+                'current_page' => 0,
+                'pages_in_current_file' => $pageCount,
+                'processed_pages_total' => $processedTotal,
+                'message' => "Extracting text — file {$currentFileIndex}/{$totalFiles}",
+            ], true);
 
             for ($page = 1; $page <= $pageCount; $page++) {
                 $rawText = $this->extractPageText($absPdf, $page);
@@ -93,16 +148,48 @@ class SegregateJntStickersJob implements ShouldQueue
                     'file' => $absPdf,
                     'page' => $page,
                 ];
+
+                $processedTotal++;
+
+                // update progress every 10 pages or ~0.6 sec
+                if ($page % 10 === 0) {
+                    $this->updateProgress([
+                        'stage' => 'extracting',
+                        'current_file' => $currentFileIndex,
+                        'total_files' => $totalFiles,
+                        'current_page' => $page,
+                        'pages_in_current_file' => $pageCount,
+                        'processed_pages_total' => $processedTotal,
+                        'message' => "Extracting text — file {$currentFileIndex}/{$totalFiles}, page {$page}/{$pageCount}",
+                    ]);
+                }
             }
+
+            // file end update
+            $this->updateProgress([
+                'stage' => 'extracting',
+                'current_file' => $currentFileIndex,
+                'total_files' => $totalFiles,
+                'current_page' => $pageCount,
+                'pages_in_current_file' => $pageCount,
+                'processed_pages_total' => $processedTotal,
+                'message' => "Finished file {$currentFileIndex}/{$totalFiles}",
+            ], true);
         }
 
         ksort($groups);
+
+        // stage: grouping done
+        $this->updateProgress([
+            'stage' => 'grouping',
+            'message' => 'Grouping pages by Goods…',
+        ], true);
+
         return $groups;
     }
 
     /**
-     * Generate output PDFs (one PDF per goods group).
-     * FIX: use page ranges per file to avoid huge Windows command length.
+     * Generate output PDFs (one per goods group) using qpdf ranges.
      *
      * @param  array<string, array{label:string, selections: array<int, array{file:string, page:int}>}>  $groups
      * @return array<int, array{goods:string, filename:string, page_count:int}>
@@ -115,12 +202,22 @@ class SegregateJntStickersJob implements ShouldQueue
         $qpdf = $this->qpdfBin();
 
         $outputs = [];
+        $groupKeys = array_keys($groups);
+        $totalGroups = count($groupKeys);
+        $groupIndex = 0;
 
         foreach ($groups as $goodsKey => $group) {
+            $groupIndex++;
+
             $label = $group['label'];
             $selections = $group['selections'];
-
             if (empty($selections)) continue;
+
+            // progress: writing
+            $this->updateProgress([
+                'stage' => 'writing',
+                'message' => "Writing outputs — group {$groupIndex}/{$totalGroups}",
+            ], true);
 
             // Group selections by source file -> pages[]
             $byFile = [];
@@ -147,7 +244,7 @@ class SegregateJntStickersJob implements ShouldQueue
                 $args[] = $filePath;
 
                 foreach ($this->pagesToRanges($pages) as $token) {
-                    $args[] = $token; // e.g., "7-100" or "5"
+                    $args[] = $token; // e.g. "7-100" or "5"
                 }
             }
 
@@ -164,6 +261,12 @@ class SegregateJntStickersJob implements ShouldQueue
         }
 
         usort($outputs, fn ($a, $b) => strcmp((string)$a['goods'], (string)$b['goods']));
+
+        $this->updateProgress([
+            'stage' => 'writing',
+            'message' => 'Finished writing outputs.',
+        ], true);
+
         return $outputs;
     }
 
@@ -201,10 +304,9 @@ class SegregateJntStickersJob implements ShouldQueue
     private function getPdfPageCount(string $absPdf): int
     {
         $pdfinfo = $this->pdfInfoBin();
+        $res = $this->runProcess([$pdfinfo, $absPdf], 60, true);
 
-        $proc = $this->runProcess([$pdfinfo, $absPdf], 60, true);
-        $out = ($proc['stdout'] ?? '') . "\n" . ($proc['stderr'] ?? '');
-
+        $out = ($res['stdout'] ?? '') . "\n" . ($res['stderr'] ?? '');
         if (preg_match('/^\s*Pages:\s*(\d+)\s*$/mi', $out, $m)) {
             return max(1, (int)$m[1]);
         }
@@ -216,26 +318,24 @@ class SegregateJntStickersJob implements ShouldQueue
     {
         $pdftotext = $this->pdfToTextBin();
 
-        // Output to stdout ("-") so we don't need temp files
-        $proc = $this->runProcess(
+        // Output to stdout ("-") so no temp files
+        $res = $this->runProcess(
             [$pdftotext, '-enc', 'UTF-8', '-f', (string)$page, '-l', (string)$page, '-layout', $absPdf, '-'],
             60,
             true
         );
 
-        return (string)($proc['stdout'] ?? '');
+        return (string)($res['stdout'] ?? '');
     }
 
     private function extractGoodsFromText(string $raw): string
     {
-        // Normalize whitespace
         $raw = str_replace("\xC2\xA0", ' ', $raw); // NBSP
         $clean = preg_replace('/\s+/u', ' ', $raw) ?? '';
         $clean = trim($clean);
 
         if ($clean === '') return '';
 
-        // Adjust delimiters if needed for your sticker template
         $delims = [
             'Qty', 'Quantity', 'Weight', 'COD', 'Amount', 'Order', 'Tracking', 'Waybill',
             'Receiver', 'Consignee', 'Sender', 'Address', 'Phone', 'Mobile',
@@ -243,7 +343,6 @@ class SegregateJntStickersJob implements ShouldQueue
         ];
         $delimPattern = implode('|', array_map(fn ($d) => preg_quote($d, '/'), $delims));
 
-        // Capture after "Goods:" until next label or end
         $pattern = '/Goods\s*:\s*(.+?)(?=\s+(?:' . $delimPattern . ')\s*:|\s+(?:' . $delimPattern . ')\b|$)/i';
 
         if (preg_match($pattern, $clean, $m)) {
@@ -262,7 +361,6 @@ class SegregateJntStickersJob implements ShouldQueue
         $g = preg_replace('/\s+/u', ' ', $g) ?? $g;
         $g = trim($g);
 
-        // Standardize "1X" -> "1 X"
         $g = preg_replace('/\b(\d+)\s*X\b/i', '$1 X', $g) ?? $g;
 
         $g = mb_strtoupper($g, 'UTF-8');
@@ -270,9 +368,51 @@ class SegregateJntStickersJob implements ShouldQueue
     }
 
     /**
-     * Run a process. If $captureOutput=true, returns stdout/stderr in array.
+     * Update progress in meta.json (throttled).
+     *
+     * @param array $fields
+     * @param bool $force
+     */
+    private function updateProgress(array $fields, bool $force = false): void
+    {
+        $now = microtime(true);
+        if (!$force) {
+            // throttle writes
+            if (($now - $this->lastProgressWrite) < 0.6) {
+                return;
+            }
+        }
+        $this->lastProgressWrite = $now;
+
+        $meta = $this->readMeta() ?? [];
+        $meta['status'] = $meta['status'] ?? 'processing';
+        $meta['progress'] = $meta['progress'] ?? [];
+
+        foreach ($fields as $k => $v) {
+            $meta['progress'][$k] = $v;
+        }
+
+        // percent compute
+        $processed = (int)($meta['progress']['processed_pages_total'] ?? 0);
+        $total = (int)($meta['progress']['total_pages_estimate'] ?? 0);
+        if ($total > 0) {
+            $pct = (int) floor(($processed / $total) * 100);
+            if ($pct < 0) $pct = 0;
+            if ($pct > 99 && ($meta['status'] ?? '') !== 'done') $pct = 99; // keep 100 for done
+            $meta['progress']['percent'] = $pct;
+        } else {
+            $meta['progress']['percent'] = (int)($meta['progress']['percent'] ?? 0);
+        }
+
+        $this->writeMeta($meta);
+    }
+
+    /**
+     * Run a process. If $captureOutput=true, returns stdout/stderr/exit.
      *
      * @param  array<int,string> $args
+     * @param  int $timeoutSeconds
+     * @param  bool $captureOutput
      * @return array{stdout:string, stderr:string, exit:int}|null
      */
     private function runProcess(array $args, int $timeoutSeconds, bool $captureOutput = false): ?array
@@ -287,12 +427,15 @@ class SegregateJntStickersJob implements ShouldQueue
 
         if (!$p->isSuccessful()) {
             $cmd = $p->getCommandLine();
-            $msg = "Command failed (exit {$exit}).\n{$cmd}\n\nSTDERR:\n{$stderr}\n\nSTDOUT:\n{$stdout}";
+            $msg = "The command \"{$cmd}\" failed. Exit Code: {$exit}\n"
+                . "Working directory: " . getcwd() . "\n"
+                . "Output:\n{$stdout}\n"
+                . "Error Output:\n{$stderr}";
             throw new \RuntimeException($msg);
         }
 
         if ($captureOutput) {
-            return ['stdout' => $stdout, 'stderr' => $stderr, 'exit' => (string)$exit];
+            return ['stdout' => $stdout, 'stderr' => $stderr, 'exit' => $exit];
         }
 
         return null;
@@ -319,7 +462,6 @@ class SegregateJntStickersJob implements ShouldQueue
     private function qpdfBin(): string
     {
         $bin = (string) env('QPDF_BIN', 'qpdf');
-        // If it's a path, validate exists
         if ($this->looksLikePath($bin) && !file_exists($bin)) {
             throw new \RuntimeException("QPDF_BIN not found at: {$bin}");
         }

@@ -12,6 +12,7 @@
       <b>Note:</b> Works best if the PDF has a text layer (not scanned images).
     </div>
 
+    {{-- Upload --}}
     <div class="border rounded-lg p-4">
       <form method="POST" action="{{ route('jnt.stickers.submit') }}" enctype="multipart/form-data" class="space-y-3">
         @csrf
@@ -47,7 +48,24 @@
       </form>
     </div>
 
+    {{-- Run Status --}}
     @if($run)
+      @php
+        $status = $run['status'] ?? 'unknown';
+        $badge = match($status) {
+          'queued' => 'bg-gray-100 text-gray-800',
+          'processing' => 'bg-orange-100 text-orange-800',
+          'done' => 'bg-emerald-100 text-emerald-800',
+          'failed' => 'bg-red-100 text-red-800',
+          default => 'bg-gray-100 text-gray-800'
+        };
+
+        $progress = $run['progress'] ?? null;
+        $pct = (int)($progress['percent'] ?? 0);
+        if ($pct < 0) $pct = 0;
+        if ($pct > 100) $pct = 100;
+      @endphp
+
       <div class="border rounded-lg p-4 space-y-3">
 
         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -58,16 +76,6 @@
 
           <div>
             <div class="text-xs font-bold text-gray-600">Status</div>
-            @php
-              $status = $run['status'] ?? 'unknown';
-              $badge = match($status) {
-                'queued' => 'bg-gray-100 text-gray-800',
-                'processing' => 'bg-orange-100 text-orange-800',
-                'done' => 'bg-emerald-100 text-emerald-800',
-                'failed' => 'bg-red-100 text-red-800',
-                default => 'bg-gray-100 text-gray-800'
-              };
-            @endphp
             <span class="inline-flex px-2 py-1 rounded-full text-xs font-bold {{ $badge }}">
               {{ strtoupper($status) }}
             </span>
@@ -78,14 +86,62 @@
           </div>
         </div>
 
+        {{-- Progress block --}}
+        @if(in_array($status, ['queued','processing'], true))
+          <div class="p-3 rounded border border-indigo-200 bg-indigo-50 text-indigo-900 text-sm space-y-2">
+            <div class="font-bold">
+              {{ $progress['message'] ?? 'Processing…' }}
+            </div>
+
+            <div class="w-full h-2 bg-indigo-100 rounded overflow-hidden">
+              <div class="h-full bg-gray-900" style="width: {{ $pct }}%"></div>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-indigo-900">
+              <div class="p-2 bg-white rounded border">
+                <div class="font-bold">Stage</div>
+                <div class="font-mono">{{ $progress['stage'] ?? '-' }}</div>
+              </div>
+              <div class="p-2 bg-white rounded border">
+                <div class="font-bold">File</div>
+                <div class="font-mono">
+                  {{ $progress['current_file'] ?? 0 }}/{{ $progress['total_files'] ?? 0 }}
+                </div>
+              </div>
+              <div class="p-2 bg-white rounded border">
+                <div class="font-bold">Page</div>
+                <div class="font-mono">
+                  {{ $progress['current_page'] ?? 0 }}/{{ $progress['pages_in_current_file'] ?? 0 }}
+                </div>
+              </div>
+              <div class="p-2 bg-white rounded border">
+                <div class="font-bold">Overall</div>
+                <div class="font-mono">
+                  {{ $pct }}% ({{ $progress['processed_pages_total'] ?? 0 }}/{{ $progress['total_pages_estimate'] ?? 0 }})
+                </div>
+              </div>
+            </div>
+
+            <div class="text-xs text-indigo-700">
+              Auto-refreshing…
+            </div>
+          </div>
+
+          <script>
+            setTimeout(() => window.location.reload(), 2500);
+          </script>
+        @endif
+
+        {{-- Error --}}
         @if(!empty($run['error']))
           <div class="p-3 rounded border border-red-200 bg-red-50 text-red-900 text-sm">
             <div class="font-bold">Error:</div>
-            <div class="font-mono text-xs">{{ $run['error'] }}</div>
+            <pre class="mt-1 whitespace-pre-wrap break-words text-xs font-mono">{{ $run['error'] }}</pre>
           </div>
         @endif
 
-        @if(($run['status'] ?? '') === 'done')
+        {{-- Done outputs --}}
+        @if($status === 'done')
           <div class="flex items-center justify-between flex-wrap gap-2 pt-2">
             <div class="font-extrabold">Outputs</div>
             <a class="px-4 py-2 rounded border text-sm font-semibold"
@@ -128,15 +184,6 @@
               </table>
             </div>
           @endif
-
-        @elseif(in_array(($run['status'] ?? ''), ['queued','processing'], true))
-          <div class="p-3 rounded border border-indigo-200 bg-indigo-50 text-indigo-900 text-sm">
-            Processing… this page will auto-refresh.
-          </div>
-
-          <script>
-            setTimeout(() => window.location.reload(), 3000);
-          </script>
         @endif
 
       </div>
