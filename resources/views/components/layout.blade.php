@@ -42,7 +42,7 @@
               <x-navlink href="/encoder/summary" :active="request()->is('macro_output/index')">Order Summary</x-navlink>
               <x-navlink href="/ads_manager/pancake-subscription-checker" :active="request()->is('ads_manager/pancake-subscription-checker')">Purchases</x-navlink>
               <x-navlink href="/jnt/hold" :active="request()->is('jnt/hold')">Hold</x-navlink>
-              <x-navlink href="/pancake/retrieve2" :active="request()->is('pancake/2')">Retrieve</x-navlink>
+              <x-navlink href="/pancake/retrieve2" :active="request()->is('pancake/retrieve2')">Retrieve</x-navlink>
               <x-navlink href="/pancake/page-id-mapping" :active="request()->is('pancake/page-id-mapping')">Pancake ID</x-navlink>
               @endif
 
