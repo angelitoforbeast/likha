@@ -44,6 +44,14 @@
 
       <a href="{{ url('/pancake/retrieve2') }}?preset=this_month"
          class="{{ btnClass($presetUi === 'this_month') }}">Month (Up to Yesterday)</a>
+
+      <div class="ml-auto flex items-center gap-2">
+        <button type="button" id="copyBtn"
+                class="inline-flex items-center px-3 py-2 rounded-md bg-gray-900 hover:bg-black text-white text-sm font-medium">
+          Copy Table
+        </button>
+        <span id="copyMsg" class="text-sm text-green-700 hidden">Copied!</span>
+      </div>
     </div>
 
     {{-- Manual filters --}}
@@ -101,7 +109,7 @@
 
     {{-- Table --}}
     <div class="overflow-x-auto">
-      <table class="min-w-full text-sm border border-gray-200">
+      <table id="resultTable" class="min-w-full text-sm border border-gray-200">
         <thead class="bg-gray-100">
           <tr>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Date Created</th>
@@ -124,7 +132,7 @@
                 @if (!empty($r->phone_number))
                   {{ $r->phone_number }}
                 @else
-                  <span class="text-gray-400">—</span>
+                  —
                 @endif
               </td>
 
@@ -132,7 +140,7 @@
                 @if (!empty($r->shop_details))
                   <div class="cell-wrap">{{ $r->shop_details }}</div>
                 @else
-                  <span class="text-gray-400">—</span>
+                  —
                 @endif
               </td>
 
@@ -140,7 +148,7 @@
                 @if (!empty($r->customers_chat))
                   <div class="cell-wrap">{{ $r->customers_chat }}</div>
                 @else
-                  <span class="text-gray-400">—</span>
+                  —
                 @endif
               </td>
             </tr>
@@ -160,4 +168,91 @@
     </div>
 
   </div>
+
+  <script>
+    (function () {
+      function normalizeCellText(el) {
+        // Get visible text; collapse extra spaces but keep line breaks (we'll encode as TSV safely)
+        let t = (el.innerText || el.textContent || '').trim();
+
+        // For spreadsheet pasting: replace internal tabs with spaces
+        t = t.replace(/\t/g, ' ');
+
+        // Keep newlines inside a cell by replacing with " ⏎ " (so TSV rows don't break).
+        // If you want real newlines in cells in Excel, that’s trickier across browsers.
+        t = t.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        t = t.replace(/\n+/g, '\n').replace(/\n/g, ' ⏎ ');
+
+        return t;
+      }
+
+      async function copyTextToClipboard(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+
+        // Fallback for non-secure contexts
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        ta.style.top = '-9999px';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+      }
+
+      function buildTSVFromTable(table) {
+        const lines = [];
+
+        // Header
+        const thead = table.querySelector('thead');
+        if (thead) {
+          const ths = Array.from(thead.querySelectorAll('th'));
+          const header = ths.map(th => normalizeCellText(th)).join('\t');
+          lines.push(header);
+        }
+
+        // Body rows
+        const tbody = table.querySelector('tbody');
+        if (tbody) {
+          const trs = Array.from(tbody.querySelectorAll('tr'));
+          trs.forEach(tr => {
+            const tds = Array.from(tr.querySelectorAll('td'));
+            if (!tds.length) return;
+            const row = tds.map(td => normalizeCellText(td)).join('\t');
+            lines.push(row);
+          });
+        }
+
+        return lines.join('\n');
+      }
+
+      const btn = document.getElementById('copyBtn');
+      const msg = document.getElementById('copyMsg');
+      const table = document.getElementById('resultTable');
+
+      if (!btn || !table) return;
+
+      btn.addEventListener('click', async () => {
+        try {
+          const tsv = buildTSVFromTable(table);
+          const ok = await copyTextToClipboard(tsv);
+
+          if (ok) {
+            msg.classList.remove('hidden');
+            setTimeout(() => msg.classList.add('hidden'), 1200);
+          } else {
+            alert('Copy failed. Try again.');
+          }
+        } catch (e) {
+          alert('Copy failed: ' + (e && e.message ? e.message : e));
+        }
+      });
+    })();
+  </script>
 </x-layout>
