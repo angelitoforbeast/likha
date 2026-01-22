@@ -7,7 +7,6 @@
   </x-slot>
 
   @php
-    // Helper for preset buttons
     if (!function_exists('btnClass')) {
       function btnClass($active) {
         return $active
@@ -16,7 +15,6 @@
       }
     }
 
-    // normalize preset for UI (month -> this_month)
     $presetUi = $preset ?? '';
     if ($presetUi === 'month') $presetUi = 'this_month';
   @endphp
@@ -30,7 +28,7 @@
       <br>
       Date filter is based on <b>pancake_conversations.created_at</b> converted to <b>{{ $tz }}</b> day.
       <br>
-      <b>SHOP DETAILS</b> is the <b>most common</b> value from <b>macro_output → SHOP DETAILS</b> for the same
+      <b>SHOP DETAILS</b> shows the <b>most common</b> value from <b>macro_output → SHOP DETAILS</b> for the same
       <b>ts_date</b> and <b>PAGE</b>.
     </div>
 
@@ -47,10 +45,6 @@
 
       <a href="{{ url('/pancake/retrieve2') }}?preset=this_month"
          class="{{ btnClass($presetUi === 'this_month') }}">This Month</a>
-
-      {{-- Support preset=month (legacy link) --}}
-      <a href="{{ url('/pancake/retrieve2') }}?preset=month"
-         class="{{ btnClass($presetUi === 'this_month') }}">Month (Alias)</a>
     </div>
 
     {{-- Manual filters --}}
@@ -102,18 +96,28 @@
       </div>
     </form>
 
+    <style>
+      /* normal table text but keeps line breaks */
+      .cell-wrap {
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.35;
+      }
+    </style>
+
     {{-- Table --}}
     <div class="overflow-x-auto">
-      <table class="min-w-full text-sm border">
+      <table class="min-w-full text-sm border border-gray-200">
         <thead class="bg-gray-100">
           <tr>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Date Created</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Page</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Full Name</th>
-            <th class="text-left px-3 py-2 border-b whitespace-nowrap">SHOP DETAILS (Mode)</th>
+            <th class="text-left px-3 py-2 border-b whitespace-nowrap">SHOP DETAILS</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">customers_chat</th>
           </tr>
         </thead>
+
         <tbody>
           @forelse ($rows as $r)
             <tr class="hover:bg-gray-50 align-top">
@@ -131,7 +135,7 @@
 
               <td class="px-3 py-2 border-b">
                 @if (!empty($r->shop_details))
-                  <pre class="whitespace-pre-wrap text-xs bg-gray-50 border rounded p-2">{{ $r->shop_details }}</pre>
+                  <div class="cell-wrap">{{ $r->shop_details }}</div>
                 @else
                   <span class="text-gray-400">—</span>
                 @endif
@@ -139,7 +143,7 @@
 
               <td class="px-3 py-2 border-b">
                 @if (!empty($r->customers_chat))
-                  <pre class="whitespace-pre-wrap text-xs bg-white border rounded p-2">{{ $r->customers_chat }}</pre>
+                  <div class="cell-wrap">{{ $r->customers_chat }}</div>
                 @else
                   <span class="text-gray-400">—</span>
                 @endif
