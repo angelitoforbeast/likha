@@ -43,9 +43,17 @@ class PancakeRetrieve2Controller extends Controller
                 $dateFrom = $now->copy()->subDays(6)->toDateString();
                 $dateTo   = $now->toDateString();
             } elseif ($preset === 'this_month') {
-                $dateFrom = $now->copy()->startOfMonth()->toDateString();
-                $dateTo   = $now->toDateString();
-            }
+    $dateFrom = $now->copy()->startOfMonth()->toDateString();
+
+    $yesterday = $now->copy()->subDay();
+    if ($yesterday->lt($now->copy()->startOfMonth())) {
+        // if today is the 1st, fall back to startOfMonth (same day) or keep as startOfMonth
+        $dateTo = $now->copy()->startOfMonth()->toDateString();
+    } else {
+        $dateTo = $yesterday->toDateString();
+    }
+}
+
         } else {
             // Normalize date strings
             $dateFrom = Carbon::parse($dateFrom, $tz)->toDateString();
