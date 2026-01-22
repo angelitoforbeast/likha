@@ -3,7 +3,6 @@
   <x-slot name="heading">Pancake Retrieve 2 — Missing in Macro Output</x-slot>
 
   @php
-    // helper for active preset button
     function btnClass($isActive) {
       return $isActive
         ? 'px-3 py-2 rounded-md bg-blue-600 text-white text-sm'
@@ -19,6 +18,9 @@
       Matching is <b>trimmed</b> + <b>case-insensitive</b>.
       <br>
       Date filter is based on <b>pancake_conversations.created_at</b>. Timezone: <b>{{ $tz }}</b>.
+      <br>
+      <b>SHOP DETAILS</b> is the <b>most common</b> value from <b>macro_output → SHOP DETAILS</b> for the same
+      <b>ts_date = DATE(created_at)</b> and <b>PAGE = Page</b>.
     </div>
 
     {{-- Preset buttons --}}
@@ -43,21 +45,20 @@
 
     {{-- Manual filters --}}
     <form method="GET" action="{{ url('/pancake/retrieve2') }}" class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
-      {{-- keep preset when doing manual filters (optional: you can remove this if you want manual to override preset) --}}
       <input type="hidden" name="preset" value="{{ $preset }}">
 
       <div class="md:col-span-2">
         <label class="block text-xs text-gray-600 mb-1">Page contains</label>
         <input type="text" name="page" value="{{ $pageSearch }}"
                class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-               placeholder="e.g. Chelsea Mercado">
+               placeholder="e.g. Vivien Castro">
       </div>
 
       <div class="md:col-span-2">
         <label class="block text-xs text-gray-600 mb-1">Full name contains</label>
         <input type="text" name="name" value="{{ $nameSearch }}"
                class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-               placeholder="e.g. Juan Dela Cruz">
+               placeholder="e.g. Ronilo Sazon">
       </div>
 
       <div>
@@ -98,6 +99,7 @@
           <tr class="text-left">
             <th class="px-3 py-2 border-b whitespace-nowrap">Date Created</th>
             <th class="px-3 py-2 border-b whitespace-nowrap">Page</th>
+            <th class="px-3 py-2 border-b whitespace-nowrap">SHOP DETAILS</th>
             <th class="px-3 py-2 border-b whitespace-nowrap">Full Name</th>
             <th class="px-3 py-2 border-b">customers_chat</th>
           </tr>
@@ -114,6 +116,10 @@
               </td>
 
               <td class="px-3 py-2 border-b whitespace-nowrap">
+                {{ $r->shop_details ?? '—' }}
+              </td>
+
+              <td class="px-3 py-2 border-b whitespace-nowrap">
                 {{ $r->full_name }}
               </td>
 
@@ -123,7 +129,7 @@
             </tr>
           @empty
             <tr>
-              <td colspan="4" class="px-3 py-6 text-center text-gray-500">
+              <td colspan="5" class="px-3 py-6 text-center text-gray-500">
                 No results for the selected filters.
               </td>
             </tr>
