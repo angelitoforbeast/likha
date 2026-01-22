@@ -59,6 +59,7 @@ use App\Http\Controllers\JntStickerController;
 use App\Http\Controllers\EncoderPendingRateController;
 use App\Http\Controllers\PancakePageIdMappingController;
 use App\Http\Controllers\JntStickerSegregatorController;
+use App\Http\Controllers\PancakeRetrieve2Controller;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -169,7 +170,7 @@ Route::delete('/abc', [BotcakePsidGsheetController::class, 'deleteSetting'])
 
 
 
-
+Route::get('/pancake/retrieve2', [PancakeRetrieve2Controller::class, 'index']);
 Route::get('/pancake/retrieve-orders', [RetrieveOrdersController::class, 'index'])
     ->name('pancake.retrieve-orders.index');
 

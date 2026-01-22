@@ -13,4 +13,9 @@ class PancakeConversation extends Model
         'full_name',
         'customers_chat',
     ];
+
+    public function page()
+    {
+        return $this->belongsTo(PancakeId::class, 'pancake_page_id', 'pancake_page_id');
+    }
 }
