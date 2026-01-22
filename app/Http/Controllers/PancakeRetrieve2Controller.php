@@ -8,110 +8,165 @@ use Carbon\Carbon;
 
 class PancakeRetrieve2Controller extends Controller
 {
+    /**
+     * Route: GET /pancake/retrieve2
+     * View : resources/views/pancake/retrieve2.blade.php  (blade: pancake.retrieve2)
+     *
+     * Goal:
+     * - Show rows from pancake_conversations that do NOT exist in macro_output
+     *   comparing (pancake_page_name + full_name) vs (PAGE + fb_name), case-insensitive + trimmed.
+     * - Date filter uses pancake_conversations.created_at in Asia/Manila day (UTC stored, so convert).
+     * - SHOP DETAILS shows the most common macro_output.`SHOP DETAILS` for same ts_date + PAGE (page name).
+     */
     public function index(Request $request)
     {
-        $tz = config('app.timezone', 'Asia/Manila');
-
-        // Filters
-        $pageSearch = trim((string) $request->query('page', ''));
-        $nameSearch = trim((string) $request->query('name', ''));
-
-        // Presets: last7 | yesterday | today | month
-        $preset = trim((string) $request->query('preset', ''));
-
-        // Dates: by default = yesterday (if user did not specify date_from/date_to AND no preset)
-        $dateFrom = trim((string) $request->query('date_from', ''));
-        $dateTo   = trim((string) $request->query('date_to', ''));
+        // -----------------------------
+        // ✅ Date presets (Asia/Manila)
+        // -----------------------------
+        $tz = 'Asia/Manila';
+        $preset = (string) $request->get('preset', '');
 
         $now = Carbon::now($tz);
+        $dateFrom = $request->get('date_from');
+        $dateTo   = $request->get('date_to');
 
-        if ($preset !== '') {
-            if ($preset === 'today') {
-                $dateFrom = $now->toDateString();
-                $dateTo   = $now->toDateString();
-            } elseif ($preset === 'yesterday') {
-                $y = $now->copy()->subDay()->toDateString();
-                $dateFrom = $y;
-                $dateTo   = $y;
-            } elseif ($preset === 'last7') {
-                $dateFrom = $now->copy()->subDays(6)->toDateString(); // inclusive 7 days (today + 6 back)
-                $dateTo   = $now->toDateString();
-            } elseif ($preset === 'month') {
-                $dateFrom = $now->copy()->startOfMonth()->toDateString();
-                $dateTo   = $now->toDateString();
-            }
-        }
-
-        // Default to yesterday if still empty
-        if ($dateFrom === '' && $dateTo === '') {
+        if (!$dateFrom || !$dateTo) {
+            // Default = yesterday
             $y = $now->copy()->subDay()->toDateString();
             $dateFrom = $y;
             $dateTo   = $y;
-            $preset   = 'yesterday';
+
+            if ($preset === 'today') {
+                $t = $now->toDateString();
+                $dateFrom = $t;
+                $dateTo   = $t;
+            } elseif ($preset === 'yesterday') {
+                // already default
+            } elseif ($preset === 'last7') {
+                $dateFrom = $now->copy()->subDays(6)->toDateString();
+                $dateTo   = $now->toDateString();
+            } elseif ($preset === 'this_month') {
+                $dateFrom = $now->copy()->startOfMonth()->toDateString();
+                $dateTo   = $now->toDateString();
+            }
+        } else {
+            // Normalize if user passed values
+            $dateFrom = Carbon::parse($dateFrom, $tz)->toDateString();
+            $dateTo   = Carbon::parse($dateTo, $tz)->toDateString();
         }
 
-        // If only one is set, mirror it
-        if ($dateFrom !== '' && $dateTo === '') $dateTo = $dateFrom;
-        if ($dateTo !== '' && $dateFrom === '') $dateFrom = $dateTo;
+        // -----------------------------
+        // ✅ Text filters
+        // -----------------------------
+        $pageContains = trim((string) $request->get('page_contains', ''));
+        $nameContains = trim((string) $request->get('name_contains', ''));
 
-        /**
-         * Macro pairs: distinct (PAGE + fb_name) normalized
-         * NOTE: macro_output has column name PAGE (no spaces) so backticks are safe in MySQL.
-         */
+        // -----------------------------
+        // ✅ Consistent "conversation date" key (Manila day)
+        // pc.created_at is stored as UTC in your DB, proven by your tinker output.
+        // -----------------------------
+        $convDateExpr = "DATE(CONVERT_TZ(pc.created_at,'+00:00','+08:00'))";
+        $convDateTimeExpr = "CONVERT_TZ(pc.created_at,'+00:00','+08:00')";
+
+        // Page name expression used for display + matching
+        // (If pancake_id mapping is missing, it will show pancake_page_id; matching to macro_output PAGE will not hit, which is fine.)
+        $pageNameExpr = "COALESCE(pi.pancake_page_name, pc.pancake_page_id)";
+        $pageKeyExpr  = "LOWER(TRIM($pageNameExpr))";
+        $nameKeyExpr  = "LOWER(TRIM(pc.full_name))";
+
+        // -----------------------------
+        // ✅ macro_output "existence" keys (do NOT date-filter: existence check is global)
+        // Matching = trimmed + case-insensitive, as you requested.
+        // -----------------------------
         $macroPairs = DB::table('macro_output')
             ->selectRaw("LOWER(TRIM(`PAGE`)) as page_key, LOWER(TRIM(`fb_name`)) as name_key")
             ->whereNotNull('PAGE')
-            ->whereNotNull('fb_name')
             ->whereRaw("TRIM(`PAGE`) <> ''")
+            ->whereNotNull('fb_name')
             ->whereRaw("TRIM(`fb_name`) <> ''")
-            ->distinct();
+            ->groupByRaw("LOWER(TRIM(`PAGE`)), LOWER(TRIM(`fb_name`))");
 
-        /**
-         * Main query:
-         * pc (pancake_conversations)
-         * join pi (pancake_id) to translate page_id -> page_name
-         * left join macroPairs by normalized (page_name + full_name)
-         * keep rows where macro pair doesn't exist (missing in macro_output)
-         */
+        // -----------------------------
+        // ✅ SHOP DETAILS mode table (per ts_date + page_key within selected date range)
+        // -----------------------------
+        $shopCounts = DB::table('macro_output')
+            ->selectRaw("
+                ts_date,
+                LOWER(TRIM(`PAGE`)) as page_key,
+                TRIM(`SHOP DETAILS`) as shop_details,
+                COUNT(*) as cnt
+            ")
+            ->whereNotNull('ts_date')
+            ->whereRaw("TRIM(ts_date) <> ''")
+            ->whereBetween('ts_date', [$dateFrom, $dateTo])
+            ->whereNotNull('PAGE')
+            ->whereRaw("TRIM(`PAGE`) <> ''")
+            ->whereNotNull(DB::raw("`SHOP DETAILS`"))
+            ->whereRaw("TRIM(`SHOP DETAILS`) <> ''")
+            ->groupByRaw("ts_date, LOWER(TRIM(`PAGE`)), TRIM(`SHOP DETAILS`)");
+
+        $shopMax = DB::query()
+            ->fromSub($shopCounts, 'scm')
+            ->selectRaw("ts_date, page_key, MAX(cnt) as max_cnt")
+            ->groupByRaw("ts_date, page_key");
+
+        // If tie in cnt, pick deterministic smallest shop_details (MIN)
+        $shopMode = DB::query()
+            ->fromSub($shopCounts, 'sc')
+            ->joinSub($shopMax, 'mx', function ($join) {
+                $join->on('mx.ts_date', '=', 'sc.ts_date')
+                    ->on('mx.page_key', '=', 'sc.page_key')
+                    ->on('mx.max_cnt', '=', 'sc.cnt');
+            })
+            ->selectRaw("sc.ts_date, sc.page_key, MIN(sc.shop_details) as shop_details")
+            ->groupByRaw("sc.ts_date, sc.page_key");
+
+        // -----------------------------
+        // ✅ Main query: Pancake conversations missing in macro_output
+        // Date filter is Manila-day based on converted created_at
+        // -----------------------------
         $q = DB::table('pancake_conversations as pc')
             ->leftJoin('pancake_id as pi', 'pi.pancake_page_id', '=', 'pc.pancake_page_id')
-            ->leftJoinSub($macroPairs, 'mo', function ($join) {
-                $join->on(DB::raw('LOWER(TRIM(pi.pancake_page_name))'), '=', 'mo.page_key')
-                     ->on(DB::raw('LOWER(TRIM(pc.full_name))'), '=', 'mo.name_key');
+            ->leftJoinSub($macroPairs, 'mp', function ($join) use ($pageKeyExpr, $nameKeyExpr) {
+                $join->on('mp.page_key', '=', DB::raw($pageKeyExpr))
+                     ->on('mp.name_key', '=', DB::raw($nameKeyExpr));
             })
-            ->whereNull('mo.page_key')
-            ->select([
-                'pc.created_at as date_created',
-                'pi.pancake_page_name as page',
-                'pc.full_name',
-                'pc.customers_chat',
-            ])
-            ->orderByDesc('pc.created_at');
+            ->leftJoinSub($shopMode, 'sm', function ($join) use ($convDateExpr, $pageKeyExpr) {
+                $join->on('sm.ts_date', '=', DB::raw($convDateExpr))
+                     ->on('sm.page_key', '=', DB::raw($pageKeyExpr));
+            })
+            ->whereNull('mp.name_key') // ✅ missing in macro_output (page+name combo does not exist)
+            ->whereRaw("$convDateExpr >= ?", [$dateFrom])
+            ->whereRaw("$convDateExpr <= ?", [$dateTo]);
 
-        // Date filter (based on pancake_conversations.created_at)
-        if ($dateFrom !== '' && $dateTo !== '') {
-            $q->whereDate('pc.created_at', '>=', $dateFrom)
-              ->whereDate('pc.created_at', '<=', $dateTo);
+        if ($pageContains !== '') {
+            $q->whereRaw("LOWER($pageNameExpr) LIKE ?", ['%' . mb_strtolower($pageContains) . '%']);
         }
 
-        // Optional text filters
-        if ($pageSearch !== '') {
-            $q->whereRaw('pi.pancake_page_name LIKE ?', ['%' . $pageSearch . '%']);
-        }
-        if ($nameSearch !== '') {
-            $q->whereRaw('pc.full_name LIKE ?', ['%' . $nameSearch . '%']);
+        if ($nameContains !== '') {
+            $q->whereRaw("LOWER(pc.full_name) LIKE ?", ['%' . mb_strtolower($nameContains) . '%']);
         }
 
-        $rows = $q->paginate(100)->withQueryString();
+        $q->selectRaw("
+            $convDateTimeExpr as date_created,
+            $pageNameExpr as page,
+            sm.shop_details as shop_details,
+            pc.full_name,
+            pc.customers_chat
+        ");
+
+        $rows = $q
+            ->orderBy('pc.created_at', 'desc')   // still ok; ordering by stored UTC datetime
+            ->paginate(200)
+            ->withQueryString();
 
         return view('pancake.retrieve2', [
-            'rows'       => $rows,
-            'pageSearch' => $pageSearch,
-            'nameSearch' => $nameSearch,
-            'dateFrom'   => $dateFrom,
-            'dateTo'     => $dateTo,
-            'preset'     => $preset,
-            'tz'         => $tz,
+            'rows'         => $rows,
+            'preset'       => $preset,
+            'date_from'    => $dateFrom,
+            'date_to'      => $dateTo,
+            'page_contains'=> $pageContains,
+            'name_contains'=> $nameContains,
         ]);
     }
 }
