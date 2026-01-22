@@ -169,21 +169,32 @@
 
   </div>
 
+  {{-- ✅ Copy Table (PRESERVE LINE BREAKS INSIDE CELLS) --}}
   <script>
     (function () {
-      function normalizeCellText(el) {
-        // Get visible text; collapse extra spaces but keep line breaks (we'll encode as TSV safely)
-        let t = (el.innerText || el.textContent || '').trim();
 
-        // For spreadsheet pasting: replace internal tabs with spaces
+      function getCellTextPreserveNewlines(el) {
+        // innerText preserves visual newlines from pre-wrap
+        let t = (el.innerText || el.textContent || '');
+
+        // Normalize line endings
+        t = t.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+        // Remove nulls just in case
+        t = t.replace(/\u0000/g, '');
+
+        // Prevent tabs from breaking columns
         t = t.replace(/\t/g, ' ');
 
-        // Keep newlines inside a cell by replacing with " ⏎ " (so TSV rows don't break).
-        // If you want real newlines in cells in Excel, that’s trickier across browsers.
-        t = t.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        t = t.replace(/\n+/g, '\n').replace(/\n/g, ' ⏎ ');
+        // Keep real newlines; trim only outer
+        return t.trim();
+      }
 
-        return t;
+      function quoteForTSVPaste(value) {
+        // Wrap in quotes and escape quotes
+        let v = String(value ?? '');
+        v = v.replace(/"/g, '""');
+        return `"${v}"`;
       }
 
       async function copyTextToClipboard(text) {
@@ -192,7 +203,6 @@
           return true;
         }
 
-        // Fallback for non-secure contexts
         const ta = document.createElement('textarea');
         ta.value = text;
         ta.style.position = 'fixed';
@@ -206,29 +216,36 @@
         return ok;
       }
 
-      function buildTSVFromTable(table) {
+      function buildTSVWithQuotedCells(table) {
         const lines = [];
 
         // Header
         const thead = table.querySelector('thead');
         if (thead) {
           const ths = Array.from(thead.querySelectorAll('th'));
-          const header = ths.map(th => normalizeCellText(th)).join('\t');
+          const header = ths
+            .map(th => quoteForTSVPaste(getCellTextPreserveNewlines(th)))
+            .join('\t');
           lines.push(header);
         }
 
-        // Body rows
+        // Body
         const tbody = table.querySelector('tbody');
         if (tbody) {
           const trs = Array.from(tbody.querySelectorAll('tr'));
           trs.forEach(tr => {
             const tds = Array.from(tr.querySelectorAll('td'));
             if (!tds.length) return;
-            const row = tds.map(td => normalizeCellText(td)).join('\t');
+
+            const row = tds
+              .map(td => quoteForTSVPaste(getCellTextPreserveNewlines(td)))
+              .join('\t');
+
             lines.push(row);
           });
         }
 
+        // Rows separated by \n; cells may contain \n INSIDE quotes
         return lines.join('\n');
       }
 
@@ -240,12 +257,14 @@
 
       btn.addEventListener('click', async () => {
         try {
-          const tsv = buildTSVFromTable(table);
+          const tsv = buildTSVWithQuotedCells(table);
           const ok = await copyTextToClipboard(tsv);
 
           if (ok) {
-            msg.classList.remove('hidden');
-            setTimeout(() => msg.classList.add('hidden'), 1200);
+            if (msg) {
+              msg.classList.remove('hidden');
+              setTimeout(() => msg.classList.add('hidden'), 1200);
+            }
           } else {
             alert('Copy failed. Try again.');
           }
@@ -253,6 +272,7 @@
           alert('Copy failed: ' + (e && e.message ? e.message : e));
         }
       });
+
     })();
   </script>
 </x-layout>
