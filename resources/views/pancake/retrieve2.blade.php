@@ -118,8 +118,9 @@
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Page</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Full Name</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Phone Number</th>
-            <th class="text-left px-3 py-2 border-b whitespace-nowrap">SHOP DETAILS</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">customers_chat</th>
+<th class="text-left px-3 py-2 border-b whitespace-nowrap">SHOP DETAILS</th>
+
           </tr>
         </thead>
 
@@ -139,20 +140,22 @@
               </td>
 
               <td class="px-3 py-2 border-b">
-                @if (!empty($r->shop_details))
-                  <div class="cell-wrap">{{ $r->shop_details }}</div>
-                @else
-                  —
-                @endif
-              </td>
+  @if (!empty($r->customers_chat))
+    <div class="cell-wrap">{{ $r->customers_chat }}</div>
+  @else
+    —
+  @endif
+</td>
 
-              <td class="px-3 py-2 border-b">
-                @if (!empty($r->customers_chat))
-                  <div class="cell-wrap">{{ $r->customers_chat }}</div>
-                @else
-                  —
-                @endif
-              </td>
+<td class="px-3 py-2 border-b">
+  @if (!empty($r->shop_details))
+    <div class="cell-wrap">{{ $r->shop_details }}</div>
+  @else
+    —
+  @endif
+</td>
+
+
             </tr>
           @empty
             <tr>
@@ -225,39 +228,31 @@
       }
 
       function buildTSVFromRows(rows) {
-        const header = [
-          'Date Created',
-          'Page',
-          'Full Name',
-          'Phone Number',
-          'SHOP DETAILS',
-          'customers_chat'
-        ].join('\t');
+  const lines = [];
 
-        const lines = [header];
+  for (const r of rows) {
+    const dateCreated = cleanOneLineCell(r.date_created);
+    const page        = cleanOneLineCell(r.page);
+    const fullName    = cleanOneLineCell(r.full_name);
+    const phone       = cleanOneLineCell(r.phone_number);
 
-        for (const r of rows) {
-          const dateCreated = cleanOneLineCell(r.date_created);
-          const page        = cleanOneLineCell(r.page);
-          const fullName    = cleanOneLineCell(r.full_name);
-          const phone       = cleanOneLineCell(r.phone_number);
+    const chatFormula = buildMultilineFormula(r.customers_chat || '');
+    const shopFormula = buildMultilineFormula(r.shop_details || '');
 
-          // Preserve line breaks safely as formula
-          const shopFormula = buildMultilineFormula(r.shop_details || '');
-          const chatFormula = buildMultilineFormula(r.customers_chat || '');
+    lines.push([
+      dateCreated,
+      page,
+      fullName,
+      phone,
+      chatFormula,
+      shopFormula
+    ].join('\t'));
+  }
 
-          lines.push([
-            dateCreated,
-            page,
-            fullName,
-            phone,
-            shopFormula,
-            chatFormula
-          ].join('\t'));
-        }
+  return lines.join('\n');
+}
 
-        return lines.join('\n');
-      }
+
 
       const btn = document.getElementById('copyBtn');
       const msg = document.getElementById('copyMsg');
