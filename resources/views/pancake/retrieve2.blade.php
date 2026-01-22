@@ -48,9 +48,10 @@
       <div class="ml-auto flex items-center gap-2">
         <button type="button" id="copyBtn"
                 class="inline-flex items-center px-3 py-2 rounded-md bg-gray-900 hover:bg-black text-white text-sm font-medium">
-          Copy Table
+          Copy All (Filtered Range)
         </button>
         <span id="copyMsg" class="text-sm text-green-700 hidden">Copied!</span>
+        <span id="copyCount" class="text-sm text-gray-600"></span>
       </div>
     </div>
 
@@ -97,7 +98,8 @@
 
           <div class="ml-auto text-sm text-gray-600">
             Range: <b>{{ $date_from }}</b> to <b>{{ $date_to }}</b> |
-            Showing: <b>{{ $rows->total() }}</b>
+            Showing (this page): <b>{{ $rows->count() }}</b> |
+            Total matched: <b>{{ $rows->total() }}</b>
           </div>
         </div>
       </div>
@@ -107,7 +109,7 @@
       .cell-wrap { white-space: pre-wrap; word-break: break-word; line-height: 1.35; }
     </style>
 
-    {{-- Table --}}
+    {{-- Table (still paginated for viewing) --}}
     <div class="overflow-x-auto">
       <table id="resultTable" class="min-w-full text-sm border border-gray-200">
         <thead class="bg-gray-100">
@@ -169,32 +171,39 @@
 
   </div>
 
-  {{-- ✅ Copy Table (PRESERVE LINE BREAKS INSIDE CELLS) --}}
+  {{-- ✅ Copy ALL matched rows (not just current page) + preserve line breaks via CHAR(10) formula --}}
   <script>
     (function () {
 
-      function getCellTextPreserveNewlines(el) {
-        // innerText preserves visual newlines from pre-wrap
-        let t = (el.innerText || el.textContent || '');
-
-        // Normalize line endings
-        t = t.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-
-        // Remove nulls just in case
-        t = t.replace(/\u0000/g, '');
-
-        // Prevent tabs from breaking columns
-        t = t.replace(/\t/g, ' ');
-
-        // Keep real newlines; trim only outer
-        return t.trim();
+      function escForFormula(s) {
+        return String(s ?? '').replace(/"/g, '""');
       }
 
-      function quoteForTSVPaste(value) {
-        // Wrap in quotes and escape quotes
-        let v = String(value ?? '');
-        v = v.replace(/"/g, '""');
-        return `"${v}"`;
+      function buildMultilineFormula(str) {
+        // Safe for Google Sheets paste: preserve line breaks inside a single cell
+        // without putting actual "\n" into clipboard rows.
+        const raw = String(str ?? '');
+        const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const lines = normalized.split('\n');
+
+        if (lines.length === 1) {
+          return '="' + escForFormula(lines[0]) + '"';
+        }
+
+        let formula = '="' + escForFormula(lines[0]) + '"';
+        for (let i = 1; i < lines.length; i++) {
+          formula += '&CHAR(10)&"' + escForFormula(lines[i]) + '"';
+        }
+        return formula;
+      }
+
+      function cleanOneLineCell(str) {
+        // For non-multiline columns: prevent tabs/newlines from breaking paste
+        let t = String(str ?? '');
+        t = t.replace(/\t/g, ' ');
+        t = t.replace(/\r\n/g, ' ').replace(/\r/g, ' ').replace(/\n/g, ' ');
+        t = t.replace(/\s+/g, ' ').trim();
+        return t;
       }
 
       async function copyTextToClipboard(text) {
@@ -202,7 +211,6 @@
           await navigator.clipboard.writeText(text);
           return true;
         }
-
         const ta = document.createElement('textarea');
         ta.value = text;
         ta.style.position = 'fixed';
@@ -216,60 +224,95 @@
         return ok;
       }
 
-      function buildTSVWithQuotedCells(table) {
-        const lines = [];
+      function buildTSVFromRows(rows) {
+        const header = [
+          'Date Created',
+          'Page',
+          'Full Name',
+          'Phone Number',
+          'SHOP DETAILS',
+          'customers_chat'
+        ].join('\t');
 
-        // Header
-        const thead = table.querySelector('thead');
-        if (thead) {
-          const ths = Array.from(thead.querySelectorAll('th'));
-          const header = ths
-            .map(th => quoteForTSVPaste(getCellTextPreserveNewlines(th)))
-            .join('\t');
-          lines.push(header);
+        const lines = [header];
+
+        for (const r of rows) {
+          const dateCreated = cleanOneLineCell(r.date_created);
+          const page        = cleanOneLineCell(r.page);
+          const fullName    = cleanOneLineCell(r.full_name);
+          const phone       = cleanOneLineCell(r.phone_number);
+
+          // Preserve line breaks safely as formula
+          const shopFormula = buildMultilineFormula(r.shop_details || '');
+          const chatFormula = buildMultilineFormula(r.customers_chat || '');
+
+          lines.push([
+            dateCreated,
+            page,
+            fullName,
+            phone,
+            shopFormula,
+            chatFormula
+          ].join('\t'));
         }
 
-        // Body
-        const tbody = table.querySelector('tbody');
-        if (tbody) {
-          const trs = Array.from(tbody.querySelectorAll('tr'));
-          trs.forEach(tr => {
-            const tds = Array.from(tr.querySelectorAll('td'));
-            if (!tds.length) return;
-
-            const row = tds
-              .map(td => quoteForTSVPaste(getCellTextPreserveNewlines(td)))
-              .join('\t');
-
-            lines.push(row);
-          });
-        }
-
-        // Rows separated by \n; cells may contain \n INSIDE quotes
         return lines.join('\n');
       }
 
       const btn = document.getElementById('copyBtn');
       const msg = document.getElementById('copyMsg');
-      const table = document.getElementById('resultTable');
+      const countEl = document.getElementById('copyCount');
 
-      if (!btn || !table) return;
+      if (!btn) return;
 
       btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        if (countEl) countEl.textContent = 'Fetching all rows...';
+
         try {
-          const tsv = buildTSVWithQuotedCells(table);
+          // Keep current filters/date range (everything in URL query)
+          const qs = window.location.search || '';
+          const url = `{{ route('pancake.retrieve2.export') }}${qs ? qs : ''}`;
+
+          const res = await fetch(url, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+          });
+
+          if (!res.ok) {
+            throw new Error('Export fetch failed (' + res.status + ')');
+          }
+
+          const json = await res.json();
+          const rows = Array.isArray(json.rows) ? json.rows : [];
+
+          if (!rows.length) {
+            alert('No rows to copy for this filter range.');
+            return;
+          }
+
+          const tsv = buildTSVFromRows(rows);
           const ok = await copyTextToClipboard(tsv);
 
-          if (ok) {
-            if (msg) {
-              msg.classList.remove('hidden');
-              setTimeout(() => msg.classList.add('hidden'), 1200);
-            }
-          } else {
+          if (!ok) {
             alert('Copy failed. Try again.');
+            return;
           }
+
+          if (msg) {
+            msg.classList.remove('hidden');
+            setTimeout(() => msg.classList.add('hidden'), 1200);
+          }
+
+          if (countEl) {
+            countEl.textContent = `Copied ${rows.length} row(s) (ALL matched for the range).`;
+          }
+
         } catch (e) {
           alert('Copy failed: ' + (e && e.message ? e.message : e));
+          if (countEl) countEl.textContent = '';
+        } finally {
+          btn.disabled = false;
         }
       });
 

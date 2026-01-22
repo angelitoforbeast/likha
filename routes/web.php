@@ -171,6 +171,9 @@ Route::delete('/abc', [BotcakePsidGsheetController::class, 'deleteSetting'])
 
 
 Route::get('/pancake/retrieve2', [PancakeRetrieve2Controller::class, 'index']);
+Route::get('/pancake/retrieve2/export', [PancakeRetrieve2Controller::class, 'export'])
+    ->name('pancake.retrieve2.export');
+
 Route::get('/pancake/retrieve-orders', [RetrieveOrdersController::class, 'index'])
     ->name('pancake.retrieve-orders.index');
 

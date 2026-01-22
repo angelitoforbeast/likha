@@ -50,14 +50,12 @@ class PancakeRetrieve2Controller extends Controller
 
                 $yesterday = $now->copy()->subDay();
                 if ($yesterday->lt($now->copy()->startOfMonth())) {
-                    // If today is the 1st, keep dateTo = startOfMonth (no negative range)
                     $dateTo = $now->copy()->startOfMonth()->toDateString();
                 } else {
                     $dateTo = $yesterday->toDateString();
                 }
             }
         } else {
-            // Normalize inputs
             $dateFrom = Carbon::parse($dateFrom, $tz)->toDateString();
             $dateTo   = Carbon::parse($dateTo, $tz)->toDateString();
         }
@@ -114,7 +112,6 @@ class PancakeRetrieve2Controller extends Controller
             ->selectRaw("ts_date, page_key, MAX(cnt) as max_cnt")
             ->groupByRaw("ts_date, page_key");
 
-        // If tie: pick deterministic MIN(shop_details)
         $shopMode = DB::query()
             ->fromSub($shopCounts, 'sc')
             ->joinSub($shopMax, 'mx', function ($join) {
@@ -162,17 +159,8 @@ class PancakeRetrieve2Controller extends Controller
                   ->paginate(200)
                   ->withQueryString();
 
-        // -----------------------------
-        // ✅ Extract phone number from customers_chat (PHP-side)
-        // -----------------------------
         $rows->getCollection()->transform(function ($r) {
-            $haystack = trim((string)($r->customers_chat ?? ''));
-
-            // OPTIONAL: minsan nilalagay sa name line yung number; safe i-append
-            $haystack2 = trim((string)($r->full_name ?? ''));
-            if ($haystack2 !== '') $haystack .= ' ' . $haystack2;
-
-            $r->phone_number = $this->extractPhoneNumber($haystack);
+            $r->phone_number = $this->extractPhoneNumber((string) ($r->customers_chat ?? ''));
             return $r;
         });
 
@@ -188,69 +176,169 @@ class PancakeRetrieve2Controller extends Controller
     }
 
     /**
-     * ✅ Robust PH mobile extractor:
-     * - Accepts: 09XXXXXXXXX, 9XXXXXXXXX, +63 9XXXXXXXXX, 63 9XXXXXXXXX
-     * - Tolerates: spaces/dashes/newlines and common "O" typed as zero (o/O -> 0)
-     * - Normalizes output to: 09XXXXXXXXX
+     * ✅ Export ALL rows (no pagination) for current filters/date range.
+     * Returns JSON rows.
      */
-    private function extractPhoneNumber(string $text): ?string
+    public function export(Request $request)
     {
-        $text = trim($text);
-        if ($text === '') return null;
+        $tz = 'Asia/Manila';
 
-        // Normalize whitespace
-        $text = str_replace(["\r\n", "\n", "\r", "\t"], ' ', $text);
+        $preset = (string) $request->get('preset', '');
+        if ($preset === 'month') $preset = 'this_month';
 
-        // Find candidates that might contain PH numbers (includes O/o/I/l confusions)
-        preg_match_all('/(?:\+?\s*63|0)?[0-9OoIiLl\-\s\(\)\.]{9,}/u', $text, $m1);
-        $candidates = $m1[0] ?? [];
+        $now = Carbon::now($tz);
 
-        // Also capture tight tokens (e.g., o992o449oo4)
-        preg_match_all('/[0-9OoIiLl]{9,}/u', $text, $m2);
-        $candidates = array_merge($candidates, $m2[0] ?? []);
+        $dateFrom = $request->get('date_from');
+        $dateTo   = $request->get('date_to');
 
-        $seen = [];
-        foreach ($candidates as $cand) {
-            $cand = trim((string)$cand);
-            if ($cand === '' || isset($seen[$cand])) continue;
-            $seen[$cand] = true;
+        if (!$dateFrom || !$dateTo) {
+            $y = $now->copy()->subDay()->toDateString();
+            $dateFrom = $y;
+            $dateTo   = $y;
 
-            $digits = $this->normalizeDigitsFromCandidate($cand);
-            if ($digits === '') continue;
-
-            $mobile = $this->normalizePhilippineMobile($digits);
-            if ($mobile !== null) {
-                return $mobile;
+            if ($preset === 'today') {
+                $t = $now->toDateString();
+                $dateFrom = $t;
+                $dateTo   = $t;
+            } elseif ($preset === 'last7') {
+                $dateFrom = $now->copy()->subDays(6)->toDateString();
+                $dateTo   = $now->toDateString();
+            } elseif ($preset === 'this_month') {
+                $dateFrom = $now->copy()->startOfMonth()->toDateString();
+                $yesterday = $now->copy()->subDay();
+                $dateTo = $yesterday->lt($now->copy()->startOfMonth())
+                    ? $now->copy()->startOfMonth()->toDateString()
+                    : $yesterday->toDateString();
             }
+        } else {
+            $dateFrom = Carbon::parse($dateFrom, $tz)->toDateString();
+            $dateTo   = Carbon::parse($dateTo, $tz)->toDateString();
         }
 
-        return null;
-    }
+        $pageContains = trim((string) $request->get('page_contains', ''));
+        $nameContains = trim((string) $request->get('name_contains', ''));
 
-    private function normalizeDigitsFromCandidate(string $cand): string
-    {
-        // Replace common confusions: o/O->0, i/I/l/L->1
-        $cand = strtr($cand, [
-            'o' => '0', 'O' => '0',
-            'i' => '1', 'I' => '1',
-            'l' => '1', 'L' => '1',
+        $convDateExpr     = "DATE(CONVERT_TZ(pc.created_at,'+00:00','+08:00'))";
+        $convDateTimeExpr = "CONVERT_TZ(pc.created_at,'+00:00','+08:00')";
+
+        $pageNameExpr = "COALESCE(pi.pancake_page_name, pc.pancake_page_id)";
+        $pageKeyExpr  = "LOWER(TRIM($pageNameExpr))";
+        $nameKeyExpr  = "LOWER(TRIM(pc.full_name))";
+
+        $macroPairs = DB::table('macro_output')
+            ->selectRaw("LOWER(TRIM(`PAGE`)) as page_key, LOWER(TRIM(`fb_name`)) as name_key")
+            ->whereNotNull('PAGE')
+            ->whereRaw("TRIM(`PAGE`) <> ''")
+            ->whereNotNull('fb_name')
+            ->whereRaw("TRIM(`fb_name`) <> ''")
+            ->groupByRaw("LOWER(TRIM(`PAGE`)), LOWER(TRIM(`fb_name`))");
+
+        $shopCounts = DB::table('macro_output')
+            ->selectRaw("
+                ts_date,
+                LOWER(TRIM(`PAGE`)) as page_key,
+                TRIM(`SHOP DETAILS`) as shop_details,
+                COUNT(*) as cnt
+            ")
+            ->whereNotNull('ts_date')
+            ->whereRaw("TRIM(ts_date) <> ''")
+            ->whereBetween('ts_date', [$dateFrom, $dateTo])
+            ->whereNotNull('PAGE')
+            ->whereRaw("TRIM(`PAGE`) <> ''")
+            ->whereNotNull(DB::raw("`SHOP DETAILS`"))
+            ->whereRaw("TRIM(`SHOP DETAILS`) <> ''")
+            ->groupByRaw("ts_date, LOWER(TRIM(`PAGE`)), TRIM(`SHOP DETAILS`)");
+
+        $shopMax = DB::query()
+            ->fromSub($shopCounts, 'scm')
+            ->selectRaw("ts_date, page_key, MAX(cnt) as max_cnt")
+            ->groupByRaw("ts_date, page_key");
+
+        $shopMode = DB::query()
+            ->fromSub($shopCounts, 'sc')
+            ->joinSub($shopMax, 'mx', function ($join) {
+                $join->on('mx.ts_date', '=', 'sc.ts_date')
+                    ->on('mx.page_key', '=', 'sc.page_key')
+                    ->on('mx.max_cnt', '=', 'sc.cnt');
+            })
+            ->selectRaw("sc.ts_date, sc.page_key, MIN(sc.shop_details) as shop_details")
+            ->groupByRaw("sc.ts_date, sc.page_key");
+
+        $q = DB::table('pancake_conversations as pc')
+            ->leftJoin('pancake_id as pi', 'pi.pancake_page_id', '=', 'pc.pancake_page_id')
+            ->leftJoinSub($macroPairs, 'mp', function ($join) use ($pageKeyExpr, $nameKeyExpr) {
+                $join->on('mp.page_key', '=', DB::raw($pageKeyExpr))
+                     ->on('mp.name_key', '=', DB::raw($nameKeyExpr));
+            })
+            ->leftJoinSub($shopMode, 'sm', function ($join) use ($convDateExpr, $pageKeyExpr) {
+                $join->on('sm.ts_date', '=', DB::raw($convDateExpr))
+                     ->on('sm.page_key', '=', DB::raw($pageKeyExpr));
+            })
+            ->whereNull('mp.name_key')
+            ->whereRaw("$convDateExpr >= ?", [$dateFrom])
+            ->whereRaw("$convDateExpr <= ?", [$dateTo]);
+
+        if ($pageContains !== '') {
+            $q->whereRaw("LOWER($pageNameExpr) LIKE ?", ['%' . mb_strtolower($pageContains) . '%']);
+        }
+
+        if ($nameContains !== '') {
+            $q->whereRaw("LOWER(pc.full_name) LIKE ?", ['%' . mb_strtolower($nameContains) . '%']);
+        }
+
+        $q->selectRaw("
+            $convDateTimeExpr as date_created,
+            $pageNameExpr as page,
+            sm.shop_details as shop_details,
+            pc.full_name,
+            pc.customers_chat
+        ");
+
+        $all = $q->orderBy('pc.created_at', 'desc')->get();
+
+        $rows = $all->map(function ($r) {
+            return [
+                'date_created'   => (string) ($r->date_created ?? ''),
+                'page'           => (string) ($r->page ?? ''),
+                'full_name'      => (string) ($r->full_name ?? ''),
+                'phone_number'   => (string) ($this->extractPhoneNumber((string) ($r->customers_chat ?? '')) ?? ''),
+                'shop_details'   => (string) ($r->shop_details ?? ''),
+                'customers_chat' => (string) ($r->customers_chat ?? ''),
+            ];
+        });
+
+        return response()->json([
+            'date_from' => $dateFrom,
+            'date_to'   => $dateTo,
+            'count'     => $rows->count(),
+            'rows'      => $rows,
         ]);
-
-        $digits = preg_replace('/\D+/', '', $cand);
-        return $digits ? (string)$digits : '';
     }
 
-    private function normalizePhilippineMobile(string $digits): ?string
+    private function extractPhoneNumber(string $text): ?string
     {
-        // Exact forms
-        if (preg_match('/^09\d{9}$/', $digits)) return $digits;           // 09XXXXXXXXX
-        if (preg_match('/^9\d{9}$/', $digits))  return '0' . $digits;     // 9XXXXXXXXX
-        if (preg_match('/^639\d{9}$/', $digits)) return '0' . substr($digits, 2); // 639XXXXXXXXX
+        if ($text === '') return null;
 
-        // Embedded in longer digit sequences
-        if (preg_match('/(09\d{9})/', $digits, $m)) return $m[1];
-        if (preg_match('/(639\d{9})/', $digits, $m)) return '0' . substr($m[1], 2);
-        if (preg_match('/(^|[^0-9])(9\d{9})([^0-9]|$)/', $digits, $m)) return '0' . $m[2];
+        if (!preg_match_all('/(?:\+?63|0)?\s*9[\d\s\-]{8,14}/i', $text, $m)) {
+            return null;
+        }
+
+        foreach ($m[0] as $raw) {
+            $digits = preg_replace('/\D+/', '', $raw);
+            if ($digits === '') continue;
+
+            if (strlen($digits) === 12 && str_starts_with($digits, '63') && substr($digits, 2, 1) === '9') {
+                $digits = '0' . substr($digits, 2);
+            }
+
+            if (strlen($digits) === 10 && str_starts_with($digits, '9')) {
+                $digits = '0' . $digits;
+            }
+
+            if (strlen($digits) === 11 && str_starts_with($digits, '09')) {
+                return $digits;
+            }
+        }
 
         return null;
     }
