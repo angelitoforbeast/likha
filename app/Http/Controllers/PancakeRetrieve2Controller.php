@@ -11,11 +11,11 @@ class PancakeRetrieve2Controller extends Controller
     public function index(Request $request)
     {
         // -----------------------------
-        // ✅ Date presets (Asia/Manila)
+        // ✅ Timezone / presets
         // -----------------------------
         $tz = 'Asia/Manila';
 
-        // Your UI sent preset=month, so support it
+        // Support legacy preset=month
         $preset = (string) $request->get('preset', '');
         if ($preset === 'month') {
             $preset = 'this_month';
@@ -23,7 +23,6 @@ class PancakeRetrieve2Controller extends Controller
 
         $now = Carbon::now($tz);
 
-        // Optional manual range
         $dateFrom = $request->get('date_from');
         $dateTo   = $request->get('date_to');
 
@@ -37,25 +36,28 @@ class PancakeRetrieve2Controller extends Controller
                 $t = $now->toDateString();
                 $dateFrom = $t;
                 $dateTo   = $t;
+
             } elseif ($preset === 'yesterday') {
                 // already set
+
             } elseif ($preset === 'last7') {
                 $dateFrom = $now->copy()->subDays(6)->toDateString();
                 $dateTo   = $now->toDateString();
+
             } elseif ($preset === 'this_month') {
-    $dateFrom = $now->copy()->startOfMonth()->toDateString();
+                // ✅ Month up to yesterday
+                $dateFrom = $now->copy()->startOfMonth()->toDateString();
 
-    $yesterday = $now->copy()->subDay();
-    if ($yesterday->lt($now->copy()->startOfMonth())) {
-        // if today is the 1st, fall back to startOfMonth (same day) or keep as startOfMonth
-        $dateTo = $now->copy()->startOfMonth()->toDateString();
-    } else {
-        $dateTo = $yesterday->toDateString();
-    }
-}
-
+                $yesterday = $now->copy()->subDay();
+                if ($yesterday->lt($now->copy()->startOfMonth())) {
+                    // If today is the 1st, keep dateTo = startOfMonth (no negative range)
+                    $dateTo = $now->copy()->startOfMonth()->toDateString();
+                } else {
+                    $dateTo = $yesterday->toDateString();
+                }
+            }
         } else {
-            // Normalize date strings
+            // Normalize inputs
             $dateFrom = Carbon::parse($dateFrom, $tz)->toDateString();
             $dateTo   = Carbon::parse($dateTo, $tz)->toDateString();
         }
@@ -69,12 +71,10 @@ class PancakeRetrieve2Controller extends Controller
         // -----------------------------
         // ✅ Manila day derived from pc.created_at (stored UTC)
         // -----------------------------
-        $convDateExpr      = "DATE(CONVERT_TZ(pc.created_at,'+00:00','+08:00'))";
-        $convDateTimeExpr  = "CONVERT_TZ(pc.created_at,'+00:00','+08:00')";
+        $convDateExpr     = "DATE(CONVERT_TZ(pc.created_at,'+00:00','+08:00'))";
+        $convDateTimeExpr = "CONVERT_TZ(pc.created_at,'+00:00','+08:00')";
 
-        // -----------------------------
-        // ✅ Display page name from pancake_id (fallback to page_id)
-        // -----------------------------
+        // Page name expression used for display + matching
         $pageNameExpr = "COALESCE(pi.pancake_page_name, pc.pancake_page_id)";
         $pageKeyExpr  = "LOWER(TRIM($pageNameExpr))";
         $nameKeyExpr  = "LOWER(TRIM(pc.full_name))";
@@ -91,7 +91,7 @@ class PancakeRetrieve2Controller extends Controller
             ->groupByRaw("LOWER(TRIM(`PAGE`)), LOWER(TRIM(`fb_name`))");
 
         // -----------------------------
-        // ✅ Mode (most common) SHOP DETAILS per ts_date + page_key, within selected date range
+        // ✅ Mode SHOP DETAILS per ts_date + page_key, within selected date range
         // -----------------------------
         $shopCounts = DB::table('macro_output')
             ->selectRaw("
@@ -114,6 +114,7 @@ class PancakeRetrieve2Controller extends Controller
             ->selectRaw("ts_date, page_key, MAX(cnt) as max_cnt")
             ->groupByRaw("ts_date, page_key");
 
+        // If tie: pick deterministic MIN(shop_details)
         $shopMode = DB::query()
             ->fromSub($shopCounts, 'sc')
             ->joinSub($shopMax, 'mx', function ($join) {
@@ -125,8 +126,7 @@ class PancakeRetrieve2Controller extends Controller
             ->groupByRaw("sc.ts_date, sc.page_key");
 
         // -----------------------------
-        // ✅ Main: rows in pancake_conversations missing in macro_output by (page + name)
-        // Date filter based on Manila day of created_at
+        // ✅ Main: pancake_conversations missing in macro_output by (page + name)
         // -----------------------------
         $q = DB::table('pancake_conversations as pc')
             ->leftJoin('pancake_id as pi', 'pi.pancake_page_id', '=', 'pc.pancake_page_id')
@@ -162,6 +162,14 @@ class PancakeRetrieve2Controller extends Controller
                   ->paginate(200)
                   ->withQueryString();
 
+        // -----------------------------
+        // ✅ Extract phone number from customers_chat (PHP-side)
+        // -----------------------------
+        $rows->getCollection()->transform(function ($r) {
+            $r->phone_number = $this->extractPhoneNumber((string) ($r->customers_chat ?? ''));
+            return $r;
+        });
+
         return view('pancake.retrieve2', [
             'rows'          => $rows,
             'preset'        => $preset,
@@ -169,7 +177,46 @@ class PancakeRetrieve2Controller extends Controller
             'date_to'       => $dateTo,
             'page_contains' => $pageContains,
             'name_contains' => $nameContains,
-            'tz'            => $tz, // ✅ FIX: so Blade can print {{ $tz }}
+            'tz'            => $tz,
         ]);
+    }
+
+    /**
+     * Extract PH mobile number from free-text chat.
+     * - Accepts: 09XXXXXXXXX, 9XXXXXXXXX, +63 9XXXXXXXXX, 63 9XXXXXXXXX with spaces/dashes.
+     * - Normalizes to: 09XXXXXXXXX (11 digits) when possible.
+     */
+    private function extractPhoneNumber(string $text): ?string
+    {
+        if ($text === '') return null;
+
+        // Find likely PH mobile patterns (loose, then normalize)
+        if (!preg_match_all('/(?:\+?63|0)?\s*9[\d\s\-]{8,14}/i', $text, $m)) {
+            return null;
+        }
+
+        foreach ($m[0] as $raw) {
+            // Keep digits only
+            $digits = preg_replace('/\D+/', '', $raw);
+            if ($digits === '') continue;
+
+            // Normalize:
+            // 639xxxxxxxxx -> 09xxxxxxxxx
+            if (strlen($digits) === 12 && str_starts_with($digits, '63') && substr($digits, 2, 1) === '9') {
+                $digits = '0' . substr($digits, 2); // 0 + 9xxxxxxxxx
+            }
+
+            // 9xxxxxxxxx (10 digits) -> 09xxxxxxxxx
+            if (strlen($digits) === 10 && str_starts_with($digits, '9')) {
+                $digits = '0' . $digits;
+            }
+
+            // Validate final PH mobile format: 09 + 9 digits (11 total)
+            if (strlen($digits) === 11 && str_starts_with($digits, '09')) {
+                return $digits;
+            }
+        }
+
+        return null;
     }
 }

@@ -26,10 +26,9 @@
       comparing <b>(pancake_page_name + full_name)</b> vs <b>(PAGE + fb_name)</b>.
       Matching is <b>trimmed</b> + <b>case-insensitive</b>.
       <br>
-      Date filter is based on <b>pancake_conversations.created_at</b> converted to <b>{{ $tz }}</b> day.
+      Date filter uses <b>{{ $tz }}</b> day (created_at is converted from UTC).
       <br>
-      <b>SHOP DETAILS</b> shows the <b>most common</b> value from <b>macro_output → SHOP DETAILS</b> for the same
-      <b>ts_date</b> and <b>PAGE</b>.
+      <b>SHOP DETAILS</b> is the most common value in <b>macro_output → SHOP DETAILS</b> per ts_date + page.
     </div>
 
     {{-- Preset buttons --}}
@@ -44,7 +43,7 @@
          class="{{ btnClass($presetUi === 'today') }}">Today</a>
 
       <a href="{{ url('/pancake/retrieve2') }}?preset=this_month"
-         class="{{ btnClass($presetUi === 'this_month') }}">This Month</a>
+         class="{{ btnClass($presetUi === 'this_month') }}">Month (Up to Yesterday)</a>
     </div>
 
     {{-- Manual filters --}}
@@ -97,12 +96,7 @@
     </form>
 
     <style>
-      /* normal table text but keeps line breaks */
-      .cell-wrap {
-        white-space: pre-wrap;
-        word-break: break-word;
-        line-height: 1.35;
-      }
+      .cell-wrap { white-space: pre-wrap; word-break: break-word; line-height: 1.35; }
     </style>
 
     {{-- Table --}}
@@ -113,6 +107,7 @@
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Date Created</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Page</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">Full Name</th>
+            <th class="text-left px-3 py-2 border-b whitespace-nowrap">Phone Number</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">SHOP DETAILS</th>
             <th class="text-left px-3 py-2 border-b whitespace-nowrap">customers_chat</th>
           </tr>
@@ -121,16 +116,16 @@
         <tbody>
           @forelse ($rows as $r)
             <tr class="hover:bg-gray-50 align-top">
-              <td class="px-3 py-2 border-b whitespace-nowrap">
-                {{ $r->date_created }}
-              </td>
+              <td class="px-3 py-2 border-b whitespace-nowrap">{{ $r->date_created }}</td>
+              <td class="px-3 py-2 border-b whitespace-nowrap">{{ $r->page }}</td>
+              <td class="px-3 py-2 border-b whitespace-nowrap">{{ $r->full_name }}</td>
 
               <td class="px-3 py-2 border-b whitespace-nowrap">
-                {{ $r->page }}
-              </td>
-
-              <td class="px-3 py-2 border-b whitespace-nowrap">
-                {{ $r->full_name }}
+                @if (!empty($r->phone_number))
+                  {{ $r->phone_number }}
+                @else
+                  <span class="text-gray-400">—</span>
+                @endif
               </td>
 
               <td class="px-3 py-2 border-b">
@@ -151,7 +146,7 @@
             </tr>
           @empty
             <tr>
-              <td colspan="5" class="px-3 py-6 text-center text-gray-500">
+              <td colspan="6" class="px-3 py-6 text-center text-gray-500">
                 No results for the selected range/filters.
               </td>
             </tr>
@@ -160,7 +155,6 @@
       </table>
     </div>
 
-    {{-- Pagination --}}
     <div>
       {{ $rows->links() }}
     </div>
