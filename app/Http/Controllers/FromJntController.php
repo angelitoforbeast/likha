@@ -1048,113 +1048,110 @@ public function statusSummaryDetails(Request $request)
     }
 
     public function rtsFiltered(Request $request)
-    {
-        $from = $request->input('from');
-        $to   = $request->input('to');
+{
+    $from = $request->input('from');
+    $to   = $request->input('to');
 
-        if (!$from || !$to) {
-            return view('jnt_rts', [
-                'results' => [],
-                'from'    => $from,
-                'to'      => $to,
-            ]);
-        }
-
-        // Include whole days
-        $fromDt = Carbon::parse($from, 'Asia/Manila')->startOfDay();
-        $toDt   = Carbon::parse($to, 'Asia/Manila')->endOfDay();
-
-        $rawData = FromJnt::whereBetween('submission_time', [
-            $fromDt->toDateTimeString(),
-            $toDt->toDateTimeString()
-        ])->get();
-
-        // Group by Sender | Item | COD
-        $grouped = $rawData->groupBy(function ($row) {
-            $sender = trim((string)($row->sender ?? ''));
-            $item   = trim((string)($row->item_name ?? ''));
-            $cod    = trim((string)($row->cod ?? ''));
-            return "{$sender}|{$item}|{$cod}";
-        });
-
-        $fmtDate = function ($v) {
-            try { return Carbon::parse($v)->format('Y-m-d'); }
-            catch (\Throwable $e) { return (string)$v; }
-        };
-
-        // Normalizer (lowercase + collapse spaces)
-        $norm = function ($s) {
-            $s = mb_strtolower((string)$s);
-            return preg_replace('/\s+/u', ' ', trim($s));
-        };
-
-        $results = collect();
-
-        foreach ($grouped as $key => $rows) {
-            // counts per normalized status
-            $statusCounts = $rows->groupBy(fn($r) => $norm($r->status ?? ''))
-                                 ->map->count()
-                                 ->toArray();
-
-            $total = max(1, $rows->count());
-
-            // Case-insensitive + partial matching
-            $rts = $delivered = $problematic = $detained = 0;
-
-            foreach ($statusCounts as $status => $count) {
-                if (str_contains($status, 'return') || $status === 'rts' || str_contains($status, 'rts')) {
-                    $rts += $count;
-                }
-                if (str_contains($status, 'deliver')) {
-                    $delivered += $count;
-                }
-                if (str_contains($status, 'problem')) {
-                    $problematic += $count;
-                }
-                if (str_contains($status, 'detain')) {
-                    $detained += $count;
-                }
-            }
-
-            // Percentages (match your sample formulas)
-            $rts_percent       = round(($rts / $total) * 100, 2);
-            $delivered_percent = round(($delivered / $total) * 100, 2);
-            $transit_percent   = round(max(0, 100 - $rts_percent - $delivered_percent), 2);
-
-            // Current RTS% among completed
-            $current_base = $rts + $delivered;
-            $current_rts  = $current_base > 0 ? round(($rts / $current_base) * 100, 2) : 'N/A';
-
-            // Max RTS%
-            $max_base = $rts + $problematic + $detained + $delivered;
-            $max_rts  = $max_base > 0 ? round((($rts + $problematic + $detained) / $max_base) * 100, 2) : 'N/A';
-
-            $minSub = $rows->min('submission_time');
-            $maxSub = $rows->max('submission_time');
-            $dateRange = $fmtDate($minSub) . ' to ' . $fmtDate($maxSub);
-
-            [$sender, $item, $cod] = array_pad(explode('|', $key), 3, '');
-
-            $results->push([
-                'date_range'        => $dateRange,
-                'sender'            => $sender,
-                'item'              => $item,
-                'cod'               => $cod,
-                'quantity'          => $rows->count(),
-                'rts_percent'       => $rts_percent,
-                'delivered_percent' => $delivered_percent,
-                'transit_percent'   => $transit_percent,
-                'current_rts'       => $current_rts,
-                'max_rts'           => $max_rts,
-            ]);
-        }
-
+    if (!$from || !$to) {
         return view('jnt_rts', [
-            'results' => $results,
+            'results' => [],
             'from'    => $from,
             'to'      => $to,
         ]);
     }
+
+    // Include whole days
+    $fromDt = Carbon::parse($from, 'Asia/Manila')->startOfDay();
+    $toDt   = Carbon::parse($to,   'Asia/Manila')->endOfDay();
+
+    // helper for date range display
+    $fmtDate = function ($v) {
+        try { return Carbon::parse($v, 'Asia/Manila')->format('Y-m-d'); }
+        catch (\Throwable $e) { return (string)$v; }
+    };
+
+    /**
+     * ✅ SQL aggregation:
+     * - group by sender + item_name + cod
+     * - compute counts per status bucket using SUM(CASE WHEN ...)
+     * - compute min/max submission_time for date range string
+     *
+     * NOTE: This assumes submission_time is DATETIME now (after migration).
+     */
+    $rows = DB::table('from_jnts')
+        ->whereBetween('submission_time', [$fromDt, $toDt])
+        ->selectRaw("
+            COALESCE(sender,'')      as sender,
+            COALESCE(item_name,'')   as item_name,
+            COALESCE(cod,'')         as cod,
+            COUNT(*)                 as quantity,
+            MIN(submission_time)     as min_sub,
+            MAX(submission_time)     as max_sub,
+
+            SUM(CASE
+                WHEN LOWER(status) LIKE '%return%' OR LOWER(status) LIKE '%rts%'
+                THEN 1 ELSE 0 END
+            ) as rts_count,
+
+            SUM(CASE
+                WHEN LOWER(status) LIKE '%deliver%'
+                THEN 1 ELSE 0 END
+            ) as delivered_count,
+
+            SUM(CASE
+                WHEN LOWER(status) LIKE '%problem%'
+                THEN 1 ELSE 0 END
+            ) as problematic_count,
+
+            SUM(CASE
+                WHEN LOWER(status) LIKE '%detain%'
+                THEN 1 ELSE 0 END
+            ) as detained_count
+        ")
+        ->groupBy('sender', 'item_name', 'cod')
+        ->get();
+
+    $results = collect($rows)->map(function ($r) use ($fmtDate) {
+        $total = max(1, (int)$r->quantity);
+
+        $rts        = (int)$r->rts_count;
+        $delivered  = (int)$r->delivered_count;
+        $problematic= (int)$r->problematic_count;
+        $detained   = (int)$r->detained_count;
+
+        $rts_percent       = round(($rts / $total) * 100, 2);
+        $delivered_percent = round(($delivered / $total) * 100, 2);
+        $transit_percent   = round(max(0, 100 - $rts_percent - $delivered_percent), 2);
+
+        $current_base = $rts + $delivered;
+        $current_rts  = $current_base > 0 ? round(($rts / $current_base) * 100, 2) : 'N/A';
+
+        $max_base = $rts + $problematic + $detained + $delivered;
+        $max_rts  = $max_base > 0 ? round((($rts + $problematic + $detained) / $max_base) * 100, 2) : 'N/A';
+
+        $dateRange = $fmtDate($r->min_sub) . ' to ' . $fmtDate($r->max_sub);
+
+        return [
+            'date_range'        => $dateRange,
+            'sender'            => trim((string)$r->sender),
+            'item'              => trim((string)$r->item_name),
+            'cod'               => trim((string)$r->cod),
+            'quantity'          => (int)$r->quantity,
+            'rts_percent'       => $rts_percent,
+            'delivered_percent' => $delivered_percent,
+            'transit_percent'   => $transit_percent,
+            'current_rts'       => $current_rts,
+            'max_rts'           => $max_rts,
+        ];
+    });
+
+    return view('jnt_rts', [
+        'results' => $results,
+        'from'    => $from,
+        'to'      => $to,
+    ]);
+}
+
 
     /**
      * Helper para sa status_logs (controller route / JNT_UPDATE):
