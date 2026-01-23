@@ -8,6 +8,12 @@
     </div>
   @endif
 
+  @if (session('warning'))
+    <div class="max-w-6xl mx-auto mt-4 bg-yellow-100 text-yellow-900 p-3 rounded">
+      {{ session('warning') }}
+    </div>
+  @endif
+
   @if ($errors->any())
     <div class="max-w-6xl mx-auto mt-4 bg-red-100 text-red-900 p-3 rounded">
       <div class="font-semibold mb-1">Please fix the following:</div>
@@ -37,9 +43,15 @@
 
       <div class="text-xs text-gray-600 mb-3">
         Rules: <b>pancake_page_id</b> cannot duplicate, and <b>pancake_page_name</b> cannot duplicate (one-to-one).
+        <br>
+        Note: You may save a page_name not in the list, but you will be asked to confirm.
       </div>
 
-      <form method="POST" action="{{ route('pancake.page_id_mapping.store') }}" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <form id="createMappingForm"
+            data-confirm-page-name="1"
+            method="POST"
+            action="{{ route('pancake.page_id_mapping.store') }}"
+            class="grid grid-cols-1 md:grid-cols-3 gap-3">
         @csrf
 
         <div>
@@ -61,7 +73,7 @@
 
           <div class="text-xs text-gray-500 mt-1">
             @if(isset($pageNames) && $pageNames->count() > 0)
-              Must match an existing page_name from ads_manager_reports.
+              You can pick from the list or type a custom name (confirmation required if not in list).
             @else
               ads_manager_reports not available; manual input allowed.
             @endif
@@ -126,7 +138,7 @@
                            required>
                     <div class="text-xs text-gray-500 mt-1">
                       @if(isset($pageNames) && $pageNames->count() > 0)
-                        Must match ads_manager_reports.page_name and must be unique in this table.
+                        You can type a custom name (confirmation required if not in list). Must be unique in this table.
                       @else
                         Manual input allowed; must be unique in this table.
                       @endif
@@ -153,7 +165,10 @@
                   </div>
 
                   <div class="edit-row hidden flex items-center gap-2" data-row="{{ $m->id }}">
-                    <form id="editForm{{ $m->id }}" method="POST" action="{{ route('pancake.page_id_mapping.update', $m->id) }}">
+                    <form id="editForm{{ $m->id }}"
+                          data-confirm-page-name="1"
+                          method="POST"
+                          action="{{ route('pancake.page_id_mapping.update', $m->id) }}">
                       @csrf
                       @method('PUT')
                     </form>
@@ -261,5 +276,46 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
       input.focus();
     }
+
+    // ✅ Confirm if pancake_page_name is not in ads_manager_reports list (datalist)
+    (function () {
+      const dl = document.getElementById('pageNamesList');
+      if (!dl) return; // no list available => no confirm needed
+
+      const known = new Set();
+      Array.from(dl.options).forEach(o => {
+        const v = (o.value || '').trim().toLowerCase();
+        if (v) known.add(v);
+      });
+
+      function isNotInList(val) {
+        const v = (val || '').trim().toLowerCase();
+        if (!v) return false;
+        return !known.has(v);
+      }
+
+      document.querySelectorAll('form[data-confirm-page-name="1"]').forEach(form => {
+        form.addEventListener('submit', function (e) {
+          let input = form.querySelector('input[name="pancake_page_name"]');
+
+          // Edit forms: inputs are outside the <form> and linked by form="editFormX"
+          if (!input && form.id) {
+            input = document.querySelector('input[form="' + form.id + '"][name="pancake_page_name"]');
+          }
+
+          if (!input) return;
+
+          const val = input.value || '';
+          if (isNotInList(val)) {
+            const ok = window.confirm(
+              `"${val}" is not in ads_manager_reports.page_name list.\n\nSave anyway?`
+            );
+            if (!ok) {
+              e.preventDefault();
+            }
+          }
+        });
+      });
+    })();
   </script>
 </x-layout>

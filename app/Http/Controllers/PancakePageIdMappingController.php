@@ -60,65 +60,90 @@ class PancakePageIdMappingController extends Controller
     }
 
     public function store(Request $request)
-    {
-        $pageNames = $this->getPageNames();
+{
+    $pageNames = $this->getPageNames();
 
-        $rules = [
-            'pancake_page_id' => ['required', 'string', 'max:255', 'unique:pancake_id,pancake_page_id'],
-            // 1-to-1: page_name must be unique in pancake_id
-            'pancake_page_name' => ['required', 'string', 'max:255', 'unique:pancake_id,pancake_page_name'],
-        ];
+    $rules = [
+        'pancake_page_id' => ['required', 'string', 'max:255', 'unique:pancake_id,pancake_page_id'],
+        'pancake_page_name' => ['required', 'string', 'max:255', 'unique:pancake_id,pancake_page_name'],
+    ];
 
-        // Must come from ads_manager_reports.page_name if available
-        if ($pageNames->count() > 0) {
-            $rules['pancake_page_name'][] = Rule::in($pageNames->values()->all());
+    $data = $request->validate($rules);
+
+    $data['pancake_page_id'] = trim($data['pancake_page_id']);
+    $data['pancake_page_name'] = trim($data['pancake_page_name']);
+
+    PancakeId::create($data);
+
+    // Optional warning if not in ads_manager_reports list (if list exists)
+    $warning = null;
+    if ($pageNames->count() > 0) {
+        $inList = $pageNames->contains(function ($pn) use ($data) {
+            return mb_strtolower(trim((string) $pn)) === mb_strtolower($data['pancake_page_name']);
+        });
+
+        if (!$inList) {
+            $warning = "Saved, but '{$data['pancake_page_name']}' is not in ads_manager_reports.page_name list.";
         }
-
-        $data = $request->validate($rules);
-
-        $data['pancake_page_id'] = trim($data['pancake_page_id']);
-        $data['pancake_page_name'] = trim($data['pancake_page_name']);
-
-        PancakeId::create($data);
-
-        return redirect()
-            ->to('/pancake/page-id-mapping')
-            ->with('success', 'Mapping added successfully.');
     }
 
-    public function update(Request $request, $id)
-    {
-        $mapping = PancakeId::findOrFail($id);
-        $pageNames = $this->getPageNames();
+    $redirect = redirect()
+        ->to('/pancake/page-id-mapping')
+        ->with('success', 'Mapping added successfully.');
 
-        $rules = [
-            'pancake_page_id' => [
-                'required', 'string', 'max:255',
-                Rule::unique('pancake_id', 'pancake_page_id')->ignore($mapping->id),
-            ],
-            // 1-to-1: page_name must be unique in pancake_id (ignore current row)
-            'pancake_page_name' => [
-                'required', 'string', 'max:255',
-                Rule::unique('pancake_id', 'pancake_page_name')->ignore($mapping->id),
-            ],
-        ];
-
-        // Must come from ads_manager_reports.page_name if available
-        if ($pageNames->count() > 0) {
-            $rules['pancake_page_name'][] = Rule::in($pageNames->values()->all());
-        }
-
-        $data = $request->validate($rules);
-
-        $data['pancake_page_id'] = trim($data['pancake_page_id']);
-        $data['pancake_page_name'] = trim($data['pancake_page_name']);
-
-        $mapping->update($data);
-
-        return redirect()
-            ->to('/pancake/page-id-mapping')
-            ->with('success', 'Mapping updated successfully.');
+    if ($warning) {
+        $redirect->with('warning', $warning);
     }
+
+    return $redirect;
+}
+
+public function update(Request $request, $id)
+{
+    $mapping = PancakeId::findOrFail($id);
+    $pageNames = $this->getPageNames();
+
+    $rules = [
+        'pancake_page_id' => [
+            'required', 'string', 'max:255',
+            Rule::unique('pancake_id', 'pancake_page_id')->ignore($mapping->id),
+        ],
+        'pancake_page_name' => [
+            'required', 'string', 'max:255',
+            Rule::unique('pancake_id', 'pancake_page_name')->ignore($mapping->id),
+        ],
+    ];
+
+    $data = $request->validate($rules);
+
+    $data['pancake_page_id'] = trim($data['pancake_page_id']);
+    $data['pancake_page_name'] = trim($data['pancake_page_name']);
+
+    $mapping->update($data);
+
+    $warning = null;
+    if ($pageNames->count() > 0) {
+        $inList = $pageNames->contains(function ($pn) use ($data) {
+            return mb_strtolower(trim((string) $pn)) === mb_strtolower($data['pancake_page_name']);
+        });
+
+        if (!$inList) {
+            $warning = "Updated, but '{$data['pancake_page_name']}' is not in ads_manager_reports.page_name list.";
+        }
+    }
+
+    $redirect = redirect()
+        ->to('/pancake/page-id-mapping')
+        ->with('success', 'Mapping updated successfully.');
+
+    if ($warning) {
+        $redirect->with('warning', $warning);
+    }
+
+    return $redirect;
+}
+
+
 
     public function destroy($id)
     {
