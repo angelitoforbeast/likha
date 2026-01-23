@@ -37,13 +37,11 @@ class FromJntController extends Controller
 
     $isReturnedStatus = function (string $s) use ($norm): bool {
         $s = $norm($s);
-        // ✅ Returned is NOT For Return
-        return str_contains($s, 'returned');
+        return str_contains($s, 'returned'); // Returned is NOT For Return
     };
 
     $isForReturnStatus = function (string $s) use ($norm): bool {
         $s = $norm($s);
-        // ✅ For Return bucket = "For Return" or "RTS" only
         if (str_contains($s, 'for return')) return true;
         if (preg_match('/\brts\b/i', $s)) return true;
         return false;
@@ -62,8 +60,7 @@ class FromJntController extends Controller
         if ($rtsGroup === 'sender') return $sender;
         if ($rtsGroup === 'item')   return $item;
 
-        // sender_item
-        return $sender . ' | ' . $item;
+        return $sender . ' | ' . $item; // sender_item
     };
 
     // ==============================
@@ -86,12 +83,13 @@ class FromJntController extends Controller
         }
     };
 
+    // ✅ BIG CUT: decode only rows that contain selected date in logs
     DB::table('from_jnts')
         ->whereNotNull('status_logs')
-        ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
+        ->whereBetween('submission_time', [$windowStart, $windowEnd])
+        ->where('status_logs', 'like', "%{$date}%") // ✅ day-only rows
         ->select('id', 'waybill_number', 'status', 'status_logs', 'rts_reason')
-        ->orderBy('id')
-        ->chunk(1000, function ($rows) use (
+        ->chunkById(1000, function ($rows) use (
             &$batches,
             $date,
             $ensureBatch,
@@ -149,13 +147,14 @@ class FromJntController extends Controller
 
                     // ✅ For Return (STRICT) — and MUST NOT be Returned currently
                     if (!$forReturnCounted && $isForReturnStatus($to)) {
-                        // ✅ important: exclude current status Returned
+
+                        // exclude current status Returned
                         if ($isReturnedStatus($currentStatus)) {
-                            $forReturnCounted = true; // prevent later double-hit
+                            $forReturnCounted = true;
                             continue;
                         }
 
-                        // optional strictness: only count if current status still For Return / RTS
+                        // only count if current status still For Return / RTS
                         if (!$isForReturnStatus($currentStatus)) {
                             $forReturnCounted = true;
                             continue;
@@ -168,7 +167,7 @@ class FromJntController extends Controller
                     }
                 }
             }
-        });
+        }, 'id');
 
     foreach ($batches as $k => $b) {
         $batches[$k]['delivering'] = count($b['delivering_set'] ?? []);
@@ -177,35 +176,45 @@ class FromJntController extends Controller
         unset($batches[$k]['delivering_set'], $batches[$k]['in_transit_set'], $batches[$k]['for_return_set']);
     }
 
-    // Delivered per batch range
+    // ==============================
+    // Delivered per batch range (✅ ONE QUERY + bucket)
+    // ==============================
     ksort($batches);
+
     if (!empty($batches)) {
-        $keys = array_keys($batches);
+        $keys  = array_keys($batches);
         $times = array_map(fn($k) => Carbon::parse($k, 'Asia/Manila'), $keys);
+        $n     = count($keys);
 
-        $n = count($keys);
+        // init delivered + ranges
         for ($i=0; $i<$n; $i++) {
-            $batchKey   = $keys[$i];
             $rangeStart = ($i === 0) ? $dayStart : $times[$i-1];
+            $rangeEnd   = ($i === $n-1) ? $dayEnd : $times[$i];
 
-            if ($i === $n-1) {
-                $rangeEnd = $dayEnd;
-                $qEndOp = '<=';
-            } else {
-                $rangeEnd = $times[$i];
-                $qEndOp = '<';
+            $batches[$keys[$i]]['delivered']   = 0;
+            $batches[$keys[$i]]['range_start'] = $rangeStart->toDateTimeString();
+            $batches[$keys[$i]]['range_end']   = $rangeEnd->toDateTimeString();
+        }
+
+        // ONE query for delivered signingtimes
+        $deliveredTimes = DB::table('from_jnts')
+            ->whereNotNull('signingtime')
+            ->whereBetween('signingtime', [$dayStart, $dayEnd])
+            ->whereBetween('submission_time', [$windowStart, $windowEnd])
+            ->whereRaw("LOWER(status) LIKE '%delivered%'")
+            ->orderBy('signingtime')
+            ->pluck('signingtime');
+
+        // bucket using pointer
+        $idx = 0;
+        foreach ($deliveredTimes as $st) {
+            $t = Carbon::parse($st, 'Asia/Manila');
+
+            while ($idx < $n - 1 && $t >= $times[$idx]) {
+                $idx++;
             }
 
-            $q = DB::table('from_jnts')
-                ->whereNotNull('signingtime')
-                ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
-                ->where('signingtime', '>=', $rangeStart->toDateTimeString())
-                ->where('signingtime', $qEndOp, $rangeEnd->toDateTimeString())
-                ->whereRaw("LOWER(status) LIKE '%delivered%'");
-
-            $batches[$batchKey]['delivered'] = (int)$q->count();
-            $batches[$batchKey]['range_start'] = $rangeStart->toDateTimeString();
-            $batches[$batchKey]['range_end']   = $rangeEnd->toDateTimeString();
+            $batches[$keys[$idx]]['delivered']++;
         }
     }
 
@@ -221,13 +230,13 @@ class FromJntController extends Controller
     // ==============================
     // RIGHT TABLE: RTS Summary (grouped within day)
     // ==============================
-    $rtsAgg = []; // key => ['label','sender','item_name','delivered','for_return','volume','rts_rate']
+    $rtsAgg = [];
 
-    // Delivered rows for day
+    // Delivered rows for day (small enough, per day)
     $deliveredRows = DB::table('from_jnts')
         ->whereNotNull('signingtime')
-        ->whereBetween('signingtime', [$dayStart->toDateTimeString(), $dayEnd->toDateTimeString()])
-        ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
+        ->whereBetween('signingtime', [$dayStart, $dayEnd])
+        ->whereBetween('submission_time', [$windowStart, $windowEnd])
         ->whereRaw("LOWER(status) LIKE '%delivered%'")
         ->select('sender','item_name')
         ->get();
@@ -246,19 +255,19 @@ class FromJntController extends Controller
         $rtsAgg[$key]['delivered']++;
     }
 
-    // For Return rows (STRICT): must have For Return/RTS transition today, and current status still For Return/RTS, and NOT Returned
+    // For Return rows (STRICT) — ✅ day-only rows
     DB::table('from_jnts')
         ->whereNotNull('status_logs')
-        ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
+        ->whereBetween('submission_time', [$windowStart, $windowEnd])
+        ->where('status_logs', 'like', "%{$date}%") // ✅ day-only rows
         ->where(function($q){
             $q->where('status_logs','like','%For Return%')
               ->orWhere('status_logs','like','%for return%')
               ->orWhere('status_logs','like','%RTS%')
               ->orWhere('status_logs','like','%rts%');
         })
-        ->select('waybill_number','status','status_logs','rts_reason','sender','item_name')
-        ->orderBy('id')
-        ->chunk(1000, function($rows) use (
+        ->select('id','waybill_number','status','status_logs','rts_reason','sender','item_name')
+        ->chunkById(1000, function($rows) use (
             &$rtsAgg,
             $date,
             $makeGroupKey,
@@ -271,8 +280,8 @@ class FromJntController extends Controller
                 if ($waybill === '') continue;
 
                 $currentStatus = (string)($row->status ?? '');
-                if ($isReturnedStatus($currentStatus)) continue;          // ✅ exclude Returned
-                if (!$isForReturnStatus($currentStatus)) continue;        // ✅ must still be For Return/RTS
+                if ($isReturnedStatus($currentStatus)) continue;          // exclude Returned
+                if (!$isForReturnStatus($currentStatus)) continue;        // must still be For Return/RTS
 
                 $decoded = json_decode((string)($row->status_logs ?? ''), true);
                 if (!is_array($decoded) || empty($decoded)) continue;
@@ -321,13 +330,13 @@ class FromJntController extends Controller
                 }
                 $rtsAgg[$key]['for_return']++;
             }
-        });
+        }, 'id');
 
     // finalize rows
     $rtsRows = [];
     $rtsTotals = ['delivered'=>0,'for_return'=>0,'rts_rate'=>0];
 
-    foreach ($rtsAgg as $key => $v) {
+    foreach ($rtsAgg as $v) {
         $del = (int)$v['delivered'];
         $fr  = (int)$v['for_return'];
         $vol = $del + $fr;
@@ -350,10 +359,7 @@ class FromJntController extends Controller
     $totalVol = $rtsTotals['delivered'] + $rtsTotals['for_return'];
     $rtsTotals['rts_rate'] = $totalVol > 0 ? ($rtsTotals['for_return'] / $totalVol) * 100 : 0;
 
-    // sort by volume desc
-    usort($rtsRows, function($a,$b){
-        return ($b['volume'] <=> $a['volume']);
-    });
+    usort($rtsRows, fn($a,$b) => ($b['volume'] <=> $a['volume']));
 
     return view('jnt_status_summary', [
         'date'      => $date,
@@ -364,6 +370,7 @@ class FromJntController extends Controller
         'rtsTotals' => $rtsTotals,
     ]);
 }
+
 
 
 public function statusSummaryRtsDetails(Request $request)
