@@ -48,8 +48,8 @@
 
               @if(in_array($role, ['Data Encoder','Data Encoder - OIC']))
               <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator')">MES SEG</x-navlink>
-            
               <x-navlink href="/encoder/checker_1" :active="request()->is('macro_output/index')">CHECKER 1</x-navlink>
+              <x-navlink href="/jnt/address" :active="request()->is('jnt/address')">Address Search</x-navlink>
               @endif
 
               @if(in_array($role, ['CEO']))

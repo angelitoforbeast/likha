@@ -60,6 +60,7 @@ use App\Http\Controllers\EncoderPendingRateController;
 use App\Http\Controllers\PancakePageIdMappingController;
 use App\Http\Controllers\JntStickerSegregatorController;
 use App\Http\Controllers\PancakeRetrieve2Controller;
+use App\Http\Controllers\JntAddressController;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -324,6 +325,8 @@ Route::get('/encoder/page-name', [MacroOutputPageNameController::class, 'index']
     Route::get('/encoder/pending-rate', [EncoderPendingRateController::class, 'index'])->name('encoder.pending-rate');
     Route::post('/macro_output/pancake-more', [MacroOutputController::class, 'pancakeMore'])
     ->name('macro_output.pancake_more');
+    Route::get('jnt/address', [JntAddressController::class, 'index'])->name('jnt.address');
+Route::get('jnt/address/search', [JntAddressController::class, 'search'])->name('jnt.address.search');
 
 
 
