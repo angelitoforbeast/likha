@@ -268,40 +268,64 @@ public function pancakeMore(Request $request)
 {
     $filePath = resource_path('views/macro_output/jnt_address.txt');
 
+    // ✅ Exact combo map: prov|city|brgy
     $validMap = [];
+
+    // ✅ Hierarchy maps (better fix)
+    // prov => [city => true]
+    $provCityMap = [];
+    // "prov|city" => [brgy => true]
+    $provCityBrgyMap = [];
+
     $validProvinces = [];
-    $validCities = [];
+    $validCities    = [];
     $validBarangays = [];
 
     if (file_exists($filePath)) {
         $lines = file($filePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+
         foreach ($lines as $line) {
             $parts = array_map('trim', explode('|', $line));
-            if (count($parts) !== 3 || strtolower($parts[0]) === 'province') continue;
+            if (count($parts) !== 3) continue;
 
-            [$prov, $city, $brgy] = $parts;
+            // skip header
+            if (strtolower($parts[0] ?? '') === 'province') continue;
 
-            $key = strtolower("$prov|$city|$brgy");
+            [$provRaw, $cityRaw, $brgyRaw] = $parts;
+
+            $prov = strtolower(trim((string)$provRaw));
+            $city = strtolower(trim((string)$cityRaw));
+            $brgy = strtolower(trim((string)$brgyRaw));
+
+            if ($prov === '' || $city === '' || $brgy === '') continue;
+
+            $key = "{$prov}|{$city}|{$brgy}";
             $validMap[$key] = true;
 
-            $validProvinces[] = strtolower($prov);
-            $validCities[]    = strtolower($city);
-            $validBarangays[] = strtolower($brgy);
+            // hierarchy maps
+            $provCityMap[$prov][$city] = true;
+            $provCityBrgyMap["{$prov}|{$city}"][$brgy] = true;
+
+            // (optional) keep legacy individual lists (still useful for some UI cases)
+            $validProvinces[] = $prov;
+            $validCities[]    = $city;
+            $validBarangays[] = $brgy;
         }
     }
 
-    $validProvinces = array_unique($validProvinces);
-    $validCities    = array_unique($validCities);
-    $validBarangays = array_unique($validBarangays);
+    $validProvinces = array_values(array_unique($validProvinces));
+    $validCities    = array_values(array_unique($validCities));
+    $validBarangays = array_values(array_unique($validBarangays));
 
     // ✅ Limit validation to provided IDs
     $ids = $request->input('ids', []);
+    if (!is_array($ids)) $ids = [];
 
     $records = MacroOutput::whereIn('id', $ids)->get([
         'id', 'FULL NAME', 'PROVINCE', 'CITY', 'BARANGAY', 'PHONE NUMBER'
     ]);
 
-    // ✅ Collect all phone numbers to check for duplicates (within this batch)
+    // ✅ Collect phone duplicates within this batch
     $phoneCounts = [];
     foreach ($records as $record) {
         $phone = trim((string)($record->{'PHONE NUMBER'} ?? ''));
@@ -318,24 +342,38 @@ public function pancakeMore(Request $request)
         $brgy  = strtolower(trim((string)($record->BARANGAY ?? '')));
         $phone = trim((string)($record->{'PHONE NUMBER'} ?? ''));
 
-        $fullKey = "$prov|$city|$brgy";
-        $isValid = isset($validMap[$fullKey]);
+        $fullKey = "{$prov}|{$city}|{$brgy}";
+        $isValidCombo = isset($validMap[$fullKey]);
 
-        // ✅ FULL NAME validation:
-        // Allowed: A-Z, a-z, Ññ, space, dot, comma
+        // ✅ Hierarchy checks
+        $provOk = isset($provCityMap[$prov]); // province exists at all
+        $cityOk = $provOk && isset($provCityMap[$prov][$city]); // city exists under province
+        $brgyOk = $cityOk && isset($provCityBrgyMap["{$prov}|{$city}"][$brgy]); // brgy exists under prov+city
+
+        /**
+         * ✅ INVALID RULES (smart / accurate):
+         * - Province invalid if province doesn't exist
+         * - City invalid if province is ok but city not under that province
+         * - Brgy invalid if city is ok but brgy not under that prov+city
+         *
+         * NOTE: If province invalid, we don't necessarily mark city/brgy invalid
+         * (you can change this if you want "all red" behavior).
+         */
+        $provInvalid = !$provOk && ($prov !== '');
+        $cityInvalid = $provOk && !$cityOk && ($city !== '');
+        $brgyInvalid = $cityOk && !$brgyOk && ($brgy !== '');
+
+        // ✅ FULL NAME validation (server-side)
         $fullName = trim((string)($record->{'FULL NAME'} ?? ''));
         $fullNameInvalid = false;
 
         if ($fullName === '') {
             $fullNameInvalid = true;
         } else {
-            // ✅ STRICT: literal space only (not tabs/newlines)
+            // strict: letters + dot + comma + dash + apostrophe + SPACE only
             if (!preg_match("/^[\\p{L}\\.,\\-\\' ]+$/u", $fullName)) {
-    $fullNameInvalid = true;
-
-
+                $fullNameInvalid = true;
             } elseif (!preg_match('/[A-Za-zÑñ]/u', $fullName)) {
-                // must contain at least one letter
                 $fullNameInvalid = true;
             }
         }
@@ -353,23 +391,36 @@ public function pancakeMore(Request $request)
             $phoneInvalid = true;
         }
 
+        // ✅ Build invalid_fields (only truthy returned, to match your JS)
+        $invalidFields = array_filter([
+            'FULL NAME'     => $fullNameInvalid,
+
+            'PROVINCE'      => $provInvalid,
+            'CITY'          => $cityInvalid,
+            'BARANGAY'      => $brgyInvalid,
+
+            'PHONE NUMBER'  => $phoneInvalid,
+        ]);
+
+        /**
+         * Optional: if you want to force show combo invalid even when all three
+         * values exist but mismatched (rare with hierarchy logic, but if blanks
+         * or weird inputs happen), you can add:
+         *
+         * if (!$isValidCombo && $provOk && $cityOk && $brgy !== '' && !isset($provCityBrgyMap["{$prov}|{$city}"][$brgy])) { ... }
+         *
+         * (Current hierarchy logic already covers that.)
+         */
+
         $results[] = [
             'id' => $record->id,
-            'invalid_fields' => array_filter([
-                'FULL NAME'     => $fullNameInvalid,
-
-                // Location validation
-                'PROVINCE'      => !$isValid && !in_array($prov, $validProvinces, true),
-                'CITY'          => !$isValid && !in_array($city, $validCities, true),
-                'BARANGAY'      => !$isValid && !in_array($brgy, $validBarangays, true),
-
-                'PHONE NUMBER'  => $phoneInvalid,
-            ]),
+            'invalid_fields' => $invalidFields,
         ];
     }
 
     return response()->json($results);
 }
+
 
 
     public function summary(Request $request)
