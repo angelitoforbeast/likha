@@ -1,6 +1,6 @@
 <x-layout>
   <x-slot name="title">Hold</x-slot>
-  <x-slot name="heading">JNT Hold Itemss</x-slot>
+  <x-slot name="heading">JNT Hold Itemsss</x-slot>
 
   @once
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
