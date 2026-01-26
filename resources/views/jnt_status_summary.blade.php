@@ -11,7 +11,6 @@
     }
     body{ font-family: Arial, sans-serif; margin:0; background:#fff; }
 
-    /* Top bar */
     .topbar{
       position: sticky;
       top: 0;
@@ -32,7 +31,6 @@
     }
     .muted{ color:#666; font-size:12px; }
 
-    /* Two columns */
     .wrap{ padding: 10px 12px 16px 12px; }
     .grid{
       display:grid;
@@ -80,7 +78,6 @@
       cursor: pointer;
     }
 
-    /* RTS rate conditional formatting (ONLY RATE CELL) */
     .rts-na   { background:#f3f4f6; }
     .rts-ok   { background:#ecfdf5; }
     .rts-mid  { background:#fef9c3; }
@@ -88,7 +85,6 @@
     .rts-bad  { background:#fee2e2; }
     .rts-cell { font-weight: 800; }
 
-    /* Modal */
     #detailsModal{
       display:none;
       position: fixed;
@@ -120,7 +116,6 @@
     }
     #detailsClose{ padding: 6px 10px; cursor:pointer; }
 
-    /* Bottom KPI (under LEFT only) */
     .kpi{
       margin-top: 8px;
       border:1px solid #e5e5e5;
@@ -251,6 +246,44 @@
           </table>
         </div>
 
+        {{-- ✅ NEW: In Transit Breakdown (Day Total) --}}
+        @php
+          $bd = $inTransitBreakdown ?? ['luzon'=>0,'visayas'=>0,'mindanao'=>0,'total'=>0];
+        @endphp
+
+        <div class="kpi" style="margin-top:8px;">
+          <div class="khead">In Transit Breakdown (Day Total)</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Intransit</th>
+                <th class="text-right" style="width:140px;">Count</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="text-bold">Luzon</td>
+                <td class="text-right text-bold">{{ (int)($bd['luzon'] ?? 0) }}</td>
+              </tr>
+              <tr>
+                <td class="text-bold">Visayas</td>
+                <td class="text-right text-bold">{{ (int)($bd['visayas'] ?? 0) }}</td>
+              </tr>
+              <tr>
+                <td class="text-bold">Mindanao</td>
+                <td class="text-right text-bold">{{ (int)($bd['mindanao'] ?? 0) }}</td>
+              </tr>
+              <tr>
+                <td class="text-bold">Total</td>
+                <td class="text-right text-bold">{{ (int)($bd['total'] ?? 0) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="muted" style="padding:8px 10px;">
+            Province source: <b>macro_output.PROVINCE</b> (preferred). If missing, fallback: <b>from_jnts.province</b>.
+          </div>
+        </div>
+
         {{-- ✅ KPI directly under Status Summary (left side only) --}}
         @php
           $tDel = (int)($totals['delivered'] ?? 0);
@@ -301,7 +334,6 @@
           ];
           $mode = $rtsGroup ?? 'sender_item';
 
-          // sort by volume desc (UI compute)
           $rtsRowsSafe = is_array($rtsRows ?? null) ? $rtsRows : (is_iterable($rtsRows ?? null) ? collect($rtsRows)->toArray() : []);
           usort($rtsRowsSafe, function($a,$b){
             $av = (int)($a['volume'] ?? (($a['delivered'] ?? 0)+($a['for_return'] ?? 0)));
