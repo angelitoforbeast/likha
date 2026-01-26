@@ -158,9 +158,7 @@
       <button type="submit">Show</button>
     </form>
 
-    <div class="muted">
-      *Left: status_logs + signingtime. Right: grouped Delivered vs For Return.
-    </div>
+
   </div>
 
   <div class="wrap">
@@ -279,9 +277,7 @@
               </tr>
             </tbody>
           </table>
-          <div class="muted" style="padding:8px 10px;">
-            Province source: <b>macro_output.PROVINCE</b> (preferred). If missing, fallback: <b>from_jnts.province</b>.
-          </div>
+
         </div>
 
         {{-- ✅ KPI directly under Status Summary (left side only) --}}
@@ -320,7 +316,7 @@
               </tr>
             </tbody>
           </table>
-          <div class="muted" style="padding:8px 10px;">UI computed only (no controller changes).</div>
+         
         </div>
       </div>
 
