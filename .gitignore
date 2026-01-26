@@ -22,3 +22,6 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+/storage/app/credentials.json
+/resources/views/encoder/tools/apikey.txt
+
