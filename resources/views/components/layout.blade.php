@@ -120,7 +120,8 @@
     'ads_manager/campaigns',
     'ads_manager/cpp',
     'jnt/hold',
-    'pancake/retrieve-orders'
+    'pancake/retrieve-orders',
+    'jnt/order-management'
 ]))
   {{-- 1) SAGAD: full width, no padding --}}
   <div class="w-full px-0">

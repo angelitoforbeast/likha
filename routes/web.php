@@ -61,6 +61,10 @@ use App\Http\Controllers\PancakePageIdMappingController;
 use App\Http\Controllers\JntStickerSegregatorController;
 use App\Http\Controllers\PancakeRetrieve2Controller;
 use App\Http\Controllers\JntAddressController;
+use App\Http\Controllers\JntShipmentController;
+use App\Http\Controllers\JntOrderUiController;
+use App\Http\Controllers\JntWaybillController;
+use App\Http\Controllers\JntOrderManagementController;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -300,7 +304,24 @@ Route::get('/jnt/stickers/commit/download', [JntStickerController::class, 'commi
         ->name('jnt.stickers.downloadZip');
 });
 
+Route::prefix('jnt/shipments')->group(function () {
+    Route::get('/', [JntShipmentController::class, 'index']);
+    Route::post('/create/{macroOutputId}', [JntShipmentController::class, 'createOne']);
+    Route::post('/bulk-create', [JntShipmentController::class, 'bulkCreate']);
+    Route::post('/track/{shipmentId}', [JntShipmentController::class, 'track']);
+    Route::post('/cancel/{shipmentId}', [JntShipmentController::class, 'cancel']);
+});
+Route::get('jnt/orders', [\App\Http\Controllers\JntOrderUiController::class, 'index']);
+Route::post('jnt/orders/batch', [\App\Http\Controllers\JntOrderUiController::class, 'createBatch']);
+Route::get('jnt/orders/batch/{runId}', [\App\Http\Controllers\JntOrderUiController::class, 'showRun']);
+Route::get('jnt/orders/batch/{runId}/status', [\App\Http\Controllers\JntOrderUiController::class, 'status']);
+Route::post('jnt/orders/batch/{runId}/stop', [\App\Http\Controllers\JntOrderUiController::class, 'stop']);
 
+
+Route::get('/jnt/waybills', [\App\Http\Controllers\JntWaybillController::class, 'index']);
+Route::post('/jnt/waybills/query-one', [\App\Http\Controllers\JntWaybillController::class, 'queryOne']);
+Route::get('/jnt/order-management', [JntOrderManagementController::class, 'index']);
+Route::post('/jnt/order-management/query', [JntOrderManagementController::class, 'query']);
 
 
 Route::get('/item/cogs', [ItemCogsController::class, 'index'])->name('item.cogs.index');
