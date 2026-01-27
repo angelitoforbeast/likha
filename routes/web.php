@@ -65,6 +65,7 @@ use App\Http\Controllers\JntShipmentController;
 use App\Http\Controllers\JntOrderUiController;
 use App\Http\Controllers\JntWaybillController;
 use App\Http\Controllers\JntOrderManagementController;
+use App\Http\Controllers\PancakeConversationIndexController;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -206,6 +207,9 @@ Route::put('/pancake/page-id-mapping/{id}', [PancakePageIdMappingController::cla
 
 Route::delete('/pancake/page-id-mapping/{id}', [PancakePageIdMappingController::class, 'destroy'])
     ->name('pancake.page_id_mapping.destroy');
+
+    Route::get('/pancake/index', [PancakeConversationIndexController::class, 'index'])
+    ->name('pancake.index');
 
 
 
