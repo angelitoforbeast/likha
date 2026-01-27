@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\Schema;
 class MacroOutputController extends Controller
 {
     // ✅ Replace ENTIRE pancakeMore() with this (returns customers_chat ONLY)
+// ✅ MacroOutputController.php
+// ✅ Replace ENTIRE pancakeMore() with this (returns customers_chat ONLY)
 public function pancakeMore(Request $request)
 {
     $request->validate([
@@ -29,7 +31,7 @@ public function pancakeMore(Request $request)
     }
 
     // table exists?
-    if (!Schema::hasTable('pancake_conversations')) {
+    if (!\Illuminate\Support\Facades\Schema::hasTable('pancake_conversations')) {
         return response()->json([
             'status' => 'success',
             'found'  => false,
@@ -37,8 +39,8 @@ public function pancakeMore(Request $request)
         ]);
     }
 
-    // ✅ exact match: full_name = fb_name
-    $row = DB::table('pancake_conversations')
+    // ✅ exact match: pancake_conversations.full_name = fb_name
+    $row = \Illuminate\Support\Facades\DB::table('pancake_conversations')
         ->select('id', 'full_name', 'customers_chat', 'created_at')
         ->where('full_name', '=', $fbName)
         ->orderByDesc('id')
@@ -66,6 +68,7 @@ public function pancakeMore(Request $request)
         'text'   => $chat, // ✅ customers_chat ONLY
     ]);
 }
+
 
     // ✅ Expecting fb_name from MacroOutput (or passed directly from UI)
    
@@ -629,6 +632,7 @@ public function pancakeMore(Request $request)
 
 
     // ✅ MacroOutputController@index (FULL) — paginate ONLY when PAGE = All
+// ✅ MacroOutputController@index (FULL) — paginate ONLY when PAGE = All
 public function index(Request $request)
 {
     $tz = 'Asia/Manila';
@@ -640,7 +644,7 @@ public function index(Request $request)
     $formattedDMY = \Carbon\Carbon::parse($date, $tz)->format('d-m-Y');
 
     // ✅ Wrapper para cross-db: mysql uses ``, pgsql uses ""
-    $wrap = fn (string $col) => DB::getQueryGrammar()->wrap($col);
+    $wrap = fn (string $col) => \Illuminate\Support\Facades\DB::getQueryGrammar()->wrap($col);
 
     // Detect ts_date type (date vs datetime/timestamp)
     $tsType = null;
@@ -650,7 +654,7 @@ public function index(Request $request)
         $tsType = null;
     }
 
-    // Build base query (NO whereDate() para di mabagal)
+    // ✅ Build base query (NO whereDate() para di mabagal)
     $baseQuery = \App\Models\MacroOutput::query()
         ->where(function ($q) use ($date, $formattedDMY, $tsType, $tz) {
 
@@ -739,6 +743,16 @@ public function index(Request $request)
         }
     }
 
+    // ✅ Pancake exists flag (so button shows only when match exists)
+    $hasPancakeTable = \Illuminate\Support\Facades\Schema::hasTable('pancake_conversations');
+    $FB = $wrap('fb_name');
+
+    // Cross-db EXISTS expression (works on MySQL + Postgres)
+    $hasPancakeExpr = "CASE WHEN EXISTS (
+        SELECT 1 FROM pancake_conversations pc
+        WHERE pc.full_name = {$FB}
+    ) THEN 1 ELSE 0 END";
+
     $selectCols = [
         'id', 'FULL NAME', 'PHONE NUMBER', 'ADDRESS',
         'PROVINCE', 'CITY', 'BARANGAY', 'STATUS',
@@ -750,6 +764,12 @@ public function index(Request $request)
         'status_logs', 'ts_date','fb_name',
     ];
 
+    if ($hasPancakeTable) {
+        $selectCols[] = \Illuminate\Support\Facades\DB::raw("{$hasPancakeExpr} as has_pancake");
+    } else {
+        $selectCols[] = \Illuminate\Support\Facades\DB::raw("0 as has_pancake");
+    }
+
     // ✅ IMPORTANT RULE BACK:
     // paginate ONLY when PAGE is All (i.e., PAGE not filled)
     $paginateOnlyWhenAll = !$request->filled('PAGE');
@@ -759,7 +779,7 @@ public function index(Request $request)
         $records = $recordQuery
             ->select($selectCols)
             ->orderByDesc('id')
-            ->paginate(100)          // or 100/whatever you want
+            ->paginate(100)
             ->withQueryString();
 
         $records->through(function ($r) {
@@ -790,6 +810,7 @@ public function index(Request $request)
         'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'
     ));
 }
+
 
 
 private function tokenizeLocation($raw, string $type): array

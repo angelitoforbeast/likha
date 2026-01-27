@@ -560,7 +560,11 @@
               <div class="pancake-extra hidden"></div>
 
               {{-- ✅ See more link (blue) --}}
-              <a href="#" class="see-more-link">See more</a>
+           {{-- ✅ See more link (only if exists in pancake_conversations) --}}
+@if(!empty($record->has_pancake))
+  <a href="#" class="see-more-link">See more</a>
+@endif
+
             </td>
 
             {{-- HIST LOGS: expand-only-once --}}
