@@ -209,7 +209,8 @@
       'ads_manager/cpp',
       'jnt/hold',
       'pancake/retrieve-orders',
-      'jnt/order-management'
+      'jnt/order-management',
+      'pancake/index'
     ]))
       <div class="w-full px-0">
         {{ $slot }}
