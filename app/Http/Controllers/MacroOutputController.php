@@ -424,6 +424,206 @@ public function pancakeMore(Request $request)
     return response()->json($results);
 }
 
+public function validateCheckerToFix(Request $request)
+{
+    $tz = 'Asia/Manila';
+
+    // same default behavior as index(): yesterday
+    $date = $request->filled('date') ? $request->input('date') : now($tz)->subDay()->toDateString();
+    $page = trim((string) $request->input('PAGE', ''));
+
+    $formattedDMY = \Carbon\Carbon::parse($date, $tz)->format('d-m-Y');
+
+    // wrapper for cross-db quoting
+    $wrap = fn (string $col) => \Illuminate\Support\Facades\DB::getQueryGrammar()->wrap($col);
+
+    // detect ts_date type
+    $tsType = null;
+    try {
+        $tsType = \Illuminate\Support\Facades\Schema::getColumnType('macro_output', 'ts_date');
+    } catch (\Throwable $e) {
+        $tsType = null;
+    }
+
+    // base scope = date + page (like index), NO checker filter (we’ll filter ✅ only later)
+    $base = \App\Models\MacroOutput::query()
+        ->where(function ($q) use ($date, $formattedDMY, $tsType, $tz) {
+            $q->where(function ($qq) use ($date, $tsType, $tz) {
+                $qq->whereNotNull('ts_date');
+
+                if ($tsType === 'date') {
+                    $qq->where('ts_date', '=', $date);
+                } else {
+                    $start = \Carbon\Carbon::parse($date, $tz)->startOfDay()->toDateTimeString();
+                    $end   = \Carbon\Carbon::parse($date, $tz)->endOfDay()->toDateTimeString();
+                    $qq->whereBetween('ts_date', [$start, $end]);
+                }
+            });
+
+            $q->orWhere(function ($qq) use ($formattedDMY) {
+                $qq->whereNull('ts_date')
+                   ->whereNotNull('TIMESTAMP')
+                   ->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}%");
+            });
+        });
+
+    if ($page !== '') {
+        $base->where('PAGE', $page);
+    }
+
+    // optional: respect status_filter pills (same meaning as index)
+    if ($request->filled('status_filter')) {
+        if ($request->status_filter === 'BLANK') {
+            $base->where(function ($q) {
+                $q->whereNull('STATUS')->orWhere('STATUS', '');
+            });
+        } else {
+            $base->where('STATUS', $request->status_filter);
+        }
+    }
+
+    // EXCLUDE cannot proceed (same as Validate button)
+    $base->where(function ($q) {
+        $q->whereNull('STATUS')->orWhere('STATUS', '<>', 'CANNOT PROCEED');
+    });
+
+    // phone duplicate counts across WHOLE scope (not just ✅ rows)
+    $allPhones = (clone $base)
+        ->select('PHONE NUMBER')
+        ->get()
+        ->map(fn($r) => trim((string)($r->{'PHONE NUMBER'} ?? '')))
+        ->filter(fn($p) => $p !== '')
+        ->values()
+        ->all();
+
+    $phoneCounts = [];
+    foreach ($allPhones as $p) {
+        $phoneCounts[$p] = ($phoneCounts[$p] ?? 0) + 1;
+    }
+
+    // ✅ only rows with checker = ✅ are candidates for update
+    $CHECKER = $wrap('APP SCRIPT CHECKER');
+
+    $candidates = (clone $base)
+        ->whereNotNull('APP SCRIPT CHECKER')
+        ->whereRaw("TRIM({$CHECKER}) = ?", ['✅'])
+        ->get([
+            'id', 'FULL NAME', 'PHONE NUMBER', 'PROVINCE', 'CITY', 'BARANGAY', 'APP SCRIPT CHECKER'
+        ]);
+
+    if ($candidates->isEmpty()) {
+        // still redirect to TO FIX filter (user expectation)
+        $params = array_filter([
+            'date' => $date,
+            'PAGE' => $page !== '' ? $page : null,
+            'status_filter' => $request->input('status_filter') ?: null,
+            'checker' => '__TO_FIX__',
+        ], fn($v) => !is_null($v) && $v !== '');
+
+        return response()->json([
+            'status' => 'success',
+            'updated' => 0,
+            'redirect_url' => route('macro_output.index', $params),
+        ]);
+    }
+
+    // Load JNT address guide maps (same as validateAddresses)
+    $filePath = resource_path('views/macro_output/jnt_address.txt');
+
+    $provCityMap = [];
+    $provCityBrgyMap = [];
+
+    if (file_exists($filePath)) {
+        $lines = file($filePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        foreach ($lines as $line) {
+            $parts = array_map('trim', explode('|', $line));
+            if (count($parts) !== 3) continue;
+            if (strtolower($parts[0] ?? '') === 'province') continue;
+
+            [$provRaw, $cityRaw, $brgyRaw] = $parts;
+
+            $prov = strtolower(trim((string)$provRaw));
+            $city = strtolower(trim((string)$cityRaw));
+            $brgy = strtolower(trim((string)$brgyRaw));
+
+            if ($prov === '' || $city === '' || $brgy === '') continue;
+
+            $provCityMap[$prov][$city] = true;
+            $provCityBrgyMap["{$prov}|{$city}"][$brgy] = true;
+        }
+    }
+
+    $idsToFix = [];
+
+    foreach ($candidates as $r) {
+        $prov  = strtolower(trim((string)($r->PROVINCE ?? '')));
+        $city  = strtolower(trim((string)($r->CITY ?? '')));
+        $brgy  = strtolower(trim((string)($r->BARANGAY ?? '')));
+        $phone = trim((string)($r->{'PHONE NUMBER'} ?? ''));
+        $fullName = trim((string)($r->{'FULL NAME'} ?? ''));
+
+        // hierarchy checks
+        $provOk = isset($provCityMap[$prov]);
+        $cityOk = $provOk && isset($provCityMap[$prov][$city]);
+        $brgyOk = $cityOk && isset($provCityBrgyMap["{$prov}|{$city}"][$brgy]);
+
+        $provInvalid = !$provOk && ($prov !== '');
+        $cityInvalid = $provOk && !$cityOk && ($city !== '');
+        $brgyInvalid = $cityOk && !$brgyOk && ($brgy !== '');
+
+        // FULL NAME invalid (same as validateAddresses)
+        $fullNameInvalid = false;
+        if ($fullName === '') {
+            $fullNameInvalid = true;
+        } else {
+            if (!preg_match("/^[\\p{L}\\.,\\-\\' ]+$/u", $fullName)) {
+                $fullNameInvalid = true;
+            } elseif (!preg_match('/[A-Za-zÑñ]/u', $fullName)) {
+                $fullNameInvalid = true;
+            }
+        }
+
+        // PHONE invalid (same as validateAddresses)
+        $phoneInvalid = false;
+        if ($phone === '') {
+            $phoneInvalid = true;
+        } elseif (!preg_match('/^9\d{9}$/', $phone)) {
+            $phoneInvalid = true;
+        } elseif ($phone === '9123456789') {
+            $phoneInvalid = true;
+        } elseif (($phoneCounts[$phone] ?? 0) > 1) {
+            $phoneInvalid = true;
+        }
+
+        // if ANY issue -> TO FIX
+        $hasIssue = $provInvalid || $cityInvalid || $brgyInvalid || $fullNameInvalid || $phoneInvalid;
+
+        if ($hasIssue) {
+            $idsToFix[] = (int) $r->id;
+        }
+    }
+
+    $updated = 0;
+    if (!empty($idsToFix)) {
+        $updated = \App\Models\MacroOutput::whereIn('id', $idsToFix)
+            ->whereRaw("TRIM({$CHECKER}) = ?", ['✅']) // safety: ✅ only
+            ->update(['APP SCRIPT CHECKER' => 'TO FIX']);
+    }
+
+    // redirect to TO FIX filter
+    $params = array_filter([
+        'date' => $date,
+        'PAGE' => $page !== '' ? $page : null,
+        'status_filter' => $request->input('status_filter') ?: null,
+        'checker' => '__TO_FIX__',
+    ], fn($v) => !is_null($v) && $v !== '');
+
+    return response()->json([
+        'status' => 'success',
+        'updated' => (int) $updated,
+        'redirect_url' => route('macro_output.index', $params),
+    ]);
+}
 
 
     public function summary(Request $request)

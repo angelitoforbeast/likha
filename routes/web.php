@@ -345,6 +345,9 @@ Route::post('/encoder/checker_1/update-field', [MacroOutputController::class, 'u
 Route::post('/macro_output/validate', [MacroOutputController::class, 'validateAddresses'])->name('macro_output.validate');
 Route::get('/macro_output/download', [MacroOutputController::class, 'download'])->name('macro_output.download');
 Route::post('/macro_output/validate-items', [MacroOutputController::class, 'validateItems']);
+Route::post('/macro_output/validate1', [\App\Http\Controllers\MacroOutputController::class, 'validateCheckerToFix'])
+  ->name('macro_output.validate1');
+
 Route::get('/encoder/page-name', [MacroOutputPageNameController::class, 'index'])
     ->name('encoder.page-name');
     Route::get('/encoder/pending-rate', [EncoderPendingRateController::class, 'index'])->name('encoder.pending-rate');

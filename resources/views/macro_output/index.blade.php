@@ -391,9 +391,16 @@
           </button>
           <span id="item-checker-status" class="text-sm text-gray-600"></span>
         @endif
-
+<button type="button" id="validate1-btn" class="bg-indigo-700 text-white px-4 py-2 rounded hover:bg-indigo-800">
+  Validate 1
+</button>
         <button type="button" id="validate-btn" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800">Validate</button>
-        <span id="validate-status" class="text-sm text-gray-600"></span>
+
+
+
+<span id="validate-status" class="text-sm text-gray-600"></span>
+<span id="validate1-status" class="text-sm text-gray-600"></span>
+
       </div>
     </form>
 
@@ -602,6 +609,55 @@
       form.submit();
     }
   </script>
+  <script>
+  document.getElementById('validate1-btn')?.addEventListener('click', function () {
+    const statusEl = document.getElementById('validate1-status');
+    statusEl.textContent = 'Validating (checker)...';
+    statusEl.classList.remove('text-green-600', 'text-red-600');
+    statusEl.classList.add('text-gray-600');
+
+    const date = document.querySelector('input[name="date"]')?.value || '';
+    const page = document.getElementById('pageHidden')?.value || '';
+
+    // keep status_filter if user clicked TOTAL/PROCEED/etc pills
+    const url = new URL(window.location.href);
+    const statusFilter = url.searchParams.get('status_filter') || '';
+
+    fetch("{{ route('macro_output.validate1') }}", {
+      method: 'POST',
+      headers: {
+        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        date: date,
+        PAGE: page,
+        status_filter: statusFilter
+      })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.status === 'success') {
+        statusEl.textContent = `Updated: ${data.updated || 0}`;
+        statusEl.classList.remove('text-gray-600');
+        statusEl.classList.add('text-green-600');
+
+        if (data.redirect_url) {
+          window.location.href = data.redirect_url; // ✅ auto refresh to TO FIX
+        }
+      } else {
+        statusEl.textContent = data.message || 'Validate 1 failed.';
+        statusEl.classList.remove('text-gray-600');
+        statusEl.classList.add('text-red-600');
+      }
+    })
+    .catch(() => {
+      statusEl.textContent = 'Validate 1 failed.';
+      statusEl.classList.remove('text-gray-600');
+      statusEl.classList.add('text-red-600');
+    });
+  });
+</script>
 
   {{-- ✅ Page dropdown JS (click shows all, typing filters) --}}
   <script>
