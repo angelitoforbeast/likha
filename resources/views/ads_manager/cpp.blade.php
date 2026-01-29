@@ -294,13 +294,9 @@
           Object.values(rawData).forEach(data => {
             const r = data[date] || {};
             if (typeof r.spent === 'number') sumSpent += r.spent;
-
-            // keep your current rule: only count orders if spent > 0
             if (r.spent && r.orders) sumOrders += r.orders;
-
             if (r.spent && r.cpm)   wImps += r.spent / r.cpm;
             if (r.spent && r.cpi)   wCPI  += r.spent / r.cpi;
-
             if (r.spent && r.tcpr_fail) tcprFail += r.tcpr_fail;
           });
 
@@ -336,8 +332,12 @@
         const data = rawData[pageFilter] || {};
 
         let html = `
-          <h2 class="font-bold text-lg mb-2">${pageFilter} – Performance by Date (${fmtISO(titleStart)} to ${fmtISO(titleEnd)})</h2>
-          <table class="w-full border text-sm mb-6">
+          <div class="flex justify-between items-center mb-2">
+            <h2 class="font-bold text-lg">${pageFilter} – Performance by Date (${fmtISO(titleStart)} to ${fmtISO(titleEnd)})</h2>
+            <button onclick="copySinglePageTable()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">Copy Table</button>
+          </div>
+
+          <table id="singlePageTable" class="w-full border text-sm mb-6">
             <thead class="bg-gray-200">
               <tr>
                 <th class="border px-2 py-1">Date</th>
@@ -390,7 +390,6 @@
             totalSpent  += r.spent;
             if (r.orders) totalOrders += r.orders;
             if (r.cpm) sumWeighted += r.spent / r.cpm;
-
             totalFail += Number(r.tcpr_fail || 0);
           }
         });
@@ -501,6 +500,22 @@
 
       navigator.clipboard.writeText(copiedText)
         .then(() => alert('SUMMARY OF ADS table copied!'))
+        .catch(err => console.error('Copy failed:', err));
+    }
+
+    function copySinglePageTable() {
+      const table = document.getElementById('singlePageTable');
+      if (!table) return;
+
+      const rows = Array.from(table.querySelectorAll('tr'));
+      const copiedText = rows.map(row => {
+        return Array.from(row.querySelectorAll('th, td'))
+          .map(cell => cell.textContent.replace(/₱/g, '').trim())
+          .join('\t');
+      }).join('\n');
+
+      navigator.clipboard.writeText(copiedText)
+        .then(() => alert('Single Page table copied!'))
         .catch(err => console.error('Copy failed:', err));
     }
 
