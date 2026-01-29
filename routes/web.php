@@ -237,6 +237,12 @@ Route::get('/ads_manager/payment/records', [PaymentActivityController::class, 'r
 
     Route::delete('/ads_manager/payment/records', [PaymentActivityController::class, 'destroyAll'])
     ->name('ads_payment.records.delete_all');
+Route::post('/ads_manager/payment/records/update-remarks', [PaymentActivityController::class, 'updateRemarks'])
+    ->name('ads_payment.records.update_remarks');
+
+
+
+
 
 Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::post('/profile', [ProfileController::class, 'update'])->name('profile.update');

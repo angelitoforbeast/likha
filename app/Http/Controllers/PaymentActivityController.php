@@ -6,6 +6,7 @@ use App\Jobs\ProcessPaymentActivityUpload;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
+use App\Models\PaymentActivity;
 
 class PaymentActivityController extends Controller
 {
@@ -60,96 +61,126 @@ class PaymentActivityController extends Controller
 
     /** Paginated records with dropdown filters + ad_account name join. */
     public function records(Request $request)
-    {
-        $perPage = 50;
+{
+    $perPage = 50;
 
-        // Default date range: last 1 month including today
-        $defaultEnd   = Carbon::today()->toDateString();
-        $defaultStart = Carbon::today()->subMonth()->toDateString();
+    // Default date range: last 1 month including today
+    $defaultEnd   = Carbon::today()->toDateString();
+    $defaultStart = Carbon::today()->subMonth()->toDateString();
 
-        $start = $request->input('start_date', $defaultStart);
-        $end   = $request->input('end_date', $defaultEnd);
+    $start = $request->input('start_date', $defaultStart);
+    $end   = $request->input('end_date', $defaultEnd);
 
-        $adAccountSel     = trim((string) $request->input('ad_account', ''));
-        $paymentMethodSel = trim((string) $request->input('payment_method', ''));
+    $adAccountSel     = trim((string) $request->input('ad_account', ''));
+    $paymentMethodSel = trim((string) $request->input('payment_method', ''));
 
-        $base = \DB::table('payment_activity_ads_manager as pa')
-            ->leftJoin('ad_accounts as aa', 'aa.ad_account_id', '=', 'pa.ad_account');
+    $base = \DB::table('payment_activity_ads_manager as pa')
+        ->leftJoin('ad_accounts as aa', 'aa.ad_account_id', '=', 'pa.ad_account');
 
-        $applyFilters = function ($q) use ($start, $end, $adAccountSel, $paymentMethodSel) {
-            $q->whereBetween('pa.date', [$start, $end]);
-            if ($adAccountSel !== '') {
-                $q->where('pa.ad_account', '=', $adAccountSel);
-            }
-            if ($paymentMethodSel !== '') {
-                $q->where('pa.payment_method', '=', $paymentMethodSel);
-            }
-        };
-
-        $rowsQuery = (clone $base)->select([
-            'pa.id',
-            'pa.date',
-            'pa.transaction_id',
-            'pa.amount',
-            'pa.ad_account',
-            'pa.payment_method',
-            'pa.source_filename',
-            'pa.import_batch_id',
-            \DB::raw('COALESCE(aa.name, pa.ad_account) as ad_account_name'),
-        ]);
-        $applyFilters($rowsQuery);
-
-        $rows = $rowsQuery
-            ->orderBy('pa.date', 'desc')
-            ->paginate($perPage)
-            ->withQueryString();
-
-        $totalQuery = (clone $base)->selectRaw('COALESCE(SUM(pa.amount),0) as total_amount');
-        $applyFilters($totalQuery);
-        $totalAmount = (float) ($totalQuery->value('total_amount') ?? 0);
-
-        // Ad Account dropdown
-        $adOptionsQuery = \DB::table('payment_activity_ads_manager as pa')
-            ->leftJoin('ad_accounts as aa', 'aa.ad_account_id', '=', 'pa.ad_account')
-            ->whereBetween('pa.date', [$start, $end]);
-
-        if ($paymentMethodSel !== '') {
-            $adOptionsQuery->where('pa.payment_method', '=', $paymentMethodSel);
-        }
-
-        $adAccountOptions = $adOptionsQuery
-            ->whereNotNull('pa.ad_account')
-            ->where('pa.ad_account', '!=', '')
-            ->selectRaw('DISTINCT pa.ad_account AS id, COALESCE(aa.name, pa.ad_account) AS name')
-            ->orderBy('name', 'asc')
-            ->get();
-
-        // Payment Method dropdown
-        $pmOptionsQuery = \DB::table('payment_activity_ads_manager as pa')
-            ->whereBetween('pa.date', [$start, $end]);
+    $applyFilters = function ($q) use ($start, $end, $adAccountSel, $paymentMethodSel) {
+        $q->whereBetween('pa.date', [$start, $end]);
 
         if ($adAccountSel !== '') {
-            $pmOptionsQuery->where('pa.ad_account', '=', $adAccountSel);
+            $q->where('pa.ad_account', '=', $adAccountSel);
         }
 
-        $paymentMethodOptions = $pmOptionsQuery
-            ->whereNotNull('pa.payment_method')
-            ->where('pa.payment_method', '!=', '')
-            ->selectRaw('DISTINCT pa.payment_method AS method')
-            ->orderBy('method', 'asc')
-            ->get();
+        if ($paymentMethodSel !== '') {
+            $q->where('pa.payment_method', '=', $paymentMethodSel);
+        }
+    };
 
-        return view('ads_manager.payment.records.index', [
-            'rows'                 => $rows,
-            'start'                => $start,
-            'end'                  => $end,
-            'totalAmount'          => $totalAmount,
-            'adAccountOptions'     => $adAccountOptions,
-            'paymentMethodOptions' => $paymentMethodOptions,
-            'adAccountSel'         => $adAccountSel,
-            'paymentMethodSel'     => $paymentMethodSel,
-        ]);
+    // ✅ Rows (include remarks_1 / remarks_2)
+    $rowsQuery = (clone $base)->select([
+        'pa.id',
+        'pa.date',
+        'pa.transaction_id',
+        'pa.amount',
+        'pa.ad_account',
+        'pa.payment_method',
+        'pa.source_filename',
+        'pa.import_batch_id',
+        'pa.remarks_1',
+        'pa.remarks_2',
+        \DB::raw('COALESCE(aa.name, pa.ad_account) as ad_account_name'),
+    ]);
+    $applyFilters($rowsQuery);
+
+    $rows = $rowsQuery
+        ->orderBy('pa.date', 'desc')
+        ->paginate($perPage)
+        ->withQueryString();
+
+    // ✅ Total amount (same filters)
+    $totalQuery = (clone $base)->selectRaw('COALESCE(SUM(pa.amount),0) as total_amount');
+    $applyFilters($totalQuery);
+    $totalAmount = (float) ($totalQuery->value('total_amount') ?? 0);
+
+    // ✅ Ad Account dropdown options (dependent on payment method + date)
+    $adOptionsQuery = \DB::table('payment_activity_ads_manager as pa')
+        ->leftJoin('ad_accounts as aa', 'aa.ad_account_id', '=', 'pa.ad_account')
+        ->whereBetween('pa.date', [$start, $end]);
+
+    if ($paymentMethodSel !== '') {
+        $adOptionsQuery->where('pa.payment_method', '=', $paymentMethodSel);
     }
+
+    $adAccountOptions = $adOptionsQuery
+        ->whereNotNull('pa.ad_account')
+        ->where('pa.ad_account', '!=', '')
+        ->selectRaw('DISTINCT pa.ad_account AS id, COALESCE(aa.name, pa.ad_account) AS name')
+        ->orderBy('name', 'asc')
+        ->get();
+
+    // ✅ Payment Method dropdown options (dependent on ad account + date)
+    $pmOptionsQuery = \DB::table('payment_activity_ads_manager as pa')
+        ->whereBetween('pa.date', [$start, $end]);
+
+    if ($adAccountSel !== '') {
+        $pmOptionsQuery->where('pa.ad_account', '=', $adAccountSel);
+    }
+
+    $paymentMethodOptions = $pmOptionsQuery
+        ->whereNotNull('pa.payment_method')
+        ->where('pa.payment_method', '!=', '')
+        ->selectRaw('DISTINCT pa.payment_method AS method')
+        ->orderBy('method', 'asc')
+        ->get();
+
+    return view('ads_manager.payment.records.index', [
+        'rows'                 => $rows,
+        'start'                => $start,
+        'end'                  => $end,
+        'totalAmount'          => $totalAmount,
+        'adAccountOptions'     => $adAccountOptions,
+        'paymentMethodOptions' => $paymentMethodOptions,
+        'adAccountSel'         => $adAccountSel,
+        'paymentMethodSel'     => $paymentMethodSel,
+    ]);
+}
+
+
+    public function updateRemarks(Request $request)
+{
+    $data = $request->validate([
+        'id' => ['required','integer'],
+        'field' => ['required','in:remarks_1,remarks_2'],
+        'value' => ['nullable','string','max:5000'],
+    ]);
+
+    $row = PaymentActivity::query()->findOrFail($data['id']);
+
+    // optional: role/permission gate check here if needed
+
+    $row->{$data['field']} = $data['value'];
+    $row->save();
+
+    return response()->json([
+        'status' => 'ok',
+        'id' => $row->id,
+        'field' => $data['field'],
+        'value' => $row->{$data['field']},
+    ]);
+}
 
     /** Optional: Delete All */
     public function truncate()

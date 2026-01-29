@@ -1,5 +1,5 @@
 <x-layout>
-    <x-slot name="title">Payment of Ads</x-slot>
+  <x-slot name="title">Payment of Ads</x-slot>
   <x-slot name="heading">Payment Activity Records</x-slot>
 
   @php
@@ -10,6 +10,15 @@
       try { return \Illuminate\Support\Carbon::parse($v)->toDateString(); } catch (\Throwable $e) { return (string)$v; }
     };
   @endphp
+
+  <style>
+    .remarks-input{
+      min-height: 34px;
+      height: 34px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
 
   <div class="bg-white p-4 rounded shadow mb-4">
     <form method="GET" class="grid md:grid-cols-12 gap-3 items-end">
@@ -31,9 +40,7 @@
         <select name="ad_account" class="w-full border rounded px-2 py-1">
           <option value="">All</option>
           @foreach ($adAccountOptions as $opt)
-            @php
-              $label = $opt->name ? $opt->name : '(no name) ' . $opt->id;
-            @endphp
+            @php $label = $opt->name ? $opt->name : '(no name) ' . $opt->id; @endphp
             <option value="{{ $opt->id }}" {{ ($adAccountSel ?? '') == $opt->id ? 'selected' : '' }}>
               {{ $label }}
             </option>
@@ -82,11 +89,14 @@
           <th class="p-2 border-b text-left">Payment Method</th>
           <th class="p-2 border-b text-left">Source</th>
           <th class="p-2 border-b text-left">Batch</th>
+          <th class="p-2 border-b text-left">Remarks 1</th>
+          <th class="p-2 border-b text-left">Remarks 2</th>
         </tr>
       </thead>
+
       <tbody>
         @forelse ($rows as $r)
-          <tr class="hover:bg-gray-50">
+          <tr class="hover:bg-gray-50 align-top">
             <td class="p-2 border-b">{{ $safeDate($r->date ?? '') }}</td>
             <td class="p-2 border-b font-mono text-sm">{{ $r->transaction_id ?? '' }}</td>
             <td class="p-2 border-b text-right">{{ isset($r->amount) ? number_format($r->amount, 2) : '0.00' }}</td>
@@ -94,10 +104,38 @@
             <td class="p-2 border-b">{{ $r->payment_method ?? '' }}</td>
             <td class="p-2 border-b text-gray-600 text-sm">{{ $r->source_filename ?? '' }}</td>
             <td class="p-2 border-b text-xs font-mono">{{ $r->import_batch_id ?? '' }}</td>
+
+            {{-- Remarks 1 --}}
+            <td class="p-2 border-b align-top">
+              <textarea
+                class="remarks-input w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-sm leading-5
+                       focus:border-blue-400 focus:ring-2 focus:ring-blue-100 focus:outline-none
+                       resize-none overflow-hidden"
+                rows="1"
+                data-id="{{ $r->id }}"
+                data-field="remarks_1"
+                placeholder="Type remarks..."
+              >{{ $r->remarks_1 ?? '' }}</textarea>
+              <div class="text-xs text-gray-500 mt-1 hidden" data-saving="{{ $r->id }}-remarks_1">saving...</div>
+            </td>
+
+            {{-- Remarks 2 --}}
+            <td class="p-2 border-b align-top">
+              <textarea
+                class="remarks-input w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-sm leading-5
+                       focus:border-blue-400 focus:ring-2 focus:ring-blue-100 focus:outline-none
+                       resize-none overflow-hidden"
+                rows="1"
+                data-id="{{ $r->id }}"
+                data-field="remarks_2"
+                placeholder="Type remarks..."
+              >{{ $r->remarks_2 ?? '' }}</textarea>
+              <div class="text-xs text-gray-500 mt-1 hidden" data-saving="{{ $r->id }}-remarks_2">saving...</div>
+            </td>
           </tr>
         @empty
           <tr>
-            <td colspan="7" class="text-center p-4 text-gray-500">No records found.</td>
+            <td colspan="9" class="text-center p-4 text-gray-500">No records found.</td>
           </tr>
         @endforelse
       </tbody>
@@ -116,5 +154,52 @@
   <script>
     flatpickr('#start_date', { dateFormat: 'Y-m-d', defaultDate: '{{ $start }}' });
     flatpickr('#end_date',   { dateFormat: 'Y-m-d', defaultDate: '{{ $end }}' });
+  </script>
+
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+
+  <script>
+    const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+    function autosize(el){
+      el.style.height = '0px';
+      el.style.height = el.scrollHeight + 'px';
+    }
+
+    document.querySelectorAll('textarea.remarks-input').forEach(el => {
+      autosize(el);
+
+      el.addEventListener('input', () => autosize(el));
+      el.addEventListener('paste', () => setTimeout(() => autosize(el), 0));
+
+      el.addEventListener('blur', async () => {
+        const id = el.dataset.id;
+        const field = el.dataset.field;
+        const value = el.value;
+
+        const savingEl = document.querySelector(`[data-saving="${id}-${field}"]`);
+        if (savingEl) savingEl.classList.remove('hidden');
+
+        try {
+          const res = await fetch("{{ route('ads_payment.records.update_remarks') }}", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRF-TOKEN": csrf,
+              "Accept": "application/json",
+            },
+            body: JSON.stringify({ id, field, value })
+          });
+
+          if (!res.ok) throw new Error("Save failed");
+          el.classList.remove('border-red-500');
+        } catch (e) {
+          el.classList.add('border-red-500');
+          console.error(e);
+        } finally {
+          if (savingEl) savingEl.classList.add('hidden');
+        }
+      });
+    });
   </script>
 </x-layout>
