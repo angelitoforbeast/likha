@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Jobs\CreateJntOrder;
 use App\Models\JntBatchRun;
 use App\Models\JntShipment;
+use App\Services\Jnt\JntClient; // ✅ FIX: correct namespace
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -48,7 +49,7 @@ class JntOrderUiController extends Controller
             $macroBase->where('PAGE', $page);
         }
 
-        // ✅ If run exists → show shipments
+        // ✅ If run exists → show shipments, else preview from macro_output
         if ($run) {
             $rows = DB::table('jnt_shipments as s')
                 ->join('macro_output as m', 'm.id', '=', 's.macro_output_id')
@@ -75,7 +76,6 @@ class JntOrderUiController extends Controller
                 ->paginate(50)
                 ->withQueryString();
         } else {
-            // ✅ Preview mode: add NULL columns so blade won't crash
             $rows = $macroBase
                 ->select([
                     DB::raw('NULL as shipment_id'),
@@ -100,12 +100,27 @@ class JntOrderUiController extends Controller
                 ->withQueryString();
         }
 
+        // ✅ Optional: compute live stats when run view (so header shows correct even before JS poll)
+        $runStats = null;
+        if ($run) {
+            $runStats = JntShipment::query()
+                ->where('jnt_batch_run_id', $run->id)
+                ->selectRaw("
+                    COUNT(*) as total,
+                    SUM(CASE WHEN mailno IS NOT NULL AND mailno != '' THEN 1 ELSE 0 END) as ok,
+                    SUM(CASE WHEN (reason IS NOT NULL AND reason != '') AND (mailno IS NULL OR mailno = '') THEN 1 ELSE 0 END) as fail,
+                    SUM(CASE WHEN ((mailno IS NULL OR mailno = '') AND (reason IS NULL OR reason = '')) THEN 1 ELSE 0 END) as pending
+                ")
+                ->first();
+        }
+
         return view('jnt.orders.index', compact(
             'date',
             'page',
             'pages',
             'run',
-            'rows'
+            'rows',
+            'runStats'
         ));
     }
 
@@ -175,8 +190,6 @@ class JntOrderUiController extends Controller
             }
         }
 
-        // ✅ IMPORTANT: route mo is POST jnt/orders/batch
-        // Redirect to view run
         return redirect()
             ->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page) . '&run_id=' . $run->id)
             ->with('success', "Batch created. Run #{$run->id} with {$total} shipments queued.");
@@ -187,68 +200,76 @@ class JntOrderUiController extends Controller
         return redirect()->to(url('/jnt/orders') . '?run_id=' . $runId);
     }
 
+    public function status(Request $request, int $runId)
+    {
+        $run = JntBatchRun::query()->findOrFail($runId);
 
-public function status(Request $request, int $runId)
-{
-    $run = JntBatchRun::query()->findOrFail($runId);
+        $idsRaw = trim((string) $request->query('ids', ''));
+        $ids = collect(explode(',', $idsRaw))
+            ->map(fn ($v) => (int) trim($v))
+            ->filter(fn ($v) => $v > 0)
+            ->values()
+            ->all();
 
-    // ids=4347,4346,... (only update visible rows)
-    $idsRaw = trim((string) $request->query('ids', ''));
-    $ids = collect(explode(',', $idsRaw))
-        ->map(fn ($v) => (int) trim($v))
-        ->filter(fn ($v) => $v > 0)
-        ->values()
-        ->all();
+        $stats = JntShipment::query()
+            ->where('jnt_batch_run_id', $runId)
+            ->selectRaw("
+                COUNT(*) as total,
+                SUM(CASE WHEN mailno IS NOT NULL AND mailno != '' THEN 1 ELSE 0 END) as ok,
+                SUM(CASE WHEN (reason IS NOT NULL AND reason != '') AND (mailno IS NULL OR mailno = '') THEN 1 ELSE 0 END) as fail,
+                SUM(CASE WHEN ((mailno IS NULL OR mailno = '') AND (reason IS NULL OR reason = '')) THEN 1 ELSE 0 END) as pending
+            ")
+            ->first();
 
-    // ✅ Progress computed from shipments
-    $stats = JntShipment::query()
-        ->where('jnt_batch_run_id', $runId)
-        ->selectRaw("
-            COUNT(*) as total,
-            SUM(CASE WHEN mailno IS NOT NULL AND mailno != '' THEN 1 ELSE 0 END) as ok,
-            SUM(CASE WHEN (reason IS NOT NULL AND reason != '') AND (mailno IS NULL OR mailno = '') THEN 1 ELSE 0 END) as fail,
-            SUM(CASE WHEN ((mailno IS NULL OR mailno = '') AND (reason IS NULL OR reason = '')) THEN 1 ELSE 0 END) as pending
-        ")
-        ->first();
+        $q = JntShipment::query()
+            ->where('jnt_batch_run_id', $runId)
+            ->select(['id', 'mailno', 'txlogisticid', 'success', 'reason', 'updated_at']);
 
-    $q = JntShipment::query()
-        ->where('jnt_batch_run_id', $runId)
-        ->select(['id', 'mailno', 'txlogisticid', 'success', 'reason', 'updated_at']);
+        if (!empty($ids)) {
+            $q->whereIn('id', $ids);
+        } else {
+            $q->orderByDesc('updated_at')->limit(200);
+        }
 
-    if (!empty($ids)) {
-        $q->whereIn('id', $ids);
-    } else {
-        $q->orderByDesc('updated_at')->limit(200);
+        $shipments = $q->get()->values();
+
+        $pending = (int) ($stats->pending ?? 0);
+        if ($pending === 0 && (string) ($run->status ?? '') === 'running') {
+            $run->status = 'finished';
+            $run->finished_at = now();
+            $run->save();
+        }
+
+        $total = (int) ($stats->total ?? 0);
+        $ok    = (int) ($stats->ok ?? 0);
+        $fail  = (int) ($stats->fail ?? 0);
+        $pend  = (int) ($stats->pending ?? 0);
+        $processed = $ok + $fail;
+
+        // ✅ IMPORTANT: return FLAT keys for your JS (and keep nested too)
+        return response()->json([
+            'status'    => (string) ($run->status ?? 'running'),
+            'total'     => $total,
+            'ok'        => $ok,
+            'fail'      => $fail,
+            'pending'   => $pend,
+            'processed' => $processed,
+
+            'run' => [
+                'id'     => (int) $run->id,
+                'status' => (string) ($run->status ?? 'running'),
+            ],
+            'stats' => [
+                'total'     => $total,
+                'ok'        => $ok,
+                'fail'      => $fail,
+                'pending'   => $pend,
+                'processed' => $processed,
+            ],
+            'shipments' => $shipments,
+        ]);
     }
 
-    $shipments = $q->get()->values();
-
-    // ✅ Auto-finish when pending==0
-    $pending = (int) ($stats->pending ?? 0);
-    if ($pending === 0 && (string)($run->status ?? '') === 'running') {
-        $run->status = 'finished';
-        $run->finished_at = now();
-        $run->save();
-    }
-
-    return response()->json([
-        'run' => [
-            'id' => (int) $run->id,
-            'status' => (string) ($run->status ?? 'running'),
-        ],
-        'stats' => [
-            'total' => (int) ($stats->total ?? 0),
-            'ok' => (int) ($stats->ok ?? 0),
-            'fail' => (int) ($stats->fail ?? 0),
-            'pending' => (int) ($stats->pending ?? 0),
-            'processed' => (int) ($stats->ok ?? 0) + (int) ($stats->fail ?? 0),
-        ],
-        'shipments' => $shipments,
-    ]);
-}
-
-
-    // ✅ since meron kang route: POST jnt/orders/batch/{runId}/stop
     public function stop(int $runId)
     {
         $run = JntBatchRun::query()->findOrFail($runId);
@@ -260,22 +281,128 @@ public function status(Request $request, int $runId)
     }
 
     public function debug(int $shipmentId)
-{
-    $s = JntShipment::query()->findOrFail($shipmentId);
+    {
+        $s = JntShipment::query()->findOrFail($shipmentId);
 
-    // ✅ These are the common fields we expect you saved per shipment.
-    // If iba column names mo, palitan mo dito (pero eto usually same sa logs mo).
-    return response()->json([
-        'id' => (int) $s->id,
+        return response()->json([
+            'id' => (int) $s->id,
+            'data_digest' => (string) ($s->data_digest ?? ''),
+            'logistics_interface' => (string) ($s->logistics_interface ?? ''),
+            'request_payload' => $s->request_payload ?? null,
+            'response_raw' => (string) ($s->response_raw ?? ''),
+            'response_json' => $s->response_json ?? null,
+        ]);
+    }
 
-        // request side
-        'data_digest' => (string) ($s->data_digest ?? ''),
-        'logistics_interface' => (string) ($s->logistics_interface ?? ''), // exact JSON string sent
-        'request_payload' => $s->request_payload ?? null, // array/json
+    public function printOne(Request $request)
+    {
+        $request->validate([
+            'shipment_id' => 'required|integer',
+        ]);
 
-        // response side
-        'response_raw' => (string) ($s->response_raw ?? ''),
-        'response_json' => $s->response_json ?? null, // array/json
-    ]);
-}
+        $shipment = JntShipment::query()->findOrFail((int) $request->shipment_id);
+
+        if (empty($shipment->mailno)) {
+            return back()->with('error', 'No mailno yet. Create order first.');
+        }
+
+        $client = JntClient::fromConfig();
+        $res = $client->printWaybill((string) $shipment->mailno);
+
+        $b64 = data_get($res, 'responseitems.base64Url')
+            ?? data_get($res, 'responseitems.0.base64Url');
+
+        if (!$b64) {
+            return back()->with('error', 'No base64Url in print response.');
+        }
+
+        $pdfBytes = base64_decode(preg_replace('/\s+/', '', (string) $b64), true);
+        if ($pdfBytes === false) {
+            return back()->with('error', 'Invalid base64 PDF returned.');
+        }
+
+        $filename = 'waybill-' . $shipment->mailno . '.pdf';
+
+        return response($pdfBytes, 200, [
+            'Content-Type'        => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="'.$filename.'"',
+        ]);
+    }
+
+    // ✅ ZIP print for whole run
+    public function printRunZip(Request $request, int $runId)
+    {
+        set_time_limit(0);
+
+        $run = JntBatchRun::query()->findOrFail($runId);
+
+        // must have mailno
+        $hasAny = JntShipment::query()
+            ->where('jnt_batch_run_id', $runId)
+            ->whereNotNull('mailno')->where('mailno', '!=', '')
+            ->exists();
+
+        if (!$hasAny) {
+            return back()->with('error', 'No mailno yet in this run. Wait for create orders to finish.');
+        }
+
+        $client = JntClient::fromConfig();
+
+        $tmpDir = storage_path('app/tmp');
+        if (!is_dir($tmpDir)) {
+            @mkdir($tmpDir, 0775, true);
+        }
+
+        $zipPath = $tmpDir . '/waybills-run-' . $runId . '-' . now()->format('YmdHis') . '.zip';
+
+        $zip = new \ZipArchive();
+        $okOpen = $zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
+        if ($okOpen !== true) {
+            throw new \RuntimeException("Cannot create zip file: {$zipPath}");
+        }
+
+        $failLines = [];
+
+        JntShipment::query()
+            ->where('jnt_batch_run_id', $runId)
+            ->whereNotNull('mailno')->where('mailno', '!=', '')
+            ->select(['id', 'mailno'])
+            ->orderBy('id')
+            ->chunk(30, function ($chunk) use ($client, $zip, &$failLines) {
+                foreach ($chunk as $s) {
+                    $mailno = (string) $s->mailno;
+
+                    try {
+                        $res = $client->printWaybill($mailno);
+
+                        $b64 = data_get($res, 'responseitems.base64Url')
+                            ?? data_get($res, 'responseitems.0.base64Url');
+
+                        if (!$b64) {
+                            $failLines[] = "{$mailno} | no base64Url";
+                            continue;
+                        }
+
+                        $pdfBytes = base64_decode(preg_replace('/\s+/', '', (string) $b64), true);
+                        if ($pdfBytes === false) {
+                            $failLines[] = "{$mailno} | invalid base64";
+                            continue;
+                        }
+
+                        $zip->addFromString("waybill-{$mailno}.pdf", $pdfBytes);
+                    } catch (\Throwable $e) {
+                        $failLines[] = "{$mailno} | " . $e->getMessage();
+                        continue;
+                    }
+                }
+            });
+
+        if (!empty($failLines)) {
+            $zip->addFromString('FAILED.txt', implode("\n", $failLines));
+        }
+
+        $zip->close();
+
+        return response()->download($zipPath)->deleteFileAfterSend(true);
+    }
 }

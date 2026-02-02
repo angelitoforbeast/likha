@@ -329,7 +329,13 @@ Route::get('jnt/orders/batch/{runId}/status', [\App\Http\Controllers\JntOrderUiC
 Route::post('jnt/orders/batch/{runId}/stop', [\App\Http\Controllers\JntOrderUiController::class, 'stop']);
 Route::get('jnt/orders/debug/{shipmentId}', [\App\Http\Controllers\JntOrderUiController::class, 'debug'])
     ->whereNumber('shipmentId');
+// ✅ Print one waybill (opens PDF)
+Route::post('jnt/orders/print-one', [\App\Http\Controllers\JntOrderUiController::class, 'printOne'])
+    ->name('jnt.orders.print_one');
 
+// ✅ Print all waybills in a run (downloads ZIP)
+Route::post('jnt/orders/batch/{runId}/print-zip', [\App\Http\Controllers\JntOrderUiController::class, 'printRunZip'])
+    ->name('jnt.orders.print_run_zip');
 
 Route::get('/jnt/waybills', [\App\Http\Controllers\JntWaybillController::class, 'index']);
 Route::post('/jnt/waybills/query-one', [\App\Http\Controllers\JntWaybillController::class, 'queryOne']);

@@ -24,6 +24,8 @@ return [
         'queryOrder'  => env('JNT_EP_QUERY',  '/api/order/queryOrder'),
         'trackForJson'=> env('JNT_EP_TRACK',  '/api/track/trackForJson'),
         'queryInvoice'  => env('JNT_EP_INVOICE', '/api/invoice/queryInvoice'),
+        'print'  => '/api/order/print',
+
     ],
 
     'msg_types' => [
