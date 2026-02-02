@@ -9,37 +9,25 @@
     $runId        = request('run_id');
 
     $pages = $pages ?? [];
+    $rows  = $rows ?? [];
+    $run   = $run ?? null;
 
-    // rows always exists (preview OR run)
-    $rows = $rows ?? [];
+    // ✅ if opened via ?run_id=123 only, recover date/page from run->filters
+    if (!empty($runId) && $run && !empty(data_get($run, 'filters'))) {
+      $runFilters = json_decode((string) data_get($run, 'filters'), true) ?: [];
+      $selectedDate = $runFilters['date'] ?? $selectedDate;
+      $selectedPage = $runFilters['page'] ?? $selectedPage;
+    }
 
-    $run = $run ?? null;
-
-    $runStatus = data_get($run, 'status', ''); // initial only
+    $runStatus = data_get($run, 'status', '');
     $isRunView = !empty($runId);
     $isRunning = $isRunView && in_array((string)$runStatus, ['running','queued','processing'], true);
 
-    // initial stats (optional)
     $total   = (int) data_get($runStats, 'total', 0);
     $ok      = (int) data_get($runStats, 'ok', 0);
     $fail    = (int) data_get($runStats, 'fail', 0);
     $pending = (int) data_get($runStats, 'pending', 0);
     $processed = $ok + $fail;
-
-    $prettyJson = function($v) {
-      if ($v === null || $v === '') return '';
-      if (is_array($v)) return json_encode($v, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-      if (is_object($v)) return json_encode($v, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-
-      if (is_string($v)) {
-        $decoded = json_decode($v, true);
-        if (json_last_error() === JSON_ERROR_NONE) {
-          return json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-        }
-        return $v;
-      }
-      return (string) $v;
-    };
   @endphp
 
   <style>
@@ -59,8 +47,6 @@
     .badge-red { background:#fee2e2; color:#991b1b; }
     .badge-yellow { background:#fef9c3; color:#854d0e; }
     .badge-gray { background:#f3f4f6; color:#374151; }
-    pre { white-space:pre-wrap; word-break:break-word; }
-    details > summary { cursor:pointer; }
   </style>
 
   {{-- Flash messages --}}
@@ -81,8 +67,7 @@
       <form method="GET" action="{{ url('jnt/orders') }}" class="flex flex-col gap-3 md:flex-row md:items-end">
         <div>
           <label class="block text-sm font-medium mb-1">Date</label>
-          <input type="date" name="date" value="{{ $selectedDate }}"
-                 class="border rounded-lg px-3 py-2 text-sm w-52">
+          <input type="date" name="date" value="{{ $selectedDate }}" class="border rounded-lg px-3 py-2 text-sm w-52">
         </div>
 
         <div>
@@ -99,8 +84,7 @@
 
         <div>
           <label class="block text-sm font-medium mb-1">Run ID</label>
-          <input type="number" name="run_id" value="{{ $runId }}"
-                 placeholder="(optional)"
+          <input type="number" name="run_id" value="{{ $runId }}" placeholder="(optional)"
                  class="border rounded-lg px-3 py-2 text-sm w-32">
         </div>
 
@@ -139,13 +123,11 @@
           </div>
 
           <div class="flex gap-2">
-            {{-- Print Run ZIP --}}
             <form method="POST" action="{{ url("jnt/orders/batch/{$runId}/print-zip") }}">
               @csrf
               <button type="submit" class="btn btn-gray">Print Run (ZIP)</button>
             </form>
 
-            {{-- Stop run --}}
             <form method="POST" action="{{ url("jnt/orders/batch/{$runId}/stop") }}">
               @csrf
               <button type="submit" class="btn btn-red">Stop Run</button>
@@ -202,14 +184,12 @@
       </thead>
 
       <tbody class="divide-y">
-        @php
-          $list = $rows; // ✅ FIX: works for preview and run
-        @endphp
+        @php $list = $rows; @endphp
 
         @forelse($list as $r)
           @php
             $shipmentId = data_get($r,'shipment_id', data_get($r,'id','-'));
-            $macroId    = data_get($r,'macro_id', data_get($r,'macro_output_id', data_get($r,'macro_id','-')));
+            $macroId    = data_get($r,'macro_id', data_get($r,'macro_output_id', '-'));
 
             $rowDate    = data_get($r,'ts_date','-');
             $rowPage    = data_get($r,'page','-');
@@ -226,17 +206,18 @@
             $cod        = data_get($r,'cod','-');
 
             $mailno     = data_get($r,'mailno', null);
-            $tx         = data_get($r,'txlogisticid', '-');
+            $tx         = data_get($r,'txlogisticid', null);
+            $reason     = data_get($r,'reason', null);
 
-            $successVal = data_get($r,'success', null);
-            $reason     = data_get($r,'reason', '-');
+            $hasMailno  = !empty($mailno);
+            $hasReason  = !empty($reason);
 
-            $isSuccess  = ($successVal === true || (string)$successVal === '1');
-            $debugHas   = false; // (optional mo later)
+            // ✅ Show status even in preview if may shipment result na
+            $hasResult  = $hasMailno || $hasReason || !empty($tx) || ((string)$shipmentId !== '-' && $shipmentId !== null);
           @endphp
 
           <tr class="align-top">
-            <td class="p-2 mono text-xs">{{ $shipmentId }}</td>
+            <td class="p-2 mono text-xs">{{ $shipmentId ?? '-' }}</td>
             <td class="p-2 mono text-xs">{{ $macroId }}</td>
             <td class="p-2 mono text-xs">{{ $rowDate }}</td>
             <td class="p-2 text-xs">{{ $rowPage }}</td>
@@ -260,28 +241,26 @@
             <td class="p-2 mono text-xs">{{ $tx ?? '-' }}</td>
 
             <td class="p-2">
-              @if($isRunView)
-                @if($isSuccess)
-                  <span class="badge badge-green">YES</span>
-                @elseif($successVal === null || $successVal === '')
-                  <span class="badge badge-yellow">PENDING</span>
-                @else
-                  <span class="badge badge-red">NO</span>
-                @endif
-              @else
+              @if(!$hasResult)
                 <span class="badge badge-gray">PREVIEW</span>
+              @else
+                @if($hasMailno)
+                  <span class="badge badge-green">YES</span>
+                @elseif($hasReason)
+                  <span class="badge badge-red">NO</span>
+                @else
+                  <span class="badge badge-yellow">PENDING</span>
+                @endif
               @endif
             </td>
 
             <td class="p-2">
-              <span class="text-xs text-gray-700">
-                {{ $reason ?? '-' }}
-              </span>
+              <span class="text-xs text-gray-700">{{ $reason ?? '-' }}</span>
             </td>
 
-            {{-- Print --}}
+            {{-- ✅ Print works in preview too IF may mailno --}}
             <td class="p-2">
-              @if($isRunView && !empty($mailno))
+              @if(!empty($mailno) && !empty($shipmentId) && (string)$shipmentId !== '-')
                 <form method="POST" action="{{ url('jnt/orders/print-one') }}" target="_blank">
                   @csrf
                   <input type="hidden" name="shipment_id" value="{{ $shipmentId }}">
@@ -296,9 +275,14 @@
               @endif
             </td>
 
-            {{-- Debug --}}
+            {{-- ✅ Debug visible in preview too IF may shipment_id --}}
             <td class="p-2">
-              <span class="text-xs muted">-</span>
+              @if(!empty($shipmentId) && (string)$shipmentId !== '-')
+                <a href="{{ url('jnt/orders/debug/' . $shipmentId) }}" target="_blank"
+                   class="underline text-xs">Debug</a>
+              @else
+                <span class="text-xs muted">-</span>
+              @endif
             </td>
           </tr>
         @empty
@@ -316,7 +300,6 @@
   @if($isRunView)
     <script>
       (function () {
-        const runId = @json((string)$runId);
         const statusUrl = @json(url("jnt/orders/batch/{$runId}/status"));
         const isRunning = @json($isRunning);
 
@@ -344,7 +327,6 @@
 
             const j = await res.json();
 
-            // ✅ works with flat OR nested
             const status = (j.status ?? j.run?.status ?? '').toString();
             const processed = Number(j.processed ?? j.stats?.processed ?? 0);
             const total = Number(j.total ?? j.stats?.total ?? 0);
@@ -381,4 +363,5 @@
       })();
     </script>
   @endif
+
 </x-layout>

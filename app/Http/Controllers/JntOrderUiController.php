@@ -12,117 +12,164 @@ use Illuminate\Support\Facades\DB;
 class JntOrderUiController extends Controller
 {
     public function index(Request $request)
-    {
-        $date = $request->input('date') ?: now('Asia/Manila')->toDateString();
-        $page = trim((string) $request->input('page', ''));
-        $runId = $request->input('run_id');
+{
+    $date  = $request->input('date') ?: now('Asia/Manila')->toDateString();
+    $page  = trim((string) $request->input('page', ''));
+    $runId = $request->input('run_id');
 
-        // Pages dropdown
-        $pages = DB::table('macro_output')
-            ->whereNotNull('PAGE')
-            ->where('PAGE', '!=', '')
-            ->distinct()
-            ->orderBy('PAGE')
-            ->pluck('PAGE')
+    // Pages dropdown
+    $pages = DB::table('macro_output')
+        ->whereNotNull('PAGE')
+        ->where('PAGE', '!=', '')
+        ->distinct()
+        ->orderBy('PAGE')
+        ->pluck('PAGE')
+        ->values()
+        ->all();
+
+    // ✅ Run only if explicitly provided
+    $run = null;
+    if ($runId) {
+        $run = JntBatchRun::query()->find((int) $runId);
+    }
+
+    // Base macro_output filter
+    $macroBase = DB::table('macro_output')
+        ->whereDate('ts_date', $date)
+        ->whereNotNull('FULL NAME')->where('FULL NAME', '!=', '')
+        ->whereNotNull('PHONE NUMBER')->where('PHONE NUMBER', '!=', '')
+        ->whereNotNull('ADDRESS')->where('ADDRESS', '!=', '')
+        ->whereNotNull('PROVINCE')->where('PROVINCE', '!=', '')
+        ->whereNotNull('CITY')->where('CITY', '!=', '')
+        ->whereNotNull('BARANGAY')->where('BARANGAY', '!=', '')
+        ->whereNotNull('ITEM_NAME')->where('ITEM_NAME', '!=', '')
+        ->whereNotNull('COD')->where('COD', '!=', '');
+
+    if ($page !== '') {
+        $macroBase->where('PAGE', $page);
+    }
+
+    // ✅ If run exists → show shipments, else preview from macro_output
+    if ($run) {
+        $rows = DB::table('jnt_shipments as s')
+            ->join('macro_output as m', 'm.id', '=', 's.macro_output_id')
+            ->where('s.jnt_batch_run_id', $run->id)
+            ->select([
+                's.id as shipment_id',
+                'm.id as macro_id',
+                'm.ts_date as ts_date',
+                'm.PAGE as page',
+                DB::raw('`m`.`FULL NAME` as full_name'),
+                DB::raw('`m`.`PHONE NUMBER` as phone_number'),
+                'm.ADDRESS as address',
+                'm.PROVINCE as province',
+                'm.CITY as city',
+                'm.BARANGAY as barangay',
+                'm.ITEM_NAME as item_name',
+                'm.COD as cod',
+                's.mailno as mailno',
+                's.txlogisticid as txlogisticid',
+                's.success as success',
+                's.reason as reason',
+            ])
+            ->orderByDesc('s.id')
+            ->paginate(50)
+            ->withQueryString();
+    } else {
+        // ✅ PREVIEW
+        $rows = $macroBase
+            ->select([
+                DB::raw('NULL as shipment_id'),
+                'id as macro_id',
+                'ts_date',
+                'PAGE as page',
+                DB::raw('`FULL NAME` as full_name'),
+                DB::raw('`PHONE NUMBER` as phone_number'),
+                'ADDRESS as address',
+                'PROVINCE as province',
+                'CITY as city',
+                'BARANGAY as barangay',
+                'ITEM_NAME as item_name',
+                'COD as cod',
+                DB::raw('NULL as mailno'),
+                DB::raw('NULL as txlogisticid'),
+                DB::raw('NULL as success'),
+                DB::raw('NULL as reason'),
+            ])
+            ->orderByDesc('id')
+            ->paginate(50)
+            ->withQueryString();
+
+        // ✅ IMPORTANT FIX:
+        // Attach latest jnt_shipments per macro_output_id so preview shows Mailno/TX/Success/Reason/Print/Debug.
+        $macroIdsOnPage = collect($rows->items())
+            ->pluck('macro_id')
+            ->filter()
+            ->unique()
             ->values()
             ->all();
 
-        // ✅ Run only if explicitly provided
-        $run = null;
-        if ($runId) {
-            $run = JntBatchRun::query()->find((int) $runId);
-        }
+        if (!empty($macroIdsOnPage)) {
+            $latestIds = DB::table('jnt_shipments')
+                ->whereIn('macro_output_id', $macroIdsOnPage)
+                ->selectRaw('MAX(id) as id')
+                ->groupBy('macro_output_id');
 
-        // Base macro_output filter
-        $macroBase = DB::table('macro_output')
-            ->whereDate('ts_date', $date)
-            ->whereNotNull('FULL NAME')->where('FULL NAME', '!=', '')
-            ->whereNotNull('PHONE NUMBER')->where('PHONE NUMBER', '!=', '')
-            ->whereNotNull('ADDRESS')->where('ADDRESS', '!=', '')
-            ->whereNotNull('PROVINCE')->where('PROVINCE', '!=', '')
-            ->whereNotNull('CITY')->where('CITY', '!=', '')
-            ->whereNotNull('BARANGAY')->where('BARANGAY', '!=', '')
-            ->whereNotNull('ITEM_NAME')->where('ITEM_NAME', '!=', '')
-            ->whereNotNull('COD')->where('COD', '!=', '');
-
-        if ($page !== '') {
-            $macroBase->where('PAGE', $page);
-        }
-
-        // ✅ If run exists → show shipments, else preview from macro_output
-        if ($run) {
-            $rows = DB::table('jnt_shipments as s')
-                ->join('macro_output as m', 'm.id', '=', 's.macro_output_id')
-                ->where('s.jnt_batch_run_id', $run->id)
+            $latestShipments = DB::table('jnt_shipments as s')
+                ->joinSub($latestIds, 'mx', 'mx.id', '=', 's.id')
                 ->select([
                     's.id as shipment_id',
-                    'm.id as macro_id',
-                    'm.ts_date as ts_date',
-                    'm.PAGE as page',
-                    DB::raw('`m`.`FULL NAME` as full_name'),
-                    DB::raw('`m`.`PHONE NUMBER` as phone_number'),
-                    'm.ADDRESS as address',
-                    'm.PROVINCE as province',
-                    'm.CITY as city',
-                    'm.BARANGAY as barangay',
-                    'm.ITEM_NAME as item_name',
-                    'm.COD as cod',
-                    's.mailno as mailno',
-                    's.txlogisticid as txlogisticid',
-                    's.success as success',
-                    's.reason as reason',
+                    's.macro_output_id',
+                    's.mailno',
+                    's.txlogisticid',
+                    's.success',
+                    's.reason',
                 ])
-                ->orderByDesc('s.id')
-                ->paginate(50)
-                ->withQueryString();
-        } else {
-            $rows = $macroBase
-                ->select([
-                    DB::raw('NULL as shipment_id'),
-                    'id as macro_id',
-                    'ts_date',
-                    'PAGE as page',
-                    DB::raw('`FULL NAME` as full_name'),
-                    DB::raw('`PHONE NUMBER` as phone_number'),
-                    'ADDRESS as address',
-                    'PROVINCE as province',
-                    'CITY as city',
-                    'BARANGAY as barangay',
-                    'ITEM_NAME as item_name',
-                    'COD as cod',
-                    DB::raw('NULL as mailno'),
-                    DB::raw('NULL as txlogisticid'),
-                    DB::raw('NULL as success'),
-                    DB::raw('NULL as reason'),
-                ])
-                ->orderByDesc('id')
-                ->paginate(50)
-                ->withQueryString();
-        }
+                ->get()
+                ->keyBy('macro_output_id');
 
-        // ✅ Optional: compute live stats when run view (so header shows correct even before JS poll)
-        $runStats = null;
-        if ($run) {
-            $runStats = JntShipment::query()
-                ->where('jnt_batch_run_id', $run->id)
-                ->selectRaw("
-                    COUNT(*) as total,
-                    SUM(CASE WHEN mailno IS NOT NULL AND mailno != '' THEN 1 ELSE 0 END) as ok,
-                    SUM(CASE WHEN (reason IS NOT NULL AND reason != '') AND (mailno IS NULL OR mailno = '') THEN 1 ELSE 0 END) as fail,
-                    SUM(CASE WHEN ((mailno IS NULL OR mailno = '') AND (reason IS NULL OR reason = '')) THEN 1 ELSE 0 END) as pending
-                ")
-                ->first();
-        }
+            $rows->setCollection(
+                $rows->getCollection()->map(function ($r) use ($latestShipments) {
+                    $mid = data_get($r, 'macro_id');
+                    $s = $latestShipments->get($mid);
+                    if (!$s) return $r;
 
-        return view('jnt.orders.index', compact(
-            'date',
-            'page',
-            'pages',
-            'run',
-            'rows',
-            'runStats'
-        ));
+                    $r->shipment_id  = $s->shipment_id;
+                    $r->mailno       = $s->mailno;
+                    $r->txlogisticid = $s->txlogisticid;
+                    $r->success      = $s->success;
+                    $r->reason       = $s->reason;
+
+                    return $r;
+                })
+            );
+        }
     }
+
+    // ✅ Optional: compute live stats when run view (so header shows correct even before JS poll)
+    $runStats = null;
+    if ($run) {
+        $runStats = JntShipment::query()
+            ->where('jnt_batch_run_id', $run->id)
+            ->selectRaw("
+                COUNT(*) as total,
+                SUM(CASE WHEN mailno IS NOT NULL AND mailno != '' THEN 1 ELSE 0 END) as ok,
+                SUM(CASE WHEN (reason IS NOT NULL AND reason != '') AND (mailno IS NULL OR mailno = '') THEN 1 ELSE 0 END) as fail,
+                SUM(CASE WHEN ((mailno IS NULL OR mailno = '') AND (reason IS NULL OR reason = '')) THEN 1 ELSE 0 END) as pending
+            ")
+            ->first();
+    }
+
+    return view('jnt.orders.index', compact(
+        'date',
+        'page',
+        'pages',
+        'run',
+        'rows',
+        'runStats'
+    ));
+}
+
 
     public function createBatch(Request $request)
     {
