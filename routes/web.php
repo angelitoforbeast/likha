@@ -323,9 +323,12 @@ Route::prefix('jnt/shipments')->group(function () {
 });
 Route::get('jnt/orders', [\App\Http\Controllers\JntOrderUiController::class, 'index']);
 Route::post('jnt/orders/batch', [\App\Http\Controllers\JntOrderUiController::class, 'createBatch']);
+
 Route::get('jnt/orders/batch/{runId}', [\App\Http\Controllers\JntOrderUiController::class, 'showRun']);
 Route::get('jnt/orders/batch/{runId}/status', [\App\Http\Controllers\JntOrderUiController::class, 'status']);
 Route::post('jnt/orders/batch/{runId}/stop', [\App\Http\Controllers\JntOrderUiController::class, 'stop']);
+Route::get('jnt/orders/debug/{shipmentId}', [\App\Http\Controllers\JntOrderUiController::class, 'debug'])
+    ->whereNumber('shipmentId');
 
 
 Route::get('/jnt/waybills', [\App\Http\Controllers\JntWaybillController::class, 'index']);

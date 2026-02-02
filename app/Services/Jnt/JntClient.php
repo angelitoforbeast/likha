@@ -51,13 +51,78 @@ class JntClient
         );
     }
 
-    public function createOrder(array $bizPayload): array
-    {
-        $msgType = (string) config('jnt.msg_types.create', 'ORDERCREATE');
-        $endpoint = $this->endpoint('create');
+    public function createOrder(array $payload): array
+{
+    $endpoint = (string) (config('jnt.endpoints.create_order') ?? '/api/order/create');
+    $msgType  = 'ORDERCREATE';
 
-        return $this->postJnt($endpoint, $msgType, $bizPayload);
+    // ✅ EXACT string sent to API
+    $logisticsInterface = json_encode(
+        $payload,
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+    );
+
+    if ($logisticsInterface === false) {
+        throw new \RuntimeException('Failed to json_encode logistics_interface');
     }
+
+    // ✅ data_digest = base64( md5_hex( logistics_interface + secret ) )
+    $secret = (string) config('jnt.credentials.secret');
+    $md5Hex = md5($logisticsInterface . $secret); // php md5() => lowercase hex string
+    $dataDigest = base64_encode($md5Hex);
+
+    $ec = (string) config('jnt.credentials.eccompanyid');
+    $cust = (string) config('jnt.credentials.customerid');
+
+    $form = [
+        'logistics_interface' => $logisticsInterface,
+        'data_digest'         => $dataDigest,
+        'msg_type'            => $msgType,
+        'eccompanyid'         => $ec,
+        'customerid'          => $cust,
+    ];
+
+    $this->lastRequest = [
+        'endpoint'            => $endpoint,
+        'msg_type'            => $msgType,
+        'logistics_interface' => $logisticsInterface, // ✅ exact
+        'data_digest'         => $dataDigest,
+        'form'                => $form,
+    ];
+
+    $url = rtrim((string) config('jnt.base_url'), '/') . $endpoint;
+
+    $resp = \Illuminate\Support\Facades\Http::asForm()
+        ->acceptJson()
+        ->timeout((int) (config('jnt.timeout_seconds') ?? 60))
+        ->post($url, $form);
+
+    $raw = $resp->body(); // ✅ exact raw response
+
+    $json = null;
+    try {
+        $json = $resp->json();
+    } catch (\Throwable $e) {
+        $json = null;
+    }
+
+    $this->lastResponse = [
+        'http_status' => $resp->status(),
+        'raw'         => $raw,   // ✅ exact
+        'json'        => $json,  // parsed
+    ];
+
+    // Return parsed array if possible, else wrap raw
+    if (is_array($json)) return $json;
+
+    return [
+        'success' => false,
+        'reason'  => 'Non-JSON response',
+        'raw'     => $raw,
+        'http_status' => $resp->status(),
+    ];
+}
+
 
     public function cancelOrder(array $bizPayload): array
     {

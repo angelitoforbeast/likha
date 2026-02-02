@@ -21,27 +21,25 @@ class JntPayloadBuilder
     {
         $now = Carbon::now('Asia/Manila');
 
-        $ec = config('jnt.credentials.eccompanyid');
-        $cust = config('jnt.credentials.customerid');
+        $ec   = (string) config('jnt.credentials.eccompanyid');
+        $cust = (string) config('jnt.credentials.customerid');
 
         // Environment: doc says staging=yes, production=no(default)
         $envYesNo = (string)($opts['environment'] ?? (config('jnt.env') === 'sandbox' ? 'yes' : 'no'));
 
         // txlogisticid: must be your internal unique order number
-        // Use macro_output id if available
-        $tx = $opts['txlogisticid']
-            ?? ('LIKHA-' . ($row['id'] ?? Str::uuid()->toString()) . '-' . $now->format('YmdHis'));
+        $tx = (string)($opts['txlogisticid']
+            ?? ('LIKHA-' . ($row['id'] ?? Str::uuid()->toString()) . '-' . $now->format('YmdHis')));
 
-        // Receiver fields (adjust keys to your actual macro_output columns)
-        $receiverName  = (string)($row['full_name'] ?? $row['FULL_NAME'] ?? $row['consignee'] ?? '');
-        $receiverPhone = (string)($row['phone_number'] ?? $row['PHONE_NUMBER'] ?? $row['consignee_phone'] ?? '');
+        // Receiver RAW fields (DO NOT NORMALIZE prov/city/area/address)
+        $receiverNameRaw  = (string)($row['full_name'] ?? $row['FULL_NAME'] ?? $row['consignee'] ?? '');
+        $receiverPhoneRaw = (string)($row['phone_number'] ?? $row['PHONE_NUMBER'] ?? $row['consignee_phone'] ?? '');
 
-        $prov = (string)($row['province'] ?? $row['PROVINCE'] ?? '');
-        $city = (string)($row['city'] ?? $row['CITY'] ?? '');
-        $brgy = (string)($row['barangay'] ?? $row['BARANGAY'] ?? '');
+        $provRaw = (string)($row['province'] ?? $row['PROVINCE'] ?? '');
+        $cityRaw = (string)($row['city'] ?? $row['CITY'] ?? '');
+        $brgyRaw = (string)($row['barangay'] ?? $row['BARANGAY'] ?? '');
 
         $addr1 = (string)($row['address'] ?? $row['ADDRESS'] ?? $row['consignee_address'] ?? '');
-        // If you already have "Address Line 1" in your system, prefer it:
         $addrLine1 = (string)($row['address_line_1'] ?? $row['Address Line 1'] ?? $addr1);
 
         // COD/itemsvalue
@@ -52,92 +50,108 @@ class JntPayloadBuilder
         // Item name
         $itemName = (string)($row['item_name'] ?? $row['ITEM_NAME'] ?? 'Item');
 
-        // Weight (kg) – default safe
+        // Weight (kg)
         $weight = (string)($opts['weight'] ?? '0.5');
 
-        // Sender: ideally from your company config, not from row
+        // ✅ Keep receiver fields RAW (trim only)
+        $prov = trim($provRaw);
+        $city = trim($cityRaw);
+        $brgy = trim($brgyRaw);
+        $addr = trim((string)$addrLine1);
+
+        // ✅ Phone normalize (safe; not related to B063)
+        $receiverPhone = self::normalizePhone($receiverPhoneRaw);
+        $receiverName  = trim($receiverNameRaw);
+
+        // Sender from config (keep stable; you can also make these RAW if you want)
+        $senderName   = (string)($opts['sender_name'] ?? config('jnt.sender.name', 'INCEPXION INC'));
+        $senderPhone  = self::normalizePhone((string)($opts['sender_phone'] ?? config('jnt.sender.phone', '09170000000')));
+        $senderMobile = self::normalizePhone((string)($opts['sender_mobile'] ?? config('jnt.sender.mobile', '09170000000')));
+
+        $senderProv   = trim((string)($opts['sender_prov'] ?? config('jnt.sender.prov', 'METRO-MANILA')));
+        $senderCity   = trim((string)($opts['sender_city'] ?? config('jnt.sender.city', 'TAGUIG')));
+        $senderArea   = trim((string)($opts['sender_area'] ?? config('jnt.sender.area', 'BAGUMBAYAN')));
+        $senderAddr   = trim((string)($opts['sender_address'] ?? config('jnt.sender.address', '')));
+
         $sender = [
-            'name'    => (string)($opts['sender_name'] ?? config('jnt.sender.name', 'INCEPXION')),
-            'phone'   => (string)($opts['sender_phone'] ?? config('jnt.sender.phone', '09170000000')),
-            'mobile'  => (string)($opts['sender_mobile'] ?? config('jnt.sender.mobile', '09170000000')),
-            'prov'    => (string)($opts['sender_prov'] ?? config('jnt.sender.prov', 'METRO-MANILA')),
-            'city'    => (string)($opts['sender_city'] ?? config('jnt.sender.city', 'TAGUIG')),
-            'area'    => (string)($opts['sender_area'] ?? config('jnt.sender.area', 'BAGUMBAYAN')),
-            'address' => (string)($opts['sender_address'] ?? config('jnt.sender.address', '')),
+            'name'    => $senderName !== '' ? $senderName : 'INCEPXION INC',
+            'phone'   => $senderPhone !== '' ? $senderPhone : '09170000000',
+            'mobile'  => $senderMobile !== '' ? $senderMobile : ($senderPhone !== '' ? $senderPhone : '09170000000'),
+            'prov'    => $senderProv !== '' ? $senderProv : 'METRO-MANILA',
+            'city'    => $senderCity !== '' ? $senderCity : 'TAGUIG',
+            'area'    => $senderArea !== '' ? $senderArea : 'BAGUMBAYAN',
+            'address' => $senderAddr !== '' ? $senderAddr : '',
         ];
 
         $receiver = [
-            'name'    => $receiverName ?: 'N/A',
-            'phone'   => $receiverPhone ?: 'N/A',
-            'mobile'  => $receiverPhone ?: 'N/A',
-            'prov'    => self::normalizeProv($prov),
-            'city'    => self::normalizeCity($city),
-            'area'    => self::normalizeArea($brgy),
-            'address' => trim($addrLine1) ?: 'N/A',
+            'name'    => $receiverName !== '' ? $receiverName : 'N/A',
+            'phone'   => $receiverPhone !== '' ? $receiverPhone : 'N/A',
+            'mobile'  => $receiverPhone !== '' ? $receiverPhone : 'N/A',
+
+            // ✅ RAW from DB (trim only; NO hyphen conversion)
+            'prov'    => $prov !== '' ? $prov : 'N/A',
+            'city'    => $city !== '' ? $city : 'N/A',
+            'area'    => $brgy !== '' ? $brgy : 'N/A',
+            'address' => $addr !== '' ? $addr : 'N/A',
         ];
 
-        $payload = [
-            'actiontype'     => 'add',
-            'environment'    => $envYesNo,
-            'eccompanyid'    => $ec,
-            'customerid'     => $cust,
-            'txlogisticid'   => $tx,
+        return [
+            'actiontype'      => 'add',
+            'environment'     => $envYesNo,
+            'eccompanyid'     => $ec,
+            'customerid'      => $cust,
+            'txlogisticid'    => $tx,
 
-            'ordertype'      => '1',
-            'servicetype'    => '6',
-            'deliverytype'   => '1',
+            'ordertype'       => '1',
+            'servicetype'     => '6',
+            'deliverytype'    => '1',
 
-            'sender'         => $sender,
-            'receiver'       => $receiver,
+            'sender'          => $sender,
+            'receiver'        => $receiver,
 
-            'createordertime'=> $now->format('Y-m-d H:i:s'),
-            'sendstarttime'  => $now->format('Y-m-d') . ' 09:00:00',
-            'sendendtime'    => $now->format('Y-m-d') . ' 18:00:00',
+            'createordertime' => $now->format('Y-m-d H:i:s'),
+            'sendstarttime'   => $now->format('Y-m-d') . ' 09:00:00',
+            'sendendtime'     => $now->format('Y-m-d') . ' 18:00:00',
 
-            'paytype'        => '1',
-            'weight'         => $weight,
-            'itemsvalue'     => (string)$cod,
-            'totalquantity'  => '1',
-            'remark'         => (string)($opts['remark'] ?? 'LIKHA'),
-
-            // recommended add
-            'isInsured'      => '0',
+            'paytype'         => '1',
+            'weight'          => $weight,
+            'itemsvalue'      => (string)$cod,
+            'totalquantity'   => '1',
+            'remark'          => (string)($opts['remark'] ?? 'LIKHA'),
+            'isInsured'       => '0',
 
             'items' => [[
-                'itemname'  => $itemName ?: 'Item',
+                'itemname'  => $itemName !== '' ? $itemName : 'Item',
                 'number'    => '1',
                 'itemvalue' => (string)$cod,
-                'desc'      => $itemName ?: 'Item',
+                'desc'      => $itemName !== '' ? $itemName : 'Item',
             ]],
         ];
-
-        return $payload;
     }
 
-    // Keep these simple; later you can enforce your exact PH normalization rules
-    protected static function normalizeProv(string $v): string
+    /**
+     * ✅ J&T PH phone normalization:
+     * - "9219723247" -> "09219723247"
+     * - "639219..."  -> "0921..."
+     * - keep as-is if already starts with 0 and 11 digits
+     */
+    protected static function normalizePhone(string $v): string
     {
-        $v = strtoupper(trim($v));
-        $v = str_replace(['.', ','], '', $v);
-        $v = preg_replace('/\s+/', '-', $v);
-        // common: Metro Manila format
-        if (in_array($v, ['NCR','METRO-MANILA','METROMANILA','MANILA'], true)) return 'METRO-MANILA';
-        return $v ?: 'N/A';
-    }
+        $v = trim($v);
+        $digits = preg_replace('/\D+/', '', $v);
 
-    protected static function normalizeCity(string $v): string
-    {
-        $v = strtoupper(trim($v));
-        $v = str_replace(['.', ','], '', $v);
-        $v = preg_replace('/\s+/', '-', $v);
-        return $v ?: 'N/A';
-    }
+        if ($digits === '') return '';
 
-    protected static function normalizeArea(string $v): string
-    {
-        $v = strtoupper(trim($v));
-        $v = str_replace(['.', ','], '', $v);
-        $v = preg_replace('/\s+/', '-', $v);
-        return $v ?: 'N/A';
+        // 63xxxxxxxxxx -> 0xxxxxxxxxx
+        if (str_starts_with($digits, '63') && strlen($digits) === 12) {
+            $digits = '0' . substr($digits, 2);
+        }
+
+        // 9xxxxxxxxx -> 09xxxxxxxxx
+        if (strlen($digits) === 10 && str_starts_with($digits, '9')) {
+            $digits = '0' . $digits;
+        }
+
+        return $digits;
     }
 }

@@ -1,219 +1,396 @@
+{{-- resources/views/jnt/orders/index.blade.php --}}
 <x-layout>
   <x-slot name="title">J&T Orders</x-slot>
-  <x-slot name="heading">J&T Orders (Create Batch from Macro Output)</x-slot>
+  <x-slot name="heading">J&T Orders</x-slot>
 
-  {{-- Flash message --}}
-  @if (session('success'))
-    <div class="max-w-7xl mx-auto mt-4 bg-green-100 text-green-900 p-3 rounded">
-      {{ session('success') }}
+  <style>
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; }
+    .btn { padding:.45rem .75rem; border-radius:.5rem; font-size:.875rem; border:1px solid #d1d5db; background:#fff; }
+    .btn-primary { background:#111827; color:#fff; border-color:#111827; }
+    .btn-danger { background:#ef4444; color:#fff; border-color:#ef4444; }
+    .tbl th, .tbl td { padding:.5rem; vertical-align:top; }
+    .tbl th { font-size:.75rem; color:#6b7280; text-transform:uppercase; letter-spacing:.04em; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .debug-pre { white-space: pre-wrap; word-break: break-word; }
+    .debug-box { background:#0b1020; color:#e5e7eb; border-radius:10px; padding:12px; }
+    .link { color:#2563eb; text-decoration: underline; cursor:pointer; }
+  </style>
+
+  @php
+    $qDate = request('date', $date ?? now()->format('Y-m-d'));
+    $qPage = request('page', $page ?? '');
+    $qRunId = request('run_id', $runId ?? '');
+    $rows = $rows ?? collect();
+    $run = $run ?? null;
+    $flash = session('status') ?? session('message');
+  @endphp
+
+  @if($flash)
+    <div class="mb-3 card p-3 text-sm">
+      {{ $flash }}
     </div>
   @endif
 
-  {{-- FILTER + ACTIONS --}}
-  <div class="max-w-7xl mx-auto mt-6 bg-white rounded shadow p-4 mb-4">
-
-    {{-- FILTER FORM --}}
+  {{-- FILTER BAR --}}
+  <div class="card p-3 mb-3">
     <form method="GET" action="{{ url('/jnt/orders') }}" class="flex flex-wrap items-end gap-3">
       <div>
-        <label class="block text-xs text-gray-600 mb-1">Date</label>
-        <input type="date"
-               name="date"
-               value="{{ $date }}"
-               class="border rounded px-2 py-1 text-sm">
+        <div class="text-xs text-gray-500 mb-1">Date</div>
+        <input type="date" name="date" value="{{ $qDate }}" class="border rounded px-2 py-1 text-sm">
       </div>
 
       <div>
-        <label class="block text-xs text-gray-600 mb-1">PAGE</label>
-        <select name="page" class="border rounded px-2 py-1 text-sm">
-          <option value="">-- All --</option>
-          @foreach($pages as $p)
-            <option value="{{ $p }}" @selected($page === $p)>{{ $p }}</option>
+        <div class="text-xs text-gray-500 mb-1">Page</div>
+        <select name="page" class="border rounded px-2 py-1 text-sm min-w-[220px]">
+          <option value="">—</option>
+          @foreach(($pages ?? []) as $p)
+            <option value="{{ $p }}" @selected($qPage === $p)>{{ $p }}</option>
           @endforeach
         </select>
       </div>
 
-      {{-- ❗ INTENTIONALLY NO run_id HERE --}}
-      <button class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-sm">
-        Apply Filter
-      </button>
+      <div>
+        <div class="text-xs text-gray-500 mb-1">Run ID</div>
+        <input type="number" name="run_id" value="{{ $qRunId }}" placeholder="(optional)" class="border rounded px-2 py-1 text-sm w-[120px]">
+      </div>
+
+      <div class="flex gap-2">
+        <button class="btn btn-primary" type="submit">Filter</button>
+
+        @if(!empty($qRunId))
+          <a class="btn" href="{{ url('/jnt/orders?date='.$qDate.'&page='.urlencode($qPage)) }}">Back to Preview</a>
+        @endif
+      </div>
     </form>
-
-    {{-- CREATE BATCH --}}
-    <div class="mt-3 flex flex-wrap gap-2">
-      <form method="POST" action="{{ url('/jnt/orders/batch') }}">
-        @csrf
-        <input type="hidden" name="date" value="{{ $date }}">
-        <input type="hidden" name="page" value="{{ $page }}">
-        <button class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded text-sm">
-          Create Batch (Use Current Filter)
-        </button>
-      </form>
-
-      <div class="text-xs text-gray-600 self-center">
-        Creates placeholder shipments then queues J&T order jobs.
-      </div>
-    </div>
-
-    {{-- RUN STATUS --}}
-    @if(!empty($run))
-      <div class="mt-4 text-sm">
-        <div class="font-semibold">
-          Live Run:
-          <span id="run-id">{{ $run->id }}</span>
-          | Status: <span id="run-status">{{ $run->status }}</span>
-          | Total: <span id="run-total">{{ (int)$run->total }}</span>
-          | Processed: <span id="run-processed">{{ (int)$run->processed }}</span>
-          | OK: <span id="run-ok">{{ (int)$run->success_count }}</span>
-          | Fail: <span id="run-fail">{{ (int)$run->fail_count }}</span>
-        </div>
-        <div id="run-note" class="text-xs text-gray-500 mt-1">
-          Waiting for updates...
-        </div>
-      </div>
-    @endif
   </div>
 
+  {{-- RUN HEADER --}}
+  @if($run)
+    @php
+      $runStatus = (string) data_get($run, 'status', 'running');
+      $runTotal = (int) data_get($run, 'total', $rows->count());
+      $runIdShow = (int) data_get($run, 'id', (int)$qRunId);
+    @endphp
+
+    <div class="card p-3 mb-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div class="text-sm font-semibold">
+            Viewing Run #{{ $runIdShow }}
+            <span class="text-xs text-gray-500">— status: <b id="runStatusText">{{ $runStatus }}</b></span>
+          </div>
+          <div class="text-xs text-gray-600 mt-1">
+            processed <span id="runProcessedText">0</span>/<span id="runTotalText">{{ $runTotal }}</span>
+            (ok <span id="runOkText">0</span>, fail <span id="runFailText">0</span>, pending <span id="runPendingText">0</span>)
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <form method="POST" action="{{ url('jnt/orders/batch') }}">
+            @csrf
+            <input type="hidden" name="date" value="{{ $qDate }}">
+            <input type="hidden" name="page" value="{{ $qPage }}">
+            <button type="submit" class="btn btn-primary">Create Batch (Queue)</button>
+          </form>
+
+          <form method="POST" action="{{ url('jnt/orders/batch/'.$runIdShow.'/stop') }}"
+                onsubmit="return confirm('Stop this run?');">
+            @csrf
+            <button type="submit" class="btn btn-danger">Stop Run</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  @else
+    <div class="card p-3 mb-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="text-sm text-gray-700">
+          Preview for <b>{{ $qDate }}</b>
+          @if($qPage) — Page: <b>{{ $qPage }}</b> @endif
+          <span class="text-xs text-gray-500 ml-2">({{ $rows->count() }} rows)</span>
+        </div>
+
+        <form method="POST" action="{{ url('jnt/orders/batch') }}">
+          @csrf
+          <input type="hidden" name="date" value="{{ $qDate }}">
+          <input type="hidden" name="page" value="{{ $qPage }}">
+          <button type="submit" class="btn btn-primary">Create Batch (Queue)</button>
+        </form>
+      </div>
+    </div>
+  @endif
+
   {{-- TABLE --}}
-  <div class="max-w-7xl mx-auto bg-white rounded shadow overflow-x-auto">
-    <table class="min-w-full text-sm">
-      <thead class="bg-gray-100 text-gray-700">
+  <div class="card overflow-x-auto">
+    <table class="tbl w-full">
+      <thead class="bg-gray-50">
         <tr>
-          <th class="px-3 py-2 text-left">ID</th>
-          <th class="px-3 py-2 text-left">Date</th>
-          <th class="px-3 py-2 text-left">PAGE</th>
-          <th class="px-3 py-2 text-left">Full Name</th>
-          <th class="px-3 py-2 text-left">Phone</th>
-          <th class="px-3 py-2 text-left">Address</th>
-          <th class="px-3 py-2 text-left">Province</th>
-          <th class="px-3 py-2 text-left">City</th>
-          <th class="px-3 py-2 text-left">Barangay</th>
-          <th class="px-3 py-2 text-left">Item</th>
-          <th class="px-3 py-2 text-left">COD</th>
-          <th class="px-3 py-2 text-left">J&T Mailno</th>
-          <th class="px-3 py-2 text-left">TxLogisticId</th>
-          <th class="px-3 py-2 text-left">Success</th>
-          <th class="px-3 py-2 text-left">Reason</th>
+          <th>Shipment ID</th>
+          <th>Macro ID</th>
+          <th>Date</th>
+          <th>Page</th>
+          <th>Receiver</th>
+          <th>Prov / City / Brgy</th>
+          <th>Item</th>
+          <th>COD</th>
+          <th>Mailno</th>
+          <th>TX</th>
+          <th>Success</th>
+          <th>Reason</th>
+          <th>API Debug</th>
         </tr>
       </thead>
 
       <tbody>
         @forelse($rows as $r)
           @php
-            $isRunRow = isset($r->shipment_id);
-            $mailno = $isRunRow ? ($r->mailno ?: '-') : '-';
-            $tx = $isRunRow ? ($r->txlogisticid ?: '-') : '-';
-            $succ = $isRunRow ? ((int)$r->success === 1) : false;
-            $reason = $isRunRow && trim((string)$r->reason) !== '' ? $r->reason : '-';
+            $shipmentId = (string) data_get($r, 'shipment_id', data_get($r, 'id', ''));
+            $macroId    = (string) data_get($r, 'macro_id', '-');
+            $tsDate     = (string) data_get($r, 'ts_date', data_get($r, 'date', '-'));
+            $pageName   = (string) data_get($r, 'page', data_get($r, 'PAGE', '-'));
+
+            $fullName   = (string) data_get($r, 'full_name', '');
+            $phone      = (string) data_get($r, 'phone_number', '');
+            $addr       = (string) data_get($r, 'address', '');
+
+            $prov       = (string) data_get($r, 'province', '');
+            $city       = (string) data_get($r, 'city', '');
+            $brgy       = (string) data_get($r, 'barangay', '');
+
+            $itemName   = (string) data_get($r, 'item_name', '');
+            $cod        = (string) data_get($r, 'cod', '');
+
+            $mailno     = (string) data_get($r, 'mailno', '');
+            $tx         = (string) data_get($r, 'txlogisticid', '');
+            $reason     = (string) data_get($r, 'reason', '');
+
+            $succ       = data_get($r, 'success'); // can be null
+            $pending = (trim($mailno)==='' && trim($tx)==='' && trim($reason)==='' && ($succ === null || (string)$succ === '0'));
+            $isOk = (!$pending) && ((string)$succ === '1' || $succ === 1 || $succ === true);
           @endphp
 
-          <tr class="border-t"
-              @if($isRunRow) data-shipment-id="{{ $r->shipment_id }}" @endif>
-            <td class="px-3 py-2 whitespace-nowrap">{{ $r->macro_id }}</td>
-            <td class="px-3 py-2 whitespace-nowrap">{{ $r->ts_date }}</td>
-            <td class="px-3 py-2 whitespace-nowrap">{{ $r->page }}</td>
-            <td class="px-3 py-2 whitespace-nowrap">{{ $r->full_name }}</td>
-            <td class="px-3 py-2 whitespace-nowrap">{{ $r->phone_number }}</td>
-            <td class="px-3 py-2 max-w-[380px] truncate" title="{{ $r->address }}">{{ $r->address }}</td>
-            <td class="px-3 py-2 whitespace-nowrap">{{ $r->province }}</td>
-            <td class="px-3 py-2 whitespace-nowrap">{{ $r->city }}</td>
-            <td class="px-3 py-2 whitespace-nowrap">{{ $r->barangay }}</td>
-            <td class="px-3 py-2 whitespace-nowrap">{{ $r->item_name }}</td>
-            <td class="px-3 py-2 whitespace-nowrap">{{ $r->cod }}</td>
+          <tr class="border-t" data-shipment-id="{{ $shipmentId }}">
+            <td class="mono text-xs">{{ $shipmentId ?: '-' }}</td>
+            <td class="mono text-xs">{{ $macroId }}</td>
+            <td class="text-xs">{{ $tsDate }}</td>
+            <td class="text-xs">{{ $pageName }}</td>
 
-            <td class="px-3 py-2 whitespace-nowrap jnt-mailno">{{ $mailno }}</td>
-            <td class="px-3 py-2 whitespace-nowrap jnt-tx">{{ $tx }}</td>
-
-            <td class="px-3 py-2 whitespace-nowrap jnt-success">
-              @if($isRunRow)
-                @if($succ)
-                  <span class="text-emerald-700 font-semibold">YES</span>
-                @else
-                  <span class="text-red-700 font-semibold">NO</span>
-                @endif
-              @else
-                -
-              @endif
+            <td class="text-xs">
+              <div class="font-semibold">{{ $fullName ?: '-' }}</div>
+              <div class="mono">{{ $phone ?: '-' }}</div>
+              <div class="text-gray-700 whitespace-pre-line">{{ $addr ?: '-' }}</div>
             </td>
 
-            <td class="px-3 py-2 max-w-[320px] truncate jnt-reason" title="{{ $reason }}">
-              {{ $reason }}
+            <td class="text-xs whitespace-pre-line">
+              <div>{{ $prov ?: '-' }}</div>
+              <div>{{ $city ?: '-' }}</div>
+              <div>{{ $brgy ?: '-' }}</div>
+            </td>
+
+            <td class="text-xs whitespace-pre-line">{{ $itemName ?: '-' }}</td>
+            <td class="mono text-xs">{{ $cod ?: '-' }}</td>
+
+            <td class="mono text-xs cell-mailno">{{ trim($mailno) !== '' ? $mailno : '-' }}</td>
+            <td class="mono text-xs cell-tx">{{ trim($tx) !== '' ? $tx : '-' }}</td>
+
+            <td class="text-xs">
+              <span class="cell-success">
+                @if($pending)
+                  <span class="px-2 py-1 rounded bg-gray-100 text-gray-800 text-xs">PENDING</span>
+                @elseif($isOk)
+                  <span class="px-2 py-1 rounded bg-green-100 text-green-800 text-xs">YES</span>
+                @else
+                  <span class="px-2 py-1 rounded bg-red-100 text-red-800 text-xs">NO</span>
+                @endif
+              </span>
+            </td>
+
+            <td class="text-xs cell-reason {{ $isOk ? 'text-gray-700' : 'text-red-700' }}">
+              {{ trim($reason) !== '' ? $reason : '-' }}
+            </td>
+
+            <td class="text-xs">
+              <span class="link js-debug-toggle" data-id="{{ $shipmentId }}">API Debug</span>
             </td>
           </tr>
+
+          {{-- hidden debug row --}}
+          <tr class="border-t hidden" id="debug-row-{{ $shipmentId }}">
+            <td colspan="13" class="p-3">
+              <div class="text-xs text-gray-600 mb-2">
+                Shipment #{{ $shipmentId }} — Debug payloads (request/response)
+              </div>
+
+              <div class="debug-box">
+                <div class="mono text-xs debug-pre" id="debug-pre-{{ $shipmentId }}">Loading...</div>
+              </div>
+            </td>
+          </tr>
+
         @empty
           <tr>
-            <td colspan="15" class="px-3 py-6 text-center text-gray-500">
-              No records found.
-            </td>
+            <td colspan="13" class="p-4 text-sm text-gray-500">No rows found for this filter.</td>
           </tr>
         @endforelse
       </tbody>
     </table>
-
-    <div class="p-3">
-      {{ $rows->links() }}
-    </div>
   </div>
 
-  {{-- LIVE POLLING --}}
-  @if(!empty($run))
-  <script>
-    (function () {
-      const runId = {{ (int)$run->id }};
-      let lastServerTime = null;
+  {{-- AUTO POLL ONLY WHEN RUN VIEW --}}
+  @if($run)
+    @php
+      $runIdShow = (int) data_get($run, 'id', (int)$qRunId);
+    @endphp
+    <script>
+      (function () {
+        const runId = {{ $runIdShow }};
+        const statusUrl = "{{ url('jnt/orders/batch/'.$runIdShow.'/status') }}";
 
-      async function poll() {
-        try {
-          const res = await fetch(`{{ url('/jnt/orders/batch') }}/${runId}/status`);
-          if (!res.ok) return;
+        function getVisibleShipmentIds() {
+          return Array.from(document.querySelectorAll('tr[data-shipment-id]'))
+            .map(tr => tr.getAttribute('data-shipment-id'))
+            .filter(v => v && v !== '');
+        }
 
-          const data = await res.json();
-          const r = data.run;
+        function setBadge(el, mailno, tx, success, reason) {
+          const pending = (!mailno && !tx && !reason && (success === null || String(success) === '0'));
+          const ok = (!pending) && (String(success) === '1' || success === true || success === 1);
 
-          document.getElementById('run-status').textContent = r.status;
-          document.getElementById('run-total').textContent = r.total;
-          document.getElementById('run-processed').textContent = r.processed;
-          document.getElementById('run-ok').textContent = r.ok;
-          document.getElementById('run-fail').textContent = r.fail;
-
-          const note = document.getElementById('run-note');
-          if (data.server_time !== lastServerTime) {
-            note.textContent = `Updated: ${data.server_time}`;
-            lastServerTime = data.server_time;
+          if (pending) {
+            el.innerHTML = '<span class="px-2 py-1 rounded bg-gray-100 text-gray-800 text-xs">PENDING</span>';
+          } else if (ok) {
+            el.innerHTML = '<span class="px-2 py-1 rounded bg-green-100 text-green-800 text-xs">YES</span>';
+          } else {
+            el.innerHTML = '<span class="px-2 py-1 rounded bg-red-100 text-red-800 text-xs">NO</span>';
           }
+        }
 
-          const map = new Map();
-          (data.latest || []).forEach(s => map.set(String(s.id), s));
+        async function poll() {
+          try {
+            const ids = getVisibleShipmentIds();
+            const url = statusUrl + (ids.length ? ('?ids=' + encodeURIComponent(ids.join(','))) : '');
 
-          document.querySelectorAll('tr[data-shipment-id]').forEach(tr => {
-            const sid = tr.getAttribute('data-shipment-id');
-            const s = map.get(sid);
-            if (!s) return;
+            const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+            if (!res.ok) return;
 
-            if (s.mailno) tr.querySelector('.jnt-mailno').textContent = s.mailno;
-            if (s.txlogisticid) tr.querySelector('.jnt-tx').textContent = s.txlogisticid;
+            const data = await res.json();
 
-            const suc = tr.querySelector('.jnt-success');
-            suc.innerHTML = String(s.success) === '1'
-              ? '<span class="text-emerald-700 font-semibold">YES</span>'
-              : '<span class="text-red-700 font-semibold">NO</span>';
+            if (data.stats) {
+              document.getElementById('runProcessedText').textContent = data.stats.processed ?? 0;
+              document.getElementById('runTotalText').textContent = data.stats.total ?? 0;
+              document.getElementById('runOkText').textContent = data.stats.ok ?? 0;
+              document.getElementById('runFailText').textContent = data.stats.fail ?? 0;
+              document.getElementById('runPendingText').textContent = data.stats.pending ?? 0;
+            }
+            if (data.run && data.run.status) {
+              document.getElementById('runStatusText').textContent = data.run.status;
+            }
 
-            const reason = s.reason && s.reason.trim() !== '' ? s.reason : '-';
-            const rea = tr.querySelector('.jnt-reason');
-            rea.textContent = reason;
-            rea.title = reason;
+            (data.shipments || []).forEach(s => {
+              const tr = document.querySelector('tr[data-shipment-id="' + s.id + '"]');
+              if (!tr) return;
+
+              const mailno = (s.mailno || '').trim();
+              const tx = (s.txlogisticid || '').trim();
+              const reason = (s.reason || '').trim();
+              const success = (s.success === undefined ? null : s.success);
+
+              const mailCell = tr.querySelector('.cell-mailno');
+              const txCell = tr.querySelector('.cell-tx');
+              const reasonCell = tr.querySelector('.cell-reason');
+              const successWrap = tr.querySelector('.cell-success');
+
+              if (mailCell) mailCell.textContent = mailno ? mailno : '-';
+              if (txCell) txCell.textContent = tx ? tx : '-';
+              if (reasonCell) reasonCell.textContent = reason ? reason : '-';
+              if (successWrap) setBadge(successWrap, mailno, tx, success, reason);
+            });
+
+            const pending = data?.stats?.pending ?? 999;
+            const status = data?.run?.status ?? '';
+            if (pending === 0 || status === 'finished') clearInterval(timer);
+          } catch (e) {}
+        }
+
+        poll();
+        const timer = setInterval(poll, 2000);
+      })();
+    </script>
+  @endif
+
+  {{-- API DEBUG TOGGLE --}}
+  <script>
+    (function(){
+      const loaded = new Set();
+
+      async function loadDebug(id) {
+        const pre = document.getElementById('debug-pre-' + id);
+        if (!pre) return;
+
+        if (loaded.has(id)) return;
+
+        try {
+          const res = await fetch("{{ url('jnt/orders/debug') }}/" + id, {
+            headers: { 'Accept': 'application/json' }
           });
 
-          if (r.status === 'finished' || r.status === 'stopped') return;
-          setTimeout(poll, 1500);
-        } catch {
-          setTimeout(poll, 2500);
+          if (!res.ok) {
+            pre.textContent = "No debug found (HTTP " + res.status + ").";
+            loaded.add(id);
+            return;
+          }
+
+          const d = await res.json();
+
+          // Pretty print: show logistics_interface as raw string, request/response JSON pretty if array/object.
+          let out = "";
+          out += "=== API DEBUG ===\n";
+          out += "shipment_id: " + (d.id ?? id) + "\n\n";
+
+          if (d.data_digest) out += "data_digest:\n" + d.data_digest + "\n\n";
+          if (d.logistics_interface) out += "logistics_interface (EXACT JSON STRING SENT):\n" + d.logistics_interface + "\n\n";
+
+          if (d.request_payload) {
+            out += "request_payload (ARRAY/JSON):\n";
+            out += JSON.stringify(d.request_payload, null, 2) + "\n\n";
+          }
+
+          if (d.response_raw) out += "response_raw (EXACT):\n" + d.response_raw + "\n\n";
+
+          if (d.response_json) {
+            out += "response_json (PARSED):\n";
+            out += JSON.stringify(d.response_json, null, 2) + "\n\n";
+          }
+
+          if (!out.trim()) out = "No debug fields saved for this shipment.";
+
+          pre.textContent = out;
+          loaded.add(id);
+
+        } catch (e) {
+          pre.textContent = "Failed to load debug: " + (e?.message || e);
+          loaded.add(id);
         }
       }
 
-      if (document.getElementById('run-status').textContent === 'running') {
-        poll();
-      }
+      document.addEventListener('click', async (ev) => {
+        const el = ev.target.closest('.js-debug-toggle');
+        if (!el) return;
+
+        const id = el.getAttribute('data-id');
+        const row = document.getElementById('debug-row-' + id);
+        if (!row) return;
+
+        // toggle
+        const isHidden = row.classList.contains('hidden');
+        if (isHidden) {
+          row.classList.remove('hidden');
+          await loadDebug(id);
+        } else {
+          row.classList.add('hidden');
+        }
+      });
     })();
   </script>
-  @endif
+
 </x-layout>
