@@ -3,7 +3,7 @@
 return [
     'env' => env('JNT_ENV', 'sandbox'),
 
-    'base_url' => env('JNT_BASE_URL', 'https://demostandard.jtexpress.ph/jts-phl-order-api'),
+    'base_url' => env('JNT_BASE_URL', 'https://jtapi.jtexpress.ph/jts-phl-order-api'),
 
     'credentials' => [
         'eccompanyid' => env('JNT_ECCOMPANYID'),
@@ -24,7 +24,8 @@ return [
         'queryOrder'  => env('JNT_EP_QUERY',  '/api/order/queryOrder'),
         'trackForJson'=> env('JNT_EP_TRACK',  '/api/track/trackForJson'),
         'queryInvoice'  => env('JNT_EP_INVOICE', '/api/invoice/queryInvoice'),
-        'print'  => '/api/order/print',
+        'print' => env('JNT_EP_PRINT', '/api/order/print'),
+
 
     ],
 

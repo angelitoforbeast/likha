@@ -66,6 +66,7 @@ use App\Http\Controllers\JntOrderUiController;
 use App\Http\Controllers\JntWaybillController;
 use App\Http\Controllers\JntOrderManagementController;
 use App\Http\Controllers\PancakeConversationIndexController;
+use App\Http\Controllers\JntWaybillPrintController;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -341,6 +342,10 @@ Route::get('/jnt/waybills', [\App\Http\Controllers\JntWaybillController::class, 
 Route::post('/jnt/waybills/query-one', [\App\Http\Controllers\JntWaybillController::class, 'queryOne']);
 Route::get('/jnt/order-management', [JntOrderManagementController::class, 'index']);
 Route::post('/jnt/order-management/query', [JntOrderManagementController::class, 'query']);
+
+Route::get('/jnt/waybills/print', [JntWaybillPrintController::class, 'index']);
+Route::post('/jnt/waybills/print-one', [JntWaybillPrintController::class, 'printOne']);
+Route::post('/jnt/waybills/print-bulk', [JntWaybillPrintController::class, 'printBulk']);
 
 
 Route::get('/item/cogs', [ItemCogsController::class, 'index'])->name('item.cogs.index');
