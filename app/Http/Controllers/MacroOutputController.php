@@ -1135,6 +1135,10 @@ private function attachHighlightTokens($r)
         // save updated field
         $record->{$field} = $newValue;
 
+        $record->validate_1   = 0;
+$record->validate_2   = 0;
+$record->item_checker = 0;
+
         // mark edited flags
         if (array_key_exists($field, $editFlags)) {
             $flag = $editFlags[$field];
