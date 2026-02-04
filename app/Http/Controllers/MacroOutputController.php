@@ -241,48 +241,95 @@ public function pancakeMore(Request $request)
     }
 
     public function validateItems(Request $request)
-    {
-        $ids = $request->input('ids', []);
-        $records = MacroOutput::whereIn('id', $ids)->get(['id', 'ITEM_NAME', 'COD']);
+{
+    $ids = $request->input('ids', []);
+    if (!is_array($ids)) $ids = [];
 
-        $results = [];
+    $records = MacroOutput::whereIn('id', $ids)->get(['id', 'ITEM_NAME', 'COD']);
 
-        foreach ($records as $record) {
-            $invalids = [];
+    $results = [];
+    $validIds = [];
+    $invalidIds = [];
 
-            if (is_null($record->ITEM_NAME) || trim($record->ITEM_NAME) === ''|| mb_strlen($record->ITEM_NAME) > 20) {
-                $invalids['ITEM_NAME'] = true;
-            }
+    foreach ($records as $record) {
+        $invalids = [];
+			 
 
-            if (is_null($record->COD) || trim($record->COD) === '') {
-                $invalids['COD'] = true;
-            }
+        $item = trim((string)($record->ITEM_NAME ?? ''));
+        $cod  = trim((string)($record->COD ?? ''));
+										
+			 
 
-            $results[] = [
-                'id' => $record->id,
-                'invalid_fields' => $invalids,
-            ];
+        if ($item === '' || mb_strlen($item, 'UTF-8') > 20) {
+            $invalids['ITEM_NAME'] = true;
+											  
+			  
         }
 
-        return response()->json($results);
+        if ($cod === '') {
+            $invalids['COD'] = true;
+        }
+
+        $isValid = empty($invalids);
+
+        if ($isValid) {
+            $validIds[] = (int) $record->id;
+        } else {
+            $invalidIds[] = (int) $record->id;
+        }
+
+        $results[] = [
+            'id' => $record->id,
+            'invalid_fields' => $invalids,
+        ];
     }
+
+    // ✅ bulk update item_checker
+    if (!empty($validIds)) {
+        MacroOutput::whereIn('id', $validIds)->update(['item_checker' => 1]);
+    }
+    if (!empty($invalidIds)) {
+        MacroOutput::whereIn('id', $invalidIds)->update(['item_checker' => 0]);
+    }
+
+    return response()->json($results);
+}
+
 
     public function validateAddresses(Request $request)
 {
     $filePath = resource_path('views/macro_output/jnt_address.txt');
 
-    // ✅ Exact combo map: prov|city|brgy
-    $validMap = [];
+    // ✅ Accept ids as array OR JSON string OR comma-separated string
+    $ids = $request->input('ids', []);
 
-    // ✅ Hierarchy maps (better fix)
-    // prov => [city => true]
+    if (is_string($ids)) {
+        $raw = trim($ids);
+
+        if ($raw === '') {
+            $ids = [];
+        } else {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                $ids = $decoded;
+            } else {
+                $ids = preg_split('/\s*,\s*/', $raw);
+            }
+        }
+    }
+
+    if (!is_array($ids)) $ids = [];
+
+    // sanitize ids
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($v) => $v > 0)));
+
+    if (empty($ids)) {
+        return response()->json([]); // nothing to validate
+    }
+
+    // ✅ Hierarchy maps
     $provCityMap = [];
-    // "prov|city" => [brgy => true]
     $provCityBrgyMap = [];
-
-    $validProvinces = [];
-    $validCities    = [];
-    $validBarangays = [];
 
     if (file_exists($filePath)) {
         $lines = file($filePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
@@ -290,8 +337,6 @@ public function pancakeMore(Request $request)
         foreach ($lines as $line) {
             $parts = array_map('trim', explode('|', $line));
             if (count($parts) !== 3) continue;
-
-            // skip header
             if (strtolower($parts[0] ?? '') === 'province') continue;
 
             [$provRaw, $cityRaw, $brgyRaw] = $parts;
@@ -302,42 +347,25 @@ public function pancakeMore(Request $request)
 
             if ($prov === '' || $city === '' || $brgy === '') continue;
 
-            $key = "{$prov}|{$city}|{$brgy}";
-            $validMap[$key] = true;
-
-            // hierarchy maps
             $provCityMap[$prov][$city] = true;
             $provCityBrgyMap["{$prov}|{$city}"][$brgy] = true;
-
-            // (optional) keep legacy individual lists (still useful for some UI cases)
-            $validProvinces[] = $prov;
-            $validCities[]    = $city;
-            $validBarangays[] = $brgy;
         }
     }
-
-    $validProvinces = array_values(array_unique($validProvinces));
-    $validCities    = array_values(array_unique($validCities));
-    $validBarangays = array_values(array_unique($validBarangays));
-
-    // ✅ Limit validation to provided IDs
-    $ids = $request->input('ids', []);
-    if (!is_array($ids)) $ids = [];
 
     $records = MacroOutput::whereIn('id', $ids)->get([
         'id', 'FULL NAME', 'PROVINCE', 'CITY', 'BARANGAY', 'PHONE NUMBER'
     ]);
 
-    // ✅ Collect phone duplicates within this batch
+    // phone duplicate counts within batch
     $phoneCounts = [];
     foreach ($records as $record) {
         $phone = trim((string)($record->{'PHONE NUMBER'} ?? ''));
-        if ($phone !== '') {
-            $phoneCounts[$phone] = ($phoneCounts[$phone] ?? 0) + 1;
-        }
+        if ($phone !== '') $phoneCounts[$phone] = ($phoneCounts[$phone] ?? 0) + 1;
     }
 
     $results = [];
+    $validIds = [];
+    $invalidIds = [];
 
     foreach ($records as $record) {
         $prov  = strtolower(trim((string)($record->PROVINCE ?? '')));
@@ -345,35 +373,23 @@ public function pancakeMore(Request $request)
         $brgy  = strtolower(trim((string)($record->BARANGAY ?? '')));
         $phone = trim((string)($record->{'PHONE NUMBER'} ?? ''));
 
-        $fullKey = "{$prov}|{$city}|{$brgy}";
-        $isValidCombo = isset($validMap[$fullKey]);
+        // hierarchy checks
+        $provOk = ($prov !== '') && isset($provCityMap[$prov]);
+        $cityOk = $provOk && ($city !== '') && isset($provCityMap[$prov][$city]);
+        $brgyOk = $cityOk && ($brgy !== '') && isset($provCityBrgyMap["{$prov}|{$city}"][$brgy]);
 
-        // ✅ Hierarchy checks
-        $provOk = isset($provCityMap[$prov]); // province exists at all
-        $cityOk = $provOk && isset($provCityMap[$prov][$city]); // city exists under province
-        $brgyOk = $cityOk && isset($provCityBrgyMap["{$prov}|{$city}"][$brgy]); // brgy exists under prov+city
+        // ✅ treat BLANK as invalid too (for validate)
+        $provInvalid = !$provOk;
+        $cityInvalid = $provOk && !$cityOk;
+        $brgyInvalid = $cityOk && !$brgyOk;
 
-        /**
-         * ✅ INVALID RULES (smart / accurate):
-         * - Province invalid if province doesn't exist
-         * - City invalid if province is ok but city not under that province
-         * - Brgy invalid if city is ok but brgy not under that prov+city
-         *
-         * NOTE: If province invalid, we don't necessarily mark city/brgy invalid
-         * (you can change this if you want "all red" behavior).
-         */
-        $provInvalid = !$provOk && ($prov !== '');
-        $cityInvalid = $provOk && !$cityOk && ($city !== '');
-        $brgyInvalid = $cityOk && !$brgyOk && ($brgy !== '');
-
-        // ✅ FULL NAME validation (server-side)
+        // FULL NAME validation
         $fullName = trim((string)($record->{'FULL NAME'} ?? ''));
         $fullNameInvalid = false;
 
         if ($fullName === '') {
             $fullNameInvalid = true;
         } else {
-            // strict: letters + dot + comma + dash + apostrophe + SPACE only
             if (!preg_match("/^[\\p{L}\\.,\\-\\' ]+$/u", $fullName)) {
                 $fullNameInvalid = true;
             } elseif (!preg_match('/[A-Za-zÑñ]/u', $fullName)) {
@@ -381,9 +397,8 @@ public function pancakeMore(Request $request)
             }
         }
 
-        // ✅ PHONE NUMBER validation
+        // PHONE validation
         $phoneInvalid = false;
-
         if ($phone === '') {
             $phoneInvalid = true;
         } elseif (!preg_match('/^9\d{9}$/', $phone)) {
@@ -394,35 +409,37 @@ public function pancakeMore(Request $request)
             $phoneInvalid = true;
         }
 
-        // ✅ Build invalid_fields (only truthy returned, to match your JS)
         $invalidFields = array_filter([
-            'FULL NAME'     => $fullNameInvalid,
-
-            'PROVINCE'      => $provInvalid,
-            'CITY'          => $cityInvalid,
-            'BARANGAY'      => $brgyInvalid,
-
-            'PHONE NUMBER'  => $phoneInvalid,
+            'FULL NAME'    => $fullNameInvalid,
+            'PROVINCE'     => $provInvalid,
+            'CITY'         => $cityInvalid,
+            'BARANGAY'     => $brgyInvalid,
+            'PHONE NUMBER' => $phoneInvalid,
         ]);
 
-        /**
-         * Optional: if you want to force show combo invalid even when all three
-         * values exist but mismatched (rare with hierarchy logic, but if blanks
-         * or weird inputs happen), you can add:
-         *
-         * if (!$isValidCombo && $provOk && $cityOk && $brgy !== '' && !isset($provCityBrgyMap["{$prov}|{$city}"][$brgy])) { ... }
-         *
-         * (Current hierarchy logic already covers that.)
-         */
+        $isValid = empty($invalidFields);
+
+        if ($isValid) $validIds[] = (int)$record->id;
+        else $invalidIds[] = (int)$record->id;
 
         $results[] = [
             'id' => $record->id,
             'invalid_fields' => $invalidFields,
+            'validate_2' => $isValid ? 1 : 0, // optional, ok lang kahit extra
         ];
+    }
+
+    // ✅ Update DB flags
+    if (!empty($validIds)) {
+        MacroOutput::whereIn('id', $validIds)->update(['validate_2' => 1]);
+    }
+    if (!empty($invalidIds)) {
+        MacroOutput::whereIn('id', $invalidIds)->update(['validate_2' => 0]);
     }
 
     return response()->json($results);
 }
+
 
 public function validateCheckerToFix(Request $request)
 {
