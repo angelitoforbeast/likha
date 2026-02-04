@@ -481,6 +481,8 @@ public function validateCheckerToFix(Request $request)
             $base->where('STATUS', $request->status_filter);
         }
     }
+    // ✅ Mark: "na-Validate 1 na" lahat ng rows sa current scope
+$marked = (clone $base)->update(['validate_1' => 1]);
 
     // EXCLUDE cannot proceed (same as Validate button)
     $base->where(function ($q) {
@@ -505,11 +507,13 @@ public function validateCheckerToFix(Request $request)
     $CHECKER = $wrap('APP SCRIPT CHECKER');
 
     $candidates = (clone $base)
-        ->whereNotNull('APP SCRIPT CHECKER')
-        ->whereRaw("TRIM({$CHECKER}) = ?", ['✅'])
-        ->get([
-            'id', 'FULL NAME', 'PHONE NUMBER', 'PROVINCE', 'CITY', 'BARANGAY', 'APP SCRIPT CHECKER'
-        ]);
+    ->whereNotNull('APP SCRIPT CHECKER')
+    ->whereRaw("TRIM({$CHECKER}) = ?", ['✅'])
+    ->get([
+        'id', 'FULL NAME', 'PHONE NUMBER', 'PROVINCE', 'CITY', 'BARANGAY',
+        'ITEM_NAME', 'COD', 'APP SCRIPT CHECKER'
+    ]);
+
 
     if ($candidates->isEmpty()) {
         // still redirect to TO FIX filter (user expectation)
@@ -521,10 +525,13 @@ public function validateCheckerToFix(Request $request)
         ], fn($v) => !is_null($v) && $v !== '');
 
         return response()->json([
-            'status' => 'success',
-            'updated' => 0,
-            'redirect_url' => route('macro_output.index', $params),
-        ]);
+  'status' => 'success',
+  'marked' => (int) $marked,
+  'updated' => 0, // ✅ wala naman inupdate to TO FIX
+  'redirect_url' => route('macro_output.index', $params),
+]);
+
+
     }
 
     // Load JNT address guide maps (same as validateAddresses)
@@ -594,9 +601,19 @@ public function validateCheckerToFix(Request $request)
         } elseif (($phoneCounts[$phone] ?? 0) > 1) {
             $phoneInvalid = true;
         }
+        // ✅ ITEM_NAME + COD checks (same as ITEM CHECKER button)
+$item = trim((string)($r->ITEM_NAME ?? ''));
+$cod  = trim((string)($r->COD ?? ''));
+
+$itemInvalid = ($item === '' || mb_strlen($item, 'UTF-8') > 20);
+$codInvalid  = ($cod === '');
+
+
 
         // if ANY issue -> TO FIX
-        $hasIssue = $provInvalid || $cityInvalid || $brgyInvalid || $fullNameInvalid || $phoneInvalid;
+        $hasIssue = $provInvalid || $cityInvalid || $brgyInvalid || $fullNameInvalid || $phoneInvalid
+         || $itemInvalid || $codInvalid;
+
 
         if ($hasIssue) {
             $idsToFix[] = (int) $r->id;
@@ -619,10 +636,12 @@ public function validateCheckerToFix(Request $request)
     ], fn($v) => !is_null($v) && $v !== '');
 
     return response()->json([
-        'status' => 'success',
-        'updated' => (int) $updated,
-        'redirect_url' => route('macro_output.index', $params),
-    ]);
+    'status' => 'success',
+    'marked' => (int) $marked,   // ✅ add
+    'updated' => (int) $updated,
+    'redirect_url' => route('macro_output.index', $params),
+]);
+
 }
 
 
