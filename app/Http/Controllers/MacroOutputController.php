@@ -481,13 +481,17 @@ public function validateCheckerToFix(Request $request)
             $base->where('STATUS', $request->status_filter);
         }
     }
-    // ✅ Mark: "na-Validate 1 na" lahat ng rows sa current scope
-$marked = (clone $base)->update(['validate_1' => 1]);
+
 
     // EXCLUDE cannot proceed (same as Validate button)
-    $base->where(function ($q) {
-        $q->whereNull('STATUS')->orWhere('STATUS', '<>', 'CANNOT PROCEED');
-    });
+    // EXCLUDE cannot proceed (same as Validate button)
+$base->where(function ($q) {
+    $q->whereNull('STATUS')->orWhere('STATUS', '<>', 'CANNOT PROCEED');
+});
+
+// ✅ Mark: "na-Validate 1 na" lahat ng rows sa current scope (EXCLUDING cannot proceed)
+$marked = (clone $base)->update(['validate_1' => 1]);
+
 
     // phone duplicate counts across WHOLE scope (not just ✅ rows)
     $allPhones = (clone $base)
@@ -506,13 +510,19 @@ $marked = (clone $base)->update(['validate_1' => 1]);
     // ✅ only rows with checker = ✅ are candidates for update
     $CHECKER = $wrap('APP SCRIPT CHECKER');
 
+    $CHECKER = $wrap('APP SCRIPT CHECKER');
+
     $candidates = (clone $base)
-    ->whereNotNull('APP SCRIPT CHECKER')
-    ->whereRaw("TRIM({$CHECKER}) = ?", ['✅'])
+    ->where(function ($q) use ($CHECKER) {
+        $q->whereNull('APP SCRIPT CHECKER')
+          ->orWhereRaw("TRIM({$CHECKER}) = ''")
+          ->orWhereRaw("TRIM({$CHECKER}) = ?", ['✅']);
+    })
     ->get([
         'id', 'FULL NAME', 'PHONE NUMBER', 'PROVINCE', 'CITY', 'BARANGAY',
         'ITEM_NAME', 'COD', 'APP SCRIPT CHECKER'
     ]);
+
 
 
     if ($candidates->isEmpty()) {
@@ -561,71 +571,100 @@ $marked = (clone $base)->update(['validate_1' => 1]);
     }
 
     $idsToFix = [];
+$idsOk    = [];
 
-    foreach ($candidates as $r) {
-        $prov  = strtolower(trim((string)($r->PROVINCE ?? '')));
-        $city  = strtolower(trim((string)($r->CITY ?? '')));
-        $brgy  = strtolower(trim((string)($r->BARANGAY ?? '')));
-        $phone = trim((string)($r->{'PHONE NUMBER'} ?? ''));
-        $fullName = trim((string)($r->{'FULL NAME'} ?? ''));
+foreach ($candidates as $r) {
+    $prov  = strtolower(trim((string)($r->PROVINCE ?? '')));
+    $city  = strtolower(trim((string)($r->CITY ?? '')));
+    $brgy  = strtolower(trim((string)($r->BARANGAY ?? '')));
+    $phone = trim((string)($r->{'PHONE NUMBER'} ?? ''));
+    $fullName = trim((string)($r->{'FULL NAME'} ?? ''));
 
-        // hierarchy checks
-        $provOk = isset($provCityMap[$prov]);
-        $cityOk = $provOk && isset($provCityMap[$prov][$city]);
-        $brgyOk = $cityOk && isset($provCityBrgyMap["{$prov}|{$city}"][$brgy]);
+    // hierarchy checks
+    $provOk = isset($provCityMap[$prov]);
+    $cityOk = $provOk && isset($provCityMap[$prov][$city]);
+    $brgyOk = $cityOk && isset($provCityBrgyMap["{$prov}|{$city}"][$brgy]);
 
-        $provInvalid = !$provOk && ($prov !== '');
-        $cityInvalid = $provOk && !$cityOk && ($city !== '');
-        $brgyInvalid = $cityOk && !$brgyOk && ($brgy !== '');
+    $provInvalid = !$provOk && ($prov !== '');
+    $cityInvalid = $provOk && !$cityOk && ($city !== '');
+    $brgyInvalid = $cityOk && !$brgyOk && ($brgy !== '');
 
-        // FULL NAME invalid (same as validateAddresses)
-        $fullNameInvalid = false;
-        if ($fullName === '') {
+    // FULL NAME invalid
+    $fullNameInvalid = false;
+    if ($fullName === '') {
+        $fullNameInvalid = true;
+    } else {
+        if (!preg_match("/^[\\p{L}\\.,\\-\\' ]+$/u", $fullName)) {
             $fullNameInvalid = true;
-        } else {
-            if (!preg_match("/^[\\p{L}\\.,\\-\\' ]+$/u", $fullName)) {
-                $fullNameInvalid = true;
-            } elseif (!preg_match('/[A-Za-zÑñ]/u', $fullName)) {
-                $fullNameInvalid = true;
-            }
-        }
-
-        // PHONE invalid (same as validateAddresses)
-        $phoneInvalid = false;
-        if ($phone === '') {
-            $phoneInvalid = true;
-        } elseif (!preg_match('/^9\d{9}$/', $phone)) {
-            $phoneInvalid = true;
-        } elseif ($phone === '9123456789') {
-            $phoneInvalid = true;
-        } elseif (($phoneCounts[$phone] ?? 0) > 1) {
-            $phoneInvalid = true;
-        }
-        // ✅ ITEM_NAME + COD checks (same as ITEM CHECKER button)
-$item = trim((string)($r->ITEM_NAME ?? ''));
-$cod  = trim((string)($r->COD ?? ''));
-
-$itemInvalid = ($item === '' || mb_strlen($item, 'UTF-8') > 20);
-$codInvalid  = ($cod === '');
-
-
-
-        // if ANY issue -> TO FIX
-        $hasIssue = $provInvalid || $cityInvalid || $brgyInvalid || $fullNameInvalid || $phoneInvalid
-         || $itemInvalid || $codInvalid;
-
-
-        if ($hasIssue) {
-            $idsToFix[] = (int) $r->id;
+        } elseif (!preg_match('/[A-Za-zÑñ]/u', $fullName)) {
+            $fullNameInvalid = true;
         }
     }
 
-    $updated = 0;
-    if (!empty($idsToFix)) {
-        $updated = \App\Models\MacroOutput::whereIn('id', $idsToFix)
-            ->whereRaw("TRIM({$CHECKER}) = ?", ['✅']) // safety: ✅ only
-            ->update(['APP SCRIPT CHECKER' => 'TO FIX']);
+    // PHONE invalid
+    $phoneInvalid = false;
+    if ($phone === '') {
+        $phoneInvalid = true;
+    } elseif (!preg_match('/^9\d{9}$/', $phone)) {
+        $phoneInvalid = true;
+    } elseif ($phone === '9123456789') {
+        $phoneInvalid = true;
+    } elseif (($phoneCounts[$phone] ?? 0) > 1) {
+        $phoneInvalid = true;
     }
+
+    // ITEM_NAME + COD invalid
+    $item = trim((string)($r->ITEM_NAME ?? ''));
+    $cod  = trim((string)($r->COD ?? ''));
+
+    $itemInvalid = ($item === '' || mb_strlen($item, 'UTF-8') > 20);
+    $codInvalid  = ($cod === '');
+
+    $hasIssue =
+        $provInvalid || $cityInvalid || $brgyInvalid ||
+        $fullNameInvalid || $phoneInvalid ||
+        $itemInvalid || $codInvalid;
+
+    if ($hasIssue) {
+        $idsToFix[] = (int) $r->id;
+    } else {
+        $idsOk[] = (int) $r->id;
+    }
+}
+
+// ✅ update TO FIX (and force validate_2/item_checker back to 0)
+$updatedToFix = 0;
+if (!empty($idsToFix)) {
+    $updatedToFix = \App\Models\MacroOutput::whereIn('id', $idsToFix)
+        ->where(function ($q) use ($CHECKER) {
+            $q->whereNull('APP SCRIPT CHECKER')
+              ->orWhereRaw("TRIM({$CHECKER}) = ''")
+              ->orWhereRaw("TRIM({$CHECKER}) = ?", ['✅']);
+        })
+        ->update([
+            'APP SCRIPT CHECKER' => 'TO FIX',
+            'validate_2'         => 0,
+            'item_checker'       => 0,
+        ]);
+}
+
+// ✅ update OK = ✅ + set validate_2/item_checker to 1
+$updatedOk = 0;
+if (!empty($idsOk)) {
+    $updatedOk = \App\Models\MacroOutput::whereIn('id', $idsOk)
+        ->where(function ($q) use ($CHECKER) {
+            $q->whereNull('APP SCRIPT CHECKER')
+              ->orWhereRaw("TRIM({$CHECKER}) = ''")
+              ->orWhereRaw("TRIM({$CHECKER}) = ?", ['✅']);
+        })
+        ->update([
+            'APP SCRIPT CHECKER' => '✅',
+            'validate_2'         => 1,
+            'item_checker'       => 1,
+        ]);
+}
+
+
 
     // redirect to TO FIX filter
     $params = array_filter([
@@ -637,10 +676,12 @@ $codInvalid  = ($cod === '');
 
     return response()->json([
     'status' => 'success',
-    'marked' => (int) $marked,   // ✅ add
-    'updated' => (int) $updated,
+    'marked' => (int) $marked,
+    'updated_to_fix' => (int) $updatedToFix,
+    'updated_ok'     => (int) $updatedOk,
     'redirect_url' => route('macro_output.index', $params),
 ]);
+
 
 }
 
