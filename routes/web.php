@@ -67,6 +67,7 @@ use App\Http\Controllers\JntWaybillController;
 use App\Http\Controllers\JntOrderManagementController;
 use App\Http\Controllers\PancakeConversationIndexController;
 use App\Http\Controllers\JntWaybillPrintController;
+use App\Http\Controllers\Jnt\SenderAddressController;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -346,6 +347,18 @@ Route::post('/jnt/order-management/query', [JntOrderManagementController::class,
 Route::get('/jnt/waybills/print', [JntWaybillPrintController::class, 'index']);
 Route::post('/jnt/waybills/print-one', [JntWaybillPrintController::class, 'printOne']);
 Route::post('/jnt/waybills/print-bulk', [JntWaybillPrintController::class, 'printBulk']);
+
+Route::get('jnt/waybills/sender-address', [SenderAddressController::class, 'index'])
+    ->name('jnt.sender_address.index');
+
+Route::post('jnt/waybills/sender-address', [SenderAddressController::class, 'store'])
+    ->name('jnt.sender_address.store');
+
+Route::put('jnt/waybills/sender-address/{senderAddress}', [SenderAddressController::class, 'update'])
+    ->name('jnt.sender_address.update');
+
+Route::delete('jnt/waybills/sender-address/{senderAddress}', [SenderAddressController::class, 'destroy'])
+    ->name('jnt.sender_address.destroy');
 
 
 Route::get('/item/cogs', [ItemCogsController::class, 'index'])->name('item.cogs.index');

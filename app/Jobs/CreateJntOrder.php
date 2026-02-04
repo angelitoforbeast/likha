@@ -52,11 +52,14 @@ class CreateJntOrder implements ShouldQueue
 
         // ✅ IMPORTANT: force environment=yes for DEMO if you are using demostandard
         // If production endpoint, set env based on config.
-        $payload = JntPayloadBuilder::buildCreateFromMacroOutput($norm, [
-            'txlogisticid' => 'MO-' . $shipment->macro_output_id . '-' . now('Asia/Manila')->format('YmdHis'),
-            'remark'       => 'LIKHA',
-            // 'environment' => 'yes', // <- uncomment if demo endpoint is used always
-        ]);
+        $itemName = trim((string)($norm['item_name'] ?? 'Item'));
+if ($itemName === '') $itemName = 'Item';
+
+$payload = JntPayloadBuilder::buildCreateFromMacroOutput($norm, [
+    'txlogisticid' => 'MO-' . $shipment->macro_output_id . '-' . now('Asia/Manila')->format('YmdHis'),
+    'remark'       => $itemName, // ✅ actual item name value
+]);
+
 
         $res = $client->createOrder($payload);
 
