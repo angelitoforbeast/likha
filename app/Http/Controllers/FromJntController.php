@@ -42,11 +42,18 @@ class FromJntController extends Controller
     };
 
     $isForReturnStatus = function (string $s) use ($norm): bool {
-        $s = $norm($s);
-        if (str_contains($s, 'for return')) return true;
-        if (preg_match('/\brts\b/i', $s)) return true;
-        return false;
-    };
+    $s = $norm($s);
+
+    // ✅ iwas false-positive: "Returned is NOT For Return"
+    if (str_contains($s, 'not for return')) return false;
+    if (str_contains($s, 'returned')) return false;
+
+    if (str_contains($s, 'for return')) return true;
+    if (preg_match('/\brts\b/i', $s)) return true;
+
+    return false;
+};
+
 
     $isDeliveringStatus = function (string $s) use ($norm): bool {
         $s = $norm($s);
@@ -220,15 +227,15 @@ class FromJntController extends Controller
                         $inTransitTodayWaybills[$waybill] = true;
                     }
 
-                    if (!$forReturnCounted && $isForReturnStatus($toRaw)) {
-                        if ($isReturnedStatus($currentStatus)) { $forReturnCounted = true; continue; }
-                        if (!$isForReturnStatus($currentStatus)) { $forReturnCounted = true; continue; }
+                    // ✅ For Return OCCURRED today (counts even if later became Returned)
+// Count only if this is the FIRST time it became For Return/RTS (no earlier For Return log before this batch_at)
+if (!$forReturnCounted && $isForReturnStatus($toRaw)) {
+    if (!$hasForReturnBefore($logs, $batchAt)) {
+        $batches[$batchAt]['for_return_set'][$waybill] = true;
+    }
+    $forReturnCounted = true; // stop after first For Return log of the day
+}
 
-                        if ($wasDeliveringToday || $isDeliveringStatus($fromRaw)) {
-                            $batches[$batchAt]['for_return_set'][$waybill] = true;
-                            $forReturnCounted = true;
-                        }
-                    }
                 }
             }
         }, 'id');
@@ -403,9 +410,7 @@ class FromJntController extends Controller
                 $waybill = trim((string)($row->waybill_number ?? ''));
                 if ($waybill === '') continue;
 
-                $currentStatus = (string)($row->status ?? '');
-                if ($isReturnedStatus($currentStatus)) continue;
-                if (!$isForReturnStatus($currentStatus)) continue;
+                
 
                 $decoded = json_decode((string)($row->status_logs ?? ''), true);
                 if (!is_array($decoded) || empty($decoded)) continue;
@@ -434,10 +439,12 @@ class FromJntController extends Controller
                         $wasDeliveringToday = true;
                     }
 
-                    if ($isForReturnStatus($toRaw) && ($wasDeliveringToday || $isDeliveringStatus($fromRaw))) {
-                        $hit = true;
-                        break;
-                    }
+                    // ✅ HIT if For Return happened on selected date AND it's the first ever For Return
+if ($isForReturnStatus($toRaw) && !$hasForReturnBefore($decoded, $ba)) {
+    $hit = true;
+    break;
+}
+
                 }
 
                 if (!$hit) continue;
@@ -531,25 +538,70 @@ public function statusSummaryRtsDetails(Request $request)
     $dayStart = $day->copy()->startOfDay();
     $dayEnd   = $day->copy()->endOfDay();
 
-    // window for scanning status_logs (same as main page)
+    // same window as main page
     $windowStart = $day->copy()->subDays(60)->startOfDay();
     $windowEnd   = $dayEnd;
 
-    // ✅ STRICT For Return detector (NOT "Returned")
-    $isForReturnStatus = function (string $s): bool {
-        $s = strtolower(trim($s));
+    // -------- helpers --------
+    $norm = function ($s) {
+        $s = mb_strtolower((string)$s);
+        return preg_replace('/\s+/u', ' ', trim($s));
+    };
+
+    // ✅ STRICT: For Return / RTS only (exclude "Returned" and "Not for return")
+    $isForReturnStatus = function (string $s) use ($norm): bool {
+        $s = $norm($s);
+
+        if (str_contains($s, 'not for return')) return false;
+        if (str_contains($s, 'returned')) return false;
+
         if (str_contains($s, 'for return')) return true;
         if (preg_match('/\brts\b/i', $s)) return true;
+
         return false;
     };
 
-    $isDeliveringStatus = function (string $s): bool {
-        $s = strtolower(trim($s));
-        return str_contains($s, 'delivering')
-            || (str_contains($s, 'deliver') && !str_contains($s, 'delivered'));
+    // ✅ same as main: Delivering counts excluded when may For Return BEFORE this batch_at (any date)
+    $hasForReturnBefore = function (array $allLogs, string $batchAt) use ($isForReturnStatus): bool {
+        // robust compare using Carbon if possible
+        try {
+            $target = Carbon::parse($batchAt, 'Asia/Manila');
+        } catch (\Throwable $e) {
+            $target = null;
+        }
+
+        foreach ($allLogs as $e) {
+            if (!is_array($e)) continue;
+
+            $baStr = (string)($e['batch_at'] ?? '');
+            if ($baStr === '') continue;
+
+            $isBefore = false;
+
+            if ($target) {
+                try {
+                    $ba = Carbon::parse($baStr, 'Asia/Manila');
+                    $isBefore = $ba->lt($target);
+                } catch (\Throwable $e) {
+                    // fallback: string compare
+                    $isBefore = ($baStr < $batchAt);
+                }
+            } else {
+                $isBefore = ($baStr < $batchAt);
+            }
+
+            if ($isBefore) {
+                $to = (string)($e['to'] ?? '');
+                if ($to !== '' && $isForReturnStatus($to)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     };
 
-    // group matcher
+    // group matcher (case-insensitive)
     $matchGroup = function ($row) use ($rtsGroup, $sender, $itemName, $grp) {
         $rowSender = trim((string)($row->sender ?? ''));
         $rowItem   = trim((string)($row->item_name ?? ''));
@@ -587,7 +639,7 @@ public function statusSummaryRtsDetails(Request $request)
             $logs = [];
             if (!empty($r->status_logs)) {
                 $d = json_decode($r->status_logs, true);
-                if (is_array($d)) $logs = $d; // FULL logs (all dates)
+                if (is_array($d)) $logs = $d; // FULL logs
             }
 
             $items[] = [
@@ -600,7 +652,6 @@ public function statusSummaryRtsDetails(Request $request)
             ];
         }
 
-        // ✅ IMPORTANT: use SAME popup blade as status summary (working)
         return view('jnt_status_summary_details', [
             'title'   => "DELIVERED • " . ($rtsGroup === 'sender_item' ? "{$sender} | {$itemName}" : $grp),
             'date'    => $date,
@@ -611,27 +662,31 @@ public function statusSummaryRtsDetails(Request $request)
     }
 
     // =========================
-    // ✅ FOR_RETURN DETAILS (STRICT, NOT Returned)
+    // ✅ FOR_RETURN DETAILS
+    // Match main summary:
+    // - For Return happened on selected date
+    // - and it's the FIRST EVER For Return/RTS (no earlier For Return log before that batch_at)
     // =========================
-    $itemsByWaybill = []; // unique
+    $itemsByWaybill = [];
 
     DB::table('from_jnts')
         ->whereNotNull('status_logs')
         ->whereBetween('submission_time', [$windowStart->toDateTimeString(), $windowEnd->toDateTimeString()])
+        ->where('status_logs', 'like', "%{$date}%")
         ->where(function($q){
             $q->where('status_logs','like','%For Return%')
               ->orWhere('status_logs','like','%for return%')
               ->orWhere('status_logs','like','%RTS%')
               ->orWhere('status_logs','like','%rts%');
         })
-        ->select('waybill_number','status','province','submission_time','signingtime','status_logs','rts_reason','sender','item_name')
+        ->select('id','waybill_number','status','province','submission_time','signingtime','status_logs','sender','item_name')
         ->orderBy('id')
-        ->chunk(1000, function($rows) use (
+        ->chunkById(1000, function($rows) use (
             &$itemsByWaybill,
             $matchGroup,
             $date,
             $isForReturnStatus,
-            $isDeliveringStatus
+            $hasForReturnBefore
         ) {
             foreach ($rows as $row) {
                 $waybill = trim((string)($row->waybill_number ?? ''));
@@ -641,47 +696,36 @@ public function statusSummaryRtsDetails(Request $request)
                 $decoded = json_decode((string)($row->status_logs ?? ''), true);
                 if (!is_array($decoded) || empty($decoded)) continue;
 
-                // logs on selected date only (for deciding if For Return today)
-                $dayLogs = [];
+                // ✅ find ANY log on selected date that is:
+                // For Return/RTS AND first-ever For Return (no earlier)
+                $hit = false;
+
                 foreach ($decoded as $e) {
-                    $ba = $e['batch_at'] ?? null;
-                    if (!$ba) continue;
-                    if (substr((string)$ba, 0, 10) !== $date) continue;
-                    $dayLogs[] = $e;
-                }
-                if (empty($dayLogs)) continue;
+                    $ba = (string)($e['batch_at'] ?? '');
+                    if ($ba === '' || substr($ba, 0, 10) !== $date) continue;
 
-                usort($dayLogs, fn($a,$b) => strcmp((string)($a['batch_at'] ?? ''), (string)($b['batch_at'] ?? '')));
+                    $toRaw = (string)($e['to'] ?? '');
+                    if ($toRaw === '') continue;
 
-                $hasRts = !is_null($row->rts_reason) && trim((string)$row->rts_reason) !== '';
-
-                $wasDeliveringToday = false;
-                foreach ($dayLogs as $e) {
-                    $to   = strtolower(trim((string)($e['to'] ?? '')));
-                    $from = strtolower(trim((string)($e['from'] ?? '')));
-
-                    // Delivering (exclude if may RTS reason)
-                    if (str_contains($to, 'delivering') && !$hasRts) {
-                        $wasDeliveringToday = true;
-                    }
-
-                    // ✅ STRICT: For Return / RTS only (NOT Returned)
-                    if ($isForReturnStatus($to) && ($wasDeliveringToday || $isDeliveringStatus($from))) {
-                        $itemsByWaybill[$waybill] = [
-                            'waybill'         => $waybill,
-                            'status'          => (string)($row->status ?? ''),
-                            'province'        => (string)($row->province ?? ''),
-                            'submission_time' => (string)($row->submission_time ?? ''),
-                            'signingtime'     => (string)($row->signingtime ?? ''),
-                            'logs'            => $decoded, // FULL logs
-                        ];
+                    if ($isForReturnStatus($toRaw) && !$hasForReturnBefore($decoded, $ba)) {
+                        $hit = true;
                         break;
                     }
                 }
-            }
-        });
 
-    // ✅ IMPORTANT: use SAME popup blade as status summary (working)
+                if (!$hit) continue;
+
+                $itemsByWaybill[$waybill] = [
+                    'waybill'         => $waybill,
+                    'status'          => (string)($row->status ?? ''),
+                    'province'        => (string)($row->province ?? ''),
+                    'submission_time' => (string)($row->submission_time ?? ''),
+                    'signingtime'     => (string)($row->signingtime ?? ''),
+                    'logs'            => $decoded, // FULL logs
+                ];
+            }
+        }, 'id');
+
     return view('jnt_status_summary_details', [
         'title'   => "FOR_RETURN • " . ($rtsGroup === 'sender_item' ? "{$sender} | {$itemName}" : $grp),
         'date'    => $date,
@@ -721,11 +765,18 @@ public function statusSummaryDetails(Request $request)
     };
 
     $isForReturnStatus = function (string $s) use ($norm): bool {
-        $s = $norm($s);
-        if (str_contains($s, 'for return')) return true;
-        if (preg_match('/\brts\b/i', $s)) return true;
-        return false;
-    };
+    $s = $norm($s);
+
+    // ✅ iwas false-positive: "Returned is NOT For Return"
+    if (str_contains($s, 'not for return')) return false;
+    if (str_contains($s, 'returned')) return false;
+
+    if (str_contains($s, 'for return')) return true;
+    if (preg_match('/\brts\b/i', $s)) return true;
+
+    return false;
+};
+
 
     $isDeliveringStatus = function (string $s) use ($norm): bool {
         $s = $norm($s);
@@ -843,14 +894,11 @@ public function statusSummaryDetails(Request $request)
             }
 
             // FIRST For Return (same as summary: first hit only)
-            if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && ($wasDeliveringToday || $isDeliveringStatus($fromRaw))) {
-                // strict: must STILL be for return now, and NOT returned
-                if (!$isReturnedStatus($currentStatus) && $isForReturnStatus($currentStatus)) {
-                    $firstForReturnBa = $ba;
-                } else {
-                    $firstForReturnBa = ''; // mark as not eligible
-                }
-            }
+            // ✅ first For Return event (ever) that occurs on selected date
+if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBefore($decoded, $ba)) {
+    $firstForReturnBa = $ba;
+}
+
         }
 
         $matched = false;
