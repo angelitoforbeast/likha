@@ -13,7 +13,18 @@
     $run   = $run ?? null;
 
     $senderPreview = $senderPreview ?? null;
-    $statusGate = $statusGate ?? (object)['enabled'=>false,'ok'=>true,'total'=>0,'missing'=>0];
+
+    // ✅ statusGate shape coming from controller:
+    // enabled, ok, total_all, missing_status, proceed_total, invalid_proceed, message
+    $statusGate = $statusGate ?? (object)[
+      'enabled' => false,
+      'ok' => true,
+      'total_all' => 0,
+      'missing_status' => 0,
+      'proceed_total' => 0,
+      'invalid_proceed' => 0,
+      'message' => null,
+    ];
 
     // ✅ if opened via ?run_id=123 only, recover date/page from run->filters
     if (!empty($runId) && $run && !empty(data_get($run, 'filters'))) {
@@ -32,8 +43,15 @@
     $pending = (int) data_get($runStats, 'pending', 0);
     $processed = $ok + $fail;
 
-    // ✅ Block preview if STATUS incomplete (preview only)
-    $statusIncomplete = (!$isRunView && $selectedPage !== '' && ($statusGate->enabled ?? false) && !($statusGate->ok ?? true));
+    // ✅ Gate behavior:
+    // - Preview view only (no run_id)
+    // - Page must be selected
+    // - If gate enabled and not ok -> block table + disable batch
+    $gateEnabled = (!$isRunView && $selectedPage !== '' && (bool) data_get($statusGate, 'enabled', false));
+    $gateOk      = (!$gateEnabled) ? true : (bool) data_get($statusGate, 'ok', true);
+    $gateBlocked = $gateEnabled && !$gateOk;
+
+    $canCreateBatch = ($selectedDate && $selectedPage && !$gateBlocked);
   @endphp
 
   <style>
@@ -63,6 +81,32 @@
   @if(session('error'))
     <div class="mb-4 card p-3 border-red-200 bg-red-50 text-red-800">
       {{ session('error') }}
+    </div>
+  @endif
+
+  {{-- ✅ Gate banner (preview only) --}}
+  @if($gateBlocked)
+    <div class="mb-4 card p-4 border-red-200 bg-red-50 text-red-800">
+      <div class="font-semibold">BLOCKED</div>
+      <div class="text-sm mt-1">
+        {{ data_get($statusGate,'message') ?? 'STATUS/VALIDATION gate blocked.' }}
+      </div>
+
+      {{-- Optional details --}}
+      <div class="text-xs mt-2">
+        <div>
+          Filter:
+          <span class="mono">{{ $selectedDate }}</span>
+          +
+          <span class="mono">{{ $selectedPage }}</span>
+        </div>
+        <div class="mt-1">
+          total_all: <span class="mono">{{ (int) data_get($statusGate,'total_all',0) }}</span>,
+          missing_status: <span class="mono font-semibold">{{ (int) data_get($statusGate,'missing_status',0) }}</span>,
+          proceed_total: <span class="mono">{{ (int) data_get($statusGate,'proceed_total',0) }}</span>,
+          invalid_proceed: <span class="mono font-semibold">{{ (int) data_get($statusGate,'invalid_proceed',0) }}</span>
+        </div>
+      </div>
     </div>
   @endif
 
@@ -209,34 +253,16 @@
     </div>
   </div>
 
-  {{-- ✅ STATUS INCOMPLETE card --}}
-  @if($statusIncomplete)
-    <div class="card p-4 mb-4 border-red-200 bg-red-50 text-red-800">
-      <div class="font-semibold">STATUS INCOMPLETE</div>
-      <div class="text-sm mt-1">
-        Sa <span class="mono">{{ $selectedDate }}</span> + <span class="mono">{{ $selectedPage }}</span>,
-        may <span class="mono font-semibold">{{ (int)$statusGate->missing }}</span> rows na walang STATUS
-        out of <span class="mono">{{ (int)$statusGate->total }}</span>.
-      </div>
-      <div class="text-xs mt-1">
-        Ayusin muna yung STATUS ng lahat ng rows bago ka makapag-preview / makapag Create Batch.
-      </div>
-    </div>
-  @endif
-
   {{-- Create batch card --}}
   <div class="card p-4 mb-4">
     <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
       <div>
         <div class="font-semibold">Batch</div>
         <div class="text-sm muted">
-          Create shipments from Macro Output (date + page), then queue Create Order. (STATUS=PROCEED only)
+          Create shipments from Macro Output (date + page), then queue Create Order.
+          (STATUS=PROCEED only, validate_1/validate_2/item_checker must be 1)
         </div>
       </div>
-
-      @php
-        $canCreateBatch = ($selectedDate && $selectedPage && !$statusIncomplete);
-      @endphp
 
       <form method="POST" action="{{ url('jnt/orders/batch') }}" class="flex gap-2">
         @csrf
@@ -276,10 +302,10 @@
       <tbody class="divide-y">
         @php $list = $rows; @endphp
 
-        @if($statusIncomplete)
+        @if($gateBlocked)
           <tr>
             <td colspan="14" class="p-6 text-center text-red-700">
-              STATUS INCOMPLETE — walang preview data.
+              {{ data_get($statusGate,'message') ?? 'BLOCKED — walang preview data.' }}
             </td>
           </tr>
         @else
@@ -382,7 +408,7 @@
           @empty
             <tr>
               <td colspan="14" class="p-6 text-center muted">
-                No rows found. (Only STATUS=PROCEED are shown) Select Date + Page then press Filter.
+                No rows found. (Only STATUS=PROCEED + validate_1/validate_2/item_checker=1 are shown)
               </td>
             </tr>
           @endforelse
@@ -471,4 +497,5 @@
       })();
     </script>
   @endif
+
 </x-layout>
