@@ -383,17 +383,19 @@
           </a>
         @endforeach
       </div>
-    <div class="text-sm text-gray-700 flex items-center gap-4">
-  <span>
-    VALIDATED:
-    <strong id="validated-badge" class="px-2 py-1 rounded bg-gray-200">—</strong>
-  </span>
 
-  <span>
-    PROCEED OK:
-    <strong id="proceed-ok-badge" class="px-2 py-1 rounded bg-gray-200">—</strong>
-  </span>
-</div>
+      {{-- ✅ LIVE BADGES --}}
+      <div class="text-sm text-gray-700 flex items-center gap-4">
+        <span>
+          VALIDATED:
+          <strong id="validated-badge" class="px-2 py-1 rounded bg-gray-200">—</strong>
+        </span>
+
+        <span>
+          PROCEED OK:
+          <strong id="proceed-ok-badge" class="px-2 py-1 rounded bg-gray-200">—</strong>
+        </span>
+      </div>
 
       <div class="ml-auto flex gap-2 items-center">
         @if($canEditItemAndCod)
@@ -402,16 +404,17 @@
           </button>
           <span id="item-checker-status" class="text-sm text-gray-600"></span>
         @endif
-<button type="button" id="validate1-btn" class="bg-indigo-700 text-white px-4 py-2 rounded hover:bg-indigo-800">
-  Validate 1
-</button>
-        <button type="button" id="validate-btn" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800">Validate</button>
 
+        <button type="button" id="validate1-btn" class="bg-indigo-700 text-white px-4 py-2 rounded hover:bg-indigo-800">
+          Validate 1
+        </button>
 
+        <button type="button" id="validate-btn" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800">
+          Validate
+        </button>
 
-<span id="validate-status" class="text-sm text-gray-600"></span>
-<span id="validate1-status" class="text-sm text-gray-600"></span>
-
+        <span id="validate-status" class="text-sm text-gray-600"></span>
+        <span id="validate1-status" class="text-sm text-gray-600"></span>
       </div>
     </form>
 
@@ -577,12 +580,10 @@
               {{-- ✅ Pancake extra area (filled by JS) --}}
               <div class="pancake-extra hidden"></div>
 
-              {{-- ✅ See more link (blue) --}}
-           {{-- ✅ See more link (only if exists in pancake_conversations) --}}
-@if(!empty($record->has_pancake))
-  <a href="#" class="see-more-link">See more</a>
-@endif
-
+              {{-- ✅ See more link (only if exists in pancake_conversations) --}}
+              @if(!empty($record->has_pancake))
+                <a href="#" class="see-more-link">See more</a>
+              @endif
             </td>
 
             {{-- HIST LOGS: expand-only-once --}}
@@ -620,55 +621,66 @@
       form.submit();
     }
   </script>
+
+  {{-- ✅ Validate 1 --}}
   <script>
-  document.getElementById('validate1-btn')?.addEventListener('click', function () {
-    const statusEl = document.getElementById('validate1-status');
-    statusEl.textContent = 'Validating (checker)...';
-    statusEl.classList.remove('text-green-600', 'text-red-600');
-    statusEl.classList.add('text-gray-600');
+    document.getElementById('validate1-btn')?.addEventListener('click', function () {
+      const statusEl = document.getElementById('validate1-status');
+      statusEl.textContent = 'Validating (checker)...';
+      statusEl.classList.remove('text-green-600', 'text-red-600');
+      statusEl.classList.add('text-gray-600');
 
-    const date = document.querySelector('input[name="date"]')?.value || '';
-    const page = document.getElementById('pageHidden')?.value || '';
+      const date = document.querySelector('input[name="date"]')?.value || '';
+      const page = document.getElementById('pageHidden')?.value || '';
 
-    // keep status_filter if user clicked TOTAL/PROCEED/etc pills
-    const url = new URL(window.location.href);
-    const statusFilter = url.searchParams.get('status_filter') || '';
+      // keep status_filter if user clicked TOTAL/PROCEED/etc pills
+      const url = new URL(window.location.href);
+      const statusFilter = url.searchParams.get('status_filter') || '';
 
-    fetch("{{ route('macro_output.validate1') }}", {
-      method: 'POST',
-      headers: {
-        'X-CSRF-TOKEN': '{{ csrf_token() }}',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        date: date,
-        PAGE: page,
-        status_filter: statusFilter
+      fetch("{{ route('macro_output.validate1') }}", {
+        method: 'POST',
+        headers: {
+          'X-CSRF-TOKEN': '{{ csrf_token() }}',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          date: date,
+          PAGE: page,
+          status_filter: statusFilter
+        })
       })
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (data.status === 'success') {
-        statusEl.textContent = `Updated: ${data.updated || 0}`;
-        statusEl.classList.remove('text-gray-600');
-        statusEl.classList.add('text-green-600');
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success') {
+          statusEl.textContent = `Updated: ${data.updated || 0}`;
+          statusEl.classList.remove('text-gray-600');
+          statusEl.classList.add('text-green-600');
 
-        if (data.redirect_url) {
-          window.location.href = data.redirect_url; // ✅ auto refresh to TO FIX
+          // ✅ LIVE UPDATE badges
+          if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
+
+          if (data.redirect_url) {
+            window.location.href = data.redirect_url; // ✅ auto refresh to TO FIX
+          }
+        } else {
+          statusEl.textContent = data.message || 'Validate 1 failed.';
+          statusEl.classList.remove('text-gray-600');
+          statusEl.classList.add('text-red-600');
+
+          // ✅ LIVE UPDATE badges
+          if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
         }
-      } else {
-        statusEl.textContent = data.message || 'Validate 1 failed.';
+      })
+      .catch(() => {
+        statusEl.textContent = 'Validate 1 failed.';
         statusEl.classList.remove('text-gray-600');
         statusEl.classList.add('text-red-600');
-      }
-    })
-    .catch(() => {
-      statusEl.textContent = 'Validate 1 failed.';
-      statusEl.classList.remove('text-gray-600');
-      statusEl.classList.add('text-red-600');
+
+        // ✅ LIVE UPDATE badges
+        if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
+      });
     });
-  });
-</script>
+  </script>
 
   {{-- ✅ Page dropdown JS (click shows all, typing filters) --}}
   <script>
@@ -890,12 +902,21 @@
 
               row.querySelectorAll('.log-cell.expanded').forEach(c => c.classList.remove('expanded'));
             }
+
+            // ✅ LIVE UPDATE badges
+            if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
           } else {
             this.classList.add('validate-invalid');
+
+            // ✅ LIVE UPDATE badges (still refresh, just in case)
+            if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
           }
         })
         .catch(() => {
           this.classList.add('validate-invalid');
+
+          // ✅ LIVE UPDATE badges
+          if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
         });
       };
 
@@ -1105,11 +1126,10 @@
     // FULL NAME allowed: A-Z, a-z, ñ/Ñ, space, dot, comma
     // Disallow other scripts (Chinese etc.) by strict whitelist.
     function isValidFullName(v) {
-  const s = (v ?? '').toString();
-  if (s.trim() === '') return true; // blank = allowed
-  return /^[\p{L}\s\.,\-']+$/u.test(s);
-}
-
+      const s = (v ?? '').toString();
+      if (s.trim() === '') return true; // blank = allowed
+      return /^[\p{L}\s\.,\-']+$/u.test(s);
+    }
 
     function clearValidateMarks() {
       document.querySelectorAll('.validate-invalid').forEach(el => el.classList.remove('validate-invalid'));
@@ -1217,11 +1237,17 @@
         statusEl.textContent = errorCount > 0 ? `${errorCount} cell(s) with issues` : 'All good! ✅';
         statusEl.classList.remove('text-gray-600');
         statusEl.classList.add(errorCount > 0 ? 'text-red-600' : 'text-green-600');
+
+        // ✅ LIVE UPDATE badges
+        if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
       })
       .catch(() => {
         statusEl.textContent = 'Validation failed.';
         statusEl.classList.remove('text-gray-600');
         statusEl.classList.add('text-red-600');
+
+        // ✅ LIVE UPDATE badges
+        if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
       });
     });
   </script>
@@ -1286,61 +1312,84 @@
       statusEl.textContent = errorCount > 0 ? `${errorCount} item(s) need fixing` : 'All good! ✅';
       statusEl.classList.remove('text-gray-600');
       statusEl.classList.add(errorCount > 0 ? 'text-red-600' : 'text-green-600');
+
+      // ✅ LIVE UPDATE badges
+      if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
     });
   </script>
+
+  {{-- ✅ LIVE BADGES: fetch + debounce + polling --}}
   <script>
-  const validatedSummaryUrl = "{{ route('macro_output.validated_summary') }}";
-  let _validatedTimer = null;
+    const validatedSummaryUrl = "{{ route('macro_output.validated_summary') }}";
+    let _validatedTimer = null;
 
-  async function refreshValidatedBadges() {
-    const date = document.querySelector('input[name="date"]')?.value || '';
-    const page = document.getElementById('pageHidden')?.value || '';
+    async function refreshValidatedBadges() {
+      const date = document.querySelector('input[name="date"]')?.value || '';
+      const page = document.getElementById('pageHidden')?.value || '';
 
-    const vb = document.getElementById('validated-badge');
-    const pb = document.getElementById('proceed-ok-badge');
+      const vb = document.getElementById('validated-badge');
+      const pb = document.getElementById('proceed-ok-badge');
 
-    if (!vb || !pb) return;
+      if (!vb || !pb) return;
 
-    try {
-      const params = new URLSearchParams();
-      if (date) params.set('date', date);
-      if (page) params.set('PAGE', page);
+      try {
+        const params = new URLSearchParams();
+        if (date) params.set('date', date);
+        if (page) params.set('PAGE', page);
 
-      const res = await fetch(validatedSummaryUrl + '?' + params.toString(), {
-        headers: { 'Accept': 'application/json' }
-      });
+        const res = await fetch(validatedSummaryUrl + '?' + params.toString(), {
+          headers: { 'Accept': 'application/json' }
+        });
 
-      const data = await res.json();
+        const data = await res.json();
 
-      // text
-      vb.textContent = data.validated ?? 'NO';
-      pb.textContent = `${data.proceed_ok ?? 0}/${data.proceed_total ?? 0}`;
+        // text
+        vb.textContent = data.validated ?? 'NO';
+        pb.textContent = `${data.proceed_ok ?? 0}/${data.proceed_total ?? 0}`;
 
-      // color
-      vb.classList.remove('bg-gray-200','bg-green-200','bg-red-200');
-      vb.classList.add((data.validated === 'YES') ? 'bg-green-200' : 'bg-red-200');
+        // color (validated)
+        vb.classList.remove('bg-gray-200','bg-green-200','bg-red-200');
+        vb.classList.add((data.validated === 'YES') ? 'bg-green-200' : 'bg-red-200');
 
-      pb.classList.remove('bg-gray-200','bg-green-200','bg-red-200');
-      pb.classList.add((data.proceed_total > 0 && data.proceed_ok === data.proceed_total) ? 'bg-green-200' : 'bg-red-200');
+        // color (proceed ok)
+        pb.classList.remove('bg-gray-200','bg-green-200','bg-red-200');
+        if ((data.proceed_total ?? 0) <= 0) {
+          pb.classList.add('bg-gray-200');
+        } else {
+          pb.classList.add((data.proceed_ok === data.proceed_total) ? 'bg-green-200' : 'bg-red-200');
+        }
 
-    } catch (e) {
-      // fallback
-      vb.textContent = 'NO';
-      vb.classList.remove('bg-gray-200','bg-green-200');
-      vb.classList.add('bg-red-200');
-      pb.textContent = '0/0';
-      pb.classList.remove('bg-gray-200','bg-green-200');
-      pb.classList.add('bg-red-200');
+      } catch (e) {
+        // fallback
+        vb.textContent = 'NO';
+        vb.classList.remove('bg-gray-200','bg-green-200');
+        vb.classList.add('bg-red-200');
+
+        pb.textContent = '0/0';
+        pb.classList.remove('bg-gray-200','bg-green-200');
+        pb.classList.add('bg-gray-200');
+      }
     }
-  }
 
-  function scheduleRefreshValidatedBadges() {
-    clearTimeout(_validatedTimer);
-    _validatedTimer = setTimeout(refreshValidatedBadges, 350);
-  }
+    function scheduleRefreshValidatedBadges() {
+      clearTimeout(_validatedTimer);
+      _validatedTimer = setTimeout(refreshValidatedBadges, 350);
+    }
 
-  window.addEventListener('load', refreshValidatedBadges);
-</script>
+    // ✅ On load + live polling
+    window.addEventListener('load', () => {
+      refreshValidatedBadges();
 
+      // optional: refresh every 5s (helps if other users are updating)
+      setInterval(() => {
+        if (!document.hidden) refreshValidatedBadges();
+      }, 5000);
+    });
+
+    // refresh when user returns to tab
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) refreshValidatedBadges();
+    });
+  </script>
 
 </x-layout>
