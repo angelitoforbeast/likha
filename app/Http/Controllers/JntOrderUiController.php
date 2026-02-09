@@ -8,6 +8,9 @@ use App\Models\JntShipment;
 use App\Services\Jnt\JntClient; // ✅ FIX: correct namespace
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
+
 
 class JntOrderUiController extends Controller
 {
@@ -28,6 +31,38 @@ class JntOrderUiController extends Controller
         $date = $filters['date'] ?? $date;
         $page = $filters['page'] ?? $page;
     }
+
+    // ✅ Sender Preview (visible before clicking Create Batch)
+    $senderPreview = Cache::remember('jnt_sender_preview:' . ($page !== '' ? $page : 'default'), 60, function () use ($page) {
+
+        // 1) Sender name = latest mapping per PAGE
+        $mappedSenderName = null;
+        if ($page !== '' && Schema::hasTable('page_sender_mappings')) {
+            $mappedSenderName = DB::table('page_sender_mappings')
+                ->where('PAGE', $page)
+                ->orderByDesc('id')
+                ->value('SENDER_NAME');
+        }
+
+        // 2) Sender address/phone/prov/city/area/address = latest row (global)
+        $addrRow = null;
+        if (Schema::hasTable('sender_addresses')) {
+            $addrRow = DB::table('sender_addresses')
+                ->orderByDesc('id')
+                ->first();
+        }
+
+        return (object) [
+            'sender_name'    => $mappedSenderName ?: (config('jnt.sender.name') ?: 'INCEPXION INC'),
+            'sender_phone'   => $addrRow->jnt_sender_phone   ?? (config('jnt.sender.phone') ?? ''),
+            'sender_prov'    => $addrRow->jnt_sender_prov    ?? (config('jnt.sender.prov') ?? ''),
+            'sender_city'    => $addrRow->jnt_sender_city    ?? (config('jnt.sender.city') ?? ''),
+            'sender_brgy'    => $addrRow->jnt_sender_area    ?? (config('jnt.sender.area') ?? ''), // area = brgy
+            'sender_address' => $addrRow->jnt_sender_address ?? (config('jnt.sender.address') ?? ''),
+            'source_mapping' => $mappedSenderName ? 'page_sender_mappings' : 'config_default',
+            'source_addr'    => $addrRow ? 'sender_addresses' : 'config_default',
+        ];
+    });
 
     // ✅ Date range (index-friendly for DATETIME ts_date)
     $dayStart = \Carbon\Carbon::parse($date, 'Asia/Manila')->startOfDay();
@@ -89,7 +124,7 @@ class JntOrderUiController extends Controller
                 's.reason as reason',
             ])
             ->orderByDesc('s.id')
-            ->simplePaginate(50) // ✅ faster than paginate()
+            ->simplePaginate(50)
             ->withQueryString();
 
         // ✅ Run stats: use counters from run (NO heavy COUNT query)
@@ -121,7 +156,7 @@ class JntOrderUiController extends Controller
                 DB::raw('NULL as reason'),
             ])
             ->orderByDesc('id')
-            ->simplePaginate(50) // ✅ faster
+            ->simplePaginate(50)
             ->withQueryString();
 
         // Attach latest shipment per macro_id (to show mailno/tx/reason in preview)
@@ -160,8 +195,9 @@ class JntOrderUiController extends Controller
         $runStats = null;
     }
 
-    return view('jnt.orders.index', compact('date','page','pages','run','rows','runStats'));
+    return view('jnt.orders.index', compact('date','page','pages','run','rows','runStats','senderPreview'));
 }
+
 
 
 

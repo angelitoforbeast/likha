@@ -1,7 +1,7 @@
 {{-- ✅ resources/views/jnt/orders/index.blade.php --}}
 <x-layout>
-  <x-slot name="title">J&T Orders</x-slot>
-  <x-slot name="heading">J&T Orders</x-slot>
+  <x-slot name="title">J&T Orderss</x-slot>
+  <x-slot name="heading">J&T Orderss</x-slot>
 
   @php
     $selectedDate = $date ?? request('date') ?? now('Asia/Manila')->toDateString();
@@ -11,6 +11,8 @@
     $pages = $pages ?? [];
     $rows  = $rows ?? [];
     $run   = $run ?? null;
+
+    $senderPreview = $senderPreview ?? null;
 
     // ✅ if opened via ?run_id=123 only, recover date/page from run->filters
     if (!empty($runId) && $run && !empty(data_get($run, 'filters'))) {
@@ -159,6 +161,49 @@
       });
     })();
   </script>
+
+  {{-- ✅ Sender Preview card (BEFORE Create Batch) --}}
+  <div class="card p-4 mb-4">
+    <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+      <div>
+        <div class="font-semibold">Sender Preview</div>
+        <div class="text-sm muted">
+          Makikita mo muna dito yung sender details na gagamitin bago mag Create Batch (Queue).
+        </div>
+      </div>
+
+      <div class="text-xs muted">
+        src: {{ data_get($senderPreview,'source_mapping','-') }} + {{ data_get($senderPreview,'source_addr','-') }}
+      </div>
+    </div>
+
+    <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="p-3 border rounded-lg">
+        <div class="text-xs muted mb-1">Sender Name</div>
+        <div class="font-medium">{{ data_get($senderPreview,'sender_name','-') }}</div>
+        @if(empty($selectedPage))
+          <div class="text-xs muted mt-1">Tip: Select a Page para makita yung mapped SENDER_NAME.</div>
+        @endif
+      </div>
+
+      <div class="p-3 border rounded-lg">
+        <div class="text-xs muted mb-1">Sender Phone</div>
+        <div class="mono text-sm">{{ data_get($senderPreview,'sender_phone','-') ?: '-' }}</div>
+      </div>
+
+      <div class="p-3 border rounded-lg">
+        <div class="text-xs muted mb-1">Prov / City / Brgy</div>
+        <div class="mono text-xs">{{ data_get($senderPreview,'sender_prov','-') ?: '-' }}</div>
+        <div class="mono text-xs">{{ data_get($senderPreview,'sender_city','-') ?: '-' }}</div>
+        <div class="mono text-xs">{{ data_get($senderPreview,'sender_brgy','-') ?: '-' }}</div>
+      </div>
+
+      <div class="p-3 border rounded-lg">
+        <div class="text-xs muted mb-1">Sender Address</div>
+        <div class="text-sm">{{ data_get($senderPreview,'sender_address','-') ?: '-' }}</div>
+      </div>
+    </div>
+  </div>
 
   {{-- Create batch card --}}
   <div class="card p-4 mb-4">
