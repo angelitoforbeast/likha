@@ -64,7 +64,7 @@ class JntPayloadBuilder
         $receiverName  = trim($receiverNameRaw);
 
         // Sender from config (keep stable; you can also make these RAW if you want)
-        $senderName   = (string)($opts['sender_name'] ?? config('jnt.sender.name', 'INCEPXION INC'));
+        $senderName   = (string)($opts['sender_name'] ?? config('jnt.sender.name', 'ONLINE SHOP'));
         $senderPhone  = self::normalizePhone((string)($opts['sender_phone'] ?? config('jnt.sender.phone', '09170000000')));
         $senderMobile = self::normalizePhone((string)($opts['sender_mobile'] ?? config('jnt.sender.mobile', '09170000000')));
 
