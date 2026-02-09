@@ -49,7 +49,6 @@
     .badge-gray { background:#f3f4f6; color:#374151; }
   </style>
 
-  {{-- Flash messages --}}
   @if(session('success'))
     <div class="mb-4 card p-3 border-green-200 bg-green-50 text-green-800">
       {{ session('success') }}
@@ -64,15 +63,15 @@
   {{-- Filter bar --}}
   <div class="card p-4 mb-4">
     <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-      <form method="GET" action="{{ url('jnt/orders') }}" class="flex flex-col gap-3 md:flex-row md:items-end">
+      <form id="filterForm" method="GET" action="{{ url('jnt/orders') }}" class="flex flex-col gap-3 md:flex-row md:items-end">
         <div>
           <label class="block text-sm font-medium mb-1">Date</label>
-          <input type="date" name="date" value="{{ $selectedDate }}" class="border rounded-lg px-3 py-2 text-sm w-52">
+          <input id="jsDate" type="date" name="date" value="{{ $selectedDate }}" class="border rounded-lg px-3 py-2 text-sm w-52">
         </div>
 
         <div>
           <label class="block text-sm font-medium mb-1">Page</label>
-          <select name="page" class="border rounded-lg px-3 py-2 text-sm w-64">
+          <select id="jsPage" name="page" class="border rounded-lg px-3 py-2 text-sm w-64">
             <option value="">-- Select Page --</option>
             @foreach(($pages ?? []) as $pVal)
               @if($pVal !== '')
@@ -84,7 +83,7 @@
 
         <div>
           <label class="block text-sm font-medium mb-1">Run ID</label>
-          <input type="number" name="run_id" value="{{ $runId }}" placeholder="(optional)"
+          <input id="jsRunId" type="number" name="run_id" value="{{ $runId }}" placeholder="(optional)"
                  class="border rounded-lg px-3 py-2 text-sm w-32">
         </div>
 
@@ -137,6 +136,29 @@
       </div>
     </div>
   </div>
+
+  {{-- ✅ Auto-submit behavior: date/page change = clear run_id (switch to preview) --}}
+  <script>
+    (function () {
+      const form = document.getElementById('filterForm');
+      const elDate = document.getElementById('jsDate');
+      const elPage = document.getElementById('jsPage');
+      const elRun  = document.getElementById('jsRunId');
+
+      if (!form || !elDate || !elPage || !elRun) return;
+
+      elDate.addEventListener('change', function () {
+        elPage.value = '';
+        elRun.value = '';
+        form.submit();
+      });
+
+      elPage.addEventListener('change', function () {
+        elRun.value = '';
+        form.submit();
+      });
+    })();
+  </script>
 
   {{-- Create batch card --}}
   <div class="card p-4 mb-4">
@@ -212,7 +234,6 @@
             $hasMailno  = !empty($mailno);
             $hasReason  = !empty($reason);
 
-            // ✅ Show status even in preview if may shipment result na
             $hasResult  = $hasMailno || $hasReason || !empty($tx) || ((string)$shipmentId !== '-' && $shipmentId !== null);
           @endphp
 
@@ -258,7 +279,6 @@
               <span class="text-xs text-gray-700">{{ $reason ?? '-' }}</span>
             </td>
 
-            {{-- ✅ Print works in preview too IF may mailno --}}
             <td class="p-2">
               @if(!empty($mailno) && !empty($shipmentId) && (string)$shipmentId !== '-')
                 <form method="POST" action="{{ url('jnt/orders/print-one') }}" target="_blank">
@@ -275,7 +295,6 @@
               @endif
             </td>
 
-            {{-- ✅ Debug visible in preview too IF may shipment_id --}}
             <td class="p-2">
               @if(!empty($shipmentId) && (string)$shipmentId !== '-')
                 <a href="{{ url('jnt/orders/debug/' . $shipmentId) }}" target="_blank"
@@ -296,7 +315,7 @@
     </table>
   </div>
 
-  {{-- Auto-refresh --}}
+  {{-- ✅ Auto-refresh (LESS aggressive reload) --}}
   @if($isRunView)
     <script>
       (function () {
@@ -317,6 +336,13 @@
         if (!isRunning) return;
 
         let lastProcessed = Number((document.getElementById('jsProcessed')?.textContent || '0/0').split('/')[0] || 0);
+
+        // ✅ Only reload table occasionally, not every increment
+        let lastReloadAt = Date.now();
+        let lastReloadProcessed = lastProcessed;
+
+        const RELOAD_EVERY_MS = 15000;        // reload table at most every 15s
+        const RELOAD_EVERY_N  = 25;           // or every 25 processed
 
         async function tick() {
           if (paused) return;
@@ -346,8 +372,13 @@
             if (elFail) elFail.textContent = fail;
             if (elPending) elPending.textContent = pending;
 
-            if (processed !== lastProcessed) {
-              lastProcessed = processed;
+            const now = Date.now();
+            const shouldReloadByCount = (processed - lastReloadProcessed) >= RELOAD_EVERY_N;
+            const shouldReloadByTime  = (now - lastReloadAt) >= RELOAD_EVERY_MS;
+
+            if (shouldReloadByCount || shouldReloadByTime) {
+              lastReloadAt = now;
+              lastReloadProcessed = processed;
               window.location.reload();
               return;
             }
@@ -356,6 +387,8 @@
               window.location.reload();
               return;
             }
+
+            lastProcessed = processed;
           } catch (e) {}
         }
 

@@ -13,29 +13,30 @@ class JntOrderUiController extends Controller
 {
     public function index(Request $request)
 {
-    $date  = $request->input('date') ?: now('Asia/Manila')->toDateString();
-    $page  = trim((string) $request->input('page', ''));
     $runId = $request->input('run_id');
 
-    // Pages dropdown
-    $pages = DB::table('macro_output')
-        ->whereNotNull('PAGE')
-        ->where('PAGE', '!=', '')
-        ->distinct()
-        ->orderBy('PAGE')
-        ->pluck('PAGE')
-        ->values()
-        ->all();
-
     // ✅ Run only if explicitly provided
-    $run = null;
-    if ($runId) {
-        $run = JntBatchRun::query()->find((int) $runId);
+    $run = $runId ? JntBatchRun::query()->find((int)$runId) : null;
+
+    // ✅ Base date/page from request
+    $date = $request->input('date') ?: now('Asia/Manila')->toDateString();
+    $page = trim((string) $request->input('page', ''));
+
+    // ✅ If opened via ?run_id=123 only, use run->filters for date/page (controller-side)
+    if ($run && !$request->filled('date') && !$request->filled('page')) {
+        $filters = json_decode((string) $run->filters, true) ?: [];
+        $date = $filters['date'] ?? $date;
+        $page = $filters['page'] ?? $page;
     }
 
-    // Base macro_output filter
-    $macroBase = DB::table('macro_output')
-        ->whereDate('ts_date', $date)
+    // ✅ Date range (index-friendly for DATETIME ts_date)
+    $dayStart = \Carbon\Carbon::parse($date, 'Asia/Manila')->startOfDay();
+    $dayEnd   = \Carbon\Carbon::parse($date, 'Asia/Manila')->endOfDay();
+
+    // ✅ Eligibility base (same as preview requirements)
+    $eligibilityBase = DB::table('macro_output')
+        ->whereBetween('ts_date', [$dayStart, $dayEnd])
+        ->whereNotNull('PAGE')->where('PAGE', '!=', '')
         ->whereNotNull('FULL NAME')->where('FULL NAME', '!=', '')
         ->whereNotNull('PHONE NUMBER')->where('PHONE NUMBER', '!=', '')
         ->whereNotNull('ADDRESS')->where('ADDRESS', '!=', '')
@@ -45,12 +46,27 @@ class JntOrderUiController extends Controller
         ->whereNotNull('ITEM_NAME')->where('ITEM_NAME', '!=', '')
         ->whereNotNull('COD')->where('COD', '!=', '');
 
+    // ✅ Pages dropdown = only pages available on selected date (and eligible rows)
+    $pages = \Cache::remember("jnt_orders_pages_" . $date, 60, function () use ($eligibilityBase) {
+        $q = clone $eligibilityBase;
+
+        return $q->select('PAGE')
+            ->distinct()
+            ->orderBy('PAGE')
+            ->pluck('PAGE')
+            ->values()
+            ->all();
+    });
+
+    // Base macro_output filter for preview rows
+    $macroBase = clone $eligibilityBase;
+
     if ($page !== '') {
         $macroBase->where('PAGE', $page);
     }
 
-    // ✅ If run exists → show shipments, else preview from macro_output
     if ($run) {
+        // ✅ Run view: show shipments
         $rows = DB::table('jnt_shipments as s')
             ->join('macro_output as m', 'm.id', '=', 's.macro_output_id')
             ->where('s.jnt_batch_run_id', $run->id)
@@ -73,8 +89,16 @@ class JntOrderUiController extends Controller
                 's.reason as reason',
             ])
             ->orderByDesc('s.id')
-            ->paginate(50)
+            ->simplePaginate(50) // ✅ faster than paginate()
             ->withQueryString();
+
+        // ✅ Run stats: use counters from run (NO heavy COUNT query)
+        $runStats = (object) [
+            'total'   => (int) ($run->total ?? 0),
+            'ok'      => (int) ($run->success_count ?? 0),
+            'fail'    => (int) ($run->fail_count ?? 0),
+            'pending' => max(0, (int) ($run->total ?? 0) - (int) ($run->processed ?? 0)),
+        ];
     } else {
         // ✅ PREVIEW
         $rows = $macroBase
@@ -97,17 +121,12 @@ class JntOrderUiController extends Controller
                 DB::raw('NULL as reason'),
             ])
             ->orderByDesc('id')
-            ->paginate(50)
+            ->simplePaginate(50) // ✅ faster
             ->withQueryString();
 
-        // ✅ IMPORTANT FIX:
-        // Attach latest jnt_shipments per macro_output_id so preview shows Mailno/TX/Success/Reason/Print/Debug.
+        // Attach latest shipment per macro_id (to show mailno/tx/reason in preview)
         $macroIdsOnPage = collect($rows->items())
-            ->pluck('macro_id')
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
+            ->pluck('macro_id')->filter()->unique()->values()->all();
 
         if (!empty($macroIdsOnPage)) {
             $latestIds = DB::table('jnt_shipments')
@@ -117,14 +136,7 @@ class JntOrderUiController extends Controller
 
             $latestShipments = DB::table('jnt_shipments as s')
                 ->joinSub($latestIds, 'mx', 'mx.id', '=', 's.id')
-                ->select([
-                    's.id as shipment_id',
-                    's.macro_output_id',
-                    's.mailno',
-                    's.txlogisticid',
-                    's.success',
-                    's.reason',
-                ])
+                ->select(['s.id as shipment_id','s.macro_output_id','s.mailno','s.txlogisticid','s.success','s.reason'])
                 ->get()
                 ->keyBy('macro_output_id');
 
@@ -144,31 +156,14 @@ class JntOrderUiController extends Controller
                 })
             );
         }
+
+        $runStats = null;
     }
 
-    // ✅ Optional: compute live stats when run view (so header shows correct even before JS poll)
-    $runStats = null;
-    if ($run) {
-        $runStats = JntShipment::query()
-            ->where('jnt_batch_run_id', $run->id)
-            ->selectRaw("
-                COUNT(*) as total,
-                SUM(CASE WHEN mailno IS NOT NULL AND mailno != '' THEN 1 ELSE 0 END) as ok,
-                SUM(CASE WHEN (reason IS NOT NULL AND reason != '') AND (mailno IS NULL OR mailno = '') THEN 1 ELSE 0 END) as fail,
-                SUM(CASE WHEN ((mailno IS NULL OR mailno = '') AND (reason IS NULL OR reason = '')) THEN 1 ELSE 0 END) as pending
-            ")
-            ->first();
-    }
-
-    return view('jnt.orders.index', compact(
-        'date',
-        'page',
-        'pages',
-        'run',
-        'rows',
-        'runStats'
-    ));
+    return view('jnt.orders.index', compact('date','page','pages','run','rows','runStats'));
 }
+
+
 
 
     public function createBatch(Request $request)
@@ -248,74 +243,72 @@ class JntOrderUiController extends Controller
     }
 
     public function status(Request $request, int $runId)
-    {
-        $run = JntBatchRun::query()->findOrFail($runId);
+{
+    $run = JntBatchRun::query()->findOrFail($runId);
 
-        $idsRaw = trim((string) $request->query('ids', ''));
-        $ids = collect(explode(',', $idsRaw))
-            ->map(fn ($v) => (int) trim($v))
-            ->filter(fn ($v) => $v > 0)
-            ->values()
-            ->all();
+    $idsRaw = trim((string) $request->query('ids', ''));
+    $ids = collect(explode(',', $idsRaw))
+        ->map(fn ($v) => (int) trim($v))
+        ->filter(fn ($v) => $v > 0)
+        ->values()
+        ->all();
 
-        $stats = JntShipment::query()
-            ->where('jnt_batch_run_id', $runId)
-            ->selectRaw("
-                COUNT(*) as total,
-                SUM(CASE WHEN mailno IS NOT NULL AND mailno != '' THEN 1 ELSE 0 END) as ok,
-                SUM(CASE WHEN (reason IS NOT NULL AND reason != '') AND (mailno IS NULL OR mailno = '') THEN 1 ELSE 0 END) as fail,
-                SUM(CASE WHEN ((mailno IS NULL OR mailno = '') AND (reason IS NULL OR reason = '')) THEN 1 ELSE 0 END) as pending
-            ")
-            ->first();
+    // ✅ Use counters from run (fast)
+    $total     = (int) ($run->total ?? 0);
+    $processed = (int) ($run->processed ?? 0);
+    $ok        = (int) ($run->success_count ?? 0);
+    $fail      = (int) ($run->fail_count ?? 0);
 
-        $q = JntShipment::query()
-            ->where('jnt_batch_run_id', $runId)
-            ->select(['id', 'mailno', 'txlogisticid', 'success', 'reason', 'updated_at']);
-
-        if (!empty($ids)) {
-            $q->whereIn('id', $ids);
-        } else {
-            $q->orderByDesc('updated_at')->limit(200);
-        }
-
-        $shipments = $q->get()->values();
-
-        $pending = (int) ($stats->pending ?? 0);
-        if ($pending === 0 && (string) ($run->status ?? '') === 'running') {
-            $run->status = 'finished';
-            $run->finished_at = now();
-            $run->save();
-        }
-
-        $total = (int) ($stats->total ?? 0);
-        $ok    = (int) ($stats->ok ?? 0);
-        $fail  = (int) ($stats->fail ?? 0);
-        $pend  = (int) ($stats->pending ?? 0);
+    // Fallback safety: if processed not maintained
+    if ($processed <= 0 && ($ok + $fail) > 0) {
         $processed = $ok + $fail;
+    }
 
-        // ✅ IMPORTANT: return FLAT keys for your JS (and keep nested too)
-        return response()->json([
-            'status'    => (string) ($run->status ?? 'running'),
+    $pending = max(0, $total - $processed);
+
+    // ✅ Auto-finish when done
+    if ($pending === 0 && (string) ($run->status ?? '') === 'running') {
+        $run->status = 'finished';
+        $run->finished_at = now();
+        $run->save();
+    }
+
+    // ✅ Shipments payload (keep, but light)
+    $q = JntShipment::query()
+        ->where('jnt_batch_run_id', $runId)
+        ->select(['id', 'mailno', 'txlogisticid', 'success', 'reason', 'updated_at']);
+
+    if (!empty($ids)) {
+        $q->whereIn('id', $ids);
+    } else {
+        $q->orderByDesc('updated_at')->limit(200);
+    }
+
+    $shipments = $q->get()->values();
+
+    return response()->json([
+        'status'    => (string) ($run->status ?? 'running'),
+        'total'     => $total,
+        'ok'        => $ok,
+        'fail'      => $fail,
+        'pending'   => $pending,
+        'processed' => $processed,
+
+        'run' => [
+            'id'     => (int) $run->id,
+            'status' => (string) ($run->status ?? 'running'),
+        ],
+        'stats' => [
             'total'     => $total,
             'ok'        => $ok,
             'fail'      => $fail,
-            'pending'   => $pend,
+            'pending'   => $pending,
             'processed' => $processed,
+        ],
+        'shipments' => $shipments,
+    ]);
+}
 
-            'run' => [
-                'id'     => (int) $run->id,
-                'status' => (string) ($run->status ?? 'running'),
-            ],
-            'stats' => [
-                'total'     => $total,
-                'ok'        => $ok,
-                'fail'      => $fail,
-                'pending'   => $pend,
-                'processed' => $processed,
-            ],
-            'shipments' => $shipments,
-        ]);
-    }
 
     public function stop(int $runId)
     {

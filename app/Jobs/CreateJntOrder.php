@@ -12,6 +12,10 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
+
+
 
 class CreateJntOrder implements ShouldQueue
 {
@@ -55,10 +59,22 @@ class CreateJntOrder implements ShouldQueue
         $itemName = trim((string)($norm['item_name'] ?? 'Item'));
 if ($itemName === '') $itemName = 'Item';
 
-$payload = JntPayloadBuilder::buildCreateFromMacroOutput($norm, [
-    'txlogisticid' => 'MO-' . $shipment->macro_output_id . '-' . now('Asia/Manila')->format('YmdHis'),
-    'remark'       => $itemName, // ✅ actual item name value
-]);
+// ✅ IMPORTANT: make txlogisticid STABLE (see #2 below)
+$tx = $shipment->txlogisticid;
+if (empty($tx)) {
+    $tx = 'MO-' . $shipment->id; // stable
+    $shipment->txlogisticid = $tx;
+    $shipment->save();
+}
+
+// ✅ sender from DB (global or per page)
+$senderOpts = $this->resolveSenderOpts((string)($norm['page'] ?? ''));
+
+$payload = JntPayloadBuilder::buildCreateFromMacroOutput($norm, array_merge([
+    'txlogisticid' => $tx,
+    'remark'       => $itemName,
+], $senderOpts));
+
 
 
         $res = $client->createOrder($payload);
@@ -212,4 +228,47 @@ $payload = JntPayloadBuilder::buildCreateFromMacroOutput($norm, [
             'ts_date' => $rowArr['ts_date'] ?? $rowArr['TS_DATE'] ?? null,
         ]);
     }
+
+    private function resolveSenderOpts(string $page): array
+{
+    $page = trim($page);
+
+    return Cache::remember("jnt_sender_opts:" . ($page !== '' ? $page : 'default'), 60, function () use ($page) {
+
+        // 1) sender name (per page) - pick LATEST
+        $senderName = null;
+
+        if ($page !== '' && Schema::hasTable('page_sender_mappings')) {
+            $senderName = DB::table('page_sender_mappings')
+                ->where('PAGE', $page)          // ✅ uppercase column
+                ->orderByDesc('id')             // ✅ latest row
+                // or ->orderByDesc('created_at')
+                ->value('SENDER_NAME');         // ✅ uppercase column
+        }
+
+        // 2) sender address fields - GLOBAL latest (from sender_addresses)
+        $addr = null;
+        if (Schema::hasTable('sender_addresses')) {
+            $addr = DB::table('sender_addresses')->orderByDesc('id')->first();
+        }
+
+        // build opts (null/empty filtered out)
+        $opts = [
+            'sender_name'    => $senderName,
+
+            'sender_phone'   => $addr->jnt_sender_phone   ?? null,
+            'sender_mobile'  => $addr->jnt_sender_phone   ?? null, // optional: same as phone
+            'sender_prov'    => $addr->jnt_sender_prov    ?? null,
+            'sender_city'    => $addr->jnt_sender_city    ?? null,
+            'sender_area'    => $addr->jnt_sender_area    ?? null,
+            'sender_address' => $addr->jnt_sender_address ?? null,
+        ];
+
+        // remove null/blank
+        return array_filter($opts, fn($v) => !is_null($v) && trim((string)$v) !== '');
+    });
+}
+
+
+
 }
