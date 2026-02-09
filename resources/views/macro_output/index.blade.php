@@ -383,6 +383,17 @@
           </a>
         @endforeach
       </div>
+    <div class="text-sm text-gray-700 flex items-center gap-4">
+  <span>
+    VALIDATED:
+    <strong id="validated-badge" class="px-2 py-1 rounded bg-gray-200">—</strong>
+  </span>
+
+  <span>
+    PROCEED OK:
+    <strong id="proceed-ok-badge" class="px-2 py-1 rounded bg-gray-200">—</strong>
+  </span>
+</div>
 
       <div class="ml-auto flex gap-2 items-center">
         @if($canEditItemAndCod)
@@ -1277,5 +1288,59 @@
       statusEl.classList.add(errorCount > 0 ? 'text-red-600' : 'text-green-600');
     });
   </script>
+  <script>
+  const validatedSummaryUrl = "{{ route('macro_output.validated_summary') }}";
+  let _validatedTimer = null;
+
+  async function refreshValidatedBadges() {
+    const date = document.querySelector('input[name="date"]')?.value || '';
+    const page = document.getElementById('pageHidden')?.value || '';
+
+    const vb = document.getElementById('validated-badge');
+    const pb = document.getElementById('proceed-ok-badge');
+
+    if (!vb || !pb) return;
+
+    try {
+      const params = new URLSearchParams();
+      if (date) params.set('date', date);
+      if (page) params.set('PAGE', page);
+
+      const res = await fetch(validatedSummaryUrl + '?' + params.toString(), {
+        headers: { 'Accept': 'application/json' }
+      });
+
+      const data = await res.json();
+
+      // text
+      vb.textContent = data.validated ?? 'NO';
+      pb.textContent = `${data.proceed_ok ?? 0}/${data.proceed_total ?? 0}`;
+
+      // color
+      vb.classList.remove('bg-gray-200','bg-green-200','bg-red-200');
+      vb.classList.add((data.validated === 'YES') ? 'bg-green-200' : 'bg-red-200');
+
+      pb.classList.remove('bg-gray-200','bg-green-200','bg-red-200');
+      pb.classList.add((data.proceed_total > 0 && data.proceed_ok === data.proceed_total) ? 'bg-green-200' : 'bg-red-200');
+
+    } catch (e) {
+      // fallback
+      vb.textContent = 'NO';
+      vb.classList.remove('bg-gray-200','bg-green-200');
+      vb.classList.add('bg-red-200');
+      pb.textContent = '0/0';
+      pb.classList.remove('bg-gray-200','bg-green-200');
+      pb.classList.add('bg-red-200');
+    }
+  }
+
+  function scheduleRefreshValidatedBadges() {
+    clearTimeout(_validatedTimer);
+    _validatedTimer = setTimeout(refreshValidatedBadges, 350);
+  }
+
+  window.addEventListener('load', refreshValidatedBadges);
+</script>
+
 
 </x-layout>

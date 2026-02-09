@@ -1087,6 +1087,99 @@ public function index(Request $request)
         'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'
     ));
 }
+public function validatedSummary(Request $request)
+{
+    $tz = 'Asia/Manila';
+
+    $date = $request->filled('date')
+        ? $request->input('date')
+        : now($tz)->subDay()->toDateString();
+
+    $page = trim((string) $request->input('PAGE', ''));
+
+    $formattedDMY = \Carbon\Carbon::parse($date, $tz)->format('d-m-Y');
+
+    // wrapper for cross-db quoting
+    $wrap = fn (string $col) => \Illuminate\Support\Facades\DB::getQueryGrammar()->wrap($col);
+
+    // detect ts_date type
+    $tsType = null;
+    try {
+        $tsType = \Illuminate\Support\Facades\Schema::getColumnType('macro_output', 'ts_date');
+    } catch (\Throwable $e) {
+        $tsType = null;
+    }
+
+    // Scope = DATE + PAGE only (NOT affected by checker/status_filter)
+    $q = \App\Models\MacroOutput::query()
+        ->where(function ($qq) use ($date, $formattedDMY, $tsType, $tz) {
+
+            // A) ts_date path
+            $qq->where(function ($q1) use ($date, $tsType, $tz) {
+                $q1->whereNotNull('ts_date');
+
+                if ($tsType === 'date') {
+                    $q1->where('ts_date', '=', $date);
+                } else {
+                    $start = \Carbon\Carbon::parse($date, $tz)->startOfDay()->toDateTimeString();
+                    $end   = \Carbon\Carbon::parse($date, $tz)->endOfDay()->toDateTimeString();
+                    $q1->whereBetween('ts_date', [$start, $end]);
+                }
+            });
+
+            // B) legacy TIMESTAMP fallback when ts_date null
+            $qq->orWhere(function ($q2) use ($formattedDMY) {
+                $q2->whereNull('ts_date')
+                   ->whereNotNull('TIMESTAMP')
+                   ->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}%");
+            });
+        });
+
+    if ($page !== '') {
+        $q->where('PAGE', $page);
+    }
+
+    $STATUS = $wrap('STATUS');
+    $V1     = $wrap('validate_1');
+    $V2     = $wrap('validate_2');
+    $IC     = $wrap('item_checker');
+
+    $driver = \Illuminate\Support\Facades\DB::connection()->getDriverName();
+
+    // boolean truth condition (cross-db)
+    if ($driver === 'pgsql') {
+        $okFlags = "({$V1} IS TRUE AND {$V2} IS TRUE AND {$IC} IS TRUE)";
+    } else {
+        $okFlags = "(COALESCE({$V1},0)=1 AND COALESCE({$V2},0)=1 AND COALESCE({$IC},0)=1)";
+    }
+
+    $row = (clone $q)->selectRaw("
+        COUNT(*) as total_rows,
+        SUM(CASE WHEN {$STATUS} IS NOT NULL AND TRIM({$STATUS}) <> '' THEN 1 ELSE 0 END) as status_filled_rows,
+        SUM(CASE WHEN {$STATUS} = 'PROCEED' THEN 1 ELSE 0 END) as proceed_total,
+        SUM(CASE WHEN {$STATUS} = 'PROCEED' AND {$okFlags} THEN 1 ELSE 0 END) as proceed_ok
+    ")->first();
+
+    $total        = (int)($row->total_rows ?? 0);
+    $statusFilled = (int)($row->status_filled_rows ?? 0);
+    $proceedTotal = (int)($row->proceed_total ?? 0);
+    $proceedOk    = (int)($row->proceed_ok ?? 0);
+
+    $validatedYes = (
+        $total > 0 &&
+        $statusFilled === $total &&
+        $proceedTotal > 0 &&
+        $proceedOk === $proceedTotal
+    );
+
+    return response()->json([
+        'validated'      => $validatedYes ? 'YES' : 'NO',
+        'proceed_ok'     => $proceedOk,
+        'proceed_total'  => $proceedTotal,
+        'status_filled'  => $statusFilled,
+        'total_rows'     => $total,
+    ]);
+}
 
 
 
