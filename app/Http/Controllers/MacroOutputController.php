@@ -118,7 +118,7 @@ public function pancakeMore(Request $request)
                     ->where(function ($innerQ) {
                         $innerQ->whereNull('STATUS')->orWhere('STATUS', '')
                             ->orWhereNull('ITEM_NAME')->orWhere('ITEM_NAME', '')
-                            ->orWhereRaw('CHAR_LENGTH(ITEM_NAME) > 20')
+                            ->orWhereRaw('CHAR_LENGTH(ITEM_NAME) > 50')
                             ->orWhereNull('COD')->orWhere('COD', '');
                     });
             });
@@ -260,7 +260,7 @@ public function pancakeMore(Request $request)
 										
 			 
 
-        if ($item === '' || mb_strlen($item, 'UTF-8') > 20) {
+        if ($item === '' || mb_strlen($item, 'UTF-8') > 50) {
             $invalids['ITEM_NAME'] = true;
 											  
 			  
@@ -634,7 +634,7 @@ foreach ($candidates as $r) {
     $item = trim((string)($r->ITEM_NAME ?? ''));
     $cod  = trim((string)($r->COD ?? ''));
 
-    $itemInvalid = ($item === '' || mb_strlen($item, 'UTF-8') > 20);
+    $itemInvalid = ($item === '' || mb_strlen($item, 'UTF-8') > 50);
     $codInvalid  = ($cod === '');
 
     $hasIssue =
