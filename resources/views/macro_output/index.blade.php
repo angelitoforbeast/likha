@@ -105,6 +105,11 @@
     .validate-invalid {
       background-color: #ff0000 !important;
     }
+    /* 🟧 Soft warning (shop-details mismatch only) */
+.validate-warn {
+  background-color: #f59e0b !important; /* orange */
+}
+
 
     /* ✅ Custom searchable dropdown (Page) */
     .page-dd { position: relative; width: 220px; }
@@ -185,7 +190,7 @@
 
         $lines = preg_split("/\r\n|\n|\r/", $raw);
         $lines = array_values(array_filter(array_map('trim', $lines))); // remove blanks
-        $lines = array_reverse($lines); // ✅ oldest first
+        $lines = array_reverse($lines); // latest first (since we append)
 
         $items = [];
 
@@ -652,7 +657,12 @@
       .then(res => res.json())
       .then(data => {
         if (data.status === 'success') {
-          statusEl.textContent = `Updated: ${data.updated || 0}`;
+          // ✅ controller returns "updated" + breakdown
+          const upd = data.updated ?? 0;
+          const tofix = data.updated_to_fix ?? 0;
+          const ok = data.updated_ok ?? 0;
+
+          statusEl.textContent = `Updated: ${upd} (TO FIX: ${tofix}, OK: ${ok})`;
           statusEl.classList.remove('text-gray-600');
           statusEl.classList.add('text-green-600');
 
@@ -667,7 +677,6 @@
           statusEl.classList.remove('text-gray-600');
           statusEl.classList.add('text-red-600');
 
-          // ✅ LIVE UPDATE badges
           if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
         }
       })
@@ -676,7 +685,6 @@
         statusEl.classList.remove('text-gray-600');
         statusEl.classList.add('text-red-600');
 
-        // ✅ LIVE UPDATE badges
         if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
       });
     });
@@ -907,15 +915,11 @@
             if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
           } else {
             this.classList.add('validate-invalid');
-
-            // ✅ LIVE UPDATE badges (still refresh, just in case)
             if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
           }
         })
         .catch(() => {
           this.classList.add('validate-invalid');
-
-          // ✅ LIVE UPDATE badges
           if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
         });
       };
@@ -1123,8 +1127,6 @@
 
   {{-- ✅ Validation helpers (FULL NAME rules + move-to-top) --}}
   <script>
-    // FULL NAME allowed: A-Z, a-z, ñ/Ñ, space, dot, comma
-    // Disallow other scripts (Chinese etc.) by strict whitelist.
     function isValidFullName(v) {
       const s = (v ?? '').toString();
       if (s.trim() === '') return true; // blank = allowed
@@ -1132,13 +1134,36 @@
     }
 
     function clearValidateMarks() {
-      document.querySelectorAll('.validate-invalid').forEach(el => el.classList.remove('validate-invalid'));
-    }
+  document.querySelectorAll('.validate-invalid').forEach(el => el.classList.remove('validate-invalid'));
+  document.querySelectorAll('.validate-warn').forEach(el => el.classList.remove('validate-warn'));
+}
 
-    function markInvalid(id, field) {
-      const el = document.querySelector(`[data-id="${id}"][data-field="${field}"]`);
-      if (el) el.classList.add('validate-invalid');
-    }
+function markInvalid(id, field) {
+  const el = document.querySelector(`[data-id="${id}"][data-field="${field}"]`);
+  if (!el) return;
+
+  // 🔴 invalid always wins
+  el.classList.remove('validate-warn');
+  el.classList.add('validate-invalid');
+}
+
+function markWarn(id, field) {
+  const el = document.querySelector(`[data-id="${id}"][data-field="${field}"]`);
+  if (!el) return;
+
+  // if already invalid, don't overwrite
+  if (el.classList.contains('validate-invalid')) return;
+
+  // optional: wag i-orange pag edited green (para di matabunan)
+  const styleAttr = (el.getAttribute('style') || '').toLowerCase();
+  const isEditedGreenInline = styleAttr.includes('#00ff00');
+  const isEditedGreenClass = el.classList.contains('bg-green-100');
+
+  if (isEditedGreenInline || isEditedGreenClass) return;
+
+  el.classList.add('validate-warn');
+}
+
 
     function moveRowsWithIssuesToTop(invalidIdsSet) {
       const tbody = document.querySelector('#table-body tbody');
@@ -1171,7 +1196,6 @@
       statusEl.classList.remove('text-green-600', 'text-red-600');
       statusEl.classList.add('text-gray-600');
 
-      // ✅ clear only validation reds
       clearValidateMarks();
 
       const rows = Array.from(document.querySelectorAll('tr[data-id]'));
@@ -1192,7 +1216,6 @@
         let errorCount = 0;
         const invalidRowIds = new Set();
 
-        // 1) server-side invalid fields (province/city/brgy + others if your API adds later)
         results.forEach(result => {
           const id = String(result.id);
           if (!result.invalid_fields) return;
@@ -1210,7 +1233,6 @@
           if (rowHasIssue) invalidRowIds.add(id);
         });
 
-        // 2) client-side FULL NAME validation
         rows.forEach(row => {
           const id = String(row.dataset.id || '');
           if (!id) return;
@@ -1229,7 +1251,6 @@
           }
         });
 
-        // 3) move invalid rows to top
         if (invalidRowIds.size > 0) {
           moveRowsWithIssuesToTop(invalidRowIds);
         }
@@ -1238,7 +1259,6 @@
         statusEl.classList.remove('text-gray-600');
         statusEl.classList.add(errorCount > 0 ? 'text-red-600' : 'text-green-600');
 
-        // ✅ LIVE UPDATE badges
         if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
       })
       .catch(() => {
@@ -1246,77 +1266,95 @@
         statusEl.classList.remove('text-gray-600');
         statusEl.classList.add('text-red-600');
 
-        // ✅ LIVE UPDATE badges
         if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
       });
     });
   </script>
 
   {{-- Item checker --}}
-  <script>
-    document.getElementById('itemCheckerBtn')?.addEventListener('click', async function () {
-      const statusEl = document.getElementById('item-checker-status');
-      statusEl.textContent = 'Checking...';
-      statusEl.classList.remove('text-green-600', 'text-red-600');
-      statusEl.classList.add('text-gray-600');
+  {{-- Item checker (RED = invalid_fields, ORANGE = warn_fields) --}}
+<script>
+  document.getElementById('itemCheckerBtn')?.addEventListener('click', async function () {
+    const statusEl = document.getElementById('item-checker-status');
+    statusEl.textContent = 'Checking...';
+    statusEl.classList.remove('text-green-600', 'text-red-600', 'text-yellow-700');
+    statusEl.classList.add('text-gray-600');
 
-      // ✅ clear only validation reds
-      clearValidateMarks();
+    clearValidateMarks();
 
-      const rows = Array.from(document.querySelectorAll('tr[data-id]'));
-      const ids = rows
-        .filter(row => row.querySelector('[data-field="STATUS"]')?.value !== 'CANNOT PROCEED')
-        .map(row => row.getAttribute('data-id'))
-        .filter(Boolean);
+    const rows = Array.from(document.querySelectorAll('tr[data-id]'));
+    const ids = rows
+      .filter(row => row.querySelector('[data-field="STATUS"]')?.value !== 'CANNOT PROCEED')
+      .map(row => row.getAttribute('data-id'))
+      .filter(Boolean);
 
-      const response = await fetch('/macro_output/validate-items', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-TOKEN': '{{ csrf_token() }}',
-        },
-        body: JSON.stringify({ ids }),
-      });
+    const response = await fetch('/macro_output/validate-items', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+      },
+      body: JSON.stringify({ ids }),
+    });
 
-      const results = await response.json();
+    const results = await response.json();
 
-      let errorCount = 0;
-      const invalidRowIds = new Set();
+    let invalidCount = 0; // 🔴 hard invalid only
+    let warnCount = 0;    // 🟧 shop-details mismatch only
+    const invalidRowIds = new Set();
 
-      results.forEach(result => {
-        const id = String(result.id);
-        const invalid = result.invalid_fields || {};
+    results.forEach(result => {
+      const id = String(result.id);
+      const invalid = result.invalid_fields || {};
+      const warn = result.warn_fields || {};
 
-        let rowHasIssue = false;
+      let rowHasInvalid = false;
 
-        if (invalid.ITEM_NAME) {
-          markInvalid(id, 'ITEM_NAME');
-          errorCount++;
-          rowHasIssue = true;
-        }
-
-        if (invalid.COD) {
-          markInvalid(id, 'COD');
-          errorCount++;
-          rowHasIssue = true;
-        }
-
-        if (rowHasIssue) invalidRowIds.add(id);
-      });
-
-      // move invalid rows to top
-      if (invalidRowIds.size > 0) {
-        moveRowsWithIssuesToTop(invalidRowIds);
+      // ITEM_NAME
+      if (invalid.ITEM_NAME) {
+        markInvalid(id, 'ITEM_NAME');
+        invalidCount++;
+        rowHasInvalid = true;
+      } else if (warn.ITEM_NAME) {
+        markWarn(id, 'ITEM_NAME');
+        warnCount++;
       }
 
-      statusEl.textContent = errorCount > 0 ? `${errorCount} item(s) need fixing` : 'All good! ✅';
-      statusEl.classList.remove('text-gray-600');
-      statusEl.classList.add(errorCount > 0 ? 'text-red-600' : 'text-green-600');
+      // COD
+      if (invalid.COD) {
+        markInvalid(id, 'COD');
+        invalidCount++;
+        rowHasInvalid = true;
+      } else if (warn.COD) {
+        markWarn(id, 'COD');
+        warnCount++;
+      }
 
-      // ✅ LIVE UPDATE badges
-      if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
+      if (rowHasInvalid) invalidRowIds.add(id);
     });
-  </script>
+
+    // move ONLY invalid to top (warning stays where it is)
+    if (invalidRowIds.size > 0) {
+      moveRowsWithIssuesToTop(invalidRowIds);
+    }
+
+    // status text
+    statusEl.classList.remove('text-gray-600');
+    if (invalidCount > 0) {
+      statusEl.textContent = `${invalidCount} item/cod field(s) need fixing`;
+      statusEl.classList.add('text-red-600');
+    } else if (warnCount > 0) {
+      statusEl.textContent = `No invalids ✅ (${warnCount} warning(s) from shop details)`;
+      statusEl.classList.add('text-yellow-700');
+    } else {
+      statusEl.textContent = 'All good! ✅';
+      statusEl.classList.add('text-green-600');
+    }
+
+    if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
+  });
+</script>
+
 
   {{-- ✅ LIVE BADGES: fetch + debounce + polling --}}
   <script>
@@ -1343,15 +1381,12 @@
 
         const data = await res.json();
 
-        // text
         vb.textContent = data.validated ?? 'NO';
         pb.textContent = `${data.proceed_ok ?? 0}/${data.proceed_total ?? 0}`;
 
-        // color (validated)
         vb.classList.remove('bg-gray-200','bg-green-200','bg-red-200');
         vb.classList.add((data.validated === 'YES') ? 'bg-green-200' : 'bg-red-200');
 
-        // color (proceed ok)
         pb.classList.remove('bg-gray-200','bg-green-200','bg-red-200');
         if ((data.proceed_total ?? 0) <= 0) {
           pb.classList.add('bg-gray-200');
@@ -1360,7 +1395,6 @@
         }
 
       } catch (e) {
-        // fallback
         vb.textContent = 'NO';
         vb.classList.remove('bg-gray-200','bg-green-200');
         vb.classList.add('bg-red-200');
@@ -1376,17 +1410,14 @@
       _validatedTimer = setTimeout(refreshValidatedBadges, 350);
     }
 
-    // ✅ On load + live polling
     window.addEventListener('load', () => {
       refreshValidatedBadges();
 
-      // optional: refresh every 5s (helps if other users are updating)
       setInterval(() => {
         if (!document.hidden) refreshValidatedBadges();
       }, 5000);
     });
 
-    // refresh when user returns to tab
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) refreshValidatedBadges();
     });
