@@ -67,7 +67,7 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
         $client = JntClient::fromConfig();
 
         // Chunk size for PDF parts to avoid RAM blowups (NOT a “limit”, it just splits output)
-        $PART_SIZE = 200;
+        $PART_SIZE = 1000;
 
         $baseDir = "jnt_waybills/bulk_runs/run_{$run->id}";
 
