@@ -11,6 +11,8 @@ use App\Models\JntWaybillPrintRun;
 use App\Models\JntWaybillPrintRunItem;
 use App\Jobs\BuildJntWaybillBulkPrint;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 class JntWaybillPrintController extends Controller
 {
@@ -200,9 +202,32 @@ public function download(int $runId)
 
     $abs = $disk->path($rel);
 
-    $filename = ($run->output_type === 'zip')
-        ? "waybills-run-{$run->id}.zip"
-        : "waybills-run-{$run->id}.pdf";
+    // ✅ Filename: FEB_09_2026_Alexa_Angeles_021026_2344.pdf/zip
+    $filterDate = $run->date
+        ? Carbon::parse($run->date, 'Asia/Manila')
+        : now('Asia/Manila')->subDay();
+
+    $filterDatePart = strtoupper($filterDate->format('M')) . '_' . $filterDate->format('d') . '_' . $filterDate->format('Y'); // FEB_09_2026
+
+    $rawName = trim((string)($run->filter_value ?? ''));
+    if ($rawName === '') {
+        $rawName = ((string)($run->filter_by ?? 'page') === 'item') ? 'ALL_ITEMS' : 'ALL_PAGES';
+    }
+
+    // sanitize: keep alnum, convert others to underscore
+    $namePart = (string) Str::of($rawName)
+        ->replaceMatches('/[^A-Za-z0-9]+/', '_')
+        ->replaceMatches('/_+/', '_')
+        ->trim('_');
+
+    // cap length for filesystem safety
+    $namePart = Str::limit($namePart, 60, '');
+
+    $downloadPart = now('Asia/Manila')->format('mdy_Hi'); // 021026_2344
+
+    $ext = ((string)$run->output_type === 'zip') ? 'zip' : 'pdf';
+
+    $filename = "{$filterDatePart}_{$namePart}_{$downloadPart}.{$ext}";
 
     // ✅ cleanup AFTER the download response is fully sent
     app()->terminating(function () use ($runId) {
@@ -235,6 +260,7 @@ public function download(int $runId)
         'Cache-Control' => 'no-store, no-cache',
     ]);
 }
+
 
 public function cancel(int $runId)
 {

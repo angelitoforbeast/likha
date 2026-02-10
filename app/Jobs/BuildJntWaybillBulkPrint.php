@@ -13,9 +13,9 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use setasign\Fpdi\Fpdi;
 use Illuminate\Support\Facades\File;
-
+use Illuminate\Support\Str;
+use setasign\Fpdi\Fpdi;
 
 class BuildJntWaybillBulkPrint implements ShouldQueue
 {
@@ -66,24 +66,22 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
 
         $client = JntClient::fromConfig();
 
-        // Chunk size for PDF parts to avoid RAM blowups (NOT a “limit”, it just splits output)
+        // Chunk size for PDF parts to avoid RAM blowups
         $PART_SIZE = 1000;
 
         $baseDir = "jnt_waybills/bulk_runs/run_{$run->id}";
 
-// ✅ ensure directory exists
-Storage::disk('local')->makeDirectory($baseDir);
+        // ✅ ensure directory exists
+        Storage::disk('local')->makeDirectory($baseDir);
 
-// ✅ get absolute dir path (Windows safe) + ensure exists
-$baseAbs = Storage::disk('local')->path($baseDir);
-File::ensureDirectoryExists($baseAbs);
-
+        // ✅ get absolute dir path + ensure exists
+        $baseAbs = Storage::disk('local')->path($baseDir);
+        File::ensureDirectoryExists($baseAbs);
 
         $partPaths = [];
         $partNo = 0;
 
         // Process items in seq order, in groups of PART_SIZE
-        $offset = 0;
         while (true) {
             // allow cancel
             $fresh = JntWaybillPrintRun::query()->find($run->id);
@@ -127,7 +125,7 @@ File::ensureDirectoryExists($baseAbs);
                     }
 
                     // FPDI needs a temp file
-                    $tmp = tempnam(sys_get_temp_dir(), 'wb_'); // ✅ no ".pdf" append
+                    $tmp = tempnam(sys_get_temp_dir(), 'wb_');
                     file_put_contents($tmp, $bytes);
 
                     $pageCount = $pdf->setSourceFile($tmp);
@@ -163,18 +161,16 @@ File::ensureDirectoryExists($baseAbs);
             if ($okInThisPart > 0) {
                 $partRel = "{$baseDir}/part_" . str_pad((string)$partNo, 3, '0', STR_PAD_LEFT) . ".pdf";
                 $partAbs = Storage::disk('local')->path($partRel);
-File::ensureDirectoryExists(dirname($partAbs));
+                File::ensureDirectoryExists(dirname($partAbs));
 
-// ✅ correct FPDF call: Output(dest, name)
-$pdf->Output('F', $partAbs);
-
+                // ✅ correct FPDF call: Output(dest, name)
+                $pdf->Output('F', $partAbs);
 
                 $partPaths[] = $partRel;
             }
 
             // save after each part
             $run->save();
-            $offset += $PART_SIZE;
         }
 
         // If nothing succeeded
@@ -202,14 +198,42 @@ $pdf->Output('F', $partAbs);
             Storage::disk('local')->put($failedTxtRel, implode("\n", $failedLines));
         }
 
+        // ✅ Build output base filename (FILTER DATE + FILTER VALUE + time generated)
+        $filterDate = $run->date
+            ? Carbon::parse($run->date, 'Asia/Manila')
+            : now('Asia/Manila')->subDay();
+
+        $filterDatePart = strtoupper($filterDate->format('M')) . '_' . $filterDate->format('d') . '_' . $filterDate->format('Y'); // FEB_09_2026
+
+        $rawName = trim((string)($run->filter_value ?? ''));
+        if ($rawName === '') {
+            $rawName = ((string)($run->filter_by ?? 'page') === 'item') ? 'ALL_ITEMS' : 'ALL_PAGES';
+        }
+
+        $namePart = (string) Str::of($rawName)
+            ->replaceMatches('/[^A-Za-z0-9]+/', '_')
+            ->replaceMatches('/_+/', '_')
+            ->trim('_');
+
+        $namePart = Str::limit($namePart, 60, '');
+
+        $timePart = now('Asia/Manila')->format('mdy_Hi'); // 021026_2344
+        $baseName = "{$filterDatePart}_{$namePart}_{$timePart}";
+
         // Decide output:
-        // - if only 1 part -> single PDF
-        // - if multiple parts -> ZIP the parts (+ FAILED.txt)
+        // - if only 1 part -> single PDF (rename to baseName)
+        // - if multiple parts -> ZIP the parts (+ FAILED.txt) named baseName
         if (count($partPaths) === 1) {
+            $finalRel = "{$baseDir}/{$baseName}.pdf";
+
+            // rename part_001.pdf -> baseName.pdf
+            Storage::disk('local')->move($partPaths[0], $finalRel);
+
             $run->output_type = 'pdf';
-            $run->output_path = $partPaths[0];
+            $run->output_path = $finalRel;
+
         } else {
-            $zipRel = "{$baseDir}/waybills-run-{$run->id}.zip";
+            $zipRel = "{$baseDir}/{$baseName}.zip";
             $zipAbs = storage_path("app/{$zipRel}");
 
             $zip = new \ZipArchive();
@@ -234,7 +258,7 @@ $pdf->Output('F', $partAbs);
             $run->output_type = 'zip';
             $run->output_path = $zipRel;
 
-            // optional cleanup parts (keep if you want)
+            // optional cleanup parts
             foreach ($partPaths as $rel) {
                 @unlink(storage_path("app/{$rel}"));
             }
@@ -258,7 +282,10 @@ $pdf->Output('F', $partAbs);
 
     private function buildItemsForAll(JntWaybillPrintRun $run): void
     {
-        $date = $run->date ? $run->date->toDateString() : now('Asia/Manila')->subDay()->toDateString();
+        $date = $run->date
+            ? Carbon::parse($run->date, 'Asia/Manila')->toDateString()
+            : now('Asia/Manila')->subDay()->toDateString();
+
         $start = $date;
         $end   = Carbon::parse($date, 'Asia/Manila')->addDay()->toDateString();
 
