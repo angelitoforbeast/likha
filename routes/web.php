@@ -345,7 +345,14 @@ Route::post('/jnt/order-management/query', [JntOrderManagementController::class,
 
 Route::get('/jnt/waybills/print', [JntWaybillPrintController::class, 'index']);
 Route::post('/jnt/waybills/print-one', [JntWaybillPrintController::class, 'printOne']);
+
+
 Route::post('/jnt/waybills/print-bulk', [JntWaybillPrintController::class, 'printBulk']);
+Route::get('/jnt/waybills/print-bulk/run/{runId}', [JntWaybillPrintController::class, 'runPage']);
+Route::get('/jnt/waybills/print-bulk/status/{runId}', [JntWaybillPrintController::class, 'statusRun']);
+Route::get('/jnt/waybills/print-bulk/download/{runId}', [JntWaybillPrintController::class, 'download']);
+Route::post('/jnt/waybills/print-bulk/cancel/{runId}', [JntWaybillPrintController::class, 'cancel']);
+
 
 Route::get('jnt/waybills/sender-address', [SenderAddressController::class, 'index'])
     ->name('jnt.sender_address.index');

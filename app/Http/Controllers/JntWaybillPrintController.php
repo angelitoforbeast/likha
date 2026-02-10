@@ -7,292 +7,247 @@ use App\Services\Jnt\JntClient;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Models\JntWaybillPrintRun;
+use App\Models\JntWaybillPrintRunItem;
+use App\Jobs\BuildJntWaybillBulkPrint;
+use Illuminate\Support\Facades\Storage;
 
 class JntWaybillPrintController extends Controller
 {
+
     public function index(Request $request)
-    {
-        // ✅ default: yesterday (Asia/Manila)
-        $date = $request->input('date')
-            ?: now('Asia/Manila')->subDay()->toDateString();
+{
+    $date = $request->input('date') ?: now('Asia/Manila')->subDay()->toDateString();
 
-        // ✅ index-friendly range filter
-        $start = $date; // 'YYYY-MM-DD'
-        $end   = Carbon::parse($date, 'Asia/Manila')->addDay()->toDateString();
+    $start = $date;
+    $end   = Carbon::parse($date, 'Asia/Manila')->addDay()->toDateString();
 
-        // filter_by: page | item
-        $filterBy = $request->input('filter_by', 'page');
-        if (!in_array($filterBy, ['page', 'item'], true)) {
-            $filterBy = 'page';
-        }
+    $filterBy = $request->input('filter_by', 'page');
+    if (!in_array($filterBy, ['page','item'], true)) $filterBy = 'page';
 
-        $filterValue = trim((string) $request->input('filter_value', ''));
+    $filterValue = trim((string) $request->input('filter_value',''));
 
-        /**
-         * Base macro filter (date range + optional page/item)
-         * NOTE: we will reuse this as subquery for macro IDs
-         */
-        $macroBase = DB::table('macro_output')
-            ->where('ts_date', '>=', $start)
-            ->where('ts_date', '<', $end);
+    $pages = DB::table('macro_output')
+        ->where('ts_date', '>=', $start)->where('ts_date', '<', $end)
+        ->whereNotNull('PAGE')->where('PAGE','!=','')
+        ->distinct()->orderBy('PAGE')->pluck('PAGE')->values()->all();
 
-        if ($filterValue !== '') {
-            if ($filterBy === 'page') {
-                $macroBase->where('PAGE', $filterValue);
-            } else {
-                $macroBase->where('ITEM_NAME', $filterValue);
-            }
-        }
+    $items = DB::table('macro_output')
+        ->where('ts_date', '>=', $start)->where('ts_date', '<', $end)
+        ->whereNotNull('ITEM_NAME')->where('ITEM_NAME','!=','')
+        ->distinct()->orderBy('ITEM_NAME')->pluck('ITEM_NAME')->values()->all();
 
-        // ✅ Macro IDs for this date+filter ONLY (used to limit shipments scan)
-        $macroIdsSub = (clone $macroBase)->select('id');
+    $macroBase = DB::table('macro_output')
+        ->where('ts_date', '>=', $start)->where('ts_date', '<', $end);
 
-        // ✅ Dropdown options depend on date only (fast if indexed)
-        $pages = DB::table('macro_output')
-            ->where('ts_date', '>=', $start)
-            ->where('ts_date', '<', $end)
-            ->whereNotNull('PAGE')->where('PAGE', '!=', '')
-            ->distinct()
-            ->orderBy('PAGE')
-            ->pluck('PAGE')
-            ->values()
-            ->all();
-
-        $items = DB::table('macro_output')
-            ->where('ts_date', '>=', $start)
-            ->where('ts_date', '<', $end)
-            ->whereNotNull('ITEM_NAME')->where('ITEM_NAME', '!=', '')
-            ->distinct()
-            ->orderBy('ITEM_NAME')
-            ->pluck('ITEM_NAME')
-            ->values()
-            ->all();
-
-        /**
-         * Latest shipment WITH mailno per macro_output_id,
-         * but only for macro IDs in this date+filter.
-         */
-        $latestShipments = DB::table('jnt_shipments')
-            ->selectRaw('macro_output_id, MAX(id) as shipment_id')
-            ->whereIn('macro_output_id', $macroIdsSub)
-            ->whereNotNull('mailno')->where('mailno', '!=', '')
-            ->groupBy('macro_output_id');
-
-        // ✅ Main rows query (macro_output + latest mailno)
-        $q = DB::table('macro_output as m')
-            ->leftJoinSub($latestShipments, 'ls', function ($join) {
-                $join->on('ls.macro_output_id', '=', 'm.id');
-            })
-            ->leftJoin('jnt_shipments as s', 's.id', '=', 'ls.shipment_id')
-            ->where('m.ts_date', '>=', $start)
-            ->where('m.ts_date', '<', $end)
-            ->select([
-                'm.id as macro_output_id',
-                'm.ts_date as ts_date',
-                'm.PAGE as page',
-                DB::raw('`m`.`FULL NAME` as fb_name'),
-                'm.ITEM_NAME as item_name',
-                'm.COD as cod',
-                'm.ADDRESS as address',
-                'm.PROVINCE as province',
-                'm.CITY as city',
-                'm.BARANGAY as barangay',
-                's.mailno as mailno',
-            ]);
-
-        if ($filterValue !== '') {
-            if ($filterBy === 'page') {
-                $q->where('m.PAGE', $filterValue);
-            } else {
-                $q->where('m.ITEM_NAME', $filterValue);
-            }
-        }
-
-        // ✅ IMPORTANT: simplePaginate = no COUNT(*)
-        $rows = $q->orderByDesc('m.id')
-            ->simplePaginate(50)
-            ->withQueryString();
-
-        return view('jnt.waybills.print', compact(
-            'date',
-            'filterBy',
-            'filterValue',
-            'pages',
-            'items',
-            'rows'
-        ));
+    if ($filterValue !== '') {
+        if ($filterBy === 'page') $macroBase->where('PAGE', $filterValue);
+        if ($filterBy === 'item') $macroBase->where('ITEM_NAME', $filterValue);
     }
 
-    public function printOne(Request $request)
-    {
-        $request->validate([
-            'mailno' => 'required|string',
+    $macroIdsSub = (clone $macroBase)->select('id');
+
+    $latestShipments = DB::table('jnt_shipments')
+        ->selectRaw('macro_output_id, MAX(id) as shipment_id')
+        ->whereIn('macro_output_id', $macroIdsSub)
+        ->whereNotNull('mailno')->where('mailno','!=','')
+        ->groupBy('macro_output_id');
+
+    $q = DB::table('macro_output as m')
+        ->leftJoinSub($latestShipments, 'ls', fn($join) => $join->on('ls.macro_output_id','=','m.id'))
+        ->leftJoin('jnt_shipments as s', 's.id','=','ls.shipment_id')
+        ->where('m.ts_date','>=',$start)->where('m.ts_date','<',$end)
+        ->select([
+            'm.id as macro_output_id',
+            'm.ts_date as ts_date',
+            'm.PAGE as page',
+            DB::raw('`m`.`FULL NAME` as fb_name'),
+            'm.ITEM_NAME as item_name',
+            'm.COD as cod',
+            'm.ADDRESS as address',
+            'm.PROVINCE as province',
+            'm.CITY as city',
+            'm.BARANGAY as barangay',
+            's.mailno as mailno',
         ]);
 
-        $mailno = trim((string) $request->mailno);
-        if ($mailno === '') {
-            return back()->with('error', 'Empty mailno.');
-        }
-
-        $client = JntClient::fromConfig();
-        $res = $client->printWaybill($mailno);
-
-        $b64 = data_get($res, 'responseitems.base64Url')
-            ?? data_get($res, 'responseitems.0.base64Url');
-
-        if (!$b64) {
-            return back()->with('error', "No base64Url returned for mailno {$mailno}.");
-        }
-
-        $pdfBytes = base64_decode(preg_replace('/\s+/', '', (string) $b64), true);
-        if ($pdfBytes === false) {
-            return back()->with('error', "Invalid base64 PDF returned for mailno {$mailno}.");
-        }
-
-        $filename = 'waybill-' . $mailno . '.pdf';
-
-        return response($pdfBytes, 200, [
-            'Content-Type'        => 'application/pdf',
-            'Content-Disposition' => 'inline; filename="'.$filename.'"',
-        ]);
+    if ($filterValue !== '') {
+        if ($filterBy === 'page') $q->where('m.PAGE', $filterValue);
+        if ($filterBy === 'item') $q->where('m.ITEM_NAME', $filterValue);
     }
+
+    $rows = $q->orderByDesc('m.id')->simplePaginate(50)->withQueryString();
+
+    return view('jnt.waybills.print', [
+        'date' => $date,
+        'filterBy' => $filterBy,
+        'filterValue' => $filterValue,
+        'pages' => $pages,
+        'items' => $items,
+        'rows' => $rows,
+    ]);
+}
 
     public function printBulk(Request $request)
 {
-    set_time_limit(0);
+    $mode = $request->input('mode', 'selected'); // selected|all
+    if (!in_array($mode, ['selected','all'], true)) $mode = 'selected';
 
-    $mode = $request->input('mode', 'selected'); // selected | all
-
-    // ✅ default: yesterday
-    $date = $request->input('date')
-        ?: now('Asia/Manila')->subDay()->toDateString();
+    $date = $request->input('date') ?: now('Asia/Manila')->subDay()->toDateString();
 
     $filterBy = $request->input('filter_by', 'page');
-    if (!in_array($filterBy, ['page', 'item'], true)) $filterBy = 'page';
+    if (!in_array($filterBy, ['page','item'], true)) $filterBy = 'page';
 
     $filterValue = trim((string) $request->input('filter_value', ''));
 
-    // ✅ Collect mailnos
-    $mailnos = [];
+    $run = JntWaybillPrintRun::query()->create([
+        'created_by'   => auth()->id(),
+        'date'         => $date,
+        'mode'         => $mode,
+        'filter_by'    => $filterBy,
+        'filter_value' => $filterValue,
+        'status'       => 'queued',
+        'message'      => 'Queued...',
+        'total'        => 0,
+        'processed'    => 0,
+        'ok_count'     => 0,
+        'fail_count'   => 0,
+    ]);
 
-    if ($mode === 'all') {
-        // index-friendly range
-        $start = $date;
-        $end   = Carbon::parse($date, 'Asia/Manila')->addDay()->toDateString();
-
-        $macroBase = DB::table('macro_output')
-            ->where('ts_date', '>=', $start)
-            ->where('ts_date', '<', $end);
-
-        if ($filterValue !== '') {
-            if ($filterBy === 'page') {
-                $macroBase->where('PAGE', $filterValue);
-            } else {
-                $macroBase->where('ITEM_NAME', $filterValue);
-            }
-        }
-
-        $macroIdsSub = (clone $macroBase)->select('id');
-
-        $latestShipments = DB::table('jnt_shipments')
-            ->selectRaw('macro_output_id, MAX(id) as shipment_id')
-            ->whereIn('macro_output_id', $macroIdsSub)
-            ->whereNotNull('mailno')->where('mailno', '!=', '')
-            ->groupBy('macro_output_id');
-
-        $q = DB::table('macro_output as m')
-            ->leftJoinSub($latestShipments, 'ls', fn($join) => $join->on('ls.macro_output_id', '=', 'm.id'))
-            ->leftJoin('jnt_shipments as s', 's.id', '=', 'ls.shipment_id')
-            ->where('m.ts_date', '>=', $start)
-            ->where('m.ts_date', '<', $end)
-            ->whereNotNull('s.mailno')->where('s.mailno', '!=', '')
-            ->select(['s.mailno'])
-            ->orderByDesc('m.id');
-
-        // ✅ Safety cap (adjust if you want)
-        $q->limit(500);
-
-        $mailnos = $q->pluck('mailno')->filter()->values()->all();
-    } else {
-        // selected mode
-        $mailnos = $request->input('mailnos', []);
-        $mailnos = collect($mailnos)
-            ->map(fn($v) => trim((string) $v))
+    // If selected mode, store selected mailnos immediately (fast)
+    if ($mode === 'selected') {
+        $mailnos = collect($request->input('mailnos', []))
+            ->map(fn($v) => trim((string)$v))
             ->filter(fn($v) => $v !== '')
             ->unique()
             ->values()
             ->all();
-    }
 
-    if (count($mailnos) <= 0) {
-        return back()->with('error', 'No mailno selected / found.');
-    }
-
-    $client = JntClient::fromConfig();
-
-    $pdf = new Fpdi();
-    $pdf->SetAutoPageBreak(false);
-
-    $failed = [];
-    $okCount = 0;
-
-    foreach ($mailnos as $mailno) {
-        try {
-            $res = $client->printWaybill($mailno);
-
-            $b64 = data_get($res, 'responseitems.base64Url')
-                ?? data_get($res, 'responseitems.0.base64Url');
-
-            if (!$b64) {
-                $failed[] = "{$mailno} | no base64Url";
-                continue;
-            }
-
-            $bytes = base64_decode(preg_replace('/\s+/', '', (string) $b64), true);
-            if ($bytes === false) {
-                $failed[] = "{$mailno} | invalid base64";
-                continue;
-            }
-
-            // FPDI needs a file
-            $tmp = tempnam(sys_get_temp_dir(), 'wb_') . '.pdf';
-            file_put_contents($tmp, $bytes);
-
-            $pageCount = $pdf->setSourceFile($tmp);
-            for ($p = 1; $p <= $pageCount; $p++) {
-                $tpl = $pdf->importPage($p);
-                $size = $pdf->getTemplateSize($tpl);
-
-                $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
-                $pdf->useTemplate($tpl);
-            }
-
-            @unlink($tmp);
-            $okCount++;
-        } catch (\Throwable $e) {
-            $failed[] = "{$mailno} | " . $e->getMessage();
-            continue;
+        if (count($mailnos) <= 0) {
+            return back()->with('error', 'No mailno selected.');
         }
+
+        $seq = 1;
+        foreach (array_chunk($mailnos, 1000) as $chunk) {
+            $toInsert = [];
+            foreach ($chunk as $m) {
+                $toInsert[] = [
+                    'run_id' => $run->id,
+                    'macro_output_id' => null,
+                    'mailno' => $m,
+                    'seq' => $seq++,
+                    'status' => 'pending',
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+            DB::table('jnt_waybill_print_run_items')->insertOrIgnore($toInsert);
+        }
+
+        $run->total = (int) JntWaybillPrintRunItem::query()->where('run_id',$run->id)->count();
+        $run->save();
     }
 
-    if ($okCount <= 0) {
-        return back()->with('error', 'No waybills were generated. (All failed)');
-    }
+    BuildJntWaybillBulkPrint::dispatch((int)$run->id);
 
-    // ✅ If may failed, add last page with failed list
-    if (!empty($failed)) {
-        $pdf->AddPage('P', 'A4');
-        $pdf->SetFont('Arial', '', 10);
-        $pdf->MultiCell(0, 5, "FAILED WAYBILLS:\n\n" . implode("\n", $failed));
-    }
+    return redirect()->to(url("/jnt/waybills/print-bulk/run/{$run->id}"));
+}
 
-    $out = $pdf->Output('S');
-    $filename = 'waybills-bulk-' . $date . '-' . now('Asia/Manila')->format('His') . '.pdf';
+public function runPage(int $runId)
+{
+    $run = JntWaybillPrintRun::query()->findOrFail($runId);
+    return view('jnt.waybills.print_run', compact('run'));
+}
 
-    return response($out, 200, [
-        'Content-Type'        => 'application/pdf',
-        'Content-Disposition' => 'inline; filename="'.$filename.'"',
+public function statusRun(int $runId)
+{
+    $run = JntWaybillPrintRun::query()->findOrFail($runId);
+
+    $fails = JntWaybillPrintRunItem::query()
+        ->where('run_id', $runId)
+        ->where('status', 'fail')
+        ->orderByDesc('updated_at')
+        ->limit(10)
+        ->pluck('error')
+        ->values();
+
+    return response()->json([
+        'id' => (int)$run->id,
+        'status' => (string)$run->status,
+        'message' => (string)($run->message ?? ''),
+        'total' => (int)$run->total,
+        'processed' => (int)$run->processed,
+        'ok' => (int)$run->ok_count,
+        'fail' => (int)$run->fail_count,
+        'output_type' => $run->output_type,
+        'output_path' => $run->output_path,
+        'recent_fails' => $fails,
     ]);
 }
+
+public function download(int $runId)
+{
+    $run = JntWaybillPrintRun::findOrFail($runId);
+
+    // only allow download when finished
+    abort_unless((string)$run->status === 'finished', 409, 'Run not finished yet.');
+
+    $rel = (string)($run->output_path ?? '');
+    abort_if($rel === '', 410, 'Output already cleaned or missing.');
+
+    $disk = Storage::disk('local');
+    abort_unless($disk->exists($rel), 404, "Output file does not exist.");
+
+    $abs = $disk->path($rel);
+
+    $filename = ($run->output_type === 'zip')
+        ? "waybills-run-{$run->id}.zip"
+        : "waybills-run-{$run->id}.pdf";
+
+    // ✅ cleanup AFTER the download response is fully sent
+    app()->terminating(function () use ($runId) {
+        try {
+            $run = JntWaybillPrintRun::find($runId);
+            if (!$run) return;
+
+            $baseDir = "jnt_waybills/bulk_runs/run_{$run->id}";
+
+            // delete files/folder
+            Storage::disk('local')->deleteDirectory($baseDir);
+
+            // optional: delete run items (para lumiit DB)
+            DB::table('jnt_waybill_print_run_items')->where('run_id', $run->id)->delete();
+
+            // optional: keep run row but mark cleaned (para di na mag-404 next time)
+            $run->output_path = null;
+            $run->output_type = null;
+            $run->message = 'Downloaded and cleaned.';
+            $run->save();
+        } catch (\Throwable $e) {
+            Log::warning('Waybill cleanup failed', [
+                'run_id' => $runId,
+                'err' => $e->getMessage(),
+            ]);
+        }
+    });
+
+    return response()->download($abs, $filename, [
+        'Cache-Control' => 'no-store, no-cache',
+    ]);
+}
+
+public function cancel(int $runId)
+{
+    $run = JntWaybillPrintRun::query()->findOrFail($runId);
+    if (!in_array((string)$run->status, ['finished','failed'], true)) {
+        $run->status = 'cancelled';
+        $run->message = 'Cancelled by user.';
+        $run->finished_at = now();
+        $run->save();
+    }
+    return back()->with('success', "Run #{$runId} cancelled.");
+}
+
+
 
 }
