@@ -67,6 +67,7 @@ use App\Http\Controllers\JntWaybillController;
 use App\Http\Controllers\JntOrderManagementController;
 use App\Http\Controllers\PancakeConversationIndexController;
 use App\Http\Controllers\JntWaybillPrintController;
+use App\Http\Controllers\JntWaybillFilesController;
 use App\Http\Controllers\Jnt\SenderAddressController;
 use App\Models\Role;
 
@@ -352,6 +353,21 @@ Route::get('/jnt/waybills/print-bulk/run/{runId}', [JntWaybillPrintController::c
 Route::get('/jnt/waybills/print-bulk/status/{runId}', [JntWaybillPrintController::class, 'statusRun']);
 Route::get('/jnt/waybills/print-bulk/download/{runId}', [JntWaybillPrintController::class, 'download']);
 Route::post('/jnt/waybills/print-bulk/cancel/{runId}', [JntWaybillPrintController::class, 'cancel']);
+
+
+Route::get('/jnt/waybills/files', [JntWaybillFilesController::class, 'index'])
+    ->name('jnt.waybills.files');
+
+Route::get('/jnt/waybills/files/download/{runId}/{filename}', [JntWaybillFilesController::class, 'download'])
+    ->whereNumber('runId')
+    ->where('filename', '.*')
+    ->name('jnt.waybills.files.download');
+
+Route::delete('/jnt/waybills/files/{runId}/{filename}', [JntWaybillFilesController::class, 'destroy'])
+    ->whereNumber('runId')
+    ->where('filename', '.*')
+    ->name('jnt.waybills.files.destroy');
+
 
 
 Route::get('jnt/waybills/sender-address', [SenderAddressController::class, 'index'])
