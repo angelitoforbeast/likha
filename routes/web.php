@@ -69,6 +69,7 @@ use App\Http\Controllers\PancakeConversationIndexController;
 use App\Http\Controllers\JntWaybillPrintController;
 use App\Http\Controllers\JntWaybillFilesController;
 use App\Http\Controllers\Jnt\SenderAddressController;
+use App\Http\Controllers\Jnt\Waybills\SenderNameController;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -272,6 +273,10 @@ Route::post('/jnt/checker/upload', [JntCheckerController::class, 'upload'])->nam
 Route::get('/jnt/checker/upload', fn () => redirect()->route('jnt.checker'));
 Route::post('/jnt/checker/update', [\App\Http\Controllers\JntCheckerController::class, 'update'])
     ->name('jnt.checker.update');
+Route::get('/jnt/waybills/sender-name', [SenderNameController::class, 'index'])
+    ->name('jnt.waybills.sender_name');
+
+
 
 Route::get('/jnt/stickers', [JntStickerController::class, 'index'])->name('jnt.stickers');
 
