@@ -47,7 +47,8 @@
                 {{ $r->SENDER_NAME !== '' ? $r->SENDER_NAME : '—' }}
               </td>
 
-              <td class="px-4 py-2">
+              {{-- ✅ red if DATE - MAPPING_CREATED > 8 days (date-only) --}}
+              <td class="px-4 py-2 {{ $r->is_stale ? 'bg-red-100 text-red-700 font-semibold' : '' }}">
                 {{ $r->mapping_created_display ?: '—' }}
               </td>
             </tr>
