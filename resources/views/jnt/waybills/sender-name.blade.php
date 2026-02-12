@@ -1,4 +1,5 @@
 <x-layout>
+  <x-slot name="title">Sender Name</x-slot>
   <x-slot name="heading">Waybills Sender Name</x-slot>
 
   <div class="p-4 space-y-4">
