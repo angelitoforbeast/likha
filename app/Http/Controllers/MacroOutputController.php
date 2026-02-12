@@ -1376,7 +1376,7 @@ class MacroOutputController extends Controller
             $qty = max(1, (int)$m[1]);
         }
 
-        $expectedCod = $price * $qty;
+        $expectedCod = $price;
 
         return [
             'item' => $item,
