@@ -13,6 +13,23 @@ class JntRemittanceController extends Controller
         $tz     = 'Asia/Manila';
         $driver = DB::getDriverName();
 
+        // ✅ Rates based on domain/host
+        $host = strtolower((string) $request->getHost());
+
+        if (str_contains($host, 'incepxion')) {
+            $codRate = 0.01;
+            $shipFee = 35.0;
+        } elseif (str_contains($host, 'likha')) {
+            $codRate = 0.015;
+            $shipFee = 37.0;
+        } else {
+            // fallback (default mo)
+            $codRate = 0.015;
+            $shipFee = 37.0;
+        }
+
+        $codVatRate = 0.12;
+
         // Default: yesterday (single day)
         $start = $request->input('start_date');
         $end   = $request->input('end_date');
@@ -27,7 +44,7 @@ class JntRemittanceController extends Controller
         }
 
         // Driver-specific SQL bits
-        $dateSignExpr = $driver === 'pgsql' ? "CAST(signingtime AS DATE)"     : "DATE(signingtime)";
+        $dateSignExpr = $driver === 'pgsql' ? "CAST(signingtime AS DATE)"      : "DATE(signingtime)";
         $dateSubExpr  = $driver === 'pgsql' ? "CAST(submission_time AS DATE)" : "DATE(submission_time)";
 
         $statusDelivered = $driver === 'pgsql'
@@ -79,8 +96,8 @@ class JntRemittanceController extends Controller
         $totals = [
             'delivered'   => 0,
             'cod_sum'     => 0.0,
-            'cod_fee'     => 0.0, // NEW: separate
-            'cod_fee_vat' => 0.0, // NEW: separate
+            'cod_fee'     => 0.0,
+            'cod_fee_vat' => 0.0,
             'picked'      => 0,
             'ship_cost'   => 0.0,
             'remittance'  => 0.0,
@@ -91,10 +108,10 @@ class JntRemittanceController extends Controller
             $codSum       = (float) ($vals['cod_sum']   ?? 0);
             $pickedCnt    = (int)   ($vals['picked']    ?? 0);
 
-            // ✅ Correct formulas
-            $codFee     = round($codSum * 0.015, 2);     // COD Fee = 1.5% × COD Sum
-            $codFeeVat  = round($codFee * 0.12, 2);      // COD Fee VAT = 0.12 × COD Fee
-            $shipCost   = round($pickedCnt * 37, 2);     // ₱37 per picked-up parcel
+            // ✅ Formulas using host-based rates
+            $codFee     = round($codSum * $codRate, 2);
+            $codFeeVat  = round($codFee * $codVatRate, 2);
+            $shipCost   = round($pickedCnt * $shipFee, 2);
             $remit      = round($codSum - $codFee - $codFeeVat - $shipCost, 2);
 
             $rows[] = [
@@ -117,13 +134,21 @@ class JntRemittanceController extends Controller
             $totals['remittance']  += $remit;
         }
 
-        usort($rows, fn($a, $b) => strcmp($a['date'], $b['date']));
+        usort($rows, fn ($a, $b) => strcmp($a['date'], $b['date']));
 
         return view('jnt.remittance', [
             'rows'   => $rows,
             'totals' => $totals,
             'start'  => $start,
             'end'    => $end,
+
+            // optional: pang debug sa UI kung anong rates ginamit
+            'rates'  => [
+                'host'         => $host,
+                'cod_fee_rate' => $codRate,
+                'ship_fee'     => $shipFee,
+                'cod_vat_rate' => $codVatRate,
+            ],
         ]);
     }
 }
