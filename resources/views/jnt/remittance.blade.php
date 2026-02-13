@@ -47,8 +47,8 @@
               <th class="px-3 py-2 border-b">Date</th>
               <th class="px-3 py-2 border-b text-right">Number of Delivered</th>
               <th class="px-3 py-2 border-b text-right">COD Sum</th>
-              <th class="px-3 py-2 border-b text-right">COD Fee<br><span class="text-[10px] font-normal">(1.5%)</span></th>
-              <th class="px-3 py-2 border-b text-right">COD Fee VAT<br><span class="text-[10px] font-normal">(1.12 × Fee)</span></th>
+              <th class="px-3 py-2 border-b text-right">COD Fee<br><span class="text-[10px] font-normal"></span></th>
+              <th class="px-3 py-2 border-b text-right">COD Fee VAT<br><span class="text-[10px] font-normal">(1.12 × COD Fee)</span></th>
               <th class="px-3 py-2 border-b text-right">Parcels Picked up</th>
               <th class="px-3 py-2 border-b text-right">Total Shipping Cost</th>
               <th class="px-3 py-2 border-b text-right">Remittance</th>
