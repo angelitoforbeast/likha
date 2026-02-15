@@ -245,7 +245,7 @@ class MacroOutputController extends Controller
     $results = [];
 
     // ✅ set mo kung ano yung current max mo (20 o 50) depende sa gusto mo
-    $MAX_ITEM_LEN = 20;
+    $MAX_ITEM_LEN = 50;
 
     foreach ($records as $record) {
         $invalids = []; // 🔴 hard invalid
