@@ -40,6 +40,11 @@ return [
     'model' => env('OPENAI_MODEL', 'gpt-4o-mini'), // may default para safe
 ],
 
+    'automation' => [
+    'key' => env('AUTOMATION_KEY'),
+],
+
+
 
 
 ];
