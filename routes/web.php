@@ -70,7 +70,7 @@ use App\Http\Controllers\JntWaybillPrintController;
 use App\Http\Controllers\JntWaybillFilesController;
 use App\Http\Controllers\Jnt\SenderAddressController;
 use App\Http\Controllers\Jnt\Waybills\SenderNameController;
-use App\Http\Controllers\AutomationController;
+// use App\Http\Controllers\AutomationController;
 use App\Models\Role;
 
 // ✅ Public routes
@@ -104,7 +104,7 @@ Route::get('/jnt/ondel', [JntOndelController::class, 'index'])->name('jnt.ondel'
 Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name('jnt.ondel.process');
 
 
-Route::post('/automation/macro-import', [AutomationController::class, 'macroImport']);
+// Route::post('/automation/macro-import', [AutomationController::class, 'macroImport']);
 
 
 
