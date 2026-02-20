@@ -74,12 +74,12 @@ class JntPayloadBuilder
         $senderAddr   = trim((string)($opts['sender_address'] ?? config('jnt.sender.address', '')));
 
         $sender = [
-            'name'    => $senderName !== '' ? $senderName : 'INCEPXION INC',
-            'phone'   => $senderPhone !== '' ? $senderPhone : '09170000000',
+            'name'    => $senderName !== '' ? $senderName : 'ONLINE SHOP',
+            'phone'   => $senderPhone !== '' ? $senderPhone : '09123456789',
             'mobile'  => $senderMobile !== '' ? $senderMobile : ($senderPhone !== '' ? $senderPhone : '09170000000'),
             'prov'    => $senderProv !== '' ? $senderProv : 'METRO-MANILA',
-            'city'    => $senderCity !== '' ? $senderCity : 'TAGUIG',
-            'area'    => $senderArea !== '' ? $senderArea : 'BAGUMBAYAN',
+            'city'    => $senderCity !== '' ? $senderCity : 'MAKATI',
+            'area'    => $senderArea !== '' ? $senderArea : 'SAN ISIDRO',
             'address' => $senderAddr !== '' ? $senderAddr : '',
         ];
 
