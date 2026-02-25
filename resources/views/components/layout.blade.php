@@ -132,7 +132,7 @@
                   </x-navlink>
                 @endif
 
-                @if(in_array($role, ['CEO','Data Encoder - OIC','Marketing - OIC']))
+                @if(Auth::check())
                   <x-navlink href="/allowed-ips" :active="request()->is('allowed-ips*')" label="IP">
                     <i class="fa-solid fa-network-wired"></i>
                   </x-navlink>

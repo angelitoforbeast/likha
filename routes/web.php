@@ -119,10 +119,8 @@ Route::middleware(['web','auth','allowed_ip'])->group(function () {
 
  // ✅ Allowed IPs (CEO only) - same style as /cpp
 Route::get('/allowed-ips', function () {
-    $role = auth()->user()->employeeProfile?->role;
-    $viewAllowed = ['CEO', 'Data Encoder - OIC', 'Marketing - OIC'];
-    if (!$role || !in_array($role, $viewAllowed)) abort(403);
-
+    // Allow any authenticated user to access the page; controller will
+    // still restrict which rows are visible (CEO sees all, others see their own).
     return app(AllowedIpController::class)->index();
 })->name('allowed_ips.index');
 
