@@ -114,11 +114,11 @@
               @elseif($group === 'page') Page
               @else Item Name @endif
             </th>
+            <th class="text-right p-2 border-b align-bottom" rowspan="2">Total</th>
             @foreach(($monthGroups ?? []) as $m)
               <th class="text-center p-2 border-b whitespace-nowrap" colspan="{{ $m['count'] ?? 0 }}">{{ $m['label'] ?? '' }}</th>
             @endforeach
             <th class="text-right p-2 border-b align-bottom" rowspan="2">Within {{ $lookbackDays }}d</th>
-            <th class="text-right p-2 border-b align-bottom" rowspan="2">Total</th>
           </tr>
           <tr class="bg-gray-50">
             @foreach($dateKeys as $dk)
@@ -131,12 +131,12 @@
           @forelse($pivotRows as $row)
             <tr class="odd:bg-white even:bg-gray-50">
               <td class="p-2 border-b" style="position: sticky; left: 0; background: white;">{{ $row['label'] ?? '—' }}</td>
+              <td class="p-2 border-b text-right font-semibold">{{ number_format($row['total'] ?? 0) }}</td>
               @foreach($dateKeys as $dk)
                 @php $v = isset($row['dates'][$dk]) ? (int)$row['dates'][$dk] : 0; @endphp
                 <td class="p-2 border-b text-right">{{ $v ? number_format($v) : '' }}</td>
               @endforeach
               <td class="p-2 border-b text-right">{{ number_format($recentMap[$row['label'] ?? ''] ?? 0) }}</td>
-              <td class="p-2 border-b text-right font-semibold">{{ number_format($row['total'] ?? 0) }}</td>
             </tr>
           @empty
             <tr><td class="p-2 text-gray-500" colspan="{{ 3 + count($dateKeys) }}">No results.</td></tr>
@@ -146,12 +146,12 @@
         <tfoot class="bg-gray-50">
           <tr>
             <th class="text-left p-2 border-t" style="position: sticky; left: 0; background: #f9fafb;">Totals</th>
+            <th class="text-right p-2 border-t">{{ number_format($grandTotal ?? 0) }}</th>
             @foreach($dateKeys as $dk)
               @php $cv = (int)($colTotals[$dk] ?? 0); @endphp
               <th class="text-right p-2 border-t">{{ $cv ? number_format($cv) : '' }}</th>
             @endforeach
             <th class="text-right p-2 border-t">{{ number_format($recentGrand ?? 0) }}</th>
-            <th class="text-right p-2 border-t">{{ number_format($grandTotal ?? 0) }}</th>
           </tr>
         </tfoot>
       </table>
