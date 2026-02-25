@@ -10,7 +10,19 @@ class AllowedIpController extends Controller
 {
     public function index()
     {
-        $ips = AllowedIp::orderBy('id', 'desc')->get();
+        $role = auth()->user()->employeeProfile?->role;
+
+        if ($role === 'CEO') {
+            // CEO sees all
+            $ips = AllowedIp::with('creator')->orderBy('id', 'desc')->get();
+        } else {
+            // Non-CEO (Data Encoder - OIC, Marketing - OIC) see only records they created
+            $ips = AllowedIp::with('creator')
+                ->where('created_by', auth()->id())
+                ->orderBy('id', 'desc')
+                ->get();
+        }
+
         return view('security.allowed_ips.index', compact('ips'));
     }
 
@@ -20,6 +32,9 @@ class AllowedIpController extends Controller
             'ip_address' => ['required', 'ip', 'unique:allowed_ips,ip_address'],
             'label'      => ['nullable', 'string', 'max:100'],
         ]);
+
+        // record who created the IP
+        $data['created_by'] = auth()->id();
 
         AllowedIp::create($data);
 

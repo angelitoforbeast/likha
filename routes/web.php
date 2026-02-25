@@ -120,14 +120,16 @@ Route::middleware(['web','auth','allowed_ip'])->group(function () {
  // ✅ Allowed IPs (CEO only) - same style as /cpp
 Route::get('/allowed-ips', function () {
     $role = auth()->user()->employeeProfile?->role;
-    if (!$role || !in_array($role, ['CEO'])) abort(403);
+    $viewAllowed = ['CEO', 'Data Encoder - OIC', 'Marketing - OIC'];
+    if (!$role || !in_array($role, $viewAllowed)) abort(403);
 
     return app(AllowedIpController::class)->index();
 })->name('allowed_ips.index');
 
 Route::post('/allowed-ips', function () {
     $role = auth()->user()->employeeProfile?->role;
-    if (!$role || !in_array($role, ['CEO'])) abort(403);
+    $createAllowed = ['CEO', 'Data Encoder - OIC', 'Marketing - OIC'];
+    if (!$role || !in_array($role, $createAllowed)) abort(403);
 
     return app(AllowedIpController::class)->store(request());
 })->name('allowed_ips.store');

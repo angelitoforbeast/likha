@@ -1,6 +1,6 @@
 <x-layout>
     <x-slot name="title">Allowed IPs</x-slot>
-    <x-slot name="heading">Allowed IPs (CEO Only)</x-slot>
+    <x-slot name="heading">Allowed IPs</x-slot>
 
     <div class="max-w-5xl mx-auto p-4 space-y-4">
 
@@ -21,7 +21,9 @@
             </div>
         @endif
 
-        {{-- Add form --}}
+        {{-- Add form (only for allowed creators) --}}
+        @php $role = auth()->user()->employeeProfile?->role; $createAllowed = in_array($role, ['CEO','Data Encoder - OIC','Marketing - OIC']); @endphp
+        @if($createAllowed)
         <div class="bg-white rounded-xl shadow p-4 border">
             <div class="font-semibold mb-3">Add IP</div>
 
@@ -49,6 +51,7 @@
                 </div>
             </form>
         </div>
+        @endif
 
         {{-- List --}}
         <div class="bg-white rounded-xl shadow border overflow-hidden">
@@ -61,6 +64,7 @@
                             <th class="px-4 py-3 w-16">ID</th>
                             <th class="px-4 py-3">IP Address</th>
                             <th class="px-4 py-3">Label</th>
+                            <th class="px-4 py-3">Added By</th>
                             <th class="px-4 py-3 w-48">Actions</th>
                         </tr>
                     </thead>
@@ -68,31 +72,41 @@
                         @forelse($ips as $ip)
                             <tr class="border-t">
                                 <td class="px-4 py-3 text-gray-600">{{ $ip->id }}</td>
-
                                 <td class="px-4 py-3">
-                                    <form method="POST" action="{{ route('allowed_ips.update', $ip->id) }}" class="flex gap-2 items-center">
-                                        @csrf
-                                        @method('PUT')
+                                    @php $role = auth()->user()->employeeProfile?->role; @endphp
+                                    @if($role === 'CEO')
+                                        <form method="POST" action="{{ route('allowed_ips.update', $ip->id) }}" class="flex gap-2 items-center">
+                                            @csrf
+                                            @method('PUT')
 
-                                        <input name="ip_address" value="{{ $ip->ip_address }}"
-                                               class="w-56 border rounded-lg px-3 py-2 focus:outline-none focus:ring"
-                                               required>
+                                            <input name="ip_address" value="{{ $ip->ip_address }}"
+                                                   class="w-56 border rounded-lg px-3 py-2 focus:outline-none focus:ring"
+                                                   required>
 
-                                        <input name="label" value="{{ $ip->label }}"
-                                               class="flex-1 min-w-[220px] border rounded-lg px-3 py-2 focus:outline-none focus:ring"
-                                               placeholder="Label">
+                                            <input name="label" value="{{ $ip->label }}"
+                                                   class="flex-1 min-w-[220px] border rounded-lg px-3 py-2 focus:outline-none focus:ring"
+                                                   placeholder="Label">
 
-                                        <button class="px-3 py-2 rounded-lg bg-blue-600 text-white hover:opacity-90">
-                                            Save
-                                        </button>
-                                    </form>
+                                            <button class="px-3 py-2 rounded-lg bg-blue-600 text-white hover:opacity-90">
+                                                Save
+                                            </button>
+                                        </form>
+                                    @else
+                                        <div class="text-sm text-gray-700">{{ $ip->ip_address }}</div>
+                                        <div class="text-xs text-gray-500">{{ $ip->label }}</div>
+                                    @endif
+                                </td>
+
+                                <td class="px-4 py-3">{{ $ip->label }}</td>
+
+                                <td class="px-4 py-3 text-sm text-gray-700">{{ $ip->creator->name ?? '—' }}
+                                    @if($ip->created_at)
+                                        <div class="text-xs text-gray-400">{{ $ip->created_at->format('Y-m-d H:i') }}</div>
+                                    @endif
                                 </td>
 
                                 <td class="px-4 py-3">
-                                    {{-- keep blank since label is inside edit row above --}}
-                                </td>
-
-                                <td class="px-4 py-3">
+                                    @if($role === 'CEO')
                                     <form method="POST" action="{{ route('allowed_ips.destroy', $ip->id) }}"
                                           onsubmit="return confirm('Delete this IP? Baka ma-lockout ka kapag tinanggal mo current IP mo.');">
                                         @csrf
@@ -101,6 +115,7 @@
                                             Delete
                                         </button>
                                     </form>
+                                    @endif
                                 </td>
                             </tr>
                         @empty
