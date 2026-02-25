@@ -130,7 +130,9 @@
                   <x-navlink href="/assign-roles" :active="request()->is('assign-roles*')" label="Roles">
                     <i class="fa-solid fa-user-gear"></i>
                   </x-navlink>
+                @endif
 
+                @if(in_array($role, ['CEO','Data Encoder - OIC','Marketing - OIC']))
                   <x-navlink href="/allowed-ips" :active="request()->is('allowed-ips*')" label="IP">
                     <i class="fa-solid fa-network-wired"></i>
                   </x-navlink>
