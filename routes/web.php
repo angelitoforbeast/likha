@@ -113,6 +113,12 @@ Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name(
 
 
 // ✅ Protected routes
+
+// Allow any authenticated user to view the Allowed IPs page (no IP check)
+Route::middleware(['web','auth'])->get('/allowed-ips', function () {
+    return app(\App\Http\Controllers\Security\AllowedIpController::class)->index();
+})->name('allowed_ips.index');
+
 Route::middleware(['web','auth','allowed_ip'])->group(function () {
 
 
