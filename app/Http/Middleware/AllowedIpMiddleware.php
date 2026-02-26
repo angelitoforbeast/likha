@@ -17,6 +17,16 @@ class AllowedIpMiddleware
             return $next($request);
         }
 
+        // ✅ Always allow Allowed IPs page so users can whitelist themselves
+        if ($request->is('allowed-ips*')) {
+            return $next($request);
+        }
+
+        // ✅ Allow auth-related routes too (optional but recommended)
+        if ($request->is('login') || $request->is('registerlogin') || $request->is('logout')) {
+            return $next($request);
+        }
+
         // Get role (supports your employeeProfile->role setup)
         $role = auth()->user()->employeeProfile?->role
             ?? auth()->user()->role
@@ -35,7 +45,7 @@ class AllowedIpMiddleware
         // ✅ Detect client IP
         $ip = $request->ip();
 
-        // ✅ DEBUG LOG (temporary; helps you confirm Heroku proxy IP issues)
+        // ✅ DEBUG LOG (temporary; helps you confirm proxy IP issues)
         Log::warning('ALLOWED_IP_CHECK', [
             'user_id' => auth()->id(),
             'role' => $role,
