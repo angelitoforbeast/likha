@@ -414,9 +414,37 @@ class SummaryOverallController extends Controller
             return 0.0;
         };
 
-        // Helper: find ALL distinct unit costs for an item (for range display)
-        $findAllUnitCosts = function(string $itemKey) use ($cogsLookup): array {
+        // Helper: find ALL distinct unit costs for an item within a date range (for range display)
+        $findAllUnitCosts = function(string $itemKey, ?string $startDate = null, ?string $endDate = null) use ($cogsLookup, &$findUnitCost): array {
             if (!isset($cogsLookup[$itemKey])) return [];
+
+            if ($startDate && $endDate) {
+                // Get costs that were effective within the date range
+                // For each date in range, the effective cost is the latest cost on or before that date
+                // But we simplify: get all distinct costs from entries within the range,
+                // plus the carry-forward cost at the start of the range
+                $costsInRange = [];
+
+                // Add carry-forward cost at start date (the cost that was effective at range start)
+                $carryForward = $findUnitCost($itemKey, $endDate);
+                if ($carryForward > 0) {
+                    $costsInRange[] = $carryForward;
+                }
+
+                // Add any costs from entries within the date range
+                foreach ($cogsLookup[$itemKey] as $entry) {
+                    if ($entry['date'] >= $startDate && $entry['date'] <= $endDate && $entry['cost'] > 0) {
+                        $costsInRange[] = $entry['cost'];
+                    }
+                }
+
+                if (empty($costsInRange)) return [];
+                $costs = array_unique($costsInRange);
+                sort($costs);
+                return array_values($costs);
+            }
+
+            // Fallback: all costs (no date filter)
             $costs = array_unique(array_map(fn($e) => $e['cost'], $cogsLookup[$itemKey]));
             sort($costs);
             return array_values($costs);
@@ -546,7 +574,7 @@ class SummaryOverallController extends Controller
         foreach ($itemsProceedRows as $r) {
             $key = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)($r->day_key ?? '') . '|' . (string)$r->page_key);
             $unitCost = $findUnitCost((string)$r->item_key, (string)$r->last_order_date);
-            $allCosts = $findAllUnitCosts((string)$r->item_key);
+            $allCosts = $findAllUnitCosts((string)$r->item_key, $start, $end);
 
             $itemsListMap[$key] ??= [];
             $itemsListMap[$key][] = [
