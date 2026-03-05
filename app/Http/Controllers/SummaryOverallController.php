@@ -277,20 +277,33 @@ class SummaryOverallController extends Controller
         }
 
         // =====================================================
-        // OPTIMIZATION #2: Collect waybills from macro_output FIRST,
-        // then aggregate from_jnts ONLY for those waybills.
+        // OPTIMIZATION #2: Create temp table with from_jnts aggregation
+        // using a subquery JOIN to filter only relevant waybills.
         // Run this ONCE and reuse for all subsequent joins.
         // =====================================================
 
-        // Step 1: Get all distinct waybills from macro_output in the date range
-        $moWaybills = (clone $mo)
-            ->whereNotNull($moWaybillCol)
-            ->where($moWaybillCol, '!=', '')
-            ->selectRaw("DISTINCT $moWaybillSql AS wb")
-            ->pluck('wb')
-            ->toArray();
+        // Build the date filter clause for the subquery
+        $dateFilterParts = [];
+        $dateFilterBindings = [];
+        if ($start && $end) {
+            $dateFilterParts[] = "$dateExpr BETWEEN ? AND ?";
+            $dateFilterBindings = [$start, $end];
+        } elseif ($start) {
+            $dateFilterParts[] = "$dateExpr >= ?";
+            $dateFilterBindings = [$start];
+        } elseif ($end) {
+            $dateFilterParts[] = "$dateExpr <= ?";
+            $dateFilterBindings = [$end];
+        }
 
-        // Step 2: Create temporary table with from_jnts aggregation for ONLY those waybills
+        $pageFilterSql = '';
+        if (!$AGGREGATE_RANGE && $pageNameNorm !== null && $pageNameNorm !== '') {
+            $pageFilterSql = " AND $pageKeyExpr = ?";
+            $dateFilterBindings[] = $pageNameNorm;
+        }
+
+        $dateWhere = !empty($dateFilterParts) ? 'WHERE ' . implode(' AND ', $dateFilterParts) . $pageFilterSql : ($pageFilterSql ? 'WHERE 1=1' . $pageFilterSql : '');
+
         if ($driver === 'mysql') {
             DB::statement("DROP TEMPORARY TABLE IF EXISTS _jnt_agg");
 
@@ -301,69 +314,31 @@ class SummaryOverallController extends Controller
                 j.`created_at`
             ))";
 
-            if (!empty($moWaybills)) {
-                // Chunk waybills to avoid too-long IN clause
-                $chunks = array_chunk($moWaybills, 5000);
-                $first = true;
-                foreach ($chunks as $chunk) {
-                    $placeholders = implode(',', array_fill(0, count($chunk), '?'));
-                    if ($first) {
-                        DB::statement("
-                            CREATE TEMPORARY TABLE _jnt_agg AS
-                            SELECT
-                                j.waybill_number AS wb,
-                                MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END) AS is_delivered,
-                                MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
-                                MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END) AS is_for_return,
-                                MAX(CASE
-                                    WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
-                                    WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
-                                    WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
-                                    ELSE 1
-                                END) AS is_in_transit,
-                                $jaMinTsExpr AS min_submit_ts
-                            FROM from_jnts j
-                            WHERE j.waybill_number IN ($placeholders)
-                            GROUP BY j.waybill_number
-                        ", $chunk);
-                        $first = false;
-                    } else {
-                        DB::statement("
-                            INSERT INTO _jnt_agg
-                            SELECT
-                                j.waybill_number AS wb,
-                                MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END),
-                                MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END),
-                                MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END),
-                                MAX(CASE
-                                    WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
-                                    WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
-                                    WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
-                                    ELSE 1
-                                END),
-                                $jaMinTsExpr
-                            FROM from_jnts j
-                            WHERE j.waybill_number IN ($placeholders)
-                            GROUP BY j.waybill_number
-                        ", $chunk);
-                    }
-                }
+            DB::statement("
+                CREATE TEMPORARY TABLE _jnt_agg AS
+                SELECT
+                    j.waybill_number AS wb,
+                    MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END) AS is_delivered,
+                    MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
+                    MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END) AS is_for_return,
+                    MAX(CASE
+                        WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
+                        WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
+                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
+                        ELSE 1
+                    END) AS is_in_transit,
+                    $jaMinTsExpr AS min_submit_ts
+                FROM from_jnts j
+                WHERE j.waybill_number IN (
+                    SELECT DISTINCT $moWaybillSql
+                    FROM macro_output mo
+                    $dateWhere
+                    AND $moWaybillSql IS NOT NULL AND $moWaybillSql != ''
+                )
+                GROUP BY j.waybill_number
+            ", $dateFilterBindings);
 
-                // Add index on the temp table for fast joins
-                DB::statement("ALTER TABLE _jnt_agg ADD PRIMARY KEY (wb)");
-            } else {
-                // No waybills — create empty temp table
-                DB::statement("
-                    CREATE TEMPORARY TABLE _jnt_agg (
-                        wb VARCHAR(255) PRIMARY KEY,
-                        is_delivered TINYINT DEFAULT 0,
-                        is_returned TINYINT DEFAULT 0,
-                        is_for_return TINYINT DEFAULT 0,
-                        is_in_transit TINYINT DEFAULT 0,
-                        min_submit_ts DATETIME NULL
-                    )
-                ");
-            }
+            DB::statement("ALTER TABLE _jnt_agg ADD PRIMARY KEY (wb)");
         } else {
             // PostgreSQL path
             DB::statement("DROP TABLE IF EXISTS _jnt_agg");
@@ -375,65 +350,31 @@ class SummaryOverallController extends Controller
                 j.\"created_at\"
             ))";
 
-            if (!empty($moWaybills)) {
-                $chunks = array_chunk($moWaybills, 5000);
-                $first = true;
-                foreach ($chunks as $chunk) {
-                    $placeholders = implode(',', array_fill(0, count($chunk), '?'));
-                    if ($first) {
-                        DB::statement("
-                            CREATE TEMPORARY TABLE _jnt_agg AS
-                            SELECT
-                                j.waybill_number AS wb,
-                                MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END)::int AS is_delivered,
-                                MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END)::int AS is_returned,
-                                MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END)::int AS is_for_return,
-                                MAX(CASE
-                                    WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
-                                    WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
-                                    WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
-                                    ELSE 1
-                                END)::int AS is_in_transit,
-                                $jaMinTsExpr AS min_submit_ts
-                            FROM from_jnts j
-                            WHERE j.waybill_number IN ($placeholders)
-                            GROUP BY j.waybill_number
-                        ", $chunk);
-                        $first = false;
-                    } else {
-                        DB::statement("
-                            INSERT INTO _jnt_agg
-                            SELECT
-                                j.waybill_number,
-                                MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END)::int,
-                                MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END)::int,
-                                MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END)::int,
-                                MAX(CASE
-                                    WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
-                                    WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
-                                    WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
-                                    ELSE 1
-                                END)::int,
-                                $jaMinTsExpr
-                            FROM from_jnts j
-                            WHERE j.waybill_number IN ($placeholders)
-                            GROUP BY j.waybill_number
-                        ", $chunk);
-                    }
-                }
-                DB::statement("ALTER TABLE _jnt_agg ADD PRIMARY KEY (wb)");
-            } else {
-                DB::statement("
-                    CREATE TEMPORARY TABLE _jnt_agg (
-                        wb VARCHAR(255) PRIMARY KEY,
-                        is_delivered INT DEFAULT 0,
-                        is_returned INT DEFAULT 0,
-                        is_for_return INT DEFAULT 0,
-                        is_in_transit INT DEFAULT 0,
-                        min_submit_ts TIMESTAMP NULL
-                    )
-                ");
-            }
+            DB::statement("
+                CREATE TEMPORARY TABLE _jnt_agg AS
+                SELECT
+                    j.waybill_number AS wb,
+                    MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END)::int AS is_delivered,
+                    MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END)::int AS is_returned,
+                    MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END)::int AS is_for_return,
+                    MAX(CASE
+                        WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
+                        WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
+                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
+                        ELSE 1
+                    END)::int AS is_in_transit,
+                    $jaMinTsExpr AS min_submit_ts
+                FROM from_jnts j
+                WHERE j.waybill_number IN (
+                    SELECT DISTINCT $moWaybillSql
+                    FROM macro_output mo
+                    $dateWhere
+                    AND $moWaybillSql IS NOT NULL AND $moWaybillSql != ''
+                )
+                GROUP BY j.waybill_number
+            ", $dateFilterBindings);
+
+            DB::statement("ALTER TABLE _jnt_agg ADD PRIMARY KEY (wb)");
         }
 
         // =====================================================
