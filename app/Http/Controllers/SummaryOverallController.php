@@ -565,7 +565,9 @@ class SummaryOverallController extends Controller
                           $itemNorm AS item_key,
                           MIN($itemLabel) AS item_label,
                           COUNT(*) AS qty,
-                          MAX($dateExpr) AS last_order_date")
+                          MAX($dateExpr) AS last_order_date,
+                          MIN($moCodClean) AS min_cod,
+                          MAX($moCodClean) AS max_cod")
             ->groupByRaw("$groupByKey, $itemNorm")
             ->get();
 
@@ -582,6 +584,8 @@ class SummaryOverallController extends Controller
                 'qty'       => (int)($r->qty ?? 0),
                 'unit_cost' => $unitCost,
                 'all_costs' => $allCosts,
+                'min_cod'   => (float)($r->min_cod ?? 0),
+                'max_cod'   => (float)($r->max_cod ?? 0),
             ];
             if (!empty($r->page_label)) $labelMap[$key] = (string)$r->page_label;
 
@@ -770,9 +774,19 @@ class SummaryOverallController extends Controller
                     } else {
                         $costStr = '₱' . number_format(min($allCosts), 2) . ' – ₱' . number_format(max($allCosts), 2);
                     }
+                    // Build COD display string for this item
+                    $minCod = (float)($it['min_cod'] ?? 0);
+                    $maxCod = (float)($it['max_cod'] ?? 0);
+                    if ($minCod == $maxCod || $maxCod <= 0) {
+                        $codStr = '₱' . number_format($maxCod > 0 ? $maxCod : $minCod, 2);
+                    } else {
+                        $codStr = '₱' . number_format($minCod, 2) . ' – ₱' . number_format($maxCod, 2);
+                    }
+
                     $itemsWithCosts[] = [
                         'label' => $lbl,
                         'cost'  => $costStr,
+                        'cod'   => $codStr,
                     ];
                 }
                 $itemsDisplay = implode(' / ', $labels);
