@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Auth;
+use App\Models\FeeSetting;
 
 class SummaryOverallController extends Controller
 {
@@ -44,9 +45,12 @@ class SummaryOverallController extends Controller
         $driver = DB::getDriverName(); // 'mysql' | 'pgsql'
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
 
-        // === CONSTS ===
-        $SHIPPING_PER_SHIPPED = 37.0;
-        $COD_FEE_RATE         = 0.015;
+        // === FEE SETTINGS (from database with effective date) ===
+        $host = strtolower((string) $request->getHost());
+        $refDate = $end ?? $start ?? $today;
+        $COD_FEE_RATE    = FeeSetting::getRate('cod_fee_rate', $host, $refDate) ?? 0.015;
+        $COD_FEE_VAT_RATE = FeeSetting::getRate('cod_fee_vat_rate', $host, $refDate) ?? 0.12;
+        $SHIPPING_PER_SHIPPED = 37.0; // fallback for projected calculations
         $DEFAULT_RTS_PCT      = 30.0;
 
         // helpers
@@ -327,7 +331,8 @@ class SummaryOverallController extends Controller
                         WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
                         ELSE 1
                     END) AS is_in_transit,
-                    $jaMinTsExpr AS min_submit_ts
+                    $jaMinTsExpr AS min_submit_ts,
+                    COALESCE(MAX(CAST(j.total_shipping_cost AS DECIMAL(18,2))), 0) AS actual_shipping_cost
                 FROM from_jnts j
                 WHERE j.waybill_number IN (
                     SELECT DISTINCT $moWaybillSql
@@ -363,7 +368,8 @@ class SummaryOverallController extends Controller
                         WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
                         ELSE 1
                     END)::int AS is_in_transit,
-                    $jaMinTsExpr AS min_submit_ts
+                    $jaMinTsExpr AS min_submit_ts,
+                    COALESCE(MAX(CAST(j.total_shipping_cost AS DECIMAL(18,2))), 0) AS actual_shipping_cost
                 FROM from_jnts j
                 WHERE j.waybill_number IN (
                     SELECT DISTINCT $moWaybillSql
@@ -449,6 +455,21 @@ class SummaryOverallController extends Controller
             $forReturnMap[$k] = (int)($r->for_return_total?? 0);
             $inTransitMap[$k] = (int)($r->in_transit_total?? 0);
             if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
+        }
+
+        // ======================
+        // ACTUAL SHIPPING COST (from from_jnts total_shipping_cost per waybill)
+        // ======================
+        $actualShipAgg = (clone $joinedBase)
+            ->selectRaw("$selectKeyAgg,
+                SUM(ja.actual_shipping_cost) AS total_actual_shipping")
+            ->groupByRaw($groupByKey)
+            ->get();
+
+        $actualShippingMap = [];
+        foreach ($actualShipAgg as $r) {
+            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
+            $actualShippingMap[$k] = (float)($r->total_actual_shipping ?? 0);
         }
 
         // ======================
@@ -746,8 +767,9 @@ class SummaryOverallController extends Controller
                 $avgDelay  = $avgDelayMap[$key]    ?? null;
                 $cogs      = $cogsMap[$key]        ?? 0.0;
 
-                $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
+                $shipping_fee   = $actualShippingMap[$key] ?? ($SHIPPING_PER_SHIPPED * $shipped);
                 $cod_fee_actual = $gross * $COD_FEE_RATE;
+                $cod_fee_vat    = $cod_fee_actual * $COD_FEE_VAT_RATE;
 
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
                 $proceed_cpp    = $proc    > 0 ? ($adspent / $proc)   * 1.0 : null;
@@ -755,7 +777,7 @@ class SummaryOverallController extends Controller
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
-                $net_profit     = $gross - $adspent - $shipping_fee - $cod_fee_actual - $cogs;
+                $net_profit     = $gross - $adspent - $shipping_fee - $cod_fee_actual - $cod_fee_vat - $cogs;
                 $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null;
                 $hold           = $proc - $shipped;
 
@@ -776,6 +798,7 @@ class SummaryOverallController extends Controller
                     'gross_sales'            => $gross,
                     'shipping_fee'           => $shipping_fee,
                     'cod_fee'                => $cod_fee_actual,
+                    'cod_fee_vat'            => $cod_fee_vat,
                     'cogs'                   => $cogs,
                     'net_profit'             => $net_profit,
                     'net_profit_pct'         => $net_profit_pct,
@@ -809,8 +832,9 @@ class SummaryOverallController extends Controller
                 $avgDelay  = $avgDelayMap[$key]    ?? null;
                 $cogs      = $cogsMap[$key]        ?? 0.0;
 
-                $shipping_fee   = $SHIPPING_PER_SHIPPED * $shipped;
+                $shipping_fee   = $actualShippingMap[$key] ?? ($SHIPPING_PER_SHIPPED * $shipped);
                 $cod_fee_actual = $gross * $COD_FEE_RATE;
+                $cod_fee_vat    = $cod_fee_actual * $COD_FEE_VAT_RATE;
 
                 $cpp            = $orders  > 0 ? ($adspent / $orders) * 1.0 : null;
                 $proceed_cpp    = $proc    > 0 ? ($adspent / $proc)   * 1.0 : null;
@@ -818,7 +842,7 @@ class SummaryOverallController extends Controller
                 $in_transit_pct = $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
                 $tcpr           = $orders  > 0 ? (1 - ($proc / $orders)) * 100.0 : null;
 
-                $net_profit     = $gross - $adspent - $shipping_fee - $cod_fee_actual - $cogs;
+                $net_profit     = $gross - $adspent - $shipping_fee - $cod_fee_actual - $cod_fee_vat - $cogs;
                 $net_profit_pct = $all_cod > 0 ? ($net_profit / $all_cod) * 100.0 : null;
                 $hold           = $proc - $shipped;
 
@@ -839,6 +863,7 @@ class SummaryOverallController extends Controller
                     'gross_sales'            => $gross,
                     'shipping_fee'           => $shipping_fee,
                     'cod_fee'                => $cod_fee_actual,
+                    'cod_fee_vat'            => $cod_fee_vat,
                     'cogs'                   => $cogs,
                     'net_profit'             => $net_profit,
                     'net_profit_pct'         => $net_profit_pct,
@@ -953,12 +978,13 @@ class SummaryOverallController extends Controller
                 $proceedCnt  = (int)  ($r['proceed']               ?? 0);
                 $adsp        = (float)($r['adspent']               ?? 0.0);
 
-                $projGross   = $procCodSum * $rtsFactor;
-                $projCodFee  = $procCodSum * $COD_FEE_RATE;
-                $projCogs    = $procUCSum  * $rtsFactor;
-                $projShipFee = $SHIPPING_PER_SHIPPED * $proceedCnt;
+                $projGross      = $procCodSum * $rtsFactor;
+                $projCodFee     = $procCodSum * $COD_FEE_RATE;
+                $projCodFeeVat  = $projCodFee * $COD_FEE_VAT_RATE;
+                $projCogs       = $procUCSum  * $rtsFactor;
+                $projShipFee    = $SHIPPING_PER_SHIPPED * $proceedCnt;
 
-                $projNP = $projGross - $adsp - $projCodFee - $projCogs - $projShipFee;
+                $projNP = $projGross - $adsp - $projCodFee - $projCodFeeVat - $projCogs - $projShipFee;
 
                 $r['projected_net_profit']     = $projNP;
                 $den                           = $procCodSum;
@@ -982,12 +1008,13 @@ class SummaryOverallController extends Controller
                 $proceedCnt  = (int)  ($r['proceed']               ?? 0);
                 $adsp        = (float)($r['adspent']               ?? 0.0);
 
-                $projGross   = $procCodSum * $rtsFactor;
-                $projCodFee  = $procCodSum * $COD_FEE_RATE;
-                $projCogs    = $procUCSum  * $rtsFactor;
-                $projShipFee = $SHIPPING_PER_SHIPPED * $proceedCnt;
+                $projGross      = $procCodSum * $rtsFactor;
+                $projCodFee     = $procCodSum * $COD_FEE_RATE;
+                $projCodFeeVat  = $projCodFee * $COD_FEE_VAT_RATE;
+                $projCogs       = $procUCSum  * $rtsFactor;
+                $projShipFee    = $SHIPPING_PER_SHIPPED * $proceedCnt;
 
-                $projNP = $projGross - $adsp - $projCodFee - $projCogs - $projShipFee;
+                $projNP = $projGross - $adsp - $projCodFee - $projCodFeeVat - $projCogs - $projShipFee;
 
                 $r['projected_net_profit']     = $projNP;
                 $den                           = $procCodSum;
@@ -1008,6 +1035,8 @@ class SummaryOverallController extends Controller
                 'all_cod' => 0.0,
                 'proceed_cod_sum' => 0.0,
                 'cogs' => 0.0,
+                'shipping_fee' => 0.0,
+                'cod_fee_vat' => 0.0,
             ];
             $delayWeightedSum = 0.0;
             $delayShipCount   = 0;
@@ -1027,6 +1056,8 @@ class SummaryOverallController extends Controller
                 $sum['all_cod']        += (float)($r['all_cod'] ?? 0);
                 $sum['proceed_cod_sum']+= (float)($r['proceed_cod_sum'] ?? 0);
                 $sum['cogs']           += (float)($r['cogs'] ?? 0);
+                $sum['shipping_fee']   += (float)($r['shipping_fee'] ?? 0);
+                $sum['cod_fee_vat']    += (float)($r['cod_fee_vat'] ?? 0);
 
                 if (isset($r['avg_delay_days']) && $r['avg_delay_days'] !== null && ($r['shipped'] ?? 0) > 0 && empty($r['is_total'])) {
                     $delayWeightedSum += (float)$r['avg_delay_days'] * (int)$r['shipped'];
@@ -1039,10 +1070,11 @@ class SummaryOverallController extends Controller
             $total_rts_pct        = $sum['shipped'] > 0 ? (($sum['returned'] + $sum['for_return']) / $sum['shipped']) * 100.0 : null;
             $total_in_transit_pct = $sum['shipped'] > 0 ? ($sum['in_transit'] / $sum['shipped']) * 100.0 : null;
             $total_tcpr           = $sum['orders']  > 0 ? (1 - ($sum['proceed'] / $sum['orders'])) * 100.0 : null;
-            $total_shipping_fee   = $SHIPPING_PER_SHIPPED * $sum['shipped'];
+            $total_shipping_fee   = $sum['shipping_fee'] ?? ($SHIPPING_PER_SHIPPED * $sum['shipped']);
             $total_cod_fee        = $sum['gross_sales'] * $COD_FEE_RATE;
+            $total_cod_fee_vat    = $sum['cod_fee_vat'] ?? ($total_cod_fee * $COD_FEE_VAT_RATE);
 
-            $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - $total_cod_fee - $sum['cogs'];
+            $total_net_profit     = $sum['gross_sales'] - $sum['adspent'] - $total_shipping_fee - $total_cod_fee - $total_cod_fee_vat - $sum['cogs'];
             $total_net_profit_pct = $sum['all_cod'] > 0 ? ($total_net_profit / $sum['all_cod']) * 100.0 : null;
             $total_avg_delay      = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
 
@@ -1080,6 +1112,7 @@ class SummaryOverallController extends Controller
                 'gross_sales'     => $sum['gross_sales'],
                 'shipping_fee'    => $total_shipping_fee,
                 'cod_fee'         => $total_cod_fee,
+                'cod_fee_vat'     => $total_cod_fee_vat,
                 'cogs'            => $sum['cogs'],
                 'net_profit'      => $total_net_profit,
                 'net_profit_pct'  => $total_net_profit_pct,
@@ -1188,8 +1221,9 @@ class SummaryOverallController extends Controller
             $rts = max(0.0, min(1.0, $rtsPctUsed / 100.0));
 
             if ($unitCostMode !== null && $codMode !== null) {
-                $targetCPP     = (1 - $rts) * (0.985 * $codMode - $unitCostMode) - 0.2  * $codMode - $SHIPPING_PER_SHIPPED;
-                $breakevenCPP  = (1 - $rts) * (0.985 * $codMode - $unitCostMode) - 0.05 * $codMode - $SHIPPING_PER_SHIPPED;
+                $codFeeWithVat = $COD_FEE_RATE * (1 + $COD_FEE_VAT_RATE);
+                $targetCPP     = (1 - $rts) * ((1 - $codFeeWithVat) * $codMode - $unitCostMode) - 0.2  * $codMode - $SHIPPING_PER_SHIPPED;
+                $breakevenCPP  = (1 - $rts) * ((1 - $codFeeWithVat) * $codMode - $unitCostMode) - 0.05 * $codMode - $SHIPPING_PER_SHIPPED;
             }
         }
 

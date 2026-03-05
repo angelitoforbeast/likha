@@ -39,6 +39,7 @@ use App\Http\Controllers\ItemCogsController;
 use App\Http\Controllers\SummaryOverallController;
 use App\Http\Controllers\JntOndelController;
 use App\Http\Controllers\JntRemittanceController;
+use App\Http\Controllers\FeeSettingController;
 use App\Http\Controllers\JntShippedController;
 use App\Http\Controllers\JntReturnScannedController;
 use App\Http\Controllers\JntReturnReconciliationController;
@@ -271,6 +272,12 @@ Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit')
 
 Route::get('/jnt/remittance', [JntRemittanceController::class, 'index'])
     ->name('jnt.remittance');
+
+// Fee Settings CRUD
+Route::get('/jnt/fee-settings', [FeeSettingController::class, 'index'])->name('fee-settings.index');
+Route::post('/jnt/fee-settings', [FeeSettingController::class, 'store'])->name('fee-settings.store');
+Route::put('/jnt/fee-settings/{fee_setting}', [FeeSettingController::class, 'update'])->name('fee-settings.update');
+Route::delete('/jnt/fee-settings/{fee_setting}', [FeeSettingController::class, 'destroy'])->name('fee-settings.destroy');
 Route::get('/jnt/shipped', [\App\Http\Controllers\JntShippedController::class, 'index'])->name('jnt.shipped');
 Route::prefix('jnt/return')->group(function () {
     Route::get('scanned', [JntReturnScannedController::class, 'index'])->name('jnt.return.scanned');

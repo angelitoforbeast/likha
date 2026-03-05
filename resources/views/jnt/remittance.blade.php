@@ -24,9 +24,12 @@
           <div class="text-xs text-gray-500 mt-1" x-text="dateLabel"></div>
         </div>
 
-        <div class="flex gap-2 md:justify-end">
+        <div class="flex gap-2 md:justify-end flex-wrap">
           <button class="px-3 py-2 rounded border hover:bg-gray-50" @click="thisMonth()">This month</button>
           <button class="px-3 py-2 rounded border hover:bg-gray-50" @click="yesterday()">Yesterday</button>
+          <a href="{{ route('fee-settings.index') }}" class="px-3 py-2 rounded border bg-gray-100 hover:bg-gray-200 text-sm flex items-center gap-1">
+            ⚙️ Fee Settings
+          </a>
         </div>
       </div>
     </section>
