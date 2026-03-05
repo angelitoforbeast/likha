@@ -33,6 +33,24 @@
     .ms-dropdown { position: absolute; z-index: 50; margin-top: 4px; width: 100%; background: white; border: 1px solid #d1d5db; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); max-height: 280px; overflow-y: auto; }
     .ms-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
     .ms-item:hover { background-color: #eff6ff; }
+    /* Draggable column header */
+    .col-draggable { cursor: grab; }
+    .col-draggable:active { cursor: grabbing; }
+    .col-dragging { opacity: 0.4; background-color: #dbeafe !important; }
+    .col-drag-over { border-left: 3px solid #3b82f6 !important; }
+    /* Column settings modal */
+    .col-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 100; display: flex; align-items: center; justify-content: center; }
+    .col-modal { background: white; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); width: 380px; max-height: 80vh; display: flex; flex-direction: column; }
+    .col-modal-header { padding: 16px 20px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: space-between; }
+    .col-modal-body { padding: 12px 20px; overflow-y: auto; flex: 1; }
+    .col-modal-footer { padding: 12px 20px; border-top: 1px solid #e5e7eb; display: flex; gap: 8px; justify-content: flex-end; }
+    .col-sort-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin: 2px 0; border: 1px solid #e5e7eb; border-radius: 8px; background: white; font-size: 13px; cursor: grab; user-select: none; transition: box-shadow 0.15s, border-color 0.15s; }
+    .col-sort-item:hover { border-color: #93c5fd; box-shadow: 0 1px 3px rgba(59,130,246,0.15); }
+    .col-sort-item:active { cursor: grabbing; }
+    .col-sort-item.dragging { opacity: 0.4; background: #eff6ff; }
+    .col-sort-item .grip { color: #9ca3af; font-size: 16px; line-height: 1; flex-shrink: 0; }
+    .col-sort-item .col-label { flex: 1; }
+    .col-sort-item .col-idx { color: #9ca3af; font-size: 11px; flex-shrink: 0; }
   </style>
 </head>
 <body class="bg-gray-100 text-gray-900">
@@ -153,6 +171,22 @@
           class="px-3 py-2 rounded text-sm font-medium transition-colors"
           @click="setPreset('last_month')">Last Month</button>
         <button class="px-3 py-2 rounded border hover:bg-gray-50 text-sm" @click="reload()">Refresh</button>
+
+        <!-- Column Settings Button -->
+        <button class="px-3 py-2 rounded border hover:bg-gray-50 text-sm flex items-center gap-1"
+                @click="showColModal = true"
+                title="Customize column order">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+          Columns
+        </button>
+        <!-- Reset Columns Button -->
+        <button class="px-3 py-2 rounded border hover:bg-gray-50 text-sm text-gray-500"
+                @click="resetColumns()"
+                title="Reset columns to default order">
+          <svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          Reset
+        </button>
+
         <span x-show="isLoading" x-transition.opacity class="inline-flex items-center gap-1">
           <span class="spinner-inline"></span>
           <span class="text-sm text-gray-500">Loading...</span>
@@ -241,57 +275,90 @@
         <table class="min-w-full w-full text-xs" x-show="!isCEO || (isCEO && !showAllColumns)">
           <thead class="bg-gray-50 sticky top-16 z-20">
             <tr class="text-left text-gray-600">
-              <th class="px-2 py-2 sortable" @click="sortBy('date')">Date <span class="sort-arrow" :class="sortArrowClass('date')" x-text="sortArrow('date')"></span></th>
-              <th class="px-2 py-2 sortable" @click="sortBy('page')">Page <span class="sort-arrow" :class="sortArrowClass('page')" x-text="sortArrow('page')"></span></th>
-              <th class="px-2 py-2">Items / Unit Cost / COD</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('adspent')">Adspent <span class="sort-arrow" :class="sortArrowClass('adspent')" x-text="sortArrow('adspent')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('orders')">Orders <span class="sort-arrow" :class="sortArrowClass('orders')" x-text="sortArrow('orders')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('proceed_cpp')">Proceed CPP <span class="sort-arrow" :class="sortArrowClass('proceed_cpp')" x-text="sortArrow('proceed_cpp')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('shipped')">Shipped <span class="sort-arrow" :class="sortArrowClass('shipped')" x-text="sortArrow('shipped')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('avg_delay_days')">Delay <span class="sort-arrow" :class="sortArrowClass('avg_delay_days')" x-text="sortArrow('avg_delay_days')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('hold')">Hold <span class="sort-arrow" :class="sortArrowClass('hold')" x-text="sortArrow('hold')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('rts_pct')">RTS% <span class="sort-arrow" :class="sortArrowClass('rts_pct')" x-text="sortArrow('rts_pct')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('actual_rts_pct')">Est. RTS% <span class="sort-arrow" :class="sortArrowClass('actual_rts_pct')" x-text="sortArrow('actual_rts_pct')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('in_transit_pct')">In Transit% <span class="sort-arrow" :class="sortArrowClass('in_transit_pct')" x-text="sortArrow('in_transit_pct')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('tcpr')">TCPR <span class="sort-arrow" :class="sortArrowClass('tcpr')" x-text="sortArrow('tcpr')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('net_profit_pct')">Net Profit(%) <span class="sort-arrow" :class="sortArrowClass('net_profit_pct')" x-text="sortArrow('net_profit_pct')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('projected_net_profit_pct')">Projected Net Profit(%) <span class="sort-arrow" :class="sortArrowClass('projected_net_profit_pct')" x-text="sortArrow('projected_net_profit_pct')"></span></th>
+              <template x-for="col in activeColumns('limited')" :key="col.key">
+                <th class="px-2 py-2 col-draggable"
+                    :class="[col.align === 'right' ? 'text-right' : '', col.sortable ? 'sortable' : '']"
+                    @click="col.sortable && sortBy(col.sortKey || col.key)"
+                    draggable="true"
+                    @dragstart="colDragStart($event, col.key, 'limited')"
+                    @dragover.prevent="colDragOver($event, col.key)"
+                    @dragleave="colDragLeave($event)"
+                    @drop.prevent="colDrop($event, col.key, 'limited')"
+                    @dragend="colDragEnd($event)"
+                    :title="'Drag to reorder'">
+                  <span x-text="col.label"></span>
+                  <template x-if="col.sortable">
+                    <span class="sort-arrow" :class="sortArrowClass(col.sortKey || col.key)" x-text="sortArrow(col.sortKey || col.key)"></span>
+                  </template>
+                </th>
+              </template>
             </tr>
           </thead>
           <tbody>
             <template x-if="filteredRows().length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="15">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" :colspan="activeColumns('limited').length">No data for selected filters.</td>
               </tr>
             </template>
             <template x-for="row in filteredRows()" :key="(row.date ?? '') + '|' + (row.page ?? '') + '|' + (row.is_total?'1':'0')">
               <tr class="border-t"
                   :class="row.is_total ? 'bg-blue-50 font-bold border-t-2 border-blue-300' : 'hover:bg-gray-50'">
-                <td class="px-2 py-2" x-text="fmtDate(row.date)"></td>
-                <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
-                <td class="px-2 py-2 items-cell"><span x-html="fmtItemsWithCosts(row.items_with_costs)"></span></td>
-                <td class="px-2 py-2 text-right" x-text="money(row.adspent)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.orders)"></td>
-                <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.proceed_cpp)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.shipped)"></td>
-                <td class="px-2 py-2 text-right" x-text="days(row.avg_delay_days)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.hold)"></td>
-                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span></td>
-                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="rtsClass(row.actual_rts_pct)" x-text="percent(row.actual_rts_pct)"></span></td>
-                <td class="px-2 py-2 text-right" x-text="percent(row.in_transit_pct)"></td>
-                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span></td>
-                <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded font-bold"
-                        :class="netClass(row.net_profit_pct)"
-                        :style="netStyle(row.net_profit_pct)"
-                        x-text="percent(row.net_profit_pct)"></span>
-                </td>
-                <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded font-bold"
-                        :class="netClass(projectedPct(row))"
-                        :style="netStyle(projectedPct(row))"
-                        x-text="percent(projectedPct(row))"></span>
-                </td>
+                <template x-for="col in activeColumns('limited')" :key="col.key">
+                  <td class="px-2 py-2"
+                      :class="[col.align === 'right' ? 'text-right' : '', col.key === 'items_with_costs' ? 'items-cell' : '']">
+                    <template x-if="col.key === 'items_with_costs'">
+                      <span x-html="fmtItemsWithCosts(row.items_with_costs)"></span>
+                    </template>
+                    <template x-if="col.key === 'date'">
+                      <span x-text="fmtDate(row.date)"></span>
+                    </template>
+                    <template x-if="col.key === 'page'">
+                      <span x-text="row.page ?? '\u2014'"></span>
+                    </template>
+                    <template x-if="col.key === 'adspent'">
+                      <span x-text="money(row.adspent)"></span>
+                    </template>
+                    <template x-if="col.key === 'orders'">
+                      <span x-text="num(row.orders)"></span>
+                    </template>
+                    <template x-if="col.key === 'proceed_cpp'">
+                      <span x-text="moneyOrDash(row.proceed_cpp)"></span>
+                    </template>
+                    <template x-if="col.key === 'shipped'">
+                      <span x-text="num(row.shipped)"></span>
+                    </template>
+                    <template x-if="col.key === 'avg_delay_days'">
+                      <span x-text="days(row.avg_delay_days)"></span>
+                    </template>
+                    <template x-if="col.key === 'hold'">
+                      <span x-text="num(row.hold)"></span>
+                    </template>
+                    <template x-if="col.key === 'rts_pct'">
+                      <span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span>
+                    </template>
+                    <template x-if="col.key === 'actual_rts_pct'">
+                      <span class="px-2 py-0.5 rounded" :class="rtsClass(row.actual_rts_pct)" x-text="percent(row.actual_rts_pct)"></span>
+                    </template>
+                    <template x-if="col.key === 'in_transit_pct'">
+                      <span x-text="percent(row.in_transit_pct)"></span>
+                    </template>
+                    <template x-if="col.key === 'tcpr'">
+                      <span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span>
+                    </template>
+                    <template x-if="col.key === 'net_profit_pct'">
+                      <span class="px-2 py-0.5 rounded font-bold"
+                            :class="netClass(row.net_profit_pct)"
+                            :style="netStyle(row.net_profit_pct)"
+                            x-text="percent(row.net_profit_pct)"></span>
+                    </template>
+                    <template x-if="col.key === 'projected_net_profit_pct'">
+                      <span class="px-2 py-0.5 rounded font-bold"
+                            :class="netClass(projectedPct(row))"
+                            :style="netStyle(projectedPct(row))"
+                            x-text="percent(projectedPct(row))"></span>
+                    </template>
+                  </td>
+                </template>
               </tr>
             </template>
           </tbody>
@@ -301,83 +368,129 @@
         <table class="min-w-full w-full text-xs" x-show="isCEO && showAllColumns">
           <thead class="bg-gray-50 sticky top-16 z-20">
             <tr class="text-left text-gray-600">
-              <th class="px-2 py-2 sortable" @click="sortBy('date')">Date <span class="sort-arrow" :class="sortArrowClass('date')" x-text="sortArrow('date')"></span></th>
-              <th class="px-2 py-2 sortable" @click="sortBy('page')">Page <span class="sort-arrow" :class="sortArrowClass('page')" x-text="sortArrow('page')"></span></th>
-              <th class="px-2 py-2">Items / Unit Cost / COD</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('adspent')">Adspent <span class="sort-arrow" :class="sortArrowClass('adspent')" x-text="sortArrow('adspent')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('orders')">Orders <span class="sort-arrow" :class="sortArrowClass('orders')" x-text="sortArrow('orders')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('proceed_cpp')">Proceed CPP <span class="sort-arrow" :class="sortArrowClass('proceed_cpp')" x-text="sortArrow('proceed_cpp')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('shipped')">Shipped <span class="sort-arrow" :class="sortArrowClass('shipped')" x-text="sortArrow('shipped')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('avg_delay_days')">Delay <span class="sort-arrow" :class="sortArrowClass('avg_delay_days')" x-text="sortArrow('avg_delay_days')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('hold')">Hold <span class="sort-arrow" :class="sortArrowClass('hold')" x-text="sortArrow('hold')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('rts_pct')">RTS% <span class="sort-arrow" :class="sortArrowClass('rts_pct')" x-text="sortArrow('rts_pct')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('actual_rts_pct')">Est. RTS% <span class="sort-arrow" :class="sortArrowClass('actual_rts_pct')" x-text="sortArrow('actual_rts_pct')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('in_transit_pct')">In Transit% <span class="sort-arrow" :class="sortArrowClass('in_transit_pct')" x-text="sortArrow('in_transit_pct')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('tcpr')">TCPR <span class="sort-arrow" :class="sortArrowClass('tcpr')" x-text="sortArrow('tcpr')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('net_profit_pct')">Net Profit(%) <span class="sort-arrow" :class="sortArrowClass('net_profit_pct')" x-text="sortArrow('net_profit_pct')"></span></th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('proceed')">Proceed</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('cannot_proceed')">Cannot Proceed</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('odz')">ODZ</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('delivered')">Delivered</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('gross_sales')">Gross Sales</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('shipping_fee')">Shipping Fee</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('cogs')">COGS</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('net_profit')">Net Profit</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('returned')">Returned</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('for_return')">For Return</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('in_transit')">In Transit</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('cpp')">CPP</th>
-              <th class="px-2 py-2 text-right">Projected Net Profit</th>
-              <th class="px-2 py-2 text-right sortable" @click="sortBy('projected_net_profit_pct')">Projected Net Profit(%)</th>
+              <template x-for="col in activeColumns('full')" :key="col.key">
+                <th class="px-2 py-2 col-draggable"
+                    :class="[col.align === 'right' ? 'text-right' : '', col.sortable ? 'sortable' : '']"
+                    @click="col.sortable && sortBy(col.sortKey || col.key)"
+                    draggable="true"
+                    @dragstart="colDragStart($event, col.key, 'full')"
+                    @dragover.prevent="colDragOver($event, col.key)"
+                    @dragleave="colDragLeave($event)"
+                    @drop.prevent="colDrop($event, col.key, 'full')"
+                    @dragend="colDragEnd($event)"
+                    :title="'Drag to reorder'">
+                  <span x-text="col.label"></span>
+                  <template x-if="col.sortable">
+                    <span class="sort-arrow" :class="sortArrowClass(col.sortKey || col.key)" x-text="sortArrow(col.sortKey || col.key)"></span>
+                  </template>
+                </th>
+              </template>
             </tr>
           </thead>
           <tbody>
             <template x-if="filteredRows().length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="28">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" :colspan="activeColumns('full').length">No data for selected filters.</td>
               </tr>
             </template>
             <template x-for="row in filteredRows()" :key="(row.date ?? '') + '|' + (row.page ?? '') + '|' + (row.is_total?'1':'0')">
               <tr class="border-t"
                   :class="row.is_total ? 'bg-blue-50 font-bold border-t-2 border-blue-300' : 'hover:bg-gray-50'">
-                <td class="px-2 py-2" x-text="fmtDate(row.date)"></td>
-                <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
-                <td class="px-2 py-2 items-cell"><span x-html="fmtItemsWithCosts(row.items_with_costs)"></span></td>
-                <td class="px-2 py-2 text-right" x-text="money(row.adspent)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.orders)"></td>
-                <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.proceed_cpp)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.shipped)"></td>
-                <td class="px-2 py-2 text-right" x-text="days(row.avg_delay_days)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.hold)"></td>
-                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span></td>
-                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="rtsClass(row.actual_rts_pct)" x-text="percent(row.actual_rts_pct)"></span></td>
-                <td class="px-2 py-2 text-right" x-text="percent(row.in_transit_pct)"></td>
-                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span></td>
-                <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded font-bold"
-                        :class="netClass(row.net_profit_pct)"
-                        :style="netStyle(row.net_profit_pct)"
-                        x-text="percent(row.net_profit_pct)"></span>
-                </td>
-                <td class="px-2 py-2 text-right" x-text="num(row.proceed)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.cannot_proceed)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.odz)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.delivered)"></td>
-                <td class="px-2 py-2 text-right" x-text="money(row.gross_sales)"></td>
-                <td class="px-2 py-2 text-right" x-text="money(row.shipping_fee)"></td>
-                <td class="px-2 py-2 text-right" x-text="money(row.cogs)"></td>
-                <td class="px-2 py-2 text-right" x-text="money(row.net_profit)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.returned)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.for_return)"></td>
-                <td class="px-2 py-2 text-right" x-text="num(row.in_transit)"></td>
-                <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.cpp)"></td>
-                <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.projected_net_profit)"></td>
-                <td class="px-2 py-2 text-right">
-                  <span class="px-2 py-0.5 rounded font-bold"
-                        :class="netClass(projectedPct(row))"
-                        :style="netStyle(projectedPct(row))"
-                        x-text="percent(projectedPct(row))"></span>
-                </td>
+                <template x-for="col in activeColumns('full')" :key="col.key">
+                  <td class="px-2 py-2"
+                      :class="[col.align === 'right' ? 'text-right' : '', col.key === 'items_with_costs' ? 'items-cell' : '']">
+                    <template x-if="col.key === 'items_with_costs'">
+                      <span x-html="fmtItemsWithCosts(row.items_with_costs)"></span>
+                    </template>
+                    <template x-if="col.key === 'date'">
+                      <span x-text="fmtDate(row.date)"></span>
+                    </template>
+                    <template x-if="col.key === 'page'">
+                      <span x-text="row.page ?? '\u2014'"></span>
+                    </template>
+                    <template x-if="col.key === 'adspent'">
+                      <span x-text="money(row.adspent)"></span>
+                    </template>
+                    <template x-if="col.key === 'orders'">
+                      <span x-text="num(row.orders)"></span>
+                    </template>
+                    <template x-if="col.key === 'proceed_cpp'">
+                      <span x-text="moneyOrDash(row.proceed_cpp)"></span>
+                    </template>
+                    <template x-if="col.key === 'shipped'">
+                      <span x-text="num(row.shipped)"></span>
+                    </template>
+                    <template x-if="col.key === 'avg_delay_days'">
+                      <span x-text="days(row.avg_delay_days)"></span>
+                    </template>
+                    <template x-if="col.key === 'hold'">
+                      <span x-text="num(row.hold)"></span>
+                    </template>
+                    <template x-if="col.key === 'rts_pct'">
+                      <span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span>
+                    </template>
+                    <template x-if="col.key === 'actual_rts_pct'">
+                      <span class="px-2 py-0.5 rounded" :class="rtsClass(row.actual_rts_pct)" x-text="percent(row.actual_rts_pct)"></span>
+                    </template>
+                    <template x-if="col.key === 'in_transit_pct'">
+                      <span x-text="percent(row.in_transit_pct)"></span>
+                    </template>
+                    <template x-if="col.key === 'tcpr'">
+                      <span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span>
+                    </template>
+                    <template x-if="col.key === 'net_profit_pct'">
+                      <span class="px-2 py-0.5 rounded font-bold"
+                            :class="netClass(row.net_profit_pct)"
+                            :style="netStyle(row.net_profit_pct)"
+                            x-text="percent(row.net_profit_pct)"></span>
+                    </template>
+                    <template x-if="col.key === 'proceed'">
+                      <span x-text="num(row.proceed)"></span>
+                    </template>
+                    <template x-if="col.key === 'cannot_proceed'">
+                      <span x-text="num(row.cannot_proceed)"></span>
+                    </template>
+                    <template x-if="col.key === 'odz'">
+                      <span x-text="num(row.odz)"></span>
+                    </template>
+                    <template x-if="col.key === 'delivered'">
+                      <span x-text="num(row.delivered)"></span>
+                    </template>
+                    <template x-if="col.key === 'gross_sales'">
+                      <span x-text="money(row.gross_sales)"></span>
+                    </template>
+                    <template x-if="col.key === 'shipping_fee'">
+                      <span x-text="money(row.shipping_fee)"></span>
+                    </template>
+                    <template x-if="col.key === 'cogs'">
+                      <span x-text="money(row.cogs)"></span>
+                    </template>
+                    <template x-if="col.key === 'net_profit'">
+                      <span x-text="money(row.net_profit)"></span>
+                    </template>
+                    <template x-if="col.key === 'returned'">
+                      <span x-text="num(row.returned)"></span>
+                    </template>
+                    <template x-if="col.key === 'for_return'">
+                      <span x-text="num(row.for_return)"></span>
+                    </template>
+                    <template x-if="col.key === 'in_transit'">
+                      <span x-text="num(row.in_transit)"></span>
+                    </template>
+                    <template x-if="col.key === 'cpp'">
+                      <span x-text="moneyOrDash(row.cpp)"></span>
+                    </template>
+                    <template x-if="col.key === 'projected_net_profit'">
+                      <span x-text="moneyOrDash(row.projected_net_profit)"></span>
+                    </template>
+                    <template x-if="col.key === 'projected_net_profit_pct'">
+                      <span class="px-2 py-0.5 rounded font-bold"
+                            :class="netClass(projectedPct(row))"
+                            :style="netStyle(projectedPct(row))"
+                            x-text="percent(projectedPct(row))"></span>
+                    </template>
+                  </td>
+                </template>
               </tr>
             </template>
           </tbody>
@@ -386,9 +499,119 @@
     </section>
   </main>
 
+  <!-- Column Settings Modal -->
+  <template x-if="showColModal">
+    <div class="col-modal-overlay" @click.self="showColModal = false" @keydown.escape.window="showColModal = false">
+      <div class="col-modal" @click.stop>
+        <div class="col-modal-header">
+          <h3 class="font-semibold text-base">Customize Columns</h3>
+          <button class="text-gray-400 hover:text-gray-600" @click="showColModal = false">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
+        </div>
+        <div class="col-modal-body">
+          <p class="text-xs text-gray-500 mb-3">Drag items to reorder columns. Changes are saved automatically.</p>
+          <div x-ref="modalSortList">
+            <template x-for="(col, idx) in modalColumns()" :key="col.key">
+              <div class="col-sort-item"
+                   draggable="true"
+                   :data-col-key="col.key"
+                   @dragstart="modalDragStart($event, idx)"
+                   @dragover.prevent="modalDragOver($event, idx)"
+                   @dragleave="modalDragLeave($event)"
+                   @drop.prevent="modalDrop($event, idx)"
+                   @dragend="modalDragEnd($event)">
+                <span class="grip">\u2630</span>
+                <span class="col-label" x-text="col.label"></span>
+                <span class="col-idx" x-text="'#' + (idx + 1)"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+        <div class="col-modal-footer">
+          <button class="px-4 py-2 text-sm rounded border text-gray-600 hover:bg-gray-50"
+                  @click="resetColumns(); showColModal = false">Reset to Default</button>
+          <button class="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+                  @click="showColModal = false">Done</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
   <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
   <script>
     function overallUI(isCEO=false, isMarketingOIC=false){
+      // Default column definitions
+      const DEFAULT_LIMITED_COLS = [
+        { key: 'date',                       label: 'Date',                    align: 'left',  sortable: true  },
+        { key: 'page',                       label: 'Page',                    align: 'left',  sortable: true  },
+        { key: 'items_with_costs',           label: 'Items / Unit Cost / COD', align: 'left',  sortable: false },
+        { key: 'adspent',                    label: 'Adspent',                 align: 'right', sortable: true  },
+        { key: 'orders',                     label: 'Orders',                  align: 'right', sortable: true  },
+        { key: 'proceed_cpp',                label: 'Proceed CPP',             align: 'right', sortable: true  },
+        { key: 'shipped',                    label: 'Shipped',                 align: 'right', sortable: true  },
+        { key: 'avg_delay_days',             label: 'Delay',                   align: 'right', sortable: true  },
+        { key: 'hold',                       label: 'Hold',                    align: 'right', sortable: true  },
+        { key: 'rts_pct',                    label: 'RTS%',                    align: 'right', sortable: true  },
+        { key: 'actual_rts_pct',             label: 'Est. RTS%',               align: 'right', sortable: true  },
+        { key: 'in_transit_pct',             label: 'In Transit%',             align: 'right', sortable: true  },
+        { key: 'tcpr',                       label: 'TCPR',                    align: 'right', sortable: true  },
+        { key: 'net_profit_pct',             label: 'Net Profit(%)',            align: 'right', sortable: true  },
+        { key: 'projected_net_profit_pct',   label: 'Projected Net Profit(%)', align: 'right', sortable: true  },
+      ];
+
+      const DEFAULT_FULL_COLS = [
+        { key: 'date',                       label: 'Date',                    align: 'left',  sortable: true  },
+        { key: 'page',                       label: 'Page',                    align: 'left',  sortable: true  },
+        { key: 'items_with_costs',           label: 'Items / Unit Cost / COD', align: 'left',  sortable: false },
+        { key: 'adspent',                    label: 'Adspent',                 align: 'right', sortable: true  },
+        { key: 'orders',                     label: 'Orders',                  align: 'right', sortable: true  },
+        { key: 'proceed_cpp',                label: 'Proceed CPP',             align: 'right', sortable: true  },
+        { key: 'shipped',                    label: 'Shipped',                 align: 'right', sortable: true  },
+        { key: 'avg_delay_days',             label: 'Delay',                   align: 'right', sortable: true  },
+        { key: 'hold',                       label: 'Hold',                    align: 'right', sortable: true  },
+        { key: 'rts_pct',                    label: 'RTS%',                    align: 'right', sortable: true  },
+        { key: 'actual_rts_pct',             label: 'Est. RTS%',               align: 'right', sortable: true  },
+        { key: 'in_transit_pct',             label: 'In Transit%',             align: 'right', sortable: true  },
+        { key: 'tcpr',                       label: 'TCPR',                    align: 'right', sortable: true  },
+        { key: 'net_profit_pct',             label: 'Net Profit(%)',            align: 'right', sortable: true  },
+        { key: 'proceed',                    label: 'Proceed',                 align: 'right', sortable: true  },
+        { key: 'cannot_proceed',             label: 'Cannot Proceed',          align: 'right', sortable: true  },
+        { key: 'odz',                        label: 'ODZ',                     align: 'right', sortable: true  },
+        { key: 'delivered',                  label: 'Delivered',               align: 'right', sortable: true  },
+        { key: 'gross_sales',                label: 'Gross Sales',             align: 'right', sortable: true  },
+        { key: 'shipping_fee',               label: 'Shipping Fee',            align: 'right', sortable: true  },
+        { key: 'cogs',                       label: 'COGS',                    align: 'right', sortable: true  },
+        { key: 'net_profit',                 label: 'Net Profit',              align: 'right', sortable: true  },
+        { key: 'returned',                   label: 'Returned',                align: 'right', sortable: true  },
+        { key: 'for_return',                 label: 'For Return',              align: 'right', sortable: true  },
+        { key: 'in_transit',                 label: 'In Transit',              align: 'right', sortable: true  },
+        { key: 'cpp',                        label: 'CPP',                     align: 'right', sortable: true  },
+        { key: 'projected_net_profit',       label: 'Projected Net Profit',    align: 'right', sortable: false },
+        { key: 'projected_net_profit_pct',   label: 'Projected Net Profit(%)', align: 'right', sortable: true  },
+      ];
+
+      const LS_KEY_LIMITED = 'likha_col_order_limited';
+      const LS_KEY_FULL    = 'likha_col_order_full';
+
+      function loadOrder(lsKey, defaults) {
+        try {
+          const saved = localStorage.getItem(lsKey);
+          if (!saved) return defaults.map(c => c.key);
+          const order = JSON.parse(saved);
+          // Validate: must contain same keys
+          const defKeys = new Set(defaults.map(c => c.key));
+          const savedKeys = new Set(order);
+          if (defKeys.size !== savedKeys.size) return defaults.map(c => c.key);
+          for (const k of defKeys) { if (!savedKeys.has(k)) return defaults.map(c => c.key); }
+          return order;
+        } catch(e) { return defaults.map(c => c.key); }
+      }
+
+      function saveOrder(lsKey, order) {
+        try { localStorage.setItem(lsKey, JSON.stringify(order)); } catch(e) {}
+      }
+
       return {
         isCEO,
         isMarketingOIC,
@@ -396,6 +619,18 @@
         showAllRows: true,
         isLoading: false,
         activePreset: '',
+        showColModal: false,
+
+        // Column order (array of keys)
+        limitedColOrder: loadOrder(LS_KEY_LIMITED, DEFAULT_LIMITED_COLS),
+        fullColOrder:    loadOrder(LS_KEY_FULL, DEFAULT_FULL_COLS),
+
+        // Drag state for table headers
+        _dragColKey: null,
+        _dragTableType: null,
+
+        // Drag state for modal
+        _modalDragIdx: null,
 
         // Sorting
         sortCol: '',
@@ -408,6 +643,105 @@
         data: { ads_daily: [], actual_rts_pct: null, top_summary: [], target_cpp: null, breakeven_cpp: null },
         filters: { page_name: 'all', start_date: '', end_date: '' },
         dateLabel: 'Select dates',
+
+        // ===== Column order helpers =====
+        activeColumns(type) {
+          const defs = type === 'full' ? DEFAULT_FULL_COLS : DEFAULT_LIMITED_COLS;
+          const order = type === 'full' ? this.fullColOrder : this.limitedColOrder;
+          const map = {};
+          defs.forEach(c => { map[c.key] = c; });
+          return order.map(k => map[k]).filter(Boolean);
+        },
+
+        modalColumns() {
+          const type = (this.isCEO && this.showAllColumns) ? 'full' : 'limited';
+          return this.activeColumns(type);
+        },
+
+        // Table header drag-and-drop
+        colDragStart(e, key, type) {
+          this._dragColKey = key;
+          this._dragTableType = type;
+          e.target.classList.add('col-dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', key);
+        },
+        colDragOver(e, key) {
+          e.target.closest('th')?.classList.add('col-drag-over');
+        },
+        colDragLeave(e) {
+          e.target.closest('th')?.classList.remove('col-drag-over');
+        },
+        colDrop(e, targetKey, type) {
+          e.target.closest('th')?.classList.remove('col-drag-over');
+          const srcKey = this._dragColKey;
+          if (!srcKey || srcKey === targetKey || this._dragTableType !== type) return;
+          const order = type === 'full' ? this.fullColOrder : this.limitedColOrder;
+          const srcIdx = order.indexOf(srcKey);
+          const tgtIdx = order.indexOf(targetKey);
+          if (srcIdx < 0 || tgtIdx < 0) return;
+          // Move src to tgt position
+          order.splice(srcIdx, 1);
+          order.splice(tgtIdx, 0, srcKey);
+          if (type === 'full') {
+            this.fullColOrder = [...order];
+            saveOrder(LS_KEY_FULL, this.fullColOrder);
+          } else {
+            this.limitedColOrder = [...order];
+            saveOrder(LS_KEY_LIMITED, this.limitedColOrder);
+          }
+        },
+        colDragEnd(e) {
+          e.target.classList.remove('col-dragging');
+          document.querySelectorAll('.col-drag-over').forEach(el => el.classList.remove('col-drag-over'));
+          this._dragColKey = null;
+          this._dragTableType = null;
+        },
+
+        // Modal drag-and-drop
+        modalDragStart(e, idx) {
+          this._modalDragIdx = idx;
+          e.target.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', idx);
+        },
+        modalDragOver(e, idx) {
+          const el = e.target.closest('.col-sort-item');
+          if (el) el.style.borderTopColor = '#3b82f6';
+        },
+        modalDragLeave(e) {
+          const el = e.target.closest('.col-sort-item');
+          if (el) el.style.borderTopColor = '';
+        },
+        modalDrop(e, targetIdx) {
+          const el = e.target.closest('.col-sort-item');
+          if (el) el.style.borderTopColor = '';
+          const srcIdx = this._modalDragIdx;
+          if (srcIdx === null || srcIdx === targetIdx) return;
+          const type = (this.isCEO && this.showAllColumns) ? 'full' : 'limited';
+          const order = type === 'full' ? [...this.fullColOrder] : [...this.limitedColOrder];
+          const item = order.splice(srcIdx, 1)[0];
+          order.splice(targetIdx, 0, item);
+          if (type === 'full') {
+            this.fullColOrder = order;
+            saveOrder(LS_KEY_FULL, order);
+          } else {
+            this.limitedColOrder = order;
+            saveOrder(LS_KEY_LIMITED, order);
+          }
+        },
+        modalDragEnd(e) {
+          e.target.classList.remove('dragging');
+          document.querySelectorAll('.col-sort-item').forEach(el => el.style.borderTopColor = '');
+          this._modalDragIdx = null;
+        },
+
+        resetColumns() {
+          this.limitedColOrder = DEFAULT_LIMITED_COLS.map(c => c.key);
+          this.fullColOrder = DEFAULT_FULL_COLS.map(c => c.key);
+          saveOrder(LS_KEY_LIMITED, this.limitedColOrder);
+          saveOrder(LS_KEY_FULL, this.fullColOrder);
+        },
 
         // formatting helpers
         money(v){ return `\u20b1${Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})}`; },
