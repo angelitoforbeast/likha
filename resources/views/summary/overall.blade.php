@@ -16,8 +16,8 @@
     /* Loading spinner */
     .spinner { border: 3px solid #e5e7eb; border-top: 3px solid #3b82f6; border-radius: 50%; width: 24px; height: 24px; animation: spin 0.8s linear infinite; display: inline-block; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    /* Loading overlay */
-    .loading-overlay { position: absolute; inset: 0; background: rgba(255,255,255,0.7); display: flex; align-items: center; justify-content: center; z-index: 10; border-radius: 0.75rem; }
+    /* Loading spinner inline */
+    .spinner-inline { border: 2px solid #e5e7eb; border-top: 2px solid #3b82f6; border-radius: 50%; width: 18px; height: 18px; animation: spin 0.8s linear infinite; display: inline-block; vertical-align: middle; }
   </style>
 </head>
 <body class="bg-gray-100 text-gray-900">
@@ -90,6 +90,10 @@
             class="px-3 py-2 rounded text-sm font-medium transition-colors"
             @click="setPreset('last_month')">Last Month</button>
           <button class="px-3 py-2 rounded border hover:bg-gray-50 text-sm" @click="reload()">Refresh</button>
+          <span x-show="isLoading" x-transition.opacity class="inline-flex items-center gap-1">
+            <span class="spinner-inline"></span>
+            <span class="text-sm text-gray-500">Loading...</span>
+          </span>
         </div>
       </div>
     </section>
@@ -167,13 +171,6 @@
 
     <!-- Daily Table -->
     <section class="bg-white rounded-xl shadow p-3 relative">
-      <!-- Loading overlay -->
-      <div class="loading-overlay" x-show="isLoading" x-transition.opacity>
-        <div class="flex flex-col items-center gap-2">
-          <div class="spinner"></div>
-          <span class="text-sm text-gray-500">Loading data...</span>
-        </div>
-      </div>
 
       <div class="flex items-center justify-between mb-2">
         <div class="font-semibold">Daily Ad Spend</div>
@@ -198,6 +195,7 @@
               <th class="px-2 py-2 text-right">Delay</th>
               <th class="px-2 py-2 text-right">Hold</th>
               <th class="px-2 py-2 text-right">RTS%</th>
+              <th class="px-2 py-2 text-right">Actual RTS%</th>
               <th class="px-2 py-2 text-right">In Transit%</th>
               <th class="px-2 py-2 text-right">TCPR</th>
               <th class="px-2 py-2 text-right">Net Profit(%)</th>
@@ -207,7 +205,7 @@
           <tbody>
             <template x-if="rowsForDisplay(data.ads_daily).length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="15">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="16">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -216,7 +214,7 @@
                   :class="row.is_total ? 'bg-blue-50 font-bold border-t-2 border-blue-300' : 'hover:bg-gray-50'">
                 <td class="px-2 py-2" x-text="fmtDate(row.date)"></td>
                 <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
-                <td class="px-2 py-2"><span x-text="row.items_display || '—'"></span></td>
+                <td class="px-2 py-2"><span x-html="fmtItems(row.items_display)"></span></td>
                 <td class="px-2 py-2 text-right"><span x-text="moneyList(row.unit_costs)"></span></td>
                 <td class="px-2 py-2 text-right" x-text="money(row.adspent)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.orders)"></td>
@@ -225,6 +223,7 @@
                 <td class="px-2 py-2 text-right" x-text="days(row.avg_delay_days)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.hold)"></td>
                 <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span></td>
+                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="rtsClass(row.actual_rts_pct)" x-text="percent(row.actual_rts_pct)"></span></td>
                 <td class="px-2 py-2 text-right" x-text="percent(row.in_transit_pct)"></td>
                 <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span></td>
                 <td class="px-2 py-2 text-right">
@@ -259,6 +258,7 @@
               <th class="px-2 py-2 text-right">Delay</th>
               <th class="px-2 py-2 text-right">Hold</th>
               <th class="px-2 py-2 text-right">RTS%</th>
+              <th class="px-2 py-2 text-right">Actual RTS%</th>
               <th class="px-2 py-2 text-right">In Transit%</th>
               <th class="px-2 py-2 text-right">TCPR</th>
               <th class="px-2 py-2 text-right">Net Profit(%)</th>
@@ -281,7 +281,7 @@
           <tbody>
             <template x-if="rowsForDisplay(data.ads_daily).length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="28">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="29">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -290,7 +290,7 @@
                   :class="row.is_total ? 'bg-blue-50 font-bold border-t-2 border-blue-300' : 'hover:bg-gray-50'">
                 <td class="px-2 py-2" x-text="fmtDate(row.date)"></td>
                 <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
-                <td class="px-2 py-2"><span x-text="row.items_display || '—'"></span></td>
+                <td class="px-2 py-2"><span x-html="fmtItems(row.items_display)"></span></td>
                 <td class="px-2 py-2 text-right"><span x-text="moneyList(row.unit_costs)"></span></td>
                 <td class="px-2 py-2 text-right" x-text="money(row.adspent)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.orders)"></td>
@@ -299,6 +299,7 @@
                 <td class="px-2 py-2 text-right" x-text="days(row.avg_delay_days)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.hold)"></td>
                 <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="rtsClass(row.rts_pct)" x-text="percent(row.rts_pct)"></span></td>
+                <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="rtsClass(row.actual_rts_pct)" x-text="percent(row.actual_rts_pct)"></span></td>
                 <td class="px-2 py-2 text-right" x-text="percent(row.in_transit_pct)"></td>
                 <td class="px-2 py-2 text-right"><span class="px-2 py-0.5 rounded" :class="tcprClass(row.tcpr)" x-text="percent(row.tcpr)"></span></td>
                 <td class="px-2 py-2 text-right">
@@ -346,7 +347,7 @@
 
         // toggles
         showAllColumns: false,
-        showAllRows: false,
+        showAllRows: true,
         isLoading: false,
         activePreset: '',
 
@@ -362,6 +363,7 @@
         percent(v){ return (v==null || isNaN(v)) ? '—' : (Number(v).toFixed(2) + '%'); },
         ymd(d){ const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); },
         days(v){ return (v==null || isNaN(v)) ? '—' : Number(v).toFixed(2); },
+        fmtItems(s){ if (!s || s === '—') return '—'; return s.split(' / ').map(i => i.trim()).join('<br>'); },
         moneyList(list){
           if (!Array.isArray(list) || list.length===0) return '—';
           return list.map(v => this.money(v)).join(', ');

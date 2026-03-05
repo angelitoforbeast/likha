@@ -882,6 +882,7 @@ class SummaryOverallController extends Controller
                 }
 
                 if ($pageRtsPct === null) $pageRtsPct = $DEFAULT_RTS_PCT;
+                $r['actual_rts_pct'] = $pageRtsPct;
                 $rtsFactor = max(0.0, min(1.0, 1.0 - ($pageRtsPct / 100.0)));
 
                 $procCodSum  = (float)($r['proceed_cod_sum']       ?? 0.0);
@@ -910,7 +911,8 @@ class SummaryOverallController extends Controller
             }
 
             foreach ($rows as &$r) {
-                if (!empty($r['is_total'])) { $r['projected_net_profit'] = null; $r['projected_net_profit_pct'] = null; continue; }
+                if (!empty($r['is_total'])) { $r['projected_net_profit'] = null; $r['projected_net_profit_pct'] = null; $r['actual_rts_pct'] = $actualRtsPct; continue; }
+                $r['actual_rts_pct'] = $actualRtsPct;
 
                 $procCodSum  = (float)($r['proceed_cod_sum']       ?? 0.0);
                 $procUCSum   = (float)($r['proceed_unit_cost_sum'] ?? 0.0);
@@ -982,10 +984,19 @@ class SummaryOverallController extends Controller
             $total_avg_delay      = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
 
             $sumProjNP  = 0.0;
+            $totalActualRtsNum = 0;
+            $totalActualRtsDen = 0;
             foreach ($rows as $r) {
                 if (!empty($r['is_total'])) continue;
                 $sumProjNP += (float)($r['projected_net_profit'] ?? 0.0);
+                // For total actual RTS: aggregate settled pages
+                $inPct = $r['in_transit_pct'] ?? null;
+                if ($inPct !== null && $inPct < 3.0) {
+                    $totalActualRtsNum += (int)($r['returned'] ?? 0) + (int)($r['for_return'] ?? 0);
+                    $totalActualRtsDen += (int)($r['delivered'] ?? 0) + (int)($r['returned'] ?? 0) + (int)($r['for_return'] ?? 0);
+                }
             }
+            $totalActualRtsPct = $totalActualRtsDen > 0 ? ($totalActualRtsNum / $totalActualRtsDen) * 100.0 : null;
             $total_projected_net_profit_pct = ($sum['proceed_cod_sum'] > 0)
                 ? ($sumProjNP / $sum['proceed_cod_sum']) * 100.0
                 : null;
@@ -1021,6 +1032,7 @@ class SummaryOverallController extends Controller
                 'is_total'        => true,
                 'projected_net_profit' => null,
                 'projected_net_profit_pct'  => $total_projected_net_profit_pct,
+                'actual_rts_pct'  => $totalActualRtsPct ?? ($AGGREGATE_RANGE ? null : $actualRtsPct),
             ];
         }
 
