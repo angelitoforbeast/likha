@@ -71,6 +71,7 @@ use App\Http\Controllers\JntWaybillPrintController;
 use App\Http\Controllers\JntWaybillFilesController;
 use App\Http\Controllers\Jnt\SenderAddressController;
 use App\Http\Controllers\Jnt\Waybills\SenderNameController;
+use App\Http\Controllers\FinanceController;
 // use App\Http\Controllers\AutomationController;
 use App\Models\Role;
 
@@ -643,6 +644,17 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/jnt_rts', [FromJntController::class, 'rtsFiltered']);
     Route::get('/jnt/hold', [JntHoldController::class, 'index'])->name('jnt.hold');
 
+
+    // ✅ Finance (CEO only)
+    Route::get('/finance', [FinanceController::class, 'index'])->name('finance.index');
+    Route::get('/finance/dashboard', [FinanceController::class, 'dashboardData'])->name('finance.dashboard');
+    Route::get('/finance/transactions', [FinanceController::class, 'transactionsData'])->name('finance.transactions');
+    Route::post('/finance/transactions', [FinanceController::class, 'storeTransaction'])->name('finance.transactions.store');
+    Route::put('/finance/transactions/{transaction}', [FinanceController::class, 'updateTransaction'])->name('finance.transactions.update');
+    Route::delete('/finance/transactions/{transaction}', [FinanceController::class, 'destroyTransaction'])->name('finance.transactions.destroy');
+    Route::get('/finance/categories', [FinanceController::class, 'categoriesData'])->name('finance.categories');
+    Route::post('/finance/categories', [FinanceController::class, 'storeCategory'])->name('finance.categories.store');
+    Route::delete('/finance/categories/{category}', [FinanceController::class, 'destroyCategory'])->name('finance.categories.destroy');
 
     // ✅ Misc
     Route::view('/rts', 'rts');

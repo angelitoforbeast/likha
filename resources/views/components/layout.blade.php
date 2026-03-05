@@ -130,6 +130,9 @@
                   <x-navlink href="/assign-roles" :active="request()->is('assign-roles*')" label="Roles">
                     <i class="fa-solid fa-user-gear"></i>
                   </x-navlink>
+                  <x-navlink href="/finance" :active="request()->is('finance*')" label="Finance">
+                    <i class="fa-solid fa-wallet"></i>
+                  </x-navlink>
                 @endif
 
                 @if(Auth::check())
