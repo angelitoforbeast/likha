@@ -33,7 +33,7 @@ class SummaryOverallController extends Controller
 
     public function data(Request $request)
     {
-        // PH timezone (for “Today” label in top summary)
+        // PH timezone (for "Today" label in top summary)
         $phTz  = new \DateTimeZone('Asia/Manila');
         $today = (new \DateTime('now', $phTz))->format('Y-m-d');
 
@@ -45,9 +45,9 @@ class SummaryOverallController extends Controller
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
 
         // === CONSTS ===
-        $SHIPPING_PER_SHIPPED = 37.0;   // Projected Shipping Fee = 37 × #proceed; Actual = 37 × shipped
-        $COD_FEE_RATE         = 0.015;  // 1.5%
-        $DEFAULT_RTS_PCT      = 30.0;   // fallback when no RTS data
+        $SHIPPING_PER_SHIPPED = 37.0;
+        $COD_FEE_RATE         = 0.015;
+        $DEFAULT_RTS_PCT      = 30.0;
 
         // helpers
         $quote = fn(string $col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
@@ -97,9 +97,8 @@ class SummaryOverallController extends Controller
         $moPageSql = 'mo.' . $quote($pageColName);
         $moPageCol = 'mo.' . $pageColName;
 
-        // IMPORTANT: display label + normalized key
-        $pageLabelExpr = "$trimFn(COALESCE($moPageSql,''))"; // UI label
-        $pageKeyExpr   = "LOWER($pageLabelExpr)";            // merge key
+        $pageLabelExpr = "$trimFn(COALESCE($moPageSql,''))";
+        $pageKeyExpr   = "LOWER($pageLabelExpr)";
 
         $statusColName = $pickCol('macro_output', ['STATUS','status','Status']) ?? 'status';
         $statusExpr    = 'mo.' . $quote($statusColName);
@@ -120,31 +119,40 @@ class SummaryOverallController extends Controller
         $moCodExpr    = 'mo.' . $quote($moCodColName);
         $moCodClean   = $castMoney($moCodExpr);
 
-        // timestamp columns (optional)
-        $tsCols = [];
-        foreach (['TIMESTAMP','timestamp'] as $c) if ($pickCol('macro_output', [$c])) $tsCols[] = $c;
+        // =====================================================
+        // OPTIMIZATION #1: Use ts_date instead of COALESCE/STR_TO_DATE
+        // ts_date is a pre-computed indexed column on macro_output
+        // =====================================================
+        $hasTsDate = Schema::hasColumn('macro_output', 'ts_date');
 
-        // DATE expression
-        if ($driver === 'mysql') {
-            if (!empty($tsCols)) {
-                $ts = 'mo.' . $quote($tsCols[0]);
-                $dateExpr = "COALESCE(
-                    DATE(STR_TO_DATE($ts, '%H:%i %d-%m-%Y')),
-                    DATE(STR_TO_DATE($ts, '%H:%i %m-%d-%Y')),
-                    DATE(mo.`created_at`)
-                )";
+        if ($hasTsDate) {
+            $dateExpr = "mo.ts_date";
+        } else {
+            // Fallback to old computed date expression
+            $tsCols = [];
+            foreach (['TIMESTAMP','timestamp'] as $c) if ($pickCol('macro_output', [$c])) $tsCols[] = $c;
+
+            if ($driver === 'mysql') {
+                if (!empty($tsCols)) {
+                    $ts = 'mo.' . $quote($tsCols[0]);
+                    $dateExpr = "COALESCE(
+                        DATE(STR_TO_DATE($ts, '%H:%i %d-%m-%Y')),
+                        DATE(STR_TO_DATE($ts, '%H:%i %m-%d-%Y')),
+                        DATE(mo.`created_at`)
+                    )";
+                } else {
+                    $dateExpr = "DATE(mo.`created_at`)";
+                }
             } else {
-                $dateExpr = "DATE(mo.`created_at`)";
+                $pgParts = [];
+                foreach ($tsCols as $c) {
+                    $ref = 'mo.' . $quote($c);
+                    $pgParts[] = "TO_TIMESTAMP(NULLIF($ref, ''), 'HH24:MI DD-MM-YYYY')";
+                    $pgParts[] = "TO_TIMESTAMP(NULLIF($ref, ''), 'HH24:MI MM-DD-YYYY')";
+                }
+                $pgParts[] = 'mo."created_at"';
+                $dateExpr  = 'DATE(COALESCE(' . implode(', ', $pgParts) . '))';
             }
-        } else { // pgsql
-            $pgParts = [];
-            foreach ($tsCols as $c) {
-                $ref = 'mo.' . $quote($c);
-                $pgParts[] = "TO_TIMESTAMP(NULLIF($ref, ''), 'HH24:MI DD-MM-YYYY')";
-                $pgParts[] = "TO_TIMESTAMP(NULLIF($ref, ''), 'HH24:MI MM-DD-YYYY')";
-            }
-            $pgParts[] = 'mo."created_at"';
-            $dateExpr  = 'DATE(COALESCE(' . implode(', ', $pgParts) . '))';
         }
 
         // Ad spend cast
@@ -166,8 +174,6 @@ class SummaryOverallController extends Controller
 
         // aggregate mode: All Pages?
         $AGGREGATE_RANGE = ($pageName === 'all');
-
-        // normalize requested page for filters (LOWER + TRIM)
         $pageNameNorm = $AGGREGATE_RANGE ? null : mb_strtolower(trim((string)$pageName));
 
         // ======================
@@ -209,7 +215,7 @@ class SummaryOverallController extends Controller
         }
 
         $adsMap   = [];
-        $labelMap = []; // key => page_label (human display)
+        $labelMap = [];
         foreach ($adsRows as $r) {
             if ($AGGREGATE_RANGE) {
                 $k = (string)$r->page_key;
@@ -223,7 +229,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // ORDERS / PROCEED / CANNOT / ODZ (macro_output)
+        // ORDERS / PROCEED / CANNOT / ODZ (macro_output) — now using ts_date
         // ======================
         $mo = DB::table('macro_output as mo');
 
@@ -239,7 +245,6 @@ class SummaryOverallController extends Controller
             $mo->whereRaw("$pageKeyExpr = ?", [$pageNameNorm]);
         }
 
-        // ==== KEY VARIANTS (Agg vs Base) ====
         if ($AGGREGATE_RANGE) {
             $selectKeyAgg  = "$pageKeyExpr AS page_key, MIN($pageLabelExpr) AS page_label";
             $groupByKey    = "$pageKeyExpr";
@@ -271,52 +276,209 @@ class SummaryOverallController extends Controller
             if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
         }
 
-        // ======================
-        // from_jnts aggregate (flags & delay)
-        // ======================
+        // =====================================================
+        // OPTIMIZATION #2: Collect waybills from macro_output FIRST,
+        // then aggregate from_jnts ONLY for those waybills.
+        // Run this ONCE and reuse for all subsequent joins.
+        // =====================================================
+
+        // Step 1: Get all distinct waybills from macro_output in the date range
+        $moWaybills = (clone $mo)
+            ->whereNotNull($moWaybillCol)
+            ->where($moWaybillCol, '!=', '')
+            ->selectRaw("DISTINCT $moWaybillSql AS wb")
+            ->pluck('wb')
+            ->toArray();
+
+        // Step 2: Create temporary table with from_jnts aggregation for ONLY those waybills
         if ($driver === 'mysql') {
-            $jaMinTs = "MIN(COALESCE(
-                STR_TO_DATE(j.".$quote($jSubmitColName).", '%Y-%m-%d %H:%i:%s'),
-                STR_TO_DATE(j.".$quote($jSubmitColName).", '%Y/%m/%d %H:%i:%s'),
-                STR_TO_DATE(j.".$quote($jSubmitColName).", '%Y-%m-%d'),
+            DB::statement("DROP TEMPORARY TABLE IF EXISTS _jnt_agg");
+
+            $jaMinTsExpr = "MIN(COALESCE(
+                STR_TO_DATE(j.`$jSubmitColName`, '%Y-%m-%d %H:%i:%s'),
+                STR_TO_DATE(j.`$jSubmitColName`, '%Y/%m/%d %H:%i:%s'),
+                STR_TO_DATE(j.`$jSubmitColName`, '%Y-%m-%d'),
                 j.`created_at`
-            )) AS min_submit_ts";
+            ))";
+
+            if (!empty($moWaybills)) {
+                // Chunk waybills to avoid too-long IN clause
+                $chunks = array_chunk($moWaybills, 5000);
+                $first = true;
+                foreach ($chunks as $chunk) {
+                    $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+                    if ($first) {
+                        DB::statement("
+                            CREATE TEMPORARY TABLE _jnt_agg AS
+                            SELECT
+                                j.waybill_number AS wb,
+                                MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END) AS is_delivered,
+                                MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
+                                MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END) AS is_for_return,
+                                MAX(CASE
+                                    WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
+                                    WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
+                                    WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
+                                    ELSE 1
+                                END) AS is_in_transit,
+                                $jaMinTsExpr AS min_submit_ts
+                            FROM from_jnts j
+                            WHERE j.waybill_number IN ($placeholders)
+                            GROUP BY j.waybill_number
+                        ", $chunk);
+                        $first = false;
+                    } else {
+                        DB::statement("
+                            INSERT INTO _jnt_agg
+                            SELECT
+                                j.waybill_number AS wb,
+                                MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END),
+                                MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END),
+                                MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END),
+                                MAX(CASE
+                                    WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
+                                    WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
+                                    WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
+                                    ELSE 1
+                                END),
+                                $jaMinTsExpr
+                            FROM from_jnts j
+                            WHERE j.waybill_number IN ($placeholders)
+                            GROUP BY j.waybill_number
+                        ", $chunk);
+                    }
+                }
+
+                // Add index on the temp table for fast joins
+                DB::statement("ALTER TABLE _jnt_agg ADD PRIMARY KEY (wb)");
+            } else {
+                // No waybills — create empty temp table
+                DB::statement("
+                    CREATE TEMPORARY TABLE _jnt_agg (
+                        wb VARCHAR(255) PRIMARY KEY,
+                        is_delivered TINYINT DEFAULT 0,
+                        is_returned TINYINT DEFAULT 0,
+                        is_for_return TINYINT DEFAULT 0,
+                        is_in_transit TINYINT DEFAULT 0,
+                        min_submit_ts DATETIME NULL
+                    )
+                ");
+            }
         } else {
-            $jaMinTs = "MIN(COALESCE(
-                TO_TIMESTAMP(NULLIF(j.".$quote($jSubmitColName).",'') , 'YYYY-MM-DD HH24:MI:SS'),
-                TO_TIMESTAMP(NULLIF(j.".$quote($jSubmitColName).",'') , 'YYYY/MM/DD HH24:MI:SS'),
-                TO_TIMESTAMP(NULLIF(j.".$quote($jSubmitColName).",'') , 'YYYY-MM-DD'),
+            // PostgreSQL path
+            DB::statement("DROP TABLE IF EXISTS _jnt_agg");
+
+            $jaMinTsExpr = "MIN(COALESCE(
+                TO_TIMESTAMP(NULLIF(j.\"$jSubmitColName\",'') , 'YYYY-MM-DD HH24:MI:SS'),
+                TO_TIMESTAMP(NULLIF(j.\"$jSubmitColName\",'') , 'YYYY/MM/DD HH24:MI:SS'),
+                TO_TIMESTAMP(NULLIF(j.\"$jSubmitColName\",'') , 'YYYY-MM-DD'),
                 j.\"created_at\"
-            )) AS min_submit_ts";
+            ))";
+
+            if (!empty($moWaybills)) {
+                $chunks = array_chunk($moWaybills, 5000);
+                $first = true;
+                foreach ($chunks as $chunk) {
+                    $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+                    if ($first) {
+                        DB::statement("
+                            CREATE TEMPORARY TABLE _jnt_agg AS
+                            SELECT
+                                j.waybill_number AS wb,
+                                MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END)::int AS is_delivered,
+                                MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END)::int AS is_returned,
+                                MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END)::int AS is_for_return,
+                                MAX(CASE
+                                    WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
+                                    WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
+                                    WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
+                                    ELSE 1
+                                END)::int AS is_in_transit,
+                                $jaMinTsExpr AS min_submit_ts
+                            FROM from_jnts j
+                            WHERE j.waybill_number IN ($placeholders)
+                            GROUP BY j.waybill_number
+                        ", $chunk);
+                        $first = false;
+                    } else {
+                        DB::statement("
+                            INSERT INTO _jnt_agg
+                            SELECT
+                                j.waybill_number,
+                                MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END)::int,
+                                MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END)::int,
+                                MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END)::int,
+                                MAX(CASE
+                                    WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
+                                    WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
+                                    WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
+                                    ELSE 1
+                                END)::int,
+                                $jaMinTsExpr
+                            FROM from_jnts j
+                            WHERE j.waybill_number IN ($placeholders)
+                            GROUP BY j.waybill_number
+                        ", $chunk);
+                    }
+                }
+                DB::statement("ALTER TABLE _jnt_agg ADD PRIMARY KEY (wb)");
+            } else {
+                DB::statement("
+                    CREATE TEMPORARY TABLE _jnt_agg (
+                        wb VARCHAR(255) PRIMARY KEY,
+                        is_delivered INT DEFAULT 0,
+                        is_returned INT DEFAULT 0,
+                        is_for_return INT DEFAULT 0,
+                        is_in_transit INT DEFAULT 0,
+                        min_submit_ts TIMESTAMP NULL
+                    )
+                ");
+            }
         }
 
-        $jaAgg = DB::table('from_jnts as j')
+        // =====================================================
+        // OPTIMIZATION #3: Pre-load cogs into a PHP lookup array
+        // (only 116 rows — much faster than correlated subqueries)
+        // =====================================================
+        $cogsAll = DB::table('cogs')
             ->selectRaw("
-                j.waybill_number AS wb,
-                MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END) AS is_delivered,
-                MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
-                MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END) AS is_for_return,
-                /* Any OTHER status = in-transit */
-                MAX(CASE 
-                    WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
-                    WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
-                    WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
-                    ELSE 1
-                END) AS is_in_transit,
-                $jaMinTs
+                LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(" . $quote($cogsItemColName) . ",'')),' ',''),'-',''),'_','')) AS item_key,
+                DATE(" . $quote($cogsDateColName) . ") AS eff_date,
+                " . $castMoney($quote($cogsUnitColName)) . " AS unit_cost
             ")
-            ->groupBy('j.waybill_number');
+            ->orderByRaw("LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(" . $quote($cogsItemColName) . ",'')),' ',''),'-',''),'_','')) ASC, DATE(" . $quote($cogsDateColName) . ") DESC")
+            ->get();
 
-        // Base join
+        // Build lookup: item_key => [ [date => ..., cost => ...], ... ] sorted by date DESC
+        $cogsLookup = [];
+        foreach ($cogsAll as $row) {
+            $cogsLookup[(string)$row->item_key][] = [
+                'date' => (string)$row->eff_date,
+                'cost' => (float)$row->unit_cost,
+            ];
+        }
+
+        // Helper: find unit cost for an item on or before a given date
+        $findUnitCost = function(string $itemKey, string $maxDate) use ($cogsLookup): float {
+            if (!isset($cogsLookup[$itemKey])) return 0.0;
+            foreach ($cogsLookup[$itemKey] as $entry) {
+                if ($entry['date'] <= $maxDate) return $entry['cost'];
+            }
+            return 0.0;
+        };
+
+        // =====================================================
+        // Now use _jnt_agg temp table for all joins (runs ONCE, reused many times)
+        // =====================================================
+
+        // Base join: macro_output JOIN _jnt_agg (temp table with index)
         $joinedBase = (clone $mo)
             ->whereNotNull($moWaybillCol)
             ->where($moWaybillCol, '!=', '')
-            ->joinSub($jaAgg, 'ja', function ($join) use ($moWaybillCol) {
-                $join->on($moWaybillCol, '=', 'ja.wb');
-            });
+            ->join('_jnt_agg AS ja', $moWaybillCol, '=', 'ja.wb');
 
         // ======================
-        // Shipped & status counts (GROUPED → Agg key)
+        // Shipped & status counts
         // ======================
         $shipAgg = (clone $joinedBase)
             ->selectRaw("$selectKeyAgg,
@@ -341,7 +503,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // Gross Sales (Delivered-only) — GROUPED → Agg key
+        // Gross Sales (Delivered-only)
         // ======================
         $innerDeliveredCod = (clone $joinedBase)
             ->whereRaw('ja.is_delivered = 1')
@@ -369,7 +531,7 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // ALL COD (all shipped) — GROUPED → Agg key
+        // ALL COD (all shipped)
         // ======================
         $innerAllCod = (clone $joinedBase)
             ->selectRaw("$selectKeyAgg, $moWaybillSql AS wb, MAX($moCodClean) AS cod_mo")
@@ -396,53 +558,42 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // ITEMS + UNIT COST LISTS — GROUPED → Agg key (PROCEED ONLY)
+        // ITEMS + UNIT COST LISTS (PROCEED ONLY) — now using PHP lookup instead of correlated subquery
         // ======================
         $moProceedOnly = (clone $mo)->whereRaw("$statusNorm = 'proceed'");
 
-        $itemsProceedBase = (clone $moProceedOnly)
-            ->selectRaw(" $selectKeyAgg,
+        $itemsProceedRows = (clone $moProceedOnly)
+            ->selectRaw("$selectKeyAgg,
                           $itemNorm AS item_key,
                           MIN($itemLabel) AS item_label,
                           COUNT(*) AS qty,
                           MAX($dateExpr) AS last_order_date")
-            ->groupByRaw("$groupByKey, $itemNorm");
-
-        // unit cost lookup at the time of last order date
-        $unitCostDispSub = "COALESCE((
-            SELECT " . $castMoney($cogsUnitExpr) . "
-            FROM cogs c
-            WHERE $cogsItemNorm = d.item_key
-              AND DATE($cogsDateExpr) <= d.last_order_date
-            ORDER BY DATE($cogsDateExpr) DESC
-            LIMIT 1
-        ), 0)";
-
-        if ($AGGREGATE_RANGE) {
-            $itemsCostRows = DB::query()
-                ->fromSub($itemsProceedBase, 'd')
-                ->selectRaw("page_key, page_label, item_key, item_label, qty, $unitCostDispSub AS unit_cost_disp")
-                ->get();
-        } else {
-            $itemsCostRows = DB::query()
-                ->fromSub($itemsProceedBase, 'd')
-                ->selectRaw("day_key, page_key, page_label, item_key, item_label, qty, $unitCostDispSub AS unit_cost_disp")
-                ->get();
-        }
+            ->groupByRaw("$groupByKey, $itemNorm")
+            ->get();
 
         $itemsListMap = [];
-        foreach ($itemsCostRows as $r) {
+        $itemsCostRows = []; // keep for later use in target CPP calc
+        foreach ($itemsProceedRows as $r) {
             $key = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)($r->day_key ?? '') . '|' . (string)$r->page_key);
+            $unitCost = $findUnitCost((string)$r->item_key, (string)$r->last_order_date);
+
             $itemsListMap[$key] ??= [];
             $itemsListMap[$key][] = [
                 'label'     => (string)($r->item_label ?? ''),
                 'qty'       => (int)($r->qty ?? 0),
-                'unit_cost' => (float)($r->unit_cost_disp ?? 0),
+                'unit_cost' => $unitCost,
             ];
             if (!empty($r->page_label)) $labelMap[$key] = (string)$r->page_label;
+
+            // Store for target CPP calculation
+            $itemsCostRows[] = (object)[
+                'item_key' => (string)$r->item_key,
+                'qty' => (int)($r->qty ?? 0),
+                'unit_cost_disp' => $unitCost,
+            ];
         }
 
-        // PROCEED COD SUM — GROUPED → Agg key
+        // PROCEED COD SUM
         $procCodRows = (clone $moProceedOnly)
             ->selectRaw("$selectKeyAgg, SUM($moCodClean) AS proceed_cod_sum")
             ->groupByRaw("$groupByKey")
@@ -455,28 +606,17 @@ class SummaryOverallController extends Controller
             if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
         }
 
-        // PROCEED Unit Cost SUM — GROUPED → Agg key (this drives Projected COGS)
-        if ($AGGREGATE_RANGE) {
-            $procUnitCostRows = DB::query()
-                ->fromSub($itemsProceedBase, 'd')
-                ->selectRaw("page_key, page_label, SUM(qty * $unitCostDispSub) AS proceed_unit_cost_sum")
-                ->groupBy('page_key','page_label')->get();
-        } else {
-            $procUnitCostRows = DB::query()
-                ->fromSub($itemsProceedBase, 'd')
-                ->selectRaw("day_key, page_key, page_label, SUM(qty * $unitCostDispSub) AS proceed_unit_cost_sum")
-                ->groupBy('day_key','page_key','page_label')->get();
-        }
-
+        // PROCEED Unit Cost SUM — now computed in PHP from itemsProceedRows
         $proceedUnitCostSumMap = [];
-        foreach ($procUnitCostRows as $r) {
-            $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $proceedUnitCostSumMap[$k] = (float)($r->proceed_unit_cost_sum ?? 0);
-            if (!empty($r->page_label)) $labelMap[$k] = (string)$r->page_label;
+        foreach ($itemsProceedRows as $r) {
+            $key = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)($r->day_key ?? '') . '|' . (string)$r->page_key);
+            $unitCost = $findUnitCost((string)$r->item_key, (string)$r->last_order_date);
+            $proceedUnitCostSumMap[$key] = ($proceedUnitCostSumMap[$key] ?? 0.0) + ((int)$r->qty * $unitCost);
+            if (!empty($r->page_label)) $labelMap[$key] = (string)$r->page_label;
         }
 
         // ======================
-        // DELAY (avg days)
+        // DELAY (avg days) — now using _jnt_agg temp table
         // ======================
         if ($driver === 'mysql') {
             $jSubmitDate = "DATE(ja.min_submit_ts)";
@@ -486,7 +626,6 @@ class SummaryOverallController extends Controller
             $delayDays   = "($jSubmitDate - $dateExpr)";
         }
 
-        // IMPORTANT: inner-most select uses BASE key (no MIN(page_label) yet)
         $delayRaw = (clone $joinedBase)
             ->selectRaw("$selectKeyBase, $moWaybillSql AS wb, $delayDays AS delay_days");
 
@@ -522,51 +661,31 @@ class SummaryOverallController extends Controller
         }
 
         // ======================
-        // COGS (Delivered-only) — GROUPED → Agg key (for actual NP)
+        // COGS (Delivered-only) — now using PHP lookup + _jnt_agg temp table
         // ======================
-        if ($AGGREGATE_RANGE) {
-            $deliveredItemsBase = (clone $joinedBase)
-                ->whereRaw('ja.is_delivered = 1')
-                ->selectRaw("$selectKeyAgg, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
-                             COUNT(DISTINCT $moWaybillSql) AS qty, MAX($dateExpr) AS last_order_date")
-                ->groupByRaw("$groupByKey, $itemNorm");
-        } else {
-            $deliveredItemsBase = (clone $joinedBase)
-                ->whereRaw('ja.is_delivered = 1')
-                ->selectRaw("$selectKeyAgg, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
-                             COUNT(DISTINCT $moWaybillSql) AS qty, MAX($dateExpr) AS last_order_date")
-                ->groupByRaw("$groupByKey, $itemNorm");
-        }
-
-        $unitCostForDeliveredSub = "COALESCE((
-            SELECT " . $castMoney($cogsUnitExpr) . "
-            FROM cogs c
-            WHERE $cogsItemNorm = d.item_key
-              AND DATE($cogsDateExpr) <= d.last_order_date
-            ORDER BY DATE($cogsDateExpr) DESC
-            LIMIT 1
-        ), 0)";
-
-        if ($AGGREGATE_RANGE) {
-            $cogsRows = DB::query()
-                ->fromSub($deliveredItemsBase, 'd')
-                ->selectRaw("page_key, SUM(qty * $unitCostForDeliveredSub) AS cogs_total")
-                ->groupBy('page_key')->get();
-        } else {
-            $cogsRows = DB::query()
-                ->fromSub($deliveredItemsBase, 'd')
-                ->selectRaw("day_key, page_key, SUM(qty * $unitCostForDeliveredSub) AS cogs_total")
-                ->groupBy('day_key','page_key')->get();
-        }
+        $deliveredItemsRows = (clone $joinedBase)
+            ->whereRaw('ja.is_delivered = 1')
+            ->selectRaw("$selectKeyAgg, $itemNorm AS item_key, MIN($itemLabel) AS item_label,
+                         COUNT(DISTINCT $moWaybillSql) AS qty, MAX($dateExpr) AS last_order_date")
+            ->groupByRaw("$groupByKey, $itemNorm")
+            ->get();
 
         $cogsMap = [];
-        foreach ($cogsRows as $r) {
+        foreach ($deliveredItemsRows as $r) {
             $k = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)$r->day_key . '|' . (string)$r->page_key);
-            $cogsMap[$k] = (float)($r->cogs_total ?? 0);
+            $unitCost = $findUnitCost((string)$r->item_key, (string)$r->last_order_date);
+            $cogsMap[$k] = ($cogsMap[$k] ?? 0.0) + ((int)$r->qty * $unitCost);
+        }
+
+        // Clean up temp table
+        if ($driver === 'mysql') {
+            DB::statement("DROP TEMPORARY TABLE IF EXISTS _jnt_agg");
+        } else {
+            DB::statement("DROP TABLE IF EXISTS _jnt_agg");
         }
 
         // ======================
-        // Merge (+ derived metrics)
+        // Merge (+ derived metrics) — same logic as before
         // ======================
         $keys = array_unique(array_merge(
             array_keys($adsMap),
@@ -598,9 +717,8 @@ class SummaryOverallController extends Controller
         $rows = [];
         foreach ($keys as $key) {
             $adspent = $adsMap[$key] ?? 0.0;
-            if ($adspent <= 0) continue; // show rows with spend only
+            if ($adspent <= 0) continue;
 
-            // Items display + unit costs
             $itemsDisplay = null;
             $unitCostsArr = [];
             if (!empty($itemsListMap[$key])) {
@@ -760,8 +878,8 @@ class SummaryOverallController extends Controller
         // ===== Actual RTS (strict: only dates with <3% In-Transit)
         $actualRtsPct = null;
         if (!$AGGREGATE_RANGE) {
-            $num = 0; // Σ(Returned + For Return)
-            $den = 0; // Σ(Delivered + Returned + For Return)
+            $num = 0;
+            $den = 0;
             foreach ($rows as $r) {
                 if (!empty($r['is_total'])) continue;
                 $inPct = $r['in_transit_pct'] ?? null;
@@ -810,18 +928,17 @@ class SummaryOverallController extends Controller
                 $proceedCnt  = (int)  ($r['proceed']               ?? 0);
                 $adsp        = (float)($r['adspent']               ?? 0.0);
 
-                $projGross   = $procCodSum * $rtsFactor;            // Σ COD(proceed) × (1-RTS)
-                $projCodFee  = $procCodSum * $COD_FEE_RATE;         // 1.5% of Σ COD(proceed)
-                $projCogs    = $procUCSum  * $rtsFactor;            // Σ UnitCost(proceed) × (1-RTS)
-                $projShipFee = $SHIPPING_PER_SHIPPED * $proceedCnt; // 37 × #proceed
+                $projGross   = $procCodSum * $rtsFactor;
+                $projCodFee  = $procCodSum * $COD_FEE_RATE;
+                $projCogs    = $procUCSum  * $rtsFactor;
+                $projShipFee = $SHIPPING_PER_SHIPPED * $proceedCnt;
 
                 $projNP = $projGross - $adsp - $projCodFee - $projCogs - $projShipFee;
 
                 $r['projected_net_profit']     = $projNP;
-                $den                           = $procCodSum;       // denom = Σ COD(proceed)
+                $den                           = $procCodSum;
                 $r['projected_net_profit_pct'] = ($den > 0) ? ($projNP / $den) * 100.0 : null;
 
-                // store denominator for Page Summary aggregation
                 $r['_proj_cod_den'] = $den;
             }
             unset($r);
@@ -875,7 +992,6 @@ class SummaryOverallController extends Controller
             $total_net_profit_pct = $sum['all_cod'] > 0 ? ($total_net_profit / $sum['all_cod']) * 100.0 : null;
             $total_avg_delay      = $delayShipCount > 0 ? ($delayWeightedSum / $delayShipCount) : null;
 
-            // Total Projected NP% = (Σ projected NP) / (Σ proceed COD)
             $sumProjNP  = 0.0;
             foreach ($rows as $r) {
                 if (!empty($r['is_total'])) continue;
@@ -973,12 +1089,11 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ===== Target CPP & Breakeven CPP (server-side KPIs; page != 'all' only)
+        // ===== Target CPP & Breakeven CPP
         $targetCPP = null;
         $breakevenCPP = null;
 
         if (!$AGGREGATE_RANGE) {
-            // Mode Unit Cost (weighted by qty from PROCEED items)
             $unitCostMode = null;
             if (!empty($itemsCostRows)) {
                 $freq = [];
@@ -989,12 +1104,11 @@ class SummaryOverallController extends Controller
                     $freq[$key] = ($freq[$key] ?? 0) + $qty;
                 }
                 if (!empty($freq)) {
-                    arsort($freq); // highest qty first
+                    arsort($freq);
                     $unitCostMode = (float)array_key_first($freq);
                 }
             }
 
-            // Mode COD (most frequent COD among PROCEED orders)
             $codMode = null;
             $codModeRow = (clone $moProceedOnly)
                 ->selectRaw("$moCodClean AS cod_clean, COUNT(*) AS cnt")
@@ -1019,7 +1133,6 @@ class SummaryOverallController extends Controller
             'ads_daily'       => $rows,
             'actual_rts_pct'  => $actualRtsPct,
             'top_summary'     => $topSummary,
-            // New KPI outputs for the top KPI row
             'target_cpp'      => $targetCPP,
             'breakeven_cpp'   => $breakevenCPP,
         ]);
