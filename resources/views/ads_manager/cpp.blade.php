@@ -114,6 +114,7 @@
       <button type="button" onclick="setQuickDate('today')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Today</button>
       <button type="button" onclick="setQuickDate('yesterday')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Yesterday</button>
       <button type="button" onclick="setQuickDate('this_week')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">This Week</button>
+      <button type="button" onclick="setQuickDate('last_7_days')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Last 7 Days</button>
       <button type="button" onclick="setQuickDate('this_month')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">This Month</button>
     </div>
   </div>
@@ -632,6 +633,12 @@
           const monday = new Date(today);
           monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
           start = formatDate(monday);
+          end = formatDate(today);
+          break;
+        case 'last_7_days':
+          const sevenDaysAgo = new Date(today);
+          sevenDaysAgo.setDate(today.getDate() - 6);
+          start = formatDate(sevenDaysAgo);
           end = formatDate(today);
           break;
         case 'this_month':
