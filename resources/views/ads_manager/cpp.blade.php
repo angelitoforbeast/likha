@@ -108,6 +108,14 @@
       <label for="endDate" class="block font-semibold mb-1">End Date:</label>
       <input type="date" id="endDate" class="border px-2 py-1 rounded" value="{{ $end ?? '' }}">
     </div>
+
+    {{-- Quick Date Filter Buttons --}}
+    <div class="flex items-end gap-2">
+      <button type="button" onclick="setQuickDate('today')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Today</button>
+      <button type="button" onclick="setQuickDate('yesterday')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Yesterday</button>
+      <button type="button" onclick="setQuickDate('this_week')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">This Week</button>
+      <button type="button" onclick="setQuickDate('this_month')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">This Month</button>
+    </div>
   </div>
 
   {{-- Display Area --}}
@@ -604,6 +612,46 @@
         if (e.key === 'Escape' && pageDd.classList.contains('open')) close();
       });
     })();
+
+    // --- Quick Date Filter ---
+    function setQuickDate(preset) {
+      const today = new Date();
+      let start, end;
+
+      switch (preset) {
+        case 'today':
+          start = end = formatDate(today);
+          break;
+        case 'yesterday':
+          const yesterday = new Date(today);
+          yesterday.setDate(today.getDate() - 1);
+          start = end = formatDate(yesterday);
+          break;
+        case 'this_week':
+          const dayOfWeek = today.getDay();
+          const monday = new Date(today);
+          monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+          start = formatDate(monday);
+          end = formatDate(today);
+          break;
+        case 'this_month':
+          const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+          start = formatDate(firstDay);
+          end = formatDate(today);
+          break;
+      }
+
+      startDateInput.value = start;
+      endDateInput.value = end;
+      navigateWithBothDates();
+    }
+
+    function formatDate(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
 
     // Events
     startDateInput.addEventListener('change', navigateWithBothDates);
