@@ -13,6 +13,13 @@
     [x-cloak]{display:none!important}
     .flatpickr-calendar{z-index:9999!important}
     body { overflow-x: hidden; }
+    /* Items column auto-width */
+    .items-cell { min-width: 280px; max-width: 450px; }
+    .items-cell .item-row { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; border-bottom: 1px solid #f3f4f6; }
+    .items-cell .item-row:last-child { border-bottom: none; }
+    .items-cell .item-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #2563eb; cursor: pointer; }
+    .items-cell .item-name:hover { text-decoration: underline; }
+    .items-cell .item-cost { white-space: nowrap; color: #6b7280; text-align: right; flex-shrink: 0; }
     /* Loading spinner */
     .spinner { border: 3px solid #e5e7eb; border-top: 3px solid #3b82f6; border-radius: 50%; width: 24px; height: 24px; animation: spin 0.8s linear infinite; display: inline-block; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -35,14 +42,28 @@
     <!-- Filters -->
     <section class="bg-white rounded-xl shadow p-3">
       <div class="grid md:grid-cols-6 gap-3 items-end">
-        <div class="md:col-span-2">
+        <div class="md:col-span-2 relative" x-data="{ open: false, search: '' }">
           <label class="block text-sm font-semibold mb-1">Page</label>
-          <select class="w-full border rounded px-3 py-2" x-model="filters.page_name" @change="reload()">
-            <option value="all">All Pages</option>
+          <div class="relative">
+            <input type="text" class="w-full border rounded px-3 py-2 pr-8" 
+                   :value="filters.page_name === 'all' ? 'All Pages' : filters.page_name"
+                   @focus="open = true; search = ''"
+                   @input="open = true; search = $event.target.value"
+                   @click.away="open = false"
+                   placeholder="Search pages...">
+            <svg class="absolute right-2 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+          </div>
+          <div x-show="open" x-transition class="absolute z-50 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto">
+            <div class="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm"
+                 :class="filters.page_name === 'all' ? 'bg-blue-100 font-semibold' : ''"
+                 @click="filters.page_name = 'all'; open = false; reload()">All Pages</div>
             @foreach(($pages ?? []) as $p)
-              <option value="{{ trim($p) }}">{{ trim($p) }}</option>
+              <div class="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm"
+                   :class="filters.page_name === '{{ trim($p) }}' ? 'bg-blue-100 font-semibold' : ''"
+                   x-show="!search || '{{ strtolower(trim($p)) }}'.includes(search.toLowerCase())"
+                   @click="filters.page_name = '{{ trim($p) }}'; open = false; reload()">{{ trim($p) }}</div>
             @endforeach
-          </select>
+          </div>
         </div>
 
         <div class="md:col-span-2">
@@ -181,12 +202,12 @@
 
       <div class="overflow-x-visible">
         <!-- LIMITED COLUMNS -->
-        <table class="min-w-full w-full text-xs table-fixed" x-show="!isCEO || (isCEO && !showAllColumns)">
+        <table class="min-w-full w-full text-xs" x-show="!isCEO || (isCEO && !showAllColumns)">
           <thead class="bg-gray-50 sticky top-16 z-20">
             <tr class="text-left text-gray-600">
               <th class="px-2 py-2">Date</th>
               <th class="px-2 py-2">Page</th>
-              <th class="px-2 py-2 min-w-[220px]">Items / Unit Cost</th>
+              <th class="px-2 py-2">Items / Unit Cost</th>
               <th class="px-2 py-2 text-right">Adspent</th>
               <th class="px-2 py-2 text-right">Orders</th>
               <th class="px-2 py-2 text-right">Proceed CPP</th>
@@ -213,7 +234,7 @@
                   :class="row.is_total ? 'bg-blue-50 font-bold border-t-2 border-blue-300' : 'hover:bg-gray-50'">
                 <td class="px-2 py-2" x-text="fmtDate(row.date)"></td>
                 <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
-                <td class="px-2 py-2"><span x-html="fmtItemsWithCosts(row.items_with_costs)"></span></td>
+                <td class="px-2 py-2 items-cell"><span x-html="fmtItemsWithCosts(row.items_with_costs)"></span></td>
                 <td class="px-2 py-2 text-right" x-text="money(row.adspent)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.orders)"></td>
                 <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.proceed_cpp)"></td>
@@ -242,12 +263,12 @@
         </table>
 
         <!-- FULL COLUMNS (CEO) -->
-        <table class="min-w-full w-full text-xs table-fixed" x-show="isCEO && showAllColumns">
+        <table class="min-w-full w-full text-xs" x-show="isCEO && showAllColumns">
           <thead class="bg-gray-50 sticky top-16 z-20">
             <tr class="text-left text-gray-600">
               <th class="px-2 py-2">Date</th>
               <th class="px-2 py-2">Page</th>
-              <th class="px-2 py-2 min-w-[220px]">Items / Unit Cost</th>
+              <th class="px-2 py-2">Items / Unit Cost</th>
               <th class="px-2 py-2 text-right">Adspent</th>
               <th class="px-2 py-2 text-right">Orders</th>
               <th class="px-2 py-2 text-right">Proceed CPP</th>
@@ -287,7 +308,7 @@
                   :class="row.is_total ? 'bg-blue-50 font-bold border-t-2 border-blue-300' : 'hover:bg-gray-50'">
                 <td class="px-2 py-2" x-text="fmtDate(row.date)"></td>
                 <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
-                <td class="px-2 py-2"><span x-html="fmtItemsWithCosts(row.items_with_costs)"></span></td>
+                <td class="px-2 py-2 items-cell"><span x-html="fmtItemsWithCosts(row.items_with_costs)"></span></td>
                 <td class="px-2 py-2 text-right" x-text="money(row.adspent)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.orders)"></td>
                 <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.proceed_cpp)"></td>
@@ -365,7 +386,10 @@
           return items.map(it => {
             const label = it.label || '—';
             const cost = it.cost || '—';
-            return `<div class="flex justify-between gap-4"><span>${label}</span><span class="text-right text-gray-600 whitespace-nowrap">${cost}</span></div>`;
+            const noCost = !it.cost || it.cost === '—' || it.cost === '₱0.00';
+            const costClass = noCost ? 'item-cost text-red-500 font-semibold' : 'item-cost';
+            const costDisplay = noCost ? '<span title="Missing unit cost!">⚠ No cost</span>' : cost;
+            return `<div class="item-row"><a href="/item/cogs" class="item-name" title="Edit in COGS">${label}</a><span class="${costClass}">${costDisplay}</span></div>`;
           }).join('');
         },
         moneyList(list){
