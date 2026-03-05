@@ -854,8 +854,56 @@ class SummaryOverallController extends Controller
             }
         }
 
-        // ===== Projected Net Profit per day (ROW-LEVEL)
-        if (!$AGGREGATE_RANGE) {
+        // ===== Projected Net Profit per row
+        if ($AGGREGATE_RANGE) {
+            // ALL PAGES VIEW: compute per-page Actual RTS using In Transit < 3% filter
+            // For each page row, we use the page's own RTS from the data
+            // Since in aggregate mode we only have one row per page (no per-date breakdown),
+            // we use the row's own in_transit_pct to decide if it's "settled"
+            // If in_transit_pct < 3%, use the row's own RTS; otherwise use raw RTS or default
+            foreach ($rows as &$r) {
+                if (!empty($r['is_total'])) { $r['projected_net_profit'] = null; $r['projected_net_profit_pct'] = null; continue; }
+
+                $inPct = $r['in_transit_pct'] ?? null;
+                $shipped = (int)($r['shipped'] ?? 0);
+                $returned = (int)($r['returned'] ?? 0);
+                $forRet = (int)($r['for_return'] ?? 0);
+                $delivered = (int)($r['delivered'] ?? 0);
+
+                // Compute per-page RTS
+                $pageRtsPct = null;
+                if ($inPct !== null && $inPct < 3.0) {
+                    // Settled: use actual RTS (returned + for_return) / (delivered + returned + for_return)
+                    $rtsDen = $delivered + $returned + $forRet;
+                    $pageRtsPct = $rtsDen > 0 ? (($returned + $forRet) / $rtsDen) * 100.0 : null;
+                } else {
+                    // Not fully settled: use raw RTS from shipped
+                    $pageRtsPct = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
+                }
+
+                if ($pageRtsPct === null) $pageRtsPct = $DEFAULT_RTS_PCT;
+                $rtsFactor = max(0.0, min(1.0, 1.0 - ($pageRtsPct / 100.0)));
+
+                $procCodSum  = (float)($r['proceed_cod_sum']       ?? 0.0);
+                $procUCSum   = (float)($r['proceed_unit_cost_sum'] ?? 0.0);
+                $proceedCnt  = (int)  ($r['proceed']               ?? 0);
+                $adsp        = (float)($r['adspent']               ?? 0.0);
+
+                $projGross   = $procCodSum * $rtsFactor;
+                $projCodFee  = $procCodSum * $COD_FEE_RATE;
+                $projCogs    = $procUCSum  * $rtsFactor;
+                $projShipFee = $SHIPPING_PER_SHIPPED * $proceedCnt;
+
+                $projNP = $projGross - $adsp - $projCodFee - $projCogs - $projShipFee;
+
+                $r['projected_net_profit']     = $projNP;
+                $den                           = $procCodSum;
+                $r['projected_net_profit_pct'] = ($den > 0) ? ($projNP / $den) * 100.0 : null;
+                $r['_proj_cod_den'] = $den;
+            }
+            unset($r);
+        } else {
+            // SINGLE PAGE VIEW: use the global effective RTS
             $rtsFactor = 1.0;
             if ($effectiveRtsPct !== null) {
                 $rtsFactor = max(0.0, min(1.0, 1.0 - ($effectiveRtsPct / 100.0)));

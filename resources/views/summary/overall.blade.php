@@ -13,6 +13,11 @@
     [x-cloak]{display:none!important}
     .flatpickr-calendar{z-index:9999!important}
     body { overflow-x: hidden; }
+    /* Loading spinner */
+    .spinner { border: 3px solid #e5e7eb; border-top: 3px solid #3b82f6; border-radius: 50%; width: 24px; height: 24px; animation: spin 0.8s linear infinite; display: inline-block; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    /* Loading overlay */
+    .loading-overlay { position: absolute; inset: 0; background: rgba(255,255,255,0.7); display: flex; align-items: center; justify-content: center; z-index: 10; border-radius: 0.75rem; }
   </style>
 </head>
 <body class="bg-gray-100 text-gray-900">
@@ -58,9 +63,33 @@
           <label for="showAllRows" class="text-sm">Show all rows</label>
         </div>
 
-        <div class="flex gap-2 md:col-span-6">
-          <button class="px-3 py-2 rounded border hover:bg-gray-50" @click="resetToThisMonth()">This month</button>
-          <button class="px-3 py-2 rounded border hover:bg-gray-50" @click="reload()">Refresh</button>
+        <!-- Quick Date Filter Buttons -->
+        <div class="flex flex-wrap gap-2 md:col-span-6">
+          <button
+            :class="activePreset === 'today' ? 'bg-blue-600 text-white ring-2 ring-blue-300' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+            class="px-3 py-2 rounded text-sm font-medium transition-colors"
+            @click="setPreset('today')">Today</button>
+          <button
+            :class="activePreset === 'yesterday' ? 'bg-blue-600 text-white ring-2 ring-blue-300' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+            class="px-3 py-2 rounded text-sm font-medium transition-colors"
+            @click="setPreset('yesterday')">Yesterday</button>
+          <button
+            :class="activePreset === 'this_week' ? 'bg-blue-600 text-white ring-2 ring-blue-300' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+            class="px-3 py-2 rounded text-sm font-medium transition-colors"
+            @click="setPreset('this_week')">This Week</button>
+          <button
+            :class="activePreset === 'last_7_days' ? 'bg-blue-600 text-white ring-2 ring-blue-300' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+            class="px-3 py-2 rounded text-sm font-medium transition-colors"
+            @click="setPreset('last_7_days')">Last 7 Days</button>
+          <button
+            :class="activePreset === 'this_month' ? 'bg-blue-600 text-white ring-2 ring-blue-300' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+            class="px-3 py-2 rounded text-sm font-medium transition-colors"
+            @click="setPreset('this_month')">This Month</button>
+          <button
+            :class="activePreset === 'last_month' ? 'bg-blue-600 text-white ring-2 ring-blue-300' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+            class="px-3 py-2 rounded text-sm font-medium transition-colors"
+            @click="setPreset('last_month')">Last Month</button>
+          <button class="px-3 py-2 rounded border hover:bg-gray-50 text-sm" @click="reload()">Refresh</button>
         </div>
       </div>
     </section>
@@ -79,7 +108,7 @@
       <div class="bg-white rounded-xl shadow p-4 flex items-center justify-between">
         <div>
           <div class="font-semibold">Target CPP</div>
-          <div class="text-xs text-gray-500">(1−RTS)·(0.985·COD − Unit) − 0.2·COD − 37</div>
+          <div class="text-xs text-gray-500">(1-RTS)·(0.985·COD - Unit) - 0.2·COD - 37</div>
         </div>
         <div class="text-2xl md:text-3xl font-extrabold" x-text="moneyOrDash(data.target_cpp)"></div>
       </div>
@@ -87,7 +116,7 @@
       <div class="bg-white rounded-xl shadow p-4 flex items-center justify-between">
         <div>
           <div class="font-semibold">Breakeven CPP</div>
-          <div class="text-xs text-gray-500">(1−RTS)·(0.985·COD − Unit) − 0.05·COD − 37</div>
+          <div class="text-xs text-gray-500">(1-RTS)·(0.985·COD - Unit) - 0.05·COD - 37</div>
         </div>
         <div class="text-2xl md:text-3xl font-extrabold" x-text="moneyOrDash(data.breakeven_cpp)"></div>
       </div>
@@ -137,7 +166,15 @@
     </section>
 
     <!-- Daily Table -->
-    <section class="bg-white rounded-xl shadow p-3">
+    <section class="bg-white rounded-xl shadow p-3 relative">
+      <!-- Loading overlay -->
+      <div class="loading-overlay" x-show="isLoading" x-transition.opacity>
+        <div class="flex flex-col items-center gap-2">
+          <div class="spinner"></div>
+          <span class="text-sm text-gray-500">Loading data...</span>
+        </div>
+      </div>
+
       <div class="flex items-center justify-between mb-2">
         <div class="font-semibold">Daily Ad Spend</div>
         <div class="text-xs text-gray-500">
@@ -175,8 +212,9 @@
             </template>
 
             <template x-for="row in rowsForDisplay(data.ads_daily)" :key="(row.date ?? '') + '|' + (row.page ?? '') + '|' + (row.is_total?'1':'0')">
-              <tr class="border-t" :class="row.is_total ? 'bg-gray-50 font-semibold' : 'hover:bg-gray-50'">
-                <td class="px-2 py-2" x-text="row.date"></td>
+              <tr class="border-t"
+                  :class="row.is_total ? 'bg-blue-50 font-bold border-t-2 border-blue-300' : 'hover:bg-gray-50'">
+                <td class="px-2 py-2" x-text="fmtDate(row.date)"></td>
                 <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
                 <td class="px-2 py-2"><span x-text="row.items_display || '—'"></span></td>
                 <td class="px-2 py-2 text-right"><span x-text="moneyList(row.unit_costs)"></span></td>
@@ -248,8 +286,9 @@
             </template>
 
             <template x-for="row in rowsForDisplay(data.ads_daily)" :key="(row.date ?? '') + '|' + (row.page ?? '') + '|' + (row.is_total?'1':'0')">
-              <tr class="border-t" :class="row.is_total ? 'bg-gray-50 font-semibold' : 'hover:bg-gray-50'">
-                <td class="px-2 py-2" x-text="row.date"></td>
+              <tr class="border-t"
+                  :class="row.is_total ? 'bg-blue-50 font-bold border-t-2 border-blue-300' : 'hover:bg-gray-50'">
+                <td class="px-2 py-2" x-text="fmtDate(row.date)"></td>
                 <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
                 <td class="px-2 py-2"><span x-text="row.items_display || '—'"></span></td>
                 <td class="px-2 py-2 text-right"><span x-text="moneyList(row.unit_costs)"></span></td>
@@ -281,16 +320,13 @@
                 <td class="px-2 py-2 text-right" x-text="num(row.for_return)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.in_transit)"></td>
                 <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.cpp)"></td>
-                <td class="px-2 py-2 text-right" x-text="(filters.page_name !== 'all') ? moneyOrDash(row.projected_net_profit) : '—'"></td>
+                <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.projected_net_profit)"></td>
 
                 <td class="px-2 py-2 text-right">
-                  <template x-if="filters.page_name !== 'all'">
-                    <span class="px-2 py-0.5 rounded font-bold"
-                          :class="netClass(projectedPct(row))"
-                          :style="netStyle(projectedPct(row))"
-                          x-text="percent(projectedPct(row))"></span>
-                  </template>
-                  <template x-if="filters.page_name === 'all'">—</template>
+                  <span class="px-2 py-0.5 rounded font-bold"
+                        :class="netClass(projectedPct(row))"
+                        :style="netStyle(projectedPct(row))"
+                        x-text="percent(projectedPct(row))"></span>
                 </td>
               </tr>
             </template>
@@ -298,8 +334,6 @@
         </table>
       </div>
     </section>
-
-    <!-- (Removed the old bottom “Actual RTS” box; now shown above as part of KPI row) -->
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
@@ -313,6 +347,8 @@
         // toggles
         showAllColumns: false,
         showAllRows: false,
+        isLoading: false,
+        activePreset: '',
 
         // data / filters
         data: { ads_daily: [], actual_rts_pct: null, top_summary: [], target_cpp: null, breakeven_cpp: null },
@@ -329,6 +365,27 @@
         moneyList(list){
           if (!Array.isArray(list) || list.length===0) return '—';
           return list.map(v => this.money(v)).join(', ');
+        },
+
+        // Format date from YYYY-MM-DD or date range to abbreviated month format
+        fmtDate(dateStr){
+          if (!dateStr) return '—';
+          // Handle "TOTAL" or similar labels
+          if (dateStr.toUpperCase() === 'TOTAL' || dateStr.toUpperCase() === 'TOTALS') return dateStr;
+          // Handle date range "YYYY-MM-DD – YYYY-MM-DD"
+          if (dateStr.includes('–') || dateStr.includes(' - ')) {
+            const sep = dateStr.includes('–') ? '–' : '-';
+            const parts = dateStr.split(sep).map(s => s.trim());
+            if (parts.length === 2) return this.fmtSingleDate(parts[0]) + ' – ' + this.fmtSingleDate(parts[1]);
+          }
+          return this.fmtSingleDate(dateStr);
+        },
+        fmtSingleDate(s){
+          if (!s) return '—';
+          const M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          const d = new Date(s + 'T00:00:00');
+          if (isNaN(d.getTime())) return s;
+          return M[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
         },
 
         // Projected % now purely from server
@@ -384,24 +441,116 @@
             : `${M(s.getMonth())} ${s.getDate()}, ${s.getFullYear()} – ${M(e.getMonth())} ${e.getDate()}, ${e.getFullYear()}`;
         },
 
-        async reload(){
-          const params = new URLSearchParams({
-            page_name: this.filters.page_name || 'all',
-            start_date: this.filters.start_date || '',
-            end_date: this.filters.end_date   || ''
-          });
-          const res  = await fetch('{{ route('summary.overall.data') }}?'+params.toString());
-          const json = await res.json();
-          this.data = json;
+        // Detect which preset matches the current date range
+        detectPreset(){
+          const today = new Date();
+          const todayStr = this.ymd(today);
+
+          const yesterday = new Date(today);
+          yesterday.setDate(today.getDate() - 1);
+          const yesterdayStr = this.ymd(yesterday);
+
+          // Monday of this week
+          const dow = today.getDay();
+          const mondayOffset = dow === 0 ? 6 : dow - 1;
+          const monday = new Date(today);
+          monday.setDate(today.getDate() - mondayOffset);
+          const mondayStr = this.ymd(monday);
+
+          // Last 7 days
+          const last7 = new Date(today);
+          last7.setDate(today.getDate() - 6);
+          const last7Str = this.ymd(last7);
+
+          // This month
+          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+          const monthStartStr = this.ymd(monthStart);
+
+          // Last month
+          const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+          const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+          const lastMonthStartStr = this.ymd(lastMonthStart);
+          const lastMonthEndStr = this.ymd(lastMonthEnd);
+
+          const s = this.filters.start_date;
+          const e = this.filters.end_date;
+
+          if (s === todayStr && e === todayStr) return 'today';
+          if (s === yesterdayStr && e === yesterdayStr) return 'yesterday';
+          if (s === mondayStr && e === todayStr) return 'this_week';
+          if (s === last7Str && e === todayStr) return 'last_7_days';
+          if (s === monthStartStr && e === todayStr) return 'this_month';
+          if (s === lastMonthStartStr && e === lastMonthEndStr) return 'last_month';
+          return '';
         },
 
-        resetToThisMonth(){
-          const now = new Date();
-          const start = new Date(now.getFullYear(), now.getMonth(), 1);
-          this.filters.start_date = this.ymd(start);
-          this.filters.end_date   = this.ymd(now);
+        setPreset(preset){
+          const today = new Date();
+          let startDate, endDate;
+
+          switch(preset){
+            case 'today':
+              startDate = endDate = today;
+              break;
+            case 'yesterday':
+              const y = new Date(today);
+              y.setDate(today.getDate() - 1);
+              startDate = endDate = y;
+              break;
+            case 'this_week':
+              const dow = today.getDay();
+              const mondayOffset = dow === 0 ? 6 : dow - 1;
+              startDate = new Date(today);
+              startDate.setDate(today.getDate() - mondayOffset);
+              endDate = today;
+              break;
+            case 'last_7_days':
+              startDate = new Date(today);
+              startDate.setDate(today.getDate() - 6);
+              endDate = today;
+              break;
+            case 'this_month':
+              startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+              endDate = today;
+              break;
+            case 'last_month':
+              startDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+              endDate = new Date(today.getFullYear(), today.getMonth(), 0);
+              break;
+          }
+
+          this.filters.start_date = this.ymd(startDate);
+          this.filters.end_date = this.ymd(endDate);
+          this.activePreset = preset;
           this.setDateLabel();
+
+          // Update flatpickr
+          const fp = document.querySelector('#dateRange')._flatpickr;
+          if (fp) {
+            fp.setDate([this.filters.start_date, this.filters.end_date], false);
+            fp.input.value = `${this.filters.start_date} to ${this.filters.end_date}`;
+          }
+
           this.reload();
+        },
+
+        async reload(){
+          this.isLoading = true;
+          try {
+            const params = new URLSearchParams({
+              page_name: this.filters.page_name || 'all',
+              start_date: this.filters.start_date || '',
+              end_date: this.filters.end_date   || ''
+            });
+            const res  = await fetch('{{ route('summary.overall.data') }}?'+params.toString());
+            const json = await res.json();
+            this.data = json;
+            this.activePreset = this.detectPreset();
+          } catch(e) {
+            console.error('Reload error:', e);
+          } finally {
+            this.isLoading = false;
+          }
         },
 
         async init(){
