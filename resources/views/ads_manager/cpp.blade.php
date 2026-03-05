@@ -110,12 +110,12 @@
     </div>
 
     {{-- Quick Date Filter Buttons --}}
-    <div class="flex items-end gap-2">
-      <button type="button" onclick="setQuickDate('today')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Today</button>
-      <button type="button" onclick="setQuickDate('yesterday')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Yesterday</button>
-      <button type="button" onclick="setQuickDate('this_week')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">This Week</button>
-      <button type="button" onclick="setQuickDate('last_7_days')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Last 7 Days</button>
-      <button type="button" onclick="setQuickDate('this_month')" class="quick-date-btn bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">This Month</button>
+    <div class="flex items-end gap-2" id="quickDateBtns">
+      <button type="button" data-preset="today" onclick="setQuickDate('today')" class="quick-date-btn bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-700 text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Today</button>
+      <button type="button" data-preset="yesterday" onclick="setQuickDate('yesterday')" class="quick-date-btn bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-700 text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Yesterday</button>
+      <button type="button" data-preset="this_week" onclick="setQuickDate('this_week')" class="quick-date-btn bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-700 text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">This Week</button>
+      <button type="button" data-preset="last_7_days" onclick="setQuickDate('last_7_days')" class="quick-date-btn bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-700 text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Last 7 Days</button>
+      <button type="button" data-preset="this_month" onclick="setQuickDate('this_month')" class="quick-date-btn bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-700 text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">This Month</button>
     </div>
   </div>
 
@@ -664,12 +664,54 @@
     startDateInput.addEventListener('change', navigateWithBothDates);
     endDateInput.addEventListener('change',   navigateWithBothDates);
 
+    // --- Highlight active quick date button ---
+    function highlightActivePreset() {
+      const s = startDateInput.value;
+      const e = endDateInput.value;
+      const today = new Date();
+      const todayStr = formatDate(today);
+
+      const yesterday = new Date(today);
+      yesterday.setDate(today.getDate() - 1);
+      const yesterdayStr = formatDate(yesterday);
+
+      const dayOfWeek = today.getDay();
+      const monday = new Date(today);
+      monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      const mondayStr = formatDate(monday);
+
+      const sevenDaysAgo = new Date(today);
+      sevenDaysAgo.setDate(today.getDate() - 6);
+      const sevenDaysAgoStr = formatDate(sevenDaysAgo);
+
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+      const firstDayStr = formatDate(firstDay);
+
+      let activePreset = null;
+      if (s === todayStr && e === todayStr) activePreset = 'today';
+      else if (s === yesterdayStr && e === yesterdayStr) activePreset = 'yesterday';
+      else if (s === mondayStr && e === todayStr) activePreset = 'this_week';
+      else if (s === sevenDaysAgoStr && e === todayStr) activePreset = 'last_7_days';
+      else if (s === firstDayStr && e === todayStr) activePreset = 'this_month';
+
+      document.querySelectorAll('#quickDateBtns .quick-date-btn').forEach(btn => {
+        if (btn.dataset.preset === activePreset) {
+          btn.classList.remove('bg-gray-200', 'text-gray-700');
+          btn.classList.add('bg-blue-600', 'text-white', 'ring-2', 'ring-blue-300');
+        } else {
+          btn.classList.remove('bg-blue-600', 'text-white', 'ring-2', 'ring-blue-300');
+          btn.classList.add('bg-gray-200', 'text-gray-700');
+        }
+      });
+    }
+
     // Init
     window.onload = () => {
       if ((!startDateInput.value || !endDateInput.value) && allDates.length) {
         startDateInput.value = allDates[0];
         endDateInput.value   = allDates[allDates.length - 1];
       }
+      highlightActivePreset();
       refreshAll();
     };
 
