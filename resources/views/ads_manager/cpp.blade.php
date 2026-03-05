@@ -170,7 +170,7 @@
     function fmtISO(iso) {
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
       if (!m) return 'Invalid Date';
-      const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const y = m[1], mm = +m[2], dd = +m[3];
       return `${months[mm-1]} ${dd}, ${y}`;
     }
@@ -317,7 +317,7 @@
 
           dateHtml += `
             <tr>
-              <td class="border px-2 py-1 text-center">${date}</td>
+              <td class="border px-2 py-1 text-center">${fmtISO(date)}</td>
               <td class="border px-2 py-1 text-center">₱${sumSpent.toFixed(2)}</td>
               <td class="border px-2 py-1 text-center">${sumOrders}</td>
               <td class="border px-2 py-1 text-center">${cpp != null ? `₱${cpp.toFixed(2)}` : '—'}</td>
@@ -376,7 +376,7 @@
 
           html += `
             <tr>
-              <td class="border px-2 py-1 text-center">${date}</td>
+              <td class="border px-2 py-1 text-center">${fmtISO(date)}</td>
               <td class="border px-2 py-1 text-center">₱${r.spent.toFixed(2)}</td>
               <td class="border px-2 py-1 text-center">${r.orders ?? '—'}</td>
               <td class="border px-2 py-1 text-center">${r.cpp != null ? `₱${r.cpp.toFixed(2)}` : '—'}</td>
