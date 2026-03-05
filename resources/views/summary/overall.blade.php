@@ -186,8 +186,7 @@
             <tr class="text-left text-gray-600">
               <th class="px-2 py-2">Date</th>
               <th class="px-2 py-2">Page</th>
-              <th class="px-2 py-2">Items</th>
-              <th class="px-2 py-2 text-right">Unit Cost</th>
+              <th class="px-2 py-2 min-w-[220px]">Items / Unit Cost</th>
               <th class="px-2 py-2 text-right">Adspent</th>
               <th class="px-2 py-2 text-right">Orders</th>
               <th class="px-2 py-2 text-right">Proceed CPP</th>
@@ -195,7 +194,7 @@
               <th class="px-2 py-2 text-right">Delay</th>
               <th class="px-2 py-2 text-right">Hold</th>
               <th class="px-2 py-2 text-right">RTS%</th>
-              <th class="px-2 py-2 text-right">Actual RTS%</th>
+              <th class="px-2 py-2 text-right">Est. RTS%</th>
               <th class="px-2 py-2 text-right">In Transit%</th>
               <th class="px-2 py-2 text-right">TCPR</th>
               <th class="px-2 py-2 text-right">Net Profit(%)</th>
@@ -205,7 +204,7 @@
           <tbody>
             <template x-if="rowsForDisplay(data.ads_daily).length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="16">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="15">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -214,8 +213,7 @@
                   :class="row.is_total ? 'bg-blue-50 font-bold border-t-2 border-blue-300' : 'hover:bg-gray-50'">
                 <td class="px-2 py-2" x-text="fmtDate(row.date)"></td>
                 <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
-                <td class="px-2 py-2"><span x-html="fmtItems(row.items_display)"></span></td>
-                <td class="px-2 py-2 text-right"><span x-text="moneyList(row.unit_costs)"></span></td>
+                <td class="px-2 py-2"><span x-html="fmtItemsWithCosts(row.items_with_costs)"></span></td>
                 <td class="px-2 py-2 text-right" x-text="money(row.adspent)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.orders)"></td>
                 <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.proceed_cpp)"></td>
@@ -249,8 +247,7 @@
             <tr class="text-left text-gray-600">
               <th class="px-2 py-2">Date</th>
               <th class="px-2 py-2">Page</th>
-              <th class="px-2 py-2">Items</th>
-              <th class="px-2 py-2 text-right">Unit Cost</th>
+              <th class="px-2 py-2 min-w-[220px]">Items / Unit Cost</th>
               <th class="px-2 py-2 text-right">Adspent</th>
               <th class="px-2 py-2 text-right">Orders</th>
               <th class="px-2 py-2 text-right">Proceed CPP</th>
@@ -258,7 +255,7 @@
               <th class="px-2 py-2 text-right">Delay</th>
               <th class="px-2 py-2 text-right">Hold</th>
               <th class="px-2 py-2 text-right">RTS%</th>
-              <th class="px-2 py-2 text-right">Actual RTS%</th>
+              <th class="px-2 py-2 text-right">Est. RTS%</th>
               <th class="px-2 py-2 text-right">In Transit%</th>
               <th class="px-2 py-2 text-right">TCPR</th>
               <th class="px-2 py-2 text-right">Net Profit(%)</th>
@@ -281,7 +278,7 @@
           <tbody>
             <template x-if="rowsForDisplay(data.ads_daily).length===0">
               <tr class="border-t">
-                <td class="px-3 py-3 text-gray-500" colspan="29">No data for selected filters.</td>
+                <td class="px-3 py-3 text-gray-500" colspan="28">No data for selected filters.</td>
               </tr>
             </template>
 
@@ -290,8 +287,7 @@
                   :class="row.is_total ? 'bg-blue-50 font-bold border-t-2 border-blue-300' : 'hover:bg-gray-50'">
                 <td class="px-2 py-2" x-text="fmtDate(row.date)"></td>
                 <td class="px-2 py-2" x-text="row.page ?? '—'"></td>
-                <td class="px-2 py-2"><span x-html="fmtItems(row.items_display)"></span></td>
-                <td class="px-2 py-2 text-right"><span x-text="moneyList(row.unit_costs)"></span></td>
+                <td class="px-2 py-2"><span x-html="fmtItemsWithCosts(row.items_with_costs)"></span></td>
                 <td class="px-2 py-2 text-right" x-text="money(row.adspent)"></td>
                 <td class="px-2 py-2 text-right" x-text="num(row.orders)"></td>
                 <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.proceed_cpp)"></td>
@@ -364,6 +360,14 @@
         ymd(d){ const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); },
         days(v){ return (v==null || isNaN(v)) ? '—' : Number(v).toFixed(2); },
         fmtItems(s){ if (!s || s === '—') return '—'; return s.split(' / ').map(i => i.trim()).join('<br>'); },
+        fmtItemsWithCosts(items){
+          if (!Array.isArray(items) || items.length===0) return '—';
+          return items.map(it => {
+            const label = it.label || '—';
+            const cost = it.cost || '—';
+            return `<div class="flex justify-between gap-4"><span>${label}</span><span class="text-right text-gray-600 whitespace-nowrap">${cost}</span></div>`;
+          }).join('');
+        },
         moneyList(list){
           if (!Array.isArray(list) || list.length===0) return '—';
           return list.map(v => this.money(v)).join(', ');

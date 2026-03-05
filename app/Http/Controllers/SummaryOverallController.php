@@ -408,6 +408,14 @@ class SummaryOverallController extends Controller
             return 0.0;
         };
 
+        // Helper: find ALL distinct unit costs for an item (for range display)
+        $findAllUnitCosts = function(string $itemKey) use ($cogsLookup): array {
+            if (!isset($cogsLookup[$itemKey])) return [];
+            $costs = array_unique(array_map(fn($e) => $e['cost'], $cogsLookup[$itemKey]));
+            sort($costs);
+            return array_values($costs);
+        };
+
         // =====================================================
         // Now use _jnt_agg temp table for all joins (runs ONCE, reused many times)
         // =====================================================
@@ -517,12 +525,14 @@ class SummaryOverallController extends Controller
         foreach ($itemsProceedRows as $r) {
             $key = $AGGREGATE_RANGE ? (string)$r->page_key : ((string)($r->day_key ?? '') . '|' . (string)$r->page_key);
             $unitCost = $findUnitCost((string)$r->item_key, (string)$r->last_order_date);
+            $allCosts = $findAllUnitCosts((string)$r->item_key);
 
             $itemsListMap[$key] ??= [];
             $itemsListMap[$key][] = [
                 'label'     => (string)($r->item_label ?? ''),
                 'qty'       => (int)($r->qty ?? 0),
                 'unit_cost' => $unitCost,
+                'all_costs' => $allCosts,
             ];
             if (!empty($r->page_label)) $labelMap[$key] = (string)$r->page_label;
 
@@ -618,6 +628,36 @@ class SummaryOverallController extends Controller
             $cogsMap[$k] = ($cogsMap[$k] ?? 0.0) + ((int)$r->qty * $unitCost);
         }
 
+        // ======================
+        // PER-DATE PER-PAGE shipped/status counts (for Estimated RTS in All Pages view)
+        // This runs the ship aggregation grouped by BOTH date and page
+        // so we can compute per-page Estimated RTS using settled dates (In Transit < 3%)
+        // ======================
+        $perDatePageShipMap = [];
+        if ($AGGREGATE_RANGE) {
+            $perDatePageShipRows = (clone $joinedBase)
+                ->selectRaw("$dateExpr AS day_key, $pageKeyExpr AS page_key,
+                    COUNT(DISTINCT $moWaybillSql) AS shipped_total,
+                    COUNT(DISTINCT CASE WHEN ja.is_delivered  = 1 THEN $moWaybillSql END) AS delivered_total,
+                    COUNT(DISTINCT CASE WHEN ja.is_returned   = 1 THEN $moWaybillSql END) AS returned_total,
+                    COUNT(DISTINCT CASE WHEN ja.is_for_return = 1 THEN $moWaybillSql END) AS for_return_total,
+                    COUNT(DISTINCT CASE WHEN ja.is_in_transit = 1 THEN $moWaybillSql END) AS in_transit_total
+                ")
+                ->groupByRaw("$dateExpr, $pageKeyExpr")
+                ->get();
+
+            foreach ($perDatePageShipRows as $r) {
+                $pk = (string)$r->page_key;
+                $perDatePageShipMap[$pk][] = [
+                    'shipped'    => (int)($r->shipped_total ?? 0),
+                    'delivered'  => (int)($r->delivered_total ?? 0),
+                    'returned'   => (int)($r->returned_total ?? 0),
+                    'for_return' => (int)($r->for_return_total ?? 0),
+                    'in_transit' => (int)($r->in_transit_total ?? 0),
+                ];
+            }
+        }
+
         // Clean up temp table
         if ($driver === 'mysql') {
             DB::statement("DROP TEMPORARY TABLE IF EXISTS _jnt_agg");
@@ -662,6 +702,7 @@ class SummaryOverallController extends Controller
 
             $itemsDisplay = null;
             $unitCostsArr = [];
+            $itemsWithCosts = [];
             if (!empty($itemsListMap[$key])) {
                 $items = $itemsListMap[$key];
                 usort($items, fn($a,$b) => strcmp($a['label'], $b['label']));
@@ -672,6 +713,18 @@ class SummaryOverallController extends Controller
                     if ($many) $lbl .= '(' . (int)$it['qty'] . ')';
                     $labels[] = $lbl;
                     $unitCostsArr[] = (float)$it['unit_cost'];
+
+                    // Build cost display string for this item
+                    $allCosts = $it['all_costs'] ?? [(float)$it['unit_cost']];
+                    if (count($allCosts) <= 1) {
+                        $costStr = '₱' . number_format($allCosts[0] ?? 0, 2);
+                    } else {
+                        $costStr = '₱' . number_format(min($allCosts), 2) . ' – ₱' . number_format(max($allCosts), 2);
+                    }
+                    $itemsWithCosts[] = [
+                        'label' => $lbl,
+                        'cost'  => $costStr,
+                    ];
                 }
                 $itemsDisplay = implode(' / ', $labels);
             }
@@ -719,6 +772,7 @@ class SummaryOverallController extends Controller
                     'avg_delay_days'         => $avgDelay,
                     'items_display'          => $itemsDisplay,
                     'unit_costs'             => $unitCostsArr,
+                    'items_with_costs'       => $itemsWithCosts,
                     'gross_sales'            => $gross,
                     'shipping_fee'           => $shipping_fee,
                     'cod_fee'                => $cod_fee_actual,
@@ -781,6 +835,7 @@ class SummaryOverallController extends Controller
                     'avg_delay_days'         => $avgDelay,
                     'items_display'          => $itemsDisplay,
                     'unit_costs'             => $unitCostsArr,
+                    'items_with_costs'       => $itemsWithCosts,
                     'gross_sales'            => $gross,
                     'shipping_fee'           => $shipping_fee,
                     'cod_fee'                => $cod_fee_actual,
@@ -856,29 +911,37 @@ class SummaryOverallController extends Controller
 
         // ===== Projected Net Profit per row
         if ($AGGREGATE_RANGE) {
-            // ALL PAGES VIEW: compute per-page Actual RTS using In Transit < 3% filter
-            // For each page row, we use the page's own RTS from the data
-            // Since in aggregate mode we only have one row per page (no per-date breakdown),
-            // we use the row's own in_transit_pct to decide if it's "settled"
-            // If in_transit_pct < 3%, use the row's own RTS; otherwise use raw RTS or default
+            // ALL PAGES VIEW: compute per-page Estimated RTS using per-date In Transit < 3% filter
+            // Same logic as single page view: only settled dates contribute to Estimated RTS
             foreach ($rows as &$r) {
                 if (!empty($r['is_total'])) { $r['projected_net_profit'] = null; $r['projected_net_profit_pct'] = null; continue; }
 
-                $inPct = $r['in_transit_pct'] ?? null;
-                $shipped = (int)($r['shipped'] ?? 0);
-                $returned = (int)($r['returned'] ?? 0);
-                $forRet = (int)($r['for_return'] ?? 0);
-                $delivered = (int)($r['delivered'] ?? 0);
+                // Compute Estimated RTS from per-date data for this page
+                $pageKey = mb_strtolower(trim((string)($r['page'] ?? '')));
+                $perDateRows = $perDatePageShipMap[$pageKey] ?? [];
 
-                // Compute per-page RTS
+                $estRtsNum = 0;
+                $estRtsDen = 0;
+                foreach ($perDateRows as $pd) {
+                    $pdShipped = $pd['shipped'];
+                    $pdInTransitPct = $pdShipped > 0 ? ($pd['in_transit'] / $pdShipped) * 100.0 : null;
+                    if ($pdInTransitPct !== null && $pdInTransitPct < 3.0) {
+                        $estRtsNum += ($pd['returned'] + $pd['for_return']);
+                        $estRtsDen += ($pd['delivered'] + $pd['returned'] + $pd['for_return']);
+                    }
+                }
+
                 $pageRtsPct = null;
-                if ($inPct !== null && $inPct < 3.0) {
-                    // Settled: use actual RTS (returned + for_return) / (delivered + returned + for_return)
-                    $rtsDen = $delivered + $returned + $forRet;
-                    $pageRtsPct = $rtsDen > 0 ? (($returned + $forRet) / $rtsDen) * 100.0 : null;
+                if ($estRtsDen > 0) {
+                    $pageRtsPct = ($estRtsNum / $estRtsDen) * 100.0;
                 } else {
-                    // Not fully settled: use raw RTS from shipped
-                    $pageRtsPct = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
+                    // Fallback: no settled dates, use overall raw RTS for this page
+                    $fallbackNum = 0; $fallbackDen = 0;
+                    foreach ($perDateRows as $pd) {
+                        $fallbackNum += ($pd['returned'] + $pd['for_return']);
+                        $fallbackDen += ($pd['delivered'] + $pd['returned'] + $pd['for_return']);
+                    }
+                    $pageRtsPct = $fallbackDen > 0 ? ($fallbackNum / $fallbackDen) * 100.0 : null;
                 }
 
                 if ($pageRtsPct === null) $pageRtsPct = $DEFAULT_RTS_PCT;
