@@ -73,6 +73,7 @@ use App\Http\Controllers\Jnt\SenderAddressController;
 use App\Http\Controllers\Jnt\Waybills\SenderNameController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\PhoneWhitelistController;
+use App\Http\Controllers\ValidationListController;
 // use App\Http\Controllers\AutomationController;
 use App\Models\Role;
 
@@ -646,11 +647,26 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get('/jnt/hold', [JntHoldController::class, 'index'])->name('jnt.hold');
 
 
-    // ✅ Phone Whitelist (CEO, Marketing, Marketing OIC)
-    Route::get('/phone-whitelist', [PhoneWhitelistController::class, 'index'])->name('phone-whitelist.index');
-    Route::get('/phone-whitelist/data', [PhoneWhitelistController::class, 'data'])->name('phone-whitelist.data');
-    Route::post('/phone-whitelist', [PhoneWhitelistController::class, 'store'])->name('phone-whitelist.store');
-    Route::delete('/phone-whitelist/{phoneWhitelist}', [PhoneWhitelistController::class, 'destroy'])->name('phone-whitelist.destroy');
+    // ✅ Validation Lists (CEO, Marketing, Marketing OIC)
+    Route::get('/validation-lists', [ValidationListController::class, 'index'])->name('validation-lists.index');
+
+    // Phone Whitelist API
+    Route::get('/validation-lists/phone/data', [ValidationListController::class, 'phoneData'])->name('validation-lists.phone.data');
+    Route::post('/validation-lists/phone', [ValidationListController::class, 'phoneStore'])->name('validation-lists.phone.store');
+    Route::delete('/validation-lists/phone/{phone}', [ValidationListController::class, 'phoneDestroy'])->name('validation-lists.phone.destroy');
+
+    // FB Name Blacklist API
+    Route::get('/validation-lists/fbname/data', [ValidationListController::class, 'fbnameData'])->name('validation-lists.fbname.data');
+    Route::post('/validation-lists/fbname', [ValidationListController::class, 'fbnameStore'])->name('validation-lists.fbname.store');
+    Route::delete('/validation-lists/fbname/{fbname}', [ValidationListController::class, 'fbnameDestroy'])->name('validation-lists.fbname.destroy');
+
+    // Keyword Blacklist API
+    Route::get('/validation-lists/keyword/data', [ValidationListController::class, 'keywordData'])->name('validation-lists.keyword.data');
+    Route::post('/validation-lists/keyword', [ValidationListController::class, 'keywordStore'])->name('validation-lists.keyword.store');
+    Route::delete('/validation-lists/keyword/{keyword}', [ValidationListController::class, 'keywordDestroy'])->name('validation-lists.keyword.destroy');
+
+    // Redirect old phone-whitelist URL
+    Route::get('/phone-whitelist', fn() => redirect()->route('validation-lists.index'));
 
     // ✅ Finance (CEO only)
     Route::get('/finance', [FinanceController::class, 'index'])->name('finance.index');

@@ -10,6 +10,8 @@ use Carbon\Carbon;
 use App\Models\DownloadedMacroOutputLog;
 use Illuminate\Support\Facades\Schema;
 use App\Models\PhoneWhitelist;
+use App\Models\FbnameBlacklist;
+use App\Models\KeywordBlacklist;
 
 class MacroOutputController extends Controller
 {
@@ -375,7 +377,8 @@ class MacroOutputController extends Controller
         }
 
         $records = MacroOutput::whereIn('id', $ids)->get([
-            'id', 'FULL NAME', 'PROVINCE', 'CITY', 'BARANGAY', 'PHONE NUMBER'
+            'id', 'FULL NAME', 'PROVINCE', 'CITY', 'BARANGAY', 'PHONE NUMBER',
+            'fb_name', 'all_user_input'
         ]);
 
         // phone duplicate counts within batch
@@ -388,6 +391,20 @@ class MacroOutputController extends Controller
         // ✅ Load whitelisted phone numbers (skip duplicate check for these)
         $whitelistedPhones = PhoneWhitelist::phonesForHost($request->getHost());
         $whitelistSet = array_flip($whitelistedPhones);
+
+        // ✅ Load FB name blacklist (case-insensitive)
+        $hostScope = str_contains(strtolower((string) $request->getHost()), 'incepxion') ? 'incepxion' : 'likha';
+        $fbnameBlacklist = FbnameBlacklist::where('host_scope', $hostScope)
+            ->pluck('fb_name')
+            ->map(fn($v) => mb_strtolower(trim($v)))
+            ->toArray();
+
+        // ✅ Load keyword blacklist (case-insensitive, partial match)
+        $keywordBlacklist = KeywordBlacklist::where('host_scope', $hostScope)
+            ->pluck('keyword')
+            ->map(fn($v) => mb_strtolower(trim($v)))
+            ->filter(fn($v) => $v !== '')
+            ->toArray();
 
         $results = [];
         $validIds = [];
@@ -438,13 +455,37 @@ class MacroOutputController extends Controller
             // ✅ Check if this phone is whitelisted (for UI indicator)
             $isWhitelisted = isset($whitelistSet[$phone]);
 
+            // ✅ FB Name blacklist check (case-insensitive)
+            $fbName = mb_strtolower(trim((string)($record->fb_name ?? '')));
+            $fbNameBlacklisted = false;
+            if ($fbName !== '' && in_array($fbName, $fbnameBlacklist, true)) {
+                $fbNameBlacklisted = true;
+            }
+
+            // ✅ Keyword blacklist check (case-insensitive, partial match on all_user_input)
+            $allUserInput = mb_strtolower((string)($record->all_user_input ?? ''));
+            $keywordBlacklisted = false;
+            $matchedKeyword = null;
+            foreach ($keywordBlacklist as $kw) {
+                if (str_contains($allUserInput, $kw)) {
+                    $keywordBlacklisted = true;
+                    $matchedKeyword = $kw;
+                    break;
+                }
+            }
+
             $invalidFields = array_filter([
-                'FULL NAME'    => $fullNameInvalid,
+                'FULL NAME'    => $fullNameInvalid || $fbNameBlacklisted,
                 'PROVINCE'     => $provInvalid,
                 'CITY'         => $cityInvalid,
                 'BARANGAY'     => $brgyInvalid,
                 'PHONE NUMBER' => $phoneInvalid,
             ]);
+
+            // If keyword blacklisted, flag the all_user_input column
+            if ($keywordBlacklisted) {
+                $invalidFields['ALL_USER_INPUT'] = true;
+            }
 
             $isValid = empty($invalidFields);
 
@@ -456,6 +497,9 @@ class MacroOutputController extends Controller
                 'invalid_fields' => $invalidFields,
                 'validate_2' => $isValid ? 1 : 0,
                 'phone_whitelisted' => $isWhitelisted,
+                'fbname_blacklisted' => $fbNameBlacklisted,
+                'keyword_blacklisted' => $keywordBlacklisted,
+                'matched_keyword' => $matchedKeyword,
             ];
         }
 
@@ -554,6 +598,20 @@ class MacroOutputController extends Controller
     $whitelistedPhones = PhoneWhitelist::phonesForHost($request->getHost());
     $whitelistSet = array_flip($whitelistedPhones);
 
+    // ✅ Load FB name blacklist (case-insensitive)
+    $hostScope = str_contains(strtolower((string) $request->getHost()), 'incepxion') ? 'incepxion' : 'likha';
+    $fbnameBlacklist = FbnameBlacklist::where('host_scope', $hostScope)
+        ->pluck('fb_name')
+        ->map(fn($v) => mb_strtolower(trim($v)))
+        ->toArray();
+
+    // ✅ Load keyword blacklist (case-insensitive, partial match)
+    $keywordBlacklist = KeywordBlacklist::where('host_scope', $hostScope)
+        ->pluck('keyword')
+        ->map(fn($v) => mb_strtolower(trim($v)))
+        ->filter(fn($v) => $v !== '')
+        ->toArray();
+
     // ✅ only rows with checker = ✅ (or blank/null) are candidates for update
     $CHECKER = $wrap('APP SCRIPT CHECKER');
 
@@ -566,7 +624,7 @@ class MacroOutputController extends Controller
         ->get([
             'id', 'FULL NAME', 'PHONE NUMBER', 'PROVINCE', 'CITY', 'BARANGAY',
             'ITEM_NAME', 'COD', 'APP SCRIPT CHECKER',
-            'SHOP DETAILS', 'all_user_input',
+            'SHOP DETAILS', 'all_user_input', 'fb_name',
         ]);
 
     if ($candidates->isEmpty()) {
@@ -664,10 +722,25 @@ class MacroOutputController extends Controller
         $itemInvalid = ($item === '' || mb_strlen($item, 'UTF-8') > 50);
         $codInvalid  = ($cod === '');
 
+        // ✅ FB Name blacklist check (case-insensitive)
+        $fbNameVal = mb_strtolower(trim((string)($r->fb_name ?? '')));
+        $fbNameBlacklisted = ($fbNameVal !== '' && in_array($fbNameVal, $fbnameBlacklist, true));
+
+        // ✅ Keyword blacklist check (case-insensitive, partial match on all_user_input)
+        $allUserInput = mb_strtolower((string)($r->all_user_input ?? ''));
+        $keywordBlacklisted = false;
+        foreach ($keywordBlacklist as $kw) {
+            if (str_contains($allUserInput, $kw)) {
+                $keywordBlacklisted = true;
+                break;
+            }
+        }
+
         $hardIssue =
             $provInvalid || $cityInvalid || $brgyInvalid ||
             $fullNameInvalid || $phoneInvalid ||
-            $itemInvalid || $codInvalid;
+            $itemInvalid || $codInvalid ||
+            $fbNameBlacklisted || $keywordBlacklisted;
 
         // ✅ SOFT (SHOP DETAILS mismatch) -> checker TO FIX pero wag galawin flags
         $shopText = trim((string)($r->{'SHOP DETAILS'} ?? ''));

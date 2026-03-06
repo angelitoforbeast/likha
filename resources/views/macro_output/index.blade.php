@@ -435,8 +435,8 @@
         <span id="validate1-status" class="text-sm text-gray-600"></span>
 
         @if(!empty($canAccessWhitelist))
-        <a href="{{ route('phone-whitelist.index') }}" class="inline-block bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 ml-2 text-sm" title="Manage whitelisted phone numbers">
-          📋 Whitelist
+        <a href="{{ route('validation-lists.index') }}" class="inline-block bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 ml-2 text-sm" title="Manage validation lists (whitelist & blacklists)">
+          📋 Validation Lists
         </a>
         @endif
       </div>
@@ -1449,22 +1449,54 @@ function markWarn(id, field) {
     clearValidateMarks = function() {
       _origClearValidateMarks();
       document.querySelectorAll('.phone-whitelisted-badge').forEach(el => el.remove());
+      document.querySelectorAll('.fbname-blacklisted-badge').forEach(el => el.remove());
+      document.querySelectorAll('.keyword-blacklisted-badge').forEach(el => el.remove());
     };
 
-    // After validate results, add whitelisted badge
+    // After validate results, add whitelisted/blacklisted badges
     function addWhitelistedBadges(results) {
       results.forEach(result => {
-        if (!result.phone_whitelisted) return;
         const id = String(result.id);
-        const phoneEl = document.querySelector(`[data-id="${id}"][data-field="PHONE NUMBER"]`);
-        if (!phoneEl) return;
-        if (phoneEl.parentElement.querySelector('.phone-whitelisted-badge')) return;
 
-        const badge = document.createElement('span');
-        badge.className = 'phone-whitelisted-badge';
-        badge.textContent = 'Whitelisted';
-        badge.title = 'This phone number is whitelisted — duplicate check skipped';
-        phoneEl.parentElement.appendChild(badge);
+        // Phone whitelisted badge
+        if (result.phone_whitelisted) {
+          const phoneEl = document.querySelector(`[data-id="${id}"][data-field="PHONE NUMBER"]`);
+          if (phoneEl && !phoneEl.parentElement.querySelector('.phone-whitelisted-badge')) {
+            const badge = document.createElement('span');
+            badge.className = 'phone-whitelisted-badge';
+            badge.textContent = 'Whitelisted';
+            badge.title = 'This phone number is whitelisted — duplicate check skipped';
+            phoneEl.parentElement.appendChild(badge);
+          }
+        }
+
+        // FB Name blacklisted badge
+        if (result.fbname_blacklisted) {
+          const row = document.querySelector(`tr[data-id="${id}"]`);
+          const customerCell = row?.querySelector('.customer-details');
+          if (customerCell && !customerCell.querySelector('.fbname-blacklisted-badge')) {
+            const badge = document.createElement('span');
+            badge.className = 'fbname-blacklisted-badge';
+            badge.style.cssText = 'display:inline-block;font-size:9px;background:#fef2f2;color:#dc2626;padding:1px 6px;border-radius:4px;margin-left:6px;font-weight:600;border:1px solid #fecaca;';
+            badge.textContent = 'Blacklisted FB';
+            badge.title = 'This FB name is blacklisted';
+            customerCell.appendChild(badge);
+          }
+        }
+
+        // Keyword blacklisted badge
+        if (result.keyword_blacklisted) {
+          const row = document.querySelector(`tr[data-id="${id}"]`);
+          const customerCell = row?.querySelector('.customer-details');
+          if (customerCell && !customerCell.querySelector('.keyword-blacklisted-badge')) {
+            const badge = document.createElement('span');
+            badge.className = 'keyword-blacklisted-badge';
+            badge.style.cssText = 'display:inline-block;font-size:9px;background:#fff7ed;color:#ea580c;padding:1px 6px;border-radius:4px;margin-left:6px;font-weight:600;border:1px solid #fed7aa;';
+            badge.textContent = 'Keyword: ' + (result.matched_keyword || '?');
+            badge.title = 'Blacklisted keyword found in customer input: ' + (result.matched_keyword || '');
+            customerCell.appendChild(badge);
+          }
+        }
       });
     }
 
