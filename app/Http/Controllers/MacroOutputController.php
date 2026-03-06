@@ -1115,8 +1115,15 @@ class MacroOutputController extends Controller
             ->orderBy('PAGE')
             ->pluck('PAGE');
 
+        // ✅ Whitelist access: CEO, Marketing, Marketing OIC
+        $canAccessWhitelist = false;
+        $userRole = preg_replace('/\s+/u', ' ', trim((string)(Auth::user()?->employeeProfile?->role ?? '')));
+        if (preg_match('/^(ceo|marketing|marketing\s*[-–—]\s*oic)$/iu', $userRole)) {
+            $canAccessWhitelist = true;
+        }
+
         return view('macro_output.index', compact(
-            'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll'
+            'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll', 'canAccessWhitelist'
         ));
     }
 
