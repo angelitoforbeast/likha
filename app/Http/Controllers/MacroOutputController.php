@@ -442,20 +442,18 @@ class MacroOutputController extends Controller
 
             // PHONE validation
             $phoneInvalid = false;
-            $isWhitelisted = isset($whitelistSet[$phone]);
-
-            if ($isWhitelisted) {
-                // ✅ Whitelisted phones skip ALL phone validation (duplicate + hardcoded checks)
-                $phoneInvalid = false;
-            } elseif ($phone === '') {
+            if ($phone === '') {
                 $phoneInvalid = true;
             } elseif (!preg_match('/^9\d{9}$/', $phone)) {
                 $phoneInvalid = true;
             } elseif ($phone === '9123456789') {
                 $phoneInvalid = true;
-            } elseif (($phoneCounts[$phone] ?? 0) > 1) {
+            } elseif (($phoneCounts[$phone] ?? 0) > 1 && !isset($whitelistSet[$phone])) {
                 $phoneInvalid = true;
             }
+
+            // ✅ Check if this phone is whitelisted (for UI indicator)
+            $isWhitelisted = isset($whitelistSet[$phone]);
 
             // ✅ FB Name blacklist check (case-insensitive)
             $fbName = mb_strtolower(trim((string)($record->fb_name ?? '')));
@@ -707,18 +705,13 @@ class MacroOutputController extends Controller
 
         // PHONE invalid
         $phoneInvalid = false;
-        $isPhoneWhitelisted = isset($whitelistSet[$phone]);
-
-        if ($isPhoneWhitelisted) {
-            // ✅ Whitelisted phones skip ALL phone validation (duplicate + hardcoded checks)
-            $phoneInvalid = false;
-        } elseif ($phone === '') {
+        if ($phone === '') {
             $phoneInvalid = true;
         } elseif (!preg_match('/^9\d{9}$/', $phone)) {
             $phoneInvalid = true;
         } elseif ($phone === '9123456789') {
             $phoneInvalid = true;
-        } elseif (($phoneCounts[$phone] ?? 0) > 1) {
+        } elseif (($phoneCounts[$phone] ?? 0) > 1 && !isset($whitelistSet[$phone])) {
             $phoneInvalid = true;
         }
 
