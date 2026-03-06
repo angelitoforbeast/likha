@@ -22,7 +22,7 @@ class PhoneWhitelistController extends Controller
         return preg_replace('/\s+/u', ' ', trim((string) $raw));
     }
 
-    private function canAdd(): bool
+    private function canAccess(): bool
     {
         $role = $this->userRole();
         return preg_match('/^(ceo|marketing|marketing\s*[-–—]\s*oic)$/iu', $role) === 1;
@@ -34,11 +34,20 @@ class PhoneWhitelistController extends Controller
         return preg_match('/^(ceo|marketing\s*[-–—]\s*oic)$/iu', $role) === 1;
     }
 
-    /* ─── API ─── */
+    /* ─── Full Page ─── */
 
     public function index(Request $request)
     {
-        if (! $this->canAdd()) abort(403);
+        if (! $this->canAccess()) abort(403);
+
+        return view('macro_output.phone-whitelist');
+    }
+
+    /* ─── JSON API ─── */
+
+    public function data(Request $request)
+    {
+        if (! $this->canAccess()) abort(403);
 
         $scope = $this->scope($request);
 
@@ -55,7 +64,7 @@ class PhoneWhitelistController extends Controller
 
     public function store(Request $request)
     {
-        if (! $this->canAdd()) abort(403);
+        if (! $this->canAccess()) abort(403);
 
         $data = $request->validate([
             'phone_number' => 'required|string|max:20',

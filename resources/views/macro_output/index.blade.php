@@ -435,9 +435,9 @@
         <span id="validate1-status" class="text-sm text-gray-600"></span>
 
         @if(!empty($canAccessWhitelist))
-        <button type="button" id="phone-whitelist-btn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 ml-2" title="Manage whitelisted phone numbers">
+        <a href="{{ route('phone-whitelist.index') }}" class="inline-block bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 ml-2 text-sm" title="Manage whitelisted phone numbers">
           📋 Whitelist
-        </button>
+        </a>
         @endif
       </div>
     </form>
@@ -1442,8 +1442,115 @@ function markWarn(id, field) {
     });
   </script>
 
-  @if(!empty($canAccessWhitelist))
-    @include('macro_output.phone-whitelist')
-  @endif
+  {{-- ═══ WHITELISTED BADGE INDICATOR (always active for all users) ═══ --}}
+  <script>
+    // Override clearValidateMarks to also remove whitelist badges
+    const _origClearValidateMarks = clearValidateMarks;
+    clearValidateMarks = function() {
+      _origClearValidateMarks();
+      document.querySelectorAll('.phone-whitelisted-badge').forEach(el => el.remove());
+    };
+
+    // After validate results, add whitelisted badge
+    function addWhitelistedBadges(results) {
+      results.forEach(result => {
+        if (!result.phone_whitelisted) return;
+        const id = String(result.id);
+        const phoneEl = document.querySelector(`[data-id="${id}"][data-field="PHONE NUMBER"]`);
+        if (!phoneEl) return;
+        if (phoneEl.parentElement.querySelector('.phone-whitelisted-badge')) return;
+
+        const badge = document.createElement('span');
+        badge.className = 'phone-whitelisted-badge';
+        badge.textContent = 'Whitelisted';
+        badge.title = 'This phone number is whitelisted — duplicate check skipped';
+        phoneEl.parentElement.appendChild(badge);
+      });
+    }
+
+    // Monkey-patch validate button to also call addWhitelistedBadges
+    (function() {
+      const btn = document.getElementById('validate-btn');
+      if (!btn) return;
+
+      const newBtn = btn.cloneNode(true);
+      btn.parentNode.replaceChild(newBtn, btn);
+
+      newBtn.addEventListener('click', function () {
+        const statusEl = document.getElementById('validate-status');
+        statusEl.textContent = 'Validating...';
+        statusEl.classList.remove('text-green-600', 'text-red-600');
+        statusEl.classList.add('text-gray-600');
+
+        clearValidateMarks();
+
+        const rows = Array.from(document.querySelectorAll('tr[data-id]'));
+        const ids = rows
+          .filter(row => row.querySelector('[data-field="STATUS"]')?.value !== 'CANNOT PROCEED')
+          .map(row => row.dataset.id);
+
+        fetch("{{ route('macro_output.validate') }}", {
+          method: 'POST',
+          headers: {
+            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ ids })
+        })
+        .then(res => res.json())
+        .then(results => {
+          let errorCount = 0;
+          const invalidRowIds = new Set();
+
+          results.forEach(result => {
+            const id = String(result.id);
+            if (!result.invalid_fields) return;
+            let rowHasIssue = false;
+            Object.keys(result.invalid_fields).forEach(field => {
+              if (result.invalid_fields[field]) {
+                errorCount++;
+                rowHasIssue = true;
+                markInvalid(id, field);
+              }
+            });
+            if (rowHasIssue) invalidRowIds.add(id);
+          });
+
+          rows.forEach(row => {
+            const id = String(row.dataset.id || '');
+            if (!id) return;
+            const status = row.querySelector('[data-field="STATUS"]')?.value || '';
+            if (status === 'CANNOT PROCEED') return;
+            const fullNameEl = row.querySelector('[data-field="FULL NAME"]');
+            if (!fullNameEl) return;
+            const fullNameVal = (fullNameEl.value ?? fullNameEl.textContent ?? '').toString();
+            if (!isValidFullName(fullNameVal)) {
+              errorCount++;
+              invalidRowIds.add(id);
+              markInvalid(id, 'FULL NAME');
+            }
+          });
+
+          addWhitelistedBadges(results);
+
+          if (invalidRowIds.size > 0) {
+            moveRowsWithIssuesToTop(invalidRowIds);
+          }
+
+          statusEl.textContent = errorCount > 0 ? `${errorCount} cell(s) with issues` : 'All good! ✅';
+          statusEl.classList.remove('text-gray-600');
+          statusEl.classList.add(errorCount > 0 ? 'text-red-600' : 'text-green-600');
+
+          if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
+        })
+        .catch(() => {
+          statusEl.textContent = 'Validation failed.';
+          statusEl.classList.remove('text-gray-600');
+          statusEl.classList.add('text-red-600');
+          if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
+        });
+      });
+    })();
+  </script>
 
 </x-layout>

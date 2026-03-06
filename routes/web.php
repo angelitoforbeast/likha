@@ -648,6 +648,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
 
     // ✅ Phone Whitelist (CEO, Marketing, Marketing OIC)
     Route::get('/phone-whitelist', [PhoneWhitelistController::class, 'index'])->name('phone-whitelist.index');
+    Route::get('/phone-whitelist/data', [PhoneWhitelistController::class, 'data'])->name('phone-whitelist.data');
     Route::post('/phone-whitelist', [PhoneWhitelistController::class, 'store'])->name('phone-whitelist.store');
     Route::delete('/phone-whitelist/{phoneWhitelist}', [PhoneWhitelistController::class, 'destroy'])->name('phone-whitelist.destroy');
 
