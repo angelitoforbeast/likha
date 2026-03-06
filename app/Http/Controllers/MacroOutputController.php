@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
 use App\Models\DownloadedMacroOutputLog;
 use Illuminate\Support\Facades\Schema;
+use App\Models\PhoneWhitelist;
 
 class MacroOutputController extends Controller
 {
@@ -384,6 +385,10 @@ class MacroOutputController extends Controller
             if ($phone !== '') $phoneCounts[$phone] = ($phoneCounts[$phone] ?? 0) + 1;
         }
 
+        // ✅ Load whitelisted phone numbers (skip duplicate check for these)
+        $whitelistedPhones = PhoneWhitelist::phonesForHost($request->getHost());
+        $whitelistSet = array_flip($whitelistedPhones);
+
         $results = [];
         $validIds = [];
         $invalidIds = [];
@@ -426,9 +431,12 @@ class MacroOutputController extends Controller
                 $phoneInvalid = true;
             } elseif ($phone === '9123456789') {
                 $phoneInvalid = true;
-            } elseif (($phoneCounts[$phone] ?? 0) > 1) {
+            } elseif (($phoneCounts[$phone] ?? 0) > 1 && !isset($whitelistSet[$phone])) {
                 $phoneInvalid = true;
             }
+
+            // ✅ Check if this phone is whitelisted (for UI indicator)
+            $isWhitelisted = isset($whitelistSet[$phone]);
 
             $invalidFields = array_filter([
                 'FULL NAME'    => $fullNameInvalid,
@@ -446,7 +454,8 @@ class MacroOutputController extends Controller
             $results[] = [
                 'id' => $record->id,
                 'invalid_fields' => $invalidFields,
-                'validate_2' => $isValid ? 1 : 0, // optional, ok lang kahit extra
+                'validate_2' => $isValid ? 1 : 0,
+                'phone_whitelisted' => $isWhitelisted,
             ];
         }
 
@@ -540,6 +549,10 @@ class MacroOutputController extends Controller
     foreach ($allPhones as $p) {
         $phoneCounts[$p] = ($phoneCounts[$p] ?? 0) + 1;
     }
+
+    // ✅ Load whitelisted phone numbers (skip duplicate check for these)
+    $whitelistedPhones = PhoneWhitelist::phonesForHost($request->getHost());
+    $whitelistSet = array_flip($whitelistedPhones);
 
     // ✅ only rows with checker = ✅ (or blank/null) are candidates for update
     $CHECKER = $wrap('APP SCRIPT CHECKER');
@@ -640,7 +653,7 @@ class MacroOutputController extends Controller
             $phoneInvalid = true;
         } elseif ($phone === '9123456789') {
             $phoneInvalid = true;
-        } elseif (($phoneCounts[$phone] ?? 0) > 1) {
+        } elseif (($phoneCounts[$phone] ?? 0) > 1 && !isset($whitelistSet[$phone])) {
             $phoneInvalid = true;
         }
 

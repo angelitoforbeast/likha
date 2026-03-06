@@ -72,6 +72,7 @@ use App\Http\Controllers\JntWaybillFilesController;
 use App\Http\Controllers\Jnt\SenderAddressController;
 use App\Http\Controllers\Jnt\Waybills\SenderNameController;
 use App\Http\Controllers\FinanceController;
+use App\Http\Controllers\PhoneWhitelistController;
 // use App\Http\Controllers\AutomationController;
 use App\Models\Role;
 
@@ -644,6 +645,11 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/jnt_rts', [FromJntController::class, 'rtsFiltered']);
     Route::get('/jnt/hold', [JntHoldController::class, 'index'])->name('jnt.hold');
 
+
+    // ✅ Phone Whitelist (CEO, Marketing, Marketing OIC)
+    Route::get('/phone-whitelist', [PhoneWhitelistController::class, 'index'])->name('phone-whitelist.index');
+    Route::post('/phone-whitelist', [PhoneWhitelistController::class, 'store'])->name('phone-whitelist.store');
+    Route::delete('/phone-whitelist/{phoneWhitelist}', [PhoneWhitelistController::class, 'destroy'])->name('phone-whitelist.destroy');
 
     // ✅ Finance (CEO only)
     Route::get('/finance', [FinanceController::class, 'index'])->name('finance.index');
