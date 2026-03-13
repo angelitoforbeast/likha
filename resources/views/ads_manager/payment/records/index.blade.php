@@ -91,12 +91,15 @@
           <th class="p-2 border-b text-left">Batch</th>
           <th class="p-2 border-b text-left">Remarks 1</th>
           <th class="p-2 border-b text-left">Remarks 2</th>
+          @if(!empty($isCEO) && $isCEO)
+          <th class="p-2 border-b text-center">Action</th>
+          @endif
         </tr>
       </thead>
 
       <tbody>
         @forelse ($rows as $r)
-          <tr class="hover:bg-gray-50 align-top">
+          <tr class="hover:bg-gray-50 align-top" id="row-{{ $r->id }}">
             <td class="p-2 border-b">{{ $safeDate($r->date ?? '') }}</td>
             <td class="p-2 border-b font-mono text-sm">{{ $r->transaction_id ?? '' }}</td>
             <td class="p-2 border-b text-right">{{ isset($r->amount) ? number_format($r->amount, 2) : '0.00' }}</td>
@@ -132,10 +135,22 @@
               >{{ $r->remarks_2 ?? '' }}</textarea>
               <div class="text-xs text-gray-500 mt-1 hidden" data-saving="{{ $r->id }}-remarks_2">saving...</div>
             </td>
+
+            @if(!empty($isCEO) && $isCEO)
+            <td class="p-2 border-b text-center">
+              <button
+                onclick="deleteTransaction({{ $r->id }}, this)"
+                class="text-red-500 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50"
+                title="Delete this transaction"
+              >
+                Delete
+              </button>
+            </td>
+            @endif
           </tr>
         @empty
           <tr>
-            <td colspan="9" class="text-center p-4 text-gray-500">No records found.</td>
+            <td colspan="{{ (!empty($isCEO) && $isCEO) ? 10 : 9 }}" class="text-center p-4 text-gray-500">No records found.</td>
           </tr>
         @endforelse
       </tbody>
@@ -201,5 +216,46 @@
         }
       });
     });
+
+    @if(!empty($isCEO) && $isCEO)
+    async function deleteTransaction(id, btn) {
+      if (!confirm('Are you sure you want to delete this transaction?')) return;
+
+      btn.disabled = true;
+      btn.textContent = '...';
+
+      try {
+        const res = await fetch("{{ route('ads_payment.records.destroy') }}", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-TOKEN": csrf,
+            "Accept": "application/json",
+          },
+          body: JSON.stringify({ id })
+        });
+
+        const data = await res.json();
+
+        if (data.status === 'ok') {
+          const row = document.getElementById('row-' + id);
+          if (row) {
+            row.style.transition = 'opacity 0.3s';
+            row.style.opacity = '0';
+            setTimeout(() => row.remove(), 300);
+          }
+        } else {
+          alert(data.message || 'Failed to delete.');
+          btn.disabled = false;
+          btn.textContent = 'Delete';
+        }
+      } catch (e) {
+        alert('Error deleting transaction.');
+        btn.disabled = false;
+        btn.textContent = 'Delete';
+        console.error(e);
+      }
+    }
+    @endif
   </script>
 </x-layout>

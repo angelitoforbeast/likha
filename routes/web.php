@@ -252,7 +252,7 @@ Route::delete('/ads_manager/ad_account/{ad_account_id}', [AdAccountController::c
     ->name('ad_accounts.destroy');
 
 Route::get('/ads_manager/payment/upload', [PaymentActivityController::class, 'create'])
-    ->name('ads_payment.upload.form');
+    ->name('ads_payment.upload');
 
 Route::post('/ads_manager/payment/upload', [PaymentActivityController::class, 'store'])
     ->name('ads_payment.upload.store');
@@ -265,6 +265,9 @@ Route::get('/ads_manager/payment/records', [PaymentActivityController::class, 'r
     ->name('ads_payment.records.delete_all');
 Route::post('/ads_manager/payment/records/update-remarks', [PaymentActivityController::class, 'updateRemarks'])
     ->name('ads_payment.records.update_remarks');
+
+Route::post('/ads_manager/payment/records/destroy', [PaymentActivityController::class, 'destroy'])
+    ->name('ads_payment.records.destroy');
 
 
 

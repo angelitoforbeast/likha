@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\ProcessPaymentActivityUpload;
+use App\Models\UploadLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Carbon\Carbon;
@@ -13,8 +14,14 @@ class PaymentActivityController extends Controller
     /** Upload form (multi-file). */
     public function create()
     {
+        $logs = UploadLog::where('type', 'payment_activity')
+            ->orderBy('created_at', 'desc')
+            ->limit(50)
+            ->get();
+
         return view('ads_manager.payment.upload', [
             'heading' => 'Upload Payment Activity',
+            'logs'    => $logs,
         ]);
     }
 
@@ -45,17 +52,34 @@ class PaymentActivityController extends Controller
                 $disk
             );
 
+            // Create upload log entry
+            $log = UploadLog::create([
+                'type'           => 'payment_activity',
+                'disk'           => $disk,
+                'path'           => $stored,
+                'original_name'  => $original,
+                'mime_type'      => $file->getMimeType(),
+                'size'           => $file->getSize(),
+                'status'         => 'queued',
+                'processed_rows' => 0,
+                'inserted'       => 0,
+                'updated'        => 0,
+                'skipped'        => 0,
+                'error_rows'     => 0,
+            ]);
+
             ProcessPaymentActivityUpload::dispatch(
                 storedPath:   $stored,
                 originalName: $original,
                 batchId:      $batchId,
                 uploadedBy:   $userName,
-                diskName:     $disk
+                diskName:     $disk,
+                uploadLogId:  $log->id
             )->onQueue('default');
         }
 
         return redirect()
-            ->route('ads_payment.records.index')
+            ->route('ads_payment.upload')
             ->with('status', 'Files uploaded. Processing in background.');
     }
 
@@ -146,6 +170,9 @@ class PaymentActivityController extends Controller
         ->orderBy('method', 'asc')
         ->get();
 
+    $user = auth()->user();
+    $isCEO = $user && strtolower(trim($user->role ?? '')) === 'ceo';
+
     return view('ads_manager.payment.records.index', [
         'rows'                 => $rows,
         'start'                => $start,
@@ -155,6 +182,7 @@ class PaymentActivityController extends Controller
         'paymentMethodOptions' => $paymentMethodOptions,
         'adAccountSel'         => $adAccountSel,
         'paymentMethodSel'     => $paymentMethodSel,
+        'isCEO'                => $isCEO,
     ]);
 }
 
@@ -181,6 +209,28 @@ class PaymentActivityController extends Controller
         'value' => $row->{$data['field']},
     ]);
 }
+
+    /** Delete a single transaction (CEO only). */
+    public function destroy(Request $request)
+    {
+        $user = auth()->user();
+        $isCEO = $user && strtolower(trim($user->role ?? '')) === 'ceo';
+
+        if (!$isCEO) {
+            return response()->json(['status' => 'error', 'message' => 'Unauthorized'], 403);
+        }
+
+        $data = $request->validate([
+            'id' => ['required', 'integer'],
+        ]);
+
+        $deleted = \DB::table('payment_activity_ads_manager')->where('id', $data['id'])->delete();
+
+        return response()->json([
+            'status'  => $deleted ? 'ok' : 'not_found',
+            'message' => $deleted ? 'Transaction deleted.' : 'Transaction not found.',
+        ]);
+    }
 
     /** Optional: Delete All */
     public function truncate()

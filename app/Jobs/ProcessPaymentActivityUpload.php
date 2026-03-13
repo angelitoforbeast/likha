@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use Carbon\Carbon;
+use App\Models\UploadLog;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -31,12 +32,16 @@ class ProcessPaymentActivityUpload implements ShouldQueue
     private int $rowsInserted = 0;
     private int $batches      = 0;
 
+    /** Detected date format from Billing report line (e.g., 'd/m/Y' or 'm/d/Y') */
+    private ?string $detectedDateFormat = null;
+
     public function __construct(
         public string $storedPath,
         public string $originalName,
         public string $batchId,
         public string $uploadedBy = 'system',
-        public ?string $diskName = null
+        public ?string $diskName = null,
+        public ?int $uploadLogId = null
     ) {}
 
     public function handle(): void
@@ -68,6 +73,12 @@ class ProcessPaymentActivityUpload implements ShouldQueue
                 return;
             }
 
+            // Update upload_log status to processing
+            $uploadLog = $this->uploadLogId ? UploadLog::find($this->uploadLogId) : null;
+            if ($uploadLog) {
+                $uploadLog->update(['status' => 'processing', 'started_at' => now()]);
+            }
+
             Log::info('[PAYMENT] Start', [
                 'file'  => $this->originalName,
                 'disk'  => $disk,
@@ -94,6 +105,7 @@ class ProcessPaymentActivityUpload implements ShouldQueue
                             $headerNorm = $this->normalizeHeader($cells);
                         } else {
                             $this->scanContext($cells, $context);
+                            $this->detectDateFormatFromBillingReport($cells);
                         }
                         continue;
                     }
@@ -129,11 +141,37 @@ class ProcessPaymentActivityUpload implements ShouldQueue
                 'disk'     => $disk,
                 'batch'    => $this->batchId,
             ]);
+
+            // Update upload_log with results
+            if ($uploadLog) {
+                $uploadLog->update([
+                    'status'         => 'done',
+                    'total_rows'     => $this->rowsRead,
+                    'processed_rows' => $this->rowsMapped,
+                    'inserted'       => $this->rowsInserted,
+                    'skipped'        => $this->rowsMapped - $this->rowsInserted,
+                    'finished_at'    => now(),
+                ]);
+            }
         } catch (\Throwable $e) {
             Log::error('[PAYMENT] FAILED', [
                 'msg'   => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+
+            // Update upload_log with error
+            $uploadLog = $this->uploadLogId ? UploadLog::find($this->uploadLogId) : null;
+            if ($uploadLog) {
+                $uploadLog->update([
+                    'status'         => 'failed',
+                    'total_rows'     => $this->rowsRead,
+                    'processed_rows' => $this->rowsMapped,
+                    'inserted'       => $this->rowsInserted,
+                    'skipped'        => max(0, $this->rowsMapped - $this->rowsInserted),
+                    'error_rows'     => 1,
+                    'finished_at'    => now(),
+                ]);
+            }
             throw $e;
         } finally {
             try { if ($reader) $reader->close(); } catch (\Throwable $e) {}
@@ -316,6 +354,47 @@ class ProcessPaymentActivityUpload implements ShouldQueue
         ];
     }
 
+    /**
+     * Detect date format from "Billing report: dd/mm/yyyy - dd/mm/yyyy" line.
+     * Uses the end date to determine format: if first segment > 12, it must be day (dd/mm/yyyy).
+     */
+    private function detectDateFormatFromBillingReport(array $cells): void
+    {
+        if ($this->detectedDateFormat !== null) return; // already detected
+
+        foreach ($cells as $cellRaw) {
+            $cell = trim((string) $cellRaw);
+            if ($cell === '') continue;
+
+            // Match "Billing report: 01/03/2026 - 15/03/2026"
+            if (preg_match('/Billing\s+report:\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\s*-\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/i', $cell, $m)) {
+                $startFirst  = (int) $m[1];
+                $startSecond = (int) $m[2];
+                $endFirst    = (int) $m[4];
+                $endSecond   = (int) $m[5];
+
+                // If any first-segment > 12, it MUST be a day → dd/mm/yyyy
+                if ($startFirst > 12 || $endFirst > 12) {
+                    $this->detectedDateFormat = 'd/m/Y';
+                    Log::info('[PAYMENT] Date format detected from Billing report: d/m/Y');
+                    return;
+                }
+
+                // If any second-segment > 12, it MUST be a day → mm/dd/yyyy
+                if ($startSecond > 12 || $endSecond > 12) {
+                    $this->detectedDateFormat = 'm/d/Y';
+                    Log::info('[PAYMENT] Date format detected from Billing report: m/d/Y');
+                    return;
+                }
+
+                // Both ambiguous — Meta CSVs use dd/mm/yyyy by default
+                $this->detectedDateFormat = 'd/m/Y';
+                Log::info('[PAYMENT] Date format ambiguous in Billing report, defaulting to d/m/Y (Meta standard)');
+                return;
+            }
+        }
+    }
+
     private function parseDate($v): ?Carbon
     {
         if ($v instanceof \DateTimeInterface) return Carbon::instance($v);
@@ -331,7 +410,15 @@ class ProcessPaymentActivityUpload implements ShouldQueue
         $s = trim((string)$v);
         if ($s === '') return null;
 
-        foreach (['Y-m-d','m/d/Y','d/m/Y','n/j/Y','m/d/y','d/m/y'] as $f) {
+        // If we detected the format from Billing report line, use it first
+        if ($this->detectedDateFormat) {
+            try {
+                return Carbon::createFromFormat($this->detectedDateFormat, $s, 'Asia/Manila');
+            } catch (\Throwable $e) {}
+        }
+
+        // Fallback: try multiple formats (d/m/Y before m/d/Y to prefer dd/mm/yyyy)
+        foreach (['Y-m-d','d/m/Y','m/d/Y','n/j/Y','d/m/y','m/d/y'] as $f) {
             try { return Carbon::createFromFormat($f, $s, 'Asia/Manila'); } catch (\Throwable $e) {}
         }
 
