@@ -30,6 +30,7 @@ class ProcessPaymentActivityUpload implements ShouldQueue
     private int $rowsRead     = 0;
     private int $rowsMapped   = 0;
     private int $rowsInserted = 0;
+    private int $rowsUpdated  = 0;
     private int $batches      = 0;
 
     /** Detected date format from Billing report line (e.g., 'd/m/Y' or 'm/d/Y') */
@@ -136,6 +137,7 @@ class ProcessPaymentActivityUpload implements ShouldQueue
                 'read'     => $this->rowsRead,
                 'mapped'   => $this->rowsMapped,
                 'inserted' => $this->rowsInserted,
+                'updated'  => $this->rowsUpdated,
                 'batches'  => $this->batches,
                 'stored'   => $this->storedPath,
                 'disk'     => $disk,
@@ -149,7 +151,8 @@ class ProcessPaymentActivityUpload implements ShouldQueue
                     'total_rows'     => $this->rowsRead,
                     'processed_rows' => $this->rowsMapped,
                     'inserted'       => $this->rowsInserted,
-                    'skipped'        => $this->rowsMapped - $this->rowsInserted,
+                    'updated'        => $this->rowsUpdated,
+                    'skipped'        => max(0, $this->rowsMapped - $this->rowsInserted - $this->rowsUpdated),
                     'finished_at'    => now(),
                 ]);
             }
@@ -449,18 +452,27 @@ class ProcessPaymentActivityUpload implements ShouldQueue
     }
 
     /**
-     * insertOrIgnore = duplicates ignored (MySQL: INSERT IGNORE, PG: ON CONFLICT DO NOTHING)
+     * Upsert: INSERT new records, UPDATE existing ones (matched by transaction_id).
+     * Updates date, amount, payment_method, source_filename, import_batch_id, uploaded_by, uploaded_at, updated_at.
      */
     private function writeBatch(array $rows): void
     {
         $this->batches++;
 
-        $inserted = DB::table('payment_activity_ads_manager')->insertOrIgnore($rows);
+        // Count existing records before upsert to determine inserts vs updates
+        $txnIds = array_column($rows, 'transaction_id');
+        $existingCount = DB::table('payment_activity_ads_manager')
+            ->whereIn('transaction_id', $txnIds)
+            ->count();
 
-        // insertOrIgnore returns count in MySQL, may return 0/true depending on driver.
-        // We'll still accumulate safely:
-        if (is_int($inserted)) {
-            $this->rowsInserted += $inserted;
-        }
+        DB::table('payment_activity_ads_manager')->upsert(
+            $rows,
+            ['transaction_id'], // unique key to match on
+            ['date', 'amount', 'payment_method', 'source_filename', 'import_batch_id', 'uploaded_by', 'uploaded_at', 'updated_at'] // columns to update
+        );
+
+        $newInserts = count($rows) - $existingCount;
+        $this->rowsInserted += max(0, $newInserts);
+        $this->rowsUpdated  += $existingCount;
     }
 }

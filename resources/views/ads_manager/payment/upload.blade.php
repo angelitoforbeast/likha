@@ -72,6 +72,7 @@
             <th class="px-3 py-2 border text-right">Total Rows</th>
             <th class="px-3 py-2 border text-right">Mapped</th>
             <th class="px-3 py-2 border text-right">Inserted</th>
+            <th class="px-3 py-2 border text-right">Updated</th>
             <th class="px-3 py-2 border text-right">Skipped</th>
             <th class="px-3 py-2 border text-right">Errors</th>
             <th class="px-3 py-2 border">Uploaded</th>
@@ -98,6 +99,7 @@
             <td class="px-3 py-2 border text-right">{{ number_format($log->total_rows ?? 0) }}</td>
             <td class="px-3 py-2 border text-right">{{ number_format($log->processed_rows ?? 0) }}</td>
             <td class="px-3 py-2 border text-right font-semibold text-green-700">{{ number_format($log->inserted ?? 0) }}</td>
+            <td class="px-3 py-2 border text-right font-semibold text-blue-700">{{ number_format($log->updated ?? 0) }}</td>
             <td class="px-3 py-2 border text-right text-gray-500">{{ number_format($log->skipped ?? 0) }}</td>
             <td class="px-3 py-2 border text-right {{ ($log->error_rows ?? 0) > 0 ? 'text-red-600 font-semibold' : 'text-gray-500' }}">{{ number_format($log->error_rows ?? 0) }}</td>
             <td class="px-3 py-2 border text-gray-600">
