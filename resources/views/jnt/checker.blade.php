@@ -69,6 +69,29 @@
                 </div>
             @endif
 
+            {{-- Shipping Fee Summary --}}
+            @if(isset($sfMismatchCount) || isset($sfCorrectCount))
+                <div class="mt-2 pt-2 border-t border-gray-300">
+                    <strong>🚚 Shipping Fee Check</strong>
+                    @if(isset($expectedShippingFee) && $expectedShippingFee !== null)
+                        <span class="text-gray-500">(Expected: ₱{{ number_format($expectedShippingFee, 2) }})</span>
+                    @else
+                        <span class="text-orange-600">(No shipping fee setting configured — <a href="{{ route('fee-settings.index') }}" class="underline">set it here</a>)</span>
+                    @endif
+                </div>
+                <div>
+                    @if(($sfCorrectCount ?? 0) > 0)
+                        <span class="text-green-700">✅ SF Correct: <strong>{{ $sfCorrectCount }}</strong></span>&nbsp;&nbsp;
+                    @endif
+                    @if(($sfMismatchCount ?? 0) > 0)
+                        <span class="text-red-700">⚠️ SF Mismatch: <strong>{{ $sfMismatchCount }}</strong></span>&nbsp;&nbsp;
+                    @endif
+                    @if(($sfNoDataCount ?? 0) > 0)
+                        <span class="text-gray-500">— No SF Data: <strong>{{ $sfNoDataCount }}</strong></span>
+                    @endif
+                </div>
+            @endif
+
             @if(!empty($filter_date_start) || !empty($filter_date_end))
                 <div class="text-gray-600">
                     📅 Filtered by date:
@@ -148,7 +171,7 @@
     @endif
 
     @if(isset($results))
-        <div class="mt-6">
+        <div class="mt-6 overflow-x-auto">
             <table class="w-full border text-sm">
                 <thead class="bg-gray-200">
                 <tr>
@@ -160,6 +183,8 @@
                     <th class="border px-2 py-1">Item</th>
                     <th class="border px-2 py-1">COD</th>
                     <th class="border px-2 py-1">Waybill</th>
+                    <th class="border px-2 py-1">SF</th>
+                    <th class="border px-2 py-1">SF Check</th>
                     <th class="border px-2 py-1">Matched ID</th>
                     <th class="border px-2 py-1">Match</th>
                 </tr>
@@ -168,7 +193,17 @@
                 @foreach($results as $row)
                     @php
                         $isMappingMissing = ($row['page'] ?? '') === '❌ Not Found in Mapping';
-                        $bg = $isMappingMissing ? 'bg-yellow-50' : ($row['matched'] ? 'bg-green-50' : 'bg-red-50');
+                        $isSfMismatch = ($row['sf_status'] ?? '') === 'mismatch';
+
+                        if ($isSfMismatch) {
+                            $bg = 'bg-orange-50';
+                        } elseif ($isMappingMissing) {
+                            $bg = 'bg-yellow-50';
+                        } elseif ($row['matched']) {
+                            $bg = 'bg-green-50';
+                        } else {
+                            $bg = 'bg-red-50';
+                        }
                     @endphp
                     <tr class="{{ $bg }}">
                         <td class="border px-2 py-1">{{ $row['source_file'] ?? '-' }}</td>
@@ -179,6 +214,24 @@
                         <td class="border px-2 py-1">{{ $row['item'] }}</td>
                         <td class="border px-2 py-1">{{ $row['cod'] }}</td>
                         <td class="border px-2 py-1">{{ $row['waybill'] ?? '' }}</td>
+                        <td class="border px-2 py-1 text-right font-mono">
+                            @if(isset($row['shipping_fee']) && $row['shipping_fee'] !== null)
+                                ₱{{ $row['shipping_fee'] }}
+                            @else
+                                <span class="text-gray-400">—</span>
+                            @endif
+                        </td>
+                        <td class="border px-2 py-1 text-center text-xs">
+                            @if(($row['sf_status'] ?? '') === 'correct')
+                                <span class="text-green-700 font-semibold">✅ OK</span>
+                            @elseif(($row['sf_status'] ?? '') === 'mismatch')
+                                <span class="text-red-700 font-semibold">⚠️ ₱{{ $row['shipping_fee'] }} vs ₱{{ number_format($row['sf_expected'] ?? 0, 2) }}</span>
+                            @elseif(($row['sf_status'] ?? '') === 'no_setting')
+                                <span class="text-orange-500">No setting</span>
+                            @else
+                                <span class="text-gray-400">—</span>
+                            @endif
+                        </td>
                         <td class="border px-2 py-1">{{ $row['matched_id'] ?? '' }}</td>
                         <td class="border px-2 py-1 text-center">
                             @if($isMappingMissing)

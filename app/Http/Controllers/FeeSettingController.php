@@ -29,11 +29,16 @@ class FeeSettingController extends Controller
         $scope = str_contains($host, 'incepxion') ? 'incepxion' : 'likha';
 
         $validated = $request->validate([
-            'setting_key'    => 'required|in:cod_fee_rate,cod_fee_vat_rate',
-            'setting_value'  => 'required|numeric|min:0|max:1',
+            'setting_key'    => 'required|in:cod_fee_rate,cod_fee_vat_rate,shipping_fee_per_order',
+            'setting_value'  => 'required|numeric|min:0',
             'effective_date' => 'required|date',
             'description'    => 'nullable|string|max:255',
         ]);
+
+        // For rate-type settings, enforce max:1
+        if (in_array($validated['setting_key'], ['cod_fee_rate', 'cod_fee_vat_rate']) && $validated['setting_value'] > 1) {
+            return back()->withErrors(['setting_value' => 'Rate values must be between 0 and 1.'])->withInput();
+        }
 
         $validated['host_scope'] = $scope;
 
@@ -55,10 +60,15 @@ class FeeSettingController extends Controller
     public function update(Request $request, FeeSetting $fee_setting)
     {
         $validated = $request->validate([
-            'setting_value'  => 'required|numeric|min:0|max:1',
+            'setting_value'  => 'required|numeric|min:0',
             'effective_date' => 'required|date',
             'description'    => 'nullable|string|max:255',
         ]);
+
+        // For rate-type settings, enforce max:1
+        if (in_array($fee_setting->setting_key, ['cod_fee_rate', 'cod_fee_vat_rate']) && $validated['setting_value'] > 1) {
+            return back()->withErrors(['setting_value' => 'Rate values must be between 0 and 1.'])->withInput();
+        }
 
         // Check for duplicate (same key + same effective_date + same scope, excluding current)
         $exists = FeeSetting::where('setting_key', $fee_setting->setting_key)

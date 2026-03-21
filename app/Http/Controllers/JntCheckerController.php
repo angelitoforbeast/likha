@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use App\Models\MacroOutput;
 use App\Models\PageSenderMapping;
+use App\Models\FeeSetting;
 
 class JntCheckerController extends Controller
 {
@@ -28,6 +29,12 @@ class JntCheckerController extends Controller
             'skippedCancelCount'   => session('skippedCancelCount'),
             'processedFilesCount'  => session('processedFilesCount'),
             'perfectMatch'         => session('perfectMatch'),
+
+            // shipping fee
+            'sfMismatchCount'      => session('sfMismatchCount'),
+            'sfCorrectCount'       => session('sfCorrectCount'),
+            'sfNoDataCount'        => session('sfNoDataCount'),
+            'expectedShippingFee'  => session('expectedShippingFee'),
         ]);
     }
 
@@ -126,9 +133,48 @@ class JntCheckerController extends Controller
                     'skippedCancelCount'  => $skippedCancelCount,
                     'processedFilesCount' => $processedFilesCount,
                     'perfectMatch'        => false,
+                    'sfMismatchCount'     => 0,
+                    'sfCorrectCount'      => 0,
+                    'sfNoDataCount'       => 0,
+                    'expectedShippingFee' => null,
                 ])
                 ->with('success', 'Uploaded successfully, but all rows were filtered out (Cancel Order).');
         }
+
+        // =========================
+        // Step SF: Get expected shipping fee from Fee Settings
+        // =========================
+        $host = strtolower((string) $request->getHost());
+        $refDate = $request->input('filter_date_start') ?? date('Y-m-d');
+        $expectedSF = FeeSetting::getRate('shipping_fee_per_order', $host, $refDate);
+
+        // Compare shipping fee for each row
+        $sfMismatchCount = 0;
+        $sfCorrectCount  = 0;
+        $sfNoDataCount   = 0;
+
+        foreach ($allResults as &$row) {
+            if (!isset($row['shipping_fee']) || $row['shipping_fee'] === null || $row['shipping_fee'] === '') {
+                $row['sf_status'] = 'no_data';
+                $sfNoDataCount++;
+            } elseif ($expectedSF === null) {
+                // No shipping fee setting configured yet
+                $row['sf_status'] = 'no_setting';
+                $sfNoDataCount++;
+            } else {
+                $actualSF = (float) $row['shipping_fee'];
+                $diff = abs($actualSF - $expectedSF);
+                if ($diff < 0.01) {
+                    $row['sf_status'] = 'correct';
+                    $sfCorrectCount++;
+                } else {
+                    $row['sf_status'] = 'mismatch';
+                    $row['sf_expected'] = $expectedSF;
+                    $sfMismatchCount++;
+                }
+            }
+        }
+        unset($row);
 
         // =========================
         // Step B: Filter MacroOutput by date if provided
@@ -266,10 +312,11 @@ class JntCheckerController extends Controller
         $matchedCount    = collect($allResults)->where('matched', true)->count();
         $notMatchedCount = collect($allResults)->where('matched', false)->count();
 
-        // Sort: mapping-missing first, then unmatched, then matched
+        // Sort: SF mismatch first, then mapping-missing, then unmatched, then matched
         $allResults = collect($allResults)->sortBy(function ($r) {
-            if (($r['page'] ?? '') === '❌ Not Found in Mapping') return 0;
-            return ($r['matched'] ? 2 : 1);
+            if (($r['sf_status'] ?? '') === 'mismatch') return 0;
+            if (($r['page'] ?? '') === '❌ Not Found in Mapping') return 1;
+            return ($r['matched'] ? 3 : 2);
         })->values()->all();
 
         // remove temp key
@@ -320,6 +367,12 @@ class JntCheckerController extends Controller
                 'skippedCancelCount'   => $skippedCancelCount,
                 'processedFilesCount'  => $processedFilesCount,
                 'perfectMatch'         => $perfectMatch,
+
+                // shipping fee
+                'sfMismatchCount'      => $sfMismatchCount,
+                'sfCorrectCount'       => $sfCorrectCount,
+                'sfNoDataCount'        => $sfNoDataCount,
+                'expectedShippingFee'  => $expectedSF,
             ]);
     }
 
@@ -411,6 +464,13 @@ class JntCheckerController extends Controller
             'airwaybill', 'awb', 'awb no', 'awb number',
         ]);
 
+        // optional shipping fee
+        $shippingFeeCol = $this->resolveHeader($headerMap, [
+            'total shipping cost', 'shipping cost', 'total freight',
+            'shipping fee', 'freight', 'freight cost', 'sf',
+            'delivery fee', 'delivery cost',
+        ]);
+
         $rows = array_slice($data, 1);
 
         $results = [];
@@ -430,23 +490,34 @@ class JntCheckerController extends Controller
             $cod      = $this->normCod($row[$codCol] ?? '0');
             $waybill  = $waybillCol ? $this->normText($row[$waybillCol] ?? '') : '';
 
+            // Parse shipping fee (optional)
+            $shippingFee = null;
+            if ($shippingFeeCol) {
+                $rawSF = $row[$shippingFeeCol] ?? '';
+                $rawSF = preg_replace('/[^0-9.]/', '', (string) $rawSF);
+                if ($rawSF !== '' && $rawSF !== '.') {
+                    $shippingFee = number_format((float) $rawSF, 2, '.', '');
+                }
+            }
+
             $mappedPage = $senderToPage[strtolower($sender)] ?? '';
             $key = $mappedPage ? $this->makeKey($mappedPage, $receiver, $item, $cod) : null;
 
             $results[] = [
-                'source_file' => $fileLabel,
-                'order_status'=> $this->normText($row[$statusCol] ?? ''),
+                'source_file'  => $fileLabel,
+                'order_status' => $this->normText($row[$statusCol] ?? ''),
 
-                'sender'      => $sender,
-                'page'        => $mappedPage ?: '❌ Not Found in Mapping',
-                'receiver'    => $receiver,
-                'item'        => $item,
-                'cod'         => $cod, // "299.00"
-                'waybill'     => $waybill,
+                'sender'       => $sender,
+                'page'         => $mappedPage ?: '❌ Not Found in Mapping',
+                'receiver'     => $receiver,
+                'item'         => $item,
+                'cod'          => $cod, // "299.00"
+                'waybill'      => $waybill,
+                'shipping_fee' => $shippingFee,
 
-                'matched'     => false,
-                'matched_id'  => null,
-                'key'         => $key, // temp
+                'matched'      => false,
+                'matched_id'   => null,
+                'key'          => $key, // temp
             ];
         }
 
