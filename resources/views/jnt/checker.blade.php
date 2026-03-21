@@ -44,6 +44,47 @@
         </button>
     </form>
 
+    {{-- BIG SF MISMATCH ALERT - impossible to miss --}}
+    @if(isset($sfMismatchCount) && ($sfMismatchCount ?? 0) > 0)
+        <div class="mb-4 p-5 rounded-lg border-2 border-red-500 bg-red-50 shadow-lg">
+            <div class="flex items-center gap-3">
+                <div class="text-4xl">⚠️</div>
+                <div>
+                    <div class="text-xl font-bold text-red-800">
+                        SHIPPING FEE MISMATCH DETECTED
+                    </div>
+                    <div class="text-lg text-red-700 mt-1">
+                        <strong>{{ $sfMismatchCount }}</strong> order(s) have WRONG shipping fee
+                        @if(isset($expectedShippingFee) && $expectedShippingFee !== null)
+                            — expected <strong>₱{{ number_format($expectedShippingFee, 2) }}</strong> per order
+                        @endif
+                    </div>
+                    <div class="text-sm text-red-600 mt-2">
+                        @if(($sfCorrectCount ?? 0) > 0)
+                            ✅ Correct: <strong>{{ $sfCorrectCount }}</strong>
+                            &nbsp;&nbsp;|&nbsp;&nbsp;
+                        @endif
+                        ❌ Mismatch: <strong>{{ $sfMismatchCount }}</strong>
+                        @if(($sfNoDataCount ?? 0) > 0)
+                            &nbsp;&nbsp;|&nbsp;&nbsp;
+                            — No SF Data: <strong>{{ $sfNoDataCount }}</strong>
+                        @endif
+                    </div>
+                </div>
+            </div>
+        </div>
+    @elseif(isset($sfMismatchCount) && ($sfMismatchCount ?? 0) === 0 && $expectedShippingFee === null)
+        <div class="mb-4 p-4 rounded-lg border-2 border-yellow-400 bg-yellow-50">
+            <div class="flex items-center gap-3">
+                <div class="text-2xl">⚠️</div>
+                <div>
+                    <div class="text-base font-bold text-yellow-800">No Shipping Fee Setting Configured</div>
+                    <div class="text-sm text-yellow-700">Cannot validate shipping fees. <a href="{{ route('fee-settings.index') }}" class="underline font-semibold">Set it here</a></div>
+                </div>
+            </div>
+        </div>
+    @endif
+
     @if(isset($matchedCount))
         <div class="mb-4 text-sm bg-gray-100 p-3 rounded border space-y-1">
             <div>
@@ -69,26 +110,14 @@
                 </div>
             @endif
 
-            {{-- Shipping Fee Summary --}}
-            @if(isset($sfMismatchCount) || isset($sfCorrectCount))
+            {{-- Shipping Fee Summary - kept inline for when there's no mismatch --}}
+            @if(isset($sfCorrectCount) && ($sfMismatchCount ?? 0) === 0 && ($sfCorrectCount ?? 0) > 0)
                 <div class="mt-2 pt-2 border-t border-gray-300">
-                    <strong>🚚 Shipping Fee Check</strong>
-                    @if(isset($expectedShippingFee) && $expectedShippingFee !== null)
-                        <span class="text-gray-500">(Expected: ₱{{ number_format($expectedShippingFee, 2) }})</span>
-                    @else
-                        <span class="text-orange-600">(No shipping fee setting configured — <a href="{{ route('fee-settings.index') }}" class="underline">set it here</a>)</span>
-                    @endif
-                </div>
-                <div>
-                    @if(($sfCorrectCount ?? 0) > 0)
-                        <span class="text-green-700">✅ SF Correct: <strong>{{ $sfCorrectCount }}</strong></span>&nbsp;&nbsp;
-                    @endif
-                    @if(($sfMismatchCount ?? 0) > 0)
-                        <span class="text-red-700">⚠️ SF Mismatch: <strong>{{ $sfMismatchCount }}</strong></span>&nbsp;&nbsp;
-                    @endif
-                    @if(($sfNoDataCount ?? 0) > 0)
-                        <span class="text-gray-500">— No SF Data: <strong>{{ $sfNoDataCount }}</strong></span>
-                    @endif
+                    <span class="text-green-700">🚚 Shipping Fee: ✅ All {{ $sfCorrectCount }} orders have correct SF
+                        @if(isset($expectedShippingFee) && $expectedShippingFee !== null)
+                            (₱{{ number_format($expectedShippingFee, 2) }})
+                        @endif
+                    </span>
                 </div>
             @endif
 
