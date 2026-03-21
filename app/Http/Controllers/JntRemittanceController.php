@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Models\FeeSetting;
 
 class JntRemittanceController extends Controller
 {
@@ -13,22 +14,8 @@ class JntRemittanceController extends Controller
         $tz     = 'Asia/Manila';
         $driver = DB::getDriverName();
 
-        // ✅ Rates based on domain/host
+        // Host-based scope
         $host = strtolower((string) $request->getHost());
-
-        if (str_contains($host, 'incepxion')) {
-            $codRate = 0.01;
-            $shipFee = 35.0;
-        } elseif (str_contains($host, 'likha')) {
-            $codRate = 0.015;
-            $shipFee = 37.0;
-        } else {
-            // fallback (default mo)
-            $codRate = 0.015;
-            $shipFee = 37.0;
-        }
-
-        $codVatRate = 0.12;
 
         // Default: yesterday (single day)
         $start = $request->input('start_date');
@@ -43,6 +30,11 @@ class JntRemittanceController extends Controller
             if (!$start && $end)  $start = $end;
         }
 
+        // Get rates from Fee Settings (with fallback to hardcoded)
+        $codRate    = FeeSetting::getRate('cod_fee_rate', $host, $start) ?? (str_contains($host, 'incepxion') ? 0.01 : 0.015);
+        $codVatRate = FeeSetting::getRate('cod_fee_vat_rate', $host, $start) ?? 0.12;
+        $expectedSF = FeeSetting::getRate('shipping_fee_per_order', $host, $start);
+
         // Driver-specific SQL bits
         $dateSignExpr = $driver === 'pgsql' ? "CAST(signingtime AS DATE)"      : "DATE(signingtime)";
         $dateSubExpr  = $driver === 'pgsql' ? "CAST(submission_time AS DATE)" : "DATE(submission_time)";
@@ -54,13 +46,15 @@ class JntRemittanceController extends Controller
         // Robust COD cast (strip commas, blanks -> 0)
         if ($driver === 'pgsql') {
             $codExpr = "COALESCE(NULLIF(REPLACE(cod, ',', ''), ''), '0')::numeric";
+            $sfExpr  = "COALESCE(total_shipping_cost, 0)::numeric";
         } else { // mysql
             $codExpr = "CAST(REPLACE(COALESCE(NULLIF(cod,''), '0'), ',', '') AS DECIMAL(18,2))";
+            $sfExpr  = "CAST(COALESCE(total_shipping_cost, 0) AS DECIMAL(18,2))";
         }
 
-        // Delivered by signingtime date
+        // Delivered by signingtime date — now includes actual shipping cost sum
         $delivered = DB::table('from_jnts')
-            ->selectRaw("$dateSignExpr AS d, COUNT(*) AS delivered_count, COALESCE(SUM($codExpr),0) AS cod_sum")
+            ->selectRaw("$dateSignExpr AS d, COUNT(*) AS delivered_count, COALESCE(SUM($codExpr),0) AS cod_sum, COALESCE(SUM($sfExpr),0) AS actual_ship_cost")
             ->whereRaw($statusDelivered)
             ->whereNotNull('signingtime')
             ->whereBetween(DB::raw($dateSignExpr), [$start, $end])
@@ -68,39 +62,62 @@ class JntRemittanceController extends Controller
             ->orderBy('d')
             ->get();
 
-        // Pickups by submission_time date
+        // Pickups by submission_time date — now includes actual shipping cost sum
         $picked = DB::table('from_jnts')
-            ->selectRaw("$dateSubExpr AS d, COUNT(*) AS picked_count")
+            ->selectRaw("$dateSubExpr AS d, COUNT(*) AS picked_count, COALESCE(SUM($sfExpr),0) AS picked_ship_cost")
             ->whereNotNull('submission_time')
             ->whereBetween(DB::raw($dateSubExpr), [$start, $end])
             ->groupBy('d')
             ->orderBy('d')
             ->get();
 
+        // SF anomaly detection per date: count records with unexpected shipping fee
+        $sfAnomalies = [];
+        if ($expectedSF !== null) {
+            $anomalyQuery = DB::table('from_jnts')
+                ->selectRaw("$dateSubExpr AS d, total_shipping_cost AS sf_value, COUNT(*) AS cnt")
+                ->whereNotNull('submission_time')
+                ->whereBetween(DB::raw($dateSubExpr), [$start, $end])
+                ->where('total_shipping_cost', '!=', $expectedSF)
+                ->groupBy('d', 'total_shipping_cost')
+                ->orderBy('d')
+                ->get();
+
+            foreach ($anomalyQuery as $row) {
+                $sfAnomalies[$row->d][] = [
+                    'sf_value' => (float) $row->sf_value,
+                    'count'    => (int) $row->cnt,
+                ];
+            }
+        }
+
         // Merge by date
         $byDate = [];
         foreach ($delivered as $r) {
             $d = $r->d;
-            $byDate[$d] = $byDate[$d] ?? ['date' => $d, 'delivered' => 0, 'cod_sum' => 0.0, 'picked' => 0];
-            $byDate[$d]['delivered'] = (int) $r->delivered_count;
-            $byDate[$d]['cod_sum']   = (float) $r->cod_sum;
+            $byDate[$d] = $byDate[$d] ?? ['date' => $d, 'delivered' => 0, 'cod_sum' => 0.0, 'picked' => 0, 'actual_ship_cost' => 0.0, 'picked_ship_cost' => 0.0];
+            $byDate[$d]['delivered']         = (int) $r->delivered_count;
+            $byDate[$d]['cod_sum']           = (float) $r->cod_sum;
+            $byDate[$d]['actual_ship_cost']  = (float) $r->actual_ship_cost;
         }
         foreach ($picked as $r) {
             $d = $r->d;
-            $byDate[$d] = $byDate[$d] ?? ['date' => $d, 'delivered' => 0, 'cod_sum' => 0.0, 'picked' => 0];
-            $byDate[$d]['picked'] = (int) $r->picked_count;
+            $byDate[$d] = $byDate[$d] ?? ['date' => $d, 'delivered' => 0, 'cod_sum' => 0.0, 'picked' => 0, 'actual_ship_cost' => 0.0, 'picked_ship_cost' => 0.0];
+            $byDate[$d]['picked']            = (int) $r->picked_count;
+            $byDate[$d]['picked_ship_cost']  = (float) $r->picked_ship_cost;
         }
 
         // Compute rows + totals
         $rows = [];
         $totals = [
-            'delivered'   => 0,
-            'cod_sum'     => 0.0,
-            'cod_fee'     => 0.0,
-            'cod_fee_vat' => 0.0,
-            'picked'      => 0,
-            'ship_cost'   => 0.0,
-            'remittance'  => 0.0,
+            'delivered'        => 0,
+            'cod_sum'          => 0.0,
+            'cod_fee'          => 0.0,
+            'cod_fee_vat'      => 0.0,
+            'picked'           => 0,
+            'ship_cost'        => 0.0,
+            'remittance'       => 0.0,
+            'sf_anomaly_count' => 0,
         ];
 
         foreach ($byDate as $d => $vals) {
@@ -108,30 +125,39 @@ class JntRemittanceController extends Controller
             $codSum       = (float) ($vals['cod_sum']   ?? 0);
             $pickedCnt    = (int)   ($vals['picked']    ?? 0);
 
-            // ✅ Formulas using host-based rates
+            // Use ACTUAL shipping cost from database
+            $shipCost = (float) ($vals['picked_ship_cost'] ?? 0.0);
+
+            // COD fee calculations using Fee Settings rates
             $codFee     = round($codSum * $codRate, 2);
             $codFeeVat  = round($codFee * $codVatRate, 2);
-            $shipCost   = round($pickedCnt * $shipFee, 2);
             $remit      = round($codSum - $codFee - $codFeeVat - $shipCost, 2);
 
+            // SF anomaly info for this date
+            $dateAnomalies = $sfAnomalies[$d] ?? [];
+            $anomalyCount  = array_sum(array_column($dateAnomalies, 'count'));
+
             $rows[] = [
-                'date'        => $d,
-                'delivered'   => $deliveredCnt,
-                'cod_sum'     => $codSum,
-                'cod_fee'     => $codFee,
-                'cod_fee_vat' => $codFeeVat,
-                'picked'      => $pickedCnt,
-                'ship_cost'   => $shipCost,
-                'remittance'  => $remit,
+                'date'             => $d,
+                'delivered'        => $deliveredCnt,
+                'cod_sum'          => $codSum,
+                'cod_fee'          => $codFee,
+                'cod_fee_vat'      => $codFeeVat,
+                'picked'           => $pickedCnt,
+                'ship_cost'        => $shipCost,
+                'remittance'       => $remit,
+                'sf_anomalies'     => $dateAnomalies,
+                'sf_anomaly_count' => $anomalyCount,
             ];
 
-            $totals['delivered']   += $deliveredCnt;
-            $totals['cod_sum']     += $codSum;
-            $totals['cod_fee']     += $codFee;
-            $totals['cod_fee_vat'] += $codFeeVat;
-            $totals['picked']      += $pickedCnt;
-            $totals['ship_cost']   += $shipCost;
-            $totals['remittance']  += $remit;
+            $totals['delivered']        += $deliveredCnt;
+            $totals['cod_sum']          += $codSum;
+            $totals['cod_fee']          += $codFee;
+            $totals['cod_fee_vat']      += $codFeeVat;
+            $totals['picked']           += $pickedCnt;
+            $totals['ship_cost']        += $shipCost;
+            $totals['remittance']       += $remit;
+            $totals['sf_anomaly_count'] += $anomalyCount;
         }
 
         usort($rows, fn ($a, $b) => strcmp($a['date'], $b['date']));
@@ -142,12 +168,11 @@ class JntRemittanceController extends Controller
             'start'  => $start,
             'end'    => $end,
 
-            // optional: pang debug sa UI kung anong rates ginamit
             'rates'  => [
-                'host'         => $host,
-                'cod_fee_rate' => $codRate,
-                'ship_fee'     => $shipFee,
-                'cod_vat_rate' => $codVatRate,
+                'host'              => $host,
+                'cod_fee_rate'      => $codRate,
+                'cod_vat_rate'      => $codVatRate,
+                'expected_ship_fee' => $expectedSF,
             ],
         ]);
     }
