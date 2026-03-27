@@ -100,6 +100,54 @@ class JntHoldDownloadController extends Controller
     }
 
     /**
+     * Apply only date and search filters (no page filter).
+     * Used to build the pages dropdown so all pages remain visible.
+     */
+    private function applyDateAndSearchOnly($query, Request $request, string $driver): void
+    {
+        $likeOp = $driver === 'pgsql' ? 'ILIKE' : 'LIKE';
+        $moItemRef    = $driver === 'pgsql' ? 'mo."ITEM_NAME"' : 'mo.`ITEM_NAME`';
+        $moWaybillRef = $driver === 'pgsql' ? 'mo."waybill"' : 'mo.`waybill`';
+        $moPageRef    = $driver === 'pgsql' ? 'mo."PAGE"' : 'mo.`PAGE`';
+        $moFullRef    = $driver === 'pgsql' ? 'mo."FULL NAME"' : 'mo.`FULL NAME`';
+
+        // Date range
+        $rangeSta = null;
+        $rangeEnd = null;
+        $dateRange = trim((string) $request->input('date_range', ''));
+        if ($dateRange !== '') {
+            $parts = preg_split('/\s+to\s+/i', $dateRange);
+            $rangeSta = trim($parts[0] ?? '');
+            $rangeEnd = trim($parts[1] ?? $parts[0] ?? '');
+        }
+        if (!$rangeSta) $rangeSta = $request->input('start');
+        if (!$rangeEnd) $rangeEnd = $request->input('end');
+
+        if ($rangeSta && $rangeEnd) {
+            $tsType = null;
+            try { $tsType = Schema::getColumnType('macro_output', 'ts_date'); } catch (\Throwable $e) {}
+            if ($tsType === 'date') {
+                $query->whereNotNull('mo.ts_date')->whereBetween('mo.ts_date', [$rangeSta, $rangeEnd]);
+            } else {
+                $startDt = Carbon::parse($rangeSta)->startOfDay()->toDateTimeString();
+                $endDt   = Carbon::parse($rangeEnd)->endOfDay()->toDateTimeString();
+                $query->whereNotNull('mo.ts_date')->whereBetween('mo.ts_date', [$startDt, $endDt]);
+            }
+        }
+
+        // Search only (no page filter)
+        $q = trim((string) $request->input('q', ''));
+        if ($q !== '') {
+            $query->where(function ($w) use ($q, $likeOp, $moItemRef, $moWaybillRef, $moPageRef, $moFullRef) {
+                $w->whereRaw("$moItemRef $likeOp ?", ["%{$q}%"])
+                  ->orWhereRaw("$moWaybillRef $likeOp ?", ["%{$q}%"])
+                  ->orWhereRaw("$moPageRef $likeOp ?", ["%{$q}%"])
+                  ->orWhereRaw("$moFullRef $likeOp ?", ["%{$q}%"]);
+            });
+        }
+    }
+
+    /**
      * Display the hold orders list page.
      */
     public function index(Request $request)
@@ -112,10 +160,14 @@ class JntHoldDownloadController extends Controller
         // Total hold count
         $totalHolds = (clone $query)->count();
 
-        // Pages dropdown (from the filtered hold set)
-        $pages = (clone $query)
+        // Pages dropdown — use a SEPARATE query with only date+search filters
+        // (no page filter) so all pages always appear in the dropdown
+        $pagesQuery = $this->holdBaseQuery($driver);
+        $this->applyDateAndSearchOnly($pagesQuery, $request, $driver);
+        $pages = $pagesQuery
             ->select('mo.PAGE')
             ->whereNotNull('mo.PAGE')
+            ->where('mo.PAGE', '!=', '')
             ->distinct()
             ->orderBy('mo.PAGE')
             ->pluck('PAGE');
