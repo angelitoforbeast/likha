@@ -35,6 +35,7 @@ use App\Http\Controllers\AdsManagerCampaignsController;
 use App\Http\Controllers\AdsInsightsController;
 use App\Http\Controllers\GPTAdGeneratorController;
 use App\Http\Controllers\JntHoldController;
+use App\Http\Controllers\JntHoldDownloadController;
 use App\Http\Controllers\ItemCogsController;
 use App\Http\Controllers\SummaryOverallController;
 use App\Http\Controllers\JntOndelController;
@@ -648,6 +649,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get('/jnt_rts', [FromJntController::class, 'rtsView']);
     Route::post('/jnt_rts', [FromJntController::class, 'rtsFiltered']);
     Route::get('/jnt/hold', [JntHoldController::class, 'index'])->name('jnt.hold');
+    Route::get('/jnt/hold/download', [JntHoldDownloadController::class, 'index'])->name('jnt.hold.download');
+    Route::get('/jnt/hold/export', [JntHoldDownloadController::class, 'export'])->name('jnt.hold.export');
 
 
     // ✅ Validation Lists (CEO, Marketing, Marketing OIC)
