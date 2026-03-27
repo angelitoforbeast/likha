@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class JntHoldDownloadController extends Controller
@@ -16,6 +17,7 @@ class JntHoldDownloadController extends Controller
     /**
      * Build the base HOLD query: macro_output rows that have a waybill
      * but no matching record in from_jnts.
+     * Always filtered to STATUS = 'PROCEED' only.
      */
     private function holdBaseQuery(string $driver)
     {
@@ -25,26 +27,15 @@ class JntHoldDownloadController extends Controller
         return DB::table($mo)
             ->leftJoin($fj, 'fj.' . self::FJ_WAYBILL_COL, '=', 'mo.' . self::MO_WAYBILL_COL)
             ->whereNull('fj.' . self::FJ_WAYBILL_COL)
-            ->whereRaw("NULLIF(TRIM(mo." . self::MO_WAYBILL_COL . "), '') IS NOT NULL");
+            ->whereRaw("NULLIF(TRIM(mo." . self::MO_WAYBILL_COL . "), '') IS NOT NULL")
+            ->where('mo.STATUS', 'PROCEED');
     }
 
     /**
-     * Parse TIMESTAMP column to a proper datetime expression.
-     */
-    private function tsExpr(string $driver): string
-    {
-        $moTsCol = $driver === 'pgsql' ? 'mo."TIMESTAMP"' : 'mo.`TIMESTAMP`';
-        return $driver === 'pgsql'
-            ? "to_timestamp($moTsCol, 'HH24:MI DD-MM-YYYY')"
-            : "STR_TO_DATE($moTsCol, '%H:%i %d-%m-%Y')";
-    }
-
-    /**
-     * Apply common filters (date range, page, search) to the query.
+     * Apply common filters (date range via ts_date, page, search) to the query.
      */
     private function applyFilters($query, Request $request, string $driver): array
     {
-        $tsExpr = $this->tsExpr($driver);
         $likeOp = $driver === 'pgsql' ? 'ILIKE' : 'LIKE';
 
         // Quoted column refs
@@ -53,43 +44,45 @@ class JntHoldDownloadController extends Controller
         $moPageRef    = $driver === 'pgsql' ? 'mo."PAGE"' : 'mo.`PAGE`';
         $moFullRef    = $driver === 'pgsql' ? 'mo."FULL NAME"' : 'mo.`FULL NAME`';
 
-        $startAt = $endAt = null;
-        $rangeSta = $request->input('start');
-        $rangeEnd = $request->input('end');
+        // --- Date range filter using ts_date ---
+        $rangeSta = null;
+        $rangeEnd = null;
 
         $dateRange = trim((string) $request->input('date_range', ''));
         if ($dateRange !== '') {
-            $parts = preg_split('/\s+(?:to|-)\s+/i', $dateRange);
-            $rangeSta = $parts[0] ?? null;
-            $rangeEnd = $parts[1] ?? $parts[0] ?? null;
+            $parts = preg_split('/\s+to\s+/i', $dateRange);
+            $rangeSta = trim($parts[0] ?? '');
+            $rangeEnd = trim($parts[1] ?? $parts[0] ?? '');
         }
 
+        // Also accept start/end params directly
+        if (!$rangeSta) $rangeSta = $request->input('start');
+        if (!$rangeEnd) $rangeEnd = $request->input('end');
+
         if ($rangeSta && $rangeEnd) {
-            $startAt = Carbon::createFromFormat('Y-m-d', $rangeSta)->startOfDay()->format('Y-m-d H:i:s');
-            $endAt   = Carbon::createFromFormat('Y-m-d', $rangeEnd)->endOfDay()->format('Y-m-d H:i:s');
-            $query->whereBetween(DB::raw($tsExpr), [$startAt, $endAt]);
-        } elseif ($rangeSta) {
-            $startAt = Carbon::createFromFormat('Y-m-d', $rangeSta)->startOfDay()->format('Y-m-d H:i:s');
-            $endAt   = Carbon::createFromFormat('Y-m-d', $rangeSta)->endOfDay()->format('Y-m-d H:i:s');
-            $query->whereBetween(DB::raw($tsExpr), [$startAt, $endAt]);
+            // Detect ts_date column type
+            $tsType = null;
+            try {
+                $tsType = Schema::getColumnType('macro_output', 'ts_date');
+            } catch (\Throwable $e) {
+                $tsType = null;
+            }
+
+            if ($tsType === 'date') {
+                $query->whereNotNull('mo.ts_date')
+                      ->whereBetween('mo.ts_date', [$rangeSta, $rangeEnd]);
+            } else {
+                $startDt = Carbon::parse($rangeSta)->startOfDay()->toDateTimeString();
+                $endDt   = Carbon::parse($rangeEnd)->endOfDay()->toDateTimeString();
+                $query->whereNotNull('mo.ts_date')
+                      ->whereBetween('mo.ts_date', [$startDt, $endDt]);
+            }
         }
 
         // Page filter
-        $page = $request->input('PAGE', '');
+        $page = trim((string) $request->input('PAGE', ''));
         if ($page !== '') {
             $query->where('mo.PAGE', $page);
-        }
-
-        // Status filter
-        $status = $request->input('status', '');
-        if ($status !== '') {
-            if ($status === 'BLANK') {
-                $query->where(function ($q) {
-                    $q->whereNull('mo.STATUS')->orWhere('mo.STATUS', '');
-                });
-            } else {
-                $query->where('mo.STATUS', $status);
-            }
         }
 
         // Search
@@ -103,7 +96,7 @@ class JntHoldDownloadController extends Controller
             });
         }
 
-        return [$rangeSta, $rangeEnd, $q, $page, $status];
+        return [$rangeSta, $rangeEnd, $q, $page];
     }
 
     /**
@@ -114,32 +107,12 @@ class JntHoldDownloadController extends Controller
         $driver = DB::getDriverName();
         $query  = $this->holdBaseQuery($driver);
 
-        [$rangeSta, $rangeEnd, $q, $page, $status] = $this->applyFilters($query, $request, $driver);
+        [$rangeSta, $rangeEnd, $q, $page] = $this->applyFilters($query, $request, $driver);
 
-        // Get total hold count (before pagination)
+        // Total hold count
         $totalHolds = (clone $query)->count();
 
-        // Status counts
-        $wrap = fn (string $col) => DB::getQueryGrammar()->wrap($col);
-        $STATUS = 'mo.STATUS';
-
-        $sc = (clone $query)->selectRaw("
-            COUNT(*) as total,
-            SUM(CASE WHEN {$STATUS} = 'PROCEED' THEN 1 ELSE 0 END) as proceed,
-            SUM(CASE WHEN {$STATUS} = 'CANNOT PROCEED' THEN 1 ELSE 0 END) as cannot_proceed,
-            SUM(CASE WHEN {$STATUS} = 'ODZ' THEN 1 ELSE 0 END) as odz,
-            SUM(CASE WHEN {$STATUS} IS NULL OR {$STATUS} = '' THEN 1 ELSE 0 END) as blank
-        ")->first();
-
-        $statusCounts = [
-            'TOTAL'          => (int) ($sc->total ?? 0),
-            'PROCEED'        => (int) ($sc->proceed ?? 0),
-            'CANNOT PROCEED' => (int) ($sc->cannot_proceed ?? 0),
-            'ODZ'            => (int) ($sc->odz ?? 0),
-            'BLANK'          => (int) ($sc->blank ?? 0),
-        ];
-
-        // Pages dropdown
+        // Pages dropdown (from the filtered hold set)
         $pages = (clone $query)
             ->select('mo.PAGE')
             ->whereNotNull('mo.PAGE')
@@ -148,7 +121,7 @@ class JntHoldDownloadController extends Controller
             ->pluck('PAGE');
 
         // Select columns for display
-        $moFullRef = $driver === 'pgsql' ? 'mo."FULL NAME"' : 'mo.`FULL NAME`';
+        $moFullRef  = $driver === 'pgsql' ? 'mo."FULL NAME"' : 'mo.`FULL NAME`';
         $moPhoneRef = $driver === 'pgsql' ? 'mo."PHONE NUMBER"' : 'mo.`PHONE NUMBER`';
 
         $records = $query->select([
@@ -162,6 +135,7 @@ class JntHoldDownloadController extends Controller
                 'mo.STATUS as status',
                 'mo.PAGE as page',
                 'mo.TIMESTAMP as timestamp',
+                'mo.ts_date',
                 'mo.ITEM_NAME as item_name',
                 'mo.COD as cod',
                 'mo.waybill as waybill',
@@ -171,8 +145,8 @@ class JntHoldDownloadController extends Controller
             ->withQueryString();
 
         return view('jnt.hold-download', compact(
-            'records', 'pages', 'totalHolds', 'statusCounts',
-            'rangeSta', 'rangeEnd', 'q', 'page', 'status'
+            'records', 'pages', 'totalHolds',
+            'rangeSta', 'rangeEnd', 'q', 'page'
         ));
     }
 
@@ -184,7 +158,7 @@ class JntHoldDownloadController extends Controller
         $driver = DB::getDriverName();
         $query  = $this->holdBaseQuery($driver);
 
-        [$rangeSta, $rangeEnd, $q, $page, $status] = $this->applyFilters($query, $request, $driver);
+        [$rangeSta, $rangeEnd, $q, $page] = $this->applyFilters($query, $request, $driver);
 
         $moFullRef  = $driver === 'pgsql' ? 'mo."FULL NAME"' : 'mo.`FULL NAME`';
         $moPhoneRef = $driver === 'pgsql' ? 'mo."PHONE NUMBER"' : 'mo.`PHONE NUMBER`';
@@ -196,9 +170,6 @@ class JntHoldDownloadController extends Controller
                 'mo.PROVINCE as province',
                 'mo.CITY as city',
                 'mo.BARANGAY as barangay',
-                'mo.STATUS as status',
-                'mo.PAGE as page',
-                'mo.TIMESTAMP as timestamp',
                 'mo.ITEM_NAME as item_name',
                 'mo.COD as cod',
                 'mo.waybill as waybill',
@@ -224,7 +195,6 @@ class JntHoldDownloadController extends Controller
                 fputcsv($handle, $row);
             }
         } else {
-            // Fallback header
             fputcsv($handle, [
                 'FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY',
                 'SERVICE', 'ITEM NAME', 'WEIGHT', 'CATEGORY', 'VALUE', 'COD', 'REMARKS', 'FB NAME'

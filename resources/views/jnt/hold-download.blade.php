@@ -1,6 +1,6 @@
 <x-layout>
   <x-slot name="title">Hold Orders – Download</x-slot>
-  <x-slot name="heading">J&T Hold Orders – View & Download</x-slot>
+  <x-slot name="heading">J&T Hold Orders – View & Download (PROCEED only)</x-slot>
 
   @once
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
@@ -20,10 +20,10 @@
 
   {{-- Filters --}}
   <form id="filtersForm" method="get" action="{{ route('jnt.hold.download') }}" class="bg-white p-4 rounded-xl shadow mb-4">
-    <div class="grid md:grid-cols-6 gap-3 items-end">
+    <div class="grid md:grid-cols-5 gap-3 items-end">
       {{-- Date Range --}}
       <div class="md:col-span-2">
-        <label class="block text-sm font-medium text-gray-700 mb-1">Date Range</label>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Date Range (ts_date)</label>
         <input id="date_range" type="text" name="date_range" placeholder="YYYY-MM-DD to YYYY-MM-DD"
                value="{{ $rangeSta && $rangeEnd ? ($rangeSta.' to '.$rangeEnd) : '' }}"
                class="w-full border rounded-lg px-3 py-2" autocomplete="off" />
@@ -37,18 +37,6 @@
           @foreach($pages as $p)
             <option value="{{ $p }}" {{ ($page ?? '') === $p ? 'selected' : '' }}>{{ $p }}</option>
           @endforeach
-        </select>
-      </div>
-
-      {{-- Status --}}
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
-        <select name="status" class="w-full border rounded-lg px-3 py-2" onchange="this.form.submit()">
-          <option value="">All</option>
-          <option value="PROCEED" {{ ($status ?? '') === 'PROCEED' ? 'selected' : '' }}>PROCEED</option>
-          <option value="CANNOT PROCEED" {{ ($status ?? '') === 'CANNOT PROCEED' ? 'selected' : '' }}>CANNOT PROCEED</option>
-          <option value="ODZ" {{ ($status ?? '') === 'ODZ' ? 'selected' : '' }}>ODZ</option>
-          <option value="BLANK" {{ ($status ?? '') === 'BLANK' ? 'selected' : '' }}>BLANK</option>
         </select>
       </div>
 
@@ -67,61 +55,43 @@
     </div>
   </form>
 
-  {{-- Summary Cards --}}
-  <div class="grid md:grid-cols-6 gap-3 mb-4">
-    <div class="bg-white rounded-xl shadow p-3 text-center">
-      <div class="text-xs text-gray-500">Total Hold</div>
-      <div class="text-2xl font-bold">{{ number_format($statusCounts['TOTAL']) }}</div>
-    </div>
-    <div class="bg-white rounded-xl shadow p-3 text-center">
-      <div class="text-xs text-gray-500">PROCEED</div>
-      <div class="text-2xl font-bold text-green-700">{{ number_format($statusCounts['PROCEED']) }}</div>
-    </div>
-    <div class="bg-white rounded-xl shadow p-3 text-center">
-      <div class="text-xs text-gray-500">CANNOT PROCEED</div>
-      <div class="text-2xl font-bold text-red-700">{{ number_format($statusCounts['CANNOT PROCEED']) }}</div>
-    </div>
-    <div class="bg-white rounded-xl shadow p-3 text-center">
-      <div class="text-xs text-gray-500">ODZ</div>
-      <div class="text-2xl font-bold text-orange-600">{{ number_format($statusCounts['ODZ']) }}</div>
-    </div>
-    <div class="bg-white rounded-xl shadow p-3 text-center">
-      <div class="text-xs text-gray-500">BLANK</div>
-      <div class="text-2xl font-bold text-gray-500">{{ number_format($statusCounts['BLANK']) }}</div>
+  {{-- Summary + Download --}}
+  <div class="grid md:grid-cols-3 gap-3 mb-4">
+    <div class="bg-white rounded-xl shadow p-4 text-center">
+      <div class="text-xs text-gray-500">Total PROCEED Hold Orders</div>
+      <div class="text-3xl font-bold text-green-700">{{ number_format($totalHolds) }}</div>
     </div>
 
     {{-- Download Button --}}
-    <form method="get" action="{{ route('jnt.hold.export') }}" class="bg-green-50 rounded-xl shadow p-3 flex flex-col items-center justify-center border-2 border-green-300">
-      {{-- Pass current filters to export --}}
+    <form method="get" action="{{ route('jnt.hold.export') }}" class="bg-green-50 rounded-xl shadow p-4 flex flex-col items-center justify-center border-2 border-green-300 md:col-span-1">
       @if($rangeSta && $rangeEnd)
         <input type="hidden" name="date_range" value="{{ $rangeSta }} to {{ $rangeEnd }}">
       @endif
-      @if($page ?? '')
+      @if(($page ?? '') !== '')
         <input type="hidden" name="PAGE" value="{{ $page }}">
       @endif
-      @if($status ?? '')
-        <input type="hidden" name="status" value="{{ $status }}">
-      @endif
-      @if($q ?? '')
+      @if(($q ?? '') !== '')
         <input type="hidden" name="q" value="{{ $q }}">
       @endif
-      <button type="submit" class="px-5 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-sm">
+      <button type="submit" class="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold">
         Download CSV
       </button>
-      <div class="text-xs text-green-700 mt-1">{{ number_format($statusCounts['TOTAL']) }} orders</div>
+      <div class="text-xs text-green-700 mt-1">{{ number_format($totalHolds) }} PROCEED orders</div>
     </form>
-  </div>
 
-  {{-- Date range info --}}
-  @if($rangeSta && $rangeEnd)
-    <div class="text-xs text-gray-500 mb-2">
-      Date range: <strong>{{ $rangeSta }}</strong> to <strong>{{ $rangeEnd }}</strong>
+    {{-- Navigation --}}
+    <div class="bg-white rounded-xl shadow p-4 flex flex-col items-center justify-center">
+      <a href="{{ route('jnt.hold') }}" class="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm">
+        &larr; Back to Hold Summary
+      </a>
+      @if($rangeSta && $rangeEnd)
+        <div class="text-xs text-gray-500 mt-2">
+          Filtered: <strong>{{ $rangeSta }}</strong> to <strong>{{ $rangeEnd }}</strong>
+        </div>
+      @else
+        <div class="text-xs text-gray-400 mt-2">No date filter (showing all)</div>
+      @endif
     </div>
-  @endif
-
-  {{-- Navigation --}}
-  <div class="flex gap-2 mb-4 text-sm">
-    <a href="{{ route('jnt.hold') }}" class="px-3 py-1 border rounded hover:bg-gray-50">Back to Hold Summary</a>
   </div>
 
   {{-- Table --}}
@@ -136,24 +106,15 @@
           <th class="border px-2 py-2">PROVINCE</th>
           <th class="border px-2 py-2">CITY</th>
           <th class="border px-2 py-2">BARANGAY</th>
-          <th class="border px-2 py-2">STATUS</th>
           <th class="border px-2 py-2">ITEM NAME</th>
           <th class="border px-2 py-2">COD</th>
           <th class="border px-2 py-2">WAYBILL</th>
           <th class="border px-2 py-2">PAGE</th>
-          <th class="border px-2 py-2">TIMESTAMP</th>
+          <th class="border px-2 py-2">DATE</th>
         </tr>
       </thead>
       <tbody>
         @forelse($records as $i => $r)
-          @php
-            $statusColor = match($r->status) {
-              'PROCEED'        => 'text-green-700 bg-green-50',
-              'CANNOT PROCEED' => 'text-red-700 bg-red-50',
-              'ODZ'            => 'text-orange-600 bg-orange-50',
-              default          => 'text-gray-500',
-            };
-          @endphp
           <tr class="hover:bg-gray-50">
             <td class="border px-2 py-1 text-gray-400 text-xs">{{ $records->firstItem() + $i }}</td>
             <td class="border px-2 py-1 font-medium">{{ $r->full_name }}</td>
@@ -162,16 +123,15 @@
             <td class="border px-2 py-1">{{ $r->province }}</td>
             <td class="border px-2 py-1">{{ $r->city }}</td>
             <td class="border px-2 py-1">{{ $r->barangay }}</td>
-            <td class="border px-2 py-1 font-semibold {{ $statusColor }}">{{ $r->status ?: '—' }}</td>
             <td class="border px-2 py-1">{{ $r->item_name }}</td>
             <td class="border px-2 py-1 text-right">{{ $r->cod }}</td>
             <td class="border px-2 py-1 font-mono text-xs">{{ $r->waybill }}</td>
             <td class="border px-2 py-1">{{ $r->page }}</td>
-            <td class="border px-2 py-1 text-xs whitespace-nowrap">{{ $r->timestamp }}</td>
+            <td class="border px-2 py-1 text-xs whitespace-nowrap">{{ $r->ts_date ? \Carbon\Carbon::parse($r->ts_date)->format('Y-m-d') : ($r->timestamp ?? '—') }}</td>
           </tr>
         @empty
           <tr>
-            <td class="border px-4 py-6 text-center text-gray-500" colspan="13">
+            <td class="border px-4 py-6 text-center text-gray-500" colspan="12">
               No HOLD orders found for the selected filters.
             </td>
           </tr>
