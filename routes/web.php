@@ -291,6 +291,7 @@ Route::get('/jnt/shipped', [\App\Http\Controllers\JntShippedController::class, '
 // Sales Declaration
 Route::get('/jnt/sales-declaration', [SalesDeclarationController::class, 'index'])->name('jnt.sales-declaration');
 Route::post('/jnt/sales-declaration/generate', [SalesDeclarationController::class, 'generate'])->name('jnt.sales-declaration.generate');
+Route::post('/jnt/sales-declaration/filter', [SalesDeclarationController::class, 'filterOptions'])->name('jnt.sales-declaration.filter');
 Route::get('/jnt/sales-declaration/export', [SalesDeclarationController::class, 'export'])->name('jnt.sales-declaration.export');
 Route::prefix('jnt/return')->group(function () {
     Route::get('scanned', [JntReturnScannedController::class, 'index'])->name('jnt.return.scanned');

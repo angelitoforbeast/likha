@@ -30,8 +30,8 @@
   </div>
 
   {{-- Filters Form --}}
-  <form id="declForm" class="bg-white p-4 rounded-xl shadow mb-4">
-    <div class="grid md:grid-cols-3 gap-4 mb-4">
+  <div class="bg-white p-4 rounded-xl shadow mb-4">
+    <div class="grid md:grid-cols-4 gap-4 mb-4">
       {{-- Month --}}
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Month</label>
@@ -54,31 +54,36 @@
           @endforeach
         </select>
       </div>
+
+      {{-- Min Orders Per Day --}}
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Min Orders / Day</label>
+        <input type="number" id="f_minperday" value="5" min="1" max="100"
+               class="w-full border rounded-lg px-3 py-2" />
+      </div>
     </div>
 
-    <div class="grid md:grid-cols-2 gap-4 mb-4">
+    <div class="grid md:grid-cols-3 gap-4 mb-4">
       {{-- Sender --}}
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Sender (optional)</label>
-        <select id="f_senders" multiple placeholder="All senders...">
-          @foreach($senders as $s)
-            <option value="{{ $s }}">{{ $s }}</option>
-          @endforeach
-        </select>
+        <select id="f_senders" multiple placeholder="All senders..."></select>
       </div>
 
       {{-- Items --}}
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Items (optional)</label>
-        <select id="f_items" multiple placeholder="All items...">
-          @foreach($items as $i)
-            <option value="{{ $i }}">{{ $i }}</option>
-          @endforeach
-        </select>
+        <select id="f_items" multiple placeholder="All items..."></select>
+      </div>
+
+      {{-- COD Values --}}
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">COD Prices (optional)</label>
+        <select id="f_cods" multiple placeholder="All prices..."></select>
       </div>
     </div>
 
-    <div class="flex items-center gap-4">
+    <div class="flex items-center gap-4 flex-wrap">
       {{-- Per Day Toggle --}}
       <label class="flex items-center gap-2 text-sm">
         <input type="checkbox" id="f_perday" checked class="rounded" />
@@ -96,8 +101,11 @@
               class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold">
         Download CSV
       </button>
+
+      {{-- Loading indicator --}}
+      <span id="filterLoading" style="display:none" class="text-sm text-gray-400">Loading filters...</span>
     </div>
-  </form>
+  </div>
 
   {{-- Loading --}}
   <div id="loading" style="display:none" class="text-center py-8">
@@ -175,25 +183,109 @@
     <input type="hidden" name="status" id="ex_status">
     <input type="hidden" name="items" id="ex_items">
     <input type="hidden" name="senders" id="ex_senders">
+    <input type="hidden" name="cod_values" id="ex_cods">
+    <input type="hidden" name="min_per_day" id="ex_minperday">
     <input type="hidden" name="seed" id="ex_seed">
   </form>
 
   <script>
     document.addEventListener('DOMContentLoaded', function () {
-      // Init Tom Select for multi-selects
-      const tsSenders = new TomSelect('#f_senders', {
+      // Init Tom Select instances
+      let tsSenders, tsItems, tsCods;
+      let isUpdating = false; // prevent infinite loops
+
+      tsSenders = new TomSelect('#f_senders', {
         plugins: ['remove_button'],
         maxOptions: 1000,
-      });
-      const tsItems = new TomSelect('#f_items', {
-        plugins: ['remove_button'],
-        maxOptions: 1000,
+        onChange: function () { if (!isUpdating) refreshFilters('sender'); },
       });
 
-      // Reload page when month changes to refresh dropdowns
+      tsItems = new TomSelect('#f_items', {
+        plugins: ['remove_button'],
+        maxOptions: 1000,
+        onChange: function () { if (!isUpdating) refreshFilters('item'); },
+      });
+
+      tsCods = new TomSelect('#f_cods', {
+        plugins: ['remove_button'],
+        maxOptions: 500,
+      });
+
+      // Month change → reload page
       document.getElementById('f_month').addEventListener('change', function () {
         window.location.href = '{{ route("jnt.sales-declaration") }}?month=' + this.value;
       });
+
+      // Status change → refresh filters
+      document.getElementById('f_status').addEventListener('change', function () {
+        refreshFilters('status');
+      });
+
+      /**
+       * Refresh cascading filter options via AJAX.
+       * @param {string} changedBy - which filter triggered the refresh
+       */
+      async function refreshFilters(changedBy) {
+        const month   = document.getElementById('f_month').value;
+        const status  = document.getElementById('f_status').value;
+        const senders = tsSenders.getValue();
+        const items   = tsItems.getValue();
+
+        document.getElementById('filterLoading').style.display = 'inline';
+
+        try {
+          const resp = await fetch('{{ route("jnt.sales-declaration.filter") }}', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-TOKEN': '{{ csrf_token() }}',
+            },
+            body: JSON.stringify({ month, status, senders, items }),
+          });
+
+          const data = await resp.json();
+          isUpdating = true;
+
+          // Update senders (only if item or status changed)
+          if (changedBy !== 'sender') {
+            const currentSenders = tsSenders.getValue();
+            tsSenders.clearOptions();
+            tsSenders.addOption(data.senders.map(s => ({ value: s, text: s })));
+            // Restore selection if still valid
+            currentSenders.forEach(s => {
+              if (data.senders.includes(s)) tsSenders.addItem(s, true);
+            });
+          }
+
+          // Update items (only if sender or status changed)
+          if (changedBy !== 'item') {
+            const currentItems = tsItems.getValue();
+            tsItems.clearOptions();
+            tsItems.addOption(data.items.map(i => ({ value: i.value, text: i.label })));
+            currentItems.forEach(i => {
+              if (data.items.find(x => x.value === i)) tsItems.addItem(i, true);
+            });
+          }
+
+          // Always update COD values
+          const currentCods = tsCods.getValue();
+          tsCods.clearOptions();
+          tsCods.addOption(data.cod_values.map(c => ({ value: String(c), text: '₱' + Number(c).toLocaleString() })));
+          currentCods.forEach(c => {
+            if (data.cod_values.map(String).includes(c)) tsCods.addItem(c, true);
+          });
+
+          isUpdating = false;
+        } catch (err) {
+          console.error('Filter refresh error:', err);
+          isUpdating = false;
+        } finally {
+          document.getElementById('filterLoading').style.display = 'none';
+        }
+      }
+
+      // Initial load of filter options
+      refreshFilters('status');
 
       let currentSeed = null;
 
@@ -205,13 +297,14 @@
           return;
         }
 
-        const month   = document.getElementById('f_month').value;
-        const status  = document.getElementById('f_status').value;
-        const perDay  = document.getElementById('f_perday').checked;
-        const senders = tsSenders.getValue();
-        const items   = tsItems.getValue();
+        const month     = document.getElementById('f_month').value;
+        const status    = document.getElementById('f_status').value;
+        const perDay    = document.getElementById('f_perday').checked;
+        const minPerDay = parseInt(document.getElementById('f_minperday').value) || 5;
+        const senders   = tsSenders.getValue();
+        const items     = tsItems.getValue();
+        const codValues = tsCods.getValue();
 
-        // Generate a random seed for reproducible export
         currentSeed = Math.floor(Math.random() * 999999999);
 
         document.getElementById('loading').style.display = 'block';
@@ -224,7 +317,10 @@
               'Content-Type': 'application/json',
               'X-CSRF-TOKEN': '{{ csrf_token() }}',
             },
-            body: JSON.stringify({ month, target_amount: target, status, per_day: perDay, items, senders }),
+            body: JSON.stringify({
+              month, target_amount: target, status, per_day: perDay,
+              min_per_day: minPerDay, items, senders, cod_values: codValues
+            }),
           });
 
           const data = await resp.json();
@@ -239,6 +335,16 @@
           document.getElementById('r_actual').textContent = '₱' + Number(data.actual_total).toLocaleString(undefined, {minimumFractionDigits: 2});
           document.getElementById('r_orders').textContent = Number(data.total_orders).toLocaleString();
           document.getElementById('r_available').textContent = Number(data.available).toLocaleString();
+
+          // Highlight if actual < target
+          const actualEl = document.getElementById('r_actual');
+          if (data.actual_total < data.target_amount) {
+            actualEl.classList.remove('text-green-700');
+            actualEl.classList.add('text-red-600');
+          } else {
+            actualEl.classList.remove('text-red-600');
+            actualEl.classList.add('text-green-700');
+          }
 
           // Per-day
           const pdSection = document.getElementById('perDaySection');
@@ -281,8 +387,10 @@
           document.getElementById('ex_month').value = month;
           document.getElementById('ex_target').value = target;
           document.getElementById('ex_status').value = status;
-          document.getElementById('ex_items').value = items.join(',');
-          document.getElementById('ex_senders').value = senders.join(',');
+          document.getElementById('ex_items').value = items.join('||');
+          document.getElementById('ex_senders').value = senders.join('||');
+          document.getElementById('ex_cods').value = codValues.join(',');
+          document.getElementById('ex_minperday').value = minPerDay;
           document.getElementById('ex_seed').value = currentSeed;
 
           document.getElementById('btnDownload').style.display = 'inline-block';

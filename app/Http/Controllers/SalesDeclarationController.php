@@ -9,43 +9,16 @@ use Carbon\Carbon;
 class SalesDeclarationController extends Controller
 {
     /**
-     * Show the sales declaration form + results.
+     * Show the sales declaration form.
      */
     public function index(Request $request)
     {
         $month = $request->input('month', now()->format('Y-m'));
 
-        // Parse month boundaries
         $startDate = Carbon::createFromFormat('Y-m', $month)->startOfMonth();
         $endDate   = $startDate->copy()->endOfMonth();
 
-        // Get available senders for this month
-        $senders = DB::table('from_jnts')
-            ->whereBetween('submission_time', [$startDate, $endDate])
-            ->whereNotNull('sender')
-            ->where('sender', '!=', '')
-            ->distinct()
-            ->orderBy('sender')
-            ->pluck('sender');
-
-        // Get available items for this month
-        $items = DB::table('from_jnts')
-            ->whereBetween('submission_time', [$startDate, $endDate])
-            ->whereNotNull('item_name')
-            ->where('item_name', '!=', '')
-            ->distinct()
-            ->orderBy('item_name')
-            ->pluck('item_name');
-
-        // Get available statuses
-        $statuses = DB::table('from_jnts')
-            ->whereBetween('submission_time', [$startDate, $endDate])
-            ->whereNotNull('status')
-            ->distinct()
-            ->orderBy('status')
-            ->pluck('status');
-
-        // Summary for the month (all delivered)
+        // Month summary (Delivered only)
         $monthTotal = DB::table('from_jnts')
             ->whereBetween('submission_time', [$startDate, $endDate])
             ->where('status', 'Delivered')
@@ -56,15 +29,125 @@ class SalesDeclarationController extends Controller
             ->where('status', 'Delivered')
             ->count();
 
+        // Available statuses
+        $statuses = DB::table('from_jnts')
+            ->whereBetween('submission_time', [$startDate, $endDate])
+            ->whereNotNull('status')
+            ->distinct()
+            ->orderBy('status')
+            ->pluck('status');
+
         return view('jnt.sales-declaration', compact(
-            'month', 'senders', 'items', 'statuses',
-            'monthTotal', 'monthCount'
+            'month', 'statuses', 'monthTotal', 'monthCount'
         ));
     }
 
     /**
-     * Generate the sales declaration: randomly pick orders until target is reached.
-     * Returns JSON for AJAX call.
+     * AJAX: Return cascading filter options (senders, items with prices, COD values).
+     */
+    public function filterOptions(Request $request)
+    {
+        $month = $request->input('month', now()->format('Y-m'));
+        $status = $request->input('status', 'Delivered');
+        $selectedSenders = $request->input('senders', []);
+        $selectedItems   = $request->input('items', []);
+
+        $startDate = Carbon::createFromFormat('Y-m', $month)->startOfMonth();
+        $endDate   = $startDate->copy()->endOfMonth();
+
+        // --- Build base query conditions ---
+        $baseWhere = function ($q) use ($startDate, $endDate, $status) {
+            $q->whereBetween('submission_time', [$startDate, $endDate])
+              ->where('status', $status);
+        };
+
+        // --- Senders: filtered by selected items ---
+        $senderQuery = DB::table('from_jnts')->where($baseWhere);
+        if (!empty($selectedItems)) {
+            // Extract raw item names (strip the price parenthesis)
+            $rawItems = array_map(function ($item) {
+                return preg_replace('/\s*\(₱.*\)$/', '', $item);
+            }, $selectedItems);
+            $senderQuery->whereIn('item_name', $rawItems);
+        }
+        $senders = $senderQuery
+            ->whereNotNull('sender')
+            ->where('sender', '!=', '')
+            ->distinct()
+            ->orderBy('sender')
+            ->pluck('sender')
+            ->values();
+
+        // --- Items with prices: filtered by selected senders ---
+        $itemQuery = DB::table('from_jnts')->where($baseWhere);
+        if (!empty($selectedSenders)) {
+            $itemQuery->whereIn('sender', $selectedSenders);
+        }
+
+        $itemPrices = $itemQuery
+            ->whereNotNull('item_name')
+            ->where('item_name', '!=', '')
+            ->select('item_name', DB::raw('CAST(cod AS DECIMAL(10,0)) as cod_val'))
+            ->distinct()
+            ->orderBy('item_name')
+            ->get();
+
+        // Group prices per item
+        $itemMap = [];
+        foreach ($itemPrices as $row) {
+            $name = $row->item_name;
+            $cod  = (int) $row->cod_val;
+            if (!isset($itemMap[$name])) {
+                $itemMap[$name] = [];
+            }
+            if ($cod > 0 && !in_array($cod, $itemMap[$name])) {
+                $itemMap[$name][] = $cod;
+            }
+        }
+
+        $items = [];
+        foreach ($itemMap as $name => $prices) {
+            sort($prices);
+            $priceStr = implode(', ', array_map(fn ($p) => '₱' . number_format($p), $prices));
+            $items[] = [
+                'value' => $name,
+                'label' => $name . ($priceStr ? " ({$priceStr})" : ''),
+                'prices' => $prices,
+            ];
+        }
+
+        usort($items, fn ($a, $b) => strcmp($a['value'], $b['value']));
+
+        // --- COD values: filtered by selected senders + items ---
+        $codQuery = DB::table('from_jnts')->where($baseWhere);
+        if (!empty($selectedSenders)) {
+            $codQuery->whereIn('sender', $selectedSenders);
+        }
+        if (!empty($selectedItems)) {
+            $rawItems = array_map(function ($item) {
+                return preg_replace('/\s*\(₱.*\)$/', '', $item);
+            }, $selectedItems);
+            $codQuery->whereIn('item_name', $rawItems);
+        }
+
+        $codValues = $codQuery
+            ->where('cod', '>', 0)
+            ->select(DB::raw('DISTINCT CAST(cod AS DECIMAL(10,0)) as cod_val'))
+            ->orderBy('cod_val')
+            ->pluck('cod_val')
+            ->map(fn ($v) => (int) $v)
+            ->values();
+
+        return response()->json([
+            'senders'    => $senders,
+            'items'      => $items,
+            'cod_values' => $codValues,
+        ]);
+    }
+
+    /**
+     * Generate the sales declaration: randomly pick orders until target is reached,
+     * with minimum orders per day distribution.
      */
     public function generate(Request $request)
     {
@@ -77,8 +160,10 @@ class SalesDeclarationController extends Controller
         $targetAmount = (float) $request->input('target_amount');
         $selectedItems   = $request->input('items', []);
         $selectedSenders = $request->input('senders', []);
+        $selectedCods    = $request->input('cod_values', []);
         $status          = $request->input('status', 'Delivered');
         $perDay          = $request->boolean('per_day', true);
+        $minPerDay       = max(1, (int) $request->input('min_per_day', 5));
 
         $startDate = Carbon::createFromFormat('Y-m', $month)->startOfMonth();
         $endDate   = $startDate->copy()->endOfMonth();
@@ -86,14 +171,24 @@ class SalesDeclarationController extends Controller
         // Build query
         $query = DB::table('from_jnts')
             ->whereBetween('submission_time', [$startDate, $endDate])
-            ->where('status', $status);
+            ->where('status', $status)
+            ->where('cod', '>', 0);
 
         if (!empty($selectedItems)) {
-            $query->whereIn('item_name', $selectedItems);
+            // Strip price parenthesis from item names
+            $rawItems = array_map(function ($item) {
+                return preg_replace('/\s*\(₱.*\)$/', '', $item);
+            }, $selectedItems);
+            $query->whereIn('item_name', $rawItems);
         }
 
         if (!empty($selectedSenders)) {
             $query->whereIn('sender', $selectedSenders);
+        }
+
+        if (!empty($selectedCods)) {
+            $codInts = array_map('intval', $selectedCods);
+            $query->whereIn(DB::raw('CAST(cod AS DECIMAL(10,0))'), $codInts);
         }
 
         // Get all qualifying orders
@@ -102,29 +197,82 @@ class SalesDeclarationController extends Controller
                 'receiver_cellphone', 'sender', 'item_name', 'cod',
                 'province', 'city', 'barangay', 'total_shipping_cost', 'status'
             ])
-            ->get()
-            ->toArray();
+            ->get();
 
-        // Shuffle randomly
-        shuffle($allOrders);
+        $totalAvailable = $allOrders->count();
 
-        // Pick orders until target is reached
+        if ($totalAvailable === 0) {
+            return response()->json([
+                'success'       => true,
+                'target_amount' => $targetAmount,
+                'actual_total'  => 0,
+                'total_orders'  => 0,
+                'available'     => 0,
+                'per_day'       => [],
+                'orders'        => [],
+            ]);
+        }
+
+        // Group orders by date
+        $ordersByDate = [];
+        foreach ($allOrders as $order) {
+            $date = Carbon::parse($order->submission_time)->format('Y-m-d');
+            $ordersByDate[$date][] = $order;
+        }
+
+        // Shuffle within each date
+        foreach ($ordersByDate as $date => &$orders) {
+            shuffle($orders);
+        }
+        unset($orders);
+
+        ksort($ordersByDate);
+
+        // Phase 1: Pick minimum orders per day from each date
         $selected = [];
         $runningTotal = 0.0;
 
-        foreach ($allOrders as $order) {
-            $cod = (float) $order->cod;
-            if ($cod <= 0) continue;
+        foreach ($ordersByDate as $date => &$orders) {
+            $picked = 0;
+            $remaining = [];
+            foreach ($orders as $order) {
+                if ($picked < $minPerDay) {
+                    $selected[] = $order;
+                    $runningTotal += (float) $order->cod;
+                    $picked++;
+                } else {
+                    $remaining[] = $order;
+                }
+            }
+            $orders = $remaining; // keep unpicked for phase 2
+        }
+        unset($orders);
 
-            $selected[] = $order;
-            $runningTotal += $cod;
+        // Phase 2: If still under target, pick more randomly from remaining
+        if ($runningTotal < $targetAmount) {
+            $pool = [];
+            foreach ($ordersByDate as $orders) {
+                foreach ($orders as $order) {
+                    $pool[] = $order;
+                }
+            }
+            shuffle($pool);
 
-            if ($runningTotal >= $targetAmount) {
-                break;
+            foreach ($pool as $order) {
+                $selected[] = $order;
+                $runningTotal += (float) $order->cod;
+                if ($runningTotal >= $targetAmount) {
+                    break;
+                }
             }
         }
 
-        // Build per-day breakdown if needed
+        // If phase 1 already exceeded target, trim from the end
+        if ($runningTotal > $targetAmount && count($selected) > 1) {
+            // We keep all — "more or less" the target is fine
+        }
+
+        // Build per-day breakdown
         $perDayData = [];
         if ($perDay && !empty($selected)) {
             foreach ($selected as $order) {
@@ -153,14 +301,14 @@ class SalesDeclarationController extends Controller
             'target_amount' => $targetAmount,
             'actual_total'  => $runningTotal,
             'total_orders'  => count($selected),
-            'available'     => count($allOrders),
+            'available'     => $totalAvailable,
             'per_day'       => $perDayData,
             'orders'        => $selected,
         ]);
     }
 
     /**
-     * Export the generated sales declaration as CSV/Excel.
+     * Export the generated sales declaration as CSV.
      */
     public function export(Request $request)
     {
@@ -168,15 +316,20 @@ class SalesDeclarationController extends Controller
         $targetAmount = (float) $request->input('target_amount', 0);
         $selectedItems   = $request->input('items', []);
         $selectedSenders = $request->input('senders', []);
+        $selectedCods    = $request->input('cod_values', []);
         $status          = $request->input('status', 'Delivered');
+        $minPerDay       = max(1, (int) $request->input('min_per_day', 5));
         $seed            = $request->input('seed', null);
 
-        // If items/senders come as comma-separated strings (from hidden form), parse them
+        // Parse comma-separated strings
         if (is_string($selectedItems) && $selectedItems !== '') {
-            $selectedItems = explode(',', $selectedItems);
+            $selectedItems = explode('||', $selectedItems);
         }
         if (is_string($selectedSenders) && $selectedSenders !== '') {
-            $selectedSenders = explode(',', $selectedSenders);
+            $selectedSenders = explode('||', $selectedSenders);
+        }
+        if (is_string($selectedCods) && $selectedCods !== '') {
+            $selectedCods = explode(',', $selectedCods);
         }
 
         $startDate = Carbon::createFromFormat('Y-m', $month)->startOfMonth();
@@ -184,14 +337,23 @@ class SalesDeclarationController extends Controller
 
         $query = DB::table('from_jnts')
             ->whereBetween('submission_time', [$startDate, $endDate])
-            ->where('status', $status);
+            ->where('status', $status)
+            ->where('cod', '>', 0);
 
         if (!empty($selectedItems) && $selectedItems !== ['']) {
-            $query->whereIn('item_name', $selectedItems);
+            $rawItems = array_map(function ($item) {
+                return preg_replace('/\s*\(₱.*\)$/', '', $item);
+            }, $selectedItems);
+            $query->whereIn('item_name', $rawItems);
         }
 
         if (!empty($selectedSenders) && $selectedSenders !== ['']) {
             $query->whereIn('sender', $selectedSenders);
+        }
+
+        if (!empty($selectedCods) && $selectedCods !== ['']) {
+            $codInts = array_map('intval', $selectedCods);
+            $query->whereIn(DB::raw('CAST(cod AS DECIMAL(10,0))'), $codInts);
         }
 
         $allOrders = $query->select([
@@ -199,34 +361,67 @@ class SalesDeclarationController extends Controller
                 'receiver_cellphone', 'sender', 'item_name', 'cod',
                 'province', 'city', 'barangay', 'total_shipping_cost', 'status'
             ])
-            ->get()
-            ->toArray();
+            ->get();
 
-        // Use seed for reproducible random if provided, otherwise random
+        // Use seed for reproducible random
         if ($seed) {
             mt_srand((int) $seed);
-            usort($allOrders, function () { return mt_rand(-1, 1); });
-        } else {
-            shuffle($allOrders);
         }
 
-        // Pick orders until target
+        // Group by date
+        $ordersByDate = [];
+        foreach ($allOrders as $order) {
+            $date = Carbon::parse($order->submission_time)->format('Y-m-d');
+            $ordersByDate[$date][] = $order;
+        }
+
+        // Shuffle within each date (seeded)
+        foreach ($ordersByDate as $date => &$orders) {
+            usort($orders, function () { return mt_rand(-1, 1); });
+        }
+        unset($orders);
+        ksort($ordersByDate);
+
+        // Phase 1: min per day
         $selected = [];
         $runningTotal = 0.0;
 
-        foreach ($allOrders as $order) {
-            $cod = (float) $order->cod;
-            if ($cod <= 0) continue;
+        foreach ($ordersByDate as $date => &$orders) {
+            $picked = 0;
+            $remaining = [];
+            foreach ($orders as $order) {
+                if ($picked < $minPerDay) {
+                    $selected[] = $order;
+                    $runningTotal += (float) $order->cod;
+                    $picked++;
+                } else {
+                    $remaining[] = $order;
+                }
+            }
+            $orders = $remaining;
+        }
+        unset($orders);
 
-            $selected[] = $order;
-            $runningTotal += $cod;
+        // Phase 2: fill to target
+        if ($runningTotal < $targetAmount) {
+            $pool = [];
+            foreach ($ordersByDate as $orders) {
+                foreach ($orders as $order) {
+                    $pool[] = $order;
+                }
+            }
+            usort($pool, function () { return mt_rand(-1, 1); });
 
-            if ($runningTotal >= $targetAmount) {
-                break;
+            foreach ($pool as $order) {
+                $selected[] = $order;
+                $runningTotal += (float) $order->cod;
+                if ($runningTotal >= $targetAmount) {
+                    break;
+                }
             }
         }
 
-        // Sort by date for export
+        // Sort by date
         usort($selected, function ($a, $b) {
             return strcmp($a->submission_time, $b->submission_time);
         });
@@ -238,17 +433,16 @@ class SalesDeclarationController extends Controller
         // Build CSV
         $handle = fopen('php://temp', 'w+');
 
-        // Header info rows
         fputcsv($handle, ['SALES DECLARATION']);
         fputcsv($handle, ['Month:', $month]);
         fputcsv($handle, ['Target Amount:', number_format($targetAmount, 2)]);
         fputcsv($handle, ['Actual Total:', number_format($runningTotal, 2)]);
         fputcsv($handle, ['Total Orders:', count($selected)]);
         fputcsv($handle, ['Status:', $status]);
+        fputcsv($handle, ['Min Orders/Day:', $minPerDay]);
         fputcsv($handle, ['Generated:', now()->format('Y-m-d H:i:s')]);
-        fputcsv($handle, []); // blank row
+        fputcsv($handle, []);
 
-        // Column headers
         fputcsv($handle, [
             'DATE', 'WAYBILL', 'RECEIVER', 'PHONE', 'SENDER',
             'ITEM', 'COD', 'PROVINCE', 'CITY', 'BARANGAY', 'SHIPPING COST'
@@ -270,7 +464,6 @@ class SalesDeclarationController extends Controller
             ]);
         }
 
-        // Summary footer
         fputcsv($handle, []);
         fputcsv($handle, ['', '', '', '', '', 'TOTAL:', $runningTotal]);
 
