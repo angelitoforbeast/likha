@@ -40,6 +40,7 @@ use App\Http\Controllers\ItemCogsController;
 use App\Http\Controllers\SummaryOverallController;
 use App\Http\Controllers\JntOndelController;
 use App\Http\Controllers\JntRemittanceController;
+use App\Http\Controllers\SalesDeclarationController;
 use App\Http\Controllers\FeeSettingController;
 use App\Http\Controllers\JntShippedController;
 use App\Http\Controllers\JntReturnScannedController;
@@ -286,6 +287,11 @@ Route::post('/jnt/fee-settings', [FeeSettingController::class, 'store'])->name('
 Route::put('/jnt/fee-settings/{fee_setting}', [FeeSettingController::class, 'update'])->name('fee-settings.update');
 Route::delete('/jnt/fee-settings/{fee_setting}', [FeeSettingController::class, 'destroy'])->name('fee-settings.destroy');
 Route::get('/jnt/shipped', [\App\Http\Controllers\JntShippedController::class, 'index'])->name('jnt.shipped');
+
+// Sales Declaration
+Route::get('/jnt/sales-declaration', [SalesDeclarationController::class, 'index'])->name('jnt.sales-declaration');
+Route::post('/jnt/sales-declaration/generate', [SalesDeclarationController::class, 'generate'])->name('jnt.sales-declaration.generate');
+Route::get('/jnt/sales-declaration/export', [SalesDeclarationController::class, 'export'])->name('jnt.sales-declaration.export');
 Route::prefix('jnt/return')->group(function () {
     Route::get('scanned', [JntReturnScannedController::class, 'index'])->name('jnt.return.scanned');
     Route::post('scanned/upload', [JntReturnScannedController::class, 'upload'])->name('jnt.return.scanned.upload');
