@@ -164,6 +164,8 @@ class SalesDeclarationController extends Controller
         $status          = $request->input('status', 'Delivered');
         $perDay          = $request->boolean('per_day', true);
         $minPerDay       = max(1, (int) $request->input('min_per_day', 5));
+        $maxPerDayInput  = $request->input('max_per_day', 10);
+        $maxPerDay       = ($maxPerDayInput !== null && $maxPerDayInput !== '') ? max(1, (int) $maxPerDayInput) : null;
 
         $startDate = Carbon::createFromFormat('Y-m', $month)->startOfMonth();
         $endDate   = $startDate->copy()->endOfMonth();
@@ -228,15 +230,17 @@ class SalesDeclarationController extends Controller
 
         ksort($ordersByDate);
 
-        // Phase 1: Pick minimum orders per day from each date
+        // Phase 1: Pick minimum orders per day from each date (respecting max)
         $selected = [];
         $runningTotal = 0.0;
+        $pickedPerDay = []; // track count per day
 
         foreach ($ordersByDate as $date => &$orders) {
             $picked = 0;
             $remaining = [];
+            $limit = $maxPerDay ? min($minPerDay, $maxPerDay) : $minPerDay;
             foreach ($orders as $order) {
-                if ($picked < $minPerDay) {
+                if ($picked < $limit) {
                     $selected[] = $order;
                     $runningTotal += (float) $order->cod;
                     $picked++;
@@ -244,23 +248,31 @@ class SalesDeclarationController extends Controller
                     $remaining[] = $order;
                 }
             }
+            $pickedPerDay[$date] = $picked;
             $orders = $remaining; // keep unpicked for phase 2
         }
         unset($orders);
 
-        // Phase 2: If still under target, pick more randomly from remaining
+        // Phase 2: If still under target, pick more randomly from remaining (respecting max per day)
         if ($runningTotal < $targetAmount) {
             $pool = [];
-            foreach ($ordersByDate as $orders) {
+            foreach ($ordersByDate as $date => $orders) {
                 foreach ($orders as $order) {
+                    $order->_date = $date; // tag with date for max check
                     $pool[] = $order;
                 }
             }
             shuffle($pool);
 
             foreach ($pool as $order) {
+                $date = $order->_date;
+                // Check max per day limit
+                if ($maxPerDay && ($pickedPerDay[$date] ?? 0) >= $maxPerDay) {
+                    continue; // skip, this day is full
+                }
                 $selected[] = $order;
                 $runningTotal += (float) $order->cod;
+                $pickedPerDay[$date] = ($pickedPerDay[$date] ?? 0) + 1;
                 if ($runningTotal >= $targetAmount) {
                     break;
                 }
@@ -319,6 +331,8 @@ class SalesDeclarationController extends Controller
         $selectedCods    = $request->input('cod_values', []);
         $status          = $request->input('status', 'Delivered');
         $minPerDay       = max(1, (int) $request->input('min_per_day', 5));
+        $maxPerDayInput  = $request->input('max_per_day', 10);
+        $maxPerDay       = ($maxPerDayInput !== null && $maxPerDayInput !== '') ? max(1, (int) $maxPerDayInput) : null;
         $seed            = $request->input('seed', null);
 
         // Parse comma-separated strings
@@ -382,15 +396,17 @@ class SalesDeclarationController extends Controller
         unset($orders);
         ksort($ordersByDate);
 
-        // Phase 1: min per day
+        // Phase 1: min per day (respecting max)
         $selected = [];
         $runningTotal = 0.0;
+        $pickedPerDay = [];
 
         foreach ($ordersByDate as $date => &$orders) {
             $picked = 0;
             $remaining = [];
+            $limit = $maxPerDay ? min($minPerDay, $maxPerDay) : $minPerDay;
             foreach ($orders as $order) {
-                if ($picked < $minPerDay) {
+                if ($picked < $limit) {
                     $selected[] = $order;
                     $runningTotal += (float) $order->cod;
                     $picked++;
@@ -398,23 +414,30 @@ class SalesDeclarationController extends Controller
                     $remaining[] = $order;
                 }
             }
+            $pickedPerDay[$date] = $picked;
             $orders = $remaining;
         }
         unset($orders);
 
-        // Phase 2: fill to target
+        // Phase 2: fill to target (respecting max per day)
         if ($runningTotal < $targetAmount) {
             $pool = [];
-            foreach ($ordersByDate as $orders) {
+            foreach ($ordersByDate as $date => $orders) {
                 foreach ($orders as $order) {
+                    $order->_date = $date;
                     $pool[] = $order;
                 }
             }
             usort($pool, function () { return mt_rand(-1, 1); });
 
             foreach ($pool as $order) {
+                $date = $order->_date;
+                if ($maxPerDay && ($pickedPerDay[$date] ?? 0) >= $maxPerDay) {
+                    continue;
+                }
                 $selected[] = $order;
                 $runningTotal += (float) $order->cod;
+                $pickedPerDay[$date] = ($pickedPerDay[$date] ?? 0) + 1;
                 if ($runningTotal >= $targetAmount) {
                     break;
                 }
@@ -440,6 +463,7 @@ class SalesDeclarationController extends Controller
         fputcsv($handle, ['Total Orders:', count($selected)]);
         fputcsv($handle, ['Status:', $status]);
         fputcsv($handle, ['Min Orders/Day:', $minPerDay]);
+        fputcsv($handle, ['Max Orders/Day:', $maxPerDay ?? 'No limit']);
         fputcsv($handle, ['Generated:', now()->format('Y-m-d H:i:s')]);
         fputcsv($handle, []);
 

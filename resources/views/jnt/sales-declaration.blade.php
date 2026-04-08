@@ -61,6 +61,13 @@
         <input type="number" id="f_minperday" value="5" min="1" max="100"
                class="w-full border rounded-lg px-3 py-2" />
       </div>
+
+      {{-- Max Orders Per Day --}}
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Max Orders / Day <span class="text-gray-400 text-xs">(optional)</span></label>
+        <input type="number" id="f_maxperday" value="10" min="1" max="10000" placeholder="No limit"
+               class="w-full border rounded-lg px-3 py-2" />
+      </div>
     </div>
 
     <div class="grid md:grid-cols-3 gap-4 mb-4">
@@ -185,6 +192,7 @@
     <input type="hidden" name="senders" id="ex_senders">
     <input type="hidden" name="cod_values" id="ex_cods">
     <input type="hidden" name="min_per_day" id="ex_minperday">
+    <input type="hidden" name="max_per_day" id="ex_maxperday">
     <input type="hidden" name="seed" id="ex_seed">
   </form>
 
@@ -301,6 +309,8 @@
         const status    = document.getElementById('f_status').value;
         const perDay    = document.getElementById('f_perday').checked;
         const minPerDay = parseInt(document.getElementById('f_minperday').value) || 5;
+        const maxPerDayVal = document.getElementById('f_maxperday').value;
+        const maxPerDay = maxPerDayVal !== '' ? parseInt(maxPerDayVal) : null;
         const senders   = tsSenders.getValue();
         const items     = tsItems.getValue();
         const codValues = tsCods.getValue();
@@ -319,7 +329,7 @@
             },
             body: JSON.stringify({
               month, target_amount: target, status, per_day: perDay,
-              min_per_day: minPerDay, items, senders, cod_values: codValues
+              min_per_day: minPerDay, max_per_day: maxPerDay, items, senders, cod_values: codValues
             }),
           });
 
@@ -391,6 +401,7 @@
           document.getElementById('ex_senders').value = senders.join('||');
           document.getElementById('ex_cods').value = codValues.join(',');
           document.getElementById('ex_minperday').value = minPerDay;
+          document.getElementById('ex_maxperday').value = maxPerDay !== null ? maxPerDay : '';
           document.getElementById('ex_seed').value = currentSeed;
 
           document.getElementById('btnDownload').style.display = 'inline-block';
