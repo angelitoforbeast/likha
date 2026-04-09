@@ -319,13 +319,15 @@
           </button>
         </form>
 
-        @if(!empty($retryRun) && $retryRun->fail_count > 0)
+        @if(($retryFailCount ?? 0) > 0)
           <form method="POST"
-                action="{{ url("jnt/orders/batch/{$retryRun->id}/retry-failed") }}"
-                onsubmit="return confirm('Retry {{ $retryRun->fail_count }} failed shipment(s) from Run #{{ $retryRun->id }}?')">
+                action="{{ url('jnt/orders/retry-by-date-page') }}"
+                onsubmit="return confirm('Retry {{ $retryFailCount }} failed shipment(s) for {{ $selectedPage }} on {{ $selectedDate }}?')">
             @csrf
+            <input type="hidden" name="date" value="{{ $selectedDate }}">
+            <input type="hidden" name="page" value="{{ $selectedPage }}">
             <button type="submit" class="btn btn-yellow">
-              Retry Failed ({{ $retryRun->fail_count }}) — Run #{{ $retryRun->id }}
+              Retry Failed ({{ $retryFailCount }})
             </button>
           </form>
         @endif

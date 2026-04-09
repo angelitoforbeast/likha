@@ -159,10 +159,10 @@ class JntOrderUiController extends Controller
     if (!$run && $statusGate->enabled && !$statusGate->ok) {
         $rows = collect([]);   // no data
         $runStats = null;
-        $retryRun = null;
+        $retryFailCount = 0;
 
         return view('jnt.orders.index', compact(
-            'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryRun'
+            'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryFailCount'
         ));
     }
 
@@ -284,29 +284,20 @@ class JntOrderUiController extends Controller
         $runStats = null;
     }
 
-    // ✅ Option A: In preview mode, detect latest run with failures for this date+page
-    // Use a join instead of JSON_EXTRACT to avoid issues with stored filter format
-    $retryRun = null;
+    // ✅ Option A: Count actual retryable failed shipments for this date+page
+    $retryFailCount = 0;
     if (!$run && $page !== '') {
-        $retryRun = JntBatchRun::query()
-            ->where('fail_count', '>', 0)
-            ->whereIn('status', ['finished', 'done', 'stopped'])
-            ->whereExists(function ($q) use ($dayStart, $dayEnd, $page) {
-                $q->select(DB::raw(1))
-                    ->from('jnt_shipments as s')
-                    ->join('macro_output as m', 'm.id', '=', 's.macro_output_id')
-                    ->whereColumn('s.jnt_batch_run_id', 'jnt_batch_runs.id')
-                    ->where('s.success', 0)
-                    ->whereNull('s.mailno')
-                    ->whereBetween('m.ts_date', [$dayStart, $dayEnd])
-                    ->where('m.PAGE', $page);
-            })
-            ->orderByDesc('id')
-            ->first();
+        $retryFailCount = (int) DB::table('jnt_shipments as s')
+            ->join('macro_output as m', 'm.id', '=', 's.macro_output_id')
+            ->where('s.success', 0)
+            ->whereNull('s.mailno')
+            ->whereBetween('m.ts_date', [$dayStart, $dayEnd])
+            ->where('m.PAGE', $page)
+            ->count();
     }
 
     return view('jnt.orders.index', compact(
-        'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryRun'
+        'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryFailCount'
     ));
 }
 
@@ -452,6 +443,62 @@ class JntOrderUiController extends Controller
     public function showRun(int $runId)
     {
         return redirect()->to(url('/jnt/orders') . '?run_id=' . $runId);
+    }
+
+    /**
+     * Retry all failed shipments for a given date+page (across any run).
+     * Shows accurate count — not the stale fail_count from the run record.
+     */
+    public function retryByDatePage(Request $request)
+    {
+        $date = $request->input('date') ?: now('Asia/Manila')->toDateString();
+        $page = trim((string) $request->input('page', ''));
+
+        if ($page === '') {
+            return redirect()->back()->with('error', 'Page is required.');
+        }
+
+        $dayStart = Carbon::parse($date, 'Asia/Manila')->startOfDay();
+        $dayEnd   = Carbon::parse($date, 'Asia/Manila')->endOfDay();
+
+        $failedShipments = JntShipment::query()
+            ->join('macro_output as m', 'm.id', '=', 'jnt_shipments.macro_output_id')
+            ->where('jnt_shipments.success', 0)
+            ->whereNull('jnt_shipments.mailno')
+            ->whereBetween('m.ts_date', [$dayStart, $dayEnd])
+            ->where('m.PAGE', $page)
+            ->select('jnt_shipments.id', 'jnt_shipments.jnt_batch_run_id')
+            ->get();
+
+        if ($failedShipments->isEmpty()) {
+            return redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page))
+                ->with('error', 'No failed shipments to retry for this date and page.');
+        }
+
+        $count = $failedShipments->count();
+
+        // Reset run counters for each affected run so they can re-finish
+        $byRun = $failedShipments->groupBy('jnt_batch_run_id');
+        foreach ($byRun as $runId => $shipments) {
+            if (!$runId) continue;
+            $affectedRun = JntBatchRun::query()->find($runId);
+            if (!$affectedRun) continue;
+            $n = $shipments->count();
+            $affectedRun->fail_count  = max(0, (int)$affectedRun->fail_count - $n);
+            $affectedRun->processed   = max(0, (int)$affectedRun->processed - $n);
+            if (in_array($affectedRun->status, ['finished', 'done', 'stopped'])) {
+                $affectedRun->status      = 'running';
+                $affectedRun->finished_at = null;
+            }
+            $affectedRun->save();
+        }
+
+        foreach ($failedShipments as $shipment) {
+            CreateJntOrder::dispatch((int) $shipment->id);
+        }
+
+        return redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page))
+            ->with('success', "Retrying {$count} failed shipment(s) for {$page} on {$date}.");
     }
 
     public function retryFailed(int $runId)
