@@ -35,73 +35,121 @@
     </div>
   @else
 
-  {{-- Mapping Form --}}
-  <section class="bg-white rounded-xl shadow p-4">
-    <h2 class="font-semibold text-lg mb-1">Assign JNT Account per Page</h2>
-    <p class="text-sm text-gray-500 mb-4">
-      Pages are sourced from <code>macro_output</code>. If a page has no account assigned,
-      it falls back to the default credentials in <code>.env</code>.
-    </p>
+  <div x-data="mappingApp()">
 
-    <form action="{{ route('jnt.accounts.mapping.save') }}" method="POST">
-      @csrf
-
-      <div class="overflow-x-auto">
-        <table class="min-w-full border border-gray-200 bg-white text-sm">
-          <thead class="bg-gray-50">
-            <tr>
-              <th class="px-3 py-2 border-b text-left">Page</th>
-              <th class="px-3 py-2 border-b text-left">JNT Account</th>
-              <th class="px-3 py-2 border-b text-left text-gray-400">Currently Assigned</th>
-            </tr>
-          </thead>
-          <tbody>
-            @forelse($pages as $page)
-              @php $mapped = $mappings->get($page); @endphp
-              <tr class="hover:bg-gray-50">
-                <td class="px-3 py-2 border-b font-medium">{{ $page }}</td>
-                <td class="px-3 py-2 border-b">
-                  <select name="mappings[{{ $page }}]"
-                          class="border border-gray-300 rounded px-2 py-1 text-sm w-full max-w-xs">
-                    <option value="">-- use .env default --</option>
-                    @foreach($accounts as $acc)
-                      <option value="{{ $acc->id }}"
-                        {{ ($mapped && $mapped->jnt_account_id == $acc->id) ? 'selected' : '' }}>
-                        {{ $acc->label }} — {{ $acc->eccompanyid }} / {{ $acc->customerid }}
-                      </option>
-                    @endforeach
-                  </select>
-                </td>
-                <td class="px-3 py-2 border-b text-gray-400 text-xs">
-                  @if($mapped && $mapped->account)
-                    <span class="text-green-700 font-medium">{{ $mapped->account->label }}</span>
-                    <span class="text-gray-400">({{ $mapped->account->customerid }})</span>
-                  @else
-                    <span class="text-gray-400 italic">.env fallback</span>
-                  @endif
-                </td>
-              </tr>
-            @empty
-              <tr>
-                <td colspan="3" class="px-3 py-4 text-center text-gray-500">
-                  No pages found in macro_output.
-                </td>
-              </tr>
-            @endforelse
-          </tbody>
-        </table>
+    {{-- Bulk Assign Bar --}}
+    <section class="bg-white rounded-xl shadow p-4 mb-4">
+      <h2 class="font-semibold text-base mb-2">Bulk Assign</h2>
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="text-sm text-gray-600" x-text="selectedCount + ' page(s) selected'"></span>
+        <select x-model="bulkAccountId"
+                class="border border-gray-300 rounded px-2 py-1.5 text-sm">
+          <option value="">-- select account --</option>
+          @foreach($accounts as $acc)
+            <option value="{{ $acc->id }}">
+              {{ $acc->label }} — {{ $acc->eccompanyid }} / {{ $acc->customerid }}
+            </option>
+          @endforeach
+          <option value="0">-- use .env default --</option>
+        </select>
+        <button type="button" @click="applyBulk()"
+                :disabled="selectedCount === 0 || bulkAccountId === ''"
+                class="px-4 py-1.5 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed">
+          Apply to Selected
+        </button>
+        <button type="button" @click="clearSelection()"
+                :disabled="selectedCount === 0"
+                class="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-md text-sm hover:bg-gray-300 disabled:opacity-40 disabled:cursor-not-allowed">
+          Clear Selection
+        </button>
       </div>
+    </section>
 
-      @if($pages->isNotEmpty())
-        <div class="mt-4">
-          <button type="submit"
-                  class="px-5 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
-            Save Mappings
-          </button>
+    {{-- Mapping Form --}}
+    <section class="bg-white rounded-xl shadow p-4">
+      <h2 class="font-semibold text-lg mb-1">Assign JNT Account per Page</h2>
+      <p class="text-sm text-gray-500 mb-4">
+        Pages are sourced from <code>macro_output</code>. If a page has no account assigned,
+        it falls back to the default credentials in <code>.env</code>.
+      </p>
+
+      <form action="{{ route('jnt.accounts.mapping.save') }}" method="POST" id="mapping-form">
+        @csrf
+
+        <div class="overflow-x-auto">
+          <table class="min-w-full border border-gray-200 bg-white text-sm">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-3 py-2 border-b text-center w-8">
+                  {{-- Select All checkbox --}}
+                  <input type="checkbox" @change="toggleAll($event)"
+                         :checked="selectedCount > 0 && selectedCount === totalCount"
+                         :indeterminate="selectedCount > 0 && selectedCount < totalCount"
+                         class="rounded cursor-pointer">
+                </th>
+                <th class="px-3 py-2 border-b text-left">Page</th>
+                <th class="px-3 py-2 border-b text-left">JNT Account</th>
+                <th class="px-3 py-2 border-b text-left text-gray-400">Currently Assigned</th>
+              </tr>
+            </thead>
+            <tbody>
+              @forelse($pages as $page)
+                @php $mapped = $mappings->get($page); @endphp
+                <tr class="hover:bg-gray-50" :class="selected['{{ addslashes($page) }}'] ? 'bg-indigo-50' : ''">
+                  {{-- Row checkbox --}}
+                  <td class="px-3 py-2 border-b text-center">
+                    <input type="checkbox"
+                           x-model="selected['{{ addslashes($page) }}']"
+                           @change="onRowCheck()"
+                           class="rounded cursor-pointer">
+                  </td>
+                  <td class="px-3 py-2 border-b font-medium">{{ $page }}</td>
+                  <td class="px-3 py-2 border-b">
+                    <select name="mappings[{{ $page }}]"
+                            x-ref="select_{{ \Illuminate\Support\Str::slug($page, '_') }}"
+                            data-page="{{ $page }}"
+                            class="page-select border border-gray-300 rounded px-2 py-1 text-sm w-full max-w-xs">
+                      <option value="">-- use .env default --</option>
+                      @foreach($accounts as $acc)
+                        <option value="{{ $acc->id }}"
+                          {{ ($mapped && $mapped->jnt_account_id == $acc->id) ? 'selected' : '' }}>
+                          {{ $acc->label }} — {{ $acc->eccompanyid }} / {{ $acc->customerid }}
+                        </option>
+                      @endforeach
+                    </select>
+                  </td>
+                  <td class="px-3 py-2 border-b text-xs">
+                    @if($mapped && $mapped->account)
+                      <span class="text-green-700 font-medium">{{ $mapped->account->label }}</span>
+                      <span class="text-gray-400">({{ $mapped->account->customerid }})</span>
+                    @else
+                      <span class="text-gray-400 italic">.env fallback</span>
+                    @endif
+                  </td>
+                </tr>
+              @empty
+                <tr>
+                  <td colspan="4" class="px-3 py-4 text-center text-gray-500">
+                    No pages found in macro_output.
+                  </td>
+                </tr>
+              @endforelse
+            </tbody>
+          </table>
         </div>
-      @endif
-    </form>
-  </section>
+
+        @if($pages->isNotEmpty())
+          <div class="mt-4">
+            <button type="submit"
+                    class="px-5 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+              Save Mappings
+            </button>
+          </div>
+        @endif
+      </form>
+    </section>
+
+  </div>
 
   @endif
 
@@ -110,5 +158,48 @@
     <h3 class="font-semibold mb-1">How it works</h3>
     <p>When a batch is created for a page, the system checks this mapping to determine which JNT account (EC Company ID + Customer ID) to use. If the page has no mapping, it uses the default credentials from <code>.env</code>.</p>
   </div>
+
+  <script>
+    function mappingApp() {
+      return {
+        selected: {},
+        bulkAccountId: '',
+        totalCount: document.querySelectorAll('.page-select').length,
+
+        get selectedCount() {
+          return Object.values(this.selected).filter(v => v).length;
+        },
+
+        toggleAll(event) {
+          const checked = event.target.checked;
+          document.querySelectorAll('.page-select').forEach(sel => {
+            const page = sel.dataset.page;
+            this.selected[page] = checked;
+          });
+        },
+
+        onRowCheck() {
+          // just triggers selectedCount reactivity
+        },
+
+        clearSelection() {
+          this.selected = {};
+        },
+
+        applyBulk() {
+          if (this.bulkAccountId === '' || this.selectedCount === 0) return;
+
+          const accountId = this.bulkAccountId === '0' ? '' : this.bulkAccountId;
+
+          document.querySelectorAll('.page-select').forEach(sel => {
+            const page = sel.dataset.page;
+            if (this.selected[page]) {
+              sel.value = accountId;
+            }
+          });
+        },
+      }
+    }
+  </script>
 
 </x-layout>
