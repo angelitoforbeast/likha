@@ -51,6 +51,49 @@ class JntClient
         );
     }
 
+    /**
+     * Build a JntClient using per-page credentials from DB.
+     * Falls back to .env config if no mapping found for the given page.
+     */
+    public static function fromPageOrConfig(string $page): self
+    {
+        $baseUrl   = rtrim((string) config('jnt.base_url'), '/');
+        $endpoints = (array) config('jnt.endpoints', []);
+        $secret    = (string) (config('jnt.credentials.secret') ?? '');
+        $apiKey    = config('jnt.credentials.api_key') ?? null;
+        $apiKey    = is_string($apiKey) && trim($apiKey) === '' ? null : $apiKey;
+
+        // Check DB mapping first
+        $mapping = \App\Models\PageJntMapping::with('account')
+            ->where('page', $page)
+            ->first();
+
+        if ($mapping && $mapping->account) {
+            $ec   = (string) $mapping->account->eccompanyid;
+            $cust = (string) $mapping->account->customerid;
+        } else {
+            $ec   = (string) (config('jnt.credentials.eccompanyid') ?? '');
+            $cust = (string) (config('jnt.credentials.customerid') ?? '');
+        }
+
+        if ($ec === '' || $cust === '' || $secret === '') {
+            throw new \RuntimeException('J&T config missing. Check JNT_ECCOMPANYID, JNT_CUSTOMERID, JNT_SECRET in .env');
+        }
+
+        return new self(
+            baseUrl: $baseUrl,
+            eccompanyid: $ec,
+            customerid: $cust,
+            secret: $secret,
+            apiKey: $apiKey,
+            timeoutSeconds: (int) (config('jnt.timeout', 30)),
+            endpoints: $endpoints,
+        );
+    }
+
+    public function getEccompanyid(): string { return $this->eccompanyid; }
+    public function getCustomerid(): string  { return $this->customerid; }
+
     public function createOrder(array $payload): array
 {
     $endpoint = (string) (config('jnt.endpoints.create_order') ?? '/api/order/create');
@@ -67,12 +110,12 @@ class JntClient
     }
 
     // ✅ data_digest = base64( md5_hex( logistics_interface + secret ) )
-    $secret = (string) config('jnt.credentials.secret');
+    $secret = $this->secret;
     $md5Hex = md5($logisticsInterface . $secret); // php md5() => lowercase hex string
     $dataDigest = base64_encode($md5Hex);
 
-    $ec = (string) config('jnt.credentials.eccompanyid');
-    $cust = (string) config('jnt.credentials.customerid');
+    $ec = $this->eccompanyid;
+    $cust = $this->customerid;
 
     $form = [
         'logistics_interface' => $logisticsInterface,

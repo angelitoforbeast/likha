@@ -34,7 +34,11 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
             'total' => count($this->macroOutputIds),
         ]);
 
-        $client = JntClient::fromConfig();
+        // Resolve per-page JNT credentials from DB mapping, fallback to .env
+        $filters = is_array($run->filters) ? $run->filters : (json_decode((string) $run->filters, true) ?? []);
+        $page    = (string) ($filters['page'] ?? '');
+
+        $client = JntClient::fromPageOrConfig($page);
 
         foreach ($this->macroOutputIds as $i => $macroId) {
             // Pull row from macro_output (adjust table/model if needed)
@@ -80,8 +84,8 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
             $payload = [
                 'actiontype' => 'add',
                 'environment' => 'yes', // staging=yes in sandbox
-                'eccompanyid' => config('jnt.credentials.eccompanyid'),
-                'customerid'  => config('jnt.credentials.customerid'),
+                'eccompanyid' => $client->getEccompanyid(),
+                'customerid'  => $client->getCustomerid(),
                 'txlogisticid'=> $tx,
 
                 'ordertype' => '1',
