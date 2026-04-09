@@ -38,7 +38,7 @@ return [
 
     // Sender defaults (edit this to your real warehouse/pickup)
     'sender' => [
-        'name'    => env('JNT_SENDER_NAME', 'INCEPXION INC'),
+        'name'    => env('JNT_SENDER_NAME', ''),
         'phone'   => env('JNT_SENDER_PHONE', '09170000000'),
         'mobile'  => env('JNT_SENDER_MOBILE', '09170000000'),
         'prov'    => env('JNT_SENDER_PROV', 'METRO-MANILA'),

@@ -56,7 +56,7 @@ class JntOrderUiController extends Controller
         }
 
         return (object) [
-            'sender_name'    => $mappedSenderName ?: (config('jnt.sender.name') ?: 'INCEPXION INC'),
+            'sender_name'    => $mappedSenderName ?: (config('jnt.sender.name') ?? ''),
             'sender_phone'   => $addrRow->jnt_sender_phone   ?? (config('jnt.sender.phone') ?? ''),
             'sender_prov'    => $addrRow->jnt_sender_prov    ?? (config('jnt.sender.prov') ?? ''),
             'sender_city'    => $addrRow->jnt_sender_city    ?? (config('jnt.sender.city') ?? ''),
