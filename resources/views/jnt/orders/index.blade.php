@@ -13,6 +13,7 @@
     $run   = $run ?? null;
 
     $senderPreview = $senderPreview ?? null;
+    $accountCheck  = $accountCheck ?? (object)['ok' => true, 'account' => null, 'message' => null];
 
     // ✅ statusGate shape coming from controller:
     // enabled, ok, total_all, missing_status, proceed_total, invalid_proceed, message
@@ -51,7 +52,8 @@
     $gateOk      = (!$gateEnabled) ? true : (bool) data_get($statusGate, 'ok', true);
     $gateBlocked = $gateEnabled && !$gateOk;
 
-    $canCreateBatch = ($selectedDate && $selectedPage && !$gateBlocked);
+    $accountOk      = (bool) data_get($accountCheck, 'ok', true);
+    $canCreateBatch = ($selectedDate && $selectedPage && !$gateBlocked && $accountOk);
   @endphp
 
   <style>
@@ -250,6 +252,37 @@
         <div class="text-xs muted mb-1">Sender Address</div>
         <div class="text-sm">{{ data_get($senderPreview,'sender_address','-') ?: '-' }}</div>
       </div>
+
+      {{-- JNT Account indicator --}}
+      @if($selectedPage !== '' && !$isRunView)
+        <div class="p-3 border rounded-lg md:col-span-2
+          {{ $accountOk ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50' }}">
+          <div class="text-xs mb-1 {{ $accountOk ? 'text-green-700' : 'text-red-700' }} font-medium">
+            JNT Account
+          </div>
+          @if($accountOk && data_get($accountCheck,'account'))
+            <div class="text-sm font-semibold text-green-800">
+              {{ data_get($accountCheck,'account')->label }}
+            </div>
+            <div class="text-xs text-green-700 font-mono mt-0.5">
+              {{ data_get($accountCheck,'account')->eccompanyid }}
+              /
+              {{ data_get($accountCheck,'account')->customerid }}
+            </div>
+          @else
+            <div class="text-sm font-semibold text-red-700">
+              ⚠️ No account mapped
+            </div>
+            <div class="text-xs text-red-600 mt-0.5">
+              {{ data_get($accountCheck,'message') }}
+              <a href="{{ route('jnt.accounts.mapping') }}" class="underline font-medium ml-1">
+                Go to Page Mapping →
+              </a>
+            </div>
+          @endif
+        </div>
+      @endif
+
     </div>
   </div>
 

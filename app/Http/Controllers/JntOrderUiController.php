@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Jobs\CreateJntOrder;
 use App\Models\JntBatchRun;
 use App\Models\JntShipment;
+use App\Models\PageJntMapping;
 use App\Services\Jnt\JntClient; // ✅ FIX: correct namespace
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -66,6 +67,25 @@ class JntOrderUiController extends Controller
             'source_addr'    => $addrRow ? 'sender_addresses' : 'config_default',
         ];
     });
+
+    // ✅ JNT Account Check (preview only, when page is selected)
+    $accountCheck = (object) [
+        'ok'      => true,
+        'account' => null,
+        'message' => null,
+    ];
+
+    if ($page !== '' && !$run) {
+        $mapping = PageJntMapping::with('account')->where('page', $page)->first();
+
+        if ($mapping && $mapping->account) {
+            $accountCheck->ok      = true;
+            $accountCheck->account = $mapping->account;
+        } else {
+            $accountCheck->ok      = false;
+            $accountCheck->message = 'No JNT Account mapped for this page. Go to Page Mapping to assign one.';
+        }
+    }
 
     /**
      * ✅ STATUS + PROCEED VALIDATION GATE (preview only)
@@ -141,7 +161,7 @@ class JntOrderUiController extends Controller
         $runStats = null;
 
         return view('jnt.orders.index', compact(
-            'date','page','pages','run','rows','runStats','senderPreview','statusGate'
+            'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck'
         ));
     }
 
@@ -264,7 +284,7 @@ class JntOrderUiController extends Controller
     }
 
     return view('jnt.orders.index', compact(
-        'date','page','pages','run','rows','runStats','senderPreview','statusGate'
+        'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck'
     ));
 }
 
@@ -277,6 +297,13 @@ class JntOrderUiController extends Controller
     if ($page === '') {
         return redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date))
             ->with('error', 'Please select a Page first.');
+    }
+
+    // ✅ JNT Account mapping check — hard block if no account mapped
+    $mapping = PageJntMapping::with('account')->where('page', $page)->first();
+    if (!$mapping || !$mapping->account) {
+        return redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page))
+            ->with('error', 'No JNT Account mapped for "' . $page . '". Go to JNT Accounts → Page Mapping to assign one before creating a batch.');
     }
 
     $dayStart = Carbon::parse($date, 'Asia/Manila')->startOfDay();
