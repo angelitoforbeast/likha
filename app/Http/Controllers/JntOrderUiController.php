@@ -376,11 +376,24 @@ class JntOrderUiController extends Controller
         ->whereNotNull('COD')->where('COD', '!=', '');
 
     $macroIds = $macroQ->pluck('id')->all();
+
+    // ✅ Exclude macro IDs that already have a shipment record (successful OR failed)
+    // Successful → already done, no need to re-batch
+    // Failed → use "Retry Failed" button instead
+    if (!empty($macroIds)) {
+        $alreadyQueued = DB::table('jnt_shipments')
+            ->whereIn('macro_output_id', $macroIds)
+            ->pluck('macro_output_id')
+            ->all();
+
+        $macroIds = array_values(array_diff($macroIds, $alreadyQueued));
+    }
+
     $total = count($macroIds);
 
     if ($total <= 0) {
         return redirect()->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page))
-            ->with('error', 'No PROCEED rows found for the selected filters.');
+            ->with('error', 'No new orders to batch. All PROCEED rows already have shipment records. Use "Retry Failed" for failed ones.');
     }
 
     $run = JntBatchRun::query()->create([
