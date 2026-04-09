@@ -52,28 +52,47 @@ class CreateJntOrder implements ShouldQueue
     $norm = $this->normalizeMacroRow($rowArr);
 
     try {
-        $client = JntClient::fromConfig();
+        $page   = (string) ($norm['page'] ?? '');
+        $client = JntClient::fromPageOrConfig($page);
 
-        // ✅ IMPORTANT: force environment=yes for DEMO if you are using demostandard
-        // If production endpoint, set env based on config.
         $itemName = trim((string)($norm['item_name'] ?? 'Item'));
-if ($itemName === '') $itemName = 'Item';
+        if ($itemName === '') $itemName = 'Item';
 
-// ✅ IMPORTANT: make txlogisticid STABLE (see #2 below)
-$tx = $shipment->txlogisticid;
-if (empty($tx)) {
-    $tx = 'MO-' . $shipment->id; // stable
-    $shipment->txlogisticid = $tx;
-    $shipment->save();
-}
+        // Apply force_uppercase if enabled on the account
+        if ($client->isForceUppercase()) {
+            $norm['full_name']    = mb_strtoupper((string)($norm['full_name'] ?? ''));
+            $norm['FULL NAME']    = mb_strtoupper((string)($norm['FULL NAME'] ?? ''));
+            $norm['address']      = mb_strtoupper((string)($norm['address'] ?? ''));
+            $norm['ADDRESS']      = mb_strtoupper((string)($norm['ADDRESS'] ?? ''));
+            $norm['province']     = mb_strtoupper((string)($norm['province'] ?? ''));
+            $norm['PROVINCE']     = mb_strtoupper((string)($norm['PROVINCE'] ?? ''));
+            $norm['city']         = mb_strtoupper((string)($norm['city'] ?? ''));
+            $norm['CITY']         = mb_strtoupper((string)($norm['CITY'] ?? ''));
+            $norm['barangay']     = mb_strtoupper((string)($norm['barangay'] ?? ''));
+            $norm['BARANGAY']     = mb_strtoupper((string)($norm['BARANGAY'] ?? ''));
+            $norm['item_name']    = mb_strtoupper((string)($norm['item_name'] ?? ''));
+            $norm['ITEM_NAME']    = mb_strtoupper((string)($norm['ITEM_NAME'] ?? ''));
+            $itemName             = mb_strtoupper($itemName);
+        }
 
-// ✅ sender from DB (global or per page)
-$senderOpts = $this->resolveSenderOpts((string)($norm['page'] ?? ''));
+        // Generate stable pure-numeric txlogisticid: 4905026 + MMDD + shipmentId (8 digits)
+        $tx = $shipment->txlogisticid;
+        if (empty($tx)) {
+            $mmdd = now('Asia/Manila')->format('md');
+            $tx   = '4905026' . $mmdd . str_pad((string)$shipment->id, 8, '0', STR_PAD_LEFT);
+            $shipment->txlogisticid = $tx;
+            $shipment->save();
+        }
 
-$payload = JntPayloadBuilder::buildCreateFromMacroOutput($norm, array_merge([
-    'txlogisticid' => $tx,
-    'remark'       => $itemName,
-], $senderOpts));
+        // ✅ sender from DB (global or per page)
+        $senderOpts = $this->resolveSenderOpts($page);
+
+        $payload = JntPayloadBuilder::buildCreateFromMacroOutput($norm, array_merge([
+            'txlogisticid' => $tx,
+            'remark'       => $itemName,
+            'eccompanyid'  => $client->getEccompanyid(),
+            'customerid'   => $client->getCustomerid(),
+        ], $senderOpts));
 
 
 

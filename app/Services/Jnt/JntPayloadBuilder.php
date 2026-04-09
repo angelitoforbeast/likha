@@ -21,8 +21,9 @@ class JntPayloadBuilder
     {
         $now = Carbon::now('Asia/Manila');
 
-        $ec   = (string) config('jnt.credentials.eccompanyid');
-        $cust = (string) config('jnt.credentials.customerid');
+        // Use per-page credentials from opts if provided, fallback to config
+        $ec   = (string) ($opts['eccompanyid'] ?? config('jnt.credentials.eccompanyid'));
+        $cust = (string) ($opts['customerid']  ?? config('jnt.credentials.customerid'));
 
         // Environment: doc says staging=yes, production=no(default)
         $envYesNo = (string)($opts['environment'] ?? (config('jnt.env') === 'sandbox' ? 'yes' : 'no'));
