@@ -159,9 +159,10 @@ class JntOrderUiController extends Controller
     if (!$run && $statusGate->enabled && !$statusGate->ok) {
         $rows = collect([]);   // no data
         $runStats = null;
+        $retryRun = null;
 
         return view('jnt.orders.index', compact(
-            'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck'
+            'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryRun'
         ));
     }
 
@@ -283,8 +284,20 @@ class JntOrderUiController extends Controller
         $runStats = null;
     }
 
+    // ✅ Option A: In preview mode, detect latest run with failures for this date+page
+    $retryRun = null;
+    if (!$run && $page !== '') {
+        $retryRun = JntBatchRun::query()
+            ->where('fail_count', '>', 0)
+            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(filters, '$.date')) = ?", [$date])
+            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(filters, '$.page')) = ?", [$page])
+            ->whereIn('status', ['finished', 'done', 'stopped'])
+            ->orderByDesc('id')
+            ->first();
+    }
+
     return view('jnt.orders.index', compact(
-        'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck'
+        'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryRun'
     ));
 }
 

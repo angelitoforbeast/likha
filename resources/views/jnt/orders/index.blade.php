@@ -307,16 +307,29 @@
         </div>
       </div>
 
-      <form method="POST" action="{{ url('jnt/orders/batch') }}" class="flex gap-2">
-        @csrf
-        <input type="hidden" name="date" value="{{ $selectedDate }}">
-        <input type="hidden" name="page" value="{{ $selectedPage }}">
-        <button type="submit"
-          class="btn btn-blue {{ $canCreateBatch ? '' : 'btn-disabled' }}"
-          {{ $canCreateBatch ? '' : 'disabled' }}>
-          Create Batch (Queue)
-        </button>
-      </form>
+      <div class="flex gap-2 flex-wrap">
+        <form method="POST" action="{{ url('jnt/orders/batch') }}">
+          @csrf
+          <input type="hidden" name="date" value="{{ $selectedDate }}">
+          <input type="hidden" name="page" value="{{ $selectedPage }}">
+          <button type="submit"
+            class="btn btn-blue {{ $canCreateBatch ? '' : 'btn-disabled' }}"
+            {{ $canCreateBatch ? '' : 'disabled' }}>
+            Create Batch (Queue)
+          </button>
+        </form>
+
+        @if(!empty($retryRun) && $retryRun->fail_count > 0)
+          <form method="POST"
+                action="{{ url("jnt/orders/batch/{$retryRun->id}/retry-failed") }}"
+                onsubmit="return confirm('Retry {{ $retryRun->fail_count }} failed shipment(s) from Run #{{ $retryRun->id }}?')">
+            @csrf
+            <button type="submit" class="btn btn-yellow">
+              Retry Failed ({{ $retryRun->fail_count }}) — Run #{{ $retryRun->id }}
+            </button>
+          </form>
+        @endif
+      </div>
     </div>
   </div>
 
