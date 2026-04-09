@@ -25,6 +25,8 @@ class JntAccountController extends Controller
             'customerid'  => 'required|string|max:100',
         ]);
 
+        $data['force_uppercase'] = $request->boolean('force_uppercase');
+
         JntAccount::create($data);
 
         return back()->with('success', 'JNT Account added successfully.');
@@ -37,6 +39,8 @@ class JntAccountController extends Controller
             'eccompanyid' => 'required|string|max:100',
             'customerid'  => 'required|string|max:100',
         ]);
+
+        $data['force_uppercase'] = $request->boolean('force_uppercase');
 
         $account->update($data);
 

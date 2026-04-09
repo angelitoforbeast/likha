@@ -60,6 +60,16 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
             $itemName = trim((string)($row->ITEM_NAME ?? ''));
             $cod      = (string)($row->COD ?? '');
 
+            // Apply force uppercase if enabled on the account
+            if ($client->isForceUppercase()) {
+                $fullName = mb_strtoupper($fullName);
+                $addr1    = mb_strtoupper($addr1);
+                $prov     = mb_strtoupper($prov);
+                $city     = mb_strtoupper($city);
+                $brgy     = mb_strtoupper($brgy);
+                $itemName = mb_strtoupper($itemName);
+            }
+
             // Basic validation
             if ($fullName === '' || $phone === '' || $addr1 === '' || $prov === '' || $city === '' || $brgy === '' || $itemName === '' || $cod === '') {
                 $this->storeFail($run, $macroId, [

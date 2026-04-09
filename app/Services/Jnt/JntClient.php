@@ -18,7 +18,8 @@ class JntClient
         protected string $secret,        // signing key ("key" in doc)
         protected ?string $apiKey = null, // optional header key
         protected int $timeoutSeconds = 30,
-        protected array $endpoints = []
+        protected array $endpoints = [],
+        protected bool $forceUppercase = false,
     ) {}
 
     public static function fromConfig(): self
@@ -68,9 +69,12 @@ class JntClient
             ->where('page', $page)
             ->first();
 
+        $forceUppercase = false;
+
         if ($mapping && $mapping->account) {
-            $ec   = (string) $mapping->account->eccompanyid;
-            $cust = (string) $mapping->account->customerid;
+            $ec             = (string) $mapping->account->eccompanyid;
+            $cust           = (string) $mapping->account->customerid;
+            $forceUppercase = (bool) $mapping->account->force_uppercase;
         } else {
             $ec   = (string) (config('jnt.credentials.eccompanyid') ?? '');
             $cust = (string) (config('jnt.credentials.customerid') ?? '');
@@ -88,11 +92,13 @@ class JntClient
             apiKey: $apiKey,
             timeoutSeconds: (int) (config('jnt.timeout', 30)),
             endpoints: $endpoints,
+            forceUppercase: $forceUppercase,
         );
     }
 
-    public function getEccompanyid(): string { return $this->eccompanyid; }
-    public function getCustomerid(): string  { return $this->customerid; }
+    public function getEccompanyid(): string   { return $this->eccompanyid; }
+    public function getCustomerid(): string    { return $this->customerid; }
+    public function isForceUppercase(): bool   { return $this->forceUppercase; }
 
     public function createOrder(array $payload): array
 {

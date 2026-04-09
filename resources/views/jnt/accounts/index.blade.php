@@ -72,6 +72,7 @@
             <th class="px-3 py-2 border-b text-left">Label</th>
             <th class="px-3 py-2 border-b text-left">EC Company ID</th>
             <th class="px-3 py-2 border-b text-left">Customer ID</th>
+            <th class="px-3 py-2 border-b text-center">Uppercase</th>
             <th class="px-3 py-2 border-b text-center">Actions</th>
           </tr>
         </thead>
@@ -91,6 +92,15 @@
               </template>
               <template x-if="!editing">
                 <td class="px-3 py-2 border-b text-center">
+                  @if($acc->force_uppercase)
+                    <span class="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">ON</span>
+                  @else
+                    <span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs">OFF</span>
+                  @endif
+                </td>
+              </template>
+              <template x-if="!editing">
+                <td class="px-3 py-2 border-b text-center">
                   <button @click="editing = true" class="text-blue-600 hover:underline text-xs mr-2">Edit</button>
                   <form action="{{ route('jnt.accounts.destroy', $acc) }}" method="POST" class="inline"
                         onsubmit="return confirm('Delete this account? Mapped pages will lose their assignment.')">
@@ -102,7 +112,7 @@
 
               {{-- Edit mode --}}
               <template x-if="editing">
-                <td colspan="4" class="px-3 py-2 border-b">
+                <td colspan="5" class="px-3 py-2 border-b">
                   <form action="{{ route('jnt.accounts.update', $acc) }}" method="POST"
                         class="flex items-center gap-2 flex-wrap">
                     @csrf @method('PUT')
@@ -115,6 +125,12 @@
                     <input type="text" name="customerid" value="{{ $acc->customerid }}"
                            placeholder="Customer ID"
                            class="border rounded px-2 py-1 text-sm w-36" required>
+                    <label class="flex items-center gap-1.5 text-sm cursor-pointer select-none">
+                      <input type="checkbox" name="force_uppercase" value="1"
+                             {{ $acc->force_uppercase ? 'checked' : '' }}
+                             class="rounded">
+                      Force Uppercase
+                    </label>
                     <button type="submit"
                             class="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700">
                       Save
@@ -130,7 +146,7 @@
             </tr>
           @empty
             <tr>
-              <td colspan="4" class="px-3 py-4 text-center text-gray-500">
+              <td colspan="5" class="px-3 py-4 text-center text-gray-500">
                 No accounts yet. Add one above.
               </td>
             </tr>
