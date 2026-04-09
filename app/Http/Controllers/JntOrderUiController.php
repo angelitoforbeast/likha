@@ -419,6 +419,41 @@ class JntOrderUiController extends Controller
         return redirect()->to(url('/jnt/orders') . '?run_id=' . $runId);
     }
 
+    public function retryFailed(int $runId)
+    {
+        $run = JntBatchRun::query()->findOrFail($runId);
+
+        // Get failed shipments only — success=0 and no mailno yet
+        $failedIds = JntShipment::query()
+            ->where('jnt_batch_run_id', $runId)
+            ->where('success', 0)
+            ->whereNull('mailno')
+            ->pluck('id')
+            ->all();
+
+        if (empty($failedIds)) {
+            return redirect()->to(url('/jnt/orders') . '?run_id=' . $runId)
+                ->with('error', 'No failed shipments to retry.');
+        }
+
+        $count = count($failedIds);
+
+        // Reset run counters for retry
+        $run->fail_count  = max(0, (int)$run->fail_count - $count);
+        $run->processed   = max(0, (int)$run->processed - $count);
+        $run->status      = 'running';
+        $run->finished_at = null;
+        $run->save();
+
+        // Re-dispatch only failed shipments
+        foreach ($failedIds as $sid) {
+            CreateJntOrder::dispatch((int) $sid);
+        }
+
+        return redirect()->to(url('/jnt/orders') . '?run_id=' . $runId)
+            ->with('success', "Retrying {$count} failed shipment(s) in Run #{$runId}.");
+    }
+
     public function status(Request $request, int $runId)
 {
     $run = JntBatchRun::query()->findOrFail($runId);

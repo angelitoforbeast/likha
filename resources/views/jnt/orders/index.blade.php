@@ -66,6 +66,8 @@
     .btn-gray { background:#e5e7eb; color:#111827; }
     .btn-gray:hover { background:#d1d5db; }
     .btn-disabled { background:#e5e7eb; color:#6b7280; cursor:not-allowed; }
+    .btn-yellow { background:#d97706; color:#fff; }
+    .btn-yellow:hover { background:#b45309; }
     .card { background:#fff; border:1px solid #e5e7eb; border-radius:1rem; }
     .muted { color:#6b7280; }
     .badge { font-size:.75rem; padding:.25rem .5rem; border-radius:999px; display:inline-flex; align-items:center; }
@@ -173,7 +175,7 @@
             @endif
           </div>
 
-          <div class="flex gap-2">
+          <div class="flex gap-2 flex-wrap">
             <form method="POST" action="{{ url("jnt/orders/batch/{$runId}/print-zip") }}">
               @csrf
               <button type="submit" class="btn btn-gray">Print Run (ZIP)</button>
@@ -183,6 +185,14 @@
               @csrf
               <button type="submit" class="btn btn-red">Stop Run</button>
             </form>
+
+            @if(($fail ?? 0) > 0)
+              <form method="POST" action="{{ url("jnt/orders/batch/{$runId}/retry-failed") }}"
+                    onsubmit="return confirm('Retry {{ $fail }} failed shipment(s) in Run #{{ $runId }}?')">
+                @csrf
+                <button type="submit" class="btn btn-yellow">Retry Failed ({{ $fail }})</button>
+              </form>
+            @endif
           </div>
         @endif
       </div>

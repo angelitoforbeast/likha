@@ -383,6 +383,7 @@ Route::post('jnt/orders/batch', [\App\Http\Controllers\JntOrderUiController::cla
 Route::get('jnt/orders/batch/{runId}', [\App\Http\Controllers\JntOrderUiController::class, 'showRun']);
 Route::get('jnt/orders/batch/{runId}/status', [\App\Http\Controllers\JntOrderUiController::class, 'status']);
 Route::post('jnt/orders/batch/{runId}/stop', [\App\Http\Controllers\JntOrderUiController::class, 'stop']);
+Route::post('jnt/orders/batch/{runId}/retry-failed', [\App\Http\Controllers\JntOrderUiController::class, 'retryFailed'])->name('jnt.orders.retry-failed');
 Route::get('jnt/orders/debug/{shipmentId}', [\App\Http\Controllers\JntOrderUiController::class, 'debug'])
     ->whereNumber('shipmentId');
 // ✅ Print one waybill (opens PDF)
