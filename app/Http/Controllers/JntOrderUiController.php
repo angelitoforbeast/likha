@@ -285,13 +285,22 @@ class JntOrderUiController extends Controller
     }
 
     // ✅ Option A: In preview mode, detect latest run with failures for this date+page
+    // Use a join instead of JSON_EXTRACT to avoid issues with stored filter format
     $retryRun = null;
     if (!$run && $page !== '') {
         $retryRun = JntBatchRun::query()
             ->where('fail_count', '>', 0)
-            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(filters, '$.date')) = ?", [$date])
-            ->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(filters, '$.page')) = ?", [$page])
             ->whereIn('status', ['finished', 'done', 'stopped'])
+            ->whereExists(function ($q) use ($dayStart, $dayEnd, $page) {
+                $q->select(DB::raw(1))
+                    ->from('jnt_shipments as s')
+                    ->join('macro_output as m', 'm.id', '=', 's.macro_output_id')
+                    ->whereColumn('s.jnt_batch_run_id', 'jnt_batch_runs.id')
+                    ->where('s.success', 0)
+                    ->whereNull('s.mailno')
+                    ->whereBetween('m.ts_date', [$dayStart, $dayEnd])
+                    ->where('m.PAGE', $page);
+            })
             ->orderByDesc('id')
             ->first();
     }
@@ -397,7 +406,7 @@ class JntOrderUiController extends Controller
     }
 
     $run = JntBatchRun::query()->create([
-        'filters'       => json_encode(['date' => $date, 'page' => $page], JSON_UNESCAPED_UNICODE),
+        'filters'       => ['date' => $date, 'page' => $page],
         'total'         => $total,
         'processed'     => 0,
         'success_count' => 0,
