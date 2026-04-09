@@ -38,6 +38,21 @@ class JntOrderUiController extends Controller
     $dayStart = Carbon::parse($date, 'Asia/Manila')->startOfDay();
     $dayEnd   = Carbon::parse($date, 'Asia/Manila')->endOfDay();
 
+    // ✅ Auto-detect latest run for date+page if none given via URL
+    if (!$run && $page !== '') {
+        $run = JntBatchRun::query()
+            ->whereExists(function ($q) use ($dayStart, $dayEnd, $page) {
+                $q->select(DB::raw(1))
+                    ->from('jnt_shipments as s')
+                    ->join('macro_output as m', 'm.id', '=', 's.macro_output_id')
+                    ->whereColumn('s.jnt_batch_run_id', 'jnt_batch_runs.id')
+                    ->whereBetween('m.ts_date', [$dayStart, $dayEnd])
+                    ->where('m.PAGE', $page);
+            })
+            ->orderByDesc('id')
+            ->first();
+    }
+
     // ✅ Sender Preview (same as you have)
     $senderPreview = Cache::remember('jnt_sender_preview:' . ($page !== '' ? $page : 'default'), 60, function () use ($page) {
 
@@ -435,7 +450,7 @@ class JntOrderUiController extends Controller
     }
 
     return redirect()
-        ->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page) . '&run_id=' . $run->id)
+        ->to(url('/jnt/orders') . '?date=' . urlencode($date) . '&page=' . urlencode($page))
         ->with('success', "Batch created. Run #{$run->id} with {$total} shipments queued.");
 }
 

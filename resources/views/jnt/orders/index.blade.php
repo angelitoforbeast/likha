@@ -35,7 +35,7 @@
     }
 
     $runStatus = data_get($run, 'status', '');
-    $isRunView = !empty($runId);
+    $isRunView = $run !== null;
     $isRunning = $isRunView && in_array((string)$runStatus, ['running','queued','processing'], true);
 
     $total   = (int) data_get($runStats, 'total', 0);
@@ -135,21 +135,8 @@
           </select>
         </div>
 
-        <div>
-          <label class="block text-sm font-medium mb-1">Run ID</label>
-          <input id="jsRunId" type="number" name="run_id" value="{{ $runId }}" placeholder="(optional)"
-                 class="border rounded-lg px-3 py-2 text-sm w-32">
-        </div>
-
         <div class="flex gap-2">
           <button type="submit" class="btn btn-blue">Filter</button>
-
-          @if($isRunView)
-            <a class="btn btn-gray"
-               href="{{ url('jnt/orders') }}?date={{ urlencode($selectedDate) }}&page={{ urlencode($selectedPage) }}">
-              Back to Preview
-            </a>
-          @endif
         </div>
       </form>
 
@@ -157,7 +144,7 @@
         @if($isRunView)
           <div class="text-sm">
             <div class="font-semibold">
-              Viewing Run #{{ $runId }}
+              Run #{{ $run->id }}
               <span class="muted">— status:</span>
               <span class="mono" id="jsStatus">{{ $runStatus ?? 'unknown' }}</span>
               <span class="muted">— processed</span>
@@ -176,47 +163,36 @@
           </div>
 
           <div class="flex gap-2 flex-wrap">
-            <form method="POST" action="{{ url("jnt/orders/batch/{$runId}/print-zip") }}">
+            <form method="POST" action="{{ url("jnt/orders/batch/{$run->id}/print-zip") }}">
               @csrf
               <button type="submit" class="btn btn-gray">Print Run (ZIP)</button>
             </form>
 
-            <form method="POST" action="{{ url("jnt/orders/batch/{$runId}/stop") }}">
+            <form method="POST" action="{{ url("jnt/orders/batch/{$run->id}/stop") }}">
               @csrf
               <button type="submit" class="btn btn-red">Stop Run</button>
             </form>
-
-            @if(($fail ?? 0) > 0)
-              <form method="POST" action="{{ url("jnt/orders/batch/{$runId}/retry-failed") }}"
-                    onsubmit="return confirm('Retry {{ $fail }} failed shipment(s) in Run #{{ $runId }}?')">
-                @csrf
-                <button type="submit" class="btn btn-yellow">Retry Failed ({{ $fail }})</button>
-              </form>
-            @endif
           </div>
         @endif
       </div>
     </div>
   </div>
 
-  {{-- ✅ Auto-submit behavior: date/page change = clear run_id (switch to preview) --}}
+  {{-- ✅ Auto-submit: date/page change = auto-filter --}}
   <script>
     (function () {
       const form = document.getElementById('filterForm');
       const elDate = document.getElementById('jsDate');
       const elPage = document.getElementById('jsPage');
-      const elRun  = document.getElementById('jsRunId');
 
-      if (!form || !elDate || !elPage || !elRun) return;
+      if (!form || !elDate || !elPage) return;
 
       elDate.addEventListener('change', function () {
         elPage.value = '';
-        elRun.value = '';
         form.submit();
       });
 
       elPage.addEventListener('change', function () {
-        elRun.value = '';
         form.submit();
       });
     })();
@@ -479,7 +455,7 @@
   @if($isRunView)
     <script>
       (function () {
-        const statusUrl = @json(url("jnt/orders/batch/{$runId}/status"));
+        const statusUrl = @json(url("jnt/orders/batch/{$run->id}/status"));
         const isRunning = @json($isRunning);
 
         let paused = false;
