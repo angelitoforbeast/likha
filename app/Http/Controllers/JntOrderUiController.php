@@ -299,9 +299,9 @@ class JntOrderUiController extends Controller
         $runStats = null;
     }
 
-    // ✅ Option A: Count actual retryable failed shipments for this date+page
+    // ✅ Count actual retryable failed shipments for this date+page
     $retryFailCount = 0;
-    if (!$run && $page !== '') {
+    if ($page !== '') {
         $retryFailCount = (int) DB::table('jnt_shipments as s')
             ->join('macro_output as m', 'm.id', '=', 's.macro_output_id')
             ->where('s.success', 0)
