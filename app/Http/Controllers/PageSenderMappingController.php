@@ -7,40 +7,50 @@ use Illuminate\Support\Facades\DB;
 
 class PageSenderMappingController extends Controller
 {
-    /**
-     * Show the sender-name page with existing mappings
-     */
+    private function getDefaultColumns(): int
+    {
+        $val = DB::table('app_settings')
+            ->where('key', 'jnt_sender_default_columns')
+            ->value('value');
+        return (int) ($val ?: 2);
+    }
+
     public function index(Request $request)
-{
-    $search = $request->input('search');
+    {
+        $search = $request->input('search');
+        $defaultColumns = $this->getDefaultColumns();
 
-    $query = DB::table('page_sender_mappings')->orderBy('created_at', 'desc');
+        $query = DB::table('page_sender_mappings')->orderBy('created_at', 'desc');
 
-    $likeOperator = DB::getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+        $likeOperator = DB::getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
 
-if ($search) {
-    $query->where(function ($q) use ($search, $likeOperator) {
-        $q->where('PAGE', $likeOperator, '%' . $search . '%')
-          ->orWhere('SENDER_NAME', $likeOperator, '%' . $search . '%');
-    });
-}
+        if ($search) {
+            $query->where(function ($q) use ($search, $likeOperator) {
+                $q->where('PAGE', $likeOperator, '%' . $search . '%')
+                  ->orWhere('SENDER_NAME', $likeOperator, '%' . $search . '%')
+                  ->orWhere('item_name', $likeOperator, '%' . $search . '%');
+            });
+        }
 
+        $mappings = $query->paginate(100);
 
-    $mappings = $query->paginate(100);
+        return view('jnt.sender-name', compact('mappings', 'defaultColumns'));
+    }
 
-    return view('jnt.sender-name', compact('mappings'));
-}
+    public function saveSetting(Request $request)
+    {
+        $cols = (int) $request->input('default_columns', 2);
+        $cols = in_array($cols, [2, 3]) ? $cols : 2;
 
-    public function delete($id)
-{
-    DB::table('page_sender_mappings')->where('id', $id)->delete();
-    return back()->with('success', 'Deleted successfully.');
-}
+        DB::table('app_settings')->upsert(
+            [['key' => 'jnt_sender_default_columns', 'value' => (string) $cols, 'created_at' => now(), 'updated_at' => now()]],
+            ['key'],
+            ['value', 'updated_at']
+        );
 
+        return back()->with('success', "Default set to {$cols} columns.");
+    }
 
-    /**
-     * Save pasted sender-name data to database (no duplicates)
-     */
     public function save(Request $request)
     {
         $rawInput = $request->input('bulk_data');
@@ -49,48 +59,66 @@ if ($search) {
             return back()->with('error', 'No data pasted.');
         }
 
-        $lines = explode(PHP_EOL, trim($rawInput));
+        $lines = explode("\n", trim($rawInput));
         $rowsToInsert = [];
         $skippedCount = 0;
 
         foreach ($lines as $line) {
-            $parts = preg_split("/\t+/", trim($line));
+            $line = trim($line);
+            if ($line === '') continue;
 
-            if (count($parts) < 2) {
+            $parts = preg_split("/\t+/", $line);
+
+            if (count($parts) === 2) {
+                // 2-column: PAGE + SENDER_NAME
+                $page       = trim($parts[0]);
+                $itemName   = null;
+                $senderName = trim($parts[1]);
+            } elseif (count($parts) >= 3) {
+                // 3-column: PAGE + ITEM_NAME + SENDER_NAME
+                $page       = trim($parts[0]);
+                $itemName   = trim($parts[1]);
+                $senderName = trim($parts[2]);
+            } else {
                 continue;
             }
 
-            $page = trim($parts[0]);
-            $senderName = trim($parts[1]);
+            if (!$page || !$senderName) continue;
 
-            if ($page && $senderName) {
-                // Check for existing row
-                $exists = DB::table('page_sender_mappings')
-                    ->where('PAGE', $page)
-                    ->where('SENDER_NAME', $senderName)
-                    ->exists();
+            // Check for existing duplicate
+            $exists = DB::table('page_sender_mappings')
+                ->where('PAGE', $page)
+                ->where('SENDER_NAME', $senderName)
+                ->when($itemName !== null,
+                    fn($q) => $q->where('item_name', $itemName),
+                    fn($q) => $q->whereNull('item_name')
+                )
+                ->exists();
 
-                if (!$exists) {
-                    $rowsToInsert[] = [
-                        'PAGE' => $page,
-                        'SENDER_NAME' => $senderName,
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ];
-                } else {
-                    $skippedCount++;
-                }
+            if (!$exists) {
+                $rowsToInsert[] = [
+                    'PAGE'        => $page,
+                    'item_name'   => $itemName,
+                    'SENDER_NAME' => $senderName,
+                    'created_at'  => now(),
+                    'updated_at'  => now(),
+                ];
+            } else {
+                $skippedCount++;
             }
         }
 
         if (count($rowsToInsert)) {
             DB::table('page_sender_mappings')->insert($rowsToInsert);
-        }
-
-        if (count($rowsToInsert)) {
             return back()->with('success', count($rowsToInsert) . ' inserted. ' . $skippedCount . ' skipped (already exist).');
         }
 
         return back()->with('error', 'All entries already exist. Nothing inserted.');
+    }
+
+    public function delete($id)
+    {
+        DB::table('page_sender_mappings')->where('id', $id)->delete();
+        return back()->with('success', 'Deleted successfully.');
     }
 }

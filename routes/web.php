@@ -316,6 +316,7 @@ Route::get('/jnt/return/inventory', [JntReturnInventoryController::class, 'index
     
    Route::get('/jnt/sender-name', [PageSenderMappingController::class, 'index']);
 Route::post('/jnt/sender-name', [PageSenderMappingController::class, 'save']);
+Route::post('/jnt/sender-name/settings', [PageSenderMappingController::class, 'saveSetting']);
 Route::post('/jnt/sender-name/delete/{id}', [\App\Http\Controllers\PageSenderMappingController::class, 'delete']);
 
 Route::get('/jnt/item-sender-name', [\App\Http\Controllers\PageItemSenderMappingController::class, 'index']);
