@@ -68,10 +68,19 @@ class JntOrderUiController extends Controller
         $mappedSenderName = null;
         $variesPerItem    = false;
 
+        $senderNames = []; // distinct sender names when toggle ON
+
         if ($page !== '' && Schema::hasTable('page_sender_mappings')) {
             if ($useItemMapping) {
-                // Toggle ON: sender name depends on item — cannot show a single value in preview
+                // Toggle ON: list all distinct sender names for this page
                 $variesPerItem = true;
+                $senderNames = DB::table('page_sender_mappings')
+                    ->where('PAGE', $page)
+                    ->whereNotNull('item_name')
+                    ->distinct()
+                    ->orderBy('SENDER_NAME')
+                    ->pluck('SENDER_NAME')
+                    ->toArray();
             } else {
                 // Toggle OFF: page-level lookup only (item_name IS NULL)
                 $mappedSenderName = DB::table('page_sender_mappings')
@@ -92,6 +101,7 @@ class JntOrderUiController extends Controller
         return (object) [
             'sender_name'      => $mappedSenderName ?: (config('jnt.sender.name') ?? ''),
             'varies_per_item'  => $variesPerItem,
+            'sender_names'     => $senderNames,
             'sender_phone'     => $addrRow->jnt_sender_phone   ?? (config('jnt.sender.phone') ?? ''),
             'sender_prov'      => $addrRow->jnt_sender_prov    ?? (config('jnt.sender.prov') ?? ''),
             'sender_city'      => $addrRow->jnt_sender_city    ?? (config('jnt.sender.city') ?? ''),

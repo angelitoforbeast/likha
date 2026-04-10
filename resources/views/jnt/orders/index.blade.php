@@ -217,8 +217,15 @@
       <div class="p-3 border rounded-lg">
         <div class="text-xs muted mb-1">Sender Name</div>
         @if(data_get($senderPreview,'varies_per_item'))
-          <div class="font-medium text-amber-700">Varies per item</div>
-          <div class="text-xs text-amber-600 mt-1">Item Mapping is ON — sender name depends on item name per order.</div>
+          @php $senderNames = data_get($senderPreview,'sender_names',[]) @endphp
+          @if(count($senderNames))
+            @foreach($senderNames as $sn)
+              <div class="font-medium text-gray-800">{{ $sn }}</div>
+            @endforeach
+          @else
+            <div class="font-medium text-amber-700">No item mappings yet</div>
+          @endif
+          <div class="text-xs text-amber-600 mt-1">Item Mapping is ON — varies per item.</div>
         @else
           <div class="font-medium">{{ data_get($senderPreview,'sender_name','-') }}</div>
           @if(empty($selectedPage))
