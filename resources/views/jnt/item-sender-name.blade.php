@@ -33,20 +33,23 @@
         </div>
       </div>
 
-      <form method="GET" action="{{ url('jnt/item-sender-name') }}" class="flex gap-2">
+      <form method="GET" action="{{ url('jnt/item-sender-name') }}" class="flex flex-wrap gap-2 items-center">
+        <input type="date" name="date_from" value="{{ $dateFromStr }}"
+               class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        <span class="text-gray-400 text-sm">to</span>
+        <input type="date" name="date_to" value="{{ $dateToStr }}"
+               class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
         <input type="text" name="search" value="{{ $search }}"
                placeholder="Search page or item..."
-               class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-56">
+               class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-44">
         <button type="submit"
                 class="bg-gray-700 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-800">
-          Search
+          Filter
         </button>
-        @if($search)
-          <a href="{{ url('jnt/item-sender-name') }}"
-             class="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm hover:bg-gray-200">
-            Clear
-          </a>
-        @endif
+        <a href="{{ url('jnt/item-sender-name') }}"
+           class="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm hover:bg-gray-200">
+          Reset
+        </a>
       </form>
     </div>
 

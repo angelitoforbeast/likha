@@ -9,53 +9,67 @@ class PageItemSenderMappingController extends Controller
 {
     public function index(Request $request)
     {
-        $since  = now()->subDays(90)->startOfDay();
+        $dateFrom = $request->input('date_from')
+            ? \Carbon\Carbon::parse($request->input('date_from'), 'Asia/Manila')->startOfDay()
+            : now('Asia/Manila')->subDays(6)->startOfDay(); // last 7 days default
+
+        $dateTo = $request->input('date_to')
+            ? \Carbon\Carbon::parse($request->input('date_to'), 'Asia/Manila')->endOfDay()
+            : now('Asia/Manila')->endOfDay();
+
         $search = trim($request->input('search', ''));
 
-        $query = DB::table('macro_output as m')
-            ->select([
-                'm.PAGE as page',
-                'm.ITEM_NAME as item_name',
-                DB::raw("(
-                    SELECT psm.SENDER_NAME
-                    FROM page_sender_mappings psm
-                    WHERE psm.PAGE = m.PAGE
-                      AND psm.item_name = m.ITEM_NAME
-                      AND psm.item_name IS NOT NULL
-                    ORDER BY psm.id DESC
-                    LIMIT 1
-                ) as sender_name"),
-                DB::raw("(
-                    SELECT psm.id
-                    FROM page_sender_mappings psm
-                    WHERE psm.PAGE = m.PAGE
-                      AND psm.item_name = m.ITEM_NAME
-                      AND psm.item_name IS NOT NULL
-                    ORDER BY psm.id DESC
-                    LIMIT 1
-                ) as mapping_id"),
-            ])
-            ->where('m.ts_date', '>=', $since)
-            ->whereNotNull('m.PAGE')->where('m.PAGE', '!=', '')
-            ->whereNotNull('m.ITEM_NAME')->where('m.ITEM_NAME', '!=', '')
-            ->groupBy('m.PAGE', 'm.ITEM_NAME');
+        // Query 1: all unique Page+Item combos from macro_output (within date range)
+        $combosQuery = DB::table('macro_output')
+            ->select('PAGE as page', 'ITEM_NAME as item_name')
+            ->whereBetween('ts_date', [$dateFrom, $dateTo])
+            ->whereNotNull('PAGE')->where('PAGE', '!=', '')
+            ->whereNotNull('ITEM_NAME')->where('ITEM_NAME', '!=', '')
+            ->groupBy('PAGE', 'ITEM_NAME');
 
+        $combos = $combosQuery->get();
+
+        // Query 2: all item-level mappings (item_name IS NOT NULL), latest per page+item
+        $mappings = DB::table('page_sender_mappings')
+            ->whereNotNull('item_name')
+            ->select('PAGE', 'item_name', 'SENDER_NAME', 'id')
+            ->orderByDesc('id')
+            ->get()
+            ->groupBy(fn($r) => $r->PAGE . '|||' . $r->item_name)
+            ->map(fn($group) => $group->first()); // keep latest
+
+        // Merge in PHP
+        $rows = $combos->map(function ($r) use ($mappings) {
+            $key           = $r->page . '|||' . $r->item_name;
+            $mapping       = $mappings->get($key);
+            $r->sender_name = $mapping?->SENDER_NAME ?? null;
+            $r->mapping_id  = $mapping?->id ?? null;
+            return $r;
+        });
+
+        // Optional search filter
         if ($search !== '') {
-            $query->where(function ($q) use ($search) {
-                $q->where('m.PAGE', 'LIKE', "%{$search}%")
-                  ->orWhere('m.ITEM_NAME', 'LIKE', "%{$search}%")
-                  ->orWhere('m.SENDER_NAME', 'LIKE', "%{$search}%");
+            $s    = mb_strtolower($search);
+            $rows = $rows->filter(function ($r) use ($s) {
+                return str_contains(mb_strtolower($r->page), $s)
+                    || str_contains(mb_strtolower($r->item_name), $s)
+                    || str_contains(mb_strtolower((string) $r->sender_name), $s);
             });
         }
 
-        // Fetch then sort in PHP: unmapped first, then by page/item
-        $rows = $query->get()->sortBy(function ($r) {
-            return [empty($r->sender_name) ? 0 : 1, $r->page, $r->item_name];
-        })->values();
+        // Sort: unmapped first, then page asc, item_name asc
+        $rows = $rows->sortBy(fn($r) => [
+            empty($r->sender_name) ? 0 : 1,
+            $r->page,
+            $r->item_name,
+        ])->values();
 
         $unmappedCount = $rows->filter(fn($r) => empty($r->sender_name))->count();
 
-        return view('jnt.item-sender-name', compact('rows', 'search', 'unmappedCount'));
+        $dateFromStr = $dateFrom->toDateString();
+        $dateToStr   = $dateTo->toDateString();
+
+        return view('jnt.item-sender-name', compact('rows', 'search', 'unmappedCount', 'dateFromStr', 'dateToStr'));
     }
 
     public function save(Request $request)
