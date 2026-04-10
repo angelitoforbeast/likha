@@ -358,9 +358,19 @@ class JntOrderUiController extends Controller
             });
     }
 
+    // ✅ Distinct sender names for items actually in the current rows (for Sender Preview list)
+    $senderNamesForRows = [];
+    if ($useItemMappingForPage && !empty($senderNameMap)) {
+        $itemNamesInRows = collect($rows)->pluck('item_name')->unique()->filter()->values()->toArray();
+        $senderNamesForRows = array_values(array_unique(array_filter(
+            array_map(fn($item) => $senderNameMap[$item] ?? null, $itemNamesInRows)
+        )));
+        sort($senderNamesForRows);
+    }
+
     return view('jnt.orders.index', compact(
         'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryFailCount',
-        'useItemMappingForPage','senderNameMap'
+        'useItemMappingForPage','senderNameMap','senderNamesForRows'
     ));
 }
 

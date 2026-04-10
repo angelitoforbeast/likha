@@ -217,16 +217,8 @@
       <div class="p-3 border rounded-lg">
         <div class="text-xs muted mb-1">Sender Name</div>
         @if(data_get($senderPreview,'varies_per_item'))
-          @php
-            // Only show sender names for items that actually appear in the current orders
-            $itemsInOrders = collect($rows)->pluck('item_name')->unique()->filter()->values()->toArray();
-            $senderNamesForOrders = array_values(array_unique(array_filter(
-              array_map(fn($item) => $senderNameMap[$item] ?? null, $itemsInOrders)
-            )));
-            sort($senderNamesForOrders);
-          @endphp
-          @if(count($senderNamesForOrders))
-            @foreach($senderNamesForOrders as $sn)
+          @if(count($senderNamesForRows))
+            @foreach($senderNamesForRows as $sn)
               <div class="font-medium text-gray-800">{{ $sn }}</div>
             @endforeach
           @else
