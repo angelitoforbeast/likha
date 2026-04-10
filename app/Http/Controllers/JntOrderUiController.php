@@ -330,8 +330,27 @@ class JntOrderUiController extends Controller
             ->count();
     }
 
+    // ✅ Build sender name map for table rows (Shop Name column)
+    $useItemMappingForPage = data_get($senderPreview, 'varies_per_item', false);
+    $senderNameMap = []; // item_name => sender_name (only when toggle ON)
+
+    if ($useItemMappingForPage && $page !== '' && Schema::hasTable('page_sender_mappings')) {
+        DB::table('page_sender_mappings')
+            ->where('PAGE', $page)
+            ->whereNotNull('item_name')
+            ->orderByDesc('id')
+            ->get(['item_name', 'SENDER_NAME'])
+            ->each(function ($m) use (&$senderNameMap) {
+                // Latest wins per item_name
+                if (!isset($senderNameMap[$m->item_name])) {
+                    $senderNameMap[$m->item_name] = $m->SENDER_NAME;
+                }
+            });
+    }
+
     return view('jnt.orders.index', compact(
-        'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryFailCount'
+        'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryFailCount',
+        'useItemMappingForPage','senderNameMap'
     ));
 }
 

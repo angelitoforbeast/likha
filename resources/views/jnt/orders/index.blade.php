@@ -328,6 +328,7 @@
           <th class="p-2 text-left">Receiver</th>
           <th class="p-2 text-left">Prov / City / Brgy</th>
           <th class="p-2 text-left">Item</th>
+          <th class="p-2 text-left">Shop</th>
           <th class="p-2 text-left">COD</th>
           <th class="p-2 text-left">Mailno</th>
           <th class="p-2 text-left">TX</th>
@@ -343,7 +344,7 @@
 
         @if($gateBlocked)
           <tr>
-            <td colspan="14" class="p-6 text-center text-red-700">
+            <td colspan="15" class="p-6 text-center text-red-700">
               {{ data_get($statusGate,'message') ?? 'BLOCKED — walang preview data.' }}
             </td>
           </tr>
@@ -365,6 +366,9 @@
               $brgy       = data_get($r,'barangay','-');
 
               $item       = data_get($r,'item_name','-');
+              $shopName   = $useItemMappingForPage
+                              ? ($senderNameMap[$item] ?? '—')
+                              : ($senderPreview->sender_name ?: '—');
               $cod        = data_get($r,'cod','-');
 
               $mailno     = data_get($r,'mailno', null);
@@ -396,6 +400,7 @@
               </td>
 
               <td class="p-2 text-xs">{{ $item }}</td>
+              <td class="p-2 text-xs {{ $shopName === '—' ? 'text-red-400' : 'text-gray-700' }}">{{ $shopName }}</td>
               <td class="p-2 mono text-xs">{{ $cod }}</td>
 
               <td class="p-2 mono text-xs">{{ $mailno ?? '-' }}</td>
@@ -446,7 +451,7 @@
             </tr>
           @empty
             <tr>
-              <td colspan="14" class="p-6 text-center muted">
+              <td colspan="15" class="p-6 text-center muted">
                 No rows found. (Only STATUS=PROCEED + validate_1/validate_2/item_checker=1 are shown)
               </td>
             </tr>
