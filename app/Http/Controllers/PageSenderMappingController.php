@@ -34,7 +34,16 @@ class PageSenderMappingController extends Controller
 
         $mappings = $query->paginate(100);
 
-        return view('jnt.sender-name', compact('mappings', 'defaultColumns'));
+        // Build shop name → page map for conflict detection in live preview
+        // If a shop name appears on multiple pages (existing violations), first occurrence wins
+        $shopPageMap = DB::table('page_sender_mappings')
+            ->select('SENDER_NAME', 'PAGE')
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->unique('SENDER_NAME')
+            ->pluck('PAGE', 'SENDER_NAME');
+
+        return view('jnt.sender-name', compact('mappings', 'defaultColumns', 'shopPageMap'));
     }
 
     public function saveSetting(Request $request)
@@ -62,6 +71,19 @@ class PageSenderMappingController extends Controller
         $lines = explode("\n", trim($rawInput));
         $rowsToInsert = [];
         $skippedCount = 0;
+        $conflictCount = 0;
+
+        // Load existing shop→page map for conflict detection
+        $shopPageMap = DB::table('page_sender_mappings')
+            ->select('SENDER_NAME', 'PAGE')
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->unique('SENDER_NAME')
+            ->pluck('PAGE', 'SENDER_NAME')
+            ->toArray();
+
+        // Also track what we're about to insert (within this batch)
+        $batchShopPageMap = [];
 
         foreach ($lines as $line) {
             $line = trim($line);
@@ -85,7 +107,19 @@ class PageSenderMappingController extends Controller
 
             if (!$page || !$senderName) continue;
 
-            // Check for existing duplicate
+            // Check: shop name already used by a different page (existing DB records)
+            if (isset($shopPageMap[$senderName]) && $shopPageMap[$senderName] !== $page) {
+                $conflictCount++;
+                continue;
+            }
+
+            // Check: shop name already used by a different page (within this batch)
+            if (isset($batchShopPageMap[$senderName]) && $batchShopPageMap[$senderName] !== $page) {
+                $conflictCount++;
+                continue;
+            }
+
+            // Check for existing exact duplicate
             $exists = DB::table('page_sender_mappings')
                 ->where('PAGE', $page)
                 ->where('SENDER_NAME', $senderName)
@@ -103,17 +137,27 @@ class PageSenderMappingController extends Controller
                     'created_at'  => now(),
                     'updated_at'  => now(),
                 ];
+                $batchShopPageMap[$senderName] = $page;
+                // Update local map so subsequent rows in same batch reflect this
+                $shopPageMap[$senderName] = $page;
             } else {
                 $skippedCount++;
             }
         }
 
+        $parts = [];
         if (count($rowsToInsert)) {
             DB::table('page_sender_mappings')->insert($rowsToInsert);
-            return back()->with('success', count($rowsToInsert) . ' inserted. ' . $skippedCount . ' skipped (already exist).');
+            $parts[] = count($rowsToInsert) . ' inserted';
+        }
+        if ($skippedCount) $parts[] = $skippedCount . ' skipped (already exist)';
+        if ($conflictCount) $parts[] = $conflictCount . ' skipped (shop name already used by a different page)';
+
+        if (count($rowsToInsert)) {
+            return back()->with('success', implode('. ', $parts) . '.');
         }
 
-        return back()->with('error', 'All entries already exist. Nothing inserted.');
+        return back()->with('error', implode('. ', $parts) ?: 'Nothing inserted.');
     }
 
     public function delete($id)

@@ -1,7 +1,7 @@
 <x-layout>
   <x-slot name="heading">Sender Name Mapping</x-slot>
 
-  <div class="p-4 space-y-5" x-data="senderNameApp({{ $defaultColumns }})" x-init="init()">
+  <div class="p-4 space-y-5" x-data="senderNameApp({{ $defaultColumns }}, {{ json_encode($shopPageMap) }})" x-init="init()">
 
     {{-- Alerts --}}
     @if(session('success'))
@@ -92,14 +92,15 @@
             </thead>
             <tbody class="divide-y divide-gray-100">
               <template x-for="(r, i) in parsed" :key="i">
-                <tr :class="r.ok ? 'bg-white' : 'bg-red-50'">
+                <tr :class="r.ok ? 'bg-white' : (r.conflict ? 'bg-orange-50' : 'bg-red-50')">
                   <td class="px-3 py-1.5 text-gray-400 text-xs" x-text="i+1"></td>
                   <td class="px-3 py-1.5 font-medium" x-text="r.page || '—'"></td>
                   <td class="px-3 py-1.5 text-gray-600 font-mono text-xs" x-show="hasItemCol" x-text="r.itemName || '(none)'"></td>
                   <td class="px-3 py-1.5 text-gray-800" x-text="r.senderName || '—'"></td>
                   <td class="px-3 py-1.5">
                     <span x-show="r.ok" class="text-xs text-green-600 font-medium">✓ OK</span>
-                    <span x-show="!r.ok" class="text-xs text-red-500 font-medium" x-text="r.error"></span>
+                    <span x-show="!r.ok && r.conflict" class="text-xs text-orange-600 font-medium" x-text="r.error"></span>
+                    <span x-show="!r.ok && !r.conflict" class="text-xs text-red-500 font-medium" x-text="r.error"></span>
                   </td>
                 </tr>
               </template>
@@ -178,9 +179,10 @@
   </div>
 
   <script>
-    function senderNameApp(defaultCols) {
+    function senderNameApp(defaultCols, shopPageMap) {
       return {
         cols: defaultCols,
+        shopPageMap: shopPageMap || {},
         raw: '',
         parsed: [],
         showSettings: false,
@@ -193,23 +195,42 @@
 
         parse() {
           const lines = this.raw.split('\n').filter(l => l.trim() !== '');
+          // Track shop→page within this batch to catch intra-batch conflicts
+          const batchMap = {};
+
           this.parsed = lines.map(line => {
             const parts = line.split('\t');
             const cleaned = parts.map(p => p.trim());
+            let page, itemName, senderName;
 
             if (cleaned.length === 2) {
-              const [page, senderName] = cleaned;
-              if (!page) return { ok: false, page, itemName: null, senderName, error: 'Missing page' };
-              if (!senderName) return { ok: false, page, itemName: null, senderName, error: 'Missing shop name' };
-              return { ok: true, page, itemName: null, senderName };
+              [page, senderName] = cleaned;
+              itemName = null;
+              if (!page) return { ok: false, conflict: false, page, itemName, senderName, error: 'Missing page' };
+              if (!senderName) return { ok: false, conflict: false, page, itemName, senderName, error: 'Missing shop name' };
             } else if (cleaned.length >= 3) {
-              const [page, itemName, senderName] = cleaned;
-              if (!page) return { ok: false, page, itemName, senderName, error: 'Missing page' };
-              if (!senderName) return { ok: false, page, itemName, senderName, error: 'Missing shop name' };
-              return { ok: true, page, itemName, senderName };
+              [page, itemName, senderName] = cleaned;
+              if (!page) return { ok: false, conflict: false, page, itemName, senderName, error: 'Missing page' };
+              if (!senderName) return { ok: false, conflict: false, page, itemName, senderName, error: 'Missing shop name' };
             } else {
-              return { ok: false, page: cleaned[0] || '', itemName: null, senderName: '', error: 'Not enough columns' };
+              return { ok: false, conflict: false, page: cleaned[0] || '', itemName: null, senderName: '', error: 'Not enough columns' };
             }
+
+            // Check existing DB map for conflict
+            const existingPage = this.shopPageMap[senderName];
+            if (existingPage && existingPage !== page) {
+              return { ok: false, conflict: true, page, itemName, senderName, error: `Shop already used by "${existingPage}"` };
+            }
+
+            // Check intra-batch conflict
+            const batchPage = batchMap[senderName];
+            if (batchPage && batchPage !== page) {
+              return { ok: false, conflict: true, page, itemName, senderName, error: `Shop already used by "${batchPage}" in this batch` };
+            }
+
+            // Valid — register in batch map
+            batchMap[senderName] = page;
+            return { ok: true, conflict: false, page, itemName, senderName };
           });
         }
       }
