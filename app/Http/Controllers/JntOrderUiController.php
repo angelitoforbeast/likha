@@ -53,15 +53,33 @@ class JntOrderUiController extends Controller
             ->first();
     }
 
-    // ✅ Sender Preview (same as you have)
+    // ✅ Sender Preview — respects use_item_sender_mapping toggle per account
     $senderPreview = Cache::remember('jnt_sender_preview:' . ($page !== '' ? $page : 'default'), 60, function () use ($page) {
 
+        // Check if this page's JNT account has item-level mapping enabled
+        $useItemMapping = false;
+        if ($page !== '') {
+            $acctMapping = \App\Models\PageJntMapping::with('account')->where('page', $page)->first();
+            if ($acctMapping && $acctMapping->account) {
+                $useItemMapping = (bool) $acctMapping->account->use_item_sender_mapping;
+            }
+        }
+
         $mappedSenderName = null;
+        $variesPerItem    = false;
+
         if ($page !== '' && Schema::hasTable('page_sender_mappings')) {
-            $mappedSenderName = DB::table('page_sender_mappings')
-                ->where('PAGE', $page)
-                ->orderByDesc('id')
-                ->value('SENDER_NAME');
+            if ($useItemMapping) {
+                // Toggle ON: sender name depends on item — cannot show a single value in preview
+                $variesPerItem = true;
+            } else {
+                // Toggle OFF: page-level lookup only (item_name IS NULL)
+                $mappedSenderName = DB::table('page_sender_mappings')
+                    ->where('PAGE', $page)
+                    ->whereNull('item_name')
+                    ->orderByDesc('id')
+                    ->value('SENDER_NAME');
+            }
         }
 
         $addrRow = null;
@@ -72,14 +90,15 @@ class JntOrderUiController extends Controller
         }
 
         return (object) [
-            'sender_name'    => $mappedSenderName ?: (config('jnt.sender.name') ?? ''),
-            'sender_phone'   => $addrRow->jnt_sender_phone   ?? (config('jnt.sender.phone') ?? ''),
-            'sender_prov'    => $addrRow->jnt_sender_prov    ?? (config('jnt.sender.prov') ?? ''),
-            'sender_city'    => $addrRow->jnt_sender_city    ?? (config('jnt.sender.city') ?? ''),
-            'sender_brgy'    => $addrRow->jnt_sender_area    ?? (config('jnt.sender.area') ?? ''),
-            'sender_address' => $addrRow->jnt_sender_address ?? (config('jnt.sender.address') ?? ''),
-            'source_mapping' => $mappedSenderName ? 'page_sender_mappings' : 'config_default',
-            'source_addr'    => $addrRow ? 'sender_addresses' : 'config_default',
+            'sender_name'      => $mappedSenderName ?: (config('jnt.sender.name') ?? ''),
+            'varies_per_item'  => $variesPerItem,
+            'sender_phone'     => $addrRow->jnt_sender_phone   ?? (config('jnt.sender.phone') ?? ''),
+            'sender_prov'      => $addrRow->jnt_sender_prov    ?? (config('jnt.sender.prov') ?? ''),
+            'sender_city'      => $addrRow->jnt_sender_city    ?? (config('jnt.sender.city') ?? ''),
+            'sender_brgy'      => $addrRow->jnt_sender_area    ?? (config('jnt.sender.area') ?? ''),
+            'sender_address'   => $addrRow->jnt_sender_address ?? (config('jnt.sender.address') ?? ''),
+            'source_mapping'   => $variesPerItem ? 'item_mappings (varies per item)' : ($mappedSenderName ? 'page_sender_mappings' : 'config_default'),
+            'source_addr'      => $addrRow ? 'sender_addresses' : 'config_default',
         ];
     });
 

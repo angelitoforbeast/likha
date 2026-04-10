@@ -216,9 +216,14 @@
     <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
       <div class="p-3 border rounded-lg">
         <div class="text-xs muted mb-1">Sender Name</div>
-        <div class="font-medium">{{ data_get($senderPreview,'sender_name','-') }}</div>
-        @if(empty($selectedPage))
-          <div class="text-xs muted mt-1">Tip: Select a Page para makita yung mapped SENDER_NAME.</div>
+        @if(data_get($senderPreview,'varies_per_item'))
+          <div class="font-medium text-amber-700">Varies per item</div>
+          <div class="text-xs text-amber-600 mt-1">Item Mapping is ON — sender name depends on item name per order.</div>
+        @else
+          <div class="font-medium">{{ data_get($senderPreview,'sender_name','-') }}</div>
+          @if(empty($selectedPage))
+            <div class="text-xs muted mt-1">Tip: Select a Page para makita yung mapped SENDER_NAME.</div>
+          @endif
         @endif
       </div>
 
