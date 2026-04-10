@@ -361,7 +361,8 @@ class JntOrderUiController extends Controller
     // ✅ Distinct sender names for items actually in the current rows (for Sender Preview list)
     $senderNamesForRows = [];
     if ($useItemMappingForPage && !empty($senderNameMap)) {
-        $itemNamesInRows = collect($rows)->pluck('item_name')->unique()->filter()->values()->toArray();
+        // $rows is a SimplePaginator — use ->items() to get the actual rows
+        $itemNamesInRows = collect($rows->items())->pluck('item_name')->unique()->filter()->values()->toArray();
         $senderNamesForRows = array_values(array_unique(array_filter(
             array_map(fn($item) => $senderNameMap[$item] ?? null, $itemNamesInRows)
         )));
