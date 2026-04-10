@@ -53,7 +53,16 @@
       </div>
 
       {{-- Textarea --}}
-      <textarea x-model="raw" @input="parse()" rows="10"
+      <textarea x-model="raw" @input="parse()"
+                @keydown.tab.prevent="
+                  const el = $event.target;
+                  const start = el.selectionStart;
+                  const end = el.selectionEnd;
+                  raw = raw.substring(0, start) + '\t' + raw.substring(end);
+                  $nextTick(() => { el.selectionStart = el.selectionEnd = start + 1; });
+                  parse();
+                "
+                rows="10"
                 class="w-full border border-gray-300 rounded-lg p-3 text-sm font-mono"
                 :placeholder="cols == 2
                   ? 'e.g.\nAngela Lim\t*ANGELA BEST PICKS\nAlexa Angeles\t*ALEXA SHOP'
