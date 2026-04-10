@@ -317,6 +317,10 @@ Route::get('/jnt/return/inventory', [JntReturnInventoryController::class, 'index
    Route::get('/jnt/sender-name', [PageSenderMappingController::class, 'index']);
 Route::post('/jnt/sender-name', [PageSenderMappingController::class, 'save']);
 Route::post('/jnt/sender-name/delete/{id}', [\App\Http\Controllers\PageSenderMappingController::class, 'delete']);
+
+Route::get('/jnt/item-sender-name', [\App\Http\Controllers\PageItemSenderMappingController::class, 'index']);
+Route::post('/jnt/item-sender-name/save', [\App\Http\Controllers\PageItemSenderMappingController::class, 'save']);
+Route::post('/jnt/item-sender-name/delete/{id}', [\App\Http\Controllers\PageItemSenderMappingController::class, 'delete']);
 Route::get('/jnt/checker', [JntCheckerController::class, 'index'])->name('jnt.checker');
 Route::post('/jnt/checker/upload', [JntCheckerController::class, 'upload'])->name('jnt.checker.upload');
 Route::get('/jnt/checker/upload', fn () => redirect()->route('jnt.checker'));

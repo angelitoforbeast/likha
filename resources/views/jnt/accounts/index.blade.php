@@ -73,6 +73,7 @@
             <th class="px-3 py-2 border-b text-left">EC Company ID</th>
             <th class="px-3 py-2 border-b text-left">Customer ID</th>
             <th class="px-3 py-2 border-b text-center">Uppercase</th>
+            <th class="px-3 py-2 border-b text-center">Item Mapping</th>
             <th class="px-3 py-2 border-b text-center">Actions</th>
           </tr>
         </thead>
@@ -94,6 +95,15 @@
                 <td class="px-3 py-2 border-b text-center">
                   @if($acc->force_uppercase)
                     <span class="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-medium">ON</span>
+                  @else
+                    <span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs">OFF</span>
+                  @endif
+                </td>
+              </template>
+              <template x-if="!editing">
+                <td class="px-3 py-2 border-b text-center">
+                  @if($acc->use_item_sender_mapping)
+                    <span class="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">ON</span>
                   @else
                     <span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs">OFF</span>
                   @endif
@@ -130,6 +140,12 @@
                              {{ $acc->force_uppercase ? 'checked' : '' }}
                              class="rounded">
                       Force Uppercase
+                    </label>
+                    <label class="flex items-center gap-1.5 text-sm cursor-pointer select-none">
+                      <input type="checkbox" name="use_item_sender_mapping" value="1"
+                             {{ $acc->use_item_sender_mapping ? 'checked' : '' }}
+                             class="rounded">
+                      Item Mapping
                     </label>
                     <button type="submit"
                             class="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700">

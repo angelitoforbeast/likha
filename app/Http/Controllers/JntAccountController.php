@@ -25,7 +25,8 @@ class JntAccountController extends Controller
             'customerid'  => 'required|string|max:100',
         ]);
 
-        $data['force_uppercase'] = $request->boolean('force_uppercase');
+        $data['force_uppercase']         = $request->boolean('force_uppercase');
+        $data['use_item_sender_mapping'] = $request->boolean('use_item_sender_mapping');
 
         JntAccount::create($data);
 
@@ -40,7 +41,8 @@ class JntAccountController extends Controller
             'customerid'  => 'required|string|max:100',
         ]);
 
-        $data['force_uppercase'] = $request->boolean('force_uppercase');
+        $data['force_uppercase']         = $request->boolean('force_uppercase');
+        $data['use_item_sender_mapping'] = $request->boolean('use_item_sender_mapping');
 
         $account->update($data);
 

@@ -10,6 +10,11 @@ class JntAccount extends Model
     protected $table = 'jnt_accounts';
     protected $guarded = [];
 
+    protected $casts = [
+        'force_uppercase'        => 'boolean',
+        'use_item_sender_mapping'=> 'boolean',
+    ];
+
     public function pageMappings(): HasMany
     {
         return $this->hasMany(PageJntMapping::class, 'jnt_account_id');

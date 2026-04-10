@@ -85,7 +85,7 @@ class CreateJntOrder implements ShouldQueue
         }
 
         // ✅ sender from DB (global or per page)
-        $senderOpts = $this->resolveSenderOpts($page);
+        $senderOpts = $this->resolveSenderOpts($page, $itemName, $client->isUseItemSenderMapping());
 
         $payload = JntPayloadBuilder::buildCreateFromMacroOutput($norm, array_merge([
             'txlogisticid' => $tx,
@@ -248,21 +248,38 @@ class CreateJntOrder implements ShouldQueue
         ]);
     }
 
-    private function resolveSenderOpts(string $page): array
+    private function resolveSenderOpts(string $page, string $itemName = '', bool $useItemMapping = false): array
 {
-    $page = trim($page);
+    $page     = trim($page);
+    $itemName = trim($itemName);
 
-    return Cache::remember("jnt_sender_opts:" . ($page !== '' ? $page : 'default'), 60, function () use ($page) {
+    $cacheKey = 'jnt_sender_opts:' . ($page !== '' ? $page : 'default');
+    if ($useItemMapping && $itemName !== '') {
+        $cacheKey .= ':item:' . md5($itemName);
+    }
 
-        // 1) sender name (per page) - pick LATEST
+    return Cache::remember($cacheKey, 60, function () use ($page, $itemName, $useItemMapping) {
+
+        // 1) sender name - per page+item or per page only
         $senderName = null;
 
         if ($page !== '' && Schema::hasTable('page_sender_mappings')) {
-            $senderName = DB::table('page_sender_mappings')
-                ->where('PAGE', $page)          // ✅ uppercase column
-                ->orderByDesc('id')             // ✅ latest row
-                // or ->orderByDesc('created_at')
-                ->value('SENDER_NAME');         // ✅ uppercase column
+            if ($useItemMapping && $itemName !== '') {
+                // Page + Item Name lookup — no fallback
+                $senderName = DB::table('page_sender_mappings')
+                    ->where('PAGE', $page)
+                    ->where('item_name', $itemName)
+                    ->whereNotNull('item_name')
+                    ->orderByDesc('id')
+                    ->value('SENDER_NAME');
+            } else {
+                // Page-only lookup (old behavior) — only pick records with no item_name
+                $senderName = DB::table('page_sender_mappings')
+                    ->where('PAGE', $page)
+                    ->whereNull('item_name')
+                    ->orderByDesc('id')
+                    ->value('SENDER_NAME');
+            }
         }
 
         // 2) sender address fields - GLOBAL latest (from sender_addresses)
