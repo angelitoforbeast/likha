@@ -70,23 +70,39 @@
             <tr class="{{ $mapped ? 'bg-white hover:bg-gray-50' : 'bg-amber-50 hover:bg-amber-100' }}">
               <td class="px-4 py-2 font-medium text-gray-800">{{ $r->page }}</td>
               <td class="px-4 py-2 text-gray-700 font-mono text-xs">{{ $r->item_name }}</td>
-              <td class="px-4 py-2">
-                <form method="POST" action="{{ url('jnt/item-sender-name/save') }}"
-                      class="flex gap-1.5 items-center">
-                  @csrf
-                  <input type="hidden" name="page" value="{{ $r->page }}">
-                  <input type="hidden" name="item_name" value="{{ $r->item_name }}">
-                  <input type="text" name="sender_name" value="{{ $r->sender_name ?? '' }}"
+              <td class="px-4 py-2"
+                  x-data="{
+                    val: {{ json_encode($r->sender_name ?? '') }},
+                    status: '',
+                    async save() {
+                      if (this.val.trim() === '') return;
+                      this.status = 'saving';
+                      try {
+                        const fd = new FormData();
+                        fd.append('_token', '{{ csrf_token() }}');
+                        fd.append('page', {{ json_encode($r->page) }});
+                        fd.append('item_name', {{ json_encode($r->item_name) }});
+                        fd.append('sender_name', this.val.trim());
+                        const res = await fetch('{{ url('jnt/item-sender-name/save') }}', { method: 'POST', body: fd });
+                        this.status = res.ok ? 'saved' : 'error';
+                      } catch(e) { this.status = 'error'; }
+                      setTimeout(() => this.status = '', 2000);
+                    }
+                  }">
+                <div class="flex items-center gap-1.5">
+                  <input type="text" x-model="val"
+                         @blur="save()"
+                         @keydown.enter.prevent="$el.blur()"
                          placeholder="{{ $mapped ? '' : 'Enter shop name...' }}"
-                         class="border border-gray-300 rounded px-2 py-1 text-sm w-full
-                                {{ $mapped ? '' : 'border-amber-400 bg-amber-50' }}">
-                  <button type="submit"
-                          class="px-2.5 py-1 text-xs font-medium rounded
-                                 {{ $mapped ? 'bg-gray-100 hover:bg-gray-200 text-gray-700' : 'bg-amber-500 hover:bg-amber-600 text-white' }}
-                                 whitespace-nowrap">
-                    {{ $mapped ? 'Update' : 'Save' }}
-                  </button>
-                </form>
+                         class="border rounded px-2 py-1 text-sm w-full
+                                {{ $mapped ? 'border-gray-300' : 'border-amber-400 bg-amber-50' }}">
+                  <span class="text-xs whitespace-nowrap w-12 text-center"
+                        :class="{ 'text-green-600': status==='saved', 'text-red-500': status==='error', 'text-gray-400': status==='saving' }">
+                    <span x-show="status==='saving'">saving…</span>
+                    <span x-show="status==='saved'">✓ saved</span>
+                    <span x-show="status==='error'">✗ error</span>
+                  </span>
+                </div>
               </td>
               <td class="px-4 py-2 text-center">
                 @if($mapped && $r->mapping_id)
