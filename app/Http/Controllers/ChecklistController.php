@@ -96,12 +96,16 @@ class ChecklistController extends Controller
             return back()->with('error', 'You are not assigned to this task.');
         }
 
-        $rules = ['notes' => 'nullable|string|max:2000'];
-
         $imageMimes = 'jpg,jpeg,png,gif,webp';
         $anyMimes   = 'jpg,jpeg,png,gif,webp,pdf,doc,docx,xls,xlsx,csv';
 
+        $rules = ['notes' => 'nullable|string|max:2000'];
+
         if ($task->type === 'photo') {
+            $rules['files']   = 'required|array|min:1|max:10';
+            $rules['files.*'] = "file|max:10240|mimes:{$imageMimes}";
+        } elseif ($task->type === 'both') {
+            $rules['notes']   = 'required|string|max:2000';
             $rules['files']   = 'required|array|min:1|max:10';
             $rules['files.*'] = "file|max:10240|mimes:{$imageMimes}";
         } elseif ($task->type === 'any') {
@@ -178,7 +182,7 @@ class ChecklistController extends Controller
         $validated = $request->validate([
             'title'       => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
-            'type'        => 'required|in:photo,note,any',
+            'type'        => 'required|in:photo,note,any,both',
         ]);
 
         $task = ChecklistTask::create([
@@ -199,7 +203,7 @@ class ChecklistController extends Controller
         $validated = $request->validate([
             'title'       => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
-            'type'        => 'required|in:photo,note,any',
+            'type'        => 'required|in:photo,note,any,both',
             'is_active'   => 'boolean',
         ]);
 

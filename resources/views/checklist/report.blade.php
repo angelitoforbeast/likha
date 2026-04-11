@@ -109,9 +109,9 @@
                   <span class="text-xs text-gray-400 hidden sm:inline">{{ $task->description }}</span>
                 @endif
                 <span class="text-xs px-2 py-0.5 rounded-full
-                  {{ $task->type === 'photo' ? 'bg-blue-50 text-blue-600' : ($task->type === 'note' ? 'bg-amber-50 text-amber-600' : 'bg-gray-100 text-gray-500') }}">
-                  {{ $task->type === 'photo' ? '📸' : ($task->type === 'note' ? '📝' : '📎') }}
-                  {{ ucfirst($task->type) }}
+                  {{ $task->type === 'photo' ? 'bg-blue-50 text-blue-600' : ($task->type === 'note' ? 'bg-amber-50 text-amber-600' : ($task->type === 'both' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-500')) }}">
+                  {{ $task->type === 'photo' ? '📸' : ($task->type === 'note' ? '📝' : ($task->type === 'both' ? '📸📝' : '📎')) }}
+                  {{ $task->type === 'both' ? 'Photo + Note' : ucfirst($task->type) }}
                 </span>
                 @if($task->assignedUsers->count())
                   <span class="text-xs text-indigo-400">→ {{ $task->assignedUsers->pluck('name')->implode(', ') }}</span>

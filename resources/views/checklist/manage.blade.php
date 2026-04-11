@@ -48,6 +48,7 @@
             <option value="any">📎 Any (photo or note)</option>
             <option value="photo">📸 Photo required</option>
             <option value="note">📝 Note only</option>
+            <option value="both">📸📝 Photo + Note (both required)</option>
           </select>
         </div>
         <input type="text" name="description" placeholder="Description (optional)..."
@@ -150,6 +151,7 @@
                 <option value="any"   {{ $t->type === 'any'   ? 'selected' : '' }}>📎 Any</option>
                 <option value="photo" {{ $t->type === 'photo' ? 'selected' : '' }}>📸 Photo</option>
                 <option value="note"  {{ $t->type === 'note'  ? 'selected' : '' }}>📝 Note</option>
+                <option value="both"  {{ $t->type === 'both'  ? 'selected' : '' }}>📸📝 Photo + Note</option>
               </select>
             </div>
             <input type="text" name="description" value="{{ $t->description }}"
