@@ -51,6 +51,20 @@
           <p class="text-sm text-gray-400 mt-1">Go to <a href="{{ route('checklist.manage') }}" class="text-blue-500 hover:underline">Manage Tasks</a> to add tasks.</p>
         </div>
       @else
+        @php
+          $allImageUrls = [];
+          foreach($tasks as $task) {
+              $sub = $submissionsByTask->get($task->id);
+              if (!$sub) continue;
+              $subFiles = $sub->files;
+              foreach($subFiles->filter(fn($f) => $f->isImage()) as $f) {
+                  $allImageUrls[] = Storage::url($f->file_path);
+              }
+              if ($subFiles->count() === 0 && $sub->file_path && $sub->isImage()) {
+                  $allImageUrls[] = Storage::url($sub->file_path);
+              }
+          }
+        @endphp
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-sm border-collapse">
@@ -365,19 +379,61 @@
   </div>
 
   {{-- ===== LIGHTBOX ===== --}}
-  <div x-data="{ lightbox: false, lightSrc: '' }"
-       @open-lightbox.window="lightSrc = $event.detail; lightbox = true"
+  <div x-data="{
+           lightbox: false,
+           images: {{ json_encode($allImageUrls ?? []) }},
+           currentIndex: 0,
+           get lightSrc() { return this.images[this.currentIndex] ?? ''; },
+           open(src) {
+               const idx = this.images.indexOf(src);
+               this.currentIndex = idx >= 0 ? idx : 0;
+               this.lightbox = true;
+           },
+           prev() { if (this.currentIndex > 0) this.currentIndex--; },
+           next() { if (this.currentIndex < this.images.length - 1) this.currentIndex++; }
+       }"
+       @open-lightbox.window="open($event.detail)"
        @keydown.escape.window="lightbox = false"
+       @keydown.arrow-left.window="if (lightbox) prev()"
+       @keydown.arrow-right.window="if (lightbox) next()"
        x-show="lightbox"
        x-transition.opacity
        @click="lightbox = false"
-       class="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
+       class="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
        style="display:none">
+
+    {{-- Close --}}
     <button @click="lightbox = false"
-            class="absolute top-4 right-4 w-9 h-9 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center text-lg transition">✕</button>
+            class="absolute top-4 right-4 w-9 h-9 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center text-lg transition z-10">✕</button>
+
+    {{-- Counter --}}
+    <template x-if="images.length > 1">
+      <div class="absolute top-4 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1 rounded-full z-10"
+           x-text="(currentIndex + 1) + ' / ' + images.length"></div>
+    </template>
+
+    {{-- Prev --}}
+    <template x-if="images.length > 1">
+      <button @click.stop="prev()"
+              :class="currentIndex === 0 ? 'opacity-20 pointer-events-none' : 'opacity-80 hover:opacity-100'"
+              class="absolute left-4 top-1/2 -translate-y-1/2 w-11 h-11 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center text-xl transition z-10">
+        ‹
+      </button>
+    </template>
+
+    {{-- Image --}}
     <img :src="lightSrc"
-         class="max-w-full max-h-full rounded-xl shadow-2xl object-contain cursor-default"
+         class="max-w-full max-h-full rounded-xl shadow-2xl object-contain"
          @click.stop>
+
+    {{-- Next --}}
+    <template x-if="images.length > 1">
+      <button @click.stop="next()"
+              :class="currentIndex === images.length - 1 ? 'opacity-20 pointer-events-none' : 'opacity-80 hover:opacity-100'"
+              class="absolute right-4 top-1/2 -translate-y-1/2 w-11 h-11 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center text-xl transition z-10">
+        ›
+      </button>
+    </template>
   </div>
 
 </x-layout>
