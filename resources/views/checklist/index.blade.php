@@ -247,7 +247,7 @@
                             + Submit
                           </button>
                         @endif
-                        @if($done && $isMine)
+                        @if($done)
                           <button @click="showForm = !showForm"
                                   class="text-xs px-2 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition">
                             Edit
@@ -269,7 +269,7 @@
                   </tr>
 
                   {{-- INLINE FORM ROW --}}
-                  @if($canSubmit || $isMine)
+                  @if($canSubmit || $done)
                     <tr x-show="showForm" x-transition class="border-b border-blue-100 bg-blue-50/20">
                       <td colspan="7" class="px-6 py-4">
                         <form method="POST" action="{{ route('checklist.submit', $task) }}" enctype="multipart/form-data">
