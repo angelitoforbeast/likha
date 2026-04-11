@@ -177,7 +177,14 @@
 
                     {{-- Task --}}
                     <td class="px-3 py-3 align-top">
-                      <p class="font-semibold text-gray-800 leading-snug">{{ $task->title }}</p>
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <p class="font-semibold text-gray-800 leading-snug">{{ $task->title }}</p>
+                        @if($task->deleted_at)
+                          <span class="text-xs px-1.5 py-0.5 rounded-full bg-red-50 text-red-400 leading-none">deleted</span>
+                        @elseif(!$task->is_active)
+                          <span class="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400 leading-none">inactive</span>
+                        @endif
+                      </div>
                       @if($task->assignedUsers->count())
                         <p class="text-xs text-indigo-400 mt-0.5">→ {{ $task->assignedUsers->pluck('name')->implode(', ') }}</p>
                       @endif

@@ -44,30 +44,64 @@ class ChecklistController extends Controller
     {
         $date = $request->query('date', now()->toDateString());
 
-        // Clamp to valid date
         try {
             $dateObj = \Carbon\Carbon::parse($date);
         } catch (\Exception $e) {
             $dateObj = now();
         }
 
-        $tasks = ChecklistTask::with('assignedUsers')
-            ->where('is_active', true)
-            ->orderBy('sort_order')
-            ->orderBy('id')
-            ->get();
+        $isToday = $dateObj->isToday();
 
+        if ($isToday) {
+            // Today: same as index — only currently active tasks
+            $tasks = ChecklistTask::with('assignedUsers')
+                ->where('is_active', true)
+                ->orderBy('sort_order')
+                ->orderBy('id')
+                ->get();
+        } else {
+            // Past date: show tasks that actually existed on that day
+            //   created_at <= end of report date  (task existed by then)
+            //   AND (deleted_at IS NULL OR deleted_at > end of report date)  (not yet deleted)
+            $endOfDay = $dateObj->copy()->endOfDay();
+
+            $tasks = ChecklistTask::withTrashed()
+                ->with('assignedUsers')
+                ->whereDate('created_at', '<=', $dateObj->toDateString())
+                ->where(function ($q) use ($endOfDay) {
+                    $q->whereNull('deleted_at')
+                      ->orWhere('deleted_at', '>', $endOfDay);
+                })
+                ->orderBy('sort_order')
+                ->orderBy('id')
+                ->get();
+        }
+
+        // Submissions for this date
         $submissionsByTask = ChecklistSubmission::with(['user', 'files', 'logs.user'])
             ->where('date', $dateObj->toDateString())
             ->get()
             ->keyBy('checklist_task_id');
+
+        // Safety net: if a submission exists for a task not in our list
+        // (e.g. task was recreated with a new ID, or edge-case timing),
+        // pull that task in too so the submission is never hidden.
+        if (!$isToday) {
+            $missingIds = $submissionsByTask->keys()->diff($tasks->pluck('id'));
+            if ($missingIds->isNotEmpty()) {
+                $extra = ChecklistTask::withTrashed()
+                    ->with('assignedUsers')
+                    ->whereIn('id', $missingIds)
+                    ->get();
+                $tasks = $tasks->merge($extra)->sortBy([['sort_order', 'asc'], ['id', 'asc']])->values();
+            }
+        }
 
         $doneCount  = $submissionsByTask->count();
         $totalTasks = $tasks->count();
 
         $prevDate = $dateObj->copy()->subDay()->toDateString();
         $nextDate = $dateObj->copy()->addDay()->toDateString();
-        $isToday  = $dateObj->isToday();
 
         return view('checklist.report', compact(
             'tasks', 'submissionsByTask',
