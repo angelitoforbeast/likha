@@ -232,6 +232,7 @@ class ChecklistController extends Controller
             'title'       => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
             'type'        => 'required|in:photo,note,any,both',
+            'ai_prompt'   => 'nullable|string|max:2000',
         ]);
 
         $task = ChecklistTask::create([
@@ -254,6 +255,7 @@ class ChecklistController extends Controller
             'description' => 'nullable|string|max:1000',
             'type'        => 'required|in:photo,note,any,both',
             'is_active'   => 'boolean',
+            'ai_prompt'   => 'nullable|string|max:2000',
         ]);
 
         $task->update($validated);
@@ -302,7 +304,14 @@ class ChecklistController extends Controller
         if ($imgFiles->isEmpty()) {
             $prompt .= "\n(No images were submitted for this task.)\n";
         }
-        $prompt .= "\nBased on the above, provide a concise analysis in 2-4 sentences: Was the task completed properly? What do the images show (if any)? Any observations, concerns, or recommendations?";
+
+        // Use task-specific AI focus prompt if set, otherwise use default
+        if ($task->ai_prompt) {
+            $prompt .= "\nAnalysis Focus: {$task->ai_prompt}";
+            $prompt .= "\n\nUsing the above focus, provide a concise analysis in 2-4 sentences based on the submission.";
+        } else {
+            $prompt .= "\nBased on the above, provide a concise analysis in 2-4 sentences: Was the task completed properly? What do the images show (if any)? Any observations, concerns, or recommendations?";
+        }
 
         $content = [['type' => 'text', 'text' => $prompt]];
 
