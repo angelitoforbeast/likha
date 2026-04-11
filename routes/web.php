@@ -121,6 +121,17 @@ Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name(
 
 // ✅ Protected routes
 
+// ✅ Daily Checklist
+Route::middleware(['web','auth'])->prefix('checklist')->name('checklist.')->group(function () {
+    Route::get('/', [\App\Http\Controllers\ChecklistController::class, 'index'])->name('index');
+    Route::post('/{task}/submit', [\App\Http\Controllers\ChecklistController::class, 'submit'])->name('submit');
+    Route::delete('/submission/{submission}', [\App\Http\Controllers\ChecklistController::class, 'deleteSubmission'])->name('delete-submission');
+    Route::post('/tasks', [\App\Http\Controllers\ChecklistController::class, 'storeTask'])->name('store-task');
+    Route::patch('/tasks/{task}', [\App\Http\Controllers\ChecklistController::class, 'updateTask'])->name('update-task');
+    Route::delete('/tasks/{task}', [\App\Http\Controllers\ChecklistController::class, 'destroyTask'])->name('destroy-task');
+    Route::post('/tasks/reorder', [\App\Http\Controllers\ChecklistController::class, 'reorderTasks'])->name('reorder');
+});
+
 // Allow any authenticated user to view the Allowed IPs page (no IP check)
 Route::middleware(['web','auth'])->group(function () {
     Route::get('/allowed-ips', [AllowedIpController::class, 'index'])->name('allowed_ips.index');
