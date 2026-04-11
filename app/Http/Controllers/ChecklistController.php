@@ -20,32 +20,21 @@ class ChecklistController extends Controller
             ->orderBy('id')
             ->get();
 
-        // All today's submissions grouped by task_id
+        // One submission per task per day — keyed by task_id
         $submissionsByTask = ChecklistSubmission::with('user')
-            ->where('date', $today)
-            ->get()
-            ->groupBy('checklist_task_id');
-
-        // My submissions keyed by task_id
-        $mySubmissions = ChecklistSubmission::where('user_id', Auth::id())
             ->where('date', $today)
             ->get()
             ->keyBy('checklist_task_id');
 
-        // All users for team summary
-        $users = User::with('employeeProfile')
-            ->orderBy('name')
-            ->get();
-
-        $myDoneCount  = $mySubmissions->count();
-        $totalTasks   = $tasks->count();
+        $doneCount  = $submissionsByTask->count();
+        $totalTasks = $tasks->count();
 
         // All tasks (including inactive) for manage panel
         $allTasks = ChecklistTask::orderBy('sort_order')->orderBy('id')->get();
 
         return view('checklist.index', compact(
-            'tasks', 'submissionsByTask', 'mySubmissions',
-            'users', 'today', 'myDoneCount', 'totalTasks', 'allTasks'
+            'tasks', 'submissionsByTask',
+            'today', 'doneCount', 'totalTasks', 'allTasks'
         ));
     }
 
@@ -69,7 +58,6 @@ class ChecklistController extends Controller
             // Delete old file if re-submitting
             $existing = ChecklistSubmission::where([
                 'checklist_task_id' => $task->id,
-                'user_id'           => Auth::id(),
                 'date'              => $today,
             ])->first();
 
@@ -86,10 +74,9 @@ class ChecklistController extends Controller
         ChecklistSubmission::updateOrCreate(
             [
                 'checklist_task_id' => $task->id,
-                'user_id'           => Auth::id(),
                 'date'              => $today,
             ],
-            $data
+            array_merge($data, ['user_id' => Auth::id()])
         );
 
         return back()->with('success', "'{$task->title}' submitted!");
@@ -97,7 +84,9 @@ class ChecklistController extends Controller
 
     public function deleteSubmission(ChecklistSubmission $submission)
     {
-        if ($submission->user_id !== Auth::id()) {
+        // Allow submitter or admin (CEO) to remove
+        if ($submission->user_id !== Auth::id() &&
+            Auth::user()?->employeeProfile?->role !== 'CEO') {
             abort(403);
         }
 
