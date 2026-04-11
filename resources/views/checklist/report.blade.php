@@ -151,11 +151,15 @@
                             'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content || ''
                           }
                         });
+                        if (!res.ok) {
+                          this.analysisError = 'Server error (' + res.status + '). Please try again.';
+                          this.analyzing = false; return;
+                        }
                         const data = await res.json();
                         this.analysis      = data.analysis  ?? null;
                         this.analysisError = data.error     ?? null;
                       } catch(e) {
-                        this.analysisError = 'Request failed. Please try again.';
+                        this.analysisError = 'Request failed: ' + e.message;
                       }
                       this.analyzing = false;
                     }
