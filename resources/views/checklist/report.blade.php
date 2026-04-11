@@ -308,29 +308,23 @@
                                 :disabled="analyzing"
                                 :class="analyzing ? 'opacity-60 cursor-not-allowed' : 'hover:bg-purple-700'"
                                 class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-purple-600 text-white transition font-medium whitespace-nowrap">
-                          <template x-if="!analyzing">
-                            <span x-text="analysisCount > 0 ? '↻ Re-analyze' : '✦ Analyze'"></span>
-                          </template>
-                          <template x-if="analyzing">
-                            <span class="flex items-center gap-1">
-                              <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                              </svg>
-                              Analyzing…
-                            </span>
-                          </template>
+                          <span x-show="!analyzing" x-text="analysisCount > 0 ? '↻ Re-analyze' : '✦ Analyze'"></span>
+                          <span x-show="analyzing" class="flex items-center gap-1">
+                            <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                            </svg>
+                            Analyzing…
+                          </span>
                         </button>
-                        <template x-if="analysisCount > 0">
-                          <button @click="toggleHistory()"
-                                  class="mt-1 text-xs text-purple-400 hover:text-purple-600 block whitespace-nowrap"
-                                  x-text="showHistory ? 'hide history' : analysisCount + (analysisCount === 1 ? ' analysis' : ' analyses')">
-                          </button>
-                        </template>
-                        <template x-if="showAnalysis && !analyzing && analysisCount === 0">
-                          <button @click="showAnalysis = false; analysisError = null;"
-                                  class="mt-1 text-xs text-gray-300 hover:text-gray-500 block">hide</button>
-                        </template>
+                        <button x-show="analysisCount > 0"
+                                @click="toggleHistory()"
+                                class="mt-1 text-xs text-purple-400 hover:text-purple-600 block whitespace-nowrap"
+                                x-text="showHistory ? 'hide history' : analysisCount + (analysisCount === 1 ? ' analysis' : ' analyses')">
+                        </button>
+                        <button x-show="showAnalysis && !analyzing && analysisCount === 0"
+                                @click="showAnalysis = false; analysisError = null;"
+                                class="mt-1 text-xs text-gray-300 hover:text-gray-500 block">hide</button>
                       @else
                         <span class="text-gray-200 text-xs">—</span>
                       @endif
