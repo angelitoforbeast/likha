@@ -10,10 +10,16 @@
         <h1 class="text-xl font-bold text-gray-800">Daily Checklist</h1>
         <p class="text-sm text-gray-500">{{ now()->format('l, F j, Y') }}</p>
       </div>
-      <a href="{{ route('checklist.manage') }}"
-         class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
-        ⚙ Manage Tasks
-      </a>
+      <div class="flex items-center gap-2">
+        <a href="{{ route('checklist.report') }}"
+           class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
+          📋 View Report
+        </a>
+        <a href="{{ route('checklist.manage') }}"
+           class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
+          ⚙ Manage
+        </a>
+      </div>
     </div>
 
     {{-- Alerts --}}

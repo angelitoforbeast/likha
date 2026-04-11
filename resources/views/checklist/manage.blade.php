@@ -10,10 +10,16 @@
         <h1 class="text-xl font-bold text-gray-800">Manage Tasks</h1>
         <p class="text-sm text-gray-500">Add, edit, reorder, or delete checklist tasks.</p>
       </div>
-      <a href="{{ route('checklist.index') }}"
-         class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
-        ← Back to Checklist
-      </a>
+      <div class="flex items-center gap-2">
+        <a href="{{ route('checklist.report') }}"
+           class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
+          📋 View Report
+        </a>
+        <a href="{{ route('checklist.index') }}"
+           class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
+          ← Checklist
+        </a>
+      </div>
     </div>
 
     {{-- Alerts --}}

@@ -125,6 +125,7 @@ Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name(
 Route::middleware(['web','auth'])->prefix('checklist')->name('checklist.')->group(function () {
     Route::get('/', [\App\Http\Controllers\ChecklistController::class, 'index'])->name('index');
     Route::get('/manage', [\App\Http\Controllers\ChecklistController::class, 'manage'])->name('manage');
+    Route::get('/report', [\App\Http\Controllers\ChecklistController::class, 'report'])->name('report');
     Route::post('/{task}/submit', [\App\Http\Controllers\ChecklistController::class, 'submit'])->name('submit');
     Route::delete('/submission/{submission}', [\App\Http\Controllers\ChecklistController::class, 'deleteSubmission'])->name('delete-submission');
     Route::post('/tasks', [\App\Http\Controllers\ChecklistController::class, 'storeTask'])->name('store-task');

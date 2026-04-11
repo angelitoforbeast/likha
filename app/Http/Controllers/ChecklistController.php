@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Carbon\Carbon;
 
 class ChecklistController extends Controller
 {
@@ -33,6 +34,42 @@ class ChecklistController extends Controller
         return view('checklist.index', compact(
             'tasks', 'submissionsByTask',
             'today', 'doneCount', 'totalTasks'
+        ));
+    }
+
+    public function report(Request $request)
+    {
+        $date = $request->query('date', now()->toDateString());
+
+        // Clamp to valid date
+        try {
+            $dateObj = \Carbon\Carbon::parse($date);
+        } catch (\Exception $e) {
+            $dateObj = now();
+        }
+
+        $tasks = ChecklistTask::with('assignedUsers')
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+
+        $submissionsByTask = ChecklistSubmission::with('user')
+            ->where('date', $dateObj->toDateString())
+            ->get()
+            ->keyBy('checklist_task_id');
+
+        $doneCount  = $submissionsByTask->count();
+        $totalTasks = $tasks->count();
+
+        $prevDate = $dateObj->copy()->subDay()->toDateString();
+        $nextDate = $dateObj->copy()->addDay()->toDateString();
+        $isToday  = $dateObj->isToday();
+
+        return view('checklist.report', compact(
+            'tasks', 'submissionsByTask',
+            'doneCount', 'totalTasks',
+            'dateObj', 'prevDate', 'nextDate', 'isToday'
         ));
     }
 
