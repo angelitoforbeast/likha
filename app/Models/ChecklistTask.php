@@ -17,4 +17,9 @@ class ChecklistTask extends Model
     {
         return $this->hasMany(ChecklistSubmission::class);
     }
+
+    public function assignedUsers(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'checklist_task_users');
+    }
 }

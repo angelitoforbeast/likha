@@ -62,73 +62,119 @@
             <option value="note">📝 Note only</option>
           </select>
         </div>
-        <div class="flex gap-2">
-          <input type="text" name="description" placeholder="Description (optional)..."
-                 class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          <button type="submit"
-                  class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 font-medium">
-            + Add Task
-          </button>
+        <input type="text" name="description" placeholder="Description (optional)..."
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        {{-- Assign users --}}
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Assign to (leave blank = anyone can submit):</label>
+          <div class="flex flex-wrap gap-2">
+            @foreach($allUsers as $u)
+              <label class="flex items-center gap-1.5 text-xs cursor-pointer px-2 py-1 rounded border border-gray-200 hover:bg-gray-100">
+                <input type="checkbox" name="assigned_users[]" value="{{ $u->id }}" class="accent-blue-600">
+                {{ $u->name }}
+              </label>
+            @endforeach
+          </div>
         </div>
+        <button type="submit"
+                class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 font-medium">
+          + Add Task
+        </button>
       </form>
 
       {{-- Task List --}}
       <div class="space-y-2">
         @forelse($allTasks as $t)
+          @php $assignedIds = $t->assignedUsers->pluck('id')->toArray(); @endphp
           <div x-data="{ editing: false }"
-               class="flex items-center gap-3 p-3 border rounded-lg {{ $t->is_active ? 'bg-white' : 'bg-gray-50 opacity-60' }}">
+               class="border rounded-lg {{ $t->is_active ? 'bg-white' : 'bg-gray-50 opacity-60' }}">
 
-            <div class="w-2 h-2 rounded-full flex-shrink-0 {{ $t->is_active ? 'bg-green-500' : 'bg-gray-300' }}"></div>
-
-            {{-- View mode --}}
-            <div class="flex-1 min-w-0" x-show="!editing">
-              <span class="text-sm font-medium text-gray-800">{{ $t->title }}</span>
-              @if($t->description)
-                <span class="text-xs text-gray-400 ml-1">— {{ $t->description }}</span>
-              @endif
-              <span class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full
-                {{ $t->type === 'photo' ? 'bg-blue-100 text-blue-700' : ($t->type === 'note' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600') }}">
-                {{ $t->type === 'photo' ? '📸 Photo' : ($t->type === 'note' ? '📝 Note' : '📎 Any') }}
-              </span>
-              @if(!$t->is_active)
-                <span class="ml-1 text-xs text-gray-400">(inactive)</span>
-              @endif
+            {{-- View row --}}
+            <div class="flex items-center gap-3 p-3" x-show="!editing">
+              <div class="w-2 h-2 rounded-full flex-shrink-0 {{ $t->is_active ? 'bg-green-500' : 'bg-gray-300' }}"></div>
+              <div class="flex-1 min-w-0">
+                <span class="text-sm font-medium text-gray-800">{{ $t->title }}</span>
+                @if($t->description)
+                  <span class="text-xs text-gray-400 ml-1">— {{ $t->description }}</span>
+                @endif
+                <span class="ml-1.5 text-xs px-1.5 py-0.5 rounded-full
+                  {{ $t->type === 'photo' ? 'bg-blue-100 text-blue-700' : ($t->type === 'note' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600') }}">
+                  {{ $t->type === 'photo' ? '📸' : ($t->type === 'note' ? '📝' : '📎') }}
+                </span>
+                @if($t->assignedUsers->count())
+                  <span class="ml-1.5 text-xs text-indigo-600">
+                    → {{ $t->assignedUsers->pluck('name')->implode(', ') }}
+                  </span>
+                @else
+                  <span class="ml-1.5 text-xs text-gray-400">→ anyone</span>
+                @endif
+                @if(!$t->is_active)
+                  <span class="ml-1 text-xs text-gray-400">(inactive)</span>
+                @endif
+              </div>
+              <div class="flex gap-1 flex-shrink-0">
+                <button @click="editing=true"
+                        class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 text-gray-600">Edit</button>
+                <form method="POST" action="{{ route('checklist.update-task', $t) }}">
+                  @csrf @method('PATCH')
+                  <input type="hidden" name="title" value="{{ $t->title }}">
+                  <input type="hidden" name="description" value="{{ $t->description }}">
+                  <input type="hidden" name="type" value="{{ $t->type }}">
+                  <input type="hidden" name="is_active" value="{{ $t->is_active ? '0' : '1' }}">
+                  @foreach($assignedIds as $uid)
+                    <input type="hidden" name="assigned_users[]" value="{{ $uid }}">
+                  @endforeach
+                  <button type="submit"
+                          class="text-xs px-2 py-1 rounded border {{ $t->is_active ? 'border-amber-300 text-amber-700 hover:bg-amber-50' : 'border-green-300 text-green-700 hover:bg-green-50' }}">
+                    {{ $t->is_active ? 'Disable' : 'Enable' }}
+                  </button>
+                </form>
+                <form method="POST" action="{{ route('checklist.destroy-task', $t) }}"
+                      onsubmit="return confirm('Delete \'{{ addslashes($t->title) }}\'? This cannot be undone.')">
+                  @csrf @method('DELETE')
+                  <button type="submit"
+                          class="text-xs px-2 py-1 rounded border border-red-300 text-red-600 hover:bg-red-50">
+                    Delete
+                  </button>
+                </form>
+              </div>
             </div>
 
             {{-- Edit mode --}}
             <form method="POST" action="{{ route('checklist.update-task', $t) }}"
-                  class="flex-1 flex gap-2" x-show="editing">
+                  class="p-3 space-y-2" x-show="editing">
               @csrf @method('PATCH')
-              <input type="text" name="title" value="{{ $t->title }}"
-                     class="flex-1 border border-gray-300 rounded px-2 py-1 text-sm">
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <input type="text" name="title" value="{{ $t->title }}" required
+                       class="sm:col-span-2 border border-gray-300 rounded px-2 py-1 text-sm">
+                <select name="type" class="border border-gray-300 rounded px-2 py-1 text-sm">
+                  <option value="any"  {{ $t->type === 'any'   ? 'selected' : '' }}>Any</option>
+                  <option value="photo"{{ $t->type === 'photo' ? 'selected' : '' }}>Photo</option>
+                  <option value="note" {{ $t->type === 'note'  ? 'selected' : '' }}>Note</option>
+                </select>
+              </div>
               <input type="text" name="description" value="{{ $t->description }}"
-                     placeholder="Description..." class="flex-1 border border-gray-300 rounded px-2 py-1 text-sm">
-              <select name="type" class="border border-gray-300 rounded px-2 py-1 text-sm">
-                <option value="any"  {{ $t->type === 'any'   ? 'selected' : '' }}>Any</option>
-                <option value="photo"{{ $t->type === 'photo' ? 'selected' : '' }}>Photo</option>
-                <option value="note" {{ $t->type === 'note'  ? 'selected' : '' }}>Note</option>
-              </select>
+                     placeholder="Description..." class="w-full border border-gray-300 rounded px-2 py-1 text-sm">
               <input type="hidden" name="is_active" value="{{ $t->is_active ? '1' : '0' }}">
-              <button type="submit" class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">Save</button>
-              <button type="button" @click="editing=false" class="px-3 py-1 bg-gray-200 text-gray-700 text-xs rounded">Cancel</button>
+              {{-- Assign users --}}
+              <div>
+                <label class="text-xs text-gray-500 mb-1 block">Assigned to (blank = anyone):</label>
+                <div class="flex flex-wrap gap-2">
+                  @foreach($allUsers as $u)
+                    <label class="flex items-center gap-1.5 text-xs cursor-pointer px-2 py-1 rounded border border-gray-200 hover:bg-gray-100">
+                      <input type="checkbox" name="assigned_users[]" value="{{ $u->id }}"
+                             {{ in_array($u->id, $assignedIds) ? 'checked' : '' }}
+                             class="accent-blue-600">
+                      {{ $u->name }}
+                    </label>
+                  @endforeach
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">Save</button>
+                <button type="button" @click="editing=false" class="px-3 py-1.5 bg-gray-200 text-gray-700 text-xs rounded">Cancel</button>
+              </div>
             </form>
-
-            {{-- Actions --}}
-            <div class="flex gap-1 flex-shrink-0" x-show="!editing">
-              <button @click="editing=true"
-                      class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 text-gray-600">Edit</button>
-              <form method="POST" action="{{ route('checklist.update-task', $t) }}">
-                @csrf @method('PATCH')
-                <input type="hidden" name="title" value="{{ $t->title }}">
-                <input type="hidden" name="description" value="{{ $t->description }}">
-                <input type="hidden" name="type" value="{{ $t->type }}">
-                <input type="hidden" name="is_active" value="{{ $t->is_active ? '0' : '1' }}">
-                <button type="submit"
-                        class="text-xs px-2 py-1 rounded border {{ $t->is_active ? 'border-amber-300 text-amber-700 hover:bg-amber-50' : 'border-green-300 text-green-700 hover:bg-green-50' }}">
-                  {{ $t->is_active ? 'Disable' : 'Enable' }}
-                </button>
-              </form>
-            </div>
           </div>
         @empty
           <p class="text-sm text-gray-400 text-center py-4">No tasks yet.</p>
@@ -141,17 +187,19 @@
 
     @forelse($tasks as $task)
       @php
-        $sub       = $submissionsByTask->get($task->id);
-        $done      = $sub !== null;
-        $isMine    = $sub && $sub->user_id === Auth::id();
-        $canSubmit = !$done;  // only if no one has submitted yet
+        $sub          = $submissionsByTask->get($task->id);
+        $done         = $sub !== null;
+        $isMine       = $sub && $sub->user_id === Auth::id();
+        $assignedIds  = $task->assignedUsers->pluck('id')->toArray();
+        $isAssigned   = empty($assignedIds) || in_array(Auth::id(), $assignedIds);
+        $canSubmit    = !$done && $isAssigned;
       @endphp
 
-      <div class="bg-white border {{ $done ? 'border-green-200' : 'border-amber-200' }} rounded-xl shadow-sm overflow-hidden"
+      <div class="bg-white border {{ $done ? 'border-green-200' : ($isAssigned ? 'border-amber-200' : 'border-gray-200') }} rounded-xl shadow-sm overflow-hidden"
            x-data="{ showForm: {{ $canSubmit ? 'true' : 'false' }} }">
 
         {{-- Card Header --}}
-        <div class="flex items-center justify-between px-4 py-3 {{ $done ? 'bg-green-50' : 'bg-amber-50' }}">
+        <div class="flex items-center justify-between px-4 py-3 {{ $done ? 'bg-green-50' : ($isAssigned ? 'bg-amber-50' : 'bg-gray-50') }}">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="font-semibold text-gray-800 text-sm">{{ $task->title }}</span>
             <span class="text-xs px-1.5 py-0.5 rounded-full
@@ -161,9 +209,15 @@
             @if($task->description)
               <span class="text-xs text-gray-500">{{ $task->description }}</span>
             @endif
+            @if($task->assignedUsers->count())
+              <span class="text-xs text-indigo-500">
+                → {{ $task->assignedUsers->pluck('name')->implode(', ') }}
+              </span>
+            @endif
           </div>
-          <span class="text-xs font-semibold flex-shrink-0 {{ $done ? 'text-green-600' : 'text-amber-600' }}">
-            {{ $done ? '✓ Done' : '⚠ Pending' }}
+          <span class="text-xs font-semibold flex-shrink-0
+            {{ $done ? 'text-green-600' : ($isAssigned ? 'text-amber-600' : 'text-gray-400') }}">
+            {{ $done ? '✓ Done' : ($isAssigned ? '⚠ Pending' : 'Not assigned') }}
           </span>
         </div>
 
@@ -172,7 +226,6 @@
           <div class="px-4 py-3 {{ $isMine ? 'bg-green-50/40' : 'bg-gray-50/60' }} border-b border-gray-100">
             <div class="flex items-start justify-between gap-3">
               <div class="flex-1 min-w-0">
-                {{-- Who submitted --}}
                 <div class="flex items-center gap-2 mb-1 flex-wrap">
                   <div class="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-500 flex-shrink-0">
                     {{ strtoupper(substr($sub->user->name ?? '?', 0, 1)) }}
@@ -206,7 +259,6 @@
                 @endif
               </div>
 
-              {{-- Edit / Remove — only submitter or CEO --}}
               @if($isMine || $isCeo)
                 <div class="flex gap-1 flex-shrink-0">
                   @if($isMine)
@@ -229,7 +281,7 @@
           </div>
         @endif
 
-        {{-- Submit Form — only shown when no submission yet (or editing own) --}}
+        {{-- Submit / Edit Form --}}
         @if($canSubmit || $isMine)
           <div x-show="showForm" x-transition class="px-4 py-3"
                x-data="{ fileName: '', previewUrl: '' }">
@@ -275,10 +327,11 @@
             </form>
           </div>
         @elseif($done && !$isMine)
-          {{-- Someone else submitted — show locked state --}}
           <div class="px-4 py-2 text-xs text-gray-400">
             Submitted by {{ $sub->user->name ?? 'someone' }} — no further submission needed.
           </div>
+        @elseif(!$isAssigned)
+          <div class="px-4 py-2 text-xs text-gray-400">This task is assigned to someone else.</div>
         @endif
 
       </div>

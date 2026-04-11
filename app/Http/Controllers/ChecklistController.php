@@ -15,7 +15,8 @@ class ChecklistController extends Controller
     {
         $today = now()->toDateString();
 
-        $tasks = ChecklistTask::where('is_active', true)
+        $tasks = ChecklistTask::with('assignedUsers')
+            ->where('is_active', true)
             ->orderBy('sort_order')
             ->orderBy('id')
             ->get();
@@ -30,17 +31,29 @@ class ChecklistController extends Controller
         $totalTasks = $tasks->count();
 
         // All tasks (including inactive) for manage panel
-        $allTasks = ChecklistTask::orderBy('sort_order')->orderBy('id')->get();
+        $allTasks = ChecklistTask::with('assignedUsers')
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+
+        // All users for assignment picker
+        $allUsers = User::with('employeeProfile')->orderBy('name')->get();
 
         return view('checklist.index', compact(
             'tasks', 'submissionsByTask',
-            'today', 'doneCount', 'totalTasks', 'allTasks'
+            'today', 'doneCount', 'totalTasks', 'allTasks', 'allUsers'
         ));
     }
 
     public function submit(Request $request, ChecklistTask $task)
     {
         $today = now()->toDateString();
+
+        // Check assignment — if task has assigned users, only they can submit
+        $assignedIds = $task->assignedUsers()->pluck('users.id')->toArray();
+        if (!empty($assignedIds) && !in_array(Auth::id(), $assignedIds)) {
+            return back()->with('error', 'You are not assigned to this task.');
+        }
 
         $rules = ['notes' => 'nullable|string|max:2000'];
 
@@ -55,7 +68,6 @@ class ChecklistController extends Controller
         $data = ['notes' => $request->notes];
 
         if ($request->hasFile('file')) {
-            // Delete old file if re-submitting
             $existing = ChecklistSubmission::where([
                 'checklist_task_id' => $task->id,
                 'date'              => $today,
@@ -72,10 +84,7 @@ class ChecklistController extends Controller
         }
 
         ChecklistSubmission::updateOrCreate(
-            [
-                'checklist_task_id' => $task->id,
-                'date'              => $today,
-            ],
+            ['checklist_task_id' => $task->id, 'date' => $today],
             array_merge($data, ['user_id' => Auth::id()])
         );
 
@@ -84,7 +93,6 @@ class ChecklistController extends Controller
 
     public function deleteSubmission(ChecklistSubmission $submission)
     {
-        // Allow submitter or admin (CEO) to remove
         if ($submission->user_id !== Auth::id() &&
             Auth::user()?->employeeProfile?->role !== 'CEO') {
             abort(403);
@@ -95,7 +103,6 @@ class ChecklistController extends Controller
         }
 
         $submission->delete();
-
         return back()->with('success', 'Submission removed.');
     }
 
@@ -107,11 +114,15 @@ class ChecklistController extends Controller
             'type'        => 'required|in:photo,note,any',
         ]);
 
-        ChecklistTask::create([
+        $task = ChecklistTask::create([
             ...$validated,
             'sort_order' => (ChecklistTask::max('sort_order') ?? 0) + 1,
             'is_active'  => true,
         ]);
+
+        // Sync assigned users
+        $userIds = array_filter((array) $request->input('assigned_users', []));
+        $task->assignedUsers()->sync($userIds);
 
         return back()->with('success', 'Task added!');
     }
@@ -127,13 +138,18 @@ class ChecklistController extends Controller
 
         $task->update($validated);
 
+        // Sync assigned users (empty array = all users can submit)
+        $userIds = array_filter((array) $request->input('assigned_users', []));
+        $task->assignedUsers()->sync($userIds);
+
         return back()->with('success', 'Task updated!');
     }
 
     public function destroyTask(ChecklistTask $task)
     {
-        $task->update(['is_active' => false]);
-        return back()->with('success', 'Task deactivated.');
+        // Hard delete — cascades to submissions and assignments via FK
+        $task->delete();
+        return back()->with('success', 'Task deleted.');
     }
 
     public function reorderTasks(Request $request)
