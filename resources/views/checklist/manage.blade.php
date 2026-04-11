@@ -78,18 +78,21 @@
       <div class="px-4 py-3 flex items-center justify-between">
         <h2 class="font-semibold text-gray-800 text-sm">All Tasks ({{ $allTasks->count() }})</h2>
         @if($allTasks->count() > 1)
-          <span class="text-xs text-gray-400">Drag to reorder</span>
+          <span class="text-xs text-gray-400">⠿ Drag to reorder</span>
         @endif
       </div>
 
+      <div id="task-sort-list" class="divide-y divide-gray-100">
       @forelse($allTasks as $t)
         @php $assignedIds = $t->assignedUsers->pluck('id')->toArray(); @endphp
 
         <div x-data="{ editing: false }"
-             class="{{ $t->is_active ? '' : 'opacity-60 bg-gray-50' }}">
+             data-id="{{ $t->id }}"
+             class="task-row {{ $t->is_active ? '' : 'opacity-60 bg-gray-50' }}">
 
           {{-- View Row --}}
           <div class="flex items-center gap-3 px-4 py-3" x-show="!editing">
+            <span class="drag-handle cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500 flex-shrink-0 select-none text-lg leading-none" title="Drag to reorder">⠿</span>
             <div class="w-2 h-2 rounded-full flex-shrink-0 {{ $t->is_active ? 'bg-green-500' : 'bg-gray-300' }}"></div>
             <div class="flex-1 min-w-0">
               <div class="flex items-center flex-wrap gap-1.5">
@@ -180,7 +183,70 @@
       @empty
         <div class="px-4 py-10 text-center text-sm text-gray-400">No tasks yet. Add one above.</div>
       @endforelse
+      </div> {{-- #task-sort-list --}}
     </div>
 
   </div>
+
+  <script>
+    (function () {
+      const list    = document.getElementById('task-sort-list');
+      if (!list) return;
+
+      let dragging  = null;
+
+      list.querySelectorAll('.task-row').forEach(row => {
+        row.setAttribute('draggable', 'false'); // only drag via handle
+
+        const handle = row.querySelector('.drag-handle');
+        if (handle) {
+          handle.addEventListener('mousedown', () => row.setAttribute('draggable', 'true'));
+          handle.addEventListener('mouseup',   () => row.setAttribute('draggable', 'false'));
+        }
+
+        row.addEventListener('dragstart', e => {
+          dragging = row;
+          row.classList.add('opacity-40', 'ring-2', 'ring-blue-400');
+          e.dataTransfer.effectAllowed = 'move';
+        });
+
+        row.addEventListener('dragend', () => {
+          row.setAttribute('draggable', 'false');
+          row.classList.remove('opacity-40', 'ring-2', 'ring-blue-400');
+          list.querySelectorAll('.task-row').forEach(r => r.classList.remove('border-t-2', 'border-blue-400'));
+          dragging = null;
+          saveOrder();
+        });
+
+        row.addEventListener('dragover', e => {
+          e.preventDefault();
+          if (!dragging || dragging === row) return;
+          const rect = row.getBoundingClientRect();
+          const mid  = rect.top + rect.height / 2;
+          list.querySelectorAll('.task-row').forEach(r => r.classList.remove('border-t-2', 'border-blue-400'));
+          if (e.clientY < mid) {
+            row.classList.add('border-t-2', 'border-blue-400');
+            list.insertBefore(dragging, row);
+          } else {
+            row.classList.add('border-t-2', 'border-blue-400');
+            list.insertBefore(dragging, row.nextSibling);
+          }
+        });
+      });
+
+      function saveOrder() {
+        const ids = [...list.querySelectorAll('.task-row')].map(r => r.dataset.id);
+        fetch('{{ route('checklist.reorder') }}', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content
+                         || '{{ csrf_token() }}',
+          },
+          body: JSON.stringify({ order: ids }),
+        });
+      }
+    })();
+  </script>
+
 </x-layout>
