@@ -248,8 +248,13 @@ class ChecklistController extends Controller
 
     public function analyzeSubmission(Request $request, ChecklistSubmission $submission)
     {
-        $task      = $submission->checklistTask;
-        $imgFiles  = $submission->files->filter(fn($f) => $f->isImage());
+        $submission->load(['task', 'files']);
+        $task     = $submission->task;
+        $imgFiles = $submission->files->filter(fn($f) => $f->isImage());
+
+        if (!$task) {
+            return response()->json(['error' => 'Task not found for this submission.'], 404);
+        }
 
         // Build prompt
         $prompt  = "You are reviewing a daily operational task submission for a business.\n\n";
