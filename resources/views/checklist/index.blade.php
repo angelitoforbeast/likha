@@ -222,10 +222,16 @@
                     </td>
 
                     {{-- Submitted by --}}
-                    <td class="px-3 py-3 align-middle">
+                    <td class="px-3 py-3 align-top">
                       @if($done)
+                        @php
+                          $editLogs  = $sub->logs->where('action', 'updated');
+                          $lastEdit  = $editLogs->first();
+                          $editCount = $editLogs->count();
+                        @endphp
+                        {{-- Original submitter --}}
                         <div class="flex items-center gap-2">
-                          <div class="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-bold text-indigo-600 flex-shrink-0">
+                          <div class="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-bold text-indigo-600 flex-shrink-0">
                             {{ strtoupper(substr($sub->user->name ?? '?', 0, 1)) }}
                           </div>
                           <div>
@@ -233,6 +239,21 @@
                             <p class="text-xs text-gray-400 leading-none mt-0.5">{{ $sub->created_at->format('h:i A') }}</p>
                           </div>
                         </div>
+                        {{-- Last editor (if different from submitter or any edit exists) --}}
+                        @if($lastEdit)
+                          <div class="flex items-center gap-1.5 mt-1.5 pt-1.5 border-t border-gray-100">
+                            <div class="w-5 h-5 rounded-full bg-amber-100 flex items-center justify-center text-xs font-bold text-amber-600 flex-shrink-0">
+                              {{ strtoupper(substr($lastEdit->user->name ?? '?', 0, 1)) }}
+                            </div>
+                            <div>
+                              <p class="text-xs text-amber-600 leading-none">edited by {{ $lastEdit->user->name ?? 'Unknown' }}</p>
+                              <p class="text-xs text-gray-400 leading-none mt-0.5">
+                                {{ \Carbon\Carbon::parse($lastEdit->created_at)->format('h:i A') }}
+                                {{ $editCount > 1 ? '&middot; '.$editCount.' edits' : '' }}
+                              </p>
+                            </div>
+                          </div>
+                        @endif
                       @else
                         <span class="text-gray-200">—</span>
                       @endif

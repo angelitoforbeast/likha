@@ -250,7 +250,7 @@
                               <p class="text-xs text-amber-600 leading-none">edited by {{ $lastEdit->user->name ?? 'Unknown' }}</p>
                               <p class="text-xs text-gray-400 leading-none mt-0.5">
                                 {{ \Carbon\Carbon::parse($lastEdit->created_at)->format('h:i A') }}
-                                @if($editCount > 1)· {{ $editCount }} edits@endif
+                                {{ $editCount > 1 ? '&middot; '.$editCount.' edits' : '' }}
                               </p>
                             </div>
                           </div>
