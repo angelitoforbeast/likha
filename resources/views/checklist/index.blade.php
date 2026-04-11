@@ -2,9 +2,7 @@
   <x-slot name="heading">Daily Checklist</x-slot>
   <x-slot name="title">Daily Checklist</x-slot>
 
-  <div class="min-h-screen bg-gray-50"
-       x-data="{ lightbox: false, lightSrc: '' }"
-       @keydown.escape.window="lightbox = false">
+  <div class="min-h-screen bg-gray-50">
 
     {{-- ===== HEADER ===== --}}
     <div class="bg-white border-b border-gray-200 shadow-sm">
@@ -153,7 +151,7 @@
                           @foreach($imageFiles as $f)
                             <div class="relative group">
                               <img src="{{ Storage::url($f->file_path) }}"
-                                   @click="lightSrc='{{ Storage::url($f->file_path) }}'; lightbox=true"
+                                   @click="$dispatch('open-lightbox', '{{ Storage::url($f->file_path) }}')"
                                    class="w-14 h-14 object-cover rounded-lg border border-gray-100 hover:opacity-80 transition shadow-sm cursor-zoom-in"
                                    alt="{{ $f->file_original_name }}">
                               @if($isMine || $isCeo)
@@ -189,7 +187,7 @@
                         {{-- Legacy single file fallback --}}
                         @if($sub->isImage())
                           <img src="{{ Storage::url($sub->file_path) }}"
-                               @click="lightSrc='{{ Storage::url($sub->file_path) }}'; lightbox=true"
+                               @click="$dispatch('open-lightbox', '{{ Storage::url($sub->file_path) }}')"
                                class="w-14 h-14 object-cover rounded-lg border border-gray-100 hover:opacity-80 transition cursor-zoom-in">
                         @else
                           <a href="{{ Storage::url($sub->file_path) }}" target="_blank"
@@ -367,7 +365,10 @@
   </div>
 
   {{-- ===== LIGHTBOX ===== --}}
-  <div x-show="lightbox"
+  <div x-data="{ lightbox: false, lightSrc: '' }"
+       @open-lightbox.window="lightSrc = $event.detail; lightbox = true"
+       @keydown.escape.window="lightbox = false"
+       x-show="lightbox"
        x-transition.opacity
        @click="lightbox = false"
        class="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
