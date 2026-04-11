@@ -134,17 +134,18 @@
 
                 <tbody
                   x-data="{
+                    analyzeUrl: '{{ $analyzeUrl }}',
                     analyzing: false,
                     analysis: null,
                     analysisError: null,
                     showAnalysis: false,
                     async analyze() {
-                      this.analyzing   = true;
+                      this.analyzing    = true;
                       this.showAnalysis = true;
-                      this.analysis    = null;
+                      this.analysis     = null;
                       this.analysisError = null;
                       try {
-                        const res = await fetch(this.$el.dataset.analyzeUrl, {
+                        const res = await fetch(this.analyzeUrl, {
                           method: 'POST',
                           headers: {
                             'Content-Type': 'application/json',
@@ -152,19 +153,18 @@
                           }
                         });
                         if (!res.ok) {
-                          this.analysisError = 'Error ' + res.status + ' → URL: ' + this.$el.dataset.analyzeUrl;
+                          this.analysisError = 'Server error (' + res.status + '). Please try again.';
                           this.analyzing = false; return;
                         }
                         const data = await res.json();
-                        this.analysis      = data.analysis  ?? null;
-                        this.analysisError = data.error     ?? null;
+                        this.analysis      = data.analysis ?? null;
+                        this.analysisError = data.error    ?? null;
                       } catch(e) {
                         this.analysisError = 'Request failed: ' + e.message;
                       }
                       this.analyzing = false;
                     }
                   }"
-                  data-analyze-url="{{ $analyzeUrl }}"
                 >
 
                   {{-- DATA ROW --}}
