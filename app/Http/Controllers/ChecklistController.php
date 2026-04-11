@@ -6,6 +6,7 @@ use App\Models\ChecklistTask;
 use App\Models\ChecklistSubmission;
 use App\Models\ChecklistSubmissionFile;
 use App\Models\ChecklistSubmissionLog;
+use App\Models\ChecklistAnalysisLog;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -78,7 +79,8 @@ class ChecklistController extends Controller
         }
 
         // Submissions for this date
-        $submissionsByTask = ChecklistSubmission::with(['user', 'files', 'logs.user'])
+        $submissionsByTask = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user'])
+            ->withCount('analysisLogs')
             ->where('date', $dateObj->toDateString())
             ->get()
             ->keyBy('checklist_task_id');
@@ -338,13 +340,38 @@ class ChecklistController extends Controller
         ]);
 
         if ($response->successful()) {
+            $analysisText = $response->json('choices.0.message.content');
+
+            ChecklistAnalysisLog::create([
+                'submission_id'   => $submission->id,
+                'user_id'         => Auth::id(),
+                'prompt_used'     => $prompt,
+                'analysis_result' => $analysisText,
+            ]);
+
             return response()->json([
-                'analysis' => $response->json('choices.0.message.content'),
+                'analysis'    => $analysisText,
+                'prompt_used' => $prompt,
+                'analyzed_by' => Auth::user()?->name,
+                'analyzed_at' => now()->format('M j, h:i A'),
             ]);
         }
 
         return response()->json([
             'error' => 'AI analysis failed (' . $response->status() . '). Check your API key.',
         ], 500);
+    }
+
+    public function getAnalysisLogs(ChecklistSubmission $submission)
+    {
+        $logs = $submission->analysisLogs()->with('user')->get()->map(fn($log) => [
+            'id'          => $log->id,
+            'analysis'    => $log->analysis_result,
+            'prompt_used' => $log->prompt_used,
+            'user'        => $log->user?->name ?? 'Unknown',
+            'created_at'  => $log->created_at->format('M j, Y g:i A'),
+        ]);
+
+        return response()->json(['logs' => $logs]);
     }
 }

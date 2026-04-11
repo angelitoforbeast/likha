@@ -124,26 +124,39 @@
 
               @foreach($tasks as $task)
                 @php
-                  $sub        = $submissionsByTask->get($task->id);
-                  $done       = $sub !== null;
-                  $subFiles   = $done ? $sub->files : collect();
-                  $imageFiles = $subFiles->filter(fn($f) => $f->isImage());
-                  $otherFiles = $subFiles->filter(fn($f) => !$f->isImage());
-                  $analyzeUrl = $done ? '/checklist/submission/'.$sub->id.'/analyze' : '';
+                  $sub           = $submissionsByTask->get($task->id);
+                  $done          = $sub !== null;
+                  $subFiles      = $done ? $sub->files : collect();
+                  $imageFiles    = $subFiles->filter(fn($f) => $f->isImage());
+                  $otherFiles    = $subFiles->filter(fn($f) => !$f->isImage());
+                  $analyzeUrl    = $done ? '/checklist/submission/'.$sub->id.'/analyze' : '';
+                  $logsUrl       = $done ? '/checklist/submission/'.$sub->id.'/analysis-logs' : '';
+                  $savedAnalysis = $done ? $sub->latestAnalysis : null;
+                  $analysisCount = $done ? ($sub->analysis_logs_count ?? 0) : 0;
                 @endphp
 
                 <tbody
                   x-data="{
                     analyzeUrl: '{{ $analyzeUrl }}',
+                    logsUrl: '{{ $logsUrl }}',
                     analyzing: false,
-                    analysis: null,
+                    analysis: {!! $savedAnalysis ? json_encode($savedAnalysis->analysis_result) : 'null' !!},
+                    promptUsed: {!! $savedAnalysis ? json_encode($savedAnalysis->prompt_used) : 'null' !!},
+                    analyzedBy: {!! $savedAnalysis ? json_encode($savedAnalysis->user?->name ?? 'Unknown') : 'null' !!},
+                    analyzedAt: {!! $savedAnalysis ? json_encode($savedAnalysis->created_at->format('M j, g:i A')) : 'null' !!},
+                    analysisCount: {{ $analysisCount }},
                     analysisError: null,
-                    showAnalysis: false,
+                    showAnalysis: {{ $savedAnalysis ? 'true' : 'false' }},
+                    showPrompt: false,
+                    showHistory: false,
+                    historyLogs: [],
+                    historyLoading: false,
                     async analyze() {
                       this.analyzing    = true;
                       this.showAnalysis = true;
                       this.analysis     = null;
                       this.analysisError = null;
+                      this.showHistory  = false;
                       try {
                         const res = await fetch(this.analyzeUrl, {
                           method: 'POST',
@@ -157,12 +170,29 @@
                           this.analyzing = false; return;
                         }
                         const data = await res.json();
-                        this.analysis      = data.analysis ?? null;
-                        this.analysisError = data.error    ?? null;
+                        this.analysis      = data.analysis    ?? null;
+                        this.promptUsed    = data.prompt_used ?? null;
+                        this.analyzedBy    = data.analyzed_by ?? null;
+                        this.analyzedAt    = data.analyzed_at ?? null;
+                        this.analysisError = data.error       ?? null;
+                        this.analysisCount += 1;
+                        this.historyLogs   = [];
                       } catch(e) {
                         this.analysisError = 'Request failed: ' + e.message;
                       }
                       this.analyzing = false;
+                    },
+                    async toggleHistory() {
+                      this.showHistory = !this.showHistory;
+                      if (this.showHistory && this.historyLogs.length === 0) {
+                        this.historyLoading = true;
+                        try {
+                          const res  = await fetch(this.logsUrl);
+                          const data = await res.json();
+                          this.historyLogs = data.logs ?? [];
+                        } catch(e) {}
+                        this.historyLoading = false;
+                      }
                     }
                   }"
                 >
@@ -279,7 +309,7 @@
                                 :class="analyzing ? 'opacity-60 cursor-not-allowed' : 'hover:bg-purple-700'"
                                 class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-purple-600 text-white transition font-medium whitespace-nowrap">
                           <template x-if="!analyzing">
-                            <span>✦ Analyze</span>
+                            <span x-text="analysisCount > 0 ? '↻ Re-analyze' : '✦ Analyze'"></span>
                           </template>
                           <template x-if="analyzing">
                             <span class="flex items-center gap-1">
@@ -291,8 +321,14 @@
                             </span>
                           </template>
                         </button>
-                        <template x-if="showAnalysis && !analyzing">
-                          <button @click="showAnalysis = false; analysis = null; analysisError = null;"
+                        <template x-if="analysisCount > 0">
+                          <button @click="toggleHistory()"
+                                  class="mt-1 text-xs text-purple-400 hover:text-purple-600 block whitespace-nowrap"
+                                  x-text="showHistory ? 'hide history' : analysisCount + (analysisCount === 1 ? ' analysis' : ' analyses')">
+                          </button>
+                        </template>
+                        <template x-if="showAnalysis && !analyzing && analysisCount === 0">
+                          <button @click="showAnalysis = false; analysisError = null;"
                                   class="mt-1 text-xs text-gray-300 hover:text-gray-500 block">hide</button>
                         </template>
                       @else
@@ -304,7 +340,7 @@
 
                   {{-- AI Analysis result row --}}
                   @if($done)
-                    <tr x-show="showAnalysis" x-transition class="border-b border-purple-100 bg-purple-50/30">
+                    <tr x-show="showAnalysis || analyzing" x-transition class="border-b border-purple-100 bg-purple-50/30">
                       <td colspan="7" class="px-6 py-4">
                         {{-- Loading --}}
                         <template x-if="analyzing">
@@ -318,11 +354,30 @@
                         </template>
                         {{-- Result --}}
                         <template x-if="!analyzing && analysis">
-                          <div class="flex gap-3">
-                            <div class="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 flex-shrink-0 mt-0.5 text-sm">✦</div>
-                            <div>
-                              <p class="text-xs font-semibold text-purple-600 mb-1">AI Analysis</p>
-                              <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-line" x-text="analysis"></p>
+                          <div class="space-y-2">
+                            <div class="flex gap-3">
+                              <div class="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 flex-shrink-0 mt-0.5 text-sm">✦</div>
+                              <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap mb-1">
+                                  <p class="text-xs font-semibold text-purple-600">AI Analysis</p>
+                                  <template x-if="analyzedBy">
+                                    <span class="text-xs text-gray-400" x-text="'by ' + analyzedBy + (analyzedAt ? ' · ' + analyzedAt : '')"></span>
+                                  </template>
+                                </div>
+                                <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-line" x-text="analysis"></p>
+                                {{-- Prompt used toggle --}}
+                                <template x-if="promptUsed">
+                                  <div class="mt-2">
+                                    <button @click="showPrompt = !showPrompt"
+                                            class="text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2"
+                                            x-text="showPrompt ? 'hide prompt' : 'show prompt used'">
+                                    </button>
+                                    <template x-if="showPrompt">
+                                      <pre class="mt-1.5 text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 whitespace-pre-wrap leading-relaxed" x-text="promptUsed"></pre>
+                                    </template>
+                                  </div>
+                                </template>
+                              </div>
                             </div>
                           </div>
                         </template>
@@ -331,6 +386,38 @@
                           <div class="flex items-center gap-2 text-sm text-red-500">
                             <span>⚠</span>
                             <span x-text="analysisError"></span>
+                          </div>
+                        </template>
+                      </td>
+                    </tr>
+
+                    {{-- History row --}}
+                    <tr x-show="showHistory" x-transition class="border-b border-purple-100 bg-purple-50/10">
+                      <td colspan="7" class="px-6 py-4">
+                        <template x-if="historyLoading">
+                          <div class="flex items-center gap-2 text-xs text-gray-400">
+                            <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                            </svg>
+                            Loading history…
+                          </div>
+                        </template>
+                        <template x-if="!historyLoading && historyLogs.length > 0">
+                          <div class="space-y-3">
+                            <p class="text-xs font-semibold text-purple-500 uppercase tracking-wide">Analysis History</p>
+                            <template x-for="(log, i) in historyLogs" :key="log.id">
+                              <div class="flex gap-3 pb-3" :class="i < historyLogs.length - 1 ? 'border-b border-purple-100' : ''">
+                                <div class="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center text-purple-500 flex-shrink-0 mt-0.5 text-xs">✦</div>
+                                <div class="flex-1 min-w-0">
+                                  <div class="flex items-center gap-2 flex-wrap mb-0.5">
+                                    <span class="text-xs text-gray-500 font-medium" x-text="'#' + (historyLogs.length - i) + ' — ' + log.user"></span>
+                                    <span class="text-xs text-gray-400" x-text="log.created_at"></span>
+                                  </div>
+                                  <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-line" x-text="log.analysis"></p>
+                                </div>
+                              </div>
+                            </template>
                           </div>
                         </template>
                       </td>

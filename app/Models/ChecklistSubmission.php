@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class ChecklistSubmission extends Model
 {
@@ -35,6 +36,16 @@ class ChecklistSubmission extends Model
     public function logs(): HasMany
     {
         return $this->hasMany(ChecklistSubmissionLog::class)->orderBy('created_at', 'desc');
+    }
+
+    public function analysisLogs(): HasMany
+    {
+        return $this->hasMany(ChecklistAnalysisLog::class, 'submission_id')->orderBy('created_at', 'desc');
+    }
+
+    public function latestAnalysis(): HasOne
+    {
+        return $this->hasOne(ChecklistAnalysisLog::class, 'submission_id')->latestOfMany();
     }
 
     public function isImage(): bool
