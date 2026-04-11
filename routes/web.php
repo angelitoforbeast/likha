@@ -133,6 +133,7 @@ Route::middleware(['web','auth'])->prefix('checklist')->name('checklist.')->grou
     Route::patch('/tasks/{task}', [\App\Http\Controllers\ChecklistController::class, 'updateTask'])->name('update-task');
     Route::delete('/tasks/{task}', [\App\Http\Controllers\ChecklistController::class, 'destroyTask'])->name('destroy-task');
     Route::post('/tasks/reorder', [\App\Http\Controllers\ChecklistController::class, 'reorderTasks'])->name('reorder');
+    Route::post('/submission/{submission}/analyze', [\App\Http\Controllers\ChecklistController::class, 'analyzeSubmission'])->name('analyze');
 });
 
 // Allow any authenticated user to view the Allowed IPs page (no IP check)

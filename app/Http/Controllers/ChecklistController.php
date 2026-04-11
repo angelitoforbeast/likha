@@ -9,6 +9,7 @@ use App\Models\ChecklistSubmissionLog;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Carbon\Carbon;
 
@@ -25,7 +26,7 @@ class ChecklistController extends Controller
             ->get();
 
         // One submission per task per day — keyed by task_id
-        $submissionsByTask = ChecklistSubmission::with(['user', 'files'])
+        $submissionsByTask = ChecklistSubmission::with(['user', 'files', 'logs.user'])
             ->where('date', $today)
             ->get()
             ->keyBy('checklist_task_id');
@@ -243,5 +244,59 @@ class ChecklistController extends Controller
             ChecklistTask::where('id', $id)->update(['sort_order' => $index]);
         }
         return response()->json(['ok' => true]);
+    }
+
+    public function analyzeSubmission(Request $request, ChecklistSubmission $submission)
+    {
+        $task      = $submission->checklistTask;
+        $imgFiles  = $submission->files->filter(fn($f) => $f->isImage());
+
+        // Build prompt
+        $prompt  = "You are reviewing a daily operational task submission for a business.\n\n";
+        $prompt .= "Task: {$task->title}\n";
+        if ($task->description) {
+            $prompt .= "Task Description: {$task->description}\n";
+        }
+        if ($submission->notes) {
+            $prompt .= "Staff Notes: {$submission->notes}\n";
+        }
+        if ($imgFiles->isEmpty()) {
+            $prompt .= "\n(No images were submitted for this task.)\n";
+        }
+        $prompt .= "\nBased on the above, provide a concise analysis in 2-4 sentences: Was the task completed properly? What do the images show (if any)? Any observations, concerns, or recommendations?";
+
+        $content = [['type' => 'text', 'text' => $prompt]];
+
+        // Attach images (up to 5) as URLs — storage is public
+        foreach ($imgFiles->take(5) as $f) {
+            $content[] = [
+                'type'      => 'image_url',
+                'image_url' => [
+                    'url'    => url(Storage::url($f->file_path)),
+                    'detail' => 'auto',
+                ],
+            ];
+        }
+
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . config('services.openai.key'),
+            'Content-Type'  => 'application/json',
+        ])->timeout(30)->post('https://api.openai.com/v1/chat/completions', [
+            'model'      => 'gpt-4o',
+            'max_tokens' => 512,
+            'messages'   => [
+                ['role' => 'user', 'content' => $content],
+            ],
+        ]);
+
+        if ($response->successful()) {
+            return response()->json([
+                'analysis' => $response->json('choices.0.message.content'),
+            ]);
+        }
+
+        return response()->json([
+            'error' => 'AI analysis failed (' . $response->status() . '). Check your API key.',
+        ], 500);
     }
 }
