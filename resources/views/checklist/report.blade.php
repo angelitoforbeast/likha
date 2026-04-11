@@ -129,7 +129,7 @@
                   $subFiles   = $done ? $sub->files : collect();
                   $imageFiles = $subFiles->filter(fn($f) => $f->isImage());
                   $otherFiles = $subFiles->filter(fn($f) => !$f->isImage());
-                  $analyzeUrl = $done ? route('checklist.analyze', $sub->id) : '';
+                  $analyzeUrl = $done ? '/checklist/submission/'.$sub->id.'/analyze' : '';
                 @endphp
 
                 <tbody
