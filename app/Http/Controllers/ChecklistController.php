@@ -100,14 +100,23 @@ class ChecklistController extends Controller
         $imageMimes = 'jpg,jpeg,png,gif,webp';
         $anyMimes   = 'jpg,jpeg,png,gif,webp,pdf,doc,docx,xls,xlsx,csv';
 
+        // Load existing submission first so we can check if files already exist
+        $existing = ChecklistSubmission::with('files')->where([
+            'checklist_task_id' => $task->id,
+            'date'              => $today,
+        ])->first();
+
+        $isNew            = $existing === null;
+        $hasExistingFiles = $existing && ($existing->files->count() > 0 || $existing->file_path);
+
         $rules = ['notes' => 'nullable|string|max:2000'];
 
         if ($task->type === 'photo') {
-            $rules['files']   = 'required|array|min:1|max:10';
+            $rules['files']   = $hasExistingFiles ? 'nullable|array|max:10' : 'required|array|min:1|max:10';
             $rules['files.*'] = "file|max:10240|mimes:{$imageMimes}";
         } elseif ($task->type === 'both') {
             $rules['notes']   = 'required|string|max:2000';
-            $rules['files']   = 'required|array|min:1|max:10';
+            $rules['files']   = $hasExistingFiles ? 'nullable|array|max:10' : 'required|array|min:1|max:10';
             $rules['files.*'] = "file|max:10240|mimes:{$imageMimes}";
         } elseif ($task->type === 'any') {
             $rules['files']   = 'nullable|array|max:10';
@@ -115,13 +124,6 @@ class ChecklistController extends Controller
         }
 
         $request->validate($rules);
-
-        $existing = ChecklistSubmission::where([
-            'checklist_task_id' => $task->id,
-            'date'              => $today,
-        ])->first();
-
-        $isNew = $existing === null;
 
         $submission = ChecklistSubmission::updateOrCreate(
             ['checklist_task_id' => $task->id, 'date' => $today],
