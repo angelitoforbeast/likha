@@ -138,21 +138,15 @@ class ChecklistController extends Controller
             'file_count'              => $fileCount,
         ]);
 
-        // If new files uploaded, replace existing files
+        // If new files uploaded, ADD to existing (not replace)
         if ($request->hasFile('files')) {
-            // Delete old files from storage
-            foreach ($submission->files as $old) {
-                Storage::disk('public')->delete($old->file_path);
-            }
-            $submission->files()->delete();
-
-            // Store new files
+            $nextOrder = $submission->files()->max('sort_order') + 1;
             foreach ($request->file('files') as $i => $file) {
                 $submission->files()->create([
                     'file_path'          => $file->store("checklist/{$today}", 'public'),
                     'file_original_name' => $file->getClientOriginalName(),
                     'file_mime'          => $file->getMimeType(),
-                    'sort_order'         => $i,
+                    'sort_order'         => $nextOrder + $i,
                 ]);
             }
         }
