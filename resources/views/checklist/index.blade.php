@@ -2,7 +2,9 @@
   <x-slot name="heading">Daily Checklist</x-slot>
   <x-slot name="title">Daily Checklist</x-slot>
 
-  <div class="min-h-screen bg-gray-50">
+  <div class="min-h-screen bg-gray-50"
+       x-data="{ lightbox: false, lightSrc: '' }"
+       @keydown.escape.window="lightbox = false">
 
     {{-- ===== HEADER ===== --}}
     <div class="bg-white border-b border-gray-200 shadow-sm">
@@ -150,11 +152,10 @@
                         <div class="flex flex-wrap gap-1">
                           @foreach($imageFiles as $f)
                             <div class="relative group">
-                              <a href="{{ Storage::url($f->file_path) }}" target="_blank">
-                                <img src="{{ Storage::url($f->file_path) }}"
-                                     class="w-14 h-14 object-cover rounded-lg border border-gray-100 hover:opacity-80 transition shadow-sm"
-                                     alt="{{ $f->file_original_name }}">
-                              </a>
+                              <img src="{{ Storage::url($f->file_path) }}"
+                                   @click="lightSrc='{{ Storage::url($f->file_path) }}'; lightbox=true"
+                                   class="w-14 h-14 object-cover rounded-lg border border-gray-100 hover:opacity-80 transition shadow-sm cursor-zoom-in"
+                                   alt="{{ $f->file_original_name }}">
                               @if($isMine || $isCeo)
                                 <form method="POST" action="{{ route('checklist.delete-file', $f) }}"
                                       onsubmit="return confirm('Remove this image?')"
@@ -187,10 +188,9 @@
                       @elseif($done && $sub->file_path)
                         {{-- Legacy single file fallback --}}
                         @if($sub->isImage())
-                          <a href="{{ Storage::url($sub->file_path) }}" target="_blank">
-                            <img src="{{ Storage::url($sub->file_path) }}"
-                                 class="w-14 h-14 object-cover rounded-lg border border-gray-100 hover:opacity-80 transition">
-                          </a>
+                          <img src="{{ Storage::url($sub->file_path) }}"
+                               @click="lightSrc='{{ Storage::url($sub->file_path) }}'; lightbox=true"
+                               class="w-14 h-14 object-cover rounded-lg border border-gray-100 hover:opacity-80 transition cursor-zoom-in">
                         @else
                           <a href="{{ Storage::url($sub->file_path) }}" target="_blank"
                              class="text-xs text-blue-500 hover:underline">📎 {{ $sub->file_original_name }}</a>
@@ -365,4 +365,18 @@
       @endif
     </div>
   </div>
+
+  {{-- ===== LIGHTBOX ===== --}}
+  <div x-show="lightbox"
+       x-transition.opacity
+       @click="lightbox = false"
+       class="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
+       style="display:none">
+    <button @click="lightbox = false"
+            class="absolute top-4 right-4 w-9 h-9 bg-white/10 hover:bg-white/20 text-white rounded-full flex items-center justify-center text-lg transition">✕</button>
+    <img :src="lightSrc"
+         class="max-w-full max-h-full rounded-xl shadow-2xl object-contain cursor-default"
+         @click.stop>
+  </div>
+
 </x-layout>
