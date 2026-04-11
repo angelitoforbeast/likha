@@ -118,8 +118,9 @@
                   <th class="text-left px-3 py-3 w-[180px]">Images</th>
                   <th class="text-left px-3 py-3 min-w-[200px]">Notes</th>
                   <th class="text-left px-3 py-3 min-w-[140px]">Submitted by</th>
-                  <th class="text-left px-3 py-3 w-[110px]">AI Analysis</th>
-                  <th class="text-left px-3 py-3 w-[120px]">Approval Check</th>
+                  <th class="text-left px-3 py-3 min-w-[220px]">AI Analysis</th>
+                  <th class="text-left px-3 py-3 min-w-[200px]">Approval Check</th>
+                  <th class="text-left px-3 py-3 w-[110px]">Analyze</th>
                 </tr>
               </thead>
 
@@ -151,7 +152,7 @@
                     analyzedAt: {!! $savedAnalysis ? \Illuminate\Support\Js::from($savedAnalysis->created_at->format('M j, g:i A')) : 'null' !!},
                     analysisCount: {{ $analysisCount }},
                     analysisError: null,
-                    showAnalysis: {{ $savedAnalysis ? 'true' : 'false' }},
+                    analysisExpanded: false,
                     showPrompt: false,
                     showHistory: false,
                     historyLogs: [],
@@ -166,14 +167,19 @@
                     approvalCheckedAt: {!! $savedApproval ? \Illuminate\Support\Js::from($savedApproval->created_at->format('M j, g:i A')) : 'null' !!},
                     approvalCount: {{ $approvalCount }},
                     approvalError: null,
-                    showApproval: {{ $savedApproval ? 'true' : 'false' }},
+                    approvalExpanded: false,
                     showApprovalPrompt: false,
                     showApprovalHistory: false,
                     approvalHistoryLogs: [],
                     approvalHistoryLoading: false,
+                    async runAll() {
+                      await Promise.all([
+                        this.analyzeUrl  ? this.analyze()       : Promise.resolve(),
+                        this.approvalUrl ? this.checkApproval() : Promise.resolve(),
+                      ]);
+                    },
                     async analyze() {
                       this.analyzing    = true;
-                      this.showAnalysis = true;
                       this.analysis     = null;
                       this.analysisError = null;
                       this.showHistory  = false;
@@ -216,7 +222,6 @@
                     },
                     async checkApproval() {
                       this.approving      = true;
-                      this.showApproval   = true;
                       this.approval       = null;
                       this.approvalError  = null;
                       this.showApprovalHistory = false;
@@ -365,15 +370,149 @@
                       @endif
                     </td>
 
-                    {{-- AI Analysis button --}}
+                    {{-- AI Analysis (inline) --}}
+                    <td class="px-3 py-3 align-top min-w-[220px]">
+                      @if($done)
+                        {{-- Loading --}}
+                        <div x-show="analyzing" class="flex items-center gap-1.5 text-xs text-purple-500">
+                          <svg class="animate-spin w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                          </svg>
+                          Analyzing…
+                        </div>
+                        {{-- Result --}}
+                        <div x-show="!analyzing && analysis">
+                          <p class="text-xs text-gray-700 leading-relaxed whitespace-pre-line"
+                             :class="analysisExpanded ? '' : 'line-clamp-4'"
+                             x-text="analysis"></p>
+                          <div class="flex items-center gap-2 mt-1 flex-wrap">
+                            <button @click="analysisExpanded = !analysisExpanded"
+                                    class="text-xs text-purple-400 hover:text-purple-600"
+                                    x-text="analysisExpanded ? 'collapse' : 'expand'"></button>
+                            <span class="text-xs text-gray-300">·</span>
+                            <span class="text-xs text-gray-400"
+                                  x-text="analyzedBy ? 'by ' + analyzedBy + (analyzedAt ? ' · ' + analyzedAt : '') : ''"></span>
+                          </div>
+                          {{-- Prompt used toggle --}}
+                          <div x-show="promptUsed" class="mt-1">
+                            <button @click="showPrompt = !showPrompt"
+                                    class="text-xs text-gray-300 hover:text-gray-500 underline underline-offset-2"
+                                    x-text="showPrompt ? 'hide prompt' : 'show prompt'"></button>
+                            <pre x-show="showPrompt"
+                                 class="mt-1 text-xs text-gray-400 bg-gray-50 border border-gray-100 rounded px-2 py-1 whitespace-pre-wrap"
+                                 x-text="promptUsed"></pre>
+                          </div>
+                          {{-- History toggle --}}
+                          <div x-show="analysisCount > 0" class="mt-1">
+                            <button @click="toggleHistory()"
+                                    class="text-xs text-purple-300 hover:text-purple-500"
+                                    x-text="showHistory ? 'hide history' : analysisCount + (analysisCount === 1 ? ' analysis' : ' analyses')"></button>
+                            <div x-show="showHistory" class="mt-1.5 space-y-2 border-t border-purple-100 pt-1.5">
+                              <div x-show="historyLoading" class="text-xs text-gray-400">Loading…</div>
+                              <template x-for="(log, i) in historyLogs" :key="log.id">
+                                <div class="text-xs">
+                                  <span class="text-gray-500 font-medium" x-text="'#'+(historyLogs.length-i)+' '+log.user+' · '+log.created_at"></span>
+                                  <p class="text-gray-600 mt-0.5 line-clamp-3 whitespace-pre-line" x-text="log.analysis"></p>
+                                </div>
+                              </template>
+                            </div>
+                          </div>
+                        </div>
+                        {{-- Error --}}
+                        <div x-show="!analyzing && analysisError" class="flex items-center gap-1 text-xs text-red-500">
+                          <span>⚠</span><span x-text="analysisError"></span>
+                        </div>
+                        {{-- Empty --}}
+                        <span x-show="!analyzing && !analysis && !analysisError" class="text-gray-200 text-xs">—</span>
+                      @else
+                        <span class="text-gray-200 text-xs">—</span>
+                      @endif
+                    </td>
+
+                    {{-- Approval Check (inline) --}}
+                    <td class="px-3 py-3 align-top min-w-[200px]">
+                      @if($done && $task->approval_prompt)
+                        {{-- Loading --}}
+                        <div x-show="approving" class="flex items-center gap-1.5 text-xs text-emerald-600">
+                          <svg class="animate-spin w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                          </svg>
+                          Checking…
+                        </div>
+                        {{-- Result --}}
+                        <div x-show="!approving && approval">
+                          <div class="mb-1">
+                            <span x-show="approvalVerdict === 'approved'"
+                                  class="text-xs font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700">✅ Approved</span>
+                            <span x-show="approvalVerdict === 'not_approved'"
+                                  class="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">❌ Not Approved</span>
+                            <span x-show="approvalVerdict === 'unknown' || !approvalVerdict"
+                                  class="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">⚠ Unknown</span>
+                          </div>
+                          <p class="text-xs text-gray-700 leading-relaxed whitespace-pre-line"
+                             :class="approvalExpanded ? '' : 'line-clamp-3'"
+                             x-text="approval"></p>
+                          <div class="flex items-center gap-2 mt-1 flex-wrap">
+                            <button @click="approvalExpanded = !approvalExpanded"
+                                    class="text-xs text-emerald-400 hover:text-emerald-600"
+                                    x-text="approvalExpanded ? 'collapse' : 'expand'"></button>
+                            <span class="text-xs text-gray-300">·</span>
+                            <span class="text-xs text-gray-400"
+                                  x-text="approvalCheckedBy ? 'by '+approvalCheckedBy+(approvalCheckedAt?' · '+approvalCheckedAt:'') : ''"></span>
+                          </div>
+                          {{-- Prompt used toggle --}}
+                          <div x-show="approvalPromptUsed" class="mt-1">
+                            <button @click="showApprovalPrompt = !showApprovalPrompt"
+                                    class="text-xs text-gray-300 hover:text-gray-500 underline underline-offset-2"
+                                    x-text="showApprovalPrompt ? 'hide prompt' : 'show prompt'"></button>
+                            <pre x-show="showApprovalPrompt"
+                                 class="mt-1 text-xs text-gray-400 bg-gray-50 border border-gray-100 rounded px-2 py-1 whitespace-pre-wrap"
+                                 x-text="approvalPromptUsed"></pre>
+                          </div>
+                          {{-- History --}}
+                          <div x-show="approvalCount > 0" class="mt-1">
+                            <button @click="toggleApprovalHistory()"
+                                    class="text-xs text-emerald-300 hover:text-emerald-500"
+                                    x-text="showApprovalHistory ? 'hide history' : approvalCount + (approvalCount === 1 ? ' check' : ' checks')"></button>
+                            <div x-show="showApprovalHistory" class="mt-1.5 space-y-2 border-t border-emerald-100 pt-1.5">
+                              <div x-show="approvalHistoryLoading" class="text-xs text-gray-400">Loading…</div>
+                              <template x-for="(log, i) in approvalHistoryLogs" :key="log.id">
+                                <div class="text-xs">
+                                  <div class="flex items-center gap-1">
+                                    <span x-show="log.verdict === 'approved'" class="text-green-600">✅</span>
+                                    <span x-show="log.verdict === 'not_approved'" class="text-red-600">❌</span>
+                                    <span x-show="log.verdict === 'unknown' || !log.verdict" class="text-gray-400">⚠</span>
+                                    <span class="text-gray-500 font-medium" x-text="'#'+(approvalHistoryLogs.length-i)+' '+log.user+' · '+log.created_at"></span>
+                                  </div>
+                                  <p class="text-gray-600 mt-0.5 line-clamp-2 whitespace-pre-line" x-text="log.analysis"></p>
+                                </div>
+                              </template>
+                            </div>
+                          </div>
+                        </div>
+                        {{-- Error --}}
+                        <div x-show="!approving && approvalError" class="flex items-center gap-1 text-xs text-red-500">
+                          <span>⚠</span><span x-text="approvalError"></span>
+                        </div>
+                        {{-- Empty --}}
+                        <span x-show="!approving && !approval && !approvalError" class="text-gray-200 text-xs">—</span>
+                      @else
+                        <span class="text-gray-200 text-xs">—</span>
+                      @endif
+                    </td>
+
+                    {{-- Analyze button (single, triggers both) --}}
                     <td class="px-3 py-3 align-middle">
                       @if($done)
-                        <button @click="analyze()"
-                                :disabled="analyzing"
-                                :class="analyzing ? 'opacity-60 cursor-not-allowed' : 'hover:bg-purple-700'"
-                                class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-purple-600 text-white transition font-medium whitespace-nowrap">
-                          <span x-show="!analyzing" x-text="analysisCount > 0 ? '↻ Re-analyze' : '✦ Analyze'"></span>
-                          <span x-show="analyzing" class="flex items-center gap-1">
+                        <button @click="runAll()"
+                                :disabled="analyzing || approving"
+                                :class="(analyzing || approving) ? 'opacity-60 cursor-not-allowed' : 'hover:bg-indigo-700'"
+                                class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white transition font-medium whitespace-nowrap">
+                          <span x-show="!analyzing && !approving"
+                                x-text="(analysisCount > 0 || approvalCount > 0) ? '↻ Re-analyze' : '✦ Analyze'"></span>
+                          <span x-show="analyzing || approving" class="flex items-center gap-1">
                             <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
                               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
                               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
@@ -381,233 +520,12 @@
                             Analyzing…
                           </span>
                         </button>
-                        <button x-show="analysisCount > 0"
-                                @click="toggleHistory()"
-                                class="mt-1 text-xs text-purple-400 hover:text-purple-600 block whitespace-nowrap"
-                                x-text="showHistory ? 'hide history' : analysisCount + (analysisCount === 1 ? ' analysis' : ' analyses')">
-                        </button>
-                        <button x-show="showAnalysis && !analyzing && analysisCount === 0"
-                                @click="showAnalysis = false; analysisError = null;"
-                                class="mt-1 text-xs text-gray-300 hover:text-gray-500 block">hide</button>
-                      @else
-                        <span class="text-gray-200 text-xs">—</span>
-                      @endif
-                    </td>
-
-                    {{-- Approval Check button --}}
-                    <td class="px-3 py-3 align-middle">
-                      @if($done && $task->approval_prompt)
-                        <button @click="checkApproval()"
-                                :disabled="approving"
-                                :class="approving ? 'opacity-60 cursor-not-allowed' : 'hover:bg-emerald-700'"
-                                class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white transition font-medium whitespace-nowrap">
-                          <span x-show="!approving" x-text="approvalCount > 0 ? '↻ Re-check' : '✔ Check'"></span>
-                          <span x-show="approving" class="flex items-center gap-1">
-                            <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
-                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                            </svg>
-                            Checking…
-                          </span>
-                        </button>
-                        <button x-show="approvalCount > 0"
-                                @click="toggleApprovalHistory()"
-                                class="mt-1 text-xs text-emerald-500 hover:text-emerald-700 block whitespace-nowrap"
-                                x-text="showApprovalHistory ? 'hide history' : approvalCount + (approvalCount === 1 ? ' check' : ' checks')">
-                        </button>
-                      @elseif($done)
-                        <span class="text-gray-200 text-xs">—</span>
                       @else
                         <span class="text-gray-200 text-xs">—</span>
                       @endif
                     </td>
 
                   </tr>
-
-                  {{-- AI Analysis result row --}}
-                  @if($done)
-                    <tr x-show="showAnalysis || analyzing" x-transition class="border-b border-purple-100 bg-purple-50/30">
-                      <td colspan="8" class="px-6 py-4">
-                        {{-- Loading --}}
-                        <template x-if="analyzing">
-                          <div class="flex items-center gap-2 text-sm text-purple-500">
-                            <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                            </svg>
-                            Analyzing submission with AI…
-                          </div>
-                        </template>
-                        {{-- Result --}}
-                        <template x-if="!analyzing && analysis">
-                          <div class="space-y-2">
-                            <div class="flex gap-3">
-                              <div class="w-7 h-7 rounded-full bg-purple-100 flex items-center justify-center text-purple-600 flex-shrink-0 mt-0.5 text-sm">✦</div>
-                              <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2 flex-wrap mb-1">
-                                  <p class="text-xs font-semibold text-purple-600">AI Analysis</p>
-                                  <template x-if="analyzedBy">
-                                    <span class="text-xs text-gray-400" x-text="'by ' + analyzedBy + (analyzedAt ? ' · ' + analyzedAt : '')"></span>
-                                  </template>
-                                </div>
-                                <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-line" x-text="analysis"></p>
-                                {{-- Prompt used toggle --}}
-                                <template x-if="promptUsed">
-                                  <div class="mt-2">
-                                    <button @click="showPrompt = !showPrompt"
-                                            class="text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2"
-                                            x-text="showPrompt ? 'hide prompt' : 'show prompt used'">
-                                    </button>
-                                    <template x-if="showPrompt">
-                                      <pre class="mt-1.5 text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 whitespace-pre-wrap leading-relaxed" x-text="promptUsed"></pre>
-                                    </template>
-                                  </div>
-                                </template>
-                              </div>
-                            </div>
-                          </div>
-                        </template>
-                        {{-- Error --}}
-                        <template x-if="!analyzing && analysisError">
-                          <div class="flex items-center gap-2 text-sm text-red-500">
-                            <span>⚠</span>
-                            <span x-text="analysisError"></span>
-                          </div>
-                        </template>
-                      </td>
-                    </tr>
-
-                    {{-- History row --}}
-                    <tr x-show="showHistory" x-transition class="border-b border-purple-100 bg-purple-50/10">
-                      <td colspan="8" class="px-6 py-4">
-                        <template x-if="historyLoading">
-                          <div class="flex items-center gap-2 text-xs text-gray-400">
-                            <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
-                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                            </svg>
-                            Loading history…
-                          </div>
-                        </template>
-                        <template x-if="!historyLoading && historyLogs.length > 0">
-                          <div class="space-y-3">
-                            <p class="text-xs font-semibold text-purple-500 uppercase tracking-wide">Analysis History</p>
-                            <template x-for="(log, i) in historyLogs" :key="log.id">
-                              <div class="flex gap-3 pb-3" :class="i < historyLogs.length - 1 ? 'border-b border-purple-100' : ''">
-                                <div class="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center text-purple-500 flex-shrink-0 mt-0.5 text-xs">✦</div>
-                                <div class="flex-1 min-w-0">
-                                  <div class="flex items-center gap-2 flex-wrap mb-0.5">
-                                    <span class="text-xs text-gray-500 font-medium" x-text="'#' + (historyLogs.length - i) + ' — ' + log.user"></span>
-                                    <span class="text-xs text-gray-400" x-text="log.created_at"></span>
-                                  </div>
-                                  <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-line" x-text="log.analysis"></p>
-                                </div>
-                              </div>
-                            </template>
-                          </div>
-                        </template>
-                      </td>
-                    </tr>
-                  @endif
-
-                  {{-- Approval Check result row --}}
-                  @if($done && $task->approval_prompt)
-                    <tr x-show="showApproval || approving" x-transition class="border-b border-emerald-100 bg-emerald-50/30">
-                      <td colspan="8" class="px-6 py-4">
-                        <template x-if="approving">
-                          <div class="flex items-center gap-2 text-sm text-emerald-600">
-                            <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                            </svg>
-                            Running approval check…
-                          </div>
-                        </template>
-                        <template x-if="!approving && approval">
-                          <div class="space-y-2">
-                            <div class="flex gap-3">
-                              <div class="flex-shrink-0 mt-0.5">
-                                <span x-show="approvalVerdict === 'approved'"
-                                      class="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-green-100 text-green-700">
-                                  ✅ Approved
-                                </span>
-                                <span x-show="approvalVerdict === 'not_approved'"
-                                      class="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-red-100 text-red-700">
-                                  ❌ Not Approved
-                                </span>
-                                <span x-show="approvalVerdict === 'unknown' || !approvalVerdict"
-                                      class="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">
-                                  ⚠ Unknown
-                                </span>
-                              </div>
-                              <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2 flex-wrap mb-1">
-                                  <p class="text-xs font-semibold text-emerald-700">Approval Check</p>
-                                  <template x-if="approvalCheckedBy">
-                                    <span class="text-xs text-gray-400" x-text="'by ' + approvalCheckedBy + (approvalCheckedAt ? ' · ' + approvalCheckedAt : '')"></span>
-                                  </template>
-                                </div>
-                                <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-line" x-text="approval"></p>
-                                <template x-if="approvalPromptUsed">
-                                  <div class="mt-2">
-                                    <button @click="showApprovalPrompt = !showApprovalPrompt"
-                                            class="text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2"
-                                            x-text="showApprovalPrompt ? 'hide prompt' : 'show prompt used'">
-                                    </button>
-                                    <template x-if="showApprovalPrompt">
-                                      <pre class="mt-1.5 text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 whitespace-pre-wrap leading-relaxed" x-text="approvalPromptUsed"></pre>
-                                    </template>
-                                  </div>
-                                </template>
-                              </div>
-                            </div>
-                          </div>
-                        </template>
-                        <template x-if="!approving && approvalError">
-                          <div class="flex items-center gap-2 text-sm text-red-500">
-                            <span>⚠</span>
-                            <span x-text="approvalError"></span>
-                          </div>
-                        </template>
-                      </td>
-                    </tr>
-
-                    {{-- Approval history row --}}
-                    <tr x-show="showApprovalHistory" x-transition class="border-b border-emerald-100 bg-emerald-50/10">
-                      <td colspan="8" class="px-6 py-4">
-                        <template x-if="approvalHistoryLoading">
-                          <div class="flex items-center gap-2 text-xs text-gray-400">
-                            <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
-                              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                            </svg>
-                            Loading history…
-                          </div>
-                        </template>
-                        <template x-if="!approvalHistoryLoading && approvalHistoryLogs.length > 0">
-                          <div class="space-y-3">
-                            <p class="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Approval History</p>
-                            <template x-for="(log, i) in approvalHistoryLogs" :key="log.id">
-                              <div class="flex gap-3 pb-3" :class="i < approvalHistoryLogs.length - 1 ? 'border-b border-emerald-100' : ''">
-                                <div class="flex-shrink-0 mt-0.5">
-                                  <span x-show="log.verdict === 'approved'" class="text-xs font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700">✅</span>
-                                  <span x-show="log.verdict === 'not_approved'" class="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">❌</span>
-                                  <span x-show="log.verdict === 'unknown' || !log.verdict" class="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">⚠</span>
-                                </div>
-                                <div class="flex-1 min-w-0">
-                                  <div class="flex items-center gap-2 flex-wrap mb-0.5">
-                                    <span class="text-xs text-gray-500 font-medium" x-text="'#' + (approvalHistoryLogs.length - i) + ' — ' + log.user"></span>
-                                    <span class="text-xs text-gray-400" x-text="log.created_at"></span>
-                                  </div>
-                                  <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-line" x-text="log.analysis"></p>
-                                </div>
-                              </div>
-                            </template>
-                          </div>
-                        </template>
-                      </td>
-                    </tr>
-                  @endif
 
                 </tbody>
               @endforeach
