@@ -2,7 +2,7 @@
   <x-slot name="heading">Manage Checklist Tasks</x-slot>
   <x-slot name="title">Manage Checklist Tasks</x-slot>
 
-  <div class="p-4 max-w-3xl mx-auto space-y-4">
+  <div class="p-4 max-w-4xl mx-auto space-y-4 mt-16">
 
     {{-- Header --}}
     <div class="flex items-center justify-between flex-wrap gap-2">

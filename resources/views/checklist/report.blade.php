@@ -2,13 +2,13 @@
   <x-slot name="heading">Daily Report</x-slot>
   <x-slot name="title">Daily Report</x-slot>
 
-  <div class="min-h-screen bg-slate-50"
+  <div class="min-h-screen bg-slate-50 mt-16"
        x-data="{ lightbox: false, lightSrc: '' }"
        @keydown.escape.window="lightbox = false">
 
     {{-- ===== STICKY HEADER ===== --}}
     <div class="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-gray-100 shadow-sm">
-      <div class="max-w-5xl mx-auto px-4 py-0">
+      <div class="max-w-4xl mx-auto px-4 py-0">
         <div class="flex items-stretch gap-0 divide-x divide-gray-100">
 
           {{-- Prev day --}}
@@ -61,7 +61,7 @@
     </div>
 
     {{-- ===== CONTENT ===== --}}
-    <div class="max-w-5xl mx-auto px-4 py-6 space-y-4">
+    <div class="max-w-4xl mx-auto px-4 py-6 space-y-4">
 
       @if($totalTasks === 0)
         <div class="text-center py-24 text-gray-400">

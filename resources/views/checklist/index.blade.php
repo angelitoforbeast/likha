@@ -2,11 +2,11 @@
   <x-slot name="heading">Daily Checklist</x-slot>
   <x-slot name="title">Daily Checklist</x-slot>
 
-  <div class="min-h-screen bg-gray-50">
+  <div class="min-h-screen bg-gray-50 mt-16">
 
     {{-- ===== HEADER ===== --}}
     <div class="bg-white border-b border-gray-200 shadow-sm">
-      <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+      <div class="max-w-screen-2xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 class="text-base font-bold text-gray-800">Daily Checklist</h1>
           <p class="text-xs text-gray-400">{{ now()->format('l, F j, Y') }}</p>
@@ -25,7 +25,7 @@
       </div>
     </div>
 
-    <div class="max-w-6xl mx-auto px-4 py-5 space-y-4">
+    <div class="max-w-screen-2xl mx-auto px-4 py-5 space-y-4">
 
       {{-- Alerts --}}
       @if(session('success'))

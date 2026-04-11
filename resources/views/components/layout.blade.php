@@ -193,7 +193,8 @@
     </div>
   </nav>
 
-  {{-- Page heading --}}
+  {{-- Page heading (hidden for checklist pages — they have their own header) --}}
+  @unless(request()->is('checklist') || request()->is('checklist/*'))
   <header class="bg-white shadow-sm mt-16">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <h1 class="text-3xl font-bold tracking-tight text-gray-900">
@@ -201,6 +202,7 @@
       </h1>
     </div>
   </header>
+  @endunless
 
   {{-- Page content --}}
   <main>
@@ -215,7 +217,9 @@
       'jnt/hold',
       'pancake/retrieve-orders',
       'jnt/order-management',
-      'pancake/index'
+      'pancake/index',
+      'checklist',
+      'checklist/*',
     ]))
       <div class="w-full px-0">
         {{ $slot }}
