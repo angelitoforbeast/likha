@@ -152,7 +152,7 @@
                           }
                         });
                         if (!res.ok) {
-                          this.analysisError = 'Server error (' + res.status + '). Please try again.';
+                          this.analysisError = 'Error ' + res.status + ' → URL: ' + this.$el.dataset.analyzeUrl;
                           this.analyzing = false; return;
                         }
                         const data = await res.json();
