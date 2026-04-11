@@ -30,19 +30,22 @@ class ChecklistController extends Controller
         $doneCount  = $submissionsByTask->count();
         $totalTasks = $tasks->count();
 
-        // All tasks (including inactive) for manage panel
+        return view('checklist.index', compact(
+            'tasks', 'submissionsByTask',
+            'today', 'doneCount', 'totalTasks'
+        ));
+    }
+
+    public function manage()
+    {
         $allTasks = ChecklistTask::with('assignedUsers')
             ->orderBy('sort_order')
             ->orderBy('id')
             ->get();
 
-        // All users for assignment picker
         $allUsers = User::with('employeeProfile')->orderBy('name')->get();
 
-        return view('checklist.index', compact(
-            'tasks', 'submissionsByTask',
-            'today', 'doneCount', 'totalTasks', 'allTasks', 'allUsers'
-        ));
+        return view('checklist.manage', compact('allTasks', 'allUsers'));
     }
 
     public function submit(Request $request, ChecklistTask $task)
