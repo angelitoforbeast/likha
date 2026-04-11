@@ -128,6 +128,7 @@ Route::middleware(['web','auth'])->prefix('checklist')->name('checklist.')->grou
     Route::get('/report', [\App\Http\Controllers\ChecklistController::class, 'report'])->name('report');
     Route::post('/{task}/submit', [\App\Http\Controllers\ChecklistController::class, 'submit'])->name('submit');
     Route::delete('/submission/{submission}', [\App\Http\Controllers\ChecklistController::class, 'deleteSubmission'])->name('delete-submission');
+    Route::delete('/files/{file}', [\App\Http\Controllers\ChecklistController::class, 'deleteFile'])->name('delete-file');
     Route::post('/tasks', [\App\Http\Controllers\ChecklistController::class, 'storeTask'])->name('store-task');
     Route::patch('/tasks/{task}', [\App\Http\Controllers\ChecklistController::class, 'updateTask'])->name('update-task');
     Route::delete('/tasks/{task}', [\App\Http\Controllers\ChecklistController::class, 'destroyTask'])->name('destroy-task');

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ChecklistTask;
 use App\Models\ChecklistSubmission;
+use App\Models\ChecklistSubmissionFile;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -23,7 +24,7 @@ class ChecklistController extends Controller
             ->get();
 
         // One submission per task per day — keyed by task_id
-        $submissionsByTask = ChecklistSubmission::with('user')
+        $submissionsByTask = ChecklistSubmission::with(['user', 'files'])
             ->where('date', $today)
             ->get()
             ->keyBy('checklist_task_id');
@@ -54,7 +55,7 @@ class ChecklistController extends Controller
             ->orderBy('id')
             ->get();
 
-        $submissionsByTask = ChecklistSubmission::with('user')
+        $submissionsByTask = ChecklistSubmission::with(['user', 'files'])
             ->where('date', $dateObj->toDateString())
             ->get()
             ->keyBy('checklist_task_id');
@@ -97,36 +98,42 @@ class ChecklistController extends Controller
 
         $rules = ['notes' => 'nullable|string|max:2000'];
 
+        $imageMimes = 'jpg,jpeg,png,gif,webp';
+        $anyMimes   = 'jpg,jpeg,png,gif,webp,pdf,doc,docx,xls,xlsx,csv';
+
         if ($task->type === 'photo') {
-            $rules['file'] = 'required|file|max:10240|mimes:jpg,jpeg,png,gif,webp';
+            $rules['files']   = 'required|array|min:1|max:10';
+            $rules['files.*'] = "file|max:10240|mimes:{$imageMimes}";
         } elseif ($task->type === 'any') {
-            $rules['file'] = 'nullable|file|max:10240|mimes:jpg,jpeg,png,gif,webp,pdf,doc,docx,xls,xlsx,csv';
+            $rules['files']   = 'nullable|array|max:10';
+            $rules['files.*'] = "file|max:10240|mimes:{$anyMimes}";
         }
 
         $request->validate($rules);
 
-        $data = ['notes' => $request->notes];
-
-        if ($request->hasFile('file')) {
-            $existing = ChecklistSubmission::where([
-                'checklist_task_id' => $task->id,
-                'date'              => $today,
-            ])->first();
-
-            if ($existing?->file_path) {
-                Storage::disk('public')->delete($existing->file_path);
-            }
-
-            $file = $request->file('file');
-            $data['file_path']          = $file->store("checklist/{$today}", 'public');
-            $data['file_original_name'] = $file->getClientOriginalName();
-            $data['file_mime']          = $file->getMimeType();
-        }
-
-        ChecklistSubmission::updateOrCreate(
+        $submission = ChecklistSubmission::updateOrCreate(
             ['checklist_task_id' => $task->id, 'date' => $today],
-            array_merge($data, ['user_id' => Auth::id()])
+            ['notes' => $request->notes, 'user_id' => Auth::id()]
         );
+
+        // If new files uploaded, replace existing files
+        if ($request->hasFile('files')) {
+            // Delete old files from storage
+            foreach ($submission->files as $old) {
+                Storage::disk('public')->delete($old->file_path);
+            }
+            $submission->files()->delete();
+
+            // Store new files
+            foreach ($request->file('files') as $i => $file) {
+                $submission->files()->create([
+                    'file_path'          => $file->store("checklist/{$today}", 'public'),
+                    'file_original_name' => $file->getClientOriginalName(),
+                    'file_mime'          => $file->getMimeType(),
+                    'sort_order'         => $i,
+                ]);
+            }
+        }
 
         return back()->with('success', "'{$task->title}' submitted!");
     }
@@ -138,12 +145,32 @@ class ChecklistController extends Controller
             abort(403);
         }
 
+        // Delete all associated files from storage
+        foreach ($submission->files as $file) {
+            Storage::disk('public')->delete($file->file_path);
+        }
+        // Also delete legacy single file if present
         if ($submission->file_path) {
             Storage::disk('public')->delete($submission->file_path);
         }
 
         $submission->delete();
         return back()->with('success', 'Submission removed.');
+    }
+
+    public function deleteFile(ChecklistSubmissionFile $file)
+    {
+        $submission = $file->submission;
+
+        if ($submission->user_id !== Auth::id() &&
+            Auth::user()?->employeeProfile?->role !== 'CEO') {
+            abort(403);
+        }
+
+        Storage::disk('public')->delete($file->file_path);
+        $file->delete();
+
+        return back()->with('success', 'File removed.');
     }
 
     public function storeTask(Request $request)

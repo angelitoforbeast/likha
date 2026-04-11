@@ -94,43 +94,73 @@
             </div>
 
             @if($done)
+              @php
+                $subFiles   = $sub->files;
+                $imgFiles   = $subFiles->filter(fn($f) => $f->isImage());
+                $otherFiles = $subFiles->filter(fn($f) => !$f->isImage());
+                $hasNewFiles = $subFiles->count() > 0;
+              @endphp
               {{-- ===== SUBMITTED CONTENT ===== --}}
               <div>
-                {{-- Photo — full width, prominent --}}
-                @if($sub->file_path && $sub->isImage())
+                {{-- Images grid (new multi-file) --}}
+                @if($imgFiles->count() === 1)
+                  <a href="{{ Storage::url($imgFiles->first()->file_path) }}" target="_blank" class="block group relative">
+                    <img src="{{ Storage::url($imgFiles->first()->file_path) }}"
+                         class="w-full object-cover max-h-96 group-hover:opacity-95 transition duration-200">
+                    <div class="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition flex items-center justify-center">
+                      <span class="opacity-0 group-hover:opacity-100 transition bg-black/50 text-white text-xs px-3 py-1.5 rounded-full">View full size ↗</span>
+                    </div>
+                  </a>
+                @elseif($imgFiles->count() > 1)
+                  <div class="grid grid-cols-2 sm:grid-cols-3 gap-1 p-1">
+                    @foreach($imgFiles as $f)
+                      <a href="{{ Storage::url($f->file_path) }}" target="_blank" class="block group relative aspect-square overflow-hidden rounded-lg">
+                        <img src="{{ Storage::url($f->file_path) }}"
+                             class="w-full h-full object-cover group-hover:opacity-90 transition duration-200">
+                        <div class="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition flex items-center justify-center">
+                          <span class="opacity-0 group-hover:opacity-100 text-white text-xs">↗</span>
+                        </div>
+                      </a>
+                    @endforeach
+                  </div>
+                @elseif(!$hasNewFiles && $sub->file_path && $sub->isImage())
+                  {{-- Legacy single file --}}
                   <a href="{{ Storage::url($sub->file_path) }}" target="_blank" class="block group relative">
                     <img src="{{ Storage::url($sub->file_path) }}"
-                         class="w-full object-cover max-h-96 group-hover:opacity-95 transition duration-200"
-                         alt="{{ $sub->file_original_name }}">
-                    <div class="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition duration-200 flex items-center justify-center">
-                      <span class="opacity-0 group-hover:opacity-100 transition bg-black/50 text-white text-xs px-3 py-1.5 rounded-full">
-                        View full size ↗
-                      </span>
-                    </div>
+                         class="w-full object-cover max-h-96 group-hover:opacity-95 transition">
                   </a>
                 @endif
 
-                {{-- Non-image file --}}
-                @if($sub->file_path && !$sub->isImage())
+                {{-- Non-image files --}}
+                @if($otherFiles->count() > 0)
+                  <div class="px-5 py-3 border-b border-gray-100 space-y-1.5">
+                    @foreach($otherFiles as $f)
+                      <a href="{{ Storage::url($f->file_path) }}" target="_blank"
+                         class="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline">
+                        <span class="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center text-sm flex-shrink-0">📎</span>
+                        {{ $f->file_original_name }}
+                      </a>
+                    @endforeach
+                  </div>
+                @elseif(!$hasNewFiles && $sub->file_path && !$sub->isImage())
                   <div class="px-5 py-3 border-b border-gray-100">
                     <a href="{{ Storage::url($sub->file_path) }}" target="_blank"
-                       class="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium hover:underline">
-                      <span class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center text-base flex-shrink-0">📎</span>
+                       class="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline">
+                      <span class="w-7 h-7 bg-blue-100 rounded-lg flex items-center justify-center text-sm flex-shrink-0">📎</span>
                       {{ $sub->file_original_name }}
-                      <svg class="w-3.5 h-3.5 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                     </a>
                   </div>
                 @endif
 
                 {{-- Notes --}}
                 @if($sub->notes)
-                  <div class="px-5 py-4 {{ $sub->file_path ? 'border-t border-gray-100' : '' }}">
+                  <div class="px-5 py-4 border-t border-gray-100">
                     <p class="text-sm text-gray-700 whitespace-pre-line leading-relaxed">{{ $sub->notes }}</p>
                   </div>
                 @endif
 
-                {{-- No content message --}}
-                @if(!$sub->file_path && !$sub->notes)
+                {{-- No content --}}
+                @if(!$hasNewFiles && !$sub->file_path && !$sub->notes)
                   <div class="px-5 py-4">
                     <p class="text-sm text-gray-400 italic">Marked as done — no notes or file attached.</p>
                   </div>
