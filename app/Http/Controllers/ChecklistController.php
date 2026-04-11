@@ -282,8 +282,6 @@ class ChecklistController extends Controller
 
     public function analyzeSubmission(Request $request, ChecklistSubmission $submission)
     {
-        \Log::info('ANALYZE_HIT', ['submission_id' => $submission->id, 'user' => auth()->id()]);
-
         $submission->load(['task', 'files']);
         $task     = $submission->task;
         $imgFiles = $submission->files->filter(fn($f) => $f->isImage());
