@@ -135,6 +135,8 @@ Route::middleware(['web','auth'])->prefix('checklist')->name('checklist.')->grou
     Route::post('/tasks/reorder', [\App\Http\Controllers\ChecklistController::class, 'reorderTasks'])->name('reorder');
     Route::post('/submission/{submission}/analyze', [\App\Http\Controllers\ChecklistController::class, 'analyzeSubmission'])->name('analyze');
     Route::get('/submission/{submission}/analysis-logs', [\App\Http\Controllers\ChecklistController::class, 'getAnalysisLogs'])->name('analysis-logs');
+    Route::post('/submission/{submission}/approval-check', [\App\Http\Controllers\ChecklistController::class, 'approvalCheck'])->name('approval-check');
+    Route::get('/submission/{submission}/approval-logs', [\App\Http\Controllers\ChecklistController::class, 'getApprovalLogs'])->name('approval-logs');
 });
 
 // Allow any authenticated user to view the Allowed IPs page (no IP check)

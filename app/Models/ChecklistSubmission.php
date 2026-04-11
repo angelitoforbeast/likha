@@ -40,12 +40,28 @@ class ChecklistSubmission extends Model
 
     public function analysisLogs(): HasMany
     {
-        return $this->hasMany(ChecklistAnalysisLog::class, 'submission_id')->orderBy('created_at', 'desc');
+        return $this->hasMany(ChecklistAnalysisLog::class, 'submission_id')
+            ->where('log_type', 'analysis')
+            ->orderBy('created_at', 'desc');
     }
 
     public function latestAnalysis(): HasOne
     {
-        return $this->hasOne(ChecklistAnalysisLog::class, 'submission_id')->latestOfMany();
+        return $this->hasOne(ChecklistAnalysisLog::class, 'submission_id')
+            ->ofMany(['created_at' => 'max'], fn($q) => $q->where('log_type', 'analysis'));
+    }
+
+    public function approvalLogs(): HasMany
+    {
+        return $this->hasMany(ChecklistAnalysisLog::class, 'submission_id')
+            ->where('log_type', 'approval')
+            ->orderBy('created_at', 'desc');
+    }
+
+    public function latestApproval(): HasOne
+    {
+        return $this->hasOne(ChecklistAnalysisLog::class, 'submission_id')
+            ->ofMany(['created_at' => 'max'], fn($q) => $q->where('log_type', 'approval'));
     }
 
     public function isImage(): bool

@@ -79,8 +79,8 @@ class ChecklistController extends Controller
         }
 
         // Submissions for this date
-        $submissionsByTask = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user'])
-            ->withCount('analysisLogs')
+        $submissionsByTask = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user', 'latestApproval.user'])
+            ->withCount(['analysisLogs', 'approvalLogs'])
             ->where('date', $dateObj->toDateString())
             ->get()
             ->keyBy('checklist_task_id');
@@ -231,10 +231,11 @@ class ChecklistController extends Controller
     public function storeTask(Request $request)
     {
         $validated = $request->validate([
-            'title'       => 'required|string|max:255',
-            'description' => 'nullable|string|max:1000',
-            'type'        => 'required|in:photo,note,any,both',
-            'ai_prompt'   => 'nullable|string|max:2000',
+            'title'           => 'required|string|max:255',
+            'description'     => 'nullable|string|max:1000',
+            'type'            => 'required|in:photo,note,any,both',
+            'ai_prompt'       => 'nullable|string|max:2000',
+            'approval_prompt' => 'nullable|string|max:2000',
         ]);
 
         $task = ChecklistTask::create([
@@ -253,11 +254,12 @@ class ChecklistController extends Controller
     public function updateTask(Request $request, ChecklistTask $task)
     {
         $validated = $request->validate([
-            'title'       => 'required|string|max:255',
-            'description' => 'nullable|string|max:1000',
-            'type'        => 'required|in:photo,note,any,both',
-            'is_active'   => 'boolean',
-            'ai_prompt'   => 'nullable|string|max:2000',
+            'title'           => 'required|string|max:255',
+            'description'     => 'nullable|string|max:1000',
+            'type'            => 'required|in:photo,note,any,both',
+            'is_active'       => 'boolean',
+            'ai_prompt'       => 'nullable|string|max:2000',
+            'approval_prompt' => 'nullable|string|max:2000',
         ]);
 
         $task->update($validated);
@@ -345,6 +347,7 @@ class ChecklistController extends Controller
             ChecklistAnalysisLog::create([
                 'submission_id'   => $submission->id,
                 'user_id'         => Auth::id(),
+                'log_type'        => 'analysis',
                 'prompt_used'     => $prompt,
                 'analysis_result' => $analysisText,
             ]);
@@ -366,6 +369,87 @@ class ChecklistController extends Controller
     {
         $logs = $submission->analysisLogs()->with('user')->get()->map(fn($log) => [
             'id'          => $log->id,
+            'analysis'    => $log->analysis_result,
+            'prompt_used' => $log->prompt_used,
+            'user'        => $log->user?->name ?? 'Unknown',
+            'created_at'  => $log->created_at->format('M j, Y g:i A'),
+        ]);
+
+        return response()->json(['logs' => $logs]);
+    }
+
+    public function approvalCheck(Request $request, ChecklistSubmission $submission)
+    {
+        $submission->load(['task', 'files']);
+        $task     = $submission->task;
+        $imgFiles = $submission->files->filter(fn($f) => $f->isImage());
+
+        if (!$task) {
+            return response()->json(['error' => 'Task not found.'], 404);
+        }
+        if (!$task->approval_prompt) {
+            return response()->json(['error' => 'No approval criteria set for this task.'], 422);
+        }
+
+        $prompt  = "You are a quality control reviewer for a business daily checklist submission.\n\n";
+        $prompt .= "Task: {$task->title}\n";
+        if ($task->description) $prompt .= "Description: {$task->description}\n";
+        if ($submission->notes) $prompt .= "Staff Notes: {$submission->notes}\n";
+        if ($imgFiles->isEmpty()) $prompt .= "\n(No images were submitted.)\n";
+        $prompt .= "\nApproval Criteria: {$task->approval_prompt}\n";
+        $prompt .= "\nIMPORTANT: Your response MUST start with exactly \"APPROVED\" or \"NOT APPROVED\" on the first line, followed by a blank line, then your explanation in 2-3 sentences.";
+
+        $content = [['type' => 'text', 'text' => $prompt]];
+        foreach ($imgFiles->take(5) as $f) {
+            $content[] = [
+                'type'      => 'image_url',
+                'image_url' => ['url' => url(Storage::url($f->file_path)), 'detail' => 'auto'],
+            ];
+        }
+
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . config('services.openai.key'),
+            'Content-Type'  => 'application/json',
+        ])->timeout(30)->post('https://api.openai.com/v1/chat/completions', [
+            'model'      => 'gpt-4o',
+            'max_tokens' => 512,
+            'messages'   => [['role' => 'user', 'content' => $content]],
+        ]);
+
+        if ($response->successful()) {
+            $text      = $response->json('choices.0.message.content');
+            $firstLine = strtoupper(trim(explode("\n", trim($text))[0]));
+            $verdict   = str_starts_with($firstLine, 'NOT APPROVED') ? 'not_approved'
+                       : (str_starts_with($firstLine, 'APPROVED')    ? 'approved' : 'unknown');
+
+            ChecklistAnalysisLog::create([
+                'submission_id'   => $submission->id,
+                'user_id'         => Auth::id(),
+                'log_type'        => 'approval',
+                'prompt_used'     => $prompt,
+                'analysis_result' => $text,
+                'verdict'         => $verdict,
+            ]);
+
+            return response()->json([
+                'verdict'     => $verdict,
+                'analysis'    => $text,
+                'prompt_used' => $prompt,
+                'checked_by'  => Auth::user()?->name,
+                'checked_at'  => now()->format('M j, g:i A'),
+            ]);
+        }
+
+        return response()->json([
+            'error' => 'Approval check failed (' . $response->status() . '). Check your API key.',
+        ], 500);
+    }
+
+    public function getApprovalLogs(ChecklistSubmission $submission)
+    {
+        $logs = $submission->approvalLogs()->with('user')->get()->map(fn($log) => [
+            'id'          => $log->id,
+            'verdict'     => $log->verdict,
             'analysis'    => $log->analysis_result,
             'prompt_used' => $log->prompt_used,
             'user'        => $log->user?->name ?? 'Unknown',

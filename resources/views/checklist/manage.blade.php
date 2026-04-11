@@ -61,6 +61,12 @@
         </div>
 
         <div>
+          <label class="text-xs text-gray-500 mb-1 block">Approval Check Prompt <span class="text-gray-400">(optional — enables ✔ Check button on report; AI will return Approved / Not Approved)</span>:</label>
+          <textarea name="approval_prompt" rows="2" placeholder="e.g. Check if the budget report shows all 3 time slots (10AM, 3PM, 7PM) with non-zero values..."
+                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none"></textarea>
+        </div>
+
+        <div>
           <label class="text-xs text-gray-500 mb-1.5 block">Assign to (leave blank = anyone can submit):</label>
           <div class="flex flex-wrap gap-2">
             @foreach($allUsers as $u)
@@ -123,6 +129,9 @@
               @if($t->ai_prompt)
                 <p class="text-xs text-purple-500 mt-0.5 italic truncate max-w-sm" title="{{ $t->ai_prompt }}">🤖 {{ $t->ai_prompt }}</p>
               @endif
+              @if($t->approval_prompt)
+                <p class="text-xs text-emerald-600 mt-0.5 italic truncate max-w-sm" title="{{ $t->approval_prompt }}">✔ {{ $t->approval_prompt }}</p>
+              @endif
             </div>
             <div class="flex gap-1 flex-shrink-0">
               <button @click="editing = true"
@@ -132,8 +141,9 @@
                 <input type="hidden" name="title"       value="{{ $t->title }}">
                 <input type="hidden" name="description" value="{{ $t->description }}">
                 <input type="hidden" name="type"        value="{{ $t->type }}">
-                <input type="hidden" name="ai_prompt"   value="{{ $t->ai_prompt }}">
-                <input type="hidden" name="is_active"   value="{{ $t->is_active ? '0' : '1' }}">
+                <input type="hidden" name="ai_prompt"       value="{{ $t->ai_prompt }}">
+                <input type="hidden" name="approval_prompt" value="{{ $t->approval_prompt }}">
+                <input type="hidden" name="is_active"       value="{{ $t->is_active ? '0' : '1' }}">
                 @foreach($assignedIds as $uid)
                   <input type="hidden" name="assigned_users[]" value="{{ $uid }}">
                 @endforeach
@@ -174,6 +184,11 @@
               <label class="text-xs text-gray-500 mb-1 block">AI Prompt Focus <span class="text-gray-400">(optional)</span>:</label>
               <textarea name="ai_prompt" rows="2" placeholder="e.g. Check if the workstation is clean and items are organized properly..."
                         class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-purple-400 resize-none">{{ $t->ai_prompt }}</textarea>
+            </div>
+            <div>
+              <label class="text-xs text-gray-500 mb-1 block">Approval Check Prompt <span class="text-gray-400">(optional — enables ✔ Check button)</span>:</label>
+              <textarea name="approval_prompt" rows="2" placeholder="e.g. Check if the budget report shows all 3 time slots with non-zero values..."
+                        class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none">{{ $t->approval_prompt }}</textarea>
             </div>
             <input type="hidden" name="is_active" value="{{ $t->is_active ? '1' : '0' }}">
             <div>
