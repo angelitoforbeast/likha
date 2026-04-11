@@ -185,6 +185,7 @@
     {{-- ====== TASK CARDS ====== --}}
     @php $isCeo = Auth::user()?->employeeProfile?->role === 'CEO'; @endphp
 
+    <div x-show="!manageTasks">
     @forelse($tasks as $task)
       @php
         $sub          = $submissionsByTask->get($task->id);
@@ -341,6 +342,7 @@
         <p class="text-sm">Click "⚙ Manage Tasks" above to add tasks.</p>
       </div>
     @endforelse
+    </div> {{-- end x-show="!manageTasks" --}}
 
   </div>
 </x-layout>
