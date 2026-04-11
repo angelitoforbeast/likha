@@ -227,23 +227,62 @@
                 </div>
               @endif
 
-              {{-- ── SUBMITTED BY ── --}}
-              <div class="flex items-center justify-between px-5 py-3 bg-gray-50 border-t border-gray-100">
-                <div class="flex items-center gap-2.5">
-                  <div class="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-bold text-indigo-600 flex-shrink-0">
-                    {{ strtoupper(substr($sub->user->name ?? '?', 0, 1)) }}
+              {{-- ── SUBMITTED BY + HISTORY ── --}}
+              @php $logs = $sub->logs; @endphp
+              <div x-data="{ showHistory: false }">
+                <div class="flex items-center justify-between px-5 py-3 bg-gray-50 border-t border-gray-100">
+                  <div class="flex items-center gap-2.5">
+                    <div class="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-bold text-indigo-600 flex-shrink-0">
+                      {{ strtoupper(substr($sub->user->name ?? '?', 0, 1)) }}
+                    </div>
+                    <div>
+                      <p class="text-xs font-semibold text-gray-700 leading-none">{{ $sub->user->name ?? 'Unknown' }}</p>
+                      <p class="text-xs text-gray-400 leading-none mt-0.5">
+                        Originally submitted · {{ $sub->created_at->format('h:i A') }}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p class="text-xs font-semibold text-gray-700 leading-none">{{ $sub->user->name ?? 'Unknown' }}</p>
-                    <p class="text-xs text-gray-400 leading-none mt-0.5">
-                      {{ $sub->created_at->format('h:i A') }}
-                      @if($sub->updated_at->gt($sub->created_at))
-                        · updated {{ $sub->updated_at->format('h:i A') }}
-                      @endif
-                    </p>
+                  <div class="flex items-center gap-2">
+                    @if($logs->count() > 1)
+                      <button @click="showHistory = !showHistory"
+                              class="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition flex items-center gap-1">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        {{ $logs->count() }} edits
+                      </button>
+                    @endif
+                    <span class="text-xs text-gray-300">{{ $sub->created_at->diffForHumans() }}</span>
                   </div>
                 </div>
-                <span class="text-xs text-gray-300">{{ $sub->created_at->diffForHumans() }}</span>
+
+                {{-- History timeline --}}
+                @if($logs->count() > 0)
+                  <div x-show="showHistory" x-transition class="border-t border-gray-100 bg-gray-50/50 px-5 py-3 space-y-2.5">
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Edit History</p>
+                    @foreach($logs as $log)
+                      <div class="flex items-start gap-3">
+                        <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5
+                          {{ $log->action === 'submitted' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600' }}">
+                          {{ strtoupper(substr($log->user->name ?? '?', 0, 1)) }}
+                        </div>
+                        <div class="flex-1 min-w-0">
+                          <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-xs font-semibold text-gray-700">{{ $log->user->name ?? 'Unknown' }}</span>
+                            <span class="text-xs px-1.5 py-0.5 rounded-full {{ $log->action === 'submitted' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600' }}">
+                              {{ $log->action === 'submitted' ? 'Submitted' : 'Updated' }}
+                            </span>
+                            @if($log->file_count > 0)
+                              <span class="text-xs text-gray-400">· {{ $log->file_count }} {{ Str::plural('file', $log->file_count) }}</span>
+                            @endif
+                          </div>
+                          @if($log->notes_snapshot)
+                            <p class="text-xs text-gray-400 mt-0.5 truncate italic">"{{ $log->notes_snapshot }}"</p>
+                          @endif
+                          <p class="text-xs text-gray-300 mt-0.5">{{ $log->created_at->format('h:i A') }} · {{ $log->created_at->diffForHumans() }}</p>
+                        </div>
+                      </div>
+                    @endforeach
+                  </div>
+                @endif
               </div>
 
             @else

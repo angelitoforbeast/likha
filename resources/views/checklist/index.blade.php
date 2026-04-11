@@ -158,7 +158,8 @@
                               @if($isMine || $isCeo)
                                 <form method="POST" action="{{ route('checklist.delete-file', $f) }}"
                                       onsubmit="return confirm('Remove this image?')"
-                                      class="absolute -top-1.5 -right-1.5 opacity-0 group-hover:opacity-100 transition">
+                                      class="absolute -top-1.5 -right-1.5 transition"
+                                      x-show="showForm">
                                   @csrf @method('DELETE')
                                   <button type="submit"
                                           class="w-5 h-5 bg-red-500 hover:bg-red-600 text-white rounded-full text-xs flex items-center justify-center shadow leading-none">✕</button>
@@ -175,7 +176,8 @@
                             </a>
                             @if($isMine || $isCeo)
                               <form method="POST" action="{{ route('checklist.delete-file', $f) }}"
-                                    onsubmit="return confirm('Remove this file?')">
+                                    onsubmit="return confirm('Remove this file?')"
+                                    x-show="showForm">
                                 @csrf @method('DELETE')
                                 <button type="submit" class="text-xs text-red-400 hover:text-red-600">✕</button>
                               </form>

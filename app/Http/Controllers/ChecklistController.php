@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ChecklistTask;
 use App\Models\ChecklistSubmission;
 use App\Models\ChecklistSubmissionFile;
+use App\Models\ChecklistSubmissionLog;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -55,7 +56,7 @@ class ChecklistController extends Controller
             ->orderBy('id')
             ->get();
 
-        $submissionsByTask = ChecklistSubmission::with(['user', 'files'])
+        $submissionsByTask = ChecklistSubmission::with(['user', 'files', 'logs.user'])
             ->where('date', $dateObj->toDateString())
             ->get()
             ->keyBy('checklist_task_id');
@@ -115,10 +116,27 @@ class ChecklistController extends Controller
 
         $request->validate($rules);
 
+        $existing = ChecklistSubmission::where([
+            'checklist_task_id' => $task->id,
+            'date'              => $today,
+        ])->first();
+
+        $isNew = $existing === null;
+
         $submission = ChecklistSubmission::updateOrCreate(
             ['checklist_task_id' => $task->id, 'date' => $today],
-            ['notes' => $request->notes, 'user_id' => Auth::id()]
+            ['notes' => $request->notes, 'user_id' => $isNew ? Auth::id() : $existing->user_id]
         );
+
+        // Log this action
+        $fileCount = $request->hasFile('files') ? count($request->file('files')) : ($submission->files()->count());
+        ChecklistSubmissionLog::create([
+            'checklist_submission_id' => $submission->id,
+            'user_id'                 => Auth::id(),
+            'action'                  => $isNew ? 'submitted' : 'updated',
+            'notes_snapshot'          => $request->notes ? \Str::limit($request->notes, 200) : null,
+            'file_count'              => $fileCount,
+        ]);
 
         // If new files uploaded, replace existing files
         if ($request->hasFile('files')) {

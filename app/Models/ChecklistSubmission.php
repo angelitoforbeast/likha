@@ -32,6 +32,11 @@ class ChecklistSubmission extends Model
         return $this->hasMany(ChecklistSubmissionFile::class)->orderBy('sort_order');
     }
 
+    public function logs(): HasMany
+    {
+        return $this->hasMany(ChecklistSubmissionLog::class)->orderBy('created_at', 'desc');
+    }
+
     public function isImage(): bool
     {
         return $this->file_mime && str_starts_with($this->file_mime, 'image/');
