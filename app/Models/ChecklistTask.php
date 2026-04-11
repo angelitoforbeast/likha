@@ -4,9 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class ChecklistTask extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = ['title', 'description', 'type', 'is_active', 'sort_order'];
 
     protected $casts = [
