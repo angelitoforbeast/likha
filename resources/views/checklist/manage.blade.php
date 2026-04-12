@@ -57,6 +57,12 @@
         <input type="time" name="scheduled_time"
                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
 
+        <select name="submission_type"
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+          <option value="group">👥 Group — one submission counts for all</option>
+          <option value="individual">👤 Individual — each user submits separately</option>
+        </select>
+
         <div>
           <label class="text-xs text-gray-500 mb-1 block">AI Prompt Focus <span class="text-gray-400">(optional — guides what the AI checks for)</span>:</label>
           <textarea name="ai_prompt" rows="2" placeholder="e.g. Check if the workstation is clean and items are organized properly..."
@@ -132,6 +138,9 @@
               @if($t->scheduled_time)
                 <span class="text-xs px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-500 font-medium mt-0.5 inline-block">🕐 {{ $t->scheduled_time ? date('g:i A', strtotime($t->scheduled_time)) : '' }}</span>
               @endif
+              @if($t->submission_type === 'individual')
+                <span class="text-xs px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-500 font-medium mt-0.5 inline-block">👤 Individual</span>
+              @endif
               @if($t->ai_prompt)
                 <p class="text-xs text-purple-500 mt-0.5 italic truncate max-w-sm" title="{{ $t->ai_prompt }}">🤖 {{ $t->ai_prompt }}</p>
               @endif
@@ -157,6 +166,7 @@
                 <input type="hidden" name="scheduled_time"  value="{{ $t->scheduled_time }}">
                 <input type="hidden" name="ai_prompt"       value="{{ $t->ai_prompt }}">
                 <input type="hidden" name="approval_prompt" value="{{ $t->approval_prompt }}">
+                <input type="hidden" name="submission_type" value="{{ $t->submission_type }}">
                 <input type="hidden" name="is_active"       value="{{ $t->is_active ? '0' : '1' }}">
                 @foreach($assignedIds as $uid)
                   <input type="hidden" name="assigned_users[]" value="{{ $uid }}">
@@ -196,6 +206,11 @@
                    class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
             <input type="time" name="scheduled_time" value="{{ $t->scheduled_time }}"
                    class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
+            <select name="submission_type"
+                    class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+              <option value="group"      {{ ($t->submission_type ?? 'group') === 'group'      ? 'selected' : '' }}>👥 Group — one submission counts for all</option>
+              <option value="individual" {{ ($t->submission_type ?? 'group') === 'individual' ? 'selected' : '' }}>👤 Individual — each user submits separately</option>
+            </select>
             <div>
               <label class="text-xs text-gray-500 mb-1 block">AI Prompt Focus <span class="text-gray-400">(optional)</span>:</label>
               <textarea name="ai_prompt" rows="2" placeholder="e.g. Check if the workstation is clean and items are organized properly..."

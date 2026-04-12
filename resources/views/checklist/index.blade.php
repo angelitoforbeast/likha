@@ -54,7 +54,9 @@
         @php
           $allImageUrls = [];
           foreach($tasks as $task) {
-              $sub = $submissionsByTask->get($task->id);
+              $sub = $task->submission_type === 'individual'
+                  ? $mySubmissionsByTask->get($task->id)
+                  : $submissionsByTask->get($task->id);
               if (!$sub) continue;
               $subFiles = $sub->files;
               foreach($subFiles->filter(fn($f) => $f->isImage()) as $f) {
@@ -82,7 +84,9 @@
 
               @foreach($tasks as $task)
                 @php
-                  $sub         = $submissionsByTask->get($task->id);
+                  $sub         = $task->submission_type === 'individual'
+                      ? $mySubmissionsByTask->get($task->id)
+                      : $submissionsByTask->get($task->id);
                   $done        = $sub !== null;
                   $isMine      = $sub && $sub->user_id === Auth::id();
                   $assignedIds = $task->assignedUsers->pluck('id')->toArray();
