@@ -122,10 +122,7 @@
       <div class="relative" x-data="{open: false}">
         <button @click="open = !open"
                 class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 font-medium">
-          👤 Assign To
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-          </svg>
+          👤 Assign To ▾
         </button>
         <div x-show="open" x-transition @click.outside="open = false"
              class="absolute left-0 top-full mt-1 z-30 bg-white border border-gray-200 rounded-xl shadow-lg p-3 min-w-[220px]">
@@ -149,10 +146,63 @@
                 @endforeach
               </div>
             </div>
-            <button type="submit"
-                    class="w-full px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 font-medium">
-              Apply
-            </button>
+            <button type="submit" class="w-full px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 font-medium">Apply</button>
+          </form>
+        </div>
+      </div>
+
+      {{-- Bulk Type --}}
+      <div class="relative" x-data="{open: false}">
+        <button @click="open = !open"
+                class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 font-medium">
+          📎 Type ▾
+        </button>
+        <div x-show="open" x-transition @click.outside="open = false"
+             class="absolute left-0 top-full mt-1 z-30 bg-white border border-gray-200 rounded-xl shadow-lg p-3 min-w-[180px]">
+          <form method="POST" action="{{ route('checklist.bulk-type') }}">
+            @csrf
+            <template x-for="id in $store.manage.selected" :key="id">
+              <input type="hidden" name="task_ids[]" :value="id">
+            </template>
+            <p class="text-xs font-semibold text-gray-500 mb-2">Set type for selected:</p>
+            <div class="space-y-1 mb-3">
+              @foreach(['any' => '📎 Any (photo or note)', 'photo' => '📸 Photo required', 'note' => '📝 Note only', 'both' => '📸📝 Photo + Note'] as $val => $label)
+                <label class="flex items-center gap-2 text-xs cursor-pointer hover:bg-blue-50 px-2 py-1.5 rounded-lg">
+                  <input type="radio" name="type" value="{{ $val }}" class="accent-blue-600" required>
+                  {{ $label }}
+                </label>
+              @endforeach
+            </div>
+            <button type="submit" class="w-full px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 font-medium">Apply</button>
+          </form>
+        </div>
+      </div>
+
+      {{-- Bulk Submission Type --}}
+      <div class="relative" x-data="{open: false}">
+        <button @click="open = !open"
+                class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 font-medium">
+          👥 Submission ▾
+        </button>
+        <div x-show="open" x-transition @click.outside="open = false"
+             class="absolute left-0 top-full mt-1 z-30 bg-white border border-gray-200 rounded-xl shadow-lg p-3 min-w-[200px]">
+          <form method="POST" action="{{ route('checklist.bulk-submission-type') }}">
+            @csrf
+            <template x-for="id in $store.manage.selected" :key="id">
+              <input type="hidden" name="task_ids[]" :value="id">
+            </template>
+            <p class="text-xs font-semibold text-gray-500 mb-2">Set submission type for selected:</p>
+            <div class="space-y-1 mb-3">
+              <label class="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-2 py-1.5 rounded-lg">
+                <input type="radio" name="submission_type" value="group" class="accent-indigo-600" required>
+                👥 Group — one submission counts for all
+              </label>
+              <label class="flex items-center gap-2 text-xs cursor-pointer hover:bg-violet-50 px-2 py-1.5 rounded-lg">
+                <input type="radio" name="submission_type" value="individual" class="accent-violet-600">
+                👤 Individual — each user submits separately
+              </label>
+            </div>
+            <button type="submit" class="w-full px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 font-medium">Apply</button>
           </form>
         </div>
       </div>
@@ -332,14 +382,16 @@
                             class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 text-gray-600">
                       Edit
                     </button>
-                    <form method="POST" action="{{ route('checklist.duplicate-task', $t) }}">
+                    <form method="POST" action="{{ route('checklist.duplicate-task', $t) }}"
+                          onsubmit="return confirm('Duplicate \'{{ addslashes($t->title) }}\'?')">
                       @csrf
                       <button type="submit"
                               class="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50">
                         Dup
                       </button>
                     </form>
-                    <form method="POST" action="{{ route('checklist.update-task', $t) }}">
+                    <form method="POST" action="{{ route('checklist.update-task', $t) }}"
+                          onsubmit="return confirm('{{ $t->is_active ? 'Disable' : 'Enable' }} \'{{ addslashes($t->title) }}\'?')">
                       @csrf @method('PATCH')
                       <input type="hidden" name="title"           value="{{ $t->title }}">
                       <input type="hidden" name="description"     value="{{ $t->description }}">

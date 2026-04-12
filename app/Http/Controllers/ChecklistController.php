@@ -373,6 +373,34 @@ class ChecklistController extends Controller
         return back()->with('success', $count . ' task(s) updated.');
     }
 
+    public function bulkType(Request $request)
+    {
+        $request->validate([
+            'task_ids'   => 'required|array',
+            'task_ids.*' => 'integer|exists:checklist_tasks,id',
+            'type'       => 'required|in:any,photo,note,both',
+        ]);
+
+        $count = ChecklistTask::whereIn('id', $request->input('task_ids'))
+            ->update(['type' => $request->input('type')]);
+
+        return back()->with('success', $count . ' task(s) updated.');
+    }
+
+    public function bulkSubmissionType(Request $request)
+    {
+        $request->validate([
+            'task_ids'        => 'required|array',
+            'task_ids.*'      => 'integer|exists:checklist_tasks,id',
+            'submission_type' => 'required|in:group,individual',
+        ]);
+
+        $count = ChecklistTask::whereIn('id', $request->input('task_ids'))
+            ->update(['submission_type' => $request->input('submission_type')]);
+
+        return back()->with('success', $count . ' task(s) updated.');
+    }
+
     public function reorderTasks(Request $request)
     {
         foreach ($request->input('order', []) as $index => $id) {
