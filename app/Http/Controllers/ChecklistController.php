@@ -26,16 +26,27 @@ class ChecklistController extends Controller
             ->orderBy('id')
             ->get();
 
-        // One submission per task per day — keyed by task_id
-        $submissionsByTask = ChecklistSubmission::with(['user', 'files', 'logs.user'])
-            ->where('date', $today)
-            ->get()
-            ->keyBy('checklist_task_id');
+        // Visibility: only show tasks the current user is assigned to (or open tasks with no assignments)
+        $tasks = $tasks->filter(function ($t) {
+            $assignedIds = $t->assignedUsers->pluck('id');
+            return $assignedIds->isEmpty() || $assignedIds->contains(Auth::id());
+        });
 
-        // Smart sort: pending first, done last; within each group timed tasks first (by time), then untimed (by sort_order)
-        $tasks = $tasks->sort(function ($a, $b) use ($submissionsByTask) {
-            $aDone = isset($submissionsByTask[$a->id]) ? 1 : 0;
-            $bDone = isset($submissionsByTask[$b->id]) ? 1 : 0;
+        // Load all today's submissions once
+        $todaySubmissions = ChecklistSubmission::with(['user', 'files', 'logs.user'])
+            ->where('date', $today)->get();
+
+        // Group tasks: any user's submission per task
+        $submissionsByTask   = $todaySubmissions->keyBy('checklist_task_id');
+        // Individual tasks: only the current user's submission per task
+        $mySubmissionsByTask = $todaySubmissions->where('user_id', Auth::id())->keyBy('checklist_task_id');
+
+        // Smart sort: pending first, done last; timed tasks before untimed within each group
+        $tasks = $tasks->sort(function ($a, $b) use ($submissionsByTask, $mySubmissionsByTask) {
+            $aSub  = $a->submission_type === 'individual' ? $mySubmissionsByTask->get($a->id) : $submissionsByTask->get($a->id);
+            $bSub  = $b->submission_type === 'individual' ? $mySubmissionsByTask->get($b->id) : $submissionsByTask->get($b->id);
+            $aDone = $aSub ? 1 : 0;
+            $bDone = $bSub ? 1 : 0;
 
             if ($aDone !== $bDone) return $aDone - $bDone;
 
@@ -51,11 +62,15 @@ class ChecklistController extends Controller
             return $a->sort_order - $b->sort_order;
         })->values();
 
-        $doneCount  = $submissionsByTask->count();
+        $doneCount  = $tasks->filter(function ($t) use ($submissionsByTask, $mySubmissionsByTask) {
+            return $t->submission_type === 'individual'
+                ? $mySubmissionsByTask->has($t->id)
+                : $submissionsByTask->has($t->id);
+        })->count();
         $totalTasks = $tasks->count();
 
         return view('checklist.index', compact(
-            'tasks', 'submissionsByTask',
+            'tasks', 'submissionsByTask', 'mySubmissionsByTask',
             'today', 'doneCount', 'totalTasks'
         ));
     }
@@ -97,16 +112,16 @@ class ChecklistController extends Controller
                 ->get();
         }
 
-        // Submissions for this date
-        $submissionsByTask = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user', 'latestApproval.user'])
+        // Submissions for this date — load all (supports both group and individual tasks)
+        $allSubmissions = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user', 'latestApproval.user'])
             ->withCount(['analysisLogs', 'approvalLogs'])
             ->where('date', $dateObj->toDateString())
-            ->get()
-            ->keyBy('checklist_task_id');
+            ->get();
 
-        // Safety net: if a submission exists for a task not in our list
-        // (e.g. task was recreated with a new ID, or edge-case timing),
-        // pull that task in too so the submission is never hidden.
+        $submissionsByTask        = $allSubmissions->keyBy('checklist_task_id');     // group: one per task
+        $submissionsGroupedByTask = $allSubmissions->groupBy('checklist_task_id');   // individual: all per task
+
+        // Safety net: if a submission exists for a task not in our list, pull it in
         if (!$isToday) {
             $missingIds = $submissionsByTask->keys()->diff($tasks->pluck('id'));
             if ($missingIds->isNotEmpty()) {
@@ -118,14 +133,14 @@ class ChecklistController extends Controller
             }
         }
 
-        $doneCount  = $submissionsByTask->count();
+        $doneCount  = $allSubmissions->pluck('checklist_task_id')->unique()->count();
         $totalTasks = $tasks->count();
 
         $prevDate = $dateObj->copy()->subDay()->toDateString();
         $nextDate = $dateObj->copy()->addDay()->toDateString();
 
         return view('checklist.report', compact(
-            'tasks', 'submissionsByTask',
+            'tasks', 'submissionsByTask', 'submissionsGroupedByTask',
             'doneCount', 'totalTasks',
             'dateObj', 'prevDate', 'nextDate', 'isToday'
         ));
@@ -156,11 +171,14 @@ class ChecklistController extends Controller
         $imageMimes = 'jpg,jpeg,png,gif,webp';
         $anyMimes   = 'jpg,jpeg,png,gif,webp,pdf,doc,docx,xls,xlsx,csv';
 
-        // Load existing submission first so we can check if files already exist
-        $existing = ChecklistSubmission::with('files')->where([
-            'checklist_task_id' => $task->id,
-            'date'              => $today,
-        ])->first();
+        // Load existing submission — for individual tasks, scope to current user
+        $existingQuery = ChecklistSubmission::with('files')
+            ->where('checklist_task_id', $task->id)
+            ->where('date', $today);
+        if ($task->submission_type === 'individual') {
+            $existingQuery->where('user_id', Auth::id());
+        }
+        $existing = $existingQuery->first();
 
         $isNew            = $existing === null;
         $hasExistingFiles = $existing && ($existing->files->count() > 0 || $existing->file_path);
@@ -181,10 +199,19 @@ class ChecklistController extends Controller
 
         $request->validate($rules);
 
-        $submission = ChecklistSubmission::updateOrCreate(
-            ['checklist_task_id' => $task->id, 'date' => $today],
-            ['notes' => $request->notes, 'user_id' => $isNew ? Auth::id() : $existing->user_id]
-        );
+        if ($task->submission_type === 'individual') {
+            // Individual: one submission per user per day
+            $submission = ChecklistSubmission::updateOrCreate(
+                ['checklist_task_id' => $task->id, 'user_id' => Auth::id(), 'date' => $today],
+                ['notes' => $request->notes]
+            );
+        } else {
+            // Group: one submission per task per day (any user)
+            $submission = ChecklistSubmission::updateOrCreate(
+                ['checklist_task_id' => $task->id, 'date' => $today],
+                ['notes' => $request->notes, 'user_id' => $isNew ? Auth::id() : $existing->user_id]
+            );
+        }
 
         // Log this action
         $fileCount = $request->hasFile('files') ? count($request->file('files')) : ($submission->files()->count());
@@ -254,14 +281,16 @@ class ChecklistController extends Controller
             'description'     => 'nullable|string|max:1000',
             'type'            => 'required|in:photo,note,any,both',
             'scheduled_time'  => 'nullable|string|max:20',
+            'submission_type' => 'nullable|in:group,individual',
             'ai_prompt'       => 'nullable|string|max:2000',
             'approval_prompt' => 'nullable|string|max:2000',
         ]);
 
         $task = ChecklistTask::create([
             ...$validated,
-            'sort_order' => (ChecklistTask::max('sort_order') ?? 0) + 1,
-            'is_active'  => true,
+            'sort_order'      => (ChecklistTask::max('sort_order') ?? 0) + 1,
+            'submission_type' => $validated['submission_type'] ?? 'group',
+            'is_active'       => true,
         ]);
 
         // Sync assigned users
@@ -279,6 +308,7 @@ class ChecklistController extends Controller
             'type'            => 'required|in:photo,note,any,both',
             'is_active'       => 'boolean',
             'scheduled_time'  => 'nullable|string|max:20',
+            'submission_type' => 'nullable|in:group,individual',
             'ai_prompt'       => 'nullable|string|max:2000',
             'approval_prompt' => 'nullable|string|max:2000',
         ]);
@@ -306,6 +336,7 @@ class ChecklistController extends Controller
             'description'     => $task->description,
             'type'            => $task->type,
             'scheduled_time'  => $task->scheduled_time,
+            'submission_type' => $task->submission_type,
             'ai_prompt'       => $task->ai_prompt,
             'approval_prompt' => $task->approval_prompt,
             'is_active'       => $task->is_active,
@@ -315,6 +346,31 @@ class ChecklistController extends Controller
         $new->assignedUsers()->sync($task->assignedUsers->pluck('id'));
 
         return back()->with('success', 'Task duplicated! Edit the copy to rename it.');
+    }
+
+    public function bulkAssign(Request $request)
+    {
+        $request->validate([
+            'task_ids'   => 'required|array',
+            'task_ids.*' => 'integer|exists:checklist_tasks,id',
+            'user_ids'   => 'nullable|array',
+            'user_ids.*' => 'nullable|integer|exists:users,id',
+        ]);
+
+        // If "clear_assign" is checked, sync to empty (anyone can submit)
+        $userIds = $request->boolean('clear_assign')
+            ? []
+            : array_filter((array) $request->input('user_ids', []));
+        $count   = 0;
+        foreach ($request->input('task_ids') as $taskId) {
+            $task = ChecklistTask::find($taskId);
+            if ($task) {
+                $task->assignedUsers()->sync($userIds);
+                $count++;
+            }
+        }
+
+        return back()->with('success', $count . ' task(s) updated.');
     }
 
     public function reorderTasks(Request $request)

@@ -134,6 +134,7 @@ Route::middleware(['web','auth'])->prefix('checklist')->name('checklist.')->grou
     Route::delete('/tasks/{task}', [\App\Http\Controllers\ChecklistController::class, 'destroyTask'])->name('destroy-task');
     Route::post('/tasks/{task}/duplicate', [\App\Http\Controllers\ChecklistController::class, 'duplicateTask'])->name('duplicate-task');
     Route::post('/tasks/reorder', [\App\Http\Controllers\ChecklistController::class, 'reorderTasks'])->name('reorder');
+    Route::post('/tasks/bulk-assign', [\App\Http\Controllers\ChecklistController::class, 'bulkAssign'])->name('bulk-assign');
     Route::post('/submission/{submission}/analyze', [\App\Http\Controllers\ChecklistController::class, 'analyzeSubmission'])->name('analyze');
     Route::get('/submission/{submission}/analysis-logs', [\App\Http\Controllers\ChecklistController::class, 'getAnalysisLogs'])->name('analysis-logs');
     Route::post('/submission/{submission}/approval-check', [\App\Http\Controllers\ChecklistController::class, 'approvalCheck'])->name('approval-check');
