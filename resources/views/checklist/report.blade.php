@@ -135,7 +135,7 @@
                   $logsUrl       = $done ? '/checklist/submission/'.$sub->id.'/analysis-logs' : '';
                   $savedAnalysis = $done ? $sub->latestAnalysis : null;
                   $analysisCount = $done ? ($sub->analysis_logs_count ?? 0) : 0;
-                  $approvalUrl      = ($done && $task->approval_prompt) ? '/checklist/submission/'.$sub->id.'/approval-check' : '';
+                  $approvalUrl      = $done ? '/checklist/submission/'.$sub->id.'/approval-check' : '';
                   $approvalLogsUrl  = $done ? '/checklist/submission/'.$sub->id.'/approval-logs' : '';
                   $savedApproval    = $done ? $sub->latestApproval : null;
                   $approvalCount    = $done ? ($sub->approval_logs_count ?? 0) : 0;
@@ -432,7 +432,7 @@
 
                     {{-- Approval Check (inline) --}}
                     <td class="px-3 py-3 align-top min-w-[200px]">
-                      @if($done && $task->approval_prompt)
+                      @if($done)
                         {{-- Loading --}}
                         <div x-show="approving" class="flex items-center gap-1.5 text-xs text-emerald-600">
                           <svg class="animate-spin w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24">
@@ -498,8 +498,6 @@
                         </div>
                         {{-- Empty --}}
                         <span x-show="!approving && !approval && !approvalError" class="text-gray-200 text-xs">—</span>
-                      @else
-                        <span class="text-gray-200 text-xs">—</span>
                       @endif
                     </td>
 

@@ -387,16 +387,14 @@ class ChecklistController extends Controller
         if (!$task) {
             return response()->json(['error' => 'Task not found.'], 404);
         }
-        if (!$task->approval_prompt) {
-            return response()->json(['error' => 'No approval criteria set for this task.'], 422);
-        }
-
         $prompt  = "You are a quality control reviewer for a business daily checklist submission.\n\n";
         $prompt .= "Task: {$task->title}\n";
         if ($task->description) $prompt .= "Description: {$task->description}\n";
         if ($submission->notes) $prompt .= "Staff Notes: {$submission->notes}\n";
         if ($imgFiles->isEmpty()) $prompt .= "\n(No images were submitted.)\n";
-        $prompt .= "\nApproval Criteria: {$task->approval_prompt}\n";
+        $criteria = $task->approval_prompt
+            ?: 'Evaluate whether the submission properly completes the task based on the title, description, and submitted content (notes and/or images). Assess overall quality and completeness.';
+        $prompt .= "\nApproval Criteria: {$criteria}\n";
         $prompt .= "\nIMPORTANT: Your response MUST start with exactly \"APPROVED\" or \"NOT APPROVED\" on the first line, followed by a blank line, then your explanation in 2-3 sentences.";
 
         $content = [['type' => 'text', 'text' => $prompt]];
