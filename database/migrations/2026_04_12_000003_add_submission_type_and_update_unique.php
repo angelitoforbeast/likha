@@ -20,18 +20,17 @@ return new class extends Migration
         // Swap unique constraint on checklist_submissions:
         // Add (checklist_task_id, user_id, date) FIRST (so FK still has a covering index),
         // then drop the old (checklist_task_id, date) — but only if it still exists.
-        $sm      = Schema::getConnection()->getDoctrineSchemaManager();
-        $indexes = $sm->listTableIndexes('checklist_submissions');
-        $oldKey  = 'checklist_submissions_checklist_task_id_date_unique';
-        $newKey  = 'checklist_submissions_checklist_task_id_user_id_date_unique';
+        $indexNames = collect(Schema::getIndexes('checklist_submissions'))->pluck('name');
+        $oldKey     = 'checklist_submissions_checklist_task_id_date_unique';
+        $newKey     = 'checklist_submissions_checklist_task_id_user_id_date_unique';
 
-        if (!array_key_exists($newKey, $indexes)) {
+        if (!$indexNames->contains($newKey)) {
             Schema::table('checklist_submissions', function (Blueprint $table) {
                 $table->unique(['checklist_task_id', 'user_id', 'date']);
             });
         }
 
-        if (array_key_exists($oldKey, $indexes)) {
+        if ($indexNames->contains($oldKey)) {
             Schema::table('checklist_submissions', function (Blueprint $table) {
                 $table->dropUnique(['checklist_task_id', 'date']);
             });
