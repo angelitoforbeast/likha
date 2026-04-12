@@ -17,10 +17,13 @@ return new class extends Migration
 
         // Update unique constraint on checklist_submissions:
         // from (checklist_task_id, date) → (checklist_task_id, user_id, date)
-        // This allows individual tasks to have one submission per user per day
+        // Must add new index FIRST so MySQL still has an index covering checklist_task_id
+        // (needed for the FK), then drop the old one.
+        Schema::table('checklist_submissions', function (Blueprint $table) {
+            $table->unique(['checklist_task_id', 'user_id', 'date']);
+        });
         Schema::table('checklist_submissions', function (Blueprint $table) {
             $table->dropUnique(['checklist_task_id', 'date']);
-            $table->unique(['checklist_task_id', 'user_id', 'date']);
         });
     }
 
