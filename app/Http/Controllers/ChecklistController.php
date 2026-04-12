@@ -234,6 +234,7 @@ class ChecklistController extends Controller
             'title'           => 'required|string|max:255',
             'description'     => 'nullable|string|max:1000',
             'type'            => 'required|in:photo,note,any,both',
+            'scheduled_time'  => 'nullable|string|max:20',
             'ai_prompt'       => 'nullable|string|max:2000',
             'approval_prompt' => 'nullable|string|max:2000',
         ]);
@@ -258,6 +259,7 @@ class ChecklistController extends Controller
             'description'     => 'nullable|string|max:1000',
             'type'            => 'required|in:photo,note,any,both',
             'is_active'       => 'boolean',
+            'scheduled_time'  => 'nullable|string|max:20',
             'ai_prompt'       => 'nullable|string|max:2000',
             'approval_prompt' => 'nullable|string|max:2000',
         ]);
@@ -276,6 +278,24 @@ class ChecklistController extends Controller
         // Hard delete — cascades to submissions and assignments via FK
         $task->delete();
         return back()->with('success', 'Task deleted.');
+    }
+
+    public function duplicateTask(ChecklistTask $task)
+    {
+        $new = ChecklistTask::create([
+            'title'           => $task->title . ' (Copy)',
+            'description'     => $task->description,
+            'type'            => $task->type,
+            'scheduled_time'  => $task->scheduled_time,
+            'ai_prompt'       => $task->ai_prompt,
+            'approval_prompt' => $task->approval_prompt,
+            'is_active'       => $task->is_active,
+            'sort_order'      => (ChecklistTask::max('sort_order') ?? 0) + 1,
+        ]);
+
+        $new->assignedUsers()->sync($task->assignedUsers->pluck('id'));
+
+        return back()->with('success', 'Task duplicated! Edit the copy to rename it.');
     }
 
     public function reorderTasks(Request $request)

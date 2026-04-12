@@ -278,6 +278,9 @@
                     <td class="px-3 py-3 align-top">
                       <div class="flex items-center gap-1.5 flex-wrap">
                         <p class="font-semibold text-gray-800 leading-snug">{{ $task->title }}</p>
+                        @if($task->scheduled_time)
+                          <span class="text-xs px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-500 font-medium leading-none">🕐 {{ $task->scheduled_time }}</span>
+                        @endif
                         @if($task->deleted_at)
                           <span class="text-xs px-1.5 py-0.5 rounded-full bg-red-50 text-red-400 leading-none">deleted</span>
                         @elseif(!$task->is_active)

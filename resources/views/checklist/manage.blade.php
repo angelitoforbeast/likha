@@ -54,6 +54,9 @@
         <input type="text" name="description" placeholder="Description (optional)..."
                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
 
+        <input type="text" name="scheduled_time" placeholder="Scheduled Time (optional, e.g. 10:00 AM, 3:00 PM, 7:00 PM)..."
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
+
         <div>
           <label class="text-xs text-gray-500 mb-1 block">AI Prompt Focus <span class="text-gray-400">(optional — guides what the AI checks for)</span>:</label>
           <textarea name="ai_prompt" rows="2" placeholder="e.g. Check if the workstation is clean and items are organized properly..."
@@ -126,6 +129,9 @@
               @else
                 <p class="text-xs text-gray-400 mt-0.5">→ Anyone</p>
               @endif
+              @if($t->scheduled_time)
+                <span class="text-xs px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-500 font-medium mt-0.5 inline-block">🕐 {{ $t->scheduled_time }}</span>
+              @endif
               @if($t->ai_prompt)
                 <p class="text-xs text-purple-500 mt-0.5 italic truncate max-w-sm" title="{{ $t->ai_prompt }}">🤖 {{ $t->ai_prompt }}</p>
               @endif
@@ -136,11 +142,19 @@
             <div class="flex gap-1 flex-shrink-0">
               <button @click="editing = true"
                       class="text-xs px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 text-gray-600">Edit</button>
+              <form method="POST" action="{{ route('checklist.duplicate-task', $t) }}">
+                @csrf
+                <button type="submit"
+                        class="text-xs px-2 py-1 rounded border border-blue-300 text-blue-600 hover:bg-blue-50">
+                  Duplicate
+                </button>
+              </form>
               <form method="POST" action="{{ route('checklist.update-task', $t) }}">
                 @csrf @method('PATCH')
                 <input type="hidden" name="title"       value="{{ $t->title }}">
                 <input type="hidden" name="description" value="{{ $t->description }}">
                 <input type="hidden" name="type"        value="{{ $t->type }}">
+                <input type="hidden" name="scheduled_time"  value="{{ $t->scheduled_time }}">
                 <input type="hidden" name="ai_prompt"       value="{{ $t->ai_prompt }}">
                 <input type="hidden" name="approval_prompt" value="{{ $t->approval_prompt }}">
                 <input type="hidden" name="is_active"       value="{{ $t->is_active ? '0' : '1' }}">
@@ -180,6 +194,9 @@
             <input type="text" name="description" value="{{ $t->description }}"
                    placeholder="Description (optional)..."
                    class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+            <input type="text" name="scheduled_time" value="{{ $t->scheduled_time }}"
+                   placeholder="Scheduled Time (optional, e.g. 10:00 AM)..."
+                   class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
             <div>
               <label class="text-xs text-gray-500 mb-1 block">AI Prompt Focus <span class="text-gray-400">(optional)</span>:</label>
               <textarea name="ai_prompt" rows="2" placeholder="e.g. Check if the workstation is clean and items are organized properly..."
