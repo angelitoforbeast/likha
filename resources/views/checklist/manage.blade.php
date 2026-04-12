@@ -54,7 +54,7 @@
         <input type="text" name="description" placeholder="Description (optional)..."
                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
 
-        <input type="text" name="scheduled_time" placeholder="Scheduled Time (optional, e.g. 10:00 AM, 3:00 PM, 7:00 PM)..."
+        <input type="time" name="scheduled_time"
                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
 
         <div>
@@ -130,7 +130,7 @@
                 <p class="text-xs text-gray-400 mt-0.5">→ Anyone</p>
               @endif
               @if($t->scheduled_time)
-                <span class="text-xs px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-500 font-medium mt-0.5 inline-block">🕐 {{ $t->scheduled_time }}</span>
+                <span class="text-xs px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-500 font-medium mt-0.5 inline-block">🕐 {{ $t->scheduled_time ? date('g:i A', strtotime($t->scheduled_time)) : '' }}</span>
               @endif
               @if($t->ai_prompt)
                 <p class="text-xs text-purple-500 mt-0.5 italic truncate max-w-sm" title="{{ $t->ai_prompt }}">🤖 {{ $t->ai_prompt }}</p>
@@ -194,8 +194,7 @@
             <input type="text" name="description" value="{{ $t->description }}"
                    placeholder="Description (optional)..."
                    class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
-            <input type="text" name="scheduled_time" value="{{ $t->scheduled_time }}"
-                   placeholder="Scheduled Time (optional, e.g. 10:00 AM)..."
+            <input type="time" name="scheduled_time" value="{{ $t->scheduled_time }}"
                    class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-sky-400">
             <div>
               <label class="text-xs text-gray-500 mb-1 block">AI Prompt Focus <span class="text-gray-400">(optional)</span>:</label>
