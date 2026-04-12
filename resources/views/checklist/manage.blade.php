@@ -215,7 +215,7 @@
       </div>
 
       <div class="overflow-x-auto">
-        <table class="w-full text-sm border-collapse">
+        <table id="task-sort-list" class="w-full text-sm border-collapse">
           <thead>
             <tr class="border-b border-gray-100 bg-gray-50/60 text-xs text-gray-400 uppercase tracking-wide font-semibold">
               <th class="px-3 py-2.5 w-8">
@@ -235,7 +235,6 @@
             </tr>
           </thead>
 
-          <tbody id="task-sort-list">
           @forelse($allTasks as $index => $t)
             @php $assignedIds = $t->assignedUsers->pluck('id')->toArray(); @endphp
 
@@ -439,7 +438,6 @@
               </tr>
             </tbody>
           @endforelse
-          </tbody>{{-- closes #task-sort-list --}}
 
         </table>
       </div>
