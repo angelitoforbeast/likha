@@ -32,6 +32,25 @@ class ChecklistController extends Controller
             ->get()
             ->keyBy('checklist_task_id');
 
+        // Smart sort: pending first, done last; within each group timed tasks first (by time), then untimed (by sort_order)
+        $tasks = $tasks->sort(function ($a, $b) use ($submissionsByTask) {
+            $aDone = isset($submissionsByTask[$a->id]) ? 1 : 0;
+            $bDone = isset($submissionsByTask[$b->id]) ? 1 : 0;
+
+            if ($aDone !== $bDone) return $aDone - $bDone;
+
+            $aHasTime = $a->scheduled_time ? 0 : 1;
+            $bHasTime = $b->scheduled_time ? 0 : 1;
+
+            if ($aHasTime !== $bHasTime) return $aHasTime - $bHasTime;
+
+            if ($a->scheduled_time && $b->scheduled_time) {
+                return strcmp($a->scheduled_time, $b->scheduled_time);
+            }
+
+            return $a->sort_order - $b->sort_order;
+        })->values();
+
         $doneCount  = $submissionsByTask->count();
         $totalTasks = $tasks->count();
 
