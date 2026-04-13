@@ -40,7 +40,13 @@ class JntWaybillPrintController extends Controller
         ->distinct()->orderBy('ITEM_NAME')->pluck('ITEM_NAME')->values()->all();
 
     $itemTypes = DB::table('item_type_mappings')
-        ->select('item_type')->distinct()->orderBy('item_type')->pluck('item_type')->values()->all();
+        ->select('item_type')->distinct()->orderBy('item_type')
+        ->whereIn('item_name', function ($q) use ($start, $end) {
+            $q->select('ITEM_NAME')->from('macro_output')
+              ->where('ts_date', '>=', $start)->where('ts_date', '<', $end)
+              ->whereNotNull('ITEM_NAME')->where('ITEM_NAME', '!=', '');
+        })
+        ->pluck('item_type')->values()->all();
 
     $macroBase = DB::table('macro_output')
         ->where('ts_date', '>=', $start)->where('ts_date', '<', $end);
