@@ -204,9 +204,13 @@ class JntOrderUiController extends Controller
         $rows = collect([]);   // no data
         $runStats = null;
         $retryFailCount = 0;
+        $useItemMappingForPage = false;
+        $senderNameMap = [];
+        $senderNamesForRows = [];
 
         return view('jnt.orders.index', compact(
-            'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryFailCount'
+            'date','page','pages','run','rows','runStats','senderPreview','statusGate','accountCheck','retryFailCount',
+            'useItemMappingForPage','senderNameMap','senderNamesForRows'
         ));
     }
 
