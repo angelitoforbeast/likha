@@ -513,7 +513,9 @@ class ChecklistController extends Controller
         if (!$task) {
             return response()->json(['error' => 'Task not found.'], 404);
         }
+        $todayManila = Carbon::now('Asia/Manila')->format('l, F j, Y \a\t g:i A T');
         $prompt  = "You are a quality control reviewer for a business daily checklist submission.\n\n";
+        $prompt .= "Today's date and time (Manila, Philippines): {$todayManila}\n\n";
         $prompt .= "Task: {$task->title}\n";
         if ($task->description) $prompt .= "Description: {$task->description}\n";
         if ($submission->notes) $prompt .= "Staff Notes: {$submission->notes}\n";
@@ -632,10 +634,12 @@ class ChecklistController extends Controller
             }
 
             // --- Approval Check ---
-            $criteria = $task->approval_prompt
+            $criteria    = $task->approval_prompt
                 ?: 'Evaluate whether the submission properly completes the task based on the title, description, and submitted content (notes and/or images). Assess overall quality and completeness.';
-            $aPrompt  = "You are a quality control reviewer for a business daily checklist submission.\n\n";
-            $aPrompt .= "Task: {$task->title}\n";
+            $todayManila = Carbon::now('Asia/Manila')->format('l, F j, Y \a\t g:i A T');
+            $aPrompt     = "You are a quality control reviewer for a business daily checklist submission.\n\n";
+            $aPrompt    .= "Today's date and time (Manila, Philippines): {$todayManila}\n\n";
+            $aPrompt    .= "Task: {$task->title}\n";
             if ($task->description) $aPrompt .= "Description: {$task->description}\n";
             if ($submission->notes) $aPrompt .= "Staff Notes: {$submission->notes}\n";
             if ($imgFiles->isEmpty()) $aPrompt .= "\n(No images were submitted.)\n";
