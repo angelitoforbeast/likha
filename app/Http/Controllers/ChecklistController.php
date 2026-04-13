@@ -236,6 +236,9 @@ class ChecklistController extends Controller
             }
         }
 
+        // Auto-analyze: runs AI analysis + approval check silently after saving
+        $this->runAutoAnalysis($submission);
+
         return back()->with('success', "'{$task->title}' submitted!");
     }
 
@@ -578,5 +581,99 @@ class ChecklistController extends Controller
         ]);
 
         return response()->json(['logs' => $logs]);
+    }
+
+    private function runAutoAnalysis(ChecklistSubmission $submission): void
+    {
+        try {
+            $submission->load(['task', 'files']);
+            $task     = $submission->task;
+            $imgFiles = $submission->files->filter(fn($f) => $f->isImage());
+
+            if (!$task) return;
+
+            // --- AI Analysis ---
+            $prompt  = "You are reviewing a daily operational task submission for a business.\n\n";
+            $prompt .= "Task: {$task->title}\n";
+            if ($task->description) $prompt .= "Task Description: {$task->description}\n";
+            if ($submission->notes) $prompt .= "Staff Notes: {$submission->notes}\n";
+            if ($imgFiles->isEmpty()) $prompt .= "\n(No images were submitted for this task.)\n";
+
+            if ($task->ai_prompt) {
+                $prompt .= "\nAnalysis Focus: {$task->ai_prompt}";
+                $prompt .= "\n\nUsing the above focus, provide a concise analysis in 2-4 sentences based on the submission.";
+            } else {
+                $prompt .= "\nBased on the above, provide a concise analysis in 2-4 sentences: Was the task completed properly? What do the images show (if any)? Any observations, concerns, or recommendations?";
+            }
+
+            $content = [['type' => 'text', 'text' => $prompt]];
+            foreach ($imgFiles->take(5) as $f) {
+                $content[] = [
+                    'type'      => 'image_url',
+                    'image_url' => ['url' => url(Storage::url($f->file_path)), 'detail' => 'auto'],
+                ];
+            }
+
+            $response = Http::withHeaders(['Authorization' => 'Bearer ' . config('services.openai.key')])
+                ->timeout(30)->post('https://api.openai.com/v1/chat/completions', [
+                    'model'      => 'gpt-4o',
+                    'max_tokens' => 512,
+                    'messages'   => [['role' => 'user', 'content' => $content]],
+                ]);
+
+            if ($response->successful()) {
+                ChecklistAnalysisLog::create([
+                    'submission_id'   => $submission->id,
+                    'user_id'         => Auth::id(),
+                    'log_type'        => 'analysis',
+                    'prompt_used'     => $prompt,
+                    'analysis_result' => $response->json('choices.0.message.content'),
+                ]);
+            }
+
+            // --- Approval Check ---
+            $criteria = $task->approval_prompt
+                ?: 'Evaluate whether the submission properly completes the task based on the title, description, and submitted content (notes and/or images). Assess overall quality and completeness.';
+            $aPrompt  = "You are a quality control reviewer for a business daily checklist submission.\n\n";
+            $aPrompt .= "Task: {$task->title}\n";
+            if ($task->description) $aPrompt .= "Description: {$task->description}\n";
+            if ($submission->notes) $aPrompt .= "Staff Notes: {$submission->notes}\n";
+            if ($imgFiles->isEmpty()) $aPrompt .= "\n(No images were submitted.)\n";
+            $aPrompt .= "\nApproval Criteria: {$criteria}\n";
+            $aPrompt .= "\nIMPORTANT: Your response MUST start with exactly \"APPROVED\" or \"NOT APPROVED\" on the first line, followed by a blank line, then your explanation in 2-3 sentences.";
+
+            $aContent = [['type' => 'text', 'text' => $aPrompt]];
+            foreach ($imgFiles->take(5) as $f) {
+                $aContent[] = [
+                    'type'      => 'image_url',
+                    'image_url' => ['url' => url(Storage::url($f->file_path)), 'detail' => 'auto'],
+                ];
+            }
+
+            $aResponse = Http::withHeaders(['Authorization' => 'Bearer ' . config('services.openai.key')])
+                ->timeout(30)->post('https://api.openai.com/v1/chat/completions', [
+                    'model'      => 'gpt-4o',
+                    'max_tokens' => 512,
+                    'messages'   => [['role' => 'user', 'content' => $aContent]],
+                ]);
+
+            if ($aResponse->successful()) {
+                $text      = $aResponse->json('choices.0.message.content');
+                $firstLine = strtoupper(trim(explode("\n", trim($text))[0]));
+                $verdict   = str_starts_with($firstLine, 'NOT APPROVED') ? 'not_approved'
+                           : (str_starts_with($firstLine, 'APPROVED')    ? 'approved' : 'unknown');
+
+                ChecklistAnalysisLog::create([
+                    'submission_id'   => $submission->id,
+                    'user_id'         => Auth::id(),
+                    'log_type'        => 'approval',
+                    'prompt_used'     => $aPrompt,
+                    'analysis_result' => $text,
+                    'verdict'         => $verdict,
+                ]);
+            }
+        } catch (\Exception $e) {
+            // Silent fail — submission always succeeds even if AI errors
+        }
     }
 }
