@@ -344,6 +344,12 @@ Route::post('/jnt/sender-name/delete/{id}', [\App\Http\Controllers\PageSenderMap
 Route::get('/jnt/item-sender-name', [\App\Http\Controllers\PageItemSenderMappingController::class, 'index']);
 Route::post('/jnt/item-sender-name/save', [\App\Http\Controllers\PageItemSenderMappingController::class, 'save']);
 Route::post('/jnt/item-sender-name/delete/{id}', [\App\Http\Controllers\PageItemSenderMappingController::class, 'delete']);
+
+Route::get('/jnt/item-types',              [\App\Http\Controllers\ItemTypeMappingController::class, 'index']);
+Route::get('/jnt/item-types/inline',       [\App\Http\Controllers\ItemTypeMappingController::class, 'inline']);
+Route::post('/jnt/item-types/save',        [\App\Http\Controllers\ItemTypeMappingController::class, 'save']);
+Route::post('/jnt/item-types/save-one',    [\App\Http\Controllers\ItemTypeMappingController::class, 'saveOne']);
+Route::post('/jnt/item-types/delete/{id}', [\App\Http\Controllers\ItemTypeMappingController::class, 'delete']);
 Route::get('/jnt/checker', [JntCheckerController::class, 'index'])->name('jnt.checker');
 Route::post('/jnt/checker/upload', [JntCheckerController::class, 'upload'])->name('jnt.checker.upload');
 Route::get('/jnt/checker/upload', fn () => redirect()->route('jnt.checker'));

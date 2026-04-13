@@ -25,7 +25,7 @@ class JntWaybillPrintController extends Controller
     $end   = Carbon::parse($date, 'Asia/Manila')->addDay()->toDateString();
 
     $filterBy = $request->input('filter_by', 'page');
-    if (!in_array($filterBy, ['page','item'], true)) $filterBy = 'page';
+    if (!in_array($filterBy, ['page','item','item_type'], true)) $filterBy = 'page';
 
     $filterValue = trim((string) $request->input('filter_value',''));
 
@@ -39,12 +39,20 @@ class JntWaybillPrintController extends Controller
         ->whereNotNull('ITEM_NAME')->where('ITEM_NAME','!=','')
         ->distinct()->orderBy('ITEM_NAME')->pluck('ITEM_NAME')->values()->all();
 
+    $itemTypes = DB::table('item_type_mappings')
+        ->select('item_type')->distinct()->orderBy('item_type')->pluck('item_type')->values()->all();
+
     $macroBase = DB::table('macro_output')
         ->where('ts_date', '>=', $start)->where('ts_date', '<', $end);
 
     if ($filterValue !== '') {
         if ($filterBy === 'page') $macroBase->where('PAGE', $filterValue);
         if ($filterBy === 'item') $macroBase->where('ITEM_NAME', $filterValue);
+        if ($filterBy === 'item_type') {
+            $itemNamesForType = DB::table('item_type_mappings')
+                ->where('item_type', $filterValue)->pluck('item_name');
+            $macroBase->whereIn('ITEM_NAME', $itemNamesForType);
+        }
     }
 
     $macroIdsSub = (clone $macroBase)->select('id');
@@ -76,17 +84,23 @@ class JntWaybillPrintController extends Controller
     if ($filterValue !== '') {
         if ($filterBy === 'page') $q->where('m.PAGE', $filterValue);
         if ($filterBy === 'item') $q->where('m.ITEM_NAME', $filterValue);
+        if ($filterBy === 'item_type') {
+            $itemNamesForType = DB::table('item_type_mappings')
+                ->where('item_type', $filterValue)->pluck('item_name');
+            $q->whereIn('m.ITEM_NAME', $itemNamesForType);
+        }
     }
 
     $rows = $q->orderByDesc('m.id')->simplePaginate(50)->withQueryString();
 
     return view('jnt.waybills.print', [
-        'date' => $date,
-        'filterBy' => $filterBy,
+        'date'        => $date,
+        'filterBy'    => $filterBy,
         'filterValue' => $filterValue,
-        'pages' => $pages,
-        'items' => $items,
-        'rows' => $rows,
+        'pages'       => $pages,
+        'items'       => $items,
+        'itemTypes'   => $itemTypes,
+        'rows'        => $rows,
     ]);
 }
 
@@ -98,7 +112,7 @@ class JntWaybillPrintController extends Controller
     $date = $request->input('date') ?: now('Asia/Manila')->subDay()->toDateString();
 
     $filterBy = $request->input('filter_by', 'page');
-    if (!in_array($filterBy, ['page','item'], true)) $filterBy = 'page';
+    if (!in_array($filterBy, ['page','item','item_type'], true)) $filterBy = 'page';
 
     $filterValue = trim((string) $request->input('filter_value', ''));
 

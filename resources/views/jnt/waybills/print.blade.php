@@ -9,6 +9,7 @@
     $filterValue = $filterValue ?? request('filter_value','');
     $pages = $pages ?? [];
     $items = $items ?? [];
+    $itemTypes = $itemTypes ?? [];
     $rows  = $rows ?? null;
   @endphp
 
@@ -48,8 +49,9 @@
         <div>
           <label class="block text-sm font-medium mb-1">Filter Type</label>
           <select name="filter_by" class="border rounded-lg px-3 py-2 text-sm w-44">
-            <option value="page" @selected($filterBy==='page')>Page</option>
-            <option value="item" @selected($filterBy==='item')>Item Name</option>
+            <option value="page"      @selected($filterBy==='page')>Page</option>
+            <option value="item"      @selected($filterBy==='item')>Item Name</option>
+            <option value="item_type" @selected($filterBy==='item_type')>Item Type</option>
           </select>
         </div>
 
@@ -61,6 +63,10 @@
             @if($filterBy === 'page')
               @foreach($pages as $p)
                 <option value="{{ $p }}" @selected($filterValue===$p)>{{ $p }}</option>
+              @endforeach
+            @elseif($filterBy === 'item_type')
+              @foreach($itemTypes as $t)
+                <option value="{{ $t }}" @selected($filterValue===$t)>{{ $t }}</option>
               @endforeach
             @else
               @foreach($items as $it)
