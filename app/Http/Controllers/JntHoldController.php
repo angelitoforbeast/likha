@@ -16,6 +16,20 @@ class JntHoldController extends Controller
 
     public function index(Request $request)
     {
+        // Redirect to default URL on fresh visit (no query params at all)
+        if (!$request->hasAny(['date_range', 'date', 'start', 'q', 'per_date', 'group', 'lookback_days', 'as_of_date', 'include_blank'])) {
+            $today        = Carbon::now('Asia/Manila')->toDateString();
+            $lastMonthStart = Carbon::now('Asia/Manila')->startOfMonth()->subMonth()->toDateString();
+            return redirect()->route('jnt.hold', [
+                'q'            => '',
+                'date_range'   => $lastMonthStart . ' to ' . $today,
+                'group'        => 'item_name',
+                'per_date'     => '1',
+                'lookback_days'=> '3',
+                'as_of_date'   => $today,
+            ]);
+        }
+
         $q            = trim((string) $request->input('q', ''));
         $includeBlank = (bool) $request->boolean('include_blank', false);
         $perDate      = (bool) $request->boolean('per_date', false);
