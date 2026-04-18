@@ -53,6 +53,17 @@
                  class="w-full border border-gray-300 p-2 rounded-md text-sm" required>
         </div>
       </div>
+      <div class="grid md:grid-cols-3 gap-3 items-end mt-3">
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Pickup Days Offset
+            <span class="text-gray-400 text-xs">(0 = today, 1 = tomorrow…)</span>
+          </label>
+          <input type="number" name="pickup_days_offset" value="{{ old('pickup_days_offset', 0) }}"
+                 min="0" max="30"
+                 class="border border-gray-300 rounded-md px-3 py-2 text-sm w-24">
+        </div>
+      </div>
       <div class="mt-3">
         <button type="submit"
                 class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
@@ -74,6 +85,7 @@
             <th class="px-3 py-2 border-b text-left">Customer ID</th>
             <th class="px-3 py-2 border-b text-center">Uppercase</th>
             <th class="px-3 py-2 border-b text-center">Item Mapping</th>
+            <th class="px-3 py-2 border-b text-center">Pickup Offset</th>
             <th class="px-3 py-2 border-b text-center">Actions</th>
           </tr>
         </thead>
@@ -111,6 +123,18 @@
               </template>
               <template x-if="!editing">
                 <td class="px-3 py-2 border-b text-center">
+                  @php $offset = (int)($acc->pickup_days_offset ?? 0); @endphp
+                  @if($offset === 0)
+                    <span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs">+0d (today)</span>
+                  @elseif($offset === 1)
+                    <span class="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">+1d (tomorrow)</span>
+                  @else
+                    <span class="px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full text-xs font-medium">+{{ $offset }}d</span>
+                  @endif
+                </td>
+              </template>
+              <template x-if="!editing">
+                <td class="px-3 py-2 border-b text-center">
                   <button @click="editing = true" class="text-blue-600 hover:underline text-xs mr-2">Edit</button>
                   <form action="{{ route('jnt.accounts.destroy', $acc) }}" method="POST" class="inline"
                         onsubmit="return confirm('Delete this account? Mapped pages will lose their assignment.')">
@@ -122,7 +146,7 @@
 
               {{-- Edit mode --}}
               <template x-if="editing">
-                <td colspan="5" class="px-3 py-2 border-b">
+                <td colspan="6" class="px-3 py-2 border-b">
                   <form action="{{ route('jnt.accounts.update', $acc) }}" method="POST"
                         class="flex items-center gap-2 flex-wrap">
                     @csrf @method('PUT')
@@ -147,6 +171,13 @@
                              class="rounded">
                       Item Mapping
                     </label>
+                    <label class="flex items-center gap-1.5 text-sm cursor-pointer select-none">
+                      <span class="font-medium">Pickup +</span>
+                      <input type="number" name="pickup_days_offset" value="{{ (int)($acc->pickup_days_offset ?? 0) }}"
+                             min="0" max="30"
+                             class="border rounded px-2 py-1 text-sm w-16">
+                      <span class="text-gray-500">days</span>
+                    </label>
                     <button type="submit"
                             class="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700">
                       Save
@@ -162,7 +193,7 @@
             </tr>
           @empty
             <tr>
-              <td colspan="5" class="px-3 py-4 text-center text-gray-500">
+              <td colspan="6" class="px-3 py-4 text-center text-gray-500">
                 No accounts yet. Add one above.
               </td>
             </tr>

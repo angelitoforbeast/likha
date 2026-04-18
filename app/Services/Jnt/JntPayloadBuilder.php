@@ -111,8 +111,8 @@ class JntPayloadBuilder
             'receiver'        => $receiver,
 
             'createordertime' => $now->format('Y-m-d H:i:s'),
-            'sendstarttime'   => $now->format('Y-m-d') . ' 09:00:00',
-            'sendendtime'     => $now->format('Y-m-d') . ' 18:00:00',
+            'sendstarttime'   => $now->copy()->addDays(max(0, (int)($opts['pickup_days_offset'] ?? 0)))->format('Y-m-d') . ' 09:00:00',
+            'sendendtime'     => $now->copy()->addDays(max(0, (int)($opts['pickup_days_offset'] ?? 0)))->format('Y-m-d') . ' 18:00:00',
 
             'paytype'         => '1',
             'weight'          => $weight,

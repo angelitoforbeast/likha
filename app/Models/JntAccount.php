@@ -13,6 +13,7 @@ class JntAccount extends Model
     protected $casts = [
         'force_uppercase'        => 'boolean',
         'use_item_sender_mapping'=> 'boolean',
+        'pickup_days_offset'     => 'integer',
     ];
 
     public function pageMappings(): HasMany

@@ -27,6 +27,7 @@ class JntAccountController extends Controller
 
         $data['force_uppercase']         = $request->boolean('force_uppercase');
         $data['use_item_sender_mapping'] = $request->boolean('use_item_sender_mapping');
+        $data['pickup_days_offset']      = max(0, min(30, (int) $request->input('pickup_days_offset', 0)));
 
         JntAccount::create($data);
 
@@ -43,6 +44,7 @@ class JntAccountController extends Controller
 
         $data['force_uppercase']         = $request->boolean('force_uppercase');
         $data['use_item_sender_mapping'] = $request->boolean('use_item_sender_mapping');
+        $data['pickup_days_offset']      = max(0, min(30, (int) $request->input('pickup_days_offset', 0)));
 
         $account->update($data);
 

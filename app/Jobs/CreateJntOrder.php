@@ -88,10 +88,11 @@ class CreateJntOrder implements ShouldQueue
         $senderOpts = $this->resolveSenderOpts($page, $itemName, $client->isUseItemSenderMapping());
 
         $payload = JntPayloadBuilder::buildCreateFromMacroOutput($norm, array_merge([
-            'txlogisticid' => $tx,
-            'remark'       => $itemName,
-            'eccompanyid'  => $client->getEccompanyid(),
-            'customerid'   => $client->getCustomerid(),
+            'txlogisticid'       => $tx,
+            'remark'             => $itemName,
+            'eccompanyid'        => $client->getEccompanyid(),
+            'customerid'         => $client->getCustomerid(),
+            'pickup_days_offset' => $client->getPickupDaysOffset(),
         ], $senderOpts));
 
 

@@ -21,6 +21,7 @@ class JntClient
         protected array $endpoints = [],
         protected bool $forceUppercase = false,
         protected bool $useItemSenderMapping = false,
+        protected int $pickupDaysOffset = 0,
     ) {}
 
     public static function fromConfig(): self
@@ -72,12 +73,14 @@ class JntClient
 
         $forceUppercase         = false;
         $useItemSenderMapping   = false;
+        $pickupDaysOffset       = 0;
 
         if ($mapping && $mapping->account) {
             $ec                   = (string) $mapping->account->eccompanyid;
             $cust                 = (string) $mapping->account->customerid;
             $forceUppercase       = (bool) $mapping->account->force_uppercase;
             $useItemSenderMapping = (bool) $mapping->account->use_item_sender_mapping;
+            $pickupDaysOffset     = (int)  $mapping->account->pickup_days_offset;
         } else {
             $ec   = (string) (config('jnt.credentials.eccompanyid') ?? '');
             $cust = (string) (config('jnt.credentials.customerid') ?? '');
@@ -97,6 +100,7 @@ class JntClient
             endpoints: $endpoints,
             forceUppercase: $forceUppercase,
             useItemSenderMapping: $useItemSenderMapping,
+            pickupDaysOffset: $pickupDaysOffset,
         );
     }
 
@@ -104,6 +108,7 @@ class JntClient
     public function getCustomerid(): string         { return $this->customerid; }
     public function isForceUppercase(): bool        { return $this->forceUppercase; }
     public function isUseItemSenderMapping(): bool  { return $this->useItemSenderMapping; }
+    public function getPickupDaysOffset(): int      { return (int) $this->pickupDaysOffset; }
 
     public function createOrder(array $payload): array
 {
