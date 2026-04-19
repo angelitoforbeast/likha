@@ -25,9 +25,9 @@
       </div>
       {{-- Sticky column headers --}}
       <div class="max-w-screen-2xl mx-auto overflow-x-auto bg-gray-50/80 border-t border-gray-100" id="checklist-head-scroll">
-        <table class="w-full text-sm border-collapse" style="table-layout:fixed;min-width:1032px">
+        <table class="w-full text-sm border-collapse" style="table-layout:fixed;min-width:1122px">
           <colgroup>
-            <col style="width:32px"><col style="width:200px"><col style="width:160px"><col style="width:160px"><col style="width:220px"><col style="width:160px"><col style="width:100px">
+            <col style="width:32px"><col style="width:200px"><col style="width:160px"><col style="width:160px"><col style="width:220px"><col style="width:90px"><col style="width:160px"><col style="width:100px">
           </colgroup>
           <thead>
             <tr class="text-xs text-gray-400 uppercase tracking-wide font-semibold">
@@ -36,6 +36,7 @@
               <th class="text-left px-3 py-2">Description</th>
               <th class="text-left px-3 py-2">Images</th>
               <th class="text-left px-3 py-2">Notes</th>
+              <th class="text-left px-3 py-2">Status</th>
               <th class="text-left px-3 py-2">Submitted by</th>
               <th class="px-3 py-2"></th>
             </tr>
@@ -88,9 +89,9 @@
         @endphp
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
           <div class="overflow-x-auto" id="checklist-body-scroll">
-            <table class="w-full text-sm border-collapse" style="table-layout:fixed;min-width:1032px">
+            <table class="w-full text-sm border-collapse" style="table-layout:fixed;min-width:1122px">
               <colgroup>
-                <col style="width:32px"><col style="width:200px"><col style="width:160px"><col style="width:160px"><col style="width:220px"><col style="width:160px"><col style="width:100px">
+                <col style="width:32px"><col style="width:200px"><col style="width:160px"><col style="width:160px"><col style="width:220px"><col style="width:90px"><col style="width:160px"><col style="width:100px">
               </colgroup>
 
               @foreach($tasks as $task)
@@ -241,8 +242,21 @@
                     <td class="px-3 py-3 align-top">
                       @if($done && $sub->notes)
                         <p class="text-sm text-gray-600 leading-relaxed line-clamp-3">{{ $sub->notes }}</p>
+                      @elseif($photoWarn && $sub->notes)
+                        <p class="text-sm text-gray-600 leading-relaxed line-clamp-3">{{ $sub->notes }}</p>
                       @else
                         <span class="text-gray-200">—</span>
+                      @endif
+                    </td>
+
+                    {{-- Status --}}
+                    <td class="px-3 py-3 align-top">
+                      @if($done)
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">DONE</span>
+                      @elseif($photoWarn)
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">IN PROGRESS</span>
+                      @else
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-400">PENDING</span>
                       @endif
                     </td>
 
@@ -317,7 +331,7 @@
                   {{-- INLINE FORM ROW --}}
                   @if($canSubmit || $done || $photoWarn)
                     <tr x-show="showForm" x-transition class="border-b border-blue-100 bg-blue-50/20">
-                      <td colspan="7" class="px-6 py-4">
+                      <td colspan="8" class="px-6 py-4">
                         <form method="POST" action="{{ route('checklist.submit', $task) }}" enctype="multipart/form-data">
                           @csrf
                           <div class="flex gap-4 items-start flex-wrap">
