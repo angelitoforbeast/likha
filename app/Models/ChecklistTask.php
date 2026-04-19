@@ -10,10 +10,16 @@ class ChecklistTask extends Model
 {
     use SoftDeletes;
 
-    protected $fillable = ['title', 'description', 'type', 'is_active', 'sort_order', 'scheduled_time', 'submission_type', 'ai_prompt', 'approval_prompt'];
+    protected $fillable = [
+        'title', 'description', 'type', 'is_active', 'sort_order',
+        'scheduled_time', 'submission_type', 'ai_prompt', 'approval_prompt',
+        'required_photos', 'frequency', 'frequency_day', 'department', 'created_by',
+    ];
 
     protected $casts = [
-        'is_active' => 'boolean',
+        'is_active'       => 'boolean',
+        'required_photos' => 'integer',
+        'frequency_day'   => 'integer',
     ];
 
     public function submissions(): HasMany

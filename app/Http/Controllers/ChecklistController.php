@@ -32,6 +32,17 @@ class ChecklistController extends Controller
             return $assignedIds->isEmpty() || $assignedIds->contains(Auth::id());
         });
 
+        // Frequency filter: only show tasks that are due today
+        $nowManila = Carbon::now('Asia/Manila');
+        $tasks = $tasks->filter(function ($t) use ($nowManila) {
+            return match($t->frequency ?? 'daily') {
+                'weekly'  => (int) $nowManila->dayOfWeek === (int) $t->frequency_day,
+                'monthly' => (int) $nowManila->day       === (int) $t->frequency_day,
+                'once'    => !ChecklistSubmission::where('checklist_task_id', $t->id)->exists(),
+                default   => true,
+            };
+        });
+
         // Load all today's submissions once
         $todaySubmissions = ChecklistSubmission::with(['user', 'files', 'logs.user'])
             ->where('date', $today)->get();
@@ -148,11 +159,27 @@ class ChecklistController extends Controller
 
     public function manage()
     {
-        $allTasks = ChecklistTask::with('assignedUsers')
-            ->orderBy('sort_order')
-            ->orderBy('id')
-            ->get();
+        $user   = Auth::user();
+        $role   = $user?->employeeProfile?->role ?? '';
+        $dept   = $user?->employeeProfile?->department ?? '';
+        $userId = $user?->id;
 
+        $query = ChecklistTask::with('assignedUsers')->orderBy('sort_order')->orderBy('id');
+
+        if ($role === 'CEO') {
+            // sees all — no filter
+        } elseif (str_contains($role, 'OIC') && $dept !== '') {
+            // OIC sees tasks tagged with their department
+            $query->where('department', $dept);
+        } else {
+            // others see tasks they created OR are assigned to
+            $query->where(function ($q) use ($userId) {
+                $q->where('created_by', $userId)
+                  ->orWhereHas('assignedUsers', fn ($r) => $r->where('users.id', $userId));
+            });
+        }
+
+        $allTasks = $query->get();
         $allUsers = User::with('employeeProfile')->orderBy('name')->get();
 
         return view('checklist.manage', compact('allTasks', 'allUsers'));
@@ -287,13 +314,20 @@ class ChecklistController extends Controller
             'submission_type' => 'nullable|in:group,individual',
             'ai_prompt'       => 'nullable|string|max:2000',
             'approval_prompt' => 'nullable|string|max:2000',
+            'required_photos' => 'nullable|integer|min:0|max:20',
+            'frequency'       => 'nullable|in:daily,weekly,monthly,once',
+            'frequency_day'   => 'nullable|integer|min:0|max:31',
+            'department'      => 'nullable|string|max:100',
         ]);
 
         $task = ChecklistTask::create([
             ...$validated,
             'sort_order'      => (ChecklistTask::max('sort_order') ?? 0) + 1,
             'submission_type' => $validated['submission_type'] ?? 'group',
+            'frequency'       => $validated['frequency'] ?? 'daily',
+            'required_photos' => $validated['required_photos'] ?? 0,
             'is_active'       => true,
+            'created_by'      => Auth::id(),
         ]);
 
         // Sync assigned users
@@ -314,6 +348,10 @@ class ChecklistController extends Controller
             'submission_type' => 'nullable|in:group,individual',
             'ai_prompt'       => 'nullable|string|max:2000',
             'approval_prompt' => 'nullable|string|max:2000',
+            'required_photos' => 'nullable|integer|min:0|max:20',
+            'frequency'       => 'nullable|in:daily,weekly,monthly,once',
+            'frequency_day'   => 'nullable|integer|min:0|max:31',
+            'department'      => 'nullable|string|max:100',
         ]);
 
         $task->update($validated);
@@ -344,6 +382,11 @@ class ChecklistController extends Controller
             'approval_prompt' => $task->approval_prompt,
             'is_active'       => $task->is_active,
             'sort_order'      => (ChecklistTask::max('sort_order') ?? 0) + 1,
+            'required_photos' => $task->required_photos,
+            'frequency'       => $task->frequency,
+            'frequency_day'   => $task->frequency_day,
+            'department'      => $task->department,
+            'created_by'      => Auth::id(),
         ]);
 
         $new->assignedUsers()->sync($task->assignedUsers->pluck('id'));

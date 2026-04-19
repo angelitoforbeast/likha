@@ -10,6 +10,7 @@
         'status'          => $t->is_active ? 'active' : 'inactive',
         'submission_type' => $t->submission_type ?? 'group',
         'assigned_ids'    => $t->assignedUsers->pluck('id')->values()->toArray(),
+        'frequency'       => $t->frequency ?? 'daily',
     ])->values();
   @endphp
 
@@ -93,6 +94,47 @@
               <label class="text-xs text-gray-500 mb-1 block">Approval Prompt <span class="text-gray-400">(optional)</span></label>
               <textarea name="approval_prompt" rows="2" placeholder="e.g. Check if budget report shows all 3 slots..."
                         class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none"></textarea>
+            </div>
+          </div>
+          {{-- Frequency, Required Photos, Department --}}
+          <div x-data="{ freq: 'daily' }" class="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
+            <div>
+              <label class="text-xs text-gray-500 mb-1 block">Frequency</label>
+              <select name="frequency" x-model="freq"
+                      class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                <option value="daily">🔁 Daily</option>
+                <option value="weekly">📅 Weekly</option>
+                <option value="monthly">🗓 Monthly</option>
+                <option value="once">1️⃣ Once (until done)</option>
+              </select>
+            </div>
+            <div x-show="freq === 'weekly'" x-cloak>
+              <label class="text-xs text-gray-500 mb-1 block">Day of Week</label>
+              <select name="frequency_day"
+                      class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                <option value="0">Sunday</option>
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+              </select>
+            </div>
+            <div x-show="freq === 'monthly'" x-cloak>
+              <label class="text-xs text-gray-500 mb-1 block">Day of Month</label>
+              <input type="number" name="frequency_day" min="1" max="31" placeholder="e.g. 15"
+                     class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+            </div>
+            <div>
+              <label class="text-xs text-gray-500 mb-1 block">Required Photos <span class="text-gray-400">(0 = none)</span></label>
+              <input type="number" name="required_photos" min="0" max="20" value="0"
+                     class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+            </div>
+            <div>
+              <label class="text-xs text-gray-500 mb-1 block">Department <span class="text-gray-400">(optional)</span></label>
+              <input type="text" name="department" placeholder="e.g. Marketing"
+                     class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
             </div>
           </div>
           <div>
@@ -281,6 +323,9 @@
               <th class="text-left px-3 py-2.5 w-20">Status</th>
               <th class="text-left px-3 py-2.5 w-24">Submission</th>
               <th class="text-left px-3 py-2.5 w-20">Time</th>
+              <th class="text-left px-3 py-2.5 w-28">Frequency</th>
+              <th class="text-left px-3 py-2.5 w-20">Photos</th>
+              <th class="text-left px-3 py-2.5 w-24">Dept</th>
               <th class="text-left px-3 py-2.5 w-48">Actions</th>
             </tr>
           </thead>
@@ -375,6 +420,42 @@
                   @endif
                 </td>
 
+                {{-- Frequency --}}
+                <td class="px-3 py-3 align-middle whitespace-nowrap">
+                  @php
+                    $freq = $t->frequency ?? 'daily';
+                    $freqDay = $t->frequency_day;
+                    $dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+                  @endphp
+                  @if($freq === 'weekly')
+                    <span class="text-xs px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">📅 {{ $dayNames[$freqDay] ?? '?' }}</span>
+                  @elseif($freq === 'monthly')
+                    <span class="text-xs px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-600">🗓 Day {{ $freqDay }}</span>
+                  @elseif($freq === 'once')
+                    <span class="text-xs px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600">1️⃣ Once</span>
+                  @else
+                    <span class="text-xs text-gray-300">Daily</span>
+                  @endif
+                </td>
+
+                {{-- Required Photos --}}
+                <td class="px-3 py-3 align-middle text-center">
+                  @if(($t->required_photos ?? 0) > 0)
+                    <span class="text-xs px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600">📸 {{ $t->required_photos }}</span>
+                  @else
+                    <span class="text-gray-300 text-xs">—</span>
+                  @endif
+                </td>
+
+                {{-- Department --}}
+                <td class="px-3 py-3 align-middle">
+                  @if($t->department)
+                    <span class="text-xs px-1.5 py-0.5 rounded-full bg-green-50 text-green-600">{{ $t->department }}</span>
+                  @else
+                    <span class="text-gray-300 text-xs">—</span>
+                  @endif
+                </td>
+
                 {{-- Actions --}}
                 <td class="px-3 py-3 align-middle">
                   <div class="flex gap-1 flex-wrap">
@@ -400,6 +481,10 @@
                       <input type="hidden" name="submission_type" value="{{ $t->submission_type }}">
                       <input type="hidden" name="ai_prompt"       value="{{ $t->ai_prompt }}">
                       <input type="hidden" name="approval_prompt" value="{{ $t->approval_prompt }}">
+                      <input type="hidden" name="required_photos" value="{{ $t->required_photos ?? 0 }}">
+                      <input type="hidden" name="frequency"       value="{{ $t->frequency ?? 'daily' }}">
+                      <input type="hidden" name="frequency_day"   value="{{ $t->frequency_day }}">
+                      <input type="hidden" name="department"      value="{{ $t->department }}">
                       <input type="hidden" name="is_active"       value="{{ $t->is_active ? '0' : '1' }}">
                       @foreach($assignedIds as $uid)
                         <input type="hidden" name="assigned_users[]" value="{{ $uid }}">
@@ -423,7 +508,7 @@
 
               {{-- EDIT ROW --}}
               <tr x-show="editing" x-transition class="border-b border-blue-100 bg-blue-50/20">
-                <td colspan="10" class="px-4 py-3">
+                <td colspan="13" class="px-4 py-3">
                   <form method="POST" action="{{ route('checklist.update-task', $t) }}" class="space-y-2">
                     @csrf @method('PATCH')
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -461,6 +546,46 @@
                       </div>
                     </div>
                     <input type="hidden" name="is_active" value="{{ $t->is_active ? '1' : '0' }}">
+                    {{-- Frequency, Required Photos, Department --}}
+                    <div x-data="{ freq: '{{ $t->frequency ?? 'daily' }}' }" class="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
+                      <div>
+                        <label class="text-xs text-gray-500 mb-1 block">Frequency</label>
+                        <select name="frequency" x-model="freq"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                          <option value="daily"   {{ ($t->frequency ?? 'daily') === 'daily'   ? 'selected' : '' }}>🔁 Daily</option>
+                          <option value="weekly"  {{ ($t->frequency ?? '') === 'weekly'  ? 'selected' : '' }}>📅 Weekly</option>
+                          <option value="monthly" {{ ($t->frequency ?? '') === 'monthly' ? 'selected' : '' }}>🗓 Monthly</option>
+                          <option value="once"    {{ ($t->frequency ?? '') === 'once'    ? 'selected' : '' }}>1️⃣ Once</option>
+                        </select>
+                      </div>
+                      <div x-show="freq === 'weekly'" x-cloak>
+                        <label class="text-xs text-gray-500 mb-1 block">Day of Week</label>
+                        <select name="frequency_day"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                          @foreach(['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'] as $di => $dn)
+                            <option value="{{ $di }}" {{ (int)($t->frequency_day ?? 0) === $di ? 'selected' : '' }}>{{ $dn }}</option>
+                          @endforeach
+                        </select>
+                      </div>
+                      <div x-show="freq === 'monthly'" x-cloak>
+                        <label class="text-xs text-gray-500 mb-1 block">Day of Month</label>
+                        <input type="number" name="frequency_day" min="1" max="31"
+                               value="{{ $t->frequency === 'monthly' ? $t->frequency_day : '' }}"
+                               placeholder="e.g. 15"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                      </div>
+                      <div>
+                        <label class="text-xs text-gray-500 mb-1 block">Required Photos</label>
+                        <input type="number" name="required_photos" min="0" max="20"
+                               value="{{ $t->required_photos ?? 0 }}"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                      </div>
+                      <div>
+                        <label class="text-xs text-gray-500 mb-1 block">Department</label>
+                        <input type="text" name="department" value="{{ $t->department }}" placeholder="e.g. Marketing"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                      </div>
+                    </div>
                     <div>
                       <label class="text-xs text-gray-500 mb-1.5 block">Assigned to <span class="text-gray-400">(blank = anyone)</span></label>
                       <div class="flex flex-wrap gap-2">
@@ -486,7 +611,7 @@
           @empty
             <tbody>
               <tr>
-                <td colspan="10" class="px-4 py-10 text-center text-sm text-gray-400">No tasks yet. Add one above.</td>
+                <td colspan="13" class="px-4 py-10 text-center text-sm text-gray-400">No tasks yet. Add one above.</td>
               </tr>
             </tbody>
           @endforelse

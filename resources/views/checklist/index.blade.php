@@ -87,14 +87,18 @@
                   $sub         = $task->submission_type === 'individual'
                       ? $mySubmissionsByTask->get($task->id)
                       : $submissionsByTask->get($task->id);
-                  $done        = $sub !== null;
+                  $subFiles    = $sub ? $sub->files : collect();
+                  $imageFiles  = $subFiles->filter(fn($f) => $f->isImage());
+                  $otherFiles  = $subFiles->filter(fn($f) => !$f->isImage());
+                  $photoCount  = $imageFiles->count();
+                  $reqPhotos   = (int) ($task->required_photos ?? 0);
+                  $photoOk     = $reqPhotos === 0 || $photoCount >= $reqPhotos;
+                  $done        = $sub !== null && $photoOk;
+                  $photoWarn   = $sub !== null && !$photoOk; // submitted but not enough photos
                   $isMine      = $sub && $sub->user_id === Auth::id();
                   $assignedIds = $task->assignedUsers->pluck('id')->toArray();
                   $isAssigned  = empty($assignedIds) || in_array(Auth::id(), $assignedIds);
-                  $canSubmit   = !$done && $isAssigned;
-                  $subFiles    = $done ? $sub->files : collect();
-                  $imageFiles  = $subFiles->filter(fn($f) => $f->isImage());
-                  $otherFiles  = $subFiles->filter(fn($f) => !$f->isImage());
+                  $canSubmit   = $sub === null && $isAssigned;
                 @endphp
 
                 <tbody
@@ -141,7 +145,8 @@
 
                     {{-- Status --}}
                     <td class="px-4 py-3 align-middle">
-                      <div class="w-2.5 h-2.5 rounded-full mx-auto {{ $done ? 'bg-green-400' : ($canSubmit ? 'bg-amber-300' : 'bg-gray-200') }}"></div>
+                      <div class="w-2.5 h-2.5 rounded-full mx-auto {{ $done ? 'bg-green-400' : ($photoWarn ? 'bg-orange-400' : ($canSubmit ? 'bg-amber-300' : 'bg-gray-200')) }}"
+                           title="{{ $photoWarn ? $photoCount.'/'.$reqPhotos.' photos — needs '.($reqPhotos - $photoCount).' more' : '' }}"></div>
                     </td>
 
                     {{-- Task --}}
@@ -155,6 +160,11 @@
                         {{ $task->type === 'photo' ? '📸' : ($task->type === 'note' ? '📝' : ($task->type === 'both' ? '📸📝' : '📎')) }}
                         {{ $task->type === 'both' ? 'Photo + Note' : ucfirst($task->type) }}
                       </span>
+                      @if($photoWarn)
+                        <span class="text-xs px-1.5 py-0.5 rounded-full mt-1 inline-block bg-orange-50 text-orange-600">
+                          📸 {{ $photoCount }}/{{ $reqPhotos }} — needs {{ $reqPhotos - $photoCount }} more
+                        </span>
+                      @endif
                     </td>
 
                     {{-- Description --}}
