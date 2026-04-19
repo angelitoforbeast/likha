@@ -3,6 +3,39 @@
   <x-slot name="title">Daily Report</x-slot>
 
   @php
+    // ── Filter data for Alpine store ──────────────────────────────────────────
+    $taskFilterData = [];
+    foreach ($tasks as $task) {
+        if ($task->submission_type === 'individual') {
+            $fSubs = $submissionsGroupedByTask->get($task->id) ?? collect();
+            $fDone = $fSubs->isNotEmpty();
+            $fUsers = $fSubs->map(fn($s) => strtolower($s->user->name ?? ''))->filter()->values()->all();
+        } else {
+            $fSub  = $submissionsByTask->get($task->id);
+            $fDone = $fSub !== null;
+            $fUsers = ($fDone && ($fSub->user ?? null)) ? [strtolower($fSub->user->name)] : [];
+        }
+        $taskFilterData[$task->id] = [
+            'done'  => $fDone,
+            'title' => strtolower($task->title),
+            'dept'  => strtolower($task->department ?? ''),
+            'users' => $fUsers,
+        ];
+    }
+    $allDepts = $tasks->pluck('department')->filter()->unique()->sort()->values()->all();
+    $allSubmitters = collect();
+    foreach ($tasks as $task) {
+        if ($task->submission_type === 'individual') {
+            $fSubs2 = $submissionsGroupedByTask->get($task->id) ?? collect();
+            $allSubmitters = $allSubmitters->merge($fSubs2->pluck('user.name')->filter());
+        } else {
+            $fSub2 = $submissionsByTask->get($task->id);
+            if ($fSub2 && ($fSub2->user ?? null)) $allSubmitters->push($fSub2->user->name);
+        }
+    }
+    $allSubmitters = $allSubmitters->unique()->sort()->values()->all();
+    // ─────────────────────────────────────────────────────────────────────────
+
     $allImageUrls = [];
     foreach($tasks as $task) {
         if ($task->submission_type === 'individual') {
@@ -28,63 +61,132 @@
   <div class="min-h-screen bg-gray-50 mt-16">
 
     {{-- ===== STICKY HEADER ===== --}}
-    <div class="sticky top-0 z-30 bg-white border-b border-gray-200 shadow-sm">
-      <div class="max-w-screen-2xl mx-auto px-4 py-0">
-        <div class="flex items-stretch gap-0 divide-x divide-gray-100">
+    <div class="sticky top-0 z-30 bg-white border-b border-gray-200 shadow-sm"
+         x-data="{
+           get filter()  { return $store.report.filter; },
+           set filter(v) { $store.report.filter = v; },
+           get search()  { return $store.report.search; },
+           set search(v) { $store.report.search = v; },
+           get dept()    { return $store.report.dept; },
+           set dept(v)   { $store.report.dept = v; },
+           get user()    { return $store.report.user; },
+           set user(v)   { $store.report.user = v; },
+           get hasFilters() { return this.filter !== 'all' || this.search !== '' || this.dept !== '' || this.user !== ''; }
+         }">
 
-          {{-- Prev day --}}
-          <a href="{{ route('checklist.report', ['date' => $prevDate]) }}"
-             class="flex items-center px-4 py-3.5 text-gray-400 hover:text-gray-700 hover:bg-gray-50 transition">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-          </a>
+      {{-- Row 1: Date nav --}}
+      <div class="flex items-stretch gap-0 divide-x divide-gray-100">
 
-          {{-- Date + picker --}}
-          <div class="flex-1 flex items-center justify-center gap-3 px-4 py-3">
-            <div class="text-center">
-              <p class="font-bold text-gray-800 text-sm leading-tight">{{ $dateObj->format('l, F j, Y') }}</p>
-              @if($isToday)
-                <span class="inline-block text-xs bg-green-100 text-green-700 font-semibold px-2 py-0.5 rounded-full leading-none mt-0.5">Today</span>
-              @else
-                <form method="GET" action="{{ route('checklist.report') }}" class="inline">
-                  <input type="date" name="date" value="{{ $dateObj->toDateString() }}"
-                         onchange="this.form.submit()"
-                         max="{{ now()->toDateString() }}"
-                         class="text-xs text-blue-500 border-0 bg-transparent cursor-pointer focus:outline-none mt-0.5">
-                </form>
-              @endif
-            </div>
+        {{-- Prev day --}}
+        <a href="{{ route('checklist.report', ['date' => $prevDate]) }}"
+           class="flex items-center px-4 py-3 text-gray-400 hover:text-gray-700 hover:bg-gray-50 transition">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        </a>
+
+        {{-- Date + picker --}}
+        <div class="flex-1 flex items-center justify-center gap-3 px-4 py-2.5">
+          <div class="text-center">
+            <p class="font-bold text-gray-800 text-sm leading-tight">{{ $dateObj->format('l, F j, Y') }}</p>
+            @if($isToday)
+              <span class="inline-block text-xs bg-green-100 text-green-700 font-semibold px-2 py-0.5 rounded-full leading-none mt-0.5">Today</span>
+            @else
+              <form method="GET" action="{{ route('checklist.report') }}" class="inline">
+                <input type="date" name="date" value="{{ $dateObj->toDateString() }}"
+                       onchange="this.form.submit()"
+                       max="{{ now()->toDateString() }}"
+                       class="text-xs text-blue-500 border-0 bg-transparent cursor-pointer focus:outline-none mt-0.5">
+              </form>
+            @endif
           </div>
-
-          {{-- Next day --}}
-          <a href="{{ route('checklist.report', ['date' => $nextDate]) }}"
-             class="flex items-center px-4 py-3.5 transition {{ $isToday ? 'text-gray-200 pointer-events-none' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50' }}">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-          </a>
-
-          {{-- Progress + links --}}
-          <div class="flex items-center gap-3 px-4 py-3">
-            <div class="flex items-center gap-2">
-              @php $pct = $totalTasks > 0 ? round($doneCount / $totalTasks * 100) : 0; @endphp
-              <svg class="w-8 h-8 -rotate-90" viewBox="0 0 36 36">
-                <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e5e7eb" stroke-width="3"/>
-                <circle cx="18" cy="18" r="15.9" fill="none"
-                        stroke="{{ $doneCount === $totalTasks && $totalTasks > 0 ? '#22c55e' : '#3b82f6' }}"
-                        stroke-width="3"
-                        stroke-dasharray="{{ $pct }}, 100"
-                        stroke-linecap="round"/>
-              </svg>
-              <div class="leading-none">
-                <p class="text-sm font-bold {{ $doneCount === $totalTasks && $totalTasks > 0 ? 'text-green-600' : 'text-gray-700' }}">{{ $doneCount }}/{{ $totalTasks }}</p>
-                <p class="text-xs text-gray-400">tasks</p>
-              </div>
-            </div>
-            <a href="{{ route('checklist.index') }}"
-               class="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition whitespace-nowrap">
-              ← Checklist
-            </a>
-          </div>
-
         </div>
+
+        {{-- Next day --}}
+        <a href="{{ route('checklist.report', ['date' => $nextDate]) }}"
+           class="flex items-center px-4 py-3 transition {{ $isToday ? 'text-gray-200 pointer-events-none' : 'text-gray-400 hover:text-gray-700 hover:bg-gray-50' }}">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        </a>
+
+        {{-- Progress + links --}}
+        <div class="flex items-center gap-3 px-4 py-2.5">
+          @php $pct = $totalTasks > 0 ? round($doneCount / $totalTasks * 100) : 0; @endphp
+          <svg class="w-7 h-7 -rotate-90" viewBox="0 0 36 36">
+            <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e5e7eb" stroke-width="3"/>
+            <circle cx="18" cy="18" r="15.9" fill="none"
+                    stroke="{{ $doneCount === $totalTasks && $totalTasks > 0 ? '#22c55e' : '#3b82f6' }}"
+                    stroke-width="3"
+                    stroke-dasharray="{{ $pct }}, 100"
+                    stroke-linecap="round"/>
+          </svg>
+          <div class="leading-none">
+            <p class="text-sm font-bold {{ $doneCount === $totalTasks && $totalTasks > 0 ? 'text-green-600' : 'text-gray-700' }}">{{ $doneCount }}/{{ $totalTasks }}</p>
+            <p class="text-xs text-gray-400">tasks</p>
+          </div>
+          <a href="{{ route('checklist.index') }}"
+             class="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition whitespace-nowrap">
+            ← Checklist
+          </a>
+        </div>
+
+      </div>
+
+      {{-- Row 2: Filters --}}
+      <div class="border-t border-gray-100 px-3 py-2 flex items-center gap-2 flex-wrap bg-gray-50/60">
+
+        {{-- Status filter chips --}}
+        <button @click="filter = 'all'"
+                :class="filter === 'all' ? 'bg-gray-700 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'"
+                class="text-xs px-3 py-1.5 rounded-full font-medium transition whitespace-nowrap">
+          All <span class="opacity-70">{{ $totalTasks }}</span>
+        </button>
+        <button @click="filter = filter === 'done' ? 'all' : 'done'"
+                :class="filter === 'done' ? 'bg-green-600 text-white' : 'bg-white text-green-700 border border-green-200 hover:bg-green-50'"
+                class="text-xs px-3 py-1.5 rounded-full font-medium transition whitespace-nowrap">
+          ✅ Done <span :class="filter === 'done' ? 'opacity-70' : ''">{{ $doneCount }}</span>
+        </button>
+        <button @click="filter = filter === 'pending' ? 'all' : 'pending'"
+                :class="filter === 'pending' ? 'bg-amber-500 text-white' : 'bg-white text-amber-700 border border-amber-200 hover:bg-amber-50'"
+                class="text-xs px-3 py-1.5 rounded-full font-medium transition whitespace-nowrap">
+          ⏳ Pending <span :class="filter === 'pending' ? 'opacity-70' : ''">{{ $totalTasks - $doneCount }}</span>
+        </button>
+
+        <div class="w-px h-4 bg-gray-200 mx-1 hidden sm:block"></div>
+
+        {{-- Search --}}
+        <div class="relative flex items-center">
+          <svg class="w-3.5 h-3.5 text-gray-400 absolute left-2.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/></svg>
+          <input x-model.debounce.200="search" type="text" placeholder="Search task…"
+                 class="text-xs border border-gray-200 rounded-full pl-7 pr-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white w-36">
+        </div>
+
+        {{-- Department filter --}}
+        @if(count($allDepts) > 0)
+          <select x-model="dept"
+                  class="text-xs border border-gray-200 rounded-full px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white">
+            <option value="">All depts</option>
+            @foreach($allDepts as $d)
+              <option value="{{ $d }}">{{ $d }}</option>
+            @endforeach
+          </select>
+        @endif
+
+        {{-- User filter --}}
+        @if(count($allSubmitters) > 0)
+          <select x-model="user"
+                  class="text-xs border border-gray-200 rounded-full px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white">
+            <option value="">All users</option>
+            @foreach($allSubmitters as $u)
+              <option value="{{ strtolower($u) }}">{{ $u }}</option>
+            @endforeach
+          </select>
+        @endif
+
+        {{-- Clear --}}
+        <button x-show="hasFilters" x-transition
+                @click="filter = 'all'; search = ''; dept = ''; user = ''"
+                class="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-full hover:bg-red-50 transition">
+          ✕ Clear
+        </button>
+
       </div>
     </div>
 
@@ -98,22 +200,6 @@
           <p class="text-sm text-gray-400 mt-1">Go to <a href="{{ route('checklist.manage') }}" class="text-blue-500 hover:underline">Manage Tasks</a> to add tasks.</p>
         </div>
       @else
-
-        {{-- Summary strip --}}
-        <div class="grid grid-cols-3 gap-3">
-          <div class="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 text-center">
-            <p class="text-2xl font-bold {{ $doneCount > 0 ? 'text-green-600' : 'text-gray-300' }}">{{ $doneCount }}</p>
-            <p class="text-xs text-gray-400 mt-0.5">Completed</p>
-          </div>
-          <div class="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 text-center">
-            <p class="text-2xl font-bold {{ ($totalTasks - $doneCount) > 0 ? 'text-amber-500' : 'text-gray-300' }}">{{ $totalTasks - $doneCount }}</p>
-            <p class="text-xs text-gray-400 mt-0.5">Pending</p>
-          </div>
-          <div class="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 text-center">
-            <p class="text-2xl font-bold text-gray-700">{{ $totalTasks }}</p>
-            <p class="text-xs text-gray-400 mt-0.5">Total Tasks</p>
-          </div>
-        </div>
 
         {{-- Table --}}
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -161,6 +247,7 @@
 
                 @if(!$isIndividual)
                 <tbody
+                  x-show="$store.report.isVisible({{ $task->id }})"
                   x-data="{
                     analyzeUrl: '{{ $analyzeUrl }}',
                     logsUrl: '{{ $logsUrl }}',
@@ -551,7 +638,7 @@
                 @else
                 {{-- ===== INDIVIDUAL TASK ===== --}}
                 {{-- Collapsible header row --}}
-                <tbody>
+                <tbody x-show="$store.report.isVisible({{ $task->id }})">
                   <tr class="border-b border-gray-100 bg-gray-50/60 cursor-pointer hover:bg-gray-100/60 transition"
                       onclick="window.dispatchEvent(new CustomEvent('toggle-task-{{ $task->id }}'))">
                     <td class="px-4 py-2.5">
@@ -597,6 +684,7 @@
                     $userEditCount       = $userEditLogs->count();
                   @endphp
                   <tbody
+                    x-show="$store.report.isVisible({{ $task->id }})"
                     x-data="{
                       open: true,
                       analyzeUrl: '{{ $userAnalyzeUrl }}',
@@ -849,7 +937,7 @@
 
                 {{-- Unsubmitted users --}}
                 @if(isset($unsubmittedUsers) && $unsubmittedUsers->count())
-                  <tbody x-data="{open: true}" @toggle-task-{{ $task->id }}.window="open = !open">
+                  <tbody x-show="$store.report.isVisible({{ $task->id }})" x-data="{open: true}" @toggle-task-{{ $task->id }}.window="open = !open">
                     @foreach($unsubmittedUsers as $u)
                       <tr x-show="open" x-transition class="border-b border-gray-50 opacity-50">
                         <td class="px-4 py-2"></td>
@@ -885,6 +973,29 @@
       @endif
     </div>
   </div>
+
+  {{-- ===== ALPINE REPORT FILTER STORE ===== --}}
+  <script>
+    document.addEventListener('alpine:init', () => {
+      Alpine.store('report', {
+        filter: 'all',
+        search: '',
+        dept:   '',
+        user:   '',
+        tasks:  {!! \Illuminate\Support\Js::from($taskFilterData) !!},
+        isVisible(taskId) {
+          const t = this.tasks[taskId];
+          if (!t) return true;
+          if (this.filter === 'done'    && !t.done) return false;
+          if (this.filter === 'pending' &&  t.done) return false;
+          if (this.search && !t.title.includes(this.search.toLowerCase())) return false;
+          if (this.dept   && t.dept !== this.dept.toLowerCase()) return false;
+          if (this.user   && !t.users.some(u => u.includes(this.user))) return false;
+          return true;
+        }
+      });
+    });
+  </script>
 
   {{-- ===== LIGHTBOX (dispatch pattern — shared across all tbody scopes) ===== --}}
   <div x-data="{
