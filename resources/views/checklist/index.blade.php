@@ -5,7 +5,7 @@
   <div class="min-h-screen bg-gray-50 mt-16">
 
     {{-- ===== HEADER ===== --}}
-    <div class="bg-white border-b border-gray-200 shadow-sm">
+    <div class="sticky top-16 z-20 bg-white border-b border-gray-200 shadow-sm">
       <div class="max-w-screen-2xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 class="text-base font-bold text-gray-800">Daily Checklist</h1>

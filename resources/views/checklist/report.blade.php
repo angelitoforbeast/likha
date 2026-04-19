@@ -10,18 +10,24 @@
             $fSubs = $submissionsGroupedByTask->get($task->id) ?? collect();
             $fDone = $fSubs->isNotEmpty();
             $fUsers = $fSubs->map(fn($s) => strtolower($s->user->name ?? ''))->filter()->values()->all();
+            $fVerdicts = $fSubs->map(fn($s) => $s->latestApproval?->verdict ?? '')->filter()->unique()->values()->all();
         } else {
             $fSub  = $submissionsByTask->get($task->id);
             $fDone = $fSub !== null;
             $fUsers = ($fDone && ($fSub->user ?? null)) ? [strtolower($fSub->user->name)] : [];
+            $fVerdict = $fDone ? ($fSub->latestApproval?->verdict ?? '') : '';
+            $fVerdicts = $fVerdict !== '' ? [$fVerdict] : [];
         }
         $taskFilterData[$task->id] = [
-            'done'  => $fDone,
-            'title' => strtolower($task->title),
-            'dept'  => strtolower($task->department ?? ''),
-            'users' => $fUsers,
+            'done'     => $fDone,
+            'title'    => strtolower($task->title),
+            'dept'     => strtolower($task->department ?? ''),
+            'users'    => $fUsers,
+            'verdicts' => $fVerdicts,
         ];
     }
+    $approvedCount    = collect($taskFilterData)->filter(fn($t) => in_array('approved',     $t['verdicts']))->count();
+    $notApprovedCount = collect($taskFilterData)->filter(fn($t) => in_array('not_approved', $t['verdicts']))->count();
     $allDepts = $tasks->pluck('department')->filter()->unique()->sort()->values()->all();
     $allSubmitters = collect();
     foreach ($tasks as $task) {
@@ -61,7 +67,7 @@
   <div class="min-h-screen bg-gray-50 mt-16">
 
     {{-- ===== STICKY HEADER ===== --}}
-    <div class="sticky top-0 z-30 bg-white border-b border-gray-200 shadow-sm"
+    <div class="sticky top-16 z-30 bg-white border-b border-gray-200 shadow-sm"
          x-data="{
            get filter()  { return $store.report.filter; },
            set filter(v) { $store.report.filter = v; },
@@ -71,7 +77,9 @@
            set dept(v)   { $store.report.dept = v; },
            get user()    { return $store.report.user; },
            set user(v)   { $store.report.user = v; },
-           get hasFilters() { return this.filter !== 'all' || this.search !== '' || this.dept !== '' || this.user !== ''; }
+           get verdict() { return $store.report.verdict; },
+           set verdict(v){ $store.report.verdict = v; },
+           get hasFilters() { return this.filter !== 'all' || this.search !== '' || this.dept !== '' || this.user !== '' || this.verdict !== 'all'; }
          }">
 
       {{-- Row 1: Date nav --}}
@@ -151,6 +159,20 @@
 
         <div class="w-px h-4 bg-gray-200 mx-1 hidden sm:block"></div>
 
+        {{-- Approval verdict chips --}}
+        <button @click="verdict = verdict === 'approved' ? 'all' : 'approved'"
+                :class="verdict === 'approved' ? 'bg-emerald-600 text-white' : 'bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50'"
+                class="text-xs px-3 py-1.5 rounded-full font-medium transition whitespace-nowrap">
+          ✅ Approved <span :class="verdict === 'approved' ? 'opacity-70' : ''">{{ $approvedCount }}</span>
+        </button>
+        <button @click="verdict = verdict === 'not_approved' ? 'all' : 'not_approved'"
+                :class="verdict === 'not_approved' ? 'bg-red-500 text-white' : 'bg-white text-red-600 border border-red-200 hover:bg-red-50'"
+                class="text-xs px-3 py-1.5 rounded-full font-medium transition whitespace-nowrap">
+          ❌ Not Approved <span :class="verdict === 'not_approved' ? 'opacity-70' : ''">{{ $notApprovedCount }}</span>
+        </button>
+
+        <div class="w-px h-4 bg-gray-200 mx-1 hidden sm:block"></div>
+
         {{-- Search --}}
         <div class="relative flex items-center">
           <svg class="w-3.5 h-3.5 text-gray-400 absolute left-2.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0"/></svg>
@@ -182,7 +204,7 @@
 
         {{-- Clear --}}
         <button x-show="hasFilters" x-transition
-                @click="filter = 'all'; search = ''; dept = ''; user = ''"
+                @click="filter = 'all'; search = ''; dept = ''; user = ''; verdict = 'all'"
                 class="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded-full hover:bg-red-50 transition">
           ✕ Clear
         </button>
@@ -978,11 +1000,12 @@
   <script>
     document.addEventListener('alpine:init', () => {
       Alpine.store('report', {
-        filter: 'all',
-        search: '',
-        dept:   '',
-        user:   '',
-        tasks:  {!! \Illuminate\Support\Js::from($taskFilterData) !!},
+        filter:  'all',
+        search:  '',
+        dept:    '',
+        user:    '',
+        verdict: 'all',
+        tasks:   {!! \Illuminate\Support\Js::from($taskFilterData) !!},
         isVisible(taskId) {
           const t = this.tasks[taskId];
           if (!t) return true;
@@ -991,6 +1014,8 @@
           if (this.search && !t.title.includes(this.search.toLowerCase())) return false;
           if (this.dept   && t.dept !== this.dept.toLowerCase()) return false;
           if (this.user   && !t.users.some(u => u.includes(this.user))) return false;
+          if (this.verdict === 'approved'     && !(t.verdicts ?? []).includes('approved'))     return false;
+          if (this.verdict === 'not_approved' && !(t.verdicts ?? []).includes('not_approved')) return false;
           return true;
         }
       });

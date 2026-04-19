@@ -14,25 +14,29 @@
     ])->values();
   @endphp
 
-  <div x-data="manageChecklist()" class="px-3 py-4 space-y-4 mt-16">
+  <div x-data="manageChecklist()" class="mt-16">
 
-    {{-- HEADER --}}
-    <div class="flex items-center justify-between flex-wrap gap-2">
-      <div>
-        <h1 class="text-xl font-bold text-gray-800">Manage Tasks</h1>
-        <p class="text-sm text-gray-500">Add, edit, reorder, or delete checklist tasks.</p>
-      </div>
-      <div class="flex items-center gap-2">
-        <a href="{{ route('checklist.report') }}"
-           class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
-          📋 View Report
-        </a>
-        <a href="{{ route('checklist.index') }}"
-           class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
-          ← Checklist
-        </a>
+    {{-- STICKY HEADER --}}
+    <div class="sticky top-16 z-20 bg-white border-b border-gray-200 shadow-sm">
+      <div class="px-3 py-3 flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h1 class="text-xl font-bold text-gray-800">Manage Tasks</h1>
+          <p class="text-sm text-gray-500">Add, edit, reorder, or delete checklist tasks.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <a href="{{ route('checklist.report') }}"
+             class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
+            📋 View Report
+          </a>
+          <a href="{{ route('checklist.index') }}"
+             class="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-gray-700">
+            ← Checklist
+          </a>
+        </div>
       </div>
     </div>
+
+    <div class="px-3 py-4 space-y-4">
 
     {{-- ALERTS --}}
     @if(session('success'))
@@ -620,6 +624,7 @@
       </div>
 
     </div>
+    </div>{{-- /px-3 py-4 space-y-4 --}}
   </div>
 
   <script>
