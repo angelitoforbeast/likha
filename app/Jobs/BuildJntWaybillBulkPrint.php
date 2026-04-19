@@ -296,9 +296,18 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
             ->where('ts_date', '>=', $start)
             ->where('ts_date', '<', $end);
 
+        // For item_type, resolve to a list of item_names first
+        $itemNamesForType = collect();
+        if ($filterValue !== '' && $filterBy === 'item_type') {
+            $itemNamesForType = DB::table('item_type_mappings')
+                ->where('item_type', $filterValue)
+                ->pluck('item_name');
+        }
+
         if ($filterValue !== '') {
-            if ($filterBy === 'page') $macroBase->where('PAGE', $filterValue);
-            else $macroBase->where('ITEM_NAME', $filterValue);
+            if ($filterBy === 'page')      $macroBase->where('PAGE', $filterValue);
+            elseif ($filterBy === 'item_type') $macroBase->whereIn('ITEM_NAME', $itemNamesForType);
+            else                           $macroBase->where('ITEM_NAME', $filterValue);
         }
 
         $macroIdsSub = (clone $macroBase)->select('id');
@@ -318,9 +327,10 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
             ->where('m.ts_date', '>=', $start)
             ->where('m.ts_date', '<', $end)
             ->whereNotNull('s.mailno')->where('s.mailno', '!=', '')
-            ->when($filterValue !== '', function ($q) use ($filterBy, $filterValue) {
-                if ($filterBy === 'page') $q->where('m.PAGE', $filterValue);
-                else $q->where('m.ITEM_NAME', $filterValue);
+            ->when($filterValue !== '', function ($q) use ($filterBy, $filterValue, $itemNamesForType) {
+                if ($filterBy === 'page')           $q->where('m.PAGE', $filterValue);
+                elseif ($filterBy === 'item_type')  $q->whereIn('m.ITEM_NAME', $itemNamesForType);
+                else                                $q->where('m.ITEM_NAME', $filterValue);
             })
             ->select(['m.id as macro_id', 's.mailno as mailno'])
             ->orderBy('m.id')
