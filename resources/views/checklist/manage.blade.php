@@ -14,7 +14,7 @@
     ])->values();
   @endphp
 
-  <div x-data="manageChecklist()" class="p-4 max-w-screen-xl mx-auto space-y-4 mt-16">
+  <div x-data="manageChecklist()" class="px-3 py-4 space-y-4 mt-16">
 
     {{-- HEADER --}}
     <div class="flex items-center justify-between flex-wrap gap-2">
