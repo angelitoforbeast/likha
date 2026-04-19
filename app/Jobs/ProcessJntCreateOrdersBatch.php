@@ -125,8 +125,8 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
                 ],
 
                 'createordertime' => now()->format('Y-m-d H:i:s'),
-                'sendstarttime' => now()->format('Y-m-d') . ' 09:00:00',
-                'sendendtime'   => now()->format('Y-m-d') . ' 18:00:00',
+                'sendstarttime' => now()->copy()->addDays(max(0, $client->getPickupDaysOffset()))->format('Y-m-d') . ' 09:00:00',
+                'sendendtime'   => now()->copy()->addDays(max(0, $client->getPickupDaysOffset()))->format('Y-m-d') . ' 18:00:00',
 
                 'paytype' => '1',
                 'weight' => (string)config('jnt.defaults.weight', '0.5'),
