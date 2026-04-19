@@ -52,6 +52,24 @@ class ChecklistController extends Controller
         // Individual tasks: only the current user's submission per task
         $mySubmissionsByTask = $todaySubmissions->where('user_id', Auth::id())->keyBy('checklist_task_id');
 
+        // ── Time gate: hide tasks whose scheduled_time hasn't arrived yet ──────────
+        $tasks = $tasks->filter(function ($t) use ($nowManila, $submissionsByTask, $mySubmissionsByTask) {
+            if (!$t->scheduled_time) return true;   // no time restriction → always show
+
+            // Already submitted today → keep visible regardless of time
+            $sub = $t->submission_type === 'individual'
+                ? $mySubmissionsByTask->get($t->id)
+                : $submissionsByTask->get($t->id);
+            if ($sub) return true;
+
+            // Parse scheduled_time ("HH:MM:SS") as today in Manila time
+            [$h, $m, $s] = array_pad(explode(':', $t->scheduled_time), 3, '00');
+            $due = $nowManila->copy()->setTime((int)$h, (int)$m, (int)$s);
+
+            return $nowManila->gte($due);   // visible only if now >= scheduled time
+        });
+        // ──────────────────────────────────────────────────────────────────────────
+
         // Smart sort: pending first, done last; timed tasks before untimed within each group
         $tasks = $tasks->sort(function ($a, $b) use ($submissionsByTask, $mySubmissionsByTask) {
             $aSub  = $a->submission_type === 'individual' ? $mySubmissionsByTask->get($a->id) : $submissionsByTask->get($a->id);
