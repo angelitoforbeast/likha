@@ -119,7 +119,7 @@ class JntOrderUiController extends Controller
         'message' => null,
     ];
 
-    if ($page !== '' && !$run) {
+    if ($page !== '') {
         $mapping = PageJntMapping::with('account')->where('page', $page)->first();
 
         if ($mapping && $mapping->account) {
