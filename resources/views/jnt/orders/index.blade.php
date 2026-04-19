@@ -279,7 +279,10 @@
           @endif
         </div>
 
-        {{-- Preferred Pickup Date --}}
+      @endif
+
+      {{-- Preferred Pickup Date — always show when page is selected --}}
+      @if($selectedPage !== '')
         @php
           $acctObj = data_get($accountCheck, 'account');
           $pOffset = $acctObj ? (int)($acctObj->pickup_days_offset ?? 0) : 0;
