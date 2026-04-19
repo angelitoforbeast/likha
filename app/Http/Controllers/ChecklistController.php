@@ -70,12 +70,22 @@ class ChecklistController extends Controller
         });
         // ──────────────────────────────────────────────────────────────────────────
 
-        // Smart sort: pending first, done last; timed tasks before untimed within each group
-        $tasks = $tasks->sort(function ($a, $b) use ($submissionsByTask, $mySubmissionsByTask) {
-            $aSub  = $a->submission_type === 'individual' ? $mySubmissionsByTask->get($a->id) : $submissionsByTask->get($a->id);
-            $bSub  = $b->submission_type === 'individual' ? $mySubmissionsByTask->get($b->id) : $submissionsByTask->get($b->id);
-            $aDone = $aSub ? 1 : 0;
-            $bDone = $bSub ? 1 : 0;
+        // Precompute true "done" per task: submission exists AND photo requirement fully met
+        $doneByTask = [];
+        foreach ($tasks as $t) {
+            $sub = $t->submission_type === 'individual'
+                ? $mySubmissionsByTask->get($t->id)
+                : $submissionsByTask->get($t->id);
+            if (!$sub) { $doneByTask[$t->id] = false; continue; }
+            $reqPhotos  = (int)($t->required_photos ?? 0);
+            $photoCount = $sub->files->filter(fn($f) => $f->isImage())->count();
+            $doneByTask[$t->id] = $reqPhotos === 0 || $photoCount >= $reqPhotos;
+        }
+
+        // Smart sort: pending/photoWarn first, fully-done last; timed tasks before untimed within each group
+        $tasks = $tasks->sort(function ($a, $b) use ($doneByTask, $submissionsByTask, $mySubmissionsByTask) {
+            $aDone = $doneByTask[$a->id] ? 1 : 0;
+            $bDone = $doneByTask[$b->id] ? 1 : 0;
 
             if ($aDone !== $bDone) return $aDone - $bDone;
 
