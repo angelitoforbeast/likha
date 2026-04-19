@@ -293,13 +293,13 @@
                             + Submit
                           </button>
                         @endif
-                        @if($done)
+                        @if($done || $photoWarn)
                           <button @click="showForm = !showForm"
                                   class="text-xs px-2 py-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition">
                             Edit
                           </button>
                         @endif
-                        @if($done && ($isMine || $isCeo))
+                        @if(($done || $photoWarn) && ($isMine || $isCeo))
                           <form method="POST" action="{{ route('checklist.delete-submission', $sub) }}"
                                 onsubmit="return confirm('Remove entire submission?')">
                             @csrf @method('DELETE')
@@ -315,7 +315,7 @@
                   </tr>
 
                   {{-- INLINE FORM ROW --}}
-                  @if($canSubmit || $done)
+                  @if($canSubmit || $done || $photoWarn)
                     <tr x-show="showForm" x-transition class="border-b border-blue-100 bg-blue-50/20">
                       <td colspan="7" class="px-6 py-4">
                         <form method="POST" action="{{ route('checklist.submit', $task) }}" enctype="multipart/form-data">

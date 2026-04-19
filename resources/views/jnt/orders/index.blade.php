@@ -284,7 +284,7 @@
       {{-- Preferred Pickup Date — always show when page is selected --}}
       @if($selectedPage !== '')
         @php
-          $pOffset = (int) \App\Models\AppSetting::get('jnt_pickup_days_offset', 0);
+          $pOffset = (int)\App\Models\AppSetting::get('jnt_pickup_days_offset', 0);
           $pDate   = \Carbon\Carbon::now('Asia/Manila')->addDays($pOffset);
         @endphp
         <div class="p-3 border rounded-lg border-blue-200 bg-blue-50">
