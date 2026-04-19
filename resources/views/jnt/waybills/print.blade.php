@@ -11,8 +11,6 @@
     $items = $items ?? [];
     $itemTypes = $itemTypes ?? [];
     $rows  = $rows ?? null;
-    $pickupOffset = $pickupOffset ?? 0;
-    $pickupDate   = $pickupDate ?? null;
   @endphp
 
   <style>
@@ -84,31 +82,6 @@
       </div>
     </form>
   </div>
-
-  {{-- Pickup Date Preview --}}
-  @if($filterValue !== '' && $pickupDate)
-    <div class="card p-3 mb-4 border-blue-200 bg-blue-50 flex items-center gap-3">
-      <div class="text-blue-600 text-lg">📅</div>
-      <div>
-        <div class="text-xs font-semibold text-blue-700 uppercase tracking-wide">Preferred Pickup Date</div>
-        <div class="text-sm font-mono font-bold text-blue-900">
-          {{ \Carbon\Carbon::parse($pickupDate)->format('F d, Y') }}
-          <span class="ml-2 text-xs font-normal text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">+{{ $pickupOffset }} day{{ $pickupOffset !== 1 ? 's' : '' }} from today</span>
-        </div>
-      </div>
-    </div>
-  @elseif($filterValue !== '' && $pickupOffset === 0)
-    <div class="card p-3 mb-4 border-gray-200 bg-gray-50 flex items-center gap-3">
-      <div class="text-gray-400 text-lg">📅</div>
-      <div>
-        <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Preferred Pickup Date</div>
-        <div class="text-sm text-gray-600">
-          Today — <span class="font-mono">{{ now('Asia/Manila')->toDateString() }}</span>
-          <span class="ml-2 text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">+0 days (no offset set)</span>
-        </div>
-      </div>
-    </div>
-  @endif
 
   {{-- Bulk actions --}}
   <div class="card p-4 mb-4">

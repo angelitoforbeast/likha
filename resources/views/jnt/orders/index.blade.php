@@ -252,7 +252,7 @@
 
       {{-- JNT Account indicator --}}
       @if($selectedPage !== '' && !$isRunView)
-        <div class="p-3 border rounded-lg md:col-span-2
+        <div class="p-3 border rounded-lg
           {{ $accountOk ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50' }}">
           <div class="text-xs mb-1 {{ $accountOk ? 'text-green-700' : 'text-red-700' }} font-medium">
             JNT Account
@@ -277,6 +277,26 @@
               </a>
             </div>
           @endif
+        </div>
+
+        {{-- Preferred Pickup Date --}}
+        @php
+          $acctObj = data_get($accountCheck, 'account');
+          $pOffset = $acctObj ? (int)($acctObj->pickup_days_offset ?? 0) : 0;
+          $pDate   = \Carbon\Carbon::now('Asia/Manila')->addDays($pOffset);
+        @endphp
+        <div class="p-3 border rounded-lg border-blue-200 bg-blue-50">
+          <div class="text-xs mb-1 text-blue-700 font-medium">Preferred Pickup Date</div>
+          <div class="text-sm font-semibold font-mono text-blue-900">
+            {{ $pDate->format('M d, Y') }}
+          </div>
+          <div class="text-xs text-blue-600 mt-0.5">
+            @if($pOffset > 0)
+              +{{ $pOffset }} day{{ $pOffset !== 1 ? 's' : '' }} from today
+            @else
+              Today (no offset)
+            @endif
+          </div>
         </div>
       @endif
 
