@@ -28,6 +28,37 @@
     </div>
   @endif
 
+  {{-- JNT Global Settings --}}
+  <section class="bg-white rounded-xl shadow p-4 mb-4 border-l-4 border-blue-400">
+    <h2 class="font-semibold text-lg mb-3">JNT Settings <span class="text-xs text-gray-400 font-normal ml-1">(per server)</span></h2>
+    <form action="{{ route('jnt.settings.save') }}" method="POST" class="flex items-end gap-4 flex-wrap">
+      @csrf
+      <div>
+        <label class="block text-sm font-medium mb-1">
+          Preferred Pickup Days Offset
+          <span class="text-gray-400 text-xs">(0 = today, 1 = tomorrow…)</span>
+        </label>
+        <div class="flex items-center gap-2">
+          <input type="number" name="jnt_pickup_days_offset" value="{{ $pickupOffset }}"
+                 min="0" max="30"
+                 class="border border-gray-300 rounded-md px-3 py-2 text-sm w-24">
+          <span class="text-sm text-gray-500">days</span>
+          @if($pickupOffset > 0)
+            <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-medium">
+              Currently: +{{ $pickupOffset }}d → {{ now('Asia/Manila')->addDays($pickupOffset)->format('M d, Y') }}
+            </span>
+          @else
+            <span class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-full">Currently: today</span>
+          @endif
+        </div>
+      </div>
+      <button type="submit"
+              class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+        Save Settings
+      </button>
+    </form>
+  </section>
+
   {{-- Add Account Form --}}
   <section class="bg-white rounded-xl shadow p-4 mb-4">
     <h2 class="font-semibold text-lg mb-3">Add New Account</h2>

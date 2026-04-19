@@ -284,8 +284,7 @@
       {{-- Preferred Pickup Date — always show when page is selected --}}
       @if($selectedPage !== '')
         @php
-          $acctObj = data_get($accountCheck, 'account');
-          $pOffset = $acctObj ? (int)($acctObj->pickup_days_offset ?? 0) : 0;
+          $pOffset = (int) \App\Models\AppSetting::get('jnt_pickup_days_offset', 0);
           $pDate   = \Carbon\Carbon::now('Asia/Manila')->addDays($pOffset);
         @endphp
         <div class="p-3 border rounded-lg border-blue-200 bg-blue-50">
@@ -297,7 +296,7 @@
             @if($pOffset > 0)
               +{{ $pOffset }} day{{ $pOffset !== 1 ? 's' : '' }} from today
             @else
-              Today (no offset)
+              Today (no offset) — <a href="{{ route('jnt.accounts.index') }}" class="underline">set in JNT Settings</a>
             @endif
           </div>
         </div>

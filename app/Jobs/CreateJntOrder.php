@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\AppSetting;
 use App\Models\JntShipment;
 use App\Models\JntBatchRun;
 use App\Services\Jnt\JntClient;
@@ -92,7 +93,7 @@ class CreateJntOrder implements ShouldQueue
             'remark'             => $itemName,
             'eccompanyid'        => $client->getEccompanyid(),
             'customerid'         => $client->getCustomerid(),
-            'pickup_days_offset' => $client->getPickupDaysOffset(),
+            'pickup_days_offset' => (int) AppSetting::get('jnt_pickup_days_offset', $client->getPickupDaysOffset()),
         ], $senderOpts));
 
 

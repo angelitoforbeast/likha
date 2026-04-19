@@ -307,6 +307,7 @@ Route::get('/jnt/remittance', [JntRemittanceController::class, 'index'])
 // JNT Accounts & Page Mapping
 Route::get('/jnt/accounts', [JntAccountController::class, 'index'])->name('jnt.accounts.index');
 Route::post('/jnt/accounts', [JntAccountController::class, 'store'])->name('jnt.accounts.store');
+Route::post('/jnt/settings', [JntAccountController::class, 'saveSettings'])->name('jnt.settings.save');
 Route::get('/jnt/accounts/mapping', [JntAccountController::class, 'mapping'])->name('jnt.accounts.mapping');
 Route::post('/jnt/accounts/mapping', [JntAccountController::class, 'saveMapping'])->name('jnt.accounts.mapping.save');
 Route::put('/jnt/accounts/{account}', [JntAccountController::class, 'update'])->name('jnt.accounts.update');

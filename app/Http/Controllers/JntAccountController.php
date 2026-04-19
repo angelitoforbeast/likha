@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AppSetting;
 use App\Models\JntAccount;
 use App\Models\PageJntMapping;
 use Illuminate\Http\Request;
@@ -14,7 +15,15 @@ class JntAccountController extends Controller
     public function index()
     {
         $accounts = JntAccount::orderBy('label')->get();
-        return view('jnt.accounts.index', compact('accounts'));
+        $pickupOffset = (int) AppSetting::get('jnt_pickup_days_offset', 0);
+        return view('jnt.accounts.index', compact('accounts', 'pickupOffset'));
+    }
+
+    public function saveSettings(Request $request)
+    {
+        $offset = max(0, min(30, (int) $request->input('jnt_pickup_days_offset', 0)));
+        AppSetting::set('jnt_pickup_days_offset', $offset);
+        return back()->with('success', 'JNT settings saved.');
     }
 
     public function store(Request $request)
