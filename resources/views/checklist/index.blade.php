@@ -23,6 +23,25 @@
           <a href="{{ route('checklist.manage') }}" class="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition">⚙ Manage</a>
         </div>
       </div>
+      {{-- Sticky column headers --}}
+      <div class="max-w-screen-2xl mx-auto overflow-x-auto bg-gray-50/80 border-t border-gray-100" id="checklist-head-scroll">
+        <table class="w-full text-sm border-collapse" style="table-layout:fixed;min-width:1032px">
+          <colgroup>
+            <col style="width:32px"><col style="width:200px"><col style="width:160px"><col style="width:160px"><col style="width:220px"><col style="width:160px"><col style="width:100px">
+          </colgroup>
+          <thead>
+            <tr class="text-xs text-gray-400 uppercase tracking-wide font-semibold">
+              <th class="text-left px-4 py-2"></th>
+              <th class="text-left px-3 py-2">Task</th>
+              <th class="text-left px-3 py-2">Description</th>
+              <th class="text-left px-3 py-2">Images</th>
+              <th class="text-left px-3 py-2">Notes</th>
+              <th class="text-left px-3 py-2">Submitted by</th>
+              <th class="px-3 py-2"></th>
+            </tr>
+          </thead>
+        </table>
+      </div>
     </div>
 
     <div class="max-w-screen-2xl mx-auto px-4 py-5 space-y-4">
@@ -68,19 +87,11 @@
           }
         @endphp
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm border-collapse">
-              <thead>
-                <tr class="border-b border-gray-100 bg-gray-50/80 text-xs text-gray-400 uppercase tracking-wide font-semibold">
-                  <th class="text-left px-4 py-3 w-8"></th>
-                  <th class="text-left px-3 py-3 min-w-[160px]">Task</th>
-                  <th class="text-left px-3 py-3 min-w-[130px]">Description</th>
-                  <th class="text-left px-3 py-3 w-[160px]">Images</th>
-                  <th class="text-left px-3 py-3 min-w-[180px]">Notes</th>
-                  <th class="text-left px-3 py-3 min-w-[130px]">Submitted by</th>
-                  <th class="px-3 py-3 w-[100px]"></th>
-                </tr>
-              </thead>
+          <div class="overflow-x-auto" id="checklist-body-scroll">
+            <table class="w-full text-sm border-collapse" style="table-layout:fixed;min-width:1032px">
+              <colgroup>
+                <col style="width:32px"><col style="width:200px"><col style="width:160px"><col style="width:160px"><col style="width:220px"><col style="width:160px"><col style="width:100px">
+              </colgroup>
 
               @foreach($tasks as $task)
                 @php
@@ -412,6 +423,17 @@
       @endif
     </div>
   </div>
+
+  <script>
+    (function() {
+      const h = document.getElementById('checklist-head-scroll');
+      const b = document.getElementById('checklist-body-scroll');
+      if (h && b) {
+        h.addEventListener('scroll', () => { if (!b._syncing) { b._syncing = true; b.scrollLeft = h.scrollLeft; setTimeout(() => b._syncing = false, 50); } });
+        b.addEventListener('scroll', () => { if (!h._syncing) { h._syncing = true; h.scrollLeft = b.scrollLeft; setTimeout(() => h._syncing = false, 50); } });
+      }
+    })();
+  </script>
 
   {{-- ===== LIGHTBOX ===== --}}
   <div x-data="{

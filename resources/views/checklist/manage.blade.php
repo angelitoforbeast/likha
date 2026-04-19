@@ -16,9 +16,11 @@
 
   <div x-data="manageChecklist()" class="mt-16">
 
-    {{-- STICKY HEADER --}}
+    {{-- STICKY HEADER: title + filter + column headers --}}
     <div class="sticky top-16 z-20 bg-white border-b border-gray-200 shadow-sm">
-      <div class="px-3 py-3 flex items-center justify-between flex-wrap gap-2">
+
+      {{-- Row 1: Title --}}
+      <div class="px-3 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b border-gray-100">
         <div>
           <h1 class="text-xl font-bold text-gray-800">Manage Tasks</h1>
           <p class="text-sm text-gray-500">Add, edit, reorder, or delete checklist tasks.</p>
@@ -33,6 +35,77 @@
             ← Checklist
           </a>
         </div>
+      </div>
+
+      {{-- Row 2: Filter bar --}}
+      <div class="px-4 py-2 border-b border-gray-100 flex items-center gap-2 flex-wrap bg-gray-50/50">
+        <span class="text-sm font-semibold text-gray-700 whitespace-nowrap">
+          Tasks (<span x-text="visibleCount"></span>/{{ $allTasks->count() }})
+        </span>
+        <div class="w-px h-4 bg-gray-200 mx-1 hidden sm:block"></div>
+        <input x-model.debounce.200="filters.title" type="text" placeholder="Search title…"
+               class="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 w-36">
+        <select x-model="filters.type"
+                class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400">
+          <option value="">All types</option>
+          <option value="any">📎 Any</option>
+          <option value="photo">📸 Photo</option>
+          <option value="note">📝 Note</option>
+          <option value="both">📸📝 Both</option>
+        </select>
+        <select x-model="filters.status"
+                class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400">
+          <option value="">All status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <select x-model="filters.submission_type"
+                class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400">
+          <option value="">All submission</option>
+          <option value="group">👥 Group</option>
+          <option value="individual">👤 Individual</option>
+        </select>
+        <select x-model="filters.assigned"
+                class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400">
+          <option value="">All assigned</option>
+          <option value="anyone">Anyone (unassigned)</option>
+          @foreach($allUsers as $u)
+            <option value="{{ $u->id }}">{{ $u->name }}</option>
+          @endforeach
+        </select>
+        <button x-show="hasFilters" @click="clearFilters()"
+                class="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50 transition">
+          ✕ Clear
+        </button>
+        <span class="ml-auto text-xs text-gray-400 hidden sm:block">⠿ drag · # to reorder</span>
+      </div>
+
+      {{-- Row 3: Column headers (synced with body via JS scroll-sync) --}}
+      <div class="overflow-x-auto" id="manage-head-scroll">
+        <table class="w-full text-sm border-collapse" style="table-layout:fixed;min-width:1360px">
+          <colgroup>
+            <col style="width:32px"><col style="width:48px"><col style="width:20px"><col><col style="width:96px"><col style="width:144px"><col style="width:80px"><col style="width:96px"><col style="width:80px"><col style="width:112px"><col style="width:80px"><col style="width:96px"><col style="width:192px">
+          </colgroup>
+          <thead>
+            <tr class="bg-gray-50/60 text-xs text-gray-400 uppercase tracking-wide font-semibold">
+              <th class="px-3 py-2 w-8">
+                <input type="checkbox" @change="toggleAll($event.target.checked)" class="accent-indigo-600 cursor-pointer">
+              </th>
+              <th class="px-1 py-2 w-12 text-center">#</th>
+              <th class="px-1 py-2 w-5"></th>
+              <th class="text-left px-3 py-2">Title</th>
+              <th class="text-left px-3 py-2 w-24">Type</th>
+              <th class="text-left px-3 py-2 w-36">Assigned To</th>
+              <th class="text-left px-3 py-2 w-20">Status</th>
+              <th class="text-left px-3 py-2 w-24">Submission</th>
+              <th class="text-left px-3 py-2 w-20">Time</th>
+              <th class="text-left px-3 py-2 w-28">Frequency</th>
+              <th class="text-left px-3 py-2 w-20">Photos</th>
+              <th class="text-left px-3 py-2 w-24">Dept</th>
+              <th class="text-left px-3 py-2 w-48">Actions</th>
+            </tr>
+          </thead>
+        </table>
       </div>
     </div>
 
@@ -262,77 +335,11 @@
     {{-- TASK TABLE --}}
     <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
 
-      {{-- Filter / Header Bar --}}
-      <div class="px-4 py-2.5 border-b border-gray-100 flex items-center gap-2 flex-wrap bg-gray-50/50">
-        <span class="text-sm font-semibold text-gray-700 whitespace-nowrap">
-          Tasks (<span x-text="visibleCount"></span>/{{ $allTasks->count() }})
-        </span>
-        <div class="w-px h-4 bg-gray-200 mx-1 hidden sm:block"></div>
-        {{-- Title search --}}
-        <input x-model.debounce.200="filters.title" type="text" placeholder="Search title…"
-               class="text-xs border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400 w-36">
-        {{-- Type --}}
-        <select x-model="filters.type"
-                class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400">
-          <option value="">All types</option>
-          <option value="any">📎 Any</option>
-          <option value="photo">📸 Photo</option>
-          <option value="note">📝 Note</option>
-          <option value="both">📸📝 Both</option>
-        </select>
-        {{-- Status --}}
-        <select x-model="filters.status"
-                class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400">
-          <option value="">All status</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-        </select>
-        {{-- Submission Type --}}
-        <select x-model="filters.submission_type"
-                class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400">
-          <option value="">All submission</option>
-          <option value="group">👥 Group</option>
-          <option value="individual">👤 Individual</option>
-        </select>
-        {{-- Assigned To --}}
-        <select x-model="filters.assigned"
-                class="text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-400">
-          <option value="">All assigned</option>
-          <option value="anyone">Anyone (unassigned)</option>
-          @foreach($allUsers as $u)
-            <option value="{{ $u->id }}">{{ $u->name }}</option>
-          @endforeach
-        </select>
-        <button x-show="hasFilters" @click="clearFilters()"
-                class="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50 transition">
-          ✕ Clear
-        </button>
-        <span class="ml-auto text-xs text-gray-400 hidden sm:block">⠿ drag · # to reorder</span>
-      </div>
-
-      <div class="overflow-x-auto">
-        <table id="task-sort-list" class="w-full text-sm border-collapse">
-          <thead>
-            <tr class="border-b border-gray-100 bg-gray-50/60 text-xs text-gray-400 uppercase tracking-wide font-semibold">
-              <th class="px-3 py-2.5 w-8">
-                <input type="checkbox"
-                       @change="toggleAll($event.target.checked)"
-                       class="accent-indigo-600 cursor-pointer">
-              </th>
-              <th class="px-1 py-2.5 w-12 text-center">#</th>
-              <th class="px-1 py-2.5 w-5"></th>
-              <th class="text-left px-3 py-2.5">Title</th>
-              <th class="text-left px-3 py-2.5 w-24">Type</th>
-              <th class="text-left px-3 py-2.5 w-36">Assigned To</th>
-              <th class="text-left px-3 py-2.5 w-20">Status</th>
-              <th class="text-left px-3 py-2.5 w-24">Submission</th>
-              <th class="text-left px-3 py-2.5 w-20">Time</th>
-              <th class="text-left px-3 py-2.5 w-28">Frequency</th>
-              <th class="text-left px-3 py-2.5 w-20">Photos</th>
-              <th class="text-left px-3 py-2.5 w-24">Dept</th>
-              <th class="text-left px-3 py-2.5 w-48">Actions</th>
-            </tr>
-          </thead>
+      <div class="overflow-x-auto" id="manage-body-scroll">
+        <table id="task-sort-list" class="w-full text-sm border-collapse" style="table-layout:fixed;min-width:1360px">
+          <colgroup>
+            <col style="width:32px"><col style="width:48px"><col style="width:20px"><col><col style="width:96px"><col style="width:144px"><col style="width:80px"><col style="width:96px"><col style="width:80px"><col style="width:112px"><col style="width:80px"><col style="width:96px"><col style="width:192px">
+          </colgroup>
 
           @forelse($allTasks as $index => $t)
             @php $assignedIds = $t->assignedUsers->pluck('id')->toArray(); @endphp
@@ -766,6 +773,16 @@
       }
 
       list.querySelectorAll('tbody.task-row').forEach(initRow);
+    })();
+
+    // Sync horizontal scroll between sticky column header and body table
+    (function() {
+      const h = document.getElementById('manage-head-scroll');
+      const b = document.getElementById('manage-body-scroll');
+      if (h && b) {
+        h.addEventListener('scroll', () => { if (!b._syncing) { b._syncing = true; b.scrollLeft = h.scrollLeft; setTimeout(() => b._syncing = false, 50); } });
+        b.addEventListener('scroll', () => { if (!h._syncing) { h._syncing = true; h.scrollLeft = b.scrollLeft; setTimeout(() => h._syncing = false, 50); } });
+      }
     })();
   </script>
 
