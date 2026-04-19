@@ -99,14 +99,53 @@ class JntWaybillPrintController extends Controller
 
     $rows = $q->orderByDesc('m.id')->simplePaginate(50)->withQueryString();
 
+    // ✅ Pickup date preview: resolve account offset for the current filter
+    $pickupOffset = 0;
+    $pickupOffsetSource = null;
+
+    if ($filterValue !== '') {
+        if ($filterBy === 'page') {
+            // Direct page lookup
+            try {
+                $pickupOffset = JntClient::fromPageOrConfig($filterValue)->getPickupDaysOffset();
+                $pickupOffsetSource = 'page';
+            } catch (\Throwable) {}
+        } else {
+            // item / item_type: find the first page that has one of these items, look up its account
+            $samplePage = DB::table('macro_output')
+                ->where('ts_date', '>=', $start)
+                ->where('ts_date', '<', $end)
+                ->when($filterBy === 'item_type', function ($q2) use ($filterValue) {
+                    $names = DB::table('item_type_mappings')->where('item_type', $filterValue)->pluck('item_name');
+                    $q2->whereIn('ITEM_NAME', $names);
+                })
+                ->when($filterBy === 'item', fn($q2) => $q2->where('ITEM_NAME', $filterValue))
+                ->whereNotNull('PAGE')->where('PAGE', '!=', '')
+                ->value('PAGE');
+
+            if ($samplePage) {
+                try {
+                    $pickupOffset = JntClient::fromPageOrConfig($samplePage)->getPickupDaysOffset();
+                    $pickupOffsetSource = 'item';
+                } catch (\Throwable) {}
+            }
+        }
+    }
+
+    $pickupDate = $pickupOffset > 0
+        ? now('Asia/Manila')->addDays($pickupOffset)->toDateString()
+        : null;
+
     return view('jnt.waybills.print', [
-        'date'        => $date,
-        'filterBy'    => $filterBy,
-        'filterValue' => $filterValue,
-        'pages'       => $pages,
-        'items'       => $items,
-        'itemTypes'   => $itemTypes,
-        'rows'        => $rows,
+        'date'          => $date,
+        'filterBy'      => $filterBy,
+        'filterValue'   => $filterValue,
+        'pages'         => $pages,
+        'items'         => $items,
+        'itemTypes'     => $itemTypes,
+        'rows'          => $rows,
+        'pickupOffset'  => $pickupOffset,
+        'pickupDate'    => $pickupDate,
     ]);
 }
 
