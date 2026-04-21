@@ -1257,13 +1257,18 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
 
     // --- RTS views ---
 
-    public function rtsView()
+    public function rtsView(Request $request)
     {
-        return view('jnt_rts', [
-            'results' => [],
-            'from'    => null,
-            'to'      => null,
-        ]);
+        // Default: 1st of last month → today
+        $defaultFrom = Carbon::now('Asia/Manila')->subMonthNoOverflow()->startOfMonth()->toDateString();
+        $defaultTo   = Carbon::now('Asia/Manila')->toDateString();
+
+        $from = $request->input('from') ?: $defaultFrom;
+        $to   = $request->input('to')   ?: $defaultTo;
+
+        return $this->rtsFiltered(
+            $request->merge(['from' => $from, 'to' => $to])
+        );
     }
 
     public function rtsFiltered(Request $request)

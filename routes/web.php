@@ -702,7 +702,6 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::view('/jnt_update', 'jnt_update');
     Route::post('/jnt_update', [FromJntController::class, 'updateOrInsert']);
     Route::get('/jnt_rts', [FromJntController::class, 'rtsView']);
-    Route::post('/jnt_rts', [FromJntController::class, 'rtsFiltered']);
     Route::get('/jnt/hold', [JntHoldController::class, 'index'])->name('jnt.hold');
     Route::get('/jnt/hold/download', [JntHoldDownloadController::class, 'index'])->name('jnt.hold.download');
     Route::get('/jnt/hold/export', [JntHoldDownloadController::class, 'export'])->name('jnt.hold.export');

@@ -19,16 +19,14 @@
   </style>
 
   {{-- Filters --}}
-  <form method="POST" action="{{ url('/jnt_rts') }}" class="mb-4 bg-white p-4 shadow rounded" id="rtsFilterForm">
-    @csrf
+  <form method="GET" action="{{ url('/jnt_rts') }}" class="mb-4 bg-white p-4 shadow rounded" id="rtsFilterForm">
     <div class="flex flex-wrap items-end gap-3">
       <div class="min-w-[260px]">
         <label class="block text-sm font-semibold mb-1">Date range</label>
         <input id="dateRange" type="text" placeholder="Select date range"
                class="w-full border border-gray-300 p-2 rounded-md shadow-sm cursor-pointer bg-white" readonly>
-        {{-- keep controller contract --}}
-        <input type="hidden" name="from" id="from" value="{{ old('from', $from ?? '') }}">
-        <input type="hidden" name="to"   id="to"   value="{{ old('to',   $to   ?? '') }}">
+        <input type="hidden" name="from" id="from" value="{{ $from ?? '' }}">
+        <input type="hidden" name="to"   id="to"   value="{{ $to   ?? '' }}">
       </div>
 
       <div class="flex-1"></div>
@@ -41,9 +39,7 @@
       </div>
 
       <button class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 shadow">Apply</button>
-      @if(!empty($from) || !empty($to))
-        <a href="{{ url('/jnt_rts') }}" class="px-4 py-2 rounded-md border hover:bg-gray-50">Reset</a>
-      @endif
+      <a href="{{ url('/jnt_rts') }}" class="px-4 py-2 rounded-md border hover:bg-gray-50">Reset</a>
     </div>
   </form>
 
