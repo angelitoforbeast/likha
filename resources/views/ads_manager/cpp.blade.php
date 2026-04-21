@@ -241,6 +241,7 @@
                 <th class="border px-2 py-1">CPI</th>
                 <th class="border px-2 py-1">CPM</th>
                 <th class="border px-2 py-1">TCPR</th>
+                <th class="border px-2 py-1">Item Names</th>
               </tr>
             </thead>
             <tbody>
@@ -263,6 +264,11 @@
             const cpm  = wImps > 0 ? sumSpent / wImps : null;
             const tcpr = sumOrders > 0 ? (tcprFail / sumOrders) : null;
 
+            // Item names: collect across all dates for this page, sort by frequency
+            const pageItemArrays = filteredDates.map(d => ((data[d] || {}).item_names || []));
+            const pageItems = prioritizedItems(pageItemArrays);
+            const pageItemContent = pageItems.join('\n') || '—';
+
             summaryHtml += `
               <tr>
                 <td class="border px-2 py-1">${page}</td>
@@ -272,6 +278,7 @@
                 <td class="border px-2 py-1">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${tcpr != null ? tcprBadge(tcpr * 100) : '—'}</td>
+                <td class="border px-2 py-1 whitespace-pre-line">${pageItemContent}</td>
               </tr>
             `;
           }
@@ -292,6 +299,7 @@
                 <th class="border px-2 py-1">CPI</th>
                 <th class="border px-2 py-1">CPM</th>
                 <th class="border px-2 py-1">TCPR</th>
+                <th class="border px-2 py-1">Item Names</th>
               </tr>
             </thead>
             <tbody>
@@ -316,6 +324,11 @@
           const cpm  = wImps > 0 ? sumSpent / wImps : null;
           const tcpr = sumOrders > 0 ? (tcprFail / sumOrders) : null;
 
+          // Item names across all pages for this date, sorted by frequency
+          const dateItemArrays = Object.values(rawData).map(data => ((data[date] || {}).item_names || []));
+          const dateItems = prioritizedItems(dateItemArrays);
+          const dateItemContent = dateItems.join('\n') || '—';
+
           dateHtml += `
             <tr>
               <td class="border px-2 py-1 text-center">${fmtISO(date)}</td>
@@ -325,6 +338,7 @@
               <td class="border px-2 py-1 text-center">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
               <td class="border px-2 py-1 text-center">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
               <td class="border px-2 py-1 text-center">${tcpr != null ? tcprBadge(tcpr * 100) : '—'}</td>
+              <td class="border px-2 py-1 whitespace-pre-line">${dateItemContent}</td>
             </tr>
           `;
         });
@@ -714,6 +728,21 @@
       highlightActivePreset();
       refreshAll();
     };
+
+    // Returns item names sorted by frequency (most occurrences first)
+    // nameArrays: array of string[] (one array per date/page)
+    function prioritizedItems(nameArrays) {
+      const counts = {};
+      nameArrays.forEach(arr => {
+        (arr || []).forEach(name => {
+          if (!name) return;
+          counts[name] = (counts[name] || 0) + 1;
+        });
+      });
+      return Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name]) => name);
+    }
 
     function tcprBadge(pct) {
       if (pct == null || isNaN(pct)) return '—';
