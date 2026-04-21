@@ -48,8 +48,15 @@ class JntPayloadBuilder
         $cod = preg_replace('/[^\d.]/', '', $cod);
         if ($cod === '' || !is_numeric($cod)) $cod = '0';
 
-        // Item name
-        $itemName = (string)($row['item_name'] ?? $row['ITEM_NAME'] ?? 'Item');
+        // Item name — parse "N x ITEM" prefix for quantity
+        $itemName = trim((string)($row['item_name'] ?? $row['ITEM_NAME'] ?? 'Item'));
+        if (preg_match('/^(\d+)\s*[xX]\s+(.+)$/u', $itemName, $m)) {
+            $qty      = max(1, (int) $m[1]);
+            $itemName = trim($m[2]);
+        } else {
+            $qty = 1;
+        }
+        if ($itemName === '') $itemName = 'Item';
 
         // Weight (kg)
         $weight = (string)($opts['weight'] ?? '0.5');
@@ -117,13 +124,13 @@ class JntPayloadBuilder
             'paytype'         => '1',
             'weight'          => $weight,
             'itemsvalue'      => (string)$cod,
-            'totalquantity'   => '1',
+            'totalquantity'   => (string) $qty,
             'remark'          => (string)($opts['remark'] ?? 'LIKHA'),
             'isInsured'       => '0',
 
             'items' => [[
                 'itemname'  => $itemName !== '' ? $itemName : 'Item',
-                'number'    => '1',
+                'number'    => (string) $qty,
                 'itemvalue' => (string)$cod,
                 'desc'      => $itemName !== '' ? $itemName : 'Item',
             ]],

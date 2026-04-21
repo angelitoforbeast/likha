@@ -57,6 +57,9 @@ class CreateJntOrder implements ShouldQueue
         $client = JntClient::fromPageOrConfig($page);
 
         $itemName = trim((string)($norm['item_name'] ?? 'Item'));
+        if (preg_match('/^(\d+)\s*[xX]\s+(.+)$/u', $itemName, $m)) {
+            $itemName = trim($m[2]);
+        }
         if ($itemName === '') $itemName = 'Item';
 
         // Apply force_uppercase if enabled on the account

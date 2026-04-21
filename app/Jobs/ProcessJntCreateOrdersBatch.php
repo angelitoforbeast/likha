@@ -61,6 +61,14 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
             $itemName = trim((string)($row->ITEM_NAME ?? ''));
             $cod      = (string)($row->COD ?? '');
 
+            // Parse "N x ITEM" prefix for quantity
+            if (preg_match('/^(\d+)\s*[xX]\s+(.+)$/u', $itemName, $m)) {
+                $qty      = max(1, (int) $m[1]);
+                $itemName = trim($m[2]);
+            } else {
+                $qty = 1;
+            }
+
             // Apply force uppercase if enabled on the account
             if ($client->isForceUppercase()) {
                 $fullName = mb_strtoupper($fullName);
@@ -132,13 +140,13 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
                 'paytype' => '1',
                 'weight' => (string)config('jnt.defaults.weight', '0.5'),
                 'itemsvalue' => (string)$cod,
-                'totalquantity' => '1',
+                'totalquantity' => (string) $qty,
                 'remark' => 'AUTO_FROM_MACRO_OUTPUT',
                 'isInsured' => '0',
 
                 'items' => [[
                     'itemname' => $itemName,
-                    'number' => '1',
+                    'number' => (string) $qty,
                     'itemvalue' => (string)$cod,
                     'desc' => $itemName,
                 ]],
