@@ -109,6 +109,22 @@
       <input type="date" id="endDate" class="border px-2 py-1 rounded" value="{{ $end ?? '' }}">
     </div>
 
+    <div>
+      <label class="block font-semibold mb-1">Item Name:</label>
+      <div class="page-dd" id="itemDd" style="width:220px">
+        <button type="button" class="page-dd-btn" id="itemDdBtn" style="width:220px" aria-haspopup="listbox" aria-expanded="false">
+          <span id="itemDdLabel">All Items</span>
+        </button>
+        <div class="page-dd-panel" id="itemDdPanel" style="width:220px">
+          <input type="text" class="page-dd-search" id="itemDdSearch" placeholder="Type to filter..." autocomplete="off">
+          <div class="page-dd-list" id="itemDdList" role="listbox">
+            <div class="page-dd-item selected" data-value="">All Items</div>
+          </div>
+        </div>
+      </div>
+      <input type="hidden" id="itemHidden" value="">
+    </div>
+
     {{-- Quick Date Filter Buttons --}}
     <div class="flex items-end gap-2" id="quickDateBtns">
       <button type="button" data-preset="today" onclick="setQuickDate('today')" class="quick-date-btn bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-700 text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Today</button>
@@ -212,8 +228,41 @@
       window.location.assign(url.toString());
     }
 
+    function getSelectedItemName() {
+      return (document.getElementById('itemHidden')?.value || '').trim();
+    }
+
+    // Populate item name dropdown from current filtered dates
+    function populateItemDropdown(filteredDates) {
+      const counts = {};
+      Object.values(rawData).forEach(data => {
+        filteredDates.forEach(date => {
+          ((data[date] || {}).item_names || []).forEach(name => {
+            if (name) counts[name] = (counts[name] || 0) + 1;
+          });
+        });
+      });
+
+      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([name]) => name);
+      const list = document.getElementById('itemDdList');
+      const current = getSelectedItemName();
+
+      // Keep "All Items" first
+      list.innerHTML = `<div class="page-dd-item ${current === '' ? 'selected' : ''}" data-value="">All Items</div>`;
+      sorted.forEach(name => {
+        list.innerHTML += `<div class="page-dd-item ${current === name ? 'selected' : ''}" data-value="${name.replace(/"/g, '&quot;')}">${name}</div>`;
+      });
+
+      // Update label if current selection no longer exists
+      if (current !== '' && !sorted.includes(current)) {
+        document.getElementById('itemHidden').value = '';
+        document.getElementById('itemDdLabel').textContent = 'All Items';
+      }
+    }
+
     // --- Render tables ---
     function renderTables(filteredDates, pageFilter) {
+      const itemFilter = getSelectedItemName(); // '' = all
       const titleStart = filteredDates[0];
       const titleEnd   = filteredDates[filteredDates.length - 1];
 
@@ -221,9 +270,10 @@
         singlePageLayout.classList.add('hidden');
         multiPageTables.classList.remove('hidden');
 
+        const itemLabel = itemFilter ? ` · ${itemFilter}` : '';
         const title = (titleStart !== titleEnd)
-          ? `SUMMARY OF ADS - ${fmtISO(titleStart)} to ${fmtISO(titleEnd)}`
-          : `SUMMARY OF ADS - ${fmtISO(titleStart)}`;
+          ? `SUMMARY OF ADS - ${fmtISO(titleStart)} to ${fmtISO(titleEnd)}${itemLabel}`
+          : `SUMMARY OF ADS - ${fmtISO(titleStart)}${itemLabel}`;
 
         // 1) Summary by Page — EXCLUDE pages with total spend == 0
         let summaryHtml = `
@@ -248,6 +298,12 @@
         `;
 
         Object.entries(rawData).forEach(([page, data]) => {
+          // If item filter active, skip pages that never have that item in filtered dates
+          if (itemFilter !== '') {
+            const hasItem = filteredDates.some(d => ((data[d] || {}).item_names || []).includes(itemFilter));
+            if (!hasItem) return;
+          }
+
           let sumSpent=0, sumOrders=0, wImps=0, wCPI=0, tcprFail=0;
           filteredDates.forEach(date => {
             const r = data[date] || {};
@@ -305,9 +361,19 @@
         `;
 
         filteredDates.forEach(date => {
+          // If item filter active, skip dates where no page has that item
+          if (itemFilter !== '') {
+            const anyHas = Object.values(rawData).some(data =>
+              ((data[date] || {}).item_names || []).includes(itemFilter)
+            );
+            if (!anyHas) return;
+          }
+
           let sumSpent=0, sumOrders=0, wImps=0, wCPI=0, tcprFail=0;
 
-          Object.values(rawData).forEach(data => {
+          Object.entries(rawData).forEach(([, data]) => {
+            // If item filter active, only sum pages that have the item on this date
+            if (itemFilter !== '' && !((data[date] || {}).item_names || []).includes(itemFilter)) return;
             const r = data[date] || {};
             if (typeof r.spent === 'number') sumSpent += r.spent;
             if (r.spent && r.orders) sumOrders += r.orders;
@@ -468,6 +534,9 @@
         ? datesWithSpendAllPages(baseDates)
         : datesWithSpendForPage(baseDates, page);
 
+      // Repopulate item dropdown based on current date range
+      populateItemDropdown(dates);
+
       if (!dates.length) {
         if (cppChart) cppChart.destroy();
         if (cpmChart) cpmChart.destroy();
@@ -618,6 +687,69 @@
       // close on ESC
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && pageDd.classList.contains('open')) close();
+      });
+    })();
+
+    // ✅ Item Name Dropdown behavior
+    (function initItemDropdown(){
+      const itemDd     = document.getElementById('itemDd');
+      const itemDdBtn  = document.getElementById('itemDdBtn');
+      const itemDdPanel= document.getElementById('itemDdPanel');
+      const itemDdSearch= document.getElementById('itemDdSearch');
+      const itemDdList = document.getElementById('itemDdList');
+      const itemHidden = document.getElementById('itemHidden');
+      const itemDdLabel= document.getElementById('itemDdLabel');
+      if (!itemDd) return;
+
+      function norm(s) {
+        return (s||'').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+      }
+      function open() {
+        itemDd.classList.add('open');
+        itemDdBtn.setAttribute('aria-expanded','true');
+        itemDdSearch.value = '';
+        filter('');
+        setTimeout(() => itemDdSearch.focus(), 0);
+      }
+      function close() {
+        itemDd.classList.remove('open');
+        itemDdBtn.setAttribute('aria-expanded','false');
+      }
+      function filter(q) {
+        const query = norm(q);
+        let shown = 0;
+        Array.from(itemDdList.querySelectorAll('.page-dd-item')).forEach(item => {
+          const match = query === '' || norm(item.textContent).includes(query);
+          item.style.display = match ? 'block' : 'none';
+          if (match) shown++;
+        });
+      }
+      function setSelected(val, labelText) {
+        itemHidden.value = val;
+        itemDdLabel.textContent = val === '' ? 'All Items' : labelText;
+        itemDdList.querySelectorAll('.page-dd-item').forEach(i => i.classList.remove('selected'));
+        const el = Array.from(itemDdList.querySelectorAll('.page-dd-item')).find(i => i.dataset.value === val);
+        if (el) el.classList.add('selected');
+        close();
+        refreshAll();
+      }
+      itemDdBtn.addEventListener('click', e => {
+        e.preventDefault();
+        itemDd.classList.contains('open') ? close() : open();
+      });
+      itemDdSearch.addEventListener('input', () => filter(itemDdSearch.value));
+      itemDdList.addEventListener('click', e => {
+        const item = e.target.closest('.page-dd-item');
+        if (!item) return;
+        setSelected(item.dataset.value ?? '', item.textContent.trim());
+      });
+      document.addEventListener('click', e => {
+        if (!itemDd.classList.contains('open')) return;
+        if (itemDd.contains(e.target)) return;
+        close();
+      });
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && itemDd.classList.contains('open')) close();
       });
     })();
 
