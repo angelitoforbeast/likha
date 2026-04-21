@@ -90,6 +90,41 @@ class JntWaybillFilesController extends Controller
         return back()->with('success', 'Deleted: ' . basename($filename));
     }
 
+    public function destroyOld(Request $request)
+    {
+        Storage::disk('local')->makeDirectory($this->baseDir);
+
+        $cutoff = \Carbon\Carbon::now('Asia/Manila')->subDay()->timestamp; // older than 1 day
+
+        $allFiles = collect(Storage::disk('local')->allFiles($this->baseDir))
+            ->filter(function ($rel) {
+                $ext = strtolower(pathinfo($rel, PATHINFO_EXTENSION));
+                return in_array($ext, ['pdf', 'zip', 'txt'], true);
+            });
+
+        $deleted = 0;
+        $runDirs = [];
+
+        foreach ($allFiles as $rel) {
+            $mtime = Storage::disk('local')->lastModified($rel);
+            if ($mtime < $cutoff) {
+                $abs = Storage::disk('local')->path($rel);
+                $runDirs[] = dirname($abs);
+                Storage::disk('local')->delete($rel);
+                $deleted++;
+            }
+        }
+
+        // Clean up empty run folders
+        foreach (array_unique($runDirs) as $dir) {
+            if (File::isDirectory($dir) && count(File::allFiles($dir)) === 0) {
+                File::deleteDirectory($dir);
+            }
+        }
+
+        return back()->with('success', "Deleted {$deleted} file(s) older than 1 day.");
+    }
+
     private function safeFilename(string $filename): string
     {
         $filename = str_replace('\\', '/', $filename);

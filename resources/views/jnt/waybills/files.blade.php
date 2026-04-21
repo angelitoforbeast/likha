@@ -21,10 +21,25 @@
       <div class="text-sm text-gray-600">
         Storage path: <span class="font-mono">{{ $baseDir ?? 'jnt_waybills/bulk_runs' }}</span>
       </div>
-      <a href="{{ route('jnt.waybills.files') }}"
-         class="inline-flex items-center rounded-lg border px-3 py-2 text-sm hover:bg-gray-50">
-        Refresh
-      </a>
+      <div class="flex items-center gap-2">
+        <form
+          method="POST"
+          action="{{ route('jnt.waybills.files.destroyOld') }}"
+          onsubmit="return confirm('Delete all files older than 1 day (≥24 hours ago)?\n\nThis cannot be undone.')"
+        >
+          @csrf
+          <button
+            type="submit"
+            class="inline-flex items-center rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
+          >
+            🗑 Delete All (1 day+)
+          </button>
+        </form>
+        <a href="{{ route('jnt.waybills.files') }}"
+           class="inline-flex items-center rounded-lg border px-3 py-2 text-sm hover:bg-gray-50">
+          Refresh
+        </a>
+      </div>
     </div>
 
     <div class="overflow-x-auto rounded-xl border bg-white shadow-sm">
@@ -66,7 +81,7 @@
                 $sizeText = $mb >= 1 ? number_format($mb, 2).' MB' : number_format($kb, 1).' KB';
 
                 // last modified format
-                $mtimeText = $mtime ? \Carbon\Carbon::createFromTimestamp($mtime)->format('Y-m-d H:i:s') : '-';
+                $mtimeText = $mtime ? \Carbon\Carbon::createFromTimestamp($mtime, 'Asia/Manila')->format('Y-m-d H:i:s') : '-';
 
                 // badge color by extension
                 $badgeClass = match (strtolower($f['ext'] ?? '')) {

@@ -458,6 +458,9 @@ Route::delete('/jnt/waybills/files/{runId}/{filename}', [JntWaybillFilesControll
     ->where('filename', '.*')
     ->name('jnt.waybills.files.destroy');
 
+Route::post('/jnt/waybills/files/destroy-old', [JntWaybillFilesController::class, 'destroyOld'])
+    ->name('jnt.waybills.files.destroyOld');
+
 
 
 Route::get('jnt/waybills/sender-address', [SenderAddressController::class, 'index'])
