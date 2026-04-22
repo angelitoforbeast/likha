@@ -300,14 +300,18 @@
                 </template>
               </td>
 
-              <!-- Price — auto from COD, always read-only -->
+              <!-- Price — mode COD (most frequent = real SRP), read-only -->
               <td style="text-align:right;">
                 <template x-if="row.price !== null">
                   <div>
                     <span style="color:#374151;" x-text="money(row.price)"></span>
-                    <template x-if="row.price_is_range">
+                    <template x-if="row.price_min !== null">
                       <div style="font-size:9px;color:#94a3b8;"
-                           x-text="'↕ ' + money(row.price_min)"></div>
+                           x-text="'↓ ' + money(row.price_min)"></div>
+                    </template>
+                    <template x-if="row.price_max !== null">
+                      <div style="font-size:9px;color:#94a3b8;"
+                           x-text="'↑ ' + money(row.price_max)"></div>
                     </template>
                   </div>
                 </template>

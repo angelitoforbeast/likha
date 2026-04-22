@@ -1258,7 +1258,6 @@ class OwnerPrivateController extends Controller
         $codClean = $castMoney($moCod);
 
         // ── macro_output: grouped by page + item for the date ─────────────────
-        // Also pulls max/min COD per item so we can auto-detect selling price
         $moRows = DB::table('macro_output as mo')
             ->whereRaw("$dateExpr = ?", [$date])
             ->whereRaw("$pageTrim != ''")
@@ -1273,6 +1272,25 @@ class OwnerPrivateController extends Controller
             ")
             ->groupByRaw("$pageKey, $pageTrim, $itemTrim")
             ->get();
+
+        // ── mode COD per page+item (most frequent = real SRP) ────────────────
+        // MAX(COD) is unreliable if a few orders have wrong/different amounts.
+        // We group by page+item+cod, then in PHP pick the cod with highest count.
+        $codFreqRows = DB::table('macro_output as mo')
+            ->whereRaw("$dateExpr = ?", [$date])
+            ->whereRaw("$pageTrim != ''")
+            ->whereRaw("$codClean > 0")
+            ->selectRaw("$pageKey AS page_key, $itemTrim AS item_name, $codClean AS cod_val, COUNT(*) AS cnt")
+            ->groupByRaw("$pageKey, $itemTrim, $codClean")
+            ->get();
+
+        $modeCodMap = []; // "page_key||item_name" → float (mode COD)
+        foreach ($codFreqRows as $r) {
+            $k = (string)$r->page_key . '||' . strtolower(trim((string)$r->item_name));
+            if (!isset($modeCodMap[$k]) || (int)$r->cnt > $modeCodMap[$k]['cnt']) {
+                $modeCodMap[$k] = ['cod' => (float)$r->cod_val, 'cnt' => (int)$r->cnt];
+            }
+        }
 
         // ── group by page ─────────────────────────────────────────────────────
         $pageGroups = [];
@@ -1289,10 +1307,13 @@ class OwnerPrivateController extends Controller
             }
             $pageGroups[$pk]['total_orders']   += (int)$row->total_orders;
             $pageGroups[$pk]['proceed_orders'] += (int)$row->proceed_orders;
+            $modeKey  = (string)$row->page_key . '||' . strtolower(trim((string)$row->item_name));
+            $modeCod  = $modeCodMap[$modeKey]['cod'] ?? (float)($row->max_cod ?? 0);
             $pageGroups[$pk]['items'][] = [
                 'item_name'      => (string)$row->item_name,
                 'total_orders'   => (int)$row->total_orders,
                 'proceed_orders' => (int)$row->proceed_orders,
+                'mode_cod'       => $modeCod,                                    // most-frequent COD = real SRP
                 'max_cod'        => (float)($row->max_cod ?? 0),
                 'min_cod'        => (float)($row->min_cod ?? $row->max_cod ?? 0),
             ];
@@ -1371,10 +1392,16 @@ class OwnerPrivateController extends Controller
             $totalOrders   = (int)$pg['total_orders'];
             $proceedOrders = (int)$pg['proceed_orders'];
 
-            // Price = auto from COD in macro_output (dominant item)
-            $price    = (float)($dominant['max_cod'] ?? 0);
+            // Price = mode COD of dominant item (most frequent = real SRP)
+            // max_cod / min_cod kept only for range indicator
+            $price    = (float)($dominant['mode_cod'] ?? $dominant['max_cod'] ?? 0);
             $priceMin = (float)($dominant['min_cod'] ?? $price);
-            $priceIsRange = $priceMin > 0 && abs($priceMin - $price) > 0.01;
+            $priceMax = (float)($dominant['max_cod'] ?? $price);
+            // Show range indicator if min or max differ materially from mode
+            $priceIsRange = $price > 0 && (
+                ($priceMin > 0 && abs($priceMin - $price) > 0.01) ||
+                abs($priceMax - $price) > 0.01
+            );
 
             // Item value = page_item_settings override (priority) or cogs table fallback
             $settings  = $settingsMap[$settingKey] ?? null;
@@ -1411,7 +1438,7 @@ class OwnerPrivateController extends Controller
                 'secondary_items'       => array_map(fn($i) => [
                     'item_name'    => $i['item_name'],
                     'total_orders' => $i['total_orders'],
-                    'price'        => (float)($i['max_cod'] ?? 0),  // each item's actual price
+                    'price'        => (float)($i['mode_cod'] ?? $i['max_cod'] ?? 0),  // mode = real SRP
                 ], $secondary),
                 'adspent'               => $adspent,
                 'orders'                => $totalOrders,
@@ -1422,7 +1449,8 @@ class OwnerPrivateController extends Controller
                 'proj_profit_per_order' => $projProfitPerOrder,
                 'rts_pct'               => $rtsPct,
                 'price'                 => $price > 0 ? $price : null,
-                'price_min'             => $priceIsRange ? $priceMin : null,
+                'price_min'             => ($priceIsRange && $priceMin > 0 && abs($priceMin - $price) > 0.01) ? $priceMin : null,
+                'price_max'             => ($priceIsRange && abs($priceMax - $price) > 0.01) ? $priceMax : null,
                 'price_is_range'        => $priceIsRange,
                 'item_value'            => $itemValue,
                 'item_value_source'     => $settings ? 'manual' : ($itemValue !== null ? 'cogs' : null),
