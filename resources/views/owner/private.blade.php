@@ -183,13 +183,13 @@
             <tr :class="editIdx === idx ? 'editing-row' : ''">
 
               <!-- Fixed: Page -->
-              <td>
+              <td style="text-align:center;">
                 <span style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;"
                       x-text="row.page_name"></span>
               </td>
 
               <!-- Fixed: Item -->
-              <td>
+              <td style="text-align:center;">
                 <div style="font-weight:600;color:#1e293b;white-space:normal;line-height:1.35;"
                      x-text="sq(row.item_name)"></div>
                 <template x-for="s in (row.secondary_items||[])" :key="s.item_name">
@@ -204,7 +204,7 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')">
+                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit):'')+(col.id==='proj_pct'&&row.proj_profit_per_order!==null&&row.price>0?rppStyle(row.proj_profit_per_order/row.price*100):'')">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -231,19 +231,10 @@
                     <span style="color:#111;" x-text="md(row.proceed_cpp)"></span>
                   </template>
 
-                  <!-- proj_profit — bold; red badge if negative, green badge if ≥3000, plain black otherwise -->
+                  <!-- proj_profit — cell background handles color; bold text -->
                   <template x-if="col.id==='proj_profit'">
-                    <span>
-                      <template x-if="row.projected_profit !== null && row.projected_profit < 0">
-                        <span class="badge br" x-text="md(row.projected_profit)"></span>
-                      </template>
-                      <template x-if="row.projected_profit !== null && row.projected_profit >= 3000">
-                        <span class="badge bg" x-text="md(row.projected_profit)"></span>
-                      </template>
-                      <template x-if="row.projected_profit === null || (row.projected_profit >= 0 && row.projected_profit < 3000)">
-                        <span style="font-weight:700;color:#111;" x-text="md(row.projected_profit)"></span>
-                      </template>
-                    </span>
+                    <span style="font-weight:700;" :style="'color:'+pbColor(row.projected_profit)"
+                          x-text="md(row.projected_profit)"></span>
                   </template>
 
                   <!-- per_order -->
@@ -251,12 +242,13 @@
                     <span style="color:#111;" x-text="md(row.proj_profit_per_order)"></span>
                   </template>
 
-                  <!-- proj_pct = /order ÷ price × 100 — bold, no badge color -->
+                  <!-- proj_pct = /order ÷ price × 100 — bold, cell bg from rppStyle -->
                   <template x-if="col.id==='proj_pct'">
                     <span>
                       <template x-if="row.proj_profit_per_order !== null && row.price > 0">
-                        <span style="color:#111;font-weight:700;"
-                              x-text="(row.proj_profit_per_order / row.price * 100).toFixed(1)+'%'"></span>
+                        <span style="font-weight:700;"
+                              :style="'color:'+rppColor(row.proj_profit_per_order/row.price*100)"
+                              x-text="(row.proj_profit_per_order/row.price*100).toFixed(1)+'%'"></span>
                       </template>
                       <template x-if="!(row.proj_profit_per_order !== null && row.price > 0)">
                         <span style="color:#cbd5e1;">—</span>
@@ -457,12 +449,11 @@
                     <span style="color:#475569;" x-text="md(tot().proceed_cpp)"></span>
                   </template>
                   <template x-if="col.id==='proj_profit'">
-                    <span class="badge" :class="pb(tot().projected_profit)"
+                    <span style="font-weight:700;" :style="'color:'+pbColor(tot().projected_profit)"
                           x-text="md(tot().projected_profit)"></span>
                   </template>
                   <template x-if="col.id==='per_order'">
-                    <span class="badge" :class="pb(tot().proj_profit_per_order)"
-                          x-text="md(tot().proj_profit_per_order)"></span>
+                    <span style="color:#111;" x-text="md(tot().proj_profit_per_order)"></span>
                   </template>
                   <template x-if="!['adspent','orders','cpp','proceed','pcpp','proj_profit','per_order'].includes(col.id)">
                     <span></span>
@@ -505,22 +496,22 @@
       // ── Column definitions ────────────────────────────────────────────────
       defaultCols() {
         return [
-          { id:'adspent',    label:'Adspent',    sort:'adspent',              align:'right', minw:90  },
-          { id:'orders',     label:'Orders',     sort:'orders',               align:'right', minw:65  },
-          { id:'cpp',        label:'CPP',        sort:'cpp',                  align:'right', minw:75  },
-          { id:'proceed',    label:'Proceed',    sort:'proceed_orders',       align:'right', minw:70  },
-          { id:'pcpp',       label:'P.CPP',      sort:'proceed_cpp',          align:'right', minw:75  },
-          { id:'proj_profit',label:'Proj.Profit',sort:'projected_profit',     align:'right', minw:95  },
-          { id:'per_order',  label:'/Order',     sort:'proj_profit_per_order',align:'right', minw:75  },
-          { id:'proj_pct',   label:'Proj.%',     sort:null,                   align:'right', minw:65  },
-          { id:'jnt_rts',    label:'RTS%',       sort:null,                   align:'right', minw:100 },
-          { id:'jnt_del',    label:'Del%',       sort:null,                   align:'right', minw:90  },
-          { id:'jnt_transit',label:'Transit%',   sort:null,                   align:'right', minw:85  },
-          { id:'rts_set',    label:'Set RTS%',   sort:'rts_pct',              align:'right', minw:110 },
-          { id:'price',      label:'Price',      sort:null,                   align:'right', minw:85  },
-          { id:'item_val',   label:'Item Val.',  sort:null,                   align:'right', minw:80  },
-          { id:'ship',       label:'Ship',       sort:null,                   align:'right', minw:58  },
-          { id:'cod_fee',    label:'COD Fee',    sort:null,                   align:'right', minw:72  },
+          { id:'adspent',    label:'Adspent',    sort:'adspent',              align:'center', minw:90  },
+          { id:'orders',     label:'Orders',     sort:'orders',               align:'center', minw:65  },
+          { id:'cpp',        label:'CPP',        sort:'cpp',                  align:'center', minw:75  },
+          { id:'proceed',    label:'Proceed',    sort:'proceed_orders',       align:'center', minw:70  },
+          { id:'pcpp',       label:'P.CPP',      sort:'proceed_cpp',          align:'center', minw:75  },
+          { id:'proj_profit',label:'Proj.Profit',sort:'projected_profit',     align:'center', minw:95  },
+          { id:'per_order',  label:'/Order',     sort:'proj_profit_per_order',align:'center', minw:75  },
+          { id:'proj_pct',   label:'Proj.%',     sort:null,                   align:'center', minw:65  },
+          { id:'jnt_rts',    label:'RTS%',       sort:null,                   align:'center', minw:100 },
+          { id:'jnt_del',    label:'Del%',       sort:null,                   align:'center', minw:90  },
+          { id:'jnt_transit',label:'Transit%',   sort:null,                   align:'center', minw:85  },
+          { id:'rts_set',    label:'Set RTS%',   sort:'rts_pct',              align:'center', minw:110 },
+          { id:'price',      label:'Price',      sort:null,                   align:'center', minw:85  },
+          { id:'item_val',   label:'Item Val.',  sort:null,                   align:'center', minw:80  },
+          { id:'ship',       label:'Ship',       sort:null,                   align:'center', minw:58  },
+          { id:'cod_fee',    label:'COD Fee',    sort:null,                   align:'center', minw:72  },
         ];
       },
 
@@ -672,6 +663,10 @@
       // ── Helpers ───────────────────────────────────────────────────────────
       sq(n){ return n||''; },
       pb(v){ if(v==null||isNaN(v)) return 'bx'; return v<0?'br':v>=3000?'bg':'bx'; },
+      pbStyle(v){ if(v==null||isNaN(Number(v))) return ''; return v<0?'background:#fee2e2;':v>=3000?'background:#dcfce7;':''; },
+      pbColor(v){ if(v==null||isNaN(Number(v))) return '#111'; return v<0?'#b91c1c':v>=3000?'#15803d':'#111'; },
+      rppStyle(v){ if(v==null||isNaN(Number(v))) return ''; if(v<5) return 'background:#fee2e2;'; if(v<10) return 'background:#ffedd5;'; if(v<15) return 'background:#fef9c3;'; if(v<20) return 'background:#dbeafe;'; return 'background:#dcfce7;'; },
+      rppColor(v){ if(v==null||isNaN(Number(v))) return '#111'; if(v<5) return '#b91c1c'; if(v<10) return '#c2410c'; if(v<15) return '#a16207'; if(v<20) return '#1d4ed8'; return '#15803d'; },
       rb(v){ if(v==null||isNaN(v)) return 'bx'; return v>45?'br':v>35?'bo':v>25?'by':'bg'; },
       dlb(v){ if(v==null||isNaN(v)) return 'bx'; return v>=80?'bg':v>=60?'by':v>=40?'bo':'br'; },
       rpp(v){ if(v==null||isNaN(v)) return 'bx'; if(v<5) return 'br'; if(v<10) return 'bo'; if(v<15) return 'by'; if(v<20) return 'bb'; return 'bg'; },
