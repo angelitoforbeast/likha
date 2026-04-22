@@ -10,6 +10,7 @@
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <style>
+    html { scroll-behavior: smooth; }
     [x-cloak]{display:none!important}
     .flatpickr-calendar{z-index:9999!important}
     body { overflow-x: hidden; }
@@ -59,7 +60,13 @@
     <div class="w-full mx-auto px-2 sm:px-3 lg:px-4">
       <div class="h-16 flex items-center justify-between">
         <div class="font-semibold text-lg">Overall Summary</div>
-        <div class="text-sm text-gray-500" x-text="dateLabel"></div>
+        <div class="flex items-center gap-4">
+          <a href="#item-summary"
+             class="text-xs px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-full hover:bg-blue-100 transition-colors font-medium">
+            ↓ RTS / Price Settings
+          </a>
+          <div class="text-sm text-gray-500" x-text="dateLabel"></div>
+        </div>
       </div>
     </div>
   </nav>
@@ -501,7 +508,7 @@
     <!-- ═══════════════════════════════════════════════════════════════════════
          ITEM SUMMARY — one day, one row per page, dominant item used for calcs
          ═══════════════════════════════════════════════════════════════════════ -->
-    <section class="bg-white rounded-xl shadow p-3" x-data="itemSummaryUI()" x-init="init()">
+    <section id="item-summary" class="bg-white rounded-xl shadow p-3" x-data="itemSummaryUI()" x-init="init()">
 
       <!-- Header -->
       <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
@@ -1188,10 +1195,11 @@
 
         async init(){
           const now = new Date();
-          const start = new Date(now);
-          start.setDate(now.getDate() - 29);
-          this.filters.start_date = this.ymd(start);
-          this.filters.end_date   = this.ymd(now);
+          // Default to yesterday
+          const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+          this.filters.start_date = this.ymd(yesterday);
+          this.filters.end_date   = this.ymd(yesterday);
+          this.activePreset = 'yesterday';
           this.setDateLabel();
 
           this.$nextTick(() => {
