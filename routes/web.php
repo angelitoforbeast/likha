@@ -482,6 +482,7 @@ Route::get('/item/cogs/grid', [ItemCogsController::class, 'grid'])->name('item.c
 Route::post('/item/cogs/update', [ItemCogsController::class, 'update'])->name('item.cogs.update'); // edit one cell
 
 Route::get('/owner/private', [OwnerPrivateController::class, 'index'])->name('owner.private');
+Route::get('/owner/private/data', [OwnerPrivateController::class, 'data'])->name('owner.private.data');
 
 Route::get('/summary/overall', [SummaryOverallController::class, 'index'])->name('summary.overall');
 Route::get('/summary/overall/data', [SummaryOverallController::class, 'data'])->name('summary.overall.data');
