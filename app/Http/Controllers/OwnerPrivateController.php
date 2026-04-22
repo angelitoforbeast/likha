@@ -1365,16 +1365,17 @@ class OwnerPrivateController extends Controller
                 ->orderBy('item_name')
                 ->orderByDesc('effective_date')
                 ->orderByDesc('id')   // tiebreaker: latest insert wins when same date
-                ->get(['page_name', 'item_name', 'price', 'rts_pct', 'effective_date', 'comment']);
+                ->get(['page_name', 'item_name', 'price', 'rts_pct', 'effective_date', 'comment', 'item_value_comment']);
 
             foreach ($settingRows as $s) {
                 $k = strtolower(trim((string)$s->page_name)).'||'.strtolower(trim((string)$s->item_name));
                 if (!isset($settingsMap[$k])) {
                     $settingsMap[$k] = [
-                        'item_value'     => (float)$s->price,
-                        'rts_pct'        => (float)$s->rts_pct,
-                        'effective_date' => (string)$s->effective_date,
-                        'comment'        => (string)($s->comment ?? ''),
+                        'item_value'           => (float)$s->price,
+                        'rts_pct'              => (float)$s->rts_pct,
+                        'effective_date'       => (string)$s->effective_date,
+                        'comment'              => (string)($s->comment ?? ''),
+                        'item_value_comment'   => (string)($s->item_value_comment ?? ''),
                     ];
                 }
             }
@@ -1534,6 +1535,7 @@ class OwnerPrivateController extends Controller
                 'settings_date'         => $settings ? $settings['effective_date'] : null,
                 'has_settings'          => $settings !== null,
                 'rts_comment'           => $rtsComment,
+                'item_value_comment'    => $settings ? ($settings['item_value_comment'] ?: null) : null,
                 'jnt_rts_pct'           => $jntRtsPct,
                 'jnt_rts_cnt'           => $jntRtsCnt,
                 'jnt_del_pct'           => $jntDelPct,
@@ -1559,7 +1561,8 @@ class OwnerPrivateController extends Controller
             'item_value'     => 'required|numeric|min:0',
             'rts_pct'        => 'required|numeric|min:0|max:100',
             'effective_date' => 'required|date',
-            'comment'        => 'nullable|string|max:500',
+            'comment'              => 'nullable|string|max:500',
+            'item_value_comment'   => 'nullable|string|max:500',
         ]);
 
         $pageName  = trim($validated['page_name']);
@@ -1589,7 +1592,8 @@ class OwnerPrivateController extends Controller
                 'price'          => $itemValue,
                 'rts_pct'        => $rtsPct,
                 'effective_date' => $effDate,
-                'comment'        => $validated['comment'] ?? null,
+                'comment'              => $validated['comment'] ?? null,
+                'item_value_comment'   => $validated['item_value_comment'] ?? null,
                 'created_at'     => now(),
                 'updated_at'     => now(),
             ]);

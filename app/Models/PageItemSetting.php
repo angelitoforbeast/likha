@@ -14,6 +14,8 @@ class PageItemSetting extends Model
         'price',
         'rts_pct',
         'effective_date',
+        'comment',
+        'item_value_comment',
     ];
 
     protected $casts = [

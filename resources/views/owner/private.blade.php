@@ -231,10 +231,19 @@
                     <span style="color:#111;" x-text="md(row.proceed_cpp)"></span>
                   </template>
 
-                  <!-- proj_profit — conditional: red if negative, green if ≥3000, neutral otherwise -->
+                  <!-- proj_profit — bold; red badge if negative, green badge if ≥3000, plain black otherwise -->
                   <template x-if="col.id==='proj_profit'">
-                    <span class="badge" :class="pb(row.projected_profit)"
-                          style="font-weight:700;" x-text="md(row.projected_profit)"></span>
+                    <span>
+                      <template x-if="row.projected_profit !== null && row.projected_profit < 0">
+                        <span class="badge br" x-text="md(row.projected_profit)"></span>
+                      </template>
+                      <template x-if="row.projected_profit !== null && row.projected_profit >= 3000">
+                        <span class="badge bg" x-text="md(row.projected_profit)"></span>
+                      </template>
+                      <template x-if="row.projected_profit === null || (row.projected_profit >= 0 && row.projected_profit < 3000)">
+                        <span style="font-weight:700;color:#111;" x-text="md(row.projected_profit)"></span>
+                      </template>
+                    </span>
                   </template>
 
                   <!-- per_order -->
@@ -363,7 +372,7 @@
                                  @keydown.enter="save()" @keydown.escape="cancel()"
                                  style="width:78px;">
                           <input class="ii-comment" type="text" maxlength="500"
-                                 x-model="ev.comment" placeholder="Comment (optional)"
+                                 x-model="ev.iv_comment" placeholder="Comment (optional)"
                                  @keydown.enter="save()" @keydown.escape="cancel()">
                         </div>
                       </template>
@@ -379,9 +388,9 @@
                                 <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
                                      x-text="'from ' + row.settings_date"></div>
                               </template>
-                              <template x-if="row.rts_comment && row.item_value_source === 'manual'">
+                              <template x-if="row.item_value_comment && row.item_value_source === 'manual'">
                                 <div style="font-size:9px;color:#64748b;margin-top:1px;font-style:italic;white-space:normal;max-width:110px;"
-                                     x-text="'💬 '+row.rts_comment"></div>
+                                     x-text="'💬 '+row.item_value_comment"></div>
                               </template>
                             </div>
                           </template>
@@ -596,9 +605,10 @@
           item_value: row.item_value !== null ? row.item_value : '',
           rts_pct:    row.rts_pct   !== null ? row.rts_pct   : '',
           comment:    row.rts_comment || '',
+          iv_comment: row.item_value_comment || '',
         };
       },
-      cancel(){ this.editIdx=-1; this.editRow=null; this.ev={item_value:'',rts_pct:'',comment:''}; },
+      cancel(){ this.editIdx=-1; this.editRow=null; this.ev={item_value:'',rts_pct:'',comment:'',iv_comment:''}; },
 
       async save(){
         const itemVal = parseFloat(this.ev.item_value);
@@ -618,7 +628,8 @@
               item_value:     itemVal,
               rts_pct:        rts,
               effective_date: this.date,
-              comment:        this.ev.comment || null,
+              comment:              this.ev.comment    || null,
+              item_value_comment:   this.ev.iv_comment || null,
             }),
           });
           let j;
