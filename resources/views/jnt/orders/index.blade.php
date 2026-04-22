@@ -1,7 +1,7 @@
 {{-- ✅ resources/views/jnt/orders/index.blade.php --}}
 <x-layout>
-  <x-slot name="title">J&T Orderss</x-slot>
-  <x-slot name="heading">J&T Orderss</x-slot>
+  <x-slot name="title">J&T Orders</x-slot>
+  <x-slot name="heading">J&T Orders</x-slot>
 
   @php
     $selectedDate = $date ?? request('date') ?? now('Asia/Manila')->toDateString();
