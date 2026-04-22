@@ -38,6 +38,7 @@ use App\Http\Controllers\JntHoldController;
 use App\Http\Controllers\JntHoldDownloadController;
 use App\Http\Controllers\ItemCogsController;
 use App\Http\Controllers\SummaryOverallController;
+use App\Http\Controllers\OwnerPrivateController;
 use App\Http\Controllers\JntOndelController;
 use App\Http\Controllers\JntRemittanceController;
 use App\Http\Controllers\SalesDeclarationController;
@@ -479,6 +480,8 @@ Route::delete('jnt/waybills/sender-address/{senderAddress}', [SenderAddressContr
 Route::get('/item/cogs', [ItemCogsController::class, 'index'])->name('item.cogs.index');
 Route::get('/item/cogs/grid', [ItemCogsController::class, 'grid'])->name('item.cogs.grid');      // JSON grid for month
 Route::post('/item/cogs/update', [ItemCogsController::class, 'update'])->name('item.cogs.update'); // edit one cell
+
+Route::get('/owner/private', [OwnerPrivateController::class, 'index'])->name('owner.private');
 
 Route::get('/summary/overall', [SummaryOverallController::class, 'index'])->name('summary.overall');
 Route::get('/summary/overall/data', [SummaryOverallController::class, 'data'])->name('summary.overall.data');
