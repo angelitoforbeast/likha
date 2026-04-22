@@ -665,10 +665,10 @@
       pb(v){ if(v==null||isNaN(v)) return 'bx'; return v<0?'br':v>=3000?'bg':'bx'; },
       pbStyle(v){ if(v==null||isNaN(Number(v))) return ''; return v<0?'background:#ff0000;':v>=3000?'background:#00ff00;':''; },
       pbColor(v){ return '#000'; },
-      rppStyle(v){ if(v==null||isNaN(Number(v))) return ''; if(v<10) return 'background:#ff6600;'; if(v<20) return 'background:#00ffff;'; return 'background:#00ff00;'; },
+      rppStyle(v){ if(v==null||isNaN(Number(v))) return ''; if(v<5) return 'background:#ff0000;'; if(v<10) return 'background:#ff6600;'; if(v<20) return 'background:#00ffff;'; return 'background:#00ff00;'; },
       rppColor(v){ return '#000'; },
-      // Set RTS%: higher RTS = worse → >35 red, >20 cyan, ≤20 green
-      rbStyle(v){ if(v==null||isNaN(Number(v))) return ''; return v>35?'background:#ff0000;':v>20?'background:#00ffff;':'background:#00ff00;'; },
+      // Set RTS%: ≤25 cyan, ≤30 green, ≤40 yellow, ≤50 orange, >50 red
+      rbStyle(v){ if(v==null||isNaN(Number(v))) return ''; if(v<=25) return 'background:#00ffff;'; if(v<=30) return 'background:#00ff00;'; if(v<=40) return 'background:#ffff00;'; if(v<=50) return 'background:#ff6600;'; return 'background:#ff0000;'; },
       rb(v){ if(v==null||isNaN(v)) return 'bx'; return v>45?'br':v>35?'bo':v>25?'by':'bg'; },
       dlb(v){ if(v==null||isNaN(v)) return 'bx'; return v>=80?'bg':v>=60?'by':v>=40?'bo':'br'; },
       rpp(v){ if(v==null||isNaN(v)) return 'bx'; if(v<5) return 'br'; if(v<10) return 'bo'; if(v<15) return 'by'; if(v<20) return 'bb'; return 'bg'; },
