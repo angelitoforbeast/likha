@@ -7,73 +7,174 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
-    html { scroll-behavior: smooth; }
     [x-cloak] { display: none !important; }
-    body { overflow-x: hidden; }
-    .spinner-inline {
-      border: 2px solid #e5e7eb; border-top: 2px solid #3b82f6;
-      border-radius: 50%; width: 16px; height: 16px;
-      animation: spin 0.8s linear infinite; display: inline-block; vertical-align: middle;
+
+    /* Fix: overflow-x on html/body so sticky thead works relative to viewport */
+    html, body { overflow-x: auto; }
+
+    body { background: #f1f5f9; min-width: 900px; }
+
+    /* Nav */
+    .top-nav {
+      position: sticky; top: 0; z-index: 50;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      height: 52px;
+      display: flex; align-items: center;
+      padding: 0 20px;
+      gap: 12px;
     }
-    @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
-    .sortable { cursor: pointer; user-select: none; }
-    .sortable:hover { background-color: #e5e7eb; }
+
+    /* Sticky thead — sticks below nav (52px) */
+    thead th {
+      position: sticky;
+      top: 52px;
+      z-index: 40;
+      background: #1e293b;
+      color: #94a3b8;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      padding: 8px 10px;
+      white-space: nowrap;
+      border-bottom: 2px solid #334155;
+      user-select: none;
+    }
+    thead th.sortable { cursor: pointer; }
+    thead th.sortable:hover { background: #263347; color: #e2e8f0; }
+    thead th.sorted { color: #60a5fa; }
+
+    /* Rows */
+    tbody tr {
+      border-bottom: 1px solid #e2e8f0;
+      transition: background .1s;
+    }
+    tbody tr:hover { background: #f8fafc; }
+    tbody tr.editing { background: #eff6ff !important; }
+
+    td {
+      font-size: 12px;
+      color: #374151;
+      padding: 7px 10px;
+      white-space: nowrap;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.5;
+    }
+    .badge-green  { background:#dcfce7; color:#15803d; }
+    .badge-yellow { background:#fef9c3; color:#a16207; }
+    .badge-orange { background:#ffedd5; color:#c2410c; }
+    .badge-red    { background:#fee2e2; color:#b91c1c; }
+    .badge-gray   { background:#f1f5f9; color:#64748b; }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block; width: 15px; height: 15px;
+      border: 2px solid #475569; border-top-color: #60a5fa;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Edit panel */
+    .edit-panel {
+      background: #eff6ff;
+      border: 1.5px solid #93c5fd;
+      border-radius: 10px;
+      padding: 12px 16px;
+      display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px;
+      margin-bottom: 10px;
+    }
+
+    /* Table container — no overflow-x here so sticky works */
+    .table-wrap {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+
+    /* Page col */
+    .col-page { min-width: 110px; max-width: 140px; }
+    /* Item col */
+    .col-item { min-width: 150px; max-width: 200px; }
+    /* Money cols */
+    .col-money { min-width: 80px; }
+    /* Count cols */
+    .col-cnt { min-width: 60px; }
+    /* Narrow */
+    .col-narrow { min-width: 50px; }
   </style>
 </head>
-<body class="bg-gray-100 text-gray-900">
+<body>
 
-  <!-- Nav -->
-  <nav class="bg-white border-b sticky top-0 z-40">
-    <div class="w-full px-3 lg:px-5">
-      <div class="h-14 flex items-center justify-between gap-3">
-        <div class="font-semibold text-base">Daily Summary</div>
-        <div class="flex items-center gap-2">
-          <input type="date" x-model="date"
-                 class="border rounded px-2 py-1.5 text-sm"
-                 @change="load()">
-          <button @click="load()"
-                  class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors">
-            Load
-          </button>
-          <span x-show="loading" x-transition.opacity><span class="spinner-inline"></span></span>
-          <span x-show="saveMsg" x-transition class="text-sm text-green-600 font-semibold" x-text="saveMsg"></span>
-        </div>
-      </div>
-    </div>
-  </nav>
+  <!-- ── Nav ───────────────────────────────────────────────────────────────── -->
+  <div class="top-nav">
+    <span style="color:#f1f5f9;font-weight:700;font-size:14px;letter-spacing:.01em;">Daily Summary</span>
+    <div style="flex:1"></div>
 
-  <main class="w-full px-2 sm:px-3 lg:px-5 py-4">
+    <input type="date" x-model="date"
+           @change="load()"
+           style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:4px 10px;font-size:13px;outline:none;">
 
-    <!-- Inline edit form -->
+    <button @click="load()"
+            style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:5px 14px;font-size:13px;font-weight:600;cursor:pointer;">
+      Load
+    </button>
+
+    <span x-show="loading" x-transition.opacity><span class="spinner"></span></span>
+
+    <span x-show="saveMsg" x-transition
+          style="color:#4ade80;font-size:13px;font-weight:700;"
+          x-text="saveMsg"></span>
+  </div>
+
+  <!-- ── Main ──────────────────────────────────────────────────────────────── -->
+  <div style="padding:14px 16px;">
+
+    <!-- Edit panel -->
     <template x-if="editIdx !== -1 && rows[editIdx]">
-      <div class="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg flex flex-wrap items-end gap-4">
+      <div class="edit-panel">
         <div>
-          <div class="text-xs font-bold text-blue-800 mb-0.5"
-               x-text="rows[editIdx].page_name + ' · ' + rows[editIdx].item_name"></div>
-          <div class="text-xs text-blue-500">Effective date: <span x-text="date"></span></div>
+          <div style="font-size:12px;font-weight:700;color:#1e40af;"
+               x-text="rows[editIdx].page_name"></div>
+          <div style="font-size:11px;color:#60a5fa;"
+               x-text="stripQty(rows[editIdx].item_name)"></div>
+          <div style="font-size:10px;color:#93c5fd;margin-top:2px;">
+            Effective: <span x-text="date"></span>
+          </div>
         </div>
         <div>
-          <label class="block text-xs font-semibold text-gray-600 mb-1">Price (₱)</label>
+          <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:4px;">Price (₱)</div>
           <input type="number" step="1" min="0" x-model="editVals.price"
-                 class="border rounded px-2 py-1.5 text-sm w-28 text-right"
                  @keydown.enter="saveEdit()" @keydown.escape="cancelEdit()"
+                 style="border:1.5px solid #93c5fd;border-radius:6px;padding:5px 10px;font-size:13px;width:100px;text-align:right;outline:none;"
                  placeholder="e.g. 299">
         </div>
         <div>
-          <label class="block text-xs font-semibold text-gray-600 mb-1">RTS %</label>
+          <div style="font-size:11px;font-weight:600;color:#475569;margin-bottom:4px;">RTS %</div>
           <input type="number" step="0.1" min="0" max="100" x-model="editVals.rts_pct"
-                 class="border rounded px-2 py-1.5 text-sm w-24 text-right"
                  @keydown.enter="saveEdit()" @keydown.escape="cancelEdit()"
+                 style="border:1.5px solid #93c5fd;border-radius:6px;padding:5px 10px;font-size:13px;width:80px;text-align:right;outline:none;"
                  placeholder="e.g. 25">
         </div>
-        <div class="flex gap-2 items-center">
-          <button @click="saveEdit()"
-                  class="px-4 py-1.5 bg-green-600 text-white rounded text-sm hover:bg-green-700 font-semibold"
-                  :disabled="saving">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button @click="saveEdit()" :disabled="saving"
+                  style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:6px 16px;font-size:13px;font-weight:700;cursor:pointer;">
             <span x-text="saving ? 'Saving…' : 'Save'"></span>
           </button>
           <button @click="cancelEdit()"
-                  class="px-3 py-1.5 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300">
+                  style="background:#e2e8f0;color:#475569;border:none;border-radius:6px;padding:6px 12px;font-size:13px;cursor:pointer;">
             Cancel
           </button>
         </div>
@@ -81,146 +182,160 @@
     </template>
 
     <!-- Table -->
-    <section class="bg-white rounded-xl shadow">
-      <div class="overflow-x-auto">
-        <table class="min-w-full text-xs">
-          <thead class="bg-gray-50 sticky top-14 z-20">
-            <tr class="text-left text-gray-600 border-b">
-              <th class="px-3 py-2 sortable" @click="sortBy('page_name')">
-                Page <span :class="arrowClass('page_name')" x-text="arrow('page_name')"></span>
-              </th>
-              <th class="px-3 py-2">Item Name</th>
-              <th class="px-3 py-2 text-right sortable" @click="sortBy('adspent')">
-                Adspent <span :class="arrowClass('adspent')" x-text="arrow('adspent')"></span>
-              </th>
-              <th class="px-3 py-2 text-right sortable" @click="sortBy('orders')">
-                Orders <span :class="arrowClass('orders')" x-text="arrow('orders')"></span>
-              </th>
-              <th class="px-3 py-2 text-right sortable" @click="sortBy('cpp')">
-                CPP <span :class="arrowClass('cpp')" x-text="arrow('cpp')"></span>
-              </th>
-              <th class="px-3 py-2 text-right sortable" @click="sortBy('proceed_orders')">
-                Proceed <span :class="arrowClass('proceed_orders')" x-text="arrow('proceed_orders')"></span>
-              </th>
-              <th class="px-3 py-2 text-right sortable" @click="sortBy('proceed_cpp')">
-                Proceed CPP <span :class="arrowClass('proceed_cpp')" x-text="arrow('proceed_cpp')"></span>
-              </th>
-              <th class="px-3 py-2 text-right sortable" @click="sortBy('projected_profit')">
-                Proj. Profit <span :class="arrowClass('projected_profit')" x-text="arrow('projected_profit')"></span>
-              </th>
-              <th class="px-3 py-2 text-right sortable" @click="sortBy('proj_profit_per_order')">
-                Profit/Order <span :class="arrowClass('proj_profit_per_order')" x-text="arrow('proj_profit_per_order')"></span>
-              </th>
-              <th class="px-3 py-2 text-right sortable" @click="sortBy('rts_pct')">
-                RTS% <span :class="arrowClass('rts_pct')" x-text="arrow('rts_pct')"></span>
-              </th>
-              <th class="px-3 py-2 text-right">Price</th>
-              <th class="px-3 py-2 text-right">Item Value</th>
-              <th class="px-3 py-2 text-right">Shipping</th>
-              <th class="px-3 py-2 text-right">COD Fee</th>
-              <th class="px-3 py-2"></th>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="col-page sortable" :class="sorted('page_name')" @click="sortBy('page_name')" style="text-align:left;">
+              Page <span x-text="arrow('page_name')"></span>
+            </th>
+            <th class="col-item" style="text-align:left;">Item</th>
+            <th class="col-money sortable" :class="sorted('adspent')" @click="sortBy('adspent')" style="text-align:right;">
+              Adspent <span x-text="arrow('adspent')"></span>
+            </th>
+            <th class="col-cnt sortable" :class="sorted('orders')" @click="sortBy('orders')" style="text-align:right;">
+              Orders <span x-text="arrow('orders')"></span>
+            </th>
+            <th class="col-money sortable" :class="sorted('cpp')" @click="sortBy('cpp')" style="text-align:right;">
+              CPP <span x-text="arrow('cpp')"></span>
+            </th>
+            <th class="col-cnt sortable" :class="sorted('proceed_orders')" @click="sortBy('proceed_orders')" style="text-align:right;">
+              Proceed <span x-text="arrow('proceed_orders')"></span>
+            </th>
+            <th class="col-money sortable" :class="sorted('proceed_cpp')" @click="sortBy('proceed_cpp')" style="text-align:right;">
+              P.CPP <span x-text="arrow('proceed_cpp')"></span>
+            </th>
+            <th class="col-money sortable" :class="sorted('projected_profit')" @click="sortBy('projected_profit')" style="text-align:right;">
+              Proj. Profit <span x-text="arrow('projected_profit')"></span>
+            </th>
+            <th class="col-money sortable" :class="sorted('proj_profit_per_order')" @click="sortBy('proj_profit_per_order')" style="text-align:right;">
+              /Order <span x-text="arrow('proj_profit_per_order')"></span>
+            </th>
+            <th class="col-narrow sortable" :class="sorted('rts_pct')" @click="sortBy('rts_pct')" style="text-align:right;">
+              RTS% <span x-text="arrow('rts_pct')"></span>
+            </th>
+            <th class="col-money" style="text-align:right;">Price</th>
+            <th class="col-money" style="text-align:right;">Item Val.</th>
+            <th class="col-money" style="text-align:right;">Ship</th>
+            <th class="col-money" style="text-align:right;">COD Fee</th>
+            <th style="min-width:52px;text-align:center;"></th>
+          </tr>
+        </thead>
+        <tbody>
+
+          <!-- Empty state -->
+          <template x-if="rows.length === 0 && !loading">
+            <tr>
+              <td colspan="15" style="text-align:center;padding:40px;color:#94a3b8;font-size:13px;">
+                No data for selected date.
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            <template x-if="rows.length === 0 && !loading">
-              <tr>
-                <td class="px-4 py-6 text-gray-400" colspan="15">
-                  No data for selected date.
-                </td>
-              </tr>
-            </template>
+          </template>
 
-            <template x-for="(row, idx) in sortedRows()" :key="row.page_key">
-              <tr class="border-t"
-                  :class="editIdx === idx ? 'bg-blue-50' : 'hover:bg-gray-50'">
+          <!-- Loading placeholder -->
+          <template x-if="rows.length === 0 && loading">
+            <tr>
+              <td colspan="15" style="text-align:center;padding:40px;color:#94a3b8;font-size:13px;">
+                <span class="spinner" style="margin-right:6px;"></span> Loading…
+              </td>
+            </tr>
+          </template>
 
-                <!-- Page -->
-                <td class="px-3 py-2 font-medium whitespace-nowrap" x-text="row.page_name"></td>
+          <template x-for="(row, idx) in sortedRows()" :key="row.page_key">
+            <tr :class="editIdx === idx ? 'editing' : ''">
 
-                <!-- Item Name -->
-                <td class="px-3 py-2" style="min-width:160px">
-                  <div class="font-semibold leading-tight" x-text="row.item_name"></div>
-                  <template x-for="sec in (row.secondary_items || [])" :key="sec.item_name">
-                    <div class="text-gray-400 text-xs leading-tight"
-                         x-text="sec.item_name + ' (' + sec.total_orders + ')'"></div>
-                  </template>
-                </td>
+              <!-- Page -->
+              <td class="col-page">
+                <div style="font-weight:600;color:#1e293b;white-space:normal;line-height:1.3;"
+                     x-text="row.page_name"></div>
+              </td>
 
-                <!-- Adspent -->
-                <td class="px-3 py-2 text-right whitespace-nowrap" x-text="money(row.adspent)"></td>
+              <!-- Item -->
+              <td class="col-item">
+                <div style="font-weight:600;color:#1e293b;white-space:normal;line-height:1.3;"
+                     x-text="stripQty(row.item_name)"></div>
+                <template x-for="sec in (row.secondary_items || [])" :key="sec.item_name">
+                  <div style="font-size:10px;color:#94a3b8;line-height:1.4;"
+                       x-text="stripQty(sec.item_name) + ' (' + sec.total_orders + ')'"></div>
+                </template>
+              </td>
 
-                <!-- Orders -->
-                <td class="px-3 py-2 text-right" x-text="num(row.orders)"></td>
+              <!-- Adspent -->
+              <td class="col-money" style="text-align:right;font-weight:500;" x-text="money(row.adspent)"></td>
 
-                <!-- CPP -->
-                <td class="px-3 py-2 text-right whitespace-nowrap" x-text="moneyOrDash(row.cpp)"></td>
+              <!-- Orders -->
+              <td class="col-cnt" style="text-align:right;" x-text="num(row.orders)"></td>
 
-                <!-- Proceed -->
-                <td class="px-3 py-2 text-right" x-text="num(row.proceed_orders)"></td>
+              <!-- CPP -->
+              <td class="col-money" style="text-align:right;color:#64748b;" x-text="moneyOrDash(row.cpp)"></td>
 
-                <!-- Proceed CPP -->
-                <td class="px-3 py-2 text-right whitespace-nowrap" x-text="moneyOrDash(row.proceed_cpp)"></td>
+              <!-- Proceed -->
+              <td class="col-cnt" style="text-align:right;font-weight:600;" x-text="num(row.proceed_orders)"></td>
 
-                <!-- Proj. Profit -->
-                <td class="px-3 py-2 text-right whitespace-nowrap">
-                  <span class="px-1.5 py-0.5 rounded font-semibold"
-                        :class="profitClass(row.projected_profit)"
-                        x-text="moneyOrDash(row.projected_profit)"></span>
-                </td>
+              <!-- Proceed CPP -->
+              <td class="col-money" style="text-align:right;color:#64748b;" x-text="moneyOrDash(row.proceed_cpp)"></td>
 
-                <!-- Profit per Order -->
-                <td class="px-3 py-2 text-right whitespace-nowrap">
-                  <span class="px-1.5 py-0.5 rounded font-semibold"
-                        :class="profitClass(row.proj_profit_per_order)"
-                        x-text="moneyOrDash(row.proj_profit_per_order)"></span>
-                </td>
+              <!-- Proj. Profit -->
+              <td class="col-money" style="text-align:right;">
+                <span class="badge" :class="profitBadge(row.projected_profit)"
+                      x-text="moneyOrDash(row.projected_profit)"></span>
+              </td>
 
-                <!-- RTS% -->
-                <td class="px-3 py-2 text-right">
-                  <span class="px-1.5 py-0.5 rounded"
-                        :class="row.rts_pct !== null ? rtsClass(row.rts_pct) : 'text-red-400 italic'"
-                        x-text="row.rts_pct !== null ? row.rts_pct.toFixed(1) + '%' : '—'"></span>
-                </td>
+              <!-- /Order -->
+              <td class="col-money" style="text-align:right;">
+                <span class="badge" :class="profitBadge(row.proj_profit_per_order)"
+                      x-text="moneyOrDash(row.proj_profit_per_order)"></span>
+              </td>
 
-                <!-- Price -->
-                <td class="px-3 py-2 text-right whitespace-nowrap"
-                    :class="row.price === null ? 'text-red-400 italic' : 'text-gray-700'"
-                    x-text="row.price !== null ? money(row.price) : '—'"></td>
+              <!-- RTS% -->
+              <td class="col-narrow" style="text-align:right;">
+                <template x-if="row.rts_pct !== null">
+                  <span class="badge" :class="rtsBadge(row.rts_pct)"
+                        x-text="row.rts_pct.toFixed(1) + '%'"></span>
+                </template>
+                <template x-if="row.rts_pct === null">
+                  <span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>
+                </template>
+              </td>
 
-                <!-- Item Value -->
-                <td class="px-3 py-2 text-right whitespace-nowrap text-gray-500"
-                    x-text="row.item_value !== null ? money(row.item_value) : '—'"></td>
+              <!-- Price -->
+              <td class="col-money" style="text-align:right;">
+                <span :style="row.price === null ? 'color:#fca5a5;font-style:italic;' : 'color:#374151;'"
+                      x-text="row.price !== null ? money(row.price) : '—'"></span>
+              </td>
 
-                <!-- Shipping -->
-                <td class="px-3 py-2 text-right whitespace-nowrap text-gray-500"
-                    x-text="row.shipping_fee !== null ? money(row.shipping_fee) : '—'"></td>
+              <!-- Item Value -->
+              <td class="col-money" style="text-align:right;color:#64748b;"
+                  x-text="row.item_value !== null ? money(row.item_value) : '—'"></td>
 
-                <!-- COD Fee -->
-                <td class="px-3 py-2 text-right whitespace-nowrap text-gray-500"
-                    x-text="row.cod_fee !== null ? money(row.cod_fee) : '—'"></td>
+              <!-- Shipping -->
+              <td class="col-money" style="text-align:right;color:#64748b;"
+                  x-text="row.shipping_fee !== null ? money(row.shipping_fee) : '—'"></td>
 
-                <!-- Edit -->
-                <td class="px-3 py-2">
-                  <button @click="startEdit(idx, row)"
-                          class="px-2 py-1 text-xs rounded border transition-colors"
-                          :class="editIdx === idx
-                            ? 'bg-blue-100 border-blue-400 text-blue-700'
-                            : 'border-gray-300 text-gray-500 hover:border-blue-300 hover:text-blue-600'">
-                    <span x-text="row.has_settings ? 'Edit' : '+ Set'"></span>
-                  </button>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </div>
+              <!-- COD Fee -->
+              <td class="col-money" style="text-align:right;color:#64748b;"
+                  x-text="row.cod_fee !== null ? money(row.cod_fee) : '—'"></td>
+
+              <!-- Edit -->
+              <td style="text-align:center;">
+                <button @click="startEdit(idx, row)"
+                        :style="editIdx === idx
+                          ? 'background:#bfdbfe;color:#1d4ed8;border:1.5px solid #93c5fd;border-radius:5px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer;'
+                          : 'background:#f8fafc;color:#64748b;border:1.5px solid #e2e8f0;border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;'">
+                  <span x-text="row.has_settings ? 'Edit' : '+ Set'"></span>
+                </button>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
 
       <!-- Footer note -->
-      <div class="px-3 py-2 text-xs text-gray-400 border-t">
-        One row per page · Dominant item used for calculations · Shipping = ₱37/proceed order · COD Fee = Price × 5% × 1.12 per delivered order
+      <div style="padding:8px 12px;font-size:10px;color:#94a3b8;border-top:1px solid #f1f5f9;">
+        One row per page · Dominant item used for calculations · Shipping = ₱37/proceed order · COD Fee = Price × 5% × 1.12 per delivered
       </div>
-    </section>
-  </main>
+    </div>
+  </div>
 
   <script>
     function privateUI() {
@@ -242,7 +357,7 @@
         sortCol:  '',
         sortDir:  'asc',
 
-        // ── data loading ──────────────────────────────────────────────────────
+        // ── data ──────────────────────────────────────────────────────────────
         async load() {
           this.loading = true;
           this.editIdx = -1;
@@ -264,15 +379,15 @@
             this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
           } else {
             this.sortCol = col;
-            this.sortDir = 'asc';
+            this.sortDir = 'desc'; // default desc for numbers
           }
         },
         arrow(col) {
-          if (this.sortCol !== col) return '↕';
-          return this.sortDir === 'asc' ? '↑' : '↓';
+          if (this.sortCol !== col) return '';
+          return this.sortDir === 'asc' ? ' ↑' : ' ↓';
         },
-        arrowClass(col) {
-          return this.sortCol === col ? 'text-blue-600 font-bold' : 'text-gray-400';
+        sorted(col) {
+          return this.sortCol === col ? 'sorted' : '';
         },
         sortedRows() {
           if (!this.sortCol) return this.rows;
@@ -287,7 +402,7 @@
           });
         },
 
-        // ── inline edit ───────────────────────────────────────────────────────
+        // ── edit ──────────────────────────────────────────────────────────────
         startEdit(idx, row) {
           this.editIdx  = idx;
           this.editVals = {
@@ -296,7 +411,7 @@
           };
           this.saveMsg = '';
           this.$nextTick(() => {
-            document.querySelector('input[x-model="editVals.price"]')?.focus();
+            document.querySelector('input[placeholder="e.g. 299"]')?.focus();
           });
         },
         cancelEdit() {
@@ -306,8 +421,8 @@
         async saveEdit() {
           const price  = parseFloat(this.editVals.price);
           const rtsPct = parseFloat(this.editVals.rts_pct);
-          if (isNaN(price)  || price  < 0)          { alert('Enter a valid Price (≥ 0).');         return; }
-          if (isNaN(rtsPct) || rtsPct < 0 || rtsPct > 100) { alert('Enter a valid RTS% (0–100).'); return; }
+          if (isNaN(price)  || price  < 0)               { alert('Valid Price needed (≥ 0).');    return; }
+          if (isNaN(rtsPct) || rtsPct < 0 || rtsPct > 100) { alert('Valid RTS% needed (0–100).'); return; }
 
           const row = this.rows[this.editIdx];
           this.saving = true;
@@ -327,7 +442,7 @@
             if (json.ok) {
               this.cancelEdit();
               await this.load();
-              this.saveMsg = 'Saved!';
+              this.saveMsg = '✓ Saved!';
               setTimeout(() => { this.saveMsg = ''; }, 2500);
             }
           } catch (e) {
@@ -338,25 +453,30 @@
           }
         },
 
-        // ── conditional formatting ────────────────────────────────────────────
-        profitClass(v) {
-          if (v == null || isNaN(v)) return '';
-          if (v <  0)   return 'bg-red-100 text-red-800';
-          if (v <  500) return 'bg-orange-100 text-orange-800';
-          if (v < 2000) return 'bg-yellow-100 text-yellow-800';
-          return 'bg-green-100 text-green-800';
-        },
-        rtsClass(v) {
-          if (v == null || isNaN(v)) return '';
-          if (v > 45) return 'bg-red-100 text-red-800';
-          if (v > 35) return 'bg-orange-100 text-orange-800';
-          if (v > 25) return 'bg-yellow-100 text-yellow-800';
-          return 'bg-green-100 text-green-800';
+        // ── formatting ────────────────────────────────────────────────────────
+        // Strip leading "2 x " / "1x " quantity prefix from item names
+        stripQty(name) {
+          if (!name) return '';
+          return name.replace(/^\d+\s*[xX]\s*/u, '').trim();
         },
 
-        // ── formatters ────────────────────────────────────────────────────────
+        profitBadge(v) {
+          if (v == null || isNaN(v)) return 'badge-gray';
+          if (v <    0) return 'badge-red';
+          if (v <  500) return 'badge-orange';
+          if (v < 2000) return 'badge-yellow';
+          return 'badge-green';
+        },
+        rtsBadge(v) {
+          if (v == null || isNaN(v)) return 'badge-gray';
+          if (v > 45) return 'badge-red';
+          if (v > 35) return 'badge-orange';
+          if (v > 25) return 'badge-yellow';
+          return 'badge-green';
+        },
+
         money(v)       { return '₱' + Number(v || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
-        moneyOrDash(v) { return (v == null || isNaN(v)) ? '—' : this.money(v); },
+        moneyOrDash(v) { return (v == null || isNaN(Number(v))) ? '—' : this.money(v); },
         num(v)         { return Number(v || 0).toLocaleString('en-PH'); },
 
         async init() { await this.load(); },
