@@ -96,7 +96,11 @@
     .by  { background:#fef9c3; color:#a16207; }
     .bo  { background:#ffedd5; color:#c2410c; }
     .br  { background:#fee2e2; color:#b91c1c; }
+    .bb  { background:#dbeafe; color:#1d4ed8; }
     .bx  { background:#f1f5f9; color:#94a3b8; }
+
+    /* Null-value cell highlight */
+    .null-warn { background:#fef2f2 !important; }
 
     /* Spinner */
     .spin {
@@ -182,6 +186,7 @@
             <th class="s" :class="ac('proj_profit_per_order')" @click="sb('proj_profit_per_order')" style="text-align:right;min-width:75px;">
               /Order<span x-text="arr('proj_profit_per_order')"></span>
             </th>
+            <th style="text-align:right;min-width:65px;">Proj.%</th>
             <th class="s" :class="ac('rts_pct')" @click="sb('rts_pct')" style="text-align:right;min-width:65px;">
               RTS%<span x-text="arr('rts_pct')"></span>
             </th>
@@ -261,8 +266,19 @@
                       x-text="md(row.proj_profit_per_order)"></span>
               </td>
 
-              <!-- RTS% -->
+              <!-- Proj.% = proj_profit_per_order / price × 100 -->
               <td style="text-align:right;">
+                <template x-if="row.proj_profit_per_order !== null && row.price > 0">
+                  <span class="badge" :class="rpp(row.proj_profit_per_order / row.price * 100)"
+                        x-text="(row.proj_profit_per_order / row.price * 100).toFixed(1)+'%'"></span>
+                </template>
+                <template x-if="!(row.proj_profit_per_order !== null && row.price > 0)">
+                  <span style="color:#cbd5e1;">—</span>
+                </template>
+              </td>
+
+              <!-- RTS% -->
+              <td style="text-align:right;" :class="row.rts_pct === null ? 'null-warn' : ''">
                 <template x-if="editIdx === idx">
                   <input class="ii" type="number" step="0.1" min="0" max="100"
                          x-model="ev.rts_pct" placeholder="RTS%"
@@ -301,7 +317,7 @@
               </td>
 
               <!-- Item Value — editable inline -->
-              <td style="text-align:right;">
+              <td style="text-align:right;" :class="editIdx !== idx && row.item_value === null ? 'null-warn' : ''">
                 <template x-if="editIdx === idx">
                   <input class="ii" type="number" step="1" min="0"
                          x-model="ev.item_value" placeholder="Item Val."
@@ -366,14 +382,14 @@
                 <span class="badge" :class="pb(tot().proj_profit_per_order)"
                       x-text="md(tot().proj_profit_per_order)"></span>
               </td>
-              <td colspan="6"></td>
+              <td colspan="7"></td>
             </tr>
           </template>
         </tbody>
       </table>
 
       <div style="padding:7px 12px;font-size:10px;color:#94a3b8;border-top:1px solid #f1f5f9;">
-        One row per page · Dominant item used · Ship=₱37/proceed · COD Fee=Price×5%×1.12/delivered
+        One row per page · Dominant item used · Ship=₱37/proceed · COD Fee=Price×rate×(1+VAT)/delivered · Proj.%=/Order÷Price
       </div>
     </div>
   </div>
@@ -508,6 +524,15 @@
         rb(v){
           if(v==null||isNaN(v)) return 'bx';
           return v>45?'br':v>35?'bo':v>25?'by':'bg';
+        },
+        // Proj.% badge: /order ÷ price × 100
+        rpp(v){
+          if(v==null||isNaN(v)) return 'bx';
+          if(v < 5)  return 'br';
+          if(v < 10) return 'bo';
+          if(v < 15) return 'by';
+          if(v < 20) return 'bb';
+          return 'bg';
         },
         money(v){ return '₱'+Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); },
         md(v)   { return (v==null||isNaN(Number(v))) ? '—' : this.money(v); },
