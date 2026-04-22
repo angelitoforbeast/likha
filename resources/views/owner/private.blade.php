@@ -204,7 +204,7 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit):'')+(col.id==='proj_pct'&&row.proj_profit_per_order!==null&&row.price>0?rppStyle(row.proj_profit_per_order/row.price*100):'')">
+                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit):'')+(col.id==='proj_pct'&&row.proj_profit_per_order!==null&&row.price>0?rppStyle(row.proj_profit_per_order/row.price*100):'')">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -314,7 +314,7 @@
                         <div>
                           <template x-if="row.rts_pct !== null">
                             <div>
-                              <span class="badge" :class="rb(row.rts_pct)"
+                              <span style="font-weight:700;color:#000;"
                                     x-text="row.rts_pct.toFixed(1)+'%'"></span>
                               <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
                                    x-text="'from ' + row.settings_date"></div>
@@ -667,6 +667,8 @@
       pbColor(v){ return '#000'; },
       rppStyle(v){ if(v==null||isNaN(Number(v))) return ''; if(v<10) return 'background:#ff0000;'; if(v<20) return 'background:#00ffff;'; return 'background:#00ff00;'; },
       rppColor(v){ return '#000'; },
+      // Set RTS%: higher RTS = worse → >35 red, >20 cyan, ≤20 green
+      rbStyle(v){ if(v==null||isNaN(Number(v))) return ''; return v>35?'background:#ff0000;':v>20?'background:#00ffff;':'background:#00ff00;'; },
       rb(v){ if(v==null||isNaN(v)) return 'bx'; return v>45?'br':v>35?'bo':v>25?'by':'bg'; },
       dlb(v){ if(v==null||isNaN(v)) return 'bx'; return v>=80?'bg':v>=60?'by':v>=40?'bo':'br'; },
       rpp(v){ if(v==null||isNaN(v)) return 'bx'; if(v<5) return 'br'; if(v<10) return 'bo'; if(v<15) return 'by'; if(v<20) return 'bb'; return 'bg'; },
