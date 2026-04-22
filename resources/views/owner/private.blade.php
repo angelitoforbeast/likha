@@ -42,12 +42,12 @@
       min-width:900px;
     }
 
-    /* Table */
-    table { width:100%; border-collapse:collapse; }
+    /* Table — MUST use separate borders for sticky z-index to work */
+    table { width:100%; border-collapse:separate; border-spacing:0; }
 
-    /* Sticky thead — sticks to top of #scroll (the actual scroll container) */
+    /* Sticky thead — high z-index so rows never bleed over it */
     thead th {
-      position:sticky; top:0; z-index:5;
+      position:sticky; top:0; z-index:30;
       background:#1e293b; color:#94a3b8;
       font-size:11px; font-weight:600;
       text-transform:uppercase; letter-spacing:.05em;
@@ -60,13 +60,18 @@
     thead th.s:hover { background:#263347; color:#e2e8f0; }
     thead th.active { color:#60a5fa; }
 
-    /* Total row — sticky at bottom */
-    tr.total-row { background:#f1f5f9; border-top:2px solid #cbd5e1 !important; }
-    tr.total-row td { font-weight:700; color:#0f172a; position:sticky; bottom:0; background:#f1f5f9; z-index:4; }
+    /* Total row — sticky at bottom, z-index below header but above rows */
+    tr.total-row td {
+      position:sticky; bottom:0; z-index:20;
+      font-weight:700; color:#0f172a;
+      background:#f1f5f9;
+      border-top:2px solid #cbd5e1;
+    }
 
-    tbody tr { border-bottom:1px solid #f1f5f9; }
-    tbody tr:hover { background:#f8fafc; }
-    tbody tr.editing-row { background:#eff6ff !important; }
+    /* Body row borders on td (required with border-collapse:separate) */
+    tbody td { border-bottom:1px solid #f1f5f9; }
+    tbody tr:hover td { background:#f8fafc; }
+    tbody tr.editing-row td { background:#eff6ff !important; }
 
     td {
       font-size:12.5px; color:#374151;
