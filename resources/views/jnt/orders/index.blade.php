@@ -226,9 +226,14 @@
           @endif
           <div class="text-xs text-amber-600 mt-1">Item Mapping is ON — varies per item.</div>
         @else
-          <div class="font-medium">{{ data_get($senderPreview,'sender_name','-') }}</div>
-          @if(empty($selectedPage))
-            <div class="text-xs muted mt-1">Tip: Select a Page para makita yung mapped SENDER_NAME.</div>
+          @php $snVal = data_get($senderPreview,'sender_name',''); @endphp
+          @if($snVal !== '')
+            <div class="font-medium">{{ $snVal }}</div>
+          @elseif(empty($selectedPage))
+            <div class="text-xs text-gray-400 mt-1">Select a Page para makita yung mapped SENDER_NAME.</div>
+          @else
+            <div class="font-semibold text-red-600">⚠ No mapping found</div>
+            <div class="text-xs text-red-500 mt-1">Walang SENDER_NAME sa page_sender_mappings para sa page na ito. Mag-fa-fail ang batch.</div>
           @endif
         @endif
       </div>

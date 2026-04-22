@@ -99,16 +99,16 @@ class JntOrderUiController extends Controller
         }
 
         return (object) [
-            'sender_name'      => $mappedSenderName ?: (config('jnt.sender.name') ?? ''),
+            'sender_name'      => $mappedSenderName ?? '',
             'varies_per_item'  => $variesPerItem,
             'sender_names'     => $senderNames,
-            'sender_phone'     => $addrRow->jnt_sender_phone   ?? (config('jnt.sender.phone') ?? ''),
-            'sender_prov'      => $addrRow->jnt_sender_prov    ?? (config('jnt.sender.prov') ?? ''),
-            'sender_city'      => $addrRow->jnt_sender_city    ?? (config('jnt.sender.city') ?? ''),
-            'sender_brgy'      => $addrRow->jnt_sender_area    ?? (config('jnt.sender.area') ?? ''),
-            'sender_address'   => $addrRow->jnt_sender_address ?? (config('jnt.sender.address') ?? ''),
-            'source_mapping'   => $variesPerItem ? 'item_mappings (varies per item)' : ($mappedSenderName ? 'page_sender_mappings' : 'config_default'),
-            'source_addr'      => $addrRow ? 'sender_addresses' : 'config_default',
+            'sender_phone'     => $addrRow->jnt_sender_phone   ?? '',
+            'sender_prov'      => $addrRow->jnt_sender_prov    ?? '',
+            'sender_city'      => $addrRow->jnt_sender_city    ?? '',
+            'sender_brgy'      => $addrRow->jnt_sender_area    ?? '',
+            'sender_address'   => $addrRow->jnt_sender_address ?? '',
+            'source_mapping'   => $variesPerItem ? 'item_mappings (varies per item)' : ($mappedSenderName ? 'page_sender_mappings' : 'no_mapping'),
+            'source_addr'      => $addrRow ? 'sender_addresses' : 'no_address',
         ];
     });
 
