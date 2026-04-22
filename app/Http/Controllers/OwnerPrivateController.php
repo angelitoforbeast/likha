@@ -1342,6 +1342,7 @@ class OwnerPrivateController extends Controller
                 ->orderBy('page_name')
                 ->orderBy('item_name')
                 ->orderByDesc('effective_date')
+                ->orderByDesc('id')   // tiebreaker: latest insert wins when same date
                 ->get(['page_name', 'item_name', 'price', 'rts_pct', 'effective_date']);
 
             foreach ($settingRows as $s) {
