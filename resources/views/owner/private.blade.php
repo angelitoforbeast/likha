@@ -210,8 +210,13 @@
                 <div style="font-weight:600;color:#1e293b;white-space:normal;line-height:1.35;"
                      x-text="sq(row.item_name)"></div>
                 <template x-for="s in (row.secondary_items||[])" :key="s.item_name">
-                  <div style="font-size:10px;color:#94a3b8;line-height:1.4;"
-                       x-text="sq(s.item_name)+' ('+s.total_orders+')'"></div>
+                  <div style="font-size:10px;color:#94a3b8;line-height:1.4;">
+                    <span x-text="sq(s.item_name)+' ('+s.total_orders+')'"></span>
+                    <!-- show price if it differs from dominant -->
+                    <template x-if="s.price && s.price !== row.price">
+                      <span style="color:#cbd5e1;" x-text="' · '+money(s.price)"></span>
+                    </template>
+                  </div>
                 </template>
               </td>
 
@@ -261,23 +266,44 @@
                 </template>
               </td>
 
-              <!-- Price -->
+              <!-- Price — auto from COD, always read-only -->
+              <td style="text-align:right;">
+                <template x-if="row.price !== null">
+                  <div>
+                    <span style="color:#374151;" x-text="money(row.price)"></span>
+                    <template x-if="row.price_is_range">
+                      <div style="font-size:9px;color:#94a3b8;"
+                           x-text="'↕ ' + money(row.price_min)"></div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="row.price === null">
+                  <span style="color:#94a3b8;font-size:11px;">—</span>
+                </template>
+              </td>
+
+              <!-- Item Value — editable inline -->
               <td style="text-align:right;">
                 <template x-if="editIdx === idx">
                   <input class="ii" type="number" step="1" min="0"
-                         x-model="ev.price" placeholder="Price"
+                         x-model="ev.item_value" placeholder="Item Val."
                          @keydown.enter="save()" @keydown.escape="cancel()"
                          style="width:78px;">
                 </template>
                 <template x-if="editIdx !== idx">
-                  <span :style="row.price===null?'color:#fca5a5;font-style:italic;':'color:#374151;'"
-                        x-text="row.price!==null ? money(row.price) : '—'"></span>
+                  <template x-if="row.item_value !== null">
+                    <div>
+                      <span style="color:#64748b;" x-text="money(row.item_value)"></span>
+                      <template x-if="row.item_value_source === 'cogs'">
+                        <div style="font-size:9px;color:#cbd5e1;">cogs</div>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="row.item_value === null">
+                    <span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>
+                  </template>
                 </template>
               </td>
-
-              <!-- Item Value -->
-              <td style="text-align:right;color:#64748b;"
-                  x-text="row.item_value!==null ? money(row.item_value) : '—'"></td>
 
               <!-- Shipping -->
               <td style="text-align:right;color:#64748b;"
@@ -323,7 +349,7 @@
         })(),
 
         rows:[], loading:false, editIdx:-1,
-        ev:{ price:'', rts_pct:'' },
+        ev:{ item_value:'', rts_pct:'' },
         saving:false, saveMsg:'',
         sortCol:'', sortDir:'desc',
 
@@ -360,14 +386,18 @@
         // ── edit ─────────────────────────────────────────────────────────────
         startEdit(idx, row){
           this.editIdx=idx;
-          this.ev = { price: row.price!==null ? row.price : '', rts_pct: row.rts_pct!==null ? row.rts_pct : '' };
+          this.ev = {
+            item_value: row.item_value !== null ? row.item_value : '',
+            rts_pct:    row.rts_pct   !== null ? row.rts_pct   : '',
+          };
           this.saveMsg='';
         },
-        cancel(){ this.editIdx=-1; this.ev={price:'',rts_pct:''}; },
+        cancel(){ this.editIdx=-1; this.ev={item_value:'',rts_pct:''}; },
         async save(){
-          const price=parseFloat(this.ev.price), rts=parseFloat(this.ev.rts_pct);
-          if(isNaN(price)||price<0)            { alert('Valid Price needed.'); return; }
-          if(isNaN(rts)||rts<0||rts>100)       { alert('Valid RTS% needed (0–100).'); return; }
+          const itemVal = parseFloat(this.ev.item_value);
+          const rts     = parseFloat(this.ev.rts_pct);
+          if(isNaN(itemVal)||itemVal<0)         { alert('Valid Item Value needed (≥ 0).'); return; }
+          if(isNaN(rts)||rts<0||rts>100)        { alert('Valid RTS% needed (0–100).'); return; }
           const row=this.rows[this.editIdx];
           this.saving=true;
           try{
@@ -375,7 +405,7 @@
               method:'POST',
               headers:{'Content-Type':'application/json','X-CSRF-TOKEN':'{{ csrf_token() }}'},
               body:JSON.stringify({ page_name:row.page_name, item_name:row.item_name,
-                                    price, rts_pct:rts, effective_date:this.date }),
+                                    item_value:itemVal, rts_pct:rts, effective_date:this.date }),
             });
             if((await r.json()).ok){
               this.cancel();

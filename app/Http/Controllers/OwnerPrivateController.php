@@ -1248,12 +1248,16 @@ class OwnerPrivateController extends Controller
         }
 
         // ── fee rates ─────────────────────────────────────────────────────────
-        // COD fee = Price × 0.05 × 1.12, per DELIVERED order only
-        $codFeeRate   = 0.05;
-        // Shipping = fixed per PROCEED order (all proceed orders pay shipping)
-        $shippingFee  = FeeSetting::getRate('shipping_per_order', $host, $date) ?? 37.0;
+        $codFeeRate  = 0.05;   // COD fee = Price × 0.05 × 1.12, per delivered only
+        $shippingFee = FeeSetting::getRate('shipping_per_order', $host, $date) ?? 37.0;
+
+        // ── COD column detection ───────────────────────────────────────────────
+        $codCol   = $pickCol('macro_output', ['COD','cod','Cod']) ?? 'COD';
+        $moCod    = 'mo.'.$quote($codCol);
+        $codClean = $castMoney($moCod);
 
         // ── macro_output: grouped by page + item for the date ─────────────────
+        // Also pulls max/min COD per item so we can auto-detect selling price
         $moRows = DB::table('macro_output as mo')
             ->whereRaw("$dateExpr = ?", [$date])
             ->whereRaw("$pageTrim != ''")
@@ -1262,7 +1266,9 @@ class OwnerPrivateController extends Controller
                 $pageKey  AS page_key,
                 $itemTrim AS item_name,
                 COUNT(*)  AS total_orders,
-                SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders
+                SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders,
+                MAX($codClean) AS max_cod,
+                MIN(CASE WHEN $codClean > 0 THEN $codClean ELSE NULL END) AS min_cod
             ")
             ->groupByRaw("$pageKey, $pageTrim, $itemTrim")
             ->get();
@@ -1286,6 +1292,8 @@ class OwnerPrivateController extends Controller
                 'item_name'      => (string)$row->item_name,
                 'total_orders'   => (int)$row->total_orders,
                 'proceed_orders' => (int)$row->proceed_orders,
+                'max_cod'        => (float)($row->max_cod ?? 0),
+                'min_cod'        => (float)($row->min_cod ?? $row->max_cod ?? 0),
             ];
         }
 
@@ -1324,6 +1332,8 @@ class OwnerPrivateController extends Controller
         }
 
         // ── page_item_settings: latest per page+item ≤ date ──────────────────
+        // NOTE: `price` column is repurposed to store item_value (COGS override).
+        // Actual selling price comes from macro_output COD column (auto-detected).
         $settingsMap = [];
         if (Schema::hasTable('page_item_settings')) {
             $settingRows = DB::table('page_item_settings')
@@ -1337,7 +1347,7 @@ class OwnerPrivateController extends Controller
                 $k = strtolower(trim((string)$s->page_name)).'||'.strtolower(trim((string)$s->item_name));
                 if (!isset($settingsMap[$k])) {
                     $settingsMap[$k] = [
-                        'price'          => (float)$s->price,
+                        'item_value'     => (float)$s->price,   // price col repurposed
                         'rts_pct'        => (float)$s->rts_pct,
                         'effective_date' => (string)$s->effective_date,
                     ];
@@ -1350,68 +1360,74 @@ class OwnerPrivateController extends Controller
         foreach ($pageGroups as $pk => $pg) {
             if (empty($pg['items'])) continue;
 
-            $dominant      = $pg['items'][0];
-            $secondary     = array_slice($pg['items'], 1);
-            $dominantKey   = strtolower(trim($dominant['item_name']));
-            $settingKey    = $pk.'||'.$dominantKey;
+            $dominant    = $pg['items'][0];
+            $secondary   = array_slice($pg['items'], 1);
+            $dominantKey = strtolower(trim($dominant['item_name']));
+            $settingKey  = $pk.'||'.$dominantKey;
 
             $adspent       = $adsMap[$pk] ?? 0.0;
             $totalOrders   = (int)$pg['total_orders'];
             $proceedOrders = (int)$pg['proceed_orders'];
-            $itemValue     = $cogsMap[$dominantKey] ?? null;
-            $settings      = $settingsMap[$settingKey] ?? null;
-            $price         = $settings ? (float)$settings['price'] : null;
-            $rtsPct        = $settings ? (float)$settings['rts_pct'] : null;
+
+            // Price = auto from COD in macro_output (dominant item)
+            $price    = (float)($dominant['max_cod'] ?? 0);
+            $priceMin = (float)($dominant['min_cod'] ?? $price);
+            $priceIsRange = $priceMin > 0 && abs($priceMin - $price) > 0.01;
+
+            // Item value = page_item_settings override (priority) or cogs table fallback
+            $settings  = $settingsMap[$settingKey] ?? null;
+            $itemValue = $settings
+                ? (float)$settings['item_value']
+                : ($cogsMap[$dominantKey] ?? null);
+            $rtsPct    = $settings ? (float)$settings['rts_pct'] : null;
 
             $cpp        = ($totalOrders > 0 && $adspent > 0) ? $adspent / $totalOrders   : null;
             $proceedCpp = ($proceedOrders > 0 && $adspent > 0) ? $adspent / $proceedOrders : null;
 
-            // COD fee per delivered order = Price × 0.05 × 1.12
-            $codFeePerDelivered = ($price !== null) ? round($price * $codFeeRate * 1.12, 4) : null;
+            // COD fee per delivered = Price × 5% × 1.12
+            $codFeePerDelivered = $price > 0 ? round($price * $codFeeRate * 1.12, 4) : null;
 
-            // Projected Profit:
-            //   Revenue  = Proceed × Price × (1-RTS)
-            //   Shipping = Proceed × shippingFee              ← all proceed orders
-            //   COGS     = Proceed × (1-RTS) × ItemValue      ← delivered only
-            //   Adspent  = exact
-            //   COD fee  = Proceed × (1-RTS) × Price×0.05×1.12 ← delivered only
-            $projProfit         = null;
-            $projProfitPerOrder = null;
-            if ($price !== null && $rtsPct !== null && $itemValue !== null) {
+            // Projected Profit (needs: price from COD, item_value, rts_pct)
+            $projProfit = $projProfitPerOrder = null;
+            if ($price > 0 && $rtsPct !== null && $itemValue !== null) {
                 $rts           = $rtsPct / 100.0;
                 $deliverFactor = 1.0 - $rts;
                 $projProfit =
-                    $proceedOrders * $price * $deliverFactor                 // revenue
-                    - $proceedOrders * $shippingFee                          // shipping (all proceed)
-                    - $proceedOrders * $deliverFactor * $itemValue           // COGS (delivered)
-                    - $adspent                                               // adspent
+                    $proceedOrders * $price * $deliverFactor                      // revenue
+                    - $proceedOrders * $shippingFee                               // shipping (all proceed)
+                    - $proceedOrders * $deliverFactor * $itemValue                // COGS (delivered)
+                    - $adspent                                                    // adspent
                     - $proceedOrders * $deliverFactor * ($price * $codFeeRate * 1.12); // COD fee (delivered)
 
                 $projProfitPerOrder = $proceedOrders > 0 ? $projProfit / $proceedOrders : null;
             }
 
             $result[] = [
-                'page_name'              => $pg['page_label'],
-                'page_key'               => $pk,
-                'item_name'              => $dominant['item_name'],
-                'secondary_items'        => array_map(fn($i) => [
+                'page_name'             => $pg['page_label'],
+                'page_key'              => $pk,
+                'item_name'             => $dominant['item_name'],
+                'secondary_items'       => array_map(fn($i) => [
                     'item_name'    => $i['item_name'],
                     'total_orders' => $i['total_orders'],
+                    'price'        => (float)($i['max_cod'] ?? 0),  // each item's actual price
                 ], $secondary),
-                'adspent'                => $adspent,
-                'orders'                 => $totalOrders,
-                'cpp'                    => $cpp,
-                'proceed_orders'         => $proceedOrders,
-                'proceed_cpp'            => $proceedCpp,
-                'projected_profit'       => $projProfit,
-                'proj_profit_per_order'  => $projProfitPerOrder,
-                'rts_pct'                => $rtsPct,
-                'price'                  => $price,
-                'item_value'             => $itemValue,
-                'shipping_fee'           => $shippingFee,
-                'cod_fee'                => $codFeePerDelivered,
-                'settings_date'          => $settings ? $settings['effective_date'] : null,
-                'has_settings'           => $settings !== null,
+                'adspent'               => $adspent,
+                'orders'                => $totalOrders,
+                'cpp'                   => $cpp,
+                'proceed_orders'        => $proceedOrders,
+                'proceed_cpp'           => $proceedCpp,
+                'projected_profit'      => $projProfit,
+                'proj_profit_per_order' => $projProfitPerOrder,
+                'rts_pct'               => $rtsPct,
+                'price'                 => $price > 0 ? $price : null,
+                'price_min'             => $priceIsRange ? $priceMin : null,
+                'price_is_range'        => $priceIsRange,
+                'item_value'            => $itemValue,
+                'item_value_source'     => $settings ? 'manual' : ($itemValue !== null ? 'cogs' : null),
+                'shipping_fee'          => $shippingFee,
+                'cod_fee'               => $codFeePerDelivered,
+                'settings_date'         => $settings ? $settings['effective_date'] : null,
+                'has_settings'          => $settings !== null,
             ];
         }
 
@@ -1427,7 +1443,7 @@ class OwnerPrivateController extends Controller
         $validated = $request->validate([
             'page_name'      => 'required|string|max:255',
             'item_name'      => 'required|string|max:255',
-            'price'          => 'required|numeric|min:0',
+            'item_value'     => 'required|numeric|min:0',   // stored in `price` column
             'rts_pct'        => 'required|numeric|min:0|max:100',
             'effective_date' => 'required|date',
         ]);
@@ -1435,7 +1451,7 @@ class OwnerPrivateController extends Controller
         DB::table('page_item_settings')->insert([
             'page_name'      => trim($validated['page_name']),
             'item_name'      => trim($validated['item_name']),
-            'price'          => $validated['price'],
+            'price'          => $validated['item_value'],   // price col repurposed as item_value
             'rts_pct'        => $validated['rts_pct'],
             'effective_date' => $validated['effective_date'],
             'created_at'     => now(),
