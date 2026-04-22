@@ -357,10 +357,15 @@
                   <template x-if="col.id==='item_val'">
                     <span>
                       <template x-if="editIdx === idx">
-                        <input class="ii" type="number" step="1" min="0"
-                               x-model="ev.item_value" placeholder="Item Val."
-                               @keydown.enter="save()" @keydown.escape="cancel()"
-                               style="width:78px;">
+                        <div style="display:flex;flex-direction:column;gap:4px;min-width:140px;">
+                          <input class="ii" type="number" step="1" min="0"
+                                 x-model="ev.item_value" placeholder="Item Val."
+                                 @keydown.enter="save()" @keydown.escape="cancel()"
+                                 style="width:78px;">
+                          <input class="ii-comment" type="text" maxlength="500"
+                                 x-model="ev.comment" placeholder="Comment (optional)"
+                                 @keydown.enter="save()" @keydown.escape="cancel()">
+                        </div>
                       </template>
                       <template x-if="editIdx !== idx">
                         <span>
