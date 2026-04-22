@@ -60,9 +60,9 @@
     thead th.s:hover { background:#263347; color:#e2e8f0; }
     thead th.active { color:#60a5fa; }
 
-    /* Total row */
-    tr.total-row { background:#f8fafc; border-top:2px solid #e2e8f0 !important; }
-    tr.total-row td { font-weight:700; color:#0f172a; }
+    /* Total row — sticky at bottom */
+    tr.total-row { background:#f1f5f9; border-top:2px solid #cbd5e1 !important; }
+    tr.total-row td { font-weight:700; color:#0f172a; position:sticky; bottom:0; background:#f1f5f9; z-index:4; }
 
     tbody tr { border-bottom:1px solid #f1f5f9; }
     tbody tr:hover { background:#f8fafc; }
