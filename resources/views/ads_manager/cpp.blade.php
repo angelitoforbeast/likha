@@ -579,7 +579,7 @@
       const rows = Array.from(table.querySelectorAll('tr'));
       const copiedText = rows.map(row => {
         return Array.from(row.querySelectorAll('th, td'))
-          .map(cell => cell.textContent.replace(/₱/g, '').trim())
+          .map(cell => cell.textContent.replace(/₱/g, '').replace(/\n+/g, ', ').trim())
           .join('\t');
       }).join('\n');
 
@@ -595,7 +595,7 @@
       const rows = Array.from(table.querySelectorAll('tr'));
       const copiedText = rows.map(row => {
         return Array.from(row.querySelectorAll('th, td'))
-          .map(cell => cell.textContent.replace(/₱/g, '').trim())
+          .map(cell => cell.textContent.replace(/₱/g, '').replace(/\n+/g, ', ').trim())
           .join('\t');
       }).join('\n');
 
