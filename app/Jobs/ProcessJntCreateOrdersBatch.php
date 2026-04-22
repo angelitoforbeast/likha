@@ -73,16 +73,16 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
 
             // Apply force uppercase if enabled on the account
             if ($client->isForceUppercase()) {
-                $fullName = mb_strtoupper($fullName);
-                $addr1    = mb_strtoupper($addr1);
-                $prov     = mb_strtoupper($prov);
-                $city     = mb_strtoupper($city);
-                $brgy     = mb_strtoupper($brgy);
-                $itemName = mb_strtoupper($itemName);
+                $fullName     = mb_strtoupper($fullName);
+                $addr1        = mb_strtoupper($addr1);
+                $prov         = mb_strtoupper($prov);
+                $city         = mb_strtoupper($city);
+                $brgy         = mb_strtoupper($brgy);
+                $origItemName = mb_strtoupper($origItemName);
             }
 
             // Basic validation
-            if ($fullName === '' || $phone === '' || $addr1 === '' || $prov === '' || $city === '' || $brgy === '' || $itemName === '' || $cod === '') {
+            if ($fullName === '' || $phone === '' || $addr1 === '' || $prov === '' || $city === '' || $brgy === '' || $origItemName === '' || $cod === '') {
                 $this->storeFail($run, $macroId, [
                     'missing' => [
                         'FULL_NAME' => $fullName === '',
@@ -91,7 +91,7 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
                         'PROVINCE' => $prov === '',
                         'CITY' => $city === '',
                         'BARANGAY' => $brgy === '',
-                        'ITEM_NAME' => $itemName === '',
+                        'ITEM_NAME' => $origItemName === '',
                         'COD' => $cod === '',
                     ]
                 ], 'MISSING_REQUIRED_FIELDS');
@@ -137,10 +137,10 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
                 'isInsured' => '0',
 
                 'items' => [[
-                    'itemname' => $itemName,
+                    'itemname' => $origItemName,
                     'number' => (string) $qty,
                     'itemvalue' => (string)$cod,
-                    'desc' => $itemName,
+                    'desc' => $origItemName,
                 ]],
             ];
 

@@ -77,6 +77,7 @@ class CreateJntOrder implements ShouldQueue
             $norm['BARANGAY']     = mb_strtoupper((string)($norm['BARANGAY'] ?? ''));
             $norm['item_name']    = mb_strtoupper((string)($norm['item_name'] ?? ''));
             $norm['ITEM_NAME']    = mb_strtoupper((string)($norm['ITEM_NAME'] ?? ''));
+            $origItemName         = mb_strtoupper($origItemName);
             $itemName             = mb_strtoupper($itemName);
         }
 
@@ -94,7 +95,7 @@ class CreateJntOrder implements ShouldQueue
 
         $payload = JntPayloadBuilder::buildCreateFromMacroOutput($norm, array_merge([
             'txlogisticid'       => $tx,
-            'remark'             => $itemName,
+            'remark'             => $origItemName,
             'eccompanyid'        => $client->getEccompanyid(),
             'customerid'         => $client->getCustomerid(),
             'pickup_days_offset' => (int) AppSetting::get('jnt_pickup_days_offset', $client->getPickupDaysOffset()),

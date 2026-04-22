@@ -48,15 +48,14 @@ class JntPayloadBuilder
         $cod = preg_replace('/[^\d.]/', '', $cod);
         if ($cod === '' || !is_numeric($cod)) $cod = '0';
 
-        // Item name — parse "N x ITEM" prefix for quantity
-        $itemName = trim((string)($row['item_name'] ?? $row['ITEM_NAME'] ?? 'Item'));
-        if (preg_match('/^(\d+)\s*[xX]\s+(.+)$/u', $itemName, $m)) {
-            $qty      = max(1, (int) $m[1]);
-            $itemName = trim($m[2]);
+        // Item name — parse "N x ITEM" prefix for quantity only; keep original name for payload
+        $origItemName = trim((string)($row['item_name'] ?? $row['ITEM_NAME'] ?? 'Item'));
+        if (preg_match('/^(\d+)\s*[xX]\s+(.+)$/u', $origItemName, $m)) {
+            $qty = max(1, (int) $m[1]);
         } else {
             $qty = 1;
         }
-        if ($itemName === '') $itemName = 'Item';
+        if ($origItemName === '') $origItemName = 'Item';
 
         // Weight (kg)
         $weight = (string)($opts['weight'] ?? '0.5');
@@ -132,10 +131,10 @@ class JntPayloadBuilder
             'isInsured'       => '0',
 
             'items' => [[
-                'itemname'  => $itemName !== '' ? $itemName : 'Item',
+                'itemname'  => $origItemName,
                 'number'    => (string) $qty,
                 'itemvalue' => (string)$cod,
-                'desc'      => $itemName !== '' ? $itemName : 'Item',
+                'desc'      => $origItemName,
             ]],
         ];
     }
