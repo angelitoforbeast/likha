@@ -1365,17 +1365,54 @@ class OwnerPrivateController extends Controller
                 ->orderBy('item_name')
                 ->orderByDesc('effective_date')
                 ->orderByDesc('id')   // tiebreaker: latest insert wins when same date
-                ->get(['page_name', 'item_name', 'price', 'rts_pct', 'effective_date']);
+                ->get(['page_name', 'item_name', 'price', 'rts_pct', 'effective_date', 'comment']);
 
             foreach ($settingRows as $s) {
                 $k = strtolower(trim((string)$s->page_name)).'||'.strtolower(trim((string)$s->item_name));
                 if (!isset($settingsMap[$k])) {
                     $settingsMap[$k] = [
-                        'item_value'     => (float)$s->price,   // price col repurposed
+                        'item_value'     => (float)$s->price,
                         'rts_pct'        => (float)$s->rts_pct,
                         'effective_date' => (string)$s->effective_date,
+                        'comment'        => (string)($s->comment ?? ''),
                     ];
                 }
+            }
+        }
+
+        // ── page_sender_mappings → from_jnts stats (90-day window) ───────────
+        $senderMap = [];
+        foreach (DB::table('page_sender_mappings')->select('PAGE','item_name','SENDER_NAME')->get() as $m) {
+            $pk = strtolower(trim((string)$m->PAGE));
+            if (!empty($m->item_name)) {
+                $senderMap[$pk.'||'.strtolower(trim((string)$m->item_name))] = trim((string)$m->SENDER_NAME);
+            } else {
+                $senderMap[$pk] = $senderMap[$pk] ?? trim((string)$m->SENDER_NAME);
+            }
+        }
+
+        $jntStatsMap = [];
+        if (!empty($senderMap)) {
+            $jntFrom = date('Y-m-d', strtotime($date.' -90 days'));
+            $jntRows = DB::table('from_jnts')
+                ->whereBetween('submission_time', [$jntFrom.' 00:00:00', $date.' 23:59:59'])
+                ->whereNotNull('sender')->where('sender','!=','')
+                ->selectRaw("
+                    LOWER(TRIM(sender)) AS sender_key,
+                    COUNT(*)            AS total,
+                    SUM(CASE WHEN LOWER(status) LIKE '%return%' OR LOWER(status) LIKE '%rts%'  THEN 1 ELSE 0 END) AS rts_cnt,
+                    SUM(CASE WHEN LOWER(status) LIKE '%deliver%'                               THEN 1 ELSE 0 END) AS del_cnt,
+                    SUM(CASE WHEN LOWER(status) LIKE '%transit%'                               THEN 1 ELSE 0 END) AS transit_cnt
+                ")
+                ->groupByRaw("LOWER(TRIM(sender))")
+                ->get();
+            foreach ($jntRows as $r) {
+                $jntStatsMap[(string)$r->sender_key] = [
+                    'total'       => (int)$r->total,
+                    'rts_cnt'     => (int)$r->rts_cnt,
+                    'del_cnt'     => (int)$r->del_cnt,
+                    'transit_cnt' => (int)$r->transit_cnt,
+                ];
             }
         }
 
@@ -1405,11 +1442,28 @@ class OwnerPrivateController extends Controller
             );
 
             // Item value = page_item_settings override (priority) or cogs table fallback
-            $settings  = $settingsMap[$settingKey] ?? null;
-            $itemValue = $settings
+            $settings   = $settingsMap[$settingKey] ?? null;
+            $itemValue  = $settings
                 ? (float)$settings['item_value']
                 : ($cogsMap[$dominantKey] ?? null);
-            $rtsPct    = $settings ? (float)$settings['rts_pct'] : null;
+            $rtsPct     = $settings ? (float)$settings['rts_pct'] : null;
+            $rtsComment = $settings ? $settings['comment'] : null;
+
+            // JNT stats — match page+item → sender → from_jnts
+            $senderName  = $senderMap[$settingKey] ?? $senderMap[$pk] ?? null;
+            $jntStats    = $senderName ? ($jntStatsMap[strtolower($senderName)] ?? null) : null;
+            $jntRtsPct = $jntDelPct = $jntTransitPct = null;
+            $jntRtsCnt = $jntDelCnt = $jntTransitCnt = $jntTotal = null;
+            if ($jntStats && $jntStats['total'] > 0) {
+                $t = $jntStats['total'];
+                $jntRtsPct     = round($jntStats['rts_cnt']     / $t * 100, 1);
+                $jntDelPct     = round($jntStats['del_cnt']      / $t * 100, 1);
+                $jntTransitPct = round($jntStats['transit_cnt']  / $t * 100, 1);
+                $jntRtsCnt     = $jntStats['rts_cnt'];
+                $jntDelCnt     = $jntStats['del_cnt'];
+                $jntTransitCnt = $jntStats['transit_cnt'];
+                $jntTotal      = $t;
+            }
 
             $cpp        = ($totalOrders > 0 && $adspent > 0) ? $adspent / $totalOrders   : null;
             $proceedCpp = ($proceedOrders > 0 && $adspent > 0) ? $adspent / $proceedOrders : null;
@@ -1459,6 +1513,14 @@ class OwnerPrivateController extends Controller
                 'cod_fee'               => $codFeePerDelivered,
                 'settings_date'         => $settings ? $settings['effective_date'] : null,
                 'has_settings'          => $settings !== null,
+                'rts_comment'           => $rtsComment,
+                'jnt_rts_pct'           => $jntRtsPct,
+                'jnt_rts_cnt'           => $jntRtsCnt,
+                'jnt_del_pct'           => $jntDelPct,
+                'jnt_del_cnt'           => $jntDelCnt,
+                'jnt_transit_pct'       => $jntTransitPct,
+                'jnt_transit_cnt'       => $jntTransitCnt,
+                'jnt_total'             => $jntTotal,
             ];
         }
 
@@ -1474,18 +1536,20 @@ class OwnerPrivateController extends Controller
         $validated = $request->validate([
             'page_name'      => 'required|string|max:255',
             'item_name'      => 'required|string|max:255',
-            'item_value'     => 'required|numeric|min:0',   // stored in `price` column
+            'item_value'     => 'required|numeric|min:0',
             'rts_pct'        => 'required|numeric|min:0|max:100',
             'effective_date' => 'required|date',
+            'comment'        => 'nullable|string|max:500',
         ]);
 
         try {
             DB::table('page_item_settings')->insert([
                 'page_name'      => trim($validated['page_name']),
                 'item_name'      => trim($validated['item_name']),
-                'price'          => $validated['item_value'],   // price col repurposed as item_value
+                'price'          => $validated['item_value'],
                 'rts_pct'        => $validated['rts_pct'],
                 'effective_date' => $validated['effective_date'],
+                'comment'        => $validated['comment'] ?? null,
                 'created_at'     => now(),
                 'updated_at'     => now(),
             ]);
