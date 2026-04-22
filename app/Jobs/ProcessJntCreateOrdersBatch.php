@@ -199,26 +199,32 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
     }
 
     /**
-     * Look up sender name from page_sender_mappings (page+item first, then page-only),
-     * then fall back to config/empty. Also pulls sender address from sender_addresses.
+     * Look up sender name from page_sender_mappings.
+     * Mirrors CreateJntOrder: checks use_item_sender_mapping toggle,
+     * then does exactly ONE lookup — no fallback between modes.
      */
     protected function resolveSenderOpts(string $page, string $itemName): array
     {
         $senderName = null;
 
         if ($page !== '' && Schema::hasTable('page_sender_mappings')) {
-            // 1) Try page + item name
-            if ($itemName !== '') {
+            // Check use_item_sender_mapping toggle on this page's JNT account
+            $useItemMapping = false;
+            $acctMapping = \App\Models\PageJntMapping::with('account')->where('page', $page)->first();
+            if ($acctMapping && $acctMapping->account) {
+                $useItemMapping = (bool) $acctMapping->account->use_item_sender_mapping;
+            }
+
+            if ($useItemMapping && $itemName !== '') {
+                // Item mapping ON: item+page lookup only — no fallback
                 $senderName = DB::table('page_sender_mappings')
                     ->where('PAGE', $page)
                     ->where('item_name', $itemName)
                     ->whereNotNull('item_name')
                     ->orderByDesc('id')
                     ->value('SENDER_NAME');
-            }
-
-            // 2) Fallback: page only (no item_name)
-            if (!$senderName) {
+            } else {
+                // Item mapping OFF: page-only lookup only — no fallback
                 $senderName = DB::table('page_sender_mappings')
                     ->where('PAGE', $page)
                     ->whereNull('item_name')
@@ -227,7 +233,7 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
             }
         }
 
-        // No fallback — if not found, fail the order with a clear error
+        // No fallback at all — fail explicitly if not found
         if (!$senderName) {
             throw new \RuntimeException("SENDER_NAME_NOT_FOUND: no page_sender_mappings entry for page='{$page}' item='{$itemName}'");
         }
