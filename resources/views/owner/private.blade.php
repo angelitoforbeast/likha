@@ -34,18 +34,18 @@
     }
 
     /* ── Table card ── */
+    /* NOTE: no overflow:hidden — it breaks position:sticky on thead */
     .card {
       background:#fff;
       border-radius:10px;
       box-shadow:0 1px 4px rgba(0,0,0,.09);
       min-width:900px;
-      overflow:hidden;
     }
 
     /* Table */
     table { width:100%; border-collapse:collapse; }
 
-    /* Sticky thead — sticks to top of #scroll */
+    /* Sticky thead — sticks to top of #scroll (the actual scroll container) */
     thead th {
       position:sticky; top:0; z-index:5;
       background:#1e293b; color:#94a3b8;
@@ -54,9 +54,15 @@
       padding:9px 10px; white-space:nowrap;
       border-bottom:2px solid #0f172a;
     }
+    thead th:first-child { border-radius:10px 0 0 0; }
+    thead th:last-child  { border-radius:0 10px 0 0; }
     thead th.s { cursor:pointer; }
     thead th.s:hover { background:#263347; color:#e2e8f0; }
     thead th.active { color:#60a5fa; }
+
+    /* Total row */
+    tr.total-row { background:#f8fafc; border-top:2px solid #e2e8f0 !important; }
+    tr.total-row td { font-weight:700; color:#0f172a; }
 
     tbody tr { border-bottom:1px solid #f1f5f9; }
     tbody tr:hover { background:#f8fafc; }
@@ -257,8 +263,12 @@
                 </template>
                 <template x-if="editIdx !== idx">
                   <template x-if="row.rts_pct !== null">
-                    <span class="badge" :class="rb(row.rts_pct)"
-                          x-text="row.rts_pct.toFixed(1)+'%'"></span>
+                    <div>
+                      <span class="badge" :class="rb(row.rts_pct)"
+                            x-text="row.rts_pct.toFixed(1)+'%'"></span>
+                      <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
+                           x-text="'from ' + row.settings_date"></div>
+                    </div>
                   </template>
                   <template x-if="row.rts_pct === null">
                     <span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>
@@ -327,6 +337,28 @@
                           x-text="row.has_settings ? 'Edit' : '+ Set'"></button>
                 </template>
               </td>
+            </tr>
+          </template>
+
+          <!-- Total row -->
+          <template x-if="rows.length > 0">
+            <tr class="total-row">
+              <td>TOTAL</td>
+              <td></td>
+              <td style="text-align:right;" x-text="money(tot().adspent)"></td>
+              <td style="text-align:right;" x-text="num(tot().orders)"></td>
+              <td style="text-align:right;color:#475569;" x-text="md(tot().cpp)"></td>
+              <td style="text-align:right;" x-text="num(tot().proceed_orders)"></td>
+              <td style="text-align:right;color:#475569;" x-text="md(tot().proceed_cpp)"></td>
+              <td style="text-align:right;">
+                <span class="badge" :class="pb(tot().projected_profit)"
+                      x-text="md(tot().projected_profit)"></span>
+              </td>
+              <td style="text-align:right;">
+                <span class="badge" :class="pb(tot().proj_profit_per_order)"
+                      x-text="md(tot().proj_profit_per_order)"></span>
+              </td>
+              <td colspan="6"></td>
             </tr>
           </template>
         </tbody>
@@ -439,6 +471,23 @@
           } finally {
             this.saving = false;
           }
+        },
+
+        // ── totals ────────────────────────────────────────────────────────────
+        tot() {
+          const t = { adspent:0, orders:0, proceed_orders:0, projected_profit:null, cpp:null, proceed_cpp:null, proj_profit_per_order:null };
+          let hasP = false;
+          for (const r of this.rows) {
+            t.adspent        += Number(r.adspent        || 0);
+            t.orders         += Number(r.orders         || 0);
+            t.proceed_orders += Number(r.proceed_orders || 0);
+            if (r.projected_profit != null) { t.projected_profit = (t.projected_profit||0) + r.projected_profit; hasP = true; }
+          }
+          if (!hasP) t.projected_profit = null;
+          t.cpp                  = t.orders         > 0 ? t.adspent / t.orders         : null;
+          t.proceed_cpp          = t.proceed_orders  > 0 ? t.adspent / t.proceed_orders : null;
+          t.proj_profit_per_order= (t.proceed_orders > 0 && t.projected_profit != null) ? t.projected_profit / t.proceed_orders : null;
+          return t;
         },
 
         // ── helpers ───────────────────────────────────────────────────────────
