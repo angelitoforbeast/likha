@@ -208,45 +208,45 @@
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
-                    <span style="font-weight:500;" x-text="money(row.adspent)"></span>
+                    <span style="color:#111;font-weight:500;" x-text="money(row.adspent)"></span>
                   </template>
 
                   <!-- orders -->
                   <template x-if="col.id==='orders'">
-                    <span x-text="num(row.orders)"></span>
+                    <span style="color:#111;" x-text="num(row.orders)"></span>
                   </template>
 
                   <!-- cpp -->
                   <template x-if="col.id==='cpp'">
-                    <span style="color:#64748b;" x-text="md(row.cpp)"></span>
+                    <span style="color:#111;" x-text="md(row.cpp)"></span>
                   </template>
 
                   <!-- proceed -->
                   <template x-if="col.id==='proceed'">
-                    <span style="font-weight:600;" x-text="num(row.proceed_orders)"></span>
+                    <span style="color:#111;font-weight:600;" x-text="num(row.proceed_orders)"></span>
                   </template>
 
                   <!-- pcpp -->
                   <template x-if="col.id==='pcpp'">
-                    <span style="color:#64748b;" x-text="md(row.proceed_cpp)"></span>
+                    <span style="color:#111;" x-text="md(row.proceed_cpp)"></span>
                   </template>
 
-                  <!-- proj_profit -->
+                  <!-- proj_profit — conditional: red if negative, green if ≥3000, neutral otherwise -->
                   <template x-if="col.id==='proj_profit'">
                     <span class="badge" :class="pb(row.projected_profit)"
-                          x-text="md(row.projected_profit)"></span>
+                          style="font-weight:700;" x-text="md(row.projected_profit)"></span>
                   </template>
 
                   <!-- per_order -->
                   <template x-if="col.id==='per_order'">
-                    <span style="color:#374151;" x-text="md(row.proj_profit_per_order)"></span>
+                    <span style="color:#111;" x-text="md(row.proj_profit_per_order)"></span>
                   </template>
 
-                  <!-- proj_pct = /order ÷ price × 100 -->
+                  <!-- proj_pct = /order ÷ price × 100 — bold, no badge color -->
                   <template x-if="col.id==='proj_pct'">
                     <span>
                       <template x-if="row.proj_profit_per_order !== null && row.price > 0">
-                        <span class="badge" :class="rpp(row.proj_profit_per_order / row.price * 100)"
+                        <span style="color:#111;font-weight:700;"
                               x-text="(row.proj_profit_per_order / row.price * 100).toFixed(1)+'%'"></span>
                       </template>
                       <template x-if="!(row.proj_profit_per_order !== null && row.price > 0)">
@@ -259,7 +259,7 @@
                   <template x-if="col.id==='jnt_rts'">
                     <span>
                       <template x-if="row.jnt_rts_pct !== null">
-                        <span style="font-size:12px;color:#374151;"
+                        <span style="color:#111;font-weight:700;font-size:12px;"
                               x-text="row.jnt_rts_pct.toFixed(1)+'%('+row.jnt_rts_cnt+')'"></span>
                       </template>
                       <template x-if="row.jnt_rts_pct === null">
@@ -272,7 +272,7 @@
                   <template x-if="col.id==='jnt_del'">
                     <span>
                       <template x-if="row.jnt_del_pct !== null">
-                        <span style="font-size:12px;color:#374151;"
+                        <span style="color:#111;font-size:12px;"
                               x-text="row.jnt_del_pct.toFixed(1)+'%('+row.jnt_del_cnt+')'"></span>
                       </template>
                       <template x-if="row.jnt_del_pct === null">
@@ -285,7 +285,7 @@
                   <template x-if="col.id==='jnt_transit'">
                     <span>
                       <template x-if="row.jnt_transit_pct !== null">
-                        <span style="font-size:12px;color:#374151;"
+                        <span style="color:#111;font-size:12px;"
                               x-text="row.jnt_transit_pct.toFixed(1)+'%('+row.jnt_transit_cnt+')'"></span>
                       </template>
                       <template x-if="row.jnt_transit_pct === null">
@@ -371,7 +371,7 @@
                         <span>
                           <template x-if="row.item_value !== null">
                             <div>
-                              <span style="color:#64748b;" x-text="money(row.item_value)"></span>
+                              <span style="color:#111;" x-text="money(row.item_value)"></span>
                               <template x-if="row.item_value_source === 'cogs'">
                                 <div style="font-size:9px;color:#cbd5e1;">cogs</div>
                               </template>
@@ -395,13 +395,13 @@
 
                   <!-- ship -->
                   <template x-if="col.id==='ship'">
-                    <span style="color:#64748b;"
+                    <span style="color:#111;"
                           x-text="row.shipping_fee !== null ? money(row.shipping_fee) : '—'"></span>
                   </template>
 
                   <!-- cod_fee -->
                   <template x-if="col.id==='cod_fee'">
-                    <span style="color:#64748b;"
+                    <span style="color:#111;"
                           x-text="row.cod_fee !== null ? money(row.cod_fee) : '—'"></span>
                   </template>
 

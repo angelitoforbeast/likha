@@ -1380,58 +1380,57 @@ class OwnerPrivateController extends Controller
             }
         }
 
-        // ── JNT stats: page_sender_mappings → from_jnts by sender + item_name + COD (60-day, excl. selected date) ─
-        // Step 1: build PAGE+item_name → SENDER_NAME lookup from page_sender_mappings
-        // Step 2: query from_jnts grouped by sender + item_name + COD over the window
-        // Step 3: match each dashboard row via sender + dominantKey + rounded price
-        // RTS%/Del% use closed-shipments denominator (returned + delivered only).
-        $jntStatsMap  = []; // "sender_key||item_key||cod_int" → stats
-        $senderLookup = []; // "page_key||item_key" or "page_key" → SENDER_NAME
+        // ── JNT stats: JOIN from_jnts → page_sender_mappings (60-day, excl. selected date) ─
+        // One PAGE can have MULTIPLE sender names in page_sender_mappings.
+        // The JOIN finds ALL from_jnts records for a page by matching every sender name.
+        // Grouped by psm.PAGE + fj.item_name + ROUND(cod) → keyed as page_key||item_key||cod_int.
+        // RTS% = rts / total, total = rts + delivered + in-transit (simple total denominator).
+        $jntStatsMap = []; // "page_key||item_key||cod_int" → stats
         $jntFrom = date('Y-m-d', strtotime($date.' -60 days'));
         $jntTo   = date('Y-m-d', strtotime($date.' -1 day'));   // exclude selected date itself
 
-        // Load page_sender_mappings — item-level rows (item_name NOT NULL) take priority,
-        // page-level rows (item_name IS NULL) are fallback.
-        $senderRows = DB::table('page_sender_mappings')->select('PAGE', 'item_name', 'SENDER_NAME')->get();
-        foreach ($senderRows as $sm) {
-            $smPk = strtolower(trim((string)($sm->PAGE ?? '')));
-            $smIk = strtolower(trim((string)($sm->item_name ?? '')));
-            if ($smPk === '') continue;
-            if ($smIk !== '') {
-                $senderLookup[$smPk.'||'.$smIk] = (string)$sm->SENDER_NAME;
-            } else {
-                if (!isset($senderLookup[$smPk])) {          // don't overwrite item-level entry
-                    $senderLookup[$smPk] = (string)$sm->SENDER_NAME;
-                }
-            }
-        }
-
         try {
-            $jntCodClean = "CAST(REPLACE(REPLACE(REPLACE(COALESCE(cod,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
-            $jntRows = DB::table('from_jnts')
-                ->whereRaw("DATE(submission_time) BETWEEN ? AND ?", [$jntFrom, $jntTo])
-                ->whereRaw("TRIM(COALESCE(sender,'')) != ''")
-                ->whereRaw("TRIM(COALESCE(item_name,'')) != ''")
-                ->whereNotNull('status')
+            $jntCodClean = "CAST(REPLACE(REPLACE(REPLACE(COALESCE(fj.cod,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
+            $jntRows = DB::table('from_jnts as fj')
+                ->join('page_sender_mappings as psm', function ($join) {
+                    $join->on(
+                        DB::raw("LOWER(TRIM(COALESCE(fj.sender,'')))"),
+                        '=',
+                        DB::raw("LOWER(TRIM(COALESCE(psm.`SENDER_NAME`,'')))")
+                    );
+                })
+                ->whereRaw("DATE(fj.submission_time) BETWEEN ? AND ?", [$jntFrom, $jntTo])
+                ->whereRaw("TRIM(COALESCE(fj.sender,'')) != ''")
+                ->whereRaw("TRIM(COALESCE(fj.item_name,'')) != ''")
+                ->whereNotNull('fj.status')
+                ->whereRaw("TRIM(COALESCE(psm.`PAGE`,'')) != ''")
                 ->selectRaw("
-                    LOWER(TRIM(COALESCE(sender,'')))    AS sender_key,
-                    LOWER(TRIM(COALESCE(item_name,''))) AS item_key,
-                    ROUND($jntCodClean)                 AS cod_val,
+                    LOWER(TRIM(COALESCE(psm.`PAGE`,'')))    AS page_key,
+                    LOWER(TRIM(COALESCE(fj.item_name,'')))  AS item_key,
+                    ROUND($jntCodClean)                     AS cod_val,
                     COUNT(*) AS total,
-                    SUM(CASE WHEN LOWER(status) LIKE '%return%' OR LOWER(status) LIKE '%rts%' THEN 1 ELSE 0 END) AS rts_cnt,
-                    SUM(CASE WHEN LOWER(status) LIKE '%deliver%'                               THEN 1 ELSE 0 END) AS del_cnt,
-                    SUM(CASE WHEN LOWER(status) LIKE '%transit%'                               THEN 1 ELSE 0 END) AS transit_cnt
+                    SUM(CASE WHEN LOWER(fj.status) LIKE '%return%' OR LOWER(fj.status) LIKE '%rts%' THEN 1 ELSE 0 END) AS rts_cnt,
+                    SUM(CASE WHEN LOWER(fj.status) LIKE '%deliver%'                                  THEN 1 ELSE 0 END) AS del_cnt,
+                    SUM(CASE WHEN LOWER(fj.status) LIKE '%transit%'                                  THEN 1 ELSE 0 END) AS transit_cnt
                 ")
-                ->groupByRaw("LOWER(TRIM(COALESCE(sender,''))), LOWER(TRIM(COALESCE(item_name,''))), ROUND($jntCodClean)")
+                ->groupByRaw("LOWER(TRIM(COALESCE(psm.`PAGE`,''))) , LOWER(TRIM(COALESCE(fj.item_name,''))), ROUND($jntCodClean)")
                 ->get();
             foreach ($jntRows as $r) {
-                $k = (string)$r->sender_key.'||'.(string)$r->item_key.'||'.(string)(int)round((float)$r->cod_val);
-                $jntStatsMap[$k] = [
-                    'total'       => (int)$r->total,
-                    'rts_cnt'     => (int)$r->rts_cnt,
-                    'del_cnt'     => (int)$r->del_cnt,
-                    'transit_cnt' => (int)$r->transit_cnt,
-                ];
+                $k = (string)$r->page_key.'||'.(string)$r->item_key.'||'.(string)(int)round((float)$r->cod_val);
+                // If multiple sender names map to same page+item+cod, SUM their counts
+                if (isset($jntStatsMap[$k])) {
+                    $jntStatsMap[$k]['total']       += (int)$r->total;
+                    $jntStatsMap[$k]['rts_cnt']     += (int)$r->rts_cnt;
+                    $jntStatsMap[$k]['del_cnt']     += (int)$r->del_cnt;
+                    $jntStatsMap[$k]['transit_cnt'] += (int)$r->transit_cnt;
+                } else {
+                    $jntStatsMap[$k] = [
+                        'total'       => (int)$r->total,
+                        'rts_cnt'     => (int)$r->rts_cnt,
+                        'del_cnt'     => (int)$r->del_cnt,
+                        'transit_cnt' => (int)$r->transit_cnt,
+                    ];
+                }
             }
         } catch (\Throwable $e) {
             // JNT stats non-critical — skip silently
@@ -1470,23 +1469,16 @@ class OwnerPrivateController extends Controller
             $rtsPct     = $settings ? (float)$settings['rts_pct'] : null;
             $rtsComment = $settings ? $settings['comment'] : null;
 
-            // JNT stats — lookup via page_sender_mappings sender → from_jnts by sender+item+COD
-            $senderName  = $senderLookup[$settingKey] ?? $senderLookup[$pk] ?? null;
-            $jntStats    = null;
-            if ($senderName !== null && $price > 0) {
-                $sKey    = strtolower(trim($senderName));
-                $jntKey  = $sKey.'||'.$dominantKey.'||'.(string)(int)round($price);
-                $jntStats = $jntStatsMap[$jntKey] ?? null;
-            }
+            // JNT stats — keyed by page_key||item_key||cod_int (from JOIN query above)
+            $jntKey   = $pk.'||'.$dominantKey.'||'.(string)(int)round($price);
+            $jntStats = $jntStatsMap[$jntKey] ?? null;
             $jntRtsPct = $jntDelPct = $jntTransitPct = null;
             $jntRtsCnt = $jntDelCnt = $jntTransitCnt = $jntTotal = null;
             if ($jntStats && $jntStats['total'] > 0) {
-                $t       = $jntStats['total'];
-                $closed  = $jntStats['rts_cnt'] + $jntStats['del_cnt']; // closed shipments only
-                // RTS% / Del% use closed denominator so in-transit orders don't dilute the rate
-                $jntRtsPct     = $closed > 0 ? round($jntStats['rts_cnt'] / $closed * 100, 1) : 0.0;
-                $jntDelPct     = $closed > 0 ? round($jntStats['del_cnt'] / $closed * 100, 1) : 0.0;
-                $jntTransitPct = round($jntStats['transit_cnt'] / $t * 100, 1); // transit vs all
+                $t = $jntStats['total']; // total = rts + delivered + in-transit
+                $jntRtsPct     = round($jntStats['rts_cnt']     / $t * 100, 1);
+                $jntDelPct     = round($jntStats['del_cnt']      / $t * 100, 1);
+                $jntTransitPct = round($jntStats['transit_cnt']  / $t * 100, 1);
                 $jntRtsCnt     = $jntStats['rts_cnt'];
                 $jntDelCnt     = $jntStats['del_cnt'];
                 $jntTransitCnt = $jntStats['transit_cnt'];
