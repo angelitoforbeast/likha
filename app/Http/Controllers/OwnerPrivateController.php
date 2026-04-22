@@ -1380,32 +1380,34 @@ class OwnerPrivateController extends Controller
             }
         }
 
-        // ── JNT stats: macro_output.waybill → from_jnts.waybill_number (90-day) ─
-        // Join via waybill number — most accurate, no sender-name matching needed.
-        // RTS%/Del% denominator = closed shipments only (returned + delivered),
-        // so the rate isn't diluted by still-in-transit orders.
-        $jntStatsMap = []; // page_key → stats
-        $jntFrom = date('Y-m-d', strtotime($date.' -90 days'));
+        // ── JNT stats: macro_output.waybill → from_jnts.waybill_number (60-day, excl. selected date) ─
+        // Keyed by page_key||item_key so each Page+Item combo gets its own RTS/Del/Transit stats.
+        // RTS%/Del% use closed-shipments denominator (returned + delivered only).
+        $jntStatsMap = []; // "page_key||item_key" → stats
+        $jntFrom = date('Y-m-d', strtotime($date.' -60 days'));
+        $jntTo   = date('Y-m-d', strtotime($date.' -1 day'));   // exclude selected date itself
         try {
-            $pageColRaw   = "LOWER(TRIM(COALESCE(mo.`PAGE`,'')))";
+            $pageColRaw = "LOWER(TRIM(COALESCE(mo.`PAGE`,'')))";
+            $itemColRaw = "LOWER({$trimFn}(COALESCE(mo.{$quote($itemCol)},'')))" ;
             $jntRows = DB::table('macro_output as mo')
                 ->join('from_jnts as fj', 'mo.waybill', '=', 'fj.waybill_number')
-                ->whereRaw("mo.ts_date BETWEEN ? AND ?", [$jntFrom, $date])
+                ->whereRaw("mo.ts_date BETWEEN ? AND ?", [$jntFrom, $jntTo])
                 ->whereRaw("TRIM(COALESCE(mo.`PAGE`,'')) != ''")
                 ->whereNotNull('mo.waybill')
                 ->where('mo.waybill', '!=', '')
                 ->whereNotNull('fj.status')
                 ->selectRaw("
                     $pageColRaw AS page_key,
+                    $itemColRaw AS item_key,
                     COUNT(*) AS total,
                     SUM(CASE WHEN LOWER(fj.status) LIKE '%return%' OR LOWER(fj.status) LIKE '%rts%' THEN 1 ELSE 0 END) AS rts_cnt,
                     SUM(CASE WHEN LOWER(fj.status) LIKE '%deliver%'                                 THEN 1 ELSE 0 END) AS del_cnt,
                     SUM(CASE WHEN LOWER(fj.status) LIKE '%transit%'                                 THEN 1 ELSE 0 END) AS transit_cnt
                 ")
-                ->groupByRaw($pageColRaw)
+                ->groupByRaw("$pageColRaw, $itemColRaw")
                 ->get();
             foreach ($jntRows as $r) {
-                $jntStatsMap[(string)$r->page_key] = [
+                $jntStatsMap[(string)$r->page_key.'||'.(string)$r->item_key] = [
                     'total'       => (int)$r->total,
                     'rts_cnt'     => (int)$r->rts_cnt,
                     'del_cnt'     => (int)$r->del_cnt,
@@ -1449,8 +1451,8 @@ class OwnerPrivateController extends Controller
             $rtsPct     = $settings ? (float)$settings['rts_pct'] : null;
             $rtsComment = $settings ? $settings['comment'] : null;
 
-            // JNT stats — keyed by page_key (waybill join, 90-day window)
-            $jntStats = $jntStatsMap[$pk] ?? null;
+            // JNT stats — keyed by page_key||item_key (waybill join, 60-day window excl. selected date)
+            $jntStats = $jntStatsMap[$settingKey] ?? null;
             $jntRtsPct = $jntDelPct = $jntTransitPct = null;
             $jntRtsCnt = $jntDelCnt = $jntTransitCnt = $jntTotal = null;
             if ($jntStats && $jntStats['total'] > 0) {

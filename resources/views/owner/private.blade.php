@@ -239,8 +239,7 @@
 
                   <!-- per_order -->
                   <template x-if="col.id==='per_order'">
-                    <span class="badge" :class="pb(row.proj_profit_per_order)"
-                          x-text="md(row.proj_profit_per_order)"></span>
+                    <span style="color:#374151;" x-text="md(row.proj_profit_per_order)"></span>
                   </template>
 
                   <!-- proj_pct = /order ÷ price × 100 -->
@@ -655,8 +654,8 @@
       },
 
       // ── Helpers ───────────────────────────────────────────────────────────
-      sq(n){ return n?n.replace(/^\d+\s*[xX]\s*/u,'').trim():''; },
-      pb(v){ if(v==null||isNaN(v)) return 'bx'; return v<0?'br':v<500?'bo':v<2000?'by':'bg'; },
+      sq(n){ return n||''; },
+      pb(v){ if(v==null||isNaN(v)) return 'bx'; return v<0?'br':v>=3000?'bg':'bx'; },
       rb(v){ if(v==null||isNaN(v)) return 'bx'; return v>45?'br':v>35?'bo':v>25?'by':'bg'; },
       dlb(v){ if(v==null||isNaN(v)) return 'bx'; return v>=80?'bg':v>=60?'by':v>=40?'bo':'br'; },
       rpp(v){ if(v==null||isNaN(v)) return 'bx'; if(v<5) return 'br'; if(v<10) return 'bo'; if(v<15) return 'by'; if(v<20) return 'bb'; return 'bg'; },
