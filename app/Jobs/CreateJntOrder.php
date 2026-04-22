@@ -56,9 +56,10 @@ class CreateJntOrder implements ShouldQueue
         $page   = (string) ($norm['page'] ?? '');
         $client = JntClient::fromPageOrConfig($page);
 
-        $itemName = trim((string)($norm['item_name'] ?? 'Item'));
+        $origItemName = trim((string)($norm['item_name'] ?? 'Item'));
+        $itemName = $origItemName;
         if (preg_match('/^(\d+)\s*[xX]\s+(.+)$/u', $itemName, $m)) {
-            $itemName = trim($m[2]);
+            $itemName = trim($m[2]);   // stripped — used for payload/remark only
         }
         if ($itemName === '') $itemName = 'Item';
 
@@ -89,7 +90,7 @@ class CreateJntOrder implements ShouldQueue
         }
 
         // ✅ sender from DB (global or per page)
-        $senderOpts = $this->resolveSenderOpts($page, $itemName, $client->isUseItemSenderMapping());
+        $senderOpts = $this->resolveSenderOpts($page, $origItemName, $client->isUseItemSenderMapping());
 
         $payload = JntPayloadBuilder::buildCreateFromMacroOutput($norm, array_merge([
             'txlogisticid'       => $tx,
