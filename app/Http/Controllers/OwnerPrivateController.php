@@ -1247,8 +1247,11 @@ class OwnerPrivateController extends Controller
             }
         }
 
-        // ── COD fee rate ──────────────────────────────────────────────────────
-        $codFeeRate = FeeSetting::getRate('cod_fee_rate', $host, $date) ?? 0.015;
+        // ── fee rates ─────────────────────────────────────────────────────────
+        // COD fee = Price × 0.05 × 1.12, per DELIVERED order only
+        $codFeeRate   = 0.05;
+        // Shipping = fixed per PROCEED order (all proceed orders pay shipping)
+        $shippingFee  = FeeSetting::getRate('shipping_per_order', $host, $date) ?? 37.0;
 
         // ── macro_output: grouped by page + item for the date ─────────────────
         $moRows = DB::table('macro_output as mo')
@@ -1363,17 +1366,27 @@ class OwnerPrivateController extends Controller
             $cpp        = ($totalOrders > 0 && $adspent > 0) ? $adspent / $totalOrders   : null;
             $proceedCpp = ($proceedOrders > 0 && $adspent > 0) ? $adspent / $proceedOrders : null;
 
-            // COD fee per order (base) = Price × rate;  with VAT × 1.12
-            $codFeeBase    = ($price !== null) ? round($price * $codFeeRate, 2) : null;
-            $codFeeWithVat = ($codFeeBase !== null) ? round($codFeeBase * 1.12, 2) : null;
+            // COD fee per delivered order = Price × 0.05 × 1.12
+            $codFeePerDelivered = ($price !== null) ? round($price * $codFeeRate * 1.12, 4) : null;
 
-            // Projected Profit
-            // = [Proceed × (1−RTS%)] × [Price − ItemValue − (CODFee×1.12)] − Adspent
-            $projProfit        = null;
+            // Projected Profit:
+            //   Revenue  = Proceed × Price × (1-RTS)
+            //   Shipping = Proceed × shippingFee              ← all proceed orders
+            //   COGS     = Proceed × (1-RTS) × ItemValue      ← delivered only
+            //   Adspent  = exact
+            //   COD fee  = Proceed × (1-RTS) × Price×0.05×1.12 ← delivered only
+            $projProfit         = null;
             $projProfitPerOrder = null;
-            if ($price !== null && $rtsPct !== null && $itemValue !== null && $codFeeBase !== null) {
-                $deliverFactor = $proceedOrders * (1 - $rtsPct / 100.0);
-                $projProfit    = $deliverFactor * ($price - $itemValue - $codFeeWithVat) - $adspent;
+            if ($price !== null && $rtsPct !== null && $itemValue !== null) {
+                $rts           = $rtsPct / 100.0;
+                $deliverFactor = 1.0 - $rts;
+                $projProfit =
+                    $proceedOrders * $price * $deliverFactor                 // revenue
+                    - $proceedOrders * $shippingFee                          // shipping (all proceed)
+                    - $proceedOrders * $deliverFactor * $itemValue           // COGS (delivered)
+                    - $adspent                                               // adspent
+                    - $proceedOrders * $deliverFactor * ($price * $codFeeRate * 1.12); // COD fee (delivered)
+
                 $projProfitPerOrder = $proceedOrders > 0 ? $projProfit / $proceedOrders : null;
             }
 
@@ -1395,7 +1408,8 @@ class OwnerPrivateController extends Controller
                 'rts_pct'                => $rtsPct,
                 'price'                  => $price,
                 'item_value'             => $itemValue,
-                'cod_fee'                => $codFeeWithVat,
+                'shipping_fee'           => $shippingFee,
+                'cod_fee'                => $codFeePerDelivered,
                 'settings_date'          => $settings ? $settings['effective_date'] : null,
                 'has_settings'           => $settings !== null,
             ];

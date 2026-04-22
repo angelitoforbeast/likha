@@ -574,6 +574,7 @@
               <th class="px-2 py-2 text-right">RTS%</th>
               <th class="px-2 py-2 text-right">Price</th>
               <th class="px-2 py-2 text-right">Item Value</th>
+              <th class="px-2 py-2 text-right">Shipping</th>
               <th class="px-2 py-2 text-right">COD Fee</th>
               <th class="px-2 py-2"></th>
             </tr>
@@ -581,7 +582,7 @@
           <tbody>
             <template x-if="rows.length === 0 && !loading">
               <tr>
-                <td class="px-3 py-4 text-gray-400" colspan="14">No data for selected date.</td>
+                <td class="px-3 py-4 text-gray-400" colspan="15">No data for selected date.</td>
               </tr>
             </template>
             <template x-for="(row, idx) in rows" :key="row.page_key">
@@ -649,7 +650,11 @@
                 <td class="px-2 py-2 text-right text-gray-500"
                     x-text="row.item_value !== null ? money(row.item_value) : '—'"></td>
 
-                <!-- COD Fee (incl. VAT, read-only) -->
+                <!-- Shipping fee per order (all proceed, read-only) -->
+                <td class="px-2 py-2 text-right text-gray-500"
+                    x-text="row.shipping_fee !== null ? money(row.shipping_fee) : '—'"></td>
+
+                <!-- COD Fee per delivered order = Price×5%×1.12 (read-only) -->
                 <td class="px-2 py-2 text-right text-gray-500"
                     x-text="row.cod_fee !== null ? money(row.cod_fee) : '—'"></td>
 
@@ -669,7 +674,7 @@
 
       <div class="mt-2 text-xs text-gray-400">
         RTS% and Price are manually set per page/item. Click <strong>+ Set</strong> or <strong>Edit</strong> to update. Changes are effective from the selected date.
-        COD Fee shown is per delivered order (incl. 12% VAT).
+        Shipping = per proceed order. COD Fee = Price × 5% × 1.12, per delivered order only.
       </div>
     </section>
 
