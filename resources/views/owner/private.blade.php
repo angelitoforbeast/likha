@@ -665,7 +665,7 @@
       pb(v){ if(v==null||isNaN(v)) return 'bx'; return v<0?'br':v>=3000?'bg':'bx'; },
       pbStyle(v){ if(v==null||isNaN(Number(v))) return ''; return v<0?'background:#ff0000;':v>=3000?'background:#00ff00;':''; },
       pbColor(v){ return '#000'; },
-      rppStyle(v){ if(v==null||isNaN(Number(v))) return ''; if(v<10) return 'background:#ff0000;'; if(v<20) return 'background:#00ffff;'; return 'background:#00ff00;'; },
+      rppStyle(v){ if(v==null||isNaN(Number(v))) return ''; if(v<10) return 'background:#ff6600;'; if(v<20) return 'background:#00ffff;'; return 'background:#00ff00;'; },
       rppColor(v){ return '#000'; },
       // Set RTS%: higher RTS = worse → >35 red, >20 cyan, ≤20 green
       rbStyle(v){ if(v==null||isNaN(Number(v))) return ''; return v>35?'background:#ff0000;':v>20?'background:#00ffff;':'background:#00ff00;'; },
