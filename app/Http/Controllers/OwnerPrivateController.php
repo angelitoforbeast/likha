@@ -1380,40 +1380,39 @@ class OwnerPrivateController extends Controller
             }
         }
 
-        // ── page_sender_mappings → from_jnts stats (90-day window) ───────────
-        $senderMap = [];
-        foreach (DB::table('page_sender_mappings')->select('PAGE','item_name','SENDER_NAME')->get() as $m) {
-            $pk = strtolower(trim((string)$m->PAGE));
-            if (!empty($m->item_name)) {
-                $senderMap[$pk.'||'.strtolower(trim((string)$m->item_name))] = trim((string)$m->SENDER_NAME);
-            } else {
-                $senderMap[$pk] = $senderMap[$pk] ?? trim((string)$m->SENDER_NAME);
-            }
-        }
-
-        $jntStatsMap = [];
-        if (!empty($senderMap)) {
-            $jntFrom = date('Y-m-d', strtotime($date.' -90 days'));
-            $jntRows = DB::table('from_jnts')
-                ->whereBetween('submission_time', [$jntFrom.' 00:00:00', $date.' 23:59:59'])
-                ->whereNotNull('sender')->where('sender','!=','')
+        // ── JNT stats: macro_output.waybill → from_jnts.waybill_number (90-day) ─
+        // page_sender_mappings sender names don't match from_jnts sender names,
+        // so we join directly via waybill for accurate per-page stats.
+        $jntStatsMap = []; // page_key → stats
+        $jntFrom = date('Y-m-d', strtotime($date.' -90 days'));
+        try {
+            $waybillCol = $quote('waybill');
+            $jntRows = DB::table('macro_output as mo')
+                ->join('from_jnts as fj', "mo.$waybillCol", '=', 'fj.waybill_number')
+                ->whereRaw("$dateExpr BETWEEN ? AND ?", [$jntFrom, $date])
+                ->whereRaw("$pageTrim != ''")
+                ->whereNotNull("mo.$waybillCol")
+                ->whereRaw("mo.$waybillCol != ''")
+                ->whereNotNull('fj.status')
                 ->selectRaw("
-                    LOWER(TRIM(sender)) AS sender_key,
-                    COUNT(*)            AS total,
-                    SUM(CASE WHEN LOWER(status) LIKE '%return%' OR LOWER(status) LIKE '%rts%'  THEN 1 ELSE 0 END) AS rts_cnt,
-                    SUM(CASE WHEN LOWER(status) LIKE '%deliver%'                               THEN 1 ELSE 0 END) AS del_cnt,
-                    SUM(CASE WHEN LOWER(status) LIKE '%transit%'                               THEN 1 ELSE 0 END) AS transit_cnt
+                    $pageKey AS page_key,
+                    COUNT(*)  AS total,
+                    SUM(CASE WHEN LOWER(fj.status) LIKE '%return%' OR LOWER(fj.status) LIKE '%rts%' THEN 1 ELSE 0 END) AS rts_cnt,
+                    SUM(CASE WHEN LOWER(fj.status) LIKE '%deliver%'                                 THEN 1 ELSE 0 END) AS del_cnt,
+                    SUM(CASE WHEN LOWER(fj.status) LIKE '%transit%'                                 THEN 1 ELSE 0 END) AS transit_cnt
                 ")
-                ->groupByRaw("LOWER(TRIM(sender))")
+                ->groupByRaw("$pageKey")
                 ->get();
             foreach ($jntRows as $r) {
-                $jntStatsMap[(string)$r->sender_key] = [
+                $jntStatsMap[(string)$r->page_key] = [
                     'total'       => (int)$r->total,
                     'rts_cnt'     => (int)$r->rts_cnt,
                     'del_cnt'     => (int)$r->del_cnt,
                     'transit_cnt' => (int)$r->transit_cnt,
                 ];
             }
+        } catch (\Throwable $e) {
+            // JNT stats are non-critical — silently skip if join fails
         }
 
         // ── build response ────────────────────────────────────────────────────
@@ -1449,9 +1448,8 @@ class OwnerPrivateController extends Controller
             $rtsPct     = $settings ? (float)$settings['rts_pct'] : null;
             $rtsComment = $settings ? $settings['comment'] : null;
 
-            // JNT stats — match page+item → sender → from_jnts
-            $senderName  = $senderMap[$settingKey] ?? $senderMap[$pk] ?? null;
-            $jntStats    = $senderName ? ($jntStatsMap[strtolower($senderName)] ?? null) : null;
+            // JNT stats — keyed by page_key (waybill join, 90-day window)
+            $jntStats = $jntStatsMap[$pk] ?? null;
             $jntRtsPct = $jntDelPct = $jntTransitPct = null;
             $jntRtsCnt = $jntDelCnt = $jntTransitCnt = $jntTotal = null;
             if ($jntStats && $jntStats['total'] > 0) {
@@ -1542,13 +1540,33 @@ class OwnerPrivateController extends Controller
             'comment'        => 'nullable|string|max:500',
         ]);
 
+        $pageName  = trim($validated['page_name']);
+        $itemName  = trim($validated['item_name']);
+        $effDate   = $validated['effective_date'];
+        $itemValue = (float)$validated['item_value'];
+        $rtsPct    = (float)$validated['rts_pct'];
+
         try {
+            // Setting both to 0 = "delete this date's override, fall back to previous"
+            if ($itemValue <= 0 && $rtsPct <= 0) {
+                DB::table('page_item_settings')
+                    ->where('page_name', $pageName)
+                    ->where('item_name', $itemName)
+                    ->where('effective_date', $effDate)
+                    ->delete();
+
+                // Also remove cogs entry for this date
+                Cogs::where('item_name', $itemName)->where('date', $effDate)->delete();
+
+                return response()->json(['ok' => true, 'deleted' => true]);
+            }
+
             DB::table('page_item_settings')->insert([
-                'page_name'      => trim($validated['page_name']),
-                'item_name'      => trim($validated['item_name']),
-                'price'          => $validated['item_value'],
-                'rts_pct'        => $validated['rts_pct'],
-                'effective_date' => $validated['effective_date'],
+                'page_name'      => $pageName,
+                'item_name'      => $itemName,
+                'price'          => $itemValue,
+                'rts_pct'        => $rtsPct,
+                'effective_date' => $effDate,
                 'comment'        => $validated['comment'] ?? null,
                 'created_at'     => now(),
                 'updated_at'     => now(),
@@ -1556,13 +1574,8 @@ class OwnerPrivateController extends Controller
 
             // Sync item_value → cogs table so /item/cogs reflects the update
             Cogs::updateOrCreate(
-                [
-                    'item_name' => trim($validated['item_name']),
-                    'date'      => $validated['effective_date'],
-                ],
-                [
-                    'unit_cost' => $validated['item_value'],
-                ]
+                ['item_name' => $itemName, 'date' => $effDate],
+                ['unit_cost' => $itemValue]
             );
         } catch (\Throwable $e) {
             return response()->json(['ok' => false, 'message' => $e->getMessage()], 500);

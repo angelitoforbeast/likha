@@ -307,6 +307,7 @@
                           <input class="ii-comment" type="text" maxlength="500"
                                  x-model="ev.comment" placeholder="Comment (optional)"
                                  @keydown.enter="save()" @keydown.escape="cancel()">
+                          <div style="font-size:9px;color:#94a3b8;">Both 0 = delete override</div>
                         </div>
                       </template>
                       <template x-if="editIdx !== idx">
@@ -584,8 +585,8 @@
       async save(){
         const itemVal = parseFloat(this.ev.item_value);
         const rts     = parseFloat(this.ev.rts_pct);
-        if(isNaN(itemVal)||itemVal<0)   { alert('Item Value needed (≥ 0).'); return; }
-        if(isNaN(rts)||rts<0||rts>100) { alert('RTS% needed (0–100).'); return; }
+        if(isNaN(itemVal)||itemVal<0)   { alert('Item Value needed (≥ 0). Set both to 0 to delete this date\'s override.'); return; }
+        if(isNaN(rts)||rts<0||rts>100) { alert('RTS% needed (0–100). Set both to 0 to delete this date\'s override.'); return; }
 
         const row = this.editRow;
         this.saving = true;
@@ -612,7 +613,7 @@
           if (j.ok) {
             this.cancel();
             await this.load();
-            this.saveMsg='✓ Saved!';
+            this.saveMsg = j.deleted ? '🗑 Deleted!' : '✓ Saved!';
             setTimeout(()=>{ this.saveMsg=''; }, 2500);
           }
         } catch(e) {
