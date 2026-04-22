@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Auth;
+use App\Models\Cogs;
 use App\Models\FeeSetting;
 
 class OwnerPrivateController extends Controller
@@ -1428,7 +1429,7 @@ class OwnerPrivateController extends Controller
                     - $adspent                                                    // adspent
                     - $proceedOrders * $deliverFactor * ($price * $codFeeRate * (1 + $codFeeVatRate)); // COD fee (delivered)
 
-                $projProfitPerOrder = $proceedOrders > 0 ? $projProfit / $proceedOrders : null;
+                $projProfitPerOrder = $totalOrders > 0 ? $projProfit / $totalOrders : null;
             }
 
             $result[] = [
@@ -1488,6 +1489,17 @@ class OwnerPrivateController extends Controller
                 'created_at'     => now(),
                 'updated_at'     => now(),
             ]);
+
+            // Sync item_value → cogs table so /item/cogs reflects the update
+            Cogs::updateOrCreate(
+                [
+                    'item_name' => trim($validated['item_name']),
+                    'date'      => $validated['effective_date'],
+                ],
+                [
+                    'unit_cost' => $validated['item_value'],
+                ]
+            );
         } catch (\Throwable $e) {
             return response()->json(['ok' => false, 'message' => $e->getMessage()], 500);
         }

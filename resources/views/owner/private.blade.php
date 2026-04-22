@@ -515,7 +515,7 @@
           if (!hasP) t.projected_profit = null;
           t.cpp                  = t.orders         > 0 ? t.adspent / t.orders         : null;
           t.proceed_cpp          = t.proceed_orders  > 0 ? t.adspent / t.proceed_orders : null;
-          t.proj_profit_per_order= (t.proceed_orders > 0 && t.projected_profit != null) ? t.projected_profit / t.proceed_orders : null;
+          t.proj_profit_per_order= (t.orders > 0 && t.projected_profit != null) ? t.projected_profit / t.orders : null;
           return t;
         },
 
