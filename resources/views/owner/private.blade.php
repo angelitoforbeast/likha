@@ -259,7 +259,7 @@
                   <template x-if="col.id==='jnt_rts'">
                     <span>
                       <template x-if="row.jnt_rts_pct !== null">
-                        <span class="badge" :class="rb(row.jnt_rts_pct)"
+                        <span style="font-size:12px;color:#374151;"
                               x-text="row.jnt_rts_pct.toFixed(1)+'%('+row.jnt_rts_cnt+')'"></span>
                       </template>
                       <template x-if="row.jnt_rts_pct === null">
@@ -272,7 +272,7 @@
                   <template x-if="col.id==='jnt_del'">
                     <span>
                       <template x-if="row.jnt_del_pct !== null">
-                        <span class="badge" :class="dlb(row.jnt_del_pct)"
+                        <span style="font-size:12px;color:#374151;"
                               x-text="row.jnt_del_pct.toFixed(1)+'%('+row.jnt_del_cnt+')'"></span>
                       </template>
                       <template x-if="row.jnt_del_pct === null">
@@ -285,7 +285,7 @@
                   <template x-if="col.id==='jnt_transit'">
                     <span>
                       <template x-if="row.jnt_transit_pct !== null">
-                        <span class="badge bx"
+                        <span style="font-size:12px;color:#374151;"
                               x-text="row.jnt_transit_pct.toFixed(1)+'%('+row.jnt_transit_cnt+')'"></span>
                       </template>
                       <template x-if="row.jnt_transit_pct === null">

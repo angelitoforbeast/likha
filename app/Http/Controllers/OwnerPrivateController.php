@@ -1380,34 +1380,53 @@ class OwnerPrivateController extends Controller
             }
         }
 
-        // ── JNT stats: macro_output.waybill → from_jnts.waybill_number (60-day, excl. selected date) ─
-        // Keyed by page_key||item_key so each Page+Item combo gets its own RTS/Del/Transit stats.
+        // ── JNT stats: page_sender_mappings → from_jnts by sender + item_name + COD (60-day, excl. selected date) ─
+        // Step 1: build PAGE+item_name → SENDER_NAME lookup from page_sender_mappings
+        // Step 2: query from_jnts grouped by sender + item_name + COD over the window
+        // Step 3: match each dashboard row via sender + dominantKey + rounded price
         // RTS%/Del% use closed-shipments denominator (returned + delivered only).
-        $jntStatsMap = []; // "page_key||item_key" → stats
+        $jntStatsMap  = []; // "sender_key||item_key||cod_int" → stats
+        $senderLookup = []; // "page_key||item_key" or "page_key" → SENDER_NAME
         $jntFrom = date('Y-m-d', strtotime($date.' -60 days'));
         $jntTo   = date('Y-m-d', strtotime($date.' -1 day'));   // exclude selected date itself
+
+        // Load page_sender_mappings — item-level rows (item_name NOT NULL) take priority,
+        // page-level rows (item_name IS NULL) are fallback.
+        $senderRows = DB::table('page_sender_mappings')->select('PAGE', 'item_name', 'SENDER_NAME')->get();
+        foreach ($senderRows as $sm) {
+            $smPk = strtolower(trim((string)($sm->PAGE ?? '')));
+            $smIk = strtolower(trim((string)($sm->item_name ?? '')));
+            if ($smPk === '') continue;
+            if ($smIk !== '') {
+                $senderLookup[$smPk.'||'.$smIk] = (string)$sm->SENDER_NAME;
+            } else {
+                if (!isset($senderLookup[$smPk])) {          // don't overwrite item-level entry
+                    $senderLookup[$smPk] = (string)$sm->SENDER_NAME;
+                }
+            }
+        }
+
         try {
-            $pageColRaw = "LOWER(TRIM(COALESCE(mo.`PAGE`,'')))";
-            $itemColRaw = "LOWER({$trimFn}(COALESCE(mo.{$quote($itemCol)},'')))" ;
-            $jntRows = DB::table('macro_output as mo')
-                ->join('from_jnts as fj', 'mo.waybill', '=', 'fj.waybill_number')
-                ->whereRaw("mo.ts_date BETWEEN ? AND ?", [$jntFrom, $jntTo])
-                ->whereRaw("TRIM(COALESCE(mo.`PAGE`,'')) != ''")
-                ->whereNotNull('mo.waybill')
-                ->where('mo.waybill', '!=', '')
-                ->whereNotNull('fj.status')
+            $jntCodClean = "CAST(REPLACE(REPLACE(REPLACE(COALESCE(cod,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
+            $jntRows = DB::table('from_jnts')
+                ->whereRaw("DATE(submission_time) BETWEEN ? AND ?", [$jntFrom, $jntTo])
+                ->whereRaw("TRIM(COALESCE(sender,'')) != ''")
+                ->whereRaw("TRIM(COALESCE(item_name,'')) != ''")
+                ->whereNotNull('status')
                 ->selectRaw("
-                    $pageColRaw AS page_key,
-                    $itemColRaw AS item_key,
+                    LOWER(TRIM(COALESCE(sender,'')))    AS sender_key,
+                    LOWER(TRIM(COALESCE(item_name,''))) AS item_key,
+                    ROUND($jntCodClean)                 AS cod_val,
                     COUNT(*) AS total,
-                    SUM(CASE WHEN LOWER(fj.status) LIKE '%return%' OR LOWER(fj.status) LIKE '%rts%' THEN 1 ELSE 0 END) AS rts_cnt,
-                    SUM(CASE WHEN LOWER(fj.status) LIKE '%deliver%'                                 THEN 1 ELSE 0 END) AS del_cnt,
-                    SUM(CASE WHEN LOWER(fj.status) LIKE '%transit%'                                 THEN 1 ELSE 0 END) AS transit_cnt
+                    SUM(CASE WHEN LOWER(status) LIKE '%return%' OR LOWER(status) LIKE '%rts%' THEN 1 ELSE 0 END) AS rts_cnt,
+                    SUM(CASE WHEN LOWER(status) LIKE '%deliver%'                               THEN 1 ELSE 0 END) AS del_cnt,
+                    SUM(CASE WHEN LOWER(status) LIKE '%transit%'                               THEN 1 ELSE 0 END) AS transit_cnt
                 ")
-                ->groupByRaw("$pageColRaw, $itemColRaw")
+                ->groupByRaw("LOWER(TRIM(COALESCE(sender,''))), LOWER(TRIM(COALESCE(item_name,''))), ROUND($jntCodClean)")
                 ->get();
             foreach ($jntRows as $r) {
-                $jntStatsMap[(string)$r->page_key.'||'.(string)$r->item_key] = [
+                $k = (string)$r->sender_key.'||'.(string)$r->item_key.'||'.(string)(int)round((float)$r->cod_val);
+                $jntStatsMap[$k] = [
                     'total'       => (int)$r->total,
                     'rts_cnt'     => (int)$r->rts_cnt,
                     'del_cnt'     => (int)$r->del_cnt,
@@ -1451,8 +1470,14 @@ class OwnerPrivateController extends Controller
             $rtsPct     = $settings ? (float)$settings['rts_pct'] : null;
             $rtsComment = $settings ? $settings['comment'] : null;
 
-            // JNT stats — keyed by page_key||item_key (waybill join, 60-day window excl. selected date)
-            $jntStats = $jntStatsMap[$settingKey] ?? null;
+            // JNT stats — lookup via page_sender_mappings sender → from_jnts by sender+item+COD
+            $senderName  = $senderLookup[$settingKey] ?? $senderLookup[$pk] ?? null;
+            $jntStats    = null;
+            if ($senderName !== null && $price > 0) {
+                $sKey    = strtolower(trim($senderName));
+                $jntKey  = $sKey.'||'.$dominantKey.'||'.(string)(int)round($price);
+                $jntStats = $jntStatsMap[$jntKey] ?? null;
+            }
             $jntRtsPct = $jntDelPct = $jntTransitPct = null;
             $jntRtsCnt = $jntDelCnt = $jntTransitCnt = $jntTotal = null;
             if ($jntStats && $jntStats['total'] > 0) {
