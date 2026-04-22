@@ -59,10 +59,11 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
             $prov     = trim((string)($row->PROVINCE ?? ''));
             $city     = trim((string)($row->CITY ?? ''));
             $brgy     = trim((string)($row->BARANGAY ?? ''));
-            $itemName = trim((string)($row->ITEM_NAME ?? ''));
-            $cod      = (string)($row->COD ?? '');
+            $origItemName = trim((string)($row->ITEM_NAME ?? '')); // keep original for sender mapping lookup
+            $itemName     = $origItemName;
+            $cod          = (string)($row->COD ?? '');
 
-            // Parse "N x ITEM" prefix for quantity
+            // Parse "N x ITEM" prefix for quantity — strip prefix for payload, keep original for DB lookups
             if (preg_match('/^(\d+)\s*[xX]\s+(.+)$/u', $itemName, $m)) {
                 $qty      = max(1, (int) $m[1]);
                 $itemName = trim($m[2]);
@@ -112,7 +113,7 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
                 'servicetype' => '6',
                 'deliverytype' => '1',
 
-                'sender' => $this->resolveSenderOpts($page, $itemName),
+                'sender' => $this->resolveSenderOpts($page, $origItemName),
 
                 'receiver' => [
                     'name' => $fullName,
