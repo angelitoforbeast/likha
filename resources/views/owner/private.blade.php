@@ -388,7 +388,7 @@
           return ph.getFullYear()+'-'+p(ph.getMonth()+1)+'-'+p(ph.getDate());
         })(),
 
-        rows:[], loading:false, editIdx:-1,
+        rows:[], loading:false, editIdx:-1, editRow:null,
         ev:{ item_value:'', rts_pct:'' },
         saving:false, saveMsg:'',
         sortCol:'', sortDir:'desc',
@@ -426,20 +426,21 @@
         // ── edit ─────────────────────────────────────────────────────────────
         startEdit(idx, row){
           this.editIdx=idx;
+          this.editRow=row;  // store reference — editIdx is sorted-array index, not rows[] index
           this.ev = {
             item_value: row.item_value !== null ? row.item_value : '',
             rts_pct:    row.rts_pct   !== null ? row.rts_pct   : '',
           };
           this.saveMsg='';
         },
-        cancel(){ this.editIdx=-1; this.ev={item_value:'',rts_pct:''}; },
+        cancel(){ this.editIdx=-1; this.editRow=null; this.ev={item_value:'',rts_pct:''}; },
         async save(){
           const itemVal = parseFloat(this.ev.item_value);
           const rts     = parseFloat(this.ev.rts_pct);
           if(isNaN(itemVal)||itemVal<0)    { alert('Item Value needed (≥ 0).'); return; }
           if(isNaN(rts)||rts<0||rts>100)  { alert('RTS% needed (0–100).'); return; }
 
-          const row = this.rows[this.editIdx];
+          const row = this.editRow;
           this.saving = true;
           try {
             const r = await fetch('{{ route('owner.private.item-setting.save') }}', {
