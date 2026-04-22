@@ -71,24 +71,27 @@ class JntPayloadBuilder
         $receiverPhone = self::normalizePhone($receiverPhoneRaw);
         $receiverName  = trim($receiverNameRaw);
 
-        // Sender from config (keep stable; you can also make these RAW if you want)
-        $senderName   = (string)($opts['sender_name'] ?? config('jnt.sender.name', 'ONLINE SHOP'));
-        $senderPhone  = self::normalizePhone((string)($opts['sender_phone'] ?? config('jnt.sender.phone', '09170000000')));
-        $senderMobile = self::normalizePhone((string)($opts['sender_mobile'] ?? config('jnt.sender.mobile', '09170000000')));
+        // Sender — no fallbacks. Must be explicitly set via opts (from page_sender_mappings / sender_addresses).
+        $senderName   = trim((string)($opts['sender_name']   ?? ''));
+        $senderPhone  = self::normalizePhone((string)($opts['sender_phone']  ?? ''));
+        $senderMobile = self::normalizePhone((string)($opts['sender_mobile'] ?? $senderPhone));
+        $senderProv   = trim((string)($opts['sender_prov']    ?? ''));
+        $senderCity   = trim((string)($opts['sender_city']    ?? ''));
+        $senderArea   = trim((string)($opts['sender_area']    ?? ''));
+        $senderAddr   = trim((string)($opts['sender_address'] ?? ''));
 
-        $senderProv   = trim((string)($opts['sender_prov'] ?? config('jnt.sender.prov', 'METRO-MANILA')));
-        $senderCity   = trim((string)($opts['sender_city'] ?? config('jnt.sender.city', 'TAGUIG')));
-        $senderArea   = trim((string)($opts['sender_area'] ?? config('jnt.sender.area', 'BAGUMBAYAN')));
-        $senderAddr   = trim((string)($opts['sender_address'] ?? config('jnt.sender.address', '')));
+        if ($senderName === '') {
+            throw new \RuntimeException('SENDER_NAME_NOT_SET: no sender name found in page_sender_mappings for this page/item combination.');
+        }
 
         $sender = [
-            'name'    => $senderName !== '' ? $senderName : 'ONLINE SHOP',
-            'phone'   => $senderPhone !== '' ? $senderPhone : '09123456789',
-            'mobile'  => $senderMobile !== '' ? $senderMobile : ($senderPhone !== '' ? $senderPhone : '09170000000'),
-            'prov'    => $senderProv !== '' ? $senderProv : 'METRO-MANILA',
-            'city'    => $senderCity !== '' ? $senderCity : 'MAKATI',
-            'area'    => $senderArea !== '' ? $senderArea : 'SAN ISIDRO',
-            'address' => $senderAddr !== '' ? $senderAddr : '',
+            'name'    => $senderName,
+            'phone'   => $senderPhone,
+            'mobile'  => $senderMobile !== '' ? $senderMobile : $senderPhone,
+            'prov'    => $senderProv,
+            'city'    => $senderCity,
+            'area'    => $senderArea,
+            'address' => $senderAddr,
         ];
 
         $receiver = [

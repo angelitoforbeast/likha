@@ -226,12 +226,12 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
             }
         }
 
-        // 3) Last resort: config
+        // No fallback — if not found, fail the order with a clear error
         if (!$senderName) {
-            $senderName = (string) config('jnt.sender.name', '');
+            throw new \RuntimeException("SENDER_NAME_NOT_FOUND: no page_sender_mappings entry for page='{$page}' item='{$itemName}'");
         }
 
-        // Sender address from sender_addresses table
+        // Sender address from sender_addresses table — no config fallback
         $addr = null;
         if (Schema::hasTable('sender_addresses')) {
             $addr = DB::table('sender_addresses')->orderByDesc('id')->first();
@@ -239,12 +239,12 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
 
         return [
             'name'    => $senderName,
-            'phone'   => (string) ($addr->jnt_sender_phone   ?? config('jnt.sender.phone',   '')),
-            'mobile'  => (string) ($addr->jnt_sender_phone   ?? config('jnt.sender.mobile',  '')),
-            'prov'    => (string) ($addr->jnt_sender_prov    ?? config('jnt.sender.prov',    '')),
-            'city'    => (string) ($addr->jnt_sender_city    ?? config('jnt.sender.city',    '')),
-            'area'    => (string) ($addr->jnt_sender_area    ?? config('jnt.sender.area',    '')),
-            'address' => (string) ($addr->jnt_sender_address ?? config('jnt.sender.address', '')),
+            'phone'   => (string) ($addr->jnt_sender_phone   ?? ''),
+            'mobile'  => (string) ($addr->jnt_sender_phone   ?? ''),
+            'prov'    => (string) ($addr->jnt_sender_prov    ?? ''),
+            'city'    => (string) ($addr->jnt_sender_city    ?? ''),
+            'area'    => (string) ($addr->jnt_sender_area    ?? ''),
+            'address' => (string) ($addr->jnt_sender_address ?? ''),
         ];
     }
 }

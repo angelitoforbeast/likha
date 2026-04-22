@@ -287,18 +287,21 @@ class CreateJntOrder implements ShouldQueue
             }
         }
 
-        // 2) sender address fields - GLOBAL latest (from sender_addresses)
+        // No fallback — if not found, fail with a clear error
+        if (!$senderName) {
+            throw new \RuntimeException("SENDER_NAME_NOT_FOUND: no page_sender_mappings entry for page='{$page}' item='{$itemName}'");
+        }
+
+        // 2) sender address fields - GLOBAL latest (from sender_addresses) — no config fallback
         $addr = null;
         if (Schema::hasTable('sender_addresses')) {
             $addr = DB::table('sender_addresses')->orderByDesc('id')->first();
         }
 
-        // build opts (null/empty filtered out)
         $opts = [
             'sender_name'    => $senderName,
-
             'sender_phone'   => $addr->jnt_sender_phone   ?? null,
-            'sender_mobile'  => $addr->jnt_sender_phone   ?? null, // optional: same as phone
+            'sender_mobile'  => $addr->jnt_sender_phone   ?? null,
             'sender_prov'    => $addr->jnt_sender_prov    ?? null,
             'sender_city'    => $addr->jnt_sender_city    ?? null,
             'sender_area'    => $addr->jnt_sender_area    ?? null,
