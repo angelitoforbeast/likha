@@ -12,6 +12,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ProcessJntCreateOrdersBatch implements ShouldQueue
 {
@@ -111,17 +112,7 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
                 'servicetype' => '6',
                 'deliverytype' => '1',
 
-                // Sender should come from your config (company pickup address)
-                // Put these in config/jnt.php or a dedicated config to keep it clean
-                'sender' => [
-                    'name' => (string)config('jnt.sender.name', 'INCEPXION'),
-                    'phone'=> (string)config('jnt.sender.phone', ''),
-                    'mobile'=>(string)config('jnt.sender.mobile', ''),
-                    'prov' => (string)config('jnt.sender.prov', ''),
-                    'city' => (string)config('jnt.sender.city', ''),
-                    'area' => (string)config('jnt.sender.area', ''),
-                    'address' => (string)config('jnt.sender.address', ''),
-                ],
+                'sender' => $this->resolveSenderOpts($page, $itemName),
 
                 'receiver' => [
                     'name' => $fullName,
@@ -204,5 +195,56 @@ class ProcessJntCreateOrdersBatch implements ShouldQueue
             'response_payload' => null,
             'created_by' => $this->userId,
         ]);
+    }
+
+    /**
+     * Look up sender name from page_sender_mappings (page+item first, then page-only),
+     * then fall back to config/empty. Also pulls sender address from sender_addresses.
+     */
+    protected function resolveSenderOpts(string $page, string $itemName): array
+    {
+        $senderName = null;
+
+        if ($page !== '' && Schema::hasTable('page_sender_mappings')) {
+            // 1) Try page + item name
+            if ($itemName !== '') {
+                $senderName = DB::table('page_sender_mappings')
+                    ->where('PAGE', $page)
+                    ->where('item_name', $itemName)
+                    ->whereNotNull('item_name')
+                    ->orderByDesc('id')
+                    ->value('SENDER_NAME');
+            }
+
+            // 2) Fallback: page only (no item_name)
+            if (!$senderName) {
+                $senderName = DB::table('page_sender_mappings')
+                    ->where('PAGE', $page)
+                    ->whereNull('item_name')
+                    ->orderByDesc('id')
+                    ->value('SENDER_NAME');
+            }
+        }
+
+        // 3) Last resort: config
+        if (!$senderName) {
+            $senderName = (string) config('jnt.sender.name', '');
+        }
+
+        // Sender address from sender_addresses table
+        $addr = null;
+        if (Schema::hasTable('sender_addresses')) {
+            $addr = DB::table('sender_addresses')->orderByDesc('id')->first();
+        }
+
+        return [
+            'name'    => $senderName,
+            'phone'   => (string) ($addr->jnt_sender_phone   ?? config('jnt.sender.phone',   '')),
+            'mobile'  => (string) ($addr->jnt_sender_phone   ?? config('jnt.sender.mobile',  '')),
+            'prov'    => (string) ($addr->jnt_sender_prov    ?? config('jnt.sender.prov',    '')),
+            'city'    => (string) ($addr->jnt_sender_city    ?? config('jnt.sender.city',    '')),
+            'area'    => (string) ($addr->jnt_sender_area    ?? config('jnt.sender.area',    '')),
+            'address' => (string) ($addr->jnt_sender_address ?? config('jnt.sender.address', '')),
+        ];
     }
 }
