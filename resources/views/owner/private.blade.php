@@ -7,135 +7,139 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
-    [x-cloak] { display: none !important; }
-    * { box-sizing: border-box; }
+    [x-cloak] { display:none !important; }
+    * { box-sizing:border-box; margin:0; padding:0; }
 
-    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #f1f5f9; }
+    /* Full-viewport flex column */
+    html, body { height:100%; background:#f1f5f9; }
+    body { display:flex; flex-direction:column; overflow:hidden; }
 
-    /* ── Fixed nav ── */
-    #top-nav {
-      position: fixed; top: 0; left: 0; right: 0;
-      height: 52px; z-index: 100;
-      background: #1e293b;
-      border-bottom: 1px solid #334155;
-      display: flex; align-items: center;
-      padding: 0 18px; gap: 10px;
+    /* ── Nav ── */
+    #nav {
+      flex-shrink:0;
+      height:52px;
+      background:#1e293b;
+      border-bottom:1px solid #334155;
+      display:flex; align-items:center;
+      padding:0 18px; gap:10px;
+      z-index:10;
     }
 
-    /* ── Scrollable area below nav ── */
-    #main-scroll {
-      position: fixed;
-      top: 52px; left: 0; right: 0; bottom: 0;
-      overflow: auto;
-      padding: 14px 16px;
+    /* ── Scroll container ── */
+    #scroll {
+      flex:1;
+      overflow:auto;
+      padding:14px 16px;
+      min-width:0;
     }
 
     /* ── Table card ── */
-    .table-card {
-      background: #fff;
-      border-radius: 10px;
-      box-shadow: 0 1px 4px rgba(0,0,0,.09);
-      overflow: hidden; /* clip rounded corners */
-      min-width: 900px;
+    .card {
+      background:#fff;
+      border-radius:10px;
+      box-shadow:0 1px 4px rgba(0,0,0,.09);
+      min-width:900px;
+      overflow:hidden;
     }
 
     /* Table */
-    table { width: 100%; border-collapse: collapse; }
+    table { width:100%; border-collapse:collapse; }
 
-    /* Sticky thead — top:0 is relative to #main-scroll container */
+    /* Sticky thead — sticks to top of #scroll */
     thead th {
-      position: sticky; top: 0; z-index: 20;
-      background: #1e293b;
-      color: #94a3b8;
-      font-size: 11px; font-weight: 600;
-      text-transform: uppercase; letter-spacing: .05em;
-      padding: 9px 10px;
-      white-space: nowrap;
-      border-bottom: 2px solid #0f172a;
+      position:sticky; top:0; z-index:5;
+      background:#1e293b; color:#94a3b8;
+      font-size:11px; font-weight:600;
+      text-transform:uppercase; letter-spacing:.05em;
+      padding:9px 10px; white-space:nowrap;
+      border-bottom:2px solid #0f172a;
     }
-    thead th.s { cursor: pointer; }
-    thead th.s:hover { background: #263347; color: #e2e8f0; }
-    thead th.active { color: #60a5fa; }
+    thead th.s { cursor:pointer; }
+    thead th.s:hover { background:#263347; color:#e2e8f0; }
+    thead th.active { color:#60a5fa; }
 
-    /* Rows */
-    tbody tr { border-bottom: 1px solid #f1f5f9; }
-    tbody tr:hover { background: #f8fafc; }
-    tbody tr.editing-row { background: #eff6ff !important; }
+    tbody tr { border-bottom:1px solid #f1f5f9; }
+    tbody tr:hover { background:#f8fafc; }
+    tbody tr.editing-row { background:#eff6ff !important; }
 
     td {
-      font-size: 12.5px;
-      color: #374151;
-      padding: 7px 10px;
-      white-space: nowrap;
-      vertical-align: middle;
+      font-size:12.5px; color:#374151;
+      padding:7px 10px; white-space:nowrap;
+      vertical-align:middle;
     }
 
     /* Inline inputs */
-    .inline-input {
-      border: 1.5px solid #93c5fd;
-      border-radius: 6px;
-      padding: 4px 8px;
-      font-size: 12px;
-      text-align: right;
-      outline: none;
-      width: 80px;
-      background: #fff;
+    .ii {
+      border:1.5px solid #93c5fd; border-radius:6px;
+      padding:4px 7px; font-size:12px;
+      text-align:right; outline:none; background:#fff;
     }
-    .inline-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,.15); }
+    .ii:focus { border-color:#3b82f6; box-shadow:0 0 0 2px rgba(59,130,246,.15); }
 
     /* Badges */
-    .badge {
-      display: inline-block;
-      padding: 2px 8px; border-radius: 9999px;
-      font-size: 11px; font-weight: 700;
-    }
-    .b-green  { background:#dcfce7; color:#15803d; }
-    .b-yellow { background:#fef9c3; color:#a16207; }
-    .b-orange { background:#ffedd5; color:#c2410c; }
-    .b-red    { background:#fee2e2; color:#b91c1c; }
-    .b-gray   { background:#f1f5f9; color:#94a3b8; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:700; }
+    .bg  { background:#dcfce7; color:#15803d; }
+    .by  { background:#fef9c3; color:#a16207; }
+    .bo  { background:#ffedd5; color:#c2410c; }
+    .br  { background:#fee2e2; color:#b91c1c; }
+    .bx  { background:#f1f5f9; color:#94a3b8; }
 
     /* Spinner */
     .spin {
-      display:inline-block; width:14px; height:14px;
+      display:inline-block; width:15px; height:15px;
       border:2px solid #475569; border-top-color:#60a5fa;
-      border-radius:50%; animation:rot .7s linear infinite;
-      vertical-align:middle;
+      border-radius:50%; animation:rot .7s linear infinite; vertical-align:middle;
     }
     @keyframes rot { to { transform:rotate(360deg); } }
 
-    /* Action buttons */
-    .btn-set  { font-size:11px; padding:3px 9px; border-radius:5px; cursor:pointer; border:1.5px solid #e2e8f0; background:#f8fafc; color:#64748b; }
-    .btn-set:hover { border-color:#93c5fd; color:#2563eb; background:#eff6ff; }
-    .btn-save { font-size:11px; padding:3px 10px; border-radius:5px; cursor:pointer; border:none; background:#16a34a; color:#fff; font-weight:700; }
+    /* Buttons */
+    .btn-refresh {
+      display:flex; align-items:center; justify-content:center;
+      width:32px; height:32px; border-radius:6px; border:1px solid #475569;
+      background:#0f172a; color:#94a3b8; cursor:pointer; font-size:16px;
+      transition:color .15s, border-color .15s;
+    }
+    .btn-refresh:hover { color:#e2e8f0; border-color:#94a3b8; }
+    .btn-refresh.spinning svg { animation:rot .7s linear infinite; }
+
+    .btn-save   { font-size:11px; padding:3px 10px; border-radius:5px; cursor:pointer; border:none; background:#16a34a; color:#fff; font-weight:700; }
     .btn-save:disabled { opacity:.6; cursor:not-allowed; }
     .btn-cancel { font-size:11px; padding:3px 8px; border-radius:5px; cursor:pointer; border:1.5px solid #e2e8f0; background:#f1f5f9; color:#475569; }
+    .btn-set    { font-size:11px; padding:3px 9px; border-radius:5px; cursor:pointer; border:1.5px solid #e2e8f0; background:#f8fafc; color:#64748b; }
+    .btn-set:hover { border-color:#93c5fd; color:#2563eb; background:#eff6ff; }
   </style>
 </head>
 <body>
 
   <!-- ── Nav ───────────────────────────────────────────────────────────────── -->
-  <div id="top-nav">
+  <div id="nav">
     <span style="color:#f1f5f9;font-weight:700;font-size:14px;">Daily Summary</span>
     <div style="flex:1"></div>
 
     <span x-show="saveMsg" x-transition style="color:#4ade80;font-size:13px;font-weight:700;" x-text="saveMsg"></span>
-    <span x-show="loading" x-transition><span class="spin"></span></span>
 
+    <!-- Date input — auto-loads on change -->
     <input type="date" x-model="date" @change="load()"
-           style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;border-radius:6px;
-                  padding:4px 10px;font-size:13px;outline:none;cursor:pointer;">
+           style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;
+                  border-radius:6px;padding:5px 10px;font-size:13px;outline:none;cursor:pointer;">
 
-    <button @click="load()"
-            style="background:#3b82f6;color:#fff;border:none;border-radius:6px;
-                   padding:5px 14px;font-size:13px;font-weight:600;cursor:pointer;">
-      Load
+    <!-- Refresh icon button -->
+    <button class="btn-refresh" :class="loading ? 'spinning' : ''"
+            @click="load()" title="Refresh">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" stroke-width="2.2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+        <path d="M21 3v5h-5"/>
+        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+        <path d="M3 21v-5h5"/>
+      </svg>
     </button>
   </div>
 
-  <!-- ── Scrollable main ───────────────────────────────────────────────────── -->
-  <div id="main-scroll">
-    <div class="table-card">
+  <!-- ── Scrollable area ───────────────────────────────────────────────────── -->
+  <div id="scroll">
+    <div class="card">
       <table>
         <thead>
           <tr>
@@ -146,7 +150,7 @@
             <th class="s" :class="ac('adspent')" @click="sb('adspent')" style="text-align:right;min-width:90px;">
               Adspent<span x-text="arr('adspent')"></span>
             </th>
-            <th class="s" :class="ac('orders')" @click="sb('orders')" style="text-align:right;min-width:60px;">
+            <th class="s" :class="ac('orders')" @click="sb('orders')" style="text-align:right;min-width:65px;">
               Orders<span x-text="arr('orders')"></span>
             </th>
             <th class="s" :class="ac('cpp')" @click="sb('cpp')" style="text-align:right;min-width:75px;">
@@ -161,16 +165,16 @@
             <th class="s" :class="ac('projected_profit')" @click="sb('projected_profit')" style="text-align:right;min-width:95px;">
               Proj.Profit<span x-text="arr('projected_profit')"></span>
             </th>
-            <th class="s" :class="ac('proj_profit_per_order')" @click="sb('proj_profit_per_order')" style="text-align:right;min-width:80px;">
+            <th class="s" :class="ac('proj_profit_per_order')" @click="sb('proj_profit_per_order')" style="text-align:right;min-width:75px;">
               /Order<span x-text="arr('proj_profit_per_order')"></span>
             </th>
             <th class="s" :class="ac('rts_pct')" @click="sb('rts_pct')" style="text-align:right;min-width:65px;">
               RTS%<span x-text="arr('rts_pct')"></span>
             </th>
             <th style="text-align:right;min-width:85px;">Price</th>
-            <th style="text-align:right;min-width:80px;">Item Val.</th>
-            <th style="text-align:right;min-width:60px;">Ship</th>
-            <th style="text-align:right;min-width:75px;">COD Fee</th>
+            <th style="text-align:right;min-width:78px;">Item Val.</th>
+            <th style="text-align:right;min-width:58px;">Ship</th>
+            <th style="text-align:right;min-width:72px;">COD Fee</th>
             <th style="text-align:center;min-width:90px;"></th>
           </tr>
         </thead>
@@ -238,10 +242,10 @@
                       x-text="md(row.proj_profit_per_order)"></span>
               </td>
 
-              <!-- RTS% — inline input when editing -->
+              <!-- RTS% -->
               <td style="text-align:right;">
                 <template x-if="editIdx === idx">
-                  <input class="inline-input" type="number" step="0.1" min="0" max="100"
+                  <input class="ii" type="number" step="0.1" min="0" max="100"
                          x-model="ev.rts_pct" placeholder="RTS%"
                          @keydown.enter="save()" @keydown.escape="cancel()"
                          style="width:65px;">
@@ -257,10 +261,10 @@
                 </template>
               </td>
 
-              <!-- Price — inline input when editing -->
+              <!-- Price -->
               <td style="text-align:right;">
                 <template x-if="editIdx === idx">
-                  <input class="inline-input" type="number" step="1" min="0"
+                  <input class="ii" type="number" step="1" min="0"
                          x-model="ev.price" placeholder="Price"
                          @keydown.enter="save()" @keydown.escape="cancel()"
                          style="width:78px;">
@@ -288,7 +292,7 @@
                 <template x-if="editIdx === idx">
                   <span style="display:inline-flex;gap:5px;align-items:center;">
                     <button class="btn-save" @click="save()" :disabled="saving"
-                            x-text="saving?'…':'Save'"></button>
+                            x-text="saving ? '…' : 'Save'"></button>
                     <button class="btn-cancel" @click="cancel()">✕</button>
                   </span>
                 </template>
@@ -303,7 +307,7 @@
       </table>
 
       <div style="padding:7px 12px;font-size:10px;color:#94a3b8;border-top:1px solid #f1f5f9;">
-        One row per page · Dominant item used · Ship = ₱37/proceed · COD Fee = Price×5%×1.12/delivered
+        One row per page · Dominant item used · Ship=₱37/proceed · COD Fee=Price×5%×1.12/delivered
       </div>
     </div>
   </div>
@@ -314,7 +318,7 @@
         date: (function(){
           const ph = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Manila'}));
           ph.setDate(ph.getDate()-1);
-          const p = n=>String(n).padStart(2,'0');
+          const p = n => String(n).padStart(2,'0');
           return ph.getFullYear()+'-'+p(ph.getMonth()+1)+'-'+p(ph.getDate());
         })(),
 
@@ -336,21 +340,18 @@
 
         // ── sort ─────────────────────────────────────────────────────────────
         sb(col){
-          if(this.sortCol===col){ this.sortDir=this.sortDir==='asc'?'desc':'asc'; }
+          if(this.sortCol===col){ this.sortDir = this.sortDir==='asc'?'desc':'asc'; }
           else{ this.sortCol=col; this.sortDir='desc'; }
         },
-        arr(col){
-          if(this.sortCol!==col) return '';
-          return this.sortDir==='asc' ? ' ↑' : ' ↓';
-        },
-        ac(col){ return this.sortCol===col?'active':''; },
+        arr(col){ return this.sortCol!==col ? '' : (this.sortDir==='asc' ? ' ↑' : ' ↓'); },
+        ac(col) { return this.sortCol===col ? 'active' : ''; },
         sortedRows(){
           if(!this.sortCol) return this.rows;
           const c=this.sortCol, d=this.sortDir==='asc'?1:-1;
           return [...this.rows].sort((a,b)=>{
             let va=a[c], vb=b[c];
-            if(va==null) va=typeof vb==='string'?'':-Infinity;
-            if(vb==null) vb=typeof va==='string'?'':-Infinity;
+            if(va==null) va = typeof vb==='string'?'':-Infinity;
+            if(vb==null) vb = typeof va==='string'?'':-Infinity;
             if(typeof va==='string') return d*va.localeCompare(vb);
             return d*(Number(va)-Number(vb));
           });
@@ -359,15 +360,14 @@
         // ── edit ─────────────────────────────────────────────────────────────
         startEdit(idx, row){
           this.editIdx=idx;
-          this.ev={ price: row.price!==null?row.price:'', rts_pct: row.rts_pct!==null?row.rts_pct:'' };
+          this.ev = { price: row.price!==null ? row.price : '', rts_pct: row.rts_pct!==null ? row.rts_pct : '' };
           this.saveMsg='';
         },
         cancel(){ this.editIdx=-1; this.ev={price:'',rts_pct:''}; },
         async save(){
           const price=parseFloat(this.ev.price), rts=parseFloat(this.ev.rts_pct);
-          if(isNaN(price)||price<0){ alert('Valid Price needed.'); return; }
-          if(isNaN(rts)||rts<0||rts>100){ alert('Valid RTS% needed (0–100).'); return; }
-
+          if(isNaN(price)||price<0)            { alert('Valid Price needed.'); return; }
+          if(isNaN(rts)||rts<0||rts>100)       { alert('Valid RTS% needed (0–100).'); return; }
           const row=this.rows[this.editIdx];
           this.saving=true;
           try{
@@ -377,8 +377,7 @@
               body:JSON.stringify({ page_name:row.page_name, item_name:row.item_name,
                                     price, rts_pct:rts, effective_date:this.date }),
             });
-            const j=await r.json();
-            if(j.ok){
+            if((await r.json()).ok){
               this.cancel();
               await this.load();
               this.saveMsg='✓ Saved!';
@@ -390,25 +389,17 @@
 
         // ── helpers ───────────────────────────────────────────────────────────
         sq(n){ return n ? n.replace(/^\d+\s*[xX]\s*/u,'').trim() : ''; },
-
         pb(v){
-          if(v==null||isNaN(v)) return 'b-gray';
-          if(v<0)    return 'b-red';
-          if(v<500)  return 'b-orange';
-          if(v<2000) return 'b-yellow';
-          return 'b-green';
+          if(v==null||isNaN(v)) return 'bx';
+          return v<0?'br':v<500?'bo':v<2000?'by':'bg';
         },
         rb(v){
-          if(v==null||isNaN(v)) return 'b-gray';
-          if(v>45) return 'b-red';
-          if(v>35) return 'b-orange';
-          if(v>25) return 'b-yellow';
-          return 'b-green';
+          if(v==null||isNaN(v)) return 'bx';
+          return v>45?'br':v>35?'bo':v>25?'by':'bg';
         },
-
         money(v){ return '₱'+Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); },
-        md(v){ return (v==null||isNaN(Number(v)))?'—':this.money(v); },
-        num(v){ return Number(v||0).toLocaleString('en-PH'); },
+        md(v)   { return (v==null||isNaN(Number(v))) ? '—' : this.money(v); },
+        num(v)  { return Number(v||0).toLocaleString('en-PH'); },
 
         async init(){ await this.load(); },
       };
