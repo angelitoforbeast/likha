@@ -1248,8 +1248,9 @@ class OwnerPrivateController extends Controller
         }
 
         // ── fee rates ─────────────────────────────────────────────────────────
-        $codFeeRate  = 0.05;   // COD fee = Price × 0.05 × 1.12, per delivered only
-        $shippingFee = FeeSetting::getRate('shipping_per_order', $host, $date) ?? 37.0;
+        $codFeeRate    = FeeSetting::getRate('cod_fee_rate',     $host, $date) ?? 0.015;
+        $codFeeVatRate = FeeSetting::getRate('cod_fee_vat_rate', $host, $date) ?? 0.12;
+        $shippingFee   = FeeSetting::getRate('shipping_per_order', $host, $date) ?? 37.0;
 
         // ── COD column detection ───────────────────────────────────────────────
         $codCol   = $pickCol('macro_output', ['COD','cod','Cod']) ?? 'COD';
@@ -1384,8 +1385,8 @@ class OwnerPrivateController extends Controller
             $cpp        = ($totalOrders > 0 && $adspent > 0) ? $adspent / $totalOrders   : null;
             $proceedCpp = ($proceedOrders > 0 && $adspent > 0) ? $adspent / $proceedOrders : null;
 
-            // COD fee per delivered = Price × 5% × 1.12
-            $codFeePerDelivered = $price > 0 ? round($price * $codFeeRate * 1.12, 4) : null;
+            // COD fee per delivered = Price × codFeeRate × (1 + VAT)
+            $codFeePerDelivered = $price > 0 ? round($price * $codFeeRate * (1 + $codFeeVatRate), 4) : null;
 
             // Projected Profit (needs: price from COD, item_value, rts_pct)
             $projProfit = $projProfitPerOrder = null;
@@ -1397,7 +1398,7 @@ class OwnerPrivateController extends Controller
                     - $proceedOrders * $shippingFee                               // shipping (all proceed)
                     - $proceedOrders * $deliverFactor * $itemValue                // COGS (delivered)
                     - $adspent                                                    // adspent
-                    - $proceedOrders * $deliverFactor * ($price * $codFeeRate * 1.12); // COD fee (delivered)
+                    - $proceedOrders * $deliverFactor * ($price * $codFeeRate * (1 + $codFeeVatRate)); // COD fee (delivered)
 
                 $projProfitPerOrder = $proceedOrders > 0 ? $projProfit / $proceedOrders : null;
             }
