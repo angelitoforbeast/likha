@@ -26,10 +26,12 @@
     }
 
     /* ── Scroll container ── */
+    /* NO top/bottom padding — sticky top:0 and bottom:0 must map to the exact
+       visible edges, otherwise rows bleed into the padding gap */
     #scroll {
       flex:1;
       overflow:auto;
-      padding:14px 16px;
+      padding:0 16px;
       min-width:0;
     }
 
@@ -40,6 +42,7 @@
       border-radius:10px;
       box-shadow:0 1px 4px rgba(0,0,0,.09);
       min-width:900px;
+      margin:14px 0;   /* vertical spacing via margin, not parent padding */
     }
 
     /* Table — MUST use separate borders for sticky z-index to work */
