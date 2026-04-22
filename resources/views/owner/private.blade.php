@@ -371,6 +371,14 @@
                               <template x-if="row.item_value_source === 'cogs'">
                                 <div style="font-size:9px;color:#cbd5e1;">cogs</div>
                               </template>
+                              <template x-if="row.item_value_source === 'manual' && row.settings_date">
+                                <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
+                                     x-text="'from ' + row.settings_date"></div>
+                              </template>
+                              <template x-if="row.rts_comment && row.item_value_source === 'manual'">
+                                <div style="font-size:9px;color:#64748b;margin-top:1px;font-style:italic;white-space:normal;max-width:110px;"
+                                     x-text="'💬 '+row.rts_comment"></div>
+                              </template>
                             </div>
                           </template>
                           <template x-if="row.item_value === null">
@@ -464,6 +472,10 @@
   function privateUI() {
     return {
       date: (function(){
+        // Use ?date= from URL if present (preserves date on refresh)
+        const urlDate = new URLSearchParams(window.location.search).get('date');
+        if (urlDate && /^\d{4}-\d{2}-\d{2}$/.test(urlDate)) return urlDate;
+        // Default: yesterday PH time
         const ph = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Manila'}));
         ph.setDate(ph.getDate()-1);
         const p = n => String(n).padStart(2,'0');
@@ -544,6 +556,8 @@
       // ── Load ─────────────────────────────────────────────────────────────
       async load(){
         this.loading=true; this.editIdx=-1; this.saveMsg='';
+        // Persist date in URL so refresh lands on same date
+        history.replaceState(null,'',`?date=${this.date}`);
         try{
           const r = await fetch('{{ route('owner.private.item-summary') }}?date='+this.date);
           const j = await r.json();
