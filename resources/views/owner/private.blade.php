@@ -396,25 +396,49 @@
         async save(){
           const itemVal = parseFloat(this.ev.item_value);
           const rts     = parseFloat(this.ev.rts_pct);
-          if(isNaN(itemVal)||itemVal<0)         { alert('Valid Item Value needed (≥ 0).'); return; }
-          if(isNaN(rts)||rts<0||rts>100)        { alert('Valid RTS% needed (0–100).'); return; }
-          const row=this.rows[this.editIdx];
-          this.saving=true;
-          try{
-            const r=await fetch('{{ route('owner.private.item-setting.save') }}',{
-              method:'POST',
-              headers:{'Content-Type':'application/json','X-CSRF-TOKEN':'{{ csrf_token() }}'},
-              body:JSON.stringify({ page_name:row.page_name, item_name:row.item_name,
-                                    item_value:itemVal, rts_pct:rts, effective_date:this.date }),
+          if(isNaN(itemVal)||itemVal<0)    { alert('Item Value needed (≥ 0).'); return; }
+          if(isNaN(rts)||rts<0||rts>100)  { alert('RTS% needed (0–100).'); return; }
+
+          const row = this.rows[this.editIdx];
+          this.saving = true;
+          try {
+            const r = await fetch('{{ route('owner.private.item-setting.save') }}', {
+              method:  'POST',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+              body:    JSON.stringify({
+                page_name:      row.page_name,
+                item_name:      row.item_name,
+                item_value:     itemVal,
+                rts_pct:        rts,
+                effective_date: this.date,
+              }),
             });
-            if((await r.json()).ok){
+
+            let j;
+            try { j = await r.json(); }
+            catch { alert('Save failed: server returned non-JSON (HTTP ' + r.status + ')'); return; }
+
+            if (!r.ok) {
+              // Laravel validation errors
+              const msg = j.message || (j.errors
+                ? Object.values(j.errors).flat().join('\n')
+                : 'HTTP ' + r.status);
+              alert('Save failed:\n' + msg);
+              return;
+            }
+
+            if (j.ok) {
               this.cancel();
               await this.load();
-              this.saveMsg='✓ Saved!';
-              setTimeout(()=>{ this.saveMsg=''; },2500);
+              this.saveMsg = '✓ Saved!';
+              setTimeout(() => { this.saveMsg = ''; }, 2500);
             }
-          }catch(e){ console.error(e); alert('Save failed.'); }
-          finally{ this.saving=false; }
+          } catch(e) {
+            console.error(e);
+            alert('Save failed: ' + e.message);
+          } finally {
+            this.saving = false;
+          }
         },
 
         // ── helpers ───────────────────────────────────────────────────────────

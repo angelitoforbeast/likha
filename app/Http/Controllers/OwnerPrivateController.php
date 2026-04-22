@@ -1448,15 +1448,19 @@ class OwnerPrivateController extends Controller
             'effective_date' => 'required|date',
         ]);
 
-        DB::table('page_item_settings')->insert([
-            'page_name'      => trim($validated['page_name']),
-            'item_name'      => trim($validated['item_name']),
-            'price'          => $validated['item_value'],   // price col repurposed as item_value
-            'rts_pct'        => $validated['rts_pct'],
-            'effective_date' => $validated['effective_date'],
-            'created_at'     => now(),
-            'updated_at'     => now(),
-        ]);
+        try {
+            DB::table('page_item_settings')->insert([
+                'page_name'      => trim($validated['page_name']),
+                'item_name'      => trim($validated['item_name']),
+                'price'          => $validated['item_value'],   // price col repurposed as item_value
+                'rts_pct'        => $validated['rts_pct'],
+                'effective_date' => $validated['effective_date'],
+                'created_at'     => now(),
+                'updated_at'     => now(),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['ok' => false, 'message' => $e->getMessage()], 500);
+        }
 
         return response()->json(['ok' => true]);
     }
