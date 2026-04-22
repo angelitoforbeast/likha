@@ -1221,9 +1221,10 @@
     function itemSummaryUI() {
       return {
         date: (function() {
-          // default to today in PH time
+          // default to yesterday in PH time
           const now = new Date();
           const ph  = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+          ph.setDate(ph.getDate() - 1);
           const pad = n => String(n).padStart(2, '0');
           return ph.getFullYear() + '-' + pad(ph.getMonth()+1) + '-' + pad(ph.getDate());
         })(),
