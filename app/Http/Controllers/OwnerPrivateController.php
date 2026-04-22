@@ -1191,4 +1191,243 @@ class OwnerPrivateController extends Controller
             'breakeven_cpp'   => $breakevenCPP,
         ]);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Item Summary (one-day view, grouped by page, dominant item used for calcs)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public function itemSummary(Request $request)
+    {
+        $this->checkAccess();
+
+        $phTz = new \DateTimeZone('Asia/Manila');
+        $date = $request->input('date', (new \DateTime('now', $phTz))->format('Y-m-d'));
+        $host = strtolower((string) $request->getHost());
+
+        $driver = DB::getDriverName();
+        $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $quote  = fn(string $col) => $driver === 'pgsql' ? '"'.$col.'"' : '`'.$col.'`';
+
+        $pickCol = function (string $table, array $candidates) {
+            foreach ($candidates as $c) {
+                if (Schema::hasColumn($table, $c)) return $c;
+            }
+            return null;
+        };
+
+        $castMoney = fn(string $expr) => $driver === 'pgsql'
+            ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(($expr)::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
+            : "CAST(REPLACE(REPLACE(REPLACE(COALESCE($expr,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
+
+        // ── column detection ──────────────────────────────────────────────────
+        $pageCol   = $pickCol('macro_output', ['PAGE','page','page_name','Page']) ?? 'PAGE';
+        $itemCol   = $pickCol('macro_output', ['ITEM_NAME','item_name','ITEM','item']) ?? 'ITEM_NAME';
+        $statusCol = $pickCol('macro_output', ['STATUS','status','Status']) ?? 'STATUS';
+        $hasTsDate = Schema::hasColumn('macro_output', 'ts_date');
+
+        $moPage   = 'mo.'.$quote($pageCol);
+        $moItem   = 'mo.'.$quote($itemCol);
+        $moStatus = 'mo.'.$quote($statusCol);
+
+        $statusNorm = "LOWER(REPLACE(REPLACE($trimFn($moStatus),' ',''),'_',''))";
+        $pageTrim   = "$trimFn(COALESCE($moPage,''))";
+        $pageKey    = "LOWER($pageTrim)";
+        $itemTrim   = "$trimFn(COALESCE($moItem,''))";
+
+        // ── date expression ───────────────────────────────────────────────────
+        if ($hasTsDate) {
+            $dateExpr = 'DATE(mo.ts_date)';
+        } else {
+            $tsCol = $pickCol('macro_output', ['TIMESTAMP','timestamp']) ?? 'created_at';
+            $tsRef = 'mo.'.$quote($tsCol);
+            if ($driver === 'mysql') {
+                $dateExpr = "COALESCE(DATE(STR_TO_DATE($tsRef,'%H:%i %d-%m-%Y')),DATE(STR_TO_DATE($tsRef,'%H:%i %m-%d-%Y')),DATE(mo.`created_at`))";
+            } else {
+                $dateExpr = "DATE(COALESCE(TO_TIMESTAMP(NULLIF($tsRef,''),'HH24:MI DD-MM-YYYY'),TO_TIMESTAMP(NULLIF($tsRef,''),'HH24:MI MM-DD-YYYY'),mo.\"created_at\"))";
+            }
+        }
+
+        // ── COD fee rate ──────────────────────────────────────────────────────
+        $codFeeRate = FeeSetting::getRate('cod_fee_rate', $host, $date) ?? 0.015;
+
+        // ── macro_output: grouped by page + item for the date ─────────────────
+        $moRows = DB::table('macro_output as mo')
+            ->whereRaw("$dateExpr = ?", [$date])
+            ->whereRaw("$pageTrim != ''")
+            ->selectRaw("
+                $pageTrim AS page_label,
+                $pageKey  AS page_key,
+                $itemTrim AS item_name,
+                COUNT(*)  AS total_orders,
+                SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders
+            ")
+            ->groupByRaw("$pageKey, $pageTrim, $itemTrim")
+            ->get();
+
+        // ── group by page ─────────────────────────────────────────────────────
+        $pageGroups = [];
+        foreach ($moRows as $row) {
+            $pk = (string)$row->page_key;
+            if (!isset($pageGroups[$pk])) {
+                $pageGroups[$pk] = [
+                    'page_label'     => (string)$row->page_label,
+                    'page_key'       => $pk,
+                    'total_orders'   => 0,
+                    'proceed_orders' => 0,
+                    'items'          => [],
+                ];
+            }
+            $pageGroups[$pk]['total_orders']   += (int)$row->total_orders;
+            $pageGroups[$pk]['proceed_orders'] += (int)$row->proceed_orders;
+            $pageGroups[$pk]['items'][] = [
+                'item_name'      => (string)$row->item_name,
+                'total_orders'   => (int)$row->total_orders,
+                'proceed_orders' => (int)$row->proceed_orders,
+            ];
+        }
+
+        // Sort items descending by total_orders (dominant = index 0)
+        foreach ($pageGroups as &$pg) {
+            usort($pg['items'], fn($a, $b) => $b['total_orders'] - $a['total_orders']);
+        }
+        unset($pg);
+
+        // ── adspent per page for the date ─────────────────────────────────────
+        $castSpend = $castMoney('amount_spent_php');
+        $adsRows = DB::table('ads_manager_reports')
+            ->whereRaw('DATE(day) = ?', [$date])
+            ->selectRaw("LOWER($trimFn(COALESCE(page_name,''))) AS page_key, SUM($castSpend) AS adspent")
+            ->groupByRaw("LOWER($trimFn(COALESCE(page_name,'')))")
+            ->get();
+        $adsMap = [];
+        foreach ($adsRows as $r) $adsMap[(string)$r->page_key] = (float)$r->adspent;
+
+        // ── COGS: latest entry ≤ date ─────────────────────────────────────────
+        $cogsItemCol = $pickCol('cogs', ['item_name','ITEM_NAME']) ?? 'item_name';
+        $cogsDateCol = $pickCol('cogs', ['date','effective_date']) ?? 'date';
+        $cogsUnitCol = $pickCol('cogs', ['unit_cost','cost']) ?? 'unit_cost';
+
+        $cogsRows = DB::table('cogs')
+            ->where($cogsDateCol, '<=', $date)
+            ->orderByDesc($cogsDateCol)
+            ->get([$cogsItemCol, $cogsDateCol, $cogsUnitCol]);
+
+        $cogsMap = []; // normalized_item_name → unit_cost
+        foreach ($cogsRows as $r) {
+            $k = strtolower(trim((string)($r->$cogsItemCol ?? '')));
+            if (!isset($cogsMap[$k])) {
+                $cogsMap[$k] = (float)($r->$cogsUnitCol ?? 0);
+            }
+        }
+
+        // ── page_item_settings: latest per page+item ≤ date ──────────────────
+        $settingsMap = [];
+        if (Schema::hasTable('page_item_settings')) {
+            $settingRows = DB::table('page_item_settings')
+                ->where('effective_date', '<=', $date)
+                ->orderBy('page_name')
+                ->orderBy('item_name')
+                ->orderByDesc('effective_date')
+                ->get(['page_name', 'item_name', 'price', 'rts_pct', 'effective_date']);
+
+            foreach ($settingRows as $s) {
+                $k = strtolower(trim((string)$s->page_name)).'||'.strtolower(trim((string)$s->item_name));
+                if (!isset($settingsMap[$k])) {
+                    $settingsMap[$k] = [
+                        'price'          => (float)$s->price,
+                        'rts_pct'        => (float)$s->rts_pct,
+                        'effective_date' => (string)$s->effective_date,
+                    ];
+                }
+            }
+        }
+
+        // ── build response ────────────────────────────────────────────────────
+        $result = [];
+        foreach ($pageGroups as $pk => $pg) {
+            if (empty($pg['items'])) continue;
+
+            $dominant      = $pg['items'][0];
+            $secondary     = array_slice($pg['items'], 1);
+            $dominantKey   = strtolower(trim($dominant['item_name']));
+            $settingKey    = $pk.'||'.$dominantKey;
+
+            $adspent       = $adsMap[$pk] ?? 0.0;
+            $totalOrders   = (int)$pg['total_orders'];
+            $proceedOrders = (int)$pg['proceed_orders'];
+            $itemValue     = $cogsMap[$dominantKey] ?? null;
+            $settings      = $settingsMap[$settingKey] ?? null;
+            $price         = $settings ? (float)$settings['price'] : null;
+            $rtsPct        = $settings ? (float)$settings['rts_pct'] : null;
+
+            $cpp        = ($totalOrders > 0 && $adspent > 0) ? $adspent / $totalOrders   : null;
+            $proceedCpp = ($proceedOrders > 0 && $adspent > 0) ? $adspent / $proceedOrders : null;
+
+            // COD fee per order (base) = Price × rate;  with VAT × 1.12
+            $codFeeBase    = ($price !== null) ? round($price * $codFeeRate, 2) : null;
+            $codFeeWithVat = ($codFeeBase !== null) ? round($codFeeBase * 1.12, 2) : null;
+
+            // Projected Profit
+            // = [Proceed × (1−RTS%)] × [Price − ItemValue − (CODFee×1.12)] − Adspent
+            $projProfit        = null;
+            $projProfitPerOrder = null;
+            if ($price !== null && $rtsPct !== null && $itemValue !== null && $codFeeBase !== null) {
+                $deliverFactor = $proceedOrders * (1 - $rtsPct / 100.0);
+                $projProfit    = $deliverFactor * ($price - $itemValue - $codFeeWithVat) - $adspent;
+                $projProfitPerOrder = $proceedOrders > 0 ? $projProfit / $proceedOrders : null;
+            }
+
+            $result[] = [
+                'page_name'              => $pg['page_label'],
+                'page_key'               => $pk,
+                'item_name'              => $dominant['item_name'],
+                'secondary_items'        => array_map(fn($i) => [
+                    'item_name'    => $i['item_name'],
+                    'total_orders' => $i['total_orders'],
+                ], $secondary),
+                'adspent'                => $adspent,
+                'orders'                 => $totalOrders,
+                'cpp'                    => $cpp,
+                'proceed_orders'         => $proceedOrders,
+                'proceed_cpp'            => $proceedCpp,
+                'projected_profit'       => $projProfit,
+                'proj_profit_per_order'  => $projProfitPerOrder,
+                'rts_pct'                => $rtsPct,
+                'price'                  => $price,
+                'item_value'             => $itemValue,
+                'cod_fee'                => $codFeeWithVat,
+                'settings_date'          => $settings ? $settings['effective_date'] : null,
+                'has_settings'           => $settings !== null,
+            ];
+        }
+
+        usort($result, fn($a, $b) => strcmp((string)$a['page_name'], (string)$b['page_name']));
+
+        return response()->json(['rows' => $result, 'date' => $date]);
+    }
+
+    public function saveItemSetting(Request $request)
+    {
+        $this->checkAccess();
+
+        $validated = $request->validate([
+            'page_name'      => 'required|string|max:255',
+            'item_name'      => 'required|string|max:255',
+            'price'          => 'required|numeric|min:0',
+            'rts_pct'        => 'required|numeric|min:0|max:100',
+            'effective_date' => 'required|date',
+        ]);
+
+        DB::table('page_item_settings')->insert([
+            'page_name'      => trim($validated['page_name']),
+            'item_name'      => trim($validated['item_name']),
+            'price'          => $validated['price'],
+            'rts_pct'        => $validated['rts_pct'],
+            'effective_date' => $validated['effective_date'],
+            'created_at'     => now(),
+            'updated_at'     => now(),
+        ]);
+
+        return response()->json(['ok' => true]);
+    }
 }

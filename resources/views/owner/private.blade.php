@@ -497,6 +497,182 @@
         </table>
       </div>
     </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         ITEM SUMMARY — one day, one row per page, dominant item used for calcs
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <section class="bg-white rounded-xl shadow p-3" x-data="itemSummaryUI()" x-init="init()">
+
+      <!-- Header -->
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <div>
+          <div class="font-semibold text-base">Item Summary</div>
+          <div class="text-xs text-gray-400">One day · dominant item per page · Price & RTS% are manually set</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="date" x-model="date"
+                 class="border rounded px-2 py-1.5 text-sm"
+                 @change="load()">
+          <button @click="load()"
+                  class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors">
+            Load
+          </button>
+          <span x-show="loading" x-transition.opacity>
+            <span class="spinner-inline"></span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Edit form (appears inline above table when a row is being edited) -->
+      <template x-if="editIdx !== -1 && rows[editIdx]">
+        <div class="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg flex flex-wrap items-end gap-3">
+          <div>
+            <div class="text-xs font-semibold text-blue-800 mb-1" x-text="rows[editIdx].page_name + ' · ' + rows[editIdx].item_name"></div>
+            <div class="text-xs text-blue-600">Effective date: <span x-text="date"></span></div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">Price (₱)</label>
+            <input type="number" step="1" min="0" x-model="editVals.price"
+                   class="border rounded px-2 py-1.5 text-sm w-28 text-right"
+                   placeholder="e.g. 299">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">RTS %</label>
+            <input type="number" step="0.1" min="0" max="100" x-model="editVals.rts_pct"
+                   class="border rounded px-2 py-1.5 text-sm w-24 text-right"
+                   placeholder="e.g. 25">
+          </div>
+          <div class="flex gap-2">
+            <button @click="saveEdit()"
+                    class="px-3 py-1.5 bg-green-600 text-white rounded text-sm hover:bg-green-700 font-semibold">
+              Save
+            </button>
+            <button @click="cancelEdit()"
+                    class="px-3 py-1.5 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300">
+              Cancel
+            </button>
+          </div>
+          <div x-show="saving" class="text-sm text-blue-600">Saving…</div>
+          <div x-show="saveMsg" x-transition class="text-sm text-green-600 font-semibold" x-text="saveMsg"></div>
+        </div>
+      </template>
+
+      <!-- Table -->
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-gray-50 sticky top-16 z-20">
+            <tr class="text-left text-gray-600">
+              <th class="px-2 py-2">Page</th>
+              <th class="px-2 py-2">Item Name</th>
+              <th class="px-2 py-2 text-right">Adspent</th>
+              <th class="px-2 py-2 text-right">Orders</th>
+              <th class="px-2 py-2 text-right">CPP</th>
+              <th class="px-2 py-2 text-right">Proceed</th>
+              <th class="px-2 py-2 text-right">Proceed CPP</th>
+              <th class="px-2 py-2 text-right">Proj. Profit</th>
+              <th class="px-2 py-2 text-right">Proj. Profit/Order</th>
+              <th class="px-2 py-2 text-right">RTS%</th>
+              <th class="px-2 py-2 text-right">Price</th>
+              <th class="px-2 py-2 text-right">Item Value</th>
+              <th class="px-2 py-2 text-right">COD Fee</th>
+              <th class="px-2 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="rows.length === 0 && !loading">
+              <tr>
+                <td class="px-3 py-4 text-gray-400" colspan="14">No data for selected date.</td>
+              </tr>
+            </template>
+            <template x-for="(row, idx) in rows" :key="row.page_key">
+              <tr class="border-t"
+                  :class="editIdx === idx ? 'bg-blue-50' : 'hover:bg-gray-50'">
+
+                <!-- Page -->
+                <td class="px-2 py-2 font-medium" x-text="row.page_name"></td>
+
+                <!-- Item Name: dominant bold + secondary gray below -->
+                <td class="px-2 py-2">
+                  <div class="font-semibold" x-text="row.item_name"></div>
+                  <template x-for="sec in (row.secondary_items || [])" :key="sec.item_name">
+                    <div class="text-gray-400 text-xs leading-tight"
+                         x-text="sec.item_name + ' (' + sec.total_orders + ')'"></div>
+                  </template>
+                </td>
+
+                <!-- Adspent -->
+                <td class="px-2 py-2 text-right" x-text="money(row.adspent)"></td>
+
+                <!-- Orders (total page) -->
+                <td class="px-2 py-2 text-right" x-text="num(row.orders)"></td>
+
+                <!-- CPP -->
+                <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.cpp)"></td>
+
+                <!-- Proceed Orders -->
+                <td class="px-2 py-2 text-right" x-text="num(row.proceed_orders)"></td>
+
+                <!-- Proceed CPP -->
+                <td class="px-2 py-2 text-right" x-text="moneyOrDash(row.proceed_cpp)"></td>
+
+                <!-- Projected Profit -->
+                <td class="px-2 py-2 text-right">
+                  <span x-text="moneyOrDash(row.projected_profit)"
+                        :class="{
+                          'text-green-700 font-semibold': row.projected_profit !== null && row.projected_profit >= 0,
+                          'text-red-600 font-semibold':   row.projected_profit !== null && row.projected_profit < 0
+                        }"></span>
+                </td>
+
+                <!-- Proj. Profit / Proceed Order -->
+                <td class="px-2 py-2 text-right">
+                  <span x-text="moneyOrDash(row.proj_profit_per_order)"
+                        :class="{
+                          'text-green-700': row.proj_profit_per_order !== null && row.proj_profit_per_order >= 0,
+                          'text-red-600':   row.proj_profit_per_order !== null && row.proj_profit_per_order < 0
+                        }"></span>
+                </td>
+
+                <!-- RTS% -->
+                <td class="px-2 py-2 text-right">
+                  <span :class="row.rts_pct === null ? 'text-red-400 italic' : 'text-gray-800'"
+                        x-text="row.rts_pct !== null ? row.rts_pct.toFixed(1) + '%' : '—'"></span>
+                </td>
+
+                <!-- Price -->
+                <td class="px-2 py-2 text-right">
+                  <span :class="row.price === null ? 'text-red-400 italic' : 'text-gray-800'"
+                        x-text="row.price !== null ? money(row.price) : '—'"></span>
+                </td>
+
+                <!-- Item Value (COGS, read-only) -->
+                <td class="px-2 py-2 text-right text-gray-500"
+                    x-text="row.item_value !== null ? money(row.item_value) : '—'"></td>
+
+                <!-- COD Fee (incl. VAT, read-only) -->
+                <td class="px-2 py-2 text-right text-gray-500"
+                    x-text="row.cod_fee !== null ? money(row.cod_fee) : '—'"></td>
+
+                <!-- Edit button -->
+                <td class="px-2 py-2">
+                  <button @click="startEdit(idx, row)"
+                          class="px-2 py-1 text-xs rounded border border-blue-300 text-blue-600 hover:bg-blue-50 transition-colors"
+                          :class="editIdx === idx ? 'bg-blue-100' : ''">
+                    <span x-text="row.has_settings ? 'Edit' : '+ Set'"></span>
+                  </button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-2 text-xs text-gray-400">
+        RTS% and Price are manually set per page/item. Click <strong>+ Set</strong> or <strong>Edit</strong> to update. Changes are effective from the selected date.
+        COD Fee shown is per delivered order (incl. 12% VAT).
+      </div>
+    </section>
+
   </main>
 
   <!-- Column Settings Modal -->
@@ -1038,6 +1214,107 @@
           await this.reload();
         }
       }
+    }
+  </script>
+
+  <script>
+    function itemSummaryUI() {
+      return {
+        date: (function() {
+          // default to today in PH time
+          const now = new Date();
+          const ph  = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+          const pad = n => String(n).padStart(2, '0');
+          return ph.getFullYear() + '-' + pad(ph.getMonth()+1) + '-' + pad(ph.getDate());
+        })(),
+        rows:    [],
+        loading: false,
+        editIdx: -1,
+        editVals: { price: '', rts_pct: '' },
+        saving:  false,
+        saveMsg: '',
+
+        async load() {
+          this.loading = true;
+          this.editIdx = -1;
+          this.saveMsg = '';
+          try {
+            const res  = await fetch('{{ route('owner.private.item-summary') }}?date=' + this.date);
+            const json = await res.json();
+            this.rows = json.rows || [];
+          } catch(e) {
+            console.error('itemSummary load error', e);
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        startEdit(idx, row) {
+          this.editIdx = idx;
+          this.editVals = {
+            price:   row.price   !== null ? row.price   : '',
+            rts_pct: row.rts_pct !== null ? row.rts_pct : '',
+          };
+          this.saveMsg = '';
+        },
+
+        cancelEdit() {
+          this.editIdx  = -1;
+          this.editVals = { price: '', rts_pct: '' };
+          this.saveMsg  = '';
+        },
+
+        async saveEdit() {
+          const price  = parseFloat(this.editVals.price);
+          const rtsPct = parseFloat(this.editVals.rts_pct);
+
+          if (isNaN(price) || price < 0) {
+            alert('Enter a valid Price (≥ 0).');
+            return;
+          }
+          if (isNaN(rtsPct) || rtsPct < 0 || rtsPct > 100) {
+            alert('Enter a valid RTS% (0 – 100).');
+            return;
+          }
+
+          const row = this.rows[this.editIdx];
+          this.saving = true;
+          try {
+            const res = await fetch('{{ route('owner.private.item-setting.save') }}', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN':  '{{ csrf_token() }}',
+              },
+              body: JSON.stringify({
+                page_name:      row.page_name,
+                item_name:      row.item_name,
+                price:          price,
+                rts_pct:        rtsPct,
+                effective_date: this.date,
+              }),
+            });
+            const json = await res.json();
+            if (json.ok) {
+              this.saveMsg = 'Saved!';
+              this.editIdx = -1;
+              await this.load();
+              setTimeout(() => { this.saveMsg = ''; }, 2500);
+            }
+          } catch(e) {
+            console.error('saveEdit error', e);
+            alert('Save failed. Check console.');
+          } finally {
+            this.saving = false;
+          }
+        },
+
+        money(v)        { return '\u20b1' + Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); },
+        moneyOrDash(v)  { return (v == null || isNaN(v)) ? '\u2014' : this.money(v); },
+        num(v)          { return Number(v||0).toLocaleString('en-PH'); },
+
+        async init() { await this.load(); }
+      };
     }
   </script>
 </body>
