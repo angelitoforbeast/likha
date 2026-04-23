@@ -6,15 +6,21 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
   <style>
-    .dataTables_wrapper .dataTables_paginate .paginate_button {
-      padding: 0.25rem 0.75rem; margin: 0 2px; border-radius: 0.375rem;
-      background-color: #1f2937; color: white !important; border: none;
+    /* paginate buttons — works wherever the element lives */
+    .dataTables_paginate .paginate_button {
+      padding: 0.2rem 0.65rem; margin: 0 2px; border-radius: 0.375rem;
+      background-color: #374151; color: white !important; border: none;
+      cursor: pointer; font-size: 12px;
     }
-    .dataTables_wrapper .dataTables_paginate .paginate_button.current {
+    .dataTables_paginate .paginate_button.current {
       background-color: #2563eb !important; font-weight: bold;
     }
-    .dataTables_wrapper .dataTables_info { margin-top: 0.75rem; color: #6b7280; }
-    .dataTables_wrapper .dataTables_filter { display:none; } /* external search bar */
+    .dataTables_paginate .paginate_button.disabled {
+      opacity: 0.4; cursor: default;
+    }
+    .dataTables_wrapper .dataTables_filter { display:none; }
+    .dataTables_wrapper .dataTables_info   { display:none; }
+    .dataTables_wrapper .dataTables_paginate { display:none; }
     .flatpickr-calendar { z-index: 9999 !important; }
   </style>
 
@@ -45,7 +51,7 @@
   </form>
 
   @if (!empty($results) && count($results))
-    <div class="bg-white shadow rounded" style="overflow:auto; max-height:calc(100vh - 220px);">
+    <div class="bg-white shadow rounded" style="overflow:auto; max-height:calc(100vh - 310px);">
       <table id="rtsTable" class="min-w-full table-auto border-collapse text-sm">
         <thead style="position:sticky;top:0;z-index:20;background:#f1f5f9;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
           <tr>
@@ -103,25 +109,47 @@
             </tr>
           @endforeach
         </tbody>
-        <tfoot style="position:sticky;bottom:0;z-index:20;background:#f8fafc;box-shadow:0 -2px 6px rgba(0,0,0,0.1);">
-          <tr style="border-top:2px solid #94a3b8;">
-            <td class="px-3 py-2 border border-gray-300 font-bold text-gray-500 text-xs uppercase tracking-wide" colspan="4" style="text-align:right;">Total</td>
-            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-gray-800" id="tot-qty"></td>
-            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-red-700" id="tot-rts"></td>
-            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-green-700" id="tot-del"></td>
-            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-blue-700" id="tot-transit"></td>
-            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-red-700" id="tot-rts-pct"></td>
-            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-green-700" id="tot-del-pct"></td>
-            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-blue-700" id="tot-transit-pct"></td>
-            <td class="px-3 py-2 border border-gray-300" colspan="2"></td>
-          </tr>
-        </tfoot>
       </table>
     </div>
   @else
     <p class="text-gray-600">No data to display. Please select a date range.</p>
   @endif
   </div>{{-- end px-4 py-6 --}}
+
+  @if (!empty($results) && count($results))
+  {{-- Fixed bottom bar: totals + pagination --}}
+  <div id="rts-bottom-bar" style="position:fixed;bottom:0;left:0;right:0;z-index:100;background:#f8fafc;border-top:2px solid #94a3b8;box-shadow:0 -4px 14px rgba(0,0,0,0.12);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 20px;gap:12px;flex-wrap:wrap;">
+
+      {{-- Totals --}}
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap;">
+        <span style="font-weight:600;color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-right:4px;">TOTAL</span>
+        <span style="font-weight:700;color:#1e293b;background:#e2e8f0;padding:2px 8px;border-radius:4px;">
+          Qty: <span id="tot-qty">—</span>
+        </span>
+        <span style="color:#94a3b8;">·</span>
+        <span style="font-weight:700;color:#b91c1c;background:#fee2e2;padding:2px 8px;border-radius:4px;">
+          RTS: <span id="tot-rts">—</span> &nbsp;<span id="tot-rts-pct" style="font-size:11px;">—</span>
+        </span>
+        <span style="color:#94a3b8;">·</span>
+        <span style="font-weight:700;color:#15803d;background:#dcfce7;padding:2px 8px;border-radius:4px;">
+          Del: <span id="tot-del">—</span> &nbsp;<span id="tot-del-pct" style="font-size:11px;">—</span>
+        </span>
+        <span style="color:#94a3b8;">·</span>
+        <span style="font-weight:700;color:#1d4ed8;background:#dbeafe;padding:2px 8px;border-radius:4px;">
+          Transit: <span id="tot-transit">—</span> &nbsp;<span id="tot-transit-pct" style="font-size:11px;">—</span>
+        </span>
+      </div>
+
+      {{-- Pagination + info --}}
+      <div style="display:flex;align-items:center;gap:14px;">
+        <span id="dt-info-slot" style="font-size:12px;color:#6b7280;white-space:nowrap;"></span>
+        <div id="dt-paging-slot"></div>
+      </div>
+
+    </div>
+  </div>
+  @endif
 
   {{-- Scripts (inline + fallback) --}}
   <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js"></script>
@@ -186,7 +214,6 @@
     function updateTotals(dt) {
       let qty = 0, rts = 0, del = 0, transit = 0;
 
-      // iterate over all filtered rows (all pages)
       dt.rows({ search: 'applied' }).nodes().each(function (row) {
         const cells = row.querySelectorAll('td[data-raw]');
         qty     += parseInt(cells[0]?.dataset.raw || 0);
@@ -196,13 +223,22 @@
       });
 
       const total = Math.max(1, qty);
-      document.getElementById('tot-qty').textContent     = fmtNum(qty);
-      document.getElementById('tot-rts').textContent     = fmtNum(rts);
-      document.getElementById('tot-del').textContent     = fmtNum(del);
-      document.getElementById('tot-transit').textContent = fmtNum(transit);
+      document.getElementById('tot-qty').textContent         = fmtNum(qty);
+      document.getElementById('tot-rts').textContent         = fmtNum(rts);
+      document.getElementById('tot-del').textContent         = fmtNum(del);
+      document.getElementById('tot-transit').textContent     = fmtNum(transit);
       document.getElementById('tot-rts-pct').textContent     = (rts / total * 100).toFixed(2) + '%';
       document.getElementById('tot-del-pct').textContent     = (del / total * 100).toFixed(2) + '%';
       document.getElementById('tot-transit-pct').textContent = (transit / total * 100).toFixed(2) + '%';
+    }
+
+    function updateInfo(dt) {
+      const info = dt.page.info();
+      const slot = document.getElementById('dt-info-slot');
+      if (!slot) return;
+      const filtered = info.recordsDisplay !== info.recordsTotal
+        ? ` (filtered from ${fmtNum(info.recordsTotal)})` : '';
+      slot.textContent = `Showing ${fmtNum(info.start + 1)}–${fmtNum(info.end)} of ${fmtNum(info.recordsDisplay)} entries${filtered}`;
     }
 
     document.addEventListener('DOMContentLoaded', function () {
@@ -215,15 +251,28 @@
         ordering: true,
         info: true,
         dom: 'lrtip',
-        order: [[8, 'desc']], // sort by RTS% desc (col index shifted +3)
+        order: [[8, 'desc']],
         pageLength: 25,
         drawCallback: function () {
-          updateTotals(this.api());
+          const api = this.api();
+          updateTotals(api);
+          updateInfo(api);
+          // move pagination into fixed bar (idempotent — only moves once)
+          const wrapper = this.api().table().container();
+          const pagEl   = wrapper.querySelector('.dataTables_paginate');
+          const pagSlot = document.getElementById('dt-paging-slot');
+          if (pagEl && pagSlot && !pagSlot.contains(pagEl)) pagSlot.appendChild(pagEl);
         }
       });
 
-      // initial totals
       updateTotals(dt);
+      updateInfo(dt);
+
+      // Move pagination on first load
+      const wrapper = dt.table().container();
+      const pagEl   = wrapper.querySelector('.dataTables_paginate');
+      const pagSlot = document.getElementById('dt-paging-slot');
+      if (pagEl && pagSlot) pagSlot.appendChild(pagEl);
 
       const searchInput = document.getElementById('globalSearch');
       if (searchInput) {
