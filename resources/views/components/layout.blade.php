@@ -221,6 +221,8 @@
       'pancake/index',
       'checklist',
       'checklist/*',
+      'jnt_rts',
+      'jnt_rts/*',
     ]))
       <div class="w-full px-0">
         {{ $slot }}

@@ -19,6 +19,7 @@
   </style>
 
   {{-- Filters --}}
+  <div class="px-4 py-6">
   <form method="GET" action="{{ url('/jnt_rts') }}" class="mb-4 bg-white p-4 shadow rounded" id="rtsFilterForm">
     <div class="flex flex-wrap items-end gap-3">
       <div class="min-w-[260px]">
@@ -120,6 +121,7 @@
   @else
     <p class="text-gray-600">No data to display. Please select a date range.</p>
   @endif
+  </div>{{-- end px-4 py-6 --}}
 
   {{-- Scripts (inline + fallback) --}}
   <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.js"></script>
