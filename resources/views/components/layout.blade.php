@@ -194,8 +194,8 @@
     </div>
   </nav>
 
-  {{-- Page heading (hidden for checklist pages — they have their own header) --}}
-  @unless(request()->is('checklist') || request()->is('checklist/*'))
+  {{-- Page heading (hidden for checklist pages and full-viewport pages) --}}
+  @unless(request()->is('checklist') || request()->is('checklist/*') || request()->is('jnt_rts') || request()->is('jnt_rts/*'))
   <header class="bg-white shadow-sm mt-16">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <h1 class="text-3xl font-bold tracking-tight text-gray-900">
