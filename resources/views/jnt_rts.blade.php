@@ -45,75 +45,75 @@
   </form>
 
   @if (!empty($results) && count($results))
-    <div class="overflow-auto bg-white p-4 shadow rounded">
-      <table id="rtsTable" class="min-w-full table-auto border text-sm">
-        <thead class="bg-gray-100 sticky top-0 z-10">
+    <div class="bg-white shadow rounded" style="overflow:auto; max-height:calc(100vh - 220px);">
+      <table id="rtsTable" class="min-w-full table-auto border-collapse text-sm">
+        <thead style="position:sticky;top:0;z-index:20;background:#f1f5f9;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
           <tr>
-            <th class="px-2 py-1 border">Date Range</th>
-            <th class="px-2 py-1 border">Sender</th>
-            <th class="px-2 py-1 border">Item</th>
-            <th class="px-2 py-1 border">COD</th>
-            <th class="px-2 py-1 border">Qty</th>
-            <th class="px-2 py-1 border">RTS Qty</th>
-            <th class="px-2 py-1 border">Del Qty</th>
-            <th class="px-2 py-1 border">Transit Qty</th>
-            <th class="px-2 py-1 border">RTS%</th>
-            <th class="px-2 py-1 border">Delivered%</th>
-            <th class="px-2 py-1 border">In Transit%</th>
-            <th class="px-2 py-1 border">Current RTS%</th>
-            <th class="px-2 py-1 border">MAX RTS%</th>
+            <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Date Range</th>
+            <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Sender</th>
+            <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Item</th>
+            <th class="px-3 py-2 border border-gray-300 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">COD</th>
+            <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Qty</th>
+            <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">RTS Qty</th>
+            <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Del Qty</th>
+            <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Transit Qty</th>
+            <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">RTS%</th>
+            <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Delivered%</th>
+            <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">In Transit%</th>
+            <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">Current RTS%</th>
+            <th class="px-3 py-2 border border-gray-300 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap">MAX RTS%</th>
           </tr>
         </thead>
         <tbody>
           @foreach ($results as $r)
             @php
-              $rtsColor = $r['rts_percent'] > 25 ? 'bg-red-200'
-                        : ($r['rts_percent'] > 20 ? 'bg-orange-200'
-                        : ($r['rts_percent'] > 15 ? 'bg-green-200' : 'bg-cyan-200'));
+              $rtsColor = $r['rts_percent'] > 25 ? 'bg-red-100'
+                        : ($r['rts_percent'] > 20 ? 'bg-orange-100'
+                        : ($r['rts_percent'] > 15 ? 'bg-green-100' : 'bg-cyan-100'));
               $num = fn($v) => is_numeric($v) ? $v : null;
             @endphp
-            <tr class="hover:bg-gray-50">
-              <td class="px-2 py-1 border whitespace-nowrap">{{ $r['date_range'] }}</td>
-              <td class="px-2 py-1 border whitespace-nowrap">{{ $r['sender'] }}</td>
-              <td class="px-2 py-1 border whitespace-nowrap">{{ $r['item'] }}</td>
-              <td class="px-2 py-1 border whitespace-nowrap">{{ $r['cod'] }}</td>
-              <td class="px-2 py-1 border text-right" data-raw="{{ (int)$r['quantity'] }}">{{ number_format((int)$r['quantity']) }}</td>
-              <td class="px-2 py-1 border text-right" data-raw="{{ (int)$r['rts_count'] }}">{{ number_format((int)$r['rts_count']) }}</td>
-              <td class="px-2 py-1 border text-right" data-raw="{{ (int)$r['delivered_count'] }}">{{ number_format((int)$r['delivered_count']) }}</td>
-              <td class="px-2 py-1 border text-right" data-raw="{{ (int)$r['transit_count'] }}">{{ number_format((int)$r['transit_count']) }}</td>
+            <tr class="hover:bg-blue-50 transition-colors">
+              <td class="px-3 py-1.5 border border-gray-200 whitespace-nowrap text-gray-700">{{ $r['date_range'] }}</td>
+              <td class="px-3 py-1.5 border border-gray-200 whitespace-nowrap font-medium text-gray-800">{{ $r['sender'] }}</td>
+              <td class="px-3 py-1.5 border border-gray-200 whitespace-nowrap text-gray-700">{{ $r['item'] }}</td>
+              <td class="px-3 py-1.5 border border-gray-200 whitespace-nowrap text-gray-700">{{ $r['cod'] }}</td>
+              <td class="px-3 py-1.5 border border-gray-200 text-right text-gray-700" data-raw="{{ (int)$r['quantity'] }}">{{ number_format((int)$r['quantity']) }}</td>
+              <td class="px-3 py-1.5 border border-gray-200 text-right text-gray-700" data-raw="{{ (int)$r['rts_count'] }}">{{ number_format((int)$r['rts_count']) }}</td>
+              <td class="px-3 py-1.5 border border-gray-200 text-right text-gray-700" data-raw="{{ (int)$r['delivered_count'] }}">{{ number_format((int)$r['delivered_count']) }}</td>
+              <td class="px-3 py-1.5 border border-gray-200 text-right text-gray-700" data-raw="{{ (int)$r['transit_count'] }}">{{ number_format((int)$r['transit_count']) }}</td>
 
-              <td class="px-2 py-1 border text-right {{ $rtsColor }}"
+              <td class="px-3 py-1.5 border border-gray-200 text-right font-semibold {{ $rtsColor }}"
                   data-order="{{ $r['rts_percent'] }}">{{ number_format($r['rts_percent'], 2) }}%</td>
 
-              <td class="px-2 py-1 border text-right"
+              <td class="px-3 py-1.5 border border-gray-200 text-right text-gray-700"
                   data-order="{{ $r['delivered_percent'] }}">{{ number_format($r['delivered_percent'], 2) }}%</td>
 
-              <td class="px-2 py-1 border text-right"
+              <td class="px-3 py-1.5 border border-gray-200 text-right text-gray-700"
                   data-order="{{ $r['transit_percent'] }}">{{ number_format($r['transit_percent'], 2) }}%</td>
 
-              <td class="px-2 py-1 border text-right"
+              <td class="px-3 py-1.5 border border-gray-200 text-right text-gray-700"
                   data-order="{{ $num($r['current_rts']) ?? -1 }}">
                 {{ is_numeric($r['current_rts']) ? number_format($r['current_rts'], 2) . '%' : 'N/A' }}
               </td>
 
-              <td class="px-2 py-1 border text-right"
+              <td class="px-3 py-1.5 border border-gray-200 text-right text-gray-700"
                   data-order="{{ $num($r['max_rts']) ?? -1 }}">
                 {{ is_numeric($r['max_rts']) ? number_format($r['max_rts'], 2) . '%' : 'N/A' }}
               </td>
             </tr>
           @endforeach
         </tbody>
-        <tfoot>
-          <tr class="bg-gray-800 text-white font-bold">
-            <td class="px-2 py-1 border" colspan="4" style="text-align:right;">TOTAL</td>
-            <td class="px-2 py-1 border text-right" id="tot-qty"></td>
-            <td class="px-2 py-1 border text-right" id="tot-rts"></td>
-            <td class="px-2 py-1 border text-right" id="tot-del"></td>
-            <td class="px-2 py-1 border text-right" id="tot-transit"></td>
-            <td class="px-2 py-1 border text-right" id="tot-rts-pct"></td>
-            <td class="px-2 py-1 border text-right" id="tot-del-pct"></td>
-            <td class="px-2 py-1 border text-right" id="tot-transit-pct"></td>
-            <td class="px-2 py-1 border" colspan="2"></td>
+        <tfoot style="position:sticky;bottom:0;z-index:20;background:#f8fafc;box-shadow:0 -2px 6px rgba(0,0,0,0.1);">
+          <tr style="border-top:2px solid #94a3b8;">
+            <td class="px-3 py-2 border border-gray-300 font-bold text-gray-500 text-xs uppercase tracking-wide" colspan="4" style="text-align:right;">Total</td>
+            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-gray-800" id="tot-qty"></td>
+            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-red-700" id="tot-rts"></td>
+            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-green-700" id="tot-del"></td>
+            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-blue-700" id="tot-transit"></td>
+            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-red-700" id="tot-rts-pct"></td>
+            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-green-700" id="tot-del-pct"></td>
+            <td class="px-3 py-2 border border-gray-300 text-right font-bold text-blue-700" id="tot-transit-pct"></td>
+            <td class="px-3 py-2 border border-gray-300" colspan="2"></td>
           </tr>
         </tfoot>
       </table>
