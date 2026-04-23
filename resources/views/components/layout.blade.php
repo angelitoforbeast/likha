@@ -75,6 +75,10 @@
                     <i class="fa-solid fa-rotate-left"></i>
                   </x-navlink>
 
+                  <x-navlink href="/jnt/supply" :active="request()->is('jnt/supply*')" label="Supply">
+                    <i class="fa-solid fa-boxes-stacking"></i>
+                  </x-navlink>
+
                   <x-navlink href="/jnt/checker" :active="request()->is('jnt/checker*')" label="JNT Checker">
                     <i class="fa-solid fa-circle-check"></i>
                   </x-navlink>
