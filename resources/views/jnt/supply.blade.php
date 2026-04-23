@@ -64,10 +64,9 @@
             <option value=""  {{ $classFilter === ''  ? 'selected' : '' }}>All Classes</option>
             <option value="A" {{ $classFilter === 'A' ? 'selected' : '' }}>A · Hero</option>
             <option value="B" {{ $classFilter === 'B' ? 'selected' : '' }}>B · Solid</option>
-            <option value="C" {{ $classFilter === 'C' ? 'selected' : '' }}>C · Average</option>
+            <option value="C" {{ $classFilter === 'C' ? 'selected' : '' }}>C · Active</option>
             <option value="D" {{ $classFilter === 'D' ? 'selected' : '' }}>D · New Item</option>
-            <option value="E" {{ $classFilter === 'E' ? 'selected' : '' }}>E · Clearing</option>
-            <option value="F" {{ $classFilter === 'F' ? 'selected' : '' }}>F · Off / Hold-only</option>
+            <option value="H" {{ $classFilter === 'H' ? 'selected' : '' }}>H · Review</option>
           </select>
         </div>
 
@@ -130,10 +129,9 @@
         <span class="font-semibold text-gray-600">Class:</span>
         <span class="class-badge bg-purple-600 text-white" style="cursor:default;">A · Hero</span>
         <span class="class-badge bg-blue-500 text-white"   style="cursor:default;">B · Solid</span>
-        <span class="class-badge bg-yellow-400 text-gray-900" style="cursor:default;">C · Average</span>
+        <span class="class-badge bg-yellow-400 text-gray-900" style="cursor:default;">C · Active</span>
         <span class="class-badge bg-orange-400 text-white" style="cursor:default;">D · New Item</span>
-        <span class="class-badge bg-pink-500 text-white"   style="cursor:default;">E · Clearing</span>
-        <span class="class-badge bg-gray-700 text-white"   style="cursor:default;">F · Off / Hold-only</span>
+        <span class="class-badge bg-gray-500 text-white"   style="cursor:default;">H · Review</span>
         <span class="text-gray-300 mx-1">|</span>
         <span class="font-semibold text-gray-600">Lifecycle:</span>
         <span class="lifecycle-badge bg-blue-100 text-blue-800"   style="cursor:default;">🆕 New</span>
@@ -151,139 +149,201 @@
     {{-- CEO-only: Class threshold editor                                    --}}
     {{-- ================================================================== --}}
     @if($isCeo)
-    <details class="bg-white rounded-lg shadow border border-indigo-200 mb-4">
+    <details class="bg-white rounded-lg shadow border border-indigo-200 mb-4" open>
       <summary class="px-4 py-3 font-semibold text-sm text-indigo-700 cursor-pointer select-none flex items-center gap-2">
         <i class="fa-solid fa-sliders text-indigo-500"></i>
-        Class Velocity Thresholds
-        <span class="text-xs font-normal text-gray-400 ml-1">CEO only — click to expand</span>
+        Classification Rules (A / B / C / D / H)
+        <span class="text-xs font-normal text-gray-400 ml-1">CEO only — lahat editable</span>
       </summary>
       <div class="px-4 pb-4 pt-2">
         <p class="text-xs text-gray-500 mb-3">
-          An item's auto-class is the <strong>highest class</strong> whose threshold ≤ the item's velocity (u/day).
-          Declining items drop 1 tier, Phasing Out / Dormant items drop 2 tiers.
-          Changes apply on next <em>Apply</em>.
+          <strong>Priority (top wins):</strong>
+          D → A → B → C → H. Kapag walang match, H (review needed).
+          Kailangan laging <em>alive</em>: last {{ $cfgAliveWindow }}-day avg ≥ {{ $cfgAliveMin }} u/day (editable sa baba).
         </p>
-        <table class="text-sm border-collapse">
+        <table class="text-sm border-collapse w-full mb-4">
           <thead>
             <tr class="bg-gray-50">
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-20">Class</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200">Label</th>
-              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200">Min Velocity (u/day)</th>
+              <th class="px-3 py-2 text-left  text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-14">Prio</th>
+              <th class="px-3 py-2 text-left  text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-24">Class</th>
+              <th class="px-3 py-2 text-left  text-xs font-semibold text-gray-500 uppercase border border-gray-200">Rule</th>
+              <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-28">Min u/day</th>
+              <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-24">Window (d)</th>
               <th class="px-3 py-2 border border-gray-200 w-16"></th>
             </tr>
           </thead>
           <tbody>
-            @foreach($classThresholdsFull as $ct)
-            @php $badgeCls = $classBadgeMap[$ct->class_key] ?? 'bg-gray-200 text-gray-600'; @endphp
+            {{-- D row --}}
             <tr class="border-b border-gray-100">
+              <td class="px-3 py-2 border border-gray-200 text-center font-bold text-gray-500">1</td>
               <td class="px-3 py-2 border border-gray-200">
-                <span class="class-badge {{ $badgeCls }}" style="cursor:default;">{{ $ct->class_key }}</span>
+                <span class="class-badge bg-orange-400 text-white" style="cursor:default;">D · New Item</span>
               </td>
-              <td class="px-3 py-2 border border-gray-200 text-gray-700 font-medium">{{ $ct->label }}</td>
+              <td class="px-3 py-2 border border-gray-200 text-gray-700">
+                age &lt; <input type="number" class="inline-num supply-kv-input" style="width:70px;"
+                       data-key="new_item_days" value="{{ $cfgDNewItemDays }}" min="1" step="1"> days
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center text-gray-300">—</td>
+              <td class="px-3 py-2 border border-gray-200 text-center text-gray-300">—</td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <button type="button" class="save-kv-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
+                        data-key="new_item_days">Save</button>
+              </td>
+            </tr>
+
+            {{-- A row --}}
+            <tr class="border-b border-gray-100">
+              <td class="px-3 py-2 border border-gray-200 text-center font-bold text-gray-500">2</td>
               <td class="px-3 py-2 border border-gray-200">
-                @if(in_array($ct->class_key, ['D','E','F'], true))
-                  <input type="number" class="inline-num" value="{{ $ct->min_velocity }}" readonly
-                         title="Class {{ $ct->class_key }} is rule-based — see Supply Rules panel"
-                         style="opacity:.5; cursor:not-allowed; width:80px;">
-                @else
-                  <input type="number" class="inline-num threshold-input" min="0" step="0.001"
-                         value="{{ $ct->min_velocity }}" data-class="{{ $ct->class_key }}" style="width:80px;">
-                @endif
+                <span class="class-badge bg-purple-600 text-white" style="cursor:default;">A · Hero</span>
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-gray-700">
+                age ≥ window <strong>AND</strong> window avg ≥ min u/day <strong>AND</strong> alive
               </td>
               <td class="px-3 py-2 border border-gray-200 text-center">
-                @if(!in_array($ct->class_key, ['D','E','F'], true))
-                  <button type="button"
-                          class="save-threshold-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
-                          data-class="{{ $ct->class_key }}">
-                    Save
-                  </button>
-                @else
-                  <span class="text-[10px] text-gray-400">rule-based</span>
-                @endif
+                <input type="number" class="inline-num supply-kv-input" style="width:80px;"
+                       data-key="class_a_min_velocity" value="{{ $cfgAMinVel }}" min="0" step="0.1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <input type="number" class="inline-num supply-kv-input" style="width:70px;"
+                       data-key="class_a_window_days" value="{{ $cfgAWindowDays }}" min="1" step="1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <button type="button" class="save-kv-btn-multi text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
+                        data-keys="class_a_min_velocity,class_a_window_days">Save</button>
+              </td>
+            </tr>
+
+            {{-- B row --}}
+            <tr class="border-b border-gray-100">
+              <td class="px-3 py-2 border border-gray-200 text-center font-bold text-gray-500">3</td>
+              <td class="px-3 py-2 border border-gray-200">
+                <span class="class-badge bg-blue-500 text-white" style="cursor:default;">B · Solid</span>
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-gray-700">
+                age ≥ window <strong>AND</strong> window avg ≥ min u/day <strong>AND</strong> alive
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <input type="number" class="inline-num supply-kv-input" style="width:80px;"
+                       data-key="class_b_min_velocity" value="{{ $cfgBMinVel }}" min="0" step="0.1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <input type="number" class="inline-num supply-kv-input" style="width:70px;"
+                       data-key="class_b_window_days" value="{{ $cfgBWindowDays }}" min="1" step="1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <button type="button" class="save-kv-btn-multi text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
+                        data-keys="class_b_min_velocity,class_b_window_days">Save</button>
+              </td>
+            </tr>
+
+            {{-- C row --}}
+            <tr class="border-b border-gray-100">
+              <td class="px-3 py-2 border border-gray-200 text-center font-bold text-gray-500">4</td>
+              <td class="px-3 py-2 border border-gray-200">
+                <span class="class-badge bg-yellow-400 text-gray-900" style="cursor:default;">C · Active</span>
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-gray-700">
+                age ≥ window <strong>AND</strong> window avg ≥ min u/day <strong>AND</strong> alive
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <input type="number" class="inline-num supply-kv-input" style="width:80px;"
+                       data-key="class_c_min_velocity" value="{{ $cfgCMinVel }}" min="0" step="0.1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <input type="number" class="inline-num supply-kv-input" style="width:70px;"
+                       data-key="class_c_window_days" value="{{ $cfgCWindowDays }}" min="1" step="1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <button type="button" class="save-kv-btn-multi text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
+                        data-keys="class_c_min_velocity,class_c_window_days">Save</button>
+              </td>
+            </tr>
+
+            {{-- H row --}}
+            <tr class="border-b border-gray-100 bg-gray-50">
+              <td class="px-3 py-2 border border-gray-200 text-center font-bold text-gray-500">5</td>
+              <td class="px-3 py-2 border border-gray-200">
+                <span class="class-badge bg-gray-500 text-white" style="cursor:default;">H · Review</span>
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-gray-500 italic" colspan="4">
+                Catch-all — lahat ng walang match sa A/B/C/D. CEO review needed (kill, boost, or ignore).
+              </td>
+            </tr>
+
+            {{-- Alive guard row --}}
+            <tr class="border-b border-gray-100 bg-emerald-50">
+              <td class="px-3 py-2 border border-gray-200 text-center text-emerald-700 font-bold" colspan="2">
+                🫀 Alive Guard
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-gray-700">
+                A/B/C additionally requires: last
+                <input type="number" class="inline-num supply-kv-input" style="width:60px;"
+                       data-key="class_abc_alive_window" value="{{ $cfgAliveWindow }}" min="1" step="1">
+                -day avg ≥
+                <input type="number" class="inline-num supply-kv-input" style="width:70px;"
+                       data-key="class_abc_alive_min" value="{{ $cfgAliveMin }}" min="0" step="0.1">
+                u/day. Kapag patay recent, fall to H kahit mataas ang window average.
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center text-gray-300" colspan="2">—</td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <button type="button" class="save-kv-btn-multi text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 rounded"
+                        data-keys="class_abc_alive_window,class_abc_alive_min">Save</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p class="text-xs text-gray-400">
+          Changes take effect on next <em>Apply</em> / reload. Hover a class badge on a row to see per-window averages.
+        </p>
+      </div>
+    </details>
+
+    {{-- Other Settings: lifecycle + display velocity (non-classification) --}}
+    @php
+      $otherSettings = $supplySettingsAll->filter(fn($s) => !in_array($s->group, ['class_a','class_b','class_c','class_d','class_abc']));
+    @endphp
+    @if($otherSettings->count() > 0)
+    <details class="bg-white rounded-lg shadow border border-emerald-200 mb-4">
+      <summary class="px-4 py-3 font-semibold text-sm text-emerald-700 cursor-pointer select-none flex items-center gap-2">
+        <i class="fa-solid fa-gears text-emerald-500"></i>
+        Other Settings (Lifecycle &amp; Velocity defaults)
+        <span class="text-xs font-normal text-gray-400 ml-1">CEO only — click to expand</span>
+      </summary>
+      <div class="px-4 pb-4 pt-2">
+        <table class="text-sm border-collapse w-full">
+          <thead>
+            <tr class="bg-gray-50">
+              <th class="px-3 py-1 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200">Setting</th>
+              <th class="px-3 py-1 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-32">Value</th>
+              <th class="px-3 py-1 border border-gray-200 w-16"></th>
+            </tr>
+          </thead>
+          <tbody>
+            @foreach($otherSettings as $s)
+            <tr class="border-b border-gray-100">
+              <td class="px-3 py-1.5 border border-gray-200 text-gray-700">
+                {{ $s->label }}
+                <code class="ml-1 text-[10px] text-gray-400">{{ $s->key }}</code>
+              </td>
+              <td class="px-3 py-1.5 border border-gray-200">
+                <input type="number" class="inline-num supply-kv-input" style="width:100px;"
+                       step="{{ $s->data_type === 'int' ? '1' : '0.001' }}" min="0"
+                       data-key="{{ $s->key }}" value="{{ $s->value }}">
+              </td>
+              <td class="px-3 py-1.5 border border-gray-200 text-center">
+                <button type="button"
+                        class="save-kv-btn text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 rounded"
+                        data-key="{{ $s->key }}">Save</button>
               </td>
             </tr>
             @endforeach
           </tbody>
         </table>
-        <p class="text-xs text-gray-400 mt-2">
-          <strong>A / B / C</strong> are velocity-based. <strong>D</strong> (New Item), <strong>E</strong> (Clearing, manual only), and <strong>F</strong> (Off / Hold-only) are rule-based — edit the rules in the Supply Rules panel below.
-        </p>
       </div>
     </details>
-
-    <details class="bg-white rounded-lg shadow border border-emerald-200 mb-4">
-      <summary class="px-4 py-3 font-semibold text-sm text-emerald-700 cursor-pointer select-none flex items-center gap-2">
-        <i class="fa-solid fa-gears text-emerald-500"></i>
-        Supply Rules & Thresholds
-        <span class="text-xs font-normal text-gray-400 ml-1">CEO only — click to expand</span>
-      </summary>
-      <div class="px-4 pb-4 pt-2">
-        <p class="text-xs text-gray-500 mb-3">
-          Rule-based knobs for <strong>Class D / F</strong> detection, lifecycle windows, and velocity defaults.
-          An item only graduates out of Class D when <strong>BOTH</strong> its age ≥ <em>New item days</em>
-          AND velocity ≥ <em>Graduation velocity</em>.
-        </p>
-        @php
-          $grouped = $supplySettingsAll->groupBy('group');
-          $groupLabels = [
-            'class_d'   => 'Class D — New Item rules',
-            'class_f'   => 'Class F — Off / Hold-only rules',
-            'lifecycle' => 'Lifecycle comparison',
-            'velocity'  => 'Velocity defaults',
-            'general'   => 'General',
-          ];
-        @endphp
-        @foreach($grouped as $groupKey => $rows)
-          <div class="mb-3">
-            <div class="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-1">
-              {{ $groupLabels[$groupKey] ?? ucfirst($groupKey) }}
-            </div>
-            <table class="text-sm border-collapse w-full">
-              <thead>
-                <tr class="bg-gray-50">
-                  <th class="px-3 py-1 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200">Setting</th>
-                  <th class="px-3 py-1 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-32">Value</th>
-                  <th class="px-3 py-1 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-20">Type</th>
-                  <th class="px-3 py-1 border border-gray-200 w-16"></th>
-                </tr>
-              </thead>
-              <tbody>
-                @foreach($rows as $s)
-                <tr class="border-b border-gray-100">
-                  <td class="px-3 py-1.5 border border-gray-200 text-gray-700">
-                    {{ $s->label }}
-                    <code class="ml-1 text-[10px] text-gray-400">{{ $s->key }}</code>
-                  </td>
-                  <td class="px-3 py-1.5 border border-gray-200">
-                    <input type="number"
-                           class="inline-num supply-kv-input"
-                           style="width:100px;"
-                           step="{{ $s->data_type === 'int' ? '1' : '0.001' }}"
-                           min="0"
-                           data-key="{{ $s->key }}"
-                           value="{{ $s->value }}">
-                  </td>
-                  <td class="px-3 py-1.5 border border-gray-200 text-xs text-gray-500">
-                    {{ $s->data_type }}
-                  </td>
-                  <td class="px-3 py-1.5 border border-gray-200 text-center">
-                    <button type="button"
-                            class="save-kv-btn text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 rounded"
-                            data-key="{{ $s->key }}">
-                      Save
-                    </button>
-                  </td>
-                </tr>
-                @endforeach
-              </tbody>
-            </table>
-          </div>
-        @endforeach
-        <p class="text-xs text-gray-400 mt-2">
-          Saved changes apply on next <em>Apply</em> (or page reload).
-        </p>
-      </div>
-    </details>
+    @endif
     @endif
 
     {{-- ================================================================== --}}
@@ -372,17 +432,16 @@
             <td class="px-3 py-2 border border-gray-200 text-center" style="background:#faf5ff;"
                 data-order="{{ $row['item_class'] }}">
               <span class="class-badge {{ $row['item_class_badge'] }}"
-                    title="Velocity: {{ $row['vel_per_day'] }} u/d · Lifecycle: {{ $row['lifecycle'] }}{{ $row['item_class_auto'] ? ' · auto' : ' · manual override' }}">
+                    title="A-win avg: {{ $row['a_avg'] }} · B-win avg: {{ $row['b_avg'] }} · C-win avg: {{ $row['c_avg'] }} · Alive-win avg: {{ $row['alive_avg'] }} · Age: {{ $row['days_running'] }}d{{ $row['item_class_auto'] ? ' · auto' : ' · manual override' }}">
                 {{ $row['item_class_label'] }}@if(!$row['item_class_auto'])<sup title="Manual override" class="text-[9px] opacity-70">★</sup>@endif
               </span>
               <select class="class-sel" title="Override class for {{ $row['item'] }}">
                 <option value="">auto</option>
                 <option value="A" {{ $row['item_class'] === 'A' && !$row['item_class_auto'] ? 'selected' : '' }}>A · Hero</option>
                 <option value="B" {{ $row['item_class'] === 'B' && !$row['item_class_auto'] ? 'selected' : '' }}>B · Solid</option>
-                <option value="C" {{ $row['item_class'] === 'C' && !$row['item_class_auto'] ? 'selected' : '' }}>C · Average</option>
+                <option value="C" {{ $row['item_class'] === 'C' && !$row['item_class_auto'] ? 'selected' : '' }}>C · Active</option>
                 <option value="D" {{ $row['item_class'] === 'D' && !$row['item_class_auto'] ? 'selected' : '' }}>D · New Item</option>
-                <option value="E" {{ $row['item_class'] === 'E' && !$row['item_class_auto'] ? 'selected' : '' }}>E · Clearing</option>
-                <option value="F" {{ $row['item_class'] === 'F' && !$row['item_class_auto'] ? 'selected' : '' }}>F · Off / Hold-only</option>
+                <option value="H" {{ $row['item_class'] === 'H' && !$row['item_class_auto'] ? 'selected' : '' }}>H · Review</option>
               </select>
             </td>
 
@@ -486,10 +545,9 @@
     const CLASS_META = {
       'A': { label: 'A · Hero',    cls: 'bg-purple-600 text-white' },
       'B': { label: 'B · Solid',   cls: 'bg-blue-500 text-white' },
-      'C': { label: 'C · Average', cls: 'bg-yellow-400 text-gray-900' },
-      'D': { label: 'D · New Item',        cls: 'bg-orange-400 text-white' },
-      'E': { label: 'E · Clearing',        cls: 'bg-pink-500 text-white' },
-      'F': { label: 'F · Off / Hold-only', cls: 'bg-gray-700 text-white' },
+      'C': { label: 'C · Active',   cls: 'bg-yellow-400 text-gray-900' },
+      'D': { label: 'D · New Item', cls: 'bg-orange-400 text-white' },
+      'H': { label: 'H · Review',   cls: 'bg-gray-500 text-white' },
     };
     const ALL_CLASS_CLS = Object.values(CLASS_META).flatMap(m => m.cls.split(' '));
 
@@ -692,7 +750,30 @@
       .catch(err => { console.error(err); e.target.disabled = false; });
     });
 
-    // ---- CEO supply_settings KV save ----
+    // ---- CEO supply_settings KV save (multi-key row) ----
+    document.addEventListener('click', async function (e) {
+      if (!e.target.classList.contains('save-kv-btn-multi')) return;
+      const keys = (e.target.dataset.keys || '').split(',').filter(Boolean);
+      e.target.disabled = true;
+      let allOk = true, lastMsg = '';
+      for (const key of keys) {
+        const input = document.querySelector(`.supply-kv-input[data-key="${key}"]`);
+        if (!input) continue;
+        const val = input.value.trim();
+        if (val === '' || isNaN(parseFloat(val))) { allOk = false; continue; }
+        const resp = await fetch('/jnt/supply/setting-kv', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+          body: JSON.stringify({ key, value: val }),
+        }).then(r => r.json()).catch(() => ({ success: false }));
+        if (resp.success) lastMsg = key + ' = ' + resp.value;
+        else allOk = false;
+      }
+      e.target.disabled = false;
+      showToast(allOk ? '✓ Saved — reload to apply' : '⚠ Some saves failed');
+    });
+
+    // ---- CEO supply_settings KV save (single key) ----
     document.addEventListener('click', function (e) {
       if (!e.target.classList.contains('save-kv-btn')) return;
       const key   = e.target.dataset.key;

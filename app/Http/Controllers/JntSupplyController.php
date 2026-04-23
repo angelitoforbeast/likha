@@ -95,48 +95,41 @@ class JntSupplyController extends Controller
     }
 
     // -----------------------------------------------------------------------
-    // Item class classification (A–F) — business semantics
+    // Item class classification (A / B / C / D / H)
     //
     // Priority (top wins):
-    //   1. F — ads OFF (is_running=false) AND recent orders ≤ f_max_orders
-    //          AND hold_units > 0 (hold-only, phasing out for real)
-    //   2. D — NEW ITEM: not yet graduated. Graduation requires BOTH
-    //          days_old >= new_item_days AND velocity >= graduation_velocity.
-    //          (User rule: AND, not OR.)
-    //   3. A / B / C — by velocity thresholds (C=floor)
-    //
-    // E is MANUAL-ONLY (CEO marks "clearing / no profit"); never auto-assigned.
+    //   1. D — age < new_item_days (bagong item, wag muna hatulan)
+    //   2. A — age ≥ A_window AND A_window avg ≥ A_min AND alive ≥ alive_min
+    //   3. B — age ≥ B_window AND B_window avg ≥ B_min AND alive ≥ alive_min
+    //   4. C — age ≥ C_window AND C_window avg ≥ C_min AND alive ≥ alive_min
+    //   5. H — catch-all (review needed)
     // -----------------------------------------------------------------------
     private function classifyItemClass(
-        float $velPerDay,
         int   $daysRunning,
-        int   $holdUnits,
-        int   $recentOrders,
-        bool  $isRunning,
-        int   $newItemDays,
-        float $graduationVelocity,
-        int   $fMaxOrders,
-        array $thresholds
+        float $aWindowAvg, float $bWindowAvg, float $cWindowAvg,
+        float $aliveAvg,
+        int   $dNewItemDays,
+        float $aMin, int $aWindowDays,
+        float $bMin, int $bWindowDays,
+        float $cMin, int $cWindowDays,
+        float $aliveMin
     ): string {
-        // 1. Class F — ads off, hold-only
-        if (!$isRunning && $holdUnits > 0 && $recentOrders <= $fMaxOrders) {
-            return 'F';
-        }
-
-        // 2. Class D — not graduated yet (requires BOTH days AND velocity)
-        $graduated = ($daysRunning >= $newItemDays) && ($velPerDay >= $graduationVelocity);
-        if (!$graduated) {
+        // 1. D — new item
+        if ($daysRunning < $dNewItemDays) {
             return 'D';
         }
-
-        // 3. A / B / C — velocity-based (skip D/E/F in thresholds list)
-        foreach ($thresholds as $t) {
-            if (in_array($t['class_key'], ['D', 'E', 'F'], true)) continue;
-            if ($velPerDay >= $t['min_velocity']) {
-                return $t['class_key'];
-            }
+        // 2/3/4. A/B/C with full-maturity + alive guard
+        if ($daysRunning >= $aWindowDays && $aWindowAvg >= $aMin && $aliveAvg >= $aliveMin) {
+            return 'A';
         }
-        return 'C'; // floor for graduated items
+        if ($daysRunning >= $bWindowDays && $bWindowAvg >= $bMin && $aliveAvg >= $aliveMin) {
+            return 'B';
+        }
+        if ($daysRunning >= $cWindowDays && $cWindowAvg >= $cMin && $aliveAvg >= $aliveMin) {
+            return 'C';
+        }
+        // 5. Catch-all
+        return 'H';
     }
 
     // -----------------------------------------------------------------------
@@ -145,13 +138,12 @@ class JntSupplyController extends Controller
     private function classBadge(string $key): array
     {
         return match ($key) {
-            'A' => ['A · Hero',           'bg-purple-600 text-white'],
-            'B' => ['B · Solid',          'bg-blue-500 text-white'],
-            'C' => ['C · Average',        'bg-yellow-400 text-gray-900'],
-            'D' => ['D · New Item',       'bg-orange-400 text-white'],
-            'E' => ['E · Clearing',       'bg-pink-500 text-white'],
-            'F' => ['F · Off / Hold-only','bg-gray-700 text-white'],
-            default => ['? · Unknown',    'bg-gray-200 text-gray-500'],
+            'A' => ['A · Hero',        'bg-purple-600 text-white'],
+            'B' => ['B · Solid',       'bg-blue-500 text-white'],
+            'C' => ['C · Active',      'bg-yellow-400 text-gray-900'],
+            'D' => ['D · New Item',    'bg-orange-400 text-white'],
+            'H' => ['H · Review',      'bg-gray-500 text-white'],
+            default => ['? · Unknown', 'bg-gray-200 text-gray-500'],
         };
     }
 
@@ -165,8 +157,7 @@ class JntSupplyController extends Controller
             'B' => 'bg-blue-500 text-white',
             'C' => 'bg-yellow-400 text-gray-900',
             'D' => 'bg-orange-400 text-white',
-            'E' => 'bg-pink-500 text-white',
-            'F' => 'bg-gray-700 text-white',
+            'H' => 'bg-gray-500 text-white',
         ];
     }
 
@@ -230,14 +221,15 @@ class JntSupplyController extends Controller
         $supplyKv = SupplySetting::asMap();
         $supplySettingsAll = SupplySetting::orderBy('group')->orderBy('sort_order')->get();
 
-        $cfgNewItemDays        = (int)   ($supplyKv['new_item_days']        ?? 30);
-        $cfgGradVelocity       = (float) ($supplyKv['graduation_velocity']  ?? 20);
-        $cfgFOrderWindowDays   = (int)   ($supplyKv['f_order_window_days']  ?? 1);
-        $cfgFMaxOrders         = (int)   ($supplyKv['f_max_orders']         ?? 0);
-        // CEO config wins by default (lifecycle-style param still in URL for advanced users)
-        if (!$request->filled('new_item_days')) {
-            $newItemDays = $cfgNewItemDays;
-        }
+        $cfgDNewItemDays  = (int)   ($supplyKv['new_item_days']          ?? 7);
+        $cfgAMinVel       = (float) ($supplyKv['class_a_min_velocity']   ?? 200);
+        $cfgAWindowDays   = (int)   ($supplyKv['class_a_window_days']    ?? 30);
+        $cfgBMinVel       = (float) ($supplyKv['class_b_min_velocity']   ?? 100);
+        $cfgBWindowDays   = (int)   ($supplyKv['class_b_window_days']    ?? 15);
+        $cfgCMinVel       = (float) ($supplyKv['class_c_min_velocity']   ?? 50);
+        $cfgCWindowDays   = (int)   ($supplyKv['class_c_window_days']    ?? 7);
+        $cfgAliveWindow   = (int)   ($supplyKv['class_abc_alive_window'] ?? 7);
+        $cfgAliveMin      = (float) ($supplyKv['class_abc_alive_min']    ?? 10);
 
         // -- 1. Hold counts -------------------------------------------------
         // Scope: last month (1st) onwards, by ts_date.
@@ -345,22 +337,38 @@ class JntSupplyController extends Controller
             $prevUnitsMap[$base] = ($prevUnitsMap[$base] ?? 0) + $qty * (int)$r->cnt;
         }
 
-        // -- 7b. F-detection window: orders per item in last f_order_window_days
-        $fFromDate = Carbon::parse($asOfDate, 'Asia/Manila')
-            ->subDays(max(0, $cfgFOrderWindowDays - 1))
+        // -- 7b. Class-window aggregates: per-item-per-date orders within
+        //       max(A, B, C, alive) window. Sub-windows computed in PHP.
+        $maxClassWindow = max($cfgAWindowDays, $cfgBWindowDays, $cfgCWindowDays, $cfgAliveWindow, 1);
+        $classFromDate  = Carbon::parse($asOfDate, 'Asia/Manila')
+            ->subDays($maxClassWindow - 1)
             ->toDateString();
 
-        $fRows = DB::table('macro_output')
-            ->whereBetween('ts_date', [$fFromDate, $asOfDate])
-            ->selectRaw("$itemCol as item_name, COUNT(*) as cnt")
-            ->groupByRaw($itemCol)
+        $classRows = DB::table('macro_output')
+            ->whereBetween('ts_date', [$classFromDate, $asOfDate])
+            ->selectRaw("$itemCol as item_name, ts_date, COUNT(*) as cnt")
+            ->groupByRaw("$itemCol, ts_date")
             ->get();
 
-        $fRecentMap = [];
-        foreach ($fRows as $r) {
-            [, $base] = $this->parseItem((string)($r->item_name ?? ''));
-            $fRecentMap[$base] = ($fRecentMap[$base] ?? 0) + (int)$r->cnt;
+        // daily[base][yyyy-mm-dd] = units that day
+        $daily = [];
+        foreach ($classRows as $r) {
+            [$qty, $base] = $this->parseItem((string)($r->item_name ?? ''));
+            $d = (string) $r->ts_date;
+            $daily[$base][$d] = ($daily[$base][$d] ?? 0) + $qty * (int)$r->cnt;
         }
+
+        // Helper: sum of units in window ending at $asOfDate covering $days calendar days
+        $windowSum = function (string $base, int $days) use ($daily, $asOfDate) {
+            if ($days <= 0) return 0;
+            $sum = 0;
+            $end = Carbon::parse($asOfDate, 'Asia/Manila');
+            for ($i = 0; $i < $days; $i++) {
+                $d = $end->copy()->subDays($i)->toDateString();
+                $sum += $daily[$base][$d] ?? 0;
+            }
+            return $sum;
+        };
 
         // -- 8. Merge all items ---------------------------------------------
         $allBases = array_unique(array_merge(
@@ -451,23 +459,26 @@ class JntSupplyController extends Controller
 
             [$lifecycleLabel, $lifecycleBadgeClass] = $this->lifecycleBadge($lifecycle);
 
-            // -- Item Class (A–F) -------------------------------------------
-            $recentOrdersForF = $fRecentMap[$base] ?? 0;
+            // -- Item Class (A / B / C / D / H) -----------------------------
+            // Per-window averages (fixed denominators = window days)
+            $aAvg     = $cfgAWindowDays   > 0 ? $windowSum($base, $cfgAWindowDays)   / $cfgAWindowDays   : 0.0;
+            $bAvg     = $cfgBWindowDays   > 0 ? $windowSum($base, $cfgBWindowDays)   / $cfgBWindowDays   : 0.0;
+            $cAvg     = $cfgCWindowDays   > 0 ? $windowSum($base, $cfgCWindowDays)   / $cfgCWindowDays   : 0.0;
+            $aliveAvg = $cfgAliveWindow   > 0 ? $windowSum($base, $cfgAliveWindow)   / $cfgAliveWindow   : 0.0;
+
             $classOverride = $setting?->class_override ?? null;
             if ($classOverride) {
                 $itemClass     = $classOverride;
                 $itemClassAuto = false;
             } else {
                 $itemClass     = $this->classifyItemClass(
-                    $velPerDay,
                     $daysRunning,
-                    $holdUnits,
-                    $recentOrdersForF,
-                    $isRunning,
-                    $newItemDays,
-                    $cfgGradVelocity,
-                    $cfgFMaxOrders,
-                    $classThresholds
+                    $aAvg, $bAvg, $cAvg, $aliveAvg,
+                    $cfgDNewItemDays,
+                    $cfgAMinVel, $cfgAWindowDays,
+                    $cfgBMinVel, $cfgBWindowDays,
+                    $cfgCMinVel, $cfgCWindowDays,
+                    $cfgAliveMin
                 );
                 $itemClassAuto = true;
             }
@@ -500,6 +511,10 @@ class JntSupplyController extends Controller
                 'item_class_auto'     => $itemClassAuto,
                 'item_class_label'    => $itemClassLabel,
                 'item_class_badge'    => $itemClassBadge,
+                'a_avg'               => round($aAvg, 2),
+                'b_avg'               => round($bAvg, 2),
+                'c_avg'               => round($cAvg, 2),
+                'alive_avg'           => round($aliveAvg, 2),
             ];
         }
 
@@ -545,10 +560,11 @@ class JntSupplyController extends Controller
             'classBadgeMap',
             'isCeo',
             'supplySettingsAll',
-            'cfgNewItemDays',
-            'cfgGradVelocity',
-            'cfgFOrderWindowDays',
-            'cfgFMaxOrders',
+            'cfgDNewItemDays',
+            'cfgAMinVel', 'cfgAWindowDays',
+            'cfgBMinVel', 'cfgBWindowDays',
+            'cfgCMinVel', 'cfgCWindowDays',
+            'cfgAliveWindow', 'cfgAliveMin',
         ));
     }
 
@@ -564,7 +580,7 @@ class JntSupplyController extends Controller
             'is_running'         => 'nullable|in:0,1,auto',
             'notes'              => 'nullable|string|max:500',
             'lifecycle_override' => 'nullable|in:,new,scaling,consistent,active,declining,phasing_out,dormant',
-            'class_override'     => 'nullable|in:,A,B,C,D,E,F',
+            'class_override'     => 'nullable|in:,A,B,C,D,H',
         ]);
 
         $itemName  = $validated['item_name'];
@@ -615,20 +631,12 @@ class JntSupplyController extends Controller
             return response()->json(['error' => 'Unauthorized'], 403);
         }
 
-        $validated = $request->validate([
-            'class_key'    => 'required|in:A,B,C,D,E,F',
-            'min_velocity' => 'required|numeric|min:0',
-        ]);
-
-        // D/E/F are rule-based (not velocity-threshold) — ignore velocity edits
-        if (in_array($validated['class_key'], ['D', 'E', 'F'], true)) {
-            return response()->json(['success' => true, 'note' => 'Class ' . $validated['class_key'] . ' is rule-based, not velocity-threshold']);
-        }
-
-        ItemClassThreshold::where('class_key', $validated['class_key'])
-            ->update(['min_velocity' => (float)$validated['min_velocity']]);
-
-        return response()->json(['success' => true]);
+        // Deprecated: class velocity thresholds now live in supply_settings KV.
+        // Kept endpoint for backward compat — redirect to saveSupplySetting mapping.
+        return response()->json([
+            'success' => false,
+            'error'   => 'Deprecated. Use /jnt/supply/setting-kv to edit class_[a|b|c]_min_velocity and class_[a|b|c]_window_days.',
+        ], 410);
     }
 
     // -----------------------------------------------------------------------
