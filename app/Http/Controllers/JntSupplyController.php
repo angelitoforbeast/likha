@@ -213,10 +213,18 @@ class JntSupplyController extends Controller
         $classBadgeMap = $this->classBadgeMap();
 
         // -- 1. Hold counts -------------------------------------------------
+        // Scope: last month (1st) onwards, by ts_date.
+        // e.g. if today = Apr 24, filter ts_date >= Mar 1.
+        $holdFromDate = Carbon::parse($asOfDate, 'Asia/Manila')
+            ->startOfMonth()
+            ->subMonth()
+            ->toDateString();
+
         $holdBase = DB::table('macro_output as mo')
             ->leftJoin('from_jnts as fj', 'fj.waybill_number', '=', 'mo.waybill')
             ->whereNull('fj.waybill_number')
-            ->whereRaw("NULLIF(TRIM($moWaybill), '') IS NOT NULL");
+            ->whereRaw("NULLIF(TRIM($moWaybill), '') IS NOT NULL")
+            ->where('mo.ts_date', '>=', $holdFromDate);
 
         if ($q !== '') {
             $holdBase->where(function ($w) use ($q, $likeOp, $moItem, $moWaybill) {
@@ -320,7 +328,8 @@ class JntSupplyController extends Controller
             $allBases = array_filter($allBases, fn($b) => stripos($b, $q) !== false);
         }
 
-        $asOfCarbon = Carbon::parse($asOfDate, 'Asia/Manila');
+        $asOfCarbon      = Carbon::parse($asOfDate, 'Asia/Manila');
+        $velocityFromCar = Carbon::parse($velocityFrom, 'Asia/Manila');
 
         $items = [];
         foreach ($allBases as $base) {
@@ -328,7 +337,20 @@ class JntSupplyController extends Controller
 
             $holdUnits     = $holdUnitsMap[$base] ?? 0;
             $totalVelUnits = $velUnitsMap[$base] ?? 0;
-            $velPerDay     = $velocityDays > 0 ? round($totalVelUnits / $velocityDays, 2) : 0.0;
+
+            // Velocity denominator = days the item actually existed within the window
+            // (raw, no minimum — true velocity for new items)
+            $firstDateForVel = $firstDateMap[$base] ?? null;
+            if ($firstDateForVel !== null) {
+                $firstCar = Carbon::parse($firstDateForVel, 'Asia/Manila');
+                // Effective window start = later of (first_order_date, velocity_from)
+                $effectiveStart = $firstCar->gt($velocityFromCar) ? $firstCar : $velocityFromCar;
+                $effectiveDays  = max(1, (int)$effectiveStart->diffInDays($asOfCarbon) + 1);
+                $effectiveDays  = min($velocityDays, $effectiveDays);
+            } else {
+                $effectiveDays = $velocityDays;
+            }
+            $velPerDay = $effectiveDays > 0 ? round($totalVelUnits / $effectiveDays, 2) : 0.0;
 
             $rtsPct       = $rtsMap[$base] ?? 0.0;
             $deliveryRate = max(0.01, 1 - $rtsPct / 100);
