@@ -1355,12 +1355,17 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
 
         $dateRange = $fmtDate($r->min_sub) . ' to ' . $fmtDate($r->max_sub);
 
+        $transit_count = max(0, (int)$r->quantity - $rts - $delivered);
+
         return [
             'date_range'        => $dateRange,
             'sender'            => trim((string)$r->sender),
             'item'              => trim((string)$r->item_name),
             'cod'               => trim((string)$r->cod),
             'quantity'          => (int)$r->quantity,
+            'rts_count'         => $rts,
+            'delivered_count'   => $delivered,
+            'transit_count'     => $transit_count,
             'rts_percent'       => $rts_percent,
             'delivered_percent' => $delivered_percent,
             'transit_percent'   => $transit_percent,

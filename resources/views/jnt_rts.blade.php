@@ -53,6 +53,9 @@
             <th class="px-2 py-1 border">Item</th>
             <th class="px-2 py-1 border">COD</th>
             <th class="px-2 py-1 border">Qty</th>
+            <th class="px-2 py-1 border">RTS Qty</th>
+            <th class="px-2 py-1 border">Del Qty</th>
+            <th class="px-2 py-1 border">Transit Qty</th>
             <th class="px-2 py-1 border">RTS%</th>
             <th class="px-2 py-1 border">Delivered%</th>
             <th class="px-2 py-1 border">In Transit%</th>
@@ -73,7 +76,10 @@
               <td class="px-2 py-1 border whitespace-nowrap">{{ $r['sender'] }}</td>
               <td class="px-2 py-1 border whitespace-nowrap">{{ $r['item'] }}</td>
               <td class="px-2 py-1 border whitespace-nowrap">{{ $r['cod'] }}</td>
-              <td class="px-2 py-1 border text-right">{{ number_format((int)$r['quantity']) }}</td>
+              <td class="px-2 py-1 border text-right" data-raw="{{ (int)$r['quantity'] }}">{{ number_format((int)$r['quantity']) }}</td>
+              <td class="px-2 py-1 border text-right" data-raw="{{ (int)$r['rts_count'] }}">{{ number_format((int)$r['rts_count']) }}</td>
+              <td class="px-2 py-1 border text-right" data-raw="{{ (int)$r['delivered_count'] }}">{{ number_format((int)$r['delivered_count']) }}</td>
+              <td class="px-2 py-1 border text-right" data-raw="{{ (int)$r['transit_count'] }}">{{ number_format((int)$r['transit_count']) }}</td>
 
               <td class="px-2 py-1 border text-right {{ $rtsColor }}"
                   data-order="{{ $r['rts_percent'] }}">{{ number_format($r['rts_percent'], 2) }}%</td>
@@ -96,6 +102,19 @@
             </tr>
           @endforeach
         </tbody>
+        <tfoot>
+          <tr class="bg-gray-800 text-white font-bold">
+            <td class="px-2 py-1 border" colspan="4" style="text-align:right;">TOTAL</td>
+            <td class="px-2 py-1 border text-right" id="tot-qty"></td>
+            <td class="px-2 py-1 border text-right" id="tot-rts"></td>
+            <td class="px-2 py-1 border text-right" id="tot-del"></td>
+            <td class="px-2 py-1 border text-right" id="tot-transit"></td>
+            <td class="px-2 py-1 border text-right" id="tot-rts-pct"></td>
+            <td class="px-2 py-1 border text-right" id="tot-del-pct"></td>
+            <td class="px-2 py-1 border text-right" id="tot-transit-pct"></td>
+            <td class="px-2 py-1 border" colspan="2"></td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   @else
@@ -158,6 +177,32 @@
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
   <script>
+    function fmtNum(n) {
+      return Number(n).toLocaleString('en-PH');
+    }
+
+    function updateTotals(dt) {
+      let qty = 0, rts = 0, del = 0, transit = 0;
+
+      // iterate over all filtered rows (all pages)
+      dt.rows({ search: 'applied' }).nodes().each(function (row) {
+        const cells = row.querySelectorAll('td[data-raw]');
+        qty     += parseInt(cells[0]?.dataset.raw || 0);
+        rts     += parseInt(cells[1]?.dataset.raw || 0);
+        del     += parseInt(cells[2]?.dataset.raw || 0);
+        transit += parseInt(cells[3]?.dataset.raw || 0);
+      });
+
+      const total = Math.max(1, qty);
+      document.getElementById('tot-qty').textContent     = fmtNum(qty);
+      document.getElementById('tot-rts').textContent     = fmtNum(rts);
+      document.getElementById('tot-del').textContent     = fmtNum(del);
+      document.getElementById('tot-transit').textContent = fmtNum(transit);
+      document.getElementById('tot-rts-pct').textContent     = (rts / total * 100).toFixed(2) + '%';
+      document.getElementById('tot-del-pct').textContent     = (del / total * 100).toFixed(2) + '%';
+      document.getElementById('tot-transit-pct').textContent = (transit / total * 100).toFixed(2) + '%';
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
       const tableEl = document.getElementById('rtsTable');
       if (!tableEl) return;
@@ -168,9 +213,15 @@
         ordering: true,
         info: true,
         dom: 'lrtip',
-        order: [[5, 'desc']], // sort by RTS% desc
-        pageLength: 25
+        order: [[8, 'desc']], // sort by RTS% desc (col index shifted +3)
+        pageLength: 25,
+        drawCallback: function () {
+          updateTotals(this.api());
+        }
       });
+
+      // initial totals
+      updateTotals(dt);
 
       const searchInput = document.getElementById('globalSearch');
       if (searchInput) {
