@@ -65,8 +65,9 @@
             <option value="A" {{ $classFilter === 'A' ? 'selected' : '' }}>A · Hero</option>
             <option value="B" {{ $classFilter === 'B' ? 'selected' : '' }}>B · Solid</option>
             <option value="C" {{ $classFilter === 'C' ? 'selected' : '' }}>C · Average</option>
-            <option value="D" {{ $classFilter === 'D' ? 'selected' : '' }}>D · At-Risk</option>
-            <option value="E" {{ $classFilter === 'E' ? 'selected' : '' }}>E · Dead</option>
+            <option value="D" {{ $classFilter === 'D' ? 'selected' : '' }}>D · New Item</option>
+            <option value="E" {{ $classFilter === 'E' ? 'selected' : '' }}>E · Clearing</option>
+            <option value="F" {{ $classFilter === 'F' ? 'selected' : '' }}>F · Off / Hold-only</option>
           </select>
         </div>
 
@@ -130,8 +131,9 @@
         <span class="class-badge bg-purple-600 text-white" style="cursor:default;">A · Hero</span>
         <span class="class-badge bg-blue-500 text-white"   style="cursor:default;">B · Solid</span>
         <span class="class-badge bg-yellow-400 text-gray-900" style="cursor:default;">C · Average</span>
-        <span class="class-badge bg-orange-400 text-white" style="cursor:default;">D · At-Risk</span>
-        <span class="class-badge bg-gray-400 text-white"   style="cursor:default;">E · Dead</span>
+        <span class="class-badge bg-orange-400 text-white" style="cursor:default;">D · New Item</span>
+        <span class="class-badge bg-pink-500 text-white"   style="cursor:default;">E · Clearing</span>
+        <span class="class-badge bg-gray-700 text-white"   style="cursor:default;">F · Off / Hold-only</span>
         <span class="text-gray-300 mx-1">|</span>
         <span class="font-semibold text-gray-600">Lifecycle:</span>
         <span class="lifecycle-badge bg-blue-100 text-blue-800"   style="cursor:default;">🆕 New</span>
@@ -179,21 +181,24 @@
               </td>
               <td class="px-3 py-2 border border-gray-200 text-gray-700 font-medium">{{ $ct->label }}</td>
               <td class="px-3 py-2 border border-gray-200">
-                @if($ct->class_key === 'E')
-                  <input type="number" class="inline-num" value="0" readonly
-                         title="Class E is always 0 — catch-all floor" style="opacity:.5; cursor:not-allowed; width:80px;">
+                @if(in_array($ct->class_key, ['D','E','F'], true))
+                  <input type="number" class="inline-num" value="{{ $ct->min_velocity }}" readonly
+                         title="Class {{ $ct->class_key }} is rule-based — see Supply Rules panel"
+                         style="opacity:.5; cursor:not-allowed; width:80px;">
                 @else
                   <input type="number" class="inline-num threshold-input" min="0" step="0.001"
                          value="{{ $ct->min_velocity }}" data-class="{{ $ct->class_key }}" style="width:80px;">
                 @endif
               </td>
               <td class="px-3 py-2 border border-gray-200 text-center">
-                @if($ct->class_key !== 'E')
+                @if(!in_array($ct->class_key, ['D','E','F'], true))
                   <button type="button"
                           class="save-threshold-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
                           data-class="{{ $ct->class_key }}">
                     Save
                   </button>
+                @else
+                  <span class="text-[10px] text-gray-400">rule-based</span>
                 @endif
               </td>
             </tr>
@@ -201,7 +206,81 @@
           </tbody>
         </table>
         <p class="text-xs text-gray-400 mt-2">
-          Changes take effect on next Apply. Items currently showing old class will refresh automatically.
+          <strong>A / B / C</strong> are velocity-based. <strong>D</strong> (New Item), <strong>E</strong> (Clearing, manual only), and <strong>F</strong> (Off / Hold-only) are rule-based — edit the rules in the Supply Rules panel below.
+        </p>
+      </div>
+    </details>
+
+    <details class="bg-white rounded-lg shadow border border-emerald-200 mb-4">
+      <summary class="px-4 py-3 font-semibold text-sm text-emerald-700 cursor-pointer select-none flex items-center gap-2">
+        <i class="fa-solid fa-gears text-emerald-500"></i>
+        Supply Rules & Thresholds
+        <span class="text-xs font-normal text-gray-400 ml-1">CEO only — click to expand</span>
+      </summary>
+      <div class="px-4 pb-4 pt-2">
+        <p class="text-xs text-gray-500 mb-3">
+          Rule-based knobs for <strong>Class D / F</strong> detection, lifecycle windows, and velocity defaults.
+          An item only graduates out of Class D when <strong>BOTH</strong> its age ≥ <em>New item days</em>
+          AND velocity ≥ <em>Graduation velocity</em>.
+        </p>
+        @php
+          $grouped = $supplySettingsAll->groupBy('group');
+          $groupLabels = [
+            'class_d'   => 'Class D — New Item rules',
+            'class_f'   => 'Class F — Off / Hold-only rules',
+            'lifecycle' => 'Lifecycle comparison',
+            'velocity'  => 'Velocity defaults',
+            'general'   => 'General',
+          ];
+        @endphp
+        @foreach($grouped as $groupKey => $rows)
+          <div class="mb-3">
+            <div class="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-1">
+              {{ $groupLabels[$groupKey] ?? ucfirst($groupKey) }}
+            </div>
+            <table class="text-sm border-collapse w-full">
+              <thead>
+                <tr class="bg-gray-50">
+                  <th class="px-3 py-1 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200">Setting</th>
+                  <th class="px-3 py-1 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-32">Value</th>
+                  <th class="px-3 py-1 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-20">Type</th>
+                  <th class="px-3 py-1 border border-gray-200 w-16"></th>
+                </tr>
+              </thead>
+              <tbody>
+                @foreach($rows as $s)
+                <tr class="border-b border-gray-100">
+                  <td class="px-3 py-1.5 border border-gray-200 text-gray-700">
+                    {{ $s->label }}
+                    <code class="ml-1 text-[10px] text-gray-400">{{ $s->key }}</code>
+                  </td>
+                  <td class="px-3 py-1.5 border border-gray-200">
+                    <input type="number"
+                           class="inline-num supply-kv-input"
+                           style="width:100px;"
+                           step="{{ $s->data_type === 'int' ? '1' : '0.001' }}"
+                           min="0"
+                           data-key="{{ $s->key }}"
+                           value="{{ $s->value }}">
+                  </td>
+                  <td class="px-3 py-1.5 border border-gray-200 text-xs text-gray-500">
+                    {{ $s->data_type }}
+                  </td>
+                  <td class="px-3 py-1.5 border border-gray-200 text-center">
+                    <button type="button"
+                            class="save-kv-btn text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 rounded"
+                            data-key="{{ $s->key }}">
+                      Save
+                    </button>
+                  </td>
+                </tr>
+                @endforeach
+              </tbody>
+            </table>
+          </div>
+        @endforeach
+        <p class="text-xs text-gray-400 mt-2">
+          Saved changes apply on next <em>Apply</em> (or page reload).
         </p>
       </div>
     </details>
@@ -301,8 +380,9 @@
                 <option value="A" {{ $row['item_class'] === 'A' && !$row['item_class_auto'] ? 'selected' : '' }}>A · Hero</option>
                 <option value="B" {{ $row['item_class'] === 'B' && !$row['item_class_auto'] ? 'selected' : '' }}>B · Solid</option>
                 <option value="C" {{ $row['item_class'] === 'C' && !$row['item_class_auto'] ? 'selected' : '' }}>C · Average</option>
-                <option value="D" {{ $row['item_class'] === 'D' && !$row['item_class_auto'] ? 'selected' : '' }}>D · At-Risk</option>
-                <option value="E" {{ $row['item_class'] === 'E' && !$row['item_class_auto'] ? 'selected' : '' }}>E · Dead</option>
+                <option value="D" {{ $row['item_class'] === 'D' && !$row['item_class_auto'] ? 'selected' : '' }}>D · New Item</option>
+                <option value="E" {{ $row['item_class'] === 'E' && !$row['item_class_auto'] ? 'selected' : '' }}>E · Clearing</option>
+                <option value="F" {{ $row['item_class'] === 'F' && !$row['item_class_auto'] ? 'selected' : '' }}>F · Off / Hold-only</option>
               </select>
             </td>
 
@@ -407,8 +487,9 @@
       'A': { label: 'A · Hero',    cls: 'bg-purple-600 text-white' },
       'B': { label: 'B · Solid',   cls: 'bg-blue-500 text-white' },
       'C': { label: 'C · Average', cls: 'bg-yellow-400 text-gray-900' },
-      'D': { label: 'D · At-Risk', cls: 'bg-orange-400 text-white' },
-      'E': { label: 'E · Dead',    cls: 'bg-gray-400 text-white' },
+      'D': { label: 'D · New Item',        cls: 'bg-orange-400 text-white' },
+      'E': { label: 'E · Clearing',        cls: 'bg-pink-500 text-white' },
+      'F': { label: 'F · Off / Hold-only', cls: 'bg-gray-700 text-white' },
     };
     const ALL_CLASS_CLS = Object.values(CLASS_META).flatMap(m => m.cls.split(' '));
 
@@ -607,6 +688,30 @@
       .then(d => {
         e.target.disabled = false;
         if (d.success) showToast('✓ Threshold saved');
+      })
+      .catch(err => { console.error(err); e.target.disabled = false; });
+    });
+
+    // ---- CEO supply_settings KV save ----
+    document.addEventListener('click', function (e) {
+      if (!e.target.classList.contains('save-kv-btn')) return;
+      const key   = e.target.dataset.key;
+      const input = document.querySelector(`.supply-kv-input[data-key="${key}"]`);
+      if (!input) return;
+      const val = input.value.trim();
+      if (val === '' || isNaN(parseFloat(val))) { alert('Invalid value'); return; }
+
+      e.target.disabled = true;
+      fetch('/jnt/supply/setting-kv', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+        body: JSON.stringify({ key, value: val }),
+      })
+      .then(r => r.json())
+      .then(d => {
+        e.target.disabled = false;
+        if (d.success) showToast('✓ ' + key + ' = ' + d.value);
+        else alert(d.error || 'Save failed');
       })
       .catch(err => { console.error(err); e.target.disabled = false; });
     });

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ItemClassThreshold;
 use App\Models\SupplyItemSetting;
+use App\Models\SupplySetting;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -94,37 +95,48 @@ class JntSupplyController extends Controller
     }
 
     // -----------------------------------------------------------------------
-    // Item class classification (A–E)
-    // $thresholds = array sorted descending by min_velocity
-    //               e.g. [['class_key'=>'A','min_velocity'=>10], ...]
+    // Item class classification (A–F) — business semantics
+    //
+    // Priority (top wins):
+    //   1. F — ads OFF (is_running=false) AND recent orders ≤ f_max_orders
+    //          AND hold_units > 0 (hold-only, phasing out for real)
+    //   2. D — NEW ITEM: not yet graduated. Graduation requires BOTH
+    //          days_old >= new_item_days AND velocity >= graduation_velocity.
+    //          (User rule: AND, not OR.)
+    //   3. A / B / C — by velocity thresholds (C=floor)
+    //
+    // E is MANUAL-ONLY (CEO marks "clearing / no profit"); never auto-assigned.
     // -----------------------------------------------------------------------
-    private function classifyItemClass(float $velPerDay, string $lifecycle, array $thresholds): string
-    {
-        // Step 1: velocity-based raw class
-        $rawClass = 'E'; // floor
-        foreach ($thresholds as $t) {
-            if ($velPerDay >= $t['min_velocity']) {
-                $rawClass = $t['class_key'];
-                break;
-            }
+    private function classifyItemClass(
+        float $velPerDay,
+        int   $daysRunning,
+        int   $holdUnits,
+        int   $recentOrders,
+        bool  $isRunning,
+        int   $newItemDays,
+        float $graduationVelocity,
+        int   $fMaxOrders,
+        array $thresholds
+    ): string {
+        // 1. Class F — ads off, hold-only
+        if (!$isRunning && $holdUnits > 0 && $recentOrders <= $fMaxOrders) {
+            return 'F';
         }
 
-        // Step 2: lifecycle penalty (shift down N tiers)
-        $penalty = match ($lifecycle) {
-            'declining'   => 1,
-            'phasing_out' => 2,
-            'dormant'     => 2,
-            default       => 0,
-        };
+        // 2. Class D — not graduated yet (requires BOTH days AND velocity)
+        $graduated = ($daysRunning >= $newItemDays) && ($velPerDay >= $graduationVelocity);
+        if (!$graduated) {
+            return 'D';
+        }
 
-        if ($penalty === 0) return $rawClass;
-
-        $rankMap  = ['A' => 0, 'B' => 1, 'C' => 2, 'D' => 3, 'E' => 4];
-        $keyMap   = [0 => 'A', 1 => 'B', 2 => 'C', 3 => 'D', 4 => 'E'];
-        $rawRank  = $rankMap[$rawClass] ?? 4;
-        $final    = min(4, $rawRank + $penalty);
-
-        return $keyMap[$final];
+        // 3. A / B / C — velocity-based (skip D/E/F in thresholds list)
+        foreach ($thresholds as $t) {
+            if (in_array($t['class_key'], ['D', 'E', 'F'], true)) continue;
+            if ($velPerDay >= $t['min_velocity']) {
+                return $t['class_key'];
+            }
+        }
+        return 'C'; // floor for graduated items
     }
 
     // -----------------------------------------------------------------------
@@ -133,12 +145,13 @@ class JntSupplyController extends Controller
     private function classBadge(string $key): array
     {
         return match ($key) {
-            'A' => ['A · Hero',    'bg-purple-600 text-white'],
-            'B' => ['B · Solid',   'bg-blue-500 text-white'],
-            'C' => ['C · Average', 'bg-yellow-400 text-gray-900'],
-            'D' => ['D · At-Risk', 'bg-orange-400 text-white'],
-            'E' => ['E · Dead',    'bg-gray-400 text-white'],
-            default => ['? · Unknown', 'bg-gray-200 text-gray-500'],
+            'A' => ['A · Hero',           'bg-purple-600 text-white'],
+            'B' => ['B · Solid',          'bg-blue-500 text-white'],
+            'C' => ['C · Average',        'bg-yellow-400 text-gray-900'],
+            'D' => ['D · New Item',       'bg-orange-400 text-white'],
+            'E' => ['E · Clearing',       'bg-pink-500 text-white'],
+            'F' => ['F · Off / Hold-only','bg-gray-700 text-white'],
+            default => ['? · Unknown',    'bg-gray-200 text-gray-500'],
         };
     }
 
@@ -152,7 +165,8 @@ class JntSupplyController extends Controller
             'B' => 'bg-blue-500 text-white',
             'C' => 'bg-yellow-400 text-gray-900',
             'D' => 'bg-orange-400 text-white',
-            'E' => 'bg-gray-400 text-white',
+            'E' => 'bg-pink-500 text-white',
+            'F' => 'bg-gray-700 text-white',
         ];
     }
 
@@ -211,6 +225,19 @@ class JntSupplyController extends Controller
             ->values()
             ->toArray();
         $classBadgeMap = $this->classBadgeMap();
+
+        // -- Load supply_settings (CEO-editable KV) -------------------------
+        $supplyKv = SupplySetting::asMap();
+        $supplySettingsAll = SupplySetting::orderBy('group')->orderBy('sort_order')->get();
+
+        $cfgNewItemDays        = (int)   ($supplyKv['new_item_days']        ?? 30);
+        $cfgGradVelocity       = (float) ($supplyKv['graduation_velocity']  ?? 20);
+        $cfgFOrderWindowDays   = (int)   ($supplyKv['f_order_window_days']  ?? 1);
+        $cfgFMaxOrders         = (int)   ($supplyKv['f_max_orders']         ?? 0);
+        // CEO config wins by default (lifecycle-style param still in URL for advanced users)
+        if (!$request->filled('new_item_days')) {
+            $newItemDays = $cfgNewItemDays;
+        }
 
         // -- 1. Hold counts -------------------------------------------------
         // Scope: last month (1st) onwards, by ts_date.
@@ -318,6 +345,23 @@ class JntSupplyController extends Controller
             $prevUnitsMap[$base] = ($prevUnitsMap[$base] ?? 0) + $qty * (int)$r->cnt;
         }
 
+        // -- 7b. F-detection window: orders per item in last f_order_window_days
+        $fFromDate = Carbon::parse($asOfDate, 'Asia/Manila')
+            ->subDays(max(0, $cfgFOrderWindowDays - 1))
+            ->toDateString();
+
+        $fRows = DB::table('macro_output')
+            ->whereBetween('ts_date', [$fFromDate, $asOfDate])
+            ->selectRaw("$itemCol as item_name, COUNT(*) as cnt")
+            ->groupByRaw($itemCol)
+            ->get();
+
+        $fRecentMap = [];
+        foreach ($fRows as $r) {
+            [, $base] = $this->parseItem((string)($r->item_name ?? ''));
+            $fRecentMap[$base] = ($fRecentMap[$base] ?? 0) + (int)$r->cnt;
+        }
+
         // -- 8. Merge all items ---------------------------------------------
         $allBases = array_unique(array_merge(
             array_keys($holdUnitsMap),
@@ -407,13 +451,24 @@ class JntSupplyController extends Controller
 
             [$lifecycleLabel, $lifecycleBadgeClass] = $this->lifecycleBadge($lifecycle);
 
-            // -- Item Class (A–E) -------------------------------------------
+            // -- Item Class (A–F) -------------------------------------------
+            $recentOrdersForF = $fRecentMap[$base] ?? 0;
             $classOverride = $setting?->class_override ?? null;
             if ($classOverride) {
                 $itemClass     = $classOverride;
                 $itemClassAuto = false;
             } else {
-                $itemClass     = $this->classifyItemClass($velPerDay, $lifecycle, $classThresholds);
+                $itemClass     = $this->classifyItemClass(
+                    $velPerDay,
+                    $daysRunning,
+                    $holdUnits,
+                    $recentOrdersForF,
+                    $isRunning,
+                    $newItemDays,
+                    $cfgGradVelocity,
+                    $cfgFMaxOrders,
+                    $classThresholds
+                );
                 $itemClassAuto = true;
             }
 
@@ -489,6 +544,11 @@ class JntSupplyController extends Controller
             'classThresholdsFull',
             'classBadgeMap',
             'isCeo',
+            'supplySettingsAll',
+            'cfgNewItemDays',
+            'cfgGradVelocity',
+            'cfgFOrderWindowDays',
+            'cfgFMaxOrders',
         ));
     }
 
@@ -504,7 +564,7 @@ class JntSupplyController extends Controller
             'is_running'         => 'nullable|in:0,1,auto',
             'notes'              => 'nullable|string|max:500',
             'lifecycle_override' => 'nullable|in:,new,scaling,consistent,active,declining,phasing_out,dormant',
-            'class_override'     => 'nullable|in:,A,B,C,D,E',
+            'class_override'     => 'nullable|in:,A,B,C,D,E,F',
         ]);
 
         $itemName  = $validated['item_name'];
@@ -556,18 +616,61 @@ class JntSupplyController extends Controller
         }
 
         $validated = $request->validate([
-            'class_key'    => 'required|in:A,B,C,D,E',
+            'class_key'    => 'required|in:A,B,C,D,E,F',
             'min_velocity' => 'required|numeric|min:0',
         ]);
 
-        // Class E is always 0 — prevent accidental changes
-        if ($validated['class_key'] === 'E') {
-            return response()->json(['success' => true, 'note' => 'Class E is always 0']);
+        // D/E/F are rule-based (not velocity-threshold) — ignore velocity edits
+        if (in_array($validated['class_key'], ['D', 'E', 'F'], true)) {
+            return response()->json(['success' => true, 'note' => 'Class ' . $validated['class_key'] . ' is rule-based, not velocity-threshold']);
         }
 
         ItemClassThreshold::where('class_key', $validated['class_key'])
             ->update(['min_velocity' => (float)$validated['min_velocity']]);
 
         return response()->json(['success' => true]);
+    }
+
+    // -----------------------------------------------------------------------
+    // POST /jnt/supply/setting-kv — CEO only, save a single supply_settings KV
+    // -----------------------------------------------------------------------
+    public function saveSupplySetting(Request $request)
+    {
+        $role = Auth::user()?->employeeProfile?->role;
+        if ($role !== 'CEO') {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $validated = $request->validate([
+            'key'   => 'required|string|max:100',
+            'value' => 'required|string|max:50',
+        ]);
+
+        $setting = SupplySetting::where('key', $validated['key'])->first();
+        if (!$setting) {
+            return response()->json(['error' => 'Unknown setting key'], 404);
+        }
+
+        // Type-validate against declared data_type
+        $val = $validated['value'];
+        switch ($setting->data_type) {
+            case 'int':
+                if (!is_numeric($val) || (int)$val != (float)$val) {
+                    return response()->json(['error' => 'Expected integer'], 422);
+                }
+                $val = (string)(int)$val;
+                break;
+            case 'float':
+                if (!is_numeric($val)) {
+                    return response()->json(['error' => 'Expected number'], 422);
+                }
+                $val = (string)(float)$val;
+                break;
+        }
+
+        $setting->value = $val;
+        $setting->save();
+
+        return response()->json(['success' => true, 'key' => $setting->key, 'value' => $setting->value]);
     }
 }

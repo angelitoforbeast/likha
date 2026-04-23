@@ -714,6 +714,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get('/jnt/supply', [\App\Http\Controllers\JntSupplyController::class, 'index'])->name('jnt.supply');
     Route::post('/jnt/supply/settings', [\App\Http\Controllers\JntSupplyController::class, 'saveSettings'])->name('jnt.supply.settings');
     Route::post('/jnt/supply/class-thresholds', [\App\Http\Controllers\JntSupplyController::class, 'saveClassThresholds'])->name('jnt.supply.class-thresholds');
+    Route::post('/jnt/supply/setting-kv', [\App\Http\Controllers\JntSupplyController::class, 'saveSupplySetting'])->name('jnt.supply.setting-kv');
 
 
     // ✅ Validation Lists (CEO, Marketing, Marketing OIC)
