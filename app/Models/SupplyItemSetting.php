@@ -14,6 +14,7 @@ class SupplyItemSetting extends Model
         'safety_days',
         'is_running',
         'notes',
+        'lifecycle_override',
     ];
 
     protected $casts = [
