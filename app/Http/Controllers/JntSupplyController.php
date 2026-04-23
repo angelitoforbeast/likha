@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ItemClassThreshold;
 use App\Models\SupplyItemSetting;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 class JntSupplyController extends Controller
@@ -50,40 +52,27 @@ class JntSupplyController extends Controller
         float  $scaleThreshold,
         float  $declineThreshold
     ): string {
-        // 1. New: first order was within $newItemDays and still selling
         if ($daysRunning <= $newItemDays && $recentVel > 0) {
             return 'new';
         }
-
-        // 2. Phasing Out: was selling before, zero recent velocity
         if ($recentVel == 0 && $prevVel > 0) {
             return 'phasing_out';
         }
-
-        // 3. Dormant: no recent AND no previous sales (but has old data)
         if ($recentVel == 0 && $prevVel == 0) {
-            return $hasOldOrders ? 'dormant' : 'dormant';
+            return 'dormant';
         }
-
-        // 4. Scaling: previous was 0 and now selling, OR velocity grew significantly
         if ($prevVel == 0 && $recentVel > 0) {
             return 'scaling';
         }
         if ($recentVel >= $prevVel * $scaleThreshold) {
             return 'scaling';
         }
-
-        // 5. Declining: velocity dropped significantly
         if ($recentVel <= $prevVel * $declineThreshold) {
             return 'declining';
         }
-
-        // 6. Consistent: long-running item with stable velocity
         if ($daysRunning >= $longRunningDays) {
             return 'consistent';
         }
-
-        // 7. Active: running but not long enough to be "consistent"
         return 'active';
     }
 
@@ -102,6 +91,69 @@ class JntSupplyController extends Controller
             'dormant'     => ['💤 Dormant',       'bg-gray-100 text-gray-500'],
             default       => ['— Unknown',        'bg-gray-100 text-gray-400'],
         };
+    }
+
+    // -----------------------------------------------------------------------
+    // Item class classification (A–E)
+    // $thresholds = array sorted descending by min_velocity
+    //               e.g. [['class_key'=>'A','min_velocity'=>10], ...]
+    // -----------------------------------------------------------------------
+    private function classifyItemClass(float $velPerDay, string $lifecycle, array $thresholds): string
+    {
+        // Step 1: velocity-based raw class
+        $rawClass = 'E'; // floor
+        foreach ($thresholds as $t) {
+            if ($velPerDay >= $t['min_velocity']) {
+                $rawClass = $t['class_key'];
+                break;
+            }
+        }
+
+        // Step 2: lifecycle penalty (shift down N tiers)
+        $penalty = match ($lifecycle) {
+            'declining'   => 1,
+            'phasing_out' => 2,
+            'dormant'     => 2,
+            default       => 0,
+        };
+
+        if ($penalty === 0) return $rawClass;
+
+        $rankMap  = ['A' => 0, 'B' => 1, 'C' => 2, 'D' => 3, 'E' => 4];
+        $keyMap   = [0 => 'A', 1 => 'B', 2 => 'C', 3 => 'D', 4 => 'E'];
+        $rawRank  = $rankMap[$rawClass] ?? 4;
+        $final    = min(4, $rawRank + $penalty);
+
+        return $keyMap[$final];
+    }
+
+    // -----------------------------------------------------------------------
+    // Item class badge label + Tailwind classes
+    // -----------------------------------------------------------------------
+    private function classBadge(string $key): array
+    {
+        return match ($key) {
+            'A' => ['A · Hero',    'bg-purple-600 text-white'],
+            'B' => ['B · Solid',   'bg-blue-500 text-white'],
+            'C' => ['C · Average', 'bg-yellow-400 text-gray-900'],
+            'D' => ['D · At-Risk', 'bg-orange-400 text-white'],
+            'E' => ['E · Dead',    'bg-gray-400 text-white'],
+            default => ['? · Unknown', 'bg-gray-200 text-gray-500'],
+        };
+    }
+
+    // -----------------------------------------------------------------------
+    // Class badge Tailwind map (for Blade threshold editor)
+    // -----------------------------------------------------------------------
+    private function classBadgeMap(): array
+    {
+        return [
+            'A' => 'bg-purple-600 text-white',
+            'B' => 'bg-blue-500 text-white',
+            'C' => 'bg-yellow-400 text-gray-900',
+            'D' => 'bg-orange-400 text-white',
+            'E' => 'bg-gray-400 text-white',
+        ];
     }
 
     // -----------------------------------------------------------------------
@@ -131,6 +183,9 @@ class JntSupplyController extends Controller
         $declineThreshold  = min(1.0, max(0.0, (float) $request->input('decline_threshold', 0.5)));
         $lifecycleFilter   = $request->input('lifecycle_filter', '');
 
+        // Class params
+        $classFilter = $request->input('class_filter', '');
+
         $velocityFrom = Carbon::parse($asOfDate, 'Asia/Manila')
             ->subDays($velocityDays - 1)
             ->toDateString();
@@ -148,7 +203,16 @@ class JntSupplyController extends Controller
 
         $itemCol = $driver === 'pgsql' ? '"ITEM_NAME"' : '`ITEM_NAME`';
 
-        // -- 1. Hold counts (all pending, no date filter) --------------------
+        // -- Load class thresholds (sorted descending for classification) ---
+        $classThresholdsFull = ItemClassThreshold::orderBy('sort_order')->get();
+        $classThresholds = $classThresholdsFull
+            ->sortByDesc('min_velocity')
+            ->map(fn($t) => ['class_key' => $t->class_key, 'min_velocity' => (float)$t->min_velocity])
+            ->values()
+            ->toArray();
+        $classBadgeMap = $this->classBadgeMap();
+
+        // -- 1. Hold counts -------------------------------------------------
         $holdBase = DB::table('macro_output as mo')
             ->leftJoin('from_jnts as fj', 'fj.waybill_number', '=', 'mo.waybill')
             ->whereNull('fj.waybill_number')
@@ -166,14 +230,13 @@ class JntSupplyController extends Controller
             ->groupByRaw($moItem)
             ->get();
 
-        // Accumulate hold units per base item
-        $holdUnitsMap = []; // base_item => units
+        $holdUnitsMap = [];
         foreach ($holdRows as $r) {
             [$qty, $base] = $this->parseItem((string)($r->item_name ?? ''));
             $holdUnitsMap[$base] = ($holdUnitsMap[$base] ?? 0) + $qty * (int)$r->hold_count;
         }
 
-        // -- 2. Velocity (orders/day over last N days) ----------------------
+        // -- 2. Velocity ----------------------------------------------------
         $velQuery = DB::table('macro_output')
             ->whereBetween('ts_date', [$velocityFrom, $asOfDate])
             ->selectRaw("$itemCol as item_name, COUNT(*) as order_count")
@@ -185,35 +248,34 @@ class JntSupplyController extends Controller
 
         $velRows = $velQuery->get();
 
-        $velUnitsMap = []; // base_item => total_units (over period)
+        $velUnitsMap = [];
         foreach ($velRows as $r) {
             [$qty, $base] = $this->parseItem((string)($r->item_name ?? ''));
             $velUnitsMap[$base] = ($velUnitsMap[$base] ?? 0) + $qty * (int)$r->order_count;
         }
 
-        // -- 3. RTS% per item (max across pages from page_item_settings) ----
+        // -- 3. RTS% --------------------------------------------------------
         $rtsRows = DB::table('page_item_settings')
             ->selectRaw('item_name, MAX(rts_pct) as max_rts')
             ->groupBy('item_name')
             ->get();
 
-        $rtsMap = []; // base_item => max rts_pct
+        $rtsMap = [];
         foreach ($rtsRows as $r) {
             [, $base] = $this->parseItem((string)($r->item_name ?? ''));
-            $cur = $rtsMap[$base] ?? 0;
-            $rtsMap[$base] = max($cur, (float)($r->max_rts ?? 0));
+            $rtsMap[$base] = max($rtsMap[$base] ?? 0, (float)($r->max_rts ?? 0));
         }
 
-        // -- 4. Supply settings (lead time overrides per item) ---------------
+        // -- 4. Supply settings ---------------------------------------------
         $supplySettings = SupplyItemSetting::all()->keyBy('item_name');
 
-        // -- 5. Lifecycle: first order date per base item --------------------
+        // -- 5. First order date (for lifecycle) ----------------------------
         $firstDateRows = DB::table('macro_output')
             ->selectRaw("$itemCol as item_name, MIN(ts_date) as first_date")
             ->groupByRaw($itemCol)
             ->get();
 
-        $firstDateMap = []; // base_item => first_date string
+        $firstDateMap = [];
         foreach ($firstDateRows as $r) {
             [, $base] = $this->parseItem((string)($r->item_name ?? ''));
             $existing = $firstDateMap[$base] ?? null;
@@ -222,7 +284,7 @@ class JntSupplyController extends Controller
             }
         }
 
-        // -- 6. Lifecycle: recent window velocity ----------------------------
+        // -- 6. Recent window velocity --------------------------------------
         $recentVelRows = DB::table('macro_output')
             ->whereBetween('ts_date', [$recentFrom, $asOfDate])
             ->selectRaw("$itemCol as item_name, COUNT(*) as cnt")
@@ -235,7 +297,7 @@ class JntSupplyController extends Controller
             $recentUnitsMap[$base] = ($recentUnitsMap[$base] ?? 0) + $qty * (int)$r->cnt;
         }
 
-        // -- 7. Lifecycle: previous window velocity --------------------------
+        // -- 7. Previous window velocity ------------------------------------
         $prevVelRows = DB::table('macro_output')
             ->whereBetween('ts_date', [$prevFrom, $prevTo])
             ->selectRaw("$itemCol as item_name, COUNT(*) as cnt")
@@ -248,13 +310,12 @@ class JntSupplyController extends Controller
             $prevUnitsMap[$base] = ($prevUnitsMap[$base] ?? 0) + $qty * (int)$r->cnt;
         }
 
-        // -- 8. Merge all items (union of hold items + velocity items) -------
+        // -- 8. Merge all items ---------------------------------------------
         $allBases = array_unique(array_merge(
             array_keys($holdUnitsMap),
             array_keys($velUnitsMap)
         ));
 
-        // Apply search filter on base item name
         if ($q !== '') {
             $allBases = array_filter($allBases, fn($b) => stripos($b, $q) !== false);
         }
@@ -278,14 +339,12 @@ class JntSupplyController extends Controller
             $leadTime   = $setting?->lead_time_days ?? $defaultLeadTime;
             $safetyDays = $setting?->safety_days    ?? $defaultSafetyDays;
 
-            // Running: explicit override > auto-detect by velocity
             if ($setting && $setting->is_running !== null) {
                 $isRunning = (bool)$setting->is_running;
             } else {
                 $isRunning = $velPerDay >= $runningThreshold;
             }
 
-            // Recommended qty
             $holdsGross = $holdUnits > 0 ? (int)ceil($holdUnits / $deliveryRate) : 0;
 
             if ($isRunning && $velPerDay > 0) {
@@ -304,10 +363,10 @@ class JntSupplyController extends Controller
                 ? (int) Carbon::parse($firstDate, 'Asia/Manila')->diffInDays($asOfCarbon)
                 : 9999;
 
-            $recentVel  = $recentDays > 0
+            $recentVel = $recentDays > 0
                 ? round(($recentUnitsMap[$base] ?? 0) / $recentDays, 4)
                 : 0.0;
-            $prevVel    = $recentDays > 0
+            $prevVel = $recentDays > 0
                 ? round(($prevUnitsMap[$base] ?? 0) / $recentDays, 4)
                 : 0.0;
             $hasOldOrders = ($firstDate !== null);
@@ -325,6 +384,18 @@ class JntSupplyController extends Controller
             }
 
             [$lifecycleLabel, $lifecycleBadgeClass] = $this->lifecycleBadge($lifecycle);
+
+            // -- Item Class (A–E) -------------------------------------------
+            $classOverride = $setting?->class_override ?? null;
+            if ($classOverride) {
+                $itemClass     = $classOverride;
+                $itemClassAuto = false;
+            } else {
+                $itemClass     = $this->classifyItemClass($velPerDay, $lifecycle, $classThresholds);
+                $itemClassAuto = true;
+            }
+
+            [$itemClassLabel, $itemClassBadge] = $this->classBadge($itemClass);
 
             $items[] = [
                 'item'                => $base,
@@ -348,13 +419,19 @@ class JntSupplyController extends Controller
                 'days_running'        => $daysRunning,
                 'recent_vel'          => round($recentVel, 2),
                 'prev_vel'            => round($prevVel, 2),
+                'item_class'          => $itemClass,
+                'item_class_auto'     => $itemClassAuto,
+                'item_class_label'    => $itemClassLabel,
+                'item_class_badge'    => $itemClassBadge,
             ];
         }
 
-        // Apply lifecycle filter
+        // Apply filters
         if ($lifecycleFilter !== '') {
-            $items = array_filter($items, fn($i) => $i['lifecycle'] === $lifecycleFilter);
-            $items = array_values($items);
+            $items = array_values(array_filter($items, fn($i) => $i['lifecycle'] === $lifecycleFilter));
+        }
+        if ($classFilter !== '') {
+            $items = array_values(array_filter($items, fn($i) => $i['item_class'] === $classFilter));
         }
 
         // Sort by recommended DESC, then item ASC
@@ -365,6 +442,9 @@ class JntSupplyController extends Controller
         $totalHoldUnits   = array_sum(array_column($items, 'hold_units'));
         $totalRecommended = array_sum(array_column($items, 'recommended'));
         $itemsWithHolds   = count(array_filter($items, fn($i) => $i['hold_units'] > 0));
+
+        // CEO check for threshold editor
+        $isCeo = Auth::user()?->employeeProfile?->role === 'CEO';
 
         return view('jnt.supply', compact(
             'items',
@@ -383,6 +463,10 @@ class JntSupplyController extends Controller
             'scaleThreshold',
             'declineThreshold',
             'lifecycleFilter',
+            'classFilter',
+            'classThresholdsFull',
+            'classBadgeMap',
+            'isCeo',
         ));
     }
 
@@ -398,6 +482,7 @@ class JntSupplyController extends Controller
             'is_running'         => 'nullable|in:0,1,auto',
             'notes'              => 'nullable|string|max:500',
             'lifecycle_override' => 'nullable|in:,new,scaling,consistent,active,declining,phasing_out,dormant',
+            'class_override'     => 'nullable|in:,A,B,C,D,E',
         ]);
 
         $itemName  = $validated['item_name'];
@@ -410,23 +495,56 @@ class JntSupplyController extends Controller
             ? $validated['lifecycle_override']
             : null;
 
+        $classOverride = ($validated['class_override'] ?? '') !== ''
+            ? $validated['class_override']
+            : null;
+
         $updateData = array_filter([
-            'lead_time_days'     => $validated['lead_time_days'] ?? null,
-            'safety_days'        => $validated['safety_days']    ?? null,
-            'is_running'         => $isRunning,
-            'notes'              => $validated['notes']          ?? null,
-            'lifecycle_override' => $lifecycleOverride,
+            'lead_time_days'  => $validated['lead_time_days'] ?? null,
+            'safety_days'     => $validated['safety_days']    ?? null,
+            'is_running'      => $isRunning,
+            'notes'           => $validated['notes']          ?? null,
         ], fn($v) => $v !== null);
 
-        // Explicitly handle null lifecycle_override (clearing override)
-        if (array_key_exists('lifecycle_override', $validated) && $lifecycleOverride === null) {
-            $updateData['lifecycle_override'] = null;
+        // Handle nullable overrides explicitly (clearing = set to null)
+        if (array_key_exists('lifecycle_override', $validated)) {
+            $updateData['lifecycle_override'] = $lifecycleOverride;
+        }
+        if (array_key_exists('class_override', $validated)) {
+            $updateData['class_override'] = $classOverride;
         }
 
         SupplyItemSetting::updateOrCreate(
             ['item_name' => $itemName],
             $updateData
         );
+
+        return response()->json(['success' => true]);
+    }
+
+    // -----------------------------------------------------------------------
+    // POST /jnt/supply/class-thresholds — CEO only, save velocity thresholds
+    // -----------------------------------------------------------------------
+    public function saveClassThresholds(Request $request)
+    {
+        // CEO-only guard
+        $role = Auth::user()?->employeeProfile?->role;
+        if ($role !== 'CEO') {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $validated = $request->validate([
+            'class_key'    => 'required|in:A,B,C,D,E',
+            'min_velocity' => 'required|numeric|min:0',
+        ]);
+
+        // Class E is always 0 — prevent accidental changes
+        if ($validated['class_key'] === 'E') {
+            return response()->json(['success' => true, 'note' => 'Class E is always 0']);
+        }
+
+        ItemClassThreshold::where('class_key', $validated['class_key'])
+            ->update(['min_velocity' => (float)$validated['min_velocity']]);
 
         return response()->json(['success' => true]);
     }

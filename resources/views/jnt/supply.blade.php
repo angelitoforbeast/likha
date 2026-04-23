@@ -17,6 +17,7 @@
     .dataTables_wrapper .dataTables_info   { color:#6b7280; font-size:12px; }
     .strength-badge  { display:inline-block; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:700; }
     .lifecycle-badge { display:inline-block; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; cursor:pointer; white-space:nowrap; }
+    .class-badge     { display:inline-block; padding:2px 10px; border-radius:9999px; font-size:12px; font-weight:800; cursor:pointer; letter-spacing:.04em; }
     .recommended-cell { font-weight:800; font-size:15px; }
     .inline-num { width:60px; border:1px solid #d1d5db; border-radius:4px; padding:2px 6px;
                   font-size:12px; text-align:center; background:white; }
@@ -24,14 +25,17 @@
     .save-toast { position:fixed; bottom:24px; right:24px; background:#16a34a; color:white;
                   padding:8px 18px; border-radius:8px; font-size:13px; font-weight:600;
                   display:none; z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,.15); }
-    /* Lifecycle override select (hidden by default, shown on badge click) */
-    .lifecycle-sel { font-size:11px; border:1px solid #d1d5db; border-radius:4px; padding:2px 4px;
-                     background:white; display:none; }
+    .lifecycle-sel, .class-sel {
+      font-size:11px; border:1px solid #d1d5db; border-radius:4px;
+      padding:2px 4px; background:white; display:none; margin-top:2px;
+    }
   </style>
 
   <div class="mx-auto px-4 py-4" style="max-width:100%;">
 
-    {{-- Filter bar --}}
+    {{-- ================================================================== --}}
+    {{-- Filter bar                                                          --}}
+    {{-- ================================================================== --}}
     <form method="GET" action="{{ url('/jnt/supply') }}" id="supplyForm"
           class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-4">
       <div class="flex flex-wrap items-end gap-3">
@@ -55,17 +59,28 @@
         </div>
 
         <div>
+          <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Class Filter</label>
+          <select name="class_filter" class="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+            <option value=""  {{ $classFilter === ''  ? 'selected' : '' }}>All Classes</option>
+            <option value="A" {{ $classFilter === 'A' ? 'selected' : '' }}>A · Hero</option>
+            <option value="B" {{ $classFilter === 'B' ? 'selected' : '' }}>B · Solid</option>
+            <option value="C" {{ $classFilter === 'C' ? 'selected' : '' }}>C · Average</option>
+            <option value="D" {{ $classFilter === 'D' ? 'selected' : '' }}>D · At-Risk</option>
+            <option value="E" {{ $classFilter === 'E' ? 'selected' : '' }}>E · Dead</option>
+          </select>
+        </div>
+
+        <div>
           <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Lifecycle Filter</label>
-          <select name="lifecycle_filter"
-                  class="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
-            <option value=""          {{ $lifecycleFilter === ''            ? 'selected' : '' }}>All</option>
-            <option value="new"       {{ $lifecycleFilter === 'new'         ? 'selected' : '' }}>🆕 New</option>
-            <option value="scaling"   {{ $lifecycleFilter === 'scaling'     ? 'selected' : '' }}>📈 Scaling</option>
-            <option value="consistent"{{ $lifecycleFilter === 'consistent'  ? 'selected' : '' }}>✅ Consistent</option>
-            <option value="active"    {{ $lifecycleFilter === 'active'      ? 'selected' : '' }}>🔄 Active</option>
-            <option value="declining" {{ $lifecycleFilter === 'declining'   ? 'selected' : '' }}>📉 Declining</option>
-            <option value="phasing_out"{{ $lifecycleFilter==='phasing_out'  ? 'selected' : '' }}>🚫 Phasing Out</option>
-            <option value="dormant"   {{ $lifecycleFilter === 'dormant'     ? 'selected' : '' }}>💤 Dormant</option>
+          <select name="lifecycle_filter" class="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+            <option value=""           {{ $lifecycleFilter === ''            ? 'selected' : '' }}>All</option>
+            <option value="new"        {{ $lifecycleFilter === 'new'         ? 'selected' : '' }}>🆕 New</option>
+            <option value="scaling"    {{ $lifecycleFilter === 'scaling'     ? 'selected' : '' }}>📈 Scaling</option>
+            <option value="consistent" {{ $lifecycleFilter === 'consistent'  ? 'selected' : '' }}>✅ Consistent</option>
+            <option value="active"     {{ $lifecycleFilter === 'active'      ? 'selected' : '' }}>🔄 Active</option>
+            <option value="declining"  {{ $lifecycleFilter === 'declining'   ? 'selected' : '' }}>📉 Declining</option>
+            <option value="phasing_out"{{ $lifecycleFilter === 'phasing_out' ? 'selected' : '' }}>🚫 Phasing Out</option>
+            <option value="dormant"    {{ $lifecycleFilter === 'dormant'     ? 'selected' : '' }}>💤 Dormant</option>
           </select>
         </div>
 
@@ -93,7 +108,7 @@
                  class="border border-gray-300 rounded-md px-3 py-1.5 text-sm">
         </div>
 
-        {{-- Hidden lifecycle params (keep user values on apply) --}}
+        {{-- Hidden lifecycle params --}}
         <input type="hidden" name="new_item_days"     value="{{ $newItemDays }}">
         <input type="hidden" name="long_running_days" value="{{ $longRunningDays }}">
         <input type="hidden" name="scale_threshold"   value="{{ $scaleThreshold }}">
@@ -109,21 +124,92 @@
         </a>
       </div>
 
-      {{-- Lifecycle legend --}}
-      <div class="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
-        <span class="font-semibold">Lifecycle:</span>
-        <span class="lifecycle-badge bg-blue-100 text-blue-800">🆕 New</span>
-        <span class="lifecycle-badge bg-green-100 text-green-800">📈 Scaling</span>
-        <span class="lifecycle-badge bg-teal-100 text-teal-800">✅ Consistent</span>
-        <span class="lifecycle-badge bg-slate-100 text-slate-700">🔄 Active</span>
-        <span class="lifecycle-badge bg-orange-100 text-orange-800">📉 Declining</span>
-        <span class="lifecycle-badge bg-red-100 text-red-800">🚫 Phasing Out</span>
-        <span class="lifecycle-badge bg-gray-100 text-gray-500">💤 Dormant</span>
-        <span class="text-gray-400 ml-2">(Click badge to override · window: {{ $recentDays }}d vs prev {{ $recentDays }}d)</span>
+      {{-- Legend row --}}
+      <div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 items-center">
+        <span class="font-semibold text-gray-600">Class:</span>
+        <span class="class-badge bg-purple-600 text-white" style="cursor:default;">A · Hero</span>
+        <span class="class-badge bg-blue-500 text-white"   style="cursor:default;">B · Solid</span>
+        <span class="class-badge bg-yellow-400 text-gray-900" style="cursor:default;">C · Average</span>
+        <span class="class-badge bg-orange-400 text-white" style="cursor:default;">D · At-Risk</span>
+        <span class="class-badge bg-gray-400 text-white"   style="cursor:default;">E · Dead</span>
+        <span class="text-gray-300 mx-1">|</span>
+        <span class="font-semibold text-gray-600">Lifecycle:</span>
+        <span class="lifecycle-badge bg-blue-100 text-blue-800"   style="cursor:default;">🆕 New</span>
+        <span class="lifecycle-badge bg-green-100 text-green-800" style="cursor:default;">📈 Scaling</span>
+        <span class="lifecycle-badge bg-teal-100 text-teal-800"   style="cursor:default;">✅ Consistent</span>
+        <span class="lifecycle-badge bg-slate-100 text-slate-700" style="cursor:default;">🔄 Active</span>
+        <span class="lifecycle-badge bg-orange-100 text-orange-800" style="cursor:default;">📉 Declining</span>
+        <span class="lifecycle-badge bg-red-100 text-red-800"     style="cursor:default;">🚫 Phasing Out</span>
+        <span class="lifecycle-badge bg-gray-100 text-gray-500"   style="cursor:default;">💤 Dormant</span>
+        <span class="text-gray-400 ml-1">(Click any badge on a row to override)</span>
       </div>
     </form>
 
-    {{-- Summary cards --}}
+    {{-- ================================================================== --}}
+    {{-- CEO-only: Class threshold editor                                    --}}
+    {{-- ================================================================== --}}
+    @if($isCeo)
+    <details class="bg-white rounded-lg shadow border border-indigo-200 mb-4">
+      <summary class="px-4 py-3 font-semibold text-sm text-indigo-700 cursor-pointer select-none flex items-center gap-2">
+        <i class="fa-solid fa-sliders text-indigo-500"></i>
+        Class Velocity Thresholds
+        <span class="text-xs font-normal text-gray-400 ml-1">CEO only — click to expand</span>
+      </summary>
+      <div class="px-4 pb-4 pt-2">
+        <p class="text-xs text-gray-500 mb-3">
+          An item's auto-class is the <strong>highest class</strong> whose threshold ≤ the item's velocity (u/day).
+          Declining items drop 1 tier, Phasing Out / Dormant items drop 2 tiers.
+          Changes apply on next <em>Apply</em>.
+        </p>
+        <table class="text-sm border-collapse">
+          <thead>
+            <tr class="bg-gray-50">
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-20">Class</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200">Label</th>
+              <th class="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase border border-gray-200">Min Velocity (u/day)</th>
+              <th class="px-3 py-2 border border-gray-200 w-16"></th>
+            </tr>
+          </thead>
+          <tbody>
+            @foreach($classThresholdsFull as $ct)
+            @php $badgeCls = $classBadgeMap[$ct->class_key] ?? 'bg-gray-200 text-gray-600'; @endphp
+            <tr class="border-b border-gray-100">
+              <td class="px-3 py-2 border border-gray-200">
+                <span class="class-badge {{ $badgeCls }}" style="cursor:default;">{{ $ct->class_key }}</span>
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-gray-700 font-medium">{{ $ct->label }}</td>
+              <td class="px-3 py-2 border border-gray-200">
+                @if($ct->class_key === 'E')
+                  <input type="number" class="inline-num" value="0" readonly
+                         title="Class E is always 0 — catch-all floor" style="opacity:.5; cursor:not-allowed; width:80px;">
+                @else
+                  <input type="number" class="inline-num threshold-input" min="0" step="0.001"
+                         value="{{ $ct->min_velocity }}" data-class="{{ $ct->class_key }}" style="width:80px;">
+                @endif
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                @if($ct->class_key !== 'E')
+                  <button type="button"
+                          class="save-threshold-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
+                          data-class="{{ $ct->class_key }}">
+                    Save
+                  </button>
+                @endif
+              </td>
+            </tr>
+            @endforeach
+          </tbody>
+        </table>
+        <p class="text-xs text-gray-400 mt-2">
+          Changes take effect on next Apply. Items currently showing old class will refresh automatically.
+        </p>
+      </div>
+    </details>
+    @endif
+
+    {{-- ================================================================== --}}
+    {{-- Summary cards                                                       --}}
+    {{-- ================================================================== --}}
     <div class="grid grid-cols-3 gap-4 mb-4">
       <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
         <div class="text-2xl font-bold text-gray-800">{{ number_format($itemsWithHolds) }}</div>
@@ -139,7 +225,9 @@
       </div>
     </div>
 
-    {{-- Table --}}
+    {{-- ================================================================== --}}
+    {{-- Table                                                               --}}
+    {{-- ================================================================== --}}
     @if(count($items) > 0)
     <div class="bg-white rounded-lg shadow border border-gray-200 overflow-auto">
       <table id="supplyTable" class="min-w-full text-sm border-collapse">
@@ -149,6 +237,8 @@
             <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Hold Units</th>
             <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Velocity (u/day)</th>
             <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Strength</th>
+            <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200"
+                style="background:#ede9fe; color:#6d28d9;">Class</th>
             <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Lifecycle</th>
             <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Running?</th>
             <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">RTS%</th>
@@ -173,11 +263,10 @@
               data-threshold="{{ $runningThreshold }}"
               data-lifecycle="{{ $row['lifecycle'] }}"
               data-lifecycle-auto="{{ $row['lifecycle_auto'] ? '1' : '0' }}"
-              data-days-running="{{ $row['days_running'] }}"
-              data-recent-vel="{{ $row['recent_vel'] }}"
-              data-prev-vel="{{ $row['prev_vel'] }}">
+              data-class="{{ $row['item_class'] }}"
+              data-class-auto="{{ $row['item_class_auto'] ? '1' : '0' }}">
 
-            {{-- Item name --}}
+            {{-- Item --}}
             <td class="px-3 py-2 border border-gray-200 font-medium text-gray-800 whitespace-nowrap">
               {{ $row['item'] }}
             </td>
@@ -195,32 +284,48 @@
               {{ $row['vel_per_day'] > 0 ? number_format($row['vel_per_day'], 1) : '—' }}
             </td>
 
-            {{-- Strength badge --}}
+            {{-- Strength --}}
             <td class="px-3 py-2 border border-gray-200 text-center" data-order="{{ $row['vel_per_day'] }}">
               <span class="strength-badge {{ $row['strength_class'] }}">{{ $row['strength_label'] }}</span>
             </td>
 
-            {{-- Lifecycle badge + inline override --}}
-            <td class="px-3 py-2 border border-gray-200 text-center" data-order="{{ array_search($row['lifecycle'], ['dormant','active','consistent','declining','new','phasing_out','scaling']) }}">
-              <span class="lifecycle-badge {{ $row['lifecycle_badge'] }}"
-                    title="Recent: {{ $row['recent_vel'] }} u/d · Prev: {{ $row['prev_vel'] }} u/d · Running {{ $row['days_running'] }}d{{ $row['lifecycle_auto'] ? ' · auto' : ' · manual override' }}">
-                {{ $row['lifecycle_label'] }}
-                @if(!$row['lifecycle_auto'])<sup title="Manual override" class="text-[9px] opacity-60">★</sup>@endif
+            {{-- Class badge + override --}}
+            <td class="px-3 py-2 border border-gray-200 text-center" style="background:#faf5ff;"
+                data-order="{{ $row['item_class'] }}">
+              <span class="class-badge {{ $row['item_class_badge'] }}"
+                    title="Velocity: {{ $row['vel_per_day'] }} u/d · Lifecycle: {{ $row['lifecycle'] }}{{ $row['item_class_auto'] ? ' · auto' : ' · manual override' }}">
+                {{ $row['item_class_label'] }}@if(!$row['item_class_auto'])<sup title="Manual override" class="text-[9px] opacity-70">★</sup>@endif
               </span>
-              <select class="lifecycle-sel mt-1"
-                      title="Override lifecycle for {{ $row['item'] }}">
+              <select class="class-sel" title="Override class for {{ $row['item'] }}">
                 <option value="">auto</option>
-                <option value="new"          {{ $row['lifecycle'] === 'new'          && !$row['lifecycle_auto'] ? 'selected' : '' }}>🆕 New</option>
-                <option value="scaling"      {{ $row['lifecycle'] === 'scaling'      && !$row['lifecycle_auto'] ? 'selected' : '' }}>📈 Scaling</option>
-                <option value="consistent"   {{ $row['lifecycle'] === 'consistent'   && !$row['lifecycle_auto'] ? 'selected' : '' }}>✅ Consistent</option>
-                <option value="active"       {{ $row['lifecycle'] === 'active'       && !$row['lifecycle_auto'] ? 'selected' : '' }}>🔄 Active</option>
-                <option value="declining"    {{ $row['lifecycle'] === 'declining'    && !$row['lifecycle_auto'] ? 'selected' : '' }}>📉 Declining</option>
-                <option value="phasing_out"  {{ $row['lifecycle'] === 'phasing_out'  && !$row['lifecycle_auto'] ? 'selected' : '' }}>🚫 Phasing Out</option>
-                <option value="dormant"      {{ $row['lifecycle'] === 'dormant'      && !$row['lifecycle_auto'] ? 'selected' : '' }}>💤 Dormant</option>
+                <option value="A" {{ $row['item_class'] === 'A' && !$row['item_class_auto'] ? 'selected' : '' }}>A · Hero</option>
+                <option value="B" {{ $row['item_class'] === 'B' && !$row['item_class_auto'] ? 'selected' : '' }}>B · Solid</option>
+                <option value="C" {{ $row['item_class'] === 'C' && !$row['item_class_auto'] ? 'selected' : '' }}>C · Average</option>
+                <option value="D" {{ $row['item_class'] === 'D' && !$row['item_class_auto'] ? 'selected' : '' }}>D · At-Risk</option>
+                <option value="E" {{ $row['item_class'] === 'E' && !$row['item_class_auto'] ? 'selected' : '' }}>E · Dead</option>
               </select>
             </td>
 
-            {{-- Running? checkbox --}}
+            {{-- Lifecycle badge + override --}}
+            <td class="px-3 py-2 border border-gray-200 text-center"
+                data-order="{{ $row['lifecycle'] }}">
+              <span class="lifecycle-badge {{ $row['lifecycle_badge'] }}"
+                    title="Recent: {{ $row['recent_vel'] }} u/d · Prev: {{ $row['prev_vel'] }} u/d · Running {{ $row['days_running'] }}d{{ $row['lifecycle_auto'] ? ' · auto' : ' · manual override' }}">
+                {{ $row['lifecycle_label'] }}@if(!$row['lifecycle_auto'])<sup title="Manual override" class="text-[9px] opacity-60">★</sup>@endif
+              </span>
+              <select class="lifecycle-sel" title="Override lifecycle for {{ $row['item'] }}">
+                <option value="">auto</option>
+                <option value="new"         {{ $row['lifecycle'] === 'new'         && !$row['lifecycle_auto'] ? 'selected' : '' }}>🆕 New</option>
+                <option value="scaling"     {{ $row['lifecycle'] === 'scaling'     && !$row['lifecycle_auto'] ? 'selected' : '' }}>📈 Scaling</option>
+                <option value="consistent"  {{ $row['lifecycle'] === 'consistent'  && !$row['lifecycle_auto'] ? 'selected' : '' }}>✅ Consistent</option>
+                <option value="active"      {{ $row['lifecycle'] === 'active'      && !$row['lifecycle_auto'] ? 'selected' : '' }}>🔄 Active</option>
+                <option value="declining"   {{ $row['lifecycle'] === 'declining'   && !$row['lifecycle_auto'] ? 'selected' : '' }}>📉 Declining</option>
+                <option value="phasing_out" {{ $row['lifecycle'] === 'phasing_out' && !$row['lifecycle_auto'] ? 'selected' : '' }}>🚫 Phasing Out</option>
+                <option value="dormant"     {{ $row['lifecycle'] === 'dormant'     && !$row['lifecycle_auto'] ? 'selected' : '' }}>💤 Dormant</option>
+              </select>
+            </td>
+
+            {{-- Running? --}}
             <td class="px-3 py-2 border border-gray-200 text-center">
               <input type="checkbox" class="running-chk w-4 h-4 cursor-pointer"
                      {{ $row['is_running'] ? 'checked' : '' }}
@@ -235,21 +340,19 @@
               {{ $row['rts_pct'] > 0 ? $row['rts_pct'].'%' : '—' }}
             </td>
 
-            {{-- Lead time (inline edit) --}}
+            {{-- Lead time --}}
             <td class="px-3 py-2 border border-gray-200 text-center">
               <input type="number" class="inline-num lead-input" min="1" max="365"
-                     value="{{ $row['lead_time_days'] }}"
-                     title="Lead time days for {{ $row['item'] }}">
+                     value="{{ $row['lead_time_days'] }}" title="Lead time for {{ $row['item'] }}">
             </td>
 
-            {{-- Safety buffer (inline edit) --}}
+            {{-- Safety buffer --}}
             <td class="px-3 py-2 border border-gray-200 text-center">
               <input type="number" class="inline-num safety-input" min="0" max="365"
-                     value="{{ $row['safety_days'] }}"
-                     title="Safety buffer days for {{ $row['item'] }}">
+                     value="{{ $row['safety_days'] }}" title="Safety buffer for {{ $row['item'] }}">
             </td>
 
-            {{-- Recommended qty (computed live) --}}
+            {{-- Recommended --}}
             <td class="px-3 py-2 border border-gray-200 text-right recommended-cell"
                 data-order="{{ $row['recommended'] }}"
                 style="background:#eff6ff; color:#1d4ed8;">
@@ -263,7 +366,7 @@
           <tr style="background:#f8fafc; border-top:2px solid #94a3b8; font-weight:700;">
             <td class="px-3 py-2 border border-gray-300 text-xs text-gray-500 uppercase">TOTAL</td>
             <td class="px-3 py-2 border border-gray-300 text-right text-blue-700">{{ number_format($totalHoldUnits) }}</td>
-            <td class="px-3 py-2 border border-gray-300" colspan="7"></td>
+            <td class="px-3 py-2 border border-gray-300" colspan="8"></td>
             <td class="px-3 py-2 border border-gray-300 text-right" style="color:#1d4ed8;">
               {{ number_format($totalRecommended) }}
             </td>
@@ -277,7 +380,7 @@
     </div>
     @endif
 
-  </div>{{-- end container --}}
+  </div>
 
   {{-- Save toast --}}
   <div class="save-toast" id="saveToast">✓ Saved</div>
@@ -287,7 +390,7 @@
   <script>
     const CSRF = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 
-    // Lifecycle badge info map (for live-updating badge after override)
+    // ---- Lifecycle metadata ----
     const LIFECYCLE_META = {
       'new':         { label: '🆕 New',        cls: 'bg-blue-100 text-blue-800' },
       'scaling':     { label: '📈 Scaling',     cls: 'bg-green-100 text-green-800' },
@@ -297,88 +400,117 @@
       'phasing_out': { label: '🚫 Phasing Out', cls: 'bg-red-100 text-red-800' },
       'dormant':     { label: '💤 Dormant',     cls: 'bg-gray-100 text-gray-500' },
     };
-    const ALL_LIFECYCLE_CLS = Object.values(LIFECYCLE_META).map(m => m.cls.split(' ')).flat();
+    const ALL_LIFECYCLE_CLS = Object.values(LIFECYCLE_META).flatMap(m => m.cls.split(' '));
 
-    // ---- DataTable init ----
+    // ---- Class metadata ----
+    const CLASS_META = {
+      'A': { label: 'A · Hero',    cls: 'bg-purple-600 text-white' },
+      'B': { label: 'B · Solid',   cls: 'bg-blue-500 text-white' },
+      'C': { label: 'C · Average', cls: 'bg-yellow-400 text-gray-900' },
+      'D': { label: 'D · At-Risk', cls: 'bg-orange-400 text-white' },
+      'E': { label: 'E · Dead',    cls: 'bg-gray-400 text-white' },
+    };
+    const ALL_CLASS_CLS = Object.values(CLASS_META).flatMap(m => m.cls.split(' '));
+
+    // ---- DataTable ----
     document.addEventListener('DOMContentLoaded', function () {
-      const tableEl = document.getElementById('supplyTable');
-      if (!tableEl) return;
-
+      if (!document.getElementById('supplyTable')) return;
       $('#supplyTable').DataTable({
         paging:    true,
-        searching: false,   // external search via form
+        searching: false,
         ordering:  true,
         info:      true,
         dom:       'rtip',
-        order:     [[9, 'desc']],  // Recommended Order col (now col index 9)
+        order:     [[10, 'desc']],   // Recommended Order (col index 10 now)
         pageLength: 50,
       });
     });
 
-    // ---- Recompute recommended qty for a row ----
+    // ---- Recompute recommended ----
     function recompute(row) {
-      const vel        = parseFloat(row.dataset.vel)     || 0;
-      const holdUnits  = parseInt(row.dataset.holds)     || 0;
-      const rtsPct     = parseFloat(row.dataset.rts)     || 0;
-      const delivRate  = Math.max(0.01, 1 - rtsPct / 100);
-      const running    = row.dataset.running === '1';
-      const lead       = parseInt(row.querySelector('.lead-input').value)   || 7;
-      const safety     = parseInt(row.querySelector('.safety-input').value) || 0;
+      const vel       = parseFloat(row.dataset.vel)   || 0;
+      const holdUnits = parseInt(row.dataset.holds)   || 0;
+      const rtsPct    = parseFloat(row.dataset.rts)   || 0;
+      const delivRate = Math.max(0.01, 1 - rtsPct / 100);
+      const running   = row.dataset.running === '1';
+      const lead      = parseInt(row.querySelector('.lead-input').value)   || 7;
+      const safety    = parseInt(row.querySelector('.safety-input').value) || 0;
 
       const holdsGross = holdUnits > 0 ? Math.ceil(holdUnits / delivRate) : 0;
       let recommended  = holdsGross;
-
       if (running && vel > 0) {
-        const leadDemand  = Math.ceil(vel * lead   / delivRate);
-        const safetyStock = Math.ceil(vel * safety / delivRate);
-        recommended = holdsGross + leadDemand + safetyStock;
+        recommended = holdsGross
+          + Math.ceil(vel * lead   / delivRate)
+          + Math.ceil(vel * safety / delivRate);
       }
 
-      const recSpan = row.querySelector('.rec-val');
-      if (recSpan) recSpan.textContent = recommended.toLocaleString('en-PH');
-      // Update data-order for sorting
-      const recCell = row.querySelector('td[style*="#eff6ff"]');
-      if (recCell) recCell.dataset.order = recommended;
+      const span = row.querySelector('.rec-val');
+      if (span) span.textContent = recommended.toLocaleString('en-PH');
     }
 
-    // ---- Save settings via AJAX ----
+    // ---- Toast ----
     let toastTimer;
-    function showToast() {
+    function showToast(msg = '✓ Saved') {
       const t = document.getElementById('saveToast');
+      t.textContent = msg;
       t.style.display = 'block';
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => t.style.display = 'none', 2000);
     }
 
+    // ---- Save item settings ----
     function saveRow(row, extra = {}) {
-      const itemName  = row.dataset.item;
-      const lead      = parseInt(row.querySelector('.lead-input').value)   || 7;
-      const safety    = parseInt(row.querySelector('.safety-input').value) || 0;
-      const isRunning = row.dataset.running;
-      const isAuto    = row.dataset.runningAuto === '1';
-      const runVal    = isAuto ? 'auto' : isRunning;
-
+      const isAuto = row.dataset.runningAuto === '1';
       fetch('/jnt/supply/settings', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-TOKEN': CSRF,
-          'Accept': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
         body: JSON.stringify({
-          item_name:      itemName,
-          lead_time_days: lead,
-          safety_days:    safety,
-          is_running:     runVal,
+          item_name:      row.dataset.item,
+          lead_time_days: parseInt(row.querySelector('.lead-input').value)   || 7,
+          safety_days:    parseInt(row.querySelector('.safety-input').value) || 0,
+          is_running:     isAuto ? 'auto' : row.dataset.running,
           ...extra,
         }),
-      })
-      .then(r => r.json())
-      .then(d => { if (d.success) showToast(); })
-      .catch(console.error);
+      }).then(r => r.json()).then(d => { if (d.success) showToast(); }).catch(console.error);
     }
 
-    // ---- Event listeners (delegated) ----
+    // ---- Badge click → show dropdown ----
+    function attachBadgeToggle(badgeSel, dropSel) {
+      document.addEventListener('click', function (e) {
+        // Close all open dropdowns of this type when clicking outside
+        if (!e.target.classList.contains(badgeSel) && !e.target.classList.contains(dropSel)) {
+          document.querySelectorAll('.' + dropSel).forEach(s => {
+            if (s.style.display !== 'none' && s.style.display !== '') {
+              const badge = s.closest('td').querySelector('.' + badgeSel);
+              if (badge) badge.style.display = '';
+              s.style.display = 'none';
+            }
+          });
+          return;
+        }
+        if (e.target.classList.contains(badgeSel)) {
+          const td  = e.target.closest('td');
+          if (!td) return;
+          const sel = td.querySelector('.' + dropSel);
+          if (!sel) return;
+          const isOpen = sel.style.display === 'block';
+          // Close all first
+          document.querySelectorAll('.' + dropSel).forEach(s => {
+            const b = s.closest('td')?.querySelector('.' + badgeSel);
+            if (b) b.style.display = '';
+            s.style.display = 'none';
+          });
+          if (!isOpen) {
+            sel.style.display = 'block';
+            e.target.style.display = 'none';
+          }
+        }
+      });
+    }
+    attachBadgeToggle('class-badge', 'class-sel');
+    attachBadgeToggle('lifecycle-badge', 'lifecycle-sel');
+
+    // ---- Change handlers ----
     document.addEventListener('change', function (e) {
       const row = e.target.closest('tr[data-item]');
       if (!row) return;
@@ -387,36 +519,53 @@
       if (e.target.classList.contains('running-chk')) {
         row.dataset.running     = e.target.checked ? '1' : '0';
         row.dataset.runningAuto = '0';
-        const autoLabel = row.querySelector('td .text-gray-400.text-xs');
-        if (autoLabel) autoLabel.remove();
+        row.querySelector('td .text-gray-400.text-xs')?.remove();
         recompute(row);
         saveRow(row);
+        return;
       }
 
-      // Lifecycle override select
-      if (e.target.classList.contains('lifecycle-sel')) {
-        const val    = e.target.value;   // '' = auto, or a lifecycle key
-        const badge  = e.target.closest('td').querySelector('.lifecycle-badge');
-
+      // Class override
+      if (e.target.classList.contains('class-sel')) {
+        const val   = e.target.value;
+        const badge = e.target.closest('td').querySelector('.class-badge');
         if (val === '') {
-          // Clear override — reload to get server-computed value
+          saveRow(row, { class_override: '' });
+          setTimeout(() => location.reload(), 400);
+        } else {
+          const meta = CLASS_META[val];
+          if (meta && badge) {
+            badge.classList.remove(...ALL_CLASS_CLS);
+            meta.cls.split(' ').forEach(c => badge.classList.add(c));
+            badge.childNodes[0].textContent = meta.label;
+            let star = badge.querySelector('sup');
+            if (!star) { star = document.createElement('sup'); star.className = 'text-[9px] opacity-70'; badge.appendChild(star); }
+            star.textContent = '★';
+          }
+          row.dataset.class     = val;
+          row.dataset.classAuto = '0';
+          e.target.style.display = 'none';
+          if (badge) badge.style.display = '';
+          saveRow(row, { class_override: val });
+        }
+        return;
+      }
+
+      // Lifecycle override
+      if (e.target.classList.contains('lifecycle-sel')) {
+        const val   = e.target.value;
+        const badge = e.target.closest('td').querySelector('.lifecycle-badge');
+        if (val === '') {
           saveRow(row, { lifecycle_override: '' });
           setTimeout(() => location.reload(), 400);
         } else {
           const meta = LIFECYCLE_META[val];
           if (meta && badge) {
-            // Update badge visually
             badge.classList.remove(...ALL_LIFECYCLE_CLS);
             meta.cls.split(' ').forEach(c => badge.classList.add(c));
-            badge.childNodes[0].textContent = meta.label + ' ';
-            // Add or update manual star marker
+            badge.childNodes[0].textContent = meta.label;
             let star = badge.querySelector('sup');
-            if (!star) {
-              star = document.createElement('sup');
-              star.title = 'Manual override';
-              star.className = 'text-[9px] opacity-60';
-              badge.appendChild(star);
-            }
+            if (!star) { star = document.createElement('sup'); star.className = 'text-[9px] opacity-60'; badge.appendChild(star); }
             star.textContent = '★';
           }
           row.dataset.lifecycle     = val;
@@ -425,49 +574,41 @@
           if (badge) badge.style.display = '';
           saveRow(row, { lifecycle_override: val });
         }
+        return;
       }
     });
 
+    // Lead / safety blur → recompute + save
     document.addEventListener('blur', function (e) {
       const row = e.target.closest('tr[data-item]');
       if (!row) return;
-
       if (e.target.classList.contains('lead-input') || e.target.classList.contains('safety-input')) {
         recompute(row);
         saveRow(row);
       }
     }, true);
 
-    // ---- Badge click → show/hide override select ----
+    // ---- CEO threshold save ----
     document.addEventListener('click', function (e) {
-      if (e.target.classList.contains('lifecycle-badge')) {
-        const td  = e.target.closest('td');
-        if (!td) return;
-        const sel = td.querySelector('.lifecycle-sel');
-        if (!sel) return;
+      if (!e.target.classList.contains('save-threshold-btn')) return;
+      const classKey = e.target.dataset.class;
+      const input    = document.querySelector(`.threshold-input[data-class="${classKey}"]`);
+      if (!input) return;
+      const minVel = parseFloat(input.value);
+      if (isNaN(minVel) || minVel < 0) { alert('Invalid velocity value'); return; }
 
-        const showing = sel.style.display === 'block' || sel.style.display === '';
-        // Hide all open selects first
-        document.querySelectorAll('.lifecycle-sel').forEach(s => s.style.display = 'none');
-
-        if (!showing) {
-          sel.style.display = 'block';
-          e.target.style.display = 'none';
-        } else {
-          e.target.style.display = '';
-        }
-      }
-
-      // Clicking elsewhere closes selects
-      if (!e.target.classList.contains('lifecycle-badge') && !e.target.classList.contains('lifecycle-sel')) {
-        document.querySelectorAll('.lifecycle-sel').forEach(s => {
-          if (s.style.display !== 'none') {
-            const badge = s.closest('td').querySelector('.lifecycle-badge');
-            if (badge) badge.style.display = '';
-            s.style.display = 'none';
-          }
-        });
-      }
+      e.target.disabled = true;
+      fetch('/jnt/supply/class-thresholds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+        body: JSON.stringify({ class_key: classKey, min_velocity: minVel }),
+      })
+      .then(r => r.json())
+      .then(d => {
+        e.target.disabled = false;
+        if (d.success) showToast('✓ Threshold saved');
+      })
+      .catch(err => { console.error(err); e.target.disabled = false; });
     });
   </script>
 </x-layout>

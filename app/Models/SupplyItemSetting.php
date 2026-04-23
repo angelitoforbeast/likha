@@ -15,6 +15,7 @@ class SupplyItemSetting extends Model
         'is_running',
         'notes',
         'lifecycle_override',
+        'class_override',
     ];
 
     protected $casts = [
