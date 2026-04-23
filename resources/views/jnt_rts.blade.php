@@ -38,8 +38,8 @@
     .flatpickr-calendar { z-index: 9999 !important; }
   </style>
 
-  {{-- Root: full viewport below nav (nav = h-16 = 64px) --}}
-  <div style="height:calc(100vh - 64px); display:flex; flex-direction:column; overflow:hidden; background:#f3f4f6;">
+  {{-- Root: fixed below nav (nav = h-16 = 64px, position:fixed top-0) --}}
+  <div style="position:fixed; top:64px; left:0; right:0; bottom:0; display:flex; flex-direction:column; overflow:hidden; background:#f3f4f6; z-index:10;">
 
     {{-- Filters bar --}}
     <div style="flex-shrink:0; padding:10px 16px 8px;">
@@ -252,9 +252,10 @@
       const tableEl = document.getElementById('rtsTable');
       if (!tableEl) return;
 
-      // Compute scrollY: full viewport minus everything outside the scroll body
-      // nav(64) + filters(~82) + controls(~34) + scrollHead(~35) + scrollFoot(~37) + padding(~14) = ~266
-      const scrollY = 'calc(100vh - 270px)';
+      // Container is position:fixed top:64px bottom:0 (fills space below nav exactly).
+      // scrollY = container height minus: filters(~82px) + controls(~34px) + scrollHead(~35px) + scrollFoot(~37px) + paddings(~24px)
+      // container height = 100vh - 64px, so: scrollY = 100vh - 64 - 82 - 34 - 35 - 37 - 24 = 100vh - 276px
+      const scrollY = 'calc(100vh - 280px)';
 
       const dt = $('#rtsTable').DataTable({
         scrollY: scrollY,
