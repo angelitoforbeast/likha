@@ -159,7 +159,7 @@
         <p class="text-xs text-gray-500 mb-3">
           <strong>Priority (top wins):</strong>
           D → A → B → C → H. Kapag walang match, H (review needed).
-          Kailangan laging <em>alive</em>: last {{ $cfgAliveWindow }}-day avg ≥ {{ $cfgAliveMin }} u/day (editable sa baba).
+          Bawat class (A/B/C) may sariling <em>alive guard</em>: recent avg ≥ min u/day sa huling N days. Kapag patay recent, fall to H.
         </p>
         <table class="text-sm border-collapse w-full mb-4">
           <thead>
@@ -167,8 +167,10 @@
               <th class="px-3 py-2 text-left  text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-14">Prio</th>
               <th class="px-3 py-2 text-left  text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-24">Class</th>
               <th class="px-3 py-2 text-left  text-xs font-semibold text-gray-500 uppercase border border-gray-200">Rule</th>
-              <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-28">Min u/day</th>
-              <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-24">Window (d)</th>
+              <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-24">Min u/day</th>
+              <th class="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase border border-gray-200 w-20">Window (d)</th>
+              <th class="px-3 py-2 text-center text-xs font-semibold text-emerald-600 uppercase border border-gray-200 w-24">Alive min</th>
+              <th class="px-3 py-2 text-center text-xs font-semibold text-emerald-600 uppercase border border-gray-200 w-20">Alive win (d)</th>
               <th class="px-3 py-2 border border-gray-200 w-16"></th>
             </tr>
           </thead>
@@ -183,6 +185,8 @@
                 age &lt; <input type="number" class="inline-num supply-kv-input" style="width:70px;"
                        data-key="new_item_days" value="{{ $cfgDNewItemDays }}" min="1" step="1"> days
               </td>
+              <td class="px-3 py-2 border border-gray-200 text-center text-gray-300">—</td>
+              <td class="px-3 py-2 border border-gray-200 text-center text-gray-300">—</td>
               <td class="px-3 py-2 border border-gray-200 text-center text-gray-300">—</td>
               <td class="px-3 py-2 border border-gray-200 text-center text-gray-300">—</td>
               <td class="px-3 py-2 border border-gray-200 text-center">
@@ -208,9 +212,17 @@
                 <input type="number" class="inline-num supply-kv-input" style="width:70px;"
                        data-key="class_a_window_days" value="{{ $cfgAWindowDays }}" min="1" step="1">
               </td>
+              <td class="px-3 py-2 border border-gray-200 text-center bg-emerald-50">
+                <input type="number" class="inline-num supply-kv-input" style="width:70px;"
+                       data-key="class_a_alive_min" value="{{ $cfgAAliveMin }}" min="0" step="0.1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center bg-emerald-50">
+                <input type="number" class="inline-num supply-kv-input" style="width:60px;"
+                       data-key="class_a_alive_window" value="{{ $cfgAAliveWindow }}" min="1" step="1">
+              </td>
               <td class="px-3 py-2 border border-gray-200 text-center">
                 <button type="button" class="save-kv-btn-multi text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
-                        data-keys="class_a_min_velocity,class_a_window_days">Save</button>
+                        data-keys="class_a_min_velocity,class_a_window_days,class_a_alive_min,class_a_alive_window">Save</button>
               </td>
             </tr>
 
@@ -231,9 +243,17 @@
                 <input type="number" class="inline-num supply-kv-input" style="width:70px;"
                        data-key="class_b_window_days" value="{{ $cfgBWindowDays }}" min="1" step="1">
               </td>
+              <td class="px-3 py-2 border border-gray-200 text-center bg-emerald-50">
+                <input type="number" class="inline-num supply-kv-input" style="width:70px;"
+                       data-key="class_b_alive_min" value="{{ $cfgBAliveMin }}" min="0" step="0.1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center bg-emerald-50">
+                <input type="number" class="inline-num supply-kv-input" style="width:60px;"
+                       data-key="class_b_alive_window" value="{{ $cfgBAliveWindow }}" min="1" step="1">
+              </td>
               <td class="px-3 py-2 border border-gray-200 text-center">
                 <button type="button" class="save-kv-btn-multi text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
-                        data-keys="class_b_min_velocity,class_b_window_days">Save</button>
+                        data-keys="class_b_min_velocity,class_b_window_days,class_b_alive_min,class_b_alive_window">Save</button>
               </td>
             </tr>
 
@@ -254,9 +274,17 @@
                 <input type="number" class="inline-num supply-kv-input" style="width:70px;"
                        data-key="class_c_window_days" value="{{ $cfgCWindowDays }}" min="1" step="1">
               </td>
+              <td class="px-3 py-2 border border-gray-200 text-center bg-emerald-50">
+                <input type="number" class="inline-num supply-kv-input" style="width:70px;"
+                       data-key="class_c_alive_min" value="{{ $cfgCAliveMin }}" min="0" step="0.1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center bg-emerald-50">
+                <input type="number" class="inline-num supply-kv-input" style="width:60px;"
+                       data-key="class_c_alive_window" value="{{ $cfgCAliveWindow }}" min="1" step="1">
+              </td>
               <td class="px-3 py-2 border border-gray-200 text-center">
                 <button type="button" class="save-kv-btn-multi text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
-                        data-keys="class_c_min_velocity,class_c_window_days">Save</button>
+                        data-keys="class_c_min_velocity,class_c_window_days,class_c_alive_min,class_c_alive_window">Save</button>
               </td>
             </tr>
 
@@ -266,29 +294,8 @@
               <td class="px-3 py-2 border border-gray-200">
                 <span class="class-badge bg-gray-500 text-white" style="cursor:default;">H · Review</span>
               </td>
-              <td class="px-3 py-2 border border-gray-200 text-gray-500 italic" colspan="4">
+              <td class="px-3 py-2 border border-gray-200 text-gray-500 italic" colspan="6">
                 Catch-all — lahat ng walang match sa A/B/C/D. CEO review needed (kill, boost, or ignore).
-              </td>
-            </tr>
-
-            {{-- Alive guard row --}}
-            <tr class="border-b border-gray-100 bg-emerald-50">
-              <td class="px-3 py-2 border border-gray-200 text-center text-emerald-700 font-bold" colspan="2">
-                🫀 Alive Guard
-              </td>
-              <td class="px-3 py-2 border border-gray-200 text-gray-700">
-                A/B/C additionally requires: last
-                <input type="number" class="inline-num supply-kv-input" style="width:60px;"
-                       data-key="class_abc_alive_window" value="{{ $cfgAliveWindow }}" min="1" step="1">
-                -day avg ≥
-                <input type="number" class="inline-num supply-kv-input" style="width:70px;"
-                       data-key="class_abc_alive_min" value="{{ $cfgAliveMin }}" min="0" step="0.1">
-                u/day. Kapag patay recent, fall to H kahit mataas ang window average.
-              </td>
-              <td class="px-3 py-2 border border-gray-200 text-center text-gray-300" colspan="2">—</td>
-              <td class="px-3 py-2 border border-gray-200 text-center">
-                <button type="button" class="save-kv-btn-multi text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 rounded"
-                        data-keys="class_abc_alive_window,class_abc_alive_min">Save</button>
               </td>
             </tr>
           </tbody>
@@ -432,7 +439,7 @@
             <td class="px-3 py-2 border border-gray-200 text-center" style="background:#faf5ff;"
                 data-order="{{ $row['item_class'] }}">
               <span class="class-badge {{ $row['item_class_badge'] }}"
-                    title="A-win avg: {{ $row['a_avg'] }} · B-win avg: {{ $row['b_avg'] }} · C-win avg: {{ $row['c_avg'] }} · Alive-win avg: {{ $row['alive_avg'] }} · Age: {{ $row['days_running'] }}d{{ $row['item_class_auto'] ? ' · auto' : ' · manual override' }}">
+                    title="A-win avg: {{ $row['a_avg'] }} (alive: {{ $row['a_alive_avg'] }}) · B-win avg: {{ $row['b_avg'] }} (alive: {{ $row['b_alive_avg'] }}) · C-win avg: {{ $row['c_avg'] }} (alive: {{ $row['c_alive_avg'] }}) · Age: {{ $row['days_running'] }}d{{ $row['item_class_auto'] ? ' · auto' : ' · manual override' }}">
                 {{ $row['item_class_label'] }}@if(!$row['item_class_auto'])<sup title="Manual override" class="text-[9px] opacity-70">★</sup>@endif
               </span>
               <select class="class-sel" title="Override class for {{ $row['item'] }}">

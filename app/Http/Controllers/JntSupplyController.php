@@ -107,25 +107,24 @@ class JntSupplyController extends Controller
     private function classifyItemClass(
         int   $daysRunning,
         float $aWindowAvg, float $bWindowAvg, float $cWindowAvg,
-        float $aliveAvg,
+        float $aAliveAvg,  float $bAliveAvg,  float $cAliveAvg,
         int   $dNewItemDays,
-        float $aMin, int $aWindowDays,
-        float $bMin, int $bWindowDays,
-        float $cMin, int $cWindowDays,
-        float $aliveMin
+        float $aMin, int $aWindowDays, float $aAliveMin,
+        float $bMin, int $bWindowDays, float $bAliveMin,
+        float $cMin, int $cWindowDays, float $cAliveMin
     ): string {
         // 1. D — new item
         if ($daysRunning < $dNewItemDays) {
             return 'D';
         }
-        // 2/3/4. A/B/C with full-maturity + alive guard
-        if ($daysRunning >= $aWindowDays && $aWindowAvg >= $aMin && $aliveAvg >= $aliveMin) {
+        // 2/3/4. A/B/C with full-maturity + per-class alive guard
+        if ($daysRunning >= $aWindowDays && $aWindowAvg >= $aMin && $aAliveAvg >= $aAliveMin) {
             return 'A';
         }
-        if ($daysRunning >= $bWindowDays && $bWindowAvg >= $bMin && $aliveAvg >= $aliveMin) {
+        if ($daysRunning >= $bWindowDays && $bWindowAvg >= $bMin && $bAliveAvg >= $bAliveMin) {
             return 'B';
         }
-        if ($daysRunning >= $cWindowDays && $cWindowAvg >= $cMin && $aliveAvg >= $aliveMin) {
+        if ($daysRunning >= $cWindowDays && $cWindowAvg >= $cMin && $cAliveAvg >= $cAliveMin) {
             return 'C';
         }
         // 5. Catch-all
@@ -228,8 +227,12 @@ class JntSupplyController extends Controller
         $cfgBWindowDays   = (int)   ($supplyKv['class_b_window_days']    ?? 15);
         $cfgCMinVel       = (float) ($supplyKv['class_c_min_velocity']   ?? 50);
         $cfgCWindowDays   = (int)   ($supplyKv['class_c_window_days']    ?? 7);
-        $cfgAliveWindow   = (int)   ($supplyKv['class_abc_alive_window'] ?? 7);
-        $cfgAliveMin      = (float) ($supplyKv['class_abc_alive_min']    ?? 10);
+        $cfgAAliveWindow  = (int)   ($supplyKv['class_a_alive_window']   ?? 7);
+        $cfgAAliveMin     = (float) ($supplyKv['class_a_alive_min']      ?? 10);
+        $cfgBAliveWindow  = (int)   ($supplyKv['class_b_alive_window']   ?? 7);
+        $cfgBAliveMin     = (float) ($supplyKv['class_b_alive_min']      ?? 10);
+        $cfgCAliveWindow  = (int)   ($supplyKv['class_c_alive_window']   ?? 7);
+        $cfgCAliveMin     = (float) ($supplyKv['class_c_alive_min']      ?? 10);
 
         // -- 1. Hold counts -------------------------------------------------
         // Scope: last month (1st) onwards, by ts_date.
@@ -339,7 +342,11 @@ class JntSupplyController extends Controller
 
         // -- 7b. Class-window aggregates: per-item-per-date orders within
         //       max(A, B, C, alive) window. Sub-windows computed in PHP.
-        $maxClassWindow = max($cfgAWindowDays, $cfgBWindowDays, $cfgCWindowDays, $cfgAliveWindow, 1);
+        $maxClassWindow = max(
+            $cfgAWindowDays, $cfgBWindowDays, $cfgCWindowDays,
+            $cfgAAliveWindow, $cfgBAliveWindow, $cfgCAliveWindow,
+            1
+        );
         $classFromDate  = Carbon::parse($asOfDate, 'Asia/Manila')
             ->subDays($maxClassWindow - 1)
             ->toDateString();
@@ -461,10 +468,12 @@ class JntSupplyController extends Controller
 
             // -- Item Class (A / B / C / D / H) -----------------------------
             // Per-window averages (fixed denominators = window days)
-            $aAvg     = $cfgAWindowDays   > 0 ? $windowSum($base, $cfgAWindowDays)   / $cfgAWindowDays   : 0.0;
-            $bAvg     = $cfgBWindowDays   > 0 ? $windowSum($base, $cfgBWindowDays)   / $cfgBWindowDays   : 0.0;
-            $cAvg     = $cfgCWindowDays   > 0 ? $windowSum($base, $cfgCWindowDays)   / $cfgCWindowDays   : 0.0;
-            $aliveAvg = $cfgAliveWindow   > 0 ? $windowSum($base, $cfgAliveWindow)   / $cfgAliveWindow   : 0.0;
+            $aAvg      = $cfgAWindowDays  > 0 ? $windowSum($base, $cfgAWindowDays)  / $cfgAWindowDays  : 0.0;
+            $bAvg      = $cfgBWindowDays  > 0 ? $windowSum($base, $cfgBWindowDays)  / $cfgBWindowDays  : 0.0;
+            $cAvg      = $cfgCWindowDays  > 0 ? $windowSum($base, $cfgCWindowDays)  / $cfgCWindowDays  : 0.0;
+            $aAliveAvg = $cfgAAliveWindow > 0 ? $windowSum($base, $cfgAAliveWindow) / $cfgAAliveWindow : 0.0;
+            $bAliveAvg = $cfgBAliveWindow > 0 ? $windowSum($base, $cfgBAliveWindow) / $cfgBAliveWindow : 0.0;
+            $cAliveAvg = $cfgCAliveWindow > 0 ? $windowSum($base, $cfgCAliveWindow) / $cfgCAliveWindow : 0.0;
 
             $classOverride = $setting?->class_override ?? null;
             if ($classOverride) {
@@ -473,12 +482,12 @@ class JntSupplyController extends Controller
             } else {
                 $itemClass     = $this->classifyItemClass(
                     $daysRunning,
-                    $aAvg, $bAvg, $cAvg, $aliveAvg,
+                    $aAvg, $bAvg, $cAvg,
+                    $aAliveAvg, $bAliveAvg, $cAliveAvg,
                     $cfgDNewItemDays,
-                    $cfgAMinVel, $cfgAWindowDays,
-                    $cfgBMinVel, $cfgBWindowDays,
-                    $cfgCMinVel, $cfgCWindowDays,
-                    $cfgAliveMin
+                    $cfgAMinVel, $cfgAWindowDays, $cfgAAliveMin,
+                    $cfgBMinVel, $cfgBWindowDays, $cfgBAliveMin,
+                    $cfgCMinVel, $cfgCWindowDays, $cfgCAliveMin
                 );
                 $itemClassAuto = true;
             }
@@ -514,7 +523,9 @@ class JntSupplyController extends Controller
                 'a_avg'               => round($aAvg, 2),
                 'b_avg'               => round($bAvg, 2),
                 'c_avg'               => round($cAvg, 2),
-                'alive_avg'           => round($aliveAvg, 2),
+                'a_alive_avg'         => round($aAliveAvg, 2),
+                'b_alive_avg'         => round($bAliveAvg, 2),
+                'c_alive_avg'         => round($cAliveAvg, 2),
             ];
         }
 
@@ -564,7 +575,9 @@ class JntSupplyController extends Controller
             'cfgAMinVel', 'cfgAWindowDays',
             'cfgBMinVel', 'cfgBWindowDays',
             'cfgCMinVel', 'cfgCWindowDays',
-            'cfgAliveWindow', 'cfgAliveMin',
+            'cfgAAliveWindow', 'cfgAAliveMin',
+            'cfgBAliveWindow', 'cfgBAliveMin',
+            'cfgCAliveWindow', 'cfgCAliveMin',
         ));
     }
 
