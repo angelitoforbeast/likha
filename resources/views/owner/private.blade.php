@@ -116,44 +116,71 @@
     <span style="color:#f1f5f9;font-weight:700;font-size:14px;">Daily Summary</span>
 
     <!-- Inline item search + checkbox list (left side, beside title) -->
-    <div style="position:relative;margin-left:8px;" @click.away="itemFilterOpen=false">
-      <input type="text" x-model="itemFilterSearch"
-             @focus="itemFilterOpen=true"
-             @click="itemFilterOpen=true"
-             placeholder="🔎 Search item…"
-             style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;
-                    border-radius:6px;padding:5px 10px;font-size:12px;outline:none;
-                    width:220px;">
-      <div x-show="itemFilterOpen" x-transition x-cloak
-           style="position:absolute;top:calc(100% + 4px);left:0;z-index:50;
-                  background:#0f172a;border:1px solid #475569;border-radius:8px;
-                  width:280px;max-height:360px;display:flex;flex-direction:column;
-                  box-shadow:0 10px 30px rgba(0,0,0,.4);padding:6px;">
-        <div style="overflow-y:auto;flex:1;">
+    <div style="position:relative;margin-left:10px;" @click.away="itemFilterOpen=false"
+         @keydown.escape.window="itemFilterOpen=false">
+      <div style="position:relative;display:flex;align-items:center;">
+        <span style="position:absolute;left:10px;font-size:12px;color:#94a3b8;pointer-events:none;">🔎</span>
+        <input type="text" x-model="itemFilterSearch"
+               @focus="itemFilterOpen=true"
+               @click="itemFilterOpen=true"
+               placeholder="Search item…"
+               style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;
+                      border-radius:6px;padding:5px 28px 5px 28px;font-size:12px;
+                      outline:none;width:240px;transition:border-color .15s;"
+               onfocus="this.style.borderColor='#2563eb';"
+               onblur="this.style.borderColor='#475569';">
+        <button x-show="itemFilterSearch" type="button"
+                @click="itemFilterSearch=''"
+                style="position:absolute;right:6px;background:none;border:none;
+                       color:#94a3b8;cursor:pointer;font-size:14px;line-height:1;
+                       padding:2px 6px;border-radius:4px;"
+                title="Clear search">×</button>
+      </div>
+      <div x-show="itemFilterOpen" x-transition.opacity.duration.150ms x-cloak
+           style="position:absolute;top:calc(100% + 6px);left:0;z-index:50;
+                  background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;
+                  width:300px;max-height:340px;display:flex;flex-direction:column;
+                  box-shadow:0 20px 40px -8px rgba(15,23,42,.35), 0 4px 12px rgba(15,23,42,.12);
+                  overflow:hidden;">
+        <div style="padding:8px 10px;border-bottom:1px solid #f1f5f9;
+                    display:flex;justify-content:space-between;align-items:center;
+                    background:#f8fafc;">
+          <span style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.5px;text-transform:uppercase;">
+            Filter by item
+          </span>
+          <span style="font-size:10px;color:#94a3b8;">
+            <span x-text="selectedItems.length" style="color:#2563eb;font-weight:700;"></span>
+            <span> / </span>
+            <span x-text="uniqueItems().length"></span>
+          </span>
+        </div>
+        <div style="overflow-y:auto;flex:1;padding:4px;">
           <template x-if="visibleItems().length === 0">
-            <div style="text-align:center;color:#64748b;font-size:11px;padding:12px;">No items match.</div>
+            <div style="text-align:center;color:#94a3b8;font-size:11px;padding:20px;">No items match.</div>
           </template>
           <template x-for="name in visibleItems()" :key="name">
-            <label style="display:flex;align-items:center;gap:8px;padding:4px 6px;cursor:pointer;
-                          border-radius:4px;font-size:12px;color:#e2e8f0;"
-                   onmouseover="this.style.background='#1e293b'"
+            <label style="display:flex;align-items:center;gap:10px;padding:6px 10px;cursor:pointer;
+                          border-radius:6px;font-size:12px;color:#0f172a;line-height:1.3;
+                          transition:background .1s;"
+                   onmouseover="this.style.background='#eff6ff'"
                    onmouseout="this.style.background=''">
               <input type="checkbox"
                      :checked="selectedItems.includes(name)"
                      @change="toggleItem(name)"
-                     style="accent-color:#2563eb;cursor:pointer;">
-              <span x-text="name" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+                     style="accent-color:#2563eb;cursor:pointer;width:14px;height:14px;flex-shrink:0;">
+              <span x-text="name"
+                    style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;"></span>
             </label>
           </template>
         </div>
-        <div style="border-top:1px solid #334155;margin-top:4px;padding-top:6px;
-                    display:flex;justify-content:space-between;align-items:center;
-                    font-size:10px;color:#94a3b8;">
-          <span><span x-text="selectedItems.length"></span> selected / <span x-text="uniqueItems().length"></span> total</span>
+        <div x-show="selectedItems.length"
+             style="border-top:1px solid #f1f5f9;padding:6px 10px;background:#f8fafc;
+                    display:flex;justify-content:flex-end;">
           <button type="button" @click="clearItems()"
-                  :disabled="!selectedItems.length"
-                  style="background:none;border:none;color:#f87171;cursor:pointer;
-                         font-size:11px;font-weight:700;">Clear all</button>
+                  style="background:none;border:none;color:#ef4444;cursor:pointer;
+                         font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px;"
+                  onmouseover="this.style.background='#fef2f2'"
+                  onmouseout="this.style.background=''">Clear all</button>
         </div>
       </div>
     </div>
