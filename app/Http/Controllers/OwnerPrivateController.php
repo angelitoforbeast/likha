@@ -1917,11 +1917,11 @@ class OwnerPrivateController extends Controller
         foreach ($pagesList as &$p) {
             $p['distinct_count'] = count($p['distinct_items']);
             $p['mixed']          = $p['distinct_count'] >= 2;
+            ksort($p['cells']);
             // Earliest date in range where this page's primary matched anchor
             $p['anchor_first_date'] = null;
             $p['anchor_included_days'] = 0;
             if ($p['anchor_item_key'] !== null) {
-                ksort($p['cells']);
                 foreach ($p['cells'] as $d => $c) {
                     if ($c['item_key'] === $p['anchor_item_key']) {
                         if ($p['anchor_first_date'] === null) $p['anchor_first_date'] = $d;
@@ -1929,6 +1929,32 @@ class OwnerPrivateController extends Controller
                     }
                 }
             }
+            // Transition markers — walk in date order, compare to previous non-empty cell
+            $prev = null;
+            foreach ($p['cells'] as $d => &$c) {
+                $c['item_changed']  = false;
+                $c['price_changed'] = false;
+                $c['price_delta']   = null;
+                if ($prev !== null) {
+                    if ($c['item_key'] !== $prev['item_key']) {
+                        $c['item_changed'] = true;
+                    } elseif ($c['mode_cod'] !== null && $prev['mode_cod'] !== null
+                              && abs($c['mode_cod'] - $prev['mode_cod']) > 0.01) {
+                        $c['price_changed'] = true;
+                        $c['price_delta']   = $c['mode_cod'] - $prev['mode_cod'];
+                    }
+                }
+                $prev = $c;
+            }
+            unset($c);
+            // Count transitions for header summary
+            $itemChanges = 0; $priceChanges = 0;
+            foreach ($p['cells'] as $c) {
+                if (!empty($c['item_changed']))  $itemChanges++;
+                if (!empty($c['price_changed'])) $priceChanges++;
+            }
+            $p['item_changes']  = $itemChanges;
+            $p['price_changes'] = $priceChanges;
             unset($p['distinct_items']);
         }
         unset($p);

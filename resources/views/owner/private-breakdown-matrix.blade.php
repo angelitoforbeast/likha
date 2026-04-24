@@ -8,11 +8,20 @@
   <style>
     body{background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
     .cell{font-size:10px;line-height:1.2;padding:4px 6px;border:1px solid #e2e8f0;
-          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;}
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;
+          position:relative;}
     .cell-anchor{background:#dbeafe;color:#1e3a8a;font-weight:600;}
     .cell-mismatch{background:#fef3c7;color:#78350f;}
     .cell-empty{background:#f1f5f9;color:#cbd5e1;text-align:center;}
     .cell-end{border-right:3px solid #2563eb;}
+    .cell-item-change{border-left:4px solid #dc2626 !important; padding-left:4px;}
+    .cell-price-change{box-shadow: inset 3px 0 0 #a855f7;}
+    .badge-new{position:absolute;top:1px;right:2px;background:#dc2626;color:#fff;
+               font-size:8px;font-weight:700;padding:0 3px;border-radius:3px;letter-spacing:0.3px;}
+    .badge-price{display:inline-block;font-size:9px;font-weight:700;padding:0 3px;border-radius:3px;
+                 margin-left:2px;}
+    .badge-price-up{background:#10b981;color:#fff;}
+    .badge-price-down{background:#ef4444;color:#fff;}
     th.date-col{font-size:10px;padding:4px 6px;background:#0f172a;color:#fff;
                 border:1px solid #1e293b;white-space:nowrap;font-family:monospace;}
     th.page-col{position:sticky;left:0;z-index:5;background:#fff;text-align:left;
@@ -57,7 +66,9 @@
     <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 bg-amber-100 border border-slate-300"></span> different primary → excluded</span>
     <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 bg-slate-100 border border-slate-300"></span> no data / tied</span>
     <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 bg-amber-50 border border-slate-300"></span> page with mixed primary</span>
-    <span class="ml-auto text-slate-500">End-date column has blue right-border.</span>
+    <span class="inline-flex items-center gap-1"><span class="inline-block w-1 h-3 bg-red-600"></span> item changed (vs prev day)</span>
+    <span class="inline-flex items-center gap-1"><span class="inline-block w-1 h-3 bg-purple-500"></span> price changed (same item)</span>
+    <span class="ml-auto text-slate-500">End-date column = blue right-border.</span>
   </div>
 
   <!-- Matrix -->
@@ -92,6 +103,16 @@
                       ⚠ {{ $p['distinct_count'] }} items · {{ $p['anchor_included_days'] }}/{{ count($dates) }} d
                     </div>
                   @endif
+                  @if(($p['item_changes'] ?? 0) > 0 || ($p['price_changes'] ?? 0) > 0)
+                    <div class="text-[10px] mt-0.5" style="color:#475569;">
+                      @if($p['item_changes'] > 0)
+                        <span style="color:#dc2626;font-weight:700;">● {{ $p['item_changes'] }} item Δ</span>
+                      @endif
+                      @if($p['price_changes'] > 0)
+                        <span style="color:#a855f7;font-weight:700;">● {{ $p['price_changes'] }} price Δ</span>
+                      @endif
+                    </div>
+                  @endif
                   @if($p['anchor_item'])
                     <div class="anchor-label mt-0.5" title="anchor item (end-date primary)">→ {{ $p['anchor_item'] }}</div>
                   @endif
@@ -111,17 +132,28 @@
                     if (!$cell) $class .= ' cell-empty';
                     elseif ($isAnchorCell) $class .= ' cell-anchor';
                     else $class .= ' cell-mismatch';
+                    if ($cell && !empty($cell['item_changed']))  $class .= ' cell-item-change';
+                    if ($cell && !empty($cell['price_changed'])) $class .= ' cell-price-change';
+                    $tip = 'no data / tied';
+                    if ($cell) {
+                        $tip = $cell['item_name'].' · '.$cell['orders'].' orders'
+                             . ($cell['mode_cod'] ? ' · ₱'.number_format($cell['mode_cod'],2) : '');
+                        if (!empty($cell['item_changed']))  $tip .= ' · NEW ITEM vs previous day';
+                        if (!empty($cell['price_changed'])) $tip .= ' · price Δ '.($cell['price_delta']>=0?'+':'').round($cell['price_delta']);
+                    }
                   @endphp
-                  <td class="{{ $class }}"
-                      @if($cell)
-                        title="{{ $cell['item_name'] }} · {{ $cell['orders'] }} orders{{ $cell['mode_cod'] ? ' · ₱'.number_format($cell['mode_cod'],2) : '' }}"
-                      @else
-                        title="no data / tied"
-                      @endif
-                  >
+                  <td class="{{ $class }}" title="{{ $tip }}">
                     @if($cell)
+                      @if(!empty($cell['item_changed']))
+                        <span class="badge-new">NEW</span>
+                      @endif
                       {{ $cell['item_name'] }}
-                      <div style="font-size:9px;color:#64748b;font-weight:400;">{{ $cell['orders'] }}{{ $cell['mode_cod'] ? ' @ '.number_format($cell['mode_cod'],0) : '' }}</div>
+                      <div style="font-size:9px;color:#64748b;font-weight:400;">
+                        {{ $cell['orders'] }}{{ $cell['mode_cod'] ? ' @ '.number_format($cell['mode_cod'],0) : '' }}
+                        @if(!empty($cell['price_changed']) && $cell['price_delta'] !== null)
+                          <span class="badge-price {{ $cell['price_delta'] >= 0 ? 'badge-price-up' : 'badge-price-down' }}">{{ $cell['price_delta']>=0 ? '▲ +' : '▼ ' }}{{ round($cell['price_delta']) }}</span>
+                        @endif
+                      </div>
                     @else
                       —
                     @endif
