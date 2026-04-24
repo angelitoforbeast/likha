@@ -114,6 +114,50 @@
   <!-- Nav -->
   <div id="nav">
     <span style="color:#f1f5f9;font-weight:700;font-size:14px;">Daily Summary</span>
+
+    <!-- Inline item search + checkbox list (left side, beside title) -->
+    <div style="position:relative;margin-left:8px;" @click.away="itemFilterOpen=false">
+      <input type="text" x-model="itemFilterSearch"
+             @focus="itemFilterOpen=true"
+             @click="itemFilterOpen=true"
+             placeholder="🔎 Search item…"
+             style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;
+                    border-radius:6px;padding:5px 10px;font-size:12px;outline:none;
+                    width:220px;">
+      <div x-show="itemFilterOpen" x-transition x-cloak
+           style="position:absolute;top:calc(100% + 4px);left:0;z-index:50;
+                  background:#0f172a;border:1px solid #475569;border-radius:8px;
+                  width:280px;max-height:360px;display:flex;flex-direction:column;
+                  box-shadow:0 10px 30px rgba(0,0,0,.4);padding:6px;">
+        <div style="overflow-y:auto;flex:1;">
+          <template x-if="visibleItems().length === 0">
+            <div style="text-align:center;color:#64748b;font-size:11px;padding:12px;">No items match.</div>
+          </template>
+          <template x-for="name in visibleItems()" :key="name">
+            <label style="display:flex;align-items:center;gap:8px;padding:4px 6px;cursor:pointer;
+                          border-radius:4px;font-size:12px;color:#e2e8f0;"
+                   onmouseover="this.style.background='#1e293b'"
+                   onmouseout="this.style.background=''">
+              <input type="checkbox"
+                     :checked="selectedItems.includes(name)"
+                     @change="toggleItem(name)"
+                     style="accent-color:#2563eb;cursor:pointer;">
+              <span x-text="name" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+            </label>
+          </template>
+        </div>
+        <div style="border-top:1px solid #334155;margin-top:4px;padding-top:6px;
+                    display:flex;justify-content:space-between;align-items:center;
+                    font-size:10px;color:#94a3b8;">
+          <span><span x-text="selectedItems.length"></span> selected / <span x-text="uniqueItems().length"></span> total</span>
+          <button type="button" @click="clearItems()"
+                  :disabled="!selectedItems.length"
+                  style="background:none;border:none;color:#f87171;cursor:pointer;
+                         font-size:11px;font-weight:700;">Clear all</button>
+        </div>
+      </div>
+    </div>
+
     <div style="flex:1"></div>
     <span x-show="saveMsg" x-transition style="color:#4ade80;font-size:13px;font-weight:700;" x-text="saveMsg"></span>
     <span style="color:#94a3b8;font-size:11px;font-weight:600;">From</span>
@@ -131,54 +175,6 @@
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
               cursor:pointer;text-decoration:none;"
        title="View page × date × item matrix for this range">🧭 Matrix</a>
-    <!-- Item filter (multi-select) -->
-    <div style="position:relative;" @click.away="itemFilterOpen=false">
-      <button type="button" @click="itemFilterOpen=!itemFilterOpen"
-              :style="'background:'+(selectedItems.length?'#1d4ed8':'#1e293b')+';color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;'"
-              title="Filter rows by item (multi-select)">
-        🔎 Items
-        <span x-show="selectedItems.length"
-              style="background:#fbbf24;color:#0f172a;border-radius:10px;padding:0 6px;margin-left:4px;font-size:11px;"
-              x-text="selectedItems.length"></span>
-      </button>
-      <div x-show="itemFilterOpen" x-transition x-cloak
-           style="position:absolute;top:calc(100% + 4px);right:0;z-index:50;
-                  background:#0f172a;border:1px solid #475569;border-radius:8px;
-                  width:280px;max-height:420px;display:flex;flex-direction:column;
-                  box-shadow:0 10px 30px rgba(0,0,0,.4);padding:8px;">
-        <div style="display:flex;gap:6px;margin-bottom:6px;">
-          <input type="text" x-model="itemFilterSearch" placeholder="Search items…"
-                 style="flex:1;background:#1e293b;color:#e2e8f0;border:1px solid #475569;
-                        border-radius:5px;padding:4px 8px;font-size:12px;outline:none;">
-          <button type="button" @click="clearItems()"
-                  :disabled="!selectedItems.length"
-                  style="background:#1e293b;color:#f87171;border:1px solid #475569;
-                         border-radius:5px;padding:4px 8px;font-size:11px;font-weight:700;
-                         cursor:pointer;"
-                  title="Clear all selected items">Clear</button>
-        </div>
-        <div style="overflow-y:auto;flex:1;border-top:1px solid #334155;padding-top:4px;">
-          <template x-if="visibleItems().length === 0">
-            <div style="text-align:center;color:#64748b;font-size:11px;padding:12px;">No items.</div>
-          </template>
-          <template x-for="name in visibleItems()" :key="name">
-            <label style="display:flex;align-items:center;gap:8px;padding:4px 6px;cursor:pointer;
-                          border-radius:4px;font-size:12px;color:#e2e8f0;"
-                   onmouseover="this.style.background='#1e293b'"
-                   onmouseout="this.style.background=''">
-              <input type="checkbox"
-                     :checked="selectedItems.includes(name)"
-                     @change="toggleItem(name)"
-                     style="accent-color:#2563eb;cursor:pointer;">
-              <span x-text="name" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
-            </label>
-          </template>
-        </div>
-        <div style="border-top:1px solid #334155;margin-top:4px;padding-top:6px;font-size:10px;color:#94a3b8;text-align:center;">
-          <span x-text="selectedItems.length"></span> selected / <span x-text="uniqueItems().length"></span> total
-        </div>
-      </div>
-    </div>
 
     <button class="btn-refresh" :class="loading ? 'spinning' : ''" @click="load()" title="Refresh">
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
