@@ -78,14 +78,89 @@
        class="text-slate-400 hover:text-white text-sm">← Back to Daily Summary</a>
     <span class="text-sm font-bold ml-3">Breakdown Matrix</span>
 
-    <form method="GET" action="{{ route('owner.private.breakdown') }}"
-          class="flex items-center gap-2 ml-4">
+    <form method="GET" action="{{ route('owner.private.breakdown') }}" id="matrixFilterForm"
+          class="flex items-center gap-2 ml-4 flex-wrap">
       <label class="text-xs text-slate-400 font-semibold">From</label>
       <input type="date" name="start_date" value="{{ $startDate }}"
              class="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
       <label class="text-xs text-slate-400 font-semibold">To</label>
       <input type="date" name="end_date" value="{{ $endDate }}"
              class="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+
+      {{-- Inline item search + checkbox list (same pattern as /owner/private) --}}
+      <div style="position:relative;" @click.away="itemFilterOpen=false"
+           @keydown.escape.window="itemFilterOpen=false">
+        <div style="position:relative;display:flex;align-items:center;">
+          <span style="position:absolute;left:10px;font-size:12px;color:#94a3b8;pointer-events:none;">🔎</span>
+          <input type="text" x-model="itemFilterSearch"
+                 @focus="itemFilterOpen=true"
+                 @click="itemFilterOpen=true"
+                 placeholder="Search item…"
+                 style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;
+                        border-radius:6px;padding:5px 28px 5px 28px;font-size:12px;
+                        outline:none;width:220px;">
+          <button x-show="itemFilterSearch" type="button"
+                  @click="itemFilterSearch=''"
+                  style="position:absolute;right:6px;background:none;border:none;
+                         color:#94a3b8;cursor:pointer;font-size:14px;line-height:1;
+                         padding:2px 6px;border-radius:4px;"
+                  title="Clear search">×</button>
+        </div>
+        <div x-show="itemFilterOpen" x-transition.opacity.duration.150ms x-cloak
+             style="position:absolute;top:calc(100% + 6px);left:0;z-index:9999;
+                    background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;
+                    width:320px;max-height:360px;display:flex;flex-direction:column;
+                    box-shadow:0 20px 40px -8px rgba(15,23,42,.35), 0 4px 12px rgba(15,23,42,.12);
+                    overflow:hidden;">
+          <div style="padding:8px 10px;border-bottom:1px solid #f1f5f9;
+                      display:flex;justify-content:space-between;align-items:center;
+                      background:#f8fafc;">
+            <span style="font-size:10px;font-weight:700;color:#64748b;letter-spacing:.5px;text-transform:uppercase;">
+              Filter by item (page with ≥ 1 matching date)
+            </span>
+            <span style="font-size:10px;color:#94a3b8;">
+              <span x-text="selectedItems.length" style="color:#2563eb;font-weight:700;"></span>
+              <span> / </span>
+              <span x-text="allItems.length"></span>
+            </span>
+          </div>
+          <div style="overflow-y:auto;flex:1;padding:4px;">
+            <template x-if="visibleItems().length === 0">
+              <div style="text-align:center;color:#94a3b8;font-size:11px;padding:20px;">No items match.</div>
+            </template>
+            <template x-for="name in visibleItems()" :key="name">
+              <label style="display:flex;align-items:center;gap:10px;padding:6px 10px;cursor:pointer;
+                            border-radius:6px;font-size:12px;color:#0f172a;line-height:1.3;"
+                     onmouseover="this.style.background='#eff6ff'"
+                     onmouseout="this.style.background=''">
+                <input type="checkbox"
+                       :checked="selectedItems.includes(name)"
+                       @change="toggleItem(name)"
+                       style="accent-color:#2563eb;cursor:pointer;width:14px;height:14px;flex-shrink:0;">
+                <span x-text="name"
+                      style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;"></span>
+              </label>
+            </template>
+          </div>
+          <div style="border-top:1px solid #f1f5f9;padding:6px 10px;background:#f8fafc;
+                      display:flex;justify-content:space-between;align-items:center;gap:6px;">
+            <button type="button" @click="clearItems()"
+                    x-show="selectedItems.length"
+                    style="background:none;border:none;color:#ef4444;cursor:pointer;
+                           font-size:11px;font-weight:700;padding:2px 6px;border-radius:4px;">Clear all</button>
+            <div style="flex:1"></div>
+            <button type="button" @click="applyFilter()"
+                    style="background:#2563eb;color:#fff;border:none;border-radius:6px;
+                           padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;">Apply</button>
+          </div>
+        </div>
+      </div>
+
+      {{-- Hidden item inputs (re-rendered by Alpine as selection changes) --}}
+      <template x-for="name in selectedItems" :key="'hi-'+name">
+        <input type="hidden" name="items[]" :value="name">
+      </template>
+
       <button type="submit"
               class="bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1 text-xs font-bold">Go</button>
       <a href="{{ route('owner.private.breakdown') }}"
@@ -95,6 +170,27 @@
 
     <div class="flex-1"></div>
     <span class="text-xs text-slate-400">{{ $startDate }} → {{ $endDate }} ({{ count($dates) }} days · {{ count($pages) }} pages)</span>
+  </div>
+
+  {{-- Selected item pills --}}
+  <div x-show="selectedItems.length" x-cloak
+       style="background:#f1f5f9;border-bottom:1px solid #e2e8f0;padding:6px 12px;
+              display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+    <span style="font-size:11px;color:#475569;font-weight:700;margin-right:4px;">Filter:</span>
+    <template x-for="name in selectedItems" :key="'pill-'+name">
+      <span style="display:inline-flex;align-items:center;gap:4px;background:#dbeafe;
+                   color:#1e3a8a;border:1px solid #93c5fd;border-radius:12px;
+                   padding:2px 8px;font-size:11px;font-weight:600;">
+        <span x-text="name"></span>
+        <button type="button" @click="toggleItem(name); applyFilter()"
+                style="background:none;border:none;color:#1e3a8a;cursor:pointer;
+                       font-size:14px;line-height:1;padding:0;font-weight:700;"
+                title="Remove">×</button>
+      </span>
+    </template>
+    <button type="button" @click="clearItems(); applyFilter()"
+            style="background:none;border:none;color:#ef4444;cursor:pointer;
+                   font-size:11px;font-weight:700;margin-left:4px;">Clear all</button>
   </div>
 
   <!-- Field Toggles (persisted per route via localStorage) -->
@@ -380,6 +476,12 @@
       vis: { item_name:true, count:true, cod:true, rts:true, cogs:true, one_item_only:false, only_missing:false },
       storageKey: 'matrix_vis:' + location.pathname,
 
+      // Item-filter state (server-side; triggers form submit via applyFilter())
+      allItems:       @json($allItems ?? []),
+      selectedItems:  @json($selectedItems ?? []),
+      itemFilterOpen: false,
+      itemFilterSearch: '',
+
       edit: {
         open:false, saving:false, error:null,
         page_key:'', page_label:'', date:'', item_name:'',
@@ -426,6 +528,26 @@
       persist(){
         try { localStorage.setItem(this.storageKey, JSON.stringify(this.vis)); }
         catch(e) { console.warn('Failed to save toggle prefs', e); }
+      },
+
+      // --- Item filter helpers (dropdown + submit) ---
+      visibleItems(){
+        const q = (this.itemFilterSearch || '').trim().toLowerCase();
+        if (!q) return this.allItems;
+        return this.allItems.filter(n => n.toLowerCase().includes(q));
+      },
+      toggleItem(name){
+        const i = this.selectedItems.indexOf(name);
+        if (i >= 0) this.selectedItems.splice(i, 1);
+        else        this.selectedItems.push(name);
+      },
+      clearItems(){ this.selectedItems = []; },
+      applyFilter(){
+        // Submit the form so the server can re-render with the items[] filter.
+        this.$nextTick(() => {
+          const f = document.getElementById('matrixFilterForm');
+          if (f) f.submit();
+        });
       },
 
       openEdit(cell){

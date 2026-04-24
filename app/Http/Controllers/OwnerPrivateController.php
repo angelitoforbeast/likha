@@ -1880,7 +1880,13 @@ class OwnerPrivateController extends Controller
 
         // No page_key → MATRIX view (all pages × all dates)
         if ($pageKey === '') {
-            return $this->renderBreakdownMatrix($startDate, $endDate);
+            $itemsFilter = (array) $request->input('items', []);
+            // Sanitize: string-only, trim, dedupe, lowercase for matching later
+            $itemsFilter = array_values(array_unique(array_filter(array_map(
+                fn($s) => is_string($s) ? trim($s) : '',
+                $itemsFilter
+            ), fn($s) => $s !== '')));
+            return $this->renderBreakdownMatrix($startDate, $endDate, $itemsFilter);
         }
 
         // Single-page view: best-effort label lookup for <title>
@@ -1903,7 +1909,7 @@ class OwnerPrivateController extends Controller
      * Matrix view: every page (rows) × every date in range (columns).
      * Cell = primary item on that date. Highlights anchor match (end_date primary) vs mismatch.
      */
-    private function renderBreakdownMatrix(string $startDate, string $endDate)
+    private function renderBreakdownMatrix(string $startDate, string $endDate, array $itemsFilter = [])
     {
         // Date spine
         $dates = [];
@@ -2102,11 +2108,42 @@ class OwnerPrivateController extends Controller
         }
         unset($p);
 
+        // Collect the universe of distinct item names across ALL pages in range
+        // (before any item filter is applied) — this feeds the dropdown so the user
+        // can pick from the full catalog, not just what's already filtered in.
+        $allItemsMap = []; // lower-trimmed => display name (first-seen casing)
+        foreach ($pagesList as $pp) {
+            foreach ($pp['cells'] as $c) {
+                $nm = trim((string)($c['item_name'] ?? ''));
+                if ($nm === '') continue;
+                $k = strtolower($nm);
+                if (!isset($allItemsMap[$k])) $allItemsMap[$k] = $nm;
+            }
+        }
+        ksort($allItemsMap);
+        $allItems = array_values($allItemsMap);
+
+        // Apply item filter: keep pages that have AT LEAST 1 cell whose item_name
+        // matches any of the selected names (case-insensitive).
+        $selectedItemsLower = array_map(fn($s) => strtolower(trim($s)), $itemsFilter);
+        if (!empty($selectedItemsLower)) {
+            $wanted = array_flip($selectedItemsLower);
+            $pagesList = array_values(array_filter($pagesList, function($p) use ($wanted) {
+                foreach ($p['cells'] as $c) {
+                    $nm = strtolower(trim((string)($c['item_name'] ?? '')));
+                    if ($nm !== '' && isset($wanted[$nm])) return true;
+                }
+                return false;
+            }));
+        }
+
         return view('owner.private-breakdown-matrix', [
-            'startDate' => $startDate,
-            'endDate'   => $endDate,
-            'dates'     => $dates,
-            'pages'     => $pagesList,
+            'startDate'     => $startDate,
+            'endDate'       => $endDate,
+            'dates'         => $dates,
+            'pages'         => $pagesList,
+            'allItems'      => $allItems,
+            'selectedItems' => $itemsFilter,
         ]);
     }
 
