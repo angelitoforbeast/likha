@@ -1,18 +1,23 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" x-data="matrixUI()" x-cloak>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>Breakdown Matrix · {{ $startDate }} → {{ $endDate }}</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
   <style>
+    [x-cloak]{display:none!important}
     body{background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
     .cell{font-size:10px;line-height:1.2;padding:4px 6px;border:1px solid #e2e8f0;
-          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px;
-          position:relative;}
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;
+          position:relative; cursor:pointer;}
+    .cell:hover{outline:2px solid #2563eb; outline-offset:-2px; z-index:2;}
     .cell-anchor{background:#dbeafe;color:#1e3a8a;font-weight:600;}
     .cell-mismatch{background:#fef3c7;color:#78350f;}
-    .cell-empty{background:#f1f5f9;color:#cbd5e1;text-align:center;}
+    .cell-empty{background:#f1f5f9;color:#cbd5e1;text-align:center;cursor:default;}
+    .cell-empty:hover{outline:none;}
     .cell-end{border-right:3px solid #2563eb;}
     .cell-item-change{border-left:4px solid #dc2626 !important; padding-left:4px;}
     .cell-price-change{box-shadow: inset 3px 0 0 #a855f7;}
@@ -22,6 +27,13 @@
                  margin-left:2px;}
     .badge-price-up{background:#10b981;color:#fff;}
     .badge-price-down{background:#ef4444;color:#fff;}
+    .badge-rts{display:inline-block;font-size:9px;font-weight:700;padding:1px 4px;border-radius:3px;
+               background:#e0e7ff;color:#3730a3;margin-top:1px;}
+    .badge-rts.inherited{background:#f1f5f9;color:#64748b;font-weight:500;}
+    .badge-rts.missing{background:#fee2e2;color:#991b1b;}
+    .badge-cogs{display:inline-block;font-size:9px;font-weight:600;padding:0 3px;border-radius:3px;
+                background:#f0fdf4;color:#166534;margin-top:1px;margin-left:2px;}
+    .badge-cogs.missing{background:#fef2f2;color:#991b1b;}
     th.date-col{font-size:10px;padding:4px 6px;background:#0f172a;color:#fff;
                 border:1px solid #1e293b;white-space:nowrap;font-family:monospace;}
     th.page-col{position:sticky;left:0;z-index:5;background:#fff;text-align:left;
@@ -31,6 +43,11 @@
     .anchor-label{font-size:9px;color:#2563eb;font-weight:700;}
     thead th{position:sticky;top:0;z-index:4;}
     thead th.page-col{z-index:6;}
+    /* Modal */
+    .modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:50;
+                    display:flex;align-items:center;justify-content:center;padding:1rem;}
+    .modal-card{background:#fff;border-radius:8px;box-shadow:0 10px 25px rgba(0,0,0,0.2);
+                max-width:480px;width:100%;max-height:90vh;overflow:auto;}
   </style>
 </head>
 <body class="min-h-screen">
@@ -65,10 +82,11 @@
     <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 bg-blue-200 border border-slate-300"></span> anchor (matches end-date primary → included)</span>
     <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 bg-amber-100 border border-slate-300"></span> different primary → excluded</span>
     <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 bg-slate-100 border border-slate-300"></span> no data / tied</span>
-    <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 bg-amber-50 border border-slate-300"></span> page with mixed primary</span>
-    <span class="inline-flex items-center gap-1"><span class="inline-block w-1 h-3 bg-red-600"></span> item changed (vs prev day)</span>
-    <span class="inline-flex items-center gap-1"><span class="inline-block w-1 h-3 bg-purple-500"></span> price changed (same item)</span>
-    <span class="ml-auto text-slate-500">End-date column = blue right-border.</span>
+    <span class="inline-flex items-center gap-1"><span class="badge-rts">RTS</span> set for this date</span>
+    <span class="inline-flex items-center gap-1"><span class="badge-rts inherited">RTS</span> inherited from earlier date</span>
+    <span class="inline-flex items-center gap-1"><span class="badge-rts missing">!</span> no RTS</span>
+    <span class="inline-flex items-center gap-1"><span class="badge-cogs">₱</span> unit cost (cogs)</span>
+    <span class="ml-auto text-slate-500">Click any cell to edit RTS / unit cost</span>
   </div>
 
   <!-- Matrix -->
@@ -137,21 +155,53 @@
                     $tip = 'no data / tied';
                     if ($cell) {
                         $tip = $cell['item_name'].' · '.$cell['orders'].' orders'
-                             . ($cell['mode_cod'] ? ' · ₱'.number_format($cell['mode_cod'],2) : '');
+                             . ($cell['mode_cod'] ? ' · ₱'.number_format($cell['mode_cod'],2) : '')
+                             . ' · RTS '.($cell['rts_pct'] !== null ? $cell['rts_pct'].'%' : '—')
+                             . ' · COGS '.($cell['unit_cost'] !== null ? '₱'.number_format($cell['unit_cost'],2) : '—');
                         if (!empty($cell['item_changed']))  $tip .= ' · NEW ITEM vs previous day';
                         if (!empty($cell['price_changed'])) $tip .= ' · price Δ '.($cell['price_delta']>=0?'+':'').round($cell['price_delta']);
+                        if (!empty($cell['rts_inherited'])) $tip .= ' · RTS inherited from '.$cell['rts_eff_date'];
                     }
+                    $cellPayload = $cell ? [
+                        'page_key'    => $p['page_key'],
+                        'page_label'  => $p['page_label'],
+                        'date'        => $d,
+                        'item_name'   => $cell['item_name'],
+                        'orders'      => $cell['orders'],
+                        'mode_cod'    => $cell['mode_cod'],
+                        'rts_pct'     => $cell['rts_pct'],
+                        'rts_eff_date'=> $cell['rts_eff_date'],
+                        'rts_inherited' => !empty($cell['rts_inherited']),
+                        'unit_cost'   => $cell['unit_cost'],
+                    ] : null;
                   @endphp
-                  <td class="{{ $class }}" title="{{ $tip }}">
+                  <td class="{{ $class }}"
+                      title="{{ $tip }}"
+                      @if($cell) @click="openEdit(@js($cellPayload))" @endif>
                     @if($cell)
                       @if(!empty($cell['item_changed']))
                         <span class="badge-new">NEW</span>
                       @endif
-                      {{ $cell['item_name'] }}
+                      <div style="font-weight:600;">{{ $cell['item_name'] }}</div>
                       <div style="font-size:9px;color:#64748b;font-weight:400;">
                         {{ $cell['orders'] }}{{ $cell['mode_cod'] ? ' @ '.number_format($cell['mode_cod'],0) : '' }}
                         @if(!empty($cell['price_changed']) && $cell['price_delta'] !== null)
                           <span class="badge-price {{ $cell['price_delta'] >= 0 ? 'badge-price-up' : 'badge-price-down' }}">{{ $cell['price_delta']>=0 ? '▲ +' : '▼ ' }}{{ round($cell['price_delta']) }}</span>
+                        @endif
+                      </div>
+                      <div>
+                        @if($cell['rts_pct'] !== null)
+                          <span class="badge-rts {{ $cell['rts_inherited'] ? 'inherited' : '' }}"
+                                title="{{ $cell['rts_inherited'] ? 'inherited from '.$cell['rts_eff_date'] : 'set on this date' }}">
+                            RTS {{ rtrim(rtrim(number_format($cell['rts_pct'],2), '0'),'.') }}%
+                          </span>
+                        @else
+                          <span class="badge-rts missing" title="no RTS set for this item on this page">RTS —</span>
+                        @endif
+                        @if($cell['unit_cost'] !== null)
+                          <span class="badge-cogs" title="unit cost (cogs)">₱{{ rtrim(rtrim(number_format($cell['unit_cost'],2), '0'),'.') }}</span>
+                        @else
+                          <span class="badge-cogs missing" title="no cogs entry">₱—</span>
                         @endif
                       </div>
                     @else
@@ -166,6 +216,152 @@
       @endif
     </div>
   </div>
+
+  <!-- Edit Modal -->
+  <template x-if="edit.open">
+    <div class="modal-backdrop" @click.self="edit.open = false">
+      <div class="modal-card">
+        <div class="px-5 py-4 border-b border-slate-200">
+          <div class="text-xs text-slate-500 uppercase tracking-wide font-bold">Edit Cell</div>
+          <div class="text-lg font-bold text-slate-900 mt-1" x-text="edit.page_label"></div>
+          <div class="text-sm text-slate-600 mt-0.5">
+            <span x-text="edit.item_name"></span>
+            <span class="text-slate-400"> · </span>
+            <span class="font-mono" x-text="edit.date"></span>
+          </div>
+          <div class="text-xs text-slate-500 mt-1">
+            <span x-text="edit.orders + ' orders'"></span>
+            <template x-if="edit.mode_cod">
+              <span x-text="' @ ₱' + Number(edit.mode_cod).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})"></span>
+            </template>
+          </div>
+        </div>
+
+        <div class="px-5 py-4 space-y-4">
+          <!-- RTS input -->
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
+              RTS%
+              <span class="text-slate-400 font-normal normal-case">(per-page, for this date onward)</span>
+            </label>
+            <div class="flex items-center gap-2">
+              <input type="number" step="0.01" min="0" max="100"
+                     x-model="edit.rts_pct"
+                     class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm font-mono"
+                     placeholder="e.g. 50">
+              <span class="text-slate-500 text-sm">%</span>
+            </div>
+            <template x-if="edit.rts_inherited && edit.rts_eff_date">
+              <div class="text-[11px] text-amber-600 mt-1">
+                ⚠ Currently inherited from <span class="font-mono" x-text="edit.rts_eff_date"></span>. Saving creates a new override starting this date.
+              </div>
+            </template>
+            <div class="text-[11px] text-slate-500 mt-1">Set 0 to remove this date's override (falls back to previous).</div>
+          </div>
+
+          <!-- Unit cost input -->
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
+              Unit Cost (COGS)
+              <span class="text-slate-400 font-normal normal-case">(GLOBAL — affects all pages on this date)</span>
+            </label>
+            <div class="flex items-center gap-2">
+              <span class="text-slate-500 text-sm">₱</span>
+              <input type="number" step="0.01" min="0"
+                     x-model="edit.unit_cost"
+                     class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm font-mono"
+                     placeholder="e.g. 25">
+            </div>
+            <div class="text-[11px] text-slate-500 mt-1">Set 0 to skip. (To delete, use /item/cogs.)</div>
+          </div>
+
+          <!-- Comments -->
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">RTS Comment (optional)</label>
+            <input type="text" x-model="edit.comment" maxlength="500"
+                   class="w-full border border-slate-300 rounded px-3 py-2 text-sm"
+                   placeholder="why is this value different?">
+          </div>
+
+          <!-- Error -->
+          <template x-if="edit.error">
+            <div class="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-3 py-2" x-text="edit.error"></div>
+          </template>
+        </div>
+
+        <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
+          <button type="button" @click="edit.open = false"
+                  class="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900">Cancel</button>
+          <button type="button" @click="submit()"
+                  :disabled="edit.saving"
+                  class="bg-blue-600 hover:bg-blue-500 text-white rounded px-4 py-2 text-sm font-bold disabled:opacity-50">
+            <span x-text="edit.saving ? 'Saving…' : 'Save'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <script>
+  function matrixUI(){
+    return {
+      edit: {
+        open:false, saving:false, error:null,
+        page_key:'', page_label:'', date:'', item_name:'',
+        orders:0, mode_cod:null,
+        rts_pct:'', rts_eff_date:null, rts_inherited:false,
+        unit_cost:'', comment:'',
+      },
+      openEdit(cell){
+        this.edit = {
+          open:true, saving:false, error:null,
+          page_key:     cell.page_key,
+          page_label:   cell.page_label,
+          date:         cell.date,
+          item_name:    cell.item_name,
+          orders:       cell.orders,
+          mode_cod:     cell.mode_cod,
+          rts_pct:      cell.rts_pct !== null ? cell.rts_pct : '',
+          rts_eff_date: cell.rts_eff_date,
+          rts_inherited:!!cell.rts_inherited,
+          unit_cost:    cell.unit_cost !== null ? cell.unit_cost : '',
+          comment:      '',
+        };
+      },
+      async submit(){
+        this.edit.saving = true; this.edit.error = null;
+        const rts  = parseFloat(this.edit.rts_pct);
+        const cost = parseFloat(this.edit.unit_cost);
+        if (isNaN(rts) || rts < 0 || rts > 100) {
+          this.edit.error = 'RTS% must be 0–100.'; this.edit.saving = false; return;
+        }
+        if (isNaN(cost) || cost < 0) {
+          this.edit.error = 'Unit cost must be ≥ 0.'; this.edit.saving = false; return;
+        }
+        try {
+          const fd = new FormData();
+          fd.append('page_name',      this.edit.page_label);
+          fd.append('item_name',      this.edit.item_name);
+          fd.append('item_value',     cost);
+          fd.append('rts_pct',        rts);
+          fd.append('effective_date', this.edit.date);
+          if (this.edit.comment) fd.append('comment', this.edit.comment);
+          const r = await fetch('{{ route('owner.private.item-setting.save') }}', {
+            method:'POST',
+            headers:{'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content, 'Accept':'application/json'},
+            body: fd,
+          });
+          const j = await r.json();
+          if (!j.ok) { this.edit.error = j.message || 'Save failed.'; this.edit.saving = false; return; }
+          // Reload to see fresh values across inherited cells
+          location.reload();
+        } catch(e) {
+          console.error(e); this.edit.error = 'Network error.'; this.edit.saving = false;
+        }
+      },
+    };
+  }
+  </script>
 
 </body>
 </html>

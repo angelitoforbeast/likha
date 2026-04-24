@@ -1927,6 +1927,69 @@ class OwnerPrivateController extends Controller
         // Excluded pages (managed via /jnt/supply/excluded-pages)
         $excludedSet = array_flip(SupplyExcludedPage::excludedSet());
 
+        // RTS overrides: all rows effective_date ≤ endDate, keyed for per-cell resolution.
+        // We resolve per cell below via "latest effective_date ≤ cell_date".
+        $rtsRowsAll = [];
+        if (Schema::hasTable('page_item_settings')) {
+            $rtsRowsAll = DB::table('page_item_settings')
+                ->where('effective_date', '<=', $endDate)
+                ->orderBy('effective_date')   // ASC so later overrides overwrite earlier in-place resolution
+                ->get(['page_name', 'item_name', 'effective_date', 'rts_pct'])
+                ->all();
+        }
+        // Index: $rtsIdx[page_key_lower][item_name_lower] = [ [date, rts], ... ] sorted ASC by date
+        $rtsIdx = [];
+        foreach ($rtsRowsAll as $r) {
+            $pk = strtolower(trim((string)$r->page_name));
+            $ik = strtolower(trim((string)$r->item_name));
+            if ($pk === '' || $ik === '') continue;
+            $rtsIdx[$pk][$ik][] = [
+                'date'    => (string)$r->effective_date,
+                'rts_pct' => $r->rts_pct !== null ? (float)$r->rts_pct : null,
+            ];
+        }
+        // Helper: resolve RTS for a (page_key, item_name, date)
+        $resolveRts = function(string $pk, string $itemName, string $date) use (&$rtsIdx): ?array {
+            $ik = strtolower(trim($itemName));
+            $list = $rtsIdx[$pk][$ik] ?? null;
+            if (!$list) return null;
+            $hit = null;
+            foreach ($list as $row) {
+                if ($row['date'] <= $date) $hit = $row;
+                else break; // sorted ASC
+            }
+            return $hit; // ['date'=>..., 'rts_pct'=>...] or null
+        };
+
+        // COGS (global per-item-per-date) — used for display only.
+        $cogsRows = Schema::hasTable('cogs')
+            ? DB::table('cogs')
+                ->where('date', '<=', $endDate)
+                ->orderBy('date')
+                ->get(['item_name', 'date', 'unit_cost'])
+                ->all()
+            : [];
+        $cogsIdx = [];
+        foreach ($cogsRows as $r) {
+            $ik = strtolower(trim((string)$r->item_name));
+            if ($ik === '') continue;
+            $cogsIdx[$ik][] = [
+                'date'      => (string)$r->date,
+                'unit_cost' => (float)$r->unit_cost,
+            ];
+        }
+        $resolveCogs = function(string $itemName, string $date) use (&$cogsIdx): ?float {
+            $ik = strtolower(trim($itemName));
+            $list = $cogsIdx[$ik] ?? null;
+            if (!$list) return null;
+            $hit = null;
+            foreach ($list as $row) {
+                if ($row['date'] <= $date) $hit = $row['unit_cost'];
+                else break;
+            }
+            return $hit;
+        };
+
         // Group by page
         $pages = []; // page_key => [label, matrix[date] => row, anchor_item_key, distinct_items set]
         foreach ($rows as $r) {
@@ -1943,11 +2006,22 @@ class OwnerPrivateController extends Controller
                 ];
             }
             $ik = (string)$r->primary_item_key;
-            $pages[$pk]['cells'][(string)$r->ts_date] = [
-                'item_name' => (string)$r->primary_item,
-                'item_key'  => $ik,
-                'orders'    => (int)$r->primary_orders,
-                'mode_cod'  => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
+            $cellDate = (string)$r->ts_date;
+            $itemName = (string)$r->primary_item;
+            $rtsHit   = $resolveRts($pk, $itemName, $cellDate);
+            $cogsVal  = $resolveCogs($itemName, $cellDate);
+            $pages[$pk]['cells'][$cellDate] = [
+                'item_name'      => $itemName,
+                'item_key'       => $ik,
+                'orders'         => (int)$r->primary_orders,
+                'mode_cod'       => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
+                // Editable RTS state
+                'rts_pct'        => $rtsHit['rts_pct'] ?? null,
+                'rts_eff_date'   => $rtsHit['date'] ?? null,
+                // Resolved from effective_date ≤ cell_date. True if the override was set
+                // on a different (earlier) date — so user knows they'd be overriding here.
+                'rts_inherited'  => $rtsHit ? ($rtsHit['date'] !== $cellDate) : false,
+                'unit_cost'      => $cogsVal,
             ];
             $pages[$pk]['distinct_items'][$ik] = true;
             if ((string)$r->ts_date === $endDate) {
