@@ -807,8 +807,6 @@
     // ================================================================
     // Class Rules CRUD
     // ================================================================
-    const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
-
     function rulePanelErr(msg) { alert(msg); }
 
     // --- Save (update) existing rule ---
