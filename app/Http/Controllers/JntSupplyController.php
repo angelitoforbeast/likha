@@ -446,7 +446,8 @@ class JntSupplyController extends Controller
         $po_pageTrim   = "$trimFn(COALESCE($moPageExpr,''))";
         $po_pageKey    = "LOWER($po_pageTrim)";
         $po_itemTrim   = "$trimFn(COALESCE($moItemExpr,''))";
-        $po_itemNorm   = "LOWER(REPLACE(REPLACE(REPLACE($po_itemTrim,' ',''),'-',''),'_',''))";
+        // NOTE: itemTrim keeps the raw name (with possible qty prefix like "2 x ...").
+        // We strip qty + normalize in PHP below (must match parseItem + $normItem).
 
         if (Schema::hasColumn('macro_output', 'ts_date')) {
             $po_dateExpr = 'DATE(mo.ts_date)';
@@ -460,26 +461,31 @@ class JntSupplyController extends Controller
             }
         }
 
+        // Pull raw (date, page_key, raw item name, proceed_count) — strip qty prefix in PHP
+        // so the item_key matches $baseKey = $normItem(parseItem(...)[1]) used upstream.
         $proceedRows = DB::table('macro_output as mo')
             ->whereRaw("$po_dateExpr BETWEEN ? AND ?", [$profitFrom, $asOfDate])
             ->whereRaw("$po_pageTrim != ''")
             ->selectRaw("
                 $po_dateExpr   AS d,
                 $po_pageKey    AS page_key,
-                $po_itemNorm   AS item_key,
+                $po_itemTrim   AS item_raw,
                 SUM(CASE WHEN $po_statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders
             ")
-            ->groupByRaw("$po_dateExpr, $po_pageKey, $po_itemNorm")
+            ->groupByRaw("$po_dateExpr, $po_pageKey, $po_itemTrim")
             ->get();
 
-        // $proceedMap[item_key][date][page_key] = proceed_orders
+        // $proceedMap[base_key][date][page_key] = proceed_orders (summed across qty variants)
         $proceedMap = [];
         foreach ($proceedRows as $pr) {
-            $ik = (string) $pr->item_key;
-            $dd = (string) $pr->d;
-            $pk = (string) $pr->page_key;
-            if ($ik === '' || $pk === '') continue;
-            $proceedMap[$ik][$dd][$pk] = (int) $pr->proceed_orders;
+            $raw = (string) $pr->item_raw;
+            $pk  = (string) $pr->page_key;
+            $dd  = (string) $pr->d;
+            if ($raw === '' || $pk === '') continue;
+            [, $baseName] = $this->parseItem($raw);              // strip "2 x " etc.
+            if ($baseName === '' || $baseName === '—') continue;
+            $ik = $normItem($baseName);                           // same normalizer as upstream
+            $proceedMap[$ik][$dd][$pk] = ($proceedMap[$ik][$dd][$pk] ?? 0) + (int) $pr->proceed_orders;
         }
 
         // Ads per (day, page_key)
