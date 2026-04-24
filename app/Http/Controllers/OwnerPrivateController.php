@@ -2050,11 +2050,16 @@ class OwnerPrivateController extends Controller
                     }
                 }
             }
-            // Per-item-key occurrence count across this page's row (denominator = total date slots).
-            $totalDateSlots = count($dates);
+            // Per-(item_key + mode_cod) occurrence count across this page's row.
+            // Composite key so "1 x MINI FLASHLIGHT @ 219" vs "@ 199" are counted separately
+            // (user expects count to reflect exact item+COD/SRP combo, matching the
+            // "1 ITEM ONLY" filter semantics). Denominator = days this page had ANY
+            // primary item recorded (not raw range length).
+            $totalDateSlots = count($p['cells']);
             $itemCounts = [];
+            $compKey = fn($c) => $c['item_key'] . '|' . (string)($c['mode_cod'] ?? '');
             foreach ($p['cells'] as $c) {
-                $k = $c['item_key'];
+                $k = $compKey($c);
                 $itemCounts[$k] = ($itemCounts[$k] ?? 0) + 1;
             }
 
@@ -2064,7 +2069,7 @@ class OwnerPrivateController extends Controller
                 $c['item_changed']  = false;
                 $c['price_changed'] = false;
                 $c['price_delta']   = null;
-                $c['count_same']    = $itemCounts[$c['item_key']] ?? 0;
+                $c['count_same']    = $itemCounts[$compKey($c)] ?? 0;
                 $c['count_total']   = $totalDateSlots;
                 if ($prev !== null) {
                     if ($c['item_key'] !== $prev['item_key']) {

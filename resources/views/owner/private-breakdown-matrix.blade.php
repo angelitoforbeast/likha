@@ -160,15 +160,23 @@
                     elseif ($isAnchorCell) $class .= ' cell-anchor';
                     if ($cell && !empty($cell['item_changed']))  $class .= ' cell-item-change';
                     if ($cell && !empty($cell['price_changed'])) $class .= ' cell-price-change';
+                    // Missing-data flag: cells without an RTS% or unit_cost need a red
+                    // warning bg (#ff0000) so they can be spotted at a glance. Overrides
+                    // the per-item pastel.
+                    $missingValue = $cell && ($cell['unit_cost'] === null || $cell['rts_pct'] === null);
                     // Per-item pastel bg so same-item cells in the row visually cluster.
                     // Hue from crc32 of normalized item key → deterministic across reloads.
                     $cellStyle = '';
                     if ($cell) {
-                        $hue = crc32((string)$cell['item_key']) % 360;
-                        if ($hue < 0) $hue += 360;
-                        // Anchor slightly darker for emphasis; others softer.
-                        $light = $isAnchorCell ? 78 : 90;
-                        $cellStyle = "background:hsl({$hue},72%,{$light}%);";
+                        if ($missingValue) {
+                            $cellStyle = 'background:#ff0000;color:#fff;';
+                        } else {
+                            $hue = crc32((string)$cell['item_key']) % 360;
+                            if ($hue < 0) $hue += 360;
+                            // Anchor slightly darker for emphasis; others softer.
+                            $light = $isAnchorCell ? 78 : 90;
+                            $cellStyle = "background:hsl({$hue},72%,{$light}%);";
+                        }
                     }
                     $tip = 'no data / tied';
                     if ($cell) {
@@ -244,16 +252,10 @@
                               title="days this item appears / total days in range">{{ $cell['count_same'] }}/{{ $cell['count_total'] }}</span>
                         @if($cell['rts_pct'] !== null)
                           <span x-show="vis.rts" class="badge-rts {{ $cell['rts_inherited'] ? 'inherited' : '' }}"
-                                title="{{ $cell['rts_inherited'] ? 'inherited from '.$cell['rts_eff_date'] : 'set on this date' }}">
-                            RTS {{ rtrim(rtrim(number_format($cell['rts_pct'],2), '0'),'.') }}%
-                          </span>
-                        @else
-                          <span x-show="vis.rts" class="badge-rts missing" title="no RTS set">RTS —</span>
+                                title="{{ $cell['rts_inherited'] ? 'inherited from '.$cell['rts_eff_date'] : 'set on this date' }}">{{ rtrim(rtrim(number_format($cell['rts_pct'],2), '0'),'.') }}%</span>
                         @endif
                         @if($cell['unit_cost'] !== null)
                           <span x-show="vis.cogs" class="badge-cogs" title="unit cost (cogs)">₱{{ rtrim(rtrim(number_format($cell['unit_cost'],2), '0'),'.') }}</span>
-                        @else
-                          <span x-show="vis.cogs" class="badge-cogs missing" title="no cogs entry">₱—</span>
                         @endif
                       </div>
                         </div>
@@ -463,10 +465,31 @@
           });
           const j = await r.json();
           if (!j.ok) { this.edit.error = j.message || 'Save failed.'; this.edit.saving = false; return; }
-          location.reload();
+          // In-place refresh: re-fetch current page, swap just the matrix container's
+          // HTML, then re-scan with Alpine so x-show/x-if bindings in the new DOM work.
+          // Keeps scroll position + open panel state + toggles intact.
+          await this.refreshMatrix();
+          this.edit.open  = false;
+          this.edit.saving = false;
         } catch(e) {
           console.error(e); this.edit.error = 'Network error.'; this.edit.saving = false;
         }
+      },
+      async refreshMatrix(){
+        try {
+          const resp = await fetch(window.location.href, { headers: {'X-Requested-With':'XMLHttpRequest'} });
+          const html = await resp.text();
+          const doc  = new DOMParser().parseFromString(html, 'text/html');
+          const fresh = doc.querySelector('.main-scroll');
+          const here  = this.$refs.mainScroll;
+          if (fresh && here) {
+            here.innerHTML = fresh.innerHTML;
+            if (window.Alpine && typeof window.Alpine.initTree === 'function') {
+              window.Alpine.initTree(here);
+            }
+            this.$nextTick(() => this.resizeTopSpacer());
+          }
+        } catch(e) { console.warn('Matrix refresh failed', e); }
       },
     };
   }
