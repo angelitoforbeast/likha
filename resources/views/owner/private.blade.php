@@ -124,6 +124,13 @@
     <input type="date" x-model="endDate" @change="load()"
            style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;
                   border-radius:6px;padding:5px 10px;font-size:13px;outline:none;cursor:pointer;">
+    <a :href="'{{ route('owner.private.breakdown') }}?start_date='+startDate+'&end_date='+endDate"
+       target="_blank"
+       x-show="!isSingleDate"
+       style="background:#1e293b;color:#93c5fd;border:1px solid #475569;
+              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+              cursor:pointer;text-decoration:none;"
+       title="View page × date × item matrix for this range">🧭 Matrix</a>
     <button class="btn-refresh" :class="loading ? 'spinning' : ''" @click="load()" title="Refresh">
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
            fill="none" stroke="currentColor" stroke-width="2.2"

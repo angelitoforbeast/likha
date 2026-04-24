@@ -1819,21 +1819,95 @@ class OwnerPrivateController extends Controller
         if (!$validDate($endDate))   $endDate   = $startDate;
         if ($startDate > $endDate)   [$startDate, $endDate] = [$endDate, $startDate];
 
-        // Best-effort label lookup so <title> + heading show page name even before AJAX
-        $pageLabel = $pageKey;
-        if ($pageKey !== '') {
-            $row = DB::table('daily_page_primary_item')
-                ->where('page_key', $pageKey)
-                ->orderByDesc('ts_date')
-                ->first(['page_label']);
-            if ($row) $pageLabel = (string)$row->page_label;
+        // No page_key → MATRIX view (all pages × all dates)
+        if ($pageKey === '') {
+            return $this->renderBreakdownMatrix($startDate, $endDate);
         }
+
+        // Single-page view: best-effort label lookup for <title>
+        $pageLabel = $pageKey;
+        $row = DB::table('daily_page_primary_item')
+            ->where('page_key', $pageKey)
+            ->orderByDesc('ts_date')
+            ->first(['page_label']);
+        if ($row) $pageLabel = (string)$row->page_label;
 
         return view('owner.private-breakdown', [
             'pageKey'    => $pageKey,
             'pageLabel'  => $pageLabel,
             'startDate'  => $startDate,
             'endDate'    => $endDate,
+        ]);
+    }
+
+    /**
+     * Matrix view: every page (rows) × every date in range (columns).
+     * Cell = primary item on that date. Highlights anchor match (end_date primary) vs mismatch.
+     */
+    private function renderBreakdownMatrix(string $startDate, string $endDate)
+    {
+        // Date spine
+        $dates = [];
+        $cursor = strtotime($startDate);
+        $last   = strtotime($endDate);
+        while ($cursor <= $last) {
+            $dates[] = date('Y-m-d', $cursor);
+            $cursor += 86400;
+        }
+
+        // All primary rows in range
+        $rows = DB::table('daily_page_primary_item')
+            ->whereBetween('ts_date', [$startDate, $endDate])
+            ->orderBy('page_label')
+            ->orderBy('ts_date')
+            ->get([
+                'ts_date', 'page_key', 'page_label',
+                'primary_item', 'primary_item_key', 'primary_orders', 'primary_mode_cod',
+            ]);
+
+        // Group by page
+        $pages = []; // page_key => [label, matrix[date] => row, anchor_item_key, distinct_items set]
+        foreach ($rows as $r) {
+            $pk = (string)$r->page_key;
+            if (!isset($pages[$pk])) {
+                $pages[$pk] = [
+                    'page_key'       => $pk,
+                    'page_label'     => (string)$r->page_label,
+                    'cells'          => [],
+                    'distinct_items' => [],
+                    'anchor_item'    => null,
+                    'anchor_item_key'=> null,
+                ];
+            }
+            $ik = (string)$r->primary_item_key;
+            $pages[$pk]['cells'][(string)$r->ts_date] = [
+                'item_name' => (string)$r->primary_item,
+                'item_key'  => $ik,
+                'orders'    => (int)$r->primary_orders,
+                'mode_cod'  => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
+            ];
+            $pages[$pk]['distinct_items'][$ik] = true;
+            if ((string)$r->ts_date === $endDate) {
+                $pages[$pk]['anchor_item']     = (string)$r->primary_item;
+                $pages[$pk]['anchor_item_key'] = $ik;
+            }
+        }
+
+        // Finalize — stable sort by label, add summary
+        $pagesList = array_values($pages);
+        usort($pagesList, fn($a, $b) => strcmp($a['page_label'], $b['page_label']));
+        foreach ($pagesList as &$p) {
+            $p['distinct_count'] = count($p['distinct_items']);
+            $p['mixed']          = $p['distinct_count'] >= 2;
+            unset($p['distinct_items']);
+        }
+        unset($p);
+
+        return view('owner.private-breakdown-matrix', [
+            'startDate' => $startDate,
+            'endDate'   => $endDate,
+            'dates'     => $dates,
+            'pages'     => $pagesList,
         ]);
     }
 
