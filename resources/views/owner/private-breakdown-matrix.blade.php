@@ -10,13 +10,14 @@
   <style>
     [x-cloak]{display:none!important}
     body{background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+    /* border-separate so sticky cells keep their borders */
+    table.matrix{border-collapse:separate;border-spacing:0;}
     .cell{font-size:10px;line-height:1.2;padding:4px 6px;border:1px solid #e2e8f0;
           white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;
-          position:relative; cursor:pointer;}
+          position:relative; cursor:pointer; color:#1e293b;}
     .cell:hover{outline:2px solid #2563eb; outline-offset:-2px; z-index:2;}
-    .cell-anchor{background:#dbeafe;color:#1e3a8a;font-weight:600;}
-    .cell-mismatch{background:#fef3c7;color:#78350f;}
-    .cell-empty{background:#f1f5f9;color:#cbd5e1;text-align:center;cursor:default;}
+    .cell-anchor{font-weight:600;}
+    .cell-empty{background:#f1f5f9 !important;color:#cbd5e1;text-align:center;cursor:default;}
     .cell-empty:hover{outline:none;}
     .cell-end{border-right:3px solid #2563eb;}
     .cell-item-change{border-left:4px solid #dc2626 !important; padding-left:4px;}
@@ -38,11 +39,16 @@
                  background:#fef9c3;color:#713f12;margin-top:1px;margin-left:2px;font-family:monospace;}
     th.date-col{font-size:10px;padding:4px 6px;background:#0f172a;color:#fff;
                 border:1px solid #1e293b;white-space:nowrap;font-family:monospace;}
-    th.page-col{position:sticky;left:0;z-index:5;background:#fff;text-align:left;
+    th.page-col,td.page-col{position:sticky;left:0;z-index:5;background:#fff;text-align:left;
                 padding:6px 10px;border:1px solid #e2e8f0;font-size:12px;max-width:200px;
-                white-space:normal;line-height:1.3;font-weight:600;}
+                white-space:normal;line-height:1.3;font-weight:600;
+                box-shadow:2px 0 0 #e2e8f0;}
     thead th{position:sticky;top:0;z-index:4;}
-    thead th.page-col{z-index:6;}
+    thead th.page-col{z-index:6;background:#0f172a;color:#fff;}
+    /* Top scrollbar that mirrors the main one */
+    .top-scroll{overflow-x:auto;overflow-y:hidden;}
+    .top-scroll > div{height:1px;}
+    .main-scroll{overflow:auto;}
     .toggle-bar{display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;}
     .toggle-bar label{display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;
                       padding:0.25rem 0.6rem;border:1px solid #cbd5e1;border-radius:6px;
@@ -106,13 +112,17 @@
     </div>
   </div>
 
-  <!-- Matrix -->
-  <div class="max-w-full overflow-auto px-4 pb-8">
-    <div class="bg-white rounded shadow inline-block min-w-full">
-      @if(count($pages) === 0)
-        <div class="p-8 text-center text-slate-400 text-sm">No data in this range.</div>
-      @else
-        <table class="border-collapse">
+  <!-- Matrix: top scrollbar mirrors the main (bottom) scrollbar -->
+  <div class="px-4 pb-8">
+    @if(count($pages) === 0)
+      <div class="bg-white rounded shadow p-8 text-center text-slate-400 text-sm">No data in this range.</div>
+    @else
+      <div class="top-scroll" x-ref="topScroll" @scroll="syncFromTop()">
+        <div x-ref="topSpacer"></div>
+      </div>
+      <div class="main-scroll bg-white rounded shadow" x-ref="mainScroll" @scroll="syncFromMain()">
+        <table class="matrix">
+
           <thead>
             <tr>
               <th class="page-col" style="min-width:180px;">Page</th>
@@ -139,9 +149,18 @@
                     if ($d === $endDate) $class .= ' cell-end';
                     if (!$cell) $class .= ' cell-empty';
                     elseif ($isAnchorCell) $class .= ' cell-anchor';
-                    else $class .= ' cell-mismatch';
                     if ($cell && !empty($cell['item_changed']))  $class .= ' cell-item-change';
                     if ($cell && !empty($cell['price_changed'])) $class .= ' cell-price-change';
+                    // Per-item pastel bg so same-item cells in the row visually cluster.
+                    // Hue from crc32 of normalized item key → deterministic across reloads.
+                    $cellStyle = '';
+                    if ($cell) {
+                        $hue = crc32((string)$cell['item_key']) % 360;
+                        if ($hue < 0) $hue += 360;
+                        // Anchor slightly darker for emphasis; others softer.
+                        $light = $isAnchorCell ? 78 : 90;
+                        $cellStyle = "background:hsl({$hue},72%,{$light}%);";
+                    }
                     $tip = 'no data / tied';
                     if ($cell) {
                         $tip = $cell['item_name'].' · '.$cell['orders'].' orders'
@@ -167,6 +186,7 @@
                     ] : null;
                   @endphp
                   <td class="{{ $class }}"
+                      style="{{ $cellStyle }}"
                       title="{{ $tip }}"
                       @if($cell) @click="openEdit(@js($cellPayload))" @endif>
                     @if($cell)
@@ -206,8 +226,8 @@
             @endforeach
           </tbody>
         </table>
-      @endif
-    </div>
+      </div>
+    @endif
   </div>
 
   <!-- Edit Modal -->
@@ -307,6 +327,8 @@
         unit_cost:'', comment:'',
       },
 
+      _syncing:false,
+
       init(){
         try {
           const raw = localStorage.getItem(this.storageKey);
@@ -317,6 +339,27 @@
             });
           }
         } catch(e) { console.warn('Failed to load toggle prefs', e); }
+        // Mirror main scroll width into the top-scrollbar's spacer so both
+        // scrollbars have identical travel.
+        this.$nextTick(() => this.resizeTopSpacer());
+        window.addEventListener('resize', () => this.resizeTopSpacer());
+      },
+      resizeTopSpacer(){
+        const m = this.$refs.mainScroll, s = this.$refs.topSpacer;
+        if (!m || !s) return;
+        s.style.width = m.scrollWidth + 'px';
+      },
+      syncFromTop(){
+        if (this._syncing) return;
+        this._syncing = true;
+        this.$refs.mainScroll.scrollLeft = this.$refs.topScroll.scrollLeft;
+        this._syncing = false;
+      },
+      syncFromMain(){
+        if (this._syncing) return;
+        this._syncing = true;
+        this.$refs.topScroll.scrollLeft = this.$refs.mainScroll.scrollLeft;
+        this._syncing = false;
       },
       persist(){
         try { localStorage.setItem(this.storageKey, JSON.stringify(this.vis)); }
