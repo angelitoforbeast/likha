@@ -1626,6 +1626,15 @@ class OwnerPrivateController extends Controller
             // COD fee per delivered = Price × codFeeRate × (1 + VAT)
             $codFeePerDelivered = $price > 0 ? round($price * $codFeeRate * (1 + $codFeeVatRate), 4) : null;
 
+            // Gross sales = Σ(srp_that_day × orders_that_day) across INCLUDED dates.
+            // Uses ALL orders (not proceed). Used by UI total Proj.% = Σprofit / Σgross.
+            $grossSales = 0.0;
+            foreach ($includedDatesArr as $slice) {
+                $pDay      = (float)($slice['mode_cod'] ?? 0);
+                $ordersDay = (int)($slice['orders'] ?? 0);
+                if ($pDay > 0 && $ordersDay > 0) $grossSales += $pDay * $ordersDay;
+            }
+
             // Projected Profit — per-slice compute summed across INCLUDED dates.
             // Uses each day's own mode_cod & adspent; rts_pct/item_value/fees anchored at end_date.
             $projProfit = $projProfitPerOrder = null;
@@ -1703,6 +1712,7 @@ class OwnerPrivateController extends Controller
                 'distinct_items_in_range'=> (int)($pg['distinct_items_in_range'] ?? 0),
                 'mixed_primary'          => (bool)($pg['mixed_primary'] ?? false),
                 'anchor_first_date'      => $pg['anchor_first_date'] ?? null,
+                'gross_sales'            => $grossSales > 0 ? $grossSales : null,
             ];
         }
 

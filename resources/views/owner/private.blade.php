@@ -513,7 +513,12 @@
                   <template x-if="col.id==='per_order'">
                     <span style="color:#111;" x-text="md(tot().proj_profit_per_order)"></span>
                   </template>
-                  <template x-if="!['adspent','orders','cpp','proceed','pcpp','proj_profit','per_order'].includes(col.id)">
+                  <template x-if="col.id==='proj_pct'">
+                    <span style="font-weight:700;color:#111;"
+                          x-text="tot().proj_pct!=null ? tot().proj_pct.toFixed(1)+'%' : '—'"
+                          :title="tot().gross_sales!=null ? 'profit ₱'+Number(tot().projected_profit||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / gross ₱'+Number(tot().gross_sales).toLocaleString('en-PH',{maximumFractionDigits:0}) : ''"></span>
+                  </template>
+                  <template x-if="!['adspent','orders','cpp','proceed','pcpp','proj_profit','per_order','proj_pct'].includes(col.id)">
                     <span></span>
                   </template>
                 </td>
@@ -772,18 +777,22 @@
 
       // ── Totals ────────────────────────────────────────────────────────────
       tot() {
-        const t = { adspent:0, orders:0, proceed_orders:0, projected_profit:null, cpp:null, proceed_cpp:null, proj_profit_per_order:null };
-        let hasP=false;
+        const t = { adspent:0, orders:0, proceed_orders:0, gross_sales:0, projected_profit:null, cpp:null, proceed_cpp:null, proj_profit_per_order:null, proj_pct:null };
+        let hasP=false, hasG=false;
         for (const r of this.rows) {
           t.adspent        += Number(r.adspent        ||0);
           t.orders         += Number(r.orders         ||0);
           t.proceed_orders += Number(r.proceed_orders ||0);
+          if (r.gross_sales!=null){ t.gross_sales += Number(r.gross_sales); hasG=true; }
           if (r.projected_profit!=null){ t.projected_profit=(t.projected_profit||0)+r.projected_profit; hasP=true; }
         }
         if(!hasP) t.projected_profit=null;
+        if(!hasG) t.gross_sales=null;
         t.cpp                  = t.orders>0         ? t.adspent/t.orders         : null;
         t.proceed_cpp          = t.proceed_orders>0  ? t.adspent/t.proceed_orders : null;
         t.proj_profit_per_order= (t.orders>0&&t.projected_profit!=null) ? t.projected_profit/t.orders : null;
+        t.proj_pct             = (t.projected_profit!=null && t.gross_sales && t.gross_sales>0)
+                                    ? (t.projected_profit/t.gross_sales*100) : null;
         return t;
       },
 
