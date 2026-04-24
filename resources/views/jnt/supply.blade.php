@@ -66,6 +66,8 @@
             <option value="B" {{ $classFilter === 'B' ? 'selected' : '' }}>B · Solid</option>
             <option value="C" {{ $classFilter === 'C' ? 'selected' : '' }}>C · Active</option>
             <option value="D" {{ $classFilter === 'D' ? 'selected' : '' }}>D · New Item</option>
+            <option value="E" {{ $classFilter === 'E' ? 'selected' : '' }}>E · Low-Vel Running</option>
+            <option value="F" {{ $classFilter === 'F' ? 'selected' : '' }}>F · Dead / No Ads</option>
             <option value="H" {{ $classFilter === 'H' ? 'selected' : '' }}>H · Review</option>
           </select>
         </div>
@@ -131,6 +133,8 @@
         <span class="class-badge bg-blue-500 text-white"   style="cursor:default;">B · Solid</span>
         <span class="class-badge bg-yellow-400 text-gray-900" style="cursor:default;">C · Active</span>
         <span class="class-badge bg-orange-400 text-white" style="cursor:default;">D · New Item</span>
+        <span class="class-badge bg-amber-600 text-white"  style="cursor:default;">E · Low-Vel Running</span>
+        <span class="class-badge bg-rose-700 text-white"   style="cursor:default;">F · Dead / No Ads</span>
         <span class="class-badge bg-gray-500 text-white"   style="cursor:default;">H · Review</span>
         <span class="text-gray-300 mx-1">|</span>
         <span class="font-semibold text-gray-600">Lifecycle:</span>
@@ -152,14 +156,14 @@
     <details class="bg-white rounded-lg shadow border border-indigo-200 mb-4" open>
       <summary class="px-4 py-3 font-semibold text-sm text-indigo-700 cursor-pointer select-none flex items-center gap-2">
         <i class="fa-solid fa-sliders text-indigo-500"></i>
-        Classification Rules (A / B / C / D / H)
+        Classification Rules (A / B / C / D / E / F / H)
         <span class="text-xs font-normal text-gray-400 ml-1">CEO only — lahat editable</span>
       </summary>
       <div class="px-4 pb-4 pt-2">
         <p class="text-xs text-gray-500 mb-3">
           <strong>Priority (top wins):</strong>
-          D → A → B → C → H. Kapag walang match, H (review needed).
-          Bawat class (A/B/C) may sariling <em>alive guard</em>: recent avg ≥ min u/day sa huling N days. Kapag patay recent, fall to H.
+          D → A → B → C → E → F → H. Kapag walang match, H (review needed).
+          Bawat class (A/B/C) may sariling <em>alive guard</em>. E = may ads pa pero below C. F = walang ads o sobrang baba.
         </p>
         <table class="text-sm border-collapse w-full mb-4">
           <thead>
@@ -288,14 +292,62 @@
               </td>
             </tr>
 
+            {{-- E row (running ads but below C) --}}
+            <tr class="border-b border-gray-100">
+              <td class="px-3 py-2 border border-gray-200 text-center font-bold text-gray-500">5</td>
+              <td class="px-3 py-2 border border-gray-200">
+                <span class="class-badge bg-amber-600 text-white" style="cursor:default;">E · Low-Vel Running</span>
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-gray-700">
+                <strong>is_running=true</strong> AND below A/B/C AND E_alive_avg ≥ alive_min
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center text-gray-300" colspan="2">—</td>
+              <td class="px-3 py-2 border border-gray-200 text-center bg-emerald-50">
+                <input type="number" class="inline-num supply-kv-input" style="width:70px;"
+                       data-key="class_e_alive_min" value="{{ $cfgEAliveMin }}" min="0" step="0.1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center bg-emerald-50">
+                <input type="number" class="inline-num supply-kv-input" style="width:60px;"
+                       data-key="class_e_alive_window" value="{{ $cfgEAliveWindow }}" min="1" step="1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <button type="button" class="save-kv-btn-multi text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
+                        data-keys="class_e_alive_min,class_e_alive_window">Save</button>
+              </td>
+            </tr>
+
+            {{-- F row (no ads or extremely low) --}}
+            <tr class="border-b border-gray-100">
+              <td class="px-3 py-2 border border-gray-200 text-center font-bold text-gray-500">6</td>
+              <td class="px-3 py-2 border border-gray-200">
+                <span class="class-badge bg-rose-700 text-white" style="cursor:default;">F · Dead / No Ads</span>
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-gray-700">
+                <strong>is_running=false</strong> OR F_alive_avg &lt; dead-threshold
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center text-gray-300" colspan="2">—</td>
+              <td class="px-3 py-2 border border-gray-200 text-center bg-emerald-50">
+                <input type="number" class="inline-num supply-kv-input" style="width:70px;"
+                       data-key="class_f_alive_min" value="{{ $cfgFAliveMin }}" min="0" step="0.1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center bg-emerald-50">
+                <input type="number" class="inline-num supply-kv-input" style="width:60px;"
+                       data-key="class_f_alive_window" value="{{ $cfgFAliveWindow }}" min="1" step="1">
+              </td>
+              <td class="px-3 py-2 border border-gray-200 text-center">
+                <button type="button" class="save-kv-btn-multi text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
+                        data-keys="class_f_alive_min,class_f_alive_window">Save</button>
+              </td>
+            </tr>
+
             {{-- H row --}}
             <tr class="border-b border-gray-100 bg-gray-50">
-              <td class="px-3 py-2 border border-gray-200 text-center font-bold text-gray-500">5</td>
+              <td class="px-3 py-2 border border-gray-200 text-center font-bold text-gray-500">7</td>
               <td class="px-3 py-2 border border-gray-200">
                 <span class="class-badge bg-gray-500 text-white" style="cursor:default;">H · Review</span>
               </td>
               <td class="px-3 py-2 border border-gray-200 text-gray-500 italic" colspan="6">
-                Catch-all — lahat ng walang match sa A/B/C/D. CEO review needed (kill, boost, or ignore).
+                Catch-all — walang nag-match sa A/B/C/D/E/F (edge case: running=true, below E-alive, pero above F-dead-threshold). CEO review needed.
               </td>
             </tr>
           </tbody>
@@ -309,7 +361,7 @@
 
     {{-- Other Settings: lifecycle + display velocity (non-classification) --}}
     @php
-      $otherSettings = $supplySettingsAll->filter(fn($s) => !in_array($s->group, ['class_a','class_b','class_c','class_d','class_abc']));
+      $otherSettings = $supplySettingsAll->filter(fn($s) => !in_array($s->group, ['class_a','class_b','class_c','class_d','class_e','class_f','class_abc']));
     @endphp
     @if($otherSettings->count() > 0)
     <details class="bg-white rounded-lg shadow border border-emerald-200 mb-4">
@@ -439,7 +491,7 @@
             <td class="px-3 py-2 border border-gray-200 text-center" style="background:#faf5ff;"
                 data-order="{{ $row['item_class'] }}">
               <span class="class-badge {{ $row['item_class_badge'] }}"
-                    title="A-win avg: {{ $row['a_avg'] }} (alive: {{ $row['a_alive_avg'] }}) · B-win avg: {{ $row['b_avg'] }} (alive: {{ $row['b_alive_avg'] }}) · C-win avg: {{ $row['c_avg'] }} (alive: {{ $row['c_alive_avg'] }}) · Age: {{ $row['days_running'] }}d{{ $row['item_class_auto'] ? ' · auto' : ' · manual override' }}">
+                    title="A: {{ $row['a_avg'] }} (alive {{ $row['a_alive_avg'] }}) · B: {{ $row['b_avg'] }} (alive {{ $row['b_alive_avg'] }}) · C: {{ $row['c_avg'] }} (alive {{ $row['c_alive_avg'] }}) · E-alive: {{ $row['e_alive_avg'] }} · F-alive: {{ $row['f_alive_avg'] }} · Running: {{ $row['is_running'] ? 'yes' : 'no' }} · Age: {{ $row['days_running'] }}d{{ $row['item_class_auto'] ? ' · auto' : ' · manual override' }}">
                 {{ $row['item_class_label'] }}@if(!$row['item_class_auto'])<sup title="Manual override" class="text-[9px] opacity-70">★</sup>@endif
               </span>
               <select class="class-sel" title="Override class for {{ $row['item'] }}">
@@ -448,6 +500,8 @@
                 <option value="B" {{ $row['item_class'] === 'B' && !$row['item_class_auto'] ? 'selected' : '' }}>B · Solid</option>
                 <option value="C" {{ $row['item_class'] === 'C' && !$row['item_class_auto'] ? 'selected' : '' }}>C · Active</option>
                 <option value="D" {{ $row['item_class'] === 'D' && !$row['item_class_auto'] ? 'selected' : '' }}>D · New Item</option>
+                <option value="E" {{ $row['item_class'] === 'E' && !$row['item_class_auto'] ? 'selected' : '' }}>E · Low-Vel Running</option>
+                <option value="F" {{ $row['item_class'] === 'F' && !$row['item_class_auto'] ? 'selected' : '' }}>F · Dead / No Ads</option>
                 <option value="H" {{ $row['item_class'] === 'H' && !$row['item_class_auto'] ? 'selected' : '' }}>H · Review</option>
               </select>
             </td>
@@ -553,8 +607,10 @@
       'A': { label: 'A · Hero',    cls: 'bg-purple-600 text-white' },
       'B': { label: 'B · Solid',   cls: 'bg-blue-500 text-white' },
       'C': { label: 'C · Active',   cls: 'bg-yellow-400 text-gray-900' },
-      'D': { label: 'D · New Item', cls: 'bg-orange-400 text-white' },
-      'H': { label: 'H · Review',   cls: 'bg-gray-500 text-white' },
+      'D': { label: 'D · New Item',        cls: 'bg-orange-400 text-white' },
+      'E': { label: 'E · Low-Vel Running', cls: 'bg-amber-600 text-white' },
+      'F': { label: 'F · Dead / No Ads',   cls: 'bg-rose-700 text-white' },
+      'H': { label: 'H · Review',          cls: 'bg-gray-500 text-white' },
     };
     const ALL_CLASS_CLS = Object.values(CLASS_META).flatMap(m => m.cls.split(' '));
 

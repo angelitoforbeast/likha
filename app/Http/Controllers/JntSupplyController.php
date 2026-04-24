@@ -95,23 +95,31 @@ class JntSupplyController extends Controller
     }
 
     // -----------------------------------------------------------------------
-    // Item class classification (A / B / C / D / H)
+    // Item class classification (A / B / C / D / E / F / H)
     //
     // Priority (top wins):
     //   1. D — age < new_item_days (bagong item, wag muna hatulan)
-    //   2. A — age ≥ A_window AND A_window avg ≥ A_min AND alive ≥ alive_min
-    //   3. B — age ≥ B_window AND B_window avg ≥ B_min AND alive ≥ alive_min
-    //   4. C — age ≥ C_window AND C_window avg ≥ C_min AND alive ≥ alive_min
-    //   5. H — catch-all (review needed)
+    //   2. A — age ≥ A_window AND A_window avg ≥ A_min AND A_alive ≥ A_alive_min
+    //   3. B — same pattern with B thresholds
+    //   4. C — same pattern with C thresholds
+    //   5. E — is_running AND E_alive_avg ≥ E_alive_min
+    //          (may ads pa, below C, pero buhay-buhay)
+    //   6. F — NOT is_running OR F_alive_avg < F_alive_min
+    //          (walang ads, o sobrang baba)
+    //   7. H — catch-all (review needed)
     // -----------------------------------------------------------------------
     private function classifyItemClass(
         int   $daysRunning,
         float $aWindowAvg, float $bWindowAvg, float $cWindowAvg,
         float $aAliveAvg,  float $bAliveAvg,  float $cAliveAvg,
+        float $eAliveAvg,  float $fAliveAvg,
+        bool  $isRunning,
         int   $dNewItemDays,
         float $aMin, int $aWindowDays, float $aAliveMin,
         float $bMin, int $bWindowDays, float $bAliveMin,
-        float $cMin, int $cWindowDays, float $cAliveMin
+        float $cMin, int $cWindowDays, float $cAliveMin,
+        float $eAliveMin,
+        float $fAliveMin
     ): string {
         // 1. D — new item
         if ($daysRunning < $dNewItemDays) {
@@ -127,7 +135,15 @@ class JntSupplyController extends Controller
         if ($daysRunning >= $cWindowDays && $cWindowAvg >= $cMin && $cAliveAvg >= $cAliveMin) {
             return 'C';
         }
-        // 5. Catch-all
+        // 5. E — running ads, below C, still alive
+        if ($isRunning && $eAliveAvg >= $eAliveMin) {
+            return 'E';
+        }
+        // 6. F — no ads, or sobrang baba
+        if (!$isRunning || $fAliveAvg < $fAliveMin) {
+            return 'F';
+        }
+        // 7. Catch-all
         return 'H';
     }
 
@@ -137,12 +153,14 @@ class JntSupplyController extends Controller
     private function classBadge(string $key): array
     {
         return match ($key) {
-            'A' => ['A · Hero',        'bg-purple-600 text-white'],
-            'B' => ['B · Solid',       'bg-blue-500 text-white'],
-            'C' => ['C · Active',      'bg-yellow-400 text-gray-900'],
-            'D' => ['D · New Item',    'bg-orange-400 text-white'],
-            'H' => ['H · Review',      'bg-gray-500 text-white'],
-            default => ['? · Unknown', 'bg-gray-200 text-gray-500'],
+            'A' => ['A · Hero',               'bg-purple-600 text-white'],
+            'B' => ['B · Solid',              'bg-blue-500 text-white'],
+            'C' => ['C · Active',             'bg-yellow-400 text-gray-900'],
+            'D' => ['D · New Item',           'bg-orange-400 text-white'],
+            'E' => ['E · Low-Vel Running',    'bg-amber-600 text-white'],
+            'F' => ['F · Dead / No Ads',      'bg-rose-700 text-white'],
+            'H' => ['H · Review',             'bg-gray-500 text-white'],
+            default => ['? · Unknown',        'bg-gray-200 text-gray-500'],
         };
     }
 
@@ -156,6 +174,8 @@ class JntSupplyController extends Controller
             'B' => 'bg-blue-500 text-white',
             'C' => 'bg-yellow-400 text-gray-900',
             'D' => 'bg-orange-400 text-white',
+            'E' => 'bg-amber-600 text-white',
+            'F' => 'bg-rose-700 text-white',
             'H' => 'bg-gray-500 text-white',
         ];
     }
@@ -233,6 +253,10 @@ class JntSupplyController extends Controller
         $cfgBAliveMin     = (float) ($supplyKv['class_b_alive_min']      ?? 10);
         $cfgCAliveWindow  = (int)   ($supplyKv['class_c_alive_window']   ?? 7);
         $cfgCAliveMin     = (float) ($supplyKv['class_c_alive_min']      ?? 10);
+        $cfgEAliveWindow  = (int)   ($supplyKv['class_e_alive_window']   ?? 14);
+        $cfgEAliveMin     = (float) ($supplyKv['class_e_alive_min']      ?? 5);
+        $cfgFAliveWindow  = (int)   ($supplyKv['class_f_alive_window']   ?? 30);
+        $cfgFAliveMin     = (float) ($supplyKv['class_f_alive_min']      ?? 1);
 
         // -- 1. Hold counts -------------------------------------------------
         // Scope: last month (1st) onwards, by ts_date.
@@ -345,6 +369,7 @@ class JntSupplyController extends Controller
         $maxClassWindow = max(
             $cfgAWindowDays, $cfgBWindowDays, $cfgCWindowDays,
             $cfgAAliveWindow, $cfgBAliveWindow, $cfgCAliveWindow,
+            $cfgEAliveWindow, $cfgFAliveWindow,
             1
         );
         $classFromDate  = Carbon::parse($asOfDate, 'Asia/Manila')
@@ -474,6 +499,8 @@ class JntSupplyController extends Controller
             $aAliveAvg = $cfgAAliveWindow > 0 ? $windowSum($base, $cfgAAliveWindow) / $cfgAAliveWindow : 0.0;
             $bAliveAvg = $cfgBAliveWindow > 0 ? $windowSum($base, $cfgBAliveWindow) / $cfgBAliveWindow : 0.0;
             $cAliveAvg = $cfgCAliveWindow > 0 ? $windowSum($base, $cfgCAliveWindow) / $cfgCAliveWindow : 0.0;
+            $eAliveAvg = $cfgEAliveWindow > 0 ? $windowSum($base, $cfgEAliveWindow) / $cfgEAliveWindow : 0.0;
+            $fAliveAvg = $cfgFAliveWindow > 0 ? $windowSum($base, $cfgFAliveWindow) / $cfgFAliveWindow : 0.0;
 
             $classOverride = $setting?->class_override ?? null;
             if ($classOverride) {
@@ -484,10 +511,14 @@ class JntSupplyController extends Controller
                     $daysRunning,
                     $aAvg, $bAvg, $cAvg,
                     $aAliveAvg, $bAliveAvg, $cAliveAvg,
+                    $eAliveAvg, $fAliveAvg,
+                    $isRunning,
                     $cfgDNewItemDays,
                     $cfgAMinVel, $cfgAWindowDays, $cfgAAliveMin,
                     $cfgBMinVel, $cfgBWindowDays, $cfgBAliveMin,
-                    $cfgCMinVel, $cfgCWindowDays, $cfgCAliveMin
+                    $cfgCMinVel, $cfgCWindowDays, $cfgCAliveMin,
+                    $cfgEAliveMin,
+                    $cfgFAliveMin
                 );
                 $itemClassAuto = true;
             }
@@ -526,6 +557,8 @@ class JntSupplyController extends Controller
                 'a_alive_avg'         => round($aAliveAvg, 2),
                 'b_alive_avg'         => round($bAliveAvg, 2),
                 'c_alive_avg'         => round($cAliveAvg, 2),
+                'e_alive_avg'         => round($eAliveAvg, 2),
+                'f_alive_avg'         => round($fAliveAvg, 2),
             ];
         }
 
@@ -578,6 +611,8 @@ class JntSupplyController extends Controller
             'cfgAAliveWindow', 'cfgAAliveMin',
             'cfgBAliveWindow', 'cfgBAliveMin',
             'cfgCAliveWindow', 'cfgCAliveMin',
+            'cfgEAliveWindow', 'cfgEAliveMin',
+            'cfgFAliveWindow', 'cfgFAliveMin',
         ));
     }
 
@@ -593,7 +628,7 @@ class JntSupplyController extends Controller
             'is_running'         => 'nullable|in:0,1,auto',
             'notes'              => 'nullable|string|max:500',
             'lifecycle_override' => 'nullable|in:,new,scaling,consistent,active,declining,phasing_out,dormant',
-            'class_override'     => 'nullable|in:,A,B,C,D,H',
+            'class_override'     => 'nullable|in:,A,B,C,D,E,F,H',
         ]);
 
         $itemName  = $validated['item_name'];
