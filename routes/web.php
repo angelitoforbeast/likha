@@ -712,6 +712,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get('/jnt/hold/download', [JntHoldDownloadController::class, 'index'])->name('jnt.hold.download');
     Route::get('/jnt/hold/export', [JntHoldDownloadController::class, 'export'])->name('jnt.hold.export');
     Route::get('/jnt/supply', [\App\Http\Controllers\JntSupplyController::class, 'index'])->name('jnt.supply');
+    Route::get('/jnt/supply/config', [\App\Http\Controllers\JntSupplyController::class, 'config'])->name('jnt.supply.config');
     Route::post('/jnt/supply/settings', [\App\Http\Controllers\JntSupplyController::class, 'saveSettings'])->name('jnt.supply.settings');
     Route::post('/jnt/supply/class-thresholds', [\App\Http\Controllers\JntSupplyController::class, 'saveClassThresholds'])->name('jnt.supply.class-thresholds');
     Route::post('/jnt/supply/setting-kv', [\App\Http\Controllers\JntSupplyController::class, 'saveSupplySetting'])->name('jnt.supply.setting-kv');

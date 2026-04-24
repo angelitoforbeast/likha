@@ -558,6 +558,24 @@ class JntSupplyController extends Controller
     }
 
     // -----------------------------------------------------------------------
+    // GET /jnt/supply/config — CEO-only admin page:
+    // Classification Rules CRUD + Other Settings (lifecycle / velocity defaults)
+    // -----------------------------------------------------------------------
+    public function config()
+    {
+        $isCeo = Auth::user()?->employeeProfile?->role === 'CEO';
+        if (!$isCeo) abort(403);
+
+        $classRules        = ItemClassRule::ordered()->get();
+        $classPalette      = ItemClassRule::palette();
+        $supplySettingsAll = SupplySetting::orderBy('group')->orderBy('sort_order')->get();
+
+        return view('jnt.supply_config', compact(
+            'classRules', 'classPalette', 'supplySettingsAll', 'isCeo'
+        ));
+    }
+
+    // -----------------------------------------------------------------------
     // POST /jnt/supply/settings — inline save per item
     // -----------------------------------------------------------------------
     public function saveSettings(Request $request)
