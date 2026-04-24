@@ -131,6 +131,55 @@
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
               cursor:pointer;text-decoration:none;"
        title="View page × date × item matrix for this range">🧭 Matrix</a>
+    <!-- Item filter (multi-select) -->
+    <div style="position:relative;" @click.away="itemFilterOpen=false">
+      <button type="button" @click="itemFilterOpen=!itemFilterOpen"
+              :style="'background:'+(selectedItems.length?'#1d4ed8':'#1e293b')+';color:#e2e8f0;border:1px solid #475569;border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;'"
+              title="Filter rows by item (multi-select)">
+        🔎 Items
+        <span x-show="selectedItems.length"
+              style="background:#fbbf24;color:#0f172a;border-radius:10px;padding:0 6px;margin-left:4px;font-size:11px;"
+              x-text="selectedItems.length"></span>
+      </button>
+      <div x-show="itemFilterOpen" x-transition x-cloak
+           style="position:absolute;top:calc(100% + 4px);right:0;z-index:50;
+                  background:#0f172a;border:1px solid #475569;border-radius:8px;
+                  width:280px;max-height:420px;display:flex;flex-direction:column;
+                  box-shadow:0 10px 30px rgba(0,0,0,.4);padding:8px;">
+        <div style="display:flex;gap:6px;margin-bottom:6px;">
+          <input type="text" x-model="itemFilterSearch" placeholder="Search items…"
+                 style="flex:1;background:#1e293b;color:#e2e8f0;border:1px solid #475569;
+                        border-radius:5px;padding:4px 8px;font-size:12px;outline:none;">
+          <button type="button" @click="clearItems()"
+                  :disabled="!selectedItems.length"
+                  style="background:#1e293b;color:#f87171;border:1px solid #475569;
+                         border-radius:5px;padding:4px 8px;font-size:11px;font-weight:700;
+                         cursor:pointer;"
+                  title="Clear all selected items">Clear</button>
+        </div>
+        <div style="overflow-y:auto;flex:1;border-top:1px solid #334155;padding-top:4px;">
+          <template x-if="visibleItems().length === 0">
+            <div style="text-align:center;color:#64748b;font-size:11px;padding:12px;">No items.</div>
+          </template>
+          <template x-for="name in visibleItems()" :key="name">
+            <label style="display:flex;align-items:center;gap:8px;padding:4px 6px;cursor:pointer;
+                          border-radius:4px;font-size:12px;color:#e2e8f0;"
+                   onmouseover="this.style.background='#1e293b'"
+                   onmouseout="this.style.background=''">
+              <input type="checkbox"
+                     :checked="selectedItems.includes(name)"
+                     @change="toggleItem(name)"
+                     style="accent-color:#2563eb;cursor:pointer;">
+              <span x-text="name" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+            </label>
+          </template>
+        </div>
+        <div style="border-top:1px solid #334155;margin-top:4px;padding-top:6px;font-size:10px;color:#94a3b8;text-align:center;">
+          <span x-text="selectedItems.length"></span> selected / <span x-text="uniqueItems().length"></span> total
+        </div>
+      </div>
+    </div>
+
     <button class="btn-refresh" :class="loading ? 'spinning' : ''" @click="load()" title="Refresh">
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
            fill="none" stroke="currentColor" stroke-width="2.2"
@@ -159,6 +208,27 @@
         <span x-show="refreshing">Recomputing…</span>
       </button>
     @endif
+  </div>
+
+  <!-- Selected item pills -->
+  <div x-show="selectedItems.length" x-cloak
+       style="background:#f1f5f9;border-bottom:1px solid #e2e8f0;padding:6px 12px;
+              display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+    <span style="font-size:11px;color:#475569;font-weight:700;margin-right:4px;">Filter:</span>
+    <template x-for="name in selectedItems" :key="name">
+      <span style="display:inline-flex;align-items:center;gap:4px;background:#dbeafe;
+                   color:#1e3a8a;border:1px solid #93c5fd;border-radius:12px;
+                   padding:2px 8px;font-size:11px;font-weight:600;">
+        <span x-text="name"></span>
+        <button type="button" @click="toggleItem(name)"
+                style="background:none;border:none;color:#1e3a8a;cursor:pointer;
+                       font-size:14px;line-height:1;padding:0;font-weight:700;"
+                title="Remove">×</button>
+      </span>
+    </template>
+    <button type="button" @click="clearItems()"
+            style="background:none;border:none;color:#ef4444;cursor:pointer;
+                   font-size:11px;font-weight:700;margin-left:4px;">Clear all</button>
   </div>
 
   <!-- Scroll area -->
@@ -260,7 +330,7 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.proj_profit_per_order!==null&&row.price>0?rppStyle(row.proj_profit_per_order/row.price*100):'')">
+                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -298,15 +368,15 @@
                     <span style="color:#111;" x-text="md(row.proj_profit_per_order)"></span>
                   </template>
 
-                  <!-- proj_pct = /order ÷ price × 100 — bold, cell bg from rppStyle -->
+                  <!-- proj_pct = projected_profit ÷ gross_sales × 100 (net margin) -->
                   <template x-if="col.id==='proj_pct'">
                     <span>
-                      <template x-if="row.proj_profit_per_order !== null && row.price > 0">
+                      <template x-if="row.projected_profit !== null && row.gross_sales > 0">
                         <span style="font-weight:700;"
-                              :style="'color:'+rppColor(row.proj_profit_per_order/row.price*100)"
-                              x-text="(row.proj_profit_per_order/row.price*100).toFixed(1)+'%'"></span>
+                              x-text="(row.projected_profit/row.gross_sales*100).toFixed(1)+'%'"
+                              :title="'profit ₱'+Number(row.projected_profit||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / gross ₱'+Number(row.gross_sales).toLocaleString('en-PH',{maximumFractionDigits:0})"></span>
                       </template>
-                      <template x-if="!(row.proj_profit_per_order !== null && row.price > 0)">
+                      <template x-if="!(row.projected_profit !== null && row.gross_sales > 0)">
                         <span style="color:#cbd5e1;">—</span>
                       </template>
                     </span>
@@ -573,6 +643,33 @@
       dragSrc:null, dragOver:null,
       cols:[],
 
+      // ── Item filter (multi-select) ───────────────────────────────────────
+      selectedItems: [],
+      itemFilterOpen: false,
+      itemFilterSearch: '',
+      uniqueItems() {
+        const set = new Set();
+        for (const r of this.rows) { if (r.item_name) set.add(r.item_name); }
+        return [...set].sort((a,b)=>a.localeCompare(b));
+      },
+      visibleItems() {
+        const q = (this.itemFilterSearch||'').toLowerCase().trim();
+        const items = this.uniqueItems();
+        if (!q) return items;
+        return items.filter(n => n.toLowerCase().includes(q));
+      },
+      toggleItem(name) {
+        const i = this.selectedItems.indexOf(name);
+        if (i>=0) this.selectedItems.splice(i,1);
+        else this.selectedItems.push(name);
+      },
+      clearItems() { this.selectedItems = []; },
+      filteredRows() {
+        if (!this.selectedItems.length) return this.rows;
+        const sel = new Set(this.selectedItems);
+        return this.rows.filter(r => sel.has(r.item_name));
+      },
+
       // ── Column definitions ────────────────────────────────────────────────
       defaultCols() {
         return [
@@ -709,9 +806,10 @@
       arr(col){ return this.sortCol!==col?'':(this.sortDir==='asc'?' ↑':' ↓'); },
       ac(col) { return this.sortCol===col?'col-active':''; },
       sortedRows(){
-        if(!this.sortCol) return this.rows;
+        const base = this.filteredRows();
+        if(!this.sortCol) return base;
         const c=this.sortCol, d=this.sortDir==='asc'?1:-1;
-        return [...this.rows].sort((a,b)=>{
+        return [...base].sort((a,b)=>{
           let va=a[c], vb=b[c];
           if(va==null) va=typeof vb==='string'?'':-Infinity;
           if(vb==null) vb=typeof va==='string'?'':-Infinity;
@@ -779,7 +877,7 @@
       tot() {
         const t = { adspent:0, orders:0, proceed_orders:0, gross_sales:0, projected_profit:null, cpp:null, proceed_cpp:null, proj_profit_per_order:null, proj_pct:null };
         let hasP=false, hasG=false;
-        for (const r of this.rows) {
+        for (const r of this.filteredRows()) {
           t.adspent        += Number(r.adspent        ||0);
           t.orders         += Number(r.orders         ||0);
           t.proceed_orders += Number(r.proceed_orders ||0);
