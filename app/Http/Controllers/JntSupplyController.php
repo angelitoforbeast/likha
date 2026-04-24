@@ -14,6 +14,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class JntSupplyController extends Controller
 {
@@ -421,6 +422,66 @@ class JntSupplyController extends Controller
             $primaryPageSet[$d][$pgKey] = true;
         }
 
+        // === PROCEED ORDERS (from macro_output) — mirrors /owner/private ===
+        // Build $proceedMap[item_key][date][page_key] = proceed_orders
+        // where proceed_orders = COUNT(rows with status='proceed') grouped by
+        // (DATE(ts_date), page_key, item_norm). Normalization must match $normItem
+        // (lower + strip spaces/dashes/underscores).
+        $quoteCol   = fn(string $col) => $driver === 'pgsql' ? '"'.$col.'"' : '`'.$col.'`';
+        $trimFn     = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $pickCol    = function (string $table, array $candidates) {
+            foreach ($candidates as $c) {
+                if (Schema::hasColumn($table, $c)) return $c;
+            }
+            return null;
+        };
+        $moPageCol   = $pickCol('macro_output', ['PAGE','page','page_name','Page']) ?? 'PAGE';
+        $moItemCol   = $pickCol('macro_output', ['ITEM_NAME','item_name','ITEM','item']) ?? 'ITEM_NAME';
+        $moStatusCol = $pickCol('macro_output', ['STATUS','status','Status']) ?? 'STATUS';
+        $moPageExpr   = 'mo.'.$quoteCol($moPageCol);
+        $moItemExpr   = 'mo.'.$quoteCol($moItemCol);
+        $moStatusExpr = 'mo.'.$quoteCol($moStatusCol);
+
+        $po_statusNorm = "LOWER(REPLACE(REPLACE($trimFn($moStatusExpr),' ',''),'_',''))";
+        $po_pageTrim   = "$trimFn(COALESCE($moPageExpr,''))";
+        $po_pageKey    = "LOWER($po_pageTrim)";
+        $po_itemTrim   = "$trimFn(COALESCE($moItemExpr,''))";
+        $po_itemNorm   = "LOWER(REPLACE(REPLACE(REPLACE($po_itemTrim,' ',''),'-',''),'_',''))";
+
+        if (Schema::hasColumn('macro_output', 'ts_date')) {
+            $po_dateExpr = 'DATE(mo.ts_date)';
+        } else {
+            $tsCol = $pickCol('macro_output', ['TIMESTAMP','timestamp']) ?? 'created_at';
+            $tsRef = 'mo.'.$quoteCol($tsCol);
+            if ($driver === 'mysql') {
+                $po_dateExpr = "COALESCE(DATE(STR_TO_DATE($tsRef,'%H:%i %d-%m-%Y')),DATE(STR_TO_DATE($tsRef,'%H:%i %m-%d-%Y')),DATE(mo.`created_at`))";
+            } else {
+                $po_dateExpr = "DATE(COALESCE(TO_TIMESTAMP(NULLIF($tsRef,''),'HH24:MI DD-MM-YYYY'),TO_TIMESTAMP(NULLIF($tsRef,''),'HH24:MI MM-DD-YYYY'),mo.\"created_at\"))";
+            }
+        }
+
+        $proceedRows = DB::table('macro_output as mo')
+            ->whereRaw("$po_dateExpr BETWEEN ? AND ?", [$profitFrom, $asOfDate])
+            ->whereRaw("$po_pageTrim != ''")
+            ->selectRaw("
+                $po_dateExpr   AS d,
+                $po_pageKey    AS page_key,
+                $po_itemNorm   AS item_key,
+                SUM(CASE WHEN $po_statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders
+            ")
+            ->groupByRaw("$po_dateExpr, $po_pageKey, $po_itemNorm")
+            ->get();
+
+        // $proceedMap[item_key][date][page_key] = proceed_orders
+        $proceedMap = [];
+        foreach ($proceedRows as $pr) {
+            $ik = (string) $pr->item_key;
+            $dd = (string) $pr->d;
+            $pk = (string) $pr->page_key;
+            if ($ik === '' || $pk === '') continue;
+            $proceedMap[$ik][$dd][$pk] = (int) $pr->proceed_orders;
+        }
+
         // Ads per (day, page_key)
         $adsRows = DB::table('ads_manager_reports')
             ->whereBetween('day', [$profitFrom, $asOfDate])
@@ -620,12 +681,18 @@ class JntSupplyController extends Controller
             $baseKey  = $normItem($base);
             $perDate  = $primaryByBase[$baseKey] ?? [];
 
+            // Ground truth: /owner/private → profit% = projected_profit / Σ(SRP × primary_orders)
+            // Numerator uses PROCEED orders (delivered-only revenue + delivered-only COGS/COD fee,
+            // but shipping is charged on all proceed attempts). Denominator uses all primary orders.
             foreach ($perDate as $d => $pagesForDate) {
                 if ($d < $profitStartDate || $d > $asOfDate) continue;
                 foreach ($pagesForDate as $pgKey => $slice) {
                     $orders  = (int) $slice['orders'];
                     if ($orders <= 0) continue;
                     $modeCod = (float) $slice['mode_cod'];
+
+                    // proceed_orders from macro_output (status='proceed'); 0 when unresolved.
+                    $proceed = (int) ($proceedMap[$baseKey][$d][$pgKey] ?? 0);
 
                     // COGS — page override first, then base cogs
                     $override = $pisMap[$pgKey][$base]['price']   ?? null;
@@ -637,23 +704,22 @@ class JntSupplyController extends Controller
                     if ($unitCost > 0) $hasAnyCogs = true;
 
                     // RTS — page override first, fallback to item-wide rate
-                    $sliceRts = $pisMap[$pgKey][$base]['rts_pct'] ?? $rtsPct;
-                    $sliceDelivered = max(0.01, 1 - $sliceRts / 100);
-                    $shipped = $orders * $sliceDelivered;
+                    $sliceRts      = $pisMap[$pgKey][$base]['rts_pct'] ?? $rtsPct;
+                    $deliverFactor = max(0.0, 1.0 - $sliceRts / 100.0);
 
-                    $gross       = $orders * $modeCod;
-                    $shippingFee = $shipped * $SHIPPING_PER_SHIPPED;
-                    $codFee      = $shipped * $modeCod * $COD_FEE_RATE;
-                    $vat         = $codFee * $COD_FEE_VAT_RATE;
-                    $cogsTotal   = $shipped * $unitCost;
+                    $ads       = (float) ($adsMap[$d][$pgKey] ?? 0);
+                    $codFeeDay = $modeCod * $COD_FEE_RATE * (1 + $COD_FEE_VAT_RATE);
 
-                    // This base IS the primary on (d, pgKey) by construction → attribute ads.
-                    $ads = (float) ($adsMap[$d][$pgKey] ?? 0);
+                    // Denominator: Σ(SRP × primary_orders) — matches /owner/private
+                    $sumGross += $modeCod * $orders;
 
-                    $net = $gross - $ads - $shippingFee - $codFee - $vat - $cogsTotal;
-
-                    $sumGross += $gross;
-                    $sumNet   += $net;
+                    // Numerator: proceed-based, delivered-only — matches /owner/private
+                    $sumNet +=
+                          $proceed * $modeCod * $deliverFactor             // revenue
+                        - $proceed * $SHIPPING_PER_SHIPPED                  // shipping (all proceed)
+                        - $proceed * $deliverFactor * $unitCost             // COGS (delivered)
+                        - $ads                                              // adspent
+                        - $proceed * $deliverFactor * $codFeeDay;           // COD fee (delivered)
                 }
             }
 
