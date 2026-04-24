@@ -27,12 +27,28 @@
 <body class="min-h-screen">
 
   <!-- Header -->
-  <div class="bg-slate-900 text-slate-100 px-4 py-3 flex items-center gap-3 shadow">
+  <div class="bg-slate-900 text-slate-100 px-4 py-3 flex items-center gap-3 shadow flex-wrap">
     <a href="{{ route('owner.private') }}?start_date={{ $startDate }}&end_date={{ $endDate }}"
        class="text-slate-400 hover:text-white text-sm">← Back to Daily Summary</a>
+    <span class="text-sm font-bold ml-3">Breakdown Matrix</span>
+
+    <form method="GET" action="{{ route('owner.private.breakdown') }}"
+          class="flex items-center gap-2 ml-4">
+      <label class="text-xs text-slate-400 font-semibold">From</label>
+      <input type="date" name="start_date" value="{{ $startDate }}"
+             class="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+      <label class="text-xs text-slate-400 font-semibold">To</label>
+      <input type="date" name="end_date" value="{{ $endDate }}"
+             class="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm">
+      <button type="submit"
+              class="bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1 text-xs font-bold">Go</button>
+      <a href="{{ route('owner.private.breakdown') }}"
+         class="text-xs text-slate-400 hover:text-white ml-1"
+         title="Reset to this month">↺ this month</a>
+    </form>
+
     <div class="flex-1"></div>
-    <span class="text-sm font-bold">Breakdown Matrix</span>
-    <span class="text-xs text-slate-400 ml-3">{{ $startDate }} → {{ $endDate }} ({{ count($dates) }} days · {{ count($pages) }} pages)</span>
+    <span class="text-xs text-slate-400">{{ $startDate }} → {{ $endDate }} ({{ count($dates) }} days · {{ count($pages) }} pages)</span>
   </div>
 
   <!-- Legend -->
@@ -72,10 +88,18 @@
                      class="text-slate-900 hover:text-blue-600 font-semibold"
                      target="_blank">{{ $p['page_label'] }}</a>
                   @if($p['mixed'])
-                    <div class="text-[10px] text-amber-700 font-semibold mt-0.5">⚠ {{ $p['distinct_count'] }} items</div>
+                    <div class="text-[10px] text-amber-700 font-semibold mt-0.5">
+                      ⚠ {{ $p['distinct_count'] }} items · {{ $p['anchor_included_days'] }}/{{ count($dates) }} d
+                    </div>
                   @endif
                   @if($p['anchor_item'])
                     <div class="anchor-label mt-0.5" title="anchor item (end-date primary)">→ {{ $p['anchor_item'] }}</div>
+                  @endif
+                  @if($p['anchor_first_date'])
+                    <div class="text-[10px] text-slate-500 mt-0.5"
+                         title="Earliest date in range where this page's primary = anchor. Compute starts here.">
+                      computed since {{ \Carbon\Carbon::parse($p['anchor_first_date'])->format('M d') }}
+                    </div>
                   @endif
                 </th>
                 @foreach($dates as $d)

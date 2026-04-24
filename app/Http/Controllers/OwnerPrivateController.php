@@ -1437,6 +1437,14 @@ class OwnerPrivateController extends Controller
             // Keep empty array for view safety (existing template iterates row.secondary_items||[]).
             $items = [$primary];
 
+            // Earliest included date = first date in range where page's primary matched anchor
+            $anchorFirstDate = null;
+            if (!empty($includedDates)) {
+                ksort($includedDates);
+                $anchorFirstDate = array_key_first($includedDates);
+                $primary['included_dates'] = $includedDates; // refresh sorted copy
+            }
+
             $pageGroups[$pk] = [
                 'page_label'     => (string)$pr->page_label,
                 'page_key'       => $pk,
@@ -1449,6 +1457,7 @@ class OwnerPrivateController extends Controller
                 'distinct_items_in_range'=> $distinctCount,
                 'mixed_primary'          => $mixedPrimary,
                 'adspent_total'          => array_sum(array_column($includedDates, 'adspent')),
+                'anchor_first_date'      => $anchorFirstDate,
             ];
         }
 
@@ -1685,6 +1694,7 @@ class OwnerPrivateController extends Controller
                 'excluded_days'          => (int)($pg['excluded_days'] ?? 0),
                 'distinct_items_in_range'=> (int)($pg['distinct_items_in_range'] ?? 0),
                 'mixed_primary'          => (bool)($pg['mixed_primary'] ?? false),
+                'anchor_first_date'      => $pg['anchor_first_date'] ?? null,
             ];
         }
 
@@ -1812,12 +1822,20 @@ class OwnerPrivateController extends Controller
 
         $pageKey   = (string) $request->input('page_key', '');
         $startDate = (string) $request->input('start_date', '');
-        $endDate   = (string) $request->input('end_date', $startDate);
+        $endDate   = (string) $request->input('end_date', '');
 
         $validDate = fn($s) => is_string($s) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $s);
-        if (!$validDate($startDate)) $startDate = (new \DateTime('now', new \DateTimeZone('Asia/Manila')))->format('Y-m-d');
-        if (!$validDate($endDate))   $endDate   = $startDate;
-        if ($startDate > $endDate)   [$startDate, $endDate] = [$endDate, $startDate];
+        $tz    = new \DateTimeZone('Asia/Manila');
+        $today = (new \DateTime('now', $tz))->format('Y-m-d');
+        // Default: this month (first day of current month → today, PH time)
+        if (!$validDate($startDate) && !$validDate($endDate)) {
+            $startDate = (new \DateTime('now', $tz))->modify('first day of this month')->format('Y-m-d');
+            $endDate   = $today;
+        } else {
+            if (!$validDate($startDate)) $startDate = $endDate ?: $today;
+            if (!$validDate($endDate))   $endDate   = $startDate;
+        }
+        if ($startDate > $endDate) [$startDate, $endDate] = [$endDate, $startDate];
 
         // No page_key → MATRIX view (all pages × all dates)
         if ($pageKey === '') {
@@ -1899,6 +1917,18 @@ class OwnerPrivateController extends Controller
         foreach ($pagesList as &$p) {
             $p['distinct_count'] = count($p['distinct_items']);
             $p['mixed']          = $p['distinct_count'] >= 2;
+            // Earliest date in range where this page's primary matched anchor
+            $p['anchor_first_date'] = null;
+            $p['anchor_included_days'] = 0;
+            if ($p['anchor_item_key'] !== null) {
+                ksort($p['cells']);
+                foreach ($p['cells'] as $d => $c) {
+                    if ($c['item_key'] === $p['anchor_item_key']) {
+                        if ($p['anchor_first_date'] === null) $p['anchor_first_date'] = $d;
+                        $p['anchor_included_days']++;
+                    }
+                }
+            }
             unset($p['distinct_items']);
         }
         unset($p);

@@ -225,10 +225,16 @@
                         x-text="row.page_name"></span>
                 </template>
                 <template x-if="row.mixed_primary">
-                  <div style="font-size:10px;color:#b45309;font-weight:600;line-height:1.3;margin-top:2px;cursor:pointer;"
-                       @click="openBreakdown(row)"
+                  <div style="cursor:pointer;" @click="openBreakdown(row)"
                        :title="row.distinct_items_in_range + ' distinct primary items across ' + row.range_days + '-day range. Click to see breakdown.'">
-                    ⚠ mixed primary · <span x-text="row.included_days + '/' + row.range_days + ' d'"></span>
+                    <div style="font-size:10px;color:#b45309;font-weight:600;line-height:1.3;margin-top:2px;">
+                      ⚠ mixed primary · <span x-text="row.included_days + '/' + row.range_days + ' d'"></span>
+                    </div>
+                    <template x-if="row.anchor_first_date">
+                      <div style="font-size:9px;color:#64748b;line-height:1.2;">
+                        computed since <span x-text="fmtMD(row.anchor_first_date)"></span>
+                      </div>
+                    </template>
                   </div>
                 </template>
               </td>
@@ -792,6 +798,12 @@
       money(v){ return '₱'+Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); },
       md(v)   { return (v==null||isNaN(Number(v)))?'—':this.money(v); },
       num(v)  { return Number(v||0).toLocaleString('en-PH'); },
+      fmtMD(dstr){
+        if(!dstr) return '';
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dstr); if(!m) return dstr;
+        const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return months[parseInt(m[2],10)-1]+' '+parseInt(m[3],10);
+      },
 
       async init(){
         this.initCols();
