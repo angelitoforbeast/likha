@@ -715,6 +715,10 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/jnt/supply/settings', [\App\Http\Controllers\JntSupplyController::class, 'saveSettings'])->name('jnt.supply.settings');
     Route::post('/jnt/supply/class-thresholds', [\App\Http\Controllers\JntSupplyController::class, 'saveClassThresholds'])->name('jnt.supply.class-thresholds');
     Route::post('/jnt/supply/setting-kv', [\App\Http\Controllers\JntSupplyController::class, 'saveSupplySetting'])->name('jnt.supply.setting-kv');
+    Route::post('/jnt/supply/class-rules',         [\App\Http\Controllers\JntSupplyController::class, 'createClassRule'])->name('jnt.supply.rules.create');
+    Route::put ('/jnt/supply/class-rules/{id}',    [\App\Http\Controllers\JntSupplyController::class, 'updateClassRule'])->name('jnt.supply.rules.update');
+    Route::delete('/jnt/supply/class-rules/{id}',  [\App\Http\Controllers\JntSupplyController::class, 'deleteClassRule'])->name('jnt.supply.rules.delete');
+    Route::post('/jnt/supply/class-rules/reorder', [\App\Http\Controllers\JntSupplyController::class, 'reorderClassRules'])->name('jnt.supply.rules.reorder');
 
 
     // ✅ Validation Lists (CEO, Marketing, Marketing OIC)

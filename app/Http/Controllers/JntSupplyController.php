@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ItemClassRule;
 use App\Models\ItemClassThreshold;
 use App\Models\SupplyItemSetting;
 use App\Models\SupplySetting;
@@ -95,89 +96,61 @@ class JntSupplyController extends Controller
     }
 
     // -----------------------------------------------------------------------
-    // Item class classification (A / B / C / D / E / F / H)
+    // Item class classification — DB-driven via item_class_rules table.
+    // Rules are evaluated in sort_order; first match wins.
     //
-    // Priority (top wins):
-    //   1. D — age < new_item_days (bagong item, wag muna hatulan)
-    //   2. A — age ≥ A_window AND A_window avg ≥ A_min AND A_alive ≥ A_alive_min
-    //   3. B — same pattern with B thresholds
-    //   4. C — same pattern with C thresholds
-    //   5. E — is_running AND E_alive_avg ≥ E_alive_min
-    //          (may ads pa, below C, pero buhay-buhay)
-    //   6. F — NOT is_running OR F_alive_avg < F_alive_min
-    //          (walang ads, o sobrang baba)
-    //   7. H — catch-all (review needed)
+    // Supported rule_type values:
+    //   - 'age_lt'        → age < age_threshold   (new-item guard)
+    //   - 'velocity_tier' → age ≥ window AND window_avg ≥ min_velocity
+    //                       AND alive_avg ≥ alive_min
+    //   - 'catch_all'     → always matches (place last)
     // -----------------------------------------------------------------------
     private function classifyItemClass(
-        int   $daysRunning,
-        float $aWindowAvg, float $bWindowAvg, float $cWindowAvg,
-        float $aAliveAvg,  float $bAliveAvg,  float $cAliveAvg,
-        float $eAliveAvg,  float $fAliveAvg,
-        bool  $isRunning,
-        int   $dNewItemDays,
-        float $aMin, int $aWindowDays, float $aAliveMin,
-        float $bMin, int $bWindowDays, float $bAliveMin,
-        float $cMin, int $cWindowDays, float $cAliveMin,
-        float $eAliveMin,
-        float $fAliveMin
+        iterable $rules,
+        int $daysRunning,
+        callable $windowSum
     ): string {
-        // 1. D — new item
-        if ($daysRunning < $dNewItemDays) {
-            return 'D';
-        }
-        // 2/3/4. A/B/C with full-maturity + per-class alive guard
-        if ($daysRunning >= $aWindowDays && $aWindowAvg >= $aMin && $aAliveAvg >= $aAliveMin) {
-            return 'A';
-        }
-        if ($daysRunning >= $bWindowDays && $bWindowAvg >= $bMin && $bAliveAvg >= $bAliveMin) {
-            return 'B';
-        }
-        if ($daysRunning >= $cWindowDays && $cWindowAvg >= $cMin && $cAliveAvg >= $cAliveMin) {
-            return 'C';
-        }
-        // 5. E — running ads, below C, still alive
-        if ($isRunning && $eAliveAvg >= $eAliveMin) {
-            return 'E';
-        }
-        // 6. F — no ads, or sobrang baba
-        if (!$isRunning || $fAliveAvg < $fAliveMin) {
-            return 'F';
-        }
-        // 7. Catch-all
-        return 'H';
-    }
+        $fallback = 'X';
 
-    // -----------------------------------------------------------------------
-    // Item class badge label + Tailwind classes
-    // -----------------------------------------------------------------------
-    private function classBadge(string $key): array
-    {
-        return match ($key) {
-            'A' => ['A · Hero',               'bg-purple-600 text-white'],
-            'B' => ['B · Solid',              'bg-blue-500 text-white'],
-            'C' => ['C · Active',             'bg-yellow-400 text-gray-900'],
-            'D' => ['D · New Item',           'bg-orange-400 text-white'],
-            'E' => ['E · Low-Vel Running',    'bg-amber-600 text-white'],
-            'F' => ['F · Dead / No Ads',      'bg-rose-700 text-white'],
-            'H' => ['H · Review',             'bg-gray-500 text-white'],
-            default => ['? · Unknown',        'bg-gray-200 text-gray-500'],
-        };
-    }
+        foreach ($rules as $rule) {
+            $type = $rule->rule_type;
 
-    // -----------------------------------------------------------------------
-    // Class badge Tailwind map (for Blade threshold editor)
-    // -----------------------------------------------------------------------
-    private function classBadgeMap(): array
-    {
-        return [
-            'A' => 'bg-purple-600 text-white',
-            'B' => 'bg-blue-500 text-white',
-            'C' => 'bg-yellow-400 text-gray-900',
-            'D' => 'bg-orange-400 text-white',
-            'E' => 'bg-amber-600 text-white',
-            'F' => 'bg-rose-700 text-white',
-            'H' => 'bg-gray-500 text-white',
-        ];
+            if ($type === ItemClassRule::TYPE_AGE_LT) {
+                $t = (int) ($rule->age_threshold ?? 0);
+                if ($t > 0 && $daysRunning < $t) {
+                    return $rule->class_key;
+                }
+                continue;
+            }
+
+            if ($type === ItemClassRule::TYPE_VELOCITY_TIER) {
+                $win       = (int)   ($rule->window_days  ?? 0);
+                $minVel    = (float) ($rule->min_velocity ?? 0);
+                $aliveWin  = (int)   ($rule->alive_window ?? $win);
+                $aliveMin  = (float) ($rule->alive_min    ?? 0);
+                if ($win <= 0) continue;
+
+                if ($daysRunning < $win) continue;
+
+                $windowAvg = $windowSum($win) / $win;
+                if ($windowAvg < $minVel) continue;
+
+                if ($aliveWin > 0 && $aliveMin > 0) {
+                    $aliveAvg = $windowSum($aliveWin) / $aliveWin;
+                    if ($aliveAvg < $aliveMin) continue;
+                }
+                return $rule->class_key;
+            }
+
+            if ($type === ItemClassRule::TYPE_CATCH_ALL) {
+                $fallback = $rule->class_key;
+                // don't return yet — a later rule could still match; but by
+                // sort_order, catch_all should be last. Safe to return.
+                return $rule->class_key;
+            }
+        }
+
+        return $fallback;
     }
 
     // -----------------------------------------------------------------------
@@ -227,36 +200,24 @@ class JntSupplyController extends Controller
 
         $itemCol = $driver === 'pgsql' ? '"ITEM_NAME"' : '`ITEM_NAME`';
 
-        // -- Load class thresholds (sorted descending for classification) ---
-        $classThresholdsFull = ItemClassThreshold::orderBy('sort_order')->get();
-        $classThresholds = $classThresholdsFull
-            ->sortByDesc('min_velocity')
-            ->map(fn($t) => ['class_key' => $t->class_key, 'min_velocity' => (float)$t->min_velocity])
-            ->values()
-            ->toArray();
-        $classBadgeMap = $this->classBadgeMap();
+        // -- Load class rules (DB-driven CRUD) ------------------------------
+        $classRules = ItemClassRule::ordered()->get();
 
-        // -- Load supply_settings (CEO-editable KV) -------------------------
+        // Badge map: class_key => ['label', 'badge_tailwind']
+        $classBadgeMap = [];
+        foreach ($classRules as $r) {
+            $classBadgeMap[$r->class_key] = [
+                'label'  => $r->label,
+                'badge'  => $r->badge_tailwind,
+            ];
+        }
+
+        // Available palette for badge color dropdown
+        $classPalette = ItemClassRule::palette();
+
+        // -- Load supply_settings (CEO-editable KV, lifecycle defaults) -----
         $supplyKv = SupplySetting::asMap();
         $supplySettingsAll = SupplySetting::orderBy('group')->orderBy('sort_order')->get();
-
-        $cfgDNewItemDays  = (int)   ($supplyKv['new_item_days']          ?? 7);
-        $cfgAMinVel       = (float) ($supplyKv['class_a_min_velocity']   ?? 200);
-        $cfgAWindowDays   = (int)   ($supplyKv['class_a_window_days']    ?? 30);
-        $cfgBMinVel       = (float) ($supplyKv['class_b_min_velocity']   ?? 100);
-        $cfgBWindowDays   = (int)   ($supplyKv['class_b_window_days']    ?? 15);
-        $cfgCMinVel       = (float) ($supplyKv['class_c_min_velocity']   ?? 50);
-        $cfgCWindowDays   = (int)   ($supplyKv['class_c_window_days']    ?? 7);
-        $cfgAAliveWindow  = (int)   ($supplyKv['class_a_alive_window']   ?? 7);
-        $cfgAAliveMin     = (float) ($supplyKv['class_a_alive_min']      ?? 10);
-        $cfgBAliveWindow  = (int)   ($supplyKv['class_b_alive_window']   ?? 7);
-        $cfgBAliveMin     = (float) ($supplyKv['class_b_alive_min']      ?? 10);
-        $cfgCAliveWindow  = (int)   ($supplyKv['class_c_alive_window']   ?? 7);
-        $cfgCAliveMin     = (float) ($supplyKv['class_c_alive_min']      ?? 10);
-        $cfgEAliveWindow  = (int)   ($supplyKv['class_e_alive_window']   ?? 14);
-        $cfgEAliveMin     = (float) ($supplyKv['class_e_alive_min']      ?? 5);
-        $cfgFAliveWindow  = (int)   ($supplyKv['class_f_alive_window']   ?? 30);
-        $cfgFAliveMin     = (float) ($supplyKv['class_f_alive_min']      ?? 1);
 
         // -- 1. Hold counts -------------------------------------------------
         // Scope: last month (1st) onwards, by ts_date.
@@ -365,13 +326,14 @@ class JntSupplyController extends Controller
         }
 
         // -- 7b. Class-window aggregates: per-item-per-date orders within
-        //       max(A, B, C, alive) window. Sub-windows computed in PHP.
-        $maxClassWindow = max(
-            $cfgAWindowDays, $cfgBWindowDays, $cfgCWindowDays,
-            $cfgAAliveWindow, $cfgBAliveWindow, $cfgCAliveWindow,
-            $cfgEAliveWindow, $cfgFAliveWindow,
-            1
-        );
+        //       the largest window required by any active rule. Sub-windows
+        //       computed in PHP via $windowSum closure.
+        $maxClassWindow = 1;
+        foreach ($classRules as $r) {
+            if ($r->rule_type === ItemClassRule::TYPE_VELOCITY_TIER) {
+                $maxClassWindow = max($maxClassWindow, (int)($r->window_days ?? 0), (int)($r->alive_window ?? 0));
+            }
+        }
         $classFromDate  = Carbon::parse($asOfDate, 'Asia/Manila')
             ->subDays($maxClassWindow - 1)
             ->toDateString();
@@ -491,39 +453,33 @@ class JntSupplyController extends Controller
 
             [$lifecycleLabel, $lifecycleBadgeClass] = $this->lifecycleBadge($lifecycle);
 
-            // -- Item Class (A / B / C / D / H) -----------------------------
-            // Per-window averages (fixed denominators = window days)
-            $aAvg      = $cfgAWindowDays  > 0 ? $windowSum($base, $cfgAWindowDays)  / $cfgAWindowDays  : 0.0;
-            $bAvg      = $cfgBWindowDays  > 0 ? $windowSum($base, $cfgBWindowDays)  / $cfgBWindowDays  : 0.0;
-            $cAvg      = $cfgCWindowDays  > 0 ? $windowSum($base, $cfgCWindowDays)  / $cfgCWindowDays  : 0.0;
-            $aAliveAvg = $cfgAAliveWindow > 0 ? $windowSum($base, $cfgAAliveWindow) / $cfgAAliveWindow : 0.0;
-            $bAliveAvg = $cfgBAliveWindow > 0 ? $windowSum($base, $cfgBAliveWindow) / $cfgBAliveWindow : 0.0;
-            $cAliveAvg = $cfgCAliveWindow > 0 ? $windowSum($base, $cfgCAliveWindow) / $cfgCAliveWindow : 0.0;
-            $eAliveAvg = $cfgEAliveWindow > 0 ? $windowSum($base, $cfgEAliveWindow) / $cfgEAliveWindow : 0.0;
-            $fAliveAvg = $cfgFAliveWindow > 0 ? $windowSum($base, $cfgFAliveWindow) / $cfgFAliveWindow : 0.0;
+            // -- Item Class (DB-driven via ItemClassRule) -------------------
+            // Per-base window-sum closure (binds the item name)
+            $sumFor = fn(int $days) => $windowSum($base, $days);
 
             $classOverride = $setting?->class_override ?? null;
-            if ($classOverride) {
+            if ($classOverride && isset($classBadgeMap[$classOverride])) {
                 $itemClass     = $classOverride;
                 $itemClassAuto = false;
             } else {
-                $itemClass     = $this->classifyItemClass(
-                    $daysRunning,
-                    $aAvg, $bAvg, $cAvg,
-                    $aAliveAvg, $bAliveAvg, $cAliveAvg,
-                    $eAliveAvg, $fAliveAvg,
-                    $isRunning,
-                    $cfgDNewItemDays,
-                    $cfgAMinVel, $cfgAWindowDays, $cfgAAliveMin,
-                    $cfgBMinVel, $cfgBWindowDays, $cfgBAliveMin,
-                    $cfgCMinVel, $cfgCWindowDays, $cfgCAliveMin,
-                    $cfgEAliveMin,
-                    $cfgFAliveMin
-                );
+                $itemClass     = $this->classifyItemClass($classRules, $daysRunning, $sumFor);
                 $itemClassAuto = true;
             }
 
-            [$itemClassLabel, $itemClassBadge] = $this->classBadge($itemClass);
+            $itemClassLabel = $classBadgeMap[$itemClass]['label'] ?? ($itemClass . ' · Unknown');
+            $itemClassBadge = $classBadgeMap[$itemClass]['badge'] ?? 'bg-gray-200 text-gray-500';
+
+            // Per-rule diagnostic averages (for hover tooltip)
+            $ruleDiagnostics = [];
+            foreach ($classRules as $r) {
+                if ($r->rule_type !== ItemClassRule::TYPE_VELOCITY_TIER) continue;
+                $win   = (int)($r->window_days  ?? 0);
+                $aliveW= (int)($r->alive_window ?? 0);
+                $ruleDiagnostics[$r->class_key] = [
+                    'win_avg'   => $win > 0      ? round($windowSum($base, $win)    / $win,    2) : 0,
+                    'alive_avg' => $aliveW > 0   ? round($windowSum($base, $aliveW) / $aliveW, 2) : 0,
+                ];
+            }
 
             $items[] = [
                 'item'                => $base,
@@ -551,14 +507,7 @@ class JntSupplyController extends Controller
                 'item_class_auto'     => $itemClassAuto,
                 'item_class_label'    => $itemClassLabel,
                 'item_class_badge'    => $itemClassBadge,
-                'a_avg'               => round($aAvg, 2),
-                'b_avg'               => round($bAvg, 2),
-                'c_avg'               => round($cAvg, 2),
-                'a_alive_avg'         => round($aAliveAvg, 2),
-                'b_alive_avg'         => round($bAliveAvg, 2),
-                'c_alive_avg'         => round($cAliveAvg, 2),
-                'e_alive_avg'         => round($eAliveAvg, 2),
-                'f_alive_avg'         => round($fAliveAvg, 2),
+                'rule_diagnostics'    => $ruleDiagnostics,
             ];
         }
 
@@ -600,19 +549,11 @@ class JntSupplyController extends Controller
             'declineThreshold',
             'lifecycleFilter',
             'classFilter',
-            'classThresholdsFull',
+            'classRules',
             'classBadgeMap',
+            'classPalette',
             'isCeo',
             'supplySettingsAll',
-            'cfgDNewItemDays',
-            'cfgAMinVel', 'cfgAWindowDays',
-            'cfgBMinVel', 'cfgBWindowDays',
-            'cfgCMinVel', 'cfgCWindowDays',
-            'cfgAAliveWindow', 'cfgAAliveMin',
-            'cfgBAliveWindow', 'cfgBAliveMin',
-            'cfgCAliveWindow', 'cfgCAliveMin',
-            'cfgEAliveWindow', 'cfgEAliveMin',
-            'cfgFAliveWindow', 'cfgFAliveMin',
         ));
     }
 
@@ -628,8 +569,16 @@ class JntSupplyController extends Controller
             'is_running'         => 'nullable|in:0,1,auto',
             'notes'              => 'nullable|string|max:500',
             'lifecycle_override' => 'nullable|in:,new,scaling,consistent,active,declining,phasing_out,dormant',
-            'class_override'     => 'nullable|in:,A,B,C,D,E,F,H',
+            'class_override'     => 'nullable|string|max:10',
         ]);
+
+        // Validate class_override against existing rules (empty OK)
+        if (!empty($validated['class_override'])) {
+            $exists = ItemClassRule::where('class_key', $validated['class_override'])->exists();
+            if (!$exists) {
+                return response()->json(['error' => 'Unknown class_key'], 422);
+            }
+        }
 
         $itemName  = $validated['item_name'];
         $isRunning = null;
@@ -728,5 +677,156 @@ class JntSupplyController extends Controller
         $setting->save();
 
         return response()->json(['success' => true, 'key' => $setting->key, 'value' => $setting->value]);
+    }
+
+    // =======================================================================
+    //  Class Rules CRUD — CEO only
+    // =======================================================================
+
+    private function ensureCeo()
+    {
+        $role = Auth::user()?->employeeProfile?->role;
+        if ($role !== 'CEO') {
+            abort(response()->json(['error' => 'Unauthorized'], 403));
+        }
+    }
+
+    /**
+     * POST /jnt/supply/class-rules — create a new rule (tier only).
+     * Fixed types (age_lt, catch_all) are seeded via migration and cannot
+     * be created/deleted from the UI.
+     */
+    public function createClassRule(Request $request)
+    {
+        $this->ensureCeo();
+
+        $validated = $request->validate([
+            'class_key'      => 'required|string|max:10|regex:/^[A-Za-z0-9_\-]+$/',
+            'label'          => 'required|string|max:80',
+            'badge_tailwind' => 'required|string|max:120',
+            'sort_order'     => 'required|integer|min:1|max:998',
+            'min_velocity'   => 'required|numeric|min:0',
+            'window_days'    => 'required|integer|min:1|max:365',
+            'alive_min'      => 'required|numeric|min:0',
+            'alive_window'   => 'required|integer|min:1|max:365',
+        ]);
+
+        $key = strtoupper($validated['class_key']);
+        if (in_array($key, ['X', 'Y'])) {
+            return response()->json(['error' => 'X and Y are reserved fixed classes'], 422);
+        }
+        if (ItemClassRule::where('class_key', $key)->exists()) {
+            return response()->json(['error' => 'class_key already exists'], 422);
+        }
+
+        $rule = ItemClassRule::create([
+            'class_key'      => $key,
+            'label'          => $validated['label'],
+            'badge_tailwind' => $validated['badge_tailwind'],
+            'sort_order'     => $validated['sort_order'],
+            'rule_type'      => ItemClassRule::TYPE_VELOCITY_TIER,
+            'min_velocity'   => $validated['min_velocity'],
+            'window_days'    => $validated['window_days'],
+            'alive_min'      => $validated['alive_min'],
+            'alive_window'   => $validated['alive_window'],
+            'is_fixed'       => false,
+            'is_active'      => true,
+        ]);
+
+        return response()->json(['success' => true, 'rule' => $rule]);
+    }
+
+    /**
+     * PUT /jnt/supply/class-rules/{id} — edit existing rule.
+     * class_key is IMMUTABLE. For fixed rules (Y, X) only label + badge
+     * + age_threshold (Y) are editable.
+     */
+    public function updateClassRule(Request $request, int $id)
+    {
+        $this->ensureCeo();
+
+        /** @var ItemClassRule $rule */
+        $rule = ItemClassRule::findOrFail($id);
+
+        $validated = $request->validate([
+            'label'          => 'required|string|max:80',
+            'badge_tailwind' => 'required|string|max:120',
+            'sort_order'     => 'nullable|integer|min:1|max:998',
+            'min_velocity'   => 'nullable|numeric|min:0',
+            'window_days'    => 'nullable|integer|min:1|max:365',
+            'alive_min'      => 'nullable|numeric|min:0',
+            'alive_window'   => 'nullable|integer|min:1|max:365',
+            'age_threshold'  => 'nullable|integer|min:1|max:365',
+        ]);
+
+        // Always-editable
+        $rule->label          = $validated['label'];
+        $rule->badge_tailwind = $validated['badge_tailwind'];
+
+        if ($rule->rule_type === ItemClassRule::TYPE_AGE_LT) {
+            // Y: age-based
+            if (isset($validated['age_threshold'])) {
+                $rule->age_threshold = $validated['age_threshold'];
+            }
+        } elseif ($rule->rule_type === ItemClassRule::TYPE_VELOCITY_TIER) {
+            foreach (['min_velocity', 'window_days', 'alive_min', 'alive_window'] as $f) {
+                if (isset($validated[$f])) $rule->{$f} = $validated[$f];
+            }
+            if (isset($validated['sort_order'])) {
+                $rule->sort_order = $validated['sort_order'];
+            }
+        }
+        // catch_all: no extra fields
+
+        $rule->save();
+        return response()->json(['success' => true, 'rule' => $rule]);
+    }
+
+    /**
+     * DELETE /jnt/supply/class-rules/{id} — delete a rule.
+     * Blocked for fixed rules (Y, X) or when any item references this key.
+     */
+    public function deleteClassRule(int $id)
+    {
+        $this->ensureCeo();
+
+        /** @var ItemClassRule $rule */
+        $rule = ItemClassRule::findOrFail($id);
+
+        if ($rule->is_fixed) {
+            return response()->json([
+                'error' => 'Cannot delete fixed class (' . $rule->class_key . ')',
+            ], 422);
+        }
+
+        $referencing = SupplyItemSetting::where('class_override', $rule->class_key)->count();
+        if ($referencing > 0) {
+            return response()->json([
+                'error' => "Cannot delete: {$referencing} item(s) still reference this class. Reassign them first.",
+            ], 422);
+        }
+
+        $rule->delete();
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * POST /jnt/supply/class-rules/reorder — bulk sort_order update.
+     * Payload: { "order": [{"id":1,"sort_order":10}, ...] }
+     */
+    public function reorderClassRules(Request $request)
+    {
+        $this->ensureCeo();
+
+        $validated = $request->validate([
+            'order'              => 'required|array|min:1',
+            'order.*.id'         => 'required|integer',
+            'order.*.sort_order' => 'required|integer|min:1|max:999',
+        ]);
+
+        foreach ($validated['order'] as $row) {
+            ItemClassRule::where('id', $row['id'])->update(['sort_order' => $row['sort_order']]);
+        }
+        return response()->json(['success' => true]);
     }
 }
