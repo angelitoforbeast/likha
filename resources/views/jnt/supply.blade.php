@@ -446,6 +446,48 @@
     };
     const ALL_CLASS_CLS = Object.values(CLASS_META).flatMap(m => m.cls.split(' '));
 
+    // ---- Clean-URL Apply: strip default-valued inputs before submit ----
+    // Mirrors the controller defaults in JntSupplyController::index. Keeps
+    // as_of_date always (since "blank" there means "yesterday", not a stable
+    // value). Produces URLs like ?as_of_date=2026-04-23 instead of one with
+    // every hidden default echoed back. Also sidesteps a reported case where
+    // the verbose URL returned 0 rows while the clean URL rendered fully —
+    // same server-side defaults, so the symptom is almost certainly browser-
+    // side (cache/autofill), and a shorter URL bypasses it.
+    document.addEventListener('DOMContentLoaded', function () {
+      const form = document.getElementById('supplyForm');
+      if (form) {
+        const DEFAULTS = {
+          q: '',
+          velocity_days: '30',
+          recent_days: '14',
+          class_filter: '',
+          lifecycle_filter: '',
+          running_threshold: '1',
+          profit_filter: '',
+          new_item_days: '30',
+          long_running_days: '90',
+          scale_threshold: '1.5',
+          decline_threshold: '0.5',
+          default_lead_time: '7',
+          default_safety_days: '3',
+        };
+        const norm = v => {
+          const s = String(v ?? '').trim();
+          // normalize numeric strings ("1.00" → "1", "30.0" → "30")
+          if (s === '' || isNaN(Number(s))) return s;
+          return String(Number(s));
+        };
+        form.addEventListener('submit', function () {
+          for (const [name, def] of Object.entries(DEFAULTS)) {
+            const el = form.querySelector(`[name="${name}"]`);
+            if (!el) continue;
+            if (norm(el.value) === norm(def)) el.disabled = true;
+          }
+        });
+      }
+    });
+
     // ---- DataTable + per-column gSheet-style filters ----
     document.addEventListener('DOMContentLoaded', function () {
       if (!document.getElementById('supplyTable')) return;

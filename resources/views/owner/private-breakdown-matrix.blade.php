@@ -48,12 +48,15 @@
                 padding:6px 10px;border:1px solid #e2e8f0;font-size:12px;max-width:200px;
                 white-space:normal;line-height:1.3;font-weight:600;
                 box-shadow:2px 0 0 #e2e8f0;}
-    thead th{position:sticky;top:0;z-index:4;}
-    thead th.page-col{z-index:6;background:#0f172a;color:#fff;}
+    /* thead cells must outrank tbody sticky-col so the header row always sits on top. */
+    thead th{position:sticky;top:0;z-index:10;}
+    thead th.page-col{z-index:11;background:#0f172a;color:#fff;}
     /* Top scrollbar that mirrors the main one */
     .top-scroll{overflow-x:auto;overflow-y:hidden;}
     .top-scroll > div{height:1px;}
-    .main-scroll{overflow:auto;}
+    /* Bounded height so the container (not the page) scrolls vertically —
+       required for position:sticky on thead to actually stick. */
+    .main-scroll{overflow:auto; max-height:calc(100vh - 180px);}
     .toggle-bar{display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;}
     .toggle-bar label{display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;
                       padding:0.25rem 0.6rem;border:1px solid #cbd5e1;border-radius:6px;
