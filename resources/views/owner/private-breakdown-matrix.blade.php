@@ -172,6 +172,18 @@
                         if (!empty($cell['price_changed'])) $tip .= ' · price Δ '.($cell['price_delta']>=0?'+':'').round($cell['price_delta']);
                         if (!empty($cell['rts_inherited'])) $tip .= ' · RTS inherited from '.$cell['rts_eff_date'];
                     }
+                    // Earliest date in the current range where THIS page has the SAME item.
+                    // Used by the "Apply to earliest" button — setting effective_date there
+                    // lets the RTS cascade forward to every matching day (via getFor's
+                    // `effective_date <= date` resolution) without N separate writes.
+                    $earliestSame = null;
+                    if ($cell) {
+                        foreach ($p['cells'] as $dk => $c2) {
+                            if (($c2['item_key'] ?? null) === $cell['item_key']) {
+                                if ($earliestSame === null || $dk < $earliestSame) $earliestSame = $dk;
+                            }
+                        }
+                    }
                     $cellPayload = $cell ? [
                         'page_key'    => $p['page_key'],
                         'page_label'  => $p['page_label'],
@@ -183,6 +195,7 @@
                         'rts_eff_date'=> $cell['rts_eff_date'],
                         'rts_inherited' => !empty($cell['rts_inherited']),
                         'unit_cost'   => $cell['unit_cost'],
+                        'earliest_same_date' => $earliestSame,
                     ] : null;
                   @endphp
                   <td class="{{ $class }}"
@@ -298,13 +311,21 @@
           </template>
         </div>
 
-        <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
+        <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 flex-wrap">
           <button type="button" @click="edit.open = false"
                   class="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900">Cancel</button>
+          <template x-if="edit.earliest_same_date && edit.earliest_same_date !== edit.date">
+            <button type="button" @click="submit(edit.earliest_same_date)"
+                    :disabled="edit.saving"
+                    class="bg-amber-500 hover:bg-amber-400 text-white rounded px-4 py-2 text-sm font-bold disabled:opacity-50"
+                    :title="'Save with effective_date = ' + edit.earliest_same_date + ' so the RTS cascades forward to every day with the same item'">
+              <span x-text="edit.saving ? 'Saving…' : '⏪ Apply from ' + edit.earliest_same_date"></span>
+            </button>
+          </template>
           <button type="button" @click="submit()"
                   :disabled="edit.saving"
                   class="bg-blue-600 hover:bg-blue-500 text-white rounded px-4 py-2 text-sm font-bold disabled:opacity-50">
-            <span x-text="edit.saving ? 'Saving…' : 'Save'"></span>
+            <span x-text="edit.saving ? 'Saving…' : 'Save (this date only)'"></span>
           </button>
         </div>
       </div>
@@ -325,6 +346,7 @@
         orders:0, mode_cod:null,
         rts_pct:'', rts_eff_date:null, rts_inherited:false,
         unit_cost:'', comment:'',
+        earliest_same_date:null,
       },
 
       _syncing:false,
@@ -380,9 +402,12 @@
           rts_inherited:!!cell.rts_inherited,
           unit_cost:    cell.unit_cost !== null ? cell.unit_cost : '',
           comment:      '',
+          earliest_same_date: cell.earliest_same_date || null,
         };
       },
-      async submit(){
+      // effective_date override: pass the earliest-same-item date to backfill.
+      // When omitted, saves for this cell's date only (original behavior).
+      async submit(overrideEffectiveDate){
         this.edit.saving = true; this.edit.error = null;
         const rts  = parseFloat(this.edit.rts_pct);
         const cost = parseFloat(this.edit.unit_cost);
@@ -398,7 +423,7 @@
           fd.append('item_name',      this.edit.item_name);
           fd.append('item_value',     cost);
           fd.append('rts_pct',        rts);
-          fd.append('effective_date', this.edit.date);
+          fd.append('effective_date', overrideEffectiveDate || this.edit.date);
           if (this.edit.comment) fd.append('comment', this.edit.comment);
           const r = await fetch('{{ route('owner.private.item-setting.save') }}', {
             method:'POST',
