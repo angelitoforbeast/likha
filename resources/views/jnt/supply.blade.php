@@ -31,10 +31,30 @@
     }
     /* Frozen column headers */
     .supply-table-wrap { max-height: calc(100vh - 260px); overflow: auto; }
-    #supplyTable thead th {
+    #supplyTable thead tr.col-filter-row th {
+      position: sticky;
+      top: 34px;                 /* sits directly under main header row */
+      z-index: 4;
+      background: #f8fafc;
+      box-shadow: inset 0 -1px 0 #cbd5e1;
+      padding: 4px 6px;
+    }
+    #supplyTable thead tr:first-child th {
       position: sticky; top: 0; z-index: 5;
       background: #f1f5f9; box-shadow: inset 0 -2px 0 #cbd5e1;
     }
+    .col-filter-input {
+      width: 100%; font-size: 11px;
+      border: 1px solid #d1d5db; border-radius: 4px;
+      padding: 2px 5px; background: white;
+    }
+    .col-filter-input:focus { outline: none; border-color: #2563eb; }
+    .profit-cell { font-weight: 800; font-size: 14px; }
+    .profit-green  { background:#dcfce7; color:#166534; }
+    .profit-yellow { background:#fef9c3; color:#854d0e; }
+    .profit-orange { background:#ffedd5; color:#9a3412; }
+    .profit-red    { background:#fee2e2; color:#991b1b; }
+    .profit-gray   { background:#f3f4f6; color:#6b7280; }
   </style>
 
   <div class="mx-auto px-4 py-4" style="max-width:100%;">
@@ -95,15 +115,15 @@
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Default Lead Time (days)</label>
-          <input name="default_lead_time" value="{{ $defaultLeadTime }}" type="number" min="1" max="365"
-                 class="border border-gray-300 rounded-md px-3 py-1.5 text-sm w-32">
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Default Safety Buffer (days)</label>
-          <input name="default_safety_days" value="{{ $defaultSafetyDays }}" type="number" min="0" max="365"
-                 class="border border-gray-300 rounded-md px-3 py-1.5 text-sm w-32">
+          <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Profit Filter</label>
+          <select name="profit_filter" class="border border-gray-300 rounded-md px-3 py-1.5 text-sm bg-white">
+            <option value=""        {{ $profitFilter === ''        ? 'selected' : '' }}>All</option>
+            <option value="green"   {{ $profitFilter === 'green'   ? 'selected' : '' }}>🟢 ≥ 15%</option>
+            <option value="yellow"  {{ $profitFilter === 'yellow'  ? 'selected' : '' }}>🟡 5 – 15%</option>
+            <option value="orange"  {{ $profitFilter === 'orange'  ? 'selected' : '' }}>🟠 0 – 5%</option>
+            <option value="red"     {{ $profitFilter === 'red'     ? 'selected' : '' }}>🔴 &lt; 0% / Missing data</option>
+            <option value="missing" {{ $profitFilter === 'missing' ? 'selected' : '' }}>⬜ No data</option>
+          </select>
         </div>
 
         <div>
@@ -112,11 +132,13 @@
                  class="border border-gray-300 rounded-md px-3 py-1.5 text-sm">
         </div>
 
-        {{-- Hidden lifecycle params --}}
-        <input type="hidden" name="new_item_days"     value="{{ $newItemDays }}">
-        <input type="hidden" name="long_running_days" value="{{ $longRunningDays }}">
-        <input type="hidden" name="scale_threshold"   value="{{ $scaleThreshold }}">
-        <input type="hidden" name="decline_threshold" value="{{ $declineThreshold }}">
+        {{-- Hidden lifecycle/defaults params (not UI-exposed anymore) --}}
+        <input type="hidden" name="new_item_days"       value="{{ $newItemDays }}">
+        <input type="hidden" name="long_running_days"   value="{{ $longRunningDays }}">
+        <input type="hidden" name="scale_threshold"     value="{{ $scaleThreshold }}">
+        <input type="hidden" name="decline_threshold"   value="{{ $declineThreshold }}">
+        <input type="hidden" name="default_lead_time"   value="{{ $defaultLeadTime }}">
+        <input type="hidden" name="default_safety_days" value="{{ $defaultSafetyDays }}">
 
         <button type="submit"
                 class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-md shadow">
@@ -157,7 +179,7 @@
     {{-- ================================================================== --}}
     {{-- Summary cards                                                       --}}
     {{-- ================================================================== --}}
-    <div class="grid grid-cols-3 gap-4 mb-4">
+    <div class="grid grid-cols-2 gap-4 mb-4">
       <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
         <div class="text-2xl font-bold text-gray-800">{{ number_format($itemsWithHolds) }}</div>
         <div class="text-xs text-gray-500 uppercase tracking-wide mt-1">Items with Holds</div>
@@ -165,10 +187,6 @@
       <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
         <div class="text-2xl font-bold text-blue-600">{{ number_format($totalHoldUnits) }}</div>
         <div class="text-xs text-gray-500 uppercase tracking-wide mt-1">Total Hold Units</div>
-      </div>
-      <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
-        <div class="text-2xl font-bold text-green-600">{{ number_format($totalRecommended) }}</div>
-        <div class="text-xs text-gray-500 uppercase tracking-wide mt-1">Total Recommended Order</div>
       </div>
     </div>
 
@@ -189,10 +207,62 @@
             <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Lifecycle</th>
             <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Running?</th>
             <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">RTS%</th>
-            <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Lead Time (d)</th>
-            <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Safety Buffer (d)</th>
             <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200"
-                style="background:#dbeafe; color:#1d4ed8;">Recommended Order</th>
+                style="background:#ecfccb; color:#3f6212;">Proj Profit%</th>
+          </tr>
+          {{-- gSheet-style per-column header filters --}}
+          <tr class="col-filter-row">
+            <th><input type="text" class="col-filter-input" data-col="0" placeholder="🔍 search…"></th>
+            <th><input type="text" class="col-filter-input col-filter-num" data-col="1" placeholder="≥ min"></th>
+            <th><input type="text" class="col-filter-input col-filter-num" data-col="2" placeholder="≥ min"></th>
+            <th>
+              <select class="col-filter-input col-filter-select" data-col="3">
+                <option value="">All</option>
+                <option value="Hot">Hot</option>
+                <option value="Strong">Strong</option>
+                <option value="Active">Active</option>
+                <option value="Light">Light</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </th>
+            <th>
+              <select class="col-filter-input col-filter-select" data-col="4">
+                <option value="">All</option>
+                @foreach($classRules as $cr)
+                  <option value="{{ $cr->class_key }}">{{ $cr->class_key }}</option>
+                @endforeach
+              </select>
+            </th>
+            <th>
+              <select class="col-filter-input col-filter-select" data-col="5">
+                <option value="">All</option>
+                <option value="new">🆕 New</option>
+                <option value="scaling">📈 Scaling</option>
+                <option value="consistent">✅ Consistent</option>
+                <option value="active">🔄 Active</option>
+                <option value="declining">📉 Declining</option>
+                <option value="phasing_out">🚫 Phasing Out</option>
+                <option value="dormant">💤 Dormant</option>
+              </select>
+            </th>
+            <th>
+              <select class="col-filter-input col-filter-select" data-col="6">
+                <option value="">All</option>
+                <option value="1">Running</option>
+                <option value="0">Not Running</option>
+              </select>
+            </th>
+            <th><input type="text" class="col-filter-input col-filter-num" data-col="7" placeholder="≥ min%"></th>
+            <th>
+              <select class="col-filter-input col-filter-select" data-col="8">
+                <option value="">All</option>
+                <option value="green">🟢 ≥ 15%</option>
+                <option value="yellow">🟡 5–15%</option>
+                <option value="orange">🟠 0–5%</option>
+                <option value="red">🔴 &lt; 0% / Missing</option>
+                <option value="missing">⬜ No data</option>
+              </select>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -288,27 +358,44 @@
             </td>
 
             {{-- RTS% --}}
-            <td class="px-3 py-2 border border-gray-200 text-right text-gray-700">
+            <td class="px-3 py-2 border border-gray-200 text-right text-gray-700"
+                data-order="{{ $row['rts_pct'] }}">
               {{ $row['rts_pct'] > 0 ? $row['rts_pct'].'%' : '—' }}
             </td>
 
-            {{-- Lead time --}}
-            <td class="px-3 py-2 border border-gray-200 text-center">
-              <input type="number" class="inline-num lead-input" min="1" max="365"
-                     value="{{ $row['lead_time_days'] }}" title="Lead time for {{ $row['item'] }}">
-            </td>
-
-            {{-- Safety buffer --}}
-            <td class="px-3 py-2 border border-gray-200 text-center">
-              <input type="number" class="inline-num safety-input" min="0" max="365"
-                     value="{{ $row['safety_days'] }}" title="Safety buffer for {{ $row['item'] }}">
-            </td>
-
-            {{-- Recommended --}}
-            <td class="px-3 py-2 border border-gray-200 text-right recommended-cell"
-                data-order="{{ $row['recommended'] }}"
-                style="background:#eff6ff; color:#1d4ed8;">
-              <span class="rec-val">{{ number_format($row['recommended']) }}</span>
+            {{-- Projected Profit% --}}
+            @php
+              $bucketClass = 'profit-' . ($row['profit_bucket'] ?? 'gray');
+              $profitVal   = $row['profit_pct'];
+              $tipParts = [
+                'Window: ' . $row['profit_window_days'] . 'd (class ' . $row['item_class'] . ')',
+                'Σ gross: ₱' . number_format($row['profit_sum_gross'], 2),
+                'Σ net: ₱'   . number_format($row['profit_sum_net'], 2),
+              ];
+              if ($row['profit_skipped_days'] > 0) {
+                $tipParts[] = 'Skipped ' . $row['profit_skipped_days'] . ' slice(s) due to tied primary';
+              }
+              if ($row['profit_mismatch_ct'] > 0) {
+                $tipParts[] = '⚠ ' . $row['profit_mismatch_ct'] . ' COGS override/base mismatch';
+              }
+              if (!$row['profit_has_cogs']) $tipParts[] = '⚠ No COGS data';
+              if (!$row['profit_has_rts'])  $tipParts[] = '⚠ No RTS% data';
+              $tip = implode(' · ', $tipParts);
+              $sortKey = $profitVal === null ? -9999 : $profitVal;
+            @endphp
+            <td class="px-3 py-2 border border-gray-200 text-right profit-cell {{ $bucketClass }}"
+                data-order="{{ $sortKey }}"
+                data-bucket="{{ $row['profit_bucket'] }}"
+                title="{{ $tip }}">
+              @if($profitVal === null)
+                <span class="text-xs">
+                  @if(!$row['profit_has_cogs']) No COGS @elseif(!$row['profit_has_rts']) No RTS @else No data @endif
+                </span>
+              @else
+                {{ number_format($profitVal, 1) }}%@if($row['profit_mismatch_ct'] > 0 || !$row['profit_has_cogs'] || !$row['profit_has_rts'])
+                  <sup class="text-[10px] opacity-70" title="{{ $tip }}">⚠</sup>
+                @endif
+              @endif
             </td>
 
           </tr>
@@ -318,10 +405,7 @@
           <tr style="background:#f8fafc; border-top:2px solid #94a3b8; font-weight:700;">
             <td class="px-3 py-2 border border-gray-300 text-xs text-gray-500 uppercase">TOTAL</td>
             <td class="px-3 py-2 border border-gray-300 text-right text-blue-700">{{ number_format($totalHoldUnits) }}</td>
-            <td class="px-3 py-2 border border-gray-300" colspan="8"></td>
-            <td class="px-3 py-2 border border-gray-300 text-right" style="color:#1d4ed8;">
-              {{ number_format($totalRecommended) }}
-            </td>
+            <td class="px-3 py-2 border border-gray-300" colspan="7"></td>
           </tr>
         </tfoot>
       </table>
@@ -362,40 +446,100 @@
     };
     const ALL_CLASS_CLS = Object.values(CLASS_META).flatMap(m => m.cls.split(' '));
 
-    // ---- DataTable ----
+    // ---- DataTable + per-column gSheet-style filters ----
     document.addEventListener('DOMContentLoaded', function () {
       if (!document.getElementById('supplyTable')) return;
-      $('#supplyTable').DataTable({
+
+      const dt = $('#supplyTable').DataTable({
         paging:    false,
-        searching: false,
+        searching: true,   // needed for per-column filters
         ordering:  true,
         info:      true,
         dom:       'rti',
-        order:     [[10, 'desc']],   // Recommended Order (col index 10)
+        order:     [[8, 'desc']],    // Proj Profit% col
+        orderCellsTop: true,
+        // Disable sort on filter row
+        columnDefs: [{ orderable: true, targets: '_all' }],
+      });
+
+      // Custom filter function for numeric ≥ min and bucket match
+      $.fn.dataTable.ext.search.push(function (settings, rowData, rowIndex, rowNodeOrig) {
+        if (settings.nTable.id !== 'supplyTable') return true;
+        const row = dt.row(rowIndex).node();
+
+        // Numeric "≥ min" filters
+        const numCols = document.querySelectorAll('.col-filter-num');
+        for (const inp of numCols) {
+          const v = inp.value.trim();
+          if (v === '') continue;
+          const min = parseFloat(v);
+          if (isNaN(min)) continue;
+          const colIdx = parseInt(inp.dataset.col);
+          const td = row.children[colIdx];
+          if (!td) continue;
+          const raw = parseFloat(td.getAttribute('data-order') ?? td.textContent.replace(/[^\d.\-]/g, ''));
+          if (isNaN(raw) || raw < min) return false;
+        }
+
+        // Class (col 4) — match data-order
+        const classSel = document.querySelector('.col-filter-select[data-col="4"]');
+        if (classSel && classSel.value !== '') {
+          const td = row.children[4];
+          if ((td?.getAttribute('data-order') ?? '') !== classSel.value) return false;
+        }
+
+        // Lifecycle (col 5) — match data-order
+        const lcSel = document.querySelector('.col-filter-select[data-col="5"]');
+        if (lcSel && lcSel.value !== '') {
+          const td = row.children[5];
+          if ((td?.getAttribute('data-order') ?? '') !== lcSel.value) return false;
+        }
+
+        // Strength (col 3) — match badge text
+        const stSel = document.querySelector('.col-filter-select[data-col="3"]');
+        if (stSel && stSel.value !== '') {
+          const td = row.children[3];
+          const label = (td?.querySelector('.strength-badge')?.textContent || '').trim();
+          if (label !== stSel.value) return false;
+        }
+
+        // Running (col 6) — checkbox checked state
+        const rnSel = document.querySelector('.col-filter-select[data-col="6"]');
+        if (rnSel && rnSel.value !== '') {
+          const td = row.children[6];
+          const cb = td?.querySelector('.running-chk');
+          const val = cb && cb.checked ? '1' : '0';
+          if (val !== rnSel.value) return false;
+        }
+
+        // Profit bucket (col 8) — data-bucket
+        const pfSel = document.querySelector('.col-filter-select[data-col="8"]');
+        if (pfSel && pfSel.value !== '') {
+          const td = row.children[8];
+          if ((td?.getAttribute('data-bucket') ?? '') !== pfSel.value) return false;
+        }
+
+        return true;
+      });
+
+      // Item text filter (col 0) — use DT column search
+      document.querySelectorAll('.col-filter-input').forEach(inp => {
+        const ev = inp.tagName === 'SELECT' ? 'change' : 'input';
+        inp.addEventListener(ev, function () {
+          const col = parseInt(this.dataset.col);
+          if (col === 0 && this.classList.contains('col-filter-input') && !this.classList.contains('col-filter-num') && !this.classList.contains('col-filter-select')) {
+            dt.column(0).search(this.value).draw();
+          } else {
+            dt.draw();
+          }
+        });
+      });
+
+      // Prevent filter-row clicks from triggering sort
+      document.querySelectorAll('.col-filter-row th').forEach(th => {
+        th.addEventListener('click', e => e.stopPropagation());
       });
     });
-
-    // ---- Recompute recommended ----
-    function recompute(row) {
-      const vel       = parseFloat(row.dataset.vel)   || 0;
-      const holdUnits = parseInt(row.dataset.holds)   || 0;
-      const rtsPct    = parseFloat(row.dataset.rts)   || 0;
-      const delivRate = Math.max(0.01, 1 - rtsPct / 100);
-      const running   = row.dataset.running === '1';
-      const lead      = parseInt(row.querySelector('.lead-input').value)   || 7;
-      const safety    = parseInt(row.querySelector('.safety-input').value) || 0;
-
-      const holdsGross = holdUnits > 0 ? Math.ceil(holdUnits / delivRate) : 0;
-      let recommended  = holdsGross;
-      if (running && vel > 0) {
-        recommended = holdsGross
-          + Math.ceil(vel * lead   / delivRate)
-          + Math.ceil(vel * safety / delivRate);
-      }
-
-      const span = row.querySelector('.rec-val');
-      if (span) span.textContent = recommended.toLocaleString('en-PH');
-    }
 
     // ---- Toast ----
     let toastTimer;
@@ -414,10 +558,8 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
         body: JSON.stringify({
-          item_name:      row.dataset.item,
-          lead_time_days: parseInt(row.querySelector('.lead-input').value)   || 7,
-          safety_days:    parseInt(row.querySelector('.safety-input').value) || 0,
-          is_running:     isAuto ? 'auto' : row.dataset.running,
+          item_name:  row.dataset.item,
+          is_running: isAuto ? 'auto' : row.dataset.running,
           ...extra,
         }),
       }).then(r => r.json()).then(d => { if (d.success) showToast(); }).catch(console.error);
@@ -469,7 +611,6 @@
         row.dataset.running     = e.target.checked ? '1' : '0';
         row.dataset.runningAuto = '0';
         row.querySelector('td .text-gray-400.text-xs')?.remove();
-        recompute(row);
         saveRow(row);
         return;
       }
@@ -526,16 +667,6 @@
         return;
       }
     });
-
-    // Lead / safety blur → recompute + save
-    document.addEventListener('blur', function (e) {
-      const row = e.target.closest('tr[data-item]');
-      if (!row) return;
-      if (e.target.classList.contains('lead-input') || e.target.classList.contains('safety-input')) {
-        recompute(row);
-        saveRow(row);
-      }
-    }, true);
 
     // ---- CEO threshold save ----
     document.addEventListener('click', function (e) {

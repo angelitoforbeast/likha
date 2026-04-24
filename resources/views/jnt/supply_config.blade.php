@@ -14,12 +14,16 @@
 
   <div class="mx-auto px-4 py-4" style="max-width:100%;">
 
-    <div class="mb-4 flex items-center gap-3">
+    <div class="mb-4 flex items-center gap-3 flex-wrap">
       <a href="{{ url('/jnt/supply') }}"
          class="text-sm px-3 py-1.5 rounded-md border border-gray-300 hover:bg-gray-50 text-gray-700">
         ← Back to Supply
       </a>
       <h2 class="text-lg font-semibold text-gray-800">Classification Rules &amp; Other Settings</h2>
+      <a href="{{ url('/jnt/supply/excluded-pages') }}"
+         class="ml-auto text-sm px-3 py-1.5 rounded-md border border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold">
+        <i class="fa-solid fa-ban mr-1"></i> Excluded Pages (multi-item)
+      </a>
     </div>
 
     {{-- ================================================================== --}}
@@ -108,14 +112,24 @@
                   </td>
                   <td class="px-2 py-2 border border-gray-200 text-center text-gray-300">—</td>
                 @elseif($isAgeLt)
-                  <td class="px-2 py-2 border border-gray-200 text-center text-gray-300" colspan="4">—</td>
+                  <td class="px-2 py-2 border border-gray-200 text-center text-gray-300">—</td>
+                  <td class="px-2 py-2 border border-gray-200 text-center bg-yellow-50" title="Non-bearing for classification — used only for Proj Profit% window.">
+                    <input type="number" class="inline-num rule-f" data-f="window_days" style="width:60px;"
+                           value="{{ $cr->window_days ?? 30 }}" min="1" max="365" step="1">
+                  </td>
+                  <td class="px-2 py-2 border border-gray-200 text-center text-gray-300" colspan="2">—</td>
                   <td class="px-2 py-2 border border-gray-200 text-center bg-orange-50">
                     <input type="number" class="inline-num rule-f" data-f="age_threshold" style="width:60px;"
                            value="{{ $cr->age_threshold }}" min="1" max="365" step="1">
                   </td>
                 @else
-                  {{-- catch_all: no fields --}}
-                  <td class="px-2 py-2 border border-gray-200 text-gray-500 italic" colspan="5">Catch-all — always matches (last resort)</td>
+                  {{-- catch_all: only window_days (for Profit% compute) --}}
+                  <td class="px-2 py-2 border border-gray-200 text-center text-gray-300">—</td>
+                  <td class="px-2 py-2 border border-gray-200 text-center bg-yellow-50" title="Non-bearing for classification — used only for Proj Profit% window.">
+                    <input type="number" class="inline-num rule-f" data-f="window_days" style="width:60px;"
+                           value="{{ $cr->window_days ?? 30 }}" min="1" max="365" step="1">
+                  </td>
+                  <td class="px-2 py-2 border border-gray-200 text-center text-gray-500 italic" colspan="3">Catch-all — always matches (last resort)</td>
                 @endif
                 <td class="px-2 py-2 border border-gray-200 text-center">
                   <div class="flex items-center gap-1 justify-center">

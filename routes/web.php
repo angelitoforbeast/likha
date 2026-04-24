@@ -721,6 +721,11 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::delete('/jnt/supply/class-rules/{id}',  [\App\Http\Controllers\JntSupplyController::class, 'deleteClassRule'])->name('jnt.supply.rules.delete');
     Route::post('/jnt/supply/class-rules/reorder', [\App\Http\Controllers\JntSupplyController::class, 'reorderClassRules'])->name('jnt.supply.rules.reorder');
 
+    // Excluded multi-item pages (CEO only) — affects Proj Profit% only
+    Route::get   ('/jnt/supply/excluded-pages',      [\App\Http\Controllers\JntSupplyController::class, 'excludedPagesIndex' ])->name('jnt.supply.excluded.index');
+    Route::post  ('/jnt/supply/excluded-pages',      [\App\Http\Controllers\JntSupplyController::class, 'storeExcludedPage'  ])->name('jnt.supply.excluded.store');
+    Route::delete('/jnt/supply/excluded-pages/{id}', [\App\Http\Controllers\JntSupplyController::class, 'destroyExcludedPage'])->name('jnt.supply.excluded.destroy');
+
 
     // ✅ Validation Lists (CEO, Marketing, Marketing OIC)
     Route::get('/validation-lists', [ValidationListController::class, 'index'])->name('validation-lists.index');

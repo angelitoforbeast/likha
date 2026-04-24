@@ -2,8 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Cogs;
+use App\Models\FeeSetting;
 use App\Models\ItemClassRule;
 use App\Models\ItemClassThreshold;
+use App\Models\PageItemSetting;
+use App\Models\SupplyExcludedPage;
 use App\Models\SupplyItemSetting;
 use App\Models\SupplySetting;
 use Carbon\Carbon;
@@ -158,7 +162,9 @@ class JntSupplyController extends Controller
     // -----------------------------------------------------------------------
     public function index(Request $request)
     {
-        $today    = Carbon::now('Asia/Manila')->toDateString();
+        $today     = Carbon::now('Asia/Manila')->toDateString();
+        // Default as-of date is yesterday (so full-day data is stable).
+        $yesterday = Carbon::now('Asia/Manila')->subDay()->toDateString();
         $driver   = DB::getDriverName();
         $likeOp   = $driver === 'pgsql' ? 'ILIKE' : 'LIKE';
         $moItem   = $driver === 'pgsql' ? 'mo."ITEM_NAME"' : 'mo.`ITEM_NAME`';
@@ -170,7 +176,7 @@ class JntSupplyController extends Controller
         $runningThreshold  = max(0.0, (float) $request->input('running_threshold', 1.0));
         $defaultLeadTime   = max(1, (int) $request->input('default_lead_time', 7));
         $defaultSafetyDays = max(0, (int) $request->input('default_safety_days', 3));
-        $asOfDate          = $request->input('as_of_date', $today);
+        $asOfDate          = $request->input('as_of_date', $yesterday);
 
         // Lifecycle params
         $recentDays        = max(1, (int) $request->input('recent_days', 14));
@@ -182,6 +188,9 @@ class JntSupplyController extends Controller
 
         // Class params
         $classFilter = $request->input('class_filter', '');
+
+        // Profit filter (color bucket: green|yellow|orange|red|missing|'')
+        $profitFilter = $request->input('profit_filter', '');
 
         $velocityFrom = Carbon::parse($asOfDate, 'Asia/Manila')
             ->subDays($velocityDays - 1)
@@ -364,6 +373,160 @@ class JntSupplyController extends Controller
             return $sum;
         };
 
+        // -- 7c. PROFIT% compute data -------------------------------------
+        // Window = max class.window_days (includes Y/X defaults from migration).
+        $maxProfitWindow = $maxClassWindow;
+        foreach ($classRules as $r) {
+            $maxProfitWindow = max($maxProfitWindow, (int) ($r->window_days ?? 0));
+        }
+        $maxProfitWindow = max(1, $maxProfitWindow);
+        $profitFrom = Carbon::parse($asOfDate, 'Asia/Manila')
+            ->subDays($maxProfitWindow - 1)
+            ->toDateString();
+
+        // Page/COD column names for macro_output (matches owner/private)
+        $pageCol = $driver === 'pgsql' ? '"PAGE"' : '`PAGE`';
+        $codCol  = $driver === 'pgsql' ? '"COD"'  : '`COD`';
+
+        // Fetch per (ts_date, page_key, base_item, cod_val) counts — one pass
+        $moProfitRows = DB::table('macro_output')
+            ->whereBetween('ts_date', [$profitFrom, $asOfDate])
+            ->selectRaw(
+                "ts_date as d, "
+                . ($driver === 'pgsql'
+                    ? "LOWER(BTRIM(COALESCE({$pageCol}::text,''))) as pg, BTRIM(COALESCE({$pageCol}::text,'')) as pg_label, "
+                    : "LOWER(TRIM(COALESCE({$pageCol},''))) as pg, TRIM(COALESCE({$pageCol},'')) as pg_label, ")
+                . "{$itemCol} as item_name, "
+                . "{$codCol} as cod_val, "
+                . "COUNT(*) as cnt"
+            )
+            ->groupByRaw(
+                "ts_date, "
+                . ($driver === 'pgsql'
+                    ? "LOWER(BTRIM(COALESCE({$pageCol}::text,''))), BTRIM(COALESCE({$pageCol}::text,'')), "
+                    : "LOWER(TRIM(COALESCE({$pageCol},''))), TRIM(COALESCE({$pageCol},'')), ")
+                . "{$itemCol}, {$codCol}"
+            )
+            ->get();
+
+        // Excluded pages (affects profit% only)
+        $excludedSet = array_flip(SupplyExcludedPage::excludedSet());
+
+        $parseCod = fn($v) => (float) preg_replace('/[^0-9.\-]/', '', (string) $v);
+
+        // profitData[date][page_key][base] = [
+        //   'total' => int,
+        //   'cod_counts' => [ codVal => count ],
+        //   'pg_label' => original page label,
+        // ]
+        $profitData = [];
+        foreach ($moProfitRows as $r) {
+            $pgKey = (string) $r->pg;
+            if ($pgKey === '' || isset($excludedSet[$pgKey])) continue;
+
+            [$qty, $base] = $this->parseItem((string) ($r->item_name ?? ''));
+            if ($base === '' || $base === '—') continue;
+
+            $d   = (string) $r->d;
+            $cnt = (int) $r->cnt;
+            $units = $qty * $cnt;
+            $cod   = $parseCod($r->cod_val);
+
+            if (!isset($profitData[$d][$pgKey][$base])) {
+                $profitData[$d][$pgKey][$base] = [
+                    'total'      => 0,
+                    'cod_counts' => [],
+                    'pg_label'   => (string) $r->pg_label,
+                ];
+            }
+            $profitData[$d][$pgKey][$base]['total'] += $units;
+            $codKey = (string) $cod;
+            $profitData[$d][$pgKey][$base]['cod_counts'][$codKey] =
+                ($profitData[$d][$pgKey][$base]['cod_counts'][$codKey] ?? 0) + $units;
+        }
+
+        // Precompute primary item per (date, page_key) + tied flag
+        // primaryMap[date][pg_key] = [ 'base' => X, 'tied' => bool ]
+        $primaryMap = [];
+        foreach ($profitData as $d => $pages) {
+            foreach ($pages as $pg => $bases) {
+                $best = -1; $bestBase = null; $tied = false;
+                foreach ($bases as $b => $info) {
+                    $t = (int) $info['total'];
+                    if ($t > $best) { $best = $t; $bestBase = $b; $tied = false; }
+                    elseif ($t === $best && $t > 0) { $tied = true; }
+                }
+                $primaryMap[$d][$pg] = ['base' => $bestBase, 'tied' => $tied];
+            }
+        }
+
+        // Ads per (day, page_key)
+        $adsRows = DB::table('ads_manager_reports')
+            ->whereBetween('day', [$profitFrom, $asOfDate])
+            ->selectRaw(
+                ($driver === 'pgsql'
+                    ? "day as d, LOWER(BTRIM(COALESCE(page_name,''))) as pg, "
+                    : "day as d, LOWER(TRIM(COALESCE(page_name,''))) as pg, ")
+                . "SUM(COALESCE(amount_spent_php,0)) as spent"
+            )
+            ->groupByRaw(
+                $driver === 'pgsql'
+                    ? "day, LOWER(BTRIM(COALESCE(page_name,'')))"
+                    : "day, LOWER(TRIM(COALESCE(page_name,'')))"
+            )
+            ->get();
+
+        $adsMap = [];
+        foreach ($adsRows as $r) {
+            $adsMap[(string) $r->d][(string) $r->pg] = (float) $r->spent;
+        }
+
+        // COGS as-of asOfDate per base item (latest date ≤ asOfDate)
+        $cogsRows = DB::table('cogs')
+            ->where('date', '<=', $asOfDate)
+            ->orderBy('item_name')
+            ->orderByDesc('date')
+            ->get(['item_name', 'date', 'unit_cost']);
+        $cogsMap = [];
+        foreach ($cogsRows as $r) {
+            [, $base] = $this->parseItem((string) ($r->item_name ?? ''));
+            if (!isset($cogsMap[$base])) {
+                $cogsMap[$base] = (float) $r->unit_cost;
+            }
+        }
+
+        // PageItemSetting overrides: latest effective_date ≤ asOfDate per (page, item)
+        $pisRows = PageItemSetting::where('effective_date', '<=', $asOfDate)
+            ->orderBy('page_name')
+            ->orderBy('item_name')
+            ->orderByDesc('effective_date')
+            ->get(['page_name', 'item_name', 'price', 'rts_pct']);
+        // pisMap[pg_key][base] = ['price'=>..,'rts_pct'=>..]
+        $pisMap = [];
+        foreach ($pisRows as $r) {
+            $pgKey = mb_strtolower(trim((string) $r->page_name));
+            [, $base] = $this->parseItem((string) ($r->item_name ?? ''));
+            if (!isset($pisMap[$pgKey][$base])) {
+                $pisMap[$pgKey][$base] = [
+                    'price'   => $r->price !== null ? (float) $r->price : null,
+                    'rts_pct' => $r->rts_pct !== null ? (float) $r->rts_pct : null,
+                ];
+            }
+        }
+
+        // Fee settings
+        $host = strtolower((string) $request->getHost());
+        $COD_FEE_RATE         = FeeSetting::getRate('cod_fee_rate', $host, $asOfDate) ?? 0.015;
+        $COD_FEE_VAT_RATE     = FeeSetting::getRate('cod_fee_vat_rate', $host, $asOfDate) ?? 0.12;
+        $SHIPPING_PER_SHIPPED = 37.0;
+
+        // Build a lookup of class_key → window_days (from loaded rules)
+        $classWindowMap = [];
+        foreach ($classRules as $r) {
+            $classWindowMap[$r->class_key] = (int) ($r->window_days ?? 30);
+            if ($classWindowMap[$r->class_key] <= 0) $classWindowMap[$r->class_key] = 30;
+        }
+
         // -- 8. Merge all items ---------------------------------------------
         $allBases = array_unique(array_merge(
             array_keys($holdUnitsMap),
@@ -481,6 +644,81 @@ class JntSupplyController extends Controller
                 ];
             }
 
+            // -- Projected Profit% -----------------------------------------
+            $profitWindowDays = $classWindowMap[$itemClass] ?? 30;
+            $profitStartDate  = $asOfCarbon->copy()->subDays($profitWindowDays - 1)->toDateString();
+
+            $sumGross      = 0.0;
+            $sumNet        = 0.0;
+            $skippedDays   = 0;   // number of (day,page) slices skipped due to tied primary
+            $mismatchCount = 0;   // cogs override vs base cogs mismatch slices
+            $hasAnyCogs    = false;
+            $usedAnyRts    = ($rtsPct > 0);
+            $profitDebug   = []; // not exposed currently but available for tooltip
+
+            foreach ($profitData as $d => $pages) {
+                if ($d < $profitStartDate || $d > $asOfDate) continue;
+                foreach ($pages as $pgKey => $bases) {
+                    if (!isset($bases[$base])) continue;
+
+                    $pm = $primaryMap[$d][$pgKey] ?? null;
+                    if ($pm && $pm['tied']) { $skippedDays++; continue; }
+
+                    $slice   = $bases[$base];
+                    $orders  = (int) $slice['total'];
+                    if ($orders <= 0) continue;
+
+                    // Mode COD
+                    $modeCod = 0.0; $modeCnt = -1;
+                    foreach ($slice['cod_counts'] as $cv => $c) {
+                        if ($c > $modeCnt) { $modeCnt = (int) $c; $modeCod = (float) $cv; }
+                    }
+
+                    // COGS — page override first, then base cogs
+                    $override = $pisMap[$pgKey][$base]['price']   ?? null;
+                    $baseCog  = $cogsMap[$base]                   ?? null;
+                    if ($override !== null && $baseCog !== null && abs($override - $baseCog) > 0.01) {
+                        $mismatchCount++;
+                    }
+                    $unitCost = $override ?? $baseCog ?? 0.0;
+                    if ($unitCost > 0) $hasAnyCogs = true;
+
+                    // RTS — page override first, fallback to item-wide max
+                    $sliceRts = $pisMap[$pgKey][$base]['rts_pct'] ?? $rtsPct;
+                    $sliceDelivered = max(0.01, 1 - $sliceRts / 100);
+                    $shipped = $orders * $sliceDelivered;
+
+                    $gross       = $orders * $modeCod;
+                    $shippingFee = $shipped * $SHIPPING_PER_SHIPPED;
+                    $codFee      = $shipped * $modeCod * $COD_FEE_RATE;
+                    $vat         = $codFee * $COD_FEE_VAT_RATE;
+                    $cogsTotal   = $shipped * $unitCost;
+
+                    // Ads attributed only when this base is the primary for (day,page)
+                    $ads = 0.0;
+                    if ($pm && $pm['base'] === $base) {
+                        $ads = (float) ($adsMap[$d][$pgKey] ?? 0);
+                    }
+
+                    $net = $gross - $ads - $shippingFee - $codFee - $vat - $cogsTotal;
+
+                    $sumGross += $gross;
+                    $sumNet   += $net;
+                }
+            }
+
+            $profitPct     = null;
+            $profitBucket  = 'missing';
+            if ($sumGross > 0) {
+                $profitPct = round(($sumNet / $sumGross) * 100, 2);
+                if (!$hasAnyCogs || !$usedAnyRts) {
+                    $profitBucket = 'red'; // missing data — treat as risky
+                } elseif ($profitPct >= 15)  $profitBucket = 'green';
+                elseif ($profitPct >= 5)     $profitBucket = 'yellow';
+                elseif ($profitPct >= 0)     $profitBucket = 'orange';
+                else                         $profitBucket = 'red';
+            }
+
             $items[] = [
                 'item'                => $base,
                 'hold_units'          => $holdUnits,
@@ -508,6 +746,16 @@ class JntSupplyController extends Controller
                 'item_class_label'    => $itemClassLabel,
                 'item_class_badge'    => $itemClassBadge,
                 'rule_diagnostics'    => $ruleDiagnostics,
+                // Projected profit%
+                'profit_pct'          => $profitPct,
+                'profit_bucket'       => $profitBucket,
+                'profit_window_days'  => $profitWindowDays,
+                'profit_sum_gross'    => round($sumGross, 2),
+                'profit_sum_net'      => round($sumNet, 2),
+                'profit_skipped_days' => $skippedDays,
+                'profit_mismatch_ct'  => $mismatchCount,
+                'profit_has_cogs'     => $hasAnyCogs,
+                'profit_has_rts'      => $usedAnyRts,
             ];
         }
 
@@ -517,6 +765,9 @@ class JntSupplyController extends Controller
         }
         if ($classFilter !== '') {
             $items = array_values(array_filter($items, fn($i) => $i['item_class'] === $classFilter));
+        }
+        if ($profitFilter !== '') {
+            $items = array_values(array_filter($items, fn($i) => $i['profit_bucket'] === $profitFilter));
         }
 
         // Sort by recommended DESC, then item ASC
@@ -549,6 +800,7 @@ class JntSupplyController extends Controller
             'declineThreshold',
             'lifecycleFilter',
             'classFilter',
+            'profitFilter',
             'classRules',
             'classBadgeMap',
             'classPalette',
@@ -782,9 +1034,13 @@ class JntSupplyController extends Controller
         $rule->badge_tailwind = $validated['badge_tailwind'];
 
         if ($rule->rule_type === ItemClassRule::TYPE_AGE_LT) {
-            // Y: age-based
+            // Y: age-based. window_days is non-bearing for classification
+            // but used by Proj Profit% compute window.
             if (isset($validated['age_threshold'])) {
                 $rule->age_threshold = $validated['age_threshold'];
+            }
+            if (isset($validated['window_days'])) {
+                $rule->window_days = $validated['window_days'];
             }
         } elseif ($rule->rule_type === ItemClassRule::TYPE_VELOCITY_TIER) {
             foreach (['min_velocity', 'window_days', 'alive_min', 'alive_window'] as $f) {
@@ -793,8 +1049,12 @@ class JntSupplyController extends Controller
             if (isset($validated['sort_order'])) {
                 $rule->sort_order = $validated['sort_order'];
             }
+        } elseif ($rule->rule_type === ItemClassRule::TYPE_CATCH_ALL) {
+            // X: non-bearing window_days used by Proj Profit% compute only.
+            if (isset($validated['window_days'])) {
+                $rule->window_days = $validated['window_days'];
+            }
         }
-        // catch_all: no extra fields
 
         $rule->save();
         return response()->json(['success' => true, 'rule' => $rule]);
@@ -845,6 +1105,65 @@ class JntSupplyController extends Controller
         foreach ($validated['order'] as $row) {
             ItemClassRule::where('id', $row['id'])->update(['sort_order' => $row['sort_order']]);
         }
+        return response()->json(['success' => true]);
+    }
+
+    // =======================================================================
+    //  Excluded Pages CRUD — CEO only (affects Proj Profit% only)
+    // =======================================================================
+
+    public function excludedPagesIndex()
+    {
+        $this->ensureCeo();
+
+        $excluded = SupplyExcludedPage::orderBy('page_name')->get();
+
+        $driver  = DB::getDriverName();
+        $pageCol = $driver === 'pgsql' ? '"PAGE"' : '`PAGE`';
+
+        // Distinct pages from macro_output for the picker (recent 120 days)
+        $since = Carbon::now('Asia/Manila')->subDays(120)->toDateString();
+        $pages = DB::table('macro_output')
+            ->where('ts_date', '>=', $since)
+            ->selectRaw(($driver === 'pgsql'
+                ? "BTRIM(COALESCE({$pageCol}::text,'')) as page_name"
+                : "TRIM(COALESCE({$pageCol},'')) as page_name"))
+            ->groupByRaw($driver === 'pgsql'
+                ? "BTRIM(COALESCE({$pageCol}::text,''))"
+                : "TRIM(COALESCE({$pageCol},''))")
+            ->orderBy('page_name')
+            ->pluck('page_name')
+            ->filter(fn($p) => (string) $p !== '')
+            ->values()
+            ->all();
+
+        return view('jnt.supply_excluded_pages', compact('excluded', 'pages'));
+    }
+
+    public function storeExcludedPage(Request $request)
+    {
+        $this->ensureCeo();
+
+        $validated = $request->validate([
+            'page_name' => 'required|string|max:200',
+            'reason'    => 'nullable|string|max:255',
+        ]);
+
+        $row = SupplyExcludedPage::updateOrCreate(
+            ['page_name' => trim($validated['page_name'])],
+            ['reason'    => $validated['reason'] ?? null]
+        );
+
+        return response()->json(['success' => true, 'row' => $row]);
+    }
+
+    public function destroyExcludedPage(int $id)
+    {
+        $this->ensureCeo();
+
+        $row = SupplyExcludedPage::findOrFail($id);
+        $row->delete();
+
         return response()->json(['success' => true]);
     }
 }
