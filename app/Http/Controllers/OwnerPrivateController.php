@@ -1801,4 +1801,134 @@ class OwnerPrivateController extends Controller
             return response()->json(['ok' => false, 'message' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * Full-page breakdown view (separate route). Renders the blade template;
+     * data is fetched client-side via pageRangeBreakdown() JSON endpoint.
+     */
+    public function breakdownPage(Request $request)
+    {
+        $this->checkAccess();
+
+        $pageKey   = (string) $request->input('page_key', '');
+        $startDate = (string) $request->input('start_date', '');
+        $endDate   = (string) $request->input('end_date', $startDate);
+
+        $validDate = fn($s) => is_string($s) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $s);
+        if (!$validDate($startDate)) $startDate = (new \DateTime('now', new \DateTimeZone('Asia/Manila')))->format('Y-m-d');
+        if (!$validDate($endDate))   $endDate   = $startDate;
+        if ($startDate > $endDate)   [$startDate, $endDate] = [$endDate, $startDate];
+
+        // Best-effort label lookup so <title> + heading show page name even before AJAX
+        $pageLabel = $pageKey;
+        if ($pageKey !== '') {
+            $row = DB::table('daily_page_primary_item')
+                ->where('page_key', $pageKey)
+                ->orderByDesc('ts_date')
+                ->first(['page_label']);
+            if ($row) $pageLabel = (string)$row->page_label;
+        }
+
+        return view('owner.private-breakdown', [
+            'pageKey'    => $pageKey,
+            'pageLabel'  => $pageLabel,
+            'startDate'  => $startDate,
+            'endDate'    => $endDate,
+        ]);
+    }
+
+    /**
+     * Per-date primary-item breakdown for ONE page across a range.
+     * Returns each date in [start_date, end_date] with that page's resolved
+     * primary item + orders + mode_cod. Flags which rows match the anchor
+     * (= primary at end_date), so the UI can show mixed-primary coordinates.
+     */
+    public function pageRangeBreakdown(Request $request)
+    {
+        $this->checkAccess();
+
+        $pageKey   = trim((string) $request->input('page_key', ''));
+        $startDate = (string) $request->input('start_date', '');
+        $endDate   = (string) $request->input('end_date', $startDate);
+
+        $validDate = fn($s) => is_string($s) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $s);
+        if ($pageKey === '' || !$validDate($startDate) || !$validDate($endDate)) {
+            return response()->json(['ok' => false, 'message' => 'Invalid input'], 422);
+        }
+        if ($startDate > $endDate) [$startDate, $endDate] = [$endDate, $startDate];
+
+        // Anchor row = primary on end_date for this page (may be null if tied/unresolved)
+        $anchor = DB::table('daily_page_primary_item')
+            ->where('ts_date', $endDate)
+            ->where('page_key', $pageKey)
+            ->first(['primary_item', 'primary_item_key', 'primary_orders', 'primary_mode_cod']);
+
+        $anchorItemKey = $anchor ? (string)$anchor->primary_item_key : null;
+
+        // All primary rows for this page across the range
+        $rows = DB::table('daily_page_primary_item')
+            ->where('page_key', $pageKey)
+            ->whereBetween('ts_date', [$startDate, $endDate])
+            ->orderBy('ts_date')
+            ->get([
+                'ts_date', 'page_label', 'primary_item', 'primary_item_key',
+                'primary_orders', 'total_orders_all', 'primary_mode_cod',
+                'second_item', 'second_orders',
+            ]);
+
+        // Fill missing dates as "no data / tied"
+        $byDate = [];
+        foreach ($rows as $r) $byDate[(string)$r->ts_date] = $r;
+
+        $pageLabel = $rows->count() ? (string)$rows[0]->page_label : $pageKey;
+
+        $out = [];
+        $cursor = strtotime($startDate);
+        $last   = strtotime($endDate);
+        while ($cursor <= $last) {
+            $d = date('Y-m-d', $cursor);
+            $r = $byDate[$d] ?? null;
+            if ($r) {
+                $ik = (string)$r->primary_item_key;
+                $out[] = [
+                    'date'             => $d,
+                    'primary_item'     => (string)$r->primary_item,
+                    'primary_item_key' => $ik,
+                    'primary_orders'   => (int)$r->primary_orders,
+                    'total_orders'     => (int)$r->total_orders_all,
+                    'mode_cod'         => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
+                    'second_item'      => $r->second_item ? (string)$r->second_item : null,
+                    'second_orders'    => $r->second_orders !== null ? (int)$r->second_orders : null,
+                    'is_anchor'        => $anchorItemKey !== null && $ik === $anchorItemKey,
+                    'has_data'         => true,
+                ];
+            } else {
+                $out[] = [
+                    'date'             => $d,
+                    'primary_item'     => null,
+                    'primary_item_key' => null,
+                    'primary_orders'   => 0,
+                    'total_orders'     => 0,
+                    'mode_cod'         => null,
+                    'second_item'      => null,
+                    'second_orders'    => null,
+                    'is_anchor'        => false,
+                    'has_data'         => false,
+                ];
+            }
+            $cursor += 86400;
+        }
+
+        return response()->json([
+            'ok'               => true,
+            'page_key'         => $pageKey,
+            'page_label'       => $pageLabel,
+            'start_date'       => $startDate,
+            'end_date'         => $endDate,
+            'anchor_item'      => $anchor ? (string)$anchor->primary_item : null,
+            'anchor_item_key'  => $anchorItemKey,
+            'anchor_mode_cod'  => $anchor && $anchor->primary_mode_cod !== null ? (float)$anchor->primary_mode_cod : null,
+            'rows'             => $out,
+        ]);
+    }
 }

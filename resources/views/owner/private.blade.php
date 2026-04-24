@@ -203,11 +203,24 @@
 
               <!-- Fixed: Page -->
               <td style="text-align:center;">
-                <span style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;"
-                      x-text="row.page_name"></span>
+                <template x-if="row.is_range">
+                  <a href="#" @click.prevent="openBreakdown(row)"
+                     style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;
+                            text-decoration:underline;text-decoration-color:#cbd5e1;
+                            text-underline-offset:2px;cursor:pointer;"
+                     onmouseover="this.style.color='#2563eb';this.style.textDecorationColor='#2563eb';"
+                     onmouseout="this.style.color='#0f172a';this.style.textDecorationColor='#cbd5e1';"
+                     title="View per-date primary item breakdown"
+                     x-text="row.page_name"></a>
+                </template>
+                <template x-if="!row.is_range">
+                  <span style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;"
+                        x-text="row.page_name"></span>
+                </template>
                 <template x-if="row.mixed_primary">
-                  <div style="font-size:10px;color:#b45309;font-weight:600;line-height:1.3;margin-top:2px;"
-                       :title="row.distinct_items_in_range + ' distinct primary items across ' + row.range_days + '-day range. Showing anchor ' + row.item_name + ' (' + row.included_days + ' of ' + row.range_days + ' day' + (row.range_days===1?'':'s') + '). ' + row.excluded_days + ' day(s) had a different primary — excluded from totals.'">
+                  <div style="font-size:10px;color:#b45309;font-weight:600;line-height:1.3;margin-top:2px;cursor:pointer;"
+                       @click="openBreakdown(row)"
+                       :title="row.distinct_items_in_range + ' distinct primary items across ' + row.range_days + '-day range. Click to see breakdown.'">
                     ⚠ mixed primary · <span x-text="row.included_days + '/' + row.range_days + ' d'"></span>
                   </div>
                 </template>
@@ -622,6 +635,16 @@
           this.rangeDays    = Number(j.range_days || 1);
         }catch(e){ console.error(e); }
         finally{ this.loading=false; }
+      },
+
+      // ── Page breakdown (navigate to separate route) ───────────────────
+      openBreakdown(row){
+        const qs = new URLSearchParams({
+          page_key:   row.page_key,
+          start_date: this.startDate,
+          end_date:   this.endDate,
+        });
+        window.open('{{ route('owner.private.breakdown') }}?'+qs.toString(), '_blank');
       },
 
       // ── CEO: manual recompute of daily_page_primary_item ────────────────
