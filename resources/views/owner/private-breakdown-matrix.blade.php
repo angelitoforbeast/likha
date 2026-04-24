@@ -117,6 +117,10 @@
              title="Show only cells that match the anchor item AND same COD/SRP as the end-date (reference).">
         <input type="checkbox" x-model="vis.one_item_only" @change="persist()"> 1 ITEM ONLY
       </label>
+      <label :class="vis.only_missing && 'active'" class="!border-red-400"
+             title="Hide pages whose cells all have both RTS% and unit cost set.">
+        <input type="checkbox" x-model="vis.only_missing" @change="persist()"> ONLY MISSING
+      </label>
       <span class="ml-4 text-[11px] text-slate-500">Click any cell to edit RTS / unit cost. Settings saved per-browser.</span>
     </div>
   </div>
@@ -144,7 +148,7 @@
           </thead>
           <tbody>
             @foreach($pages as $p)
-              <tr>
+              <tr x-show="!vis.only_missing || {{ !empty($p['has_missing']) ? 'true' : 'false' }}">
                 <th class="page-col">
                   <a href="{{ route('owner.private.breakdown') }}?page_key={{ urlencode($p['page_key']) }}&start_date={{ $startDate }}&end_date={{ $endDate }}"
                      class="text-slate-900 hover:text-blue-600"
@@ -249,7 +253,7 @@
                       </div>
                       <div>
                         <span x-show="vis.count" class="badge-count"
-                              title="days this item appears / total days in range">{{ $cell['count_same'] }}/{{ $cell['count_total'] }}</span>
+                              title="orders for this item on this date">{{ $cell['orders'] }}</span>
                         @if($cell['rts_pct'] !== null)
                           <span x-show="vis.rts" class="badge-rts {{ $cell['rts_inherited'] ? 'inherited' : '' }}"
                                 title="{{ $cell['rts_inherited'] ? 'inherited from '.$cell['rts_eff_date'] : 'set on this date' }}">{{ rtrim(rtrim(number_format($cell['rts_pct'],2), '0'),'.') }}%</span>
@@ -370,7 +374,7 @@
     return {
       // Visibility toggles — persisted per route in localStorage.
       // Key includes pathname so ibang page may sariling preference.
-      vis: { item_name:true, count:true, cod:true, rts:true, cogs:true, one_item_only:false },
+      vis: { item_name:true, count:true, cod:true, rts:true, cogs:true, one_item_only:false, only_missing:false },
       storageKey: 'matrix_vis:' + location.pathname,
 
       edit: {

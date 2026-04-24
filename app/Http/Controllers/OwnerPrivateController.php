@@ -2091,6 +2091,13 @@ class OwnerPrivateController extends Controller
             }
             $p['item_changes']  = $itemChanges;
             $p['price_changes'] = $priceChanges;
+            // Flag pages that have any cell missing unit_cost or rts_pct — used by
+            // the "ONLY MISSING" toggle in the view to hide fully-configured pages.
+            $hasMissing = false;
+            foreach ($p['cells'] as $c) {
+                if ($c['unit_cost'] === null || $c['rts_pct'] === null) { $hasMissing = true; break; }
+            }
+            $p['has_missing'] = $hasMissing;
             unset($p['distinct_items']);
         }
         unset($p);
