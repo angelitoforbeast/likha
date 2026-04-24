@@ -64,6 +64,9 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
         $runUpdated   = 0;
         $runSkipped   = 0;
 
+        // Collect distinct ts_dates touched by this run → for primary-item recompute hook
+        $touchedDates = [];
+
         foreach ($items as $item) {
             $setting = $item->setting_id ? ($settings[$item->setting_id] ?? null) : null;
 
@@ -215,6 +218,12 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
                             ['fb_name', '=', $fbName],
                         ])->first();
 
+                        // Track ts_date for primary-item recompute hook.
+                        // TIMESTAMP format: "H:i d-m-Y" → extract Y-m-d.
+                        if (!empty($timestamp) && preg_match('/^\d{2}:\d{2} (\d{2})-(\d{2})-(\d{4})$/', $timestamp, $dm)) {
+                            $touchedDates[$dm[3] . '-' . $dm[2] . '-' . $dm[1]] = true;
+                        }
+
                         if (!$existing) {
                             MacroOutput::create($data);
                             $inserted++;
@@ -315,6 +324,24 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
                 ? "May {$failedCount} sheet(s) na failed."
                 : 'Import completed.',
         ]);
+
+        // === Recompute daily_page_primary_item for touched dates ===
+        // Wrapped in try/catch so any failure here never marks the import as failed.
+        if (!empty($touchedDates)) {
+            try {
+                $svc = app(\App\Services\DailyPrimaryItemService::class);
+                $summary = $svc->recomputeDates(array_keys($touchedDates));
+                Log::info('daily_page_primary_item recompute after macro import', [
+                    'run_id'  => $run->id,
+                    'dates'   => array_keys($touchedDates),
+                    'summary' => $summary,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('daily_page_primary_item recompute failed (non-fatal): ' . $e->getMessage(), [
+                    'run_id' => $run->id,
+                ]);
+            }
+        }
     }
 
     private function updateRunTotals(MacroImportRun $run, int $processedSettings, int $processed, int $inserted, int $updated, int $skipped): void

@@ -1258,73 +1258,93 @@ class OwnerPrivateController extends Controller
         $moCod    = 'mo.'.$quote($codCol);
         $codClean = $castMoney($moCod);
 
-        // ── macro_output: grouped by page + item for the date ─────────────────
-        $moRows = DB::table('macro_output as mo')
+        // ── PRIMARY ITEMS (materialized): single source of truth ─────────────
+        // daily_page_primary_item enforces ONE primary item per (date, page_key).
+        // Ties are NOT stored → we surface those as "skipped" below.
+        $primaryRows = DB::table('daily_page_primary_item')
+            ->where('ts_date', $date)
+            ->get([
+                'page_label', 'page_key', 'primary_item', 'primary_item_key',
+                'primary_orders', 'total_orders_all', 'primary_mode_cod',
+                'second_item', 'second_orders',
+            ]);
+
+        $primaryByPage = []; // page_key → row
+        foreach ($primaryRows as $pr) {
+            $primaryByPage[(string)$pr->page_key] = $pr;
+        }
+
+        // ── Enrich primaries with proceed_orders + COD range (from macro_output)
+        // Only query rows where (page_key, item_norm) matches one of our primaries.
+        $itemNormExpr = "LOWER(REPLACE(REPLACE(REPLACE($itemTrim,' ',''),'-',''),'_',''))";
+        $statRows = DB::table('macro_output as mo')
             ->whereRaw("$dateExpr = ?", [$date])
             ->whereRaw("$pageTrim != ''")
             ->selectRaw("
-                $pageTrim AS page_label,
-                $pageKey  AS page_key,
-                $itemTrim AS item_name,
-                COUNT(*)  AS total_orders,
+                $pageKey AS page_key,
+                $itemNormExpr AS item_key,
                 SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders,
                 MAX($codClean) AS max_cod,
                 MIN(CASE WHEN $codClean > 0 THEN $codClean ELSE NULL END) AS min_cod
             ")
-            ->groupByRaw("$pageKey, $pageTrim, $itemTrim")
+            ->groupByRaw("$pageKey, $itemNormExpr")
             ->get();
 
-        // ── mode COD per page+item (most frequent = real SRP) ────────────────
-        // MAX(COD) is unreliable if a few orders have wrong/different amounts.
-        // We group by page+item+cod, then in PHP pick the cod with highest count.
-        $codFreqRows = DB::table('macro_output as mo')
+        $statByPageItem = []; // page_key||item_key → stats
+        foreach ($statRows as $s) {
+            $statByPageItem[(string)$s->page_key.'||'.(string)$s->item_key] = $s;
+        }
+
+        // ── Count unresolved slices (present on macro_output but not in primary table)
+        $pagesSeenRows = DB::table('macro_output as mo')
             ->whereRaw("$dateExpr = ?", [$date])
             ->whereRaw("$pageTrim != ''")
-            ->whereRaw("$codClean > 0")
-            ->selectRaw("$pageKey AS page_key, $itemTrim AS item_name, $codClean AS cod_val, COUNT(*) AS cnt")
-            ->groupByRaw("$pageKey, $itemTrim, $codClean")
+            ->selectRaw("$pageKey AS page_key")
+            ->groupByRaw("$pageKey")
             ->get();
+        $pagesSeen = array_map(fn($r) => (string)$r->page_key, $pagesSeenRows->all());
+        $skippedPages = array_values(array_diff($pagesSeen, array_keys($primaryByPage)));
+        $skippedCount = count($skippedPages);
 
-        $modeCodMap = []; // "page_key||item_name" → float (mode COD)
-        foreach ($codFreqRows as $r) {
-            $k = (string)$r->page_key . '||' . strtolower(trim((string)$r->item_name));
-            if (!isset($modeCodMap[$k]) || (int)$r->cnt > $modeCodMap[$k]['cnt']) {
-                $modeCodMap[$k] = ['cod' => (float)$r->cod_val, 'cnt' => (int)$r->cnt];
-            }
-        }
-
-        // ── group by page ─────────────────────────────────────────────────────
+        // ── Build pageGroups shape expected downstream ──────────────────────
+        // "Secondary items" now = the single second_item recorded in the table (if any).
         $pageGroups = [];
-        foreach ($moRows as $row) {
-            $pk = (string)$row->page_key;
-            if (!isset($pageGroups[$pk])) {
-                $pageGroups[$pk] = [
-                    'page_label'     => (string)$row->page_label,
-                    'page_key'       => $pk,
-                    'total_orders'   => 0,
+        foreach ($primaryByPage as $pk => $pr) {
+            $statKey = $pk.'||'.(string)$pr->primary_item_key;
+            $stat    = $statByPageItem[$statKey] ?? null;
+
+            $primary = [
+                'item_name'      => (string)$pr->primary_item,
+                'item_key'       => (string)$pr->primary_item_key,
+                'total_orders'   => (int)$pr->primary_orders,
+                'proceed_orders' => $stat ? (int)$stat->proceed_orders : 0,
+                'mode_cod'       => $pr->primary_mode_cod !== null ? (float)$pr->primary_mode_cod : 0.0,
+                'max_cod'        => $stat ? (float)($stat->max_cod ?? 0) : (float)($pr->primary_mode_cod ?? 0),
+                'min_cod'        => $stat ? (float)($stat->min_cod ?? $stat->max_cod ?? 0) : (float)($pr->primary_mode_cod ?? 0),
+            ];
+
+            $items = [$primary];
+            if (!empty($pr->second_item)) {
+                // Best-effort: reuse primary mode_cod as an unknown; we didn't cache second mode.
+                $items[] = [
+                    'item_name'      => (string)$pr->second_item,
+                    'item_key'       => null,
+                    'total_orders'   => (int)($pr->second_orders ?? 0),
                     'proceed_orders' => 0,
-                    'items'          => [],
+                    'mode_cod'       => 0.0,
+                    'max_cod'        => 0.0,
+                    'min_cod'        => 0.0,
                 ];
             }
-            $pageGroups[$pk]['total_orders']   += (int)$row->total_orders;
-            $pageGroups[$pk]['proceed_orders'] += (int)$row->proceed_orders;
-            $modeKey  = (string)$row->page_key . '||' . strtolower(trim((string)$row->item_name));
-            $modeCod  = $modeCodMap[$modeKey]['cod'] ?? (float)($row->max_cod ?? 0);
-            $pageGroups[$pk]['items'][] = [
-                'item_name'      => (string)$row->item_name,
-                'total_orders'   => (int)$row->total_orders,
-                'proceed_orders' => (int)$row->proceed_orders,
-                'mode_cod'       => $modeCod,                                    // most-frequent COD = real SRP
-                'max_cod'        => (float)($row->max_cod ?? 0),
-                'min_cod'        => (float)($row->min_cod ?? $row->max_cod ?? 0),
+
+            $pageGroups[$pk] = [
+                'page_label'     => (string)$pr->page_label,
+                'page_key'       => $pk,
+                'total_orders'   => (int)$pr->primary_orders,           // primary-only; non-primary rows excluded
+                'proceed_orders' => $stat ? (int)$stat->proceed_orders : 0,
+                'items'          => $items,
             ];
         }
-
-        // Sort items descending by total_orders (dominant = index 0)
-        foreach ($pageGroups as &$pg) {
-            usort($pg['items'], fn($a, $b) => $b['total_orders'] - $a['total_orders']);
-        }
-        unset($pg);
 
         // ── adspent per page for the date ─────────────────────────────────────
         $castSpend = $castMoney('amount_spent_php');
@@ -1548,7 +1568,12 @@ class OwnerPrivateController extends Controller
 
         usort($result, fn($a, $b) => strcmp((string)$a['page_name'], (string)$b['page_name']));
 
-        return response()->json(['rows' => $result, 'date' => $date]);
+        return response()->json([
+            'rows'           => $result,
+            'date'           => $date,
+            'skipped_count'  => $skippedCount,
+            'skipped_pages'  => $skippedPages,
+        ]);
     }
 
     public function saveItemSetting(Request $request)
@@ -1608,5 +1633,46 @@ class OwnerPrivateController extends Controller
         }
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * CEO-only manual refresh of daily_page_primary_item for a date range.
+     * Accepts optional start_date / end_date — defaults to last 90 days.
+     */
+    public function refreshPrimaryItems(Request $request)
+    {
+        $this->checkAccess();
+
+        $tz    = new \DateTimeZone('Asia/Manila');
+        $today = (new \DateTime('now', $tz))->format('Y-m-d');
+
+        $from = $request->input('start_date');
+        $to   = $request->input('end_date');
+
+        if (!$from && !$to) {
+            $to   = $today;
+            $from = (new \DateTime($today, $tz))->modify('-89 days')->format('Y-m-d');
+        } else {
+            if (!$from) $from = $to;
+            if (!$to)   $to   = $from;
+        }
+
+        if (strtotime($from) === false || strtotime($to) === false) {
+            return response()->json(['ok' => false, 'message' => 'Invalid date(s)'], 422);
+        }
+        if ($from > $to) [$from, $to] = [$to, $from];
+
+        try {
+            $svc = app(\App\Services\DailyPrimaryItemService::class);
+            $t0  = microtime(true);
+            $summary = $svc->recomputeRange($from, $to);
+            $summary['elapsed_s'] = round(microtime(true) - $t0, 2);
+            $summary['from'] = $from;
+            $summary['to']   = $to;
+
+            return response()->json(['ok' => true, 'summary' => $summary]);
+        } catch (\Throwable $e) {
+            return response()->json(['ok' => false, 'message' => $e->getMessage()], 500);
+        }
     }
 }

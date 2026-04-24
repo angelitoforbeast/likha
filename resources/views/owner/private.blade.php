@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
   <title>Daily Summary • Private</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -128,6 +129,19 @@
         <path d="M3 21v-5h5"/>
       </svg>
     </button>
+
+    @if(!empty($isCEO))
+      <button id="refreshPrimaryBtn"
+              @click="refreshPrimary()"
+              :disabled="refreshing"
+              title="Recompute daily_page_primary_item (last 90 days)"
+              style="background:#1e293b;color:#fbbf24;border:1px solid #475569;
+                     border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+                     cursor:pointer;margin-left:4px;">
+        <span x-show="!refreshing">🔄 Primary Items</span>
+        <span x-show="refreshing">Recomputing…</span>
+      </button>
+    @endif
   </div>
 
   <!-- Scroll area -->
@@ -468,6 +482,12 @@
       </table>
       <div style="padding:7px 12px;font-size:10px;color:#94a3b8;border-top:1px solid #f1f5f9;">
         One row per page · Price = mode COD · Ship/proceed · COD Fee=Price×rate×(1+VAT)/delivered · Proj.%=/Order÷Price · RTS/Del/Transit% = JNT 90-day · Drag headers to reorder
+        <template x-if="skippedCount > 0">
+          <span style="color:#b45309;font-weight:600;margin-left:8px;"
+                :title="'Pages excluded: '+skippedPages.join(', ')">
+            ⚠ <span x-text="skippedCount"></span> page(s) skipped (tied primary or unresolved — hover for list)
+          </span>
+        </template>
       </div>
     </div>
   </div>
@@ -489,6 +509,8 @@
       rows:[], loading:false, editIdx:-1, editRow:null,
       ev:{ item_value:'', rts_pct:'', comment:'' },
       saving:false, saveMsg:'',
+      refreshing:false,
+      skippedCount:0, skippedPages:[],
       sortCol:'', sortDir:'desc',
       dragSrc:null, dragOver:null,
       cols:[],
@@ -566,8 +588,42 @@
           const r = await fetch('{{ route('owner.private.item-summary') }}?date='+this.date);
           const j = await r.json();
           this.rows = j.rows||[];
+          this.skippedCount = j.skipped_count || 0;
+          this.skippedPages = j.skipped_pages || [];
         }catch(e){ console.error(e); }
         finally{ this.loading=false; }
+      },
+
+      // ── CEO: manual recompute of daily_page_primary_item ────────────────
+      async refreshPrimary(){
+        if (this.refreshing) return;
+        if (!confirm('Recompute primary-item table for the last 90 days?\nThis rebuilds the cached per-page/date primary item used by /owner/private and /jnt/supply.')) return;
+        this.refreshing = true; this.saveMsg = '';
+        try {
+          const r = await fetch('{{ route('owner.private.refresh-primary-items') }}', {
+            method: 'POST',
+            headers: {
+              'Content-Type':'application/json',
+              'Accept':'application/json',
+              'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+            },
+            body: JSON.stringify({}),
+          });
+          const j = await r.json();
+          if (j.ok && j.summary) {
+            const s = j.summary;
+            this.saveMsg = `✓ ${s.rows_upserted} rows · ${s.ties_skipped} ties skipped (${s.from}→${s.to}, ${s.elapsed_s}s)`;
+            setTimeout(() => this.saveMsg = '', 6000);
+            await this.load();
+          } else {
+            alert(j.message || 'Refresh failed');
+          }
+        } catch(e) {
+          console.error(e);
+          alert('Network error');
+        } finally {
+          this.refreshing = false;
+        }
       },
 
       // ── Sort ─────────────────────────────────────────────────────────────

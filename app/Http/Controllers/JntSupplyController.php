@@ -384,80 +384,41 @@ class JntSupplyController extends Controller
             ->subDays($maxProfitWindow - 1)
             ->toDateString();
 
-        // Page/COD column names for macro_output (matches owner/private)
-        $pageCol = $driver === 'pgsql' ? '"PAGE"' : '`PAGE`';
-        $codCol  = $driver === 'pgsql' ? '"COD"'  : '`COD`';
-
-        // Fetch per (ts_date, page_key, base_item, cod_val) counts — one pass
-        $moProfitRows = DB::table('macro_output')
-            ->whereBetween('ts_date', [$profitFrom, $asOfDate])
-            ->selectRaw(
-                "ts_date as d, "
-                . ($driver === 'pgsql'
-                    ? "LOWER(BTRIM(COALESCE({$pageCol}::text,''))) as pg, BTRIM(COALESCE({$pageCol}::text,'')) as pg_label, "
-                    : "LOWER(TRIM(COALESCE({$pageCol},''))) as pg, TRIM(COALESCE({$pageCol},'')) as pg_label, ")
-                . "{$itemCol} as item_name, "
-                . "{$codCol} as cod_val, "
-                . "COUNT(*) as cnt"
-            )
-            ->groupByRaw(
-                "ts_date, "
-                . ($driver === 'pgsql'
-                    ? "LOWER(BTRIM(COALESCE({$pageCol}::text,''))), BTRIM(COALESCE({$pageCol}::text,'')), "
-                    : "LOWER(TRIM(COALESCE({$pageCol},''))), TRIM(COALESCE({$pageCol},'')), ")
-                . "{$itemCol}, {$codCol}"
-            )
-            ->get();
-
         // Excluded pages (affects profit% only)
         $excludedSet = array_flip(SupplyExcludedPage::excludedSet());
 
-        $parseCod = fn($v) => (float) preg_replace('/[^0-9.\-]/', '', (string) $v);
+        // Normalize an item label the SAME way daily_page_primary_item.primary_item_key does:
+        // LOWER + strip spaces/dashes/underscores.
+        $normItem = fn(string $s) => strtolower(preg_replace('/[\s\-_]+/u', '', $s));
 
-        // profitData[date][page_key][base] = [
-        //   'total' => int,
-        //   'cod_counts' => [ codVal => count ],
-        //   'pg_label' => original page label,
-        // ]
-        $profitData = [];
-        foreach ($moProfitRows as $r) {
-            $pgKey = (string) $r->pg;
+        // === PRIMARY ITEMS (materialized): read cached (date, page, primary_item, mode_cod)
+        // Absence of row for a (date, page_key) = tied/unresolved → automatically excluded.
+        $primaryRowsProfit = DB::table('daily_page_primary_item')
+            ->whereBetween('ts_date', [$profitFrom, $asOfDate])
+            ->get([
+                'ts_date', 'page_key', 'primary_item', 'primary_orders', 'primary_mode_cod',
+            ]);
+
+        // $primaryByBase[base_key_normalized][date][page_key] = ['orders', 'mode_cod']
+        // $primaryPageSet[date][page_key] = true  (used later to attribute ads only when
+        //   this base is THE primary on that slice — same semantics as before)
+        $primaryByBase = [];
+        $primaryPageSet = [];
+        foreach ($primaryRowsProfit as $r) {
+            $pgKey = (string) $r->page_key;
             if ($pgKey === '' || isset($excludedSet[$pgKey])) continue;
 
-            [$qty, $base] = $this->parseItem((string) ($r->item_name ?? ''));
+            $d = (string) $r->ts_date;
+            // primary_item still carries qty prefix ("2 x FLASHLIGHT") → strip via parseItem
+            [, $base] = $this->parseItem((string) $r->primary_item);
             if ($base === '' || $base === '—') continue;
 
-            $d   = (string) $r->d;
-            $cnt = (int) $r->cnt;
-            $units = $qty * $cnt;
-            $cod   = $parseCod($r->cod_val);
-
-            if (!isset($profitData[$d][$pgKey][$base])) {
-                $profitData[$d][$pgKey][$base] = [
-                    'total'      => 0,
-                    'cod_counts' => [],
-                    'pg_label'   => (string) $r->pg_label,
-                ];
-            }
-            $profitData[$d][$pgKey][$base]['total'] += $units;
-            $codKey = (string) $cod;
-            $profitData[$d][$pgKey][$base]['cod_counts'][$codKey] =
-                ($profitData[$d][$pgKey][$base]['cod_counts'][$codKey] ?? 0) + $units;
-        }
-
-        // Precompute primary item per (date, page_key) + tied flag
-        // primaryMap[date][pg_key] = [ 'base' => X, 'tied' => bool ]
-        $primaryMap = [];
-        foreach ($profitData as $d => $pages) {
-            foreach ($pages as $pg => $bases) {
-                $best = -1; $bestBase = null; $tied = false;
-                foreach ($bases as $b => $info) {
-                    $t = (int) $info['total'];
-                    if ($t > $best) { $best = $t; $bestBase = $b; $tied = false; }
-                    elseif ($t === $best && $t > 0) { $tied = true; }
-                }
-                $primaryMap[$d][$pg] = ['base' => $bestBase, 'tied' => $tied];
-            }
+            $baseKey = $normItem($base);
+            $primaryByBase[$baseKey][$d][$pgKey] = [
+                'orders'   => (int) $r->primary_orders,
+                'mode_cod' => $r->primary_mode_cod !== null ? (float) $r->primary_mode_cod : 0.0,
+            ];
+            $primaryPageSet[$d][$pgKey] = true;
         }
 
         // Ads per (day, page_key)
@@ -645,34 +606,26 @@ class JntSupplyController extends Controller
             }
 
             // -- Projected Profit% -----------------------------------------
+            // Sources slices EXCLUSIVELY from daily_page_primary_item.
+            // Tied / unresolved slices are already absent from that table → no manual skip needed here.
             $profitWindowDays = $classWindowMap[$itemClass] ?? 30;
             $profitStartDate  = $asOfCarbon->copy()->subDays($profitWindowDays - 1)->toDateString();
 
             $sumGross      = 0.0;
             $sumNet        = 0.0;
-            $skippedDays   = 0;   // number of (day,page) slices skipped due to tied primary
             $mismatchCount = 0;   // cogs override vs base cogs mismatch slices
             $hasAnyCogs    = false;
             $usedAnyRts    = ($rtsPct > 0);
-            $profitDebug   = []; // not exposed currently but available for tooltip
 
-            foreach ($profitData as $d => $pages) {
+            $baseKey  = $normItem($base);
+            $perDate  = $primaryByBase[$baseKey] ?? [];
+
+            foreach ($perDate as $d => $pagesForDate) {
                 if ($d < $profitStartDate || $d > $asOfDate) continue;
-                foreach ($pages as $pgKey => $bases) {
-                    if (!isset($bases[$base])) continue;
-
-                    $pm = $primaryMap[$d][$pgKey] ?? null;
-                    if ($pm && $pm['tied']) { $skippedDays++; continue; }
-
-                    $slice   = $bases[$base];
-                    $orders  = (int) $slice['total'];
+                foreach ($pagesForDate as $pgKey => $slice) {
+                    $orders  = (int) $slice['orders'];
                     if ($orders <= 0) continue;
-
-                    // Mode COD
-                    $modeCod = 0.0; $modeCnt = -1;
-                    foreach ($slice['cod_counts'] as $cv => $c) {
-                        if ($c > $modeCnt) { $modeCnt = (int) $c; $modeCod = (float) $cv; }
-                    }
+                    $modeCod = (float) $slice['mode_cod'];
 
                     // COGS — page override first, then base cogs
                     $override = $pisMap[$pgKey][$base]['price']   ?? null;
@@ -683,7 +636,7 @@ class JntSupplyController extends Controller
                     $unitCost = $override ?? $baseCog ?? 0.0;
                     if ($unitCost > 0) $hasAnyCogs = true;
 
-                    // RTS — page override first, fallback to item-wide max
+                    // RTS — page override first, fallback to item-wide rate
                     $sliceRts = $pisMap[$pgKey][$base]['rts_pct'] ?? $rtsPct;
                     $sliceDelivered = max(0.01, 1 - $sliceRts / 100);
                     $shipped = $orders * $sliceDelivered;
@@ -694,11 +647,8 @@ class JntSupplyController extends Controller
                     $vat         = $codFee * $COD_FEE_VAT_RATE;
                     $cogsTotal   = $shipped * $unitCost;
 
-                    // Ads attributed only when this base is the primary for (day,page)
-                    $ads = 0.0;
-                    if ($pm && $pm['base'] === $base) {
-                        $ads = (float) ($adsMap[$d][$pgKey] ?? 0);
-                    }
+                    // This base IS the primary on (d, pgKey) by construction → attribute ads.
+                    $ads = (float) ($adsMap[$d][$pgKey] ?? 0);
 
                     $net = $gross - $ads - $shippingFee - $codFee - $vat - $cogsTotal;
 
@@ -752,7 +702,7 @@ class JntSupplyController extends Controller
                 'profit_window_days'  => $profitWindowDays,
                 'profit_sum_gross'    => round($sumGross, 2),
                 'profit_sum_net'      => round($sumNet, 2),
-                'profit_skipped_days' => $skippedDays,
+                'profit_skipped_days' => 0, // Ties now excluded at materialization; always 0 here.
                 'profit_mismatch_ct'  => $mismatchCount,
                 'profit_has_cogs'     => $hasAnyCogs,
                 'profit_has_rts'      => $usedAnyRts,
