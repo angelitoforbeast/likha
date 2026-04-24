@@ -295,6 +295,40 @@ class JntSupplyController extends Controller
             $rtsMap[$base] = max($rtsMap[$base] ?? 0, (float)($r->max_rts ?? 0));
         }
 
+        // -- 3b. RTS% DETAIL for transparency (shown in RTS% column tooltip).
+        // Per (base_item, page_name, qty-variant) → list of rts values so user
+        // can see how many distinct values exist (the displayed RTS is the MAX).
+        $rtsDetailRows = DB::table('page_item_settings')
+            ->whereNotNull('rts_pct')
+            ->get(['page_name', 'item_name', 'rts_pct']);
+        $rtsDetailMap = []; // base => [ ['page'=>..., 'variant'=>..., 'rts'=>...], ... ]
+        foreach ($rtsDetailRows as $r) {
+            [, $base] = $this->parseItem((string)($r->item_name ?? ''));
+            if ($base === '') continue;
+            $rtsDetailMap[$base][] = [
+                'page'    => (string)$r->page_name,
+                'variant' => (string)$r->item_name,
+                'rts'     => (float)$r->rts_pct,
+            ];
+        }
+
+        // -- 3c. LAST ORDER DATE per base item (uses macro_output).
+        //        Grouped by the same item_name column used for velocity, then
+        //        parseItem-reduced to base so qty-variants collapse together.
+        $lastDateRows = DB::table('macro_output')
+            ->selectRaw("$itemCol as item_name, MAX(ts_date) as last_date")
+            ->groupByRaw($itemCol)
+            ->get();
+        $lastDateMap = [];
+        foreach ($lastDateRows as $r) {
+            [, $base] = $this->parseItem((string)($r->item_name ?? ''));
+            if ($base === '') continue;
+            $existing = $lastDateMap[$base] ?? null;
+            if ($existing === null || $r->last_date > $existing) {
+                $lastDateMap[$base] = (string)$r->last_date;
+            }
+        }
+
         // -- 4. Supply settings ---------------------------------------------
         $supplySettings = SupplyItemSetting::all()->keyBy('item_name');
 
@@ -864,6 +898,29 @@ class JntSupplyController extends Controller
                 'is_running'          => $isRunning,
                 'is_running_auto'     => ($setting?->is_running === null),
                 'rts_pct'             => round($rtsPct, 1),
+                // Transparency: all distinct (page, qty-variant, rts%) rows that
+                // feed this item. Displayed RTS is the MAX of these; the tooltip
+                // shows the full list so the user can see if multiple exist.
+                'rts_details'         => (function() use ($rtsDetailMap, $base) {
+                    $rows = $rtsDetailMap[$base] ?? [];
+                    // De-dupe by (page|variant|rts) and sort for stable display.
+                    $seen = [];
+                    $out  = [];
+                    foreach ($rows as $r) {
+                        $k = strtolower($r['page']) . '|' . strtolower($r['variant']) . '|' . $r['rts'];
+                        if (isset($seen[$k])) continue;
+                        $seen[$k] = true;
+                        $out[] = $r;
+                    }
+                    usort($out, function($a, $b) {
+                        return $b['rts'] <=> $a['rts']
+                            ?: strcmp($a['page'], $b['page'])
+                            ?: strcmp($a['variant'], $b['variant']);
+                    });
+                    return $out;
+                })(),
+                // Last date this base item appeared in macro_output (any status).
+                'last_order_date'     => $lastDateMap[$base] ?? null,
                 'delivery_rate'       => round($deliveryRate * 100, 1),
                 'lead_time_days'      => $leadTime,
                 'safety_days'         => $safetyDays,

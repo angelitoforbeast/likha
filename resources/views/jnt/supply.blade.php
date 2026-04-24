@@ -30,8 +30,18 @@
       font-size:11px; border:1px solid #d1d5db; border-radius:4px;
       padding:2px 4px; background:white; display:none; margin-top:2px;
     }
-    /* Frozen column headers */
-    .supply-table-wrap { max-height: calc(100vh - 260px); overflow: auto; }
+    /* Frozen column headers + edge-to-edge: no horizontal scroll, let long
+       text wrap within its cell instead. */
+    .supply-table-wrap { max-height: calc(100vh - 260px); overflow-y: auto; overflow-x: hidden; width: 100%; }
+    #supplyTable { width: 100%; }
+    #supplyTable th, #supplyTable td { padding: 4px 6px; font-size: 12px; }
+    /* Allow wrapping for compact edge-to-edge layout; keep date/number cells
+       on one line to stay readable. Use !important to override Tailwind's
+       whitespace-nowrap utility already baked into the markup. */
+    #supplyTable th { white-space: normal !important; line-height: 1.2; }
+    #supplyTable td.cell-nowrap, #supplyTable th.cell-nowrap { white-space: nowrap !important; }
+    /* Item column can use a bit more room without exploding width. */
+    #supplyTable td:first-child { word-break: break-word; }
     #supplyTable thead tr.col-filter-row th {
       position: sticky;
       top: 34px;                 /* sits directly under main header row */
@@ -195,8 +205,29 @@
     {{-- Table                                                               --}}
     {{-- ================================================================== --}}
     @if(count($items) > 0)
+    {{-- Column visibility panel — shared globally via the same stateSave hook. --}}
+    <div class="flex items-center gap-2 mb-2 text-xs relative">
+      <button type="button" id="colVisBtn"
+              class="px-3 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 font-semibold">
+        ⚙ Columns
+      </button>
+      <button type="button" onclick="window.__resetSupplyColumns && window.__resetSupplyColumns()"
+              class="px-3 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50"
+              title="Reset column order, sort, filters & visibility (shared — affects everyone)">
+        ↺ Reset layout
+      </button>
+      <span class="text-gray-400">Drag any header to reorder · Saved globally.</span>
+      <div id="colVisPanel"
+           class="hidden absolute top-8 left-0 bg-white border border-gray-200 rounded shadow-lg p-2 z-50"
+           style="min-width:220px;">
+        <div class="text-xs font-semibold text-gray-500 uppercase mb-1 px-1">Show / Hide Columns</div>
+        {{-- Populated by JS. --}}
+        <div id="colVisList" class="flex flex-col gap-0.5 max-h-80 overflow-auto"></div>
+      </div>
+    </div>
     <div class="bg-white rounded-lg shadow border border-gray-200 supply-table-wrap">
-      <table id="supplyTable" class="min-w-full text-sm border-collapse">
+      <table id="supplyTable" class="w-full text-sm border-collapse"
+             style="table-layout:auto;">
         <thead>
           <tr style="background:#f1f5f9; border-bottom:2px solid #cbd5e1;">
             <th class="px-3 py-2 text-left   text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Item</th>
@@ -207,7 +238,8 @@
                 style="background:#ede9fe; color:#6d28d9;">Class</th>
             <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Lifecycle</th>
             <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">Running?</th>
-            <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">RTS%</th>
+            <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200"
+                title="Displayed value = MAX across all (page × qty-variant) overrides. Hover a cell to see the full per-page list. Profit calc uses the per-page override, falling back to this MAX.">RTS%</th>
             <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200"
                 style="background:#ecfccb; color:#3f6212;">Proj Profit%</th>
             {{-- Transparency columns: shows which qty-exact variants + cogs values
@@ -216,6 +248,8 @@
                 style="background:#fef3c7; color:#78350f;" title="The exact qty-variant item_name(s) fed into PROJ PROFIT% — matches cogs table lookup key">Item Name(s)</th>
             <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200"
                 style="background:#fef3c7; color:#78350f;" title="Unit cost (₱) actually used per variant. Red = no cogs entry found.">COGS (₱)</th>
+            <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200"
+                title="Latest date any qty-variant of this item appeared in macro_output (any status).">Last Order</th>
           </tr>
           {{-- gSheet-style per-column header filters --}}
           <tr class="col-filter-row">
@@ -273,6 +307,9 @@
             {{-- No filters on transparency columns (read-only diagnostics). --}}
             <th></th>
             <th></th>
+            {{-- Last Order: "since YYYY-MM-DD" filter (rows with last_order ≥ value). --}}
+            <th><input type="date" class="col-filter-input col-filter-date" data-col="11"
+                       title="Show items with a last order on/after this date"></th>
           </tr>
         </thead>
         <tbody>
@@ -367,10 +404,24 @@
               @endif
             </td>
 
-            {{-- RTS% --}}
+            {{-- RTS% — displayed value is MAX across (page × qty-variant). Tooltip
+                 lists every distinct value so user knows if it's a summary. --}}
+            @php
+              $rtsDetails = $row['rts_details'] ?? [];
+              $rtsCount   = count($rtsDetails);
+              $rtsTip     = $rtsCount === 0
+                ? 'No RTS% overrides configured for this item'
+                : ($rtsCount . ' override(s) · displayed = MAX' . "\n"
+                   . implode("\n", array_map(
+                       fn($r) => sprintf('• %s · %s · %s%%', $r['page'], $r['variant'], rtrim(rtrim(number_format($r['rts'],2),'0'),'.')),
+                       array_slice($rtsDetails, 0, 20)
+                     ))
+                   . ($rtsCount > 20 ? "\n… (+" . ($rtsCount - 20) . ' more)' : ''));
+            @endphp
             <td class="px-3 py-2 border border-gray-200 text-right text-gray-700"
-                data-order="{{ $row['rts_pct'] }}">
-              {{ $row['rts_pct'] > 0 ? $row['rts_pct'].'%' : '—' }}
+                data-order="{{ $row['rts_pct'] }}"
+                title="{{ $rtsTip }}">
+              {{ $row['rts_pct'] > 0 ? $row['rts_pct'].'%' : '—' }}@if($rtsCount > 1)<sup class="text-[9px] text-purple-700 font-semibold ml-0.5" title="{{ $rtsCount }} distinct overrides">×{{ $rtsCount }}</sup>@endif
             </td>
 
             {{-- Projected Profit% --}}
@@ -442,6 +493,38 @@
               @endif
             </td>
 
+            {{-- Last Order Date — latest appearance in macro_output, any status. --}}
+            @php
+              $lod = $row['last_order_date'] ?? null;
+              $lodSort = $lod ? (int) str_replace('-', '', $lod) : 0;
+              $lodAgeDays = null;
+              if ($lod) {
+                $diff = (strtotime($asOfDate ?? date('Y-m-d')) - strtotime($lod));
+                $lodAgeDays = (int) floor($diff / 86400);
+              }
+              $lodColor = 'text-gray-700';
+              if ($lodAgeDays !== null) {
+                if ($lodAgeDays <= 1)       $lodColor = 'text-green-700 font-semibold';
+                elseif ($lodAgeDays <= 7)   $lodColor = 'text-green-700';
+                elseif ($lodAgeDays <= 30)  $lodColor = 'text-gray-700';
+                elseif ($lodAgeDays <= 90)  $lodColor = 'text-amber-700';
+                else                        $lodColor = 'text-red-600';
+              }
+            @endphp
+            <td class="px-3 py-2 border border-gray-200 text-center whitespace-nowrap {{ $lodColor }}"
+                data-order="{{ $lodSort }}"
+                data-date="{{ $lod ?? '' }}"
+                title="{{ $lod ? ('Last order: ' . $lod . ($lodAgeDays !== null ? ' (' . $lodAgeDays . 'd ago)' : '')) : 'No orders in macro_output' }}">
+              @if($lod)
+                {{ $lod }}
+                @if($lodAgeDays !== null)
+                  <div class="text-[10px] opacity-70">{{ $lodAgeDays }}d ago</div>
+                @endif
+              @else
+                <span class="text-gray-400">—</span>
+              @endif
+            </td>
+
           </tr>
           @endforeach
         </tbody>
@@ -450,6 +533,7 @@
             {{-- One <td> per column so ColReorder can move them cleanly. --}}
             <td class="px-3 py-2 border border-gray-300 text-xs text-gray-500 uppercase">TOTAL</td>
             <td class="px-3 py-2 border border-gray-300 text-right text-blue-700">{{ number_format($totalHoldUnits) }}</td>
+            <td class="px-3 py-2 border border-gray-300"></td>
             <td class="px-3 py-2 border border-gray-300"></td>
             <td class="px-3 py-2 border border-gray-300"></td>
             <td class="px-3 py-2 border border-gray-300"></td>
@@ -606,7 +690,50 @@
         };
 
         wireFilters(dt);
+        wireColVisPanel(dt);
       };
+
+      // --- Column show/hide panel ---------------------------------------------
+      // Lists every column with a checkbox; visibility is saved via stateSave
+      // (so it's shared globally like column order). Uses ORIGINAL column index.
+      function wireColVisPanel(dt) {
+        const btn    = document.getElementById('colVisBtn');
+        const panel  = document.getElementById('colVisPanel');
+        const listEl = document.getElementById('colVisList');
+        if (!btn || !panel || !listEl) return;
+
+        const render = () => {
+          listEl.innerHTML = '';
+          dt.columns().every(function () {
+            const idx = this.index();              // original index
+            const visible = this.visible();
+            // Header label — strip whitespace, take text from first <th>.
+            const thText = $(this.header()).clone().children().remove().end().text().trim()
+                        || $(this.header()).text().trim() || ('Col ' + idx);
+            const id = 'colvis_' + idx;
+            const wrap = document.createElement('label');
+            wrap.className = 'flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer text-xs';
+            wrap.innerHTML = `
+              <input type="checkbox" id="${id}" ${visible ? 'checked' : ''} data-idx="${idx}">
+              <span>${thText}</span>`;
+            listEl.appendChild(wrap);
+            wrap.querySelector('input').addEventListener('change', function () {
+              dt.column(idx).visible(this.checked);
+              // stateSave will be triggered automatically by DataTables.
+            });
+          });
+        };
+
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const hidden = panel.classList.contains('hidden');
+          if (hidden) { render(); panel.classList.remove('hidden'); }
+          else panel.classList.add('hidden');
+        });
+        document.addEventListener('click', (e) => {
+          if (!panel.contains(e.target) && e.target !== btn) panel.classList.add('hidden');
+        });
+      }
 
       // Fetch once, then init. Any error → init with null state (default order).
       fetch(TABLE_STATE_URL, { headers: { 'Accept': 'application/json' } })
@@ -677,6 +804,14 @@
         if (pfSel && pfSel.value !== '') {
           const td = cellByOriginalIdx(rowIndex, 8);
           if ((td?.getAttribute('data-bucket') ?? '') !== pfSel.value) return false;
+        }
+
+        // Last Order (col 11) — "since" date filter
+        const lodInp = document.querySelector('.col-filter-date[data-col="11"]');
+        if (lodInp && lodInp.value !== '') {
+          const td = cellByOriginalIdx(rowIndex, 11);
+          const d  = td?.getAttribute('data-date') || '';
+          if (d === '' || d < lodInp.value) return false;
         }
 
         return true;
