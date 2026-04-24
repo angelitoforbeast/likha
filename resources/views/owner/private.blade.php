@@ -143,6 +143,11 @@
     </button>
 
     @if(!empty($isCEO))
+      <a href="{{ route('jnt.supply.excluded.index') }}" target="_blank"
+         title="Manage excluded pages (affects /owner/private + /jnt/supply)"
+         style="background:#1e293b;color:#f87171;border:1px solid #475569;
+                border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+                cursor:pointer;margin-left:4px;text-decoration:none;">🚫 Excluded</a>
       <button id="refreshPrimaryBtn"
               @click="refreshPrimary()"
               :disabled="refreshing"

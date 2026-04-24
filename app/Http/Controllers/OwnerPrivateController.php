@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Auth;
 use App\Models\Cogs;
 use App\Models\FeeSetting;
+use App\Models\SupplyExcludedPage;
 
 class OwnerPrivateController extends Controller
 {
@@ -1289,9 +1290,14 @@ class OwnerPrivateController extends Controller
                 'second_item', 'second_orders',
             ]);
 
+        // Excluded pages (managed via /jnt/supply/excluded-pages) — never participate in profit compute
+        $excludedSet = array_flip(SupplyExcludedPage::excludedSet());
+
         $anchorByPage = []; // page_key → anchor row
         foreach ($anchorRows as $pr) {
-            $anchorByPage[(string)$pr->page_key] = $pr;
+            $pk = (string)$pr->page_key;
+            if (isset($excludedSet[$pk])) continue;
+            $anchorByPage[$pk] = $pr;
         }
         // Back-compat alias used downstream; semantic = "the anchor (end_date) primary per page".
         $primaryByPage = $anchorByPage;
@@ -1352,6 +1358,8 @@ class OwnerPrivateController extends Controller
             ->groupByRaw("$pageKey")
             ->get();
         $pagesSeen = array_map(fn($r) => (string)$r->page_key, $pagesSeenRows->all());
+        // Exclude manually-excluded pages from the "skipped" count (they are intentionally out, not unresolved)
+        $pagesSeen = array_values(array_filter($pagesSeen, fn($pk) => !isset($excludedSet[$pk])));
         $skippedPages = array_values(array_diff($pagesSeen, array_keys($anchorByPage)));
         $skippedCount = count($skippedPages);
 
@@ -1883,10 +1891,14 @@ class OwnerPrivateController extends Controller
                 'primary_item', 'primary_item_key', 'primary_orders', 'primary_mode_cod',
             ]);
 
+        // Excluded pages (managed via /jnt/supply/excluded-pages)
+        $excludedSet = array_flip(SupplyExcludedPage::excludedSet());
+
         // Group by page
         $pages = []; // page_key => [label, matrix[date] => row, anchor_item_key, distinct_items set]
         foreach ($rows as $r) {
             $pk = (string)$r->page_key;
+            if (isset($excludedSet[$pk])) continue;
             if (!isset($pages[$pk])) {
                 $pages[$pk] = [
                     'page_key'       => $pk,
