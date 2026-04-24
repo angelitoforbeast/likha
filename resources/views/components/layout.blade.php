@@ -17,6 +17,8 @@
     [x-cloak] { display: none !important; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    /* Prevent horizontal page scroll — wide content uses its own internal scroll container */
+    html, body { overflow-x: hidden; }
   </style>
 </head>
 <body class="h-full">
@@ -227,6 +229,8 @@
       'checklist/*',
       'jnt_rts',
       'jnt_rts/*',
+      'jnt/supply',
+      'jnt/supply/*',
     ]))
       <div class="w-full px-0">
         {{ $slot }}
