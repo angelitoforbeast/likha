@@ -178,6 +178,9 @@ class JntSupplyController extends Controller
         $defaultLeadTime   = max(1, (int) $request->input('default_lead_time', 7));
         $defaultSafetyDays = max(0, (int) $request->input('default_safety_days', 3));
         $asOfDate          = $request->input('as_of_date', $yesterday);
+        // Debug instrumentation: ?debug_item=<base> dumps per-(page,date) slices for that item
+        // as JSON so we can compare column-by-column with /owner/private. Off by default.
+        $debugItem = strtolower(trim((string) $request->input('debug_item', '')));
 
         // Lifecycle params
         $recentDays        = max(1, (int) $request->input('recent_days', 14));
@@ -694,6 +697,10 @@ class JntSupplyController extends Controller
             $baseKey  = $normItem($base);
             $perDate  = $primaryByBase[$baseKey] ?? [];
 
+            // Capture per-slice diagnostics only when the request targets this item.
+            $isDebugThis = ($debugItem !== '' && strtolower($base) === $debugItem);
+            $debugSlices = [];
+
             // Ground truth: /owner/private → profit% = projected_profit / Σ(SRP × primary_orders)
             // Numerator uses PROCEED orders (delivered-only revenue + delivered-only COGS/COD fee,
             // but shipping is charged on all proceed attempts). Denominator uses all primary orders.
@@ -725,13 +732,57 @@ class JntSupplyController extends Controller
                     $sumGross += $modeCod * $orders;
 
                     // Numerator: proceed-based, delivered-only — matches /owner/private
-                    $sumNet +=
-                          $proceed * $modeCod * $deliverFactor             // revenue
-                        - $proceed * $SHIPPING_PER_SHIPPED                  // shipping (all proceed)
-                        - $proceed * $deliverFactor * $unitCost             // COGS (delivered)
-                        - $ads                                              // adspent
-                        - $proceed * $deliverFactor * $codFeeDay;           // COD fee (delivered)
+                    $revenue  = $proceed * $modeCod * $deliverFactor;
+                    $shipping = $proceed * $SHIPPING_PER_SHIPPED;
+                    $cogs     = $proceed * $deliverFactor * $unitCost;
+                    $codFee   = $proceed * $deliverFactor * $codFeeDay;
+                    $netCon   = $revenue - $shipping - $cogs - $ads - $codFee;
+
+                    $sumNet += $netCon;
+
+                    if ($isDebugThis) {
+                        $debugSlices[] = [
+                            'date'          => $d,
+                            'page_key'      => $pgKey,
+                            'item_raw'      => (string)($slice['item_raw'] ?? ''),
+                            'orders'        => $orders,
+                            'mode_cod'      => round($modeCod, 2),
+                            'proceed'       => $proceed,
+                            'rts_pct'       => round($sliceRts, 2),
+                            'rts_source'    => isset($pisMap[$pgKey][$primaryExact]['rts_pct']) ? 'pis_override' : 'fallback_max',
+                            'unit_cost'     => round($unitCost, 2),
+                            'ads'           => round($ads, 2),
+                            'cod_fee_day'   => round($codFeeDay, 4),
+                            'deliver_fct'   => round($deliverFactor, 4),
+                            'gross_contrib' => round($modeCod * $orders, 2),
+                            'revenue'       => round($revenue, 2),
+                            'shipping'      => round($shipping, 2),
+                            'cogs_cost'     => round($cogs, 2),
+                            'cod_fee_cost'  => round($codFee, 2),
+                            'net_contrib'   => round($netCon, 2),
+                        ];
+                    }
                 }
+            }
+
+            if ($isDebugThis) {
+                // Short-circuit: render JSON dump so it's easy to compare against /owner/private.
+                return response()->json([
+                    'item'               => $base,
+                    'item_class'         => $itemClass,
+                    'profit_window_days' => $profitWindowDays,
+                    'profit_start_date'  => $profitStartDate,
+                    'as_of_date'         => $asOfDate,
+                    'fallback_rts_pct'   => $rtsPct,
+                    'total_orders'       => array_sum(array_column($debugSlices, 'orders')),
+                    'total_proceed'      => array_sum(array_column($debugSlices, 'proceed')),
+                    'total_ads'          => array_sum(array_column($debugSlices, 'ads')),
+                    'sum_gross'          => round($sumGross, 2),
+                    'sum_net'            => round($sumNet, 2),
+                    'profit_pct'         => $sumGross > 0 ? round(($sumNet / $sumGross) * 100, 2) : null,
+                    'slice_count'        => count($debugSlices),
+                    'slices'             => $debugSlices,
+                ], 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
             }
 
             $profitPct     = null;
