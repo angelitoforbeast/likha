@@ -729,6 +729,12 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post  ('/jnt/supply/excluded-pages',      [\App\Http\Controllers\JntSupplyController::class, 'storeExcludedPage'  ])->name('jnt.supply.excluded.store');
     Route::delete('/jnt/supply/excluded-pages/{id}', [\App\Http\Controllers\JntSupplyController::class, 'destroyExcludedPage'])->name('jnt.supply.excluded.destroy');
 
+    // Global DataTables state (column order / sort / filters) — shared across
+    // all accounts & devices via app_settings KV.
+    Route::get   ('/jnt/supply/table-state', [\App\Http\Controllers\JntSupplyController::class, 'getTableState'  ])->name('jnt.supply.table-state.get');
+    Route::post  ('/jnt/supply/table-state', [\App\Http\Controllers\JntSupplyController::class, 'saveTableState' ])->name('jnt.supply.table-state.save');
+    Route::delete('/jnt/supply/table-state', [\App\Http\Controllers\JntSupplyController::class, 'resetTableState'])->name('jnt.supply.table-state.reset');
+
 
     // ✅ Validation Lists (CEO, Marketing, Marketing OIC)
     Route::get('/validation-lists', [ValidationListController::class, 'index'])->name('validation-lists.index');

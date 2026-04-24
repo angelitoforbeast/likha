@@ -840,16 +840,19 @@ class JntSupplyController extends Controller
                 ], 200, [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
             }
 
+            // User rule: if ANY required input is missing (no COGS for item OR no
+            // RTS% for item), don't compute profit% at all — show as No data.
+            // Per-slice missing cogs (cogs_source === 'missing') also counts as
+            // "no COGS for this item", since a slice with ₱0 cost silently inflates
+            // profit. If even one slice had missing cogs, we null the whole row.
             $profitPct     = null;
             $profitBucket  = 'missing';
-            if ($sumGross > 0) {
+            if ($sumGross > 0 && $hasAnyCogs && $usedAnyRts && !$missingCogsAny) {
                 $profitPct = round(($sumNet / $sumGross) * 100, 2);
-                if (!$hasAnyCogs || !$usedAnyRts) {
-                    $profitBucket = 'red'; // missing data — treat as risky
-                } elseif ($profitPct >= 15)  $profitBucket = 'green';
-                elseif ($profitPct >= 5)     $profitBucket = 'yellow';
-                elseif ($profitPct >= 0)     $profitBucket = 'orange';
-                else                         $profitBucket = 'red';
+                if ($profitPct >= 15)       $profitBucket = 'green';
+                elseif ($profitPct >= 5)    $profitBucket = 'yellow';
+                elseif ($profitPct >= 0)    $profitBucket = 'orange';
+                else                        $profitBucket = 'red';
             }
 
             $items[] = [
@@ -1089,6 +1092,59 @@ class JntSupplyController extends Controller
         $setting->save();
 
         return response()->json(['success' => true, 'key' => $setting->key, 'value' => $setting->value]);
+    }
+
+    // =======================================================================
+    //  Global supply-table UI state (column order / sort / filters)
+    //
+    //  Stored in `app_settings` under key `ui_supply_table_state` as a JSON
+    //  blob. Shared across ALL users & devices — drag a column once, and it
+    //  stays that way for everyone. Anyone who can see the page can save it
+    //  (no CEO gate) since reordering columns is a UI preference, not data.
+    // =======================================================================
+    public function getTableState()
+    {
+        $row = DB::table('app_settings')
+            ->where('key', 'ui_supply_table_state')
+            ->first(['value']);
+        $raw = $row->value ?? null;
+        $data = null;
+        if (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) $data = $decoded;
+        }
+        return response()->json(['ok' => true, 'state' => $data]);
+    }
+
+    public function saveTableState(Request $request)
+    {
+        // Accept either a JSON body or a 'state' field.
+        $state = $request->input('state');
+        if (is_string($state)) {
+            $decoded = json_decode($state, true);
+            $state   = is_array($decoded) ? $decoded : null;
+        }
+        if (!is_array($state)) {
+            return response()->json(['ok' => false, 'error' => 'Invalid state payload'], 422);
+        }
+
+        // Size guard — DataTables state is typically < 10KB.
+        $json = json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($json === false || strlen($json) > 65000) {
+            return response()->json(['ok' => false, 'error' => 'State too large'], 422);
+        }
+
+        DB::table('app_settings')->updateOrInsert(
+            ['key' => 'ui_supply_table_state'],
+            ['value' => $json, 'updated_at' => now(), 'created_at' => now()]
+        );
+        return response()->json(['ok' => true]);
+    }
+
+    public function resetTableState()
+    {
+        DB::table('app_settings')->where('key', 'ui_supply_table_state')->delete();
+        return response()->json(['ok' => true]);
     }
 
     // =======================================================================

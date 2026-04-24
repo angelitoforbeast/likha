@@ -3,6 +3,7 @@
   <x-slot name="heading">Supply Planner</x-slot>
 
   <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+  <link rel="stylesheet" href="https://cdn.datatables.net/colreorder/1.7.0/css/colReorder.dataTables.min.css">
 
   <style>
     .dt-paging .paginate_button,
@@ -446,9 +447,18 @@
         </tbody>
         <tfoot>
           <tr style="background:#f8fafc; border-top:2px solid #94a3b8; font-weight:700;">
+            {{-- One <td> per column so ColReorder can move them cleanly. --}}
             <td class="px-3 py-2 border border-gray-300 text-xs text-gray-500 uppercase">TOTAL</td>
             <td class="px-3 py-2 border border-gray-300 text-right text-blue-700">{{ number_format($totalHoldUnits) }}</td>
-            <td class="px-3 py-2 border border-gray-300" colspan="9"></td>
+            <td class="px-3 py-2 border border-gray-300"></td>
+            <td class="px-3 py-2 border border-gray-300"></td>
+            <td class="px-3 py-2 border border-gray-300"></td>
+            <td class="px-3 py-2 border border-gray-300"></td>
+            <td class="px-3 py-2 border border-gray-300"></td>
+            <td class="px-3 py-2 border border-gray-300"></td>
+            <td class="px-3 py-2 border border-gray-300"></td>
+            <td class="px-3 py-2 border border-gray-300"></td>
+            <td class="px-3 py-2 border border-gray-300"></td>
           </tr>
         </tfoot>
       </table>
@@ -466,6 +476,7 @@
 
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
   <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/colreorder/1.7.0/js/dataTables.colReorder.min.js"></script>
   <script>
     const CSRF = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 
@@ -535,22 +546,86 @@
     document.addEventListener('DOMContentLoaded', function () {
       if (!document.getElementById('supplyTable')) return;
 
-      const dt = $('#supplyTable').DataTable({
-        paging:    false,
-        searching: true,   // needed for per-column filters
-        ordering:  true,
-        info:      true,
-        dom:       'rti',
-        order:     [[8, 'desc']],    // Proj Profit% col
-        orderCellsTop: true,
-        // Disable sort on filter row
-        columnDefs: [{ orderable: true, targets: '_all' }],
-      });
+      // Server-backed state endpoints (shared across ALL users & devices).
+      const TABLE_STATE_URL = '{{ route('jnt.supply.table-state.get') }}';
+      const TABLE_STATE_SAVE = '{{ route('jnt.supply.table-state.save') }}';
+      const TABLE_STATE_RESET = '{{ route('jnt.supply.table-state.reset') }}';
+
+      // Cache of the latest state loaded from the server — returned synchronously
+      // from stateLoadCallback. We fetch BEFORE init so it's populated in time.
+      let serverState = null;
+
+      // Debounced save so filter keystrokes don't hammer the server.
+      let saveTimer = null;
+      const queueSave = (data) => {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+          fetch(TABLE_STATE_SAVE, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-TOKEN': CSRF,
+              'Accept': 'application/json',
+            },
+            body: JSON.stringify({ state: data }),
+            keepalive: true,
+          }).catch(() => { /* best-effort; no UI noise */ });
+        }, 600);
+      };
+
+      const initDataTable = () => {
+        const dt = $('#supplyTable').DataTable({
+          paging:    false,
+          searching: true,
+          ordering:  true,
+          info:      true,
+          dom:       'Rrti',                 // R = ColReorder handle
+          order:     [[8, 'desc']],          // default sort (overridden by state if any)
+          orderCellsTop: true,
+          colReorder: {
+            realtime: true,
+            fixedColumnsLeft: 0,
+          },
+          stateSave: true,
+          stateDuration: -1,
+          // Persist to SERVER (global), not localStorage.
+          stateSaveCallback: function (settings, data) { queueSave(data); },
+          stateLoadCallback: function () { return serverState; },
+          columnDefs: [{ orderable: true, targets: '_all' }],
+        });
+
+        // Expose for reset button/console.
+        window.__resetSupplyColumns = function () {
+          fetch(TABLE_STATE_RESET, {
+            method: 'DELETE',
+            headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+          }).finally(() => {
+            dt.state.clear();
+            location.reload();
+          });
+        };
+
+        wireFilters(dt);
+      };
+
+      // Fetch once, then init. Any error → init with null state (default order).
+      fetch(TABLE_STATE_URL, { headers: { 'Accept': 'application/json' } })
+        .then(r => r.ok ? r.json() : null)
+        .then(j => { serverState = (j && j.state) ? j.state : null; })
+        .catch(() => { serverState = null; })
+        .finally(initDataTable);
+
+      function wireFilters(dt) {
+      // Helper: resolve a TD by ORIGINAL column index, so filters keep working
+      // after the user drags columns around (ColReorder swaps DOM cells, but the
+      // DT column API still uses original indexes).
+      const cellByOriginalIdx = (rowIdx, origColIdx) => {
+        try { return dt.cell(rowIdx, origColIdx).node(); } catch (e) { return null; }
+      };
 
       // Custom filter function for numeric ≥ min and bucket match
       $.fn.dataTable.ext.search.push(function (settings, rowData, rowIndex, rowNodeOrig) {
         if (settings.nTable.id !== 'supplyTable') return true;
-        const row = dt.row(rowIndex).node();
 
         // Numeric "≥ min" filters
         const numCols = document.querySelectorAll('.col-filter-num');
@@ -560,7 +635,7 @@
           const min = parseFloat(v);
           if (isNaN(min)) continue;
           const colIdx = parseInt(inp.dataset.col);
-          const td = row.children[colIdx];
+          const td = cellByOriginalIdx(rowIndex, colIdx);
           if (!td) continue;
           const raw = parseFloat(td.getAttribute('data-order') ?? td.textContent.replace(/[^\d.\-]/g, ''));
           if (isNaN(raw) || raw < min) return false;
@@ -569,21 +644,21 @@
         // Class (col 4) — match data-order
         const classSel = document.querySelector('.col-filter-select[data-col="4"]');
         if (classSel && classSel.value !== '') {
-          const td = row.children[4];
+          const td = cellByOriginalIdx(rowIndex, 4);
           if ((td?.getAttribute('data-order') ?? '') !== classSel.value) return false;
         }
 
         // Lifecycle (col 5) — match data-order
         const lcSel = document.querySelector('.col-filter-select[data-col="5"]');
         if (lcSel && lcSel.value !== '') {
-          const td = row.children[5];
+          const td = cellByOriginalIdx(rowIndex, 5);
           if ((td?.getAttribute('data-order') ?? '') !== lcSel.value) return false;
         }
 
         // Strength (col 3) — match badge text
         const stSel = document.querySelector('.col-filter-select[data-col="3"]');
         if (stSel && stSel.value !== '') {
-          const td = row.children[3];
+          const td = cellByOriginalIdx(rowIndex, 3);
           const label = (td?.querySelector('.strength-badge')?.textContent || '').trim();
           if (label !== stSel.value) return false;
         }
@@ -591,7 +666,7 @@
         // Running (col 6) — checkbox checked state
         const rnSel = document.querySelector('.col-filter-select[data-col="6"]');
         if (rnSel && rnSel.value !== '') {
-          const td = row.children[6];
+          const td = cellByOriginalIdx(rowIndex, 6);
           const cb = td?.querySelector('.running-chk');
           const val = cb && cb.checked ? '1' : '0';
           if (val !== rnSel.value) return false;
@@ -600,7 +675,7 @@
         // Profit bucket (col 8) — data-bucket
         const pfSel = document.querySelector('.col-filter-select[data-col="8"]');
         if (pfSel && pfSel.value !== '') {
-          const td = row.children[8];
+          const td = cellByOriginalIdx(rowIndex, 8);
           if ((td?.getAttribute('data-bucket') ?? '') !== pfSel.value) return false;
         }
 
@@ -624,6 +699,7 @@
       document.querySelectorAll('.col-filter-row th').forEach(th => {
         th.addEventListener('click', e => e.stopPropagation());
       });
+      } // end wireFilters
     });
 
     // ---- Toast ----
