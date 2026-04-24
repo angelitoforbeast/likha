@@ -116,7 +116,12 @@
     <span style="color:#f1f5f9;font-weight:700;font-size:14px;">Daily Summary</span>
     <div style="flex:1"></div>
     <span x-show="saveMsg" x-transition style="color:#4ade80;font-size:13px;font-weight:700;" x-text="saveMsg"></span>
-    <input type="date" x-model="date" @change="load()"
+    <span style="color:#94a3b8;font-size:11px;font-weight:600;">From</span>
+    <input type="date" x-model="startDate" @change="load()"
+           style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;
+                  border-radius:6px;padding:5px 10px;font-size:13px;outline:none;cursor:pointer;">
+    <span style="color:#94a3b8;font-size:11px;font-weight:600;">To</span>
+    <input type="date" x-model="endDate" @change="load()"
            style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;
                   border-radius:6px;padding:5px 10px;font-size:13px;outline:none;cursor:pointer;">
     <button class="btn-refresh" :class="loading ? 'spinning' : ''" @click="load()" title="Refresh">
@@ -200,6 +205,12 @@
               <td style="text-align:center;">
                 <span style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;"
                       x-text="row.page_name"></span>
+                <template x-if="row.mixed_primary">
+                  <div style="font-size:10px;color:#b45309;font-weight:600;line-height:1.3;margin-top:2px;"
+                       :title="row.distinct_items_in_range + ' distinct primary items across ' + row.range_days + '-day range. Showing anchor ' + row.item_name + ' (' + row.included_days + ' of ' + row.range_days + ' day' + (row.range_days===1?'':'s') + '). ' + row.excluded_days + ' day(s) had a different primary — excluded from totals.'">
+                    ⚠ mixed primary · <span x-text="row.included_days + '/' + row.range_days + ' d'"></span>
+                  </div>
+                </template>
               </td>
 
               <!-- Fixed: Item -->
@@ -432,9 +443,12 @@
                     <button class="btn-cancel" @click="cancel()">✕</button>
                   </span>
                 </template>
-                <template x-if="editIdx !== idx">
+                <template x-if="editIdx !== idx && row.is_single_date">
                   <button class="btn-set" @click="startEdit(idx, row)"
                           x-text="row.has_settings ? 'Edit' : '+ Set'"></button>
+                </template>
+                <template x-if="editIdx !== idx && !row.is_single_date">
+                  <span style="font-size:10px;color:#cbd5e1;" title="Switch From = To to edit">—</span>
                 </template>
               </td>
             </tr>
@@ -495,15 +509,23 @@
   <script>
   function privateUI() {
     return {
-      date: (function(){
-        // Use ?date= from URL if present (preserves date on refresh)
-        const urlDate = new URLSearchParams(window.location.search).get('date');
-        if (urlDate && /^\d{4}-\d{2}-\d{2}$/.test(urlDate)) return urlDate;
-        // Default: yesterday PH time
+      ...(function(){
+        // URL precedence: ?start_date + ?end_date > legacy ?date= > yesterday PH
+        const qs = new URLSearchParams(window.location.search);
+        const re = /^\d{4}-\d{2}-\d{2}$/;
+        const urlStart = qs.get('start_date');
+        const urlEnd   = qs.get('end_date');
+        const urlDate  = qs.get('date');
         const ph = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Manila'}));
         ph.setDate(ph.getDate()-1);
         const p = n => String(n).padStart(2,'0');
-        return ph.getFullYear()+'-'+p(ph.getMonth()+1)+'-'+p(ph.getDate());
+        const yesterday = ph.getFullYear()+'-'+p(ph.getMonth()+1)+'-'+p(ph.getDate());
+        let s, e;
+        if (urlStart && re.test(urlStart) && urlEnd && re.test(urlEnd)) { s = urlStart; e = urlEnd; }
+        else if (urlDate && re.test(urlDate)) { s = urlDate; e = urlDate; }
+        else { s = yesterday; e = yesterday; }
+        if (s > e) { const t = s; s = e; e = t; }
+        return { startDate: s, endDate: e };
       })(),
 
       rows:[], loading:false, editIdx:-1, editRow:null,
@@ -511,6 +533,7 @@
       saving:false, saveMsg:'',
       refreshing:false,
       skippedCount:0, skippedPages:[],
+      isSingleDate:true, rangeDays:1,
       sortCol:'', sortDir:'desc',
       dragSrc:null, dragOver:null,
       cols:[],
@@ -582,14 +605,21 @@
       // ── Load ─────────────────────────────────────────────────────────────
       async load(){
         this.loading=true; this.editIdx=-1; this.saveMsg='';
-        // Persist date in URL so refresh lands on same date
-        history.replaceState(null,'',`?date=${this.date}`);
+        // Normalize: if start > end, swap before query
+        if (this.startDate && this.endDate && this.startDate > this.endDate) {
+          const t = this.startDate; this.startDate = this.endDate; this.endDate = t;
+        }
+        // Persist range in URL so refresh restores it
+        const qs = new URLSearchParams({ start_date: this.startDate, end_date: this.endDate });
+        history.replaceState(null,'','?'+qs.toString());
         try{
-          const r = await fetch('{{ route('owner.private.item-summary') }}?date='+this.date);
+          const r = await fetch('{{ route('owner.private.item-summary') }}?'+qs.toString());
           const j = await r.json();
           this.rows = j.rows||[];
           this.skippedCount = j.skipped_count || 0;
           this.skippedPages = j.skipped_pages || [];
+          this.isSingleDate = !!j.is_single_date;
+          this.rangeDays    = Number(j.range_days || 1);
         }catch(e){ console.error(e); }
         finally{ this.loading=false; }
       },
@@ -658,6 +688,7 @@
       cancel(){ this.editIdx=-1; this.editRow=null; this.ev={item_value:'',rts_pct:'',comment:'',iv_comment:''}; },
 
       async save(){
+        if (!this.isSingleDate) { alert('Switch to single-date mode (From = To) to edit.'); return; }
         const itemVal = parseFloat(this.ev.item_value);
         const rts     = parseFloat(this.ev.rts_pct);
         if(isNaN(itemVal)||itemVal<0)   { alert('Item Value needed (≥ 0). Set both to 0 to delete this date\'s override.'); return; }
@@ -674,7 +705,7 @@
               item_name:      row.item_name,
               item_value:     itemVal,
               rts_pct:        rts,
-              effective_date: this.date,
+              effective_date: this.endDate,
               comment:              this.ev.comment    || null,
               item_value_comment:   this.ev.iv_comment || null,
             }),

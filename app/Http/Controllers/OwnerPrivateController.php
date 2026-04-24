@@ -1202,7 +1202,27 @@ class OwnerPrivateController extends Controller
         $this->checkAccess();
 
         $phTz = new \DateTimeZone('Asia/Manila');
-        $date = $request->input('date', (new \DateTime('now', $phTz))->format('Y-m-d'));
+        $today = (new \DateTime('now', $phTz))->format('Y-m-d');
+
+        // Range mode: start_date/end_date take precedence; legacy ?date=X still works.
+        $legacyDate = $request->input('date');
+        $startDate  = $request->input('start_date', $legacyDate ?: $today);
+        $endDate    = $request->input('end_date',   $legacyDate ?: $startDate);
+
+        // Sanitize — only accept YYYY-MM-DD
+        $validDate = fn($s) => is_string($s) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $s);
+        if (!$validDate($startDate)) $startDate = $today;
+        if (!$validDate($endDate))   $endDate   = $startDate;
+        if ($startDate > $endDate)   [$startDate, $endDate] = [$endDate, $startDate];
+
+        $isSingleDate = ($startDate === $endDate);
+        $rangeDays    = (int) ((strtotime($endDate) - strtotime($startDate)) / 86400) + 1;
+
+        // Backwards-compat alias: many downstream code paths still reference `$date` for
+        // "as-of" snapshots (fee rates, COGS, page_item_settings, JNT stats window).
+        // All of those should anchor on END_DATE per spec.
+        $date = $endDate;
+
         $host = strtolower((string) $request->getHost());
 
         $driver = DB::getDriverName();
@@ -1258,103 +1278,179 @@ class OwnerPrivateController extends Controller
         $moCod    = 'mo.'.$quote($codCol);
         $codClean = $castMoney($moCod);
 
-        // ── PRIMARY ITEMS (materialized): single source of truth ─────────────
-        // daily_page_primary_item enforces ONE primary item per (date, page_key).
-        // Ties are NOT stored → we surface those as "skipped" below.
-        $primaryRows = DB::table('daily_page_primary_item')
-            ->where('ts_date', $date)
+        // ── ANCHOR PRIMARY ITEMS (end_date only) ─────────────────────────────
+        // Per spec: use the primary_item resolved on END_DATE per page as the "anchor".
+        // Ties at end_date → no anchor row → page is skipped from the table.
+        $anchorRows = DB::table('daily_page_primary_item')
+            ->where('ts_date', $endDate)
             ->get([
                 'page_label', 'page_key', 'primary_item', 'primary_item_key',
                 'primary_orders', 'total_orders_all', 'primary_mode_cod',
                 'second_item', 'second_orders',
             ]);
 
-        $primaryByPage = []; // page_key → row
-        foreach ($primaryRows as $pr) {
-            $primaryByPage[(string)$pr->page_key] = $pr;
+        $anchorByPage = []; // page_key → anchor row
+        foreach ($anchorRows as $pr) {
+            $anchorByPage[(string)$pr->page_key] = $pr;
+        }
+        // Back-compat alias used downstream; semantic = "the anchor (end_date) primary per page".
+        $primaryByPage = $anchorByPage;
+
+        // ── RANGE PRIMARY ITEMS (for mixed-primary flag + included-slice filter) ───
+        // Only needed when start != end; but we always query it (cheap, indexed by ts_date).
+        $rangePrimaryRows = DB::table('daily_page_primary_item')
+            ->whereBetween('ts_date', [$startDate, $endDate])
+            ->get([
+                'ts_date', 'page_key', 'primary_item_key', 'primary_orders', 'primary_mode_cod',
+            ]);
+
+        // rangeByPage[page_key][ts_date] = ['item_key','orders','mode_cod']
+        $rangeByPage         = [];
+        $distinctItemsByPage = []; // page_key → [item_key => true]
+        foreach ($rangePrimaryRows as $r) {
+            $pk = (string)$r->page_key;
+            $d  = (string)$r->ts_date;
+            $ik = (string)$r->primary_item_key;
+            $rangeByPage[$pk][$d] = [
+                'item_key' => $ik,
+                'orders'   => (int)$r->primary_orders,
+                'mode_cod' => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : 0.0,
+            ];
+            $distinctItemsByPage[$pk][$ik] = true;
         }
 
-        // ── Enrich primaries with proceed_orders + COD range (from macro_output)
-        // Only query rows where (page_key, item_norm) matches one of our primaries.
+        // ── Enrich anchors with proceed_orders + COD range (per date, per page) ───
+        // Query macro_output grouped by (page_key, item_norm, date) across the range so
+        // we can attribute proceed counts to the included dates only.
         $itemNormExpr = "LOWER(REPLACE(REPLACE(REPLACE($itemTrim,' ',''),'-',''),'_',''))";
         $statRows = DB::table('macro_output as mo')
-            ->whereRaw("$dateExpr = ?", [$date])
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$startDate, $endDate])
             ->whereRaw("$pageTrim != ''")
             ->selectRaw("
+                $dateExpr AS d,
                 $pageKey AS page_key,
                 $itemNormExpr AS item_key,
                 SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders,
                 MAX($codClean) AS max_cod,
                 MIN(CASE WHEN $codClean > 0 THEN $codClean ELSE NULL END) AS min_cod
             ")
-            ->groupByRaw("$pageKey, $itemNormExpr")
+            ->groupByRaw("$dateExpr, $pageKey, $itemNormExpr")
             ->get();
 
-        $statByPageItem = []; // page_key||item_key → stats
+        // statByKeyDate[page_key||item_key][date] = stats row
+        $statByKeyDate = [];
         foreach ($statRows as $s) {
-            $statByPageItem[(string)$s->page_key.'||'.(string)$s->item_key] = $s;
+            $k = (string)$s->page_key.'||'.(string)$s->item_key;
+            $statByKeyDate[$k][(string)$s->d] = $s;
         }
 
-        // ── Count unresolved slices (present on macro_output but not in primary table)
+        // ── Count unresolved slices (pages seen in range but no anchor on end_date) ──
         $pagesSeenRows = DB::table('macro_output as mo')
-            ->whereRaw("$dateExpr = ?", [$date])
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$startDate, $endDate])
             ->whereRaw("$pageTrim != ''")
             ->selectRaw("$pageKey AS page_key")
             ->groupByRaw("$pageKey")
             ->get();
         $pagesSeen = array_map(fn($r) => (string)$r->page_key, $pagesSeenRows->all());
-        $skippedPages = array_values(array_diff($pagesSeen, array_keys($primaryByPage)));
+        $skippedPages = array_values(array_diff($pagesSeen, array_keys($anchorByPage)));
         $skippedCount = count($skippedPages);
 
-        // ── Build pageGroups shape expected downstream ──────────────────────
-        // "Secondary items" now = the single second_item recorded in the table (if any).
+        // ── Per-page, per-date adspent (for summing across included dates only) ─────
+        $castSpend = $castMoney('amount_spent_php');
+        $adsRows = DB::table('ads_manager_reports')
+            ->whereRaw('DATE(day) BETWEEN ? AND ?', [$startDate, $endDate])
+            ->selectRaw("
+                DATE(day) AS d,
+                LOWER($trimFn(COALESCE(page_name,''))) AS page_key,
+                SUM($castSpend) AS adspent
+            ")
+            ->groupByRaw("DATE(day), LOWER($trimFn(COALESCE(page_name,'')))")
+            ->get();
+        // adsByDate[page_key][date] = adspent
+        $adsByDate = [];
+        foreach ($adsRows as $r) {
+            $adsByDate[(string)$r->page_key][(string)$r->d] = (float)$r->adspent;
+        }
+        // adsMap[page_key] = total adspent (used only in single-date back-compat paths below).
+        $adsMap = [];
+        foreach ($adsByDate as $pk => $byD) {
+            $adsMap[$pk] = array_sum($byD);
+        }
+
+        // ── Build pageGroups: aggregate over INCLUDED range slices per anchor ──────
+        // Included slice = (date, page) where range primary_item_key == anchor's item_key.
         $pageGroups = [];
-        foreach ($primaryByPage as $pk => $pr) {
-            $statKey = $pk.'||'.(string)$pr->primary_item_key;
-            $stat    = $statByPageItem[$statKey] ?? null;
+        foreach ($anchorByPage as $pk => $pr) {
+            $anchorKey = (string)$pr->primary_item_key;
+            $perDate   = $rangeByPage[$pk] ?? [];
+
+            $totalOrders   = 0;
+            $proceedOrders = 0;
+            $includedDates = [];     // date → ['orders','mode_cod','adspent']
+            $maxCod        = 0.0;
+            $minCod        = null;
+            $statKey       = $pk.'||'.$anchorKey;
+
+            foreach ($perDate as $d => $slice) {
+                if ($slice['item_key'] !== $anchorKey) continue; // excluded: different primary that day
+                $totalOrders += (int)$slice['orders'];
+
+                $stat = $statByKeyDate[$statKey][$d] ?? null;
+                if ($stat) {
+                    $proceedOrders += (int)$stat->proceed_orders;
+                    $maxCod = max($maxCod, (float)($stat->max_cod ?? 0));
+                    $sMin = $stat->min_cod !== null ? (float)$stat->min_cod : null;
+                    if ($sMin !== null && $sMin > 0) {
+                        $minCod = $minCod === null ? $sMin : min($minCod, $sMin);
+                    }
+                }
+
+                $includedDates[$d] = [
+                    'orders'   => (int)$slice['orders'],
+                    'mode_cod' => (float)$slice['mode_cod'],
+                    'adspent'  => (float)($adsByDate[$pk][$d] ?? 0),
+                    'proceed'  => $stat ? (int)$stat->proceed_orders : 0,
+                ];
+            }
+
+            $excludedDays  = count($perDate) - count($includedDates);
+            $distinctCount = isset($distinctItemsByPage[$pk]) ? count($distinctItemsByPage[$pk]) : 0;
+            $mixedPrimary  = $distinctCount >= 2;
+
+            // Anchor price = end_date's primary_mode_cod (per spec).
+            $anchorModeCod = $pr->primary_mode_cod !== null ? (float)$pr->primary_mode_cod : 0.0;
+            if ($maxCod <= 0) $maxCod = $anchorModeCod;
+            if ($minCod === null || $minCod <= 0) $minCod = $anchorModeCod;
 
             $primary = [
                 'item_name'      => (string)$pr->primary_item,
-                'item_key'       => (string)$pr->primary_item_key,
-                'total_orders'   => (int)$pr->primary_orders,
-                'proceed_orders' => $stat ? (int)$stat->proceed_orders : 0,
-                'mode_cod'       => $pr->primary_mode_cod !== null ? (float)$pr->primary_mode_cod : 0.0,
-                'max_cod'        => $stat ? (float)($stat->max_cod ?? 0) : (float)($pr->primary_mode_cod ?? 0),
-                'min_cod'        => $stat ? (float)($stat->min_cod ?? $stat->max_cod ?? 0) : (float)($pr->primary_mode_cod ?? 0),
+                'item_key'       => $anchorKey,
+                'total_orders'   => $totalOrders,
+                'proceed_orders' => $proceedOrders,
+                'mode_cod'       => $anchorModeCod,
+                'max_cod'        => $maxCod,
+                'min_cod'        => $minCod,
+                'included_dates' => $includedDates, // for per-slice profit compute below
             ];
 
+            // No secondary items exposed in range mode (spec: single anchor only).
+            // Keep empty array for view safety (existing template iterates row.secondary_items||[]).
             $items = [$primary];
-            if (!empty($pr->second_item)) {
-                // Best-effort: reuse primary mode_cod as an unknown; we didn't cache second mode.
-                $items[] = [
-                    'item_name'      => (string)$pr->second_item,
-                    'item_key'       => null,
-                    'total_orders'   => (int)($pr->second_orders ?? 0),
-                    'proceed_orders' => 0,
-                    'mode_cod'       => 0.0,
-                    'max_cod'        => 0.0,
-                    'min_cod'        => 0.0,
-                ];
-            }
 
             $pageGroups[$pk] = [
                 'page_label'     => (string)$pr->page_label,
                 'page_key'       => $pk,
-                'total_orders'   => (int)$pr->primary_orders,           // primary-only; non-primary rows excluded
-                'proceed_orders' => $stat ? (int)$stat->proceed_orders : 0,
+                'total_orders'   => $totalOrders,
+                'proceed_orders' => $proceedOrders,
                 'items'          => $items,
+                // Range-mode fields used by response builder:
+                'included_days'          => count($includedDates),
+                'excluded_days'          => max(0, $excludedDays),
+                'distinct_items_in_range'=> $distinctCount,
+                'mixed_primary'          => $mixedPrimary,
+                'adspent_total'          => array_sum(array_column($includedDates, 'adspent')),
             ];
         }
-
-        // ── adspent per page for the date ─────────────────────────────────────
-        $castSpend = $castMoney('amount_spent_php');
-        $adsRows = DB::table('ads_manager_reports')
-            ->whereRaw('DATE(day) = ?', [$date])
-            ->selectRaw("LOWER($trimFn(COALESCE(page_name,''))) AS page_key, SUM($castSpend) AS adspent")
-            ->groupByRaw("LOWER($trimFn(COALESCE(page_name,'')))")
-            ->get();
-        $adsMap = [];
-        foreach ($adsRows as $r) $adsMap[(string)$r->page_key] = (float)$r->adspent;
 
         // ── COGS: latest entry ≤ date ─────────────────────────────────────────
         $cogsItemCol = $pickCol('cogs', ['item_name','ITEM_NAME']) ?? 'item_name';
@@ -1467,9 +1563,10 @@ class OwnerPrivateController extends Controller
             $dominantKey = strtolower(trim($dominant['item_name']));
             $settingKey  = $pk.'||'.$dominantKey;
 
-            $adspent       = $adsMap[$pk] ?? 0.0;
+            $adspent       = (float)($pg['adspent_total'] ?? ($adsMap[$pk] ?? 0.0));
             $totalOrders   = (int)$pg['total_orders'];
             $proceedOrders = (int)$pg['proceed_orders'];
+            $includedDatesArr = $dominant['included_dates'] ?? [];
 
             // Price = mode COD of dominant item (most frequent = real SRP)
             // max_cod / min_cod kept only for range indicator
@@ -1512,19 +1609,36 @@ class OwnerPrivateController extends Controller
             // COD fee per delivered = Price × codFeeRate × (1 + VAT)
             $codFeePerDelivered = $price > 0 ? round($price * $codFeeRate * (1 + $codFeeVatRate), 4) : null;
 
-            // Projected Profit (needs: price from COD, item_value, rts_pct)
+            // Projected Profit — per-slice compute summed across INCLUDED dates.
+            // Uses each day's own mode_cod & adspent; rts_pct/item_value/fees anchored at end_date.
             $projProfit = $projProfitPerOrder = null;
-            if ($price > 0 && $rtsPct !== null && $itemValue !== null) {
+            if ($rtsPct !== null && $itemValue !== null && !empty($includedDatesArr)) {
                 $rts           = $rtsPct / 100.0;
                 $deliverFactor = 1.0 - $rts;
-                $projProfit =
-                    $proceedOrders * $price * $deliverFactor                      // revenue
-                    - $proceedOrders * $shippingFee                               // shipping (all proceed)
-                    - $proceedOrders * $deliverFactor * $itemValue                // COGS (delivered)
-                    - $adspent                                                    // adspent
-                    - $proceedOrders * $deliverFactor * ($price * $codFeeRate * (1 + $codFeeVatRate)); // COD fee (delivered)
-
-                $projProfitPerOrder = $totalOrders > 0 ? $projProfit / $totalOrders : null;
+                $sumProfit = 0.0;
+                $anyPrice  = false;
+                foreach ($includedDatesArr as $d => $slice) {
+                    $pDay       = (float)($slice['mode_cod'] ?? 0);
+                    $proceedDay = (int)($slice['proceed'] ?? 0);
+                    $adsDay     = (float)($slice['adspent'] ?? 0);
+                    if ($pDay <= 0) {
+                        // no price that day → can't compute revenue; still subtract adspent so ROI isn't overstated
+                        $sumProfit -= $adsDay;
+                        continue;
+                    }
+                    $anyPrice = true;
+                    $codFeeDay = $pDay * $codFeeRate * (1 + $codFeeVatRate);
+                    $sumProfit +=
+                        $proceedDay * $pDay * $deliverFactor                      // revenue
+                        - $proceedDay * $shippingFee                              // shipping (all proceed)
+                        - $proceedDay * $deliverFactor * $itemValue               // COGS (delivered)
+                        - $adsDay                                                 // adspent
+                        - $proceedDay * $deliverFactor * $codFeeDay;              // COD fee (delivered)
+                }
+                if ($anyPrice) {
+                    $projProfit = $sumProfit;
+                    $projProfitPerOrder = $totalOrders > 0 ? $projProfit / $totalOrders : null;
+                }
             }
 
             $result[] = [
@@ -1563,6 +1677,14 @@ class OwnerPrivateController extends Controller
                 'jnt_transit_pct'       => $jntTransitPct,
                 'jnt_transit_cnt'       => $jntTransitCnt,
                 'jnt_total'             => $jntTotal,
+                // Range-mode fields
+                'is_range'               => !$isSingleDate,
+                'is_single_date'         => $isSingleDate,
+                'range_days'             => $rangeDays,
+                'included_days'          => (int)($pg['included_days'] ?? 0),
+                'excluded_days'          => (int)($pg['excluded_days'] ?? 0),
+                'distinct_items_in_range'=> (int)($pg['distinct_items_in_range'] ?? 0),
+                'mixed_primary'          => (bool)($pg['mixed_primary'] ?? false),
             ];
         }
 
@@ -1570,7 +1692,11 @@ class OwnerPrivateController extends Controller
 
         return response()->json([
             'rows'           => $result,
-            'date'           => $date,
+            'date'           => $date, // back-compat: equals end_date
+            'start_date'     => $startDate,
+            'end_date'       => $endDate,
+            'is_single_date' => $isSingleDate,
+            'range_days'     => $rangeDays,
             'skipped_count'  => $skippedCount,
             'skipped_pages'  => $skippedPages,
         ]);
