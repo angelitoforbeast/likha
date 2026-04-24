@@ -2048,12 +2048,22 @@ class OwnerPrivateController extends Controller
                     }
                 }
             }
-            // Transition markers — walk in date order, compare to previous non-empty cell
+            // Per-item-key occurrence count across this page's row (denominator = total date slots).
+            $totalDateSlots = count($dates);
+            $itemCounts = [];
+            foreach ($p['cells'] as $c) {
+                $k = $c['item_key'];
+                $itemCounts[$k] = ($itemCounts[$k] ?? 0) + 1;
+            }
+
+            // Transition markers + attach count_same/total per cell.
             $prev = null;
             foreach ($p['cells'] as $d => &$c) {
                 $c['item_changed']  = false;
                 $c['price_changed'] = false;
                 $c['price_delta']   = null;
+                $c['count_same']    = $itemCounts[$c['item_key']] ?? 0;
+                $c['count_total']   = $totalDateSlots;
                 if ($prev !== null) {
                     if ($c['item_key'] !== $prev['item_key']) {
                         $c['item_changed'] = true;

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" x-data="matrixUI()" x-cloak>
+<html lang="en" x-data="matrixUI()" x-init="init()" x-cloak>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -34,15 +34,21 @@
     .badge-cogs{display:inline-block;font-size:9px;font-weight:600;padding:0 3px;border-radius:3px;
                 background:#f0fdf4;color:#166534;margin-top:1px;margin-left:2px;}
     .badge-cogs.missing{background:#fef2f2;color:#991b1b;}
+    .badge-count{display:inline-block;font-size:9px;font-weight:600;padding:0 3px;border-radius:3px;
+                 background:#fef9c3;color:#713f12;margin-top:1px;margin-left:2px;font-family:monospace;}
     th.date-col{font-size:10px;padding:4px 6px;background:#0f172a;color:#fff;
                 border:1px solid #1e293b;white-space:nowrap;font-family:monospace;}
     th.page-col{position:sticky;left:0;z-index:5;background:#fff;text-align:left;
-                padding:4px 8px;border:1px solid #e2e8f0;font-size:11px;max-width:170px;
-                white-space:normal;line-height:1.3;}
-    th.page-col.mixed{background:#fffbeb;}
-    .anchor-label{font-size:9px;color:#2563eb;font-weight:700;}
+                padding:6px 10px;border:1px solid #e2e8f0;font-size:12px;max-width:200px;
+                white-space:normal;line-height:1.3;font-weight:600;}
     thead th{position:sticky;top:0;z-index:4;}
     thead th.page-col{z-index:6;}
+    .toggle-bar{display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;}
+    .toggle-bar label{display:inline-flex;align-items:center;gap:0.35rem;cursor:pointer;
+                      padding:0.25rem 0.6rem;border:1px solid #cbd5e1;border-radius:6px;
+                      background:#fff;font-size:11px;font-weight:600;color:#334155;user-select:none;}
+    .toggle-bar label.active{background:#2563eb;border-color:#2563eb;color:#fff;}
+    .toggle-bar label input{accent-color:#fff;}
     /* Modal */
     .modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:50;
                     display:flex;align-items:center;justify-content:center;padding:1rem;}
@@ -77,16 +83,27 @@
     <span class="text-xs text-slate-400">{{ $startDate }} → {{ $endDate }} ({{ count($dates) }} days · {{ count($pages) }} pages)</span>
   </div>
 
-  <!-- Legend -->
-  <div class="max-w-7xl mx-auto px-4 pt-4 pb-2 text-xs text-slate-600 flex gap-4 items-center flex-wrap">
-    <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 bg-blue-200 border border-slate-300"></span> anchor (matches end-date primary → included)</span>
-    <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 bg-amber-100 border border-slate-300"></span> different primary → excluded</span>
-    <span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 bg-slate-100 border border-slate-300"></span> no data / tied</span>
-    <span class="inline-flex items-center gap-1"><span class="badge-rts">RTS</span> set for this date</span>
-    <span class="inline-flex items-center gap-1"><span class="badge-rts inherited">RTS</span> inherited from earlier date</span>
-    <span class="inline-flex items-center gap-1"><span class="badge-rts missing">!</span> no RTS</span>
-    <span class="inline-flex items-center gap-1"><span class="badge-cogs">₱</span> unit cost (cogs)</span>
-    <span class="ml-auto text-slate-500">Click any cell to edit RTS / unit cost</span>
+  <!-- Field Toggles (persisted per route via localStorage) -->
+  <div class="max-w-7xl mx-auto px-4 pt-4 pb-2">
+    <div class="toggle-bar">
+      <span class="text-xs text-slate-500 font-bold uppercase tracking-wide">Show:</span>
+      <label :class="vis.item_name && 'active'">
+        <input type="checkbox" x-model="vis.item_name" @change="persist()"> ITEM NAME
+      </label>
+      <label :class="vis.count && 'active'">
+        <input type="checkbox" x-model="vis.count" @change="persist()"> COUNT
+      </label>
+      <label :class="vis.cod && 'active'">
+        <input type="checkbox" x-model="vis.cod" @change="persist()"> COD
+      </label>
+      <label :class="vis.rts && 'active'">
+        <input type="checkbox" x-model="vis.rts" @change="persist()"> RTS
+      </label>
+      <label :class="vis.cogs && 'active'">
+        <input type="checkbox" x-model="vis.cogs" @change="persist()"> COGS
+      </label>
+      <span class="ml-4 text-[11px] text-slate-500">Click any cell to edit RTS / unit cost. Settings saved per-browser.</span>
+    </div>
   </div>
 
   <!-- Matrix -->
@@ -98,13 +115,10 @@
         <table class="border-collapse">
           <thead>
             <tr>
-              <th class="page-col" style="min-width:170px;">Page</th>
+              <th class="page-col" style="min-width:180px;">Page</th>
               @foreach($dates as $d)
                 <th class="date-col {{ $d === $endDate ? 'cell-end' : '' }}">
                   {{ \Carbon\Carbon::parse($d)->format('M d') }}
-                  @if($d === $endDate)
-                    <div class="anchor-label" style="color:#93c5fd;">anchor</div>
-                  @endif
                 </th>
               @endforeach
             </tr>
@@ -112,34 +126,10 @@
           <tbody>
             @foreach($pages as $p)
               <tr>
-                <th class="page-col {{ $p['mixed'] ? 'mixed' : '' }}">
+                <th class="page-col">
                   <a href="{{ route('owner.private.breakdown') }}?page_key={{ urlencode($p['page_key']) }}&start_date={{ $startDate }}&end_date={{ $endDate }}"
-                     class="text-slate-900 hover:text-blue-600 font-semibold"
+                     class="text-slate-900 hover:text-blue-600"
                      target="_blank">{{ $p['page_label'] }}</a>
-                  @if($p['mixed'])
-                    <div class="text-[10px] text-amber-700 font-semibold mt-0.5">
-                      ⚠ {{ $p['distinct_count'] }} items · {{ $p['anchor_included_days'] }}/{{ count($dates) }} d
-                    </div>
-                  @endif
-                  @if(($p['item_changes'] ?? 0) > 0 || ($p['price_changes'] ?? 0) > 0)
-                    <div class="text-[10px] mt-0.5" style="color:#475569;">
-                      @if($p['item_changes'] > 0)
-                        <span style="color:#dc2626;font-weight:700;">● {{ $p['item_changes'] }} item Δ</span>
-                      @endif
-                      @if($p['price_changes'] > 0)
-                        <span style="color:#a855f7;font-weight:700;">● {{ $p['price_changes'] }} price Δ</span>
-                      @endif
-                    </div>
-                  @endif
-                  @if($p['anchor_item'])
-                    <div class="anchor-label mt-0.5" title="anchor item (end-date primary)">→ {{ $p['anchor_item'] }}</div>
-                  @endif
-                  @if($p['anchor_first_date'])
-                    <div class="text-[10px] text-slate-500 mt-0.5"
-                         title="Earliest date in range where this page's primary = anchor. Compute starts here.">
-                      computed since {{ \Carbon\Carbon::parse($p['anchor_first_date'])->format('M d') }}
-                    </div>
-                  @endif
                 </th>
                 @foreach($dates as $d)
                   @php
@@ -155,6 +145,7 @@
                     $tip = 'no data / tied';
                     if ($cell) {
                         $tip = $cell['item_name'].' · '.$cell['orders'].' orders'
+                             . ' · '.$cell['count_same'].'/'.$cell['count_total'].' days'
                              . ($cell['mode_cod'] ? ' · ₱'.number_format($cell['mode_cod'],2) : '')
                              . ' · RTS '.($cell['rts_pct'] !== null ? $cell['rts_pct'].'%' : '—')
                              . ' · COGS '.($cell['unit_cost'] !== null ? '₱'.number_format($cell['unit_cost'],2) : '—');
@@ -182,26 +173,28 @@
                       @if(!empty($cell['item_changed']))
                         <span class="badge-new">NEW</span>
                       @endif
-                      <div style="font-weight:600;">{{ $cell['item_name'] }}</div>
-                      <div style="font-size:9px;color:#64748b;font-weight:400;">
+                      <div x-show="vis.item_name" style="font-weight:600;">{{ $cell['item_name'] }}</div>
+                      <div x-show="vis.cod" style="font-size:9px;color:#64748b;font-weight:400;">
                         {{ $cell['orders'] }}{{ $cell['mode_cod'] ? ' @ '.number_format($cell['mode_cod'],0) : '' }}
                         @if(!empty($cell['price_changed']) && $cell['price_delta'] !== null)
                           <span class="badge-price {{ $cell['price_delta'] >= 0 ? 'badge-price-up' : 'badge-price-down' }}">{{ $cell['price_delta']>=0 ? '▲ +' : '▼ ' }}{{ round($cell['price_delta']) }}</span>
                         @endif
                       </div>
                       <div>
+                        <span x-show="vis.count" class="badge-count"
+                              title="days this item appears / total days in range">{{ $cell['count_same'] }}/{{ $cell['count_total'] }}</span>
                         @if($cell['rts_pct'] !== null)
-                          <span class="badge-rts {{ $cell['rts_inherited'] ? 'inherited' : '' }}"
+                          <span x-show="vis.rts" class="badge-rts {{ $cell['rts_inherited'] ? 'inherited' : '' }}"
                                 title="{{ $cell['rts_inherited'] ? 'inherited from '.$cell['rts_eff_date'] : 'set on this date' }}">
                             RTS {{ rtrim(rtrim(number_format($cell['rts_pct'],2), '0'),'.') }}%
                           </span>
                         @else
-                          <span class="badge-rts missing" title="no RTS set for this item on this page">RTS —</span>
+                          <span x-show="vis.rts" class="badge-rts missing" title="no RTS set">RTS —</span>
                         @endif
                         @if($cell['unit_cost'] !== null)
-                          <span class="badge-cogs" title="unit cost (cogs)">₱{{ rtrim(rtrim(number_format($cell['unit_cost'],2), '0'),'.') }}</span>
+                          <span x-show="vis.cogs" class="badge-cogs" title="unit cost (cogs)">₱{{ rtrim(rtrim(number_format($cell['unit_cost'],2), '0'),'.') }}</span>
                         @else
-                          <span class="badge-cogs missing" title="no cogs entry">₱—</span>
+                          <span x-show="vis.cogs" class="badge-cogs missing" title="no cogs entry">₱—</span>
                         @endif
                       </div>
                     @else
@@ -238,7 +231,6 @@
         </div>
 
         <div class="px-5 py-4 space-y-4">
-          <!-- RTS input -->
           <div>
             <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
               RTS%
@@ -259,7 +251,6 @@
             <div class="text-[11px] text-slate-500 mt-1">Set 0 to remove this date's override (falls back to previous).</div>
           </div>
 
-          <!-- Unit cost input -->
           <div>
             <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
               Unit Cost (COGS)
@@ -275,7 +266,6 @@
             <div class="text-[11px] text-slate-500 mt-1">Set 0 to skip. (To delete, use /item/cogs.)</div>
           </div>
 
-          <!-- Comments -->
           <div>
             <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">RTS Comment (optional)</label>
             <input type="text" x-model="edit.comment" maxlength="500"
@@ -283,7 +273,6 @@
                    placeholder="why is this value different?">
           </div>
 
-          <!-- Error -->
           <template x-if="edit.error">
             <div class="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-3 py-2" x-text="edit.error"></div>
           </template>
@@ -305,6 +294,11 @@
   <script>
   function matrixUI(){
     return {
+      // Visibility toggles — persisted per route in localStorage.
+      // Key includes pathname so ibang page may sariling preference.
+      vis: { item_name:true, count:true, cod:true, rts:true, cogs:true },
+      storageKey: 'matrix_vis:' + location.pathname,
+
       edit: {
         open:false, saving:false, error:null,
         page_key:'', page_label:'', date:'', item_name:'',
@@ -312,6 +306,23 @@
         rts_pct:'', rts_eff_date:null, rts_inherited:false,
         unit_cost:'', comment:'',
       },
+
+      init(){
+        try {
+          const raw = localStorage.getItem(this.storageKey);
+          if (raw) {
+            const saved = JSON.parse(raw);
+            Object.keys(this.vis).forEach(k => {
+              if (typeof saved[k] === 'boolean') this.vis[k] = saved[k];
+            });
+          }
+        } catch(e) { console.warn('Failed to load toggle prefs', e); }
+      },
+      persist(){
+        try { localStorage.setItem(this.storageKey, JSON.stringify(this.vis)); }
+        catch(e) { console.warn('Failed to save toggle prefs', e); }
+      },
+
       openEdit(cell){
         this.edit = {
           open:true, saving:false, error:null,
@@ -353,7 +364,6 @@
           });
           const j = await r.json();
           if (!j.ok) { this.edit.error = j.message || 'Save failed.'; this.edit.saving = false; return; }
-          // Reload to see fresh values across inherited cells
           location.reload();
         } catch(e) {
           console.error(e); this.edit.error = 'Network error.'; this.edit.saving = false;
