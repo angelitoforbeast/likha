@@ -17,7 +17,8 @@
     #nav {
       flex-shrink:0; height:52px; background:#1e293b;
       border-bottom:1px solid #334155;
-      display:flex; align-items:center; padding:0 18px; gap:10px; z-index:10;
+      display:flex; align-items:center; padding:0 18px; gap:10px;
+      position:relative; z-index:100;
     }
 
     #scroll { flex:1; overflow:auto; padding:0 16px; min-width:0; }
@@ -137,7 +138,7 @@
                 title="Clear search">×</button>
       </div>
       <div x-show="itemFilterOpen" x-transition.opacity.duration.150ms x-cloak
-           style="position:absolute;top:calc(100% + 6px);left:0;z-index:50;
+           style="position:absolute;top:calc(100% + 6px);left:0;z-index:9999;
                   background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;
                   width:300px;max-height:340px;display:flex;flex-direction:column;
                   box-shadow:0 20px 40px -8px rgba(15,23,42,.35), 0 4px 12px rgba(15,23,42,.12);
