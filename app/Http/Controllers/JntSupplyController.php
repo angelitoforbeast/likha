@@ -193,6 +193,11 @@ class JntSupplyController extends Controller
         // Profit filter (color bucket: green|yellow|orange|red|missing|'')
         $profitFilter = $request->input('profit_filter', '');
 
+        // DIAGNOSTIC: ?debug_item=mini+flashlight → dump per-(page,date) slice rows as JSON
+        // Used to pinpoint where /jnt/supply diverges from /owner/private. Harmless when empty.
+        $debugItem = trim((string) $request->input('debug_item', ''));
+        $debugSlices = [];   // filled inside profit loop when $debugItem matches current $base
+
         $velocityFrom = Carbon::parse($asOfDate, 'Asia/Manila')
             ->subDays($velocityDays - 1)
             ->toDateString();
@@ -488,20 +493,21 @@ class JntSupplyController extends Controller
             $proceedMap[$ik][$dd][$pk] = ($proceedMap[$ik][$dd][$pk] ?? 0) + (int) $pr->proceed_orders;
         }
 
-        // Ads per (day, page_key)
+        // Ads per (day, page_key) — mirrors /owner/private exactly (line 1367-1381):
+        //   1) DATE(day) cast so DATETIME columns don't fragment groups by timestamp.
+        //   2) $castMoney sanitizes ₱/,/spaces from amount_spent_php before SUM.
+        $castMoneyAds = $driver === 'pgsql'
+            ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE((amount_spent_php)::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
+            : "CAST(REPLACE(REPLACE(REPLACE(COALESCE(amount_spent_php,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
+        $adsPageKeyExpr = "LOWER($trimFn(COALESCE(page_name,'')))";
         $adsRows = DB::table('ads_manager_reports')
-            ->whereBetween('day', [$profitFrom, $asOfDate])
-            ->selectRaw(
-                ($driver === 'pgsql'
-                    ? "day as d, LOWER(BTRIM(COALESCE(page_name,''))) as pg, "
-                    : "day as d, LOWER(TRIM(COALESCE(page_name,''))) as pg, ")
-                . "SUM(COALESCE(amount_spent_php,0)) as spent"
-            )
-            ->groupByRaw(
-                $driver === 'pgsql'
-                    ? "day, LOWER(BTRIM(COALESCE(page_name,'')))"
-                    : "day, LOWER(TRIM(COALESCE(page_name,'')))"
-            )
+            ->whereRaw('DATE(day) BETWEEN ? AND ?', [$profitFrom, $asOfDate])
+            ->selectRaw("
+                DATE(day) AS d,
+                $adsPageKeyExpr AS pg,
+                SUM($castMoneyAds) AS spent
+            ")
+            ->groupByRaw("DATE(day), $adsPageKeyExpr")
             ->get();
 
         $adsMap = [];
@@ -687,6 +693,8 @@ class JntSupplyController extends Controller
             $baseKey  = $normItem($base);
             $perDate  = $primaryByBase[$baseKey] ?? [];
 
+            $isDebugBase = ($debugItem !== '' && $normItem($debugItem) === $baseKey);
+
             // Ground truth: /owner/private → profit% = projected_profit / Σ(SRP × primary_orders)
             // Numerator uses PROCEED orders (delivered-only revenue + delivered-only COGS/COD fee,
             // but shipping is charged on all proceed attempts). Denominator uses all primary orders.
@@ -720,12 +728,37 @@ class JntSupplyController extends Controller
                     $sumGross += $modeCod * $orders;
 
                     // Numerator: proceed-based, delivered-only — matches /owner/private
-                    $sumNet +=
-                          $proceed * $modeCod * $deliverFactor             // revenue
-                        - $proceed * $SHIPPING_PER_SHIPPED                  // shipping (all proceed)
-                        - $proceed * $deliverFactor * $unitCost             // COGS (delivered)
-                        - $ads                                              // adspent
-                        - $proceed * $deliverFactor * $codFeeDay;           // COD fee (delivered)
+                    $revenue  = $proceed * $modeCod * $deliverFactor;
+                    $shipping = $proceed * $SHIPPING_PER_SHIPPED;
+                    $cogsAmt  = $proceed * $deliverFactor * $unitCost;
+                    $codFeeAmt= $proceed * $deliverFactor * $codFeeDay;
+                    $netContrib = $revenue - $shipping - $cogsAmt - $ads - $codFeeAmt;
+
+                    $sumNet += $netContrib;
+
+                    if ($isDebugBase) {
+                        $debugSlices[] = [
+                            'date'         => $d,
+                            'page_key'     => $pgKey,
+                            'orders'       => $orders,
+                            'mode_cod'     => round($modeCod, 2),
+                            'proceed'      => $proceed,
+                            'rts_pct'      => round($sliceRts, 2),
+                            'rts_source'   => isset($pisMap[$pgKey][$base]['rts_pct']) ? 'pis_override' : 'item_max_fallback',
+                            'unit_cost'    => round($unitCost, 2),
+                            'unit_cost_src'=> $override !== null ? 'pis_override' : ($baseCog !== null ? 'cogs_base' : 'zero'),
+                            'pis_price'    => $override,
+                            'cogs_base'    => $baseCog,
+                            'ads'          => round($ads, 2),
+                            'codfee_per'   => round($codFeeDay, 4),
+                            'revenue'      => round($revenue, 2),
+                            'shipping'     => round($shipping, 2),
+                            'cogs'         => round($cogsAmt, 2),
+                            'codfee'       => round($codFeeAmt, 2),
+                            'net_contrib'  => round($netContrib, 2),
+                            'gross_contrib'=> round($modeCod * $orders, 2),
+                        ];
+                    }
                 }
             }
 
@@ -779,6 +812,54 @@ class JntSupplyController extends Controller
                 'profit_has_cogs'     => $hasAnyCogs,
                 'profit_has_rts'      => $usedAnyRts,
             ];
+        }
+
+        // DIAGNOSTIC dump: only when ?debug_item=... was passed.
+        if ($debugItem !== '') {
+            // per-page totals
+            $byPage = [];
+            foreach ($debugSlices as $s) {
+                $pk = $s['page_key'];
+                if (!isset($byPage[$pk])) {
+                    $byPage[$pk] = [
+                        'page_key'=>$pk,'orders'=>0,'proceed'=>0,'ads'=>0,
+                        'revenue'=>0,'shipping'=>0,'cogs'=>0,'codfee'=>0,
+                        'net'=>0,'gross'=>0,'rts_pcts'=>[],'unit_costs'=>[],
+                    ];
+                }
+                $byPage[$pk]['orders']  += $s['orders'];
+                $byPage[$pk]['proceed'] += $s['proceed'];
+                $byPage[$pk]['ads']     += $s['ads'];
+                $byPage[$pk]['revenue'] += $s['revenue'];
+                $byPage[$pk]['shipping']+= $s['shipping'];
+                $byPage[$pk]['cogs']    += $s['cogs'];
+                $byPage[$pk]['codfee']  += $s['codfee'];
+                $byPage[$pk]['net']     += $s['net_contrib'];
+                $byPage[$pk]['gross']   += $s['gross_contrib'];
+                $byPage[$pk]['rts_pcts'][$s['rts_pct']] = true;
+                $byPage[$pk]['unit_costs'][$s['unit_cost']] = true;
+            }
+            foreach ($byPage as &$p) {
+                $p['rts_pcts']   = array_keys($p['rts_pcts']);
+                $p['unit_costs'] = array_keys($p['unit_costs']);
+                foreach (['ads','revenue','shipping','cogs','codfee','net','gross'] as $k) {
+                    $p[$k] = round($p[$k], 2);
+                }
+            }
+
+            $sumGross = 0; $sumNet = 0;
+            foreach ($debugSlices as $s) { $sumGross += $s['gross_contrib']; $sumNet += $s['net_contrib']; }
+
+            return response()->json([
+                'debug_item'   => $debugItem,
+                'date_range'   => [$profitFrom, $asOfDate],
+                'slice_count'  => count($debugSlices),
+                'sum_gross'    => round($sumGross, 2),
+                'sum_net'      => round($sumNet, 2),
+                'profit_pct'   => $sumGross > 0 ? round(($sumNet/$sumGross)*100, 3) : null,
+                'by_page'      => array_values($byPage),
+                'slices'       => $debugSlices,
+            ], 200, [], JSON_PRETTY_PRINT);
         }
 
         // Apply filters
