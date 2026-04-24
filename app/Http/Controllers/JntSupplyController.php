@@ -193,10 +193,6 @@ class JntSupplyController extends Controller
         // Profit filter (color bucket: green|yellow|orange|red|missing|'')
         $profitFilter = $request->input('profit_filter', '');
 
-        // DIAGNOSTIC: ?debug_item=mini+flashlight → dump per-(page,date) slice rows as JSON
-        // Used to pinpoint where /jnt/supply diverges from /owner/private. Harmless when empty.
-        $debugItem = trim((string) $request->input('debug_item', ''));
-        $debugSlices = [];   // filled inside profit loop when $debugItem matches current $base
 
         $velocityFrom = Carbon::parse($asOfDate, 'Asia/Manila')
             ->subDays($velocityDays - 1)
@@ -423,6 +419,9 @@ class JntSupplyController extends Controller
             $primaryByBase[$baseKey][$d][$pgKey] = [
                 'orders'   => (int) $r->primary_orders,
                 'mode_cod' => $r->primary_mode_cod !== null ? (float) $r->primary_mode_cod : 0.0,
+                // Full qty-preserving name (e.g. "1 x MINI FLASHLIGHT") — needed so
+                // page_item_settings lookup matches /owner/private's exact-qty key.
+                'item_raw' => (string) $r->primary_item,
             ];
             $primaryPageSet[$d][$pgKey] = true;
         }
@@ -529,20 +528,22 @@ class JntSupplyController extends Controller
             }
         }
 
-        // PageItemSetting overrides: latest effective_date ≤ asOfDate per (page, item)
+        // PageItemSetting overrides: latest effective_date ≤ asOfDate per (page, item).
+        // Only rts_pct is per-page — unit cost is now sourced globally from `cogs`
+        // (see migration 2026_04_24_000010). Key by QTY-EXACT item name so different
+        // qty variants don't cross-contaminate (e.g. Luna's "1 x" vs "2 x" settings).
         $pisRows = PageItemSetting::where('effective_date', '<=', $asOfDate)
             ->orderBy('page_name')
             ->orderBy('item_name')
             ->orderByDesc('effective_date')
-            ->get(['page_name', 'item_name', 'price', 'rts_pct']);
-        // pisMap[pg_key][base] = ['price'=>..,'rts_pct'=>..]
+            ->get(['page_name', 'item_name', 'rts_pct']);
         $pisMap = [];
         foreach ($pisRows as $r) {
-            $pgKey = mb_strtolower(trim((string) $r->page_name));
-            [, $base] = $this->parseItem((string) ($r->item_name ?? ''));
-            if (!isset($pisMap[$pgKey][$base])) {
-                $pisMap[$pgKey][$base] = [
-                    'price'   => $r->price !== null ? (float) $r->price : null,
+            $pgKey   = mb_strtolower(trim((string) $r->page_name));
+            $ikExact = mb_strtolower(trim((string) ($r->item_name ?? '')));
+            if ($ikExact === '') continue;
+            if (!isset($pisMap[$pgKey][$ikExact])) {
+                $pisMap[$pgKey][$ikExact] = [
                     'rts_pct' => $r->rts_pct !== null ? (float) $r->rts_pct : null,
                 ];
             }
@@ -693,8 +694,6 @@ class JntSupplyController extends Controller
             $baseKey  = $normItem($base);
             $perDate  = $primaryByBase[$baseKey] ?? [];
 
-            $isDebugBase = ($debugItem !== '' && $normItem($debugItem) === $baseKey);
-
             // Ground truth: /owner/private → profit% = projected_profit / Σ(SRP × primary_orders)
             // Numerator uses PROCEED orders (delivered-only revenue + delivered-only COGS/COD fee,
             // but shipping is charged on all proceed attempts). Denominator uses all primary orders.
@@ -708,17 +707,15 @@ class JntSupplyController extends Controller
                     // proceed_orders from macro_output (status='proceed'); 0 when unresolved.
                     $proceed = (int) ($proceedMap[$baseKey][$d][$pgKey] ?? 0);
 
-                    // COGS — page override first, then base cogs
-                    $override = $pisMap[$pgKey][$base]['price']   ?? null;
-                    $baseCog  = $cogsMap[$base]                   ?? null;
-                    if ($override !== null && $baseCog !== null && abs($override - $baseCog) > 0.01) {
-                        $mismatchCount++;
-                    }
-                    $unitCost = $override ?? $baseCog ?? 0.0;
+                    // QTY-EXACT key for RTS lookup (mirrors /owner/private).
+                    $primaryExact = mb_strtolower(trim((string) ($slice['item_raw'] ?? '')));
+
+                    // COGS — global cogs table is now single source of truth.
+                    $unitCost = $cogsMap[$base] ?? 0.0;
                     if ($unitCost > 0) $hasAnyCogs = true;
 
-                    // RTS — page override first, fallback to item-wide rate
-                    $sliceRts      = $pisMap[$pgKey][$base]['rts_pct'] ?? $rtsPct;
+                    // RTS — per-page override (qty-exact), fallback to item-wide rate.
+                    $sliceRts      = $pisMap[$pgKey][$primaryExact]['rts_pct'] ?? $rtsPct;
                     $deliverFactor = max(0.0, 1.0 - $sliceRts / 100.0);
 
                     $ads       = (float) ($adsMap[$d][$pgKey] ?? 0);
@@ -728,37 +725,12 @@ class JntSupplyController extends Controller
                     $sumGross += $modeCod * $orders;
 
                     // Numerator: proceed-based, delivered-only — matches /owner/private
-                    $revenue  = $proceed * $modeCod * $deliverFactor;
-                    $shipping = $proceed * $SHIPPING_PER_SHIPPED;
-                    $cogsAmt  = $proceed * $deliverFactor * $unitCost;
-                    $codFeeAmt= $proceed * $deliverFactor * $codFeeDay;
-                    $netContrib = $revenue - $shipping - $cogsAmt - $ads - $codFeeAmt;
-
-                    $sumNet += $netContrib;
-
-                    if ($isDebugBase) {
-                        $debugSlices[] = [
-                            'date'         => $d,
-                            'page_key'     => $pgKey,
-                            'orders'       => $orders,
-                            'mode_cod'     => round($modeCod, 2),
-                            'proceed'      => $proceed,
-                            'rts_pct'      => round($sliceRts, 2),
-                            'rts_source'   => isset($pisMap[$pgKey][$base]['rts_pct']) ? 'pis_override' : 'item_max_fallback',
-                            'unit_cost'    => round($unitCost, 2),
-                            'unit_cost_src'=> $override !== null ? 'pis_override' : ($baseCog !== null ? 'cogs_base' : 'zero'),
-                            'pis_price'    => $override,
-                            'cogs_base'    => $baseCog,
-                            'ads'          => round($ads, 2),
-                            'codfee_per'   => round($codFeeDay, 4),
-                            'revenue'      => round($revenue, 2),
-                            'shipping'     => round($shipping, 2),
-                            'cogs'         => round($cogsAmt, 2),
-                            'codfee'       => round($codFeeAmt, 2),
-                            'net_contrib'  => round($netContrib, 2),
-                            'gross_contrib'=> round($modeCod * $orders, 2),
-                        ];
-                    }
+                    $sumNet +=
+                          $proceed * $modeCod * $deliverFactor             // revenue
+                        - $proceed * $SHIPPING_PER_SHIPPED                  // shipping (all proceed)
+                        - $proceed * $deliverFactor * $unitCost             // COGS (delivered)
+                        - $ads                                              // adspent
+                        - $proceed * $deliverFactor * $codFeeDay;           // COD fee (delivered)
                 }
             }
 
@@ -812,54 +784,6 @@ class JntSupplyController extends Controller
                 'profit_has_cogs'     => $hasAnyCogs,
                 'profit_has_rts'      => $usedAnyRts,
             ];
-        }
-
-        // DIAGNOSTIC dump: only when ?debug_item=... was passed.
-        if ($debugItem !== '') {
-            // per-page totals
-            $byPage = [];
-            foreach ($debugSlices as $s) {
-                $pk = $s['page_key'];
-                if (!isset($byPage[$pk])) {
-                    $byPage[$pk] = [
-                        'page_key'=>$pk,'orders'=>0,'proceed'=>0,'ads'=>0,
-                        'revenue'=>0,'shipping'=>0,'cogs'=>0,'codfee'=>0,
-                        'net'=>0,'gross'=>0,'rts_pcts'=>[],'unit_costs'=>[],
-                    ];
-                }
-                $byPage[$pk]['orders']  += $s['orders'];
-                $byPage[$pk]['proceed'] += $s['proceed'];
-                $byPage[$pk]['ads']     += $s['ads'];
-                $byPage[$pk]['revenue'] += $s['revenue'];
-                $byPage[$pk]['shipping']+= $s['shipping'];
-                $byPage[$pk]['cogs']    += $s['cogs'];
-                $byPage[$pk]['codfee']  += $s['codfee'];
-                $byPage[$pk]['net']     += $s['net_contrib'];
-                $byPage[$pk]['gross']   += $s['gross_contrib'];
-                $byPage[$pk]['rts_pcts'][$s['rts_pct']] = true;
-                $byPage[$pk]['unit_costs'][$s['unit_cost']] = true;
-            }
-            foreach ($byPage as &$p) {
-                $p['rts_pcts']   = array_keys($p['rts_pcts']);
-                $p['unit_costs'] = array_keys($p['unit_costs']);
-                foreach (['ads','revenue','shipping','cogs','codfee','net','gross'] as $k) {
-                    $p[$k] = round($p[$k], 2);
-                }
-            }
-
-            $sumGross = 0; $sumNet = 0;
-            foreach ($debugSlices as $s) { $sumGross += $s['gross_contrib']; $sumNet += $s['net_contrib']; }
-
-            return response()->json([
-                'debug_item'   => $debugItem,
-                'date_range'   => [$profitFrom, $asOfDate],
-                'slice_count'  => count($debugSlices),
-                'sum_gross'    => round($sumGross, 2),
-                'sum_net'      => round($sumNet, 2),
-                'profit_pct'   => $sumGross > 0 ? round(($sumNet/$sumGross)*100, 3) : null,
-                'by_page'      => array_values($byPage),
-                'slices'       => $debugSlices,
-            ], 200, [], JSON_PRETTY_PRINT);
         }
 
         // Apply filters

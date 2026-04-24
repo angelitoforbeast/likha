@@ -1488,8 +1488,9 @@ class OwnerPrivateController extends Controller
         }
 
         // ── page_item_settings: latest per page+item ≤ date ──────────────────
-        // NOTE: `price` column is repurposed to store item_value (COGS override).
-        // Actual selling price comes from macro_output COD column (auto-detected).
+        // RTS% is per-page. item_value (unit cost) is NOT sourced here anymore —
+        // it comes from the global `cogs` table (keyed by item_name + date only).
+        // The `price` column was dropped (see migration 2026_04_24_000010).
         $settingsMap = [];
         if (Schema::hasTable('page_item_settings')) {
             $settingRows = DB::table('page_item_settings')
@@ -1498,13 +1499,12 @@ class OwnerPrivateController extends Controller
                 ->orderBy('item_name')
                 ->orderByDesc('effective_date')
                 ->orderByDesc('id')   // tiebreaker: latest insert wins when same date
-                ->get(['page_name', 'item_name', 'price', 'rts_pct', 'effective_date', 'comment', 'item_value_comment']);
+                ->get(['page_name', 'item_name', 'rts_pct', 'effective_date', 'comment', 'item_value_comment']);
 
             foreach ($settingRows as $s) {
                 $k = strtolower(trim((string)$s->page_name)).'||'.strtolower(trim((string)$s->item_name));
                 if (!isset($settingsMap[$k])) {
                     $settingsMap[$k] = [
-                        'item_value'           => (float)$s->price,
                         'rts_pct'              => (float)$s->rts_pct,
                         'effective_date'       => (string)$s->effective_date,
                         'comment'              => (string)($s->comment ?? ''),
@@ -1596,11 +1596,10 @@ class OwnerPrivateController extends Controller
                 abs($priceMax - $price) > 0.01
             );
 
-            // Item value = page_item_settings override (priority) or cogs table fallback
+            // Item value = GLOBAL cogs table only (one source of truth per item+date).
+            // RTS% still comes from page_item_settings (per-page).
             $settings   = $settingsMap[$settingKey] ?? null;
-            $itemValue  = $settings
-                ? (float)$settings['item_value']
-                : ($cogsMap[$dominantKey] ?? null);
+            $itemValue  = $cogsMap[$dominantKey] ?? null;
             $rtsPct     = $settings ? (float)$settings['rts_pct'] : null;
             $rtsComment = $settings ? $settings['comment'] : null;
 
@@ -1689,7 +1688,8 @@ class OwnerPrivateController extends Controller
                 'price_max'             => ($priceIsRange && abs($priceMax - $price) > 0.01) ? $priceMax : null,
                 'price_is_range'        => $priceIsRange,
                 'item_value'            => $itemValue,
-                'item_value_source'     => $settings ? 'manual' : ($itemValue !== null ? 'cogs' : null),
+                // After 2026-04-24 redesign: item_value is always sourced from the global cogs table.
+                'item_value_source'     => $itemValue !== null ? 'cogs' : null,
                 'shipping_fee'          => $shippingFee,
                 'cod_fee'               => $codFeePerDelivered,
                 'settings_date'         => $settings ? $settings['effective_date'] : null,
@@ -1750,43 +1750,66 @@ class OwnerPrivateController extends Controller
         $itemValue = (float)$validated['item_value'];
         $rtsPct    = (float)$validated['rts_pct'];
 
+        // -----------------------------------------------------------------
+        // New clean model (2026-04-24):
+        //   - COGS (item_value) is GLOBAL: stored only in `cogs` (item, date).
+        //     This endpoint UPSERTS cogs when item_value > 0. It NEVER deletes
+        //     a cogs row (cogs is global — deleting from a per-page form would
+        //     silently wipe the cost basis for every other page on that date).
+        //     To delete a cogs row, use the /item/cogs management page.
+        //   - RTS% is PER-PAGE: stored in `page_item_settings`
+        //     (page, item, effective_date). Saving rts_pct > 0 upserts that row;
+        //     saving rts_pct = 0 deletes the (page, item, date) override so it
+        //     falls back to the previous effective_date.
+        //   - The two fields are independent: zeroing one doesn't force zeroing
+        //     the other. Form still requires numeric values, but 0 means "clear
+        //     my override" for that field's scope (see above).
+        // -----------------------------------------------------------------
         try {
-            // Setting both to 0 = "delete this date's override, fall back to previous"
-            if ($itemValue <= 0 && $rtsPct <= 0) {
+            // --- RTS% side (per-page) ---
+            if ($rtsPct > 0) {
+                // Upsert the per-page RTS override for this (page, item, date).
+                DB::table('page_item_settings')->updateOrInsert(
+                    [
+                        'page_name'      => $pageName,
+                        'item_name'      => $itemName,
+                        'effective_date' => $effDate,
+                    ],
+                    [
+                        'rts_pct'            => $rtsPct,
+                        'comment'            => $validated['comment'] ?? null,
+                        'item_value_comment' => $validated['item_value_comment'] ?? null,
+                        'updated_at'         => now(),
+                        'created_at'         => now(),
+                    ]
+                );
+            } else {
+                // rts_pct = 0 → drop the per-page override for this date only.
+                // Falls back to the previous effective_date (or item-wide default).
                 DB::table('page_item_settings')
                     ->where('page_name', $pageName)
                     ->where('item_name', $itemName)
                     ->where('effective_date', $effDate)
                     ->delete();
-
-                // Also remove cogs entry for this date
-                Cogs::where('item_name', $itemName)->where('date', $effDate)->delete();
-
-                return response()->json(['ok' => true, 'deleted' => true]);
             }
 
-            DB::table('page_item_settings')->insert([
-                'page_name'      => $pageName,
-                'item_name'      => $itemName,
-                'price'          => $itemValue,
-                'rts_pct'        => $rtsPct,
-                'effective_date' => $effDate,
-                'comment'              => $validated['comment'] ?? null,
-                'item_value_comment'   => $validated['item_value_comment'] ?? null,
-                'created_at'     => now(),
-                'updated_at'     => now(),
-            ]);
-
-            // Sync item_value → cogs table so /item/cogs reflects the update
-            Cogs::updateOrCreate(
-                ['item_name' => $itemName, 'date' => $effDate],
-                ['unit_cost' => $itemValue]
-            );
+            // --- COGS side (global, upsert-only) ---
+            if ($itemValue > 0) {
+                Cogs::updateOrCreate(
+                    ['item_name' => $itemName, 'date' => $effDate],
+                    ['unit_cost' => $itemValue]
+                );
+            }
+            // item_value = 0 → intentionally no-op on cogs. (Delete must go through /item/cogs.)
         } catch (\Throwable $e) {
             return response()->json(['ok' => false, 'message' => $e->getMessage()], 500);
         }
 
-        return response()->json(['ok' => true]);
+        return response()->json([
+            'ok'            => true,
+            'rts_deleted'   => $rtsPct <= 0,
+            'cogs_upserted' => $itemValue > 0,
+        ]);
     }
 
     /**

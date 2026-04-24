@@ -11,7 +11,6 @@ class PageItemSetting extends Model
     protected $fillable = [
         'page_name',
         'item_name',
-        'price',
         'rts_pct',
         'effective_date',
         'comment',
@@ -19,7 +18,6 @@ class PageItemSetting extends Model
     ];
 
     protected $casts = [
-        'price'          => 'decimal:2',
         'rts_pct'        => 'decimal:2',
         'effective_date' => 'date',
     ];
