@@ -260,7 +260,7 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit):'')+(col.id==='proj_pct'&&row.proj_profit_per_order!==null&&row.price>0?rppStyle(row.proj_profit_per_order/row.price*100):'')">
+                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.proj_profit_per_order!==null&&row.price>0?rppStyle(row.proj_profit_per_order/row.price*100):'')">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -491,7 +491,7 @@
               <td>TOTAL</td>
               <td></td>
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align">
+                <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')">
                   <template x-if="col.id==='adspent'">
                     <span x-text="money(tot().adspent)"></span>
                   </template>
@@ -508,8 +508,7 @@
                     <span style="color:#475569;" x-text="md(tot().proceed_cpp)"></span>
                   </template>
                   <template x-if="col.id==='proj_profit'">
-                    <span style="font-weight:700;" :style="'color:'+pbColor(tot().projected_profit)"
-                          x-text="md(tot().projected_profit)"></span>
+                    <span style="font-weight:700;" x-text="md(tot().projected_profit)"></span>
                   </template>
                   <template x-if="col.id==='per_order'">
                     <span style="color:#111;" x-text="md(tot().proj_profit_per_order)"></span>
@@ -790,8 +789,27 @@
 
       // ── Helpers ───────────────────────────────────────────────────────────
       sq(n){ return n||''; },
-      pb(v){ if(v==null||isNaN(v)) return 'bx'; return v<0?'br':v>=3000?'bg':'bx'; },
-      pbStyle(v){ if(v==null||isNaN(Number(v))) return ''; return v<0?'background:#ff0000;':v>=3000?'background:#00ff00;':''; },
+      // Projected Profit threshold is PER-DAY. If the row has a limited included-day window
+      // (mixed primary), divide by included_days. Otherwise divide by range_days.
+      ppd(v, row){
+        if (v==null || isNaN(Number(v))) return null;
+        let days = 1;
+        if (row) {
+          days = Number(row.included_days) > 0 ? Number(row.included_days)
+               : (Number(row.range_days) > 0 ? Number(row.range_days) : 1);
+        }
+        return Number(v) / days;
+      },
+      pb(v, row){
+        const p = this.ppd(v, row);
+        if (p==null) return 'bx';
+        return p<0 ? 'br' : p>=3000 ? 'bg' : 'bx';
+      },
+      pbStyle(v, row){
+        const p = this.ppd(v, row);
+        if (p==null) return '';
+        return p<0 ? 'background:#ff0000;' : p>=3000 ? 'background:#00ff00;' : '';
+      },
       pbColor(v){ return '#000'; },
       rppStyle(v){ if(v==null||isNaN(Number(v))) return ''; if(v<5) return 'background:#ff0000;'; if(v<10) return 'background:#ff6600;'; if(v<20) return 'background:#00ffff;'; return 'background:#00ff00;'; },
       rppColor(v){ return '#000'; },
