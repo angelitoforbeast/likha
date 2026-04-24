@@ -212,6 +212,10 @@
       <label :class="vis.cogs && 'active'">
         <input type="checkbox" x-model="vis.cogs" @change="persist()"> COGS
       </label>
+      <label :class="vis.proj_pct && 'active'"
+             title="Projected profit% per cell (revenue − shipping − cogs − ads − cod fee) / (orders × mode COD)">
+        <input type="checkbox" x-model="vis.proj_pct" @change="persist()"> PROJ%
+      </label>
       <label :class="vis.one_item_only && 'active'" class="!border-amber-400"
              title="Show only cells that match the anchor item AND same COD/SRP as the end-date (reference).">
         <input type="checkbox" x-model="vis.one_item_only" @change="persist()"> 1 ITEM ONLY
@@ -360,6 +364,19 @@
                         @if($cell['unit_cost'] !== null)
                           <span x-show="vis.cogs" class="badge-cogs" title="unit cost (cogs)">₱{{ rtrim(rtrim(number_format($cell['unit_cost'],2), '0'),'.') }}</span>
                         @endif
+                        @if($cell['profit_pct'] !== null)
+                          @php
+                            $pp = (float)$cell['profit_pct'];
+                            $ppColor = $pp >= 15 ? '#16a34a' : ($pp >= 5 ? '#ca8a04' : ($pp >= 0 ? '#ea580c' : '#dc2626'));
+                          @endphp
+                          <span x-show="vis.proj_pct"
+                                title="projected profit% · proceed {{ (int)($cell['proceed'] ?? 0) }} · ads ₱{{ number_format((float)($cell['ads'] ?? 0),2) }}"
+                                style="display:inline-block;padding:1px 4px;border-radius:4px;font-size:9px;font-weight:700;background:{{ $ppColor }};color:#fff;">{{ $pp >= 0 ? '+' : '' }}{{ rtrim(rtrim(number_format($pp,1),'0'),'.') }}%</span>
+                        @elseif($cell)
+                          <span x-show="vis.proj_pct"
+                                title="missing RTS, COGS, or mode COD — cannot compute"
+                                style="display:inline-block;padding:1px 4px;border-radius:4px;font-size:9px;font-weight:700;background:#e5e7eb;color:#6b7280;">—</span>
+                        @endif
                       </div>
                         </div>
                       </template>
@@ -473,7 +490,7 @@
     return {
       // Visibility toggles — persisted per route in localStorage.
       // Key includes pathname so ibang page may sariling preference.
-      vis: { item_name:true, count:true, cod:true, rts:true, cogs:true, one_item_only:false, only_missing:false },
+      vis: { item_name:true, count:true, cod:true, rts:true, cogs:true, proj_pct:false, one_item_only:false, only_missing:false },
       storageKey: 'matrix_vis:' + location.pathname,
 
       // Item-filter state (server-side; triggers form submit via applyFilter())

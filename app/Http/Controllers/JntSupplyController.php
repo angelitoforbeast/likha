@@ -517,17 +517,44 @@ class JntSupplyController extends Controller
             $adsMap[(string) $r->d][(string) $r->pg] = (float) $r->spent;
         }
 
-        // COGS as-of asOfDate per base item (latest date ≤ asOfDate)
+        // COGS as-of asOfDate — keyed by QTY-EXACT item name (mirrors /owner/private).
+        //
+        // Why qty-exact: the cogs table stores one row per SKU variant (e.g.
+        // "1 x ANTI - PULGAS" = ₱17 and "2 x ANTI - PULGAS" = ₱34 are separate entries
+        // because the 2x bundle has 2× the material). Previously this code stripped
+        // the qty prefix and keyed by base name, causing the first-seen variant
+        // (alphabetical) to silently win — e.g. a legacy "1 x" row at ₱17 would mask
+        // the current "2 x" row at ₱34, halving cogs on every 2x slice. That bug
+        // inflated PROJ PROFIT% across every item with a qty prefix.
+        //
+        // Two indexes built:
+        //   $cogsMapExact[lower("2 x anti - pulgas")] = 34   — authoritative, used first
+        //   $cogsMapBase [lower("anti - pulgas")]      = 17  — fallback only (first-seen
+        //                                                     by date DESC so latest wins)
         $cogsRows = DB::table('cogs')
             ->where('date', '<=', $asOfDate)
             ->orderBy('item_name')
             ->orderByDesc('date')
             ->get(['item_name', 'date', 'unit_cost']);
-        $cogsMap = [];
+        $cogsMapExact = [];   // exact_key => ['unit_cost', 'item_name']
+        $cogsMapBase  = [];   // base_key  => ['unit_cost', 'item_name']
         foreach ($cogsRows as $r) {
-            [, $base] = $this->parseItem((string) ($r->item_name ?? ''));
-            if (!isset($cogsMap[$base])) {
-                $cogsMap[$base] = (float) $r->unit_cost;
+            $rawName = (string) ($r->item_name ?? '');
+            if ($rawName === '') continue;
+            $exactKey = mb_strtolower(trim($rawName));
+            if (!isset($cogsMapExact[$exactKey])) {
+                $cogsMapExact[$exactKey] = [
+                    'unit_cost' => (float) $r->unit_cost,
+                    'item_name' => $rawName,
+                ];
+            }
+            [, $base] = $this->parseItem($rawName);
+            $baseKey = mb_strtolower(trim((string) $base));
+            if ($baseKey !== '' && !isset($cogsMapBase[$baseKey])) {
+                $cogsMapBase[$baseKey] = [
+                    'unit_cost' => (float) $r->unit_cost,
+                    'item_name' => $rawName,
+                ];
             }
         }
 
@@ -694,6 +721,13 @@ class JntSupplyController extends Controller
             $hasAnyCogs    = false;
             $usedAnyRts    = ($rtsPct > 0);
 
+            // Per-row cogs transparency: track every qty-variant name + cogs actually
+            // used during the slice loop, so the view can render new "ITEM NAME(S)"
+            // and "COGS USED" columns for audit.
+            //   $variantCogs[lower(item_raw)] = ['item_name', 'unit_cost', 'source' (exact|base|missing)]
+            $variantCogs     = [];
+            $missingCogsAny  = false;
+
             $baseKey  = $normItem($base);
             $perDate  = $primaryByBase[$baseKey] ?? [];
 
@@ -714,12 +748,32 @@ class JntSupplyController extends Controller
                     // proceed_orders from macro_output (status='proceed'); 0 when unresolved.
                     $proceed = (int) ($proceedMap[$baseKey][$d][$pgKey] ?? 0);
 
-                    // QTY-EXACT key for RTS lookup (mirrors /owner/private).
-                    $primaryExact = mb_strtolower(trim((string) ($slice['item_raw'] ?? '')));
+                    // QTY-EXACT key for RTS + COGS lookup (mirrors /owner/private).
+                    $itemRaw      = (string) ($slice['item_raw'] ?? '');
+                    $primaryExact = mb_strtolower(trim($itemRaw));
 
-                    // COGS — global cogs table is now single source of truth.
-                    $unitCost = $cogsMap[$base] ?? 0.0;
+                    // COGS — qty-exact lookup first, fallback to base. See the
+                    // $cogsMapExact/$cogsMapBase build above for rationale. This
+                    // mirrors /owner/private which never strips the qty prefix.
+                    $cogsHit = $cogsMapExact[$primaryExact]
+                        ?? $cogsMapBase[mb_strtolower(trim($base))]
+                        ?? null;
+                    $unitCost    = $cogsHit['unit_cost'] ?? 0.0;
+                    $cogsSource  = $cogsHit
+                        ? (isset($cogsMapExact[$primaryExact]) ? 'exact' : 'base')
+                        : 'missing';
                     if ($unitCost > 0) $hasAnyCogs = true;
+                    if ($cogsSource === 'missing') $missingCogsAny = true;
+
+                    // Track per-variant cogs used (for the new transparency columns).
+                    if ($primaryExact !== '' && !isset($variantCogs[$primaryExact])) {
+                        $variantCogs[$primaryExact] = [
+                            'item_name' => $cogsHit['item_name'] ?? $itemRaw,
+                            'item_raw'  => $itemRaw,
+                            'unit_cost' => $unitCost,
+                            'source'    => $cogsSource,
+                        ];
+                    }
 
                     // RTS — per-page override (qty-exact), fallback to item-wide rate.
                     $sliceRts      = $pisMap[$pgKey][$primaryExact]['rts_pct'] ?? $rtsPct;
@@ -751,6 +805,7 @@ class JntSupplyController extends Controller
                             'rts_pct'       => round($sliceRts, 2),
                             'rts_source'    => isset($pisMap[$pgKey][$primaryExact]['rts_pct']) ? 'pis_override' : 'fallback_max',
                             'unit_cost'     => round($unitCost, 2),
+                            'cogs_source'   => $cogsSource,
                             'ads'           => round($ads, 2),
                             'cod_fee_day'   => round($codFeeDay, 4),
                             'deliver_fct'   => round($deliverFactor, 4),
@@ -834,6 +889,15 @@ class JntSupplyController extends Controller
                 'profit_mismatch_ct'  => $mismatchCount,
                 'profit_has_cogs'     => $hasAnyCogs,
                 'profit_has_rts'      => $usedAnyRts,
+                // Per-row transparency: which qty-exact variants fed into the profit
+                // compute and the cogs each one resolved to. Sorted ascending so the
+                // most common "1 x" appears before "2 x" etc.
+                'cogs_variants'       => (function() use ($variantCogs) {
+                    $out = array_values($variantCogs);
+                    usort($out, fn($a, $b) => strcmp($a['item_raw'], $b['item_raw']));
+                    return $out;
+                })(),
+                'cogs_missing_any'    => $missingCogsAny,
             ];
         }
 

@@ -1996,6 +1996,82 @@ class OwnerPrivateController extends Controller
             return $hit;
         };
 
+        // ── Per-cell PROJ% plumbing ──────────────────────────────────────────
+        // Cell-level profit% = slice profit / slice gross. Mirrors /jnt/supply formula:
+        //   revenue  = proceed × mode_cod × (1 - rts/100)
+        //   shipping = proceed × 37
+        //   cogs     = proceed × (1 - rts/100) × unit_cost
+        //   cod_fee  = proceed × (1 - rts/100) × mode_cod × 0.015 × 1.12
+        //   net      = revenue − shipping − cogs − ads − cod_fee
+        //   gross    = mode_cod × orders      (denominator, matches /owner/private)
+        //   pct      = net / gross × 100
+        //
+        // Two extra queries: proceed per (page_key, date, item_norm) and ads per
+        // (page_key, date). Both ranges are cheap (indexed by ts_date / day).
+
+        // 1) Proceed orders from macro_output. Item key normalization must match
+        //    what daily_page_primary_item uses (strip qty + lower).
+        $driver = DB::getDriverName();
+        $castMoneyAds = $driver === 'pgsql'
+            ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE((amount_spent_php)::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
+            : "CAST(REPLACE(REPLACE(REPLACE(COALESCE(amount_spent_php,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
+        $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
+
+        $moPageCol   = Schema::hasColumn('macro_output', 'PAGE') ? '`PAGE`'
+                     : (Schema::hasColumn('macro_output', 'page') ? 'page' : 'page_name');
+        $moItemCol   = Schema::hasColumn('macro_output', 'ITEM_NAME') ? '`ITEM_NAME`'
+                     : (Schema::hasColumn('macro_output', 'item_name') ? 'item_name' : '`ITEM`');
+        $moStatusCol = Schema::hasColumn('macro_output', 'STATUS') ? '`STATUS`'
+                     : (Schema::hasColumn('macro_output', 'status') ? 'status' : '`STATUS`');
+        $moDateExpr  = Schema::hasColumn('macro_output', 'ts_date')
+                         ? 'DATE(ts_date)' : 'DATE(`created_at`)';
+
+        $moStatusNorm = "LOWER(REPLACE(REPLACE($trimFn({$moStatusCol}),' ',''),'_',''))";
+        $moPageKey    = "LOWER($trimFn(COALESCE({$moPageCol},'')))";
+        $moItemTrim   = "$trimFn(COALESCE({$moItemCol},''))";
+
+        $proceedRows = DB::table('macro_output')
+            ->whereRaw("$moDateExpr BETWEEN ? AND ?", [$startDate, $endDate])
+            ->whereRaw("$moPageKey != ''")
+            ->selectRaw("
+                $moDateExpr AS d,
+                $moPageKey  AS pg,
+                $moItemTrim AS item_raw,
+                SUM(CASE WHEN $moStatusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed
+            ")
+            ->groupByRaw("$moDateExpr, $moPageKey, $moItemTrim")
+            ->get();
+
+        // $proceedMap[page_key][date][item_raw_lower] = proceed count
+        $proceedMap = [];
+        foreach ($proceedRows as $pr) {
+            $pk = (string)$pr->pg;
+            $d  = (string)$pr->d;
+            $ir = mb_strtolower(trim((string)$pr->item_raw));
+            if ($pk === '' || $ir === '') continue;
+            $proceedMap[$pk][$d][$ir] = (int)$pr->proceed;
+        }
+
+        // 2) Ads per (page_key, date)
+        $adsRows = DB::table('ads_manager_reports')
+            ->whereRaw('DATE(day) BETWEEN ? AND ?', [$startDate, $endDate])
+            ->selectRaw("
+                DATE(day) AS d,
+                LOWER($trimFn(COALESCE(page_name,''))) AS pg,
+                SUM($castMoneyAds) AS spent
+            ")
+            ->groupByRaw("DATE(day), LOWER($trimFn(COALESCE(page_name,'')))")
+            ->get();
+        $adsMap = [];
+        foreach ($adsRows as $r) {
+            $adsMap[(string)$r->pg][(string)$r->d] = (float)$r->spent;
+        }
+
+        // 3) Fee constants (match /jnt/supply)
+        $SHIPPING_PER_SHIPPED = 37.0;
+        $COD_FEE_RATE         = 0.015;
+        $COD_FEE_VAT_RATE     = 0.12;
+
         // Group by page
         $pages = []; // page_key => [label, matrix[date] => row, anchor_item_key, distinct_items set]
         foreach ($rows as $r) {
@@ -2017,6 +2093,28 @@ class OwnerPrivateController extends Controller
             $itemName = (string)$r->primary_item;
             $rtsHit   = $resolveRts($pk, $itemName, $cellDate);
             $cogsVal  = $resolveCogs($itemName, $cellDate);
+
+            // Per-cell PROJ% — only computable when all ingredients are present.
+            $proceedHere = (int) ($proceedMap[$pk][$cellDate][mb_strtolower(trim($itemName))] ?? 0);
+            $adsHere     = (float) ($adsMap[$pk][$cellDate] ?? 0.0);
+            $profitPct   = null;
+            if ($cogsVal !== null
+                && ($rtsHit['rts_pct'] ?? null) !== null
+                && $r->primary_mode_cod !== null
+                && (int)$r->primary_orders > 0) {
+                $modeCod = (float)$r->primary_mode_cod;
+                $orders  = (int)$r->primary_orders;
+                $rts     = (float)$rtsHit['rts_pct'];
+                $deliver = max(0.0, 1.0 - $rts / 100.0);
+                $revenue  = $proceedHere * $modeCod * $deliver;
+                $shipping = $proceedHere * $SHIPPING_PER_SHIPPED;
+                $cogsAmt  = $proceedHere * $deliver * (float)$cogsVal;
+                $codFee   = $proceedHere * $deliver * $modeCod * $COD_FEE_RATE * (1 + $COD_FEE_VAT_RATE);
+                $net      = $revenue - $shipping - $cogsAmt - $adsHere - $codFee;
+                $gross    = $modeCod * $orders;
+                if ($gross > 0) $profitPct = round($net / $gross * 100, 1);
+            }
+
             $pages[$pk]['cells'][$cellDate] = [
                 'item_name'      => $itemName,
                 'item_key'       => $ik,
@@ -2029,6 +2127,9 @@ class OwnerPrivateController extends Controller
                 // on a different (earlier) date — so user knows they'd be overriding here.
                 'rts_inherited'  => $rtsHit ? ($rtsHit['date'] !== $cellDate) : false,
                 'unit_cost'      => $cogsVal,
+                'proceed'        => $proceedHere,
+                'ads'            => $adsHere,
+                'profit_pct'     => $profitPct,
             ];
             $pages[$pk]['distinct_items'][$ik] = true;
             if ((string)$r->ts_date === $endDate) {

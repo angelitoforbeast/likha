@@ -209,6 +209,12 @@
             <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200">RTS%</th>
             <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200"
                 style="background:#ecfccb; color:#3f6212;">Proj Profit%</th>
+            {{-- Transparency columns: shows which qty-exact variants + cogs values
+                 the PROJ% calc used. Helps audit when numbers look off. --}}
+            <th class="px-3 py-2 text-left   text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200"
+                style="background:#fef3c7; color:#78350f;" title="The exact qty-variant item_name(s) fed into PROJ PROFIT% — matches cogs table lookup key">Item Name(s)</th>
+            <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200"
+                style="background:#fef3c7; color:#78350f;" title="Unit cost (₱) actually used per variant. Red = no cogs entry found.">COGS (₱)</th>
           </tr>
           {{-- gSheet-style per-column header filters --}}
           <tr class="col-filter-row">
@@ -263,6 +269,9 @@
                 <option value="missing">⬜ No data</option>
               </select>
             </th>
+            {{-- No filters on transparency columns (read-only diagnostics). --}}
+            <th></th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -398,6 +407,40 @@
               @endif
             </td>
 
+            {{-- Item Name(s) used in compute — one line per qty-variant. --}}
+            @php $variants = $row['cogs_variants'] ?? []; @endphp
+            <td class="px-3 py-2 border border-gray-200 text-left text-xs {{ !empty($row['cogs_missing_any']) ? 'bg-red-50' : '' }}"
+                style="white-space:normal; line-height:1.35; max-width:200px;">
+              @if(count($variants) === 0)
+                <span class="text-gray-400">—</span>
+              @else
+                @foreach($variants as $v)
+                  <div class="{{ $v['source'] === 'missing' ? 'text-red-600 font-semibold' : ($v['source'] === 'base' ? 'text-amber-700' : 'text-gray-700') }}"
+                       title="source: {{ $v['source'] }}{{ $v['source'] !== 'exact' ? ' (fallback — no exact cogs match)' : '' }}">
+                    {{ $v['item_raw'] }}@if($v['source'] !== 'exact')<sup class="text-[9px]">※</sup>@endif
+                  </div>
+                @endforeach
+              @endif
+            </td>
+
+            {{-- COGS value used per variant (same order as Item Name(s) column). --}}
+            <td class="px-3 py-2 border border-gray-200 text-right text-xs {{ !empty($row['cogs_missing_any']) ? 'bg-red-50' : '' }}"
+                style="white-space:normal; line-height:1.35; font-family:monospace;">
+              @if(count($variants) === 0)
+                <span class="text-gray-400">—</span>
+              @else
+                @foreach($variants as $v)
+                  <div class="{{ $v['source'] === 'missing' ? 'text-red-600 font-bold' : 'text-gray-700' }}">
+                    @if($v['source'] === 'missing')
+                      NONE
+                    @else
+                      ₱{{ rtrim(rtrim(number_format($v['unit_cost'],2), '0'),'.') }}
+                    @endif
+                  </div>
+                @endforeach
+              @endif
+            </td>
+
           </tr>
           @endforeach
         </tbody>
@@ -405,7 +448,7 @@
           <tr style="background:#f8fafc; border-top:2px solid #94a3b8; font-weight:700;">
             <td class="px-3 py-2 border border-gray-300 text-xs text-gray-500 uppercase">TOTAL</td>
             <td class="px-3 py-2 border border-gray-300 text-right text-blue-700">{{ number_format($totalHoldUnits) }}</td>
-            <td class="px-3 py-2 border border-gray-300" colspan="7"></td>
+            <td class="px-3 py-2 border border-gray-300" colspan="9"></td>
           </tr>
         </tfoot>
       </table>
