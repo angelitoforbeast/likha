@@ -22,6 +22,11 @@
     .cell-end{border-right:3px solid #2563eb;}
     .cell-item-change{border-left:4px solid #dc2626 !important; padding-left:4px;}
     .cell-price-change{box-shadow: inset 3px 0 0 #a855f7;}
+    /* "1 ITEM ONLY" filter: cells that do NOT match anchor item + anchor COD
+       get neutralized — same visual as empty. Children hidden via x-show. */
+    .cell-filtered{background:#f1f5f9 !important; color:#cbd5e1 !important;
+                   border:1px solid #e2e8f0 !important; box-shadow:none !important;
+                   border-left:1px solid #e2e8f0 !important; cursor:default !important;}
     .badge-new{position:absolute;top:1px;right:2px;background:#dc2626;color:#fff;
                font-size:8px;font-weight:700;padding:0 3px;border-radius:3px;letter-spacing:0.3px;}
     .badge-price{display:inline-block;font-size:9px;font-weight:700;padding:0 3px;border-radius:3px;
@@ -108,6 +113,10 @@
       <label :class="vis.cogs && 'active'">
         <input type="checkbox" x-model="vis.cogs" @change="persist()"> COGS
       </label>
+      <label :class="vis.one_item_only && 'active'" class="!border-amber-400"
+             title="Show only cells that match the anchor item AND same COD/SRP as the end-date (reference).">
+        <input type="checkbox" x-model="vis.one_item_only" @change="persist()"> 1 ITEM ONLY
+      </label>
       <span class="ml-4 text-[11px] text-slate-500">Click any cell to edit RTS / unit cost. Settings saved per-browser.</span>
     </div>
   </div>
@@ -172,6 +181,20 @@
                         if (!empty($cell['price_changed'])) $tip .= ' · price Δ '.($cell['price_delta']>=0?'+':'').round($cell['price_delta']);
                         if (!empty($cell['rts_inherited'])) $tip .= ' · RTS inherited from '.$cell['rts_eff_date'];
                     }
+                    // Anchor match: same item_key AND same mode_cod as the end-date reference.
+                    // "1 ITEM ONLY" filter uses this to reveal when the current mode started
+                    // at its current COD/SRP — cells with a different COD get filtered out even
+                    // if the item name matches.
+                    $matchesAnchor = false;
+                    if ($cell && $p['anchor_item_key'] && $cell['item_key'] === $p['anchor_item_key']) {
+                        $anchorCod = $p['anchor_mode_cod'] ?? null;
+                        $cellCod   = $cell['mode_cod'];
+                        if ($anchorCod === null && $cellCod === null) {
+                            $matchesAnchor = true;
+                        } elseif ($anchorCod !== null && $cellCod !== null) {
+                            $matchesAnchor = abs((float)$anchorCod - (float)$cellCod) < 0.01;
+                        }
+                    }
                     // Earliest date in the current range where THIS page has the SAME item.
                     // Used by the "Apply to earliest" button — setting effective_date there
                     // lets the RTS cascade forward to every matching day (via getFor's
@@ -199,10 +222,13 @@
                     ] : null;
                   @endphp
                   <td class="{{ $class }}"
-                      style="{{ $cellStyle }}"
+                      :class="vis.one_item_only && !{{ $matchesAnchor ? 'true' : 'false' }} ? 'cell-filtered' : ''"
+                      :style="(vis.one_item_only && !{{ $matchesAnchor ? 'true' : 'false' }}) ? '' : '{{ $cellStyle }}'"
                       title="{{ $tip }}"
-                      @if($cell) @click="openEdit(@js($cellPayload))" @endif>
+                      @if($cell) @click="(vis.one_item_only && !{{ $matchesAnchor ? 'true' : 'false' }}) ? null : openEdit(@js($cellPayload))" @endif>
                     @if($cell)
+                      <template x-if="!vis.one_item_only || {{ $matchesAnchor ? 'true' : 'false' }}">
+                        <div>
                       @if(!empty($cell['item_changed']))
                         <span class="badge-new">NEW</span>
                       @endif
@@ -230,6 +256,11 @@
                           <span x-show="vis.cogs" class="badge-cogs missing" title="no cogs entry">₱—</span>
                         @endif
                       </div>
+                        </div>
+                      </template>
+                      <template x-if="vis.one_item_only && !{{ $matchesAnchor ? 'true' : 'false' }}">
+                        <span style="color:#cbd5e1;">—</span>
+                      </template>
                     @else
                       —
                     @endif
@@ -337,7 +368,7 @@
     return {
       // Visibility toggles — persisted per route in localStorage.
       // Key includes pathname so ibang page may sariling preference.
-      vis: { item_name:true, count:true, cod:true, rts:true, cogs:true },
+      vis: { item_name:true, count:true, cod:true, rts:true, cogs:true, one_item_only:false },
       storageKey: 'matrix_vis:' + location.pathname,
 
       edit: {

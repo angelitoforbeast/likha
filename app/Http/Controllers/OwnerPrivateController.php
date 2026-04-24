@@ -2003,6 +2003,7 @@ class OwnerPrivateController extends Controller
                     'distinct_items' => [],
                     'anchor_item'    => null,
                     'anchor_item_key'=> null,
+                    'anchor_mode_cod'=> null,
                 ];
             }
             $ik = (string)$r->primary_item_key;
@@ -2025,8 +2026,9 @@ class OwnerPrivateController extends Controller
             ];
             $pages[$pk]['distinct_items'][$ik] = true;
             if ((string)$r->ts_date === $endDate) {
-                $pages[$pk]['anchor_item']     = (string)$r->primary_item;
-                $pages[$pk]['anchor_item_key'] = $ik;
+                $pages[$pk]['anchor_item']      = (string)$r->primary_item;
+                $pages[$pk]['anchor_item_key']  = $ik;
+                $pages[$pk]['anchor_mode_cod']  = $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null;
             }
         }
 
