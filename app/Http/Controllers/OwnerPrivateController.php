@@ -1637,37 +1637,58 @@ class OwnerPrivateController extends Controller
             // Projected Profit — per-slice compute summed across INCLUDED dates.
             // Uses each day's own mode_cod & adspent; rts_pct/item_value/fees anchored at end_date.
             $projProfit = $projProfitPerOrder = null;
-            // 1-DAY variant: same formula, but only the slice on $endDate.
-            // Strict end_date semantics — if end_date has no slice for this page+item,
-            // both projProfitLastDay and grossSalesLastDay stay at their initial values
-            // and proj_pct_last_day will be null in the output.
-            $projProfitLastDay  = null;
-            $grossSalesLastDay  = 0.0;
-            $ordersLastDay      = 0;
-            $procOrdersLastDay  = 0;
+            // Trailing-N-day variants: same formula, but only the last N days
+            // ending at $endDate (inclusive). 1D = end_date strictly.
+            // Strict — if a window has no slice for this page+item, the % is null.
+            $projProfitLastDay   = null; $grossSalesLastDay   = 0.0; $ordersLastDay   = 0; $procOrdersLastDay   = 0;
+            $projProfitLast3Day  = null; $grossSalesLast3Day  = 0.0; $ordersLast3Day  = 0; $procOrdersLast3Day  = 0;
+            $projProfitLast7Day  = null; $grossSalesLast7Day  = 0.0; $ordersLast7Day  = 0; $procOrdersLast7Day  = 0;
+
+            // Window lower bounds (clamped to startDate so we never reach outside the
+            // user's range — keeps the calc deterministic when range is shorter than N).
+            $startTs    = strtotime($startDate);
+            $endTs      = strtotime($endDate);
+            $start3DTs  = max($startTs, strtotime('-2 days', $endTs));   // last 3 days inclusive
+            $start7DTs  = max($startTs, strtotime('-6 days', $endTs));   // last 7 days inclusive
             if ($rtsPct !== null && $itemValue !== null && !empty($includedDatesArr)) {
                 $rts           = $rtsPct / 100.0;
                 $deliverFactor = 1.0 - $rts;
                 $sumProfit = 0.0;
                 $anyPrice  = false;
-                $sumProfitLastDay = 0.0;
-                $anyPriceLastDay  = false;
+                $sumProfitLastDay  = 0.0; $anyPriceLastDay  = false;
+                $sumProfitLast3Day = 0.0; $anyPriceLast3Day = false;
+                $sumProfitLast7Day = 0.0; $anyPriceLast7Day = false;
                 foreach ($includedDatesArr as $d => $slice) {
                     $pDay       = (float)($slice['mode_cod'] ?? 0);
                     $proceedDay = (int)($slice['proceed'] ?? 0);
                     $adsDay     = (float)($slice['adspent'] ?? 0);
+                    $dTs        = strtotime((string)$d);
                     $isLastDay  = ((string)$d === (string)$endDate);
+                    $inLast3D   = ($dTs >= $start3DTs && $dTs <= $endTs);
+                    $inLast7D   = ($dTs >= $start7DTs && $dTs <= $endTs);
+
                     if ($isLastDay) {
                         $ordersLastDay     += (int)($slice['orders'] ?? 0);
                         $procOrdersLastDay += $proceedDay;
-                        if ($pDay > 0) {
-                            $grossSalesLastDay += $pDay * (int)($slice['orders'] ?? 0);
-                        }
+                        if ($pDay > 0) $grossSalesLastDay += $pDay * (int)($slice['orders'] ?? 0);
                     }
+                    if ($inLast3D) {
+                        $ordersLast3Day     += (int)($slice['orders'] ?? 0);
+                        $procOrdersLast3Day += $proceedDay;
+                        if ($pDay > 0) $grossSalesLast3Day += $pDay * (int)($slice['orders'] ?? 0);
+                    }
+                    if ($inLast7D) {
+                        $ordersLast7Day     += (int)($slice['orders'] ?? 0);
+                        $procOrdersLast7Day += $proceedDay;
+                        if ($pDay > 0) $grossSalesLast7Day += $pDay * (int)($slice['orders'] ?? 0);
+                    }
+
                     if ($pDay <= 0) {
                         // no price that day → can't compute revenue; still subtract adspent so ROI isn't overstated
                         $sumProfit -= $adsDay;
-                        if ($isLastDay) $sumProfitLastDay -= $adsDay;
+                        if ($isLastDay) $sumProfitLastDay  -= $adsDay;
+                        if ($inLast3D)  $sumProfitLast3Day -= $adsDay;
+                        if ($inLast7D)  $sumProfitLast7Day -= $adsDay;
                         continue;
                     }
                     $anyPrice = true;
@@ -1679,24 +1700,22 @@ class OwnerPrivateController extends Controller
                         - $adsDay                                                 // adspent
                         - $proceedDay * $deliverFactor * $codFeeDay;              // COD fee (delivered)
                     $sumProfit += $sliceProfit;
-                    if ($isLastDay) {
-                        $anyPriceLastDay = true;
-                        $sumProfitLastDay += $sliceProfit;
-                    }
+                    if ($isLastDay) { $anyPriceLastDay  = true; $sumProfitLastDay  += $sliceProfit; }
+                    if ($inLast3D)  { $anyPriceLast3Day = true; $sumProfitLast3Day += $sliceProfit; }
+                    if ($inLast7D)  { $anyPriceLast7Day = true; $sumProfitLast7Day += $sliceProfit; }
                 }
                 if ($anyPrice) {
                     $projProfit = $sumProfit;
                     $projProfitPerOrder = $totalOrders > 0 ? $projProfit / $totalOrders : null;
                 }
-                if ($anyPriceLastDay) {
-                    $projProfitLastDay = $sumProfitLastDay;
-                }
+                if ($anyPriceLastDay)  $projProfitLastDay  = $sumProfitLastDay;
+                if ($anyPriceLast3Day) $projProfitLast3Day = $sumProfitLast3Day;
+                if ($anyPriceLast7Day) $projProfitLast7Day = $sumProfitLast7Day;
             }
-            // Proj.%(1D) = profit_last_day / gross_sales_last_day. Null when den ≤ 0
-            // (no orders on end_date, no price, or missing RTS/item_value).
-            $projPctLastDay = ($projProfitLastDay !== null && $grossSalesLastDay > 0)
-                ? ($projProfitLastDay / $grossSalesLastDay) * 100.0
-                : null;
+            // Window %s. Null when den ≤ 0 (no orders / no price) or RTS/cogs missing.
+            $projPctLastDay  = ($projProfitLastDay  !== null && $grossSalesLastDay  > 0) ? ($projProfitLastDay  / $grossSalesLastDay)  * 100.0 : null;
+            $projPctLast3Day = ($projProfitLast3Day !== null && $grossSalesLast3Day > 0) ? ($projProfitLast3Day / $grossSalesLast3Day) * 100.0 : null;
+            $projPctLast7Day = ($projProfitLast7Day !== null && $grossSalesLast7Day > 0) ? ($projProfitLast7Day / $grossSalesLast7Day) * 100.0 : null;
 
             $result[] = [
                 'page_name'             => $pg['page_label'],
@@ -1714,13 +1733,23 @@ class OwnerPrivateController extends Controller
                 'proceed_cpp'           => $proceedCpp,
                 'projected_profit'      => $projProfit,
                 'proj_profit_per_order' => $projProfitPerOrder,
-                // 1-day variant — strictly the slice on end_date. Null when
-                // end_date has no slice for this page+item, or RTS/item_value missing.
+                // Trailing-window variants ending at end_date (inclusive). Null when
+                // window has no slice for this page+item, or RTS/item_value missing.
                 'projected_profit_last_day' => $projProfitLastDay,
                 'proj_pct_last_day'         => $projPctLastDay,
                 'orders_last_day'           => $ordersLastDay,
                 'proceed_last_day'          => $procOrdersLastDay,
                 'gross_sales_last_day'      => $grossSalesLastDay,
+                'projected_profit_last_3d'  => $projProfitLast3Day,
+                'proj_pct_last_3d'          => $projPctLast3Day,
+                'orders_last_3d'            => $ordersLast3Day,
+                'proceed_last_3d'           => $procOrdersLast3Day,
+                'gross_sales_last_3d'       => $grossSalesLast3Day,
+                'projected_profit_last_7d'  => $projProfitLast7Day,
+                'proj_pct_last_7d'          => $projPctLast7Day,
+                'orders_last_7d'            => $ordersLast7Day,
+                'proceed_last_7d'           => $procOrdersLast7Day,
+                'gross_sales_last_7d'       => $grossSalesLast7Day,
                 'rts_pct'               => $rtsPct,
                 'price'                 => $price > 0 ? $price : null,
                 'price_min'             => ($priceIsRange && $priceMin > 0 && abs($priceMin - $price) > 0.01) ? $priceMin : null,
