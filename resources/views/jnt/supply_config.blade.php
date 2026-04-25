@@ -245,6 +245,112 @@
     </details>
     @endif
 
+    {{-- ================================================================== --}}
+    {{-- Days Last Order — Color Rules                                       --}}
+    {{-- ================================================================== --}}
+    @if($isCeo)
+    <details class="bg-white rounded-lg shadow border border-amber-200 mb-4" open
+             x-data="dloColorRulesEditor()">
+      <summary class="cursor-pointer px-4 py-3 font-semibold text-amber-800 bg-amber-50 rounded-t-lg flex items-center justify-between">
+        <span>🎨 Days Last Order — Color Rules</span>
+        <span class="text-xs font-normal text-amber-700">Conditional formatting para sa "Days Last Order" column sa /jnt/supply</span>
+      </summary>
+      <div class="p-4">
+        <p class="text-xs text-gray-600 mb-3">
+          Bawat rule may <b>operator</b>, <b>value (days)</b>, at <b>color</b>. Top-to-bottom evaluation —
+          <b>first match wins</b>. Halimbawa: gusto mo red kapag ≥5 days, ilagay sa unang row na operator <code>≥</code>, value <code>5</code>, color red.
+          Drag <span class="text-gray-400">⋮⋮</span> to reorder. Empty rule list = walang coloring.
+        </p>
+
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="bg-gray-50 text-xs text-gray-600 uppercase tracking-wide">
+              <th class="px-2 py-1 text-left  border border-gray-200 w-8"></th>
+              <th class="px-2 py-1 text-left  border border-gray-200">If days last order is</th>
+              <th class="px-2 py-1 text-left  border border-gray-200 w-24">Operator</th>
+              <th class="px-2 py-1 text-left  border border-gray-200 w-24">Value (days)</th>
+              <th class="px-2 py-1 text-left  border border-gray-200 w-32">Color</th>
+              <th class="px-2 py-1 text-left  border border-gray-200">Label (optional)</th>
+              <th class="px-2 py-1 text-center border border-gray-200 w-16">Bold?</th>
+              <th class="px-2 py-1 text-center border border-gray-200 w-24">Preview</th>
+              <th class="px-2 py-1 text-center border border-gray-200 w-16"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(r, i) in rules" :key="i">
+              <tr class="border-b border-gray-100">
+                <td class="px-2 py-1 border border-gray-200 text-gray-400 cursor-move select-none"
+                    draggable="true"
+                    @dragstart="dragIdx = i"
+                    @dragover.prevent
+                    @drop="onDrop(i)">⋮⋮</td>
+                <td class="px-2 py-1 border border-gray-200 text-gray-500">if days</td>
+                <td class="px-2 py-1 border border-gray-200">
+                  <select x-model="r.op" class="w-full border rounded px-1 py-0.5 text-sm">
+                    <option value=">=">≥ (greater or equal)</option>
+                    <option value=">">&gt; (greater than)</option>
+                    <option value="=">= (equal to)</option>
+                    <option value="<=">≤ (less or equal)</option>
+                    <option value="<">&lt; (less than)</option>
+                  </select>
+                </td>
+                <td class="px-2 py-1 border border-gray-200">
+                  <input type="number" min="0" step="1" x-model.number="r.value"
+                         class="w-full border rounded px-2 py-0.5 text-sm">
+                </td>
+                <td class="px-2 py-1 border border-gray-200">
+                  <input type="color" x-model="r.color" class="w-12 h-7 cursor-pointer border rounded">
+                  <input type="text"  x-model="r.color" maxlength="7"
+                         class="w-20 border rounded px-1 py-0.5 text-xs ml-1 font-mono"
+                         placeholder="#rrggbb">
+                </td>
+                <td class="px-2 py-1 border border-gray-200">
+                  <input type="text" x-model="r.label" maxlength="40"
+                         placeholder="e.g. Cold"
+                         class="w-full border rounded px-2 py-0.5 text-sm">
+                </td>
+                <td class="px-2 py-1 border border-gray-200 text-center">
+                  <input type="checkbox" x-model="r.bold">
+                </td>
+                <td class="px-2 py-1 border border-gray-200 text-center"
+                    :style="'color:'+r.color+';'+(r.bold?'font-weight:700;':'')">
+                  <span x-text="r.value ?? 0"></span>
+                </td>
+                <td class="px-2 py-1 border border-gray-200 text-center">
+                  <button type="button" @click="rules.splice(i,1)"
+                          class="text-red-600 hover:text-red-800 text-xs">✕</button>
+                </td>
+              </tr>
+            </template>
+            <template x-if="rules.length === 0">
+              <tr><td colspan="9" class="px-2 py-4 text-center text-gray-400 italic border border-gray-200">
+                No rules configured — Days Last Order column will use default text color.
+              </td></tr>
+            </template>
+          </tbody>
+        </table>
+
+        <div class="flex gap-2 mt-3">
+          <button type="button" @click="addRule()"
+                  class="text-sm px-3 py-1.5 rounded-md border border-gray-300 hover:bg-gray-50 text-gray-700">
+            + Add rule
+          </button>
+          <button type="button" @click="resetDefaults()"
+                  class="text-sm px-3 py-1.5 rounded-md border border-gray-300 hover:bg-gray-50 text-gray-700">
+            Reset to defaults
+          </button>
+          <div class="flex-1"></div>
+          <button type="button" @click="save()"
+                  :disabled="saving"
+                  class="text-sm px-4 py-1.5 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-semibold disabled:opacity-50">
+            <span x-show="!saving">💾 Save Rules</span>
+            <span x-show="saving">Saving…</span>
+          </button>
+        </div>
+      </div>
+    </details>
+    @endif
+
   </div>
 
   <div class="save-toast" id="saveToast">✓ Saved</div>
@@ -403,5 +509,53 @@
       })
       .catch(err => { console.error(err); e.target.disabled = false; });
     });
+
+    // ─── Days Last Order — Color Rules editor ─────────────────────────────
+    function dloColorRulesEditor() {
+      return {
+        rules: @json($colorRules ?? []),
+        saving: false,
+        dragIdx: -1,
+        addRule() {
+          this.rules.push({ op:'>=', value:0, color:'#6b7280', label:'', bold:false });
+        },
+        resetDefaults() {
+          if (!confirm('Reset to default color rules? Hindi pa nase-save until you click Save.')) return;
+          this.rules = [
+            { op:'>=', value:30, color:'#dc2626', label:'Cold (≥30d)',   bold:true  },
+            { op:'>=', value:7,  color:'#d97706', label:'Slowing (≥7d)', bold:false },
+            { op:'>=', value:2,  color:'#374151', label:'Normal (≥2d)',  bold:false },
+            { op:'<',  value:2,  color:'#16a34a', label:'Fresh (<2d)',   bold:true  },
+          ];
+        },
+        onDrop(targetIdx) {
+          if (this.dragIdx < 0 || this.dragIdx === targetIdx) return;
+          const moved = this.rules.splice(this.dragIdx, 1)[0];
+          this.rules.splice(targetIdx, 0, moved);
+          this.dragIdx = -1;
+        },
+        async save() {
+          this.saving = true;
+          try {
+            const r = await fetch('{{ route('jnt.supply.dlo-color-rules.save') }}', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+              body: JSON.stringify({ rules: this.rules }),
+            });
+            const j = await r.json();
+            if (j.ok) {
+              this.rules = j.rules;
+              showToast('✓ Color rules saved');
+            } else {
+              alert(j.error || 'Save failed');
+            }
+          } catch(e) {
+            console.error(e); alert('Save failed: '+e.message);
+          } finally {
+            this.saving = false;
+          }
+        },
+      };
+    }
   </script>
 </x-layout>

@@ -984,6 +984,9 @@ class JntSupplyController extends Controller
         // CEO check for threshold editor
         $isCeo = Auth::user()?->employeeProfile?->role === 'CEO';
 
+        // Days-Last-Order color rules (CEO-editable in /jnt/supply/config).
+        $dloColorRules = $this->loadColorRules();
+
         return view('jnt.supply', compact(
             'items',
             'totalHoldUnits',
@@ -1008,6 +1011,7 @@ class JntSupplyController extends Controller
             'classPalette',
             'isCeo',
             'supplySettingsAll',
+            'dloColorRules',
         ));
     }
 
@@ -1024,9 +1028,79 @@ class JntSupplyController extends Controller
         $classPalette      = ItemClassRule::palette();
         $supplySettingsAll = SupplySetting::orderBy('group')->orderBy('sort_order')->get();
 
+        // Days Last Order — color rules (CEO-editable). Stored as JSON in
+        // app_settings. Each rule has { op, value, color, label }, evaluated
+        // top-to-bottom; first match wins.
+        $colorRules = $this->loadColorRules();
+
         return view('jnt.supply_config', compact(
-            'classRules', 'classPalette', 'supplySettingsAll', 'isCeo'
+            'classRules', 'classPalette', 'supplySettingsAll', 'isCeo', 'colorRules'
         ));
+    }
+
+    /**
+     * Load Days-Last-Order color rules. Defaults if nothing saved.
+     */
+    private function loadColorRules(): array
+    {
+        $row = DB::table('app_settings')->where('key', 'supply_dlo_color_rules')->first(['value']);
+        if ($row && $row->value) {
+            $decoded = json_decode($row->value, true);
+            if (is_array($decoded)) return $decoded;
+        }
+        // Sensible defaults if nothing configured yet.
+        return [
+            ['op' => '>=', 'value' => 30, 'color' => '#dc2626', 'label' => 'Cold (≥30d)',  'bold' => true],
+            ['op' => '>=', 'value' => 7,  'color' => '#d97706', 'label' => 'Slowing (≥7d)','bold' => false],
+            ['op' => '>=', 'value' => 2,  'color' => '#374151', 'label' => 'Normal (≥2d)', 'bold' => false],
+            ['op' => '<',  'value' => 2,  'color' => '#16a34a', 'label' => 'Fresh (<2d)',  'bold' => true],
+        ];
+    }
+
+    // POST /jnt/supply/dlo-color-rules — CEO only, save the rules JSON.
+    public function saveDloColorRules(Request $request)
+    {
+        $role = Auth::user()?->employeeProfile?->role;
+        if ($role !== 'CEO') return response()->json(['error' => 'Unauthorized'], 403);
+
+        $rules = $request->input('rules');
+        if (is_string($rules)) {
+            $decoded = json_decode($rules, true);
+            $rules   = is_array($decoded) ? $decoded : null;
+        }
+        if (!is_array($rules)) {
+            return response()->json(['ok' => false, 'error' => 'Invalid rules payload'], 422);
+        }
+
+        // Sanitize each rule.
+        $clean = [];
+        $allowedOps = ['>', '>=', '=', '<=', '<'];
+        foreach ($rules as $r) {
+            if (!is_array($r)) continue;
+            $op = (string) ($r['op'] ?? '');
+            if (!in_array($op, $allowedOps, true)) continue;
+            $val = $r['value'] ?? null;
+            if (!is_numeric($val)) continue;
+            $color = trim((string) ($r['color'] ?? ''));
+            if (!preg_match('/^#[0-9a-fA-F]{6}$/', $color)) $color = '#6b7280';
+            $label = trim((string) ($r['label'] ?? ''));
+            if (mb_strlen($label) > 40) $label = mb_substr($label, 0, 40);
+            $clean[] = [
+                'op'    => $op,
+                'value' => (float) $val,
+                'color' => strtolower($color),
+                'label' => $label,
+                'bold'  => !empty($r['bold']),
+            ];
+            if (count($clean) >= 20) break;
+        }
+
+        $json = json_encode($clean, JSON_UNESCAPED_SLASHES);
+        DB::table('app_settings')->updateOrInsert(
+            ['key' => 'supply_dlo_color_rules'],
+            ['value' => $json, 'updated_at' => now(), 'created_at' => now()]
+        );
+        return response()->json(['ok' => true, 'rules' => $clean]);
     }
 
     // -----------------------------------------------------------------------

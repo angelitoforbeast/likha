@@ -44,7 +44,10 @@
     #supplyTable td:first-child { word-break: break-word; }
     #supplyTable thead tr.col-filter-row th {
       position: sticky;
-      top: 34px;                 /* sits directly under main header row */
+      /* CSS var set by JS based on the actual rendered height of the main
+         header row — yung dating hardcoded 34px ay namamali pag nag-wrap
+         yung header text (e.g. "DAYS LAST ORDER") to two lines. */
+      top: var(--supply-header-h, 34px);
       z-index: 4;
       background: #f8fafc;
       box-shadow: inset 0 -1px 0 #cbd5e1;
@@ -167,23 +170,6 @@
         @endif
       </div>
 
-      {{-- Legend row --}}
-      <div class="mt-3 flex flex-wrap gap-3 text-xs text-gray-500 items-center">
-        <span class="font-semibold text-gray-600">Class:</span>
-        @foreach($classRules as $cr)
-          <span class="class-badge {{ $cr->badge_tailwind }}" style="cursor:default;">{{ $cr->label }}</span>
-        @endforeach
-        <span class="text-gray-300 mx-1">|</span>
-        <span class="font-semibold text-gray-600">Lifecycle:</span>
-        <span class="lifecycle-badge bg-blue-100 text-blue-800"   style="cursor:default;">🆕 New</span>
-        <span class="lifecycle-badge bg-green-100 text-green-800" style="cursor:default;">📈 Scaling</span>
-        <span class="lifecycle-badge bg-teal-100 text-teal-800"   style="cursor:default;">✅ Consistent</span>
-        <span class="lifecycle-badge bg-slate-100 text-slate-700" style="cursor:default;">🔄 Active</span>
-        <span class="lifecycle-badge bg-orange-100 text-orange-800" style="cursor:default;">📉 Declining</span>
-        <span class="lifecycle-badge bg-red-100 text-red-800"     style="cursor:default;">🚫 Phasing Out</span>
-        <span class="lifecycle-badge bg-gray-100 text-gray-500"   style="cursor:default;">💤 Dormant</span>
-        <span class="text-gray-400 ml-1">(Click any badge on a row to override)</span>
-      </div>
     </form>
 
 
@@ -498,7 +484,8 @@
             {{-- Days Last Order — count of days from TODAY (PH) back to the last
                  macro_output date for this item. 0 = today, 1 = yesterday, etc.
                  Reference is TODAY, NOT $asOfDate, so the value reflects "how
-                 fresh is this item right now" regardless of the filter. --}}
+                 fresh is this item right now" regardless of the filter.
+                 Coloring driven by CEO-configured rules (/jnt/supply/config). --}}
             @php
               $lod = $row['last_order_date'] ?? null;
               // PH "today" — keep computation deterministic across server tz.
@@ -514,19 +501,40 @@
               }
               // Sort: smaller days = fresher (top); null = sentinel large number
               $lodSort = $lodAgeDays === null ? 999999 : $lodAgeDays;
-              $lodColor = 'text-gray-700';
+
+              // Match against CEO-configured rules. First match wins (top-to-bottom).
+              $lodInline = '';
+              $lodLabel  = '';
               if ($lodAgeDays !== null) {
-                if ($lodAgeDays <= 1)       $lodColor = 'text-green-700 font-bold';
-                elseif ($lodAgeDays <= 7)   $lodColor = 'text-green-700';
-                elseif ($lodAgeDays <= 30)  $lodColor = 'text-gray-700';
-                elseif ($lodAgeDays <= 90)  $lodColor = 'text-amber-700';
-                else                        $lodColor = 'text-red-600 font-semibold';
+                foreach ($dloColorRules ?? [] as $rule) {
+                  $op = $rule['op'] ?? '';
+                  $v  = (float)($rule['value'] ?? 0);
+                  $hit = match ($op) {
+                    '>=' => $lodAgeDays >= $v,
+                    '>'  => $lodAgeDays >  $v,
+                    '='  => $lodAgeDays == $v,
+                    '<=' => $lodAgeDays <= $v,
+                    '<'  => $lodAgeDays <  $v,
+                    default => false,
+                  };
+                  if ($hit) {
+                    $color = $rule['color'] ?? '#374151';
+                    $lodInline = 'color:' . $color . ';' . (!empty($rule['bold']) ? 'font-weight:700;' : '');
+                    $lodLabel  = (string)($rule['label'] ?? '');
+                    break;
+                  }
+                }
               }
+              $tipBase = $lod
+                ? ('Last order ' . $lod . ' · ' . $lodAgeDays . ' day(s) ago vs today (' . $__phToday . ')')
+                : 'No orders in macro_output';
+              if ($lodLabel !== '') $tipBase .= ' · ' . $lodLabel;
             @endphp
-            <td class="px-3 py-2 border border-gray-200 text-center whitespace-nowrap {{ $lodColor }}"
+            <td class="px-3 py-2 border border-gray-200 text-center whitespace-nowrap"
+                style="{{ $lodInline }}"
                 data-order="{{ $lodSort }}"
                 data-days="{{ $lodAgeDays === null ? '' : $lodAgeDays }}"
-                title="{{ $lod ? ('Last order ' . $lod . ' · ' . $lodAgeDays . ' day(s) ago vs today (' . $__phToday . ')') : 'No orders in macro_output' }}">
+                title="{{ $tipBase }}">
               @if($lodAgeDays !== null)
                 {{ $lodAgeDays }}
               @else
@@ -712,7 +720,30 @@
 
         wireFilters(dt);
         wireColVisPanel(dt);
+        wireStickyHeader(dt);
       };
+
+      // Measures the rendered height of the main header row and exposes it as
+      // a CSS variable so the filter row's sticky `top` lines up exactly
+      // beneath it — even when header text wraps to multiple lines.
+      function wireStickyHeader(dt) {
+        const wrap = document.querySelector('.supply-table-wrap');
+        const mainHead = document.querySelector('#supplyTable thead tr:first-child');
+        if (!wrap || !mainHead) return;
+        const apply = () => {
+          const h = mainHead.getBoundingClientRect().height;
+          if (h > 0) wrap.style.setProperty('--supply-header-h', h + 'px');
+        };
+        apply();
+        // Watch for header height changes (column reorder/resize/text rewrap).
+        if (window.ResizeObserver) {
+          const ro = new ResizeObserver(() => apply());
+          ro.observe(mainHead);
+        }
+        window.addEventListener('resize', apply);
+        // Also re-measure after DataTables redraws (column visibility toggles, etc.)
+        dt.on('draw.dt column-visibility.dt column-reorder.dt', () => setTimeout(apply, 0));
+      }
 
       // --- Column show/hide panel ---------------------------------------------
       // Lists every column with a checkbox; visibility is saved via stateSave

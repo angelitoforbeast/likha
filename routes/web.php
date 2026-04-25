@@ -735,6 +735,9 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post  ('/jnt/supply/table-state', [\App\Http\Controllers\JntSupplyController::class, 'saveTableState' ])->name('jnt.supply.table-state.save');
     Route::delete('/jnt/supply/table-state', [\App\Http\Controllers\JntSupplyController::class, 'resetTableState'])->name('jnt.supply.table-state.reset');
 
+    // Days-Last-Order color rules (CEO only) — JSON list of {op,value,color,label,bold}.
+    Route::post  ('/jnt/supply/dlo-color-rules', [\App\Http\Controllers\JntSupplyController::class, 'saveDloColorRules'])->name('jnt.supply.dlo-color-rules.save');
+
 
     // ✅ Validation Lists (CEO, Marketing, Marketing OIC)
     Route::get('/validation-lists', [ValidationListController::class, 'index'])->name('validation-lists.index');
