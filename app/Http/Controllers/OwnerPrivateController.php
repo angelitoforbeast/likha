@@ -1637,34 +1637,66 @@ class OwnerPrivateController extends Controller
             // Projected Profit — per-slice compute summed across INCLUDED dates.
             // Uses each day's own mode_cod & adspent; rts_pct/item_value/fees anchored at end_date.
             $projProfit = $projProfitPerOrder = null;
+            // 1-DAY variant: same formula, but only the slice on $endDate.
+            // Strict end_date semantics — if end_date has no slice for this page+item,
+            // both projProfitLastDay and grossSalesLastDay stay at their initial values
+            // and proj_pct_last_day will be null in the output.
+            $projProfitLastDay  = null;
+            $grossSalesLastDay  = 0.0;
+            $ordersLastDay      = 0;
+            $procOrdersLastDay  = 0;
             if ($rtsPct !== null && $itemValue !== null && !empty($includedDatesArr)) {
                 $rts           = $rtsPct / 100.0;
                 $deliverFactor = 1.0 - $rts;
                 $sumProfit = 0.0;
                 $anyPrice  = false;
+                $sumProfitLastDay = 0.0;
+                $anyPriceLastDay  = false;
                 foreach ($includedDatesArr as $d => $slice) {
                     $pDay       = (float)($slice['mode_cod'] ?? 0);
                     $proceedDay = (int)($slice['proceed'] ?? 0);
                     $adsDay     = (float)($slice['adspent'] ?? 0);
+                    $isLastDay  = ((string)$d === (string)$endDate);
+                    if ($isLastDay) {
+                        $ordersLastDay     += (int)($slice['orders'] ?? 0);
+                        $procOrdersLastDay += $proceedDay;
+                        if ($pDay > 0) {
+                            $grossSalesLastDay += $pDay * (int)($slice['orders'] ?? 0);
+                        }
+                    }
                     if ($pDay <= 0) {
                         // no price that day → can't compute revenue; still subtract adspent so ROI isn't overstated
                         $sumProfit -= $adsDay;
+                        if ($isLastDay) $sumProfitLastDay -= $adsDay;
                         continue;
                     }
                     $anyPrice = true;
                     $codFeeDay = $pDay * $codFeeRate * (1 + $codFeeVatRate);
-                    $sumProfit +=
+                    $sliceProfit =
                         $proceedDay * $pDay * $deliverFactor                      // revenue
                         - $proceedDay * $shippingFee                              // shipping (all proceed)
                         - $proceedDay * $deliverFactor * $itemValue               // COGS (delivered)
                         - $adsDay                                                 // adspent
                         - $proceedDay * $deliverFactor * $codFeeDay;              // COD fee (delivered)
+                    $sumProfit += $sliceProfit;
+                    if ($isLastDay) {
+                        $anyPriceLastDay = true;
+                        $sumProfitLastDay += $sliceProfit;
+                    }
                 }
                 if ($anyPrice) {
                     $projProfit = $sumProfit;
                     $projProfitPerOrder = $totalOrders > 0 ? $projProfit / $totalOrders : null;
                 }
+                if ($anyPriceLastDay) {
+                    $projProfitLastDay = $sumProfitLastDay;
+                }
             }
+            // Proj.%(1D) = profit_last_day / gross_sales_last_day. Null when den ≤ 0
+            // (no orders on end_date, no price, or missing RTS/item_value).
+            $projPctLastDay = ($projProfitLastDay !== null && $grossSalesLastDay > 0)
+                ? ($projProfitLastDay / $grossSalesLastDay) * 100.0
+                : null;
 
             $result[] = [
                 'page_name'             => $pg['page_label'],
@@ -1682,6 +1714,13 @@ class OwnerPrivateController extends Controller
                 'proceed_cpp'           => $proceedCpp,
                 'projected_profit'      => $projProfit,
                 'proj_profit_per_order' => $projProfitPerOrder,
+                // 1-day variant — strictly the slice on end_date. Null when
+                // end_date has no slice for this page+item, or RTS/item_value missing.
+                'projected_profit_last_day' => $projProfitLastDay,
+                'proj_pct_last_day'         => $projPctLastDay,
+                'orders_last_day'           => $ordersLastDay,
+                'proceed_last_day'          => $procOrdersLastDay,
+                'gross_sales_last_day'      => $grossSalesLastDay,
                 'rts_pct'               => $rtsPct,
                 'price'                 => $price > 0 ? $price : null,
                 'price_min'             => ($priceIsRange && $priceMin > 0 && abs($priceMin - $price) > 0.01) ? $priceMin : null,

@@ -354,7 +354,7 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')">
+                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')+(col.id==='proj_pct_1d'&&row.proj_pct_last_day!==null?rppStyle(row.proj_pct_last_day):'')">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -402,6 +402,21 @@
                       </template>
                       <template x-if="!(row.projected_profit !== null && row.gross_sales > 0)">
                         <span style="color:#cbd5e1;">—</span>
+                      </template>
+                    </span>
+                  </template>
+
+                  <!-- proj_pct_1d = same formula, but only the slice on end_date.
+                       Strict end_date — null when end_date has no slice for this page+item. -->
+                  <template x-if="col.id==='proj_pct_1d'">
+                    <span>
+                      <template x-if="row.proj_pct_last_day !== null">
+                        <span style="font-weight:700;"
+                              x-text="row.proj_pct_last_day.toFixed(1)+'%'"
+                              :title="'1D profit ₱'+Number(row.projected_profit_last_day||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / gross ₱'+Number(row.gross_sales_last_day||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' · orders '+(row.orders_last_day||0)+' · proceed '+(row.proceed_last_day||0)+' (end_date only)'"></span>
+                      </template>
+                      <template x-if="row.proj_pct_last_day === null">
+                        <span style="color:#cbd5e1;" title="No slice on end_date for this page+item, or RTS/item_value missing">—</span>
                       </template>
                     </span>
                   </template>
@@ -612,7 +627,12 @@
                           x-text="tot().proj_pct!=null ? tot().proj_pct.toFixed(1)+'%' : '—'"
                           :title="tot().gross_sales!=null ? 'profit ₱'+Number(tot().projected_profit||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / gross ₱'+Number(tot().gross_sales).toLocaleString('en-PH',{maximumFractionDigits:0}) : ''"></span>
                   </template>
-                  <template x-if="!['adspent','orders','cpp','proceed','pcpp','proj_profit','per_order','proj_pct'].includes(col.id)">
+                  <template x-if="col.id==='proj_pct_1d'">
+                    <span style="font-weight:700;color:#111;"
+                          x-text="tot().proj_pct_1d!=null ? tot().proj_pct_1d.toFixed(1)+'%' : '—'"
+                          :title="tot().gross_sales_last_day ? '1D profit ₱'+Number(tot().projected_profit_last_day||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / gross ₱'+Number(tot().gross_sales_last_day||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' (end_date only)' : ''"></span>
+                  </template>
+                  <template x-if="!['adspent','orders','cpp','proceed','pcpp','proj_profit','per_order','proj_pct','proj_pct_1d'].includes(col.id)">
                     <span></span>
                   </template>
                 </td>
@@ -705,6 +725,7 @@
           { id:'proj_profit',label:'Proj.Profit',sort:'projected_profit',     align:'center', minw:95  },
           { id:'per_order',  label:'/Order',     sort:'proj_profit_per_order',align:'center', minw:75  },
           { id:'proj_pct',   label:'Proj.%',     sort:null,                   align:'center', minw:65  },
+          { id:'proj_pct_1d',label:'Proj.%(1D)', sort:'proj_pct_last_day',    align:'center', minw:75  },
           { id:'jnt_rts',    label:'RTS%',       sort:null,                   align:'center', minw:100 },
           { id:'jnt_del',    label:'Del%',       sort:null,                   align:'center', minw:90  },
           { id:'jnt_transit',label:'Transit%',   sort:null,                   align:'center', minw:85  },
@@ -899,22 +920,34 @@
 
       // ── Totals ────────────────────────────────────────────────────────────
       tot() {
-        const t = { adspent:0, orders:0, proceed_orders:0, gross_sales:0, projected_profit:null, cpp:null, proceed_cpp:null, proj_profit_per_order:null, proj_pct:null };
-        let hasP=false, hasG=false;
+        const t = { adspent:0, orders:0, proceed_orders:0, gross_sales:0, projected_profit:null, cpp:null, proceed_cpp:null, proj_profit_per_order:null, proj_pct:null,
+                    projected_profit_last_day:null, gross_sales_last_day:0, proj_pct_1d:null };
+        let hasP=false, hasG=false, hasP1=false;
         for (const r of this.filteredRows()) {
           t.adspent        += Number(r.adspent        ||0);
           t.orders         += Number(r.orders         ||0);
           t.proceed_orders += Number(r.proceed_orders ||0);
           if (r.gross_sales!=null){ t.gross_sales += Number(r.gross_sales); hasG=true; }
           if (r.projected_profit!=null){ t.projected_profit=(t.projected_profit||0)+r.projected_profit; hasP=true; }
+          // 1D totals — only sum rows that have an end_date slice.
+          if (r.projected_profit_last_day!=null){
+            t.projected_profit_last_day = (t.projected_profit_last_day||0) + Number(r.projected_profit_last_day);
+            hasP1 = true;
+          }
+          if (r.gross_sales_last_day!=null){
+            t.gross_sales_last_day += Number(r.gross_sales_last_day);
+          }
         }
         if(!hasP) t.projected_profit=null;
         if(!hasG) t.gross_sales=null;
+        if(!hasP1) t.projected_profit_last_day=null;
         t.cpp                  = t.orders>0         ? t.adspent/t.orders         : null;
         t.proceed_cpp          = t.proceed_orders>0  ? t.adspent/t.proceed_orders : null;
         t.proj_profit_per_order= (t.orders>0&&t.projected_profit!=null) ? t.projected_profit/t.orders : null;
         t.proj_pct             = (t.projected_profit!=null && t.gross_sales && t.gross_sales>0)
                                     ? (t.projected_profit/t.gross_sales*100) : null;
+        t.proj_pct_1d          = (t.projected_profit_last_day!=null && t.gross_sales_last_day>0)
+                                    ? (t.projected_profit_last_day/t.gross_sales_last_day*100) : null;
         return t;
       },
 
