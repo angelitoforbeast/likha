@@ -197,11 +197,13 @@
               class="px-3 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 font-semibold">
         ⚙ Columns
       </button>
-      <button type="button" onclick="window.__resetSupplyColumns && window.__resetSupplyColumns()"
-              class="px-3 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50"
-              title="Reset column order, sort, filters & visibility (shared — affects everyone)">
+      {{-- Reset Layout — uses ?reset_layout=1 URL fallback so it works even
+           if the JS init failed (e.g. corrupt saved state breaking DataTables). --}}
+      <a href="{{ url()->current() }}?reset_layout=1{{ request()->getQueryString() ? '&'.preg_replace('/(^|&)reset_layout=[^&]*/','',request()->getQueryString()) : '' }}"
+         class="px-3 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-50 no-underline"
+         title="Wipe saved column order/sort/filters/visibility and reload — works even if the table is broken.">
         ↺ Reset layout
-      </button>
+      </a>
       <span class="text-gray-400">Drag any header to reorder · Saved globally.</span>
       <div id="colVisPanel"
            class="hidden absolute top-8 left-0 bg-white border border-gray-200 rounded shadow-lg p-2 z-50"
@@ -666,6 +668,27 @@
       const TABLE_STATE_SAVE = '{{ route('jnt.supply.table-state.save') }}';
       const TABLE_STATE_RESET = '{{ route('jnt.supply.table-state.reset') }}';
 
+      // PANIC BUTTON — always works, doesn't depend on DataTable init succeeding.
+      // Clicking "Reset layout" calls this directly. Also exposes ?reset_layout=1
+      // URL param as a fallback recovery vector.
+      const hardReset = () => {
+        return fetch(TABLE_STATE_RESET, {
+          method: 'DELETE',
+          headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+        }).catch(() => {}).finally(() => {
+          // Strip any reset param from URL and reload fresh.
+          const u = new URL(window.location.href);
+          u.searchParams.delete('reset_layout');
+          window.location.replace(u.toString());
+        });
+      };
+      window.__resetSupplyColumns = hardReset;
+      // Auto-trigger if URL has ?reset_layout=1
+      if (new URLSearchParams(window.location.search).get('reset_layout') === '1') {
+        hardReset();
+        return;
+      }
+
       // Number of original columns, used as a sanity check on loaded state.
       // Saved state is considered compatible IF AND ONLY IF its ColReorder/columns
       // arrays match the current column count. We deliberately do NOT use a
@@ -695,8 +718,8 @@
         }, 600);
       };
 
-      const initDataTable = () => {
-        const dt = $('#supplyTable').DataTable({
+      const buildDataTable = (useState) => {
+        return $('#supplyTable').DataTable({
           paging:    false,
           searching: true,
           ordering:  true,
@@ -708,27 +731,38 @@
             realtime: true,
             fixedColumnsLeft: 0,
           },
-          stateSave: true,
+          stateSave: useState,               // disable stateSave when we don't trust state
           stateDuration: -1,
-          // Persist to SERVER (global), not localStorage.
           stateSaveCallback: function (settings, data) { queueSave(data); },
-          stateLoadCallback: function () { return serverState; },
+          stateLoadCallback: function () { return useState ? serverState : null; },
           columnDefs: [{ orderable: true, targets: '_all' }],
         });
+      };
 
-        // Expose for reset button/console.
-        window.__resetSupplyColumns = function () {
+      const initDataTable = () => {
+        let dt;
+        try {
+          dt = buildDataTable(true);
+        } catch (err) {
+          console.error('[supply] DataTable init failed with saved state — recovering', err);
+          // Wipe corrupt state on the server so it doesn't keep breaking us.
           fetch(TABLE_STATE_RESET, {
             method: 'DELETE',
             headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
-          }).finally(() => {
-            dt.state.clear();
-            location.reload();
-          });
-        };
+          }).catch(() => {});
+          // Tear down the half-initialized table and rebuild with no state.
+          try { $('#supplyTable').DataTable().destroy(); } catch (e2) {}
+          serverState = null;
+          dt = buildDataTable(false);
+        }
 
-        wireFilters(dt);
-        wireColVisPanel(dt);
+        try {
+          wireFilters(dt);
+        } catch (err) { console.error('[supply] wireFilters failed', err); }
+
+        try {
+          wireColVisPanel(dt);
+        } catch (err) { console.error('[supply] wireColVisPanel failed', err); }
       };
 
       // --- Column show/hide panel ---------------------------------------------
