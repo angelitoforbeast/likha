@@ -44,10 +44,10 @@
     #supplyTable td:first-child { word-break: break-word; }
     #supplyTable thead tr.col-filter-row th {
       position: sticky;
-      /* CSS var set by JS based on the actual rendered height of the main
-         header row — yung dating hardcoded 34px ay namamali pag nag-wrap
-         yung header text (e.g. "DAYS LAST ORDER") to two lines. */
-      top: var(--supply-header-h, 34px);
+      /* `top` value set inline by wireStickyHeader() JS using the measured
+         offsetHeight of the main header row. CSS fallback only used if JS
+         hasn't run yet. */
+      top: 38px;
       z-index: 4;
       background: #f8fafc;
       box-shadow: inset 0 -1px 0 #cbd5e1;
@@ -56,6 +56,10 @@
     #supplyTable thead tr:first-child th {
       position: sticky; top: 0; z-index: 5;
       background: #f1f5f9; box-shadow: inset 0 -2px 0 #cbd5e1;
+      /* Stable rendered height so the filter row's top measurement is
+         deterministic. Adjust if labels need more vertical room. */
+      min-height: 36px;
+      vertical-align: middle;
     }
     .col-filter-input {
       width: 100%; font-size: 11px;
@@ -671,7 +675,7 @@
       // a saved state with N columns will misalign when columns become N+1 and
       // ColReorder/sort indexes will point at the wrong things (drag breaks,
       // headers go to wrong positions).
-      const TABLE_SCHEMA_VERSION = 'v2-2026-04-25-dayslastorder';
+      const TABLE_SCHEMA_VERSION = 'v3-2026-04-25-stickyfix';
 
       // Number of original columns, used as a sanity check on loaded state.
       const EXPECTED_COL_COUNT = document.querySelectorAll('#supplyTable thead tr:first-child th').length;
@@ -737,26 +741,37 @@
         wireStickyHeader(dt);
       };
 
-      // Measures the rendered height of the main header row and exposes it as
-      // a CSS variable so the filter row's sticky `top` lines up exactly
-      // beneath it — even when header text wraps to multiple lines.
+      // Measures the rendered height of the main header row and applies the
+      // matching `top` directly to every filter-row TH so the sticky filter
+      // row sits FLUSH below the main header — no overlap regardless of how
+      // many lines the header text wraps to.
       function wireStickyHeader(dt) {
-        const wrap = document.querySelector('.supply-table-wrap');
         const mainHead = document.querySelector('#supplyTable thead tr:first-child');
-        if (!wrap || !mainHead) return;
+        if (!mainHead) return;
         const apply = () => {
-          const h = mainHead.getBoundingClientRect().height;
-          if (h > 0) wrap.style.setProperty('--supply-header-h', h + 'px');
+          const h = Math.max(mainHead.offsetHeight, mainHead.getBoundingClientRect().height);
+          if (h <= 0) return;
+          const topPx = Math.ceil(h) + 'px';
+          document.querySelectorAll('#supplyTable thead tr.col-filter-row th').forEach(th => {
+            th.style.top = topPx;
+          });
         };
+        // Multi-frame measurement — table layout settles after a tick or two.
         apply();
-        // Watch for header height changes (column reorder/resize/text rewrap).
+        requestAnimationFrame(apply);
+        setTimeout(apply, 100);
+        setTimeout(apply, 400);
+        // Re-measure on any layout change.
         if (window.ResizeObserver) {
-          const ro = new ResizeObserver(() => apply());
+          const ro = new ResizeObserver(apply);
           ro.observe(mainHead);
+          mainHead.querySelectorAll('th').forEach(th => ro.observe(th));
         }
         window.addEventListener('resize', apply);
-        // Also re-measure after DataTables redraws (column visibility toggles, etc.)
-        dt.on('draw.dt column-visibility.dt column-reorder.dt', () => setTimeout(apply, 0));
+        dt.on('draw.dt column-visibility.dt column-reorder.dt', () => {
+          requestAnimationFrame(apply);
+          setTimeout(apply, 50);
+        });
       }
 
       // --- Column show/hide panel ---------------------------------------------
