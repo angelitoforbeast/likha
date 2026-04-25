@@ -249,7 +249,7 @@
             <th class="px-3 py-2 text-right  text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200"
                 style="background:#fef3c7; color:#78350f;" title="Unit cost (₱) actually used per variant. Red = no cogs entry found.">COGS (₱)</th>
             <th class="px-3 py-2 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border border-gray-200"
-                title="Latest date any qty-variant of this item appeared in macro_output (any status).">Last Order</th>
+                title="Days since last order — counted from TODAY (PH). 0 = ordered today, 1 = yesterday, etc.">Days Last Order</th>
           </tr>
           {{-- gSheet-style per-column header filters --}}
           <tr class="col-filter-row">
@@ -307,9 +307,11 @@
             {{-- No filters on transparency columns (read-only diagnostics). --}}
             <th></th>
             <th></th>
-            {{-- Last Order: "since YYYY-MM-DD" filter (rows with last_order ≥ value). --}}
-            <th><input type="date" class="col-filter-input col-filter-date" data-col="11"
-                       title="Show items with a last order on/after this date"></th>
+            {{-- Days Last Order: "≤ max days" filter (e.g. enter 7 to show items
+                 ordered within the last 7 days from today). --}}
+            <th><input type="text" class="col-filter-input col-filter-days" data-col="11"
+                       placeholder="≤ max days"
+                       title="Show items where Days Last Order ≤ this value"></th>
           </tr>
         </thead>
         <tbody>
@@ -493,33 +495,40 @@
               @endif
             </td>
 
-            {{-- Last Order Date — latest appearance in macro_output, any status. --}}
+            {{-- Days Last Order — count of days from TODAY (PH) back to the last
+                 macro_output date for this item. 0 = today, 1 = yesterday, etc.
+                 Reference is TODAY, NOT $asOfDate, so the value reflects "how
+                 fresh is this item right now" regardless of the filter. --}}
             @php
               $lod = $row['last_order_date'] ?? null;
-              $lodSort = $lod ? (int) str_replace('-', '', $lod) : 0;
+              // PH "today" — keep computation deterministic across server tz.
+              static $__phToday = null;
+              if ($__phToday === null) {
+                  $__phToday = (new \DateTime('now', new \DateTimeZone('Asia/Manila')))->format('Y-m-d');
+              }
               $lodAgeDays = null;
               if ($lod) {
-                $diff = (strtotime($asOfDate ?? date('Y-m-d')) - strtotime($lod));
+                $diff = (strtotime($__phToday) - strtotime($lod));
                 $lodAgeDays = (int) floor($diff / 86400);
+                if ($lodAgeDays < 0) $lodAgeDays = 0;
               }
+              // Sort: smaller days = fresher (top); null = sentinel large number
+              $lodSort = $lodAgeDays === null ? 999999 : $lodAgeDays;
               $lodColor = 'text-gray-700';
               if ($lodAgeDays !== null) {
-                if ($lodAgeDays <= 1)       $lodColor = 'text-green-700 font-semibold';
+                if ($lodAgeDays <= 1)       $lodColor = 'text-green-700 font-bold';
                 elseif ($lodAgeDays <= 7)   $lodColor = 'text-green-700';
                 elseif ($lodAgeDays <= 30)  $lodColor = 'text-gray-700';
                 elseif ($lodAgeDays <= 90)  $lodColor = 'text-amber-700';
-                else                        $lodColor = 'text-red-600';
+                else                        $lodColor = 'text-red-600 font-semibold';
               }
             @endphp
             <td class="px-3 py-2 border border-gray-200 text-center whitespace-nowrap {{ $lodColor }}"
                 data-order="{{ $lodSort }}"
-                data-date="{{ $lod ?? '' }}"
-                title="{{ $lod ? ('Last order: ' . $lod . ($lodAgeDays !== null ? ' (' . $lodAgeDays . 'd ago)' : '')) : 'No orders in macro_output' }}">
-              @if($lod)
-                {{ $lod }}
-                @if($lodAgeDays !== null)
-                  <div class="text-[10px] opacity-70">{{ $lodAgeDays }}d ago</div>
-                @endif
+                data-days="{{ $lodAgeDays === null ? '' : $lodAgeDays }}"
+                title="{{ $lod ? ('Last order ' . $lod . ' · ' . $lodAgeDays . ' day(s) ago vs today (' . $__phToday . ')') : 'No orders in macro_output' }}">
+              @if($lodAgeDays !== null)
+                {{ $lodAgeDays }}
               @else
                 <span class="text-gray-400">—</span>
               @endif
@@ -635,6 +644,16 @@
       const TABLE_STATE_SAVE = '{{ route('jnt.supply.table-state.save') }}';
       const TABLE_STATE_RESET = '{{ route('jnt.supply.table-state.reset') }}';
 
+      // Schema version — bump whenever columns are added/removed/renamed so
+      // stale states from earlier table layouts get auto-discarded. Without this,
+      // a saved state with N columns will misalign when columns become N+1 and
+      // ColReorder/sort indexes will point at the wrong things (drag breaks,
+      // headers go to wrong positions).
+      const TABLE_SCHEMA_VERSION = 'v2-2026-04-25-dayslastorder';
+
+      // Number of original columns, used as a sanity check on loaded state.
+      const EXPECTED_COL_COUNT = document.querySelectorAll('#supplyTable thead tr:first-child th').length;
+
       // Cache of the latest state loaded from the server — returned synchronously
       // from stateLoadCallback. We fetch BEFORE init so it's populated in time.
       let serverState = null;
@@ -643,6 +662,8 @@
       let saveTimer = null;
       const queueSave = (data) => {
         if (saveTimer) clearTimeout(saveTimer);
+        // Tag state with schema version so future column changes can invalidate.
+        const tagged = Object.assign({}, data, { __schema: TABLE_SCHEMA_VERSION });
         saveTimer = setTimeout(() => {
           fetch(TABLE_STATE_SAVE, {
             method: 'POST',
@@ -651,7 +672,7 @@
               'X-CSRF-TOKEN': CSRF,
               'Accept': 'application/json',
             },
-            body: JSON.stringify({ state: data }),
+            body: JSON.stringify({ state: tagged }),
             keepalive: true,
           }).catch(() => { /* best-effort; no UI noise */ });
         }, 600);
@@ -735,10 +756,32 @@
         });
       }
 
-      // Fetch once, then init. Any error → init with null state (default order).
+      // Fetch once, then init. Validate the loaded state — if schema version
+      // differs OR ColReorder.order length doesn't match the current column count,
+      // the state is from an older table layout and would corrupt the rendering.
+      // In that case, clear server-side and start fresh.
+      const isStateCompatible = (s) => {
+        if (!s || typeof s !== 'object') return false;
+        if (s.__schema !== TABLE_SCHEMA_VERSION) return false;
+        if (Array.isArray(s.ColReorder) && s.ColReorder.length !== EXPECTED_COL_COUNT) return false;
+        if (Array.isArray(s.columns) && s.columns.length !== EXPECTED_COL_COUNT) return false;
+        return true;
+      };
       fetch(TABLE_STATE_URL, { headers: { 'Accept': 'application/json' } })
         .then(r => r.ok ? r.json() : null)
-        .then(j => { serverState = (j && j.state) ? j.state : null; })
+        .then(j => {
+          const candidate = (j && j.state) ? j.state : null;
+          if (isStateCompatible(candidate)) {
+            serverState = candidate;
+          } else if (candidate) {
+            // Stale → wipe so it doesn't keep corrupting future loads.
+            serverState = null;
+            fetch(TABLE_STATE_RESET, {
+              method: 'DELETE',
+              headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json' },
+            }).catch(() => {});
+          }
+        })
         .catch(() => { serverState = null; })
         .finally(initDataTable);
 
@@ -806,12 +849,17 @@
           if ((td?.getAttribute('data-bucket') ?? '') !== pfSel.value) return false;
         }
 
-        // Last Order (col 11) — "since" date filter
-        const lodInp = document.querySelector('.col-filter-date[data-col="11"]');
-        if (lodInp && lodInp.value !== '') {
-          const td = cellByOriginalIdx(rowIndex, 11);
-          const d  = td?.getAttribute('data-date') || '';
-          if (d === '' || d < lodInp.value) return false;
+        // Days Last Order (col 11) — "≤ max days" filter (numeric)
+        const lodInp = document.querySelector('.col-filter-days[data-col="11"]');
+        if (lodInp && lodInp.value.trim() !== '') {
+          const max = parseInt(lodInp.value.trim(), 10);
+          if (!isNaN(max)) {
+            const td = cellByOriginalIdx(rowIndex, 11);
+            const dStr = td?.getAttribute('data-days') ?? '';
+            if (dStr === '') return false;            // missing → exclude
+            const d = parseInt(dStr, 10);
+            if (isNaN(d) || d > max) return false;
+          }
         }
 
         return true;
