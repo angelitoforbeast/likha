@@ -666,14 +666,11 @@
       const TABLE_STATE_SAVE = '{{ route('jnt.supply.table-state.save') }}';
       const TABLE_STATE_RESET = '{{ route('jnt.supply.table-state.reset') }}';
 
-      // Schema version — bump whenever columns are added/removed/renamed so
-      // stale states from earlier table layouts get auto-discarded. Without this,
-      // a saved state with N columns will misalign when columns become N+1 and
-      // ColReorder/sort indexes will point at the wrong things (drag breaks,
-      // headers go to wrong positions).
-      const TABLE_SCHEMA_VERSION = 'v4-2026-04-25-nostickyfilter';
-
       // Number of original columns, used as a sanity check on loaded state.
+      // Saved state is considered compatible IF AND ONLY IF its ColReorder/columns
+      // arrays match the current column count. We deliberately do NOT use a
+      // version string — that was wiping arrangements on every deploy. As long
+      // as columns aren't added/removed, your saved arrangement persists forever.
       const EXPECTED_COL_COUNT = document.querySelectorAll('#supplyTable thead tr:first-child th').length;
 
       // Cache of the latest state loaded from the server — returned synchronously
@@ -684,8 +681,6 @@
       let saveTimer = null;
       const queueSave = (data) => {
         if (saveTimer) clearTimeout(saveTimer);
-        // Tag state with schema version so future column changes can invalidate.
-        const tagged = Object.assign({}, data, { __schema: TABLE_SCHEMA_VERSION });
         saveTimer = setTimeout(() => {
           fetch(TABLE_STATE_SAVE, {
             method: 'POST',
@@ -694,7 +689,7 @@
               'X-CSRF-TOKEN': CSRF,
               'Accept': 'application/json',
             },
-            body: JSON.stringify({ state: tagged }),
+            body: JSON.stringify({ state: data }),
             keepalive: true,
           }).catch(() => { /* best-effort; no UI noise */ });
         }, 600);
@@ -743,48 +738,72 @@
         const btn    = document.getElementById('colVisBtn');
         const panel  = document.getElementById('colVisPanel');
         const listEl = document.getElementById('colVisList');
-        if (!btn || !panel || !listEl) return;
+        if (!btn || !panel || !listEl) {
+          console.warn('[supply] colVis panel: missing element', { btn, panel, listEl });
+          return;
+        }
 
         const render = () => {
           listEl.innerHTML = '';
           dt.columns().every(function () {
             const idx = this.index();              // original index
             const visible = this.visible();
-            // Header label — strip whitespace, take text from first <th>.
             const thText = $(this.header()).clone().children().remove().end().text().trim()
                         || $(this.header()).text().trim() || ('Col ' + idx);
             const id = 'colvis_' + idx;
             const wrap = document.createElement('label');
             wrap.className = 'flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer text-xs';
+            wrap.style.cursor = 'pointer';
             wrap.innerHTML = `
-              <input type="checkbox" id="${id}" ${visible ? 'checked' : ''} data-idx="${idx}">
+              <input type="checkbox" id="${id}" ${visible ? 'checked' : ''} data-idx="${idx}" style="cursor:pointer;">
               <span>${thText}</span>`;
             listEl.appendChild(wrap);
-            wrap.querySelector('input').addEventListener('change', function () {
-              dt.column(idx).visible(this.checked);
-              // stateSave will be triggered automatically by DataTables.
+            const cb = wrap.querySelector('input');
+            // Stop click bubbling so the document listener doesn't close the panel.
+            cb.addEventListener('click', (e) => e.stopPropagation());
+            wrap.addEventListener('click', (e) => e.stopPropagation());
+            cb.addEventListener('change', function (e) {
+              e.stopPropagation();
+              try {
+                dt.column(idx).visible(this.checked);
+              } catch (err) {
+                console.error('[supply] toggle col vis failed', idx, err);
+              }
             });
           });
         };
 
-        btn.addEventListener('click', (e) => {
+        // Toggle panel — guard against the button click bubbling to the
+        // document listener which would immediately close it.
+        btn.addEventListener('click', function (e) {
+          e.preventDefault();
           e.stopPropagation();
-          const hidden = panel.classList.contains('hidden');
-          if (hidden) { render(); panel.classList.remove('hidden'); }
-          else panel.classList.add('hidden');
+          const isHidden = panel.classList.contains('hidden');
+          if (isHidden) {
+            render();
+            panel.classList.remove('hidden');
+          } else {
+            panel.classList.add('hidden');
+          }
         });
+
+        // Click inside the panel should not close it.
+        panel.addEventListener('click', (e) => e.stopPropagation());
+
+        // Click anywhere else closes the panel.
         document.addEventListener('click', (e) => {
-          if (!panel.contains(e.target) && e.target !== btn) panel.classList.add('hidden');
+          if (panel.classList.contains('hidden')) return;
+          if (panel.contains(e.target) || e.target === btn || btn.contains(e.target)) return;
+          panel.classList.add('hidden');
         });
       }
 
-      // Fetch once, then init. Validate the loaded state — if schema version
-      // differs OR ColReorder.order length doesn't match the current column count,
-      // the state is from an older table layout and would corrupt the rendering.
-      // In that case, clear server-side and start fresh.
+      // Fetch once, then init. State only invalidated kapag mismatch ang
+      // column count (ibig sabihin nagdagdag/inalis ako ng column sa table).
+      // Otherwise, your saved arrangement is preserved across every deploy.
       const isStateCompatible = (s) => {
         if (!s || typeof s !== 'object') return false;
-        if (s.__schema !== TABLE_SCHEMA_VERSION) return false;
+        // Strip out any leftover __schema field from older versions — harmless.
         if (Array.isArray(s.ColReorder) && s.ColReorder.length !== EXPECTED_COL_COUNT) return false;
         if (Array.isArray(s.columns) && s.columns.length !== EXPECTED_COL_COUNT) return false;
         return true;
@@ -794,9 +813,11 @@
         .then(j => {
           const candidate = (j && j.state) ? j.state : null;
           if (isStateCompatible(candidate)) {
+            // Drop any legacy schema tag — DataTables doesn't care about it.
+            if (candidate.__schema) delete candidate.__schema;
             serverState = candidate;
           } else if (candidate) {
-            // Stale → wipe so it doesn't keep corrupting future loads.
+            // Column count mismatch → discard so it doesn't corrupt rendering.
             serverState = null;
             fetch(TABLE_STATE_RESET, {
               method: 'DELETE',
