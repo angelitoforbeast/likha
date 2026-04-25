@@ -503,6 +503,8 @@
               $lodSort = $lodAgeDays === null ? 999999 : $lodAgeDays;
 
               // Match against CEO-configured rules. First match wins (top-to-bottom).
+              // Color is applied to the cell BACKGROUND (gsheet-style), with auto
+              // text color (white on dark, near-black on light) for readability.
               $lodInline = '';
               $lodLabel  = '';
               if ($lodAgeDays !== null) {
@@ -518,8 +520,20 @@
                     default => false,
                   };
                   if ($hit) {
-                    $color = $rule['color'] ?? '#374151';
-                    $lodInline = 'color:' . $color . ';' . (!empty($rule['bold']) ? 'font-weight:700;' : '');
+                    $bg = $rule['color'] ?? '#e5e7eb';
+                    // Compute text color via YIQ luminance — same trick as gsheet.
+                    $hex = ltrim($bg, '#');
+                    if (strlen($hex) === 6) {
+                      $r = hexdec(substr($hex, 0, 2));
+                      $g = hexdec(substr($hex, 2, 2));
+                      $b = hexdec(substr($hex, 4, 2));
+                      $yiq = ($r * 299 + $g * 587 + $b * 114) / 1000;
+                      $textColor = $yiq >= 150 ? '#111827' : '#ffffff';
+                    } else {
+                      $textColor = '#111827';
+                    }
+                    $lodInline = 'background:' . $bg . ';color:' . $textColor . ';'
+                               . (!empty($rule['bold']) ? 'font-weight:700;' : '');
                     $lodLabel  = (string)($rule['label'] ?? '');
                     break;
                   }

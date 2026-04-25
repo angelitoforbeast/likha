@@ -313,7 +313,7 @@
                   <input type="checkbox" x-model="r.bold">
                 </td>
                 <td class="px-2 py-1 border border-gray-200 text-center"
-                    :style="'color:'+r.color+';'+(r.bold?'font-weight:700;':'')">
+                    :style="'background:'+r.color+';color:'+previewTextColor(r.color)+';'+(r.bold?'font-weight:700;':'')">
                   <span x-text="r.value ?? 0"></span>
                 </td>
                 <td class="px-2 py-1 border border-gray-200 text-center">
@@ -516,16 +516,28 @@
         rules: @json($colorRules ?? []),
         saving: false,
         dragIdx: -1,
+        // Auto-pick black/white text based on background luminance (gsheet trick).
+        previewTextColor(hex) {
+          const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
+          if (!m) return '#111827';
+          const r = parseInt(m[1].slice(0,2), 16);
+          const g = parseInt(m[1].slice(2,4), 16);
+          const b = parseInt(m[1].slice(4,6), 16);
+          const yiq = (r*299 + g*587 + b*114) / 1000;
+          return yiq >= 150 ? '#111827' : '#ffffff';
+        },
         addRule() {
-          this.rules.push({ op:'>=', value:0, color:'#6b7280', label:'', bold:false });
+          this.rules.push({ op:'>=', value:0, color:'#fde68a', label:'', bold:false });
         },
         resetDefaults() {
           if (!confirm('Reset to default color rules? Hindi pa nase-save until you click Save.')) return;
+          // Background-friendly palette — light enough to read black text on,
+          // matches gsheet conditional-formatting defaults.
           this.rules = [
-            { op:'>=', value:30, color:'#dc2626', label:'Cold (≥30d)',   bold:true  },
-            { op:'>=', value:7,  color:'#d97706', label:'Slowing (≥7d)', bold:false },
-            { op:'>=', value:2,  color:'#374151', label:'Normal (≥2d)',  bold:false },
-            { op:'<',  value:2,  color:'#16a34a', label:'Fresh (<2d)',   bold:true  },
+            { op:'>=', value:30, color:'#fecaca', label:'Cold (≥30d)',   bold:true  },
+            { op:'>=', value:7,  color:'#fed7aa', label:'Slowing (≥7d)', bold:false },
+            { op:'>=', value:2,  color:'#fef3c7', label:'Normal (≥2d)',  bold:false },
+            { op:'<',  value:2,  color:'#bbf7d0', label:'Fresh (<2d)',   bold:true  },
           ];
         },
         onDrop(targetIdx) {

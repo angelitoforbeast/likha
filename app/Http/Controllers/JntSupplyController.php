@@ -1048,12 +1048,13 @@ class JntSupplyController extends Controller
             $decoded = json_decode($row->value, true);
             if (is_array($decoded)) return $decoded;
         }
-        // Sensible defaults if nothing configured yet.
+        // Sensible defaults if nothing configured yet — background-friendly
+        // (light enough na readable yung text, gsheet-style).
         return [
-            ['op' => '>=', 'value' => 30, 'color' => '#dc2626', 'label' => 'Cold (≥30d)',  'bold' => true],
-            ['op' => '>=', 'value' => 7,  'color' => '#d97706', 'label' => 'Slowing (≥7d)','bold' => false],
-            ['op' => '>=', 'value' => 2,  'color' => '#374151', 'label' => 'Normal (≥2d)', 'bold' => false],
-            ['op' => '<',  'value' => 2,  'color' => '#16a34a', 'label' => 'Fresh (<2d)',  'bold' => true],
+            ['op' => '>=', 'value' => 30, 'color' => '#fecaca', 'label' => 'Cold (≥30d)',   'bold' => true],
+            ['op' => '>=', 'value' => 7,  'color' => '#fed7aa', 'label' => 'Slowing (≥7d)', 'bold' => false],
+            ['op' => '>=', 'value' => 2,  'color' => '#fef3c7', 'label' => 'Normal (≥2d)',  'bold' => false],
+            ['op' => '<',  'value' => 2,  'color' => '#bbf7d0', 'label' => 'Fresh (<2d)',   'bold' => true],
         ];
     }
 
