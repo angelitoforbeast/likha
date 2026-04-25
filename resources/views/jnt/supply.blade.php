@@ -30,9 +30,10 @@
       font-size:11px; border:1px solid #d1d5db; border-radius:4px;
       padding:2px 4px; background:white; display:none; margin-top:2px;
     }
-    /* Frozen column headers + edge-to-edge: no horizontal scroll, let long
-       text wrap within its cell instead. */
-    .supply-table-wrap { max-height: calc(100vh - 260px); overflow-y: auto; overflow-x: hidden; width: 100%; }
+    /* Frozen column headers + edge-to-edge with overflow-x: auto so the
+       rightmost columns don't get clipped on narrower screens. The previous
+       `overflow-x: hidden` was cutting off the last few columns. */
+    .supply-table-wrap { max-height: calc(100vh - 260px); overflow-y: auto; overflow-x: auto; width: 100%; }
     #supplyTable { width: 100%; }
     #supplyTable th, #supplyTable td { padding: 4px 6px; font-size: 12px; }
     /* Allow wrapping for compact edge-to-edge layout; keep date/number cells
