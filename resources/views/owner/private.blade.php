@@ -354,7 +354,7 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')+(col.id==='proj_pct_1d'&&row.proj_pct_last_day!==null?rppStyle(row.proj_pct_last_day):'')+(col.id==='proj_pct_3d'&&row.proj_pct_last_3d!==null?rppStyle(row.proj_pct_last_3d):'')+(col.id==='proj_pct_7d'&&row.proj_pct_last_7d!==null?rppStyle(row.proj_pct_last_7d):'')">
+                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')+(col.id==='proj_pct_1d'&&row.proj_pct_last_day!==null?rppStyle(row.proj_pct_last_day):'')+(col.id==='proj_pct_3d'&&row.proj_pct_last_3d!==null?rppStyle(row.proj_pct_last_3d):'')+(col.id==='proj_pct_7d'&&row.proj_pct_last_7d!==null?rppStyle(row.proj_pct_last_7d):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -643,7 +643,7 @@
               <td>TOTAL</td>
               <td></td>
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')">
+                <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(tot().projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(tot().projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(tot().projected_profit_last_7d,7):'')">
                   <template x-if="col.id==='adspent'">
                     <span x-text="money(tot().adspent)"></span>
                   </template>
@@ -1053,6 +1053,15 @@
         const p = this.ppd(v, row);
         if (p==null) return '';
         return p<0 ? 'background:#ff0000;' : p>=3000 ? 'background:#00ff00;' : '';
+      },
+      // Color profit cells for fixed N-day windows (1D/3D/7D). Threshold is the
+      // SAME per-day rule used by the range Proj.Profit: average daily profit.
+      // Window is clamped to rangeDays so a 5-day range gets a 5-day "7D" window.
+      pbStyleN(v, n){
+        if (v==null || isNaN(Number(v))) return '';
+        const days = Math.max(1, Math.min(Number(n)||1, Number(this.rangeDays)||1));
+        const avg = Number(v) / days;
+        return avg<0 ? 'background:#ff0000;' : avg>=3000 ? 'background:#00ff00;' : '';
       },
       pbColor(v){ return '#000'; },
       rppStyle(v){ if(v==null||isNaN(Number(v))) return ''; if(v<5) return 'background:#ff0000;'; if(v<10) return 'background:#ff6600;'; if(v<20) return 'background:#00ffff;'; return 'background:#00ff00;'; },
