@@ -43,13 +43,11 @@
     #supplyTable td.cell-nowrap, #supplyTable th.cell-nowrap { white-space: nowrap !important; }
     /* Item column can use a bit more room without exploding width. */
     #supplyTable td:first-child { word-break: break-word; }
+    /* Filter row — NOT sticky kasi nag-co-conflict ang `position: sticky` sa
+       ColReorder drag mechanism (drag clone position-absolute, original th
+       position-sticky → broken drag on subsequent loads). Main header lang
+       ang sticky, filter row scrolls naturally out of view. */
     #supplyTable thead tr.col-filter-row th {
-      position: sticky;
-      /* `top` value set inline by wireStickyHeader() JS using the measured
-         offsetHeight of the main header row. CSS fallback only used if JS
-         hasn't run yet. */
-      top: 38px;
-      z-index: 4;
       background: #f8fafc;
       box-shadow: inset 0 -1px 0 #cbd5e1;
       padding: 4px 6px;
@@ -57,9 +55,6 @@
     #supplyTable thead tr:first-child th {
       position: sticky; top: 0; z-index: 5;
       background: #f1f5f9; box-shadow: inset 0 -2px 0 #cbd5e1;
-      /* Stable rendered height so the filter row's top measurement is
-         deterministic. Adjust if labels need more vertical room. */
-      min-height: 36px;
       vertical-align: middle;
     }
     .col-filter-input {
@@ -676,7 +671,7 @@
       // a saved state with N columns will misalign when columns become N+1 and
       // ColReorder/sort indexes will point at the wrong things (drag breaks,
       // headers go to wrong positions).
-      const TABLE_SCHEMA_VERSION = 'v3-2026-04-25-stickyfix';
+      const TABLE_SCHEMA_VERSION = 'v4-2026-04-25-nostickyfilter';
 
       // Number of original columns, used as a sanity check on loaded state.
       const EXPECTED_COL_COUNT = document.querySelectorAll('#supplyTable thead tr:first-child th').length;
@@ -739,41 +734,7 @@
 
         wireFilters(dt);
         wireColVisPanel(dt);
-        wireStickyHeader(dt);
       };
-
-      // Measures the rendered height of the main header row and applies the
-      // matching `top` directly to every filter-row TH so the sticky filter
-      // row sits FLUSH below the main header — no overlap regardless of how
-      // many lines the header text wraps to.
-      function wireStickyHeader(dt) {
-        const mainHead = document.querySelector('#supplyTable thead tr:first-child');
-        if (!mainHead) return;
-        const apply = () => {
-          const h = Math.max(mainHead.offsetHeight, mainHead.getBoundingClientRect().height);
-          if (h <= 0) return;
-          const topPx = Math.ceil(h) + 'px';
-          document.querySelectorAll('#supplyTable thead tr.col-filter-row th').forEach(th => {
-            th.style.top = topPx;
-          });
-        };
-        // Multi-frame measurement — table layout settles after a tick or two.
-        apply();
-        requestAnimationFrame(apply);
-        setTimeout(apply, 100);
-        setTimeout(apply, 400);
-        // Re-measure on any layout change.
-        if (window.ResizeObserver) {
-          const ro = new ResizeObserver(apply);
-          ro.observe(mainHead);
-          mainHead.querySelectorAll('th').forEach(th => ro.observe(th));
-        }
-        window.addEventListener('resize', apply);
-        dt.on('draw.dt column-visibility.dt column-reorder.dt', () => {
-          requestAnimationFrame(apply);
-          setTimeout(apply, 50);
-        });
-      }
 
       // --- Column show/hide panel ---------------------------------------------
       // Lists every column with a checkbox; visibility is saved via stateSave
