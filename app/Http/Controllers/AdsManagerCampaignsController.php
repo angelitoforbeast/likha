@@ -502,7 +502,7 @@ class AdsManagerCampaignsController extends Controller
             fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
 
             if ($level === 'campaigns') {
-                fputcsv($out, ['Campaign','Page','Active','First Launched','Days Ago','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
@@ -512,7 +512,7 @@ class AdsManagerCampaignsController extends Controller
                     ]);
                 }
             } elseif ($level === 'adsets') {
-                fputcsv($out, ['Ad set','Campaign','Page','Active','First Launched','Days Ago','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
@@ -522,7 +522,7 @@ class AdsManagerCampaignsController extends Controller
                     ]);
                 }
             } else {
-                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Days Ago','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         ($r['headline'] ?? 'Ad '.$r['ad_id']), $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',

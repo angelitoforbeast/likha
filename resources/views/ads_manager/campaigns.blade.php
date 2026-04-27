@@ -106,7 +106,7 @@
                   <div class="inline-flex items-center gap-1">First launched <span x-show="sortBy==='first_started'">▼</span></div>
                 </th>
                 <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('first_started')">
-                  <div class="inline-flex items-center gap-1">Days ago <span x-show="sortBy==='first_started'">▼</span></div>
+                  <div class="inline-flex items-center gap-1">Days running <span x-show="sortBy==='first_started'">▼</span></div>
                 </th>
                 <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('latest_started')">
                   <div class="inline-flex items-center gap-1">Latest start <span x-show="sortBy==='latest_started'">▼</span></div>
@@ -178,12 +178,12 @@
                     </template>
                   </td>
 
-                  <!-- Days ago — only show kapag currently Active. Pag OFF, "—".
-                       Reason: "Days ago" implies "running for X days" — misleading
-                       sa OFF entities na hindi tumatakbo. -->
+                  <!-- Days running — count of days since first_started. Only
+                       shown kapag currently Active. Pag OFF, "—". Number lang,
+                       walang "d ago" suffix. -->
                   <td class="px-4 py-3 whitespace-nowrap text-gray-700">
                     <template x-if="row.first_started && row.on">
-                      <span x-text="daysAgo(row.first_started)"></span>
+                      <span x-text="daysSince(row.first_started)"></span>
                     </template>
                     <template x-if="!row.first_started || !row.on">
                       <span class="text-gray-400">—</span>
@@ -326,6 +326,15 @@
           if (diffDays > 1)    return diffDays + 'd ago';
           if (diffDays === -1) return 'tomorrow';
           return 'in ' + Math.abs(diffDays) + 'd';
+        },
+        // daysSince('2026-04-23') → '3' (raw number only — for the "Days running" column)
+        daysSince(s){
+          if (!s) return '';
+          const d = new Date((s+'').slice(0,10) + 'T00:00:00');
+          if (isNaN(d.getTime())) return '';
+          const ph = new Date(new Date().toLocaleString('en-US', {timeZone: 'Asia/Manila'}));
+          const phMid = new Date(ph.getFullYear(), ph.getMonth(), ph.getDate());
+          return String(Math.max(0, Math.round((phMid - d) / 86400000)));
         },
         monthName(i){ return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i]; },
         setDateLabel(){
