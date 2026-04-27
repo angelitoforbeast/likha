@@ -79,40 +79,80 @@ class AdsManagerCampaignsController extends Controller
 
         // ──────────────────────────────────────────────────────────────────
         // STARTED DATES (GLOBAL, NOT FILTERED BY DATE RANGE)
-        // For each campaign / ad_set / ad we expose two dates:
-        //   first_started  = MIN(DATE(starts))  — earliest scheduled launch
-        //                    fallback MIN(day)  if `starts` is NULL throughout
-        //   latest_started = MAX(DATE(starts))  — most recent launch (handles
-        //                    relaunches, also reflects newest adset/ad inside
-        //                    a campaign/adset when there are multiple).
-        // GLOBAL so the user filtering to a narrow date range still sees the
-        // true first/latest launch dates.
+        //
+        //   first_started  = original launch.
+        //                    MIN(DATE(starts)) fallback to MIN(day).
+        //
+        //   latest_started = pinakahuling off→on transition. Detected by
+        //                    looking at per-day delivery status: a day where
+        //                    is_active=1 AND prev_day's is_active=0 (or no
+        //                    prior row) is a "fresh start". MAX of those is
+        //                    the latest resumption. For never-paused campaigns,
+        //                    this equals first_started (only the first day
+        //                    qualifies as a fresh start).
+        //
+        //                    NOTE: cannot use MAX(DATE(starts)) here because
+        //                    FB's daily export overwrites `starts` to today on
+        //                    each fresh row of an active campaign — so MAX
+        //                    always returned today regardless of real history.
+        //
+        // Both GLOBAL — not filtered by the date range so the user sees the
+        // true historic dates even when narrowing to a recent window.
         // ──────────────────────────────────────────────────────────────────
         $datePart = $driver === 'pgsql' ? 'DATE(starts)' : 'DATE(`starts`)';
 
+        // first_started — kept as MIN(starts), works correctly today.
         $campaignStartedDates = DB::table('ads_manager_reports')
             ->selectRaw("
                 campaign_id,
-                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started,
-                COALESCE(MAX($datePart), MAX($dayExpr)) AS latest_started
+                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started
             ")
             ->groupBy('campaign_id');
 
         $adSetStartedDates = DB::table('ads_manager_reports')
             ->selectRaw("
                 ad_set_id,
-                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started,
-                COALESCE(MAX($datePart), MAX($dayExpr)) AS latest_started
+                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started
             ")
             ->groupBy('ad_set_id');
 
         $adStartedDates = DB::table('ads_manager_reports')
             ->selectRaw("
                 ad_id,
-                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started,
-                COALESCE(MAX($datePart), MAX($dayExpr)) AS latest_started
+                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started
             ")
             ->groupBy('ad_id');
+
+        // latest_started — built via 3-stage subqueries:
+        //   1) per (id, day) is_active flag (any row marked active%)
+        //   2) add LAG(is_active) over (partition by id order by day)
+        //   3) keep rows where is_active=1 AND (prev=0 OR prev IS NULL),
+        //      then GROUP BY id with MAX(day) — the latest fresh start.
+        $buildFreshStart = function (string $idCol, string $deliveryCol) use ($dayExpr) {
+            $dailyActive = DB::table('ads_manager_reports')
+                ->whereNotNull('day')
+                ->selectRaw("
+                    $idCol AS id,
+                    $dayExpr AS day,
+                    MAX(CASE WHEN LOWER(TRIM($deliveryCol)) LIKE 'active%' THEN 1 ELSE 0 END) AS is_active
+                ")
+                ->groupBy($idCol, DB::raw($dayExpr));
+
+            $withLag = DB::query()->fromSub($dailyActive, 'd')->selectRaw("
+                id, day, is_active,
+                LAG(is_active) OVER (PARTITION BY id ORDER BY day) AS prev_active
+            ");
+
+            return DB::query()->fromSub($withLag, 'lp')
+                ->whereRaw('is_active = 1 AND (prev_active = 0 OR prev_active IS NULL)')
+                ->selectRaw('id, MAX(day) AS latest_started')
+                ->groupBy('id');
+        };
+
+        $campaignFreshStart = $buildFreshStart('campaign_id', 'campaign_delivery');
+        $adSetFreshStart    = $buildFreshStart('ad_set_id',   'ad_set_delivery');
+        // Ads inherit delivery from their ad set (no own delivery field).
+        $adFreshStart       = $buildFreshStart('ad_id',       'ad_set_delivery');
 
         // Latest day per ad set
         $latestAdSetDay = DB::table('ads_manager_reports')
@@ -176,6 +216,9 @@ class AdsManagerCampaignsController extends Controller
                 ->leftJoinSub($campaignStartedDates, 'sd', function ($j) {
                     $j->on('ads_manager_reports.campaign_id', '=', 'sd.campaign_id');
                 })
+                ->leftJoinSub($campaignFreshStart, 'fs', function ($j) {
+                    $j->on('ads_manager_reports.campaign_id', '=', 'fs.id');
+                })
                 ->selectRaw('
                     ads_manager_reports.campaign_id,
                     MAX(campaign_name) AS campaign_name,
@@ -194,7 +237,7 @@ class AdsManagerCampaignsController extends Controller
 
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
-                    MAX(sd.latest_started) AS latest_started
+                    MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.campaign_id');
 
@@ -247,6 +290,9 @@ class AdsManagerCampaignsController extends Controller
                 ->leftJoinSub($adSetStartedDates, 'sd', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'sd.ad_set_id');
                 })
+                ->leftJoinSub($adSetFreshStart, 'fs', function ($j) {
+                    $j->on('ads_manager_reports.ad_set_id', '=', 'fs.id');
+                })
                 ->selectRaw('
                     ads_manager_reports.ad_set_id,
                     MAX(ad_set_name)   AS ad_set_name,
@@ -267,7 +313,7 @@ class AdsManagerCampaignsController extends Controller
 
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
-                    MAX(sd.latest_started) AS latest_started
+                    MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.ad_set_id');
 
@@ -323,6 +369,9 @@ class AdsManagerCampaignsController extends Controller
                 ->leftJoinSub($adStartedDates, 'sd', function ($j) {
                     $j->on('ads_manager_reports.ad_id', '=', 'sd.ad_id');
                 })
+                ->leftJoinSub($adFreshStart, 'fs', function ($j) {
+                    $j->on('ads_manager_reports.ad_id', '=', 'fs.id');
+                })
                 ->selectRaw('
                     ads_manager_reports.ad_id,
                     MAX(headline)      AS headline,
@@ -346,7 +395,7 @@ class AdsManagerCampaignsController extends Controller
 
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
-                    MAX(sd.latest_started) AS latest_started
+                    MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.ad_id');
 
