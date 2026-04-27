@@ -109,20 +109,17 @@
     .btn-set    { font-size:11px; padding:3px 9px; border-radius:5px; cursor:pointer; border:1.5px solid #e2e8f0; background:#f8fafc; color:#64748b; }
     .btn-set:hover { border-color:#93c5fd; color:#2563eb; background:#eff6ff; }
 
-    /* ── Inline campaigns expand: chip toggle + FB Ads Manager-like table ── */
-    .expand-chip {
-      display:inline-flex; align-items:center; gap:4px;
-      background:#eff6ff; color:#1d4ed8;
-      border:1px solid #bfdbfe; border-radius:999px;
-      padding:2px 9px 2px 7px; font-size:11px; font-weight:600;
-      cursor:pointer; margin-right:6px; vertical-align:middle;
-      line-height:1.3; user-select:none;
-      transition:background .12s, border-color .12s, color .12s;
+    /* ── Inline campaigns expand: simple chevron toggle ───────────────── */
+    .expand-chev {
+      display:inline-block; vertical-align:middle;
+      background:none; border:none; cursor:pointer;
+      color:#94a3b8; font-size:12px; line-height:1;
+      padding:2px 4px; margin-right:4px;
+      transition:color .12s, transform .15s;
+      user-select:none;
     }
-    .expand-chip:hover { background:#dbeafe; border-color:#93c5fd; }
-    .expand-chip.active { background:#1d4ed8; color:white; border-color:#1d4ed8; }
-    .expand-chip .chev { font-size:9px; transition:transform .15s; display:inline-block; }
-    .expand-chip.active .chev { transform:rotate(90deg); }
+    .expand-chev:hover { color:#0f172a; }
+    .expand-chev.active { color:#0f172a; transform:rotate(90deg); }
 
     /* FB Ads Manager-like table for the inline expand panel. */
     .fb-table { font-size:12px; border-collapse:separate; border-spacing:0; width:100%; background:white; }
@@ -378,15 +375,13 @@
 
               <!-- Fixed: Page -->
               <td style="text-align:center;">
-                {{-- Inline expand chip — fetches & shows this page's
-                     campaigns/adsets/ads via /ads_manager/campaigns/data. --}}
-                <button class="expand-chip"
+                {{-- Inline expand chevron — fetches & shows this page's
+                     campaigns/adsets/ads via /ads_manager/campaigns/data.
+                     Simple right-arrow that rotates to down-arrow when open. --}}
+                <button class="expand-chev"
                         :class="(expandedPages[row.page_name] || {}).open ? 'active' : ''"
                         @click.stop="togglePageExpand(row.page_name)"
-                        :title="(expandedPages[row.page_name] || {}).open ? 'Hide campaigns' : 'Show campaigns for this page'">
-                  <span class="chev">▶</span>
-                  <span x-text="(expandedPages[row.page_name] || {}).open ? 'Hide' : 'Campaigns'"></span>
-                </button>
+                        :title="(expandedPages[row.page_name] || {}).open ? 'Hide campaigns' : 'Show campaigns'">›</button>
                 <template x-if="row.is_range">
                   <a href="#" @click.prevent="openBreakdown(row)"
                      style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;
