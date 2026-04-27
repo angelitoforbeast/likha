@@ -738,6 +738,11 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     // Days-Last-Order color rules (CEO only) — JSON list of {op,value,color,label,bold}.
     Route::post  ('/jnt/supply/dlo-color-rules', [\App\Http\Controllers\JntSupplyController::class, 'saveDloColorRules'])->name('jnt.supply.dlo-color-rules.save');
 
+    // ── macro_output filtered export (CEO only) ──────────────────────────
+    Route::get ('/macro/export',           [\App\Http\Controllers\MacroExportController::class, 'index'])   ->name('macro.export');
+    Route::post('/macro/export/count',     [\App\Http\Controllers\MacroExportController::class, 'count'])   ->name('macro.export.count');
+    Route::post('/macro/export/download',  [\App\Http\Controllers\MacroExportController::class, 'download'])->name('macro.export.download');
+
 
     // ✅ Validation Lists (CEO, Marketing, Marketing OIC)
     Route::get('/validation-lists', [ValidationListController::class, 'index'])->name('validation-lists.index');
