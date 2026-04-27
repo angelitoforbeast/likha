@@ -25,11 +25,106 @@
     .toast.show { display:block; }
   </style>
 
-  <div class="mx-auto px-4 py-4" style="max-width:920px;" x-data="colsSettings()">
+  <div class="mx-auto px-4 py-4" style="max-width:980px;" x-data="colsSettings()">
 
     <p class="text-xs text-slate-500 mb-3">
       Drag any row to reorder · Toggle the checkbox to hide/show · Click <b>Save</b> per section to persist globally (affects all viewers).
     </p>
+
+    {{-- ─── Computation Settings ───────────────────────────────────────── --}}
+    <div class="col-section" x-data="breakevenPctEditor({{ $breakevenTargetPct ?? 5 }})">
+      <div class="flex items-baseline justify-between mb-1">
+        <h3>🧮 Computation Settings</h3>
+        <span class="text-[10px] text-slate-400">app_settings · owner_breakeven_target_pct</span>
+      </div>
+      <p class="note">
+        Target Proj.% para sa <b>"Breakeven CPP"</b> column. Default: <code>5</code> (= 5% net margin).
+        Applied formula:<br>
+        <code>breakeven_cpp = (proceed/orders) × [(1 − rts) × (0.9832 × price − item_value) − 37] − (target/100) × price</code>
+      </p>
+      <div class="flex items-center gap-3 mt-2">
+        <label class="text-xs text-slate-600 font-semibold">Target %:</label>
+        <input type="number" step="0.1" min="0" max="100"
+               x-model.number="value"
+               class="border border-slate-300 rounded px-3 py-1.5 text-sm w-28 text-right">
+        <span class="text-xs text-slate-500">column header will say "Breakeven CPP (<span x-text="value"></span>%)"</span>
+        <div class="flex-1"></div>
+        <button class="save-btn" :disabled="saving" @click="save()">
+          <span x-show="!saving">💾 Save target %</span>
+          <span x-show="saving">Saving…</span>
+        </button>
+      </div>
+    </div>
+
+    {{-- ─── Conditional Formatting ─────────────────────────────────────── --}}
+    <div class="col-section" x-data="colFormatEditor(@js($colFormat ?? new \stdClass()))">
+      <div class="flex items-baseline justify-between mb-1">
+        <h3>🎨 Conditional Formatting (per column)</h3>
+        <span class="text-[10px] text-slate-400">app_settings · owner_private_col_format</span>
+      </div>
+      <p class="note">
+        Per-column rules. <b>First match wins</b> (top-to-bottom). Operator (<code>≥ &gt; = ≤ &lt;</code>) +
+        threshold value + background color + optional bold + label. Pinipili na column sa dropdown sa baba.
+      </p>
+
+      <div class="flex items-center gap-2 mb-2">
+        <label class="text-xs font-semibold text-slate-600">Add rules to:</label>
+        <select x-model="activeCol" class="border border-slate-300 rounded px-2 py-1 text-sm">
+          <template x-for="c in @js($catalog['owner_private'] ?? [])" :key="c.id">
+            <option :value="c.id" x-text="c.label + (rulesFor(c.id).length ? ' (' + rulesFor(c.id).length + ')' : '')"></option>
+          </template>
+        </select>
+        <button class="reset-btn" @click="addRule(activeCol)">+ Add rule</button>
+        <div class="flex-1"></div>
+        <button class="save-btn" :disabled="saving" @click="save()">
+          <span x-show="!saving">💾 Save formatting</span>
+          <span x-show="saving">Saving…</span>
+        </button>
+      </div>
+
+      {{-- Rules table for active column --}}
+      <div class="col-list" x-show="rulesFor(activeCol).length > 0">
+        <template x-for="(r, idx) in rulesFor(activeCol)" :key="activeCol+'-'+idx">
+          <div class="col-item" style="cursor:default;">
+            <span class="col-handle"
+                  draggable="true"
+                  @dragstart="ruleDragStart(idx, $event)"
+                  @dragover.prevent
+                  @drop="ruleDrop(idx)">⋮⋮</span>
+            <span class="text-xs text-slate-500" style="min-width:30px;">if &nbsp;value</span>
+            <select x-model="r.op" class="border border-slate-300 rounded px-1 py-0.5 text-xs">
+              <option value=">=">≥</option>
+              <option value=">">&gt;</option>
+              <option value="=">=</option>
+              <option value="<=">≤</option>
+              <option value="<">&lt;</option>
+            </select>
+            <input type="number" step="0.01" x-model.number="r.value"
+                   class="border border-slate-300 rounded px-2 py-0.5 text-xs w-24 text-right">
+            <span class="text-xs text-slate-500">→ bg</span>
+            <input type="color" x-model="r.bg" class="w-12 h-7 cursor-pointer border rounded">
+            <input type="text" x-model="r.bg" maxlength="7"
+                   class="border border-slate-300 rounded px-1 py-0.5 text-xs w-20 font-mono">
+            <label class="text-xs flex items-center gap-1">
+              <input type="checkbox" x-model="r.bold"> bold
+            </label>
+            <input type="text" x-model="r.label" placeholder="label (optional)"
+                   class="flex-1 border border-slate-300 rounded px-2 py-0.5 text-xs"
+                   maxlength="40">
+            <span class="px-2 py-0.5 text-xs rounded"
+                  :style="'background:'+r.bg+';color:'+previewTextColor(r.bg)+';'+(r.bold?'font-weight:700;':'')"
+                  x-text="(r.value ?? 0)"></span>
+            <button class="text-red-600 hover:text-red-800 text-sm"
+                    @click="removeRule(activeCol, idx)" title="Remove rule">✕</button>
+          </div>
+        </template>
+      </div>
+      <div x-show="rulesFor(activeCol).length === 0"
+           class="text-xs text-slate-400 italic px-3 py-4 text-center"
+           style="border:1px dashed #cbd5e1;border-radius:6px;">
+        Walang rules pa para sa column na ito. Click "+ Add rule" para magsimula.
+      </div>
+    </div>
 
     {{-- ─── Section 1: /owner/private ──────────────────────────────────────── --}}
     <div class="col-section" x-data="sectionState('owner_private', @js($savedOwnerPrivate))">
@@ -130,6 +225,98 @@
           t.textContent = msg;
           t.classList.add('show');
           setTimeout(() => t.classList.remove('show'), 1800);
+        },
+      };
+    }
+
+    function breakevenPctEditor(initial) {
+      return {
+        value: Number(initial) || 5,
+        saving: false,
+        async save() {
+          this.saving = true;
+          try {
+            const fd = new FormData();
+            fd.append('_token', COL_CSRF);
+            fd.append('value', this.value);
+            const r = await fetch('{{ route('owner.column-settings.breakeven-pct') }}', { method: 'POST', body: fd });
+            const j = await r.json();
+            if (!j.ok) throw new Error(j.error || 'Save failed');
+            const t = document.getElementById('colsToast');
+            t.textContent = '✓ Target % saved';
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 1800);
+          } catch (e) {
+            alert('Save failed: ' + e.message);
+          } finally { this.saving = false; }
+        },
+      };
+    }
+
+    // Per-column conditional formatting editor.
+    // `initial` is a map: { col_id: [ {op,value,bg,bold,label}, ... ] }
+    function colFormatEditor(initial) {
+      return {
+        rules: (typeof initial === 'object' && initial !== null && !Array.isArray(initial)) ? Object.assign({}, initial) : {},
+        activeCol: 'tcpr',
+        saving: false,
+        dragIdx: -1,
+
+        rulesFor(colId) {
+          if (!this.rules[colId]) this.rules[colId] = [];
+          return this.rules[colId];
+        },
+        addRule(colId) {
+          this.rulesFor(colId).push({ op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '' });
+          // Force reactivity.
+          this.rules = Object.assign({}, this.rules);
+        },
+        removeRule(colId, idx) {
+          this.rulesFor(colId).splice(idx, 1);
+          this.rules = Object.assign({}, this.rules);
+        },
+        ruleDragStart(idx, ev) {
+          this.dragIdx = idx;
+          ev.dataTransfer.effectAllowed = 'move';
+        },
+        ruleDrop(targetIdx) {
+          if (this.dragIdx < 0 || this.dragIdx === targetIdx) return;
+          const list = this.rulesFor(this.activeCol);
+          const moved = list.splice(this.dragIdx, 1)[0];
+          list.splice(targetIdx, 0, moved);
+          this.dragIdx = -1;
+          this.rules = Object.assign({}, this.rules);
+        },
+        previewTextColor(hex) {
+          const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
+          if (!m) return '#111827';
+          const r = parseInt(m[1].slice(0,2), 16);
+          const g = parseInt(m[1].slice(2,4), 16);
+          const b = parseInt(m[1].slice(4,6), 16);
+          const yiq = (r*299 + g*587 + b*114) / 1000;
+          return yiq >= 150 ? '#111827' : '#ffffff';
+        },
+        async save() {
+          this.saving = true;
+          try {
+            // Drop empty arrays before serializing.
+            const clean = {};
+            Object.keys(this.rules).forEach(k => {
+              if (Array.isArray(this.rules[k]) && this.rules[k].length > 0) clean[k] = this.rules[k];
+            });
+            const fd = new FormData();
+            fd.append('_token', COL_CSRF);
+            fd.append('rules', JSON.stringify(clean));
+            const r = await fetch('{{ route('owner.column-settings.col-format') }}', { method: 'POST', body: fd });
+            const j = await r.json();
+            if (!j.ok) throw new Error(j.error || 'Save failed');
+            const t = document.getElementById('colsToast');
+            t.textContent = '✓ Formatting saved';
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 1800);
+          } catch (e) {
+            alert('Save failed: ' + e.message);
+          } finally { this.saving = false; }
         },
       };
     }

@@ -46,10 +46,14 @@ class OwnerPrivateController extends Controller
         $colsCtrl = new \App\Http\Controllers\OwnerColumnSettingsController();
         $ownerPrivateColsConfig = $colsCtrl->loadConfig('owner_private');
         $campaignsColsConfig    = $colsCtrl->loadConfig('campaigns');
+        // Computed-column settings (also CEO-managed in the same page).
+        $breakevenTargetPct     = $colsCtrl->loadBreakevenTargetPct();    // e.g. 5.0
+        $colFormatRules         = $colsCtrl->loadColFormat();             // {col_id: [rules]}
 
         return view('owner.private', compact(
             'pages', 'isCEO', 'isMarketingOIC',
-            'ownerPrivateColsConfig', 'campaignsColsConfig'
+            'ownerPrivateColsConfig', 'campaignsColsConfig',
+            'breakevenTargetPct', 'colFormatRules'
         ));
     }
 

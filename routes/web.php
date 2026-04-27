@@ -746,8 +746,10 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     // ── Column settings (CEO only) — manages visibility/order para sa
     //    /owner/private at /ads_manager/campaigns tables. One page, two
     //    sections; saved globally to app_settings KV.
-    Route::get ('/owner/column-settings',      [\App\Http\Controllers\OwnerColumnSettingsController::class, 'index'])->name('owner.column-settings');
-    Route::post('/owner/column-settings/save', [\App\Http\Controllers\OwnerColumnSettingsController::class, 'save' ])->name('owner.column-settings.save');
+    Route::get ('/owner/column-settings',                [\App\Http\Controllers\OwnerColumnSettingsController::class, 'index'])           ->name('owner.column-settings');
+    Route::post('/owner/column-settings/save',           [\App\Http\Controllers\OwnerColumnSettingsController::class, 'save' ])           ->name('owner.column-settings.save');
+    Route::post('/owner/column-settings/breakeven-pct',  [\App\Http\Controllers\OwnerColumnSettingsController::class, 'saveBreakevenPct'])->name('owner.column-settings.breakeven-pct');
+    Route::post('/owner/column-settings/col-format',     [\App\Http\Controllers\OwnerColumnSettingsController::class, 'saveColFormat'])   ->name('owner.column-settings.col-format');
 
 
     // ✅ Validation Lists (CEO, Marketing, Marketing OIC)

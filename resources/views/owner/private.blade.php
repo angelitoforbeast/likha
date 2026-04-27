@@ -427,7 +427,7 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')+(col.id==='proj_pct_1d'&&row.proj_pct_last_day!==null?rppStyle(row.proj_pct_last_day):'')+(col.id==='proj_pct_3d'&&row.proj_pct_last_3d!==null?rppStyle(row.proj_pct_last_3d):'')+(col.id==='proj_pct_7d'&&row.proj_pct_last_7d!==null?rppStyle(row.proj_pct_last_7d):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')">
+                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')+(col.id==='proj_pct_1d'&&row.proj_pct_last_day!==null?rppStyle(row.proj_pct_last_day):'')+(col.id==='proj_pct_3d'&&row.proj_pct_last_3d!==null?rppStyle(row.proj_pct_last_3d):'')+(col.id==='proj_pct_7d'&&row.proj_pct_last_7d!==null?rppStyle(row.proj_pct_last_7d):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, col.id==='tcpr'?tcprFor(row):(col.id==='breakeven_cpp'?breakevenCppFor(row):(col.id==='proj_pct'?(row.gross_sales>0?row.projected_profit/row.gross_sales*100:null):(col.id==='proj_pct_1d'?row.proj_pct_last_day:(col.id==='proj_pct_3d'?row.proj_pct_last_3d:(col.id==='proj_pct_7d'?row.proj_pct_last_7d:row[col.sort||col.id])))))">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -452,6 +452,18 @@
                   <!-- pcpp -->
                   <template x-if="col.id==='pcpp'">
                     <span style="color:#111;" x-text="md(row.proceed_cpp)"></span>
+                  </template>
+
+                  <!-- TCPR (pending rate) — (1 − proceed/orders) × 100 -->
+                  <template x-if="col.id==='tcpr'">
+                    <span x-text="tcprFor(row) === null ? '—' : tcprFor(row).toFixed(1) + '%'"></span>
+                  </template>
+
+                  <!-- Breakeven CPP — derived from existing profit math at the
+                       global target Proj.% (configurable via /owner/column-settings). -->
+                  <template x-if="col.id==='breakeven_cpp'">
+                    <span :title="breakevenCppFor(row) === null ? 'Missing rts / item_value / price / orders' : ('Target ' + (window.__BREAKEVEN_PCT__ ?? 5) + '% Proj.% · actual CPP ' + md(row.cpp))"
+                          x-text="breakevenCppFor(row) === null ? '—' : md(breakevenCppFor(row))"></span>
                   </template>
 
                   <!-- proj_profit — cell background handles color; bold text -->
@@ -747,6 +759,12 @@
                   <template x-if="col.id==='pcpp'">
                     <span style="color:#475569;" x-text="md(tot().proceed_cpp)"></span>
                   </template>
+                  <template x-if="col.id==='tcpr'">
+                    <span x-text="(tot().orders > 0) ? ((1 - tot().proceed_orders / tot().orders) * 100).toFixed(1) + '%' : '—'"></span>
+                  </template>
+                  <template x-if="col.id==='breakeven_cpp'">
+                    <span style="color:#cbd5e1;">—</span>
+                  </template>
                   <template x-if="col.id==='proj_profit'">
                     <span style="font-weight:700;" x-text="md(tot().projected_profit)"></span>
                   </template>
@@ -782,7 +800,7 @@
                   <template x-if="col.id==='proj_prof_7d'">
                     <span style="font-weight:700;" x-text="md(tot().projected_profit_last_7d)"></span>
                   </template>
-                  <template x-if="!['adspent','orders','cpp','proceed','pcpp','proj_profit','per_order','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_3d','proj_prof_7d'].includes(col.id)">
+                  <template x-if="!['adspent','orders','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_3d','proj_prof_7d'].includes(col.id)">
                     <span></span>
                   </template>
                 </td>
@@ -812,6 +830,9 @@
   // same visibility/order as /ads_manager/campaigns.
   window.__OWNER_PRIVATE_COLS__ = @json($ownerPrivateColsConfig ?? ['order' => [], 'hidden' => []]);
   window.__CAMPAIGNS_COLS__     = @json($campaignsColsConfig    ?? ['order' => [], 'hidden' => []]);
+  // Computation + formatting settings.
+  window.__BREAKEVEN_PCT__      = {{ $breakevenTargetPct ?? 5 }};
+  window.__COL_FORMAT__         = @json($colFormatRules ?? new \stdClass());
 
   function privateUI() {
     return {
@@ -892,6 +913,8 @@
           { id:'cpp',        label:'CPP',        sort:'cpp',                  align:'center', minw:75  },
           { id:'proceed',    label:'Proceed',    sort:'proceed_orders',       align:'center', minw:70  },
           { id:'pcpp',       label:'P.CPP',      sort:'proceed_cpp',          align:'center', minw:75  },
+          { id:'tcpr',          label:'TCPR',           sort:null,                          align:'center', minw:65  },
+          { id:'breakeven_cpp', label:this._breakevenLabel(), sort:null,                    align:'center', minw:115 },
           { id:'proj_profit',label:'Proj.Profit',sort:'projected_profit',     align:'center', minw:95  },
           { id:'per_order',  label:'/Order',     sort:'proj_profit_per_order',align:'center', minw:75  },
           { id:'proj_pct',     label:'Proj.%',         sort:null,                          align:'center', minw:65  },
@@ -1220,6 +1243,73 @@
         const ph = new Date(new Date().toLocaleString('en-US', {timeZone: 'Asia/Manila'}));
         const phMid = new Date(ph.getFullYear(), ph.getMonth(), ph.getDate());
         return String(Math.max(0, Math.round((phMid - d) / 86400000)));
+      },
+
+      // ── Computed columns: TCPR + Breakeven CPP ────────────────────────────
+      // Target % is global (managed via /owner/column-settings, default 5).
+      _breakevenLabel(){ return 'Breakeven CPP (' + (window.__BREAKEVEN_PCT__ ?? 5) + '%)'; },
+
+      // TCPR = (1 - proceed/orders) × 100. Returns number or null when den=0.
+      tcprFor(row){
+        const o = Number(row.orders ?? 0);
+        const p = Number(row.proceed_orders ?? 0);
+        if (o <= 0) return null;
+        return (1 - p / o) * 100;
+      },
+
+      // Breakeven CPP at the global target %. Formula derived from the
+      // existing /owner/private profit math:
+      //   (proceed/orders) × [(1 − rts) × (0.9832 × price − item_value) − 37]
+      //   − (target/100) × price
+      // Returns null when any required input is missing/invalid.
+      breakevenCppFor(row){
+        const o     = Number(row.orders ?? 0);
+        const p     = Number(row.proceed_orders ?? 0);
+        const price = Number(row.price ?? 0);
+        const iv    = row.item_value;
+        const rts   = row.rts_pct;
+        if (o <= 0 || price <= 0 || iv == null || rts == null) return null;
+        const procRate = p / o;
+        const df       = 1 - (Number(rts) / 100);
+        const target   = (Number(window.__BREAKEVEN_PCT__ ?? 5)) / 100;
+        const F = 0.0168;  // cod_fee_rate × (1 + VAT) = 0.015 × 1.12
+        const SF = 37;
+        return procRate * (df * (price * (1 - F) - Number(iv)) - SF) - target * price;
+      },
+
+      // Conditional formatting — returns inline style string for a cell
+      // matching the first rule that applies (top-to-bottom). Returns ''
+      // when no rule matches or no rules configured.
+      cellFormatStyle(colId, value){
+        const rules = (window.__COL_FORMAT__ || {})[colId];
+        if (!Array.isArray(rules) || rules.length === 0) return '';
+        if (value == null || isNaN(Number(value))) return '';
+        const v = Number(value);
+        for (const r of rules) {
+          const t = Number(r.value);
+          let hit = false;
+          switch (r.op) {
+            case '>=': hit = v >= t; break;
+            case '>':  hit = v >  t; break;
+            case '=':  hit = v == t; break;
+            case '<=': hit = v <= t; break;
+            case '<':  hit = v <  t; break;
+          }
+          if (hit) {
+            const bg = r.bg || '#fee2e2';
+            // YIQ luminance for auto text color.
+            const m = /^#([0-9a-f]{6})$/i.exec(bg);
+            let txt = '#111827';
+            if (m) {
+              const R = parseInt(m[1].slice(0,2), 16);
+              const G = parseInt(m[1].slice(2,4), 16);
+              const B = parseInt(m[1].slice(4,6), 16);
+              if ((R*299 + G*587 + B*114) / 1000 < 150) txt = '#ffffff';
+            }
+            return 'background:' + bg + ';color:' + txt + ';' + (r.bold ? 'font-weight:700;' : '');
+          }
+        }
+        return '';
       },
 
       // ── Campaigns column catalog (mirrors the one in /ads_manager/campaigns)

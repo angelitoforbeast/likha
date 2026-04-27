@@ -31,6 +31,13 @@ class OwnerColumnSettingsController extends Controller
 {
     private const KEY_OWNER_PRIVATE = 'owner_private_cols';
     private const KEY_CAMPAIGNS     = 'campaigns_cols';
+    // Breakeven CPP target % (single integer/decimal stored as string).
+    // Default = 5 (i.e. 5% Proj.% target). Used by /owner/private to label
+    // and compute the "Breakeven CPP (N%)" column.
+    private const KEY_BREAKEVEN_PCT = 'owner_breakeven_target_pct';
+    // Per-column conditional formatting rules — JSON map keyed by column id.
+    // Shape: { "<col_id>": [ {"op":">=","value":30,"bg":"#fecaca","bold":true,"label":"High"}, ... ] }
+    private const KEY_COL_FORMAT    = 'owner_private_col_format';
 
     /**
      * Column catalog: every column the user can show/hide/reorder per table.
@@ -38,28 +45,30 @@ class OwnerColumnSettingsController extends Controller
      */
     public const CATALOG = [
         'owner_private' => [
-            ['id' => 'adspent',      'label' => 'Adspent'],
-            ['id' => 'orders',       'label' => 'Orders'],
-            ['id' => 'cpp',          'label' => 'CPP'],
-            ['id' => 'proceed',      'label' => 'Proceed'],
-            ['id' => 'pcpp',         'label' => 'P.CPP'],
-            ['id' => 'proj_profit',  'label' => 'Proj.Profit'],
-            ['id' => 'per_order',    'label' => '/Order'],
-            ['id' => 'proj_pct',     'label' => 'Proj.%'],
-            ['id' => 'proj_pct_1d',  'label' => 'Proj.%(1D)'],
-            ['id' => 'proj_pct_3d',  'label' => 'Proj.%(3D)'],
-            ['id' => 'proj_pct_7d',  'label' => 'Proj.%(7D)'],
-            ['id' => 'proj_prof_1d', 'label' => 'Proj.Profit(1D)'],
-            ['id' => 'proj_prof_3d', 'label' => 'Proj.Profit(3D)'],
-            ['id' => 'proj_prof_7d', 'label' => 'Proj.Profit(7D)'],
-            ['id' => 'jnt_rts',      'label' => 'RTS%'],
-            ['id' => 'jnt_del',      'label' => 'Del%'],
-            ['id' => 'jnt_transit',  'label' => 'Transit%'],
-            ['id' => 'rts_set',      'label' => 'Set RTS%'],
-            ['id' => 'price',        'label' => 'Price'],
-            ['id' => 'item_val',     'label' => 'Item Val.'],
-            ['id' => 'ship',         'label' => 'Ship'],
-            ['id' => 'cod_fee',      'label' => 'COD Fee'],
+            ['id' => 'adspent',       'label' => 'Adspent'],
+            ['id' => 'orders',        'label' => 'Orders'],
+            ['id' => 'cpp',           'label' => 'CPP'],
+            ['id' => 'proceed',       'label' => 'Proceed'],
+            ['id' => 'pcpp',          'label' => 'P.CPP'],
+            ['id' => 'tcpr',          'label' => 'TCPR (Pending Rate)'],
+            ['id' => 'breakeven_cpp', 'label' => 'Breakeven CPP'],
+            ['id' => 'proj_profit',   'label' => 'Proj.Profit'],
+            ['id' => 'per_order',     'label' => '/Order'],
+            ['id' => 'proj_pct',      'label' => 'Proj.%'],
+            ['id' => 'proj_pct_1d',   'label' => 'Proj.%(1D)'],
+            ['id' => 'proj_pct_3d',   'label' => 'Proj.%(3D)'],
+            ['id' => 'proj_pct_7d',   'label' => 'Proj.%(7D)'],
+            ['id' => 'proj_prof_1d',  'label' => 'Proj.Profit(1D)'],
+            ['id' => 'proj_prof_3d',  'label' => 'Proj.Profit(3D)'],
+            ['id' => 'proj_prof_7d',  'label' => 'Proj.Profit(7D)'],
+            ['id' => 'jnt_rts',       'label' => 'RTS%'],
+            ['id' => 'jnt_del',       'label' => 'Del%'],
+            ['id' => 'jnt_transit',   'label' => 'Transit%'],
+            ['id' => 'rts_set',       'label' => 'Set RTS%'],
+            ['id' => 'price',         'label' => 'Price'],
+            ['id' => 'item_val',      'label' => 'Item Val.'],
+            ['id' => 'ship',          'label' => 'Ship'],
+            ['id' => 'cod_fee',       'label' => 'COD Fee'],
         ],
         'campaigns' => [
             ['id' => 'on',             'label' => 'Off / On'],
@@ -89,6 +98,7 @@ class OwnerColumnSettingsController extends Controller
             // Initial defaults derived from existing /owner/private layout.
             // Everything is visible by default — admins shrink as needed.
             'adspent', 'orders', 'cpp', 'proceed', 'pcpp',
+            'tcpr', 'breakeven_cpp',
             'proj_profit', 'per_order', 'proj_pct',
             'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d',
             'proj_prof_1d', 'proj_prof_3d', 'proj_prof_7d',
@@ -122,7 +132,112 @@ class OwnerColumnSettingsController extends Controller
             'defaultVisible'   => self::DEFAULT_VISIBLE,
             'savedOwnerPrivate'=> $this->loadConfig('owner_private'),
             'savedCampaigns'   => $this->loadConfig('campaigns'),
+            'breakevenTargetPct' => $this->loadBreakevenTargetPct(),
+            'colFormat'        => $this->loadColFormat(),
         ]);
+    }
+
+    /** GET-side helper: current Breakeven CPP target % (default 5). */
+    public function loadBreakevenTargetPct(): float
+    {
+        $row = DB::table('app_settings')->where('key', self::KEY_BREAKEVEN_PCT)->first(['value']);
+        if ($row && is_numeric($row->value)) return (float) $row->value;
+        return 5.0;
+    }
+
+    /** Per-column conditional formatting rules. Always returns a map. */
+    public function loadColFormat(): array
+    {
+        $row = DB::table('app_settings')->where('key', self::KEY_COL_FORMAT)->first(['value']);
+        if (!$row || !$row->value) return [];
+        $decoded = json_decode($row->value, true);
+        if (!is_array($decoded)) return [];
+
+        $allowedIds = array_column(self::CATALOG['owner_private'], 'id');
+        $allowedSet = array_flip($allowedIds);
+        $allowedOps = ['>', '>=', '=', '<=', '<'];
+        $out = [];
+        foreach ($decoded as $colId => $rules) {
+            if (!is_string($colId) || !isset($allowedSet[$colId]) || !is_array($rules)) continue;
+            $clean = [];
+            foreach ($rules as $r) {
+                if (!is_array($r)) continue;
+                $op = (string) ($r['op'] ?? '');
+                if (!in_array($op, $allowedOps, true)) continue;
+                if (!is_numeric($r['value'] ?? null)) continue;
+                $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
+                if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
+                $clean[] = [
+                    'op'    => $op,
+                    'value' => (float) $r['value'],
+                    'bg'    => strtolower($bg),
+                    'bold'  => !empty($r['bold']),
+                    'label' => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
+                ];
+                if (count($clean) >= 10) break;
+            }
+            if (!empty($clean)) $out[$colId] = $clean;
+        }
+        return $out;
+    }
+
+    /** POST /owner/column-settings/breakeven-pct — single number 0..100. */
+    public function saveBreakevenPct(Request $request)
+    {
+        $this->checkAccess();
+        $val = $request->input('value');
+        if (!is_numeric($val)) return response()->json(['ok' => false, 'error' => 'Invalid number'], 422);
+        $val = (float) $val;
+        if ($val < 0 || $val > 100) return response()->json(['ok' => false, 'error' => 'Out of range'], 422);
+        DB::table('app_settings')->updateOrInsert(
+            ['key' => self::KEY_BREAKEVEN_PCT],
+            ['value' => (string) $val, 'updated_at' => now(), 'created_at' => now()]
+        );
+        return response()->json(['ok' => true, 'value' => $val]);
+    }
+
+    /** POST /owner/column-settings/col-format — replaces the full map. */
+    public function saveColFormat(Request $request)
+    {
+        $this->checkAccess();
+        $rules = $request->input('rules');
+        if (is_string($rules)) {
+            $decoded = json_decode($rules, true);
+            $rules = is_array($decoded) ? $decoded : null;
+        }
+        if (!is_array($rules)) return response()->json(['ok' => false, 'error' => 'Invalid rules'], 422);
+
+        $allowedIds = array_column(self::CATALOG['owner_private'], 'id');
+        $allowedSet = array_flip($allowedIds);
+        $allowedOps = ['>', '>=', '=', '<=', '<'];
+        $clean = [];
+        foreach ($rules as $colId => $list) {
+            if (!is_string($colId) || !isset($allowedSet[$colId]) || !is_array($list)) continue;
+            $colClean = [];
+            foreach ($list as $r) {
+                if (!is_array($r)) continue;
+                $op = (string) ($r['op'] ?? '');
+                if (!in_array($op, $allowedOps, true)) continue;
+                if (!is_numeric($r['value'] ?? null)) continue;
+                $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
+                if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
+                $colClean[] = [
+                    'op'    => $op,
+                    'value' => (float) $r['value'],
+                    'bg'    => strtolower($bg),
+                    'bold'  => !empty($r['bold']),
+                    'label' => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
+                ];
+                if (count($colClean) >= 10) break;
+            }
+            if (!empty($colClean)) $clean[$colId] = $colClean;
+        }
+
+        DB::table('app_settings')->updateOrInsert(
+            ['key' => self::KEY_COL_FORMAT],
+            ['value' => json_encode($clean, JSON_UNESCAPED_SLASHES), 'updated_at' => now(), 'created_at' => now()]
+        );
+        return response()->json(['ok' => true, 'rules' => $clean]);
     }
 
     /**
