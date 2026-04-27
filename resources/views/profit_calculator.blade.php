@@ -153,10 +153,19 @@
         Fill any 2 — the 3rd auto-fills (formula: <code>ad_spend = orders × cpp</code>).
       </div>
 
+      {{-- Proceed ↔ Ship Rate: bidirectional auto-derive via
+             ship_rate = proceed / orders × 100
+           Orders is independent — does NOT react to changes here. But pag
+           nagbago Orders, yung derived (non-recently-edited) ng dalawa
+           ay nire-recompute so they stay in sync. --}}
       <div class="row">
         <div class="column">
-          <label>Ship Rate (%) <span class="hint">orders → shipped (default 95)</span></label>
-          <input type="number" step="0.01" id="shipRate" value="95">
+          <label>Proceed <span class="hint">count of orders that shipped</span></label>
+          <input type="number" step="0.01" id="proceed" data-pair-input>
+        </div>
+        <div class="column">
+          <label>Ship Rate (%) <span class="hint">= proceed / orders × 100</span></label>
+          <input type="number" step="0.01" id="shipRate" value="95" data-pair-input>
         </div>
         <div class="column">
           <label>RTS (%) <span class="hint">shipped → returned</span></label>
@@ -287,8 +296,69 @@
     // Re-derive when truncate toggle changes (orders rounding may differ).
     document.getElementById('truncate').addEventListener('change', deriveTriField);
 
+    // ── Proceed ↔ Ship Rate pair (bidirectional, anchored on Orders) ──────
+    // Tracks which of the two was edited most recently — the other is the
+    // "derived" one that auto-updates. Orders is independent: editing Orders
+    // does NOT change either, but it triggers a re-derive of the
+    // non-recently-edited one so they stay consistent.
+    let pairLastEdited = 'shipRate';   // initial state (default value 95)
+
+    function derivePair() {
+      if (suppressDerive) return;
+      const orders = parseFloat(document.getElementById('orders').value);
+      if (isNaN(orders) || orders === 0) return;
+      const truncate = document.getElementById('truncate').checked;
+      const procEl = document.getElementById('proceed');
+      const rateEl = document.getElementById('shipRate');
+
+      if (pairLastEdited === 'shipRate') {
+        // Derive Proceed from Ship Rate.
+        const rate = parseFloat(rateEl.value);
+        if (isNaN(rate)) return;
+        let proc = orders * (rate / 100);
+        if (truncate) proc = Math.floor(proc);
+        suppressDerive = true;
+        procEl.value = String(Number(proc.toFixed(truncate ? 0 : 4)));
+        procEl.dataset.derived = '1';
+        procEl.style.background = '#f0f9ff';
+        suppressDerive = false;
+      } else {
+        // Derive Ship Rate from Proceed.
+        const proc = parseFloat(procEl.value);
+        if (isNaN(proc)) return;
+        const rate = (proc / orders) * 100;
+        suppressDerive = true;
+        rateEl.value = String(Number(rate.toFixed(2)));
+        rateEl.dataset.derived = '1';
+        rateEl.style.background = '#f0f9ff';
+        suppressDerive = false;
+      }
+    }
+
+    document.querySelectorAll('[data-pair-input]').forEach(el => {
+      el.addEventListener('input', e => {
+        if (suppressDerive) return;
+        e.target.dataset.derived = '';
+        e.target.style.background = '';
+        pairLastEdited = e.target.id === 'proceed' ? 'proceed' : 'shipRate';
+        derivePair();
+      });
+    });
+
+    // When Orders changes (via tri-input edit OR tri-derive), re-derive the
+    // pair so they stay consistent. Hooked here AFTER tri-derive runs.
+    document.getElementById('orders').addEventListener('input', () => {
+      // Slight delay so tri-derive sets the value before we read it.
+      setTimeout(derivePair, 0);
+    });
+    // Truncate toggle also reshapes Proceed integer rounding.
+    document.getElementById('truncate').addEventListener('change', () => {
+      derivePair();
+      deriveTriField();
+    });
+
     function resetDefaults(){
-      ['adSpend','orders','cpp','rts','price','cogs'].forEach(id => {
+      ['adSpend','orders','cpp','rts','price','cogs','proceed'].forEach(id => {
         const el = document.getElementById(id);
         el.value = '';
         el.dataset.derived = '';
@@ -296,19 +366,22 @@
       });
       // Keep operating defaults.
       document.getElementById('shipRate').value = '95';
+      document.getElementById('shipRate').dataset.derived = '';
+      document.getElementById('shipRate').style.background = '';
       document.getElementById('codFee').value = '1.5';
       document.getElementById('shipping').value = '37';
       document.getElementById('truncate').checked = true;
       document.getElementById('output').innerHTML = '';
       triHistory = [];
+      pairLastEdited = 'shipRate';
     }
 
     function calculateProfit() {
       const adSpend = parseFloat(document.getElementById('adSpend').value);
       const ordersRaw = parseFloat(document.getElementById('orders').value);
       const cppRaw = parseFloat(document.getElementById('cpp').value);
-      const shipRatePctRaw = parseFloat(document.getElementById('shipRate').value);
-      const shipRate = (isNaN(shipRatePctRaw) ? 95 : shipRatePctRaw) / 100;
+      const proceedRaw  = parseFloat(document.getElementById('proceed').value);
+      const shipRatePct = parseFloat(document.getElementById('shipRate').value);
       const rts = parseFloat(document.getElementById('rts').value) / 100;
       const price = parseFloat(document.getElementById('price').value);
       const cogs = parseFloat(document.getElementById('cogs').value);
@@ -319,8 +392,7 @@
       const outputDiv = document.getElementById('output');
       outputDiv.innerHTML = '';
 
-      // Need at least 2 of the 3 tri-inputs (auto-derive should have filled
-      // the 3rd already, but validate just in case).
+      // Tri-input validation (Ad Spend / Orders / CPP).
       const triFilled = [!isNaN(adSpend), !isNaN(ordersRaw), !isNaN(cppRaw)].filter(Boolean).length;
       if (triFilled < 2) {
         outputDiv.innerHTML = `
@@ -329,8 +401,13 @@
         `;
         return;
       }
-      if (isNaN(shipRate) || shipRate < 0 || shipRate > 1) {
-        outputDiv.innerHTML = `<strong class="error">Ship Rate must be between 0 and 100.</strong>`;
+      // Need either Proceed OR Ship Rate (the other auto-derives via Orders).
+      if (isNaN(proceedRaw) && isNaN(shipRatePct)) {
+        outputDiv.innerHTML = `<strong class="error">Please fill Proceed or Ship Rate.</strong>`;
+        return;
+      }
+      if (!isNaN(shipRatePct) && (shipRatePct < 0 || shipRatePct > 100)) {
+        outputDiv.innerHTML = `<strong class="error">Ship Rate must be 0–100.</strong>`;
         return;
       }
       if (isNaN(price) || isNaN(cogs) || isNaN(rts)) {
@@ -338,21 +415,29 @@
         return;
       }
 
-      // Resolve any missing 3rd field.
+      // Resolve missing 3rd tri-field.
       let adS = adSpend, ord = ordersRaw, cppV = cppRaw;
       if (isNaN(adS))  adS  = ord * cppV;
       if (isNaN(ord))  ord  = cppV !== 0 ? adS / cppV : 0;
       if (isNaN(cppV)) cppV = ord !== 0 ? adS / ord  : 0;
 
-      // Apply truncation (or not) to integer-typed counts.
       const round = v => truncate ? Math.floor(v) : v;
-
       const orders = round(ord);
-      const shipped = round(orders * shipRate);
-      const delivered = round(shipped * (1 - rts));
+
+      // Resolve Proceed from whichever the user provided.
+      let proceed;
+      if (!isNaN(proceedRaw)) {
+        proceed = round(proceedRaw);
+      } else {
+        proceed = round(orders * (shipRatePct / 100));
+      }
+      const effectiveShipRate = orders > 0 ? proceed / orders : 0;
+
+      // Math (proceed = shipped — same value in this calc).
+      const delivered = round(proceed * (1 - rts));
       const revenue = delivered * price;
       const totalCOGS = delivered * cogs;
-      const totalShipping = shipped * shipping;
+      const totalShipping = proceed * shipping;
       const totalCODFee = delivered * (price * codFeePercent);
       const totalCost = adS + totalCOGS + totalShipping + totalCODFee;
       const profit = revenue - totalCost;
@@ -367,7 +452,7 @@
 
       outputDiv.innerHTML = `
         <strong>Total Orders:</strong> ${intFmt(orders)}<br>
-        <strong>Shipped Orders (${(shipRate*100).toFixed(1)}%):</strong> ${intFmt(shipped)}<br>
+        <strong>Proceed (${(effectiveShipRate*100).toFixed(1)}%):</strong> ${intFmt(proceed)}<br>
         <strong>Delivered Orders:</strong> ${intFmt(delivered)}<br>
         <strong>Net Profit:</strong> <span class="${profCls}">${peso(profit)}</span><br>
         <strong>CPP (Cost Per Purchase):</strong> ${peso(cppV)}<br>
