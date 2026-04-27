@@ -290,7 +290,7 @@
             <th style="text-align:center;min-width:90px;"></th>
           </tr>
         </thead>
-        <tbody>
+        <tbody class="msg-tbody">
 
           <template x-if="rows.length === 0 && !loading">
             <tr><td :colspan="cols.length + 3" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
@@ -304,11 +304,27 @@
             </td></tr>
           </template>
 
+        </tbody>
+
+          {{-- Per-row: <tbody> wraps both the page row AND its inline expand
+               row so they stay interleaved. HTML allows multiple <tbody>
+               per <table>; using one per iteration is the canonical Alpine
+               pattern when an x-for needs to produce multiple <tr>s. --}}
           <template x-for="(row, idx) in sortedRows()" :key="row.page_key">
+          <tbody class="page-row-tbody">
             <tr :class="editIdx === idx ? 'editing-row' : ''">
 
               <!-- Fixed: Page -->
               <td style="text-align:center;">
+                {{-- Inline expand chevron — fetches & shows this page's
+                     campaigns/adsets/ads via /ads_manager/campaigns/data. --}}
+                <button class="page-expand-toggle"
+                        @click.stop="togglePageExpand(row.page_name)"
+                        :title="(expandedPages[row.page_name] || {}).open ? 'Hide campaigns' : 'Show campaigns'"
+                        x-text="(expandedPages[row.page_name] || {}).open ? '▼' : '▶'"
+                        style="display:inline-block;margin-right:5px;color:#64748b;
+                               background:none;border:none;cursor:pointer;font-size:11px;
+                               vertical-align:middle;line-height:1;padding:0 2px;"></button>
                 <template x-if="row.is_range">
                   <a href="#" @click.prevent="openBreakdown(row)"
                      style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;
@@ -635,8 +651,23 @@
                 </template>
               </td>
             </tr>
+
+            {{-- Inline expand row — sits directly after THIS page row when
+                 expandedPages[page_name].open is true. Hosts the nested
+                 campaigns / adsets / ads view from /ads_manager/campaigns/data.
+                 Wrapped together with the page row inside a per-iteration
+                 <tbody> so they stay interleaved (Alpine x-for needs single
+                 root child — <tbody> serves as that root). --}}
+            <tr x-show="(expandedPages[row.page_name] || {}).open"
+                class="page-expand-row">
+              <td :colspan="(cols.length + 3)" style="padding:0;">
+                @include('owner._private_expand_inline')
+              </td>
+            </tr>
+          </tbody>
           </template>
 
+          <tbody class="total-tbody">
           <!-- Total row -->
           <template x-if="rows.length > 0">
             <tr class="total-row">
@@ -754,6 +785,13 @@
       sortCol:'', sortDir:'desc',
       dragSrc:null, dragOver:null,
       cols:[],
+
+      // ── Inline campaigns/adsets/ads expand (per-page) ─────────────────────
+      // Each map keyed by entity id holds { open, loading, error, <list> }.
+      // Cached so collapse/re-expand doesn't re-fetch.
+      expandedPages: {},      // page_name → { open, loading, error, campaigns:[] }
+      expandedCampaigns: {},  // campaign_id → { open, loading, error, adsets:[] }
+      expandedAdSets: {},     // ad_set_id   → { open, loading, error, ads:[] }
 
       // ── Item filter (multi-select) ───────────────────────────────────────
       selectedItems: [],
@@ -1079,6 +1117,105 @@
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dstr); if(!m) return dstr;
         const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         return months[parseInt(m[2],10)-1]+' '+parseInt(m[3],10);
+      },
+
+      // ── Date helpers (mirrors /ads_manager/campaigns Alpine helpers) ──────
+      // 'YYYY-MM-DD' (or 'YYYY-MM-DD HH:MM:SS') → 'Apr 23, 2026'
+      fmtDate(s){
+        if(!s) return '';
+        const d = new Date((s+'').slice(0,10) + 'T00:00:00');
+        if(isNaN(d.getTime())) return s;
+        return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+      },
+      // 'YYYY-MM-DD' → '57' (raw integer days since, PH timezone reference).
+      daysSince(s){
+        if(!s) return '';
+        const d = new Date((s+'').slice(0,10) + 'T00:00:00');
+        if(isNaN(d.getTime())) return '';
+        const ph = new Date(new Date().toLocaleString('en-US', {timeZone: 'Asia/Manila'}));
+        const phMid = new Date(ph.getFullYear(), ph.getMonth(), ph.getDate());
+        return String(Math.max(0, Math.round((phMid - d) / 86400000)));
+      },
+
+      // ── Inline expand: campaigns / adsets / ads ───────────────────────────
+      // Date range = "this calendar month" (PH) — independent ng /owner/private
+      // filter, intentional per spec. Cached client-side.
+
+      // Build YYYY-MM-DD for first-of-month and today (PH).
+      _thisMonthRangePH(){
+        const ph = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Manila'}));
+        const p = n => String(n).padStart(2,'0');
+        const fmt = d => d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+        const start = new Date(ph.getFullYear(), ph.getMonth(), 1);
+        return { start: fmt(start), end: fmt(ph) };
+      },
+
+      // Generic fetcher into /ads_manager/campaigns/data with passed params.
+      async _fetchCampaignsData(params){
+        const r = this._thisMonthRangePH();
+        const qs = new URLSearchParams(Object.assign({
+          start_date: r.start,
+          end_date:   r.end,
+          limit:      1000,
+          sort_by:    'default',
+          sort_dir:   'desc',
+        }, params));
+        const res = await fetch('{{ route('ads_manager.campaigns.data') }}?' + qs.toString());
+        if (!res.ok) throw new Error('HTTP '+res.status);
+        return await res.json();
+      },
+
+      // Toggle the per-page campaigns expand. First open fetches; subsequent
+      // toggles just flip `open` without re-fetching.
+      async togglePageExpand(pageName){
+        const cur = this.expandedPages[pageName];
+        if (cur && cur.campaigns) {
+          this.expandedPages[pageName] = Object.assign({}, cur, { open: !cur.open });
+          return;
+        }
+        this.expandedPages[pageName] = { open: true, loading: true, error: null, campaigns: null };
+        try {
+          const j = await this._fetchCampaignsData({ level: 'campaigns', page_name: pageName });
+          this.expandedPages[pageName] = { open: true, loading: false, error: null, campaigns: j.rows || [] };
+        } catch (e) {
+          this.expandedPages[pageName] = { open: true, loading: false, error: e.message || 'Failed to load', campaigns: [] };
+        }
+      },
+
+      // Toggle a campaign's adsets expand inside an already-expanded page.
+      async toggleCampaignExpand(campaignId, pageName){
+        const cur = this.expandedCampaigns[campaignId];
+        if (cur && cur.adsets) {
+          this.expandedCampaigns[campaignId] = Object.assign({}, cur, { open: !cur.open });
+          return;
+        }
+        this.expandedCampaigns[campaignId] = { open: true, loading: true, error: null, adsets: null };
+        try {
+          const j = await this._fetchCampaignsData({
+            level: 'adsets', page_name: pageName, campaign_id: campaignId,
+          });
+          this.expandedCampaigns[campaignId] = { open: true, loading: false, error: null, adsets: j.rows || [] };
+        } catch (e) {
+          this.expandedCampaigns[campaignId] = { open: true, loading: false, error: e.message || 'Failed to load', adsets: [] };
+        }
+      },
+
+      // Toggle an ad set's ads expand inside an already-expanded campaign.
+      async toggleAdSetExpand(adSetId, campaignId, pageName){
+        const cur = this.expandedAdSets[adSetId];
+        if (cur && cur.ads) {
+          this.expandedAdSets[adSetId] = Object.assign({}, cur, { open: !cur.open });
+          return;
+        }
+        this.expandedAdSets[adSetId] = { open: true, loading: true, error: null, ads: null };
+        try {
+          const j = await this._fetchCampaignsData({
+            level: 'ads', page_name: pageName, ad_set_id: adSetId,
+          });
+          this.expandedAdSets[adSetId] = { open: true, loading: false, error: null, ads: j.rows || [] };
+        } catch (e) {
+          this.expandedAdSets[adSetId] = { open: true, loading: false, error: e.message || 'Failed to load', ads: [] };
+        }
       },
 
       async init(){
