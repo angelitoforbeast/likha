@@ -59,10 +59,13 @@ class MacroExportController extends Controller
         $distinct = $this->loadDistinctValues();
 
         return view('macro.export', [
-            'allColumns'  => self::ALL_COLUMNS,
-            'distinctPages'    => $distinct['pages'],
-            'distinctItems'    => $distinct['items'],
-            'distinctStatuses' => $distinct['statuses'],
+            'allColumns'         => self::ALL_COLUMNS,
+            'distinctPages'      => $distinct['pages'],
+            'distinctItems'      => $distinct['items'],
+            'distinctStatuses'   => $distinct['statuses'],
+            'distinctProvinces'  => $distinct['provinces'],
+            'distinctCities'     => $distinct['cities'],
+            'distinctBarangays'  => $distinct['barangays'],
         ]);
     }
 
@@ -90,24 +93,20 @@ class MacroExportController extends Controller
         $statuses = array_values(array_filter(array_map('trim', $statuses), fn($s) => $s !== ''));
         if (!empty($statuses)) $q->whereIn('STATUS', $statuses);
 
-        // ── Address fields — INDEPENDENT, multi-value (comma-separated),
-        //    substring match (case-insensitive). Per user spec: "kahit isa
-        //    lang pwede" — kung Barangay lang may laman, walang req sa
-        //    Province / City. Within a field, multiple values OR'd together.
+        // ── Address fields — INDEPENDENT, exact-match multi-select.
+        //    Per user spec: "kahit isa lang pwede" — kung Barangay lang ang
+        //    may laman, walang req sa Province / City. Within a field, multiple
+        //    selections are OR'd. Across fields, AND.
+        //    Inputs: provinces[], cities[], barangays[] (multi-select dropdowns).
         foreach ([
-            'province'  => 'PROVINCE',
-            'city'      => 'CITY',
-            'barangay'  => 'BARANGAY',
+            'provinces' => 'PROVINCE',
+            'cities'    => 'CITY',
+            'barangays' => 'BARANGAY',
         ] as $reqKey => $col) {
-            $raw = trim((string) $request->input($reqKey, ''));
-            if ($raw === '') continue;
-            $tokens = array_values(array_filter(array_map('trim', explode(',', $raw)), fn($s) => $s !== ''));
-            if (empty($tokens)) continue;
-            $q->where(function ($sub) use ($col, $tokens) {
-                foreach ($tokens as $t) {
-                    $sub->orWhereRaw("LOWER(`$col`) LIKE ?", ['%' . mb_strtolower($t) . '%']);
-                }
-            });
+            $vals = (array) $request->input($reqKey, []);
+            $vals = array_values(array_filter(array_map('trim', $vals), fn($s) => $s !== ''));
+            if (empty($vals)) continue;
+            $q->whereIn($col, $vals);
         }
 
         // ── Free-text search across name/phone/address/all_user_input ──────
@@ -275,23 +274,23 @@ class MacroExportController extends Controller
      */
     private function loadDistinctValues(): array
     {
-        return cache()->remember('macro_export.distinct_v1', 300, function () {
-            $pages = DB::table('macro_output')
-                ->whereNotNull('PAGE')->where('PAGE', '!=', '')
-                ->distinct()->orderBy('PAGE')
-                ->pluck('PAGE')->all();
-
-            $items = DB::table('macro_output')
-                ->whereNotNull('ITEM_NAME')->where('ITEM_NAME', '!=', '')
-                ->distinct()->orderBy('ITEM_NAME')
-                ->pluck('ITEM_NAME')->all();
-
-            $statuses = DB::table('macro_output')
-                ->whereNotNull('STATUS')->where('STATUS', '!=', '')
-                ->distinct()->orderBy('STATUS')
-                ->pluck('STATUS')->all();
-
-            return compact('pages', 'items', 'statuses');
+        // Cached 15 min — these are heavy queries on a big table, but the
+        // distinct value sets change slowly.
+        return cache()->remember('macro_export.distinct_v2', 900, function () {
+            $distinctOf = function (string $col) {
+                return DB::table('macro_output')
+                    ->whereNotNull($col)->where($col, '!=', '')
+                    ->distinct()->orderBy($col)
+                    ->pluck($col)->all();
+            };
+            return [
+                'pages'     => $distinctOf('PAGE'),
+                'items'     => $distinctOf('ITEM_NAME'),
+                'statuses'  => $distinctOf('STATUS'),
+                'provinces' => $distinctOf('PROVINCE'),
+                'cities'    => $distinctOf('CITY'),
+                'barangays' => $distinctOf('BARANGAY'),
+            ];
         });
     }
 }

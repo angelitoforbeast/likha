@@ -78,22 +78,50 @@
     </div>
 
     <div class="section">
-      <h3>Address — Independent (substring match · comma-separated for multi-value)</h3>
+      <h3>Address — Independent (multi-select dropdowns)</h3>
       <p class="text-xs text-gray-500 mb-2">
-        Bawat field nag-fi-filter independently. Halimbawa: kung Barangay lang may laman, walang req sa Province / City. Multi-value via comma.
+        Each field filters independently. Halimbawa: kung Barangay lang may laman, walang req sa Province / City.
+        Pwede mag-pili ng multiple values per field. Type sa search box pag malaki yung listahan.
       </p>
       <div class="field-grid">
         <div>
-          <label class="field-label">Province (contains)</label>
-          <input type="text" x-model="filters.province" placeholder="e.g. Tarlac, Pampanga">
+          <label class="field-label">Province <span class="text-gray-400" x-text="filters.provinces.length ? '('+filters.provinces.length+' selected)' : ''"></span></label>
+          <input type="text" class="multi-search" placeholder="🔍 search…" x-model="search.provinces">
+          <div class="multi-list">
+            <template x-for="p in visibleAddressList(distinctProvinces, search.provinces, filters.provinces)" :key="p">
+              <label><input type="checkbox" :value="p" x-model="filters.provinces"><span x-text="p"></span></label>
+            </template>
+            <div x-show="addressOverflow(distinctProvinces, search.provinces)"
+                 class="text-[10px] text-gray-400 italic px-2 py-1">
+              … showing first 500. Type to narrow down.
+            </div>
+          </div>
         </div>
         <div>
-          <label class="field-label">City (contains)</label>
-          <input type="text" x-model="filters.city" placeholder="e.g. Manila, Quezon">
+          <label class="field-label">City <span class="text-gray-400" x-text="filters.cities.length ? '('+filters.cities.length+' selected)' : ''"></span></label>
+          <input type="text" class="multi-search" placeholder="🔍 search…" x-model="search.cities">
+          <div class="multi-list">
+            <template x-for="p in visibleAddressList(distinctCities, search.cities, filters.cities)" :key="p">
+              <label><input type="checkbox" :value="p" x-model="filters.cities"><span x-text="p"></span></label>
+            </template>
+            <div x-show="addressOverflow(distinctCities, search.cities)"
+                 class="text-[10px] text-gray-400 italic px-2 py-1">
+              … showing first 500. Type to narrow down.
+            </div>
+          </div>
         </div>
         <div>
-          <label class="field-label">Barangay (contains)</label>
-          <input type="text" x-model="filters.barangay" placeholder="e.g. San Roque, Tondo">
+          <label class="field-label">Barangay <span class="text-gray-400" x-text="filters.barangays.length ? '('+filters.barangays.length+' selected)' : ''"></span></label>
+          <input type="text" class="multi-search" placeholder="🔍 search…" x-model="search.barangays">
+          <div class="multi-list">
+            <template x-for="p in visibleAddressList(distinctBarangays, search.barangays, filters.barangays)" :key="p">
+              <label><input type="checkbox" :value="p" x-model="filters.barangays"><span x-text="p"></span></label>
+            </template>
+            <div x-show="addressOverflow(distinctBarangays, search.barangays)"
+                 class="text-[10px] text-gray-400 italic px-2 py-1">
+              … showing first 500. Type to narrow down.
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -208,20 +236,23 @@
   <script>
   function macroExport() {
     return {
-      allColumns:       @json($allColumns),
-      distinctPages:    @json($distinctPages),
-      distinctItems:    @json($distinctItems),
-      distinctStatuses: @json($distinctStatuses),
+      allColumns:        @json($allColumns),
+      distinctPages:     @json($distinctPages),
+      distinctItems:     @json($distinctItems),
+      distinctStatuses:  @json($distinctStatuses),
+      distinctProvinces: @json($distinctProvinces),
+      distinctCities:    @json($distinctCities),
+      distinctBarangays: @json($distinctBarangays),
       editFlags: [
         'edited_full_name','edited_phone_number','edited_address',
         'edited_province','edited_city','edited_barangay',
         'edited_cod','edited_item_name',
       ],
-      search: { pages:'', items:'', statuses:'' },
+      search: { pages:'', items:'', statuses:'', provinces:'', cities:'', barangays:'' },
       filters: {
         start_date:'', end_date:'',
         pages:[], items:[], statuses:[],
-        province:'', city:'', barangay:'',
+        provinces:[], cities:[], barangays:[],
         search:'', cxd:'', waybill:'any',
         validate_1:'any', validate_2:'any', item_checker:'any',
         edited_full_name:'any', edited_phone_number:'any', edited_address:'any',
@@ -248,16 +279,41 @@
         ].filter(c => this.allColumns.includes(c));
       },
 
+      // For huge address lists (e.g. tens of thousands of barangays), only
+      // render up to 500 matching items + always-include the currently-checked
+      // ones so they don't disappear when the user types something else.
+      ADDRESS_RENDER_LIMIT: 500,
+      visibleAddressList(full, query, selected) {
+        const q = (query || '').toLowerCase().trim();
+        const filtered = q
+          ? full.filter(x => x && x.toLowerCase().includes(q))
+          : full;
+        if (filtered.length <= this.ADDRESS_RENDER_LIMIT) return filtered;
+        // Always include selected items even if they don't match the search.
+        const head = filtered.slice(0, this.ADDRESS_RENDER_LIMIT);
+        const headSet = new Set(head);
+        const extras = (selected || []).filter(s => !headSet.has(s));
+        return [...head, ...extras];
+      },
+      addressOverflow(full, query) {
+        const q = (query || '').toLowerCase().trim();
+        const matchedCount = q ? full.filter(x => x && x.toLowerCase().includes(q)).length : full.length;
+        return matchedCount > this.ADDRESS_RENDER_LIMIT;
+      },
+
       // Build a FormData with all current filter values for POST.
       buildPayload() {
         const fd = new FormData();
         fd.append('_token', '{{ csrf_token() }}');
         if (this.filters.start_date) fd.append('start_date', this.filters.start_date);
         if (this.filters.end_date)   fd.append('end_date',   this.filters.end_date);
-        this.filters.pages.forEach(v    => fd.append('pages[]', v));
-        this.filters.items.forEach(v    => fd.append('items[]', v));
-        this.filters.statuses.forEach(v => fd.append('statuses[]', v));
-        ['province','city','barangay','search','cxd','waybill'].forEach(k => {
+        this.filters.pages.forEach(v     => fd.append('pages[]',     v));
+        this.filters.items.forEach(v     => fd.append('items[]',     v));
+        this.filters.statuses.forEach(v  => fd.append('statuses[]',  v));
+        this.filters.provinces.forEach(v => fd.append('provinces[]', v));
+        this.filters.cities.forEach(v    => fd.append('cities[]',    v));
+        this.filters.barangays.forEach(v => fd.append('barangays[]', v));
+        ['search','cxd','waybill'].forEach(k => {
           if (this.filters[k] !== '' && this.filters[k] !== 'any') fd.append(k, this.filters[k]);
           else if (k === 'waybill') fd.append(k, 'any');
         });
