@@ -483,10 +483,11 @@ class AdsManagerCampaignsController extends Controller
             'Content-Disposition' => "attachment; filename=\"$filename\""
         ];
 
-        // Compute "days ago" from a date string (YYYY-MM-DD) using PH timezone
-        // for consistent reference vs the in-table label.
-        $daysAgo = function ($s) {
-            if (empty($s)) return '';
+        // Compute "days ago" from a date string (YYYY-MM-DD) using PH timezone.
+        // Returns blank if the entity is OFF — matches the in-table behavior
+        // where "Days ago" only shows for currently Active entities.
+        $daysAgo = function ($s, $isOn) {
+            if (empty($s) || !$isOn) return '';
             try {
                 $d = new \DateTime(substr((string)$s, 0, 10) . ' 00:00:00', new \DateTimeZone('Asia/Manila'));
                 $today = new \DateTime('now', new \DateTimeZone('Asia/Manila'));
@@ -505,7 +506,7 @@ class AdsManagerCampaignsController extends Controller
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
-                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null), $r['latest_started'] ?? '',
+                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null, !empty($r['on'])), $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $r['messages'], $r['purchases']
                     ]);
@@ -515,7 +516,7 @@ class AdsManagerCampaignsController extends Controller
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
-                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null), $r['latest_started'] ?? '',
+                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null, !empty($r['on'])), $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $r['messages'], $r['purchases']
                     ]);
@@ -525,7 +526,7 @@ class AdsManagerCampaignsController extends Controller
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         ($r['headline'] ?? 'Ad '.$r['ad_id']), $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
-                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null), $r['latest_started'] ?? '',
+                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null, !empty($r['on'])), $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $r['messages'], $r['purchases']
                     ]);

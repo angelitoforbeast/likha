@@ -178,12 +178,14 @@
                     </template>
                   </td>
 
-                  <!-- Days ago — derived from first_started -->
+                  <!-- Days ago — only show kapag currently Active. Pag OFF, "—".
+                       Reason: "Days ago" implies "running for X days" — misleading
+                       sa OFF entities na hindi tumatakbo. -->
                   <td class="px-4 py-3 whitespace-nowrap text-gray-700">
-                    <template x-if="row.first_started">
+                    <template x-if="row.first_started && row.on">
                       <span x-text="daysAgo(row.first_started)"></span>
                     </template>
-                    <template x-if="!row.first_started">
+                    <template x-if="!row.first_started || !row.on">
                       <span class="text-gray-400">—</span>
                     </template>
                   </td>
