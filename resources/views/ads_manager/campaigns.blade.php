@@ -102,6 +102,12 @@
                   <span x-show="tab==='adsets'">Ad set</span>
                   <span x-show="tab==='ads'">Ad</span>
                 </th>
+                <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('first_started')">
+                  <div class="inline-flex items-center gap-1">First launched <span x-show="sortBy==='first_started'">▼</span></div>
+                </th>
+                <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('latest_started')">
+                  <div class="inline-flex items-center gap-1">Latest start <span x-show="sortBy==='latest_started'">▼</span></div>
+                </th>
                 <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('spend')">
                   <div class="inline-flex items-center gap-1">Amount spent <span x-show="sortBy==='spend'">▼</span></div>
                 </th>
@@ -159,6 +165,32 @@
                     <div class="text-[11px] text-gray-500" x-text="row.page_name"></div>
                   </td>
 
+                  <!-- First launched -->
+                  <td class="px-4 py-3 whitespace-nowrap">
+                    <template x-if="row.first_started">
+                      <div>
+                        <div class="font-medium" x-text="fmtDate(row.first_started)"></div>
+                        <div class="text-[11px] text-gray-500" x-text="daysAgo(row.first_started)"></div>
+                      </div>
+                    </template>
+                    <template x-if="!row.first_started">
+                      <span class="text-gray-400">—</span>
+                    </template>
+                  </td>
+
+                  <!-- Latest start -->
+                  <td class="px-4 py-3 whitespace-nowrap">
+                    <template x-if="row.latest_started">
+                      <div>
+                        <div class="font-medium" x-text="fmtDate(row.latest_started)"></div>
+                        <div class="text-[11px] text-gray-500" x-text="daysAgo(row.latest_started)"></div>
+                      </div>
+                    </template>
+                    <template x-if="!row.latest_started">
+                      <span class="text-gray-400">—</span>
+                    </template>
+                  </td>
+
                   <!-- Spend -->
                   <td class="px-4 py-3" x-text="money(row.spend)"></td>
 
@@ -188,6 +220,8 @@
                 <td class="px-4 py-3 text-gray-600">
                   <span x-text="`Results from ${rows.length} ${tabLabel()}`"></span>
                 </td>
+                <td class="px-4 py-3"></td><!-- First launched -->
+                <td class="px-4 py-3"></td><!-- Latest start -->
                 <td class="px-4 py-3 font-medium" x-text="money(totals.spend ?? 0)"></td>
                 <td class="px-4 py-3" x-text="totals.cpm_1000 != null ? money(totals.cpm_1000) : '—'"></td>
                 <td class="px-4 py-3" x-text="totals.cpm_msg  != null ? money(totals.cpm_msg)  : '—'"></td>
@@ -256,6 +290,30 @@
         money(v){ return `₱${Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})}`; },
         num(v){ return Number(v||0).toLocaleString('en-PH'); },
         ymd(d){ const p=n=>String(n).padStart(2,'0'); return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); },
+
+        // ── Started-date display helpers ─────────────────────────────────
+        // fmtDate('2026-04-23') → 'Apr 23, 2026'
+        fmtDate(s){
+          if (!s) return '';
+          // s may be 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS' — parse safely.
+          const d = new Date((s+'').slice(0,10) + 'T00:00:00');
+          if (isNaN(d.getTime())) return s;
+          return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+        },
+        // daysAgo('2026-04-23') → '3d ago' / 'today' / 'in 5d' (future = scheduled)
+        daysAgo(s){
+          if (!s) return '';
+          const d = new Date((s+'').slice(0,10) + 'T00:00:00');
+          if (isNaN(d.getTime())) return '';
+          const ph = new Date(new Date().toLocaleString('en-US', {timeZone: 'Asia/Manila'}));
+          const phMid = new Date(ph.getFullYear(), ph.getMonth(), ph.getDate());
+          const diffDays = Math.round((phMid - d) / 86400000);
+          if (diffDays === 0)  return 'today';
+          if (diffDays === 1)  return '1d ago';
+          if (diffDays > 1)    return diffDays + 'd ago';
+          if (diffDays === -1) return 'tomorrow';
+          return 'in ' + Math.abs(diffDays) + 'd';
+        },
         monthName(i){ return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i]; },
         setDateLabel(){
           if (!this.filters.start_date || !this.filters.end_date) { this.dateLabel = 'Select dates'; return; }

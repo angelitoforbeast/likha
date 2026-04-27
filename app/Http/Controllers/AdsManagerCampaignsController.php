@@ -77,6 +77,43 @@ class AdsManagerCampaignsController extends Controller
             ")
             ->groupBy('a.campaign_id');
 
+        // ──────────────────────────────────────────────────────────────────
+        // STARTED DATES (GLOBAL, NOT FILTERED BY DATE RANGE)
+        // For each campaign / ad_set / ad we expose two dates:
+        //   first_started  = MIN(DATE(starts))  — earliest scheduled launch
+        //                    fallback MIN(day)  if `starts` is NULL throughout
+        //   latest_started = MAX(DATE(starts))  — most recent launch (handles
+        //                    relaunches, also reflects newest adset/ad inside
+        //                    a campaign/adset when there are multiple).
+        // GLOBAL so the user filtering to a narrow date range still sees the
+        // true first/latest launch dates.
+        // ──────────────────────────────────────────────────────────────────
+        $datePart = $driver === 'pgsql' ? 'DATE(starts)' : 'DATE(`starts`)';
+
+        $campaignStartedDates = DB::table('ads_manager_reports')
+            ->selectRaw("
+                campaign_id,
+                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started,
+                COALESCE(MAX($datePart), MAX($dayExpr)) AS latest_started
+            ")
+            ->groupBy('campaign_id');
+
+        $adSetStartedDates = DB::table('ads_manager_reports')
+            ->selectRaw("
+                ad_set_id,
+                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started,
+                COALESCE(MAX($datePart), MAX($dayExpr)) AS latest_started
+            ")
+            ->groupBy('ad_set_id');
+
+        $adStartedDates = DB::table('ads_manager_reports')
+            ->selectRaw("
+                ad_id,
+                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started,
+                COALESCE(MAX($datePart), MAX($dayExpr)) AS latest_started
+            ")
+            ->groupBy('ad_id');
+
         // Latest day per ad set
         $latestAdSetDay = DB::table('ads_manager_reports')
             ->selectRaw("ad_set_id, MAX($dayExpr) AS latest_day")
@@ -136,6 +173,9 @@ class AdsManagerCampaignsController extends Controller
                 ->leftJoinSub($campaignLatestStatus, 'ls', function ($j) {
                     $j->on('ads_manager_reports.campaign_id', '=', 'ls.campaign_id');
                 })
+                ->leftJoinSub($campaignStartedDates, 'sd', function ($j) {
+                    $j->on('ads_manager_reports.campaign_id', '=', 'sd.campaign_id');
+                })
                 ->selectRaw('
                     ads_manager_reports.campaign_id,
                     MAX(campaign_name) AS campaign_name,
@@ -152,11 +192,13 @@ class AdsManagerCampaignsController extends Controller
                     CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
                     CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
-                    COALESCE(MAX(ls.is_on_latest), 0) AS is_on
+                    COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
+                    MAX(sd.first_started)  AS first_started,
+                    MAX(sd.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.campaign_id');
 
-            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','campaign_name','page_name'];
+            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','campaign_name','page_name','first_started','latest_started'];
 
             if ($sortBy === 'default') {
                 $rows = $query->orderByDesc('is_on')
@@ -176,6 +218,9 @@ class AdsManagerCampaignsController extends Controller
                     'campaign_name'   => $r->campaign_name,
                     'page_name'       => $r->page_name,
                     'on'              => (bool) ($r->is_on ?? 0),
+
+                    'first_started'   => $r->first_started  ?? null,
+                    'latest_started'  => $r->latest_started ?? null,
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -199,6 +244,9 @@ class AdsManagerCampaignsController extends Controller
                 ->leftJoinSub($adSetLatestStatus, 'ls', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
                 })
+                ->leftJoinSub($adSetStartedDates, 'sd', function ($j) {
+                    $j->on('ads_manager_reports.ad_set_id', '=', 'sd.ad_set_id');
+                })
                 ->selectRaw('
                     ads_manager_reports.ad_set_id,
                     MAX(ad_set_name)   AS ad_set_name,
@@ -217,11 +265,13 @@ class AdsManagerCampaignsController extends Controller
                     CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
                     CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
-                    COALESCE(MAX(ls.is_on_latest), 0) AS is_on
+                    COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
+                    MAX(sd.first_started)  AS first_started,
+                    MAX(sd.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.ad_set_id');
 
-            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','ad_set_name','campaign_name','page_name'];
+            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','ad_set_name','campaign_name','page_name','first_started','latest_started'];
 
             if ($sortBy === 'default') {
                 $rows = $query->orderByDesc('is_on')
@@ -243,6 +293,9 @@ class AdsManagerCampaignsController extends Controller
                     'ad_set_name'     => $r->ad_set_name,
                     'page_name'       => $r->page_name,
                     'on'              => (bool) ($r->is_on ?? 0),
+
+                    'first_started'   => $r->first_started  ?? null,
+                    'latest_started'  => $r->latest_started ?? null,
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -267,6 +320,9 @@ class AdsManagerCampaignsController extends Controller
                 ->leftJoinSub($adSetLatestStatus, 'ls', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
                 })
+                ->leftJoinSub($adStartedDates, 'sd', function ($j) {
+                    $j->on('ads_manager_reports.ad_id', '=', 'sd.ad_id');
+                })
                 ->selectRaw('
                     ads_manager_reports.ad_id,
                     MAX(headline)      AS headline,
@@ -288,11 +344,13 @@ class AdsManagerCampaignsController extends Controller
                     CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
                     CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
 
-                    COALESCE(MAX(ls.is_on_latest), 0) AS is_on
+                    COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
+                    MAX(sd.first_started)  AS first_started,
+                    MAX(sd.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.ad_id');
 
-            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','headline','item_name'];
+            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','headline','item_name','first_started','latest_started'];
 
             if ($sortBy === 'default') {
                 $rows = $query->orderByDesc('is_on')
@@ -317,6 +375,9 @@ class AdsManagerCampaignsController extends Controller
                     'item_name'       => $r->item_name,
                     'page_name'       => $r->page_name,
                     'on'              => (bool) ($r->is_on ?? 0),
+
+                    'first_started'   => $r->first_started  ?? null,
+                    'latest_started'  => $r->latest_started ?? null,
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -378,28 +439,31 @@ class AdsManagerCampaignsController extends Controller
             fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
 
             if ($level === 'campaigns') {
-                fputcsv($out, ['Campaign','Page','Active','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Campaign','Page','Active','First Launched','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
+                        $r['first_started'] ?? '', $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $r['messages'], $r['purchases']
                     ]);
                 }
             } elseif ($level === 'adsets') {
-                fputcsv($out, ['Ad set','Campaign','Page','Active','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Ad set','Campaign','Page','Active','First Launched','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
+                        $r['first_started'] ?? '', $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $r['messages'], $r['purchases']
                     ]);
                 }
             } else {
-                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         ($r['headline'] ?? 'Ad '.$r['ad_id']), $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
+                        $r['first_started'] ?? '', $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $r['messages'], $r['purchases']
                     ]);
