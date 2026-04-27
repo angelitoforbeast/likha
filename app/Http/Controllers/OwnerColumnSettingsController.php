@@ -127,13 +127,15 @@ class OwnerColumnSettingsController extends Controller
     {
         $this->checkAccess();
 
+        $cf = $this->loadColFormat();   // ['groups'=>[...], 'byCol'=>[...]]
         return view('owner.column_settings', [
             'catalog'          => self::CATALOG,
             'defaultVisible'   => self::DEFAULT_VISIBLE,
             'savedOwnerPrivate'=> $this->loadConfig('owner_private'),
             'savedCampaigns'   => $this->loadConfig('campaigns'),
             'breakevenTargetPct' => $this->loadBreakevenTargetPct(),
-            'colFormat'        => $this->loadColFormat(),
+            // Editor uses the groups shape (shared rules across columns).
+            'colFormatGroups'  => $cf['groups'] ?? [],
         ]);
     }
 
@@ -145,40 +147,96 @@ class OwnerColumnSettingsController extends Controller
         return 5.0;
     }
 
-    /** Per-column conditional formatting rules. Always returns a map. */
+    /**
+     * Conditional formatting groups. Each group has:
+     *   - cols:  string[]   — columns that share these rules
+     *   - rules: array of   — { op, value, bg, bold, label }
+     *
+     * Returns shape:
+     *   {
+     *     "groups": [ { "cols":[...], "rules":[...] }, ... ],
+     *     "byCol":  { "<col_id>": [ rule, ... ], ... }   ← flattened for the view
+     *   }
+     *
+     * Backwards compat: if storage is in the old `{col_id: [rules]}` shape,
+     * we convert each col into its own group on load (no schema upgrade
+     * required — first save in the new UI persists the new shape).
+     */
     public function loadColFormat(): array
     {
+        $empty = ['groups' => [], 'byCol' => []];
         $row = DB::table('app_settings')->where('key', self::KEY_COL_FORMAT)->first(['value']);
-        if (!$row || !$row->value) return [];
+        if (!$row || !$row->value) return $empty;
         $decoded = json_decode($row->value, true);
-        if (!is_array($decoded)) return [];
+        if (!is_array($decoded)) return $empty;
 
         $allowedIds = array_column(self::CATALOG['owner_private'], 'id');
         $allowedSet = array_flip($allowedIds);
         $allowedOps = ['>', '>=', '=', '<=', '<'];
-        $out = [];
-        foreach ($decoded as $colId => $rules) {
-            if (!is_string($colId) || !isset($allowedSet[$colId]) || !is_array($rules)) continue;
-            $clean = [];
-            foreach ($rules as $r) {
-                if (!is_array($r)) continue;
-                $op = (string) ($r['op'] ?? '');
-                if (!in_array($op, $allowedOps, true)) continue;
-                if (!is_numeric($r['value'] ?? null)) continue;
-                $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
-                if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
-                $clean[] = [
-                    'op'    => $op,
-                    'value' => (float) $r['value'],
-                    'bg'    => strtolower($bg),
-                    'bold'  => !empty($r['bold']),
-                    'label' => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
-                ];
-                if (count($clean) >= 10) break;
+
+        $cleanRule = function ($r) use ($allowedOps) {
+            if (!is_array($r)) return null;
+            $op = (string) ($r['op'] ?? '');
+            if (!in_array($op, $allowedOps, true)) return null;
+            if (!is_numeric($r['value'] ?? null)) return null;
+            $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
+            if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
+            return [
+                'op'    => $op,
+                'value' => (float) $r['value'],
+                'bg'    => strtolower($bg),
+                'bold'  => !empty($r['bold']),
+                'label' => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
+            ];
+        };
+
+        // Detect new (groups) vs legacy (byCol map) shape.
+        $groups = [];
+        if (isset($decoded['groups']) && is_array($decoded['groups'])) {
+            foreach ($decoded['groups'] as $g) {
+                if (!is_array($g)) continue;
+                $cols = [];
+                foreach ((array)($g['cols'] ?? []) as $c) {
+                    if (is_string($c) && isset($allowedSet[$c]) && !in_array($c, $cols, true)) $cols[] = $c;
+                }
+                $rules = [];
+                foreach ((array)($g['rules'] ?? []) as $r) {
+                    $cr = $cleanRule($r);
+                    if ($cr) $rules[] = $cr;
+                    if (count($rules) >= 20) break;
+                }
+                if (!empty($cols) && !empty($rules)) {
+                    $groups[] = ['cols' => $cols, 'rules' => $rules];
+                }
+                if (count($groups) >= 30) break;
             }
-            if (!empty($clean)) $out[$colId] = $clean;
+        } else {
+            // Legacy {col_id: [rules]} → one group per column.
+            foreach ($decoded as $colId => $rules) {
+                if (!is_string($colId) || !isset($allowedSet[$colId]) || !is_array($rules)) continue;
+                $clean = [];
+                foreach ($rules as $r) {
+                    $cr = $cleanRule($r);
+                    if ($cr) $clean[] = $cr;
+                    if (count($clean) >= 20) break;
+                }
+                if (!empty($clean)) {
+                    $groups[] = ['cols' => [$colId], 'rules' => $clean];
+                }
+            }
         }
-        return $out;
+
+        // Build flat byCol view (one column may legitimately appear in many
+        // groups — we concatenate so the view evaluates them in group order).
+        $byCol = [];
+        foreach ($groups as $g) {
+            foreach ($g['cols'] as $c) {
+                if (!isset($byCol[$c])) $byCol[$c] = [];
+                foreach ($g['rules'] as $r) $byCol[$c][] = $r;
+            }
+        }
+
+        return ['groups' => $groups, 'byCol' => $byCol];
     }
 
     /** POST /owner/column-settings/breakeven-pct — single number 0..100. */
@@ -196,48 +254,71 @@ class OwnerColumnSettingsController extends Controller
         return response()->json(['ok' => true, 'value' => $val]);
     }
 
-    /** POST /owner/column-settings/col-format — replaces the full map. */
+    /**
+     * POST /owner/column-settings/col-format — replaces the full groups list.
+     * Body: { groups: [ { cols:[...], rules:[...] }, ... ] }
+     * Stored shape: { "groups": [...] } (no byCol persisted — derived on read).
+     */
     public function saveColFormat(Request $request)
     {
         $this->checkAccess();
-        $rules = $request->input('rules');
-        if (is_string($rules)) {
-            $decoded = json_decode($rules, true);
-            $rules = is_array($decoded) ? $decoded : null;
+        $payload = $request->input('groups');
+        if (is_string($payload)) {
+            $decoded = json_decode($payload, true);
+            $payload = is_array($decoded) ? $decoded : null;
         }
-        if (!is_array($rules)) return response()->json(['ok' => false, 'error' => 'Invalid rules'], 422);
+        if (!is_array($payload)) return response()->json(['ok' => false, 'error' => 'Invalid payload'], 422);
 
         $allowedIds = array_column(self::CATALOG['owner_private'], 'id');
         $allowedSet = array_flip($allowedIds);
         $allowedOps = ['>', '>=', '=', '<=', '<'];
-        $clean = [];
-        foreach ($rules as $colId => $list) {
-            if (!is_string($colId) || !isset($allowedSet[$colId]) || !is_array($list)) continue;
-            $colClean = [];
-            foreach ($list as $r) {
+
+        $groups = [];
+        foreach ($payload as $g) {
+            if (!is_array($g)) continue;
+            $cols = [];
+            foreach ((array)($g['cols'] ?? []) as $c) {
+                if (is_string($c) && isset($allowedSet[$c]) && !in_array($c, $cols, true)) $cols[] = $c;
+            }
+            $rules = [];
+            foreach ((array)($g['rules'] ?? []) as $r) {
                 if (!is_array($r)) continue;
                 $op = (string) ($r['op'] ?? '');
                 if (!in_array($op, $allowedOps, true)) continue;
                 if (!is_numeric($r['value'] ?? null)) continue;
                 $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
                 if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
-                $colClean[] = [
+                $rules[] = [
                     'op'    => $op,
                     'value' => (float) $r['value'],
                     'bg'    => strtolower($bg),
                     'bold'  => !empty($r['bold']),
                     'label' => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
                 ];
-                if (count($colClean) >= 10) break;
+                if (count($rules) >= 20) break;
             }
-            if (!empty($colClean)) $clean[$colId] = $colClean;
+            if (!empty($cols) && !empty($rules)) {
+                $groups[] = ['cols' => $cols, 'rules' => $rules];
+            }
+            if (count($groups) >= 30) break;
         }
 
         DB::table('app_settings')->updateOrInsert(
             ['key' => self::KEY_COL_FORMAT],
-            ['value' => json_encode($clean, JSON_UNESCAPED_SLASHES), 'updated_at' => now(), 'created_at' => now()]
+            ['value' => json_encode(['groups' => $groups], JSON_UNESCAPED_SLASHES),
+             'updated_at' => now(), 'created_at' => now()]
         );
-        return response()->json(['ok' => true, 'rules' => $clean]);
+
+        // Return groups + flattened byCol so the client can refresh its state
+        // without a full reload.
+        $byCol = [];
+        foreach ($groups as $g) {
+            foreach ($g['cols'] as $c) {
+                if (!isset($byCol[$c])) $byCol[$c] = [];
+                foreach ($g['rules'] as $r) $byCol[$c][] = $r;
+            }
+        }
+        return response()->json(['ok' => true, 'groups' => $groups, 'byCol' => $byCol]);
     }
 
     /**

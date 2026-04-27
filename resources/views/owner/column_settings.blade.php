@@ -31,6 +31,10 @@
     .target-chip:not(.active) .chip-count { background:#e2e8f0; }
     .builder-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:10px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; margin-top:8px; }
     .builder-row label.text-xs { font-weight:600; color:#475569; }
+    /* Rule group cards (shared rules across N columns). */
+    .rule-group { background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:10px 12px; margin-top:10px; }
+    .rule-group-header { display:flex; align-items:center; justify-content:space-between; padding-bottom:6px; border-bottom:1px solid #e2e8f0; }
+    .rule-group-section { margin-top:8px; }
     .toast.show { display:block; }
   </style>
 
@@ -65,30 +69,20 @@
       </div>
     </div>
 
-    {{-- ─── Conditional Formatting ─────────────────────────────────────── --}}
-    <div class="col-section" x-data="colFormatEditor(@js($colFormat ?? new \stdClass()))">
+    {{-- ─── Conditional Formatting (rule groups) ──────────────────────── --}}
+    <div class="col-section" x-data="colFormatEditor(@js($colFormatGroups ?? []))">
       <div class="flex items-baseline justify-between mb-1">
-        <h3>🎨 Conditional Formatting (per column)</h3>
+        <h3>🎨 Conditional Formatting</h3>
         <span class="text-[10px] text-slate-400">app_settings · owner_private_col_format</span>
       </div>
       <p class="note">
-        Per-column rules. <b>First match wins</b> (top-to-bottom). Operator (<code>≥ &gt; = ≤ &lt;</code>) +
-        threshold value + background color + optional bold + label.
-        <br><b>Bulk creation:</b> i-tick mo isa o higit pang columns sa baba, fill in the draft rule, then "+ Add rule"
-        — pareho silang makakakuha ng kopya. Each column may sariling rules pagkatapos.
+        <b>Rule groups</b> — each group has a list of columns it applies to + a list of rules.
+        Edit a rule once → automatically applies sa <b>lahat</b> ng columns na kasali sa group.
+        Walang need i-duplicate. Within a group, rules are evaluated <b>top-to-bottom · first match wins</b>.
       </p>
 
-      {{-- ── Existing rules: per-active-column editor ────────────────────── --}}
-      <div class="flex items-center gap-2 mb-2 mt-3">
-        <label class="text-xs font-semibold text-slate-600">Manage rules for:</label>
-        <select x-model="activeCol" class="border border-slate-300 rounded px-2 py-1 text-sm">
-          <template x-for="c in @js($catalog['owner_private'] ?? [])" :key="c.id">
-            <option :value="c.id" x-text="c.label + (rulesFor(c.id).length ? ' (' + rulesFor(c.id).length + ')' : '')"></option>
-          </template>
-        </select>
-        <button class="reset-btn" @click="copyOpen = !copyOpen"
-                :title="'Copy this column\'s rules to other columns'"
-                x-show="rulesFor(activeCol).length > 0">📋 Copy rules to…</button>
+      <div class="flex items-center gap-2 mt-3">
+        <button class="reset-btn" @click="addGroup()">+ New rule group</button>
         <div class="flex-1"></div>
         <button class="save-btn" :disabled="saving" @click="save()">
           <span x-show="!saving">💾 Save formatting</span>
@@ -96,122 +90,94 @@
         </button>
       </div>
 
-      {{-- Copy-to-other-cols panel (expandable) --}}
-      <div x-show="copyOpen" class="builder-row" style="margin-top:0;margin-bottom:8px;background:#fffbeb;border-color:#fde68a;">
-        <label class="text-xs">📋 Copy <b><span x-text="rulesFor(activeCol).length"></span></b> rule(s) of <b><span x-text="labelFor(activeCol)"></span></b> to:</label>
-        <div class="target-chip-row" style="flex:1 1 100%;">
-          <template x-for="c in @js($catalog['owner_private'] ?? [])" :key="'copy-'+c.id">
-            <span :class="'target-chip ' + (copyTargets.has(c.id) ? 'active' : '')"
-                  @click="toggleCopyTarget(c.id)"
-                  x-show="c.id !== activeCol"
-                  x-text="c.label"></span>
-          </template>
-        </div>
-        <div style="display:flex;gap:6px;flex:1 1 100%;">
-          <button class="reset-btn" @click="copyTargets = new Set()">Clear</button>
-          <div class="flex-1"></div>
-          <button class="save-btn" :disabled="copyTargets.size === 0"
-                  @click="executeCopyToTargets(); copyOpen = false;">Copy to <span x-text="copyTargets.size"></span> column(s)</button>
-        </div>
-      </div>
-
-      {{-- Rules table for active column --}}
-      <div class="col-list" x-show="rulesFor(activeCol).length > 0">
-        <template x-for="(r, idx) in rulesFor(activeCol)" :key="activeCol+'-'+idx">
-          <div class="col-item" style="cursor:default;">
-            <span class="col-handle"
-                  draggable="true"
-                  @dragstart="ruleDragStart(idx, $event)"
-                  @dragover.prevent
-                  @drop="ruleDrop(idx)">⋮⋮</span>
-            <span class="text-xs text-slate-500" style="min-width:30px;">if &nbsp;value</span>
-            <select x-model="r.op" class="border border-slate-300 rounded px-1 py-0.5 text-xs">
-              <option value=">=">≥</option>
-              <option value=">">&gt;</option>
-              <option value="=">=</option>
-              <option value="<=">≤</option>
-              <option value="<">&lt;</option>
-            </select>
-            <input type="number" step="0.01" x-model.number="r.value"
-                   class="border border-slate-300 rounded px-2 py-0.5 text-xs w-24 text-right">
-            <span class="text-xs text-slate-500">→ bg</span>
-            <input type="color" x-model="r.bg" class="w-12 h-7 cursor-pointer border rounded">
-            <input type="text" x-model="r.bg" maxlength="7"
-                   class="border border-slate-300 rounded px-1 py-0.5 text-xs w-20 font-mono">
-            <label class="text-xs flex items-center gap-1">
-              <input type="checkbox" x-model="r.bold"> bold
-            </label>
-            <input type="text" x-model="r.label" placeholder="label (optional)"
-                   class="flex-1 border border-slate-300 rounded px-2 py-0.5 text-xs"
-                   maxlength="40">
-            <span class="px-2 py-0.5 text-xs rounded"
-                  :style="'background:'+r.bg+';color:'+previewTextColor(r.bg)+';'+(r.bold?'font-weight:700;':'')"
-                  x-text="(r.value ?? 0)"></span>
-            <button class="text-red-600 hover:text-red-800 text-sm"
-                    @click="removeRule(activeCol, idx)" title="Remove rule">✕</button>
-          </div>
-        </template>
-      </div>
-      <div x-show="rulesFor(activeCol).length === 0"
-           class="text-xs text-slate-400 italic px-3 py-4 text-center"
+      {{-- Empty state --}}
+      <div x-show="groups.length === 0"
+           class="text-xs text-slate-400 italic px-3 py-6 text-center mt-3"
            style="border:1px dashed #cbd5e1;border-radius:6px;">
-        Walang rules pa para sa column na ito. Use the bulk builder below to add rules.
+        Walang rule groups pa. Click <b>"+ New rule group"</b> para magsimula.
       </div>
 
-      {{-- ── BULK RULE BUILDER ──────────────────────────────────────────── --}}
-      <div style="margin-top:14px;padding-top:12px;border-top:1px dashed #cbd5e1;">
-        <div class="text-xs font-semibold text-slate-700" style="margin-bottom:6px;">
-          ➕ Bulk Add Rule — applies to <span x-text="targetCols.size"></span> selected column(s)
-        </div>
+      {{-- ── Rule groups list ─────────────────────────────────────────── --}}
+      <template x-for="(g, gIdx) in groups" :key="'g-'+gIdx">
+        <div class="rule-group">
+          <div class="rule-group-header">
+            <div class="text-xs font-semibold text-slate-700">
+              📑 Group #<span x-text="gIdx + 1"></span>
+              <span class="text-slate-500 font-normal" x-show="g.rules.length > 0">·
+                <span x-text="g.rules.length"></span> rule(s) ·
+                applies to <span x-text="g.cols.length"></span> column(s)
+              </span>
+            </div>
+            <button class="text-red-600 hover:text-red-800 text-xs font-semibold"
+                    @click="if(confirm('Delete this group?')) removeGroup(gIdx)">× Delete group</button>
+          </div>
 
-        {{-- Target columns multi-select chips --}}
-        <div class="target-chip-row">
-          <span class="target-chip" :class="allTargetsActive() ? 'active' : ''"
-                @click="allTargetsActive() ? clearTargets() : selectAllTargets()"
-                title="Toggle all"
-                x-text="allTargetsActive() ? '✓ All columns selected' : '☐ Select all'"></span>
-          <template x-for="c in @js($catalog['owner_private'] ?? [])" :key="'t-'+c.id">
-            <span :class="'target-chip ' + (targetCols.has(c.id) ? 'active' : '')"
-                  @click="toggleTargetCol(c.id)">
-              <span x-text="c.label"></span>
-              <span class="chip-count" x-show="rulesFor(c.id).length > 0" x-text="rulesFor(c.id).length"></span>
-            </span>
-          </template>
-        </div>
+          {{-- Columns this group applies to --}}
+          <div class="rule-group-section">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
+              Apply to columns (click to toggle)
+            </div>
+            <div class="target-chip-row">
+              <template x-for="c in @js($catalog['owner_private'] ?? [])" :key="'g-'+gIdx+'-c-'+c.id">
+                <span :class="'target-chip ' + (g.cols.includes(c.id) ? 'active' : '')"
+                      @click="toggleGroupCol(gIdx, c.id)"
+                      x-text="c.label"></span>
+              </template>
+            </div>
+          </div>
 
-        {{-- Draft rule form --}}
-        <div class="builder-row">
-          <label class="text-xs">if value</label>
-          <select x-model="draftRule.op" class="border border-slate-300 rounded px-1 py-1 text-xs">
-            <option value=">=">≥</option>
-            <option value=">">&gt;</option>
-            <option value="=">=</option>
-            <option value="<=">≤</option>
-            <option value="<">&lt;</option>
-          </select>
-          <input type="number" step="0.01" x-model.number="draftRule.value"
-                 class="border border-slate-300 rounded px-2 py-1 text-xs w-24 text-right">
-          <label class="text-xs">→ bg</label>
-          <input type="color" x-model="draftRule.bg" class="w-12 h-7 cursor-pointer border rounded">
-          <input type="text" x-model="draftRule.bg" maxlength="7"
-                 class="border border-slate-300 rounded px-1 py-1 text-xs w-20 font-mono">
-          <label class="text-xs flex items-center gap-1">
-            <input type="checkbox" x-model="draftRule.bold"> bold
-          </label>
-          <input type="text" x-model="draftRule.label" placeholder="label (optional)"
-                 class="flex-1 border border-slate-300 rounded px-2 py-1 text-xs"
-                 maxlength="40">
-          <span class="px-2 py-0.5 text-xs rounded"
-                :style="'background:'+draftRule.bg+';color:'+previewTextColor(draftRule.bg)+';'+(draftRule.bold?'font-weight:700;':'')"
-                x-text="(draftRule.value ?? 0)"></span>
-          <button class="save-btn" style="padding:6px 14px;"
-                  :disabled="targetCols.size === 0"
-                  @click="addRuleToTargets()">+ Add rule</button>
+          {{-- Rules in this group --}}
+          <div class="rule-group-section">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
+              Rules (top-to-bottom · first match wins)
+            </div>
+            <div class="col-list" x-show="g.rules.length > 0">
+              <template x-for="(r, rIdx) in g.rules" :key="'g-'+gIdx+'-r-'+rIdx">
+                <div class="col-item" style="cursor:default;">
+                  <span class="col-handle"
+                        draggable="true"
+                        @dragstart="ruleDragStart(gIdx, rIdx, $event)"
+                        @dragover.prevent
+                        @drop="ruleDrop(gIdx, rIdx)">⋮⋮</span>
+                  <span class="text-xs text-slate-500" style="min-width:30px;">if &nbsp;value</span>
+                  <select x-model="r.op" class="border border-slate-300 rounded px-1 py-0.5 text-xs">
+                    <option value=">=">≥</option>
+                    <option value=">">&gt;</option>
+                    <option value="=">=</option>
+                    <option value="<=">≤</option>
+                    <option value="<">&lt;</option>
+                  </select>
+                  <input type="number" step="0.01" x-model.number="r.value"
+                         class="border border-slate-300 rounded px-2 py-0.5 text-xs w-24 text-right">
+                  <span class="text-xs text-slate-500">→ bg</span>
+                  <input type="color" x-model="r.bg" class="w-12 h-7 cursor-pointer border rounded">
+                  <input type="text" x-model="r.bg" maxlength="7"
+                         class="border border-slate-300 rounded px-1 py-0.5 text-xs w-20 font-mono">
+                  <label class="text-xs flex items-center gap-1">
+                    <input type="checkbox" x-model="r.bold"> bold
+                  </label>
+                  <input type="text" x-model="r.label" placeholder="label (optional)"
+                         class="flex-1 border border-slate-300 rounded px-2 py-0.5 text-xs"
+                         maxlength="40">
+                  <span class="px-2 py-0.5 text-xs rounded"
+                        :style="'background:'+r.bg+';color:'+previewTextColor(r.bg)+';'+(r.bold?'font-weight:700;':'')"
+                        x-text="(r.value ?? 0)"></span>
+                  <button class="text-red-600 hover:text-red-800 text-sm"
+                          @click="removeRule(gIdx, rIdx)" title="Remove rule">✕</button>
+                </div>
+              </template>
+            </div>
+            <div x-show="g.rules.length === 0"
+                 class="text-xs text-slate-400 italic px-3 py-3 text-center"
+                 style="border:1px dashed #cbd5e1;border-radius:6px;">
+              Walang rules pa sa group na ito.
+            </div>
+            <div class="mt-2">
+              <button class="reset-btn" @click="addRuleToGroup(gIdx)">+ Add rule to this group</button>
+            </div>
+          </div>
         </div>
-        <p class="text-[10px] text-slate-500 mt-1">
-          Tip: rule is duplicated — each target column gets its own copy. Edit/remove independently afterward.
-        </p>
-      </div>
+      </template>
     </div>
 
     {{-- ─── Section 1: /owner/private ──────────────────────────────────────── --}}
@@ -341,97 +307,56 @@
       };
     }
 
-    // Per-column conditional formatting editor.
-    // `initial` is a map: { col_id: [ {op,value,bg,bold,label}, ... ] }
-    function colFormatEditor(initial) {
-      // Catalog of valid column ids (kept in sync with PHP CATALOG['owner_private']).
+    // Rule-group based editor. State shape:
+    //   groups: [ { cols: ["tcpr","proj_pct"], rules: [ {op,value,bg,bold,label}, ... ] } ]
+    // A rule defined in a group applies to every column listed in that
+    // group's `cols` array — edit once → all linked columns update.
+    function colFormatEditor(initialGroups) {
       const CATALOG = @json($catalog['owner_private'] ?? []);
       const ID_TO_LABEL = Object.fromEntries(CATALOG.map(c => [c.id, c.label]));
+      // Deep-clone to avoid Alpine reactivity sharing on object props.
+      const cleanInitial = Array.isArray(initialGroups) ? JSON.parse(JSON.stringify(initialGroups)) : [];
       return {
-        rules: (typeof initial === 'object' && initial !== null && !Array.isArray(initial)) ? Object.assign({}, initial) : {},
-        activeCol: 'tcpr',
+        groups: cleanInitial,
         saving: false,
-        dragIdx: -1,
-        // Bulk builder state — which columns to apply the next rule to.
-        targetCols: new Set(['tcpr']),
-        // Draft rule fields (the next rule to be added to all targetCols).
-        draftRule: { op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '' },
-        // Copy panel state.
-        copyOpen: false,
-        copyTargets: new Set(),
+        dragSrc: null,   // { gIdx, rIdx }
 
         labelFor(id){ return ID_TO_LABEL[id] || id; },
-        rulesFor(colId) {
-          if (!this.rules[colId]) this.rules[colId] = [];
-          return this.rules[colId];
+
+        addGroup(){
+          this.groups.push({ cols: [], rules: [] });
         },
-        // Single-column legacy add (still used by future shortcuts; kept for safety).
-        addRule(colId) {
-          this.rulesFor(colId).push({ op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '' });
-          this.rules = Object.assign({}, this.rules);
+        removeGroup(gIdx){ this.groups.splice(gIdx, 1); },
+        toggleGroupCol(gIdx, colId){
+          const g = this.groups[gIdx];
+          if (!g) return;
+          const i = g.cols.indexOf(colId);
+          if (i >= 0) g.cols.splice(i, 1);
+          else g.cols.push(colId);
         },
-        // Toggle a target column for the bulk builder.
-        toggleTargetCol(id){
-          if (this.targetCols.has(id)) this.targetCols.delete(id);
-          else this.targetCols.add(id);
-          this.targetCols = new Set([...this.targetCols]);
+        addRuleToGroup(gIdx){
+          const g = this.groups[gIdx];
+          if (!g) return;
+          g.rules.push({ op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '' });
         },
-        selectAllTargets(){ this.targetCols = new Set(CATALOG.map(c => c.id)); },
-        clearTargets(){ this.targetCols = new Set(); },
-        allTargetsActive(){ return this.targetCols.size === CATALOG.length; },
-        // Push a deep-copy of the draft rule into every target column.
-        addRuleToTargets(){
-          if (this.targetCols.size === 0) return;
-          const draft = this.draftRule;
-          this.targetCols.forEach(colId => {
-            this.rulesFor(colId).push({
-              op:    draft.op,
-              value: Number(draft.value) || 0,
-              bg:    String(draft.bg || '#fee2e2'),
-              bold:  !!draft.bold,
-              label: String(draft.label || ''),
-            });
-          });
-          this.rules = Object.assign({}, this.rules);
-          // Reset draft for the next entry (keep target selection so user can
-          // add many rules to the same set quickly).
-          this.draftRule = { op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '' };
+        removeRule(gIdx, rIdx){
+          const g = this.groups[gIdx];
+          if (!g) return;
+          g.rules.splice(rIdx, 1);
         },
-        // Copy panel: toggle a target column.
-        toggleCopyTarget(id){
-          if (this.copyTargets.has(id)) this.copyTargets.delete(id);
-          else this.copyTargets.add(id);
-          this.copyTargets = new Set([...this.copyTargets]);
-        },
-        // Duplicate active column's rules into selected target columns.
-        // Each receives independent deep copies (no live linking).
-        executeCopyToTargets(){
-          if (this.copyTargets.size === 0) return;
-          const src = this.rulesFor(this.activeCol);
-          this.copyTargets.forEach(colId => {
-            const dst = this.rulesFor(colId);
-            src.forEach(r => dst.push({
-              op: r.op, value: r.value, bg: r.bg, bold: !!r.bold, label: r.label || ''
-            }));
-          });
-          this.rules = Object.assign({}, this.rules);
-          this.copyTargets = new Set();
-        },
-        removeRule(colId, idx) {
-          this.rulesFor(colId).splice(idx, 1);
-          this.rules = Object.assign({}, this.rules);
-        },
-        ruleDragStart(idx, ev) {
-          this.dragIdx = idx;
+        ruleDragStart(gIdx, rIdx, ev){
+          this.dragSrc = { gIdx, rIdx };
           ev.dataTransfer.effectAllowed = 'move';
         },
-        ruleDrop(targetIdx) {
-          if (this.dragIdx < 0 || this.dragIdx === targetIdx) return;
-          const list = this.rulesFor(this.activeCol);
-          const moved = list.splice(this.dragIdx, 1)[0];
-          list.splice(targetIdx, 0, moved);
-          this.dragIdx = -1;
-          this.rules = Object.assign({}, this.rules);
+        ruleDrop(gIdx, rIdx){
+          if (!this.dragSrc) return;
+          // Only allow reordering within the same group.
+          if (this.dragSrc.gIdx !== gIdx) { this.dragSrc = null; return; }
+          if (this.dragSrc.rIdx === rIdx) { this.dragSrc = null; return; }
+          const g = this.groups[gIdx];
+          const moved = g.rules.splice(this.dragSrc.rIdx, 1)[0];
+          g.rules.splice(rIdx, 0, moved);
+          this.dragSrc = null;
         },
         previewTextColor(hex) {
           const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
@@ -445,17 +370,27 @@
         async save() {
           this.saving = true;
           try {
-            // Drop empty arrays before serializing.
-            const clean = {};
-            Object.keys(this.rules).forEach(k => {
-              if (Array.isArray(this.rules[k]) && this.rules[k].length > 0) clean[k] = this.rules[k];
-            });
+            const clean = this.groups
+              .filter(g => Array.isArray(g.cols) && g.cols.length > 0
+                        && Array.isArray(g.rules) && g.rules.length > 0)
+              .map(g => ({
+                cols: [...new Set(g.cols)],
+                rules: g.rules.map(r => ({
+                  op:    r.op,
+                  value: Number(r.value) || 0,
+                  bg:    String(r.bg || '#fee2e2'),
+                  bold:  !!r.bold,
+                  label: String(r.label || ''),
+                })),
+              }));
             const fd = new FormData();
             fd.append('_token', COL_CSRF);
-            fd.append('rules', JSON.stringify(clean));
+            fd.append('groups', JSON.stringify(clean));
             const r = await fetch('{{ route('owner.column-settings.col-format') }}', { method: 'POST', body: fd });
             const j = await r.json();
             if (!j.ok) throw new Error(j.error || 'Save failed');
+            // Reflect server-cleaned groups back so the UI shows what's persisted.
+            this.groups = Array.isArray(j.groups) ? JSON.parse(JSON.stringify(j.groups)) : [];
             const t = document.getElementById('colsToast');
             t.textContent = '✓ Formatting saved';
             t.classList.add('show');
