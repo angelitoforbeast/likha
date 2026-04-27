@@ -22,14 +22,10 @@
       <b x-text="row.page_name"></b>
       <span style="margin:0 6px;color:#cbd5e1;">·</span>
       <span>
-        item filter: <b x-text="_stripQty(row.item_name)"></b>
-        <span class="text-[10px] text-slate-500" x-show="_stripQty(row.item_name) !== row.item_name"
-              x-text="' (from ' + row.item_name + ' — qty stripped to match ads data)'"></span>
-        ·
-        <span x-text="row.anchor_first_date ? ('since ' + fmtMD(row.anchor_first_date)) : 'all dates'"></span>
+        <span x-text="row.anchor_first_date ? ('since ' + fmtMD(row.anchor_first_date) + ' (when ' + row.item_name + ' became primary)') : ('range start')"></span>
         →
         <span x-text="endDate"></span>
-        · only with spend
+        · all campaigns with spend
       </span>
     </div>
     <button class="expand-close" @click="togglePageExpand(row.page_name)">✕ Close</button>
@@ -46,7 +42,7 @@
                  && !(expandedPages[row.page_name] || {}).error
                  && Array.isArray((expandedPages[row.page_name] || {}).campaigns)
                  && (expandedPages[row.page_name] || {}).campaigns.length === 0">
-    <div class="text-xs italic" style="color:#65676b;padding:14px 6px;">Walang campaigns para sa page na ito sa this-month range.</div>
+    <div class="text-xs italic" style="color:#65676b;padding:14px 6px;">Walang campaigns na may spend para sa page na ito sa selected date range.</div>
   </template>
 
   <template x-if="!(expandedPages[row.page_name] || {}).loading

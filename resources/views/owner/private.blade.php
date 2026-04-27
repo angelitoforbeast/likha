@@ -1487,20 +1487,21 @@
         return m ? m[1].trim() : s;
       },
 
-      // Resolve {start_date, end_date, item_name} scope per page row.
-      // item_name is stripped of qty prefix so it matches ads_manager_reports.
+      // Resolve {start_date, end_date} scope per page row.
+      // The breakdown matrix tells us WHEN this page's current primary item
+      // first appeared (anchor_first_date). We just use that date range to
+      // pull all the page's campaigns/adsets/ads that had spend in that
+      // window — no item-name filter (ads_manager_reports.item_name is
+      // unreliable / often empty / different formatting; matching on it
+      // hides legit ad activity).
       _pageScopeFor(pageName){
         const row = (this.rows || []).find(r => r.page_name === pageName);
         const fallbackEnd = this.endDate || '';
         const fallbackStart = this.startDate || fallbackEnd;
-        if (!row) return { start_date: fallbackStart, end_date: fallbackEnd, item_name: '' };
+        if (!row) return { start_date: fallbackStart, end_date: fallbackEnd };
         const start = row.anchor_first_date || fallbackStart;
         const end   = this.endDate || fallbackEnd;
-        return {
-          start_date: start,
-          end_date:   end,
-          item_name:  this._stripQty(row.item_name || ''),
-        };
+        return { start_date: start, end_date: end };
       },
 
       // Generic fetcher into /ads_manager/campaigns/data with passed params.
