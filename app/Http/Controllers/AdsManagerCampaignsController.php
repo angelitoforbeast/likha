@@ -31,6 +31,153 @@ class AdsManagerCampaignsController extends Controller
         return view('ads_manager.campaigns', compact('pages', 'campaignsColsConfig', 'campaignsColFormatRules'));
     }
 
+    /**
+     * GET /ads_manager/campaigns/history — daily change log derived from
+     * spend transitions in `ads_manager_reports`.
+     *
+     * For each entity (campaign / adset / ad), we look at consecutive daily
+     * rows ordered by day and emit events:
+     *   • Created       — first day this entity ever appeared in the data
+     *   • Turned ON     — spend > 0 today AND (no prior row OR prior spend ≤ 0)
+     *   • Turned OFF    — spend ≤ 0 today AND prior spend > 0
+     *
+     * Spend-transition is preferred over delivery-status because numeric
+     * metrics are preserved historically by FB exports while delivery flags
+     * may be overwritten on re-import.
+     */
+    public function history(Request $request)
+    {
+        $pages = DB::table('ads_manager_reports')
+            ->whereNotNull('page_name')
+            ->selectRaw('TRIM(page_name) AS page_name')
+            ->distinct()->orderBy('page_name')
+            ->pluck('page_name')->toArray();
+
+        return view('ads_manager.campaigns_history', compact('pages'));
+    }
+
+    /**
+     * GET /ads_manager/campaigns/history/data — JSON change log.
+     * Filters: start_date, end_date, page_name, level (all|campaigns|adsets|ads).
+     */
+    public function historyData(Request $request)
+    {
+        $start    = $request->input('start_date');
+        $end      = $request->input('end_date');
+        $pageName = $request->input('page_name');
+        $levelF   = (string) $request->input('level', 'all'); // all|campaigns|adsets|ads
+
+        $driver = DB::getDriverName();
+        $dayExpr = $driver === 'pgsql'
+            ? 'COALESCE(day, DATE(reporting_starts))'
+            : 'COALESCE(`day`, DATE(`reporting_starts`))';
+
+        // Per-entity-per-day spend + name + page snapshot.
+        // Granularity: ad_id (lowest level). Campaign/adset events derive from
+        // aggregating the ad-level events upstream (e.g. campaign turned on
+        // = its first ad started spending).
+        $base = DB::table('ads_manager_reports')
+            ->whereNotNull('day');
+        if ($pageName && $pageName !== 'all') {
+            $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
+        }
+
+        // Build a daily aggregate per (id, day) per level.
+        $buildDaily = function (string $idCol) use ($base, $dayExpr) {
+            return (clone $base)
+                ->selectRaw("
+                    $idCol AS id,
+                    $dayExpr AS d,
+                    COALESCE(SUM(amount_spent_php), 0) AS spend,
+                    MAX(page_name)     AS page_name,
+                    MAX(campaign_id)   AS campaign_id,
+                    MAX(campaign_name) AS campaign_name,
+                    MAX(ad_set_id)     AS ad_set_id,
+                    MAX(ad_set_name)   AS ad_set_name,
+                    MAX(headline)      AS headline,
+                    MAX(item_name)     AS item_name
+                ")
+                ->groupBy($idCol, DB::raw($dayExpr));
+        };
+
+        // Decorate each row with prior-day spend via window function so we
+        // can detect transitions in PHP.
+        $events = [];
+        foreach (['campaigns' => 'campaign_id', 'adsets' => 'ad_set_id', 'ads' => 'ad_id'] as $level => $idCol) {
+            if ($levelF !== 'all' && $levelF !== $level) continue;
+
+            $daily = $buildDaily($idCol);
+            $withLag = DB::query()->fromSub($daily, 'd')->selectRaw("
+                d.*,
+                LAG(spend) OVER (PARTITION BY id ORDER BY d) AS prev_spend
+            ");
+
+            // Pull the entire dataset; PHP filters to the requested date
+            // range AFTER detecting transitions (so we still know what was
+            // happening just before `start`).
+            $rows = $withLag->get();
+
+            foreach ($rows as $r) {
+                $day = (string) $r->d;
+                if ($start && $day < $start) continue;
+                if ($end   && $day > $end)   continue;
+
+                $cur  = (float) $r->spend;
+                $prev = $r->prev_spend === null ? null : (float) $r->prev_spend;
+
+                $event = null;
+                if ($prev === null) {
+                    $event = $cur > 0 ? 'created_with_spend' : 'created';
+                } elseif ($prev <= 0 && $cur > 0) {
+                    $event = 'turned_on';
+                } elseif ($prev > 0 && $cur <= 0) {
+                    $event = 'turned_off';
+                }
+                if (!$event) continue;
+
+                $events[] = [
+                    'day'           => $day,
+                    'level'         => $level === 'campaigns' ? 'campaign'
+                                     : ($level === 'adsets' ? 'adset' : 'ad'),
+                    'event'         => $event,
+                    'entity_id'     => (string) $r->id,
+                    'entity_name'   => $level === 'campaigns' ? ($r->campaign_name ?: 'Campaign '.$r->id)
+                                     : ($level === 'adsets'  ? ($r->ad_set_name   ?: 'Ad set '  .$r->id)
+                                     :                         ($r->headline      ?: 'Ad '      .$r->id)),
+                    'page_name'     => (string) $r->page_name,
+                    'campaign_name' => (string) ($r->campaign_name ?? ''),
+                    'ad_set_name'   => (string) ($r->ad_set_name   ?? ''),
+                    'item_name'     => (string) ($r->item_name     ?? ''),
+                    'spend'         => $cur,
+                    'prev_spend'    => $prev,
+                ];
+            }
+        }
+
+        // Sort: most recent first; within day group by level then name.
+        usort($events, function ($a, $b) {
+            $c = strcmp($b['day'], $a['day']);
+            if ($c !== 0) return $c;
+            // campaign → adset → ad ordering
+            $rank = ['campaign' => 0, 'adset' => 1, 'ad' => 2];
+            $c = ($rank[$a['level']] ?? 9) <=> ($rank[$b['level']] ?? 9);
+            if ($c !== 0) return $c;
+            return strcmp($a['entity_name'], $b['entity_name']);
+        });
+
+        // Per-day summary counts for the header chips.
+        $byDay = [];
+        foreach ($events as $e) {
+            $d = $e['day'];
+            if (!isset($byDay[$d])) $byDay[$d] = [
+                'created' => 0, 'turned_on' => 0, 'turned_off' => 0, 'created_with_spend' => 0,
+            ];
+            $byDay[$d][$e['event']]++;
+        }
+
+        return response()->json(['ok' => true, 'events' => $events, 'by_day' => $byDay]);
+    }
+
     public function data(Request $request)
     {
         // Inputs

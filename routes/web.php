@@ -559,6 +559,12 @@ Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'ind
      Route::get('/ads_manager/campaigns/data', [AdsManagerCampaignsController::class, 'data'])
         ->name('ads_manager.campaigns.data');
 
+     // History — daily change log derived from spend transitions.
+     Route::get('/ads_manager/campaigns/history',      [AdsManagerCampaignsController::class, 'history'])
+        ->name('ads_manager.campaigns.history');
+     Route::get('/ads_manager/campaigns/history/data', [AdsManagerCampaignsController::class, 'historyData'])
+        ->name('ads_manager.campaigns.history.data');
+
     Route::get('/ads_manager/insights', [AdsInsightsController::class, 'index'])->name('ads.insights.index');
     Route::post('/ads_manager/insights/analyze',
     [\App\Http\Controllers\AdsInsightsController::class, 'analyze']

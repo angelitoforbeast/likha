@@ -76,6 +76,9 @@
             <span class="i">⏱️</span>
             <span x-text="dateLabel"></span>
           </button>
+          <a href="{{ route('ads_manager.campaigns.history') }}"
+             class="border rounded px-3 py-1.5 text-sm hover:bg-gray-50 no-underline text-gray-700"
+             title="View daily change log (created, turned on/off)">⏱ History</a>
           <button class="border rounded px-3 py-1.5 text-sm hover:bg-gray-50" @click="exportCsv()">Export</button>
         </div>
       </div>
