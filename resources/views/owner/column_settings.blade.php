@@ -22,6 +22,15 @@
     .reset-btn { background:white; color:#374151; padding:8px 14px; border-radius:6px; font-weight:600; font-size:12px; cursor:pointer; border:1px solid #d1d5db; }
     .reset-btn:hover { background:#f3f4f6; }
     .toast { position:fixed; bottom:20px; right:20px; background:#16a34a; color:white; padding:10px 18px; border-radius:6px; font-weight:600; font-size:13px; box-shadow:0 4px 12px rgba(0,0,0,.15); z-index:9999; display:none; }
+    /* Multi-select chip pills used by the bulk rule builder. */
+    .target-chip-row { display:flex; flex-wrap:wrap; gap:5px; padding:6px; border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc; max-height:120px; overflow-y:auto; }
+    .target-chip { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border-radius:9999px; font-size:11px; font-weight:600; cursor:pointer; user-select:none; border:1px solid #cbd5e1; background:white; color:#475569; transition:all .12s; }
+    .target-chip:hover { border-color:#93c5fd; color:#2563eb; }
+    .target-chip.active { background:#2563eb; color:white; border-color:#2563eb; }
+    .target-chip .chip-count { font-size:9px; padding:1px 5px; background:rgba(255,255,255,.25); border-radius:9999px; }
+    .target-chip:not(.active) .chip-count { background:#e2e8f0; }
+    .builder-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:10px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; margin-top:8px; }
+    .builder-row label.text-xs { font-weight:600; color:#475569; }
     .toast.show { display:block; }
   </style>
 
@@ -64,22 +73,46 @@
       </div>
       <p class="note">
         Per-column rules. <b>First match wins</b> (top-to-bottom). Operator (<code>≥ &gt; = ≤ &lt;</code>) +
-        threshold value + background color + optional bold + label. Pinipili na column sa dropdown sa baba.
+        threshold value + background color + optional bold + label.
+        <br><b>Bulk creation:</b> i-tick mo isa o higit pang columns sa baba, fill in the draft rule, then "+ Add rule"
+        — pareho silang makakakuha ng kopya. Each column may sariling rules pagkatapos.
       </p>
 
-      <div class="flex items-center gap-2 mb-2">
-        <label class="text-xs font-semibold text-slate-600">Add rules to:</label>
+      {{-- ── Existing rules: per-active-column editor ────────────────────── --}}
+      <div class="flex items-center gap-2 mb-2 mt-3">
+        <label class="text-xs font-semibold text-slate-600">Manage rules for:</label>
         <select x-model="activeCol" class="border border-slate-300 rounded px-2 py-1 text-sm">
           <template x-for="c in @js($catalog['owner_private'] ?? [])" :key="c.id">
             <option :value="c.id" x-text="c.label + (rulesFor(c.id).length ? ' (' + rulesFor(c.id).length + ')' : '')"></option>
           </template>
         </select>
-        <button class="reset-btn" @click="addRule(activeCol)">+ Add rule</button>
+        <button class="reset-btn" @click="copyOpen = !copyOpen"
+                :title="'Copy this column\'s rules to other columns'"
+                x-show="rulesFor(activeCol).length > 0">📋 Copy rules to…</button>
         <div class="flex-1"></div>
         <button class="save-btn" :disabled="saving" @click="save()">
           <span x-show="!saving">💾 Save formatting</span>
           <span x-show="saving">Saving…</span>
         </button>
+      </div>
+
+      {{-- Copy-to-other-cols panel (expandable) --}}
+      <div x-show="copyOpen" class="builder-row" style="margin-top:0;margin-bottom:8px;background:#fffbeb;border-color:#fde68a;">
+        <label class="text-xs">📋 Copy <b><span x-text="rulesFor(activeCol).length"></span></b> rule(s) of <b><span x-text="labelFor(activeCol)"></span></b> to:</label>
+        <div class="target-chip-row" style="flex:1 1 100%;">
+          <template x-for="c in @js($catalog['owner_private'] ?? [])" :key="'copy-'+c.id">
+            <span :class="'target-chip ' + (copyTargets.has(c.id) ? 'active' : '')"
+                  @click="toggleCopyTarget(c.id)"
+                  x-show="c.id !== activeCol"
+                  x-text="c.label"></span>
+          </template>
+        </div>
+        <div style="display:flex;gap:6px;flex:1 1 100%;">
+          <button class="reset-btn" @click="copyTargets = new Set()">Clear</button>
+          <div class="flex-1"></div>
+          <button class="save-btn" :disabled="copyTargets.size === 0"
+                  @click="executeCopyToTargets(); copyOpen = false;">Copy to <span x-text="copyTargets.size"></span> column(s)</button>
+        </div>
       </div>
 
       {{-- Rules table for active column --}}
@@ -122,7 +155,62 @@
       <div x-show="rulesFor(activeCol).length === 0"
            class="text-xs text-slate-400 italic px-3 py-4 text-center"
            style="border:1px dashed #cbd5e1;border-radius:6px;">
-        Walang rules pa para sa column na ito. Click "+ Add rule" para magsimula.
+        Walang rules pa para sa column na ito. Use the bulk builder below to add rules.
+      </div>
+
+      {{-- ── BULK RULE BUILDER ──────────────────────────────────────────── --}}
+      <div style="margin-top:14px;padding-top:12px;border-top:1px dashed #cbd5e1;">
+        <div class="text-xs font-semibold text-slate-700" style="margin-bottom:6px;">
+          ➕ Bulk Add Rule — applies to <span x-text="targetCols.size"></span> selected column(s)
+        </div>
+
+        {{-- Target columns multi-select chips --}}
+        <div class="target-chip-row">
+          <span class="target-chip" :class="allTargetsActive() ? 'active' : ''"
+                @click="allTargetsActive() ? clearTargets() : selectAllTargets()"
+                title="Toggle all"
+                x-text="allTargetsActive() ? '✓ All columns selected' : '☐ Select all'"></span>
+          <template x-for="c in @js($catalog['owner_private'] ?? [])" :key="'t-'+c.id">
+            <span :class="'target-chip ' + (targetCols.has(c.id) ? 'active' : '')"
+                  @click="toggleTargetCol(c.id)">
+              <span x-text="c.label"></span>
+              <span class="chip-count" x-show="rulesFor(c.id).length > 0" x-text="rulesFor(c.id).length"></span>
+            </span>
+          </template>
+        </div>
+
+        {{-- Draft rule form --}}
+        <div class="builder-row">
+          <label class="text-xs">if value</label>
+          <select x-model="draftRule.op" class="border border-slate-300 rounded px-1 py-1 text-xs">
+            <option value=">=">≥</option>
+            <option value=">">&gt;</option>
+            <option value="=">=</option>
+            <option value="<=">≤</option>
+            <option value="<">&lt;</option>
+          </select>
+          <input type="number" step="0.01" x-model.number="draftRule.value"
+                 class="border border-slate-300 rounded px-2 py-1 text-xs w-24 text-right">
+          <label class="text-xs">→ bg</label>
+          <input type="color" x-model="draftRule.bg" class="w-12 h-7 cursor-pointer border rounded">
+          <input type="text" x-model="draftRule.bg" maxlength="7"
+                 class="border border-slate-300 rounded px-1 py-1 text-xs w-20 font-mono">
+          <label class="text-xs flex items-center gap-1">
+            <input type="checkbox" x-model="draftRule.bold"> bold
+          </label>
+          <input type="text" x-model="draftRule.label" placeholder="label (optional)"
+                 class="flex-1 border border-slate-300 rounded px-2 py-1 text-xs"
+                 maxlength="40">
+          <span class="px-2 py-0.5 text-xs rounded"
+                :style="'background:'+draftRule.bg+';color:'+previewTextColor(draftRule.bg)+';'+(draftRule.bold?'font-weight:700;':'')"
+                x-text="(draftRule.value ?? 0)"></span>
+          <button class="save-btn" style="padding:6px 14px;"
+                  :disabled="targetCols.size === 0"
+                  @click="addRuleToTargets()">+ Add rule</button>
+        </div>
+        <p class="text-[10px] text-slate-500 mt-1">
+          Tip: rule is duplicated — each target column gets its own copy. Edit/remove independently afterward.
+        </p>
       </div>
     </div>
 
@@ -256,20 +344,78 @@
     // Per-column conditional formatting editor.
     // `initial` is a map: { col_id: [ {op,value,bg,bold,label}, ... ] }
     function colFormatEditor(initial) {
+      // Catalog of valid column ids (kept in sync with PHP CATALOG['owner_private']).
+      const CATALOG = @json($catalog['owner_private'] ?? []);
+      const ID_TO_LABEL = Object.fromEntries(CATALOG.map(c => [c.id, c.label]));
       return {
         rules: (typeof initial === 'object' && initial !== null && !Array.isArray(initial)) ? Object.assign({}, initial) : {},
         activeCol: 'tcpr',
         saving: false,
         dragIdx: -1,
+        // Bulk builder state — which columns to apply the next rule to.
+        targetCols: new Set(['tcpr']),
+        // Draft rule fields (the next rule to be added to all targetCols).
+        draftRule: { op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '' },
+        // Copy panel state.
+        copyOpen: false,
+        copyTargets: new Set(),
 
+        labelFor(id){ return ID_TO_LABEL[id] || id; },
         rulesFor(colId) {
           if (!this.rules[colId]) this.rules[colId] = [];
           return this.rules[colId];
         },
+        // Single-column legacy add (still used by future shortcuts; kept for safety).
         addRule(colId) {
           this.rulesFor(colId).push({ op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '' });
-          // Force reactivity.
           this.rules = Object.assign({}, this.rules);
+        },
+        // Toggle a target column for the bulk builder.
+        toggleTargetCol(id){
+          if (this.targetCols.has(id)) this.targetCols.delete(id);
+          else this.targetCols.add(id);
+          this.targetCols = new Set([...this.targetCols]);
+        },
+        selectAllTargets(){ this.targetCols = new Set(CATALOG.map(c => c.id)); },
+        clearTargets(){ this.targetCols = new Set(); },
+        allTargetsActive(){ return this.targetCols.size === CATALOG.length; },
+        // Push a deep-copy of the draft rule into every target column.
+        addRuleToTargets(){
+          if (this.targetCols.size === 0) return;
+          const draft = this.draftRule;
+          this.targetCols.forEach(colId => {
+            this.rulesFor(colId).push({
+              op:    draft.op,
+              value: Number(draft.value) || 0,
+              bg:    String(draft.bg || '#fee2e2'),
+              bold:  !!draft.bold,
+              label: String(draft.label || ''),
+            });
+          });
+          this.rules = Object.assign({}, this.rules);
+          // Reset draft for the next entry (keep target selection so user can
+          // add many rules to the same set quickly).
+          this.draftRule = { op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '' };
+        },
+        // Copy panel: toggle a target column.
+        toggleCopyTarget(id){
+          if (this.copyTargets.has(id)) this.copyTargets.delete(id);
+          else this.copyTargets.add(id);
+          this.copyTargets = new Set([...this.copyTargets]);
+        },
+        // Duplicate active column's rules into selected target columns.
+        // Each receives independent deep copies (no live linking).
+        executeCopyToTargets(){
+          if (this.copyTargets.size === 0) return;
+          const src = this.rulesFor(this.activeCol);
+          this.copyTargets.forEach(colId => {
+            const dst = this.rulesFor(colId);
+            src.forEach(r => dst.push({
+              op: r.op, value: r.value, bg: r.bg, bold: !!r.bold, label: r.label || ''
+            }));
+          });
+          this.rules = Object.assign({}, this.rules);
+          this.copyTargets = new Set();
         },
         removeRule(colId, idx) {
           this.rulesFor(colId).splice(idx, 1);
