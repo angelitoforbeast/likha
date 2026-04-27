@@ -346,12 +346,15 @@ class AdsManagerCampaignsController extends Controller
             $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
         }
 
-        // Item filter — qty-variant exact match (e.g. "2 x MINI FLASHLIGHT").
+        // Item filter — substring match (case-insensitive) to tolerate
+        // formatting variations sa ads_manager_reports.item_name (e.g.
+        // "RUBBER COATING SPRAY", "Rubber Coating Spray", "1 x RUBBER...").
         // Used by /owner/private inline expand to scope campaigns/adsets/ads
         // to ONLY those tied to the row's specific item. Aggregations (spend
         // totals, CPP, etc.) are computed against this filtered set.
         if (is_string($itemName) && trim($itemName) !== '') {
-            $base->whereRaw('LOWER(TRIM(COALESCE(item_name,\'\'))) = LOWER(TRIM(?))', [trim($itemName)]);
+            $like = '%'.mb_strtolower(trim($itemName)).'%';
+            $base->whereRaw('LOWER(COALESCE(item_name,\'\')) LIKE ?', [$like]);
         }
 
         // Search (case-insensitive)
