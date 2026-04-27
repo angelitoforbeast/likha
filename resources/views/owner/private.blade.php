@@ -427,7 +427,7 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')+(col.id==='proj_pct_1d'&&row.proj_pct_last_day!==null?rppStyle(row.proj_pct_last_day):'')+(col.id==='proj_pct_3d'&&row.proj_pct_last_3d!==null?rppStyle(row.proj_pct_last_3d):'')+(col.id==='proj_pct_7d'&&row.proj_pct_last_7d!==null?rppStyle(row.proj_pct_last_7d):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, col.id==='tcpr'?tcprFor(row):(col.id==='breakeven_cpp'?breakevenCppFor(row):(col.id==='proj_pct'?(row.gross_sales>0?row.projected_profit/row.gross_sales*100:null):(col.id==='proj_pct_1d'?row.proj_pct_last_day:(col.id==='proj_pct_3d'?row.proj_pct_last_3d:(col.id==='proj_pct_7d'?row.proj_pct_last_7d:row[col.sort||col.id])))))">
+                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')+(col.id==='proj_pct_1d'&&row.proj_pct_last_day!==null?rppStyle(row.proj_pct_last_day):'')+(col.id==='proj_pct_3d'&&row.proj_pct_last_3d!==null?rppStyle(row.proj_pct_last_3d):'')+(col.id==='proj_pct_7d'&&row.proj_pct_last_7d!==null?rppStyle(row.proj_pct_last_7d):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row))">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -1275,6 +1275,43 @@
         const F = 0.0168;  // cod_fee_rate × (1 + VAT) = 0.015 × 1.12
         const SF = 37;
         return procRate * (df * (price * (1 - F) - Number(iv)) - SF) - target * price;
+      },
+
+      // Resolve the numeric value the conditional-formatting rules should
+      // evaluate against, per column type. Centralized so the inline :style
+      // expression stays simple (parens-balanced).
+      cellValueFor(col, row){
+        if (!col || !row) return null;
+        switch (col.id) {
+          case 'tcpr':          return this.tcprFor(row);
+          case 'breakeven_cpp': return this.breakevenCppFor(row);
+          case 'proj_pct':
+            return (row.gross_sales > 0 && row.projected_profit != null)
+              ? (row.projected_profit / row.gross_sales) * 100 : null;
+          case 'proj_pct_1d':   return row.proj_pct_last_day;
+          case 'proj_pct_3d':   return row.proj_pct_last_3d;
+          case 'proj_pct_7d':   return row.proj_pct_last_7d;
+          case 'proj_profit':   return row.projected_profit;
+          case 'proj_prof_1d':  return row.projected_profit_last_day;
+          case 'proj_prof_3d':  return row.projected_profit_last_3d;
+          case 'proj_prof_7d':  return row.projected_profit_last_7d;
+          case 'rts_set':       return row.rts_pct;
+          case 'jnt_rts':       return row.jnt_rts_pct;
+          case 'jnt_del':       return row.jnt_del_pct;
+          case 'jnt_transit':   return row.jnt_transit_pct;
+          case 'cpp':           return row.cpp;
+          case 'pcpp':          return row.proceed_cpp;
+          case 'per_order':     return row.proj_profit_per_order;
+          case 'adspent':       return row.adspent;
+          case 'orders':        return row.orders;
+          case 'proceed':       return row.proceed_orders;
+          case 'price':         return row.price;
+          case 'item_val':      return row.item_value;
+          case 'ship':          return row.shipping_fee;
+          case 'cod_fee':       return row.cod_fee;
+          default:
+            return col.sort && row[col.sort] !== undefined ? row[col.sort] : row[col.id];
+        }
       },
 
       // Conditional formatting — returns inline style string for a cell
