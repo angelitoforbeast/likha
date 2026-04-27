@@ -108,6 +108,63 @@
     .btn-cancel { font-size:11px; padding:3px 8px; border-radius:5px; cursor:pointer; border:1.5px solid #e2e8f0; background:#f1f5f9; color:#475569; }
     .btn-set    { font-size:11px; padding:3px 9px; border-radius:5px; cursor:pointer; border:1.5px solid #e2e8f0; background:#f8fafc; color:#64748b; }
     .btn-set:hover { border-color:#93c5fd; color:#2563eb; background:#eff6ff; }
+
+    /* ── Inline campaigns expand: chip toggle + FB Ads Manager-like table ── */
+    .expand-chip {
+      display:inline-flex; align-items:center; gap:4px;
+      background:#eff6ff; color:#1d4ed8;
+      border:1px solid #bfdbfe; border-radius:999px;
+      padding:2px 9px 2px 7px; font-size:11px; font-weight:600;
+      cursor:pointer; margin-right:6px; vertical-align:middle;
+      line-height:1.3; user-select:none;
+      transition:background .12s, border-color .12s, color .12s;
+    }
+    .expand-chip:hover { background:#dbeafe; border-color:#93c5fd; }
+    .expand-chip.active { background:#1d4ed8; color:white; border-color:#1d4ed8; }
+    .expand-chip .chev { font-size:9px; transition:transform .15s; display:inline-block; }
+    .expand-chip.active .chev { transform:rotate(90deg); }
+
+    /* FB Ads Manager-like table for the inline expand panel. */
+    .fb-table { font-size:12px; border-collapse:separate; border-spacing:0; width:100%; background:white; }
+    .fb-table thead th {
+      background:#f0f2f5; color:#65676b;
+      font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;
+      border-bottom:1px solid #ced0d4; padding:7px 10px;
+      text-align:left; vertical-align:middle; white-space:nowrap;
+    }
+    .fb-table thead th.sortable { cursor:pointer; user-select:none; }
+    .fb-table thead th.sortable:hover { background:#e4e6eb; }
+    .fb-table thead th.text-right { text-align:right; }
+    .fb-table tbody td {
+      border-bottom:1px solid #e4e6eb; padding:8px 10px;
+      color:#1c1e21; vertical-align:top; font-size:12px;
+    }
+    .fb-table tbody tr:hover td { background:#f7f8fa; }
+    .fb-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .fb-table .name { color:#1877f2; font-weight:500; }
+    .fb-table .name:hover { text-decoration:underline; }
+    .fb-table .sub { font-size:10px; color:#65676b; margin-top:1px; }
+    .fb-pill { display:inline-flex; align-items:center; gap:5px; font-size:11px; line-height:1; }
+    .fb-pill::before { content:''; width:7px; height:7px; border-radius:50%; display:inline-block; }
+    .fb-pill.active::before { background:#42b72a; }
+    .fb-pill.off::before    { background:#bcc0c4; }
+    .fb-pill.active { color:#1c1e21; }
+    .fb-pill.off    { color:#65676b; }
+
+    /* Expand-row container — drop the row's outer cell padding so the
+       inner panel can fill edge-to-edge cleanly. */
+    tr.page-expand-row > td { padding:0; }
+    .expand-panel { background:#f8fafc; border-top:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1; padding:12px 16px; }
+    .expand-panel .expand-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+    .expand-panel .expand-title  { font-size:12px; color:#475569; }
+    .expand-panel .expand-title b { color:#0f172a; }
+    .expand-panel .expand-close  { font-size:11px; color:#64748b; cursor:pointer; padding:2px 8px; border-radius:5px; border:1px solid #cbd5e1; background:white; }
+    .expand-panel .expand-close:hover { background:#f1f5f9; }
+    .expand-wrap { background:white; border:1px solid #cbd5e1; border-radius:6px; overflow-x:auto; max-width:100%; }
+
+    /* Nested expand backgrounds (visual hierarchy). */
+    .expand-nest-1 td.nest-host { background:#eef2f7; padding:10px 14px; }
+    .expand-nest-2 td.nest-host { background:#dde4ed; padding:10px 14px; }
   </style>
 </head>
 <body>
@@ -216,6 +273,11 @@
     </button>
 
     @if(!empty($isCEO))
+      <a href="{{ route('owner.column-settings') }}" target="_blank"
+         title="Configure column visibility / order globally for /owner/private and the campaigns expand panel"
+         style="background:#1e293b;color:#a5b4fc;border:1px solid #475569;
+                border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+                cursor:pointer;margin-left:4px;text-decoration:none;">⚙ Columns</a>
       <a href="{{ route('jnt.supply.excluded.index') }}" target="_blank"
          title="Manage excluded pages (affects /owner/private + /jnt/supply)"
          style="background:#1e293b;color:#f87171;border:1px solid #475569;
@@ -316,15 +378,15 @@
 
               <!-- Fixed: Page -->
               <td style="text-align:center;">
-                {{-- Inline expand chevron — fetches & shows this page's
+                {{-- Inline expand chip — fetches & shows this page's
                      campaigns/adsets/ads via /ads_manager/campaigns/data. --}}
-                <button class="page-expand-toggle"
+                <button class="expand-chip"
+                        :class="(expandedPages[row.page_name] || {}).open ? 'active' : ''"
                         @click.stop="togglePageExpand(row.page_name)"
-                        :title="(expandedPages[row.page_name] || {}).open ? 'Hide campaigns' : 'Show campaigns'"
-                        x-text="(expandedPages[row.page_name] || {}).open ? '▼' : '▶'"
-                        style="display:inline-block;margin-right:5px;color:#64748b;
-                               background:none;border:none;cursor:pointer;font-size:11px;
-                               vertical-align:middle;line-height:1;padding:0 2px;"></button>
+                        :title="(expandedPages[row.page_name] || {}).open ? 'Hide campaigns' : 'Show campaigns for this page'">
+                  <span class="chev">▶</span>
+                  <span x-text="(expandedPages[row.page_name] || {}).open ? 'Hide' : 'Campaigns'"></span>
+                </button>
                 <template x-if="row.is_range">
                   <a href="#" @click.prevent="openBreakdown(row)"
                      style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;
@@ -749,6 +811,13 @@
   </div>
 
   <script>
+  // GLOBAL column settings injected by OwnerPrivateController (managed via
+  // CEO-only /owner/column-settings). Read in initCols() and the Alpine
+  // expand panel so /owner/private + the inline campaigns expand share the
+  // same visibility/order as /ads_manager/campaigns.
+  window.__OWNER_PRIVATE_COLS__ = @json($ownerPrivateColsConfig ?? ['order' => [], 'hidden' => []]);
+  window.__CAMPAIGNS_COLS__     = @json($campaignsColsConfig    ?? ['order' => [], 'hidden' => []]);
+
   function privateUI() {
     return {
       ...(function(){
@@ -850,19 +919,40 @@
 
       initCols() {
         const defs = this.defaultCols();
-        const saved = localStorage.getItem('private_col_order_v1');
-        if (saved) {
-          try {
-            const ids = JSON.parse(saved);
-            const defMap = Object.fromEntries(defs.map(c => [c.id, c]));
-            const ordered = ids.map(id => defMap[id]).filter(Boolean);
-            const savedSet = new Set(ids);
-            defs.forEach(c => { if (!savedSet.has(c.id)) ordered.push(c); });
-            this.cols = ordered;
-            return;
-          } catch(e) {}
+        const defMap = Object.fromEntries(defs.map(c => [c.id, c]));
+
+        // Server-injected GLOBAL config (CEO-managed via /owner/column-settings)
+        // takes precedence over localStorage. The hidden array filters out
+        // entire columns; the order array sets the visual sequence.
+        const serverCfg = window.__OWNER_PRIVATE_COLS__ || {};
+        const hiddenSet = new Set(Array.isArray(serverCfg.hidden) ? serverCfg.hidden : []);
+
+        let orderedIds;
+        if (Array.isArray(serverCfg.order) && serverCfg.order.length) {
+          orderedIds = serverCfg.order.slice();
+        } else {
+          // Fallback: localStorage (legacy per-browser preference) → defaults.
+          const saved = localStorage.getItem('private_col_order_v1');
+          if (saved) {
+            try { orderedIds = JSON.parse(saved); } catch(e) { orderedIds = null; }
+          }
+          if (!orderedIds) orderedIds = defs.map(c => c.id);
         }
-        this.cols = defs;
+
+        // Resolve to col definitions, drop unknown ids, exclude hidden,
+        // then append any catalog cols not in the saved order.
+        const seen = new Set();
+        const ordered = [];
+        for (const id of orderedIds) {
+          if (defMap[id] && !hiddenSet.has(id) && !seen.has(id)) {
+            ordered.push(defMap[id]);
+            seen.add(id);
+          }
+        }
+        for (const c of defs) {
+          if (!hiddenSet.has(c.id) && !seen.has(c.id)) ordered.push(c);
+        }
+        this.cols = ordered;
       },
 
       saveCols() {
@@ -1135,6 +1225,55 @@
         const ph = new Date(new Date().toLocaleString('en-US', {timeZone: 'Asia/Manila'}));
         const phMid = new Date(ph.getFullYear(), ph.getMonth(), ph.getDate());
         return String(Math.max(0, Math.round((phMid - d) / 86400000)));
+      },
+
+      // ── Campaigns column catalog (mirrors the one in /ads_manager/campaigns)
+      // Used by the inline expand panel rendering. Visibility/order via the
+      // CEO-managed config injected into window.__CAMPAIGNS_COLS__.
+      defaultCampaignsCols(){
+        return [
+          { id:'on',             label:'Off / On',         sort:null,             type:'on',           align:'left',  minw:80  },
+          { id:'name',           label:'Name',             sort:null,             type:'name',         align:'left',  minw:200 },
+          { id:'first_started',  label:'First launched',   sort:'first_started',  type:'date',         align:'left',  minw:110 },
+          { id:'days_running',   label:'Days running',     sort:'first_started',  type:'days_running', align:'left',  minw:90  },
+          { id:'latest_started', label:'Latest start',     sort:'latest_started', type:'date',         align:'left',  minw:110 },
+          { id:'spend',          label:'Amount spent',     sort:'spend',          type:'money',        align:'right', minw:110 },
+          { id:'cpm_1000',       label:'CPM (per 1,000)',  sort:'cpm_1000',       type:'money',        align:'right', minw:110 },
+          { id:'cpm_msg',        label:'Cost per messaging',sort:'cpm_msg',       type:'money',        align:'right', minw:120 },
+          { id:'cpr',            label:'Cost per result',  sort:'cpr',            type:'money',        align:'right', minw:120 },
+          { id:'cpp',            label:'Cost per purchase',sort:'cpp',            type:'money',        align:'right', minw:130 },
+          { id:'impressions',    label:'Impressions',      sort:null,             type:'integer',      align:'right', minw:100 },
+          { id:'messages',       label:'Messages',         sort:null,             type:'integer',      align:'right', minw:90  },
+          { id:'purchases',      label:'Purchases',        sort:null,             type:'integer',      align:'right', minw:100 },
+        ];
+      },
+      visibleCampaignsCols(){
+        const defs = this.defaultCampaignsCols();
+        const defMap = Object.fromEntries(defs.map(c => [c.id, c]));
+        const cfg = window.__CAMPAIGNS_COLS__ || {};
+        const hidden = new Set(Array.isArray(cfg.hidden) ? cfg.hidden : []);
+        const order  = Array.isArray(cfg.order) && cfg.order.length ? cfg.order : defs.map(c => c.id);
+        const seen = new Set(); const out = [];
+        for (const id of order) {
+          if (defMap[id] && !hidden.has(id) && !seen.has(id)) { out.push(defMap[id]); seen.add(id); }
+        }
+        for (const c of defs) { if (!hidden.has(c.id) && !seen.has(c.id)) out.push(c); }
+        return out;
+      },
+      // Header label per col, with name col tab-aware.
+      campLabel(col, level){
+        if (col.id === 'name') {
+          return level === 'campaigns' ? 'Campaign'
+               : level === 'adsets'    ? 'Ad set'
+               : 'Ad';
+        }
+        return col.label;
+      },
+      // Display name from row by level.
+      campRowName(row, level){
+        if (level === 'campaigns') return row.campaign_name || ('Campaign ' + row.campaign_id);
+        if (level === 'adsets')    return row.ad_set_name   || ('Ad set '   + row.ad_set_id);
+        return row.headline || ('Ad ' + row.ad_id);
       },
 
       // ── Inline expand: campaigns / adsets / ads ───────────────────────────

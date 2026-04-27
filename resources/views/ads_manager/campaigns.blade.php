@@ -14,6 +14,46 @@
   <style>
     [x-cloak]{display:none!important}
     .flatpickr-calendar{z-index:9999!important}
+
+    /* ── FB Ads Manager-like table styling ────────────────────────────── */
+    .fb-table { font-size:13px; border-collapse:separate; border-spacing:0; width:100%; background:white; }
+    .fb-table thead th {
+      background:#f0f2f5; color:#65676b;
+      font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.03em;
+      border-bottom:1px solid #ced0d4; padding:10px 12px;
+      text-align:left; vertical-align:middle; white-space:nowrap;
+      position:sticky; top:0; z-index:10;
+    }
+    .fb-table thead th.sortable { cursor:pointer; user-select:none; }
+    .fb-table thead th.sortable:hover { background:#e4e6eb; }
+    .fb-table thead th.text-right { text-align:right; }
+    .fb-table thead th.col-checkbox { width:34px; padding:10px 6px 10px 12px; }
+    .fb-table tbody td {
+      border-bottom:1px solid #e4e6eb; padding:11px 12px;
+      color:#1c1e21; vertical-align:top;
+    }
+    .fb-table tbody tr:hover td { background:#f7f8fa; }
+    .fb-table tbody tr.editing-row td { background:#fef3c7 !important; }
+    .fb-table tbody tr.cursor-pointer td:not(.col-checkbox) { cursor:pointer; }
+    .fb-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .fb-table .name { color:#1877f2; font-weight:500; }
+    .fb-table .name:hover { text-decoration:underline; }
+    .fb-table .sub { font-size:11px; color:#65676b; margin-top:1px; }
+    .fb-table tr.totals td {
+      background:#f5f6f7; border-top:2px solid #ced0d4; font-weight:600; color:#1c1e21;
+      position:sticky; bottom:0; z-index:8;
+    }
+    .fb-pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; line-height:1; }
+    .fb-pill::before {
+      content:''; width:8px; height:8px; border-radius:50%; display:inline-block;
+    }
+    .fb-pill.active::before { background:#42b72a; }
+    .fb-pill.off::before    { background:#bcc0c4; }
+    .fb-pill.active { color:#1c1e21; }
+    .fb-pill.off    { color:#65676b; }
+    .fb-table .col-checkbox { width:34px; padding:11px 6px 11px 12px; }
+    /* Sort arrow */
+    .fb-sort-arrow { font-size:9px; color:#1877f2; margin-left:4px; }
   </style>
 </head>
 <body class="bg-gray-100 text-gray-900">
@@ -85,164 +125,111 @@
     <section class="relative left-1/2 right-1/2 -mx-[50vw] w-screen bg-white shadow-sm border-y rounded-none">
       <div class="px-2 sm:px-3 lg:px-4">
         <div class="overflow-auto max-h-[70vh]">
-          <table class="w-full min-w-[1100px] text-sm">
-            <!-- Sticky HEADER -->
-            <thead class="bg-gray-50 sticky top-0 z-30">
-              <tr class="text-left text-gray-600">
-                <!-- NEW: Select-all checkbox -->
-                <th class="w-10 px-4 py-3">
+          {{-- ─── Cols-driven table (FB Ads Manager-style) ─────────────────────
+               Visibility/order ay galing sa /owner/column-settings (CEO)
+               via window.__CAMPAIGNS_COLS__. Each col has a `type` na
+               nag-dictate ng renderer (status pill, name, date, money, etc.). --}}
+          <table class="fb-table">
+            <thead>
+              <tr>
+                <th class="col-checkbox">
                   <input type="checkbox"
                          :checked="allChecked()"
                          @change="toggleCheckAll($event)"
                          class="h-4 w-4 rounded border-gray-300">
                 </th>
-                <th class="w-24 px-4 py-3">Off / On</th>
-                <th class="px-4 py-3">
-                  <span x-show="tab==='campaigns'">Campaign</span>
-                  <span x-show="tab==='adsets'">Ad set</span>
-                  <span x-show="tab==='ads'">Ad</span>
-                </th>
-                <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('first_started')">
-                  <div class="inline-flex items-center gap-1">First launched <span x-show="sortBy==='first_started'">▼</span></div>
-                </th>
-                <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('first_started')">
-                  <div class="inline-flex items-center gap-1">Days running <span x-show="sortBy==='first_started'">▼</span></div>
-                </th>
-                <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('latest_started')">
-                  <div class="inline-flex items-center gap-1">Latest start <span x-show="sortBy==='latest_started'">▼</span></div>
-                </th>
-                <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('spend')">
-                  <div class="inline-flex items-center gap-1">Amount spent <span x-show="sortBy==='spend'">▼</span></div>
-                </th>
-                <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('cpm_1000')">
-                  <div class="inline-flex items-center gap-1">CPM (per 1,000) <span x-show="sortBy==='cpm_1000'">▼</span></div>
-                </th>
-                <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('cpm_msg')">
-                  <div class="inline-flex items-center gap-1">Cost per messaging <span x-show="sortBy==='cpm_msg'">▼</span></div>
-                </th>
-                <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('cpr')">
-                  <div class="inline-flex items-center gap-1">Cost per result <span x-show="sortBy==='cpr'">▼</span></div>
-                </th>
-                <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('cpp')">
-                  <div class="inline-flex items-center gap-1">Cost per purchase <span x-show="sortBy==='cpp'">▼</span></div>
-                </th>
-                <th class="px-4 py-3">Impr.</th>
-                <th class="px-4 py-3">Msgs</th>
-                <th class="px-4 py-3">Purchases</th>
+                <template x-for="col in visibleCols()" :key="'h-'+col.id">
+                  <th :class="(col.sort ? 'sortable ' : '') + (col.align==='right' ? 'text-right' : '')"
+                      :style="col.minw ? ('min-width:'+col.minw+'px') : ''"
+                      @click="col.sort && toggleSort(col.sort)">
+                    <span x-text="colLabel(col)"></span>
+                    <span class="fb-sort-arrow" x-show="col.sort && sortBy === col.sort"
+                          x-text="sortDir==='asc' ? '▲' : '▼'"></span>
+                  </th>
+                </template>
               </tr>
             </thead>
 
             <tbody>
               <template x-for="row in rows" :key="rowKey(row)">
-                <tr class="border-t hover:bg-gray-50"
-                    @click="rowClick(row)"
+                <tr @click="rowClick(row)"
                     :class="{'cursor-pointer': tab!=='ads'}">
-                  <!-- NEW: row checkbox -->
-                  <td class="px-4 py-3" @click.stop>
+                  <td class="col-checkbox" @click.stop>
                     <input type="checkbox"
                            :checked="isChecked(row)"
                            @change="onCheck(row, $event.target.checked)"
                            class="h-4 w-4 rounded border-gray-300">
                   </td>
-
-                  <!-- Off / On -->
-                  <td class="px-4 py-3">
-                    <span class="inline-flex items-center gap-2">
-                      <span class="inline-block w-2.5 h-2.5 rounded-full" :class="row.on ? 'bg-emerald-600' : 'bg-gray-400'"></span>
-                      <span x-text="row.on ? 'Active' : 'Off'"></span>
-                    </span>
-                  </td>
-
-                  <!-- Name -->
-                  <td class="px-4 py-3">
-                    <template x-if="tab==='campaigns'">
-                      <div class="font-medium text-blue-700 hover:underline" x-text="row.campaign_name"></div>
-                    </template>
-                    <template x-if="tab==='adsets'">
-                      <div class="font-medium text-blue-700 hover:underline" x-text="row.ad_set_name"></div>
-                    </template>
-                    <template x-if="tab==='ads'">
-                      <div class="font-medium text-blue-700 hover:underline" x-text="row.headline || ('Ad '+row.ad_id)"></div>
-                      <div class="text-[11px] text-gray-500" x-text="row.item_name"></div>
-                    </template>
-                    <div class="text-[11px] text-gray-500" x-text="row.page_name"></div>
-                  </td>
-
-                  <!-- First launched -->
-                  <td class="px-4 py-3 whitespace-nowrap">
-                    <template x-if="row.first_started">
-                      <div class="font-medium" x-text="fmtDate(row.first_started)"></div>
-                    </template>
-                    <template x-if="!row.first_started">
-                      <span class="text-gray-400">—</span>
-                    </template>
-                  </td>
-
-                  <!-- Days running — count of days since first_started. Only
-                       shown kapag currently Active. Pag OFF, "—". Number lang,
-                       walang "d ago" suffix. -->
-                  <td class="px-4 py-3 whitespace-nowrap text-gray-700">
-                    <template x-if="row.first_started && row.on">
-                      <span x-text="daysSince(row.first_started)"></span>
-                    </template>
-                    <template x-if="!row.first_started || !row.on">
-                      <span class="text-gray-400">—</span>
-                    </template>
-                  </td>
-
-                  <!-- Latest start -->
-                  <td class="px-4 py-3 whitespace-nowrap">
-                    <template x-if="row.latest_started">
-                      <div>
-                        <div class="font-medium" x-text="fmtDate(row.latest_started)"></div>
-                        <div class="text-[11px] text-gray-500" x-text="daysAgo(row.latest_started)"></div>
-                      </div>
-                    </template>
-                    <template x-if="!row.latest_started">
-                      <span class="text-gray-400">—</span>
-                    </template>
-                  </td>
-
-                  <!-- Spend -->
-                  <td class="px-4 py-3" x-text="money(row.spend)"></td>
-
-                  <!-- CPM per 1,000 -->
-                  <td class="px-4 py-3" x-text="row.cpm_1000 != null ? money(row.cpm_1000) : '—'"></td>
-
-                  <!-- Cost per message -->
-                  <td class="px-4 py-3" x-text="row.cpm_msg != null ? money(row.cpm_msg) : '—'"></td>
-
-                  <!-- Cost per result -->
-                  <td class="px-4 py-3" x-text="row.cpr != null ? money(row.cpr) : '—'"></td>
-
-                  <!-- Cost per purchase -->
-                  <td class="px-4 py-3" x-text="row.cpp != null ? money(row.cpp) : '—'"></td>
-
-                  <!-- Impressions / Messages / Purchases -->
-                  <td class="px-4 py-3" x-text="num(row.impressions)"></td>
-                  <td class="px-4 py-3" x-text="num(row.messages)"></td>
-                  <td class="px-4 py-3" x-text="num(row.purchases)"></td>
+                  <template x-for="col in visibleCols()" :key="'c-'+col.id">
+                    <td :class="(col.align==='right' ? 'num' : '')"
+                        :style="col.id==='days_running' ? 'white-space:nowrap;' : ''">
+                      {{-- on: status pill --}}
+                      <template x-if="col.type==='on'">
+                        <span :class="'fb-pill ' + (row.on ? 'active' : 'off')"
+                              x-text="row.on ? 'Active' : 'Off'"></span>
+                      </template>
+                      {{-- name: campaign / adset / ad name (varies per tab) --}}
+                      <template x-if="col.type==='name'">
+                        <div>
+                          <div class="name" x-text="rowName(row)"></div>
+                          <template x-if="tab==='ads' && row.item_name">
+                            <div class="sub" x-text="row.item_name"></div>
+                          </template>
+                          <div class="sub" x-text="row.page_name"></div>
+                        </div>
+                      </template>
+                      {{-- first_started / latest_started: date display --}}
+                      <template x-if="col.type==='date'">
+                        <span>
+                          <template x-if="row[col.id]">
+                            <span style="white-space:nowrap;" x-text="fmtDate(row[col.id])"></span>
+                          </template>
+                          <template x-if="!row[col.id]">
+                            <span style="color:#bcc0c4;">—</span>
+                          </template>
+                        </span>
+                      </template>
+                      {{-- days_running: integer derived from first_started when Active --}}
+                      <template x-if="col.type==='days_running'">
+                        <span>
+                          <template x-if="row.first_started && row.on">
+                            <span x-text="daysSince(row.first_started)"></span>
+                          </template>
+                          <template x-if="!row.first_started || !row.on">
+                            <span style="color:#bcc0c4;">—</span>
+                          </template>
+                        </span>
+                      </template>
+                      {{-- money: ₱ formatted with em-dash fallback --}}
+                      <template x-if="col.type==='money'">
+                        <span x-text="row[col.id] != null ? money(row[col.id]) : '—'"></span>
+                      </template>
+                      {{-- integer: locale-formatted count --}}
+                      <template x-if="col.type==='integer'">
+                        <span x-text="num(row[col.id])"></span>
+                      </template>
+                    </td>
+                  </template>
                 </tr>
               </template>
 
-              <!-- Sticky FOOTER totals -->
-              <tr class="bg-gray-50 border-t sticky bottom-0 z-20">
-                <td class="px-4 py-3"></td>
-                <td class="px-4 py-3"></td>
-                <td class="px-4 py-3 text-gray-600">
-                  <span x-text="`Results from ${rows.length} ${tabLabel()}`"></span>
-                </td>
-                <td class="px-4 py-3"></td><!-- First launched -->
-                <td class="px-4 py-3"></td><!-- Days ago -->
-                <td class="px-4 py-3"></td><!-- Latest start -->
-                <td class="px-4 py-3 font-medium" x-text="money(totals.spend ?? 0)"></td>
-                <td class="px-4 py-3" x-text="totals.cpm_1000 != null ? money(totals.cpm_1000) : '—'"></td>
-                <td class="px-4 py-3" x-text="totals.cpm_msg  != null ? money(totals.cpm_msg)  : '—'"></td>
-                <td class="px-4 py-3" x-text="totals.cpr      != null ? money(totals.cpr)      : '—'"></td>
-                <td class="px-4 py-3" x-text="totals.cpp      != null ? money(totals.cpp)      : '—'"></td>
-                <td class="px-4 py-3" x-text="num(totals.impressions ?? 0)"></td>
-                <td class="px-4 py-3" x-text="num(totals.messages ?? 0)"></td>
-                <td class="px-4 py-3" x-text="num(totals.purchases ?? 0)"></td>
+              <tr class="totals">
+                <td class="col-checkbox"></td>
+                <template x-for="col in visibleCols()" :key="'t-'+col.id">
+                  <td :class="(col.align==='right' ? 'num' : '')">
+                    {{-- Totals show data only for money + integer cols --}}
+                    <template x-if="col.type==='name'">
+                      <span x-text="`Results from ${rows.length} ${tabLabel()}`"></span>
+                    </template>
+                    <template x-if="col.type==='money'">
+                      <span x-text="totals[col.id] != null ? money(totals[col.id]) : '—'"></span>
+                    </template>
+                    <template x-if="col.type==='integer'">
+                      <span x-text="num(totals[col.id] ?? 0)"></span>
+                    </template>
+                    {{-- on, date, days_running: blank in totals --}}
+                  </td>
+                </template>
               </tr>
             </tbody>
           </table>
@@ -255,6 +242,11 @@
   <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
 
   <script>
+    // GLOBAL column visibility/order injected by AdsManagerCampaignsController
+    // (CEO-managed via /owner/column-settings). Same shape as the one used
+    // inside /owner/private's expand panel.
+    window.__CAMPAIGNS_COLS__ = @json($campaignsColsConfig ?? ['order' => [], 'hidden' => []]);
+
     function campaignsUI() {
       return {
         tab: 'campaigns',
@@ -271,6 +263,61 @@
           page_name: 'all',
           q: '',
           limit: 200,
+        },
+
+        // Column catalog — each col has id (data key on row),
+        // sort (server sort key, null = not sortable), type (renderer),
+        // align (right for numerics), minw (px hint).
+        // Order/visibility filtered at runtime via visibleCols().
+        defaultCampaignsCols(){
+          return [
+            { id:'on',             label:'Off / On',         sort:null,             type:'on',           align:'left',  minw:80  },
+            { id:'name',           label:'Name',             sort:null,             type:'name',         align:'left',  minw:200 },
+            { id:'first_started',  label:'First launched',   sort:'first_started',  type:'date',         align:'left',  minw:110 },
+            { id:'days_running',   label:'Days running',     sort:'first_started',  type:'days_running', align:'left',  minw:90  },
+            { id:'latest_started', label:'Latest start',     sort:'latest_started', type:'date',         align:'left',  minw:110 },
+            { id:'spend',          label:'Amount spent',     sort:'spend',          type:'money',        align:'right', minw:110 },
+            { id:'cpm_1000',       label:'CPM (per 1,000)',  sort:'cpm_1000',       type:'money',        align:'right', minw:110 },
+            { id:'cpm_msg',        label:'Cost per messaging', sort:'cpm_msg',      type:'money',        align:'right', minw:120 },
+            { id:'cpr',            label:'Cost per result',  sort:'cpr',            type:'money',        align:'right', minw:120 },
+            { id:'cpp',            label:'Cost per purchase',sort:'cpp',            type:'money',        align:'right', minw:130 },
+            { id:'impressions',    label:'Impressions',      sort:null,             type:'integer',      align:'right', minw:100 },
+            { id:'messages',       label:'Messages',         sort:null,             type:'integer',      align:'right', minw:90  },
+            { id:'purchases',      label:'Purchases',        sort:null,             type:'integer',      align:'right', minw:100 },
+          ];
+        },
+        // Apply server-injected order + hidden filter.
+        visibleCols(){
+          const defs = this.defaultCampaignsCols();
+          const defMap = Object.fromEntries(defs.map(c => [c.id, c]));
+          const cfg = window.__CAMPAIGNS_COLS__ || {};
+          const hidden = new Set(Array.isArray(cfg.hidden) ? cfg.hidden : []);
+          const order  = Array.isArray(cfg.order) && cfg.order.length ? cfg.order : defs.map(c => c.id);
+          const seen = new Set();
+          const out = [];
+          for (const id of order) {
+            if (defMap[id] && !hidden.has(id) && !seen.has(id)) { out.push(defMap[id]); seen.add(id); }
+          }
+          // Append any catalog cols not in the saved order (for newly-added).
+          for (const c of defs) {
+            if (!hidden.has(c.id) && !seen.has(c.id)) out.push(c);
+          }
+          return out;
+        },
+        // Header label override — "Name" col uses tab-aware label.
+        colLabel(col){
+          if (col.id === 'name') {
+            return this.tab === 'campaigns' ? 'Campaign'
+                 : this.tab === 'adsets'    ? 'Ad set'
+                 : 'Ad';
+          }
+          return col.label;
+        },
+        // Row name based on tab.
+        rowName(row){
+          if (this.tab === 'campaigns') return row.campaign_name || ('Campaign ' + row.campaign_id);
+          if (this.tab === 'adsets')    return row.ad_set_name   || ('Ad set '   + row.ad_set_id);
+          return row.headline || ('Ad ' + row.ad_id);
         },
 
         // NEW: selections

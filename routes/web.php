@@ -743,6 +743,12 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/macro/export/count',     [\App\Http\Controllers\MacroExportController::class, 'count'])   ->name('macro.export.count');
     Route::post('/macro/export/download',  [\App\Http\Controllers\MacroExportController::class, 'download'])->name('macro.export.download');
 
+    // ── Column settings (CEO only) — manages visibility/order para sa
+    //    /owner/private at /ads_manager/campaigns tables. One page, two
+    //    sections; saved globally to app_settings KV.
+    Route::get ('/owner/column-settings',      [\App\Http\Controllers\OwnerColumnSettingsController::class, 'index'])->name('owner.column-settings');
+    Route::post('/owner/column-settings/save', [\App\Http\Controllers\OwnerColumnSettingsController::class, 'save' ])->name('owner.column-settings.save');
+
 
     // ✅ Validation Lists (CEO, Marketing, Marketing OIC)
     Route::get('/validation-lists', [ValidationListController::class, 'index'])->name('validation-lists.index');

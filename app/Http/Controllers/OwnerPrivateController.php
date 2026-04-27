@@ -40,7 +40,17 @@ class OwnerPrivateController extends Controller
         $isMarketingOIC = preg_match('/^marketing\s*[-–—]\s*oic$/iu', $roleNorm) === 1;
         $isCEO          = preg_match('/^ceo$/iu', $roleNorm) === 1;
 
-        return view('owner.private', compact('pages', 'isCEO', 'isMarketingOIC'));
+        // Column visibility/order configs (CEO-managed via /owner/column-settings).
+        // Both injected so the inline campaigns expand panel shares the same
+        // saved visibility as /ads_manager/campaigns.
+        $colsCtrl = new \App\Http\Controllers\OwnerColumnSettingsController();
+        $ownerPrivateColsConfig = $colsCtrl->loadConfig('owner_private');
+        $campaignsColsConfig    = $colsCtrl->loadConfig('campaigns');
+
+        return view('owner.private', compact(
+            'pages', 'isCEO', 'isMarketingOIC',
+            'ownerPrivateColsConfig', 'campaignsColsConfig'
+        ));
     }
 
     public function data(Request $request)

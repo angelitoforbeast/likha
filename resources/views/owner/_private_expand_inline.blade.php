@@ -1,282 +1,280 @@
 {{--
   Inline campaigns/adsets/ads drilldown for /owner/private rows.
+  FB Ads Manager-like styling. Cols-driven via visibleCampaignsCols()
+  (visibility + order managed globally via /owner/column-settings).
+
   Reuses /ads_manager/campaigns/data JSON endpoint with page_name +
   optional campaign_id / ad_set_id filters. Tree-style nested expand.
-  Date range = this calendar month (PH) — NOT the /owner/private filter.
+  Date range = this calendar month (PH).
 
-  Expected scope when included:
+  Expected scope (from Alpine privateUI):
     row              — current page row from sortedRows()
-    expandedPages    — Alpine state, keyed by page_name
-    expandedCampaigns— Alpine state, keyed by campaign_id
-    expandedAdSets   — Alpine state, keyed by ad_set_id
-    helpers: money, num, fmtDate, daysSince
+    expandedPages    — keyed by page_name
+    expandedCampaigns— keyed by campaign_id
+    expandedAdSets   — keyed by ad_set_id
+    helpers: money, num, fmtDate, daysSince, visibleCampaignsCols,
+             campLabel(col, level), campRowName(row, level)
 --}}
-<div class="px-4 py-3" style="background:#f8fafc;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;">
+<div class="expand-panel">
 
-  {{-- Header strip with date-range note + close hint --}}
-  <div class="flex items-center justify-between mb-2">
-    <div class="text-xs text-slate-600">
-      <span class="font-semibold" x-text="row.page_name"></span>
-      <span class="text-slate-400 mx-1">·</span>
-      <span>Campaigns (this month, default — independent ng filter sa taas)</span>
+  <div class="expand-header">
+    <div class="expand-title">
+      <b x-text="row.page_name"></b>
+      <span style="margin:0 6px;color:#cbd5e1;">·</span>
+      <span>Campaigns (this month default — independent ng filter sa taas)</span>
     </div>
-    <button class="text-xs text-slate-500 hover:text-slate-700"
-            @click="togglePageExpand(row.page_name)">✕ Close</button>
+    <button class="expand-close" @click="togglePageExpand(row.page_name)">✕ Close</button>
   </div>
 
-  {{-- Loading / error / empty --}}
   <template x-if="(expandedPages[row.page_name] || {}).loading">
-    <div class="text-xs text-slate-500 italic py-2">Loading campaigns…</div>
+    <div class="text-xs italic" style="color:#65676b;padding:14px 6px;">Loading campaigns…</div>
   </template>
   <template x-if="(expandedPages[row.page_name] || {}).error">
-    <div class="text-xs text-red-600 py-2"
+    <div class="text-xs" style="color:#dc2626;padding:14px 6px;"
          x-text="'⚠ ' + (expandedPages[row.page_name] || {}).error"></div>
   </template>
   <template x-if="!(expandedPages[row.page_name] || {}).loading
                  && !(expandedPages[row.page_name] || {}).error
                  && Array.isArray((expandedPages[row.page_name] || {}).campaigns)
                  && (expandedPages[row.page_name] || {}).campaigns.length === 0">
-    <div class="text-xs text-slate-500 italic py-2">Walang campaigns para sa page na ito sa this-month range.</div>
+    <div class="text-xs italic" style="color:#65676b;padding:14px 6px;">Walang campaigns para sa page na ito sa this-month range.</div>
   </template>
 
-  {{-- Campaigns table --}}
   <template x-if="!(expandedPages[row.page_name] || {}).loading
                  && !(expandedPages[row.page_name] || {}).error
                  && Array.isArray((expandedPages[row.page_name] || {}).campaigns)
                  && (expandedPages[row.page_name] || {}).campaigns.length > 0">
-    <table class="w-full text-xs border-collapse" style="background:white;border:1px solid #e2e8f0;">
-      <thead style="background:#f1f5f9;">
-        <tr class="text-left text-slate-600">
-          <th class="w-6 px-2 py-1.5"></th>{{-- chevron --}}
-          <th class="w-20 px-2 py-1.5">Off / On</th>
-          <th class="px-2 py-1.5">Campaign</th>
-          <th class="px-2 py-1.5 whitespace-nowrap">First launched</th>
-          <th class="px-2 py-1.5 whitespace-nowrap">Days running</th>
-          <th class="px-2 py-1.5 whitespace-nowrap">Latest start</th>
-          <th class="px-2 py-1.5 text-right">Spend</th>
-          <th class="px-2 py-1.5 text-right">CPM (1k)</th>
-          <th class="px-2 py-1.5 text-right">Cost/Msg</th>
-          <th class="px-2 py-1.5 text-right">Cost/Result</th>
-          <th class="px-2 py-1.5 text-right">Cost/Purchase</th>
-          <th class="px-2 py-1.5 text-right">Impr.</th>
-          <th class="px-2 py-1.5 text-right">Msgs</th>
-          <th class="px-2 py-1.5 text-right">Purchases</th>
+    <div class="expand-wrap">
+    <table class="fb-table">
+      <thead>
+        <tr>
+          <th style="width:32px;padding:7px 4px 7px 10px;"></th>{{-- chevron col --}}
+          <template x-for="col in visibleCampaignsCols()" :key="'ec-h-'+col.id">
+            <th :class="(col.sort ? 'sortable ' : '') + (col.align==='right' ? 'text-right' : '')"
+                :style="col.minw ? ('min-width:'+col.minw+'px') : ''">
+              <span x-text="campLabel(col, 'campaigns')"></span>
+            </th>
+          </template>
         </tr>
       </thead>
 
       <template x-for="c in ((expandedPages[row.page_name] || {}).campaigns || [])" :key="c.campaign_id">
-        <tbody class="border-t border-slate-200">
+        <tbody style="border-top:1px solid #e4e6eb;">
+
           {{-- Campaign row --}}
-          <tr class="hover:bg-slate-50">
-            <td class="px-2 py-1.5 align-top">
-              <button class="text-slate-500 hover:text-slate-900 select-none"
-                      @click="toggleCampaignExpand(c.campaign_id, row.page_name)"
-                      x-text="(expandedCampaigns[c.campaign_id] || {}).open ? '▼' : '▶'"
-                      :title="(expandedCampaigns[c.campaign_id] || {}).open ? 'Hide ad sets' : 'Show ad sets'"></button>
+          <tr>
+            <td style="text-align:center;padding:8px 4px 8px 10px;">
+              <button @click="toggleCampaignExpand(c.campaign_id, row.page_name)"
+                      style="background:none;border:none;cursor:pointer;color:#65676b;font-size:11px;line-height:1;padding:2px;"
+                      :title="(expandedCampaigns[c.campaign_id] || {}).open ? 'Hide ad sets' : 'Show ad sets'"
+                      x-text="(expandedCampaigns[c.campaign_id] || {}).open ? '▼' : '▶'"></button>
             </td>
-            <td class="px-2 py-1.5 align-top">
-              <span class="inline-flex items-center gap-1.5">
-                <span class="inline-block w-2 h-2 rounded-full"
-                      :class="c.on ? 'bg-emerald-600' : 'bg-slate-400'"></span>
-                <span class="text-[11px]" x-text="c.on ? 'Active' : 'Off'"></span>
-              </span>
-            </td>
-            <td class="px-2 py-1.5 align-top">
-              <div class="font-medium text-slate-800" x-text="c.campaign_name || ('Campaign '+c.campaign_id)"></div>
-            </td>
-            <td class="px-2 py-1.5 align-top whitespace-nowrap">
-              <span x-show="c.first_started" x-text="fmtDate(c.first_started)"></span>
-              <span x-show="!c.first_started" class="text-slate-400">—</span>
-            </td>
-            <td class="px-2 py-1.5 align-top whitespace-nowrap">
-              <span x-show="c.first_started && c.on" x-text="daysSince(c.first_started)"></span>
-              <span x-show="!c.first_started || !c.on" class="text-slate-400">—</span>
-            </td>
-            <td class="px-2 py-1.5 align-top whitespace-nowrap">
-              <span x-show="c.latest_started" x-text="fmtDate(c.latest_started)"></span>
-              <span x-show="!c.latest_started" class="text-slate-400">—</span>
-            </td>
-            <td class="px-2 py-1.5 text-right align-top" x-text="money(c.spend)"></td>
-            <td class="px-2 py-1.5 text-right align-top" x-text="c.cpm_1000!=null?money(c.cpm_1000):'—'"></td>
-            <td class="px-2 py-1.5 text-right align-top" x-text="c.cpm_msg !=null?money(c.cpm_msg ):'—'"></td>
-            <td class="px-2 py-1.5 text-right align-top" x-text="c.cpr     !=null?money(c.cpr    ):'—'"></td>
-            <td class="px-2 py-1.5 text-right align-top" x-text="c.cpp     !=null?money(c.cpp    ):'—'"></td>
-            <td class="px-2 py-1.5 text-right align-top" x-text="num(c.impressions)"></td>
-            <td class="px-2 py-1.5 text-right align-top" x-text="num(c.messages)"></td>
-            <td class="px-2 py-1.5 text-right align-top" x-text="num(c.purchases)"></td>
+            <template x-for="col in visibleCampaignsCols()" :key="'ec-c-'+col.id">
+              <td :class="(col.align==='right' ? 'num' : '')">
+                <template x-if="col.type==='on'">
+                  <span :class="'fb-pill ' + (c.on ? 'active' : 'off')"
+                        x-text="c.on ? 'Active' : 'Off'"></span>
+                </template>
+                <template x-if="col.type==='name'">
+                  <div>
+                    <div class="name" x-text="campRowName(c, 'campaigns')"></div>
+                  </div>
+                </template>
+                <template x-if="col.type==='date'">
+                  <span>
+                    <template x-if="c[col.id]">
+                      <span style="white-space:nowrap;" x-text="fmtDate(c[col.id])"></span>
+                    </template>
+                    <template x-if="!c[col.id]"><span style="color:#bcc0c4;">—</span></template>
+                  </span>
+                </template>
+                <template x-if="col.type==='days_running'">
+                  <span>
+                    <template x-if="c.first_started && c.on">
+                      <span x-text="daysSince(c.first_started)"></span>
+                    </template>
+                    <template x-if="!c.first_started || !c.on">
+                      <span style="color:#bcc0c4;">—</span>
+                    </template>
+                  </span>
+                </template>
+                <template x-if="col.type==='money'">
+                  <span x-text="c[col.id] != null ? money(c[col.id]) : '—'"></span>
+                </template>
+                <template x-if="col.type==='integer'">
+                  <span x-text="num(c[col.id])"></span>
+                </template>
+              </td>
+            </template>
           </tr>
 
-          {{-- Ad sets nested under this campaign --}}
-          <tr x-show="(expandedCampaigns[c.campaign_id] || {}).open">
-            <td colspan="14" style="background:#eef2f7;padding:10px 12px;">
+          {{-- Ad sets nested under this campaign (level 1) --}}
+          <tr x-show="(expandedCampaigns[c.campaign_id] || {}).open" class="expand-nest-1">
+            <td class="nest-host" :colspan="visibleCampaignsCols().length + 1">
               <template x-if="(expandedCampaigns[c.campaign_id] || {}).loading">
-                <div class="text-xs text-slate-500 italic">Loading ad sets…</div>
+                <div class="text-xs italic" style="color:#65676b;">Loading ad sets…</div>
               </template>
               <template x-if="(expandedCampaigns[c.campaign_id] || {}).error">
-                <div class="text-xs text-red-600"
+                <div class="text-xs" style="color:#dc2626;"
                      x-text="'⚠ ' + (expandedCampaigns[c.campaign_id] || {}).error"></div>
               </template>
               <template x-if="!(expandedCampaigns[c.campaign_id] || {}).loading
                              && !(expandedCampaigns[c.campaign_id] || {}).error
                              && Array.isArray((expandedCampaigns[c.campaign_id] || {}).adsets)
                              && (expandedCampaigns[c.campaign_id] || {}).adsets.length === 0">
-                <div class="text-xs text-slate-500 italic">Walang ad sets sa loob ng campaign na ito.</div>
+                <div class="text-xs italic" style="color:#65676b;">Walang ad sets sa loob ng campaign na ito.</div>
               </template>
 
               <template x-if="!(expandedCampaigns[c.campaign_id] || {}).loading
                              && !(expandedCampaigns[c.campaign_id] || {}).error
                              && Array.isArray((expandedCampaigns[c.campaign_id] || {}).adsets)
                              && (expandedCampaigns[c.campaign_id] || {}).adsets.length > 0">
-                <table class="w-full text-xs border-collapse" style="background:white;border:1px solid #cbd5e1;">
-                  <thead style="background:#e2e8f0;">
-                    <tr class="text-left text-slate-700">
-                      <th class="w-6 px-2 py-1.5"></th>
-                      <th class="w-20 px-2 py-1.5">Off / On</th>
-                      <th class="px-2 py-1.5">Ad set</th>
-                      <th class="px-2 py-1.5 whitespace-nowrap">First launched</th>
-                      <th class="px-2 py-1.5 whitespace-nowrap">Days running</th>
-                      <th class="px-2 py-1.5 whitespace-nowrap">Latest start</th>
-                      <th class="px-2 py-1.5 text-right">Spend</th>
-                      <th class="px-2 py-1.5 text-right">CPM (1k)</th>
-                      <th class="px-2 py-1.5 text-right">Cost/Msg</th>
-                      <th class="px-2 py-1.5 text-right">Cost/Result</th>
-                      <th class="px-2 py-1.5 text-right">Cost/Purchase</th>
-                      <th class="px-2 py-1.5 text-right">Impr.</th>
-                      <th class="px-2 py-1.5 text-right">Msgs</th>
-                      <th class="px-2 py-1.5 text-right">Purchases</th>
+                <div class="expand-wrap" style="border-color:#94a3b8;">
+                <table class="fb-table">
+                  <thead>
+                    <tr>
+                      <th style="width:32px;padding:7px 4px 7px 10px;"></th>
+                      <template x-for="col in visibleCampaignsCols()" :key="'ea-h-'+col.id">
+                        <th :class="(col.sort ? 'sortable ' : '') + (col.align==='right' ? 'text-right' : '')"
+                            :style="col.minw ? ('min-width:'+col.minw+'px') : ''">
+                          <span x-text="campLabel(col, 'adsets')"></span>
+                        </th>
+                      </template>
                     </tr>
                   </thead>
 
                   <template x-for="aset in ((expandedCampaigns[c.campaign_id] || {}).adsets || [])" :key="aset.ad_set_id">
-                    <tbody class="border-t border-slate-200">
-                      <tr class="hover:bg-slate-50">
-                        <td class="px-2 py-1.5 align-top">
-                          <button class="text-slate-500 hover:text-slate-900 select-none"
-                                  @click="toggleAdSetExpand(aset.ad_set_id, c.campaign_id, row.page_name)"
-                                  x-text="(expandedAdSets[aset.ad_set_id] || {}).open ? '▼' : '▶'"
-                                  :title="(expandedAdSets[aset.ad_set_id] || {}).open ? 'Hide ads' : 'Show ads'"></button>
+                    <tbody style="border-top:1px solid #e4e6eb;">
+
+                      {{-- Ad set row --}}
+                      <tr>
+                        <td style="text-align:center;padding:8px 4px 8px 10px;">
+                          <button @click="toggleAdSetExpand(aset.ad_set_id, c.campaign_id, row.page_name)"
+                                  style="background:none;border:none;cursor:pointer;color:#65676b;font-size:11px;line-height:1;padding:2px;"
+                                  :title="(expandedAdSets[aset.ad_set_id] || {}).open ? 'Hide ads' : 'Show ads'"
+                                  x-text="(expandedAdSets[aset.ad_set_id] || {}).open ? '▼' : '▶'"></button>
                         </td>
-                        <td class="px-2 py-1.5 align-top">
-                          <span class="inline-flex items-center gap-1.5">
-                            <span class="inline-block w-2 h-2 rounded-full"
-                                  :class="aset.on ? 'bg-emerald-600' : 'bg-slate-400'"></span>
-                            <span class="text-[11px]" x-text="aset.on ? 'Active' : 'Off'"></span>
-                          </span>
-                        </td>
-                        <td class="px-2 py-1.5 align-top">
-                          <div class="font-medium text-slate-800" x-text="aset.ad_set_name || ('Ad set '+aset.ad_set_id)"></div>
-                        </td>
-                        <td class="px-2 py-1.5 align-top whitespace-nowrap">
-                          <span x-show="aset.first_started" x-text="fmtDate(aset.first_started)"></span>
-                          <span x-show="!aset.first_started" class="text-slate-400">—</span>
-                        </td>
-                        <td class="px-2 py-1.5 align-top whitespace-nowrap">
-                          <span x-show="aset.first_started && aset.on" x-text="daysSince(aset.first_started)"></span>
-                          <span x-show="!aset.first_started || !aset.on" class="text-slate-400">—</span>
-                        </td>
-                        <td class="px-2 py-1.5 align-top whitespace-nowrap">
-                          <span x-show="aset.latest_started" x-text="fmtDate(aset.latest_started)"></span>
-                          <span x-show="!aset.latest_started" class="text-slate-400">—</span>
-                        </td>
-                        <td class="px-2 py-1.5 text-right align-top" x-text="money(aset.spend)"></td>
-                        <td class="px-2 py-1.5 text-right align-top" x-text="aset.cpm_1000!=null?money(aset.cpm_1000):'—'"></td>
-                        <td class="px-2 py-1.5 text-right align-top" x-text="aset.cpm_msg !=null?money(aset.cpm_msg ):'—'"></td>
-                        <td class="px-2 py-1.5 text-right align-top" x-text="aset.cpr     !=null?money(aset.cpr    ):'—'"></td>
-                        <td class="px-2 py-1.5 text-right align-top" x-text="aset.cpp     !=null?money(aset.cpp    ):'—'"></td>
-                        <td class="px-2 py-1.5 text-right align-top" x-text="num(aset.impressions)"></td>
-                        <td class="px-2 py-1.5 text-right align-top" x-text="num(aset.messages)"></td>
-                        <td class="px-2 py-1.5 text-right align-top" x-text="num(aset.purchases)"></td>
+                        <template x-for="col in visibleCampaignsCols()" :key="'ea-c-'+col.id">
+                          <td :class="(col.align==='right' ? 'num' : '')">
+                            <template x-if="col.type==='on'">
+                              <span :class="'fb-pill ' + (aset.on ? 'active' : 'off')"
+                                    x-text="aset.on ? 'Active' : 'Off'"></span>
+                            </template>
+                            <template x-if="col.type==='name'">
+                              <div class="name" x-text="campRowName(aset, 'adsets')"></div>
+                            </template>
+                            <template x-if="col.type==='date'">
+                              <span>
+                                <template x-if="aset[col.id]"><span style="white-space:nowrap;" x-text="fmtDate(aset[col.id])"></span></template>
+                                <template x-if="!aset[col.id]"><span style="color:#bcc0c4;">—</span></template>
+                              </span>
+                            </template>
+                            <template x-if="col.type==='days_running'">
+                              <span>
+                                <template x-if="aset.first_started && aset.on"><span x-text="daysSince(aset.first_started)"></span></template>
+                                <template x-if="!aset.first_started || !aset.on"><span style="color:#bcc0c4;">—</span></template>
+                              </span>
+                            </template>
+                            <template x-if="col.type==='money'">
+                              <span x-text="aset[col.id] != null ? money(aset[col.id]) : '—'"></span>
+                            </template>
+                            <template x-if="col.type==='integer'">
+                              <span x-text="num(aset[col.id])"></span>
+                            </template>
+                          </td>
+                        </template>
                       </tr>
 
-                      {{-- Ads nested under this ad set --}}
-                      <tr x-show="(expandedAdSets[aset.ad_set_id] || {}).open">
-                        <td colspan="14" style="background:#dde4ed;padding:10px 12px;">
+                      {{-- Ads nested under this ad set (level 2 — leaf, no further expand) --}}
+                      <tr x-show="(expandedAdSets[aset.ad_set_id] || {}).open" class="expand-nest-2">
+                        <td class="nest-host" :colspan="visibleCampaignsCols().length + 1">
                           <template x-if="(expandedAdSets[aset.ad_set_id] || {}).loading">
-                            <div class="text-xs text-slate-500 italic">Loading ads…</div>
+                            <div class="text-xs italic" style="color:#65676b;">Loading ads…</div>
                           </template>
                           <template x-if="(expandedAdSets[aset.ad_set_id] || {}).error">
-                            <div class="text-xs text-red-600"
+                            <div class="text-xs" style="color:#dc2626;"
                                  x-text="'⚠ ' + (expandedAdSets[aset.ad_set_id] || {}).error"></div>
                           </template>
                           <template x-if="!(expandedAdSets[aset.ad_set_id] || {}).loading
                                          && !(expandedAdSets[aset.ad_set_id] || {}).error
                                          && Array.isArray((expandedAdSets[aset.ad_set_id] || {}).ads)
                                          && (expandedAdSets[aset.ad_set_id] || {}).ads.length === 0">
-                            <div class="text-xs text-slate-500 italic">Walang ads sa loob ng ad set na ito.</div>
+                            <div class="text-xs italic" style="color:#65676b;">Walang ads sa loob ng ad set na ito.</div>
                           </template>
 
                           <template x-if="!(expandedAdSets[aset.ad_set_id] || {}).loading
                                          && !(expandedAdSets[aset.ad_set_id] || {}).error
                                          && Array.isArray((expandedAdSets[aset.ad_set_id] || {}).ads)
                                          && (expandedAdSets[aset.ad_set_id] || {}).ads.length > 0">
-                            <table class="w-full text-xs border-collapse" style="background:white;border:1px solid #94a3b8;">
-                              <thead style="background:#cbd5e1;">
-                                <tr class="text-left text-slate-700">
-                                  <th class="w-20 px-2 py-1.5">Off / On</th>
-                                  <th class="px-2 py-1.5">Ad (Headline)</th>
-                                  <th class="px-2 py-1.5 whitespace-nowrap">First launched</th>
-                                  <th class="px-2 py-1.5 whitespace-nowrap">Days running</th>
-                                  <th class="px-2 py-1.5 whitespace-nowrap">Latest start</th>
-                                  <th class="px-2 py-1.5 text-right">Spend</th>
-                                  <th class="px-2 py-1.5 text-right">CPM (1k)</th>
-                                  <th class="px-2 py-1.5 text-right">Cost/Msg</th>
-                                  <th class="px-2 py-1.5 text-right">Cost/Result</th>
-                                  <th class="px-2 py-1.5 text-right">Cost/Purchase</th>
-                                  <th class="px-2 py-1.5 text-right">Impr.</th>
-                                  <th class="px-2 py-1.5 text-right">Msgs</th>
-                                  <th class="px-2 py-1.5 text-right">Purchases</th>
+                            <div class="expand-wrap" style="border-color:#64748b;">
+                            <table class="fb-table">
+                              <thead>
+                                <tr>
+                                  <template x-for="col in visibleCampaignsCols()" :key="'ed-h-'+col.id">
+                                    <th :class="(col.sort ? 'sortable ' : '') + (col.align==='right' ? 'text-right' : '')"
+                                        :style="col.minw ? ('min-width:'+col.minw+'px') : ''">
+                                      <span x-text="campLabel(col, 'ads')"></span>
+                                    </th>
+                                  </template>
                                 </tr>
                               </thead>
                               <tbody>
                                 <template x-for="ad in ((expandedAdSets[aset.ad_set_id] || {}).ads || [])" :key="ad.ad_id">
-                                  <tr class="border-t border-slate-200 hover:bg-slate-50">
-                                    <td class="px-2 py-1.5 align-top">
-                                      <span class="inline-flex items-center gap-1.5">
-                                        <span class="inline-block w-2 h-2 rounded-full"
-                                              :class="ad.on ? 'bg-emerald-600' : 'bg-slate-400'"></span>
-                                        <span class="text-[11px]" x-text="ad.on ? 'Active' : 'Off'"></span>
-                                      </span>
-                                    </td>
-                                    <td class="px-2 py-1.5 align-top">
-                                      <div class="font-medium text-slate-800" x-text="ad.headline || ('Ad '+ad.ad_id)"></div>
-                                      <div class="text-[10px] text-slate-500" x-text="ad.item_name"></div>
-                                    </td>
-                                    <td class="px-2 py-1.5 align-top whitespace-nowrap">
-                                      <span x-show="ad.first_started" x-text="fmtDate(ad.first_started)"></span>
-                                      <span x-show="!ad.first_started" class="text-slate-400">—</span>
-                                    </td>
-                                    <td class="px-2 py-1.5 align-top whitespace-nowrap">
-                                      <span x-show="ad.first_started && ad.on" x-text="daysSince(ad.first_started)"></span>
-                                      <span x-show="!ad.first_started || !ad.on" class="text-slate-400">—</span>
-                                    </td>
-                                    <td class="px-2 py-1.5 align-top whitespace-nowrap">
-                                      <span x-show="ad.latest_started" x-text="fmtDate(ad.latest_started)"></span>
-                                      <span x-show="!ad.latest_started" class="text-slate-400">—</span>
-                                    </td>
-                                    <td class="px-2 py-1.5 text-right align-top" x-text="money(ad.spend)"></td>
-                                    <td class="px-2 py-1.5 text-right align-top" x-text="ad.cpm_1000!=null?money(ad.cpm_1000):'—'"></td>
-                                    <td class="px-2 py-1.5 text-right align-top" x-text="ad.cpm_msg !=null?money(ad.cpm_msg ):'—'"></td>
-                                    <td class="px-2 py-1.5 text-right align-top" x-text="ad.cpr     !=null?money(ad.cpr    ):'—'"></td>
-                                    <td class="px-2 py-1.5 text-right align-top" x-text="ad.cpp     !=null?money(ad.cpp    ):'—'"></td>
-                                    <td class="px-2 py-1.5 text-right align-top" x-text="num(ad.impressions)"></td>
-                                    <td class="px-2 py-1.5 text-right align-top" x-text="num(ad.messages)"></td>
-                                    <td class="px-2 py-1.5 text-right align-top" x-text="num(ad.purchases)"></td>
+                                  <tr>
+                                    <template x-for="col in visibleCampaignsCols()" :key="'ed-c-'+col.id">
+                                      <td :class="(col.align==='right' ? 'num' : '')">
+                                        <template x-if="col.type==='on'">
+                                          <span :class="'fb-pill ' + (ad.on ? 'active' : 'off')"
+                                                x-text="ad.on ? 'Active' : 'Off'"></span>
+                                        </template>
+                                        <template x-if="col.type==='name'">
+                                          <div>
+                                            <div class="name" x-text="campRowName(ad, 'ads')"></div>
+                                            <template x-if="ad.item_name">
+                                              <div class="sub" x-text="ad.item_name"></div>
+                                            </template>
+                                          </div>
+                                        </template>
+                                        <template x-if="col.type==='date'">
+                                          <span>
+                                            <template x-if="ad[col.id]"><span style="white-space:nowrap;" x-text="fmtDate(ad[col.id])"></span></template>
+                                            <template x-if="!ad[col.id]"><span style="color:#bcc0c4;">—</span></template>
+                                          </span>
+                                        </template>
+                                        <template x-if="col.type==='days_running'">
+                                          <span>
+                                            <template x-if="ad.first_started && ad.on"><span x-text="daysSince(ad.first_started)"></span></template>
+                                            <template x-if="!ad.first_started || !ad.on"><span style="color:#bcc0c4;">—</span></template>
+                                          </span>
+                                        </template>
+                                        <template x-if="col.type==='money'">
+                                          <span x-text="ad[col.id] != null ? money(ad[col.id]) : '—'"></span>
+                                        </template>
+                                        <template x-if="col.type==='integer'">
+                                          <span x-text="num(ad[col.id])"></span>
+                                        </template>
+                                      </td>
+                                    </template>
                                   </tr>
                                 </template>
                               </tbody>
                             </table>
+                            </div>
                           </template>
                         </td>
                       </tr>
                     </tbody>
                   </template>
                 </table>
+                </div>
               </template>
             </td>
           </tr>
+
         </tbody>
       </template>
     </table>
+    </div>
   </template>
 
 </div>

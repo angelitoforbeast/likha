@@ -18,7 +18,13 @@ class AdsManagerCampaignsController extends Controller
             ->pluck('page_name')
             ->toArray();
 
-        return view('ads_manager.campaigns', compact('pages'));
+        // CEO-managed column visibility/order, shared with /owner/private's
+        // inline campaigns expand. Loaded from app_settings via the settings
+        // controller's resolver. Always returns a clean { order, hidden } shape.
+        $colsCtrl = new \App\Http\Controllers\OwnerColumnSettingsController();
+        $campaignsColsConfig = $colsCtrl->loadConfig('campaigns');
+
+        return view('ads_manager.campaigns', compact('pages', 'campaignsColsConfig'));
     }
 
     public function data(Request $request)
