@@ -216,10 +216,15 @@ class OwnerColumnSettingsController extends Controller
             if ($val === null) return null;
             $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
             if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
+            // Optional text color override. Defaults to '' (= use the row's
+            // inherited text color, which is black on /owner/private).
+            $color = trim((string) ($r['color'] ?? ''));
+            if ($color !== '' && !preg_match('/^#[0-9a-fA-F]{6}$/', $color)) $color = '';
             return [
                 'op'    => $op,
                 'value' => $val,
                 'bg'    => strtolower($bg),
+                'color' => $color === '' ? '' : strtolower($color),
                 'bold'  => !empty($r['bold']),
                 'label' => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
             ];
@@ -350,10 +355,13 @@ class OwnerColumnSettingsController extends Controller
                 if ($val === null) continue;
                 $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
                 if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
+                $color = trim((string) ($r['color'] ?? ''));
+                if ($color !== '' && !preg_match('/^#[0-9a-fA-F]{6}$/', $color)) $color = '';
                 $rules[] = [
                     'op'    => $op,
                     'value' => $val,
                     'bg'    => strtolower($bg),
+                    'color' => $color === '' ? '' : strtolower($color),
                     'bold'  => !empty($r['bold']),
                     'label' => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
                 ];

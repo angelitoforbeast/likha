@@ -348,15 +348,9 @@
               case '<':  hit = v <  t; break;
             }
             if (hit) {
-              const bg = r.bg || '#fee2e2';
-              const m = /^#([0-9a-f]{6})$/i.exec(bg);
-              let txt = '#111827';
-              if (m) {
-                const R = parseInt(m[1].slice(0,2), 16);
-                const G = parseInt(m[1].slice(2,4), 16);
-                const B = parseInt(m[1].slice(4,6), 16);
-                if ((R*299 + G*587 + B*114) / 1000 < 150) txt = '#ffffff';
-              }
+              const bg  = r.bg || '#fee2e2';
+              // Default text = black. Override only when rule sets a color.
+              const txt = (r.color && /^#[0-9a-f]{6}$/i.test(r.color)) ? r.color : '#111827';
               return 'background:' + bg + ';color:' + txt + ';' + (r.bold ? 'font-weight:700;' : '');
             }
           }

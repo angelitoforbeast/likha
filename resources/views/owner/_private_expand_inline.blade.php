@@ -21,7 +21,13 @@
     <div class="expand-title">
       <b x-text="row.page_name"></b>
       <span style="margin:0 6px;color:#cbd5e1;">·</span>
-      <span>Campaigns (this month default — independent ng filter sa taas)</span>
+      <span>
+        <b x-text="row.item_name"></b> ·
+        <span x-text="row.anchor_first_date ? ('since ' + fmtMD(row.anchor_first_date)) : 'all dates'"></span>
+        →
+        <span x-text="endDate"></span>
+        · only with spend
+      </span>
     </div>
     <button class="expand-close" @click="togglePageExpand(row.page_name)">✕ Close</button>
   </div>

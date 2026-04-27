@@ -15,7 +15,7 @@
   The Alpine component below is unique per section because of x-data scope.
 --}}
 <div class="col-section"
-     x-data="colFormatEditor(@js($tableId), @js($tableCatalog), @js($catalog['owner_private'] ?? []), @js($initialGroups))">
+     x-data="colFormatEditor(@js($tableId), @js($tableCatalog), @js($catalog['owner_private'] ?? []), @js($initialGroups), {{ $breakevenTargetPct ?? 5 }})">
   <div class="flex items-baseline justify-between mb-1">
     <h3>{!! $sectionTitle !!}</h3>
     <span class="text-[10px] text-slate-400">{{ $sectionKey }}</span>
@@ -118,6 +118,19 @@
               <input type="color" x-model="r.bg" class="w-12 h-7 cursor-pointer border rounded">
               <input type="text" x-model="r.bg" maxlength="7"
                      class="border border-slate-300 rounded px-1 py-0.5 text-xs w-20 font-mono">
+              {{-- Optional text color. Empty = inherit (black by default).
+                   Click the swatch to override; click ✕ to clear back to default. --}}
+              <span class="text-xs text-slate-500">font</span>
+              <input type="color"
+                     :value="r.color || '#111827'"
+                     @input="r.color = $event.target.value"
+                     class="w-12 h-7 cursor-pointer border rounded"
+                     :title="r.color ? ('Custom: '+r.color) : 'Default (black) — click to override'">
+              <button type="button" @click="r.color = ''"
+                      class="text-[10px] text-slate-400 hover:text-slate-700"
+                      style="background:none;border:none;padding:0 2px;cursor:pointer;"
+                      x-show="r.color"
+                      title="Reset font color to default (black)">✕</button>
               <label class="text-xs flex items-center gap-1">
                 <input type="checkbox" x-model="r.bold"> bold
               </label>
@@ -126,7 +139,7 @@
                      style="min-width:120px;"
                      maxlength="40">
               <span class="px-2 py-0.5 text-xs rounded"
-                    :style="'background:'+r.bg+';color:'+previewTextColor(r.bg)+';'+(r.bold?'font-weight:700;':'')"
+                    :style="'background:'+r.bg+';color:'+(r.color || '#111827')+';'+(r.bold?'font-weight:700;':'')"
                     x-text="rulePreviewText(r)"></span>
               <button class="text-red-600 hover:text-red-800 text-sm"
                       @click="removeRule(gIdx, rIdx)" title="Remove rule">✕</button>

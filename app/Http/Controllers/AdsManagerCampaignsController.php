@@ -43,6 +43,12 @@ class AdsManagerCampaignsController extends Controller
         $sortDir     = strtolower($request->input('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
         $limit       = max(1, min((int) $request->input('limit', 200), 1000));
         $export      = $request->input('export');             // 'csv' to export
+        // Item-scope filters used by /owner/private inline expand:
+        //   item_name      — exact qty-variant match (e.g. "2 x MINI FLASHLIGHT")
+        //   only_with_spend — when '1', drops aggregated rows where SUM(spend) <= 0
+        // Both are optional (omit for the standalone /ads_manager/campaigns view).
+        $itemName       = $request->input('item_name');
+        $onlyWithSpend  = (string) $request->input('only_with_spend', '') === '1';
 
         // Drilldown params (single selection)
         $campaignId  = $request->input('campaign_id');
@@ -193,6 +199,14 @@ class AdsManagerCampaignsController extends Controller
             $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
         }
 
+        // Item filter — qty-variant exact match (e.g. "2 x MINI FLASHLIGHT").
+        // Used by /owner/private inline expand to scope campaigns/adsets/ads
+        // to ONLY those tied to the row's specific item. Aggregations (spend
+        // totals, CPP, etc.) are computed against this filtered set.
+        if (is_string($itemName) && trim($itemName) !== '') {
+            $base->whereRaw('LOWER(TRIM(COALESCE(item_name,\'\'))) = LOWER(TRIM(?))', [trim($itemName)]);
+        }
+
         // Search (case-insensitive)
         if ($q) {
             $like = '%'.trim($q).'%';
@@ -250,6 +264,9 @@ class AdsManagerCampaignsController extends Controller
                     MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.campaign_id');
+
+            // Drop campaigns with zero spend in the window when caller asked.
+            if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','campaign_name','page_name','first_started','latest_started'];
 
@@ -326,6 +343,8 @@ class AdsManagerCampaignsController extends Controller
                     MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.ad_set_id');
+
+            if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','ad_set_name','campaign_name','page_name','first_started','latest_started'];
 
@@ -408,6 +427,8 @@ class AdsManagerCampaignsController extends Controller
                     MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.ad_id');
+
+            if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
             $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','headline','item_name','first_started','latest_started'];
 

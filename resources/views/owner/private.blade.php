@@ -276,6 +276,18 @@
       </svg>
     </button>
 
+    {{-- Expand-all / Hide-all toggle for the per-page campaigns expand.
+         One button — label flips based on current state:
+           - Some/all rows collapsed (or no rows expanded) → "▶ Expand all"
+           - All visible rows expanded → "▼ Hide all" --}}
+    <button type="button" @click="toggleAllExpand()"
+            :title="anyExpanded() ? 'Collapse all campaigns panels' : 'Expand campaigns for every page row'"
+            style="background:#1e293b;color:#86efac;border:1px solid #475569;
+                   border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+                   cursor:pointer;margin-left:4px;">
+      <span x-text="anyExpanded() ? '▼ Hide all' : '▶ Expand all'"></span>
+    </button>
+
     @if(!empty($isCEO))
       <a href="{{ route('owner.column-settings') }}" target="_blank"
          title="Configure column visibility / order globally for /owner/private and the campaigns expand panel"
@@ -1371,15 +1383,10 @@
             case '<':  hit = v <  t; break;
           }
           if (hit) {
-            const bg = r.bg || '#fee2e2';
-            const m = /^#([0-9a-f]{6})$/i.exec(bg);
-            let txt = '#111827';
-            if (m) {
-              const R = parseInt(m[1].slice(0,2), 16);
-              const G = parseInt(m[1].slice(2,4), 16);
-              const B = parseInt(m[1].slice(4,6), 16);
-              if ((R*299 + G*587 + B*114) / 1000 < 150) txt = '#ffffff';
-            }
+            const bg  = r.bg || '#fee2e2';
+            // Default text = black. Override only when rule explicitly sets a
+            // color (configured via /owner/column-settings).
+            const txt = (r.color && /^#[0-9a-f]{6}$/i.test(r.color)) ? r.color : '#111827';
             return 'background:' + bg + ';color:' + txt + ';' + (r.bold ? 'font-weight:700;' : '');
           }
         }
@@ -1462,35 +1469,77 @@
       },
 
       // ── Inline expand: campaigns / adsets / ads ───────────────────────────
-      // Date range = "this calendar month" (PH) — independent ng /owner/private
-      // filter, intentional per spec. Cached client-side.
+      // Date range = `[row.anchor_first_date .. /owner/private end_date]` so
+      // we only see ad activity from when the page's CURRENT primary item
+      // first became primary. Item filter = exact qty-variant match
+      // (e.g. "2 x MINI FLASHLIGHT"). only_with_spend=1 hides idle entities.
+      // Falls back to this-month range if anchor missing (legacy single-date).
 
-      // Build YYYY-MM-DD for first-of-month and today (PH).
-      _thisMonthRangePH(){
-        const ph = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Manila'}));
-        const p = n => String(n).padStart(2,'0');
-        const fmt = d => d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
-        const start = new Date(ph.getFullYear(), ph.getMonth(), 1);
-        return { start: fmt(start), end: fmt(ph) };
+      // Resolve {start_date, end_date, item_name} scope per page row.
+      _pageScopeFor(pageName){
+        const row = (this.rows || []).find(r => r.page_name === pageName);
+        // Fallback dates: /owner/private's filter end_date for both ends
+        // when no row context is available (rare).
+        const fallbackEnd = this.endDate || '';
+        const fallbackStart = this.startDate || fallbackEnd;
+        if (!row) return { start_date: fallbackStart, end_date: fallbackEnd, item_name: '' };
+        const start = row.anchor_first_date || fallbackStart;
+        const end   = this.endDate || fallbackEnd;
+        return { start_date: start, end_date: end, item_name: row.item_name || '' };
       },
 
       // Generic fetcher into /ads_manager/campaigns/data with passed params.
       async _fetchCampaignsData(params){
-        const r = this._thisMonthRangePH();
         const qs = new URLSearchParams(Object.assign({
-          start_date: r.start,
-          end_date:   r.end,
-          limit:      1000,
-          sort_by:    'default',
-          sort_dir:   'desc',
+          limit:           1000,
+          sort_by:         'default',
+          sort_dir:        'desc',
+          only_with_spend: '1',
         }, params));
         const res = await fetch('{{ route('ads_manager.campaigns.data') }}?' + qs.toString());
         if (!res.ok) throw new Error('HTTP '+res.status);
         return await res.json();
       },
 
+      // Are any visible page rows currently expanded? Used by the
+      // "Expand all / Hide all" toggle button to choose its label + action.
+      anyExpanded(){
+        const visible = (this.sortedRows ? this.sortedRows() : (this.rows || []));
+        for (const r of visible) {
+          const st = this.expandedPages[r.page_name];
+          if (st && st.open) return true;
+        }
+        return false;
+      },
+
+      // Single-button toggle: if any row is open → collapse all visible rows;
+      // otherwise → expand all visible rows (fires N parallel fetches).
+      // Uses the existing togglePageExpand so cache + load semantics match.
+      async toggleAllExpand(){
+        const visible = (this.sortedRows ? this.sortedRows() : (this.rows || []));
+        if (this.anyExpanded()) {
+          // Collapse: just flip open=false on already-loaded entries (no fetch).
+          for (const r of visible) {
+            const st = this.expandedPages[r.page_name];
+            if (st && st.open) {
+              this.expandedPages[r.page_name] = Object.assign({}, st, { open: false });
+            }
+          }
+        } else {
+          // Expand all: kick off togglePageExpand for any not-yet-expanded row.
+          // Run in parallel — let each panel resolve independently.
+          const tasks = [];
+          for (const r of visible) {
+            const st = this.expandedPages[r.page_name];
+            if (!st || !st.open) tasks.push(this.togglePageExpand(r.page_name));
+          }
+          await Promise.allSettled(tasks);
+        }
+      },
+
       // Toggle the per-page campaigns expand. First open fetches; subsequent
-      // toggles just flip `open` without re-fetching.
+      // toggles just flip `open` without re-fetching. Scope = the page's
+      // current primary item run window.
       async togglePageExpand(pageName){
         const cur = this.expandedPages[pageName];
         if (cur && cur.campaigns) {
@@ -1499,7 +1548,10 @@
         }
         this.expandedPages[pageName] = { open: true, loading: true, error: null, campaigns: null };
         try {
-          const j = await this._fetchCampaignsData({ level: 'campaigns', page_name: pageName });
+          const scope = this._pageScopeFor(pageName);
+          const j = await this._fetchCampaignsData(Object.assign({
+            level: 'campaigns', page_name: pageName,
+          }, scope));
           this.expandedPages[pageName] = { open: true, loading: false, error: null, campaigns: j.rows || [] };
         } catch (e) {
           this.expandedPages[pageName] = { open: true, loading: false, error: e.message || 'Failed to load', campaigns: [] };
@@ -1507,6 +1559,7 @@
       },
 
       // Toggle a campaign's adsets expand inside an already-expanded page.
+      // Scope (date range + item filter) inherits from the parent page's row.
       async toggleCampaignExpand(campaignId, pageName){
         const cur = this.expandedCampaigns[campaignId];
         if (cur && cur.adsets) {
@@ -1515,9 +1568,10 @@
         }
         this.expandedCampaigns[campaignId] = { open: true, loading: true, error: null, adsets: null };
         try {
-          const j = await this._fetchCampaignsData({
+          const scope = this._pageScopeFor(pageName);
+          const j = await this._fetchCampaignsData(Object.assign({
             level: 'adsets', page_name: pageName, campaign_id: campaignId,
-          });
+          }, scope));
           this.expandedCampaigns[campaignId] = { open: true, loading: false, error: null, adsets: j.rows || [] };
         } catch (e) {
           this.expandedCampaigns[campaignId] = { open: true, loading: false, error: e.message || 'Failed to load', adsets: [] };
@@ -1533,9 +1587,10 @@
         }
         this.expandedAdSets[adSetId] = { open: true, loading: true, error: null, ads: null };
         try {
-          const j = await this._fetchCampaignsData({
+          const scope = this._pageScopeFor(pageName);
+          const j = await this._fetchCampaignsData(Object.assign({
             level: 'ads', page_name: pageName, ad_set_id: adSetId,
-          });
+          }, scope));
           this.expandedAdSets[adSetId] = { open: true, loading: false, error: null, ads: j.rows || [] };
         } catch (e) {
           this.expandedAdSets[adSetId] = { open: true, loading: false, error: e.message || 'Failed to load', ads: [] };

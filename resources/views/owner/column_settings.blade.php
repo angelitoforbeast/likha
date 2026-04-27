@@ -223,14 +223,22 @@
     //   groups: [ { cols: [...], rules: [ {op,value,bg,bold,label}, ... ] } ]
     // A rule's `value` is either a number (literal) OR
     //   { type:'ref', table:'owner_private', col:'<col_id>' } (cross-ref).
-    function colFormatEditor(tableId, tableCatalog, ownerPrivateCatalog, initialGroups) {
+    function colFormatEditor(tableId, tableCatalog, ownerPrivateCatalog, initialGroups, breakevenPct) {
+      // Inject the configured target % into breakeven_cpp's label so users see
+      // the same "Breakeven CPP (5%)" form as the actual column header in the
+      // table — minimizes confusion when picking a Ref target.
+      const enrichedOwnerCatalog = (ownerPrivateCatalog || []).map(c =>
+        c.id === 'breakeven_cpp'
+          ? Object.assign({}, c, { label: c.label + ' (' + (breakevenPct ?? 5) + '%)' })
+          : c
+      );
       const ID_TO_LABEL = Object.fromEntries((tableCatalog || []).map(c => [c.id, c.label]));
-      const OP_LABEL_TO_REF_LABEL = Object.fromEntries((ownerPrivateCatalog || []).map(c => [c.id, c.label]));
+      const OP_LABEL_TO_REF_LABEL = Object.fromEntries(enrichedOwnerCatalog.map(c => [c.id, c.label]));
       const cleanInitial = Array.isArray(initialGroups) ? JSON.parse(JSON.stringify(initialGroups)) : [];
       return {
         tableId,
         tableCatalog: tableCatalog || [],
-        ownerPrivateCatalog: ownerPrivateCatalog || [],
+        ownerPrivateCatalog: enrichedOwnerCatalog,
         groups: cleanInitial,
         saving: false,
         dragSrc: null,   // { gIdx, rIdx }
@@ -320,6 +328,7 @@
                     op:    r.op,
                     value: value,
                     bg:    String(r.bg || '#fee2e2'),
+                    color: r.color ? String(r.color) : '',
                     bold:  !!r.bold,
                     label: String(r.label || ''),
                   };
