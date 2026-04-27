@@ -105,6 +105,9 @@
                 <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('first_started')">
                   <div class="inline-flex items-center gap-1">First launched <span x-show="sortBy==='first_started'">▼</span></div>
                 </th>
+                <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('first_started')">
+                  <div class="inline-flex items-center gap-1">Days ago <span x-show="sortBy==='first_started'">▼</span></div>
+                </th>
                 <th class="px-4 py-3 cursor-pointer select-none" @click="toggleSort('latest_started')">
                   <div class="inline-flex items-center gap-1">Latest start <span x-show="sortBy==='latest_started'">▼</span></div>
                 </th>
@@ -168,10 +171,17 @@
                   <!-- First launched -->
                   <td class="px-4 py-3 whitespace-nowrap">
                     <template x-if="row.first_started">
-                      <div>
-                        <div class="font-medium" x-text="fmtDate(row.first_started)"></div>
-                        <div class="text-[11px] text-gray-500" x-text="daysAgo(row.first_started)"></div>
-                      </div>
+                      <div class="font-medium" x-text="fmtDate(row.first_started)"></div>
+                    </template>
+                    <template x-if="!row.first_started">
+                      <span class="text-gray-400">—</span>
+                    </template>
+                  </td>
+
+                  <!-- Days ago — derived from first_started -->
+                  <td class="px-4 py-3 whitespace-nowrap text-gray-700">
+                    <template x-if="row.first_started">
+                      <span x-text="daysAgo(row.first_started)"></span>
                     </template>
                     <template x-if="!row.first_started">
                       <span class="text-gray-400">—</span>
@@ -221,6 +231,7 @@
                   <span x-text="`Results from ${rows.length} ${tabLabel()}`"></span>
                 </td>
                 <td class="px-4 py-3"></td><!-- First launched -->
+                <td class="px-4 py-3"></td><!-- Days ago -->
                 <td class="px-4 py-3"></td><!-- Latest start -->
                 <td class="px-4 py-3 font-medium" x-text="money(totals.spend ?? 0)"></td>
                 <td class="px-4 py-3" x-text="totals.cpm_1000 != null ? money(totals.cpm_1000) : '—'"></td>

@@ -483,36 +483,49 @@ class AdsManagerCampaignsController extends Controller
             'Content-Disposition' => "attachment; filename=\"$filename\""
         ];
 
-        return response()->stream(function () use ($rows, $level) {
+        // Compute "days ago" from a date string (YYYY-MM-DD) using PH timezone
+        // for consistent reference vs the in-table label.
+        $daysAgo = function ($s) {
+            if (empty($s)) return '';
+            try {
+                $d = new \DateTime(substr((string)$s, 0, 10) . ' 00:00:00', new \DateTimeZone('Asia/Manila'));
+                $today = new \DateTime('now', new \DateTimeZone('Asia/Manila'));
+                $today->setTime(0, 0, 0);
+                $diff = (int) floor(($today->getTimestamp() - $d->getTimestamp()) / 86400);
+                return (string) $diff;
+            } catch (\Throwable $e) { return ''; }
+        };
+
+        return response()->stream(function () use ($rows, $level, $daysAgo) {
             $out = fopen('php://output', 'w');
             fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
 
             if ($level === 'campaigns') {
-                fputcsv($out, ['Campaign','Page','Active','First Launched','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Campaign','Page','Active','First Launched','Days Ago','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
-                        $r['first_started'] ?? '', $r['latest_started'] ?? '',
+                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null), $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $r['messages'], $r['purchases']
                     ]);
                 }
             } elseif ($level === 'adsets') {
-                fputcsv($out, ['Ad set','Campaign','Page','Active','First Launched','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Ad set','Campaign','Page','Active','First Launched','Days Ago','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
-                        $r['first_started'] ?? '', $r['latest_started'] ?? '',
+                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null), $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $r['messages'], $r['purchases']
                     ]);
                 }
             } else {
-                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Days Ago','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         ($r['headline'] ?? 'Ad '.$r['ad_id']), $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
-                        $r['first_started'] ?? '', $r['latest_started'] ?? '',
+                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null), $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $r['messages'], $r['purchases']
                     ]);
