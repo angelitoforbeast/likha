@@ -22,7 +22,10 @@
       <b x-text="row.page_name"></b>
       <span style="margin:0 6px;color:#cbd5e1;">·</span>
       <span>
-        <b x-text="row.item_name"></b> ·
+        item filter: <b x-text="_stripQty(row.item_name)"></b>
+        <span class="text-[10px] text-slate-500" x-show="_stripQty(row.item_name) !== row.item_name"
+              x-text="' (from ' + row.item_name + ' — qty stripped to match ads data)'"></span>
+        ·
         <span x-text="row.anchor_first_date ? ('since ' + fmtMD(row.anchor_first_date)) : 'all dates'"></span>
         →
         <span x-text="endDate"></span>

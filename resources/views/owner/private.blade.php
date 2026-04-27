@@ -1475,17 +1475,32 @@
       // (e.g. "2 x MINI FLASHLIGHT"). only_with_spend=1 hides idle entities.
       // Falls back to this-month range if anchor missing (legacy single-date).
 
+      // Strip leading qty prefix (e.g. "2 x MINI FLASHLIGHT" → "MINI FLASHLIGHT")
+      // so the value matches `ads_manager_reports.item_name` which usually
+      // stores the base item name (FB Ads Manager doesn't track qty variants
+      // in its item_name field).
+      _stripQty(name){
+        if (!name) return '';
+        const s = String(name).trim();
+        // Match patterns like "1 x ", "2 X ", "3x ", "10 x" at start.
+        const m = /^\d+\s*[xX×]\s*(.+)$/.exec(s);
+        return m ? m[1].trim() : s;
+      },
+
       // Resolve {start_date, end_date, item_name} scope per page row.
+      // item_name is stripped of qty prefix so it matches ads_manager_reports.
       _pageScopeFor(pageName){
         const row = (this.rows || []).find(r => r.page_name === pageName);
-        // Fallback dates: /owner/private's filter end_date for both ends
-        // when no row context is available (rare).
         const fallbackEnd = this.endDate || '';
         const fallbackStart = this.startDate || fallbackEnd;
         if (!row) return { start_date: fallbackStart, end_date: fallbackEnd, item_name: '' };
         const start = row.anchor_first_date || fallbackStart;
         const end   = this.endDate || fallbackEnd;
-        return { start_date: start, end_date: end, item_name: row.item_name || '' };
+        return {
+          start_date: start,
+          end_date:   end,
+          item_name:  this._stripQty(row.item_name || ''),
+        };
       },
 
       // Generic fetcher into /ads_manager/campaigns/data with passed params.
