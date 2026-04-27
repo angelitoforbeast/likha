@@ -746,6 +746,15 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     // ── Column settings (CEO only) — manages visibility/order para sa
     //    /owner/private at /ads_manager/campaigns tables. One page, two
     //    sections; saved globally to app_settings KV.
+    // Standalone Profit Calculator (CEO only) — quick what-if tool, no DB.
+    Route::get('/profit-calculator', function () {
+        $roleRaw  = \Illuminate\Support\Facades\Auth::user()?->employeeProfile?->role ?? '';
+        $roleNorm = preg_replace('/\s+/u', ' ', trim((string) $roleRaw));
+        $isCEO    = preg_match('/^ceo$/iu', $roleNorm) === 1;
+        if (!$isCEO) abort(404);
+        return view('profit_calculator');
+    })->name('profit-calculator');
+
     Route::get ('/owner/column-settings',                [\App\Http\Controllers\OwnerColumnSettingsController::class, 'index'])           ->name('owner.column-settings');
     Route::post('/owner/column-settings/save',           [\App\Http\Controllers\OwnerColumnSettingsController::class, 'save' ])           ->name('owner.column-settings.save');
     Route::post('/owner/column-settings/breakeven-pct',  [\App\Http\Controllers\OwnerColumnSettingsController::class, 'saveBreakevenPct'])->name('owner.column-settings.breakeven-pct');
