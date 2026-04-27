@@ -1,0 +1,147 @@
+{{--
+  Reusable conditional-formatting section. Used twice on /owner/column-settings:
+    - one for owner_private (Page Summary)
+    - one for campaigns (Campaigns / Ad Sets / Ads)
+
+  Required scope:
+    $sectionTitle    — h3 text
+    $sectionKey      — small monospace label (storage key hint)
+    $tableId         — 'owner_private' | 'campaigns'
+    $tableCatalog    — array of {id,label} for this table's columns
+    $initialGroups   — pre-saved groups for this table
+    $note            — HTML note string
+    $allowRefValues  — bool, when true a rule's value can be a cross-table ref
+
+  The Alpine component below is unique per section because of x-data scope.
+--}}
+<div class="col-section"
+     x-data="colFormatEditor(@js($tableId), @js($tableCatalog), @js($catalog['owner_private'] ?? []), @js($initialGroups))">
+  <div class="flex items-baseline justify-between mb-1">
+    <h3>{!! $sectionTitle !!}</h3>
+    <span class="text-[10px] text-slate-400">{{ $sectionKey }}</span>
+  </div>
+  <p class="note">{!! $note !!}</p>
+
+  <div class="flex items-center gap-2 mt-3">
+    <button class="reset-btn" @click="addGroup()">+ New rule group</button>
+    <div class="flex-1"></div>
+    <button class="save-btn" :disabled="saving" @click="save()">
+      <span x-show="!saving">💾 Save formatting</span>
+      <span x-show="saving">Saving…</span>
+    </button>
+  </div>
+
+  <div x-show="groups.length === 0"
+       class="text-xs text-slate-400 italic px-3 py-6 text-center mt-3"
+       style="border:1px dashed #cbd5e1;border-radius:6px;">
+    Walang rule groups pa. Click <b>"+ New rule group"</b> para magsimula.
+  </div>
+
+  <template x-for="(g, gIdx) in groups" :key="'g-'+gIdx">
+    <div class="rule-group">
+      <div class="rule-group-header">
+        <div class="text-xs font-semibold text-slate-700">
+          📑 Group #<span x-text="gIdx + 1"></span>
+          <span class="text-slate-500 font-normal" x-show="g.rules.length > 0">·
+            <span x-text="g.rules.length"></span> rule(s) ·
+            applies to <span x-text="g.cols.length"></span> column(s)
+          </span>
+        </div>
+        <button class="text-red-600 hover:text-red-800 text-xs font-semibold"
+                @click="if(confirm('Delete this group?')) removeGroup(gIdx)">× Delete group</button>
+      </div>
+
+      <div class="rule-group-section">
+        <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
+          Apply to columns (click to toggle)
+        </div>
+        <div class="target-chip-row">
+          <template x-for="c in tableCatalog" :key="'g-'+gIdx+'-c-'+c.id">
+            <span :class="'target-chip ' + (g.cols.includes(c.id) ? 'active' : '')"
+                  @click="toggleGroupCol(gIdx, c.id)"
+                  x-text="c.label"></span>
+          </template>
+        </div>
+      </div>
+
+      <div class="rule-group-section">
+        <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
+          Rules (top-to-bottom · first match wins)
+        </div>
+        <div class="col-list" x-show="g.rules.length > 0">
+          <template x-for="(r, rIdx) in g.rules" :key="'g-'+gIdx+'-r-'+rIdx">
+            <div class="col-item" style="cursor:default;flex-wrap:wrap;">
+              <span class="col-handle"
+                    draggable="true"
+                    @dragstart="ruleDragStart(gIdx, rIdx, $event)"
+                    @dragover.prevent
+                    @drop="ruleDrop(gIdx, rIdx)">⋮⋮</span>
+              <span class="text-xs text-slate-500" style="min-width:30px;">if &nbsp;value</span>
+              <select x-model="r.op" class="border border-slate-300 rounded px-1 py-0.5 text-xs">
+                <option value=">=">≥</option>
+                <option value=">">&gt;</option>
+                <option value="=">=</option>
+                <option value="<=">≤</option>
+                <option value="<">&lt;</option>
+              </select>
+
+              {{-- Value input: literal number OR ref-to-Page-Summary col --}}
+              @if(!empty($allowRefValues))
+              <select :value="ruleValueKind(r)"
+                      @change="setRuleValueKind(r, $event.target.value)"
+                      class="border border-slate-300 rounded px-1 py-0.5 text-xs"
+                      title="Choose: literal number, or reference to Page Summary column">
+                <option value="literal">📐 Literal</option>
+                <option value="ref">🔗 Ref → Page Summary</option>
+              </select>
+              @endif
+
+              <template x-if="ruleValueKind(r) === 'literal'">
+                <input type="number" step="0.01"
+                       :value="r.value"
+                       @input="r.value = ($event.target.value === '' ? 0 : parseFloat($event.target.value))"
+                       class="border border-slate-300 rounded px-2 py-0.5 text-xs w-24 text-right">
+              </template>
+              <template x-if="ruleValueKind(r) === 'ref'">
+                <select :value="r.value && r.value.col ? r.value.col : ''"
+                        @change="r.value = { type:'ref', table:'owner_private', col:$event.target.value }"
+                        class="border border-slate-300 rounded px-1 py-0.5 text-xs"
+                        style="max-width:180px;">
+                  <option value="" disabled>— pick column —</option>
+                  <template x-for="oc in ownerPrivateCatalog" :key="'ref-'+oc.id">
+                    <option :value="oc.id" x-text="oc.label"></option>
+                  </template>
+                </select>
+              </template>
+
+              <span class="text-xs text-slate-500">→ bg</span>
+              <input type="color" x-model="r.bg" class="w-12 h-7 cursor-pointer border rounded">
+              <input type="text" x-model="r.bg" maxlength="7"
+                     class="border border-slate-300 rounded px-1 py-0.5 text-xs w-20 font-mono">
+              <label class="text-xs flex items-center gap-1">
+                <input type="checkbox" x-model="r.bold"> bold
+              </label>
+              <input type="text" x-model="r.label" placeholder="label (optional)"
+                     class="flex-1 border border-slate-300 rounded px-2 py-0.5 text-xs"
+                     style="min-width:120px;"
+                     maxlength="40">
+              <span class="px-2 py-0.5 text-xs rounded"
+                    :style="'background:'+r.bg+';color:'+previewTextColor(r.bg)+';'+(r.bold?'font-weight:700;':'')"
+                    x-text="rulePreviewText(r)"></span>
+              <button class="text-red-600 hover:text-red-800 text-sm"
+                      @click="removeRule(gIdx, rIdx)" title="Remove rule">✕</button>
+            </div>
+          </template>
+        </div>
+        <div x-show="g.rules.length === 0"
+             class="text-xs text-slate-400 italic px-3 py-3 text-center"
+             style="border:1px dashed #cbd5e1;border-radius:6px;">
+          Walang rules pa sa group na ito.
+        </div>
+        <div class="mt-2">
+          <button class="reset-btn" @click="addRuleToGroup(gIdx)">+ Add rule to this group</button>
+        </div>
+      </div>
+    </div>
+  </template>
+</div>

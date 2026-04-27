@@ -22,9 +22,13 @@ class AdsManagerCampaignsController extends Controller
         // inline campaigns expand. Loaded from app_settings via the settings
         // controller's resolver. Always returns a clean { order, hidden } shape.
         $colsCtrl = new \App\Http\Controllers\OwnerColumnSettingsController();
-        $campaignsColsConfig = $colsCtrl->loadConfig('campaigns');
+        $campaignsColsConfig     = $colsCtrl->loadConfig('campaigns');
+        // Conditional formatting rules for campaigns columns (literal-only
+        // applies here — ref-rules need parent /owner/private context which
+        // doesn't exist sa standalone view).
+        $campaignsColFormatRules = $colsCtrl->loadColFormat('campaigns')['byCol'] ?? [];
 
-        return view('ads_manager.campaigns', compact('pages', 'campaignsColsConfig'));
+        return view('ads_manager.campaigns', compact('pages', 'campaignsColsConfig', 'campaignsColFormatRules'));
     }
 
     public function data(Request $request)

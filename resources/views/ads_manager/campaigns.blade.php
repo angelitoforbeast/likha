@@ -162,7 +162,7 @@
                   </td>
                   <template x-for="col in visibleCols()" :key="'c-'+col.id">
                     <td :class="(col.align==='right' ? 'num' : '')"
-                        :style="col.id==='days_running' ? 'white-space:nowrap;' : ''">
+                        :style="(col.id==='days_running' ? 'white-space:nowrap;' : '') + cellFormatStyle(col.id, row[col.id])">
                       {{-- on: status pill --}}
                       <template x-if="col.type==='on'">
                         <span :class="'fb-pill ' + (row.on ? 'active' : 'off')"
@@ -246,6 +246,11 @@
     // (CEO-managed via /owner/column-settings). Same shape as the one used
     // inside /owner/private's expand panel.
     window.__CAMPAIGNS_COLS__ = @json($campaignsColsConfig ?? ['order' => [], 'hidden' => []]);
+    // Conditional formatting rules for campaigns table. Cross-table refs
+    // (e.g. cpp ≥ breakeven_cpp from owner_private) are SKIPPED here since
+    // standalone view has no parent page-summary context — only literal rules
+    // evaluate. Use /owner/private expand panel for full ref support.
+    window.__CAMPAIGNS_COL_FORMAT__ = @json($campaignsColFormatRules ?? new \stdClass());
 
     function campaignsUI() {
       return {
@@ -318,6 +323,44 @@
           if (this.tab === 'campaigns') return row.campaign_name || ('Campaign ' + row.campaign_id);
           if (this.tab === 'adsets')    return row.ad_set_name   || ('Ad set '   + row.ad_set_id);
           return row.headline || ('Ad ' + row.ad_id);
+        },
+
+        // Conditional formatting for campaigns table cells. Standalone view
+        // has no /owner/private parent context, so cross-table refs (e.g.
+        // `cpp ≥ owner_private:breakeven_cpp`) cannot resolve and are skipped
+        // (the rule iteration falls through to the next rule).
+        cellFormatStyle(colId, value){
+          const rules = (window.__CAMPAIGNS_COL_FORMAT__ || {})[colId];
+          if (!Array.isArray(rules) || rules.length === 0) return '';
+          if (value == null || isNaN(Number(value))) return '';
+          const v = Number(value);
+          for (const r of rules) {
+            // Cross-table ref → skip (no parent context here).
+            if (r.value && typeof r.value === 'object' && r.value.type === 'ref') continue;
+            const t = Number(r.value);
+            if (isNaN(t)) continue;
+            let hit = false;
+            switch (r.op) {
+              case '>=': hit = v >= t; break;
+              case '>':  hit = v >  t; break;
+              case '=':  hit = v == t; break;
+              case '<=': hit = v <= t; break;
+              case '<':  hit = v <  t; break;
+            }
+            if (hit) {
+              const bg = r.bg || '#fee2e2';
+              const m = /^#([0-9a-f]{6})$/i.exec(bg);
+              let txt = '#111827';
+              if (m) {
+                const R = parseInt(m[1].slice(0,2), 16);
+                const G = parseInt(m[1].slice(2,4), 16);
+                const B = parseInt(m[1].slice(4,6), 16);
+                if ((R*299 + G*587 + B*114) / 1000 < 150) txt = '#ffffff';
+              }
+              return 'background:' + bg + ';color:' + txt + ';' + (r.bold ? 'font-weight:700;' : '');
+            }
+          }
+          return '';
         },
 
         // NEW: selections

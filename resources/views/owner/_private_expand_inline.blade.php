@@ -70,7 +70,8 @@
                       x-text="(expandedCampaigns[c.campaign_id] || {}).open ? '▼' : '▶'"></button>
             </td>
             <template x-for="col in visibleCampaignsCols()" :key="'ec-c-'+col.id">
-              <td :class="(col.align==='right' ? 'num' : '')">
+              <td :class="(col.align==='right' ? 'num' : '')"
+                  :style="campaignsCellFormatStyle(col.id, c, c[col.id])">
                 <template x-if="col.type==='on'">
                   <span :class="'fb-pill ' + (c.on ? 'active' : 'off')"
                         x-text="c.on ? 'Active' : 'Off'"></span>
@@ -155,7 +156,8 @@
                                   x-text="(expandedAdSets[aset.ad_set_id] || {}).open ? '▼' : '▶'"></button>
                         </td>
                         <template x-for="col in visibleCampaignsCols()" :key="'ea-c-'+col.id">
-                          <td :class="(col.align==='right' ? 'num' : '')">
+                          <td :class="(col.align==='right' ? 'num' : '')"
+                              :style="campaignsCellFormatStyle(col.id, aset, aset[col.id])">
                             <template x-if="col.type==='on'">
                               <span :class="'fb-pill ' + (aset.on ? 'active' : 'off')"
                                     x-text="aset.on ? 'Active' : 'Off'"></span>
@@ -222,7 +224,8 @@
                                 <template x-for="ad in ((expandedAdSets[aset.ad_set_id] || {}).ads || [])" :key="ad.ad_id">
                                   <tr>
                                     <template x-for="col in visibleCampaignsCols()" :key="'ed-c-'+col.id">
-                                      <td :class="(col.align==='right' ? 'num' : '')">
+                                      <td :class="(col.align==='right' ? 'num' : '')"
+                                          :style="campaignsCellFormatStyle(col.id, ad, ad[col.id])">
                                         <template x-if="col.type==='on'">
                                           <span :class="'fb-pill ' + (ad.on ? 'active' : 'off')"
                                                 x-text="ad.on ? 'Active' : 'Off'"></span>

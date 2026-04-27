@@ -48,14 +48,15 @@ class OwnerPrivateController extends Controller
         $campaignsColsConfig    = $colsCtrl->loadConfig('campaigns');
         // Computed-column settings (also CEO-managed in the same page).
         $breakevenTargetPct     = $colsCtrl->loadBreakevenTargetPct();    // e.g. 5.0
-        // loadColFormat() now returns ['groups' => [...], 'byCol' => {...}].
-        // The view only needs the flattened byCol map for cellFormatStyle().
-        $colFormatRules         = $colsCtrl->loadColFormat()['byCol'] ?? [];
+        // loadColFormat($table) returns ['groups' => [...], 'byCol' => {...}].
+        // The view consumes the flattened byCol maps for cellFormatStyle().
+        $colFormatRules           = $colsCtrl->loadColFormat('owner_private')['byCol'] ?? [];
+        $campaignsColFormatRules  = $colsCtrl->loadColFormat('campaigns')['byCol']     ?? [];
 
         return view('owner.private', compact(
             'pages', 'isCEO', 'isMarketingOIC',
             'ownerPrivateColsConfig', 'campaignsColsConfig',
-            'breakevenTargetPct', 'colFormatRules'
+            'breakevenTargetPct', 'colFormatRules', 'campaignsColFormatRules'
         ));
     }
 

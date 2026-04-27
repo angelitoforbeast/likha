@@ -847,6 +847,10 @@
   // Computation + formatting settings.
   window.__BREAKEVEN_PCT__      = {{ $breakevenTargetPct ?? 5 }};
   window.__COL_FORMAT__         = @json($colFormatRules ?? new \stdClass());
+  // Campaigns table rules — used by the inline expand panel cells.
+  // Cross-table ref values (e.g. `cpp ≥ breakeven_cpp`) resolved by looking
+  // up the parent page-summary row via row.page_name.
+  window.__CAMPAIGNS_COL_FORMAT__ = @json($campaignsColFormatRules ?? new \stdClass());
 
   function privateUI() {
     return {
@@ -1328,16 +1332,36 @@
         }
       },
 
-      // Conditional formatting — returns inline style string for a cell
-      // matching the first rule that applies (top-to-bottom). Returns ''
-      // when no rule matches or no rules configured.
-      cellFormatStyle(colId, value){
-        const rules = (window.__COL_FORMAT__ || {})[colId];
+      // Resolve a rule's threshold value. Numbers pass through. Cross-refs
+      // (`{type:'ref',table:'owner_private',col:'<id>'}`) are looked up via
+      // cellValueFor() on the supplied refRow (typically the parent page
+      // summary row). Returns NaN when ref can't be resolved.
+      resolveRuleThreshold(threshold, refRow){
+        if (threshold == null) return NaN;
+        if (typeof threshold === 'number') return threshold;
+        if (typeof threshold === 'object' && threshold.type === 'ref') {
+          if (!refRow) return NaN;
+          const fakeCol = { id: threshold.col, sort: null };
+          const v = this.cellValueFor(fakeCol, refRow);
+          return (v == null || isNaN(Number(v))) ? NaN : Number(v);
+        }
+        // Possibly a numeric-ish string.
+        const n = Number(threshold);
+        return isNaN(n) ? NaN : n;
+      },
+
+      // Generic rule evaluator. Pass:
+      //   rules  — array of {op, value, bg, bold, label}
+      //   value  — cell numeric value
+      //   refRow — optional row to use when threshold is a ref (page summary
+      //            row in the campaigns expand context; null in standalone)
+      _evalRules(rules, value, refRow){
         if (!Array.isArray(rules) || rules.length === 0) return '';
         if (value == null || isNaN(Number(value))) return '';
         const v = Number(value);
         for (const r of rules) {
-          const t = Number(r.value);
+          const t = this.resolveRuleThreshold(r.value, refRow);
+          if (isNaN(t)) continue;   // ref couldn't resolve → skip rule
           let hit = false;
           switch (r.op) {
             case '>=': hit = v >= t; break;
@@ -1348,7 +1372,6 @@
           }
           if (hit) {
             const bg = r.bg || '#fee2e2';
-            // YIQ luminance for auto text color.
             const m = /^#([0-9a-f]{6})$/i.exec(bg);
             let txt = '#111827';
             if (m) {
@@ -1361,6 +1384,32 @@
           }
         }
         return '';
+      },
+
+      // Conditional formatting for owner_private rows. Refs (rare here) use
+      // the row itself as the ref source.
+      cellFormatStyle(colId, value){
+        const rules = (window.__COL_FORMAT__ || {})[colId];
+        // For owner_private cells there's no "parent" — refs resolve against
+        // the same row (rare use case).
+        return this._evalRules(rules, value, this._currentOwnerRefRow || null);
+      },
+
+      // Look up a page-summary row by page_name (used by campaigns rules).
+      pageRowFor(pageName){
+        if (!pageName || !Array.isArray(this.rows)) return null;
+        return this.rows.find(r => r.page_name === pageName) || null;
+      },
+
+      // Conditional formatting for inline expand rows (campaign / adset / ad).
+      // Resolves the value via cellValueFor against the campaign-level row's
+      // own data — but uses the parent page summary row as the ref source so
+      // rules like "cpp ≥ breakeven_cpp" work.
+      campaignsCellFormatStyle(colId, campaignRow, value){
+        const rules = (window.__CAMPAIGNS_COL_FORMAT__ || {})[colId];
+        if (!Array.isArray(rules) || rules.length === 0) return '';
+        const refRow = this.pageRowFor(campaignRow?.page_name);
+        return this._evalRules(rules, value, refRow);
       },
 
       // ── Campaigns column catalog (mirrors the one in /ads_manager/campaigns)

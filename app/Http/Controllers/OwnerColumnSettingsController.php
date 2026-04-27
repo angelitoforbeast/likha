@@ -35,9 +35,17 @@ class OwnerColumnSettingsController extends Controller
     // Default = 5 (i.e. 5% Proj.% target). Used by /owner/private to label
     // and compute the "Breakeven CPP (N%)" column.
     private const KEY_BREAKEVEN_PCT = 'owner_breakeven_target_pct';
-    // Per-column conditional formatting rules — JSON map keyed by column id.
-    // Shape: { "<col_id>": [ {"op":">=","value":30,"bg":"#fecaca","bold":true,"label":"High"}, ... ] }
-    private const KEY_COL_FORMAT    = 'owner_private_col_format';
+    // Per-column conditional formatting rule groups — JSON. Two separate keys
+    // because the two tables have different column catalogs and live in
+    // different views; keeping them isolated avoids accidental clobbers and
+    // simplifies validation. New shape (since the rule-groups refactor):
+    //   { "groups": [ { "cols": [...], "rules": [ rule, ... ] } ] }
+    // A rule's `value` may be:
+    //   - a number  (literal threshold), OR
+    //   - { "type":"ref", "table":"owner_private", "col":"breakeven_cpp" }
+    //     (cross-table reference; resolved at render time by the view).
+    private const KEY_COL_FORMAT          = 'owner_private_col_format';
+    private const KEY_CAMPAIGNS_COL_FORMAT = 'campaigns_col_format';
 
     /**
      * Column catalog: every column the user can show/hide/reorder per table.
@@ -127,15 +135,17 @@ class OwnerColumnSettingsController extends Controller
     {
         $this->checkAccess();
 
-        $cf = $this->loadColFormat();   // ['groups'=>[...], 'byCol'=>[...]]
+        $cfOwner     = $this->loadColFormat('owner_private');
+        $cfCampaigns = $this->loadColFormat('campaigns');
         return view('owner.column_settings', [
             'catalog'          => self::CATALOG,
             'defaultVisible'   => self::DEFAULT_VISIBLE,
             'savedOwnerPrivate'=> $this->loadConfig('owner_private'),
             'savedCampaigns'   => $this->loadConfig('campaigns'),
             'breakevenTargetPct' => $this->loadBreakevenTargetPct(),
-            // Editor uses the groups shape (shared rules across columns).
-            'colFormatGroups'  => $cf['groups'] ?? [],
+            // Editor uses the groups shape (shared rules across columns) — one per table.
+            'colFormatGroups'           => $cfOwner['groups'] ?? [],
+            'campaignsColFormatGroups'  => $cfCampaigns['groups'] ?? [],
         ]);
     }
 
@@ -148,9 +158,11 @@ class OwnerColumnSettingsController extends Controller
     }
 
     /**
-     * Conditional formatting groups. Each group has:
+     * Conditional formatting groups for a given table. Each group has:
      *   - cols:  string[]   — columns that share these rules
      *   - rules: array of   — { op, value, bg, bold, label }
+     *     where `value` is either a number (literal) or
+     *           { type:"ref", table:"owner_private", col:"<col_id>" }
      *
      * Returns shape:
      *   {
@@ -158,32 +170,55 @@ class OwnerColumnSettingsController extends Controller
      *     "byCol":  { "<col_id>": [ rule, ... ], ... }   ← flattened for the view
      *   }
      *
-     * Backwards compat: if storage is in the old `{col_id: [rules]}` shape,
-     * we convert each col into its own group on load (no schema upgrade
-     * required — first save in the new UI persists the new shape).
+     * `$table` accepts 'owner_private' (default) or 'campaigns'.
+     *
+     * Backwards compat: legacy `{col_id: [rules]}` shape (pre-groups refactor)
+     * still loads fine — each col becomes its own group automatically.
      */
-    public function loadColFormat(): array
+    public function loadColFormat(string $table = 'owner_private'): array
     {
         $empty = ['groups' => [], 'byCol' => []];
-        $row = DB::table('app_settings')->where('key', self::KEY_COL_FORMAT)->first(['value']);
+        if (!array_key_exists($table, self::CATALOG)) return $empty;
+
+        $key = $this->colFormatKey($table);
+        $row = DB::table('app_settings')->where('key', $key)->first(['value']);
         if (!$row || !$row->value) return $empty;
         $decoded = json_decode($row->value, true);
         if (!is_array($decoded)) return $empty;
 
-        $allowedIds = array_column(self::CATALOG['owner_private'], 'id');
-        $allowedSet = array_flip($allowedIds);
-        $allowedOps = ['>', '>=', '=', '<=', '<'];
+        $allowedIds   = array_column(self::CATALOG[$table], 'id');
+        $allowedSet   = array_flip($allowedIds);
+        $allowedOps   = ['>', '>=', '=', '<=', '<'];
+        // Cross-ref values can target any owner_private column id.
+        $refTargetIds = array_column(self::CATALOG['owner_private'], 'id');
+        $refTargetSet = array_flip($refTargetIds);
 
-        $cleanRule = function ($r) use ($allowedOps) {
+        $cleanValue = function ($v) use ($refTargetSet) {
+            // Plain numeric literal.
+            if (is_numeric($v)) return (float) $v;
+            // Cross-table reference object.
+            if (is_array($v)
+                && (($v['type'] ?? null) === 'ref')
+                && (($v['table'] ?? null) === 'owner_private')
+                && is_string($v['col'] ?? null)
+                && isset($refTargetSet[$v['col']])
+            ) {
+                return ['type' => 'ref', 'table' => 'owner_private', 'col' => $v['col']];
+            }
+            return null;
+        };
+
+        $cleanRule = function ($r) use ($allowedOps, $cleanValue) {
             if (!is_array($r)) return null;
             $op = (string) ($r['op'] ?? '');
             if (!in_array($op, $allowedOps, true)) return null;
-            if (!is_numeric($r['value'] ?? null)) return null;
+            $val = $cleanValue($r['value'] ?? null);
+            if ($val === null) return null;
             $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
             if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
             return [
                 'op'    => $op,
-                'value' => (float) $r['value'],
+                'value' => $val,
                 'bg'    => strtolower($bg),
                 'bold'  => !empty($r['bold']),
                 'label' => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
@@ -239,6 +274,11 @@ class OwnerColumnSettingsController extends Controller
         return ['groups' => $groups, 'byCol' => $byCol];
     }
 
+    private function colFormatKey(string $table): string
+    {
+        return $table === 'campaigns' ? self::KEY_CAMPAIGNS_COL_FORMAT : self::KEY_COL_FORMAT;
+    }
+
     /** POST /owner/column-settings/breakeven-pct — single number 0..100. */
     public function saveBreakevenPct(Request $request)
     {
@@ -256,12 +296,18 @@ class OwnerColumnSettingsController extends Controller
 
     /**
      * POST /owner/column-settings/col-format — replaces the full groups list.
-     * Body: { groups: [ { cols:[...], rules:[...] }, ... ] }
+     * Body: { table: 'owner_private'|'campaigns', groups: [ { cols, rules } ] }
      * Stored shape: { "groups": [...] } (no byCol persisted — derived on read).
+     *
+     * A rule's `value` may be a number or `{type:"ref",table:"owner_private",col:"..."}`.
      */
     public function saveColFormat(Request $request)
     {
         $this->checkAccess();
+        $table = (string) $request->input('table', 'owner_private');
+        if (!array_key_exists($table, self::CATALOG)) {
+            return response()->json(['ok' => false, 'error' => 'Unknown table'], 422);
+        }
         $payload = $request->input('groups');
         if (is_string($payload)) {
             $decoded = json_decode($payload, true);
@@ -269,9 +315,24 @@ class OwnerColumnSettingsController extends Controller
         }
         if (!is_array($payload)) return response()->json(['ok' => false, 'error' => 'Invalid payload'], 422);
 
-        $allowedIds = array_column(self::CATALOG['owner_private'], 'id');
-        $allowedSet = array_flip($allowedIds);
-        $allowedOps = ['>', '>=', '=', '<=', '<'];
+        $allowedIds   = array_column(self::CATALOG[$table], 'id');
+        $allowedSet   = array_flip($allowedIds);
+        $allowedOps   = ['>', '>=', '=', '<=', '<'];
+        $refTargetIds = array_column(self::CATALOG['owner_private'], 'id');
+        $refTargetSet = array_flip($refTargetIds);
+
+        $cleanValue = function ($v) use ($refTargetSet) {
+            if (is_numeric($v)) return (float) $v;
+            if (is_array($v)
+                && (($v['type'] ?? null) === 'ref')
+                && (($v['table'] ?? null) === 'owner_private')
+                && is_string($v['col'] ?? null)
+                && isset($refTargetSet[$v['col']])
+            ) {
+                return ['type' => 'ref', 'table' => 'owner_private', 'col' => $v['col']];
+            }
+            return null;
+        };
 
         $groups = [];
         foreach ($payload as $g) {
@@ -285,12 +346,13 @@ class OwnerColumnSettingsController extends Controller
                 if (!is_array($r)) continue;
                 $op = (string) ($r['op'] ?? '');
                 if (!in_array($op, $allowedOps, true)) continue;
-                if (!is_numeric($r['value'] ?? null)) continue;
+                $val = $cleanValue($r['value'] ?? null);
+                if ($val === null) continue;
                 $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
                 if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
                 $rules[] = [
                     'op'    => $op,
-                    'value' => (float) $r['value'],
+                    'value' => $val,
                     'bg'    => strtolower($bg),
                     'bold'  => !empty($r['bold']),
                     'label' => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
@@ -304,7 +366,7 @@ class OwnerColumnSettingsController extends Controller
         }
 
         DB::table('app_settings')->updateOrInsert(
-            ['key' => self::KEY_COL_FORMAT],
+            ['key' => $this->colFormatKey($table)],
             ['value' => json_encode(['groups' => $groups], JSON_UNESCAPED_SLASHES),
              'updated_at' => now(), 'created_at' => now()]
         );
@@ -318,7 +380,7 @@ class OwnerColumnSettingsController extends Controller
                 foreach ($g['rules'] as $r) $byCol[$c][] = $r;
             }
         }
-        return response()->json(['ok' => true, 'groups' => $groups, 'byCol' => $byCol]);
+        return response()->json(['ok' => true, 'table' => $table, 'groups' => $groups, 'byCol' => $byCol]);
     }
 
     /**
