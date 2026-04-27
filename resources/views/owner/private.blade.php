@@ -110,16 +110,23 @@
     .btn-set:hover { border-color:#93c5fd; color:#2563eb; background:#eff6ff; }
 
     /* ── Inline campaigns expand: simple chevron toggle ───────────────── */
+    /* The Page cell uses a fixed-width "gutter" so the chevron sits at the
+       same x position on every row regardless of the page name length.
+       Inner content (name + optional warnings) flows naturally. */
+    .page-cell { display:flex; align-items:flex-start; gap:6px; text-align:left; }
+    .page-cell-body { flex:1; min-width:0; }
     .expand-chev {
-      display:inline-block; vertical-align:middle;
-      background:none; border:none; cursor:pointer;
-      color:#94a3b8; font-size:12px; line-height:1;
-      padding:2px 4px; margin-right:4px;
-      transition:color .12s, transform .15s;
+      flex-shrink:0;
+      width:22px; height:22px;
+      display:inline-flex; align-items:center; justify-content:center;
+      background:none; border:1px solid transparent; border-radius:4px;
+      cursor:pointer; color:#64748b; font-size:16px; line-height:1;
+      padding:0; margin-top:1px;
+      transition:color .12s, background .12s, border-color .12s, transform .15s;
       user-select:none;
     }
-    .expand-chev:hover { color:#0f172a; }
-    .expand-chev.active { color:#0f172a; transform:rotate(90deg); }
+    .expand-chev:hover { color:#0f172a; background:#f1f5f9; border-color:#cbd5e1; }
+    .expand-chev.active { color:#0f172a; background:#dbeafe; border-color:#93c5fd; transform:rotate(90deg); }
 
     /* FB Ads Manager-like table for the inline expand panel. */
     .fb-table { font-size:12px; border-collapse:separate; border-spacing:0; width:100%; background:white; }
@@ -374,41 +381,48 @@
             <tr :class="editIdx === idx ? 'editing-row' : ''">
 
               <!-- Fixed: Page -->
-              <td style="text-align:center;">
-                {{-- Inline expand chevron — fetches & shows this page's
-                     campaigns/adsets/ads via /ads_manager/campaigns/data.
-                     Simple right-arrow that rotates to down-arrow when open. --}}
-                <button class="expand-chev"
-                        :class="(expandedPages[row.page_name] || {}).open ? 'active' : ''"
-                        @click.stop="togglePageExpand(row.page_name)"
-                        :title="(expandedPages[row.page_name] || {}).open ? 'Hide campaigns' : 'Show campaigns'">›</button>
-                <template x-if="row.is_range">
-                  <a href="#" @click.prevent="openBreakdown(row)"
-                     style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;
-                            text-decoration:underline;text-decoration-color:#cbd5e1;
-                            text-underline-offset:2px;cursor:pointer;"
-                     onmouseover="this.style.color='#2563eb';this.style.textDecorationColor='#2563eb';"
-                     onmouseout="this.style.color='#0f172a';this.style.textDecorationColor='#cbd5e1';"
-                     title="View per-date primary item breakdown"
-                     x-text="row.page_name"></a>
-                </template>
-                <template x-if="!row.is_range">
-                  <span style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;"
-                        x-text="row.page_name"></span>
-                </template>
-                <template x-if="row.mixed_primary">
-                  <div style="cursor:pointer;" @click="openBreakdown(row)"
-                       :title="row.distinct_items_in_range + ' distinct primary items across ' + row.range_days + '-day range. Click to see breakdown.'">
-                    <div style="font-size:10px;color:#b45309;font-weight:600;line-height:1.3;margin-top:2px;">
-                      ⚠ mixed primary · <span x-text="row.included_days + '/' + row.range_days + ' d'"></span>
-                    </div>
-                    <template x-if="row.anchor_first_date">
-                      <div style="font-size:9px;color:#64748b;line-height:1.2;">
-                        computed since <span x-text="fmtMD(row.anchor_first_date)"></span>
+              <td>
+                {{-- Page cell layout: chevron in a fixed-width gutter so it
+                     vertically aligns to the FIRST LINE of the page name
+                     across every row (regardless of multi-line warnings). --}}
+                <div class="page-cell">
+                  {{-- Inline expand chevron — fetches & shows this page's
+                       campaigns/adsets/ads via /ads_manager/campaigns/data.
+                       Right arrow rotates down when open. --}}
+                  <button class="expand-chev"
+                          :class="(expandedPages[row.page_name] || {}).open ? 'active' : ''"
+                          @click.stop="togglePageExpand(row.page_name)"
+                          :title="(expandedPages[row.page_name] || {}).open ? 'Hide campaigns' : 'Show campaigns'">›</button>
+                  <div class="page-cell-body">
+                    <template x-if="row.is_range">
+                      <a href="#" @click.prevent="openBreakdown(row)"
+                         style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;
+                                text-decoration:underline;text-decoration-color:#cbd5e1;
+                                text-underline-offset:2px;cursor:pointer;"
+                         onmouseover="this.style.color='#2563eb';this.style.textDecorationColor='#2563eb';"
+                         onmouseout="this.style.color='#0f172a';this.style.textDecorationColor='#cbd5e1';"
+                         title="View per-date primary item breakdown"
+                         x-text="row.page_name"></a>
+                    </template>
+                    <template x-if="!row.is_range">
+                      <span style="font-weight:600;color:#0f172a;white-space:normal;line-height:1.35;"
+                            x-text="row.page_name"></span>
+                    </template>
+                    <template x-if="row.mixed_primary">
+                      <div style="cursor:pointer;" @click="openBreakdown(row)"
+                           :title="row.distinct_items_in_range + ' distinct primary items across ' + row.range_days + '-day range. Click to see breakdown.'">
+                        <div style="font-size:10px;color:#b45309;font-weight:600;line-height:1.3;margin-top:2px;">
+                          ⚠ mixed primary · <span x-text="row.included_days + '/' + row.range_days + ' d'"></span>
+                        </div>
+                        <template x-if="row.anchor_first_date">
+                          <div style="font-size:9px;color:#64748b;line-height:1.2;">
+                            computed since <span x-text="fmtMD(row.anchor_first_date)"></span>
+                          </div>
+                        </template>
                       </div>
                     </template>
                   </div>
-                </template>
+                </div>
               </td>
 
               <!-- Fixed: Item -->
