@@ -55,8 +55,9 @@ class MacroExportController extends Controller
         $this->checkAccess();
 
         // Lookup data for the multi-select filters. Distinct values are cached
-        // for 5 minutes — they don't change often and the queries can be slow.
+        // for 15 minutes — they don't change often and the queries can be slow.
         $distinct = $this->loadDistinctValues();
+        $addressTriples = $this->loadAddressTriples();
 
         return view('macro.export', [
             'allColumns'         => self::ALL_COLUMNS,
@@ -66,7 +67,36 @@ class MacroExportController extends Controller
             'distinctProvinces'  => $distinct['provinces'],
             'distinctCities'     => $distinct['cities'],
             'distinctBarangays'  => $distinct['barangays'],
+            // Each triple = [province, city, barangay]. Used by the JS to
+            // cascade-filter dropdowns (pick a city → barangay options narrow
+            // to only those that occur in that city, etc.). Bidirectional.
+            'addressTriples'     => $addressTriples,
         ]);
+    }
+
+    /**
+     * Distinct (province, city, barangay) triples — used for cascading filter
+     * in the UI. Cached 15min. If the result set is huge (>50k triples), we
+     * still return it; client falls back to plain distinct lists if needed.
+     */
+    private function loadAddressTriples(): array
+    {
+        return cache()->remember('macro_export.addr_triples_v1', 900, function () {
+            return DB::table('macro_output')
+                ->select('PROVINCE', 'CITY', 'BARANGAY')
+                ->whereNotNull('PROVINCE')->where('PROVINCE', '!=', '')
+                ->whereNotNull('CITY')    ->where('CITY',     '!=', '')
+                ->whereNotNull('BARANGAY')->where('BARANGAY', '!=', '')
+                ->distinct()
+                ->orderBy('PROVINCE')->orderBy('CITY')->orderBy('BARANGAY')
+                ->get()
+                ->map(fn($r) => [
+                    (string) $r->PROVINCE,
+                    (string) $r->CITY,
+                    (string) $r->BARANGAY,
+                ])
+                ->all();
+        });
     }
 
     /** Build the filtered query (without selecting columns yet). */

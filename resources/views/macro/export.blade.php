@@ -78,50 +78,74 @@
     </div>
 
     <div class="section">
-      <h3>Address — Independent (multi-select dropdowns)</h3>
+      <h3>Address — Cascading Multi-Select</h3>
       <p class="text-xs text-gray-500 mb-2">
-        Each field filters independently. Halimbawa: kung Barangay lang may laman, walang req sa Province / City.
-        Pwede mag-pili ng multiple values per field. Type sa search box pag malaki yung listahan.
+        Pag may sine-select ka sa isang field, mag-aadjust automatic yung ibang fields papunta lang sa mga matching values.
+        Bidirectional — pwede mag-start sa Barangay, sa City, o sa Province. Multi-select pa rin per field. Type sa search box para mag-narrow down.
       </p>
+      <div class="flex justify-end mb-2">
+        <button type="button" class="text-xs text-amber-600 hover:underline"
+                @click="filters.provinces=[]; filters.cities=[]; filters.barangays=[];">
+          ↻ Clear all address filters
+        </button>
+      </div>
       <div class="field-grid">
         <div>
-          <label class="field-label">Province <span class="text-gray-400" x-text="filters.provinces.length ? '('+filters.provinces.length+' selected)' : ''"></span></label>
+          <label class="field-label">
+            Province
+            <span class="text-gray-400" x-text="filters.provinces.length ? '('+filters.provinces.length+' selected)' : ''"></span>
+          </label>
           <input type="text" class="multi-search" placeholder="🔍 search…" x-model="search.provinces">
           <div class="multi-list">
-            <template x-for="p in visibleAddressList(distinctProvinces, search.provinces, filters.provinces)" :key="p">
+            <template x-for="p in visibleAddressList(cascadedProvinces(), search.provinces, filters.provinces)" :key="p">
               <label><input type="checkbox" :value="p" x-model="filters.provinces"><span x-text="p"></span></label>
             </template>
-            <div x-show="addressOverflow(distinctProvinces, search.provinces)"
+            <div x-show="addressOverflow(cascadedProvinces(), search.provinces)"
                  class="text-[10px] text-gray-400 italic px-2 py-1">
               … showing first 500. Type to narrow down.
             </div>
           </div>
+          <div class="text-[10px] text-gray-500 mt-1"
+               x-show="filters.cities.length || filters.barangays.length"
+               x-text="'Filtered to ' + cascadedProvinces().length + ' matching province(s)'"></div>
         </div>
         <div>
-          <label class="field-label">City <span class="text-gray-400" x-text="filters.cities.length ? '('+filters.cities.length+' selected)' : ''"></span></label>
+          <label class="field-label">
+            City
+            <span class="text-gray-400" x-text="filters.cities.length ? '('+filters.cities.length+' selected)' : ''"></span>
+          </label>
           <input type="text" class="multi-search" placeholder="🔍 search…" x-model="search.cities">
           <div class="multi-list">
-            <template x-for="p in visibleAddressList(distinctCities, search.cities, filters.cities)" :key="p">
+            <template x-for="p in visibleAddressList(cascadedCities(), search.cities, filters.cities)" :key="p">
               <label><input type="checkbox" :value="p" x-model="filters.cities"><span x-text="p"></span></label>
             </template>
-            <div x-show="addressOverflow(distinctCities, search.cities)"
+            <div x-show="addressOverflow(cascadedCities(), search.cities)"
                  class="text-[10px] text-gray-400 italic px-2 py-1">
               … showing first 500. Type to narrow down.
             </div>
           </div>
+          <div class="text-[10px] text-gray-500 mt-1"
+               x-show="filters.provinces.length || filters.barangays.length"
+               x-text="'Filtered to ' + cascadedCities().length + ' matching city(ies)'"></div>
         </div>
         <div>
-          <label class="field-label">Barangay <span class="text-gray-400" x-text="filters.barangays.length ? '('+filters.barangays.length+' selected)' : ''"></span></label>
+          <label class="field-label">
+            Barangay
+            <span class="text-gray-400" x-text="filters.barangays.length ? '('+filters.barangays.length+' selected)' : ''"></span>
+          </label>
           <input type="text" class="multi-search" placeholder="🔍 search…" x-model="search.barangays">
           <div class="multi-list">
-            <template x-for="p in visibleAddressList(distinctBarangays, search.barangays, filters.barangays)" :key="p">
+            <template x-for="p in visibleAddressList(cascadedBarangays(), search.barangays, filters.barangays)" :key="p">
               <label><input type="checkbox" :value="p" x-model="filters.barangays"><span x-text="p"></span></label>
             </template>
-            <div x-show="addressOverflow(distinctBarangays, search.barangays)"
+            <div x-show="addressOverflow(cascadedBarangays(), search.barangays)"
                  class="text-[10px] text-gray-400 italic px-2 py-1">
               … showing first 500. Type to narrow down.
             </div>
           </div>
+          <div class="text-[10px] text-gray-500 mt-1"
+               x-show="filters.provinces.length || filters.cities.length"
+               x-text="'Filtered to ' + cascadedBarangays().length + ' matching barangay(s)'"></div>
         </div>
       </div>
     </div>
@@ -243,6 +267,8 @@
       distinctProvinces: @json($distinctProvinces),
       distinctCities:    @json($distinctCities),
       distinctBarangays: @json($distinctBarangays),
+      // Distinct (province, city, barangay) triples for cascading filter.
+      addressTriples:    @json($addressTriples),
       editFlags: [
         'edited_full_name','edited_phone_number','edited_address',
         'edited_province','edited_city','edited_barangay',
@@ -278,6 +304,58 @@
           'PROVINCE','CITY','BARANGAY','ITEM_NAME','COD','STATUS','waybill',
         ].filter(c => this.allColumns.includes(c));
       },
+
+      // ─── CASCADING ADDRESS FILTERS ────────────────────────────────────
+      // Each cascadedXxx() returns the visible options for that field given
+      // the current selections in the OTHER two fields. The cascade is
+      // bidirectional — picking a Barangay narrows Province + City to only
+      // those that contain it; picking a Province narrows City + Barangay,
+      // and so on. Selected values are always preserved (never disappear).
+      _cascadeCache: null,
+      _cascadeCacheKey: '',
+      _cascadeCompute() {
+        // Memoize across selection changes so a typing burst doesn't re-iterate
+        // tens of thousands of triples on every keystroke.
+        const key = JSON.stringify([
+          this.filters.provinces.slice().sort(),
+          this.filters.cities.slice().sort(),
+          this.filters.barangays.slice().sort(),
+        ]);
+        if (key === this._cascadeCacheKey && this._cascadeCache) return this._cascadeCache;
+
+        const provSet = new Set(this.filters.provinces);
+        const citySet = new Set(this.filters.cities);
+        const brgySet = new Set(this.filters.barangays);
+        const hasProv = provSet.size > 0, hasCity = citySet.size > 0, hasBrgy = brgySet.size > 0;
+
+        // For each field's cascaded list, ignore that field's own selections
+        // (otherwise picking 1 city would hide all other cities — bad UX).
+        const provList = new Set();   // visible provinces given selected city + brgy
+        const cityList = new Set();   // visible cities given selected prov + brgy
+        const brgyList = new Set();   // visible barangays given selected prov + city
+
+        for (const [p, c, b] of this.addressTriples) {
+          // Province visibility — match against city + brgy only.
+          if ((!hasCity || citySet.has(c)) && (!hasBrgy || brgySet.has(b))) provList.add(p);
+          // City visibility — match against prov + brgy only.
+          if ((!hasProv || provSet.has(p)) && (!hasBrgy || brgySet.has(b))) cityList.add(c);
+          // Barangay visibility — match against prov + city only.
+          if ((!hasProv || provSet.has(p)) && (!hasCity || citySet.has(c))) brgyList.add(b);
+        }
+
+        const sortAlpha = arr => [...arr].sort((a, b) => a.localeCompare(b, 'en'));
+        const cache = {
+          provinces: hasCity || hasBrgy ? sortAlpha(provList) : this.distinctProvinces,
+          cities:    hasProv || hasBrgy ? sortAlpha(cityList) : this.distinctCities,
+          barangays: hasProv || hasCity ? sortAlpha(brgyList) : this.distinctBarangays,
+        };
+        this._cascadeCache = cache;
+        this._cascadeCacheKey = key;
+        return cache;
+      },
+      cascadedProvinces() { return this._cascadeCompute().provinces; },
+      cascadedCities()    { return this._cascadeCompute().cities;    },
+      cascadedBarangays() { return this._cascadeCompute().barangays; },
 
       // For huge address lists (e.g. tens of thousands of barangays), only
       // render up to 500 matching items + always-include the currently-checked
