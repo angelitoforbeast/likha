@@ -329,29 +329,53 @@ class AdsManagerCampaignsController extends Controller
         // Both GLOBAL — not filtered by the date range so the user sees the
         // true historic dates even when narrowing to a recent window.
         // ──────────────────────────────────────────────────────────────────
-        $datePart = $driver === 'pgsql' ? 'DATE(starts)' : 'DATE(`starts`)';
+        // first_started — derived purely from MIN(day). The legacy `starts`
+        // column is 100% NULL across all rows so we ignore it.
+        //
+        // ALSO compute `was_running_at_data_start` — true when the earliest
+        // record for the entity already has spend > 0. That means the ad was
+        // ALREADY active on its first day in our DB, so the actual launch
+        // happened BEFORE our data window. Display logic uses this flag to
+        // prefix the date with "≥" (running since at least that day, true
+        // launch unknown) instead of misrepresenting it as the launch date.
+        //
+        // Pattern per level:
+        //   1) sub_dailySpend = per (id, day) SUM(spend) — daily activity
+        //   2) sub_earliest   = per id MIN(day)
+        //   3) join sub_earliest back to sub_dailySpend to get spend ON
+        //      that earliest day → running_at_start = (spend_on_earliest > 0)
+        $buildStarted = function (string $idCol) use ($dayExpr) {
+            $dailySpend = DB::table('ads_manager_reports')
+                ->whereNotNull('day')
+                ->whereNotNull($idCol)
+                ->selectRaw("
+                    $idCol AS id,
+                    $dayExpr AS day,
+                    COALESCE(SUM(amount_spent_php), 0) AS spend
+                ")
+                ->groupBy($idCol, DB::raw($dayExpr));
 
-        // first_started — kept as MIN(starts), works correctly today.
-        $campaignStartedDates = DB::table('ads_manager_reports')
-            ->selectRaw("
-                campaign_id,
-                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started
-            ")
-            ->groupBy('campaign_id');
+            $earliest = DB::query()->fromSub($dailySpend, 'd')
+                ->selectRaw('id, MIN(day) AS first_started')
+                ->groupBy('id');
 
-        $adSetStartedDates = DB::table('ads_manager_reports')
-            ->selectRaw("
-                ad_set_id,
-                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started
-            ")
-            ->groupBy('ad_set_id');
+            // Join back to find the spend ON the earliest day for each id.
+            return DB::query()
+                ->fromSub($earliest, 'e')
+                ->leftJoinSub($dailySpend, 's', function ($j) {
+                    $j->on('s.id', '=', 'e.id')
+                      ->on('s.day', '=', 'e.first_started');
+                })
+                ->selectRaw('
+                    e.id,
+                    e.first_started,
+                    CASE WHEN COALESCE(s.spend, 0) > 0 THEN 1 ELSE 0 END AS running_at_start
+                ');
+        };
 
-        $adStartedDates = DB::table('ads_manager_reports')
-            ->selectRaw("
-                ad_id,
-                COALESCE(MIN($datePart), MIN($dayExpr)) AS first_started
-            ")
-            ->groupBy('ad_id');
+        $campaignStartedDates = $buildStarted('campaign_id');
+        $adSetStartedDates    = $buildStarted('ad_set_id');
+        $adStartedDates       = $buildStarted('ad_id');
 
         // latest_started — built via 3-stage subqueries:
         //   1) per (id, day) is_active flag (any row marked active%)
@@ -455,7 +479,7 @@ class AdsManagerCampaignsController extends Controller
                     $j->on('ads_manager_reports.campaign_id', '=', 'ls.campaign_id');
                 })
                 ->leftJoinSub($campaignStartedDates, 'sd', function ($j) {
-                    $j->on('ads_manager_reports.campaign_id', '=', 'sd.campaign_id');
+                    $j->on('ads_manager_reports.campaign_id', '=', 'sd.id');
                 })
                 ->leftJoinSub($campaignFreshStart, 'fs', function ($j) {
                     $j->on('ads_manager_reports.campaign_id', '=', 'fs.id');
@@ -481,6 +505,7 @@ class AdsManagerCampaignsController extends Controller
 
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
+                    MAX(sd.running_at_start) AS running_at_start,
                     MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.campaign_id');
@@ -510,6 +535,7 @@ class AdsManagerCampaignsController extends Controller
                     'on'              => (bool) ($r->is_on ?? 0),
 
                     'first_started'   => $r->first_started  ?? null,
+                    'running_at_start'=> (int) ($r->running_at_start ?? 0) === 1,
                     'latest_started'  => $r->latest_started ?? null,
 
                     'spend'           => (float) ($r->spend ?? 0),
@@ -538,7 +564,7 @@ class AdsManagerCampaignsController extends Controller
                     $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
                 })
                 ->leftJoinSub($adSetStartedDates, 'sd', function ($j) {
-                    $j->on('ads_manager_reports.ad_set_id', '=', 'sd.ad_set_id');
+                    $j->on('ads_manager_reports.ad_set_id', '=', 'sd.id');
                 })
                 ->leftJoinSub($adSetFreshStart, 'fs', function ($j) {
                     $j->on('ads_manager_reports.ad_set_id', '=', 'fs.id');
@@ -566,6 +592,7 @@ class AdsManagerCampaignsController extends Controller
 
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
+                    MAX(sd.running_at_start) AS running_at_start,
                     MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.ad_set_id');
@@ -596,6 +623,7 @@ class AdsManagerCampaignsController extends Controller
                     'on'              => (bool) ($r->is_on ?? 0),
 
                     'first_started'   => $r->first_started  ?? null,
+                    'running_at_start'=> (int) ($r->running_at_start ?? 0) === 1,
                     'latest_started'  => $r->latest_started ?? null,
 
                     'spend'           => (float) ($r->spend ?? 0),
@@ -625,7 +653,7 @@ class AdsManagerCampaignsController extends Controller
                     $j->on('ads_manager_reports.ad_set_id', '=', 'ls.ad_set_id');
                 })
                 ->leftJoinSub($adStartedDates, 'sd', function ($j) {
-                    $j->on('ads_manager_reports.ad_id', '=', 'sd.ad_id');
+                    $j->on('ads_manager_reports.ad_id', '=', 'sd.id');
                 })
                 ->leftJoinSub($adFreshStart, 'fs', function ($j) {
                     $j->on('ads_manager_reports.ad_id', '=', 'fs.id');
@@ -656,6 +684,7 @@ class AdsManagerCampaignsController extends Controller
 
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
+                    MAX(sd.running_at_start) AS running_at_start,
                     MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.ad_id');
@@ -689,6 +718,7 @@ class AdsManagerCampaignsController extends Controller
                     'on'              => (bool) ($r->is_on ?? 0),
 
                     'first_started'   => $r->first_started  ?? null,
+                    'running_at_start'=> (int) ($r->running_at_start ?? 0) === 1,
                     'latest_started'  => $r->latest_started ?? null,
 
                     'spend'           => (float) ($r->spend ?? 0),
@@ -780,7 +810,9 @@ class AdsManagerCampaignsController extends Controller
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
-                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null, !empty($r['on'])), $r['latest_started'] ?? '',
+                        ((!empty($r['running_at_start']) && !empty($r['first_started'])) ? '>= ' : '') . ($r['first_started'] ?? ''),
+                        ((!empty($r['running_at_start']) && !empty($r['first_started'])) ? '>= ' : '') . $daysAgo($r['first_started'] ?? null, !empty($r['on'])),
+                        $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $intOrBlank($r['link_clicks'] ?? null), $rate($r['welcome_msg_rate'] ?? null),
                         $r['messages'], $rate($r['conversion_rate'] ?? null), $r['purchases']
@@ -791,7 +823,9 @@ class AdsManagerCampaignsController extends Controller
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
-                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null, !empty($r['on'])), $r['latest_started'] ?? '',
+                        ((!empty($r['running_at_start']) && !empty($r['first_started'])) ? '>= ' : '') . ($r['first_started'] ?? ''),
+                        ((!empty($r['running_at_start']) && !empty($r['first_started'])) ? '>= ' : '') . $daysAgo($r['first_started'] ?? null, !empty($r['on'])),
+                        $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $intOrBlank($r['link_clicks'] ?? null), $rate($r['welcome_msg_rate'] ?? null),
                         $r['messages'], $rate($r['conversion_rate'] ?? null), $r['purchases']
@@ -802,7 +836,9 @@ class AdsManagerCampaignsController extends Controller
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         ($r['headline'] ?? 'Ad '.$r['ad_id']), $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
-                        $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null, !empty($r['on'])), $r['latest_started'] ?? '',
+                        ((!empty($r['running_at_start']) && !empty($r['first_started'])) ? '>= ' : '') . ($r['first_started'] ?? ''),
+                        ((!empty($r['running_at_start']) && !empty($r['first_started'])) ? '>= ' : '') . $daysAgo($r['first_started'] ?? null, !empty($r['on'])),
+                        $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
                         $r['impressions'], $intOrBlank($r['link_clicks'] ?? null), $rate($r['welcome_msg_rate'] ?? null),
                         $r['messages'], $rate($r['conversion_rate'] ?? null), $r['purchases']

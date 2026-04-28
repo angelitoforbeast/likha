@@ -181,22 +181,38 @@
                           <div class="sub" x-text="row.page_name"></div>
                         </div>
                       </template>
-                      {{-- first_started / latest_started: date display --}}
+                      {{-- first_started / latest_started: date display.
+                           When `running_at_start` is true (campaign already
+                           had spend on its earliest record), prefix with "≥"
+                           because the actual launch happened BEFORE our
+                           data window. --}}
                       <template x-if="col.type==='date'">
                         <span>
                           <template x-if="row[col.id]">
-                            <span style="white-space:nowrap;" x-text="fmtDate(row[col.id])"></span>
+                            <span style="white-space:nowrap;"
+                                  :title="(col.id==='first_started' && row.running_at_start) ? 'Already running at the earliest record — true launch happened before our data starts' : ''">
+                              <template x-if="col.id==='first_started' && row.running_at_start">
+                                <span style="color:#64748b;font-weight:600;">≥&nbsp;</span>
+                              </template>
+                              <span x-text="fmtDate(row[col.id])"></span>
+                            </span>
                           </template>
                           <template x-if="!row[col.id]">
                             <span style="color:#bcc0c4;">—</span>
                           </template>
                         </span>
                       </template>
-                      {{-- days_running: integer derived from first_started when Active --}}
+                      {{-- days_running: integer derived from first_started when Active.
+                           Same "≥" prefix when running_at_start — count is a lower bound. --}}
                       <template x-if="col.type==='days_running'">
                         <span>
                           <template x-if="row.first_started && row.on">
-                            <span x-text="daysSince(row.first_started)"></span>
+                            <span :title="row.running_at_start ? 'Already running at our data boundary — at least this many days' : ''">
+                              <template x-if="row.running_at_start">
+                                <span style="color:#64748b;font-weight:600;">≥&nbsp;</span>
+                              </template>
+                              <span x-text="daysSince(row.first_started)"></span>
+                            </span>
                           </template>
                           <template x-if="!row.first_started || !row.on">
                             <span style="color:#bcc0c4;">—</span>

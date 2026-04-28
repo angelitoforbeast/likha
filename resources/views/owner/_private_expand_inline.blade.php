@@ -89,7 +89,13 @@
                 <template x-if="col.type==='date'">
                   <span>
                     <template x-if="c[col.id]">
-                      <span style="white-space:nowrap;" x-text="fmtDate(c[col.id])"></span>
+                      <span style="white-space:nowrap;"
+                            :title="(col.id==='first_started' && c.running_at_start) ? 'Already running at our earliest record — true launch is before our data' : ''">
+                        <template x-if="col.id==='first_started' && c.running_at_start">
+                          <span style="color:#64748b;font-weight:600;">≥&nbsp;</span>
+                        </template>
+                        <span x-text="fmtDate(c[col.id])"></span>
+                      </span>
                     </template>
                     <template x-if="!c[col.id]"><span style="color:#bcc0c4;">—</span></template>
                   </span>
@@ -97,7 +103,12 @@
                 <template x-if="col.type==='days_running'">
                   <span>
                     <template x-if="c.first_started && c.on">
-                      <span x-text="daysSince(c.first_started)"></span>
+                      <span :title="c.running_at_start ? 'Lower bound — already running before our data starts' : ''">
+                        <template x-if="c.running_at_start">
+                          <span style="color:#64748b;font-weight:600;">≥&nbsp;</span>
+                        </template>
+                        <span x-text="daysSince(c.first_started)"></span>
+                      </span>
                     </template>
                     <template x-if="!c.first_started || !c.on">
                       <span style="color:#bcc0c4;">—</span>
@@ -175,13 +186,28 @@
                             </template>
                             <template x-if="col.type==='date'">
                               <span>
-                                <template x-if="aset[col.id]"><span style="white-space:nowrap;" x-text="fmtDate(aset[col.id])"></span></template>
+                                <template x-if="aset[col.id]">
+                                  <span style="white-space:nowrap;"
+                                        :title="(col.id==='first_started' && aset.running_at_start) ? 'Already running at earliest record — true launch is before our data' : ''">
+                                    <template x-if="col.id==='first_started' && aset.running_at_start">
+                                      <span style="color:#64748b;font-weight:600;">≥&nbsp;</span>
+                                    </template>
+                                    <span x-text="fmtDate(aset[col.id])"></span>
+                                  </span>
+                                </template>
                                 <template x-if="!aset[col.id]"><span style="color:#bcc0c4;">—</span></template>
                               </span>
                             </template>
                             <template x-if="col.type==='days_running'">
                               <span>
-                                <template x-if="aset.first_started && aset.on"><span x-text="daysSince(aset.first_started)"></span></template>
+                                <template x-if="aset.first_started && aset.on">
+                                  <span :title="aset.running_at_start ? 'Lower bound — already running before our data' : ''">
+                                    <template x-if="aset.running_at_start">
+                                      <span style="color:#64748b;font-weight:600;">≥&nbsp;</span>
+                                    </template>
+                                    <span x-text="daysSince(aset.first_started)"></span>
+                                  </span>
+                                </template>
                                 <template x-if="!aset.first_started || !aset.on"><span style="color:#bcc0c4;">—</span></template>
                               </span>
                             </template>
@@ -251,13 +277,28 @@
                                         </template>
                                         <template x-if="col.type==='date'">
                                           <span>
-                                            <template x-if="ad[col.id]"><span style="white-space:nowrap;" x-text="fmtDate(ad[col.id])"></span></template>
+                                            <template x-if="ad[col.id]">
+                                              <span style="white-space:nowrap;"
+                                                    :title="(col.id==='first_started' && ad.running_at_start) ? 'Already running at earliest record — true launch is before our data' : ''">
+                                                <template x-if="col.id==='first_started' && ad.running_at_start">
+                                                  <span style="color:#64748b;font-weight:600;">≥&nbsp;</span>
+                                                </template>
+                                                <span x-text="fmtDate(ad[col.id])"></span>
+                                              </span>
+                                            </template>
                                             <template x-if="!ad[col.id]"><span style="color:#bcc0c4;">—</span></template>
                                           </span>
                                         </template>
                                         <template x-if="col.type==='days_running'">
                                           <span>
-                                            <template x-if="ad.first_started && ad.on"><span x-text="daysSince(ad.first_started)"></span></template>
+                                            <template x-if="ad.first_started && ad.on">
+                                              <span :title="ad.running_at_start ? 'Lower bound — already running before our data' : ''">
+                                                <template x-if="ad.running_at_start">
+                                                  <span style="color:#64748b;font-weight:600;">≥&nbsp;</span>
+                                                </template>
+                                                <span x-text="daysSince(ad.first_started)"></span>
+                                              </span>
+                                            </template>
                                             <template x-if="!ad.first_started || !ad.on"><span style="color:#bcc0c4;">—</span></template>
                                           </span>
                                         </template>
