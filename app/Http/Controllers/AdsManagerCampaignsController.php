@@ -178,16 +178,29 @@ class AdsManagerCampaignsController extends Controller
             if ($levelF !== 'all' && $levelF !== $level) continue;
 
             $daily = $buildDaily($idCol);
+            // Window functions: capture both prev_spend AND prev_day. The
+            // prev_day is the date of the LAST observed record before this
+            // one — used to back-shift "turned_off" events to the actual
+            // last-spending day (user mental model: "I paused it on Day X
+            // because Day X+1 had no spend").
             $withLag = DB::query()->fromSub($daily, 'd')->selectRaw("
                 d.*,
-                LAG(spend) OVER (PARTITION BY id ORDER BY d) AS prev_spend
+                LAG(spend) OVER (PARTITION BY id ORDER BY d) AS prev_spend,
+                LAG(d)     OVER (PARTITION BY id ORDER BY d) AS prev_day
             ");
 
             // Outer query: classify the event in SQL + filter to date window
-            // + drop noise events. Only meaningful transitions returned to PHP.
+            // + drop noise events. For turned_off events, the canonical
+            // display day is prev_day (the last day spend > 0).
             $eventQuery = DB::query()->fromSub($withLag, 'w')
                 ->selectRaw("
-                    w.id, w.d, w.spend, w.prev_spend,
+                    w.id,
+                    CASE
+                        WHEN w.prev_spend > 0 AND w.spend <= 0 THEN COALESCE(w.prev_day, w.d)
+                        ELSE w.d
+                    END AS event_day,
+                    w.d AS observed_day,
+                    w.spend, w.prev_spend, w.prev_day,
                     w.page_name, w.campaign_id, w.campaign_name,
                     w.ad_set_id, w.ad_set_name, w.headline, w.item_name,
                     CASE
@@ -203,16 +216,35 @@ class AdsManagerCampaignsController extends Controller
                     OR (w.prev_spend > 0  AND w.spend <= 0)
                 )");
 
-            if ($start) $eventQuery->whereRaw('w.d >= ?', [$start]);
-            if ($end)   $eventQuery->whereRaw('w.d <= ?', [$end]);
+            // Date filter applies to event_day (post-shift) so user-selected
+            // ranges line up with what they expect to see on screen.
+            if ($start) $eventQuery->whereRaw("(CASE
+                    WHEN w.prev_spend > 0 AND w.spend <= 0 THEN COALESCE(w.prev_day, w.d)
+                    ELSE w.d END) >= ?", [$start]);
+            if ($end)   $eventQuery->whereRaw("(CASE
+                    WHEN w.prev_spend > 0 AND w.spend <= 0 THEN COALESCE(w.prev_day, w.d)
+                    ELSE w.d END) <= ?", [$end]);
 
-            $eventQuery->orderByDesc('w.d')->limit($hardLimitPerLevel);
+            $eventQuery->orderByDesc('event_day')->limit($hardLimitPerLevel);
 
             $rows = $eventQuery->get();
 
             foreach ($rows as $r) {
+                // For turned_off events, prev_spend is the LAST day's spend;
+                // current row's spend is 0. We display the event on prev_day
+                // and report the spend that was active just before the pause
+                // (so the user sees "₱473.65 was the last day's spend").
+                $isTurnedOff = $r->event_kind === 'turned_off';
+                $displaySpend = $isTurnedOff
+                    ? (float) ($r->prev_spend ?? 0)  // last spending day's spend
+                    : (float) $r->spend;
+                $displayPrevSpend = $isTurnedOff
+                    ? 0.0  // implied pause day spend = 0
+                    : ($r->prev_spend === null ? null : (float) $r->prev_spend);
+
                 $events[] = [
-                    'day'           => (string) $r->d,
+                    'day'           => (string) $r->event_day,
+                    'observed_day'  => (string) $r->observed_day, // raw transition date for debug/tooltip
                     'level'         => $level === 'campaigns' ? 'campaign'
                                      : ($level === 'adsets' ? 'adset' : 'ad'),
                     'event'         => (string) $r->event_kind,
@@ -221,14 +253,90 @@ class AdsManagerCampaignsController extends Controller
                                      : ($level === 'adsets'  ? ($r->ad_set_name   ?: 'Ad set '  .$r->id)
                                      :                         ($r->headline      ?: 'Ad '      .$r->id)),
                     'page_name'     => (string) $r->page_name,
+                    'campaign_id'   => (string) ($r->campaign_id   ?? ''),
                     'campaign_name' => (string) ($r->campaign_name ?? ''),
+                    'ad_set_id'     => (string) ($r->ad_set_id     ?? ''),
                     'ad_set_name'   => (string) ($r->ad_set_name   ?? ''),
                     'item_name'     => (string) ($r->item_name     ?? ''),
-                    'spend'         => (float) $r->spend,
-                    'prev_spend'    => $r->prev_spend === null ? null : (float) $r->prev_spend,
+                    'spend'         => $displaySpend,
+                    'prev_spend'    => $displayPrevSpend,
                 ];
             }
         }
+
+        // Attach creative content per event so the user can see + edit
+        // headline/welcome_message/quick_replies/ad_link/feedback inline.
+        // Source: ad_campaign_creatives (acc) — keyed primarily by ad_id,
+        // secondarily by campaign_id.
+        $campaignIds = [];
+        $adSetIds    = [];
+        foreach ($events as $e) {
+            if ($e['level'] === 'campaign' && !empty($e['entity_id'])) $campaignIds[] = $e['entity_id'];
+            if ($e['level'] === 'adset'    && !empty($e['entity_id'])) $adSetIds[]    = $e['entity_id'];
+            if ($e['level'] === 'ad'       && !empty($e['campaign_id'])) $campaignIds[] = $e['campaign_id'];
+        }
+        $campaignIds = array_values(array_unique($campaignIds));
+        $adSetIds    = array_values(array_unique($adSetIds));
+
+        // Fetch creatives by campaign_id (representative row per campaign —
+        // pick MAX(id) to grab the latest insert/update order).
+        $creativeByCampaign = [];
+        if (!empty($campaignIds)) {
+            $rows = DB::table('ad_campaign_creatives')
+                ->whereIn('campaign_id', $campaignIds)
+                ->whereNotNull('campaign_id')
+                ->orderBy('campaign_id')->orderByDesc('id')
+                ->get(['id','campaign_id','ad_id','body_ad_settings','headline','welcome_message','quick_reply_1','quick_reply_2','quick_reply_3','ad_link','feedback']);
+            foreach ($rows as $r) {
+                if (!isset($creativeByCampaign[$r->campaign_id])) {
+                    $creativeByCampaign[$r->campaign_id] = $r;
+                }
+            }
+        }
+
+        // Adset → creative: resolve via ads_manager_reports (find any ad_id
+        // under each ad_set_id, then look up its creative).
+        $creativeByAdSet = [];
+        if (!empty($adSetIds)) {
+            $adIdMap = DB::table('ads_manager_reports')
+                ->whereIn('ad_set_id', $adSetIds)
+                ->whereNotNull('ad_id')
+                ->selectRaw('ad_set_id, MAX(ad_id) AS ad_id')
+                ->groupBy('ad_set_id')
+                ->pluck('ad_id', 'ad_set_id');
+
+            if ($adIdMap->isNotEmpty()) {
+                $adIds = $adIdMap->values()->all();
+                $byAdId = DB::table('ad_campaign_creatives')
+                    ->whereIn('ad_id', $adIds)
+                    ->orderBy('ad_id')->orderByDesc('id')
+                    ->get(['id','ad_id','body_ad_settings','headline','welcome_message','quick_reply_1','quick_reply_2','quick_reply_3','ad_link','feedback'])
+                    ->keyBy('ad_id');
+
+                foreach ($adIdMap as $asId => $adId) {
+                    if (isset($byAdId[$adId])) $creativeByAdSet[$asId] = $byAdId[$adId];
+                }
+            }
+        }
+
+        // Stitch creatives into each event payload.
+        foreach ($events as &$e) {
+            $cre = null;
+            if ($e['level'] === 'campaign')      $cre = $creativeByCampaign[$e['entity_id']]   ?? null;
+            elseif ($e['level'] === 'adset')     $cre = $creativeByAdSet[$e['entity_id']]      ?? null;
+            elseif ($e['level'] === 'ad')        $cre = $creativeByCampaign[$e['campaign_id']] ?? null;
+
+            $e['creative_id']      = $cre ? (int) $cre->id : null;
+            $e['body']             = $cre->body_ad_settings ?? '';
+            $e['headline']         = $cre->headline         ?? '';
+            $e['welcome_message']  = $cre->welcome_message  ?? '';
+            $e['quick_reply_1']    = $cre->quick_reply_1    ?? '';
+            $e['quick_reply_2']    = $cre->quick_reply_2    ?? '';
+            $e['quick_reply_3']    = $cre->quick_reply_3    ?? '';
+            $e['ad_link']          = $cre->ad_link          ?? '';
+            $e['feedback']         = $cre ? (int) ($cre->feedback ?? 0) : 0;
+        }
+        unset($e);
 
         // Sort: most recent first; within day group by level then name.
         usort($events, function ($a, $b) {

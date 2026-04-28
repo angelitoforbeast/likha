@@ -10,8 +10,21 @@
   <style>
     [x-cloak]{display:none!important}
     body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; background:#f0f2f5; }
-    .ev-row { display:grid; grid-template-columns: 90px 110px minmax(0,1fr) 110px 110px; gap:10px; align-items:center; padding:7px 12px; border-bottom:1px solid #e4e6eb; font-size:13px; }
-    .ev-row:hover { background:#f7f8fa; }
+    /* New row layout adds creative columns: Event, Level, Entity, Headline,
+       Welcome msg, Quick replies, Spend, Prev. Wide table — wrap inside a
+       horizontal scroll container. */
+    .ev-row { display:grid; grid-template-columns: 96px 96px minmax(180px,1.2fr) minmax(140px,1fr) minmax(180px,1.4fr) minmax(220px,1.6fr) 100px 100px 80px; gap:10px; align-items:start; padding:8px 12px; border-bottom:1px solid #e4e6eb; font-size:12px; }
+    .ev-row:hover { background:#fafbfd; }
+    .crew-input { width:100%; border:1px solid #d4d6db; border-radius:4px; padding:4px 6px; font-size:11px; line-height:1.35; min-height:30px; resize:vertical; font-family:inherit; }
+    .crew-input:focus { outline:2px solid #3b82f6; outline-offset:-1px; border-color:#3b82f6; }
+    .crew-input.dirty { border-color:#f59e0b; background:#fffbeb; }
+    .crew-input.saved { border-color:#10b981; background:#f0fdf4; transition:background 600ms ease; }
+    .crew-row-actions { display:flex; flex-direction:column; gap:4px; align-items:stretch; }
+    .crew-btn { font-size:10px; padding:3px 6px; border-radius:4px; border:1px solid #d4d6db; background:white; cursor:pointer; font-weight:600; }
+    .crew-btn.save { background:#2563eb; color:white; border-color:#2563eb; }
+    .crew-btn.save:hover { background:#1d4ed8; }
+    .crew-btn.save:disabled { opacity:.5; cursor:wait; }
+    .crew-feedback-toggle { display:inline-flex; align-items:center; gap:3px; font-size:10px; }
     .ev-pill { display:inline-flex; align-items:center; gap:5px; font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:600; line-height:1; white-space:nowrap; }
     .ev-pill.created     { background:#dbeafe; color:#1d4ed8; }
     .ev-pill.created_with_spend { background:#dcfce7; color:#15803d; }
@@ -129,11 +142,15 @@
             <div>Event</div>
             <div>Level</div>
             <div>Entity</div>
+            <div>Headline</div>
+            <div>Welcome message</div>
+            <div>Quick replies (1 / 2 / 3)</div>
             <div class="num">Spend</div>
             <div class="num">Prev spend</div>
+            <div>Save</div>
           </div>
 
-          <template x-for="e in eventsForDay(day)" :key="e.level + '-' + e.entity_id + '-' + day">
+          <template x-for="(e, eIdx) in eventsForDay(day)" :key="e.level + '-' + e.entity_id + '-' + day + '-' + eIdx">
             <div class="ev-row">
               <div>
                 <span :class="'ev-pill ' + e.event" x-text="eventLabel(e.event)"></span>
@@ -154,10 +171,75 @@
                   <template x-if="e.level === 'ad' && (e.campaign_name || e.ad_set_name)">
                     <span> · <span x-text="(e.campaign_name||'')+(e.ad_set_name?(' / '+e.ad_set_name):'')"></span></span>
                   </template>
+                  <template x-if="e.creative_id">
+                    <div class="text-[10px] text-blue-600 mt-1">creative #<span x-text="e.creative_id"></span></div>
+                  </template>
+                  <template x-if="!e.creative_id">
+                    <div class="text-[10px] text-gray-400 mt-1">no creative linked</div>
+                  </template>
                 </div>
+              </div>
+              {{-- Headline --}}
+              <div>
+                <input type="text" class="crew-input"
+                       :class="{ dirty: e._dirty?.headline, saved: e._saved?.headline }"
+                       :value="e.headline"
+                       :disabled="!e.creative_id"
+                       @input="markDirty(e, 'headline', $event.target.value)"
+                       placeholder="(empty)">
+              </div>
+              {{-- Welcome message --}}
+              <div>
+                <textarea class="crew-input"
+                          :class="{ dirty: e._dirty?.welcome_message, saved: e._saved?.welcome_message }"
+                          rows="2"
+                          :disabled="!e.creative_id"
+                          @input="markDirty(e, 'welcome_message', $event.target.value)"
+                          placeholder="(empty)"
+                          x-text="e.welcome_message"></textarea>
+              </div>
+              {{-- Quick replies (3 stacked inputs) --}}
+              <div class="space-y-1">
+                <input type="text" class="crew-input"
+                       :class="{ dirty: e._dirty?.quick_reply_1, saved: e._saved?.quick_reply_1 }"
+                       :value="e.quick_reply_1"
+                       :disabled="!e.creative_id"
+                       @input="markDirty(e, 'quick_reply_1', $event.target.value)"
+                       placeholder="QR 1">
+                <input type="text" class="crew-input"
+                       :class="{ dirty: e._dirty?.quick_reply_2, saved: e._saved?.quick_reply_2 }"
+                       :value="e.quick_reply_2"
+                       :disabled="!e.creative_id"
+                       @input="markDirty(e, 'quick_reply_2', $event.target.value)"
+                       placeholder="QR 2">
+                <input type="text" class="crew-input"
+                       :class="{ dirty: e._dirty?.quick_reply_3, saved: e._saved?.quick_reply_3 }"
+                       :value="e.quick_reply_3"
+                       :disabled="!e.creative_id"
+                       @input="markDirty(e, 'quick_reply_3', $event.target.value)"
+                       placeholder="QR 3">
+                <input type="url" class="crew-input"
+                       :class="{ dirty: e._dirty?.ad_link, saved: e._saved?.ad_link }"
+                       :value="e.ad_link"
+                       :disabled="!e.creative_id"
+                       @input="markDirty(e, 'ad_link', $event.target.value)"
+                       placeholder="https://… (ad link)">
               </div>
               <div class="num" x-text="peso(e.spend)"></div>
               <div class="num text-gray-400" x-text="e.prev_spend === null ? '—' : peso(e.prev_spend)"></div>
+              <div class="crew-row-actions">
+                <button type="button" class="crew-btn save"
+                        :disabled="!e.creative_id || !hasDirty(e) || e._saving"
+                        @click="saveCreative(e)"
+                        x-text="e._saving ? '…' : 'Save'"></button>
+                <label class="crew-feedback-toggle">
+                  <input type="checkbox"
+                         :checked="!!e.feedback"
+                         :disabled="!e.creative_id"
+                         @change="markDirty(e, 'feedback', $event.target.checked ? 1 : 0)">
+                  Feedback
+                </label>
+              </div>
             </div>
           </template>
         </div>
@@ -220,12 +302,81 @@
             const r = await fetch('{{ route('ads_manager.campaigns.history.data') }}?' + qs.toString());
             const j = await r.json();
             if (!j.ok) throw new Error(j.error || 'Failed');
-            this.events = j.events || [];
+            // Initialize per-event mutable state for inline edits.
+            this.events = (j.events || []).map(e => Object.assign({}, e, {
+              _dirty: {}, _saved: {}, _saving: false, _draft: {},
+            }));
             this.byDay  = j.by_day || {};
           } catch (e) {
             alert('Load failed: ' + e.message);
           } finally {
             this.loading = false;
+          }
+        },
+
+        // Inline edit helpers
+        markDirty(e, field, value){
+          // Compare with original event field — if same as original, clear dirty.
+          const original = e[field] ?? '';
+          const changed = String(value ?? '') !== String(original ?? '');
+          if (!e._dirty) e._dirty = {};
+          if (!e._draft) e._draft = {};
+          e._draft[field] = value;
+          e._dirty[field] = changed;
+          // Clear "saved" indicator on edit
+          if (e._saved) e._saved[field] = false;
+        },
+        hasDirty(e){
+          if (!e._dirty) return false;
+          return Object.values(e._dirty).some(v => v === true);
+        },
+        async saveCreative(e){
+          if (!e.creative_id) { alert('Walang creative na naka-link sa event na ito.'); return; }
+          if (!this.hasDirty(e)) return;
+          e._saving = true;
+          try {
+            const fields = ['headline','welcome_message','quick_reply_1','quick_reply_2','quick_reply_3','ad_link','feedback'];
+            const body = new FormData();
+            // Laravel needs _method=PUT for spoofing on FormData.
+            body.append('_method', 'PUT');
+            for (const f of fields) {
+              if (e._dirty?.[f]) {
+                let v = e._draft?.[f];
+                if (f === 'feedback') v = (v ? 1 : 0);
+                body.append(f, v ?? '');
+              }
+            }
+            const url = '/ads-manager/edit-messaging-template/' + e.creative_id;
+            const r = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+              },
+              body,
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok || j.ok === false) throw new Error(j.message || ('HTTP ' + r.status));
+            // Commit drafts to source-of-truth fields, mark _saved (for green flash),
+            // clear _dirty.
+            if (!e._saved) e._saved = {};
+            for (const f of fields) {
+              if (e._dirty?.[f]) {
+                e[f] = e._draft[f];
+                e._saved[f] = true;
+                e._dirty[f] = false;
+              }
+            }
+            // After 1.5s, clear the green flash
+            setTimeout(() => {
+              for (const f of fields) if (e._saved && e._saved[f]) e._saved[f] = false;
+            }, 1500);
+          } catch (err) {
+            console.error(err);
+            alert('Save failed: ' + err.message);
+          } finally {
+            e._saving = false;
           }
         },
 
