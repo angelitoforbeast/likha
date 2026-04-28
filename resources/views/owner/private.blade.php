@@ -169,6 +169,31 @@
     /* Nested expand backgrounds (visual hierarchy). */
     .expand-nest-1 td.nest-host { background:#eef2f7; padding:10px 14px; }
     .expand-nest-2 td.nest-host { background:#dde4ed; padding:10px 14px; }
+
+    /* ── Expanded page-section grouping ───────────────────────────────────
+       Goal: when a page row is expanded, it forms a clear "card" with its
+       inline campaigns panel so the eye doesn't blur the boundary between
+       this page and the next one. Achieved via:
+         1) thick bottom border on the expand-row (4px slate-700)
+         2) tinted left accent bar (3px blue) running through both the
+            page row + the expand panel
+         3) subtle box-shadow under the expand panel for "lifted" feel
+       Non-expanded sections stay clean (1px row separator only). */
+    tbody.page-section-expanded > tr.page-row-expanded > td:first-child {
+      box-shadow: inset 3px 0 0 #2563eb;
+    }
+    tbody.page-section-expanded > tr.page-row-expanded > td {
+      background: #f1f5f9;
+    }
+    tbody.page-section-expanded > tr.page-expand-row > td {
+      border-bottom: 4px solid #334155;
+      box-shadow: inset 3px 0 0 #2563eb, 0 2px 0 rgba(15,23,42,0.06);
+    }
+    /* Visual fallback for non-collapsing-border tables: ensure the row
+       above the next page-row has a subtle bottom rule. */
+    tbody.page-section-expanded + tbody > tr:first-child > td {
+      border-top: 0;
+    }
   </style>
 </head>
 <body>
@@ -389,8 +414,8 @@
                per <table>; using one per iteration is the canonical Alpine
                pattern when an x-for needs to produce multiple <tr>s. --}}
           <template x-for="(row, idx) in sortedRows()" :key="row.page_key">
-          <tbody class="page-row-tbody">
-            <tr :class="editIdx === idx ? 'editing-row' : ''">
+          <tbody :class="'page-row-tbody' + ((expandedPages[row.page_name] || {}).open ? ' page-section-expanded' : '')">
+            <tr :class="(editIdx === idx ? 'editing-row ' : '') + ((expandedPages[row.page_name] || {}).open ? 'page-row-expanded' : '')">
 
               <!-- Fixed: Page -->
               <td>
