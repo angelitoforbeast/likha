@@ -10,21 +10,27 @@
   <style>
     [x-cloak]{display:none!important}
     body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; background:#f0f2f5; }
-    /* New row layout adds creative columns: Event, Level, Entity, Headline,
-       Welcome msg, Quick replies, Spend, Prev. Wide table — wrap inside a
-       horizontal scroll container. */
-    .ev-row { display:grid; grid-template-columns: 96px 96px minmax(180px,1.2fr) minmax(140px,1fr) minmax(180px,1.4fr) minmax(220px,1.6fr) 100px 100px 80px; gap:10px; align-items:start; padding:8px 12px; border-bottom:1px solid #e4e6eb; font-size:12px; }
-    .ev-row:hover { background:#fafbfd; }
-    .crew-input { width:100%; border:1px solid #d4d6db; border-radius:4px; padding:4px 6px; font-size:11px; line-height:1.35; min-height:30px; resize:vertical; font-family:inherit; }
+    /* 2-line per-event layout — no horizontal scroll. Row 1 = event header
+       (event chip, level, entity, spend numbers, save). Row 2 = creative
+       editor (headline, welcome msg, 3 quick replies + ad link, feedback). */
+    .ev-block { padding:8px 12px; border-bottom:1px solid #e4e6eb; font-size:12px; }
+    .ev-block:hover { background:#fafbfd; }
+    .ev-head { display:grid; grid-template-columns: 90px 80px minmax(0,1fr) 100px 100px 90px; gap:10px; align-items:center; }
+    .ev-head .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .ev-creative { display:grid; grid-template-columns: minmax(0,1.2fr) minmax(0,1.6fr) minmax(0,1.6fr); gap:10px; align-items:start; margin-top:6px; padding-left:8px; border-left:2px solid #e4e6eb; }
+    .ev-creative-block { display:flex; flex-direction:column; gap:3px; }
+    .ev-creative-label { font-size:9px; color:#65676b; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; }
+    .crew-input { width:100%; border:1px solid #d4d6db; border-radius:4px; padding:4px 6px; font-size:11px; line-height:1.35; min-height:28px; resize:vertical; font-family:inherit; box-sizing:border-box; }
     .crew-input:focus { outline:2px solid #3b82f6; outline-offset:-1px; border-color:#3b82f6; }
     .crew-input.dirty { border-color:#f59e0b; background:#fffbeb; }
     .crew-input.saved { border-color:#10b981; background:#f0fdf4; transition:background 600ms ease; }
-    .crew-row-actions { display:flex; flex-direction:column; gap:4px; align-items:stretch; }
-    .crew-btn { font-size:10px; padding:3px 6px; border-radius:4px; border:1px solid #d4d6db; background:white; cursor:pointer; font-weight:600; }
+    .crew-input:disabled { background:#f5f6f7; color:#9ca3af; cursor:not-allowed; }
+    .crew-btn { font-size:10px; padding:4px 8px; border-radius:4px; border:1px solid #d4d6db; background:white; cursor:pointer; font-weight:600; }
     .crew-btn.save { background:#2563eb; color:white; border-color:#2563eb; }
-    .crew-btn.save:hover { background:#1d4ed8; }
-    .crew-btn.save:disabled { opacity:.5; cursor:wait; }
-    .crew-feedback-toggle { display:inline-flex; align-items:center; gap:3px; font-size:10px; }
+    .crew-btn.save:hover:not(:disabled) { background:#1d4ed8; }
+    .crew-btn.save:disabled { opacity:.4; cursor:not-allowed; }
+    .crew-feedback-toggle { display:inline-flex; align-items:center; gap:4px; font-size:10px; cursor:pointer; }
+    .ev-actions { display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
     .ev-pill { display:inline-flex; align-items:center; gap:5px; font-size:11px; padding:2px 8px; border-radius:9999px; font-weight:600; line-height:1; white-space:nowrap; }
     .ev-pill.created     { background:#dbeafe; color:#1d4ed8; }
     .ev-pill.created_with_spend { background:#dcfce7; color:#15803d; }
@@ -138,107 +144,113 @@
             </div>
           </div>
 
-          <div class="ev-row" style="background:#f5f6f7;font-weight:600;color:#65676b;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;">
-            <div>Event</div>
-            <div>Level</div>
-            <div>Entity</div>
-            <div>Headline</div>
-            <div>Welcome message</div>
-            <div>Quick replies (1 / 2 / 3)</div>
-            <div class="num">Spend</div>
-            <div class="num">Prev spend</div>
-            <div>Save</div>
+          <div class="ev-block" style="background:#f5f6f7;font-weight:600;color:#65676b;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;border-bottom:1px solid #d4d6db;">
+            <div class="ev-head">
+              <div>Event</div>
+              <div>Level</div>
+              <div>Entity</div>
+              <div class="num">Spend</div>
+              <div class="num">Prev</div>
+              <div style="text-align:right;">Action</div>
+            </div>
           </div>
 
           <template x-for="(e, eIdx) in eventsForDay(day)" :key="e.level + '-' + e.entity_id + '-' + day + '-' + eIdx">
-            <div class="ev-row">
-              <div>
-                <span :class="'ev-pill ' + e.event" x-text="eventLabel(e.event)"></span>
-              </div>
-              <div>
-                <span :class="'level-pill ' + e.level" x-text="e.level"></span>
-              </div>
-              <div>
-                <div class="font-medium text-gray-900" x-text="e.entity_name"></div>
-                <div class="text-[11px] text-gray-500">
-                  <span x-text="e.page_name"></span>
-                  <template x-if="e.level === 'ad' && e.item_name">
-                    <span> · <span x-text="e.item_name"></span></span>
-                  </template>
-                  <template x-if="e.level === 'adset' && e.campaign_name">
-                    <span> · <span x-text="e.campaign_name"></span></span>
-                  </template>
-                  <template x-if="e.level === 'ad' && (e.campaign_name || e.ad_set_name)">
-                    <span> · <span x-text="(e.campaign_name||'')+(e.ad_set_name?(' / '+e.ad_set_name):'')"></span></span>
-                  </template>
-                  <template x-if="e.creative_id">
-                    <div class="text-[10px] text-blue-600 mt-1">creative #<span x-text="e.creative_id"></span></div>
-                  </template>
-                  <template x-if="!e.creative_id">
-                    <div class="text-[10px] text-gray-400 mt-1">no creative linked</div>
-                  </template>
+            <div class="ev-block">
+              {{-- Row 1: Event header --}}
+              <div class="ev-head">
+                <div>
+                  <span :class="'ev-pill ' + e.event" x-text="eventLabel(e.event)"></span>
+                </div>
+                <div>
+                  <span :class="'level-pill ' + e.level" x-text="e.level"></span>
+                </div>
+                <div>
+                  <div class="font-medium text-gray-900" x-text="e.entity_name"></div>
+                  <div class="text-[11px] text-gray-500">
+                    <span x-text="e.page_name"></span>
+                    <template x-if="e.level === 'ad' && e.item_name">
+                      <span> · <span x-text="e.item_name"></span></span>
+                    </template>
+                    <template x-if="e.level === 'adset' && e.campaign_name">
+                      <span> · <span x-text="e.campaign_name"></span></span>
+                    </template>
+                    <template x-if="e.level === 'ad' && (e.campaign_name || e.ad_set_name)">
+                      <span> · <span x-text="(e.campaign_name||'')+(e.ad_set_name?(' / '+e.ad_set_name):'')"></span></span>
+                    </template>
+                    <template x-if="e.creative_id">
+                      <span class="text-blue-600"> · creative #<span x-text="e.creative_id"></span></span>
+                    </template>
+                    <template x-if="!e.creative_id">
+                      <span class="text-gray-400"> · no creative linked</span>
+                    </template>
+                  </div>
+                </div>
+                <div class="num" x-text="peso(e.spend)"></div>
+                <div class="num text-gray-400" x-text="e.prev_spend === null ? '—' : peso(e.prev_spend)"></div>
+                <div class="ev-actions">
+                  <button type="button" class="crew-btn save"
+                          :disabled="!e.creative_id || !hasDirty(e) || e._saving"
+                          @click="saveCreative(e)"
+                          x-text="e._saving ? 'Saving…' : 'Save'"></button>
+                  <label class="crew-feedback-toggle">
+                    <input type="checkbox"
+                           :checked="!!e.feedback"
+                           :disabled="!e.creative_id"
+                           @change="markDirty(e, 'feedback', $event.target.checked ? 1 : 0)">
+                    Feedback
+                  </label>
                 </div>
               </div>
-              {{-- Headline --}}
-              <div>
-                <input type="text" class="crew-input"
-                       :class="{ dirty: e._dirty?.headline, saved: e._saved?.headline }"
-                       :value="e.headline"
-                       :disabled="!e.creative_id"
-                       @input="markDirty(e, 'headline', $event.target.value)"
-                       placeholder="(empty)">
-              </div>
-              {{-- Welcome message --}}
-              <div>
-                <textarea class="crew-input"
-                          :class="{ dirty: e._dirty?.welcome_message, saved: e._saved?.welcome_message }"
-                          rows="2"
-                          :disabled="!e.creative_id"
-                          @input="markDirty(e, 'welcome_message', $event.target.value)"
-                          placeholder="(empty)"
-                          x-text="e.welcome_message"></textarea>
-              </div>
-              {{-- Quick replies (3 stacked inputs) --}}
-              <div class="space-y-1">
-                <input type="text" class="crew-input"
-                       :class="{ dirty: e._dirty?.quick_reply_1, saved: e._saved?.quick_reply_1 }"
-                       :value="e.quick_reply_1"
-                       :disabled="!e.creative_id"
-                       @input="markDirty(e, 'quick_reply_1', $event.target.value)"
-                       placeholder="QR 1">
-                <input type="text" class="crew-input"
-                       :class="{ dirty: e._dirty?.quick_reply_2, saved: e._saved?.quick_reply_2 }"
-                       :value="e.quick_reply_2"
-                       :disabled="!e.creative_id"
-                       @input="markDirty(e, 'quick_reply_2', $event.target.value)"
-                       placeholder="QR 2">
-                <input type="text" class="crew-input"
-                       :class="{ dirty: e._dirty?.quick_reply_3, saved: e._saved?.quick_reply_3 }"
-                       :value="e.quick_reply_3"
-                       :disabled="!e.creative_id"
-                       @input="markDirty(e, 'quick_reply_3', $event.target.value)"
-                       placeholder="QR 3">
-                <input type="url" class="crew-input"
-                       :class="{ dirty: e._dirty?.ad_link, saved: e._saved?.ad_link }"
-                       :value="e.ad_link"
-                       :disabled="!e.creative_id"
-                       @input="markDirty(e, 'ad_link', $event.target.value)"
-                       placeholder="https://… (ad link)">
-              </div>
-              <div class="num" x-text="peso(e.spend)"></div>
-              <div class="num text-gray-400" x-text="e.prev_spend === null ? '—' : peso(e.prev_spend)"></div>
-              <div class="crew-row-actions">
-                <button type="button" class="crew-btn save"
-                        :disabled="!e.creative_id || !hasDirty(e) || e._saving"
-                        @click="saveCreative(e)"
-                        x-text="e._saving ? '…' : 'Save'"></button>
-                <label class="crew-feedback-toggle">
-                  <input type="checkbox"
-                         :checked="!!e.feedback"
+
+              {{-- Row 2: Creative editor (3-column grid) --}}
+              <div class="ev-creative">
+                <div class="ev-creative-block">
+                  <div class="ev-creative-label">Headline</div>
+                  <input type="text" class="crew-input"
+                         :class="{ dirty: e._dirty?.headline, saved: e._saved?.headline }"
+                         :value="e.headline"
                          :disabled="!e.creative_id"
-                         @change="markDirty(e, 'feedback', $event.target.checked ? 1 : 0)">
-                  Feedback
-                </label>
+                         @input="markDirty(e, 'headline', $event.target.value)"
+                         placeholder="(empty)">
+                </div>
+                <div class="ev-creative-block">
+                  <div class="ev-creative-label">Welcome Message</div>
+                  <textarea class="crew-input"
+                            :class="{ dirty: e._dirty?.welcome_message, saved: e._saved?.welcome_message }"
+                            rows="3"
+                            :disabled="!e.creative_id"
+                            @input="markDirty(e, 'welcome_message', $event.target.value)"
+                            placeholder="(empty)"
+                            x-text="e.welcome_message"></textarea>
+                </div>
+                <div class="ev-creative-block">
+                  <div class="ev-creative-label">Quick Replies (1 / 2 / 3) + Ad Link</div>
+                  <input type="text" class="crew-input"
+                         :class="{ dirty: e._dirty?.quick_reply_1, saved: e._saved?.quick_reply_1 }"
+                         :value="e.quick_reply_1"
+                         :disabled="!e.creative_id"
+                         @input="markDirty(e, 'quick_reply_1', $event.target.value)"
+                         placeholder="QR 1">
+                  <input type="text" class="crew-input"
+                         :class="{ dirty: e._dirty?.quick_reply_2, saved: e._saved?.quick_reply_2 }"
+                         :value="e.quick_reply_2"
+                         :disabled="!e.creative_id"
+                         @input="markDirty(e, 'quick_reply_2', $event.target.value)"
+                         placeholder="QR 2">
+                  <input type="text" class="crew-input"
+                         :class="{ dirty: e._dirty?.quick_reply_3, saved: e._saved?.quick_reply_3 }"
+                         :value="e.quick_reply_3"
+                         :disabled="!e.creative_id"
+                         @input="markDirty(e, 'quick_reply_3', $event.target.value)"
+                         placeholder="QR 3">
+                  <input type="url" class="crew-input"
+                         :class="{ dirty: e._dirty?.ad_link, saved: e._saved?.ad_link }"
+                         :value="e.ad_link"
+                         :disabled="!e.creative_id"
+                         @input="markDirty(e, 'ad_link', $event.target.value)"
+                         placeholder="https://… (ad link)">
+                </div>
               </div>
             </div>
           </template>
