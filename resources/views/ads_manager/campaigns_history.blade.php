@@ -14,7 +14,10 @@
        (handled by removing the max-w-7xl wrapper sa main). Columns:
        Event, Level, Entity, Headline, Welcome msg, Quick replies + ad link,
        Spend, Prev, Save. */
-    .ev-row { display:grid; grid-template-columns: 96px 80px minmax(180px,1.1fr) minmax(160px,1.1fr) minmax(200px,1.4fr) minmax(220px,1.5fr) 90px 90px 90px; gap:10px; align-items:start; padding:8px 12px; border-bottom:1px solid #e4e6eb; font-size:12px; }
+    .ev-row { display:grid; grid-template-columns: 96px 80px minmax(180px,1.1fr) minmax(160px,1.1fr) minmax(200px,1.4fr) minmax(220px,1.5fr) 90px 90px 90px; gap:10px; align-items:stretch; padding:8px 12px; border-bottom:1px solid #e4e6eb; font-size:12px; }
+    /* Welcome Message textarea fills its cell height so it lines up with
+       the QR1+QR2+QR3+Ad Link stack on its right. */
+    .ev-row textarea.crew-input { height:100%; min-height:120px; }
     .ev-row:hover { background:#fafbfd; }
     .crew-input { width:100%; border:1px solid #d4d6db; border-radius:4px; padding:4px 6px; font-size:11px; line-height:1.35; min-height:28px; resize:vertical; font-family:inherit; box-sizing:border-box; }
     .crew-input:focus { outline:2px solid #3b82f6; outline-offset:-1px; border-color:#3b82f6; }
@@ -264,18 +267,38 @@
         byDay: {},
         loading: false,
         filters: (function(){
-          // Default: this calendar month (PH).
+          // Default: this calendar month (PH), level=campaigns. Reads URL
+          // query params first so a refresh/share preserves the user's state.
           const ph = new Date(new Date().toLocaleString('en-US', {timeZone:'Asia/Manila'}));
           const p = n => String(n).padStart(2,'0');
           const fmt = d => d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
           const start = new Date(ph.getFullYear(), ph.getMonth(), 1);
+          const url = new URL(window.location.href);
+          const q   = url.searchParams;
           return {
-            start_date: fmt(start),
-            end_date:   fmt(ph),
-            page_name:  'all',
-            level:      'all',
+            start_date: q.get('start_date') || fmt(start),
+            end_date:   q.get('end_date')   || fmt(ph),
+            page_name:  q.get('page_name')  || 'all',
+            level:      q.get('level')      || 'campaigns',
           };
         })(),
+
+        // Sync current filters into the URL (replaceState — no history entry,
+        // just so refresh/share preserves state). Called on every reload().
+        _syncUrl(){
+          try {
+            const url = new URL(window.location.href);
+            const set = (k, v) => {
+              if (v === null || v === '' || v === undefined) url.searchParams.delete(k);
+              else url.searchParams.set(k, v);
+            };
+            set('start_date', this.filters.start_date);
+            set('end_date',   this.filters.end_date);
+            set('page_name',  this.filters.page_name);
+            set('level',      this.filters.level);
+            window.history.replaceState({}, '', url.toString());
+          } catch (e) { /* ignore — non-fatal */ }
+        },
 
         sortedDays(){
           return Object.keys(this.byDay).sort((a, b) => b.localeCompare(a));
@@ -302,12 +325,14 @@
 
         async reload(){
           this.loading = true;
+          // Mirror the active filters into the browser URL so refresh keeps state.
+          this._syncUrl();
           try {
             const qs = new URLSearchParams({
               start_date: this.filters.start_date || '',
               end_date:   this.filters.end_date   || '',
               page_name:  this.filters.page_name  || 'all',
-              level:      this.filters.level      || 'all',
+              level:      this.filters.level      || 'campaigns',
             });
             const r = await fetch('{{ route('ads_manager.campaigns.history.data') }}?' + qs.toString());
             const j = await r.json();
