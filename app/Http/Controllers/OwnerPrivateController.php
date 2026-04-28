@@ -1825,6 +1825,7 @@ class OwnerPrivateController extends Controller
             'item_value'     => 'required|numeric|min:0',
             'rts_pct'        => 'required|numeric|min:0|max:100',
             'effective_date' => 'required|date',
+            'apply_through'        => 'nullable|date',
             'comment'              => 'nullable|string|max:500',
             'item_value_comment'   => 'nullable|string|max:500',
         ]);
@@ -1832,6 +1833,14 @@ class OwnerPrivateController extends Controller
         $pageName  = trim($validated['page_name']);
         $itemName  = trim($validated['item_name']);
         $effDate   = $validated['effective_date'];
+        // When set, ALSO overwrite any existing rows whose date is
+        // BETWEEN ($effDate, $applyThrough]. Use case: user clicks
+        // "Apply from <earliest>" on a later cell whose date already
+        // has its own row → both endpoints + everything in between
+        // should pick up the new value.
+        $applyThrough = !empty($validated['apply_through']) && $validated['apply_through'] > $effDate
+            ? $validated['apply_through']
+            : null;
         $itemValue = (float)$validated['item_value'];
         $rtsPct    = (float)$validated['rts_pct'];
 
@@ -1868,6 +1877,20 @@ class OwnerPrivateController extends Controller
                         'created_at'         => now(),
                     ]
                 );
+                // When "Apply from" is used on a cell whose own date already
+                // has its own override row, propagate forward by overwriting
+                // every existing override in (effDate, applyThrough].
+                if ($applyThrough) {
+                    DB::table('page_item_settings')
+                        ->where('page_name', $pageName)
+                        ->where('item_name', $itemName)
+                        ->where('effective_date', '>', $effDate)
+                        ->where('effective_date', '<=', $applyThrough)
+                        ->update([
+                            'rts_pct'    => $rtsPct,
+                            'updated_at' => now(),
+                        ]);
+                }
             } else {
                 // rts_pct = 0 → drop the per-page override for this date only.
                 // Falls back to the previous effective_date (or item-wide default).
@@ -1876,6 +1899,14 @@ class OwnerPrivateController extends Controller
                     ->where('item_name', $itemName)
                     ->where('effective_date', $effDate)
                     ->delete();
+                if ($applyThrough) {
+                    DB::table('page_item_settings')
+                        ->where('page_name', $pageName)
+                        ->where('item_name', $itemName)
+                        ->where('effective_date', '>', $effDate)
+                        ->where('effective_date', '<=', $applyThrough)
+                        ->delete();
+                }
             }
 
             // --- COGS side (global, upsert-only) ---
@@ -1884,6 +1915,17 @@ class OwnerPrivateController extends Controller
                     ['item_name' => $itemName, 'date' => $effDate],
                     ['unit_cost' => $itemValue]
                 );
+                // Cascade through any existing same-item rows in the apply range.
+                if ($applyThrough) {
+                    DB::table('cogs')
+                        ->where('item_name', $itemName)
+                        ->where('date', '>', $effDate)
+                        ->where('date', '<=', $applyThrough)
+                        ->update([
+                            'unit_cost'  => $itemValue,
+                            'updated_at' => now(),
+                        ]);
+                }
             }
             // item_value = 0 → intentionally no-op on cogs. (Delete must go through /item/cogs.)
         } catch (\Throwable $e) {
@@ -2239,6 +2281,25 @@ class OwnerPrivateController extends Controller
                     if ($c['item_key'] === $p['anchor_item_key']) {
                         if ($p['anchor_first_date'] === null) $p['anchor_first_date'] = $d;
                         $p['anchor_included_days']++;
+                    }
+                }
+                // If the in-range streak begins on the very first day of the range,
+                // walk BACKWARDS through daily_page_primary_item to find the true
+                // start of the consecutive streak (could predate $startDate by months).
+                if ($p['anchor_first_date'] === $startDate) {
+                    $priorRows = DB::table('daily_page_primary_item')
+                        ->where('page_key', $p['page_key'])
+                        ->where('ts_date', '<', $startDate)
+                        ->orderByDesc('ts_date')
+                        ->limit(400) // safety cap (~13 months back)
+                        ->get(['ts_date', 'primary_item_key']);
+                    $expected = (new \DateTime($startDate))->modify('-1 day')->format('Y-m-d');
+                    foreach ($priorRows as $pr) {
+                        $d = (string)$pr->ts_date;
+                        if ($d !== $expected) break; // gap → stop
+                        if ((string)$pr->primary_item_key !== $p['anchor_item_key']) break;
+                        $p['anchor_first_date'] = $d;
+                        $expected = (new \DateTime($d))->modify('-1 day')->format('Y-m-d');
                     }
                 }
             }

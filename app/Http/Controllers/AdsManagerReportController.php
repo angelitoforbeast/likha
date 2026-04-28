@@ -78,7 +78,7 @@ class AdsManagerReportController extends Controller
             ->limit(50)
             ->get([
                 'id','status','original_name','processed_rows','inserted','updated','skipped','error_rows',
-                'started_at','finished_at','created_at'
+                'error_message','started_at','finished_at','created_at'
             ]);
 
         return response()->json([
@@ -91,6 +91,7 @@ class AdsManagerReportController extends Controller
                 'updated'       => (int) ($l->updated ?? 0),
                 'skipped'       => (int) ($l->skipped ?? 0),
                 'error_rows'    => (int) ($l->error_rows ?? 0),
+                'error_message' => (string) ($l->error_message ?? ''),
                 'started_at'    => $l->started_at?->toDateTimeString(),
                 'finished_at'   => $l->finished_at?->toDateTimeString(),
                 'created_at'    => $l->created_at?->toDateTimeString(),

@@ -24,6 +24,7 @@ class UploadLog extends Model
         'updated',
         'skipped',
         'error_rows',
+        'error_message',
         'errors_path',
         'started_at',
         'finished_at',

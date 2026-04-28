@@ -90,6 +90,23 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
                     if ($headerIndex === null) {
                         $headerIndex = $this->buildHeaderIndex($cells);
+
+                        // GUARD: validate required headers BEFORE any row is processed.
+                        // If any required column is missing, abort the entire upload —
+                        // walang partial import. User sees the missing list in the UI.
+                        $missing = $this->missingRequiredHeaders($headerIndex);
+                        if (!empty($missing)) {
+                            $msg = 'Missing required column(s): ' . implode(', ', $missing);
+                            Log::warning("[AdsMgr Import] $msg", ['path' => $this->storedPath]);
+                            if ($log) {
+                                $log->update([
+                                    'status'        => 'failed',
+                                    'error_message' => $msg,
+                                    'finished_at'   => now(),
+                                ]);
+                            }
+                            return; // bail out; finally{} closes reader + cleans temp
+                        }
                         continue;
                     }
 
@@ -278,6 +295,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             'reach'                           => 'reach',
             'impressions'                     => 'impressions',
             'cost per result'                 => 'cost_per_result',
+            'link clicks'                     => 'link_clicks',
             'ad set delivery'                 => 'ad_set_delivery',
             'messaging conversations started' => 'messaging_conversations_started',
             'campaign id'                     => 'campaign_id',
@@ -306,6 +324,49 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         return $out;
     }
 
+    /**
+     * REQUIRED Excel headers (normalized, lowercase). If ANY of these are
+     * missing, the upload is rejected wholesale before any row is processed.
+     *
+     * Note: 'day' has a fallback (`reporting starts`) — pass kung either of
+     * the two is present. Lahat ng iba dapat literal na nasa file.
+     */
+    private function requiredHeaders(): array
+    {
+        return [
+            // [labelForUserMessage => [acceptedNormalizedHeaders, ...]]
+            'Day'                  => ['day', 'reporting starts'],
+            'Ad ID'                => ['ad id'],
+            'Campaign ID'          => ['campaign id'],
+            'Ad Set ID'            => ['ad set id'],
+            'Page Name'            => ['page name'],
+            'Campaign Name'        => ['campaign name'],
+            'Ad Set Name'          => ['ad set name'],
+            'Amount Spent (PHP)'   => ['amount spent (php)'],
+            'Impressions'          => ['impressions'],
+            'Results'              => ['results'],
+            'Result Type'          => ['result type'],
+            'Link Clicks'          => ['link clicks'],
+        ];
+    }
+
+    /**
+     * Returns user-facing labels of required headers absent from the file.
+     * Empty array = all good, proceed.
+     */
+    private function missingRequiredHeaders(array $headerIndex): array
+    {
+        $missing = [];
+        foreach ($this->requiredHeaders() as $label => $accepts) {
+            $found = false;
+            foreach ($accepts as $candidate) {
+                if (isset($headerIndex[$candidate])) { $found = true; break; }
+            }
+            if (!$found) $missing[] = $label;
+        }
+        return $missing;
+    }
+
     /** Build normalized header index: headerLabel(norm) => columnIndex */
     private function buildHeaderIndex(array $headers): array
     {
@@ -331,7 +392,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         }
 
         // integers
-        foreach (['reach','impressions','results','purchases','messaging_conversations_started'] as $intCol) {
+        foreach (['reach','impressions','results','purchases','messaging_conversations_started','link_clicks'] as $intCol) {
             if (array_key_exists($intCol, $row)) $row[$intCol] = $this->toInt($row[$intCol]);
         }
 
@@ -480,6 +541,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'reach');
                 $this->putIfExists($updateData, $r, 'impressions');
                 $this->putIfExists($updateData, $r, 'cost_per_result');
+                $this->putIfExists($updateData, $r, 'link_clicks');
                 $this->putIfExists($updateData, $r, 'ad_set_delivery');
                 $this->putIfExists($updateData, $r, 'messaging_conversations_started');
                 $this->putIfExists($updateData, $r, 'campaign_id');

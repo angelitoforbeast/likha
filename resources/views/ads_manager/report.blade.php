@@ -87,6 +87,7 @@
               <th class="p-2">Updated</th>
               <th class="p-2">Skipped</th>
               <th class="p-2">Errors</th>
+              <th class="p-2">Error message</th>
               <th class="p-2">Started</th>
               <th class="p-2">Finished</th>
             </tr>
@@ -120,6 +121,7 @@
                 <td class="p-2 font-mono" data-col="updated">{{ (int)($log->updated ?? 0) }}</td>
                 <td class="p-2 font-mono" data-col="skipped">{{ (int)($log->skipped ?? 0) }}</td>
                 <td class="p-2 font-mono" data-col="error_rows">{{ (int)($log->error_rows ?? 0) }}</td>
+                <td class="p-2 text-xs text-red-700 max-w-xs whitespace-normal break-words" data-col="error_message">{{ $log->error_message }}</td>
 
                 <td class="p-2 font-mono text-xs" data-col="started_at">{{ $log->started_at }}</td>
                 <td class="p-2 font-mono text-xs" data-col="finished_at">{{ $log->finished_at }}</td>
@@ -195,6 +197,7 @@
           setText('updated',  l.updated  ?? 0);
           setText('skipped',  l.skipped  ?? 0);
           setText('error_rows', l.error_rows ?? 0);
+          setText('error_message', l.error_message ?? '');
           setText('started_at',  l.started_at ?? '');
           setText('finished_at', l.finished_at ?? '');
         }

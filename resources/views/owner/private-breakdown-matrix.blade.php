@@ -225,6 +225,16 @@
         <input type="checkbox" x-model="vis.only_missing" @change="persist()"> ONLY MISSING
       </label>
       <span class="ml-4 text-[11px] text-slate-500">Click any cell to edit RTS / unit cost. Settings saved per-browser.</span>
+
+      <button type="button" @click="recomputeRange()" :disabled="recomputing"
+              class="ml-3 px-3 py-1 rounded border text-[11px] font-semibold disabled:opacity-50"
+              :class="recomputing ? 'bg-slate-200 border-slate-300 text-slate-500'
+                                  : 'bg-amber-500 border-amber-600 text-white hover:bg-amber-600'"
+              :title="'Recompute daily_page_primary_item for ' + '{{ $startDate }}' + ' → ' + '{{ $endDate }}'">
+        <span x-show="!recomputing">↻ Recompute visible range</span>
+        <span x-show="recomputing">Recomputing…</span>
+      </button>
+      <span class="text-[11px] text-emerald-700 font-semibold" x-show="recomputeMsg" x-text="recomputeMsg"></span>
     </div>
   </div>
 
@@ -509,6 +519,37 @@
       },
 
       _syncing:false,
+      recomputing:false,
+      recomputeMsg:'',
+
+      async recomputeRange(){
+        if (this.recomputing) return;
+        const from = '{{ $startDate }}';
+        const to   = '{{ $endDate }}';
+        if (!confirm('Recompute daily_page_primary_item for ' + from + ' → ' + to + '?\nThis rebuilds primary-item cells from macro_output for those dates.')) return;
+        this.recomputing = true; this.recomputeMsg = '';
+        try {
+          const r = await fetch('{{ route('owner.private.refresh-primary-items') }}', {
+            method:'POST',
+            headers:{
+              'Content-Type':'application/json',
+              'Accept':'application/json',
+              'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
+            },
+            body: JSON.stringify({ start_date: from, end_date: to }),
+          });
+          const j = await r.json();
+          if (!j.ok) { alert(j.message || 'Recompute failed'); return; }
+          const s = j.summary || {};
+          this.recomputeMsg = `✓ ${s.rows_upserted||0} rows · ${s.ties_skipped||0} ties skipped (${s.elapsed_s||0}s)`;
+          await this.refreshMatrix();
+          setTimeout(() => this.recomputeMsg = '', 8000);
+        } catch(e) {
+          console.error(e); alert('Network error');
+        } finally {
+          this.recomputing = false;
+        }
+      },
 
       init(){
         try {
@@ -603,6 +644,12 @@
           fd.append('item_value',     cost);
           fd.append('rts_pct',        rts);
           fd.append('effective_date', overrideEffectiveDate || this.edit.date);
+          // When using "Apply from X" on a cell whose own date already has a
+          // row, also propagate the new value forward through the cell's date
+          // (overwrites every existing row in [from, cellDate]).
+          if (overrideEffectiveDate && overrideEffectiveDate !== this.edit.date) {
+            fd.append('apply_through', this.edit.date);
+          }
           if (this.edit.comment) fd.append('comment', this.edit.comment);
           const r = await fetch('{{ route('owner.private.item-setting.save') }}', {
             method:'POST',
