@@ -345,90 +345,52 @@ class AdsManagerCampaignsController extends Controller
         //   2) sub_earliest   = per id MIN(day)
         //   3) join sub_earliest back to sub_dailySpend to get spend ON
         //      that earliest day → running_at_start = (spend_on_earliest > 0)
-        // first_started detection logic:
+        // first_started detection — based on actual spend, not just data presence.
         //
-        //   We want "First Launched" to reflect when the campaign started in
-        //   its CURRENT identity (current item_name). Existing FB campaigns
-        //   often get re-purposed — same campaign_id keeps running but the
-        //   creative + item_name swaps mid-life. Naive MIN(day) reports the
-        //   campaign's first-ever appearance, which misleads users when an
-        //   old campaign is now selling something different.
+        //   Why: FB exports often include placeholder rows with spend = 0 for
+        //   campaigns that exist but aren't actively running. Naive MIN(day)
+        //   would report those as "First Launched", which is wrong — the user
+        //   thinks of "launched" as "started spending".
         //
-        //   Steps per level:
-        //     1) Per (id, day): SUM(spend) + capture an item_name representative
-        //     2) Latest item_name per id = item_name on MAX(day) (current-state)
-        //     3) first_started = MIN(day) where item_name == latest_item AND
-        //        spend > 0 (when this current product started running)
-        //     4) running_at_start = 1 if the very first record of this id had
-        //        spend > 0 (campaign was already active at our data boundary —
-        //        we can't see earlier history)
-        //
-        //   Fallback: if latest item_name is NULL/empty for the id (some imports
-        //   skip the column), first_started reverts to MIN(day) of any spend.
-        $buildStarted = function (string $idCol) use ($dayExpr, $driver) {
-            $itemTrim = $driver === 'pgsql' ? "BTRIM(COALESCE(item_name,''))" : "TRIM(COALESCE(item_name,''))";
-
-            // 1) Daily aggregate per (id, day) — keep the "dominant" item_name
-            //    of the day (just MAX as proxy when multiple).
+        //   Per id (campaign_id / ad_set_id / ad_id):
+        //     • first_started     = MIN(day) where spend > 0  (true launch)
+        //     • running_at_start  = TRUE only when first_started equals MIN(day)
+        //                           overall — i.e. the campaign was already
+        //                           spending on its very first record, so we
+        //                           can't see when it actually started.
+        //                           If we observed a clean spend=0 → spend>0
+        //                           transition, we DO know the launch.
+        //     • Fallback: if id never had spend > 0, first_started = MIN(day).
+        $buildStarted = function (string $idCol) use ($dayExpr) {
+            // 1) Daily spend aggregate per (id, day).
             $dailySpend = DB::table('ads_manager_reports')
                 ->whereNotNull('day')
                 ->whereNotNull($idCol)
                 ->selectRaw("
                     $idCol AS id,
                     $dayExpr AS day,
-                    COALESCE(SUM(amount_spent_php), 0) AS spend,
-                    MAX($itemTrim)                     AS item_name
+                    COALESCE(SUM(amount_spent_php), 0) AS spend
                 ")
                 ->groupBy($idCol, DB::raw($dayExpr));
 
-            // 2) Per-id maxima: max day, min day, and earliest-day spend probe.
-            $maxDay = DB::query()->fromSub($dailySpend, 'd')
-                ->selectRaw('id, MAX(day) AS max_day, MIN(day) AS min_day')
-                ->groupBy('id');
-
-            // 3) Latest item_name per id (item on the campaign's MAX day).
-            $latestItem = DB::query()
-                ->fromSub($maxDay, 'mx')
-                ->joinSub($dailySpend, 'dl', function ($j) {
-                    $j->on('dl.id', '=', 'mx.id')->on('dl.day', '=', 'mx.max_day');
-                })
-                ->selectRaw('mx.id, mx.min_day, MAX(dl.item_name) AS latest_item');
-
-            // 4) Spend on min_day per id — drives running_at_start flag.
-            $earliestProbe = DB::query()
-                ->fromSub($maxDay, 'mn')
-                ->leftJoinSub($dailySpend, 'de', function ($j) {
-                    $j->on('de.id', '=', 'mn.id')->on('de.day', '=', 'mn.min_day');
-                })
-                ->selectRaw('mn.id, COALESCE(de.spend, 0) AS earliest_spend');
-
-            // 5) first_started = MIN(day) where (id matches AND item matches
-            //    AND spend > 0). Fallback to global MIN(day) if no item match.
-            $itemFirstDay = DB::query()
-                ->fromSub($dailySpend, 'ds')
-                ->joinSub($latestItem, 'li', function ($j) {
-                    $j->on('li.id', '=', 'ds.id')
-                      ->on('li.latest_item', '=', 'ds.item_name');
-                })
-                ->whereRaw("ds.spend > 0 AND COALESCE(li.latest_item,'') <> ''")
-                ->selectRaw('ds.id, MIN(ds.day) AS first_with_current_item')
-                ->groupBy('ds.id');
-
-            // 6) Final: stitch together. Use first_with_current_item when
-            //    available, else fall back to min_day.
+            // 2) Per id: MIN(day) of any record + MIN(day) where spend > 0.
             return DB::query()
-                ->fromSub($maxDay, 'm')
-                ->leftJoinSub($itemFirstDay, 'ifd', function ($j) {
-                    $j->on('ifd.id', '=', 'm.id');
-                })
-                ->leftJoinSub($earliestProbe, 'ep', function ($j) {
-                    $j->on('ep.id', '=', 'm.id');
-                })
+                ->fromSub($dailySpend, 'd')
                 ->selectRaw('
-                    m.id,
-                    COALESCE(ifd.first_with_current_item, m.min_day) AS first_started,
-                    CASE WHEN COALESCE(ep.earliest_spend, 0) > 0 THEN 1 ELSE 0 END AS running_at_start
-                ');
+                    id,
+                    MIN(day)                                          AS min_day,
+                    MIN(CASE WHEN spend > 0 THEN day END)             AS first_spend_day,
+                    COALESCE(
+                        MIN(CASE WHEN spend > 0 THEN day END),
+                        MIN(day)
+                    )                                                  AS first_started,
+                    CASE
+                        WHEN MIN(CASE WHEN spend > 0 THEN day END) IS NOT NULL
+                         AND MIN(CASE WHEN spend > 0 THEN day END) = MIN(day)
+                        THEN 1 ELSE 0
+                    END                                                AS running_at_start
+                ')
+                ->groupBy('id');
         };
 
         $campaignStartedDates = $buildStarted('campaign_id');
