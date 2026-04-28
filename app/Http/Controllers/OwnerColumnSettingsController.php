@@ -90,7 +90,10 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'cpr',            'label' => 'Cost per result'],
             ['id' => 'cpp',            'label' => 'Cost per purchase'],
             ['id' => 'impressions',    'label' => 'Impressions'],
+            ['id' => 'link_clicks',       'label' => 'Link clicks'],
+            ['id' => 'welcome_msg_rate',  'label' => 'Welcome Msg Rate (%)'],
             ['id' => 'messages',       'label' => 'Messages'],
+            ['id' => 'conversion_rate',   'label' => 'Conv Rate (%)'],
             ['id' => 'purchases',      'label' => 'Purchases'],
         ],
     ];
@@ -119,7 +122,9 @@ class OwnerColumnSettingsController extends Controller
             // start hidden — admin can re-enable per the settings page.
             'on', 'name',
             'first_started', 'days_running', 'latest_started',
-            'spend', 'cpp', 'impressions', 'purchases',
+            'spend', 'cpp', 'impressions',
+            'link_clicks', 'welcome_msg_rate', 'messages', 'conversion_rate',
+            'purchases',
         ],
     ];
 

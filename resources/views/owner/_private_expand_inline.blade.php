@@ -108,7 +108,10 @@
                   <span x-text="c[col.id] != null ? money(c[col.id]) : '—'"></span>
                 </template>
                 <template x-if="col.type==='integer'">
-                  <span x-text="num(c[col.id])"></span>
+                  <span x-text="c[col.id] != null ? num(c[col.id]) : '—'"></span>
+                </template>
+                <template x-if="col.type==='percent'">
+                  <span x-text="c[col.id] != null ? (Number(c[col.id]).toFixed(1) + '%') : '—'"></span>
                 </template>
               </td>
             </template>
@@ -186,7 +189,10 @@
                               <span x-text="aset[col.id] != null ? money(aset[col.id]) : '—'"></span>
                             </template>
                             <template x-if="col.type==='integer'">
-                              <span x-text="num(aset[col.id])"></span>
+                              <span x-text="aset[col.id] != null ? num(aset[col.id]) : '—'"></span>
+                            </template>
+                            <template x-if="col.type==='percent'">
+                              <span x-text="aset[col.id] != null ? (Number(aset[col.id]).toFixed(1) + '%') : '—'"></span>
                             </template>
                           </td>
                         </template>
@@ -259,7 +265,10 @@
                                           <span x-text="ad[col.id] != null ? money(ad[col.id]) : '—'"></span>
                                         </template>
                                         <template x-if="col.type==='integer'">
-                                          <span x-text="num(ad[col.id])"></span>
+                                          <span x-text="ad[col.id] != null ? num(ad[col.id]) : '—'"></span>
+                                        </template>
+                                        <template x-if="col.type==='percent'">
+                                          <span x-text="ad[col.id] != null ? (Number(ad[col.id]).toFixed(1) + '%') : '—'"></span>
                                         </template>
                                       </td>
                                     </template>

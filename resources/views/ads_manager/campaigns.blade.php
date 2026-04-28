@@ -209,7 +209,11 @@
                       </template>
                       {{-- integer: locale-formatted count --}}
                       <template x-if="col.type==='integer'">
-                        <span x-text="num(row[col.id])"></span>
+                        <span x-text="row[col.id] != null ? num(row[col.id]) : '—'"></span>
+                      </template>
+                      {{-- percent: 1 decimal + % suffix, em-dash fallback --}}
+                      <template x-if="col.type==='percent'">
+                        <span x-text="row[col.id] != null ? (Number(row[col.id]).toFixed(1) + '%') : '—'"></span>
                       </template>
                     </td>
                   </template>
@@ -228,7 +232,10 @@
                       <span x-text="totals[col.id] != null ? money(totals[col.id]) : '—'"></span>
                     </template>
                     <template x-if="col.type==='integer'">
-                      <span x-text="num(totals[col.id] ?? 0)"></span>
+                      <span x-text="totals[col.id] != null ? num(totals[col.id]) : '—'"></span>
+                    </template>
+                    <template x-if="col.type==='percent'">
+                      <span x-text="totals[col.id] != null ? (Number(totals[col.id]).toFixed(1) + '%') : '—'"></span>
                     </template>
                     {{-- on, date, days_running: blank in totals --}}
                   </td>
@@ -290,7 +297,10 @@
             { id:'cpr',            label:'Cost per result',  sort:'cpr',            type:'money',        align:'right', minw:120 },
             { id:'cpp',            label:'Cost per purchase',sort:'cpp',            type:'money',        align:'right', minw:130 },
             { id:'impressions',    label:'Impressions',      sort:null,             type:'integer',      align:'right', minw:100 },
+            { id:'link_clicks',       label:'Link clicks',         sort:'link_clicks',      type:'integer',      align:'right', minw:90  },
+            { id:'welcome_msg_rate',  label:'Welcome Msg Rate (%)',sort:'welcome_msg_rate', type:'percent',      align:'right', minw:130 },
             { id:'messages',       label:'Messages',         sort:null,             type:'integer',      align:'right', minw:90  },
+            { id:'conversion_rate',   label:'Conv Rate (%)',       sort:'conversion_rate',  type:'percent',      align:'right', minw:110 },
             { id:'purchases',      label:'Purchases',        sort:null,             type:'integer',      align:'right', minw:100 },
           ];
         },

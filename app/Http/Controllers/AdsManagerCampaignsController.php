@@ -403,11 +403,14 @@ class AdsManagerCampaignsController extends Controller
                     SUM(purchases) AS purchases,
                     SUM(impressions) AS impressions,
                     SUM(reach) AS reach,
+                    SUM(link_clicks) AS link_clicks,
 
                     CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
                     CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
                     CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
+                    CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
+                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
 
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
@@ -418,7 +421,7 @@ class AdsManagerCampaignsController extends Controller
             // Drop campaigns with zero spend in the window when caller asked.
             if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
-            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','campaign_name','page_name','first_started','latest_started'];
+            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','link_clicks','welcome_msg_rate','conversion_rate','campaign_name','page_name','first_started','latest_started'];
 
             if ($sortBy === 'default') {
                 $rows = $query->orderByDesc('is_on')
@@ -451,6 +454,9 @@ class AdsManagerCampaignsController extends Controller
                     'purchases'       => (int)   ($r->purchases ?? 0),
                     'impressions'     => (int)   ($r->impressions ?? 0),
                     'reach'           => (int)   ($r->reach ?? 0),
+                    'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
+                    'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
+                    'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
                 ];
             });
 
@@ -482,11 +488,14 @@ class AdsManagerCampaignsController extends Controller
                     SUM(purchases) AS purchases,
                     SUM(impressions) AS impressions,
                     SUM(reach) AS reach,
+                    SUM(link_clicks) AS link_clicks,
 
                     CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
                     CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
                     CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
+                    CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
+                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
 
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
@@ -496,7 +505,7 @@ class AdsManagerCampaignsController extends Controller
 
             if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
-            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','ad_set_name','campaign_name','page_name','first_started','latest_started'];
+            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','link_clicks','welcome_msg_rate','conversion_rate','ad_set_name','campaign_name','page_name','first_started','latest_started'];
 
             if ($sortBy === 'default') {
                 $rows = $query->orderByDesc('is_on')
@@ -531,6 +540,9 @@ class AdsManagerCampaignsController extends Controller
                     'purchases'       => (int)   ($r->purchases ?? 0),
                     'impressions'     => (int)   ($r->impressions ?? 0),
                     'reach'           => (int)   ($r->reach ?? 0),
+                    'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
+                    'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
+                    'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
                 ];
             });
 
@@ -566,11 +578,14 @@ class AdsManagerCampaignsController extends Controller
                     SUM(purchases) AS purchases,
                     SUM(impressions) AS impressions,
                     SUM(reach) AS reach,
+                    SUM(link_clicks) AS link_clicks,
 
                     CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
                     CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
                     CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
+                    CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
+                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
 
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
@@ -580,7 +595,7 @@ class AdsManagerCampaignsController extends Controller
 
             if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
-            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','headline','item_name','first_started','latest_started'];
+            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','link_clicks','welcome_msg_rate','conversion_rate','headline','item_name','first_started','latest_started'];
 
             if ($sortBy === 'default') {
                 $rows = $query->orderByDesc('is_on')
@@ -618,6 +633,9 @@ class AdsManagerCampaignsController extends Controller
                     'purchases'       => (int)   ($r->purchases ?? 0),
                     'impressions'     => (int)   ($r->impressions ?? 0),
                     'reach'           => (int)   ($r->reach ?? 0),
+                    'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
+                    'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
+                    'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
                 ];
             });
         }
@@ -629,7 +647,8 @@ class AdsManagerCampaignsController extends Controller
             COALESCE(SUM(purchases),0) AS purchases,
             COALESCE(SUM(impressions),0) AS impressions,
             COALESCE(SUM(reach),0) AS reach,
-            COALESCE(SUM(results),0) AS results
+            COALESCE(SUM(results),0) AS results,
+            COALESCE(SUM(link_clicks),0) AS link_clicks
         ')->first();
 
         $totals = [
@@ -638,10 +657,13 @@ class AdsManagerCampaignsController extends Controller
             'purchases'   => (int)   ($tot->purchases ?? 0),
             'impressions' => (int)   ($tot->impressions ?? 0),
             'reach'       => (int)   ($tot->reach ?? 0),
+            'link_clicks' => (int)   ($tot->link_clicks ?? 0),
             'cpp'         => ($tot->purchases ?? 0)   > 0 ? (float) ($tot->spend / $tot->purchases) : null,
             'cpm_msg'     => ($tot->messages ?? 0)    > 0 ? (float) ($tot->spend / $tot->messages)  : null,
             'cpm_1000'    => ($tot->impressions ?? 0) > 0 ? (float) (($tot->spend / $tot->impressions) * 1000) : null,
             'cpr'         => ($tot->results ?? 0)     > 0 ? (float) ($tot->spend / $tot->results) : null,
+            'welcome_msg_rate' => ($tot->link_clicks ?? 0) > 0 ? (float) (($tot->messages * 100.0) / $tot->link_clicks) : null,
+            'conversion_rate'  => ($tot->messages ?? 0)    > 0 ? (float) (($tot->purchases * 100.0) / $tot->messages) : null,
         ];
 
         // CSV export (optional)
@@ -682,34 +704,41 @@ class AdsManagerCampaignsController extends Controller
             $out = fopen('php://output', 'w');
             fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
 
+            // Render rate column as bare number (1 decimal) or blank — matches UI "—" semantics.
+            $rate = fn($v) => ($v === null || $v === '') ? '' : number_format((float)$v, 1, '.', '');
+            $intOrBlank = fn($v) => ($v === null || $v === '') ? '' : (string)(int)$v;
+
             if ($level === 'campaigns') {
-                fputcsv($out, ['Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Link Clicks','Welcome Msg Rate (%)','Msgs','Conv Rate (%)','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
                         $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null, !empty($r['on'])), $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
-                        $r['impressions'], $r['messages'], $r['purchases']
+                        $r['impressions'], $intOrBlank($r['link_clicks'] ?? null), $rate($r['welcome_msg_rate'] ?? null),
+                        $r['messages'], $rate($r['conversion_rate'] ?? null), $r['purchases']
                     ]);
                 }
             } elseif ($level === 'adsets') {
-                fputcsv($out, ['Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Link Clicks','Welcome Msg Rate (%)','Msgs','Conv Rate (%)','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
                         $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null, !empty($r['on'])), $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
-                        $r['impressions'], $r['messages'], $r['purchases']
+                        $r['impressions'], $intOrBlank($r['link_clicks'] ?? null), $rate($r['welcome_msg_rate'] ?? null),
+                        $r['messages'], $rate($r['conversion_rate'] ?? null), $r['purchases']
                     ]);
                 }
             } else {
-                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Msgs','Purchases']);
+                fputcsv($out, ['Ad (Headline)','Ad set','Campaign','Page','Active','First Launched','Days Running','Latest Start','Spend','CPM (1k)','Cost/Msg','Cost/Result','Cost/Purchase','Impr.','Link Clicks','Welcome Msg Rate (%)','Msgs','Conv Rate (%)','Purchases']);
                 foreach ($rows as $r) {
                     fputcsv($out, [
                         ($r['headline'] ?? 'Ad '.$r['ad_id']), $r['ad_set_name'], $r['campaign_name'], $r['page_name'], $r['on'] ? '1':'0',
                         $r['first_started'] ?? '', $daysAgo($r['first_started'] ?? null, !empty($r['on'])), $r['latest_started'] ?? '',
                         $r['spend'], $r['cpm_1000'], $r['cpm_msg'], $r['cpr'], $r['cpp'],
-                        $r['impressions'], $r['messages'], $r['purchases']
+                        $r['impressions'], $intOrBlank($r['link_clicks'] ?? null), $rate($r['welcome_msg_rate'] ?? null),
+                        $r['messages'], $rate($r['conversion_rate'] ?? null), $r['purchases']
                     ]);
                 }
             }
