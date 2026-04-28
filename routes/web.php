@@ -565,6 +565,10 @@ Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'ind
      Route::get('/ads_manager/campaigns/history/data', [AdsManagerCampaignsController::class, 'historyData'])
         ->name('ads_manager.campaigns.history.data');
 
+     // TEMP diagnostic — verify earliest day / starts in DB. Remove after debug.
+     Route::get('/ads_manager/campaigns/_diag', [AdsManagerCampaignsController::class, 'diag'])
+        ->name('ads_manager.campaigns.diag');
+
     Route::get('/ads_manager/insights', [AdsInsightsController::class, 'index'])->name('ads.insights.index');
     Route::post('/ads_manager/insights/analyze',
     [\App\Http\Controllers\AdsInsightsController::class, 'analyze']

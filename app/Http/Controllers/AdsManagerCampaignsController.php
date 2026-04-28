@@ -32,6 +32,73 @@ class AdsManagerCampaignsController extends Controller
     }
 
     /**
+     * TEMP diagnostic — verify what's actually in DB para sa first_started bug.
+     * Hit /ads_manager/campaigns/_diag?q=SALES+VID+2 to investigate a campaign.
+     * Remove this method + route after debugging.
+     */
+    public function diag(Request $request)
+    {
+        $q = trim((string)$request->input('q', ''));
+
+        // Global stats
+        $global = DB::table('ads_manager_reports')->selectRaw('
+            MIN(`day`)              AS earliest_day,
+            MAX(`day`)              AS latest_day,
+            MIN(DATE(`starts`))     AS earliest_starts,
+            MAX(DATE(`starts`))     AS latest_starts,
+            COUNT(*)                AS total_rows,
+            SUM(CASE WHEN `starts` IS NULL THEN 1 ELSE 0 END) AS rows_with_null_starts,
+            SUM(CASE WHEN `day`    IS NULL THEN 1 ELSE 0 END) AS rows_with_null_day
+        ')->first();
+
+        // Per-campaign breakdown for the matching query
+        $perCampaign = collect();
+        if ($q !== '') {
+            $like = '%' . $q . '%';
+            $perCampaign = DB::table('ads_manager_reports')
+                ->selectRaw('
+                    campaign_id,
+                    MIN(campaign_name)        AS campaign_name,
+                    MIN(page_name)            AS page_name,
+                    MIN(`day`)                AS earliest_day,
+                    MAX(`day`)                AS latest_day,
+                    MIN(DATE(`starts`))       AS earliest_starts,
+                    MAX(DATE(`starts`))       AS latest_starts,
+                    COUNT(*)                  AS row_count,
+                    SUM(CASE WHEN `starts` IS NULL THEN 1 ELSE 0 END) AS null_starts_count
+                ')
+                ->where(function ($w) use ($like) {
+                    $w->where('campaign_name', 'like', $like)
+                      ->orWhere('ad_set_name', 'like', $like)
+                      ->orWhere('headline', 'like', $like);
+                })
+                ->groupBy('campaign_id')
+                ->orderBy('earliest_day')
+                ->limit(50)
+                ->get();
+        }
+
+        // Distribution of `starts` values across all rows
+        $startsHistogram = DB::table('ads_manager_reports')
+            ->selectRaw('DATE(`starts`) AS d, COUNT(*) AS n')
+            ->whereNotNull('starts')
+            ->groupBy(DB::raw('DATE(`starts`)'))
+            ->orderBy('d')
+            ->limit(20)
+            ->get();
+
+        return response()->json([
+            'global'           => $global,
+            'query'            => $q,
+            'per_campaign'     => $perCampaign,
+            'starts_histogram_first_20' => $startsHistogram,
+            'note' => 'If earliest_day is 2026-01-01 across multiple campaigns → no older import data exists. '
+                   .'If earliest_starts is forced to 2026-01-01 but day records exist earlier → bug sa starts column. '
+                   .'If lahat NULL ang starts → controller falls back to MIN(day), which is correct.',
+        ]);
+    }
+
+    /**
      * GET /ads_manager/campaigns/history — daily change log derived from
      * spend transitions in `ads_manager_reports`.
      *
