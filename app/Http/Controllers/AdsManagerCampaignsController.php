@@ -42,15 +42,23 @@ class AdsManagerCampaignsController extends Controller
         $q = trim((string)$request->input('q', ''));
 
         // Global stats
-        $global = DB::table('ads_manager_reports')->selectRaw('
+        $hasAccountIdCol = Schema::hasColumn('ads_manager_reports', 'account_id');
+        $accountIdSelect = $hasAccountIdCol
+            ? "SUM(CASE WHEN account_id IS NULL OR account_id = '' THEN 1 ELSE 0 END) AS rows_with_null_account_id,
+               COUNT(DISTINCT NULLIF(TRIM(COALESCE(account_id,'')),'')) AS distinct_account_ids"
+            : "0 AS rows_with_null_account_id, 0 AS distinct_account_ids";
+        $global = DB::table('ads_manager_reports')->selectRaw("
             MIN(`day`)              AS earliest_day,
             MAX(`day`)              AS latest_day,
             MIN(DATE(`starts`))     AS earliest_starts,
             MAX(DATE(`starts`))     AS latest_starts,
             COUNT(*)                AS total_rows,
             SUM(CASE WHEN `starts` IS NULL THEN 1 ELSE 0 END) AS rows_with_null_starts,
-            SUM(CASE WHEN `day`    IS NULL THEN 1 ELSE 0 END) AS rows_with_null_day
-        ')->first();
+            SUM(CASE WHEN `day`    IS NULL THEN 1 ELSE 0 END) AS rows_with_null_day,
+            $accountIdSelect
+        ")->first();
+        $global = (array) $global;
+        $global['account_id_column_exists'] = $hasAccountIdCol;
 
         // Per-campaign breakdown for the matching query
         $perCampaign = collect();

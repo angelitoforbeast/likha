@@ -14,7 +14,7 @@
        (handled by removing the max-w-7xl wrapper sa main). Columns:
        Event, Level, Entity, Headline, Welcome msg, Quick replies + ad link,
        Spend, Prev, Save. */
-    .ev-row { display:grid; grid-template-columns: 96px 80px minmax(180px,1.1fr) minmax(160px,1.1fr) minmax(200px,1.4fr) minmax(220px,1.5fr) 90px 90px 90px; gap:10px; align-items:stretch; padding:8px 12px; border-bottom:1px solid #e4e6eb; font-size:12px; }
+    .ev-row { display:grid; grid-template-columns: 90px 70px minmax(170px,1fr) minmax(120px,0.8fr) minmax(150px,1fr) minmax(180px,1.3fr) minmax(200px,1.4fr) 80px 80px 80px; gap:8px; align-items:stretch; padding:8px 12px; border-bottom:1px solid #e4e6eb; font-size:12px; }
     /* Welcome Message textarea fills its cell height so it lines up with
        the QR1+QR2+QR3+Ad Link stack on its right. */
     .ev-row textarea.crew-input { height:100%; min-height:120px; }
@@ -152,6 +152,7 @@
             <div>Event</div>
             <div>Level</div>
             <div>Entity</div>
+            <div>Account</div>
             <div>Headline</div>
             <div>Welcome message</div>
             <div>Quick replies + ad link</div>
@@ -187,22 +188,28 @@
                   <template x-if="!e.creative_id">
                     <span class="text-gray-400"> · no creative linked</span>
                   </template>
-                  <template x-if="e.account_id">
-                    <div style="font-size:10px;margin-top:2px;">
-                      <span style="color:#475569;font-weight:600;">Acct:</span>
-                      <template x-if="e.account_name">
-                        <span style="color:#0f172a;" x-text="' '+e.account_name"></span>
-                      </template>
-                      <template x-if="!e.account_name">
-                        <span style="color:#dc2626;font-weight:600;"> ⚠ unmapped</span>
-                      </template>
-                      <span style="color:#94a3b8;font-family:monospace;margin-left:4px;" x-text="e.account_id"></span>
-                    </div>
-                  </template>
                   <template x-if="!isEditable(e)">
                     <div class="mt-1"><span class="ev-readonly-badge">READ-ONLY · only Turned ON is editable</span></div>
                   </template>
                 </div>
+              </div>
+              {{-- Account (dedicated column) --}}
+              <div>
+                <template x-if="e.account_id && e.account_name">
+                  <div>
+                    <div style="font-weight:500;color:#0f172a;font-size:11px;line-height:1.3;" x-text="e.account_name"></div>
+                    <div style="font-size:10px;color:#94a3b8;font-family:monospace;margin-top:2px;" x-text="e.account_id"></div>
+                  </div>
+                </template>
+                <template x-if="e.account_id && !e.account_name">
+                  <div title="Hindi pa naka-register sa /ads_manager/ad_account">
+                    <div style="color:#dc2626;font-weight:600;font-size:11px;">⚠ unmapped</div>
+                    <div style="font-size:10px;color:#94a3b8;font-family:monospace;margin-top:2px;" x-text="e.account_id"></div>
+                  </div>
+                </template>
+                <template x-if="!e.account_id">
+                  <span style="color:#cbd5e1;font-size:11px;">—</span>
+                </template>
               </div>
               {{-- Headline --}}
               <div>
