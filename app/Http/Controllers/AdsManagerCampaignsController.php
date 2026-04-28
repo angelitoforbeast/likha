@@ -168,9 +168,12 @@ class AdsManagerCampaignsController extends Controller
                 ->groupBy($idCol, DB::raw($dayExpr));
         };
 
-        // Decorate each row with prior-day spend via window function so we
-        // can detect transitions in PHP.
+        // Detect transitions in SQL (not PHP) and date-filter at the outer
+        // level so we never drag the full dataset to PHP. Also drop the
+        // useless "created with zero spend" event — those are just FB
+        // placeholder rows for inactive campaigns and pollute the log.
         $events = [];
+        $hardLimitPerLevel = 5000;
         foreach (['campaigns' => 'campaign_id', 'adsets' => 'ad_set_id', 'ads' => 'ad_id'] as $level => $idCol) {
             if ($levelF !== 'all' && $levelF !== $level) continue;
 
@@ -180,34 +183,39 @@ class AdsManagerCampaignsController extends Controller
                 LAG(spend) OVER (PARTITION BY id ORDER BY d) AS prev_spend
             ");
 
-            // Pull the entire dataset; PHP filters to the requested date
-            // range AFTER detecting transitions (so we still know what was
-            // happening just before `start`).
-            $rows = $withLag->get();
+            // Outer query: classify the event in SQL + filter to date window
+            // + drop noise events. Only meaningful transitions returned to PHP.
+            $eventQuery = DB::query()->fromSub($withLag, 'w')
+                ->selectRaw("
+                    w.id, w.d, w.spend, w.prev_spend,
+                    w.page_name, w.campaign_id, w.campaign_name,
+                    w.ad_set_id, w.ad_set_name, w.headline, w.item_name,
+                    CASE
+                        WHEN w.prev_spend IS NULL AND w.spend > 0 THEN 'created_with_spend'
+                        WHEN w.prev_spend <= 0   AND w.spend > 0 THEN 'turned_on'
+                        WHEN w.prev_spend > 0    AND w.spend <= 0 THEN 'turned_off'
+                        ELSE NULL
+                    END AS event_kind
+                ")
+                ->whereRaw("(
+                    (w.prev_spend IS NULL AND w.spend > 0)
+                    OR (w.prev_spend <= 0 AND w.spend > 0)
+                    OR (w.prev_spend > 0  AND w.spend <= 0)
+                )");
+
+            if ($start) $eventQuery->whereRaw('w.d >= ?', [$start]);
+            if ($end)   $eventQuery->whereRaw('w.d <= ?', [$end]);
+
+            $eventQuery->orderByDesc('w.d')->limit($hardLimitPerLevel);
+
+            $rows = $eventQuery->get();
 
             foreach ($rows as $r) {
-                $day = (string) $r->d;
-                if ($start && $day < $start) continue;
-                if ($end   && $day > $end)   continue;
-
-                $cur  = (float) $r->spend;
-                $prev = $r->prev_spend === null ? null : (float) $r->prev_spend;
-
-                $event = null;
-                if ($prev === null) {
-                    $event = $cur > 0 ? 'created_with_spend' : 'created';
-                } elseif ($prev <= 0 && $cur > 0) {
-                    $event = 'turned_on';
-                } elseif ($prev > 0 && $cur <= 0) {
-                    $event = 'turned_off';
-                }
-                if (!$event) continue;
-
                 $events[] = [
-                    'day'           => $day,
+                    'day'           => (string) $r->d,
                     'level'         => $level === 'campaigns' ? 'campaign'
                                      : ($level === 'adsets' ? 'adset' : 'ad'),
-                    'event'         => $event,
+                    'event'         => (string) $r->event_kind,
                     'entity_id'     => (string) $r->id,
                     'entity_name'   => $level === 'campaigns' ? ($r->campaign_name ?: 'Campaign '.$r->id)
                                      : ($level === 'adsets'  ? ($r->ad_set_name   ?: 'Ad set '  .$r->id)
@@ -216,8 +224,8 @@ class AdsManagerCampaignsController extends Controller
                     'campaign_name' => (string) ($r->campaign_name ?? ''),
                     'ad_set_name'   => (string) ($r->ad_set_name   ?? ''),
                     'item_name'     => (string) ($r->item_name     ?? ''),
-                    'spend'         => $cur,
-                    'prev_spend'    => $prev,
+                    'spend'         => (float) $r->spend,
+                    'prev_spend'    => $r->prev_spend === null ? null : (float) $r->prev_spend,
                 ];
             }
         }
