@@ -14,7 +14,14 @@
        (handled by removing the max-w-7xl wrapper sa main). Columns:
        Event, Level, Entity, Headline, Welcome msg, Quick replies + ad link,
        Spend, Prev, Save. */
-    .ev-row { display:grid; grid-template-columns: 90px 70px minmax(170px,1fr) minmax(120px,0.8fr) minmax(150px,1fr) minmax(180px,1.3fr) minmax(200px,1.4fr) 80px 80px 80px; gap:8px; align-items:stretch; padding:8px 12px; border-bottom:1px solid #e4e6eb; font-size:12px; }
+    /* 9-column layout (no more Action column — autosave handles persistence). */
+    .ev-row { display:grid; grid-template-columns: 90px 70px minmax(170px,1fr) minmax(140px,0.9fr) minmax(170px,1.1fr) minmax(200px,1.4fr) minmax(220px,1.5fr) 80px 80px; gap:8px; align-items:stretch; padding:8px 12px; border-bottom:1px solid #e4e6eb; font-size:12px; }
+    /* Per-input save indicator badge, sits absolute at top-right of each input. */
+    .crew-save-flag { position:absolute; top:2px; right:4px; font-size:9px; padding:1px 5px; border-radius:3px; pointer-events:none; opacity:0; transition:opacity 200ms ease; }
+    .crew-save-flag.saving { background:#fef3c7; color:#92400e; opacity:1; }
+    .crew-save-flag.saved  { background:#dcfce7; color:#166534; opacity:1; }
+    .crew-save-flag.error  { background:#fee2e2; color:#991b1b; opacity:1; }
+    .crew-cell { position:relative; }
     /* Welcome Message textarea fills its cell height so it lines up with
        the QR1+QR2+QR3+Ad Link stack on its right. */
     .ev-row textarea.crew-input { height:100%; min-height:120px; }
@@ -162,12 +169,11 @@
             <div>Level</div>
             <div>Entity</div>
             <div>Account</div>
-            <div>Headline</div>
+            <div>Body / Headline</div>
             <div>Welcome message</div>
             <div>Quick replies + ad link</div>
             <div class="num">Spend</div>
             <div class="num">Prev</div>
-            <div>Action</div>
           </div>
 
           <template x-for="(e, eIdx) in eventsForDay(day)" :key="e.level + '-' + e.entity_id + '-' + day + '-' + eIdx">
@@ -220,7 +226,7 @@
                   <span style="color:#cbd5e1;font-size:11px;">—</span>
                 </template>
               </div>
-              {{-- Body (top, read-only) + Headline (bottom, editable on turned_on).
+              {{-- Body (top, read-only) + Headline (bottom, autosave on turned_on).
                    Column uses flex column so Body grows to fill remaining height,
                    matching the Welcome Message column and the QR+ad link stack. --}}
               <div class="head-col">
@@ -228,65 +234,80 @@
                 <div :class="'body-block' + (e.body ? '' : ' empty')"
                      :title="e.body || ''"
                      x-text="e.body || '(no body)'"></div>
-                <input type="text" class="crew-input"
-                       :class="{ dirty: e._dirty?.headline, saved: e._saved?.headline, readonly: !isEditable(e) }"
-                       :value="e.headline"
-                       :disabled="!isEditable(e) || !e.creative_id"
-                       @input="markDirty(e, 'headline', $event.target.value)"
-                       placeholder="Headline">
+                <div class="crew-cell">
+                  <input type="text" class="crew-input"
+                         :class="{ readonly: !isEditable(e) }"
+                         :value="e.headline"
+                         :disabled="!isEditable(e) || !e.creative_id"
+                         @input="onFieldInput(e, 'headline', $event.target.value)"
+                         @blur="onFieldBlur(e, 'headline', $event.target.value)"
+                         placeholder="Headline">
+                  <span :class="'crew-save-flag ' + (e._flag?.headline || '')"
+                        x-text="flagText(e._flag?.headline)"></span>
+                </div>
               </div>
               {{-- Welcome message --}}
-              <div>
+              <div class="crew-cell">
                 <textarea class="crew-input"
-                          :class="{ dirty: e._dirty?.welcome_message, saved: e._saved?.welcome_message, readonly: !isEditable(e) }"
+                          :class="{ readonly: !isEditable(e) }"
                           rows="3"
                           :disabled="!isEditable(e) || !e.creative_id"
-                          @input="markDirty(e, 'welcome_message', $event.target.value)"
+                          @input="onFieldInput(e, 'welcome_message', $event.target.value)"
+                          @blur="onFieldBlur(e, 'welcome_message', $event.target.value)"
                           placeholder="(empty)"
                           x-text="e.welcome_message"></textarea>
+                <span :class="'crew-save-flag ' + (e._flag?.welcome_message || '')"
+                      x-text="flagText(e._flag?.welcome_message)"></span>
               </div>
               {{-- Quick replies + ad link --}}
               <div class="crew-stack">
-                <input type="text" class="crew-input"
-                       :class="{ dirty: e._dirty?.quick_reply_1, saved: e._saved?.quick_reply_1, readonly: !isEditable(e) }"
-                       :value="e.quick_reply_1"
-                       :disabled="!isEditable(e) || !e.creative_id"
-                       @input="markDirty(e, 'quick_reply_1', $event.target.value)"
-                       placeholder="QR 1">
-                <input type="text" class="crew-input"
-                       :class="{ dirty: e._dirty?.quick_reply_2, saved: e._saved?.quick_reply_2, readonly: !isEditable(e) }"
-                       :value="e.quick_reply_2"
-                       :disabled="!isEditable(e) || !e.creative_id"
-                       @input="markDirty(e, 'quick_reply_2', $event.target.value)"
-                       placeholder="QR 2">
-                <input type="text" class="crew-input"
-                       :class="{ dirty: e._dirty?.quick_reply_3, saved: e._saved?.quick_reply_3, readonly: !isEditable(e) }"
-                       :value="e.quick_reply_3"
-                       :disabled="!isEditable(e) || !e.creative_id"
-                       @input="markDirty(e, 'quick_reply_3', $event.target.value)"
-                       placeholder="QR 3">
-                <input type="url" class="crew-input"
-                       :class="{ dirty: e._dirty?.ad_link, saved: e._saved?.ad_link, readonly: !isEditable(e) }"
-                       :value="e.ad_link"
-                       :disabled="!isEditable(e) || !e.creative_id"
-                       @input="markDirty(e, 'ad_link', $event.target.value)"
-                       placeholder="https://… (ad link)">
+                <div class="crew-cell">
+                  <input type="text" class="crew-input"
+                         :class="{ readonly: !isEditable(e) }"
+                         :value="e.quick_reply_1"
+                         :disabled="!isEditable(e) || !e.creative_id"
+                         @input="onFieldInput(e, 'quick_reply_1', $event.target.value)"
+                         @blur="onFieldBlur(e, 'quick_reply_1', $event.target.value)"
+                         placeholder="QR 1">
+                  <span :class="'crew-save-flag ' + (e._flag?.quick_reply_1 || '')"
+                        x-text="flagText(e._flag?.quick_reply_1)"></span>
+                </div>
+                <div class="crew-cell">
+                  <input type="text" class="crew-input"
+                         :class="{ readonly: !isEditable(e) }"
+                         :value="e.quick_reply_2"
+                         :disabled="!isEditable(e) || !e.creative_id"
+                         @input="onFieldInput(e, 'quick_reply_2', $event.target.value)"
+                         @blur="onFieldBlur(e, 'quick_reply_2', $event.target.value)"
+                         placeholder="QR 2">
+                  <span :class="'crew-save-flag ' + (e._flag?.quick_reply_2 || '')"
+                        x-text="flagText(e._flag?.quick_reply_2)"></span>
+                </div>
+                <div class="crew-cell">
+                  <input type="text" class="crew-input"
+                         :class="{ readonly: !isEditable(e) }"
+                         :value="e.quick_reply_3"
+                         :disabled="!isEditable(e) || !e.creative_id"
+                         @input="onFieldInput(e, 'quick_reply_3', $event.target.value)"
+                         @blur="onFieldBlur(e, 'quick_reply_3', $event.target.value)"
+                         placeholder="QR 3">
+                  <span :class="'crew-save-flag ' + (e._flag?.quick_reply_3 || '')"
+                        x-text="flagText(e._flag?.quick_reply_3)"></span>
+                </div>
+                <div class="crew-cell">
+                  <input type="url" class="crew-input"
+                         :class="{ readonly: !isEditable(e) }"
+                         :value="e.ad_link"
+                         :disabled="!isEditable(e) || !e.creative_id"
+                         @input="onFieldInput(e, 'ad_link', $event.target.value)"
+                         @blur="onFieldBlur(e, 'ad_link', $event.target.value)"
+                         placeholder="https://… (ad link)">
+                  <span :class="'crew-save-flag ' + (e._flag?.ad_link || '')"
+                        x-text="flagText(e._flag?.ad_link)"></span>
+                </div>
               </div>
               <div class="num" x-text="peso(e.spend)"></div>
               <div class="num text-gray-400" x-text="e.prev_spend === null ? '—' : peso(e.prev_spend)"></div>
-              <div class="ev-actions">
-                <button type="button" class="crew-btn save"
-                        :disabled="!isEditable(e) || !e.creative_id || !hasDirty(e) || e._saving"
-                        @click="saveCreative(e)"
-                        x-text="e._saving ? 'Saving…' : 'Save'"></button>
-                <label class="crew-feedback-toggle">
-                  <input type="checkbox"
-                         :checked="!!e.feedback"
-                         :disabled="!isEditable(e) || !e.creative_id"
-                         @change="markDirty(e, 'feedback', $event.target.checked ? 1 : 0)">
-                  Feedback
-                </label>
-              </div>
             </div>
           </template>
         </div>
@@ -372,8 +393,12 @@
             const j = await r.json();
             if (!j.ok) throw new Error(j.error || 'Failed');
             // Initialize per-event mutable state for inline edits.
+            // _flag tracks per-field save status: '' | 'saving' | 'saved' | 'error'
+            // _debounce tracks per-event-per-field setTimeout handles for debounced
+            // saves. We deliberately don't store _saving as a row-level lock —
+            // each field saves independently.
             this.events = (j.events || []).map(e => Object.assign({}, e, {
-              _dirty: {}, _saved: {}, _saving: false, _draft: {},
+              _flag: {}, _debounce: {},
             }));
             this.byDay  = j.by_day || {};
           } catch (e) {
@@ -383,44 +408,47 @@
           }
         },
 
-        // Inline edit helpers
+        // Inline edit helpers — autosave model.
         // Only "turned_on" events are editable. turned_off + created_with_spend
         // are read-only — those don't represent a fresh creative state, just
         // transitions on existing creatives.
         isEditable(e){
           return e && e.event === 'turned_on';
         },
-        markDirty(e, field, value){
-          // Compare with original event field — if same as original, clear dirty.
-          const original = e[field] ?? '';
-          const changed = String(value ?? '') !== String(original ?? '');
-          if (!e._dirty) e._dirty = {};
-          if (!e._draft) e._draft = {};
-          e._draft[field] = value;
-          e._dirty[field] = changed;
-          // Clear "saved" indicator on edit
-          if (e._saved) e._saved[field] = false;
+        flagText(state){
+          return state === 'saving' ? '…' : state === 'saved' ? '✓' : state === 'error' ? '!' : '';
         },
-        hasDirty(e){
-          if (!e._dirty) return false;
-          return Object.values(e._dirty).some(v => v === true);
+        // Debounced autosave on input — fires the save 600ms after the user
+        // stops typing. Mirrors edit-messaging-template's debounce behavior.
+        onFieldInput(e, field, value){
+          if (!this.isEditable(e) || !e.creative_id) return;
+          if (!e._debounce) e._debounce = {};
+          if (e._debounce[field]) clearTimeout(e._debounce[field]);
+          e._debounce[field] = setTimeout(() => {
+            this.saveField(e, field, value);
+          }, 600);
         },
-        async saveCreative(e){
-          if (!e.creative_id) { alert('Walang creative na naka-link sa event na ito.'); return; }
-          if (!this.hasDirty(e)) return;
-          e._saving = true;
+        // Immediate save on blur — flush any pending debounced timer first.
+        onFieldBlur(e, field, value){
+          if (!this.isEditable(e) || !e.creative_id) return;
+          if (e._debounce && e._debounce[field]) {
+            clearTimeout(e._debounce[field]);
+            e._debounce[field] = null;
+          }
+          // Skip blur-save if value hasn't changed from original.
+          if (String(value ?? '') === String(e[field] ?? '')) return;
+          this.saveField(e, field, value);
+        },
+        async saveField(e, field, value){
+          if (!e.creative_id) return;
+          // Skip if value unchanged (debounce can fire while editing back to original).
+          if (String(value ?? '') === String(e[field] ?? '')) return;
+          if (!e._flag) e._flag = {};
+          e._flag[field] = 'saving';
           try {
-            const fields = ['headline','welcome_message','quick_reply_1','quick_reply_2','quick_reply_3','ad_link','feedback'];
             const body = new FormData();
-            // Laravel needs _method=PUT for spoofing on FormData.
             body.append('_method', 'PUT');
-            for (const f of fields) {
-              if (e._dirty?.[f]) {
-                let v = e._draft?.[f];
-                if (f === 'feedback') v = (v ? 1 : 0);
-                body.append(f, v ?? '');
-              }
-            }
+            body.append(field, value ?? '');
             const url = '/ads-manager/edit-messaging-template/' + e.creative_id;
             const r = await fetch(url, {
               method: 'POST',
@@ -433,25 +461,18 @@
             });
             const j = await r.json().catch(() => ({}));
             if (!r.ok || j.ok === false) throw new Error(j.message || ('HTTP ' + r.status));
-            // Commit drafts to source-of-truth fields, mark _saved (for green flash),
-            // clear _dirty.
-            if (!e._saved) e._saved = {};
-            for (const f of fields) {
-              if (e._dirty?.[f]) {
-                e[f] = e._draft[f];
-                e._saved[f] = true;
-                e._dirty[f] = false;
-              }
-            }
-            // After 1.5s, clear the green flash
+            e[field]      = value;     // commit local source-of-truth
+            e._flag[field] = 'saved';
+            // Auto-fade the saved badge after 1.5s
             setTimeout(() => {
-              for (const f of fields) if (e._saved && e._saved[f]) e._saved[f] = false;
+              if (e._flag && e._flag[field] === 'saved') e._flag[field] = '';
             }, 1500);
           } catch (err) {
-            console.error(err);
-            alert('Save failed: ' + err.message);
-          } finally {
-            e._saving = false;
+            console.error('autosave failed', field, err);
+            e._flag[field] = 'error';
+            setTimeout(() => {
+              if (e._flag && e._flag[field] === 'error') e._flag[field] = '';
+            }, 3000);
           }
         },
 

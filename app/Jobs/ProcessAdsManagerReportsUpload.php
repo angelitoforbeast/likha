@@ -547,7 +547,9 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'ad_set_delivery');
                 $this->putIfExists($updateData, $r, 'messaging_conversations_started');
                 $this->putIfExists($updateData, $r, 'campaign_id');
-                $this->putIfExists($updateData, $r, 'account_id');
+                // NOTE: account_id is intentionally NOT written to ads_manager_reports.
+                // It is a campaign-level attribute and lives sa ad_campaign_creatives now
+                // (see upsertCreativesForChunk below).
                 $this->putIfExists($updateData, $r, 'ad_set_id');
                 $this->putIfExists($updateData, $r, 'ad_set_budget');
                 $this->putIfExists($updateData, $r, 'ad_set_budget_type');
@@ -610,6 +612,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             $p = [
                 'ad_id'            => $adId,
                 'campaign_id'      => $campaignId,
+                'account_id'       => $r['account_id'] ?? null,
                 'campaign_name'    => $r['campaign_name'] ?? null,
                 'page_name'        => $r['page_name'] ?? null,
                 'ad_set_delivery'  => $r['ad_set_delivery'] ?? null,
@@ -635,12 +638,15 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
         if (empty($payloads)) return;
 
-        // Existing rows
+        // Existing rows (also fetch account_id so we can backfill NULLs)
+        $hasAccountIdCol = \Illuminate\Support\Facades\Schema::hasColumn('ad_campaign_creatives', 'account_id');
+        $cols = $hasAccountIdCol ? ['id','ad_id','campaign_id','account_id'] : ['id','ad_id','campaign_id'];
+
         $existingByAdId = [];
         if (!empty($adIds)) {
             $existingByAdId = DB::table('ad_campaign_creatives')
                 ->whereIn('ad_id', array_values(array_unique($adIds)))
-                ->get(['id','ad_id','campaign_id'])
+                ->get($cols)
                 ->keyBy('ad_id')
                 ->all();
         }
@@ -649,19 +655,25 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         if (!empty($campaignIds)) {
             $existingByCampaignId = DB::table('ad_campaign_creatives')
                 ->whereIn('campaign_id', array_values(array_unique($campaignIds)))
-                ->get(['id','ad_id','campaign_id'])
+                ->get($cols)
                 ->keyBy('campaign_id')
                 ->all();
         }
 
         $toInsert = [];
-        $toUpdateAdId = []; // [id => ad_id] fill only if current is NULL
+        $toUpdateAdId       = []; // [id => ad_id]      fill only if current is NULL
+        $toUpdateAccountId  = []; // [id => account_id] fill only if current is NULL
 
         foreach ($payloads as $p) {
             $adId       = $p['ad_id'] ?? null;
             $campaignId = $p['campaign_id'] ?? null;
+            $accountId  = $p['account_id'] ?? null;
 
             if ($adId && isset($existingByAdId[$adId])) {
+                $row = $existingByAdId[$adId];
+                if ($hasAccountIdCol && $accountId && empty($row->account_id ?? null)) {
+                    $toUpdateAccountId[(int)$row->id] = $accountId;
+                }
                 continue;
             }
 
@@ -670,9 +682,14 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 if ($adId && empty($row->ad_id)) {
                     $toUpdateAdId[(int)$row->id] = $adId;
                 }
+                if ($hasAccountIdCol && $accountId && empty($row->account_id ?? null)) {
+                    $toUpdateAccountId[(int)$row->id] = $accountId;
+                }
                 continue;
             }
 
+            // Drop the account_id key from payload if column doesn't exist yet.
+            if (!$hasAccountIdCol) unset($p['account_id']);
             $toInsert[] = $p;
         }
 
@@ -689,6 +706,16 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 ->whereNull('ad_id')
                 ->update([
                     'ad_id'      => $adId,
+                    'updated_at' => $now,
+                ]);
+        }
+
+        foreach ($toUpdateAccountId as $id => $accountId) {
+            DB::table('ad_campaign_creatives')
+                ->where('id', $id)
+                ->whereNull('account_id')
+                ->update([
+                    'account_id' => $accountId,
                     'updated_at' => $now,
                 ]);
         }

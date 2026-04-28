@@ -41,12 +41,7 @@ class AdsManagerCampaignsController extends Controller
     {
         $q = trim((string)$request->input('q', ''));
 
-        // Global stats
-        $hasAccountIdCol = Schema::hasColumn('ads_manager_reports', 'account_id');
-        $accountIdSelect = $hasAccountIdCol
-            ? "SUM(CASE WHEN account_id IS NULL OR account_id = '' THEN 1 ELSE 0 END) AS rows_with_null_account_id,
-               COUNT(DISTINCT NULLIF(TRIM(COALESCE(account_id,'')),'')) AS distinct_account_ids"
-            : "0 AS rows_with_null_account_id, 0 AS distinct_account_ids";
+        // Global stats from facts table
         $global = DB::table('ads_manager_reports')->selectRaw("
             MIN(`day`)              AS earliest_day,
             MAX(`day`)              AS latest_day,
@@ -54,11 +49,23 @@ class AdsManagerCampaignsController extends Controller
             MAX(DATE(`starts`))     AS latest_starts,
             COUNT(*)                AS total_rows,
             SUM(CASE WHEN `starts` IS NULL THEN 1 ELSE 0 END) AS rows_with_null_starts,
-            SUM(CASE WHEN `day`    IS NULL THEN 1 ELSE 0 END) AS rows_with_null_day,
-            $accountIdSelect
+            SUM(CASE WHEN `day`    IS NULL THEN 1 ELSE 0 END) AS rows_with_null_day
         ")->first();
         $global = (array) $global;
-        $global['account_id_column_exists'] = $hasAccountIdCol;
+
+        // Account stats from creatives table (the new home for account_id)
+        $hasAccountIdInCreatives = Schema::hasColumn('ad_campaign_creatives', 'account_id');
+        $global['account_id_column_exists_in_creatives'] = $hasAccountIdInCreatives;
+        if ($hasAccountIdInCreatives) {
+            $crStats = DB::table('ad_campaign_creatives')->selectRaw("
+                COUNT(*) AS total_creative_rows,
+                SUM(CASE WHEN account_id IS NULL OR account_id = '' THEN 1 ELSE 0 END) AS creatives_with_null_account_id,
+                COUNT(DISTINCT NULLIF(TRIM(COALESCE(account_id,'')),'')) AS distinct_account_ids
+            ")->first();
+            $global['total_creative_rows']            = (int) ($crStats->total_creative_rows ?? 0);
+            $global['creatives_with_null_account_id'] = (int) ($crStats->creatives_with_null_account_id ?? 0);
+            $global['distinct_account_ids']           = (int) ($crStats->distinct_account_ids ?? 0);
+        }
 
         // Per-campaign breakdown for the matching query
         $perCampaign = collect();
@@ -167,7 +174,6 @@ class AdsManagerCampaignsController extends Controller
                     $dayExpr AS d,
                     COALESCE(SUM(amount_spent_php), 0) AS spend,
                     MAX(page_name)     AS page_name,
-                    MAX(account_id)    AS account_id,
                     MAX(campaign_id)   AS campaign_id,
                     MAX(campaign_name) AS campaign_name,
                     MAX(ad_set_id)     AS ad_set_id,
@@ -211,7 +217,7 @@ class AdsManagerCampaignsController extends Controller
                     END AS event_day,
                     w.d AS observed_day,
                     w.spend, w.prev_spend, w.prev_day,
-                    w.page_name, w.account_id, w.campaign_id, w.campaign_name,
+                    w.page_name, w.campaign_id, w.campaign_name,
                     w.ad_set_id, w.ad_set_name, w.headline, w.item_name,
                     CASE
                         WHEN w.prev_spend IS NULL AND w.spend > 0 THEN 'created_with_spend'
@@ -263,7 +269,7 @@ class AdsManagerCampaignsController extends Controller
                                      : ($level === 'adsets'  ? ($r->ad_set_name   ?: 'Ad set '  .$r->id)
                                      :                         ($r->headline      ?: 'Ad '      .$r->id)),
                     'page_name'     => (string) $r->page_name,
-                    'account_id'    => $r->account_id ? (string) $r->account_id : null,
+                    // account_id + account_name resolved later via campaign_id
                     'campaign_id'   => (string) ($r->campaign_id   ?? ''),
                     'campaign_name' => (string) ($r->campaign_name ?? ''),
                     'ad_set_id'     => (string) ($r->ad_set_id     ?? ''),
@@ -349,21 +355,37 @@ class AdsManagerCampaignsController extends Controller
         }
         unset($e);
 
-        // Resolve account_name from ad_accounts catalog (single batch query).
-        $accountIds = [];
+        // Resolve account_id + account_name per event via campaign_id.
+        // account_id lives sa ad_campaign_creatives now (campaign-level attribute),
+        // not on the daily fact rows.
+        $cmpIds = [];
         foreach ($events as $e) {
-            if (!empty($e['account_id'])) $accountIds[] = $e['account_id'];
+            if (!empty($e['campaign_id'])) $cmpIds[] = $e['campaign_id'];
         }
-        $accountIds = array_values(array_unique($accountIds));
+        $cmpIds = array_values(array_unique($cmpIds));
+
+        $accountByCampaign = [];
+        if (!empty($cmpIds) && Schema::hasColumn('ad_campaign_creatives', 'account_id')) {
+            $accountByCampaign = DB::table('ad_campaign_creatives')
+                ->whereIn('campaign_id', $cmpIds)
+                ->whereNotNull('account_id')
+                ->where('account_id', '!=', '')
+                ->selectRaw('campaign_id, MAX(account_id) AS account_id')
+                ->groupBy('campaign_id')
+                ->pluck('account_id', 'campaign_id')
+                ->all();
+        }
         $accountNameMap = [];
-        if (!empty($accountIds) && Schema::hasTable('ad_accounts')) {
+        if (!empty($accountByCampaign) && Schema::hasTable('ad_accounts')) {
             $accountNameMap = DB::table('ad_accounts')
-                ->whereIn('ad_account_id', $accountIds)
+                ->whereIn('ad_account_id', array_values($accountByCampaign))
                 ->pluck('name', 'ad_account_id')
                 ->all();
         }
         foreach ($events as &$e) {
-            $aid = $e['account_id'] ?? null;
+            $cid = $e['campaign_id'] ?? null;
+            $aid = $cid && isset($accountByCampaign[$cid]) ? (string) $accountByCampaign[$cid] : null;
+            $e['account_id']   = $aid;
             $e['account_name'] = ($aid && isset($accountNameMap[$aid]))
                 ? (string) $accountNameMap[$aid]
                 : null;
@@ -674,8 +696,7 @@ class AdsManagerCampaignsController extends Controller
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
                     MAX(sd.running_at_start) AS running_at_start,
-                    MAX(fs.latest_started) AS latest_started,
-                    MAX(account_id)        AS account_id
+                    MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.campaign_id');
 
@@ -706,7 +727,8 @@ class AdsManagerCampaignsController extends Controller
                     'first_started'   => $r->first_started  ?? null,
                     'running_at_start'=> (int) ($r->running_at_start ?? 0) === 1,
                     'latest_started'  => $r->latest_started ?? null,
-                    'account_id'      => $r->account_id ? (string) $r->account_id : null,
+                    // account_id + account_name are stitched in below via a
+                    // batched lookup against ad_campaign_creatives + ad_accounts.
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -763,8 +785,7 @@ class AdsManagerCampaignsController extends Controller
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
                     MAX(sd.running_at_start) AS running_at_start,
-                    MAX(fs.latest_started) AS latest_started,
-                    MAX(account_id)        AS account_id
+                    MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.ad_set_id');
 
@@ -796,7 +817,8 @@ class AdsManagerCampaignsController extends Controller
                     'first_started'   => $r->first_started  ?? null,
                     'running_at_start'=> (int) ($r->running_at_start ?? 0) === 1,
                     'latest_started'  => $r->latest_started ?? null,
-                    'account_id'      => $r->account_id ? (string) $r->account_id : null,
+                    // account_id + account_name are stitched in below via a
+                    // batched lookup against ad_campaign_creatives + ad_accounts.
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -857,8 +879,7 @@ class AdsManagerCampaignsController extends Controller
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
                     MAX(sd.running_at_start) AS running_at_start,
-                    MAX(fs.latest_started) AS latest_started,
-                    MAX(account_id)        AS account_id
+                    MAX(fs.latest_started) AS latest_started
                 ')
                 ->groupBy('ads_manager_reports.ad_id');
 
@@ -893,7 +914,8 @@ class AdsManagerCampaignsController extends Controller
                     'first_started'   => $r->first_started  ?? null,
                     'running_at_start'=> (int) ($r->running_at_start ?? 0) === 1,
                     'latest_started'  => $r->latest_started ?? null,
-                    'account_id'      => $r->account_id ? (string) $r->account_id : null,
+                    // account_id + account_name are stitched in below via a
+                    // batched lookup against ad_campaign_creatives + ad_accounts.
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -911,25 +933,43 @@ class AdsManagerCampaignsController extends Controller
             });
         }
 
-        // Resolve account_name from ad_accounts catalog. Single batched lookup
-        // keyed by ad_account_id. Rows with missing/unmapped account_id will
-        // surface account_name = null so the view can show a warning state.
-        $accountIds = [];
+        // Resolve account_id + account_name from `ad_campaign_creatives` (the
+        // source of truth for the campaign→account relationship) JOIN'd with
+        // the `ad_accounts` catalog (for human-readable name).
+        //
+        // We collect the campaign_ids appearing in the result and do a single
+        // batched lookup. account_id is keyed per campaign_id (1:1).
+        $campaignIdsInResult = [];
         foreach ($rows as $r) {
-            $aid = $r['account_id'] ?? null;
-            if ($aid !== null && $aid !== '') $accountIds[] = $aid;
+            $cid = $r['campaign_id'] ?? null;
+            if ($cid) $campaignIdsInResult[] = (string) $cid;
         }
-        $accountIds = array_values(array_unique($accountIds));
+        $campaignIdsInResult = array_values(array_unique($campaignIdsInResult));
+
+        $accountByCampaign = []; // campaign_id => account_id
+        if (!empty($campaignIdsInResult) && Schema::hasColumn('ad_campaign_creatives', 'account_id')) {
+            $accountByCampaign = DB::table('ad_campaign_creatives')
+                ->whereIn('campaign_id', $campaignIdsInResult)
+                ->whereNotNull('account_id')
+                ->where('account_id', '!=', '')
+                ->selectRaw('campaign_id, MAX(account_id) AS account_id')
+                ->groupBy('campaign_id')
+                ->pluck('account_id', 'campaign_id')
+                ->all();
+        }
+
         $accountNameMap = [];
-        if (!empty($accountIds) && Schema::hasTable('ad_accounts')) {
+        if (!empty($accountByCampaign) && Schema::hasTable('ad_accounts')) {
             $accountNameMap = DB::table('ad_accounts')
-                ->whereIn('ad_account_id', $accountIds)
+                ->whereIn('ad_account_id', array_values($accountByCampaign))
                 ->pluck('name', 'ad_account_id')
                 ->all();
         }
-        $rows = $rows->map(function ($r) use ($accountNameMap) {
-            $aid = $r['account_id'] ?? null;
-            $r['account_name'] = ($aid !== null && isset($accountNameMap[$aid]))
+        $rows = $rows->map(function ($r) use ($accountByCampaign, $accountNameMap) {
+            $cid = $r['campaign_id'] ?? null;
+            $aid = $cid && isset($accountByCampaign[$cid]) ? (string) $accountByCampaign[$cid] : null;
+            $r['account_id']   = $aid;
+            $r['account_name'] = ($aid && isset($accountNameMap[$aid]))
                 ? (string) $accountNameMap[$aid]
                 : null;
             return $r;
