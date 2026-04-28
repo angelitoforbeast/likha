@@ -32,6 +32,10 @@
     .crew-btn.save:disabled { opacity:.4; cursor:not-allowed; }
     .crew-feedback-toggle { display:inline-flex; align-items:center; gap:4px; font-size:10px; cursor:pointer; user-select:none; }
     .ev-actions { display:flex; flex-direction:column; gap:4px; align-items:stretch; }
+    /* Body block — read-only, clamped to 4 lines with hover-to-expand tooltip. */
+    .body-block { font-size:10px; line-height:1.4; color:#475569; background:#f8fafc; border:1px dashed #cbd5e1; border-radius:4px; padding:4px 6px; margin-top:4px; max-height:5.5em; overflow:hidden; position:relative; white-space:pre-wrap; word-wrap:break-word; }
+    .body-block.empty { color:#cbd5e1; font-style:italic; border-style:dotted; }
+    .body-block-label { font-size:9px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px; }
     .num { text-align:right; font-variant-numeric:tabular-nums; }
     /* "Read-only" hint for non-turned_on events */
     .ev-readonly-badge { display:inline-block; font-size:9px; padding:1px 5px; border-radius:3px; background:#e5e7eb; color:#6b7280; font-weight:600; letter-spacing:0.03em; }
@@ -211,7 +215,7 @@
                   <span style="color:#cbd5e1;font-size:11px;">—</span>
                 </template>
               </div>
-              {{-- Headline --}}
+              {{-- Headline + Body (body is read-only, mirrors edit-messaging-template) --}}
               <div>
                 <input type="text" class="crew-input"
                        :class="{ dirty: e._dirty?.headline, saved: e._saved?.headline, readonly: !isEditable(e) }"
@@ -219,6 +223,10 @@
                        :disabled="!isEditable(e) || !e.creative_id"
                        @input="markDirty(e, 'headline', $event.target.value)"
                        placeholder="(empty)">
+                <div class="body-block-label" style="margin-top:6px;">Body</div>
+                <div :class="'body-block' + (e.body ? '' : ' empty')"
+                     :title="e.body || ''"
+                     x-text="e.body || '(no body)'"></div>
               </div>
               {{-- Welcome message --}}
               <div>
