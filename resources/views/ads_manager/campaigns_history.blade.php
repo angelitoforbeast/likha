@@ -187,6 +187,18 @@
                   <template x-if="!e.creative_id">
                     <span class="text-gray-400"> · no creative linked</span>
                   </template>
+                  <template x-if="e.account_id">
+                    <div style="font-size:10px;margin-top:2px;">
+                      <span style="color:#475569;font-weight:600;">Acct:</span>
+                      <template x-if="e.account_name">
+                        <span style="color:#0f172a;" x-text="' '+e.account_name"></span>
+                      </template>
+                      <template x-if="!e.account_name">
+                        <span style="color:#dc2626;font-weight:600;"> ⚠ unmapped</span>
+                      </template>
+                      <span style="color:#94a3b8;font-family:monospace;margin-left:4px;" x-text="e.account_id"></span>
+                    </div>
+                  </template>
                   <template x-if="!isEditable(e)">
                     <div class="mt-1"><span class="ev-readonly-badge">READ-ONLY · only Turned ON is editable</span></div>
                   </template>

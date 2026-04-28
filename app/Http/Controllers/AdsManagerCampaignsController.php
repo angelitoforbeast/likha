@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdsManagerCampaignsController extends Controller
@@ -158,6 +159,7 @@ class AdsManagerCampaignsController extends Controller
                     $dayExpr AS d,
                     COALESCE(SUM(amount_spent_php), 0) AS spend,
                     MAX(page_name)     AS page_name,
+                    MAX(account_id)    AS account_id,
                     MAX(campaign_id)   AS campaign_id,
                     MAX(campaign_name) AS campaign_name,
                     MAX(ad_set_id)     AS ad_set_id,
@@ -201,7 +203,7 @@ class AdsManagerCampaignsController extends Controller
                     END AS event_day,
                     w.d AS observed_day,
                     w.spend, w.prev_spend, w.prev_day,
-                    w.page_name, w.campaign_id, w.campaign_name,
+                    w.page_name, w.account_id, w.campaign_id, w.campaign_name,
                     w.ad_set_id, w.ad_set_name, w.headline, w.item_name,
                     CASE
                         WHEN w.prev_spend IS NULL AND w.spend > 0 THEN 'created_with_spend'
@@ -253,6 +255,7 @@ class AdsManagerCampaignsController extends Controller
                                      : ($level === 'adsets'  ? ($r->ad_set_name   ?: 'Ad set '  .$r->id)
                                      :                         ($r->headline      ?: 'Ad '      .$r->id)),
                     'page_name'     => (string) $r->page_name,
+                    'account_id'    => $r->account_id ? (string) $r->account_id : null,
                     'campaign_id'   => (string) ($r->campaign_id   ?? ''),
                     'campaign_name' => (string) ($r->campaign_name ?? ''),
                     'ad_set_id'     => (string) ($r->ad_set_id     ?? ''),
@@ -335,6 +338,27 @@ class AdsManagerCampaignsController extends Controller
             $e['quick_reply_3']    = $cre->quick_reply_3    ?? '';
             $e['ad_link']          = $cre->ad_link          ?? '';
             $e['feedback']         = $cre ? (int) ($cre->feedback ?? 0) : 0;
+        }
+        unset($e);
+
+        // Resolve account_name from ad_accounts catalog (single batch query).
+        $accountIds = [];
+        foreach ($events as $e) {
+            if (!empty($e['account_id'])) $accountIds[] = $e['account_id'];
+        }
+        $accountIds = array_values(array_unique($accountIds));
+        $accountNameMap = [];
+        if (!empty($accountIds) && Schema::hasTable('ad_accounts')) {
+            $accountNameMap = DB::table('ad_accounts')
+                ->whereIn('ad_account_id', $accountIds)
+                ->pluck('name', 'ad_account_id')
+                ->all();
+        }
+        foreach ($events as &$e) {
+            $aid = $e['account_id'] ?? null;
+            $e['account_name'] = ($aid && isset($accountNameMap[$aid]))
+                ? (string) $accountNameMap[$aid]
+                : null;
         }
         unset($e);
 
@@ -642,7 +666,8 @@ class AdsManagerCampaignsController extends Controller
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
                     MAX(sd.running_at_start) AS running_at_start,
-                    MAX(fs.latest_started) AS latest_started
+                    MAX(fs.latest_started) AS latest_started,
+                    MAX(account_id)        AS account_id
                 ')
                 ->groupBy('ads_manager_reports.campaign_id');
 
@@ -673,6 +698,7 @@ class AdsManagerCampaignsController extends Controller
                     'first_started'   => $r->first_started  ?? null,
                     'running_at_start'=> (int) ($r->running_at_start ?? 0) === 1,
                     'latest_started'  => $r->latest_started ?? null,
+                    'account_id'      => $r->account_id ? (string) $r->account_id : null,
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -729,7 +755,8 @@ class AdsManagerCampaignsController extends Controller
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
                     MAX(sd.running_at_start) AS running_at_start,
-                    MAX(fs.latest_started) AS latest_started
+                    MAX(fs.latest_started) AS latest_started,
+                    MAX(account_id)        AS account_id
                 ')
                 ->groupBy('ads_manager_reports.ad_set_id');
 
@@ -761,6 +788,7 @@ class AdsManagerCampaignsController extends Controller
                     'first_started'   => $r->first_started  ?? null,
                     'running_at_start'=> (int) ($r->running_at_start ?? 0) === 1,
                     'latest_started'  => $r->latest_started ?? null,
+                    'account_id'      => $r->account_id ? (string) $r->account_id : null,
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -821,7 +849,8 @@ class AdsManagerCampaignsController extends Controller
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
                     MAX(sd.running_at_start) AS running_at_start,
-                    MAX(fs.latest_started) AS latest_started
+                    MAX(fs.latest_started) AS latest_started,
+                    MAX(account_id)        AS account_id
                 ')
                 ->groupBy('ads_manager_reports.ad_id');
 
@@ -856,6 +885,7 @@ class AdsManagerCampaignsController extends Controller
                     'first_started'   => $r->first_started  ?? null,
                     'running_at_start'=> (int) ($r->running_at_start ?? 0) === 1,
                     'latest_started'  => $r->latest_started ?? null,
+                    'account_id'      => $r->account_id ? (string) $r->account_id : null,
 
                     'spend'           => (float) ($r->spend ?? 0),
                     'cpm_1000'        => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
@@ -872,6 +902,30 @@ class AdsManagerCampaignsController extends Controller
                 ];
             });
         }
+
+        // Resolve account_name from ad_accounts catalog. Single batched lookup
+        // keyed by ad_account_id. Rows with missing/unmapped account_id will
+        // surface account_name = null so the view can show a warning state.
+        $accountIds = [];
+        foreach ($rows as $r) {
+            $aid = $r['account_id'] ?? null;
+            if ($aid !== null && $aid !== '') $accountIds[] = $aid;
+        }
+        $accountIds = array_values(array_unique($accountIds));
+        $accountNameMap = [];
+        if (!empty($accountIds) && Schema::hasTable('ad_accounts')) {
+            $accountNameMap = DB::table('ad_accounts')
+                ->whereIn('ad_account_id', $accountIds)
+                ->pluck('name', 'ad_account_id')
+                ->all();
+        }
+        $rows = $rows->map(function ($r) use ($accountNameMap) {
+            $aid = $r['account_id'] ?? null;
+            $r['account_name'] = ($aid !== null && isset($accountNameMap[$aid]))
+                ? (string) $accountNameMap[$aid]
+                : null;
+            return $r;
+        });
 
         // Totals for current filter (no group)
         $tot = (clone $base)->selectRaw('

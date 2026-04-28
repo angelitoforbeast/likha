@@ -124,6 +124,23 @@
                 <template x-if="col.type==='percent'">
                   <span x-text="c[col.id] != null ? (Number(c[col.id]).toFixed(1) + '%') : '—'"></span>
                 </template>
+                <template x-if="col.type==='account'">
+                  <span>
+                    <template x-if="c.account_id && c.account_name">
+                      <span>
+                        <span style="font-weight:500;" x-text="c.account_name"></span>
+                        <div style="font-size:10px;color:#94a3b8;font-family:monospace;" x-text="c.account_id"></div>
+                      </span>
+                    </template>
+                    <template x-if="c.account_id && !c.account_name">
+                      <span title="Hindi pa naka-register sa /ads_manager/ad_account">
+                        <span style="color:#dc2626;font-weight:600;">⚠ unmapped</span>
+                        <div style="font-size:10px;color:#94a3b8;font-family:monospace;" x-text="c.account_id"></div>
+                      </span>
+                    </template>
+                    <template x-if="!c.account_id"><span style="color:#cbd5e1;">—</span></template>
+                  </span>
+                </template>
               </td>
             </template>
           </tr>
@@ -220,6 +237,23 @@
                             <template x-if="col.type==='percent'">
                               <span x-text="aset[col.id] != null ? (Number(aset[col.id]).toFixed(1) + '%') : '—'"></span>
                             </template>
+                            <template x-if="col.type==='account'">
+                              <span>
+                                <template x-if="aset.account_id && aset.account_name">
+                                  <span>
+                                    <span style="font-weight:500;" x-text="aset.account_name"></span>
+                                    <div style="font-size:10px;color:#94a3b8;font-family:monospace;" x-text="aset.account_id"></div>
+                                  </span>
+                                </template>
+                                <template x-if="aset.account_id && !aset.account_name">
+                                  <span title="Hindi pa naka-register sa /ads_manager/ad_account">
+                                    <span style="color:#dc2626;font-weight:600;">⚠ unmapped</span>
+                                    <div style="font-size:10px;color:#94a3b8;font-family:monospace;" x-text="aset.account_id"></div>
+                                  </span>
+                                </template>
+                                <template x-if="!aset.account_id"><span style="color:#cbd5e1;">—</span></template>
+                              </span>
+                            </template>
                           </td>
                         </template>
                       </tr>
@@ -310,6 +344,23 @@
                                         </template>
                                         <template x-if="col.type==='percent'">
                                           <span x-text="ad[col.id] != null ? (Number(ad[col.id]).toFixed(1) + '%') : '—'"></span>
+                                        </template>
+                                        <template x-if="col.type==='account'">
+                                          <span>
+                                            <template x-if="ad.account_id && ad.account_name">
+                                              <span>
+                                                <span style="font-weight:500;" x-text="ad.account_name"></span>
+                                                <div style="font-size:10px;color:#94a3b8;font-family:monospace;" x-text="ad.account_id"></div>
+                                              </span>
+                                            </template>
+                                            <template x-if="ad.account_id && !ad.account_name">
+                                              <span title="Hindi pa naka-register sa /ads_manager/ad_account">
+                                                <span style="color:#dc2626;font-weight:600;">⚠ unmapped</span>
+                                                <div style="font-size:10px;color:#94a3b8;font-family:monospace;" x-text="ad.account_id"></div>
+                                              </span>
+                                            </template>
+                                            <template x-if="!ad.account_id"><span style="color:#cbd5e1;">—</span></template>
+                                          </span>
                                         </template>
                                       </td>
                                     </template>

@@ -227,6 +227,26 @@
                       <template x-if="col.type==='integer'">
                         <span x-text="row[col.id] != null ? num(row[col.id]) : '—'"></span>
                       </template>
+                      {{-- account: name + id sub-text. Warning if unmapped. --}}
+                      <template x-if="col.type==='account'">
+                        <span>
+                          <template x-if="row.account_id && row.account_name">
+                            <span>
+                              <span class="font-medium" x-text="row.account_name"></span>
+                              <div style="font-size:10px;color:#94a3b8;font-family:monospace;" x-text="row.account_id"></div>
+                            </span>
+                          </template>
+                          <template x-if="row.account_id && !row.account_name">
+                            <span title="Hindi pa naka-register sa /ads_manager/ad_account">
+                              <span style="color:#dc2626;font-weight:600;">⚠ unmapped</span>
+                              <div style="font-size:10px;color:#94a3b8;font-family:monospace;" x-text="row.account_id"></div>
+                            </span>
+                          </template>
+                          <template x-if="!row.account_id">
+                            <span style="color:#cbd5e1;">—</span>
+                          </template>
+                        </span>
+                      </template>
                       {{-- percent: 1 decimal + % suffix, em-dash fallback --}}
                       <template x-if="col.type==='percent'">
                         <span x-text="row[col.id] != null ? (Number(row[col.id]).toFixed(1) + '%') : '—'"></span>
@@ -304,6 +324,7 @@
           return [
             { id:'on',             label:'Off / On',         sort:null,             type:'on',           align:'left',  minw:80  },
             { id:'name',           label:'Name',             sort:null,             type:'name',         align:'left',  minw:200 },
+            { id:'account',        label:'Account',          sort:null,             type:'account',      align:'left',  minw:140 },
             { id:'first_started',  label:'First launched',   sort:'first_started',  type:'date',         align:'left',  minw:110 },
             { id:'days_running',   label:'Days running',     sort:'first_started',  type:'days_running', align:'left',  minw:90  },
             { id:'latest_started', label:'Latest start',     sort:'latest_started', type:'date',         align:'left',  minw:110 },

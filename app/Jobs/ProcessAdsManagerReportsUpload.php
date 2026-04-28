@@ -299,6 +299,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             'ad set delivery'                 => 'ad_set_delivery',
             'messaging conversations started' => 'messaging_conversations_started',
             'campaign id'                     => 'campaign_id',
+            'account id'                      => 'account_id',
             'ad set id'                       => 'ad_set_id',
             'ad set budget'                   => 'ad_set_budget',
             'ad set budget type'              => 'ad_set_budget_type',
@@ -337,6 +338,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             // [labelForUserMessage => [acceptedNormalizedHeaders, ...]]
             'Day'                  => ['day', 'reporting starts'],
             'Ad ID'                => ['ad id'],
+            'Account ID'           => ['account id'],
             'Campaign ID'          => ['campaign id'],
             'Ad Set ID'            => ['ad set id'],
             'Page Name'            => ['page name'],
@@ -545,6 +547,7 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'ad_set_delivery');
                 $this->putIfExists($updateData, $r, 'messaging_conversations_started');
                 $this->putIfExists($updateData, $r, 'campaign_id');
+                $this->putIfExists($updateData, $r, 'account_id');
                 $this->putIfExists($updateData, $r, 'ad_set_id');
                 $this->putIfExists($updateData, $r, 'ad_set_budget');
                 $this->putIfExists($updateData, $r, 'ad_set_budget_type');
