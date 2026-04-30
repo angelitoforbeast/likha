@@ -84,7 +84,7 @@
   <main class="px-4 py-4 space-y-4" style="max-width:none;">
 
     <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
         <div>
           <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">From</label>
           <input type="date" x-model="filters.start_date"
@@ -113,6 +113,17 @@
             <option value="campaigns">Campaigns only</option>
             <option value="adsets">Ad Sets only</option>
             <option value="ads">Ads only</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Event</label>
+          <select x-model="filters.event"
+                  class="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-white">
+            <option value="all">All events</option>
+            <option value="turned_on">Turned ON only</option>
+            <option value="turned_off">Turned OFF only</option>
+            <option value="created_with_spend">Created (with spend) only</option>
+            <option value="on_off">Turned ON + OFF (skip Created)</option>
           </select>
         </div>
       </div>
@@ -306,7 +317,17 @@
                         x-text="flagText(e._flag?.ad_link)"></span>
                 </div>
               </div>
-              <div class="num" x-text="peso(e.spend)"></div>
+              {{-- Spend cell — primary value on top, lifetime efficiency
+                   metrics (CPM/CPP/WMR/Conv) as sub-text below for context. --}}
+              <div class="num">
+                <div x-text="peso(e.spend)"></div>
+                <div style="margin-top:4px;padding-top:4px;border-top:1px dashed #cbd5e1;font-size:9px;line-height:1.55;color:#64748b;text-align:right;">
+                  <div title="Lifetime CPM (per 1,000 impressions)">CPM <span style="color:#0f172a;font-weight:600;" x-text="e.lifetime_cpm_1000 == null ? '—' : ('₱'+Number(e.lifetime_cpm_1000).toFixed(2))"></span></div>
+                  <div title="Lifetime Cost per Purchase">CPP <span style="color:#0f172a;font-weight:600;" x-text="e.lifetime_cpp == null ? '—' : ('₱'+Number(e.lifetime_cpp).toFixed(2))"></span></div>
+                  <div title="Lifetime Welcome Message Rate (msgs / link_clicks)">WMR <span style="color:#0f172a;font-weight:600;" x-text="e.lifetime_wmr == null ? '—' : (Number(e.lifetime_wmr).toFixed(1)+'%')"></span></div>
+                  <div title="Lifetime Conversion Rate (purchases / msgs)">Conv <span style="color:#0f172a;font-weight:600;" x-text="e.lifetime_conv == null ? '—' : (Number(e.lifetime_conv).toFixed(1)+'%')"></span></div>
+                </div>
+              </div>
               <div class="num text-gray-400" x-text="e.prev_spend === null ? '—' : peso(e.prev_spend)"></div>
             </div>
           </template>
@@ -335,6 +356,7 @@
             end_date:   q.get('end_date')   || fmt(ph),
             page_name:  q.get('page_name')  || 'all',
             level:      q.get('level')      || 'campaigns',
+            event:      q.get('event')      || 'all',
           };
         })(),
 
@@ -351,6 +373,7 @@
             set('end_date',   this.filters.end_date);
             set('page_name',  this.filters.page_name);
             set('level',      this.filters.level);
+            set('event',      this.filters.event);
             window.history.replaceState({}, '', url.toString());
           } catch (e) { /* ignore — non-fatal */ }
         },
@@ -388,6 +411,7 @@
               end_date:   this.filters.end_date   || '',
               page_name:  this.filters.page_name  || 'all',
               level:      this.filters.level      || 'campaigns',
+              event:      this.filters.event      || 'all',
             });
             const r = await fetch('{{ route('ads_manager.campaigns.history.data') }}?' + qs.toString());
             const j = await r.json();

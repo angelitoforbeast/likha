@@ -150,6 +150,13 @@ class AdsManagerCampaignsController extends Controller
         $end      = $request->input('end_date');
         $pageName = $request->input('page_name');
         $levelF   = (string) $request->input('level', 'all'); // all|campaigns|adsets|ads
+        // Event filter: which event kinds to keep. Accepted values:
+        //   'all'                  → all events (default)
+        //   'turned_on'            → only ON transitions
+        //   'turned_off'           → only OFF transitions
+        //   'created_with_spend'   → only "created with spend"
+        //   'on_off'               → ON + OFF (drop Created)
+        $eventF   = (string) $request->input('event', 'all');
 
         $driver = DB::getDriverName();
         $dayExpr = $driver === 'pgsql'
@@ -166,13 +173,20 @@ class AdsManagerCampaignsController extends Controller
             $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
         }
 
-        // Build a daily aggregate per (id, day) per level.
+        // Build a daily aggregate per (id, day) per level. Includes the raw
+        // metric components needed downstream for lifetime cumulative metrics
+        // (CPM, CPP, Welcome Msg Rate, Conv Rate).
         $buildDaily = function (string $idCol) use ($base, $dayExpr) {
             return (clone $base)
                 ->selectRaw("
                     $idCol AS id,
                     $dayExpr AS d,
                     COALESCE(SUM(amount_spent_php), 0) AS spend,
+                    COALESCE(SUM(impressions), 0)     AS impressions,
+                    COALESCE(SUM(messaging_conversations_started), 0) AS messages,
+                    COALESCE(SUM(purchases), 0)       AS purchases,
+                    COALESCE(SUM(link_clicks), 0)     AS link_clicks,
+                    COALESCE(SUM(results), 0)         AS results,
                     MAX(page_name)     AS page_name,
                     MAX(campaign_id)   AS campaign_id,
                     MAX(campaign_name) AS campaign_name,
@@ -231,6 +245,26 @@ class AdsManagerCampaignsController extends Controller
                     OR (w.prev_spend <= 0 AND w.spend > 0)
                     OR (w.prev_spend > 0  AND w.spend <= 0)
                 )");
+
+            // Event-kind filter — narrow down to specific transition types.
+            switch ($eventF) {
+                case 'turned_on':
+                    $eventQuery->whereRaw("w.prev_spend <= 0 AND w.prev_spend IS NOT NULL AND w.spend > 0");
+                    break;
+                case 'turned_off':
+                    $eventQuery->whereRaw("w.prev_spend > 0 AND w.spend <= 0");
+                    break;
+                case 'created_with_spend':
+                    $eventQuery->whereRaw("w.prev_spend IS NULL AND w.spend > 0");
+                    break;
+                case 'on_off':
+                    $eventQuery->whereRaw("(
+                        (w.prev_spend <= 0 AND w.prev_spend IS NOT NULL AND w.spend > 0)
+                        OR (w.prev_spend > 0 AND w.spend <= 0)
+                    )");
+                    break;
+                // 'all' or anything else → no extra filter
+            }
 
             // Date filter applies to event_day (post-shift) so user-selected
             // ranges line up with what they expect to see on screen.
@@ -352,6 +386,112 @@ class AdsManagerCampaignsController extends Controller
             $e['quick_reply_3']    = $cre->quick_reply_3    ?? '';
             $e['ad_link']          = $cre->ad_link          ?? '';
             $e['feedback']         = $cre ? (int) ($cre->feedback ?? 0) : 0;
+        }
+        unset($e);
+
+        // ── Compute LIFETIME metrics per event (CPM, CPP, WMR, Conv Rate) ──
+        //   For each event, we want "what was the campaign's cumulative
+        //   performance up to and including event_day".
+        //   Strategy: per level, fetch ALL daily aggregate rows for the
+        //   relevant entity_ids (no date filter), sort by day ASC, then
+        //   compute running cumulative sums in PHP. Per event, look up the
+        //   running totals as of event_day.
+        $entityIdsByLevel = ['campaign' => [], 'adset' => [], 'ad' => []];
+        foreach ($events as $e) {
+            $lvl = $e['level'];
+            if (!empty($e['entity_id']) && isset($entityIdsByLevel[$lvl])) {
+                $entityIdsByLevel[$lvl][] = $e['entity_id'];
+            }
+        }
+        $lifetimeByLevel = ['campaign' => [], 'adset' => [], 'ad' => []];
+        $idColPerLevel   = ['campaign' => 'campaign_id', 'adset' => 'ad_set_id', 'ad' => 'ad_id'];
+        foreach ($entityIdsByLevel as $lvl => $ids) {
+            $ids = array_values(array_unique($ids));
+            if (empty($ids)) continue;
+            $idCol = $idColPerLevel[$lvl];
+            // Pull daily metrics for those entities — no date range cap;
+            // we want LIFETIME totals up to each event_day.
+            $rowsAll = DB::table('ads_manager_reports')
+                ->whereNotNull('day')
+                ->whereIn($idCol, $ids)
+                ->selectRaw("
+                    $idCol AS id,
+                    $dayExpr AS d,
+                    COALESCE(SUM(amount_spent_php), 0) AS spend,
+                    COALESCE(SUM(impressions), 0)     AS impressions,
+                    COALESCE(SUM(messaging_conversations_started), 0) AS messages,
+                    COALESCE(SUM(purchases), 0)       AS purchases,
+                    COALESCE(SUM(link_clicks), 0)     AS link_clicks,
+                    COALESCE(SUM(results), 0)         AS results
+                ")
+                ->groupBy($idCol, DB::raw($dayExpr))
+                ->orderBy(DB::raw('1'))   // by id
+                ->orderBy(DB::raw('2'))   // then by day ASC
+                ->get();
+
+            // Build per-id sorted day list with running cumulatives.
+            $perId = []; // [id => [['d'=>..., 'cum_spend'=>..., 'cum_impr'=>..., ...], ...]]
+            $running = []; // [id => ['spend'=>..., 'impressions'=>..., ...]]
+            foreach ($rowsAll as $r) {
+                $id = (string) $r->id;
+                if (!isset($running[$id])) {
+                    $running[$id] = ['spend'=>0,'impr'=>0,'msgs'=>0,'purch'=>0,'lc'=>0,'res'=>0];
+                }
+                $running[$id]['spend'] += (float) $r->spend;
+                $running[$id]['impr']  += (float) $r->impressions;
+                $running[$id]['msgs']  += (float) $r->messages;
+                $running[$id]['purch'] += (float) $r->purchases;
+                $running[$id]['lc']    += (float) $r->link_clicks;
+                $running[$id]['res']   += (float) $r->results;
+                $perId[$id][] = [
+                    'd'         => (string) $r->d,
+                    'spend'     => $running[$id]['spend'],
+                    'impr'      => $running[$id]['impr'],
+                    'msgs'      => $running[$id]['msgs'],
+                    'purch'     => $running[$id]['purch'],
+                    'lc'        => $running[$id]['lc'],
+                    'res'       => $running[$id]['res'],
+                ];
+            }
+            $lifetimeByLevel[$lvl] = $perId;
+        }
+
+        // Resolver: "lifetime metrics up to <date> for entity <id> at <level>"
+        // — picks the latest cumulative snapshot whose d <= the target date.
+        $resolveLifetime = function (string $level, string $id, string $upTo) use (&$lifetimeByLevel) {
+            $list = $lifetimeByLevel[$level][$id] ?? null;
+            if (!$list) return null;
+            $hit = null;
+            foreach ($list as $row) {
+                if ($row['d'] <= $upTo) $hit = $row;
+                else break;
+            }
+            return $hit;
+        };
+
+        // Stitch into events. Spend (FB amount_spent_php) is divided by 1.12
+        // here too — matches the rest of the app's "ex-VAT" convention so
+        // the displayed CPM/CPP align with the campaigns table.
+        foreach ($events as &$e) {
+            $life = $resolveLifetime($e['level'], $e['entity_id'], $e['day']);
+            if ($life) {
+                $spend = $life['spend'] / 1.12;
+                $impr  = $life['impr'];
+                $msgs  = $life['msgs'];
+                $purch = $life['purch'];
+                $lc    = $life['lc'];
+                $e['lifetime_spend']    = round($spend, 2);
+                $e['lifetime_cpm_1000'] = $impr  > 0 ? round(($spend / $impr) * 1000, 2) : null;
+                $e['lifetime_cpp']      = $purch > 0 ? round($spend / $purch, 2) : null;
+                $e['lifetime_wmr']      = $lc    > 0 ? round(($msgs * 100.0) / $lc, 1) : null;
+                $e['lifetime_conv']     = $msgs  > 0 ? round(($purch * 100.0) / $msgs, 1) : null;
+            } else {
+                $e['lifetime_spend']    = null;
+                $e['lifetime_cpm_1000'] = null;
+                $e['lifetime_cpp']      = null;
+                $e['lifetime_wmr']      = null;
+                $e['lifetime_conv']     = null;
+            }
         }
         unset($e);
 
