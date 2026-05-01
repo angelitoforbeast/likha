@@ -778,16 +778,26 @@ class AdsManagerCampaignsController extends Controller
             $base->whereRaw('LOWER(COALESCE(item_name,\'\')) LIKE ?', [$like]);
         }
 
-        // Search (case-insensitive)
+        // Search (case-insensitive) — LEVEL-AWARE so the user's intuition
+        // matches: "I'm on Campaigns tab, I expect campaign-name matches".
+        //   Campaigns tab: campaign_name only
+        //   Adsets tab:    ad_set_name only
+        //   Ads tab:       headline + item_name (the ad's identifying fields)
+        // This avoids surprise matches via deep body/headline text on parent
+        // levels, and also makes the search query much cheaper (1–2 LIKEs
+        // instead of 5).
         if ($q) {
             $like = '%'.trim($q).'%';
-            $base->where(function ($qq) use ($like) {
-                $qq->whereRaw('LOWER(COALESCE(campaign_name, \'\')) LIKE LOWER(?)', [$like])
-                   ->orWhereRaw('LOWER(COALESCE(ad_set_name, \'\')) LIKE LOWER(?)', [$like])
-                   ->orWhereRaw('LOWER(COALESCE(headline, \'\')) LIKE LOWER(?)', [$like])
-                   ->orWhereRaw('LOWER(COALESCE(body_ad_settings, \'\')) LIKE LOWER(?)', [$like])
-                   ->orWhereRaw('LOWER(COALESCE(item_name, \'\')) LIKE LOWER(?)', [$like]);
-            });
+            if ($level === 'campaigns') {
+                $base->whereRaw('LOWER(COALESCE(campaign_name, \'\')) LIKE LOWER(?)', [$like]);
+            } elseif ($level === 'adsets') {
+                $base->whereRaw('LOWER(COALESCE(ad_set_name, \'\')) LIKE LOWER(?)', [$like]);
+            } else { // ads
+                $base->where(function ($qq) use ($like) {
+                    $qq->whereRaw('LOWER(COALESCE(headline, \'\'))  LIKE LOWER(?)', [$like])
+                       ->orWhereRaw('LOWER(COALESCE(item_name, \'\')) LIKE LOWER(?)', [$like]);
+                });
+            }
         }
 
         // Apply multi-select filters to child levels

@@ -100,11 +100,14 @@
                 @click="switchTab('ads')">Ads</button>
       </div>
 
-      <div class="flex-1 min-w-[280px]">
-        <input type="search" x-model.debounce.500ms="filters.q"
-               placeholder="Search campaign / ad set / ad / page / item"
-               class="w-full rounded border px-3 py-2 text-sm bg-white"
-               @input.debounce.500ms="reload()" />
+      <div class="flex-1 min-w-[280px] relative">
+        <input type="search" x-model.debounce.350ms="filters.q"
+               :placeholder="searchPlaceholder()"
+               class="w-full rounded border px-3 py-2 text-sm bg-white pr-9"
+               @input.debounce.350ms="reload()" />
+        <span x-show="loading" class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400" style="pointer-events:none;">
+          ⏳
+        </span>
       </div>
 
       <div class="flex items-center gap-2 flex-wrap">
@@ -324,6 +327,17 @@
         sortDir: 'desc',
         dateLabel: 'This month',
         datePreset: 'this_month',  // bound to the preset dropdown
+        loading: false,            // shown next to search input during fetch
+
+        // Search placeholder is level-aware so the user knows what's actually
+        // being searched (matches the controller's level-aware search clause).
+        searchPlaceholder(){
+          return this.tab === 'campaigns'
+            ? 'Search Campaign name…'
+            : this.tab === 'adsets'
+              ? 'Search Ad set name…'
+              : 'Search Ad headline / item…';
+        },
         filters: {
           start_date: '',
           end_date: '',
@@ -719,11 +733,18 @@
 
           // Mirror to URL before fetch so a refresh mid-load preserves intent.
           this.syncUrl();
+          this.loading = true;
 
-          const res  = await fetch('{{ route('ads_manager.campaigns.data') }}?'+params.toString());
-          const json = await res.json();
-          this.rows   = json.rows || [];
-          this.totals = json.totals || {};
+          try {
+            const res  = await fetch('{{ route('ads_manager.campaigns.data') }}?'+params.toString());
+            const json = await res.json();
+            this.rows   = json.rows || [];
+            this.totals = json.totals || {};
+          } catch (err) {
+            console.error('reload failed', err);
+          } finally {
+            this.loading = false;
+          }
         },
 
         exportCsv(){
