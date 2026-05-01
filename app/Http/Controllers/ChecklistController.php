@@ -126,49 +126,81 @@ class ChecklistController extends Controller
 
         $isToday = $dateObj->isToday();
 
+        // Access policy: CEO sees ALL tasks + ALL submissions across users.
+        // Non-CEO users only see tasks where they're explicitly assigned
+        // (via the assignedUsers pivot). Submissions are correspondingly
+        // filtered to those tasks the user can see.
+        $authUser = \Illuminate\Support\Facades\Auth::user();
+        $userId   = $authUser?->id;
+        $role     = strtoupper(trim((string)($authUser?->employeeProfile?->role ?? '')));
+        $isCEO    = $role === 'CEO';
+
         if ($isToday) {
             // Today: same as index — only currently active tasks
-            $tasks = ChecklistTask::with('assignedUsers')
-                ->where('is_active', true)
-                ->orderBy('sort_order')
-                ->orderBy('id')
-                ->get();
+            $taskQuery = ChecklistTask::with('assignedUsers')
+                ->where('is_active', true);
         } else {
             // Past date: show tasks that actually existed on that day
             //   created_at <= end of report date  (task existed by then)
             //   AND (deleted_at IS NULL OR deleted_at > end of report date)  (not yet deleted)
             $endOfDay = $dateObj->copy()->endOfDay();
 
-            $tasks = ChecklistTask::withTrashed()
+            $taskQuery = ChecklistTask::withTrashed()
                 ->with('assignedUsers')
                 ->whereDate('created_at', '<=', $dateObj->toDateString())
                 ->where(function ($q) use ($endOfDay) {
                     $q->whereNull('deleted_at')
                       ->orWhere('deleted_at', '>', $endOfDay);
-                })
-                ->orderBy('sort_order')
-                ->orderBy('id')
-                ->get();
+                });
         }
 
-        // Submissions for this date — load all (supports both group and individual tasks)
-        $allSubmissions = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user', 'latestApproval.user'])
+        // Non-CEO: scope to tasks where the user is among the assignees.
+        if (!$isCEO && $userId) {
+            $taskQuery->whereHas('assignedUsers', function ($q) use ($userId) {
+                $q->where('users.id', $userId);
+            });
+        }
+
+        $tasks = $taskQuery->orderBy('sort_order')->orderBy('id')->get();
+
+        // Submissions for this date — load all that the user is allowed to see.
+        $subQuery = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user', 'latestApproval.user'])
             ->withCount(['analysisLogs', 'approvalLogs'])
-            ->where('date', $dateObj->toDateString())
-            ->get();
+            ->where('date', $dateObj->toDateString());
+
+        if (!$isCEO && $userId) {
+            // Non-CEO: only submissions for tasks they're assigned to.
+            $allowedTaskIds = $tasks->pluck('id')->all();
+            if (empty($allowedTaskIds)) {
+                $subQuery->whereRaw('1=0'); // no allowed tasks → empty result
+            } else {
+                $subQuery->whereIn('checklist_task_id', $allowedTaskIds);
+            }
+        }
+
+        $allSubmissions = $subQuery->get();
 
         $submissionsByTask        = $allSubmissions->keyBy('checklist_task_id');     // group: one per task
         $submissionsGroupedByTask = $allSubmissions->groupBy('checklist_task_id');   // individual: all per task
 
-        // Safety net: if a submission exists for a task not in our list, pull it in
+        // Safety net: if a submission exists for a task not in our list, pull it in.
+        // For non-CEO viewers, only pull tasks the user is actually assigned to —
+        // we don't want this fallback to leak unrelated tasks.
         if (!$isToday) {
             $missingIds = $submissionsByTask->keys()->diff($tasks->pluck('id'));
             if ($missingIds->isNotEmpty()) {
-                $extra = ChecklistTask::withTrashed()
+                $extraQuery = ChecklistTask::withTrashed()
                     ->with('assignedUsers')
-                    ->whereIn('id', $missingIds)
-                    ->get();
-                $tasks = $tasks->merge($extra)->sortBy([['sort_order', 'asc'], ['id', 'asc']])->values();
+                    ->whereIn('id', $missingIds);
+                if (!$isCEO && $userId) {
+                    $extraQuery->whereHas('assignedUsers', function ($q) use ($userId) {
+                        $q->where('users.id', $userId);
+                    });
+                }
+                $extra = $extraQuery->get();
+                if ($extra->isNotEmpty()) {
+                    $tasks = $tasks->merge($extra)->sortBy([['sort_order', 'asc'], ['id', 'asc']])->values();
+                }
             }
         }
 
