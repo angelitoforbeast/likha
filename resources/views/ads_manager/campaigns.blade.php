@@ -102,17 +102,32 @@
 
       <div class="flex-1 min-w-[280px]">
         <input type="search" x-model.debounce.500ms="filters.q"
-               placeholder="Search to filter by name or text"
+               placeholder="Search campaign / ad set / ad / page / item"
                class="w-full rounded border px-3 py-2 text-sm bg-white"
-               @input="reload()" />
+               @input.debounce.500ms="reload()" />
       </div>
 
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 flex-wrap">
+        {{-- Date preset dropdown — quick ranges. Selecting one updates
+             the date range + Flatpickr display + triggers reload. --}}
+        <select class="border rounded px-2 py-2 text-sm bg-white"
+                x-model="datePreset"
+                @change="applyDatePreset($event.target.value)">
+          <option value="">Custom range…</option>
+          <option value="today">Today</option>
+          <option value="yesterday">Yesterday</option>
+          <option value="last_3">Last 3 days</option>
+          <option value="last_7">Last 7 days</option>
+          <option value="this_month">This month</option>
+          <option value="last_month">Last month</option>
+          <option value="last_and_this">Last + This month</option>
+        </select>
+
         {{-- Unified single input (one day or range) --}}
-        <div class="min-w-[260px]">
-          <label class="block text-sm font-semibold mb-1">Date range</label>
+        <div class="min-w-[220px]">
+          <label class="block text-xs font-semibold mb-1 text-gray-500">Date range</label>
           <input id="dateRange" type="text" placeholder="Select date range"
-                 class="w-full border border-gray-300 p-2 rounded-md shadow-sm cursor-pointer bg-white" readonly>
+                 class="w-full border border-gray-300 p-2 rounded-md shadow-sm cursor-pointer bg-white text-sm" readonly>
         </div>
 
         <select class="border rounded px-2 py-2 text-sm" x-model="filters.page_name" @change="reload()">
@@ -308,12 +323,102 @@
         sortBy: 'default',
         sortDir: 'desc',
         dateLabel: 'This month',
+        datePreset: 'this_month',  // bound to the preset dropdown
         filters: {
           start_date: '',
           end_date: '',
           page_name: 'all',
           q: '',
           limit: 200,
+        },
+
+        // ── URL persistence helpers ────────────────────────────────────────
+        // Read filters from window.location.search on init so refresh +
+        // shared links preserve the user's view.
+        readFiltersFromUrl(){
+          try {
+            const q = new URL(window.location.href).searchParams;
+            const get = (k) => { const v = q.get(k); return (v === null || v === '') ? null : v; };
+            const start = get('start_date');
+            const end   = get('end_date');
+            const page  = get('page_name');
+            const search= get('q');
+            const tab   = get('tab');
+            const sort  = get('sort_by');
+            const dir   = get('sort_dir');
+            const preset= get('preset');
+            if (start) this.filters.start_date = start;
+            if (end)   this.filters.end_date   = end;
+            if (page)  this.filters.page_name  = page;
+            if (search)this.filters.q          = search;
+            if (tab && ['campaigns','adsets','ads'].includes(tab)) this.tab = tab;
+            if (sort)  this.sortBy  = sort;
+            if (dir && ['asc','desc'].includes(dir)) this.sortDir = dir;
+            if (preset !== null) this.datePreset = preset || '';
+          } catch(e) { /* ignore — non-fatal */ }
+        },
+        // Mirror current filters into the URL via replaceState (no history entry).
+        syncUrl(){
+          try {
+            const url = new URL(window.location.href);
+            const set = (k, v) => {
+              if (v === null || v === undefined || v === '' || v === 'all') url.searchParams.delete(k);
+              else url.searchParams.set(k, v);
+            };
+            set('tab',         this.tab);
+            set('start_date',  this.filters.start_date);
+            set('end_date',    this.filters.end_date);
+            set('page_name',   this.filters.page_name);
+            set('q',           this.filters.q);
+            set('sort_by',     this.sortBy === 'default' ? null : this.sortBy);
+            set('sort_dir',    this.sortDir === 'desc' && this.sortBy === 'default' ? null : this.sortDir);
+            set('preset',      this.datePreset);
+            window.history.replaceState({}, '', url.toString());
+          } catch(e) {}
+        },
+
+        // Apply a named date preset to the filter range. Recomputes labels
+        // + Flatpickr display + reloads.
+        applyDatePreset(preset){
+          if (!preset) return;
+          const ph    = new Date(new Date().toLocaleString('en-US', {timeZone: 'Asia/Manila'}));
+          const today = new Date(ph.getFullYear(), ph.getMonth(), ph.getDate());
+          let start, end;
+          switch (preset) {
+            case 'today':
+              start = today; end = today; break;
+            case 'yesterday': {
+              const y = new Date(today); y.setDate(today.getDate() - 1);
+              start = y; end = y; break;
+            }
+            case 'last_3': {
+              const s = new Date(today); s.setDate(today.getDate() - 2);
+              start = s; end = today; break;
+            }
+            case 'last_7': {
+              const s = new Date(today); s.setDate(today.getDate() - 6);
+              start = s; end = today; break;
+            }
+            case 'this_month':
+              start = new Date(today.getFullYear(), today.getMonth(), 1);
+              end   = today; break;
+            case 'last_month':
+              start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+              end   = new Date(today.getFullYear(), today.getMonth(), 0); break; // last day of prev
+            case 'last_and_this':
+              start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+              end   = today; break;
+            default:
+              return;
+          }
+          this.filters.start_date = this.ymd(start);
+          this.filters.end_date   = this.ymd(end);
+          this.setDateLabel();
+          // Sync Flatpickr display kung naka-init
+          if (window._fpInstance && typeof window._fpInstance.setDate === 'function') {
+            window._fpInstance.setDate([this.filters.start_date, this.filters.end_date], false);
+          }
+          this.reload();
         },
 
         // Column catalog — each col has id (data key on row),
@@ -612,6 +717,9 @@
             }
           }
 
+          // Mirror to URL before fetch so a refresh mid-load preserves intent.
+          this.syncUrl();
+
           const res  = await fetch('{{ route('ads_manager.campaigns.data') }}?'+params.toString());
           const json = await res.json();
           this.rows   = json.rows || [];
@@ -655,13 +763,15 @@
           const start = new Date(now.getFullYear(), now.getMonth(), 1);
           this.filters.start_date = this.ymd(start);
           this.filters.end_date   = this.ymd(now);
+          // Read URL params after defaults so URL overrides win.
+          this.readFiltersFromUrl();
           this.setDateLabel();
 
           // Init Flatpickr after Alpine renders
           this.$nextTick(() => {
             const fp = window.flatpickr || null;
             if (!fp) return;
-            fp('#dateRange', {
+            const inst = fp('#dateRange', {
               mode: 'range',
               dateFormat: 'Y-m-d',
               defaultDate: [this.filters.start_date, this.filters.end_date],
@@ -670,6 +780,8 @@
                   const [from, to] = selectedDates;
                   this.filters.start_date = this.ymd(from);
                   this.filters.end_date   = this.ymd(to);
+                  // User picked a custom range → clear preset selection.
+                  this.datePreset = '';
                 } else if (selectedDates.length === 1) {
                   const d = selectedDates[0];
                   this.filters.start_date = this.ymd(d);
@@ -682,8 +794,11 @@
               },
               onReady: (selectedDates, dateStr, instance) => {
                 instance.input.value = `${this.filters.start_date} to ${this.filters.end_date}`;
+                // Cache instance globally so applyDatePreset() can update display.
+                window._fpInstance = instance;
               }
             });
+            window._fpInstance = inst;
           });
 
           await this.reload();
