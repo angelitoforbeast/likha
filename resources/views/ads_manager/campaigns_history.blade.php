@@ -331,9 +331,9 @@
               <div class="num">
                 <div x-text="peso(e.spend)"></div>
                 <div class="lt-metrics">
-                  <div class="lt-k" title="Lifetime CPM (per 1,000 impressions)">CPM</div>
-                  <div :class="'lt-v' + (e.lifetime_cpm_1000 == null ? ' empty' : '')"
-                       x-text="e.lifetime_cpm_1000 == null ? '—' : ('₱'+Number(e.lifetime_cpm_1000).toFixed(2))"></div>
+                  <div class="lt-k" title="Lifetime CPM = Cost per Messaging (spend / messages started)">CPM</div>
+                  <div :class="'lt-v' + (e.lifetime_cpm == null ? ' empty' : '')"
+                       x-text="e.lifetime_cpm == null ? '—' : ('₱'+Number(e.lifetime_cpm).toFixed(2))"></div>
                   <div class="lt-k" title="Lifetime Cost per Purchase">CPP</div>
                   <div :class="'lt-v' + (e.lifetime_cpp == null ? ' empty' : '')"
                        x-text="e.lifetime_cpp == null ? '—' : ('₱'+Number(e.lifetime_cpp).toFixed(2))"></div>

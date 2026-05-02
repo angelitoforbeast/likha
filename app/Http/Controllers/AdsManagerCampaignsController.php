@@ -470,27 +470,30 @@ class AdsManagerCampaignsController extends Controller
         };
 
         // Stitch into events. Spend (FB amount_spent_php) is divided by 1.12
-        // here too — matches the rest of the app's "ex-VAT" convention so
-        // the displayed CPM/CPP align with the campaigns table.
+        // here too — matches the rest of the app's "ex-VAT" convention.
+        //
+        // NOTE: in this page "CPM" = COST PER MESSAGING (spend / messages),
+        // NOT the standard Cost-Per-Mille (cost per 1,000 impressions). User
+        // request — semantics are domain-specific to the messenger ads
+        // workflow, where every "M" stands for "Messaging".
         foreach ($events as &$e) {
             $life = $resolveLifetime($e['level'], $e['entity_id'], $e['day']);
             if ($life) {
                 $spend = $life['spend'] / 1.12;
-                $impr  = $life['impr'];
                 $msgs  = $life['msgs'];
                 $purch = $life['purch'];
                 $lc    = $life['lc'];
-                $e['lifetime_spend']    = round($spend, 2);
-                $e['lifetime_cpm_1000'] = $impr  > 0 ? round(($spend / $impr) * 1000, 2) : null;
-                $e['lifetime_cpp']      = $purch > 0 ? round($spend / $purch, 2) : null;
-                $e['lifetime_wmr']      = $lc    > 0 ? round(($msgs * 100.0) / $lc, 1) : null;
-                $e['lifetime_conv']     = $msgs  > 0 ? round(($purch * 100.0) / $msgs, 1) : null;
+                $e['lifetime_spend']   = round($spend, 2);
+                $e['lifetime_cpm']     = $msgs  > 0 ? round($spend / $msgs, 2) : null; // cost per messaging
+                $e['lifetime_cpp']     = $purch > 0 ? round($spend / $purch, 2) : null;
+                $e['lifetime_wmr']     = $lc    > 0 ? round(($msgs * 100.0) / $lc, 1) : null;
+                $e['lifetime_conv']    = $msgs  > 0 ? round(($purch * 100.0) / $msgs, 1) : null;
             } else {
-                $e['lifetime_spend']    = null;
-                $e['lifetime_cpm_1000'] = null;
-                $e['lifetime_cpp']      = null;
-                $e['lifetime_wmr']      = null;
-                $e['lifetime_conv']     = null;
+                $e['lifetime_spend']   = null;
+                $e['lifetime_cpm']     = null;
+                $e['lifetime_cpp']     = null;
+                $e['lifetime_wmr']     = null;
+                $e['lifetime_conv']    = null;
             }
         }
         unset($e);
