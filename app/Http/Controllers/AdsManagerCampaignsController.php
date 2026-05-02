@@ -574,9 +574,14 @@ class AdsManagerCampaignsController extends Controller
         // Item-scope filters used by /owner/private inline expand:
         //   item_name      — exact qty-variant match (e.g. "2 x MINI FLASHLIGHT")
         //   only_with_spend — when '1', drops aggregated rows where SUM(spend) <= 0
-        // Both are optional (omit for the standalone /ads_manager/campaigns view).
+        //   include_windows — when '1', adds cpp_today / cpp_3d / cpp_7d trailing
+        //                     windows anchored at end_date (independent of the
+        //                     main range filter). Off by default to keep legacy
+        //                     callers' response shape unchanged.
+        // All optional (omit for the standalone /ads_manager/campaigns view).
         $itemName       = $request->input('item_name');
         $onlyWithSpend  = (string) $request->input('only_with_spend', '') === '1';
+        $includeWindows = (string) $request->input('include_windows', '') === '1';
 
         // Drilldown params (single selection)
         $campaignId  = $request->input('campaign_id');
@@ -1083,6 +1088,97 @@ class AdsManagerCampaignsController extends Controller
                     'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
                     'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
                 ];
+            });
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // Windowed CPPs (today / 3d / 7d) — opt-in via include_windows=1.
+        // Computed via a SEPARATE aggregation against ads_manager_reports with
+        // a [end_date − 6, end_date] date filter (independent of the main
+        // start/end filter). Stitched into rows by id. Skipped when end_date
+        // is missing.
+        // ──────────────────────────────────────────────────────────────────
+        if ($includeWindows && $end) {
+            $endDateObj = new \DateTime($end);
+            $endStr     = $endDateObj->format('Y-m-d');
+            $endMinus2  = (clone $endDateObj)->modify('-2 days')->format('Y-m-d');
+            $endMinus6  = (clone $endDateObj)->modify('-6 days')->format('Y-m-d');
+
+            $idCol = $level === 'campaigns' ? 'campaign_id'
+                   : ($level === 'adsets'   ? 'ad_set_id' : 'ad_id');
+
+            // Mirror the same NON-DATE filters as $base. Date filter overridden
+            // to the trailing-7-day window.
+            $winQuery = DB::table('ads_manager_reports')
+                ->whereRaw("$dayExpr BETWEEN ? AND ?", [$endMinus6, $endStr]);
+
+            if ($pageName && $pageName !== 'all') {
+                $winQuery->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
+            }
+            if (is_string($itemName) && trim($itemName) !== '') {
+                $likeItem = '%'.mb_strtolower(trim($itemName)).'%';
+                $winQuery->whereRaw('LOWER(COALESCE(item_name,\'\')) LIKE ?', [$likeItem]);
+            }
+            if ($q) {
+                $likeQ = '%'.trim($q).'%';
+                if ($level === 'campaigns') {
+                    $winQuery->whereRaw('LOWER(COALESCE(campaign_name, \'\')) LIKE LOWER(?)', [$likeQ]);
+                } elseif ($level === 'adsets') {
+                    $winQuery->whereRaw('LOWER(COALESCE(ad_set_name, \'\')) LIKE LOWER(?)', [$likeQ]);
+                } else {
+                    $winQuery->where(function ($qq) use ($likeQ) {
+                        $qq->whereRaw('LOWER(COALESCE(headline, \'\'))  LIKE LOWER(?)', [$likeQ])
+                           ->orWhereRaw('LOWER(COALESCE(item_name, \'\')) LIKE LOWER(?)', [$likeQ]);
+                    });
+                }
+            }
+            if ($level !== 'campaigns' && !empty($campaignIds)) {
+                $winQuery->whereIn('campaign_id', $campaignIds);
+            }
+            if ($level === 'ads' && !empty($adSetIds)) {
+                $winQuery->whereIn('ad_set_id', $adSetIds);
+            }
+            if ($level === 'campaigns' && $campaignId) {
+                $winQuery->where('campaign_id', $campaignId);
+            } elseif ($level === 'adsets' && empty($campaignIds) && $campaignId) {
+                $winQuery->where('campaign_id', $campaignId);
+            } elseif ($level === 'ads' && empty($adSetIds) && $adSetId) {
+                $winQuery->where('ad_set_id', $adSetId);
+            }
+
+            $winRows = $winQuery
+                ->selectRaw("
+                    $idCol AS id,
+                    SUM(CASE WHEN $dayExpr = ?              THEN amount_spent_php ELSE 0 END) / 1.12 AS spend_today,
+                    SUM(CASE WHEN $dayExpr BETWEEN ? AND ?  THEN amount_spent_php ELSE 0 END) / 1.12 AS spend_3d,
+                    SUM(amount_spent_php) / 1.12                                                       AS spend_7d,
+                    SUM(CASE WHEN $dayExpr = ?              THEN purchases       ELSE 0 END)           AS purch_today,
+                    SUM(CASE WHEN $dayExpr BETWEEN ? AND ?  THEN purchases       ELSE 0 END)           AS purch_3d,
+                    SUM(purchases)                                                                     AS purch_7d
+                ", [$endStr, $endMinus2, $endStr, $endStr, $endMinus2, $endStr])
+                ->groupBy($idCol)
+                ->get();
+
+            $windowMap = [];
+            foreach ($winRows as $w) {
+                $windowMap[(string) $w->id] = $w;
+            }
+
+            $rows = $rows->map(function ($r) use ($windowMap, $level) {
+                $idKey = $level === 'campaigns' ? ($r['campaign_id'] ?? null)
+                       : ($level === 'adsets'   ? ($r['ad_set_id']   ?? null)
+                       : ($r['ad_id'] ?? null));
+                $w = $idKey !== null ? ($windowMap[(string) $idKey] ?? null) : null;
+                $r['cpp_today']       = ($w && (int) $w->purch_today > 0) ? round((float) $w->spend_today / (float) $w->purch_today, 2) : null;
+                $r['cpp_3d']          = ($w && (int) $w->purch_3d    > 0) ? round((float) $w->spend_3d    / (float) $w->purch_3d,    2) : null;
+                $r['cpp_7d']          = ($w && (int) $w->purch_7d    > 0) ? round((float) $w->spend_7d    / (float) $w->purch_7d,    2) : null;
+                $r['spend_today']     = $w ? (float) $w->spend_today : 0.0;
+                $r['spend_3d']        = $w ? (float) $w->spend_3d    : 0.0;
+                $r['spend_7d']        = $w ? (float) $w->spend_7d    : 0.0;
+                $r['purchases_today'] = $w ? (int)   $w->purch_today : 0;
+                $r['purchases_3d']    = $w ? (int)   $w->purch_3d    : 0;
+                $r['purchases_7d']    = $w ? (int)   $w->purch_7d    : 0;
+                return $r;
             });
         }
 

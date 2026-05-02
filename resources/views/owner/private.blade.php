@@ -1460,6 +1460,9 @@
           { id:'cpm_msg',        label:'Cost per messaging',sort:'cpm_msg',       type:'money',        align:'right', minw:120 },
           { id:'cpr',            label:'Cost per result',  sort:'cpr',            type:'money',        align:'right', minw:120 },
           { id:'cpp',            label:'Cost per purchase',sort:'cpp',            type:'money',        align:'right', minw:130 },
+          { id:'cpp_today',      label:'CPP (today)',      sort:'cpp_today',      type:'money',        align:'right', minw:110 },
+          { id:'cpp_3d',         label:'CPP (3d)',         sort:'cpp_3d',         type:'money',        align:'right', minw:100 },
+          { id:'cpp_7d',         label:'CPP (7d)',         sort:'cpp_7d',         type:'money',        align:'right', minw:100 },
           { id:'impressions',    label:'Impressions',      sort:null,             type:'integer',      align:'right', minw:100 },
           { id:'link_clicks',       label:'Link clicks',         sort:'link_clicks',      type:'integer',      align:'right', minw:90  },
           { id:'welcome_msg_rate',  label:'Welcome Msg Rate (%)',sort:'welcome_msg_rate', type:'percent',      align:'right', minw:130 },
@@ -1540,6 +1543,7 @@
           sort_by:         'default',
           sort_dir:        'desc',
           only_with_spend: '1',
+          include_windows: '1',
         }, params));
         const res = await fetch('{{ route('ads_manager.campaigns.data') }}?' + qs.toString());
         if (!res.ok) throw new Error('HTTP '+res.status);
