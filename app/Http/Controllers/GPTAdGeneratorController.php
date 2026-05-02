@@ -31,6 +31,73 @@ class GPTAdGeneratorController extends Controller
     public const DEFAULT_MODEL = 'gpt-4o';
 
     /**
+     * GET /gpt-ad-generator/history
+     *
+     * Browseable list of past generations, filterable by user / product / model.
+     * Anyone na may access sa /gpt-ad-generator ay pwede tingnan lahat — para
+     * makita ang patterns ng team. Each row displays a "View" button na
+     * nag-fe-fetch ng detail JSON via historyDetail().
+     */
+    public function history(Request $request)
+    {
+        $q          = trim((string) $request->query('q', ''));
+        $userFilter = trim((string) $request->query('user', ''));
+        $modelFilter= trim((string) $request->query('model', ''));
+
+        $query = DB::table('gpt_ad_generations')
+            ->orderByDesc('created_at');
+
+        if ($q !== '') {
+            $like = '%'.mb_strtolower($q).'%';
+            $query->where(function ($w) use ($like) {
+                $w->whereRaw('LOWER(product_name) LIKE ?', [$like])
+                  ->orWhereRaw('LOWER(product_description) LIKE ?', [$like])
+                  ->orWhereRaw('LOWER(page_filter) LIKE ?', [$like])
+                  ->orWhereRaw('LOWER(item_filter) LIKE ?', [$like]);
+            });
+        }
+        if ($userFilter !== '') {
+            $query->where('user_email', $userFilter);
+        }
+        if ($modelFilter !== '') {
+            $query->where('model', $modelFilter);
+        }
+
+        $rows = $query->paginate(50)->appends($request->query());
+
+        // Distinct dropdown lists for filters
+        $allUsers  = DB::table('gpt_ad_generations')->whereNotNull('user_email')
+            ->distinct()->orderBy('user_email')->pluck('user_email')->toArray();
+        $allModels = DB::table('gpt_ad_generations')->whereNotNull('model')
+            ->distinct()->orderBy('model')->pluck('model')->toArray();
+
+        return view('gpt.gpt_ad_history', [
+            'rows'        => $rows,
+            'q'           => $q,
+            'userFilter'  => $userFilter,
+            'modelFilter' => $modelFilter,
+            'allUsers'    => $allUsers,
+            'allModels'   => $allModels,
+        ]);
+    }
+
+    /**
+     * GET /gpt-ad-generator/history/{id}
+     *
+     * JSON detail of a single past generation. Used by the history view's
+     * inline detail expand.
+     */
+    public function historyDetail(int $id)
+    {
+        $row = DB::table('gpt_ad_generations')->where('id', $id)->first();
+        if (!$row) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+        $row->output_variants = json_decode($row->output_variants ?? '[]', true) ?: [];
+        return response()->json($row);
+    }
+
+    /**
      * POST /api/generate-gpt-summary
      *
      * If `stream=1` AND `n=1` → returns text/event-stream (SSE) chunks of GPT

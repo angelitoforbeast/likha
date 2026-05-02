@@ -121,6 +121,9 @@
             <div class="gpt-card-title">⚙️ Generation Settings</div>
             <div class="gpt-card-subtitle">Configure the prompt + GPT model. Click Generate to run.</div>
           </div>
+          <a href="{{ route('gpt.history') }}" class="btn-ghost" title="Browse all past generations">
+            📚 History
+          </a>
         </div>
 
         <div class="flex-1 overflow-auto">

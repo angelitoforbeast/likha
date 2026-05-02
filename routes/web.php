@@ -107,6 +107,11 @@ Route::post('/assign-roles/{id}', [RoleAssignmentController::class, 'update']);
 Route::post('/api/generate-gpt-summary', [GPTAdGeneratorController::class, 'generate'])
     ->middleware('throttle:20,60');
 Route::get('/gpt-ad-generator', [GPTAdGeneratorController::class, 'showGeneratorForm']);
+Route::get('/gpt-ad-generator/history', [GPTAdGeneratorController::class, 'history'])
+    ->name('gpt.history');
+Route::get('/gpt-ad-generator/history/{id}', [GPTAdGeneratorController::class, 'historyDetail'])
+    ->whereNumber('id')
+    ->name('gpt.history.detail');
 // Suggestions are cached 5min, but still throttle to 60/min/IP for safety.
 Route::get('/ad-copy-suggestions', [GPTAdGeneratorController::class, 'loadAdCopySuggestions'])
     ->middleware('throttle:60,1')
