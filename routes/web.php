@@ -103,9 +103,14 @@ Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->midd
 Route::get('/assign-roles', [RoleAssignmentController::class, 'index']);
 Route::post('/assign-roles/{id}', [RoleAssignmentController::class, 'update']);
 
-Route::post('/api/generate-gpt-summary', [GPTAdGeneratorController::class, 'generate']);
+// 20 GPT generations per hour per IP — protects OpenAI billing from runaway loops.
+Route::post('/api/generate-gpt-summary', [GPTAdGeneratorController::class, 'generate'])
+    ->middleware('throttle:20,60');
 Route::get('/gpt-ad-generator', [GPTAdGeneratorController::class, 'showGeneratorForm']);
-Route::get('/ad-copy-suggestions', [GPTAdGeneratorController::class, 'loadAdCopySuggestions'])->name('gpt.suggestions');
+// Suggestions are cached 5min, but still throttle to 60/min/IP for safety.
+Route::get('/ad-copy-suggestions', [GPTAdGeneratorController::class, 'loadAdCopySuggestions'])
+    ->middleware('throttle:60,1')
+    ->name('gpt.suggestions');
 
 // ✅ Ondel Counter
 Route::get('/jnt/ondel', [JntOndelController::class, 'index'])->name('jnt.ondel');

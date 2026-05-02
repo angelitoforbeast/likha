@@ -37,7 +37,9 @@ return [
 
     'openai' => [
     'key'   => env('OPENAI_API_KEY'),
-    'model' => env('OPENAI_MODEL', 'gpt-4o-mini'), // may default para safe
+    // Default to gpt-4o (faster + cheaper than gpt-4, comparable quality for
+    // structured ad-copy output). Set OPENAI_MODEL in .env to override.
+    'model' => env('OPENAI_MODEL', 'gpt-4o'),
 ],
 
     'automation' => [

@@ -6,64 +6,235 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class GPTAdGeneratorController extends Controller
 {
-    /** POST /api/generate-gpt-summary */
-    // app/Http/Controllers/GPTAdGeneratorController.php
-public function generate(Request $request)
-{
-    $request->validate([
-        'prompt' => 'required|string',
-    ]);
-
-    $prompt = $request->input('prompt');
-
-    try {
-        $response = Http::withToken(env('OPENAI_API_KEY'))->post('https://api.openai.com/v1/chat/completions', [
-            'model' => 'gpt-4',
-            'messages' => [
-                [
-                    'role' => 'system',
-                    'content' => implode("\n", [
-                        'You are a performance-focused Facebook Ads copywriter.',
-                        // ✅ REFERENCE MODE, not strict
-                        'Treat the "=== Suggestions" block as style/structure/length REFERENCE only.',
-                        'Prefer tone/phrasing and structural patterns seen in TOP-PERFORMING items; avoid WORST patterns.',
-                        'Mirror the typical length of TOP-PERFORMING samples for Primary Text and Messaging Template.',
-                        'You MAY adapt or create new Quick Replies that reduce friction; keep them short. Do NOT copy QR1–QR3 verbatim unless they are already optimal.',
-                        // ✅ Guardrails
-                        'Do NOT invent details (colors/sizes/fit/materials/variants/bundles/warranty/COD/delivery/promos/price) unless explicitly present in Suggestions or the Product Description.',
-                        // ✅ Output shape
-                        'Output EXACTLY one single line with 7 tab-separated fields: Item, Primary Text, Headline, Messaging Template, Quick Reply 1, Quick Reply 2, Quick Reply 3.',
-                        'Never add headers, labels, explanations, or extra lines.',
-                    ]),
-                ],
-                ['role' => 'user', 'content' => $prompt],
-            ],
-            // Slightly more creative para hindi paulit-ulit ang QR
-            'temperature' => 0.5,
-            'max_tokens' => 500,
+    /**
+     * POST /api/generate-gpt-summary
+     *
+     * If `stream=1` AND `n=1` → returns text/event-stream (SSE) chunks of GPT
+     * deltas as they arrive. After the stream completes, history row is
+     * inserted server-side. Otherwise → returns JSON with `variants[]`.
+     */
+    public function generate(Request $request)
+    {
+        $request->validate([
+            'prompt'              => 'required|string',
+            'temperature'         => 'sometimes|numeric|min:0|max:2',
+            'n'                   => 'sometimes|integer|min:1|max:5',
+            'stream'              => 'sometimes|boolean',
+            'product_name'        => 'sometimes|string|max:255',
+            'product_description' => 'sometimes|string',
+            'page_filter'         => 'sometimes|string|max:255|nullable',
+            'item_filter'         => 'sometimes|string|max:255|nullable',
+            'active_only'         => 'sometimes|boolean',
         ]);
 
-        if ($response->successful()) {
+        $prompt        = $request->input('prompt');
+        $temperature   = (float) $request->input('temperature', 0.5);
+        $n             = (int)   $request->input('n', 1);
+        $streamWanted  = (bool)  $request->input('stream', false);
+        $stream        = $streamWanted && $n === 1; // SSE only when single variant
+        $model         = config('services.openai.model', 'gpt-4o');
+
+        $payload = [
+            'model'       => $model,
+            'messages'    => [
+                ['role' => 'system', 'content' => $this->systemPrompt()],
+                ['role' => 'user',   'content' => $prompt],
+            ],
+            'temperature' => $temperature,
+            'max_tokens'  => 500,
+            'n'           => $n,
+        ];
+
+        $context = [
+            'product_name'        => (string) $request->input('product_name', ''),
+            'product_description' => (string) $request->input('product_description', ''),
+            'page_filter'         => $request->input('page_filter') ?: null,
+            'item_filter'         => $request->input('item_filter') ?: null,
+            'active_only'         => (bool) $request->input('active_only', true),
+            'temperature'         => $temperature,
+            'variants_requested'  => $n,
+            'final_prompt'        => $prompt,
+            'model'               => $model,
+        ];
+
+        if ($stream) {
+            return $this->generateStreaming($payload, $context);
+        }
+
+        return $this->generateJson($payload, $context);
+    }
+
+    /** Non-streaming path — single OpenAI call, returns JSON with variants[]. */
+    private function generateJson(array $payload, array $context)
+    {
+        try {
+            $response = Http::withToken(env('OPENAI_API_KEY'))
+                ->timeout(60)
+                ->post('https://api.openai.com/v1/chat/completions', $payload);
+
+            if (!$response->successful()) {
+                return response()->json([
+                    'output' => '❌ GPT request failed.',
+                    'error'  => $response->body(),
+                ], 500);
+            }
+
+            $variants = collect($response['choices'] ?? [])
+                ->map(fn ($c) => trim($c['message']['content'] ?? ''))
+                ->filter()
+                ->values()
+                ->all();
+
+            $historyId = $this->logGeneration($context, $variants);
+
             return response()->json([
-                'output' => $response['choices'][0]['message']['content'] ?? 'No output from GPT.',
+                'output'     => $variants[0] ?? 'No output from GPT.',
+                'variants'   => $variants,
+                'model'      => $payload['model'] ?? null,
+                'history_id' => $historyId,
             ]);
-        } else {
+        } catch (\Exception $e) {
+            Log::error('GPT Exception: ' . $e->getMessage());
             return response()->json([
-                'output' => '❌ GPT request failed.',
-                'error' => $response->body(),
+                'output' => '❌ Server error occurred.',
+                'error'  => $e->getMessage(),
             ], 500);
         }
-    } catch (\Exception $e) {
-        \Log::error('GPT Exception: ' . $e->getMessage());
-        return response()->json([
-            'output' => '❌ Server error occurred.',
-            'error' => $e->getMessage(),
-        ], 500);
     }
-}
+
+    /**
+     * Streaming path — opens an SSE response and forwards OpenAI delta chunks
+     * to the client as they arrive. After the upstream stream ends, the full
+     * accumulated text is logged to gpt_ad_generations.
+     *
+     * Uses Guzzle's stream option for clean chunked reads. Callers should
+     * disable PHP output buffering at the server level for true low-latency
+     * streaming (e.g. set `output_buffering = Off` in php.ini, or
+     * `fastcgi_buffering off` in nginx).
+     */
+    private function generateStreaming(array $payload, array $context): StreamedResponse
+    {
+        $payload['stream'] = true;
+
+        $response = new StreamedResponse(function () use ($payload, $context) {
+            // Disable PHP output buffering so chunks reach the client live.
+            @ob_implicit_flush(true);
+            while (ob_get_level() > 0) @ob_end_flush();
+
+            $accumulated = '';
+
+            try {
+                $upstream = Http::withToken(env('OPENAI_API_KEY'))
+                    ->timeout(120)
+                    ->withOptions(['stream' => true])
+                    ->post('https://api.openai.com/v1/chat/completions', $payload);
+
+                $body = $upstream->toPsrResponse()->getBody();
+                $buffer = '';
+
+                while (!$body->eof()) {
+                    $chunk = $body->read(4096);
+                    if ($chunk === '' || $chunk === false) continue;
+                    $buffer .= $chunk;
+
+                    // OpenAI sends events separated by "\n\n". Process complete events,
+                    // keep incomplete tail in buffer.
+                    while (($pos = strpos($buffer, "\n\n")) !== false) {
+                        $event = substr($buffer, 0, $pos);
+                        $buffer = substr($buffer, $pos + 2);
+
+                        foreach (explode("\n", $event) as $line) {
+                            $line = trim($line);
+                            if ($line === '' || !str_starts_with($line, 'data:')) continue;
+                            $json = trim(substr($line, 5));
+                            if ($json === '[DONE]') {
+                                echo "data: [DONE]\n\n";
+                                @flush();
+                                continue;
+                            }
+                            $data = json_decode($json, true);
+                            $delta = $data['choices'][0]['delta']['content'] ?? '';
+                            if ($delta !== '') {
+                                $accumulated .= $delta;
+                                echo 'data: ' . json_encode(['delta' => $delta], JSON_UNESCAPED_UNICODE) . "\n\n";
+                                @flush();
+                            }
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::error('GPT streaming exception: ' . $e->getMessage());
+                echo 'data: ' . json_encode(['error' => $e->getMessage()], JSON_UNESCAPED_UNICODE) . "\n\n";
+                @flush();
+            }
+
+            // Persist after stream ends (best-effort).
+            try {
+                $accumulated = trim($accumulated);
+                if ($accumulated !== '') {
+                    $this->logGeneration($context, [$accumulated]);
+                }
+            } catch (\Throwable $e) {
+                Log::error('GPT streaming log error: ' . $e->getMessage());
+            }
+        });
+
+        $response->headers->set('Content-Type', 'text/event-stream');
+        $response->headers->set('Cache-Control', 'no-cache');
+        $response->headers->set('X-Accel-Buffering', 'no'); // nginx: don't buffer
+        return $response;
+    }
+
+    /** System prompt content — pulled out to share between JSON + streaming paths. */
+    private function systemPrompt(): string
+    {
+        return implode("\n", [
+            'You are a performance-focused Facebook Ads copywriter.',
+            'Treat the "=== Suggestions" block as style/structure/length REFERENCE only.',
+            'Prefer tone/phrasing and structural patterns seen in TOP-PERFORMING items; avoid WORST patterns.',
+            'Mirror the typical length of TOP-PERFORMING samples for Primary Text and Messaging Template.',
+            'You MAY adapt or create new Quick Replies that reduce friction; keep them short. Do NOT copy QR1–QR3 verbatim unless they are already optimal.',
+            'Do NOT invent details (colors/sizes/fit/materials/variants/bundles/warranty/COD/delivery/promos/price) unless explicitly present in Suggestions or the Product Description.',
+            'Output EXACTLY one single line with 7 tab-separated fields: Item, Primary Text, Headline, Messaging Template, Quick Reply 1, Quick Reply 2, Quick Reply 3.',
+            'Never add headers, labels, explanations, or extra lines.',
+        ]);
+    }
+
+    /**
+     * Insert a row into gpt_ad_generations. Best-effort — failures are logged
+     * but not surfaced to the user. Returns inserted id or null.
+     */
+    private function logGeneration(array $context, array $variants): ?int
+    {
+        if (!Schema::hasTable('gpt_ad_generations')) return null;
+        try {
+            return DB::table('gpt_ad_generations')->insertGetId([
+                'user_email'         => Auth::user()?->email,
+                'product_name'       => $context['product_name'] ?? '',
+                'product_description'=> $context['product_description'] ?? '',
+                'page_filter'        => $context['page_filter'] ?? null,
+                'item_filter'        => $context['item_filter'] ?? null,
+                'active_only'        => (bool) ($context['active_only'] ?? true),
+                'temperature'        => $context['temperature'] ?? null,
+                'variants_requested' => $context['variants_requested'] ?? 1,
+                'final_prompt'       => $context['final_prompt'] ?? null,
+                'output_variants'    => json_encode(array_values($variants), JSON_UNESCAPED_UNICODE),
+                'model'              => $context['model'] ?? null,
+                'created_at'         => now(),
+                'updated_at'         => now(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('logGeneration error: ' . $e->getMessage());
+            return null;
+        }
+    }
 
 
 
@@ -80,18 +251,69 @@ public function generate(Request $request)
         $pages = collect($rawPages)->map(fn ($p) => $this->normalizePage($p))
             ->filter()->unique()->sort()->values()->toArray();
 
-        return view('gpt.gpt_ad_generator', compact('promptText', 'pages'));
+        // Distinct items from ads_manager_reports.item_name (for the new
+        // item filter dropdown). Normalized + de-duped same as pages.
+        $rawItems = DB::table('ads_manager_reports')
+            ->whereNotNull('item_name')
+            ->where('item_name', '<>', '')
+            ->pluck('item_name');
+
+        $items = collect($rawItems)->map(fn ($i) => $this->normalizePage($i))
+            ->filter()->unique()->sort()->values()->toArray();
+
+        return view('gpt.gpt_ad_generator', compact('promptText', 'pages', 'items'));
     }
 
-    /** GET /ad-copy-suggestions?page={page|all} */
+    /**
+     * GET /ad-copy-suggestions?page={page|all}&item={item|all}&active_only={0|1}
+     *
+     * Cached 5 minutes per (page, item, active_only) combo.
+     */
     public function loadAdCopySuggestions(Request $request)
     {
-        try {
-            $pageParam = $request->query('page');
-            $pageNorm  = $this->normalizePage(is_string($pageParam) ? $pageParam : '');
-            $applyPage = $pageNorm !== '' && mb_strtolower($pageNorm) !== 'all';
+        $pageParam  = (string) $request->query('page', 'all');
+        $itemParam  = (string) $request->query('item', 'all');
+        $activeOnly = (string) $request->query('active_only', '1') === '1';
 
-            // If filtering by page, resolve to the exact RAW page_name variants that normalize to $pageNorm
+        $pageNorm = $this->normalizePage($pageParam);
+        $itemNorm = $this->normalizePage($itemParam);
+
+        $cacheKey = sprintf(
+            'gpt_suggestions:%s:%s:%d',
+            mb_strtolower($pageNorm !== '' ? $pageNorm : 'all'),
+            mb_strtolower($itemNorm !== '' ? $itemNorm : 'all'),
+            $activeOnly ? 1 : 0
+        );
+
+        try {
+            $payload = Cache::remember($cacheKey, 300 /* 5 min */, function () use ($pageNorm, $itemNorm, $activeOnly) {
+                return $this->buildSuggestions($pageNorm, $itemNorm, $activeOnly);
+            });
+        } catch (\Throwable $e) {
+            Log::error('loadAdCopySuggestions cache error', ['msg' => $e->getMessage()]);
+            $payload = ['output' => '❌ Server error occurred.', 'error' => $e->getMessage()];
+        }
+
+        return response()->json($payload, 200, [], JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * Build the CPM-ranked suggestions payload. Pure function (no request);
+     * extracted so it's cache-friendly and can be called recursively for the
+     * active→all-time fallback.
+     *
+     * Returns: ['output' => string] or ['output' => warning] when empty.
+     * When fallback was used (active had no data), also includes
+     * 'fallback_used' => true and 'fallback_reason' => string.
+     */
+    private function buildSuggestions(string $pageNorm, string $itemNorm, bool $activeOnly): array
+    {
+        try {
+            $applyPage = $pageNorm !== '' && mb_strtolower($pageNorm) !== 'all';
+            $applyItem = $itemNorm !== '' && mb_strtolower($itemNorm) !== 'all';
+
+            // Resolve raw page_name strings that normalize to $pageNorm (covers
+            // NBSP / whitespace variants in the DB).
             $rawMatches = null;
             if ($applyPage) {
                 $rawPages = DB::table('ads_manager_reports')
@@ -103,20 +325,42 @@ public function generate(Request $request)
                 $rawMatches = [];
                 foreach ($rawPages as $rp) {
                     if ($this->normalizePage($rp) === $pageNorm) {
-                        $rawMatches[] = $rp; // exact raw string stored in DB
+                        $rawMatches[] = $rp;
                     }
                 }
 
                 if (empty($rawMatches)) {
-                    return response()->json([
-                        'output' => "⚠️ No matching page found for “{$pageNorm}”."
-                    ], 200, [], JSON_UNESCAPED_UNICODE);
+                    return ['output' => "⚠️ No matching page found for “{$pageNorm}”."];
                 }
             }
 
-            // 1) Aggregate reports (NO SQL REPLACE/UNHEX)
+            // Active-set filter: subquery of ad_set_ids whose ad_set_delivery
+            // is 'active%' on its latest day. Mirrors AdsManagerCampaignsController.
+            $activeAdSets = null;
+            if ($activeOnly) {
+                $latestAdSetDay = DB::table('ads_manager_reports')
+                    ->selectRaw('ad_set_id, MAX(`day`) AS latest_day')
+                    ->whereNotNull('ad_set_id')
+                    ->groupBy('ad_set_id');
+
+                $activeAdSets = DB::table(DB::raw('ads_manager_reports a'))
+                    ->joinSub($latestAdSetDay, 't', function ($j) {
+                        $j->on('a.ad_set_id', '=', 't.ad_set_id')
+                          ->whereRaw('a.`day` = t.latest_day');
+                    })
+                    ->whereRaw("LOWER(TRIM(a.ad_set_delivery)) LIKE 'active%'")
+                    ->select('a.ad_set_id')
+                    ->distinct();
+            }
+
+            // 1) Aggregate reports
             $reports = DB::table('ads_manager_reports as r')
                 ->when($applyPage, fn ($q) => $q->whereIn('r.page_name', $rawMatches))
+                ->when($applyItem, fn ($q) => $q->whereRaw(
+                    'LOWER(COALESCE(r.item_name, \'\')) LIKE ?',
+                    ['%'.mb_strtolower($itemNorm).'%']
+                ))
+                ->when($activeAdSets, fn ($q) => $q->whereIn('r.ad_set_id', $activeAdSets))
                 ->whereNotNull('r.ad_id')
                 ->where('r.ad_id', '<>', '')
                 ->select([
@@ -129,9 +373,18 @@ public function generate(Request $request)
                 ->havingRaw('SUM(COALESCE(r.messaging_conversations_started, 0)) > 0')
                 ->get();
 
+            // Fallback: if active-only returned nothing, retry without the
+            // active filter and tag the response so the UI can show a banner.
+            if ($reports->isEmpty() && $activeOnly) {
+                $fallback = $this->buildSuggestions($pageNorm, $itemNorm, false);
+                $fallback['fallback_used']   = true;
+                $fallback['fallback_reason'] = 'No active ads found for this scope. Showing all-time data instead.';
+                return $fallback;
+            }
+
             if ($reports->isEmpty()) {
-                $scope = $applyPage ? " for “{$pageNorm}”" : "";
-                return response()->json(['output' => "⚠️ No valid ad reports found{$scope}."], 200, [], JSON_UNESCAPED_UNICODE);
+                $scope = $this->scopeLabel($pageNorm, $itemNorm, $activeOnly);
+                return ['output' => "⚠️ No valid ad reports found{$scope}."];
             }
 
             // 2) Fetch creatives by ad_id
@@ -183,8 +436,8 @@ public function generate(Request $request)
             ->values();
 
             if ($rows->isEmpty()) {
-                $scope = $applyPage ? " for “{$pageNorm}”" : "";
-                return response()->json(['output' => "⚠️ No valid ad data found{$scope}."], 200, [], JSON_UNESCAPED_UNICODE);
+                $scope = $this->scopeLabel($pageNorm, $itemNorm, $activeOnly);
+                return ['output' => "⚠️ No valid ad data found{$scope}."];
             }
 
             // 4) Rankings/stats from FILTERED set only
@@ -224,14 +477,24 @@ public function generate(Request $request)
                 return implode("\n", $lines);
             })->values()->implode("\n\n");
 
-            return response()->json(['output' => $out], 200, [], JSON_UNESCAPED_UNICODE);
+            return ['output' => $out, 'fallback_used' => false];
         } catch (\Throwable $e) {
-            Log::error('loadAdCopySuggestions error', ['msg' => $e->getMessage()]);
-            return response()->json([
+            Log::error('buildSuggestions error', ['msg' => $e->getMessage()]);
+            return [
                 'output' => '❌ Server error occurred.',
                 'error'  => $e->getMessage(),
-            ], 500, [], JSON_UNESCAPED_UNICODE);
+            ];
         }
+    }
+
+    /** Human-readable scope label for "no data" warning messages. */
+    private function scopeLabel(string $pageNorm, string $itemNorm, bool $activeOnly): string
+    {
+        $parts = [];
+        if ($pageNorm !== '' && mb_strtolower($pageNorm) !== 'all') $parts[] = "page “{$pageNorm}”";
+        if ($itemNorm !== '' && mb_strtolower($itemNorm) !== 'all') $parts[] = "item “{$itemNorm}”";
+        if ($activeOnly) $parts[] = 'active ads only';
+        return $parts ? ' for ' . implode(', ', $parts) : '';
     }
 
     /** Helpers */
