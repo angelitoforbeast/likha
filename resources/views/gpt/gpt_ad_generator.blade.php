@@ -58,30 +58,76 @@
     /* Filter "chips" preview */
     .gpt-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; background:#eef2ff; color:#4338ca; }
 
-    /* Output table — fixed layout so cells wrap instead of forcing horizontal scroll */
-    .gpt-output-wrap { width:100%; overflow-x:hidden; }
-    .gpt-output-table {
-      width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0; font-size:12.5px;
+    /* Output card layout — replaces the wide table. One card per variant. */
+    .v-card {
+      background:#fff; border:1px solid #e5e7eb; border-radius:10px;
+      padding:12px 14px; margin-bottom:10px;
+      transition:border-color 0.12s, box-shadow 0.12s;
     }
-    .gpt-output-table thead th {
-      position:sticky; top:0; z-index:1;
-      background:#f8fafc; color:#475569; font-weight:600; font-size:10.5px;
-      text-transform:uppercase; letter-spacing:0.04em;
-      padding:9px 10px; border-bottom:2px solid #e2e8f0; text-align:left;
+    .v-card:hover { border-color:#c7d2fe; box-shadow:0 2px 6px rgba(99,102,241,0.06); }
+    .v-card-head {
+      display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:10px; padding-bottom:8px; border-bottom:1px dashed #e2e8f0;
     }
-    .gpt-output-table tbody td {
-      padding:8px 10px; border-bottom:1px solid #f1f5f9; color:#0f172a;
-      vertical-align:top; word-wrap:break-word; overflow-wrap:break-word; white-space:normal;
+    .v-card-head .v-no { font-size:10px; font-weight:700; color:#4338ca; text-transform:uppercase; letter-spacing:0.06em; }
+    .v-card-head .v-item { font-size:14px; font-weight:600; color:#0f172a; margin-left:8px; }
+    .v-grid {
+      display:grid; grid-template-columns:1.1fr 1.4fr 0.9fr; gap:14px;
     }
-    .gpt-output-table tbody tr:hover td { background:#f8fafc; }
-    .gpt-output-table tbody tr:last-child td { border-bottom:none; }
-    /* Column widths — proportional, last (action) is fixed */
-    .gpt-output-table colgroup col.c-item    { width:9%; }
-    .gpt-output-table colgroup col.c-primary { width:22%; }
-    .gpt-output-table colgroup col.c-head    { width:14%; }
-    .gpt-output-table colgroup col.c-msg     { width:21%; }
-    .gpt-output-table colgroup col.c-qr      { width:9%; }
-    .gpt-output-table colgroup col.c-action  { width:74px; }
+    @media (max-width: 900px) {
+      .v-grid { grid-template-columns:1fr; }
+    }
+    .v-cell { display:flex; flex-direction:column; gap:8px; }
+    .v-field-label {
+      font-size:9.5px; font-weight:700; color:#64748b;
+      text-transform:uppercase; letter-spacing:0.06em; margin-bottom:2px;
+    }
+    .v-field-value {
+      font-size:12.5px; color:#0f172a; line-height:1.5; word-wrap:break-word;
+    }
+    /* Messaging template needs preserved newlines */
+    .v-field-value.preserve { white-space:pre-wrap; }
+    .v-field-block { padding:8px 10px; background:#f8fafc; border-radius:6px; border:1px solid #f1f5f9; }
+    .v-qr-list { display:flex; flex-direction:column; gap:6px; }
+    .v-qr {
+      padding:6px 10px; background:#eef2ff; border-radius:999px;
+      font-size:11.5px; color:#3730a3; font-weight:500;
+    }
+    .v-qr.empty { background:#f1f5f9; color:#94a3b8; font-style:italic; }
+    .v-empty {
+      padding:36px; text-align:center; color:#94a3b8; font-size:13px; font-style:italic;
+    }
+
+    /* Resize handles */
+    .resize-h {
+      width:6px; cursor:col-resize; background:transparent; flex-shrink:0;
+      transition:background 0.15s; position:relative;
+    }
+    .resize-h:hover, .resize-h.dragging { background:#c7d2fe; }
+    .resize-h::before {
+      content:''; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+      width:2px; height:36px; background:#cbd5e1; border-radius:2px;
+    }
+    .resize-h:hover::before, .resize-h.dragging::before { background:#6366f1; }
+
+    .resize-v {
+      height:6px; cursor:row-resize; background:transparent; flex-shrink:0;
+      transition:background 0.15s; position:relative;
+    }
+    .resize-v:hover, .resize-v.dragging { background:#c7d2fe; }
+    .resize-v::before {
+      content:''; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+      width:36px; height:2px; background:#cbd5e1; border-radius:2px;
+    }
+    .resize-v:hover::before, .resize-v.dragging::before { background:#6366f1; }
+    body.is-resizing { user-select:none; cursor:col-resize; }
+    body.is-resizing-v { user-select:none; cursor:row-resize; }
+
+    /* Save prompt button */
+    .save-prompt-row { display:flex; align-items:center; gap:8px; margin-top:6px; }
+    .save-prompt-status { font-size:11px; color:#64748b; }
+    .save-prompt-status.ok { color:#16a34a; }
+    .save-prompt-status.err { color:#dc2626; }
 
     /* Suggestions box: monospace-ish for ad copy readability */
     #suggestionsBox {
@@ -110,12 +156,15 @@
     .gpt-action-bar .pill-input select:focus { outline:none; }
   </style>
 
-  <!-- Viewport-fitting wrapper: height set via JS to avoid page scrollbars -->
-  <div id="viewportFit" class="w-full flex flex-col gap-4 overflow-hidden">
-    <!-- TOP: Left (Inputs) + Right (Suggestions). Form takes ~40%, suggestions ~60% on wide screens. -->
-    <div id="topGrid" class="grid md:grid-cols-5 gap-4 overflow-hidden" style="height:auto;">
-      <!-- LEFT: Inputs -->
-      <div id="leftCard" class="gpt-card h-full flex flex-col overflow-hidden md:col-span-2">
+  <!-- Viewport-fitting wrapper. Layout:
+       [ left column ] [ resize-h ] [ right column ]
+       Left column = Settings (top) + resize-v + Suggestions (bottom).
+       Right column = GPT Output card (full height). All 3 panels resizable. -->
+  <div id="viewportFit" class="w-full flex overflow-hidden" style="gap:0;">
+    <!-- LEFT COLUMN -->
+    <div id="leftCol" class="flex flex-col overflow-hidden" style="width:42%; min-width:320px;">
+      <!-- Settings card -->
+      <div id="leftCard" class="gpt-card flex flex-col overflow-hidden" style="height:55%; min-height:200px;">
         <div class="gpt-card-header">
           <div>
             <div class="gpt-card-title">⚙️ Generation Settings</div>
@@ -211,6 +260,10 @@
           <div class="gpt-section">
             <div class="gpt-section-label">Custom Prompt</div>
             <textarea id="prompt" class="gpt-textarea text-xs" rows="7">{{ $promptText }}</textarea>
+            <div class="save-prompt-row">
+              <button onclick="saveCustomPrompt()" class="btn-secondary" style="padding:5px 12px;font-size:11.5px;">💾 Save as default</button>
+              <span id="savePromptStatus" class="save-prompt-status"></span>
+            </div>
             <details class="mt-2 text-sm">
               <summary class="cursor-pointer text-slate-500 hover:text-slate-700 text-xs">👁 Preview final prompt (debug)</summary>
               <textarea id="finalPromptPreview" class="mt-2 gpt-textarea text-xs" rows="6" readonly></textarea>
@@ -247,8 +300,11 @@
         </div>
       </div>
 
-      <!-- RIGHT: Suggestions -->
-      <div id="sugCard" class="gpt-card h-full flex flex-col overflow-hidden md:col-span-3">
+      <!-- Vertical resize handle between Settings and Suggestions -->
+      <div id="resizeV" class="resize-v" title="Drag to resize"></div>
+
+      <!-- Suggestions card (lower part of left column) -->
+      <div id="sugCard" class="gpt-card flex flex-col overflow-hidden" style="height:45%; min-height:140px;">
         <div class="gpt-card-header">
           <div>
             <div class="gpt-card-title">💡 Suggestions <span class="text-slate-400 font-normal">(auto-fed)</span></div>
@@ -266,42 +322,23 @@
       </div>
     </div>
 
-    <!-- BOTTOM: FULL-WIDTH OUTPUT TABLE -->
-    <div id="outputWrap" class="flex-1 overflow-hidden" style="height:auto;">
-      <div id="outputBox" class="gpt-card h-full flex flex-col overflow-hidden hidden">
+    <!-- Horizontal resize handle between left column and right column -->
+    <div id="resizeH" class="resize-h" title="Drag to resize"></div>
+
+    <!-- RIGHT COLUMN: GPT Output (full height) -->
+    <div id="outputWrap" class="flex-1 overflow-hidden">
+      <div id="outputBox" class="gpt-card h-full flex flex-col overflow-hidden">
         <div class="gpt-card-header">
           <div>
             <div class="gpt-card-title">📋 GPT Output</div>
-            <div class="gpt-card-subtitle"><span id="variantCountLabel">0</span> variant(s) generated · click <span class="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded">📋 Use</span> to copy a single row, or Copy All for all rows tab-separated.</div>
+            <div class="gpt-card-subtitle"><span id="variantCountLabel">0</span> variant(s) generated · click <span class="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded">📋 Use</span> per card to copy, or Copy All for tab-separated rows.</div>
           </div>
           <button onclick="copyOutput()" class="btn-secondary">📋 Copy All</button>
         </div>
-        <div class="flex-1 overflow-y-auto overflow-x-hidden gpt-output-wrap">
-          <table class="gpt-output-table" id="gptOutputTable">
-            <colgroup>
-              <col class="c-item">
-              <col class="c-primary">
-              <col class="c-head">
-              <col class="c-msg">
-              <col class="c-qr">
-              <col class="c-qr">
-              <col class="c-qr">
-              <col class="c-action">
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Primary Text</th>
-                <th>Headline</th>
-                <th>Messaging Template</th>
-                <th>QR 1</th>
-                <th>QR 2</th>
-                <th>QR 3</th>
-                <th class="text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody id="gptOutputBody"></tbody>
-          </table>
+        <div class="flex-1 overflow-auto p-3" id="outputCardsWrap">
+          <div id="gptOutputBody">
+            <div class="v-empty">Click 🚀 Generate to create ad copy variants. They'll appear here as cards.</div>
+          </div>
         </div>
       </div>
     </div>
@@ -319,26 +356,78 @@
 [/SUGGESTION-STRICT MODE]
 `.trim();
 
-    // ===== Height management to fit entire UI inside viewport (no page scrollbars) =====
+    // ===== Height management — fit the whole UI inside the viewport.
+    // Layout = horizontal split (leftCol vs outputWrap) with handle in between.
+    // leftCol is itself a vertical split (leftCard + sugCard).
     function computeLayoutHeights() {
       const root = document.getElementById('viewportFit');
-      const topGrid = document.getElementById('topGrid');
-      const outputWrap = document.getElementById('outputWrap');
-      if (!root || !topGrid || !outputWrap) return;
-
+      if (!root) return;
       const topOffset = root.getBoundingClientRect().top;
-      const gapFallback = 16; // ~gap-4
-      const rootStyles = getComputedStyle(root);
-      const rootGap = parseFloat(rootStyles.gap || rootStyles.rowGap || gapFallback) || gapFallback;
-
       const available = Math.max(480, Math.round(window.innerHeight - topOffset - 8));
       root.style.height = available + 'px';
+    }
 
-      const topH = Math.max(260, Math.round(available * 0.56));
-      const bottomH = Math.max(220, available - topH - rootGap);
+    // ===== Resizable panels =====
+    function setupResizers() {
+      const root = document.getElementById('viewportFit');
+      const leftCol = document.getElementById('leftCol');
+      const leftCard = document.getElementById('leftCard');
+      const sugCard = document.getElementById('sugCard');
+      const handleH = document.getElementById('resizeH');
+      const handleV = document.getElementById('resizeV');
 
-      topGrid.style.height = topH + 'px';
-      outputWrap.style.height = bottomH + 'px';
+      // Horizontal: drag handleH to resize leftCol vs outputWrap.
+      if (handleH && leftCol && root) {
+        let dragging = false;
+        handleH.addEventListener('mousedown', (e) => {
+          dragging = true;
+          handleH.classList.add('dragging');
+          document.body.classList.add('is-resizing');
+          e.preventDefault();
+        });
+        window.addEventListener('mousemove', (e) => {
+          if (!dragging) return;
+          const rect = root.getBoundingClientRect();
+          const offset = e.clientX - rect.left;
+          const min = 280, max = rect.width - 320;
+          const newWidth = Math.min(max, Math.max(min, offset));
+          leftCol.style.width = newWidth + 'px';
+        });
+        window.addEventListener('mouseup', () => {
+          if (!dragging) return;
+          dragging = false;
+          handleH.classList.remove('dragging');
+          document.body.classList.remove('is-resizing');
+        });
+      }
+
+      // Vertical: drag handleV inside leftCol to resize leftCard vs sugCard.
+      if (handleV && leftCard && sugCard && leftCol) {
+        let dragging = false;
+        handleV.addEventListener('mousedown', (e) => {
+          dragging = true;
+          handleV.classList.add('dragging');
+          document.body.classList.add('is-resizing-v');
+          e.preventDefault();
+        });
+        window.addEventListener('mousemove', (e) => {
+          if (!dragging) return;
+          const rect = leftCol.getBoundingClientRect();
+          const offset = e.clientY - rect.top;
+          const handleSize = 6;
+          const min = 140, max = rect.height - 140 - handleSize;
+          const topH = Math.min(max, Math.max(min, offset));
+          const botH = rect.height - topH - handleSize;
+          leftCard.style.height = topH + 'px';
+          sugCard.style.height = botH + 'px';
+        });
+        window.addEventListener('mouseup', () => {
+          if (!dragging) return;
+          dragging = false;
+          handleV.classList.remove('dragging');
+          document.body.classList.remove('is-resizing-v');
+        });
+      }
     }
 
     window.addEventListener('resize', computeLayoutHeights);
@@ -346,6 +435,7 @@
       computeLayoutHeights();
       setTimeout(computeLayoutHeights, 0);
       setTimeout(computeLayoutHeights, 200);
+      setupResizers();
       if (typeof syncStreamCheckbox === 'function') syncStreamCheckbox();
     });
 
@@ -367,41 +457,98 @@
       else { cb.disabled = false; }
     }
 
-    // Render an array of 7-tab-separated variant strings into output rows.
-    // Each row gets a "Use this" copy button.
+    // Normalize a raw GPT variant string. GPT sometimes outputs literal
+    // backslash-t / backslash-n (e.g. "Item \t Primary \t ...") instead of
+    // real tabs/newlines. Convert to actual control chars so split + display
+    // work correctly. Keep the original string accessible via data-raw too.
+    function normalizeVariant(raw) {
+      if (raw === null || raw === undefined) return "";
+      return String(raw)
+        .replace(/\\t/g, "\t")
+        .replace(/\\n/g, "\n")
+        .trim();
+    }
+
+    // Render an array of variant strings as cards. 3-column grid per card:
+    //   col 1: Primary Text (top) + Headline (bottom)
+    //   col 2: Messaging Template (preserves line breaks)
+    //   col 3: Q1, Q2, Q3 stacked
+    // "Use" button copies just that variant tab-separated.
     function renderVariants(variants) {
       const body = document.getElementById("gptOutputBody");
       const countLabel = document.getElementById("variantCountLabel");
       if (countLabel) countLabel.textContent = (variants && variants.length) || 0;
 
       if (!variants || variants.length === 0) {
-        body.innerHTML = `<tr><td colspan="8" style="color:#dc2626;text-align:center;padding:18px;">⚠️ GPT did not return a result.</td></tr>`;
+        body.innerHTML = `<div class="v-empty" style="color:#dc2626;">⚠️ GPT did not return a result.</div>`;
         return;
       }
-      body.innerHTML = variants.map((v, idx) => {
-        const parts = (v || "").split("\t");
-        const cells = [0,1,2,3,4,5,6].map(i => `<td>${escapeHtml(parts[i] ?? "")}</td>`).join("");
+
+      body.innerHTML = variants.map((rawV, idx) => {
+        const v = normalizeVariant(rawV);
+        const parts = v.split("\t");
+        const item    = parts[0] ?? "";
+        const primary = parts[1] ?? "";
+        const headline= parts[2] ?? "";
+        const message = parts[3] ?? "";
+        const q1      = parts[4] ?? "";
+        const q2      = parts[5] ?? "";
+        const q3      = parts[6] ?? "";
+
+        const qrCell = (label, val) => val
+          ? `<div class="v-qr"><strong style="opacity:0.65;font-size:10px;letter-spacing:0.04em;">${label}</strong> ${escapeHtml(val)}</div>`
+          : `<div class="v-qr empty">${label} — empty —</div>`;
+
         return `
-          <tr data-variant="${idx}">
-            ${cells}
-            <td class="text-center">
-              <button onclick="copyVariant(${idx})"
-                      class="btn-secondary"
-                      style="padding:4px 10px;font-size:11px;">
+          <div class="v-card" data-variant="${idx}" data-raw="${escapeHtml(v)}">
+            <div class="v-card-head">
+              <div>
+                <span class="v-no">Variant ${idx + 1}</span>
+                <span class="v-item">${escapeHtml(item) || '<span style="color:#94a3b8;">(no item)</span>'}</span>
+              </div>
+              <button onclick="copyVariant(${idx})" class="btn-secondary" style="padding:4px 10px;font-size:11px;">
                 📋 Use
               </button>
-            </td>
-          </tr>`;
+            </div>
+            <div class="v-grid">
+              <div class="v-cell">
+                <div>
+                  <div class="v-field-label">Primary Text</div>
+                  <div class="v-field-block"><div class="v-field-value">${escapeHtml(primary)}</div></div>
+                </div>
+                <div>
+                  <div class="v-field-label">Headline</div>
+                  <div class="v-field-block"><div class="v-field-value">${escapeHtml(headline)}</div></div>
+                </div>
+              </div>
+              <div class="v-cell">
+                <div class="v-field-label">Messaging Template</div>
+                <div class="v-field-block" style="flex:1;">
+                  <div class="v-field-value preserve">${escapeHtml(message)}</div>
+                </div>
+              </div>
+              <div class="v-cell">
+                <div class="v-field-label">Quick Replies</div>
+                <div class="v-qr-list">
+                  ${qrCell('QR1', q1)}
+                  ${qrCell('QR2', q2)}
+                  ${qrCell('QR3', q3)}
+                </div>
+              </div>
+            </div>
+          </div>`;
       }).join("");
     }
 
     function copyVariant(idx) {
-      const row = document.querySelector(`#gptOutputBody tr[data-variant="${idx}"]`);
-      if (!row) return;
-      const cells = [...row.querySelectorAll("td")].slice(0, 7);
-      const tabSeparated = cells.map(c => c.textContent.trim()).join("\t");
-      navigator.clipboard.writeText(tabSeparated).then(() => {
-        const btn = row.querySelector("button");
+      const card = document.querySelector(`#gptOutputBody .v-card[data-variant="${idx}"]`);
+      if (!card) return;
+      const raw = card.dataset.raw || "";
+      // Re-pack into tab-separated 7-field row using actual tabs.
+      const parts = raw.split("\t");
+      const seven = [0,1,2,3,4,5,6].map(i => parts[i] ?? "").join("\t");
+      navigator.clipboard.writeText(seven).then(() => {
+        const btn = card.querySelector("button");
         if (btn) { const old = btn.textContent; btn.textContent = "✅"; setTimeout(() => btn.textContent = old, 800); }
       });
     }
@@ -627,17 +774,54 @@
     }
 
     // Copy ALL variants as multi-line tab-separated (1 row per variant).
-    // Action column is excluded.
     function copyOutput() {
-      const rows = document.querySelectorAll("#gptOutputBody tr[data-variant]");
-      if (!rows.length) return alert("Nothing to copy.");
-      const lines = [...rows].map((r) => {
-        const cells = [...r.querySelectorAll("td")].slice(0, 7);
-        return cells.map((c) => c.textContent.trim()).join("\t");
+      const cards = document.querySelectorAll("#gptOutputBody .v-card[data-variant]");
+      if (!cards.length) return alert("Nothing to copy.");
+      const lines = [...cards].map((c) => {
+        const raw = c.dataset.raw || "";
+        const parts = raw.split("\t");
+        return [0,1,2,3,4,5,6].map((i) => parts[i] ?? "").join("\t");
       });
       navigator.clipboard.writeText(lines.join("\n")).then(() => {
         alert("✅ Copied " + lines.length + " variant(s) to clipboard!");
       });
+    }
+
+    // Save the custom prompt textarea back to the prompts file (server-side).
+    async function saveCustomPrompt() {
+      const status = document.getElementById("savePromptStatus");
+      const prompt = (document.getElementById("prompt")?.value ?? "").trim();
+      if (!prompt) {
+        status.className = "save-prompt-status err";
+        status.textContent = "⚠ Empty prompt — nothing to save.";
+        return;
+      }
+      status.className = "save-prompt-status";
+      status.textContent = "Saving…";
+      try {
+        const r = await fetch("{{ route('gpt.prompt.save') }}", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": "{{ csrf_token() }}" },
+          body: JSON.stringify({ prompt }),
+        });
+        if (r.status === 403) {
+          status.className = "save-prompt-status err";
+          status.textContent = "❌ Login required to save.";
+          return;
+        }
+        const data = await r.json();
+        if (r.ok && data.ok) {
+          status.className = "save-prompt-status ok";
+          const by = data.saved_by ? ` by ${data.saved_by}` : "";
+          status.textContent = `✅ Saved${by}. Future page loads will use this prompt.`;
+        } else {
+          status.className = "save-prompt-status err";
+          status.textContent = "❌ " + (data.error || "Save failed");
+        }
+      } catch (e) {
+        status.className = "save-prompt-status err";
+        status.textContent = "❌ " + e.message;
+      }
     }
   </script>
 </x-layout>

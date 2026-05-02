@@ -37,10 +37,19 @@
     .h-detail h4 { font-size:11px; font-weight:700; color:#475569; text-transform:uppercase; letter-spacing:0.06em; margin-top:10px; margin-bottom:4px; }
     .h-detail h4:first-child { margin-top:0; }
     .h-detail pre { background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; font-size:11.5px; line-height:1.5; white-space:pre-wrap; max-height:240px; overflow:auto; color:#0f172a; }
-    .h-variant { background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; margin-bottom:6px; font-size:11.5px; }
-    .h-variant-fields { display:grid; grid-template-columns:90px 1fr; gap:4px 10px; align-items:start; }
-    .h-variant-fields strong { color:#475569; font-size:10.5px; text-transform:uppercase; letter-spacing:0.04em; }
-    .h-variant-fields span { color:#0f172a; word-wrap:break-word; }
+    /* Variant card — mirrors the main /gpt-ad-generator output layout */
+    .h-variant { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+    .h-v-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; padding-bottom:6px; border-bottom:1px dashed #e2e8f0; }
+    .h-v-head .h-v-no { font-size:10px; font-weight:700; color:#4338ca; text-transform:uppercase; letter-spacing:0.06em; }
+    .h-v-head .h-v-item { font-size:13px; font-weight:600; color:#0f172a; }
+    .h-v-grid { display:grid; grid-template-columns:1.1fr 1.4fr 0.9fr; gap:10px; }
+    @media (max-width: 900px) { .h-v-grid { grid-template-columns:1fr; } }
+    .h-v-cell { display:flex; flex-direction:column; gap:6px; }
+    .h-v-label { font-size:9.5px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:2px; }
+    .h-v-block { padding:7px 10px; background:#f8fafc; border-radius:6px; border:1px solid #f1f5f9; font-size:11.5px; line-height:1.5; color:#0f172a; word-wrap:break-word; }
+    .h-v-block.preserve { white-space:pre-wrap; }
+    .h-v-qr { padding:5px 9px; background:#eef2ff; border-radius:999px; font-size:11px; color:#3730a3; }
+    .h-v-qr.empty { background:#f1f5f9; color:#94a3b8; font-style:italic; }
   </style>
 
   <div class="w-full flex flex-col gap-4" x-data="historyApp()">
@@ -99,8 +108,11 @@
                   <div style="font-size:10.5px;color:#94a3b8;">{{ \Carbon\Carbon::parse($row->created_at)->format('g:i A') }}</div>
                 </td>
                 <td>
-                  @if ($row->user_email)
-                    <span class="pill gray">{{ $row->user_email }}</span>
+                  @if ($row->user_name || $row->user_email)
+                    <span class="pill gray">{{ $row->user_name ?: $row->user_email }}</span>
+                    @if ($row->user_name && $row->user_email)
+                      <div style="font-size:10px;color:#94a3b8;margin-top:2px;">{{ $row->user_email }}</div>
+                    @endif
                   @else
                     <span style="color:#cbd5e1;font-size:11px;">— anonymous —</span>
                   @endif
@@ -173,12 +185,45 @@
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const d = await res.json();
 
+            const normalize = (s) => String(s ?? "").replace(/\\t/g, "\t").replace(/\\n/g, "\n").trim();
+            const qrBlock = (label, val) => val
+              ? `<div class="h-v-qr"><strong style="opacity:0.65;font-size:9.5px;letter-spacing:0.04em;">${label}</strong> ${escapeHtml(val)}</div>`
+              : `<div class="h-v-qr empty">${label} — empty —</div>`;
+
             const variants = Array.isArray(d.output_variants) ? d.output_variants : [];
-            const variantHtml = variants.map((v, idx) => {
-              const parts = (v || "").split("\t");
-              const labels = ['Item','Primary Text','Headline','Messaging Template','QR1','QR2','QR3'];
-              const fields = labels.map((label, i) => `<strong>${label}</strong><span>${escapeHtml(parts[i] ?? '—')}</span>`).join('');
-              return `<div class="h-variant"><div style="font-size:10.5px;font-weight:700;color:#4338ca;margin-bottom:6px;">VARIANT ${idx+1}</div><div class="h-variant-fields">${fields}</div></div>`;
+            const variantHtml = variants.map((rawV, idx) => {
+              const v = normalize(rawV);
+              const parts = v.split("\t");
+              const item    = parts[0] ?? '';
+              const primary = parts[1] ?? '';
+              const headline= parts[2] ?? '';
+              const message = parts[3] ?? '';
+              const q1      = parts[4] ?? '';
+              const q2      = parts[5] ?? '';
+              const q3      = parts[6] ?? '';
+              return `
+                <div class="h-variant">
+                  <div class="h-v-head">
+                    <span class="h-v-no">Variant ${idx+1}</span>
+                    <span class="h-v-item">${escapeHtml(item) || '<span style="color:#94a3b8;">(no item)</span>'}</span>
+                  </div>
+                  <div class="h-v-grid">
+                    <div class="h-v-cell">
+                      <div><div class="h-v-label">Primary Text</div><div class="h-v-block">${escapeHtml(primary)}</div></div>
+                      <div><div class="h-v-label">Headline</div><div class="h-v-block">${escapeHtml(headline)}</div></div>
+                    </div>
+                    <div class="h-v-cell">
+                      <div class="h-v-label">Messaging Template</div>
+                      <div class="h-v-block preserve" style="flex:1;">${escapeHtml(message)}</div>
+                    </div>
+                    <div class="h-v-cell">
+                      <div class="h-v-label">Quick Replies</div>
+                      ${qrBlock('QR1', q1)}
+                      ${qrBlock('QR2', q2)}
+                      ${qrBlock('QR3', q3)}
+                    </div>
+                  </div>
+                </div>`;
             }).join('');
 
             const promptHtml = d.final_prompt ? `<h4>Final prompt sent to GPT</h4><pre>${escapeHtml(d.final_prompt)}</pre>` : '';
@@ -187,7 +232,7 @@
                 <div>🌡 Temperature: <strong style="color:#0f172a;">${d.temperature ?? '—'}</strong></div>
                 <div>🔢 Variants requested: <strong style="color:#0f172a;">${d.variants_requested ?? '—'}</strong></div>
                 <div>🤖 Model: <strong style="color:#0f172a;">${d.model ?? '—'}</strong></div>
-                <div>👤 User: <strong style="color:#0f172a;">${escapeHtml(d.user_email ?? '— anonymous —')}</strong></div>
+                <div>👤 User: <strong style="color:#0f172a;">${escapeHtml(d.user_name || d.user_email || '— anonymous —')}</strong></div>
               </div>`;
 
             this.detailHtml[id] = meta + (variantHtml ? `<h4>Generated variants (${variants.length})</h4>${variantHtml}` : '<div style="color:#94a3b8;">No variants saved.</div>') + promptHtml;

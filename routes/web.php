@@ -112,6 +112,10 @@ Route::get('/gpt-ad-generator/history', [GPTAdGeneratorController::class, 'histo
 Route::get('/gpt-ad-generator/history/{id}', [GPTAdGeneratorController::class, 'historyDetail'])
     ->whereNumber('id')
     ->name('gpt.history.detail');
+// Save the base prompt file. Throttled tighter — admin-only feature.
+Route::post('/gpt-ad-generator/prompt', [GPTAdGeneratorController::class, 'savePrompt'])
+    ->middleware('throttle:10,60')
+    ->name('gpt.prompt.save');
 // Suggestions are cached 5min, but still throttle to 60/min/IP for safety.
 Route::get('/ad-copy-suggestions', [GPTAdGeneratorController::class, 'loadAdCopySuggestions'])
     ->middleware('throttle:60,1')

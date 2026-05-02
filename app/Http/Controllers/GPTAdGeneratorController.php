@@ -44,23 +44,31 @@ class GPTAdGeneratorController extends Controller
         $userFilter = trim((string) $request->query('user', ''));
         $modelFilter= trim((string) $request->query('model', ''));
 
-        $query = DB::table('gpt_ad_generations')
-            ->orderByDesc('created_at');
+        // LEFT JOIN users to resolve display name (avoids needing a column).
+        // Optional second JOIN to employee_profiles for the proper full name when set.
+        $query = DB::table('gpt_ad_generations as g')
+            ->leftJoin('users as u', 'u.email', '=', 'g.user_email')
+            ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+            ->select([
+                'g.*',
+                DB::raw('COALESCE(ep.name, u.name) AS user_name'),
+            ])
+            ->orderByDesc('g.created_at');
 
         if ($q !== '') {
             $like = '%'.mb_strtolower($q).'%';
             $query->where(function ($w) use ($like) {
-                $w->whereRaw('LOWER(product_name) LIKE ?', [$like])
-                  ->orWhereRaw('LOWER(product_description) LIKE ?', [$like])
-                  ->orWhereRaw('LOWER(page_filter) LIKE ?', [$like])
-                  ->orWhereRaw('LOWER(item_filter) LIKE ?', [$like]);
+                $w->whereRaw('LOWER(g.product_name) LIKE ?', [$like])
+                  ->orWhereRaw('LOWER(g.product_description) LIKE ?', [$like])
+                  ->orWhereRaw('LOWER(g.page_filter) LIKE ?', [$like])
+                  ->orWhereRaw('LOWER(g.item_filter) LIKE ?', [$like]);
             });
         }
         if ($userFilter !== '') {
-            $query->where('user_email', $userFilter);
+            $query->where('g.user_email', $userFilter);
         }
         if ($modelFilter !== '') {
-            $query->where('model', $modelFilter);
+            $query->where('g.model', $modelFilter);
         }
 
         $rows = $query->paginate(50)->appends($request->query());
@@ -82,6 +90,33 @@ class GPTAdGeneratorController extends Controller
     }
 
     /**
+     * POST /gpt-ad-generator/prompt
+     *
+     * Save the editable base prompt back to resources/views/gpt/gpt_ad_prompts.txt
+     * so future page loads default to this version. Auth required to prevent
+     * anonymous edits.
+     */
+    public function savePrompt(Request $request)
+    {
+        $request->validate(['prompt' => 'required|string|max:20000']);
+        if (!Auth::check()) {
+            return response()->json(['error' => 'Login required to save prompt.'], 403);
+        }
+        try {
+            $path = resource_path('views/gpt/gpt_ad_prompts.txt');
+            file_put_contents($path, $request->input('prompt'));
+            return response()->json([
+                'ok'         => true,
+                'saved_at'   => now()->toIso8601String(),
+                'saved_by'   => Auth::user()?->name ?? Auth::user()?->email,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('savePrompt error: ' . $e->getMessage());
+            return response()->json(['error' => 'Save failed.', 'detail' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * GET /gpt-ad-generator/history/{id}
      *
      * JSON detail of a single past generation. Used by the history view's
@@ -89,7 +124,15 @@ class GPTAdGeneratorController extends Controller
      */
     public function historyDetail(int $id)
     {
-        $row = DB::table('gpt_ad_generations')->where('id', $id)->first();
+        $row = DB::table('gpt_ad_generations as g')
+            ->leftJoin('users as u', 'u.email', '=', 'g.user_email')
+            ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+            ->select([
+                'g.*',
+                DB::raw('COALESCE(ep.name, u.name) AS user_name'),
+            ])
+            ->where('g.id', $id)
+            ->first();
         if (!$row) {
             return response()->json(['error' => 'Not found'], 404);
         }
