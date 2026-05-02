@@ -64,7 +64,8 @@
       </thead>
 
       <template x-for="c in ((expandedPages[row.page_name] || {}).campaigns || [])" :key="c.campaign_id">
-        <tbody style="border-top:1px solid #e4e6eb;">
+        <tbody :class="c._divider_top ? 'campaign-active-off-divider' : ''"
+               style="border-top:1px solid #e4e6eb;">
 
           {{-- Campaign row --}}
           <tr>

@@ -164,7 +164,14 @@
     .expand-panel .expand-title b { color:#0f172a; }
     .expand-panel .expand-close  { font-size:11px; color:#64748b; cursor:pointer; padding:2px 8px; border-radius:5px; border:1px solid #cbd5e1; background:white; }
     .expand-panel .expand-close:hover { background:#f1f5f9; }
-    .expand-wrap { background:white; border:1px solid #cbd5e1; border-radius:6px; overflow-x:auto; max-width:100%; }
+    .expand-wrap { background:white; border:2px solid #64748b; border-radius:6px; overflow-x:auto; max-width:100%; }
+
+    /* Visual divider between the last "Active" campaign and the first "Off"
+       campaign in the expanded list. Backend sorts is_on DESC by default so
+       the transition happens once. JS post-process marks the boundary
+       tbody with `c._divider_top` after fetch. */
+    .fb-table tbody.campaign-active-off-divider { border-top:3px solid #475569; }
+    .fb-table tbody.campaign-active-off-divider > tr:first-child > td { border-top:3px solid #475569; }
 
     /* Nested expand backgrounds (visual hierarchy). */
     .expand-nest-1 td.nest-host { background:#eef2f7; padding:10px 14px; }
@@ -1601,9 +1608,28 @@
           const j = await this._fetchCampaignsData(Object.assign({
             level: 'campaigns', page_name: pageName,
           }, scope));
-          this.expandedPages[pageName] = { open: true, loading: false, error: null, campaigns: j.rows || [] };
+          const campaigns = j.rows || [];
+          this._markActiveOffDivider(campaigns);
+          this.expandedPages[pageName] = { open: true, loading: false, error: null, campaigns };
         } catch (e) {
           this.expandedPages[pageName] = { open: true, loading: false, error: e.message || 'Failed to load', campaigns: [] };
+        }
+      },
+
+      // Tag the first off-after-active campaign with `_divider_top = true` so
+      // the template can render a thicker top border separating the Active
+      // group from the Off group. Backend sorts is_on DESC by default, so the
+      // active→off transition is unique. No-op if the list is all-active or
+      // all-off.
+      _markActiveOffDivider(list){
+        let seenActive = false;
+        for (const c of (list || [])) {
+          if (c.on) {
+            seenActive = true;
+          } else if (seenActive) {
+            c._divider_top = true;
+            return;
+          }
         }
       },
 
