@@ -60,6 +60,61 @@ class OwnerPrivateController extends Controller
         ));
     }
 
+    /**
+     * Resolve the start date of the most recent uninterrupted streak where
+     * this page's primary == $anchorKey, walking backward day-by-day from
+     * $endDate through daily_page_primary_item.
+     *
+     * Tie/missing days (no row for that date) are skipped transparently —
+     * they don't break the streak. Only an explicitly different primary
+     * stops the walk.
+     *
+     * Walks past the user's start_date up to $maxDaysBack total. Returns
+     * YYYY-MM-DD or null if anchor doesn't match $endDate's primary.
+     */
+    private function resolveAnchorStreakStart(
+        string $pageKey,
+        string $anchorKey,
+        string $endDate,
+        int $maxDaysBack = 400
+    ): ?string {
+        $earliestQuery = (new \DateTime($endDate))
+            ->modify("-{$maxDaysBack} days")
+            ->format('Y-m-d');
+
+        $rows = DB::table('daily_page_primary_item')
+            ->where('page_key', $pageKey)
+            ->whereBetween('ts_date', [$earliestQuery, $endDate])
+            ->get(['ts_date', 'primary_item_key']);
+
+        $byDate = [];
+        foreach ($rows as $r) {
+            $byDate[(string)$r->ts_date] = (string)$r->primary_item_key;
+        }
+
+        if (($byDate[$endDate] ?? null) !== $anchorKey) {
+            return null;
+        }
+
+        $streakStart = $endDate;
+        $cursor = (new \DateTime($endDate))->modify('-1 day');
+        $stop   = new \DateTime($earliestQuery);
+
+        while ($cursor >= $stop) {
+            $d = $cursor->format('Y-m-d');
+            if (isset($byDate[$d])) {
+                if ($byDate[$d] === $anchorKey) {
+                    $streakStart = $d;
+                } else {
+                    break;
+                }
+            }
+            $cursor->modify('-1 day');
+        }
+
+        return $streakStart;
+    }
+
     public function data(Request $request)
     {
         $this->checkAccess();
@@ -1403,11 +1458,18 @@ class OwnerPrivateController extends Controller
         }
 
         // ── Build pageGroups: aggregate over INCLUDED range slices per anchor ──────
-        // Included slice = (date, page) where range primary_item_key == anchor's item_key.
+        // Included slice = (date, page) within [streakStart, endDate] where the page's
+        // primary == anchor. streakStart = start of the most recent uninterrupted streak
+        // (walks backward from endDate, tolerating tie/missing days). May predate startDate.
         $pageGroups = [];
         foreach ($anchorByPage as $pk => $pr) {
             $anchorKey = (string)$pr->primary_item_key;
             $perDate   = $rangeByPage[$pk] ?? [];
+
+            $streakStart = $this->resolveAnchorStreakStart($pk, $anchorKey, $endDate);
+            if ($streakStart === null) continue; // anchor not on end_date for this page
+
+            $metricsFrom = $streakStart < $startDate ? $startDate : $streakStart;
 
             $totalOrders   = 0;
             $proceedOrders = 0;
@@ -1417,7 +1479,8 @@ class OwnerPrivateController extends Controller
             $statKey       = $pk.'||'.$anchorKey;
 
             foreach ($perDate as $d => $slice) {
-                if ($slice['item_key'] !== $anchorKey) continue; // excluded: different primary that day
+                if ($d < $metricsFrom) continue;                 // before streak window
+                if ($slice['item_key'] !== $anchorKey) continue; // defensive: tie/different day
                 $totalOrders += (int)$slice['orders'];
 
                 $stat = $statByKeyDate[$statKey][$d] ?? null;
@@ -1447,6 +1510,8 @@ class OwnerPrivateController extends Controller
             if ($maxCod <= 0) $maxCod = $anchorModeCod;
             if ($minCod === null || $minCod <= 0) $minCod = $anchorModeCod;
 
+            if (!empty($includedDates)) ksort($includedDates);
+
             $primary = [
                 'item_name'      => (string)$pr->primary_item,
                 'item_key'       => $anchorKey,
@@ -1462,14 +1527,6 @@ class OwnerPrivateController extends Controller
             // Keep empty array for view safety (existing template iterates row.secondary_items||[]).
             $items = [$primary];
 
-            // Earliest included date = first date in range where page's primary matched anchor
-            $anchorFirstDate = null;
-            if (!empty($includedDates)) {
-                ksort($includedDates);
-                $anchorFirstDate = array_key_first($includedDates);
-                $primary['included_dates'] = $includedDates; // refresh sorted copy
-            }
-
             $pageGroups[$pk] = [
                 'page_label'     => (string)$pr->page_label,
                 'page_key'       => $pk,
@@ -1482,7 +1539,7 @@ class OwnerPrivateController extends Controller
                 'distinct_items_in_range'=> $distinctCount,
                 'mixed_primary'          => $mixedPrimary,
                 'adspent_total'          => array_sum(array_column($includedDates, 'adspent')),
-                'anchor_first_date'      => $anchorFirstDate,
+                'anchor_first_date'      => $streakStart,
             ];
         }
 
@@ -2273,33 +2330,25 @@ class OwnerPrivateController extends Controller
             $p['distinct_count'] = count($p['distinct_items']);
             $p['mixed']          = $p['distinct_count'] >= 2;
             ksort($p['cells']);
-            // Earliest date in range where this page's primary matched anchor
+            // Most recent uninterrupted streak start where primary == anchor.
+            // Walks backward from end_date through daily_page_primary_item, tolerating
+            // tie/missing days. May predate $startDate.
             $p['anchor_first_date'] = null;
             $p['anchor_included_days'] = 0;
             if ($p['anchor_item_key'] !== null) {
-                foreach ($p['cells'] as $d => $c) {
-                    if ($c['item_key'] === $p['anchor_item_key']) {
-                        if ($p['anchor_first_date'] === null) $p['anchor_first_date'] = $d;
-                        $p['anchor_included_days']++;
-                    }
-                }
-                // If the in-range streak begins on the very first day of the range,
-                // walk BACKWARDS through daily_page_primary_item to find the true
-                // start of the consecutive streak (could predate $startDate by months).
-                if ($p['anchor_first_date'] === $startDate) {
-                    $priorRows = DB::table('daily_page_primary_item')
-                        ->where('page_key', $p['page_key'])
-                        ->where('ts_date', '<', $startDate)
-                        ->orderByDesc('ts_date')
-                        ->limit(400) // safety cap (~13 months back)
-                        ->get(['ts_date', 'primary_item_key']);
-                    $expected = (new \DateTime($startDate))->modify('-1 day')->format('Y-m-d');
-                    foreach ($priorRows as $pr) {
-                        $d = (string)$pr->ts_date;
-                        if ($d !== $expected) break; // gap → stop
-                        if ((string)$pr->primary_item_key !== $p['anchor_item_key']) break;
-                        $p['anchor_first_date'] = $d;
-                        $expected = (new \DateTime($d))->modify('-1 day')->format('Y-m-d');
+                $p['anchor_first_date'] = $this->resolveAnchorStreakStart(
+                    $p['page_key'],
+                    $p['anchor_item_key'],
+                    $endDate
+                );
+                if ($p['anchor_first_date'] !== null) {
+                    $metricsFrom = $p['anchor_first_date'] < $startDate
+                        ? $startDate
+                        : $p['anchor_first_date'];
+                    foreach ($p['cells'] as $d => $c) {
+                        if ($d >= $metricsFrom && $c['item_key'] === $p['anchor_item_key']) {
+                            $p['anchor_included_days']++;
+                        }
                     }
                 }
             }
