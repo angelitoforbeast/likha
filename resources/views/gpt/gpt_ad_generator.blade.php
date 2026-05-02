@@ -5,14 +5,13 @@
   <style>
     /* Form polish */
     .gpt-card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
-    .gpt-card-header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #f1f5f9; }
+    .gpt-card-header { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid #f1f5f9; }
     .gpt-card-title { font-size:13px; font-weight:600; color:#0f172a; letter-spacing:0.02em; }
     .gpt-card-subtitle { font-size:11px; color:#64748b; margin-top:2px; }
-    .gpt-card-body { padding:14px 16px; }
 
-    .gpt-section { padding:12px 16px; border-bottom:1px solid #f1f5f9; }
+    .gpt-section { padding:10px 14px; border-bottom:1px solid #f1f5f9; }
     .gpt-section:last-child { border-bottom:none; }
-    .gpt-section-label { font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px; }
+    .gpt-section-label { font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
 
     .gpt-label { display:block; font-size:12px; font-weight:600; color:#334155; margin-bottom:4px; }
     .gpt-hint  { font-size:11px; color:#94a3b8; margin-top:4px; line-height:1.4; }
@@ -59,19 +58,30 @@
     /* Filter "chips" preview */
     .gpt-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; background:#eef2ff; color:#4338ca; }
 
-    /* Output table */
-    .gpt-output-table { width:100%; border-collapse:separate; border-spacing:0; font-size:13px; }
+    /* Output table — fixed layout so cells wrap instead of forcing horizontal scroll */
+    .gpt-output-wrap { width:100%; overflow-x:hidden; }
+    .gpt-output-table {
+      width:100%; table-layout:fixed; border-collapse:separate; border-spacing:0; font-size:12.5px;
+    }
     .gpt-output-table thead th {
       position:sticky; top:0; z-index:1;
-      background:#f8fafc; color:#475569; font-weight:600; font-size:11px;
+      background:#f8fafc; color:#475569; font-weight:600; font-size:10.5px;
       text-transform:uppercase; letter-spacing:0.04em;
-      padding:10px 12px; border-bottom:2px solid #e2e8f0; text-align:left;
+      padding:9px 10px; border-bottom:2px solid #e2e8f0; text-align:left;
     }
     .gpt-output-table tbody td {
-      padding:10px 12px; border-bottom:1px solid #f1f5f9; color:#0f172a; vertical-align:top;
+      padding:8px 10px; border-bottom:1px solid #f1f5f9; color:#0f172a;
+      vertical-align:top; word-wrap:break-word; overflow-wrap:break-word; white-space:normal;
     }
     .gpt-output-table tbody tr:hover td { background:#f8fafc; }
     .gpt-output-table tbody tr:last-child td { border-bottom:none; }
+    /* Column widths — proportional, last (action) is fixed */
+    .gpt-output-table colgroup col.c-item    { width:9%; }
+    .gpt-output-table colgroup col.c-primary { width:22%; }
+    .gpt-output-table colgroup col.c-head    { width:14%; }
+    .gpt-output-table colgroup col.c-msg     { width:21%; }
+    .gpt-output-table colgroup col.c-qr      { width:9%; }
+    .gpt-output-table colgroup col.c-action  { width:74px; }
 
     /* Suggestions box: monospace-ish for ad copy readability */
     #suggestionsBox {
@@ -86,8 +96,8 @@
 
     /* Action bar at bottom of left card */
     .gpt-action-bar {
-      display:flex; flex-wrap:wrap; align-items:center; gap:10px;
-      padding:12px 16px; border-top:1px solid #e5e7eb; background:#f8fafc; border-bottom-left-radius:12px; border-bottom-right-radius:12px;
+      display:flex; flex-wrap:wrap; align-items:center; gap:8px;
+      padding:10px 14px; border-top:1px solid #e5e7eb; background:#f8fafc; border-bottom-left-radius:12px; border-bottom-right-radius:12px;
     }
     .gpt-action-bar > .spacer { flex:1; }
     .gpt-action-bar .pill-input {
@@ -101,11 +111,11 @@
   </style>
 
   <!-- Viewport-fitting wrapper: height set via JS to avoid page scrollbars -->
-  <div id="viewportFit" class="max-w-6xl mx-auto flex flex-col gap-4 overflow-hidden">
-    <!-- TOP: Left (Inputs) + Right (Suggestions) -->
-    <div id="topGrid" class="grid md:grid-cols-2 gap-4 overflow-hidden" style="height:auto;">
+  <div id="viewportFit" class="w-full flex flex-col gap-4 overflow-hidden">
+    <!-- TOP: Left (Inputs) + Right (Suggestions). Form takes ~40%, suggestions ~60% on wide screens. -->
+    <div id="topGrid" class="grid md:grid-cols-5 gap-4 overflow-hidden" style="height:auto;">
       <!-- LEFT: Inputs -->
-      <div id="leftCard" class="gpt-card h-full flex flex-col overflow-hidden">
+      <div id="leftCard" class="gpt-card h-full flex flex-col overflow-hidden md:col-span-2">
         <div class="gpt-card-header">
           <div>
             <div class="gpt-card-title">⚙️ Generation Settings</div>
@@ -235,7 +245,7 @@
       </div>
 
       <!-- RIGHT: Suggestions -->
-      <div id="sugCard" class="gpt-card h-full flex flex-col overflow-hidden">
+      <div id="sugCard" class="gpt-card h-full flex flex-col overflow-hidden md:col-span-3">
         <div class="gpt-card-header">
           <div>
             <div class="gpt-card-title">💡 Suggestions <span class="text-slate-400 font-normal">(auto-fed)</span></div>
@@ -263,8 +273,18 @@
           </div>
           <button onclick="copyOutput()" class="btn-secondary">📋 Copy All</button>
         </div>
-        <div class="flex-1 overflow-auto">
+        <div class="flex-1 overflow-y-auto overflow-x-hidden gpt-output-wrap">
           <table class="gpt-output-table" id="gptOutputTable">
+            <colgroup>
+              <col class="c-item">
+              <col class="c-primary">
+              <col class="c-head">
+              <col class="c-msg">
+              <col class="c-qr">
+              <col class="c-qr">
+              <col class="c-qr">
+              <col class="c-action">
+            </colgroup>
             <thead>
               <tr>
                 <th>Item</th>
@@ -274,7 +294,7 @@
                 <th>QR 1</th>
                 <th>QR 2</th>
                 <th>QR 3</th>
-                <th class="text-center" style="width:90px;">Action</th>
+                <th class="text-center">Action</th>
               </tr>
             </thead>
             <tbody id="gptOutputBody"></tbody>
