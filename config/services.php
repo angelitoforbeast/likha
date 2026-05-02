@@ -36,10 +36,10 @@ return [
     ],
 
     'openai' => [
-    'key'   => env('OPENAI_API_KEY'),
-    // Default to gpt-4o (faster + cheaper than gpt-4, comparable quality for
-    // structured ad-copy output). Set OPENAI_MODEL in .env to override.
-    'model' => env('OPENAI_MODEL', 'gpt-4o'),
+    'key' => env('OPENAI_API_KEY'),
+    // Model is now picked per-request via the UI dropdown sa /gpt-ad-generator.
+    // Allowed list + default lives sa GPTAdGeneratorController::ALLOWED_MODELS
+    // and ::DEFAULT_MODEL.
 ],
 
     'automation' => [

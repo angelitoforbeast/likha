@@ -14,6 +14,23 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class GPTAdGeneratorController extends Controller
 {
     /**
+     * Whitelist of OpenAI models the generator may call. User picks per-request
+     * via the UI dropdown; backend rejects anything not in this list. Order
+     * here is the order shown in the dropdown.
+     *
+     * Labels are shown to the user; keys are the actual model IDs sent to OpenAI.
+     */
+    public const ALLOWED_MODELS = [
+        'gpt-4o'         => 'GPT-4o (recommended) — best quality vs cost',
+        'gpt-4o-mini'    => 'GPT-4o mini — cheapest, fast, slightly lower quality',
+        'gpt-4-turbo'    => 'GPT-4 Turbo — older, larger context',
+        'gpt-4'          => 'GPT-4 (legacy)',
+    ];
+
+    /** Default model when the request omits one or sends an invalid value. */
+    public const DEFAULT_MODEL = 'gpt-4o';
+
+    /**
      * POST /api/generate-gpt-summary
      *
      * If `stream=1` AND `n=1` → returns text/event-stream (SSE) chunks of GPT
@@ -27,6 +44,7 @@ class GPTAdGeneratorController extends Controller
             'temperature'         => 'sometimes|numeric|min:0|max:2',
             'n'                   => 'sometimes|integer|min:1|max:5',
             'stream'              => 'sometimes|boolean',
+            'model'               => 'sometimes|string|in:' . implode(',', array_keys(self::ALLOWED_MODELS)),
             'product_name'        => 'sometimes|string|max:255',
             'product_description' => 'sometimes|string',
             'page_filter'         => 'sometimes|string|max:255|nullable',
@@ -39,7 +57,8 @@ class GPTAdGeneratorController extends Controller
         $n             = (int)   $request->input('n', 1);
         $streamWanted  = (bool)  $request->input('stream', false);
         $stream        = $streamWanted && $n === 1; // SSE only when single variant
-        $model         = config('services.openai.model', 'gpt-4o');
+        $requestedModel = (string) $request->input('model', '');
+        $model         = isset(self::ALLOWED_MODELS[$requestedModel]) ? $requestedModel : self::DEFAULT_MODEL;
 
         $payload = [
             'model'       => $model,
@@ -261,7 +280,10 @@ class GPTAdGeneratorController extends Controller
         $items = collect($rawItems)->map(fn ($i) => $this->normalizePage($i))
             ->filter()->unique()->sort()->values()->toArray();
 
-        return view('gpt.gpt_ad_generator', compact('promptText', 'pages', 'items'));
+        $models        = self::ALLOWED_MODELS;
+        $defaultModel  = self::DEFAULT_MODEL;
+
+        return view('gpt.gpt_ad_generator', compact('promptText', 'pages', 'items', 'models', 'defaultModel'));
     }
 
     /**

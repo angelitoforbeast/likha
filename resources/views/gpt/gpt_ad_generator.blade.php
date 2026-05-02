@@ -68,6 +68,16 @@
           </div>
 
           <div>
+            <label class="block font-semibold">🤖 Model</label>
+            <select id="modelSelect" class="w-full border rounded p-2 text-sm">
+              @foreach (($models ?? []) as $mid => $mlabel)
+                <option value="{{ $mid }}" @if(($defaultModel ?? '') === $mid) selected @endif>{{ $mlabel }}</option>
+              @endforeach
+            </select>
+            <p class="text-xs text-gray-500 mt-1">Default = {{ $defaultModel ?? 'gpt-4o' }}. Switch para sa cheaper / better quality runs.</p>
+          </div>
+
+          <div>
             <label class="block font-semibold">🎨 Creativity (Temperature): <span id="tempVal">0.5</span></label>
             <input id="temperature" type="range" min="0" max="1" step="0.1" value="0.5"
                    oninput="document.getElementById('tempVal').textContent = this.value;"
@@ -308,6 +318,7 @@
       const pageFilter   = document.getElementById("pageSelect")?.value ?? "";
       const itemFilter   = document.getElementById("itemSelect")?.value ?? "";
       const activeOnly   = !!document.getElementById("activeOnly")?.checked;
+      const model        = document.getElementById("modelSelect")?.value ?? "";
 
       const outputBox = document.getElementById("outputBox");
       const loadingBox = document.getElementById("loadingBox");
@@ -337,6 +348,7 @@
         temperature,
         n: variantsCount,
         stream: streamWanted,
+        model,
         product_name: name,
         product_description: desc,
         page_filter: pageFilter && pageFilter !== "all" ? pageFilter : null,
