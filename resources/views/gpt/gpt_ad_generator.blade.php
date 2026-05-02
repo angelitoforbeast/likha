@@ -2,208 +2,283 @@
   <x-slot name="title">Ad Captions</x-slot>
   <x-slot name="heading">Ad Copy Generator</x-slot>
 
+  <style>
+    /* Form polish */
+    .gpt-card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
+    .gpt-card-header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #f1f5f9; }
+    .gpt-card-title { font-size:13px; font-weight:600; color:#0f172a; letter-spacing:0.02em; }
+    .gpt-card-subtitle { font-size:11px; color:#64748b; margin-top:2px; }
+    .gpt-card-body { padding:14px 16px; }
+
+    .gpt-section { padding:12px 16px; border-bottom:1px solid #f1f5f9; }
+    .gpt-section:last-child { border-bottom:none; }
+    .gpt-section-label { font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px; }
+
+    .gpt-label { display:block; font-size:12px; font-weight:600; color:#334155; margin-bottom:4px; }
+    .gpt-hint  { font-size:11px; color:#94a3b8; margin-top:4px; line-height:1.4; }
+
+    .gpt-input, .gpt-select, .gpt-textarea {
+      width:100%; padding:8px 10px; font-size:13px; color:#0f172a;
+      background:#fff; border:1px solid #cbd5e1; border-radius:6px;
+      transition:border-color 0.15s, box-shadow 0.15s;
+    }
+    .gpt-input:focus, .gpt-select:focus, .gpt-textarea:focus {
+      outline:none; border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,0.12);
+    }
+    .gpt-textarea { resize:vertical; line-height:1.5; }
+
+    /* Range slider */
+    .gpt-range { width:100%; accent-color:#6366f1; }
+
+    /* Buttons */
+    .btn-primary {
+      display:inline-flex; align-items:center; gap:6px;
+      background:#4f46e5; color:#fff; font-weight:600; font-size:13px;
+      padding:9px 16px; border-radius:7px; transition:background 0.12s;
+      box-shadow:0 1px 2px rgba(79,70,229,0.25);
+    }
+    .btn-primary:hover { background:#4338ca; }
+    .btn-secondary {
+      display:inline-flex; align-items:center; gap:6px;
+      background:#fff; color:#4f46e5; font-weight:600; font-size:13px;
+      padding:8px 14px; border:1px solid #c7d2fe; border-radius:7px; transition:background 0.12s;
+    }
+    .btn-secondary:hover { background:#eef2ff; }
+    .btn-ghost {
+      display:inline-flex; align-items:center; gap:5px;
+      background:transparent; color:#64748b; font-size:12px;
+      padding:5px 10px; border-radius:6px; transition:background 0.12s, color 0.12s;
+    }
+    .btn-ghost:hover { background:#f1f5f9; color:#0f172a; }
+    .btn-ghost.danger { color:#dc2626; }
+    .btn-ghost.danger:hover { background:#fef2f2; color:#b91c1c; }
+
+    /* Pretty checkboxes — keep native, just tint */
+    .gpt-check { accent-color:#4f46e5; width:15px; height:15px; }
+
+    /* Filter "chips" preview */
+    .gpt-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; background:#eef2ff; color:#4338ca; }
+
+    /* Output table */
+    .gpt-output-table { width:100%; border-collapse:separate; border-spacing:0; font-size:13px; }
+    .gpt-output-table thead th {
+      position:sticky; top:0; z-index:1;
+      background:#f8fafc; color:#475569; font-weight:600; font-size:11px;
+      text-transform:uppercase; letter-spacing:0.04em;
+      padding:10px 12px; border-bottom:2px solid #e2e8f0; text-align:left;
+    }
+    .gpt-output-table tbody td {
+      padding:10px 12px; border-bottom:1px solid #f1f5f9; color:#0f172a; vertical-align:top;
+    }
+    .gpt-output-table tbody tr:hover td { background:#f8fafc; }
+    .gpt-output-table tbody tr:last-child td { border-bottom:none; }
+
+    /* Suggestions box: monospace-ish for ad copy readability */
+    #suggestionsBox {
+      background:#fafafa; font-family:ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size:12px; line-height:1.55; color:#1e293b;
+      border:1px solid #e2e8f0; border-radius:8px;
+    }
+    #suggestionsBox:empty::before {
+      content:"Click 'Load Ad Copy Suggestions' to fetch top/worst CPM patterns from existing ads.";
+      color:#94a3b8; font-style:italic; font-family:inherit;
+    }
+
+    /* Action bar at bottom of left card */
+    .gpt-action-bar {
+      display:flex; flex-wrap:wrap; align-items:center; gap:10px;
+      padding:12px 16px; border-top:1px solid #e5e7eb; background:#f8fafc; border-bottom-left-radius:12px; border-bottom-right-radius:12px;
+    }
+    .gpt-action-bar > .spacer { flex:1; }
+    .gpt-action-bar .pill-input {
+      display:inline-flex; align-items:center; gap:5px; font-size:12px; color:#475569;
+      padding:5px 10px; background:#fff; border:1px solid #e2e8f0; border-radius:999px;
+    }
+    .gpt-action-bar .pill-input select {
+      border:none; background:transparent; padding:0 4px; font-size:12px; font-weight:600; color:#0f172a;
+    }
+    .gpt-action-bar .pill-input select:focus { outline:none; }
+  </style>
+
   <!-- Viewport-fitting wrapper: height set via JS to avoid page scrollbars -->
   <div id="viewportFit" class="max-w-6xl mx-auto flex flex-col gap-4 overflow-hidden">
     <!-- TOP: Left (Inputs) + Right (Suggestions) -->
     <div id="topGrid" class="grid md:grid-cols-2 gap-4 overflow-hidden" style="height:auto;">
-      <!-- LEFT: Inputs (scroll only inside) -->
-      <div id="leftCard" class="bg-white p-3 md:p-4 rounded shadow h-full flex flex-col overflow-hidden">
-        <div class="space-y-4 flex-1 overflow-auto pr-1">
+      <!-- LEFT: Inputs -->
+      <div id="leftCard" class="gpt-card h-full flex flex-col overflow-hidden">
+        <div class="gpt-card-header">
           <div>
-            <label class="block font-semibold">📦 Product Name</label>
-            <input
-              type="text"
-              id="productName"
-              class="w-full border rounded p-2 text-sm"
-              placeholder="e.g., Tactical Flashlight"
-              value="Tactical Flashlight"
-            />
-          </div>
-
-          <div>
-            <label class="block font-semibold">📝 Product Description</label>
-            <textarea
-              id="productDescription"
-              class="w-full border rounded p-2 text-sm"
-              rows="3"
-              placeholder="e.g., Rechargeable, heavy duty, super liwanag, waterproof"
-            >Rechargeable, Heavy Duty, Super liwanag, Waterproof, Pang emergency</textarea>
-          </div>
-
-          <!-- Page + Item filters for suggestions -->
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block font-semibold">📄 Page</label>
-              <select id="pageSelect" class="w-full border rounded p-2 text-sm">
-                <option value="all">All Pages</option>
-                @foreach ($pages as $p)
-                  <option value="{{ $p }}">{{ $p }}</option>
-                @endforeach
-              </select>
-            </div>
-            <div>
-              <label class="block font-semibold">🛒 Item</label>
-              <select id="itemSelect" class="w-full border rounded p-2 text-sm">
-                <option value="all">All Items</option>
-                @foreach ($items ?? [] as $i)
-                  <option value="{{ $i }}">{{ $i }}</option>
-                @endforeach
-              </select>
-            </div>
-          </div>
-          <p class="text-xs text-gray-500 -mt-2">Filters affect “Load Ad Copy Suggestions”.</p>
-
-          <div class="flex items-center gap-2">
-            <input id="activeOnly" type="checkbox" class="h-4 w-4" checked />
-            <label for="activeOnly" class="text-sm text-gray-700">
-              Active ads only (currently running)
-            </label>
-          </div>
-
-          <div class="flex items-center gap-2">
-            <input id="includeSuggestions" type="checkbox" class="h-4 w-4" checked />
-            <label for="includeSuggestions" class="text-sm text-gray-700">
-              Include suggestions in the GPT prompt
-            </label>
-          </div>
-
-          <div>
-            <label class="block font-semibold">🤖 Model</label>
-            <select id="modelSelect" class="w-full border rounded p-2 text-sm">
-              @foreach (($models ?? []) as $mid => $mlabel)
-                <option value="{{ $mid }}" @if(($defaultModel ?? '') === $mid) selected @endif>{{ $mlabel }}</option>
-              @endforeach
-            </select>
-            <p class="text-xs text-gray-500 mt-1">Default = {{ $defaultModel ?? 'gpt-4o' }}. Switch para sa cheaper / better quality runs.</p>
-          </div>
-
-          <div>
-            <label class="block font-semibold">🎨 Creativity (Temperature): <span id="tempVal">0.5</span></label>
-            <input id="temperature" type="range" min="0" max="1" step="0.1" value="0.5"
-                   oninput="document.getElementById('tempVal').textContent = this.value;"
-                   class="w-full" />
-            <p class="text-xs text-gray-500">0 = predictable / deterministic. 1 = more creative / varied.</p>
-          </div>
-
-          <div>
-            <label class="block font-semibold">✏️ Custom GPT Prompt (editable)</label>
-            <textarea
-              id="prompt"
-              class="w-full border rounded p-2 text-sm"
-              rows="8"
-            >{{ $promptText }}</textarea>
+            <div class="gpt-card-title">⚙️ Generation Settings</div>
+            <div class="gpt-card-subtitle">Configure the prompt + GPT model. Click Generate to run.</div>
           </div>
         </div>
 
-        <div class="pt-3 flex flex-wrap gap-3 items-center">
-          <button
-            onclick="generateGPTSummary()"
-            class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded text-sm"
-          >
-            🚀 Generate GPT Output
-          </button>
+        <div class="flex-1 overflow-auto">
+          <!-- Section: Product -->
+          <div class="gpt-section">
+            <div class="gpt-section-label">Product</div>
+            <div class="space-y-3">
+              <div>
+                <label class="gpt-label" for="productName">📦 Product Name</label>
+                <input type="text" id="productName" class="gpt-input" placeholder="e.g., Tactical Flashlight" value="Tactical Flashlight" />
+              </div>
+              <div>
+                <label class="gpt-label" for="productDescription">📝 Description</label>
+                <textarea id="productDescription" class="gpt-textarea" rows="3"
+                  placeholder="e.g., Rechargeable, heavy duty, super liwanag, waterproof">Rechargeable, Heavy Duty, Super liwanag, Waterproof, Pang emergency</textarea>
+              </div>
+            </div>
+          </div>
 
-          <label class="flex items-center gap-1 text-sm">
-            Variants:
-            <select id="variantsCount" class="border rounded p-1 text-sm" onchange="syncStreamCheckbox()">
+          <!-- Section: Suggestions filters -->
+          <div class="gpt-section">
+            <div class="gpt-section-label">Suggestions Source</div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="gpt-label" for="pageSelect">📄 Page</label>
+                <select id="pageSelect" class="gpt-select">
+                  <option value="all">All Pages</option>
+                  @foreach ($pages as $p)
+                    <option value="{{ $p }}">{{ $p }}</option>
+                  @endforeach
+                </select>
+              </div>
+              <div>
+                <label class="gpt-label" for="itemSelect">🛒 Item</label>
+                <select id="itemSelect" class="gpt-select">
+                  <option value="all">All Items</option>
+                  @foreach ($items ?? [] as $i)
+                    <option value="{{ $i }}">{{ $i }}</option>
+                  @endforeach
+                </select>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3">
+              <label class="flex items-center gap-2 text-sm text-slate-700">
+                <input id="activeOnly" type="checkbox" class="gpt-check" checked />
+                Active ads only
+              </label>
+              <label class="flex items-center gap-2 text-sm text-slate-700">
+                <input id="includeSuggestions" type="checkbox" class="gpt-check" checked />
+                Feed suggestions to GPT
+              </label>
+            </div>
+          </div>
+
+          <!-- Section: Model + creativity -->
+          <div class="gpt-section">
+            <div class="gpt-section-label">GPT Settings</div>
+            <div class="space-y-3">
+              <div>
+                <label class="gpt-label" for="modelSelect">🤖 Model</label>
+                <select id="modelSelect" class="gpt-select">
+                  @foreach (($models ?? []) as $mid => $mlabel)
+                    <option value="{{ $mid }}" @if(($defaultModel ?? '') === $mid) selected @endif>{{ $mlabel }}</option>
+                  @endforeach
+                </select>
+                <div class="gpt-hint">Default: <span class="font-medium text-slate-600">{{ $defaultModel ?? 'gpt-4o' }}</span>. Pick cheaper / better-quality models per run.</div>
+              </div>
+              <div>
+                <div class="flex items-center justify-between">
+                  <label class="gpt-label !mb-0" for="temperature">🎨 Creativity</label>
+                  <span class="text-sm font-mono font-semibold text-indigo-600" id="tempVal">0.5</span>
+                </div>
+                <input id="temperature" type="range" min="0" max="1" step="0.1" value="0.5"
+                       oninput="document.getElementById('tempVal').textContent = this.value;"
+                       class="gpt-range mt-2" />
+                <div class="flex justify-between text-[10px] text-slate-400 mt-1 font-medium">
+                  <span>0 · predictable</span>
+                  <span>1 · creative</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section: Custom prompt -->
+          <div class="gpt-section">
+            <div class="gpt-section-label">Custom Prompt</div>
+            <textarea id="prompt" class="gpt-textarea text-xs" rows="7">{{ $promptText }}</textarea>
+            <details class="mt-2 text-sm">
+              <summary class="cursor-pointer text-slate-500 hover:text-slate-700 text-xs">👁 Preview final prompt (debug)</summary>
+              <textarea id="finalPromptPreview" class="mt-2 gpt-textarea text-xs" rows="6" readonly></textarea>
+            </details>
+          </div>
+        </div>
+
+        <!-- Sticky action bar -->
+        <div class="gpt-action-bar">
+          <button onclick="generateGPTSummary()" class="btn-primary">🚀 Generate</button>
+
+          <label class="pill-input" title="How many alternative ad copies to generate at once">
+            Variants
+            <select id="variantsCount" onchange="syncStreamCheckbox()">
               <option value="1" selected>1</option>
               <option value="3">3</option>
               <option value="5">5</option>
             </select>
           </label>
 
-          <label class="flex items-center gap-1 text-sm">
-            <input id="streamOutput" type="checkbox" class="h-4 w-4" />
-            Stream live (only when Variants = 1)
+          <label class="pill-input" title="Stream output token-by-token (only with Variants=1)">
+            <input id="streamOutput" type="checkbox" class="gpt-check" />
+            <span>Stream live</span>
           </label>
 
-          <button
-            id="btnLoadSuggestions"
-            onclick="loadAdCopySuggestions()"
-            class="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded text-sm"
-          >
-            💡 Load Ad Copy Suggestions
-          </button>
+          <button id="btnLoadSuggestions" onclick="loadAdCopySuggestions()" class="btn-secondary">💡 Load Suggestions</button>
 
-          <div
-            id="loadingBox"
-            class="ml-auto text-blue-600 font-medium hidden self-center text-sm"
-            aria-live="polite"
-          >
-            Generating summary…
+          <div class="spacer"></div>
+
+          <div id="loadingBox" class="hidden text-indigo-600 font-medium text-xs flex items-center gap-2" aria-live="polite">
+            <span class="inline-block w-3 h-3 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"></span>
+            <span id="loadingText">Generating…</span>
           </div>
         </div>
-
-        <!-- Prompt Preview (debug) -->
-        <details class="mt-2 text-sm">
-          <summary class="cursor-pointer text-gray-600">👁 Preview final prompt (debug)</summary>
-          <textarea id="finalPromptPreview" class="mt-2 w-full h-32 border rounded p-2 text-xs overflow-auto" readonly></textarea>
-        </details>
       </div>
 
-      <!-- RIGHT: Suggestions (same height as left; scroll only inside) -->
-      <div id="sugCard" class="bg-white p-3 md:p-4 rounded shadow h-full flex flex-col overflow-hidden">
-        <div class="flex items-center justify-between mb-2">
-          <h2 class="font-semibold text-base md:text-lg text-gray-800">💡 Suggestions (auto-fed)</h2>
-          <div class="flex gap-2">
-            <button
-              onclick="copySuggestions()"
-              class="bg-gray-200 hover:bg-gray-300 text-gray-800 text-xs px-3 py-1 rounded"
-            >
-              📋 Copy
-            </button>
-            <button
-              onclick="clearSuggestions()"
-              class="bg-red-100 hover:bg-red-200 text-red-700 text-xs px-3 py-1 rounded"
-            >
-              🗑 Clear
-            </button>
+      <!-- RIGHT: Suggestions -->
+      <div id="sugCard" class="gpt-card h-full flex flex-col overflow-hidden">
+        <div class="gpt-card-header">
+          <div>
+            <div class="gpt-card-title">💡 Suggestions <span class="text-slate-400 font-normal">(auto-fed)</span></div>
+            <div class="gpt-card-subtitle">CPM-ranked patterns from your existing ads.</div>
+          </div>
+          <div class="flex gap-1">
+            <button onclick="copySuggestions()" class="btn-ghost">📋 Copy</button>
+            <button onclick="clearSuggestions()" class="btn-ghost danger">🗑 Clear</button>
           </div>
         </div>
-
-        <!-- Only the inside scrolls; card height controlled by JS -->
-        <div
-          id="suggestionsBox"
-          class="flex-1 overflow-auto min-h-0 whitespace-pre-wrap text-sm text-gray-800 border rounded p-3"
-        ></div>
+        <div class="flex-1 overflow-hidden p-3">
+          <div id="suggestionsBox" class="h-full overflow-auto whitespace-pre-wrap p-3"></div>
+        </div>
         <textarea id="suggestionsRaw" class="hidden"></textarea>
       </div>
     </div>
 
-    <!-- BOTTOM: FULL-WIDTH OUTPUT TABLE (fills remaining height; scroll inside) -->
+    <!-- BOTTOM: FULL-WIDTH OUTPUT TABLE -->
     <div id="outputWrap" class="flex-1 overflow-hidden" style="height:auto;">
-      <div id="outputBox" class="bg-white p-3 md:p-4 rounded shadow h-full flex flex-col overflow-hidden hidden relative">
-        <div class="flex justify-between items-center mb-2">
-          <h2 class="font-semibold text-base md:text-lg text-gray-800">📋 GPT Output (Tabular View)</h2>
-          <button
-            onclick="copyOutput()"
-            class="bg-green-600 hover:bg-green-700 text-white text-xs md:text-sm px-3 py-1 rounded"
-          >
-            📋 Copy
-          </button>
-        </div>
-
-        <div class="flex-1 overflow-auto min-h-0">
-          <div class="overflow-auto">
-            <table
-              class="w-full table-auto text-xs md:text-sm border border-gray-200 text-left"
-              id="gptOutputTable"
-            >
-              <thead class="bg-gray-100 text-gray-700">
-                <tr>
-                  <th class="border px-3 py-2">Item</th>
-                  <th class="border px-3 py-2">Primary Text</th>
-                  <th class="border px-3 py-2">Headline</th>
-                  <th class="border px-3 py-2">Messaging Template</th>
-                  <th class="border px-3 py-2">Quick Reply 1</th>
-                  <th class="border px-3 py-2">Quick Reply 2</th>
-                  <th class="border px-3 py-2">Quick Reply 3</th>
-                  <th class="border px-2 py-2 w-20 text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody id="gptOutputBody"></tbody>
-            </table>
+      <div id="outputBox" class="gpt-card h-full flex flex-col overflow-hidden hidden">
+        <div class="gpt-card-header">
+          <div>
+            <div class="gpt-card-title">📋 GPT Output</div>
+            <div class="gpt-card-subtitle"><span id="variantCountLabel">0</span> variant(s) generated · click <span class="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded">📋 Use</span> to copy a single row, or Copy All for all rows tab-separated.</div>
           </div>
+          <button onclick="copyOutput()" class="btn-secondary">📋 Copy All</button>
+        </div>
+        <div class="flex-1 overflow-auto">
+          <table class="gpt-output-table" id="gptOutputTable">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Primary Text</th>
+                <th>Headline</th>
+                <th>Messaging Template</th>
+                <th>QR 1</th>
+                <th>QR 2</th>
+                <th>QR 3</th>
+                <th class="text-center" style="width:90px;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="gptOutputBody"></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -273,19 +348,23 @@
     // Each row gets a "Use this" copy button.
     function renderVariants(variants) {
       const body = document.getElementById("gptOutputBody");
+      const countLabel = document.getElementById("variantCountLabel");
+      if (countLabel) countLabel.textContent = (variants && variants.length) || 0;
+
       if (!variants || variants.length === 0) {
-        body.innerHTML = `<tr><td colspan="8" class="text-red-600 px-3 py-2">⚠️ GPT did not return a result.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="8" style="color:#dc2626;text-align:center;padding:18px;">⚠️ GPT did not return a result.</td></tr>`;
         return;
       }
       body.innerHTML = variants.map((v, idx) => {
         const parts = (v || "").split("\t");
-        const cells = [0,1,2,3,4,5,6].map(i => `<td class="border px-3 py-2">${escapeHtml(parts[i] ?? "")}</td>`).join("");
+        const cells = [0,1,2,3,4,5,6].map(i => `<td>${escapeHtml(parts[i] ?? "")}</td>`).join("");
         return `
-          <tr class="hover:bg-blue-50" data-variant="${idx}">
+          <tr data-variant="${idx}">
             ${cells}
-            <td class="border px-2 py-2 text-center">
+            <td class="text-center">
               <button onclick="copyVariant(${idx})"
-                      class="bg-green-600 hover:bg-green-700 text-white text-xs px-2 py-1 rounded">
+                      class="btn-secondary"
+                      style="padding:4px 10px;font-size:11px;">
                 📋 Use
               </button>
             </td>
@@ -341,7 +420,8 @@
 
       outputBox.classList.add("hidden");
       loadingBox.classList.remove("hidden");
-      loadingBox.textContent = streamWanted ? "Streaming live…" : `Generating ${variantsCount} variant(s)…`;
+      const loadingText = document.getElementById("loadingText");
+      if (loadingText) loadingText.textContent = streamWanted ? "Streaming live…" : `Generating ${variantsCount} variant(s)…`;
 
       const body = {
         prompt: finalPrompt,
@@ -372,7 +452,8 @@
         outputBox.classList.remove("hidden");
       } finally {
         loadingBox.classList.add("hidden");
-        loadingBox.textContent = "Generating summary…";
+        const loadingTextRef = document.getElementById("loadingText");
+        if (loadingTextRef) loadingTextRef.textContent = "Generating…";
         computeLayoutHeights();
       }
     }
