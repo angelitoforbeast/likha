@@ -92,21 +92,32 @@ class GPTAdGeneratorController extends Controller
     /**
      * POST /gpt-ad-generator/prompt
      *
-     * Save the editable base prompt back to resources/views/gpt/gpt_ad_prompts.txt
-     * so future page loads default to this version. Auth required to prevent
-     * anonymous edits.
+     * Save a new version of the base prompt to the `gpt_prompts` table
+     * (append-only — every save creates a new row, preserving full history).
+     * The latest row is what showGeneratorForm() resolves on load.
+     *
+     * Auth required so we can attribute changes.
      */
     public function savePrompt(Request $request)
     {
-        $request->validate(['prompt' => 'required|string|max:20000']);
+        $request->validate([
+            'prompt' => 'required|string|max:20000',
+            'note'   => 'nullable|string|max:500',
+        ]);
         if (!Auth::check()) {
             return response()->json(['error' => 'Login required to save prompt.'], 403);
         }
         try {
-            $path = resource_path('views/gpt/gpt_ad_prompts.txt');
-            file_put_contents($path, $request->input('prompt'));
+            $id = DB::table('gpt_prompts')->insertGetId([
+                'prompt_text'    => $request->input('prompt'),
+                'saved_by_email' => Auth::user()?->email,
+                'note'           => $request->input('note'),
+                'created_at'     => now(),
+                'updated_at'     => now(),
+            ]);
             return response()->json([
                 'ok'         => true,
+                'id'         => $id,
                 'saved_at'   => now()->toIso8601String(),
                 'saved_by'   => Auth::user()?->name ?? Auth::user()?->email,
             ]);
@@ -114,6 +125,69 @@ class GPTAdGeneratorController extends Controller
             Log::error('savePrompt error: ' . $e->getMessage());
             return response()->json(['error' => 'Save failed.', 'detail' => $e->getMessage()], 500);
         }
+    }
+
+    /** GET /gpt-ad-generator/prompt-history — list all versions. */
+    public function promptHistory()
+    {
+        $rows = DB::table('gpt_prompts as p')
+            ->leftJoin('users as u', 'u.email', '=', 'p.saved_by_email')
+            ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+            ->select([
+                'p.*',
+                DB::raw('COALESCE(ep.name, u.name) AS saved_by_name'),
+            ])
+            ->orderByDesc('p.id')
+            ->paginate(30);
+
+        return view('gpt.gpt_prompt_history', ['rows' => $rows]);
+    }
+
+    /**
+     * GET /gpt-ad-generator/prompt-history/{id} — single version JSON.
+     * Used by the inline detail expand and the "Restore" preview.
+     */
+    public function promptVersion(int $id)
+    {
+        $row = DB::table('gpt_prompts as p')
+            ->leftJoin('users as u', 'u.email', '=', 'p.saved_by_email')
+            ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+            ->select([
+                'p.*',
+                DB::raw('COALESCE(ep.name, u.name) AS saved_by_name'),
+            ])
+            ->where('p.id', $id)
+            ->first();
+        if (!$row) return response()->json(['error' => 'Not found'], 404);
+        return response()->json($row);
+    }
+
+    /**
+     * POST /gpt-ad-generator/prompt-history/{id}/restore — make this version
+     * the active one by inserting a new row with the same text + a note.
+     * Auth required.
+     */
+    public function promptRestore(int $id, Request $request)
+    {
+        if (!Auth::check()) {
+            return response()->json(['error' => 'Login required.'], 403);
+        }
+        $src = DB::table('gpt_prompts')->where('id', $id)->first();
+        if (!$src) return response()->json(['error' => 'Source version not found'], 404);
+
+        $newId = DB::table('gpt_prompts')->insertGetId([
+            'prompt_text'    => $src->prompt_text,
+            'saved_by_email' => Auth::user()?->email,
+            'note'           => 'Restored from version #' . $id,
+            'created_at'     => now(),
+            'updated_at'     => now(),
+        ]);
+
+        return response()->json([
+            'ok'           => true,
+            'id'           => $newId,
+            'restored_from'=> $id,
+        ]);
     }
 
     /**
@@ -330,7 +404,11 @@ class GPTAdGeneratorController extends Controller
             'Prefer tone/phrasing and structural patterns seen in TOP-PERFORMING items; avoid WORST patterns.',
             'Mirror the typical length of TOP-PERFORMING samples for Primary Text and Messaging Template.',
             'You MAY adapt or create new Quick Replies that reduce friction; keep them short. Do NOT copy QR1–QR3 verbatim unless they are already optimal.',
-            'Do NOT invent details (colors/sizes/fit/materials/variants/bundles/warranty/COD/delivery/promos/price) unless explicitly present in Suggestions or the Product Description.',
+            // HARD constraint — never violate.
+            'HARD CONSTRAINT: Do NOT invent factual details (colors/sizes/fit/materials/variants/bundles/warranty/COD/delivery/promos/price) unless explicitly present in Suggestions or the Product Description.',
+            // Diversity — only matters when the request asks for multiple variants.
+            'DIVERSITY: When generating MORE than one variant in a single response, EACH variant MUST use a DISTINCT hook angle from this set: (1) curiosity / question hook, (2) fear or safety / pain-point, (3) social proof / others-are-buying, (4) value / sulit / worth-it, (5) urgency / FOMO. No two variants in the same response may share opening words or main hook category. Vary sentence rhythm, emoji placement, and call-to-action style across variants.',
+            // Output shape.
             'Output EXACTLY one single line with 7 tab-separated fields: Item, Primary Text, Headline, Messaging Template, Quick Reply 1, Quick Reply 2, Quick Reply 3.',
             'Never add headers, labels, explanations, or extra lines.',
         ]);
@@ -367,10 +445,25 @@ class GPTAdGeneratorController extends Controller
 
 
 
+    /**
+     * Resolve the current active prompt — latest row in `gpt_prompts`,
+     * falling back to the legacy `gpt_ad_prompts.txt` file when the table
+     * is empty (first-time deploy).
+     */
+    private function resolveActivePrompt(): string
+    {
+        if (Schema::hasTable('gpt_prompts')) {
+            $row = DB::table('gpt_prompts')->orderByDesc('id')->first();
+            if ($row && trim($row->prompt_text) !== '') return $row->prompt_text;
+        }
+        $path = resource_path('views/gpt/gpt_ad_prompts.txt');
+        return is_file($path) ? (string) file_get_contents($path) : '';
+    }
+
     /** GET /gpt-ad-generator */
     public function showGeneratorForm()
     {
-        $promptText = file_get_contents(resource_path('views/gpt/gpt_ad_prompts.txt'));
+        $promptText = $this->resolveActivePrompt();
 
         // Get raw page names, normalize in PHP (avoid SQL REPLACE/UNHEX)
         $rawPages = DB::table('ads_manager_reports')

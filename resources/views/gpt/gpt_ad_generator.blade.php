@@ -258,10 +258,14 @@
 
           <!-- Section: Custom prompt -->
           <div class="gpt-section">
-            <div class="gpt-section-label">Custom Prompt</div>
+            <div class="flex items-center justify-between mb-1">
+              <div class="gpt-section-label" style="margin-bottom:0;">Custom Prompt</div>
+              <a href="{{ route('gpt.prompt.history') }}" class="btn-ghost" style="padding:3px 8px;font-size:10.5px;">📜 Versions</a>
+            </div>
             <textarea id="prompt" class="gpt-textarea text-xs" rows="7">{{ $promptText }}</textarea>
+            <input id="promptNote" type="text" class="gpt-input mt-2" style="font-size:11.5px;" placeholder="Optional note about this change (e.g. 'added diversity rule')" />
             <div class="save-prompt-row">
-              <button onclick="saveCustomPrompt()" class="btn-secondary" style="padding:5px 12px;font-size:11.5px;">💾 Save as default</button>
+              <button onclick="saveCustomPrompt()" class="btn-secondary" style="padding:5px 12px;font-size:11.5px;">💾 Save new version</button>
               <span id="savePromptStatus" class="save-prompt-status"></span>
             </div>
             <details class="mt-2 text-sm">
@@ -345,16 +349,10 @@
   </div>
 
   <script>
-    // ===== Strict rules injected into the final prompt so GPT follows Suggestions only =====
-    const STRICT_RULES = `
-[SUGGESTION-STRICT MODE]
-- Use ONLY themes/messages that appear in the "=== Suggestions" block or in the Product Description.
-- Do NOT mention colors, sizes, fit, materials, variants, bundles, warranty, COD, promos, or delivery details UNLESS explicitly present in Suggestions or Product Description.
-- Prefer tone/phrasing of TOP-PERFORMING items. Avoid WORST list patterns.
-- If Suggestions include "Welcome Message" and "QR1/QR2/QR3", base your "Messaging Template" and "Quick Reply 1–3" on them (rephrase ok, but keep same intent).
-- Output must be a SINGLE LINE with 7 tab-separated fields, no extra text.
-[/SUGGESTION-STRICT MODE]
-`.trim();
+    // STRICT rules used to be re-injected here, but they're already in the
+    // base prompt file (gpt_ad_prompts.txt) — duplicating wasted tokens and
+    // double-emphasized constraints, which collapsed multi-variant outputs
+    // toward a single template. Removed 2026-05-03.
 
     // ===== Height management — fit the whole UI inside the viewport.
     // Layout = horizontal split (leftCol vs outputWrap) with handle in between.
@@ -578,10 +576,10 @@
         return;
       }
 
-      // Final Prompt = base prompt + STRICT_RULES + optional suggestions + product info
+      // Final Prompt = base prompt (which already contains STRICT_MODE rules)
+      // + optional suggestions + product info.
       const finalPrompt =
         customPrompt +
-        "\n\n" + STRICT_RULES +
         (includeSug && suggestions ? `\n\n${suggestions}` : "") +
         `\n\nProduct Name: ${name}\nProduct Description: ${desc}`;
 
@@ -787,10 +785,11 @@
       });
     }
 
-    // Save the custom prompt textarea back to the prompts file (server-side).
+    // Save the custom prompt as a new version sa gpt_prompts table.
     async function saveCustomPrompt() {
       const status = document.getElementById("savePromptStatus");
       const prompt = (document.getElementById("prompt")?.value ?? "").trim();
+      const note   = (document.getElementById("promptNote")?.value ?? "").trim();
       if (!prompt) {
         status.className = "save-prompt-status err";
         status.textContent = "⚠ Empty prompt — nothing to save.";
@@ -802,7 +801,7 @@
         const r = await fetch("{{ route('gpt.prompt.save') }}", {
           method: "POST",
           headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": "{{ csrf_token() }}" },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, note: note || null }),
         });
         if (r.status === 403) {
           status.className = "save-prompt-status err";
@@ -813,7 +812,9 @@
         if (r.ok && data.ok) {
           status.className = "save-prompt-status ok";
           const by = data.saved_by ? ` by ${data.saved_by}` : "";
-          status.textContent = `✅ Saved${by}. Future page loads will use this prompt.`;
+          status.textContent = `✅ Saved as version #${data.id}${by}.`;
+          const nField = document.getElementById("promptNote");
+          if (nField) nField.value = "";
         } else {
           status.className = "save-prompt-status err";
           status.textContent = "❌ " + (data.error || "Save failed");
