@@ -14,9 +14,12 @@
       @endif
     </span>
     <span class="bubble-controls">
-      <button class="bubble-arrow" data-act="up"   title="Move up">↑</button>
-      <button class="bubble-arrow" data-act="down" title="Move down">↓</button>
-      <button class="bubble-arrow" data-act="del"  title="Delete">✕</button>
+      <button type="button" class="bubble-arrow" title="Move up"
+        onclick="window.flowEd.moveBubble(this.closest('.bubble'), -1, this.closest('.flow-card'))">↑</button>
+      <button type="button" class="bubble-arrow" title="Move down"
+        onclick="window.flowEd.moveBubble(this.closest('.bubble'), 1, this.closest('.flow-card'))">↓</button>
+      <button type="button" class="bubble-arrow" title="Delete"
+        onclick="window.flowEd.deleteBubble(this.closest('.bubble'), this.closest('.flow-card'))">✕</button>
     </span>
   </div>
 

@@ -160,9 +160,14 @@
               <span class="save-status" data-status="{{ $flow }}"></span>
             </div>
             <div class="flow-actions">
-              <button class="ct-btn-secondary expand-btn" data-act="toggle">✏️ Edit</button>
-              <button class="ct-btn save-btn" data-act="save" style="display:none;">💾 Save</button>
-              <button class="ct-btn-ghost close-btn" data-act="close" style="display:none;">✕ Close</button>
+              <button type="button" class="ct-btn-secondary expand-btn"
+                onclick="window.flowEd.toggleExpand(this.closest('.flow-card'))">✏️ Edit</button>
+              <button type="button" class="ct-btn save-btn"
+                onclick="window.flowEd.saveFlow(this.closest('.flow-card').dataset.flow)"
+                style="display:none;">💾 Save</button>
+              <button type="button" class="ct-btn-ghost close-btn"
+                onclick="window.flowEd.toggleExpand(this.closest('.flow-card'))"
+                style="display:none;">✕ Close</button>
             </div>
           </div>
 
@@ -308,24 +313,16 @@
         },
 
         // ====== DOM manipulation ======
+        // Edit/Save/Close + ↑↓✕ buttons use inline onclick handlers (see HTML).
+        // wireFlowCard / wireBubble only attach input listeners + media drop zones.
         wireFlowCard(card) {
           const flow = card.dataset.flow;
-          // Edit / Save / Close buttons in the header.
-          card.querySelector('[data-act="toggle"]')?.addEventListener('click', () => this.toggleExpand(card));
-          card.querySelector('[data-act="close"]')?.addEventListener('click', () => this.toggleExpand(card));
-          card.querySelector('[data-act="save"]')?.addEventListener('click', () => this.saveFlow(flow));
-          // Wire all existing bubbles' controls.
           const container = card.querySelector('.bubbles-container');
           container.querySelectorAll('.bubble').forEach((b) => this.wireBubble(b, flow));
         },
 
         wireBubble(bubble, flow) {
           const card = bubble.closest('.flow-card');
-          // Up/down/delete buttons → mark dirty + reorder DOM (no autosave)
-          bubble.querySelector('[data-act="up"]')?.addEventListener('click', () => this.moveBubble(bubble, -1, card));
-          bubble.querySelector('[data-act="down"]')?.addEventListener('click', () => this.moveBubble(bubble, +1, card));
-          bubble.querySelector('[data-act="del"]')?.addEventListener('click', () => this.deleteBubble(bubble, card));
-
           // Mark dirty on input changes (text + caption fields)
           const ta = bubble.querySelector('textarea');
           if (ta) ta.addEventListener('input', () => this.setDirty(card, true));
@@ -495,9 +492,12 @@
             <div class="bubble-head">
               <span class="bubble-type">${type === 'text' ? '📝 Text' : type === 'image' ? '🖼️ Image' : '🎥 Video'}</span>
               <span class="bubble-controls">
-                <button class="bubble-arrow" data-act="up"   title="Move up">↑</button>
-                <button class="bubble-arrow" data-act="down" title="Move down">↓</button>
-                <button class="bubble-arrow" data-act="del"  title="Delete">✕</button>
+                <button type="button" class="bubble-arrow" title="Move up"
+                  onclick="window.flowEd.moveBubble(this.closest('.bubble'), -1, this.closest('.flow-card'))">↑</button>
+                <button type="button" class="bubble-arrow" title="Move down"
+                  onclick="window.flowEd.moveBubble(this.closest('.bubble'), 1, this.closest('.flow-card'))">↓</button>
+                <button type="button" class="bubble-arrow" title="Delete"
+                  onclick="window.flowEd.deleteBubble(this.closest('.bubble'), this.closest('.flow-card'))">✕</button>
               </span>
             </div>`;
           if (type === 'text') {
