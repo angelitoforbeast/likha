@@ -58,11 +58,22 @@
     .media-drop {
       border:2px dashed #cbd5e1; border-radius:8px; padding:18px;
       text-align:center; cursor:pointer; background:#fff; transition:all 0.15s;
+      position:relative; outline:none;
     }
     .media-drop:hover, .media-drop.dragover { border-color:#6366f1; background:#eef2ff; }
+    .media-drop.active { border-color:#16a34a; background:#f0fdf4; box-shadow:0 0 0 3px rgba(22,163,74,0.15); }
+    .media-drop.active::after {
+      content:'✓ active — Ctrl+V to paste'; position:absolute; top:6px; right:8px;
+      font-size:10px; color:#16a34a; font-weight:600; letter-spacing:0.04em;
+    }
     .media-drop.uploading { opacity:0.6; cursor:wait; }
     .media-drop p { margin:0; font-size:12px; color:#64748b; }
     .media-drop .hint { font-size:10.5px; color:#94a3b8; margin-top:4px; }
+    .media-drop .pick-btn {
+      display:inline-block; margin-top:6px; font-size:11px;
+      color:#4f46e5; text-decoration:underline; cursor:pointer;
+    }
+    .media-drop .pick-btn:hover { color:#4338ca; }
     .media-preview { margin-top:8px; }
     .media-preview img, .media-preview video {
       max-width:100%; max-height:240px; border-radius:6px;
@@ -159,12 +170,15 @@
     function flowEditor() {
       return {
         status: {},
+        _activeDrop: null,
         init() {
           window.flowEd = this;
-          // Wire up existing bubbles (autosave on blur, reorder, delete, paste images)
+          // Wire up existing bubbles (autosave on blur, reorder, delete, drop)
           document.querySelectorAll('.flow-card').forEach((card) => {
             this.wireFlowCard(card);
           });
+          // Single document-level paste listener for clipboard images.
+          this.wireDocumentPaste();
         },
 
         // ====== Persistence ======
@@ -247,8 +261,30 @@
         wireDropZone(drop, bubble, flow) {
           const kind = bubble.dataset.type; // 'image' or 'video'
           const fileInput = drop.querySelector('input[type="file"]');
+          const pickBtn = drop.querySelector('.pick-btn');
 
-          drop.addEventListener('click', () => fileInput?.click());
+          // Click on drop zone → make this the "active" zone for paste/drag.
+          // Doesn't open file picker — user clicks the explicit "Choose file"
+          // link OR the file input directly. This allows Ctrl+V to work after
+          // clicking the area (Messenger-style).
+          drop.addEventListener('click', (e) => {
+            if (e.target.matches('.pick-btn, input[type="file"]')) return;
+            // Mark this as active across the whole document.
+            document.querySelectorAll('.media-drop.active').forEach((d) => {
+              if (d !== drop) d.classList.remove('active');
+            });
+            drop.classList.add('active');
+            window.flowEd._activeDrop = drop;
+            drop.focus();
+          });
+
+          // Explicit "Choose file" link opens file picker.
+          pickBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fileInput?.click();
+          });
+
+          // Drag & drop
           drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('dragover'); });
           drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
           drop.addEventListener('drop', (e) => {
@@ -257,24 +293,38 @@
             const f = e.dataTransfer.files[0];
             if (f) this.uploadMedia(f, kind, bubble, flow);
           });
+
+          // File input change
           fileInput?.addEventListener('change', (e) => {
             const f = e.target.files[0];
             if (f) this.uploadMedia(f, kind, bubble, flow);
           });
+        },
 
-          // Paste-from-clipboard support (image only — videos can't be clipboard-pasted)
-          if (kind === 'image') {
-            drop.addEventListener('paste', (e) => {
-              for (const item of e.clipboardData.items) {
-                if (item.type.startsWith('image/')) {
-                  const file = item.getAsFile();
-                  if (file) this.uploadMedia(file, kind, bubble, flow);
-                  break;
+        // Document-level paste listener — image only (videos can't be
+        // clipboard-pasted). Routes the pasted image to the most recently
+        // clicked image drop zone. Mirrors Messenger / Discord UX.
+        wireDocumentPaste() {
+          document.addEventListener('paste', (e) => {
+            const drop = window.flowEd._activeDrop;
+            if (!drop) return;
+            const bubble = drop.closest('.bubble');
+            if (!bubble || bubble.dataset.type !== 'image') return;
+            const flowCard = bubble.closest('.flow-card');
+            if (!flowCard) return;
+
+            const items = e.clipboardData?.items || [];
+            for (const item of items) {
+              if (item.type.startsWith('image/')) {
+                const file = item.getAsFile();
+                if (file) {
+                  e.preventDefault();
+                  this.uploadMedia(file, 'image', bubble, flowCard.dataset.flow);
                 }
+                break;
               }
-            });
-            drop.setAttribute('tabindex', '0'); // make focusable so paste works
-          }
+            }
+          });
         },
 
         async uploadMedia(file, kind, bubble, flow) {
@@ -382,8 +432,11 @@
                 : `<video controls src="${url}"></video><div class="url">${url}</div>`)
             : '';
           const dropHint = type === 'image'
-            ? '<p>📎 Click, drag-drop, or <strong>Ctrl+V paste</strong> an image</p><p class="hint">jpg/png/gif/webp · max 5MB</p>'
-            : '<p>📎 Click or drag-drop a video file</p><p class="hint">mp4/webm/mov · max 50MB</p>';
+            ? '<p>1️⃣ <strong>Click here</strong> first to activate this slot</p>'
+            + '<p class="hint">2️⃣ Then <strong>Ctrl+V</strong> to paste, drag-drop, or <span class="pick-btn">📂 choose file</span></p>'
+            + '<p class="hint">jpg/png/gif/webp · max 5MB</p>'
+            : '<p><strong>Drag-drop</strong> a video, or <span class="pick-btn">📂 choose file</span></p>'
+            + '<p class="hint">mp4/webm/mov · max 50MB</p>';
           return `<div class="bubble" data-type="${type}" data-url="${url}">
             ${head}
             <div class="media-drop" tabindex="0">

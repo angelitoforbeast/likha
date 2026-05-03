@@ -26,10 +26,11 @@
     <div class="media-drop" tabindex="0">
       <input type="file" accept="{{ $accept }}" hidden>
       @if ($type === 'image')
-        <p>📎 Click, drag-drop, or <strong>Ctrl+V paste</strong> an image</p>
+        <p>1️⃣ <strong>Click here</strong> first to activate this slot</p>
+        <p class="hint">2️⃣ Then <strong>Ctrl+V</strong> to paste, drag-drop, or <span class="pick-btn">📂 choose file</span></p>
         <p class="hint">jpg/png/gif/webp · max 5MB</p>
       @else
-        <p>📎 Click or drag-drop a video file</p>
+        <p><strong>Drag-drop</strong> a video, or <span class="pick-btn">📂 choose file</span></p>
         <p class="hint">mp4/webm/mov · max 50MB</p>
       @endif
     </div>
