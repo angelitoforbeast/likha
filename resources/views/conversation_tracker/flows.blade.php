@@ -20,17 +20,23 @@
     .ct-btn-danger { background:transparent; color:#dc2626; font-size:11px; padding:3px 7px; border:1px solid #fecaca; border-radius:5px; cursor:pointer; }
     .ct-btn-danger:hover { background:#fef2f2; }
 
-    /* Flow card */
-    .flow-card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; margin-bottom:14px; }
-    .flow-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    /* Flow card — collapsible by default; expand to edit. */
+    .flow-card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:10px 14px; margin-bottom:8px; transition:padding 0.15s; }
+    .flow-card.expanded { padding:14px; box-shadow:0 2px 6px rgba(99,102,241,0.08); border-color:#c7d2fe; }
+    .flow-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .flow-card.expanded .flow-head { margin-bottom:12px; padding-bottom:10px; border-bottom:1px dashed #e2e8f0; }
     .flow-name {
       font-size:12px; font-weight:700; color:#3730a3; background:#eef2ff;
       padding:4px 12px; border-radius:999px; letter-spacing:0.04em;
     }
     .flow-name.loop { color:#92400e; background:#fef3c7; }
     .flow-name.main { color:#166534; background:#dcfce7; }
-    .flow-actions { display:flex; gap:6px; flex-wrap:wrap; }
-    .save-status { font-size:10.5px; color:#94a3b8; margin-left:8px; }
+    .flow-summary { font-size:11.5px; color:#64748b; }
+    .flow-summary .unsaved { color:#d97706; font-weight:600; }
+    .flow-summary .saved { color:#16a34a; font-weight:600; }
+    .flow-actions { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .flow-body { transition:max-height 0.2s ease-out; }
+    .save-status { font-size:10.5px; }
     .save-status.saving { color:#6366f1; }
     .save-status.saved { color:#16a34a; }
     .save-status.error { color:#dc2626; }
@@ -130,36 +136,52 @@
         <a href="/conversation/tracker" class="text-indigo-600 underline">Import page</a>.
       </div>
     @else
-      <!-- Flow cards -->
+      <!-- Flow cards (collapsed by default) -->
       @foreach ($flowNames as $flow)
         @php
           $bubbles = $contentsByFlow[$flow] ?? [];
           $cls = 'flow-name';
           if (str_starts_with($flow, 'LOOP'))     $cls .= ' loop';
           elseif ($flow === 'MAIN FLOW')           $cls .= ' main';
+          $bubbleCount = count($bubbles);
         @endphp
-        <div class="flow-card" data-flow="{{ $flow }}">
+        <div class="flow-card" data-flow="{{ $flow }}" data-expanded="false" data-dirty="false">
           <div class="flow-head">
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-3 flex-wrap">
               <span class="{{ $cls }}">{{ $flow }}</span>
-              <span class="save-status" :class="status['{{ $flow }}']?.cls" x-text="status['{{ $flow }}']?.text || ''"></span>
+              <span class="flow-summary">
+                @if ($bubbleCount > 0)
+                  <span class="saved">✓ {{ $bubbleCount }} bubble{{ $bubbleCount === 1 ? '' : 's' }} saved</span>
+                @else
+                  <span style="color:#94a3b8;">— no bubbles yet —</span>
+                @endif
+                <span class="dirty-tag hidden" style="margin-left:8px;color:#d97706;font-weight:600;">● Unsaved changes</span>
+              </span>
+              <span class="save-status" data-status="{{ $flow }}"></span>
+            </div>
+            <div class="flow-actions">
+              <button class="ct-btn-secondary expand-btn" data-act="toggle">✏️ Edit</button>
+              <button class="ct-btn save-btn" data-act="save" style="display:none;">💾 Save</button>
+              <button class="ct-btn-ghost close-btn" data-act="close" style="display:none;">✕ Close</button>
             </div>
           </div>
 
-          <div class="bubbles-container" data-flow="{{ $flow }}">
-            @if (empty($bubbles))
-              <div class="empty-flow">No bubbles yet. Click below to add the first one.</div>
-            @else
-              @foreach ($bubbles as $i => $b)
-                @include('conversation_tracker._bubble', ['bubble' => $b, 'index' => $i, 'flow' => $flow])
-              @endforeach
-            @endif
-          </div>
+          <div class="flow-body" style="display:none;">
+            <div class="bubbles-container" data-flow="{{ $flow }}">
+              @if (empty($bubbles))
+                <div class="empty-flow">No bubbles yet. Click below to add the first one.</div>
+              @else
+                @foreach ($bubbles as $i => $b)
+                  @include('conversation_tracker._bubble', ['bubble' => $b, 'index' => $i, 'flow' => $flow])
+                @endforeach
+              @endif
+            </div>
 
-          <div class="add-bubble-row">
-            <button class="ct-btn-secondary" onclick="window.flowEd.addBubble('{{ $flow }}', 'text')">📝 Add Text</button>
-            <button class="ct-btn-secondary" onclick="window.flowEd.addBubble('{{ $flow }}', 'image')">🖼️ Add Image</button>
-            <button class="ct-btn-secondary" onclick="window.flowEd.addBubble('{{ $flow }}', 'video')">🎥 Add Video</button>
+            <div class="add-bubble-row">
+              <button class="ct-btn-secondary" onclick="window.flowEd.addBubble('{{ $flow }}', 'text')">📝 Add Text</button>
+              <button class="ct-btn-secondary" onclick="window.flowEd.addBubble('{{ $flow }}', 'image')">🖼️ Add Image</button>
+              <button class="ct-btn-secondary" onclick="window.flowEd.addBubble('{{ $flow }}', 'video')">🎥 Add Video</button>
+            </div>
           </div>
         </div>
       @endforeach
@@ -187,7 +209,7 @@
           if (!card) return;
           const bubbles = this.collectBubbles(card);
 
-          this.setStatus(flowName, 'saving', 'Saving…');
+          this.setStatus(card, 'saving', 'Saving…');
           try {
             const res = await fetch("{{ route('conversation.tracker.flows.save') }}", {
               method: 'POST',
@@ -200,18 +222,72 @@
             });
             const data = await res.json();
             if (res.ok && data.ok) {
-              this.setStatus(flowName, 'saved', `✅ Saved (${data.bubble_count})`);
-              setTimeout(() => this.setStatus(flowName, '', ''), 2000);
+              this.setStatus(card, 'saved', `✅ Saved (${data.bubble_count})`);
+              this.setDirty(card, false);
+              this.updateSummary(card, data.bubble_count);
+              setTimeout(() => this.setStatus(card, '', ''), 2000);
             } else {
-              this.setStatus(flowName, 'error', '❌ ' + (data.error || 'save failed'));
+              this.setStatus(card, 'error', '❌ ' + (data.error || 'save failed'));
             }
           } catch (e) {
-            this.setStatus(flowName, 'error', '❌ ' + e.message);
+            this.setStatus(card, 'error', '❌ ' + e.message);
           }
         },
 
-        setStatus(flow, cls, text) {
-          this.status[flow] = { cls, text };
+        setStatus(card, cls, text) {
+          const el = card.querySelector('.save-status');
+          if (!el) return;
+          el.className = 'save-status ' + (cls || '');
+          el.textContent = text || '';
+        },
+
+        setDirty(card, dirty) {
+          card.dataset.dirty = dirty ? 'true' : 'false';
+          const tag = card.querySelector('.dirty-tag');
+          if (tag) tag.classList.toggle('hidden', !dirty);
+          // Highlight Save button when dirty
+          const saveBtn = card.querySelector('.save-btn');
+          if (saveBtn) saveBtn.style.opacity = dirty ? '1' : '0.7';
+        },
+
+        updateSummary(card, bubbleCount) {
+          // Update the "✓ N bubbles saved" text after a successful save.
+          const sum = card.querySelector('.flow-summary');
+          if (!sum) return;
+          // Remove any existing saved/empty span
+          sum.querySelectorAll(':scope > span:not(.dirty-tag)').forEach(s => s.remove());
+          const span = document.createElement('span');
+          if (bubbleCount > 0) {
+            span.className = 'saved';
+            span.textContent = `✓ ${bubbleCount} bubble${bubbleCount === 1 ? '' : 's'} saved`;
+          } else {
+            span.style.color = '#94a3b8';
+            span.textContent = '— no bubbles yet —';
+          }
+          sum.insertBefore(span, sum.firstChild);
+        },
+
+        toggleExpand(card) {
+          const isOpen = card.dataset.expanded === 'true';
+          if (isOpen) {
+            // Closing — warn if dirty
+            if (card.dataset.dirty === 'true') {
+              if (!confirm('Close without saving? Unsaved changes will be lost.')) return;
+            }
+            card.dataset.expanded = 'false';
+            card.classList.remove('expanded');
+            card.querySelector('.flow-body').style.display = 'none';
+            card.querySelector('.expand-btn').style.display = '';
+            card.querySelector('.save-btn').style.display = 'none';
+            card.querySelector('.close-btn').style.display = 'none';
+          } else {
+            card.dataset.expanded = 'true';
+            card.classList.add('expanded');
+            card.querySelector('.flow-body').style.display = '';
+            card.querySelector('.expand-btn').style.display = 'none';
+            card.querySelector('.save-btn').style.display = '';
+            card.querySelector('.close-btn').style.display = '';
+          }
         },
 
         collectBubbles(card) {
@@ -234,24 +310,27 @@
         // ====== DOM manipulation ======
         wireFlowCard(card) {
           const flow = card.dataset.flow;
+          // Edit / Save / Close buttons in the header.
+          card.querySelector('[data-act="toggle"]')?.addEventListener('click', () => this.toggleExpand(card));
+          card.querySelector('[data-act="close"]')?.addEventListener('click', () => this.toggleExpand(card));
+          card.querySelector('[data-act="save"]')?.addEventListener('click', () => this.saveFlow(flow));
+          // Wire all existing bubbles' controls.
           const container = card.querySelector('.bubbles-container');
-          // Wire all bubbles' controls.
           container.querySelectorAll('.bubble').forEach((b) => this.wireBubble(b, flow));
         },
 
         wireBubble(bubble, flow) {
-          // Up/down/delete buttons
-          bubble.querySelector('[data-act="up"]')?.addEventListener('click', () => this.moveBubble(bubble, -1, flow));
-          bubble.querySelector('[data-act="down"]')?.addEventListener('click', () => this.moveBubble(bubble, +1, flow));
-          bubble.querySelector('[data-act="del"]')?.addEventListener('click', () => this.deleteBubble(bubble, flow));
+          const card = bubble.closest('.flow-card');
+          // Up/down/delete buttons → mark dirty + reorder DOM (no autosave)
+          bubble.querySelector('[data-act="up"]')?.addEventListener('click', () => this.moveBubble(bubble, -1, card));
+          bubble.querySelector('[data-act="down"]')?.addEventListener('click', () => this.moveBubble(bubble, +1, card));
+          bubble.querySelector('[data-act="del"]')?.addEventListener('click', () => this.deleteBubble(bubble, card));
 
-          // Text autosave on blur
+          // Mark dirty on input changes (text + caption fields)
           const ta = bubble.querySelector('textarea');
-          if (ta) ta.addEventListener('blur', () => this.saveFlow(flow));
-
-          // Caption autosave on blur
+          if (ta) ta.addEventListener('input', () => this.setDirty(card, true));
           const cap = bubble.querySelector('input.caption-input');
-          if (cap) cap.addEventListener('blur', () => this.saveFlow(flow));
+          if (cap) cap.addEventListener('input', () => this.setDirty(card, true));
 
           // Media drop zone
           const drop = bubble.querySelector('.media-drop');
@@ -329,8 +408,9 @@
 
         async uploadMedia(file, kind, bubble, flow) {
           const drop = bubble.querySelector('.media-drop');
+          const card = bubble.closest('.flow-card');
           drop?.classList.add('uploading');
-          this.setStatus(flow, 'saving', 'Uploading ' + kind + '…');
+          this.setStatus(card, 'saving', 'Uploading ' + kind + '…');
 
           const fd = new FormData();
           fd.append('file', file);
@@ -344,7 +424,7 @@
             });
             const data = await res.json();
             if (!res.ok || !data.ok) {
-              this.setStatus(flow, 'error', '❌ Upload failed: ' + (data.message || ('HTTP ' + res.status)));
+              this.setStatus(card, 'error', '❌ Upload failed: ' + (data.message || ('HTTP ' + res.status)));
               return;
             }
             // Update bubble with new URL + render preview
@@ -357,10 +437,11 @@
                 previewBox.innerHTML = `<video controls src="${data.url}"></video><div class="url">${data.url}</div>`;
               }
             }
-            // Save the flow
-            await this.saveFlow(flow);
+            // Mark dirty — user must click Save to persist the bubble URL.
+            this.setDirty(card, true);
+            this.setStatus(card, 'saved', '✅ Uploaded — click 💾 Save to persist');
           } catch (e) {
-            this.setStatus(flow, 'error', '❌ ' + e.message);
+            this.setStatus(card, 'error', '❌ ' + e.message);
           } finally {
             drop?.classList.remove('uploading');
           }
@@ -378,21 +459,22 @@
           const bubble = div.firstElementChild;
           container.appendChild(bubble);
           this.wireBubble(bubble, flow);
+          this.setDirty(card, true);
           // Focus the textarea (text) or click the drop zone (media)
           if (type === 'text') bubble.querySelector('textarea')?.focus();
         },
 
-        moveBubble(bubble, direction, flow) {
+        moveBubble(bubble, direction, card) {
           const parent = bubble.parentElement;
           if (direction === -1 && bubble.previousElementSibling) {
             parent.insertBefore(bubble, bubble.previousElementSibling);
           } else if (direction === +1 && bubble.nextElementSibling) {
             parent.insertBefore(bubble.nextElementSibling, bubble);
           }
-          this.saveFlow(flow);
+          this.setDirty(card, true);
         },
 
-        deleteBubble(bubble, flow) {
+        deleteBubble(bubble, card) {
           if (!confirm('Delete this bubble?')) return;
           const container = bubble.parentElement;
           bubble.remove();
@@ -402,7 +484,7 @@
             empty.textContent = 'No bubbles yet. Click below to add the first one.';
             container.appendChild(empty);
           }
-          this.saveFlow(flow);
+          this.setDirty(card, true);
         },
 
         bubbleHtml(type, data) {
