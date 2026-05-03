@@ -61,6 +61,10 @@
                     <i class="fa-solid fa-store"></i>
                   </x-navlink>
 
+                  <x-navlink href="/conversation/tracker" :active="request()->is('conversation/tracker*')" label="Conv Tracker">
+                    <i class="fa-solid fa-comments"></i>
+                  </x-navlink>
+
                   <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/*')" label="Macro">
                     <i class="fa-solid fa-table"></i>
                   </x-navlink>
