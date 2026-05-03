@@ -633,6 +633,11 @@ Route::get ('/conversation/tracker/status', [\App\Http\Controllers\ConversationT
     ->name('conversation.tracker.status');
 Route::match(['get','delete'], '/conversation/tracker/view', [\App\Http\Controllers\ConversationTrackerImportController::class, 'view'])
     ->name('conversation.tracker.view');
+Route::delete('/conversation/tracker/view/{id}', [\App\Http\Controllers\ConversationTrackerImportController::class, 'destroyRow'])
+    ->whereNumber('id')
+    ->name('conversation.tracker.row.delete');
+Route::get('/conversation/tracker/stats', [\App\Http\Controllers\ConversationTrackerImportController::class, 'stats'])
+    ->name('conversation.tracker.stats');
 
 Route::get   ('/conversation/tracker/settings', [\App\Http\Controllers\ConversationTrackerSettingController::class, 'settings'])
     ->name('conversation.tracker.settings');

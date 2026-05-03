@@ -30,7 +30,8 @@
         <div class="ct-title">🚀 Run Import</div>
         <div class="flex items-center gap-2 flex-wrap">
           <a href="/conversation/tracker/settings" class="ct-btn-secondary">⚙️ Settings ({{ count($settings) }})</a>
-          <a href="/conversation/tracker/view" class="ct-btn-secondary">📊 View Imported</a>
+          <a href="/conversation/tracker/view" class="ct-btn-secondary">📋 View Imported</a>
+          <a href="/conversation/tracker/stats" class="ct-btn-secondary">📊 Stats</a>
           <button id="btnStart" onclick="startImport()" class="ct-btn">🚀 Start Import</button>
         </div>
       </div>

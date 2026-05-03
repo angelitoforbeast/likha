@@ -21,12 +21,15 @@
     .ct-table tbody td { padding:8px 10px; border-bottom:1px solid #f1f5f9; vertical-align:top; word-wrap:break-word; }
     .ct-table tbody tr:hover td { background:#f8fafc; }
     .ct-table colgroup col.c-date { width:130px; }
-    .ct-table colgroup col.c-page { width:130px; }
-    .ct-table colgroup col.c-name { width:150px; }
-    .ct-table colgroup col.c-phone { width:115px; }
-    .ct-table colgroup col.c-contact { width:130px; }
+    .ct-table colgroup col.c-page { width:120px; }
+    .ct-table colgroup col.c-name { width:140px; }
+    .ct-table colgroup col.c-phone { width:110px; }
+    .ct-table colgroup col.c-contact { width:120px; }
     .ct-table colgroup col.c-cx { width:22%; }
     .ct-table colgroup col.c-resp { width:auto; }
+    .ct-table colgroup col.c-action { width:60px; }
+    .row-del-btn { background:transparent; border:1px solid #fecaca; color:#dc2626; padding:3px 8px; border-radius:5px; font-size:11px; cursor:pointer; }
+    .row-del-btn:hover { background:#fef2f2; }
 
     .text-block-pre { white-space:pre-wrap; font-size:11px; color:#475569; line-height:1.4; max-height:120px; overflow:auto; padding:6px; background:#f8fafc; border-radius:4px; border:1px solid #f1f5f9; }
     .pill-page { background:#eef2ff; color:#4338ca; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; }
@@ -43,6 +46,7 @@
         <div class="ct-title">📊 Imported records ({{ $rows->total() }} total)</div>
         <div class="flex gap-2 flex-wrap">
           <a href="/conversation/tracker" class="ct-btn-ghost">← Back to Import</a>
+          <a href="/conversation/tracker/stats" class="ct-btn-ghost">📊 Stats</a>
           <a href="/conversation/tracker/settings" class="ct-btn-ghost">⚙️ Settings</a>
         </div>
       </div>
@@ -74,6 +78,7 @@
             <col class="c-contact">
             <col class="c-cx">
             <col class="c-resp">
+            <col class="c-action">
           </colgroup>
           <thead>
             <tr>
@@ -84,6 +89,7 @@
               <th>Contact ID</th>
               <th>All CX Details</th>
               <th>Response Tracker</th>
+              <th style="text-align:center;">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -117,9 +123,18 @@
                     <span style="color:#cbd5e1;">—</span>
                   @endif
                 </td>
+                <td style="text-align:center;">
+                  <form method="POST" action="/conversation/tracker/view/{{ $r->id }}"
+                        onsubmit="return confirm('Delete row #{{ $r->id }} ({{ $r->name ?: 'no name' }})?')"
+                        class="inline">
+                    @csrf
+                    @method('DELETE')
+                    <button type="submit" class="row-del-btn" title="Delete row">🗑️</button>
+                  </form>
+                </td>
               </tr>
             @empty
-              <tr><td colspan="7" style="text-align:center;padding:36px;color:#94a3b8;">No records yet. Run an import from the <a href="/conversation/tracker" class="text-indigo-600 underline">Import page</a>.</td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:36px;color:#94a3b8;">No records yet. Run an import from the <a href="/conversation/tracker" class="text-indigo-600 underline">Import page</a>.</td></tr>
             @endforelse
           </tbody>
         </table>

@@ -136,4 +136,180 @@ class ConversationTrackerImportController extends Controller
 
         return view('conversation_tracker.view', compact('rows', 'pages'));
     }
+
+    /** DELETE /conversation/tracker/view/{id} — delete one row. */
+    public function destroyRow($id)
+    {
+        $row = ConversationTracker::findOrFail($id);
+        $row->delete();
+        return redirect()->back()->with('status', "🗑️ Row #{$id} deleted.");
+    }
+
+    /**
+     * GET /conversation/tracker/stats
+     *
+     * Aggregates per-FLOW counts from response_tracker text. Mirrors the
+     * user's Google Sheets formula:
+     *   FLOW · TOTAL · REPLIED · REPLIED CELLS · CUSTOMER ORDERED
+     */
+    public function stats(Request $request)
+    {
+        $pageName  = trim((string) $request->query('page_name', ''));
+        $fromDate  = trim((string) $request->query('from_date', ''));
+        $toDate    = trim((string) $request->query('to_date', ''));
+        $replyFlag = strtoupper(trim((string) $request->query('reply_flag', 'CUSTOMER_REPLY')));
+        $orderFlag = strtoupper(trim((string) $request->query('order_flag', 'CUSTOMER ORDERED')));
+
+        if ($replyFlag === '') $replyFlag = 'CUSTOMER_REPLY';
+        if ($orderFlag === '') $orderFlag = 'CUSTOMER ORDERED';
+
+        $query = ConversationTracker::query()
+            ->whereNotNull('response_tracker')
+            ->where('response_tracker', '<>', '');
+
+        if ($pageName !== '' && strtolower($pageName) !== 'all') {
+            $query->where('page_name', $pageName);
+        }
+        if ($fromDate !== '') $query->where('subscription_date', '>=', $fromDate . ' 00:00:00');
+        if ($toDate !== '')   $query->where('subscription_date', '<=', $toDate . ' 23:59:59');
+
+        // Stream-friendly chunking — keeps memory bounded for big datasets.
+        $flowTotal       = []; // F => count of rows where F appears
+        $flowReplied     = []; // F => count of REPLIED events
+        $flowRepliedCell = []; // F => count of rows where F had ≥1 REPLIED
+        $flowOrdered     = []; // F => count of CUSTOMER ORDERED events
+        $totalRows       = 0;
+
+        $query->select('response_tracker')
+            ->orderBy('id')
+            ->chunk(500, function ($chunk) use (&$flowTotal, &$flowReplied, &$flowRepliedCell, &$flowOrdered, &$totalRows, $replyFlag, $orderFlag) {
+                foreach ($chunk as $row) {
+                    $totalRows++;
+                    $parsed = self::parseResponseTracker($row->response_tracker, $replyFlag, $orderFlag);
+
+                    foreach ($parsed['unique_flows'] as $f) {
+                        $flowTotal[$f] = ($flowTotal[$f] ?? 0) + 1;
+                    }
+                    foreach ($parsed['replied_events'] as $f) {
+                        $flowReplied[$f] = ($flowReplied[$f] ?? 0) + 1;
+                    }
+                    foreach ($parsed['replied_unique'] as $f) {
+                        $flowRepliedCell[$f] = ($flowRepliedCell[$f] ?? 0) + 1;
+                    }
+                    foreach ($parsed['ordered_events'] as $f) {
+                        $flowOrdered[$f] = ($flowOrdered[$f] ?? 0) + 1;
+                    }
+                }
+            });
+
+        // Combine into rows
+        $allFlows = array_unique(array_merge(
+            array_keys($flowTotal),
+            array_keys($flowReplied),
+            array_keys($flowRepliedCell),
+            array_keys($flowOrdered)
+        ));
+
+        // Sort: LOOP N (numeric), then MAIN FLOW, then SEQUENCE N (numeric), then alphabetical.
+        usort($allFlows, function ($a, $b) {
+            $weight = function (string $f): array {
+                if (preg_match('/^LOOP\s*0*(\d+)$/', $f, $m))     return [0, (int) $m[1], $f];
+                if ($f === 'MAIN FLOW')                              return [1, 0, $f];
+                if (preg_match('/^SEQUENCE\s*0*(\d+)$/', $f, $m)) return [2, (int) $m[1], $f];
+                return [3, 0, $f];
+            };
+            $wa = $weight($a); $wb = $weight($b);
+            if ($wa[0] !== $wb[0]) return $wa[0] <=> $wb[0];
+            if ($wa[1] !== $wb[1]) return $wa[1] <=> $wb[1];
+            return strcmp($wa[2], $wb[2]);
+        });
+
+        $statsRows = [];
+        foreach ($allFlows as $f) {
+            $statsRows[] = [
+                'flow'          => $f,
+                'total'         => $flowTotal[$f]       ?? 0,
+                'replied'       => $flowReplied[$f]     ?? 0,
+                'replied_cells' => $flowRepliedCell[$f] ?? 0,
+                'ordered'       => $flowOrdered[$f]     ?? 0,
+            ];
+        }
+
+        $pages = ConversationTracker::select('page_name')
+            ->whereNotNull('page_name')->distinct()->orderBy('page_name')->pluck('page_name');
+
+        return view('conversation_tracker.stats', [
+            'statsRows'  => $statsRows,
+            'totalRows'  => $totalRows,
+            'pages'      => $pages,
+            'pageName'   => $pageName,
+            'fromDate'   => $fromDate,
+            'toDate'     => $toDate,
+            'replyFlag'  => $replyFlag,
+            'orderFlag'  => $orderFlag,
+        ]);
+    }
+
+    /**
+     * Parse a single response_tracker text block into events. Mirrors the
+     * GSheets formula's logic line-by-line.
+     *
+     * Returns:
+     *   - unique_flows[]    — flows seen in this row (deduped, for TOTAL)
+     *   - replied_events[]  — flow at each reply line (counted, for REPLIED)
+     *   - replied_unique[]  — unique flows that had ≥1 reply (deduped, for REPLIED CELLS)
+     *   - ordered_events[]  — flow at each order line (counted, for CUSTOMER ORDERED)
+     */
+    public static function parseResponseTracker(?string $text, string $replyFlag, string $orderFlag): array
+    {
+        $out = [
+            'unique_flows'   => [],
+            'replied_events' => [],
+            'replied_unique' => [],
+            'ordered_events' => [],
+        ];
+        if ($text === null || trim($text) === '') return $out;
+
+        $replyFlagU = strtoupper($replyFlag);
+        $orderFlagU = strtoupper($orderFlag);
+        $replyPat = '/^' . preg_quote($replyFlagU, '/') . ':?/i';
+
+        $lines = preg_split('/\R/', $text);
+        $activeFlow      = null;
+        $rowFlowsSet     = [];
+        $rowRepliedSet   = [];
+
+        foreach ($lines as $line) {
+            $upper = strtoupper(trim($line));
+            if ($upper === '') continue;
+
+            // [FLOW NAME] tag — set active flow + register in row's flow set.
+            if (preg_match('/^\[([^\]]+)\]/', $upper, $m)) {
+                $name = trim(preg_replace('/\s+/', ' ', $m[1]));
+                if ($name !== '' && $name !== 'TOTAL') {
+                    $activeFlow = $name;
+                    $rowFlowsSet[$name] = true;
+                }
+                continue;
+            }
+
+            if ($activeFlow === null) continue;
+
+            // Reply line: prefix match, with optional colon.
+            if (preg_match($replyPat, $upper)) {
+                $out['replied_events'][] = $activeFlow;
+                $rowRepliedSet[$activeFlow] = true;
+                continue;
+            }
+
+            // Order line: line equals order_flag exactly (after upper+trim).
+            if ($upper === $orderFlagU) {
+                $out['ordered_events'][] = $activeFlow;
+            }
+        }
+
+        $out['unique_flows']   = array_keys($rowFlowsSet);
+        $out['replied_unique'] = array_keys($rowRepliedSet);
+        return $out;
+    }
 }
