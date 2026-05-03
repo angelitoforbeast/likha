@@ -44,10 +44,21 @@
     <div class="ct-card">
       <div class="ct-card-header">
         <div class="ct-title">📊 Imported records ({{ $rows->total() }} total)</div>
-        <div class="flex gap-2 flex-wrap">
+        <div class="flex gap-2 flex-wrap items-center">
           <a href="/conversation/tracker" class="ct-btn-ghost">← Back to Import</a>
           <a href="/conversation/tracker/stats" class="ct-btn-ghost">📊 Stats</a>
+          <a href="/conversation/tracker/flows" class="ct-btn-ghost">🎯 Flows</a>
           <a href="/conversation/tracker/settings" class="ct-btn-ghost">⚙️ Settings</a>
+          <form method="POST" action="/conversation/tracker/view"
+                onsubmit="return confirm('🚨 PERMANENTLY DELETE ALL conversation_trackers records? This cannot be undone!')"
+                class="inline">
+            @csrf @method('DELETE')
+            <button type="submit"
+                    class="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded"
+                    title="Debug: truncate the entire table">
+              🗑️ Delete ALL
+            </button>
+          </form>
         </div>
       </div>
       <form method="GET" action="/conversation/tracker/view" class="grid grid-cols-2 md:grid-cols-5 gap-2 p-3">

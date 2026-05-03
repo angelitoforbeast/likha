@@ -44,6 +44,7 @@
         <div class="flex gap-2 flex-wrap">
           <a href="/conversation/tracker" class="ct-btn-ghost">← Back to Import</a>
           <a href="/conversation/tracker/view" class="ct-btn-ghost">📋 View Records</a>
+          <a href="/conversation/tracker/flows" class="ct-btn-ghost">🎯 Flows</a>
         </div>
       </div>
 
@@ -123,7 +124,7 @@
               <th data-sort="replied" data-type="num" class="num">Replied</th>
               <th data-sort="replied_cells" data-type="num" class="num">Replied Cells</th>
               <th data-sort="ordered" data-type="num" class="num">Customer Ordered</th>
-              <th data-sort="rate" data-type="num" class="num" title="Replied / Total">Reply rate</th>
+              <th data-sort="rate" data-type="num" class="num" title="Replied Cells / Total">Reply rate</th>
               <th data-sort="conv" data-type="num" class="num" title="Customer Ordered / Replied Cells">Conv rate</th>
             </tr>
           </thead>
@@ -135,7 +136,7 @@
                 if (str_starts_with($flow, 'LOOP'))     $cls .= ' loop';
                 elseif ($flow === 'MAIN FLOW')           $cls .= ' main';
                 elseif (str_starts_with($flow, 'SEQUENCE')) $cls .= ' seq';
-                $rate = $r['total'] > 0 ? ($r['replied'] / $r['total'] * 100) : null;
+                $rate = $r['total'] > 0 ? ($r['replied_cells'] / $r['total'] * 100) : null;
                 $conv = $r['replied_cells'] > 0 ? ($r['ordered'] / $r['replied_cells'] * 100) : null;
               @endphp
               <tr data-flow="{{ $flow }}" data-total="{{ $r['total'] }}" data-replied="{{ $r['replied'] }}" data-replied_cells="{{ $r['replied_cells'] }}" data-ordered="{{ $r['ordered'] }}" data-rate="{{ $rate ?? -1 }}" data-conv="{{ $conv ?? -1 }}">

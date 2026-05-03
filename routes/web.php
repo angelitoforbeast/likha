@@ -639,6 +639,15 @@ Route::delete('/conversation/tracker/view/{id}', [\App\Http\Controllers\Conversa
 Route::get('/conversation/tracker/stats', [\App\Http\Controllers\ConversationTrackerImportController::class, 'stats'])
     ->name('conversation.tracker.stats');
 
+// Flow Templates editor (per-page bubble library)
+Route::get ('/conversation/tracker/flows', [\App\Http\Controllers\ConversationTrackerImportController::class, 'flowsIndex'])
+    ->name('conversation.tracker.flows');
+Route::post('/conversation/tracker/flows/save', [\App\Http\Controllers\ConversationTrackerImportController::class, 'flowsSave'])
+    ->name('conversation.tracker.flows.save');
+Route::post('/conversation/tracker/flows/upload', [\App\Http\Controllers\ConversationTrackerImportController::class, 'flowsUpload'])
+    ->middleware('throttle:30,1')
+    ->name('conversation.tracker.flows.upload');
+
 Route::get   ('/conversation/tracker/settings', [\App\Http\Controllers\ConversationTrackerSettingController::class, 'settings'])
     ->name('conversation.tracker.settings');
 Route::post  ('/conversation/tracker/settings', [\App\Http\Controllers\ConversationTrackerSettingController::class, 'store']);

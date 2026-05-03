@@ -4,11 +4,14 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use App\Jobs\ImportConversationTrackerFromGoogleSheet;
 use App\Models\ConversationTracker;
 use App\Models\ConversationTrackerSetting;
 use App\Models\ConversationTrackerRun;
 use App\Models\ConversationTrackerRunSheet;
+use App\Models\ConversationFlowContent;
 
 class ConversationTrackerImportController extends Controller
 {
@@ -311,5 +314,150 @@ class ConversationTrackerImportController extends Controller
         $out['unique_flows']   = array_keys($rowFlowsSet);
         $out['replied_unique'] = array_keys($rowRepliedSet);
         return $out;
+    }
+
+    /**
+     * GET /conversation/tracker/flows
+     * Flow templates editor — auto-detects flow names per page from imported
+     * response_tracker text, then loads any saved bubbles content.
+     */
+    public function flowsIndex(Request $request)
+    {
+        $pages = ConversationTracker::select('page_name')
+            ->whereNotNull('page_name')->distinct()->orderBy('page_name')->pluck('page_name');
+
+        $selectedPage = (string) $request->query('page', '');
+        if ($selectedPage === '' && $pages->isNotEmpty()) {
+            $selectedPage = (string) $pages->first();
+        }
+
+        $flowNames = [];
+        $contentsByFlow = [];
+
+        if ($selectedPage !== '') {
+            // Auto-detect flow names from this page's imports.
+            $set = [];
+            ConversationTracker::where('page_name', $selectedPage)
+                ->whereNotNull('response_tracker')
+                ->where('response_tracker', '<>', '')
+                ->select('response_tracker')
+                ->orderBy('id')
+                ->chunk(500, function ($chunk) use (&$set) {
+                    foreach ($chunk as $r) {
+                        if (preg_match_all('/\[([^\]]+)\]/', $r->response_tracker, $m)) {
+                            foreach ($m[1] as $f) {
+                                $name = strtoupper(trim(preg_replace('/\s+/', ' ', $f)));
+                                if ($name !== '' && $name !== 'TOTAL') {
+                                    $set[$name] = true;
+                                }
+                            }
+                        }
+                    }
+                });
+
+            $flowNames = array_keys($set);
+            // Natural sort: LOOP, MAIN FLOW, SEQUENCE, others.
+            usort($flowNames, function ($a, $b) {
+                $weight = function (string $f): array {
+                    if (preg_match('/^LOOP\s*0*(\d+)$/', $f, $m))     return [0, (int) $m[1], $f];
+                    if ($f === 'MAIN FLOW')                              return [1, 0, $f];
+                    if (preg_match('/^SEQUENCE\s*0*(\d+)$/', $f, $m)) return [2, (int) $m[1], $f];
+                    return [3, 0, $f];
+                };
+                $wa = $weight($a); $wb = $weight($b);
+                if ($wa[0] !== $wb[0]) return $wa[0] <=> $wb[0];
+                if ($wa[1] !== $wb[1]) return $wa[1] <=> $wb[1];
+                return strcmp($wa[2], $wb[2]);
+            });
+
+            // Load existing flow contents for this page.
+            $contentsByFlow = ConversationFlowContent::where('page_name', $selectedPage)
+                ->get()
+                ->keyBy('flow_name')
+                ->map(fn ($r) => $r->bubbles ?: [])
+                ->toArray();
+        }
+
+        return view('conversation_tracker.flows', [
+            'pages'          => $pages,
+            'selectedPage'   => $selectedPage,
+            'flowNames'      => $flowNames,
+            'contentsByFlow' => $contentsByFlow,
+        ]);
+    }
+
+    /**
+     * POST /conversation/tracker/flows/save
+     * Upserts the bubbles array for a (page, flow). Returns JSON.
+     */
+    public function flowsSave(Request $request)
+    {
+        $request->validate([
+            'page_name' => 'required|string|max:255',
+            'flow_name' => 'required|string|max:255',
+            'bubbles'   => 'present|array',
+            'bubbles.*.type' => 'required|in:text,image,video',
+            'bubbles.*.text' => 'nullable|string',
+            'bubbles.*.url'  => 'nullable|string',
+            'bubbles.*.caption' => 'nullable|string',
+        ]);
+
+        $row = ConversationFlowContent::updateOrCreate(
+            [
+                'page_name' => $request->input('page_name'),
+                'flow_name' => $request->input('flow_name'),
+            ],
+            [
+                'bubbles' => $request->input('bubbles', []),
+            ]
+        );
+
+        return response()->json([
+            'ok'         => true,
+            'id'         => $row->id,
+            'saved_at'   => now()->toIso8601String(),
+            'bubble_count' => count($row->bubbles ?: []),
+        ]);
+    }
+
+    /**
+     * POST /conversation/tracker/flows/upload
+     * Accepts an image or video file (multipart/form-data, field "file")
+     * + a "kind" indicator ("image" or "video"). Saves to public storage
+     * under /conversation_flows and returns the public URL.
+     */
+    public function flowsUpload(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|max:51200', // 50MB max (covers video)
+            'kind' => 'required|in:image,video',
+        ]);
+
+        $kind = $request->input('kind');
+        $file = $request->file('file');
+
+        // Type-specific size + MIME check.
+        if ($kind === 'image') {
+            $request->validate([
+                'file' => 'mimes:jpg,jpeg,png,gif,webp|max:5120', // 5MB
+            ]);
+        } else { // video
+            $request->validate([
+                'file' => 'mimes:mp4,webm,mov|max:51200', // 50MB
+            ]);
+        }
+
+        $ext = strtolower($file->getClientOriginalExtension());
+        $name = (string) Str::uuid() . '.' . $ext;
+        $path = $file->storeAs('conversation_flows', $name, 'public');
+        // $path = "conversation_flows/<uuid>.ext"; storage:link makes it
+        // accessible at /storage/conversation_flows/<uuid>.ext
+
+        return response()->json([
+            'ok'   => true,
+            'url'  => '/storage/' . $path,
+            'kind' => $kind,
+            'size' => $file->getSize(),
+        ]);
     }
 }
