@@ -624,6 +624,25 @@ Route::delete('/likha_order_import/settings/{id}', [LikhaOrderSettingController:
 Route::match(['get','delete'], '/likha_order/view', [LikhaOrderImportController::class, 'view']);
 
 
+// ── Conversation Tracker import ──────────────────────────────────────
+Route::get ('/conversation/tracker',        [\App\Http\Controllers\ConversationTrackerImportController::class, 'index'])
+    ->name('conversation.tracker');
+Route::post('/conversation/tracker/start',  [\App\Http\Controllers\ConversationTrackerImportController::class, 'start'])
+    ->name('conversation.tracker.start');
+Route::get ('/conversation/tracker/status', [\App\Http\Controllers\ConversationTrackerImportController::class, 'status'])
+    ->name('conversation.tracker.status');
+Route::match(['get','delete'], '/conversation/tracker/view', [\App\Http\Controllers\ConversationTrackerImportController::class, 'view'])
+    ->name('conversation.tracker.view');
+
+Route::get   ('/conversation/tracker/settings', [\App\Http\Controllers\ConversationTrackerSettingController::class, 'settings'])
+    ->name('conversation.tracker.settings');
+Route::post  ('/conversation/tracker/settings', [\App\Http\Controllers\ConversationTrackerSettingController::class, 'store']);
+Route::put   ('/conversation/tracker/settings/{id}', [\App\Http\Controllers\ConversationTrackerSettingController::class, 'update']);
+Route::delete('/conversation/tracker/settings/{id}', [\App\Http\Controllers\ConversationTrackerSettingController::class, 'destroy']);
+Route::get   ('/conversation/tracker/settings/fetch-sheets', [\App\Http\Controllers\ConversationTrackerSettingController::class, 'fetchSheetTabs'])
+    ->name('conversation.tracker.fetch-sheets');
+
+
     // ✅ Macro GSheet
 
 Route::put('/macro/settings/{id}', [MacroGsheetController::class, 'update'])->name('macro.settings.update');
