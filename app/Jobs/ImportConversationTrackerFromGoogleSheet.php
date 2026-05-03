@@ -106,12 +106,14 @@ class ImportConversationTrackerFromGoogleSheet implements ShouldQueue
                     $rawPhone      = trim((string)($row[4] ?? ''));
                     $cxDetails     = (string)($row[5] ?? '');
                     $responseTrack = (string)($row[6] ?? '');
+                    $contactId     = trim((string)($row[7] ?? '')) ?: null;
 
                     $subDate    = self::parseSubscriptionDate($rawSubDate);
                     $uploadDate = self::parseUploadDate($rawUploadDate);
                     $phone      = self::normalizePhone($rawPhone);
 
-                    $payload = [
+                    // Build full payload from incoming row.
+                    $newRow = [
                         'subscription_date'     => $subDate,
                         'subscription_date_raw' => $rawSubDate ?: null,
                         'upload_date'           => $uploadDate,
@@ -119,18 +121,39 @@ class ImportConversationTrackerFromGoogleSheet implements ShouldQueue
                         'page_name'             => $pageName,
                         'name'                  => $name,
                         'phone_number'          => $phone,
+                        'contact_id'            => $contactId,
                         'all_cx_details'        => $cxDetails ?: null,
                         'response_tracker'      => $responseTrack ?: null,
                         'imported_run_id'       => $run->id,
                     ];
 
-                    // Upsert: lookup by (page_name, name); phone is tiebreaker on multi-match.
-                    $matchedId = self::findMatchedId($pageName, $name, $phone);
+                    // Upsert lookup:
+                    //  1. If contact_id present → primary key (page_name, contact_id)
+                    //  2. Else → fallback to (page_name, name) + phone tiebreaker
+                    $matchedId = self::findMatchedId($pageName, $name, $phone, $contactId);
                     if ($matchedId) {
-                        ConversationTracker::where('id', $matchedId)->update($payload);
+                        // MERGE SEMANTICS: don't overwrite existing data with empty/null
+                        // for these fields (preserves phone, dates, message bodies when
+                        // new upload is partial).
+                        $mergeFields = [
+                            'phone_number',
+                            'subscription_date',
+                            'subscription_date_raw',
+                            'all_cx_details',
+                            'response_tracker',
+                            'name',
+                            'contact_id',
+                        ];
+                        $updatePayload = $newRow;
+                        foreach ($mergeFields as $f) {
+                            if ($updatePayload[$f] === null || $updatePayload[$f] === '') {
+                                unset($updatePayload[$f]); // skip — keep existing
+                            }
+                        }
+                        ConversationTracker::where('id', $matchedId)->update($updatePayload);
                         $updated++;
                     } else {
-                        ConversationTracker::create($payload);
+                        ConversationTracker::create($newRow);
                         $inserted++;
                     }
 
@@ -247,28 +270,64 @@ class ImportConversationTrackerFromGoogleSheet implements ShouldQueue
     }
 
     /**
-     * Lookup by (page_name, name). Returns the matching row id, or null.
-     * If multiple rows match, use phone_number as tiebreaker. If still
-     * ambiguous, return null (caller will INSERT a new row).
+     * Find an existing row to UPDATE (vs INSERT new). Lookup priority:
+     *
+     *  1. If contact_id is non-empty → PRIMARY: (page_name, contact_id)
+     *     - 1 match → that row (UPDATE)
+     *     - 0 matches → return null (INSERT)
+     *     - 2+ matches → return most recent (rare; treat as duplicate)
+     *
+     *  2. Fallback (no contact_id) → (page_name, name) with phone tiebreaker
+     *     - 1 match → that row
+     *     - 2+ matches:
+     *         - If phone present + 1 candidate matches phone → that one
+     *         - Else if all candidates have null phone → most recent
+     *         - Else → most recent (best-effort)
+     *     - 0 matches → return null (INSERT)
      */
-    public static function findMatchedId(?string $pageName, ?string $name, ?string $phone): ?int
-    {
-        if (!$pageName || !$name) return null;
+    public static function findMatchedId(
+        ?string $pageName,
+        ?string $name,
+        ?string $phone,
+        ?string $contactId = null
+    ): ?int {
+        if (!$pageName) return null;
+
+        // PRIMARY: (page_name, contact_id) when contact_id is given.
+        if ($contactId !== null && $contactId !== '') {
+            $row = ConversationTracker::where('page_name', $pageName)
+                ->where('contact_id', $contactId)
+                ->orderByDesc('id')
+                ->first();
+            return $row ? (int) $row->id : null;
+        }
+
+        // FALLBACK: (page_name, name).
+        if (!$name) return null;
 
         $candidates = ConversationTracker::where('page_name', $pageName)
             ->where('name', $name)
             ->select('id', 'phone_number')
+            ->orderByDesc('id')
             ->get();
 
         if ($candidates->isEmpty()) return null;
         if ($candidates->count() === 1) return (int) $candidates->first()->id;
 
-        // Multiple candidates → phone tiebreaker.
-        $phoneMatches = $candidates->filter(
-            fn ($c) => self::normalizePhone($c->phone_number) === $phone && $phone !== null
-        );
-        if ($phoneMatches->count() === 1) return (int) $phoneMatches->first()->id;
+        // Multiple candidates with same (page, name).
+        if ($phone !== null && $phone !== '') {
+            // Try phone tiebreaker.
+            $phoneMatches = $candidates->filter(
+                fn ($c) => self::normalizePhone($c->phone_number) === $phone
+            );
+            if ($phoneMatches->count() >= 1) {
+                return (int) $phoneMatches->first()->id; // most recent first
+            }
+            // No phone match → different person → INSERT
+            return null;
+        }
 
-        return null; // ambiguous — let caller INSERT
+        // No phone in upload → assume same person, pick most recent.
+        return (int) $candidates->first()->id;
     }
 }

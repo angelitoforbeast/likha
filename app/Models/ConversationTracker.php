@@ -14,6 +14,7 @@ class ConversationTracker extends Model
         'page_name',
         'name',
         'phone_number',
+        'contact_id',
         'all_cx_details',
         'response_tracker',
         'imported_run_id',

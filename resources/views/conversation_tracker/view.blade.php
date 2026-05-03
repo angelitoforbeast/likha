@@ -21,10 +21,11 @@
     .ct-table tbody td { padding:8px 10px; border-bottom:1px solid #f1f5f9; vertical-align:top; word-wrap:break-word; }
     .ct-table tbody tr:hover td { background:#f8fafc; }
     .ct-table colgroup col.c-date { width:130px; }
-    .ct-table colgroup col.c-page { width:140px; }
-    .ct-table colgroup col.c-name { width:160px; }
-    .ct-table colgroup col.c-phone { width:120px; }
-    .ct-table colgroup col.c-cx { width:25%; }
+    .ct-table colgroup col.c-page { width:130px; }
+    .ct-table colgroup col.c-name { width:150px; }
+    .ct-table colgroup col.c-phone { width:115px; }
+    .ct-table colgroup col.c-contact { width:130px; }
+    .ct-table colgroup col.c-cx { width:22%; }
     .ct-table colgroup col.c-resp { width:auto; }
 
     .text-block-pre { white-space:pre-wrap; font-size:11px; color:#475569; line-height:1.4; max-height:120px; overflow:auto; padding:6px; background:#f8fafc; border-radius:4px; border:1px solid #f1f5f9; }
@@ -70,6 +71,7 @@
             <col class="c-page">
             <col class="c-name">
             <col class="c-phone">
+            <col class="c-contact">
             <col class="c-cx">
             <col class="c-resp">
           </colgroup>
@@ -79,6 +81,7 @@
               <th>Page</th>
               <th>Name</th>
               <th>Phone</th>
+              <th>Contact ID</th>
               <th>All CX Details</th>
               <th>Response Tracker</th>
             </tr>
@@ -93,6 +96,13 @@
                 <td><span class="pill-page">{{ $r->page_name ?: '—' }}</span></td>
                 <td style="font-weight:600;">{{ $r->name ?: '—' }}</td>
                 <td style="font-family:monospace;font-size:11.5px;">{{ $r->phone_number ?: '—' }}</td>
+                <td style="font-family:monospace;font-size:10.5px;color:#475569;">
+                  @if ($r->contact_id)
+                    {{ \Illuminate\Support\Str::limit($r->contact_id, 18) }}
+                  @else
+                    <span style="color:#cbd5e1;">—</span>
+                  @endif
+                </td>
                 <td>
                   @if ($r->all_cx_details)
                     <div class="text-block-pre">{{ $r->all_cx_details }}</div>
@@ -109,7 +119,7 @@
                 </td>
               </tr>
             @empty
-              <tr><td colspan="6" style="text-align:center;padding:36px;color:#94a3b8;">No records yet. Run an import from the <a href="/conversation/tracker" class="text-indigo-600 underline">Import page</a>.</td></tr>
+              <tr><td colspan="7" style="text-align:center;padding:36px;color:#94a3b8;">No records yet. Run an import from the <a href="/conversation/tracker" class="text-indigo-600 underline">Import page</a>.</td></tr>
             @endforelse
           </tbody>
         </table>
