@@ -39,6 +39,61 @@
 
   <div class="w-full flex flex-col gap-4 p-2">
 
+    {{-- Queue Status — system-wide (auto-refreshes every 5s) --}}
+    <div class="v2-card" id="queueStatusCard">
+      <div class="v2-card-header">
+        <div class="v2-title">⚙ Queue Status (system-wide)</div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-slate-500">Auto-refresh: 5s</span>
+          @if($isCEO)
+            <button id="btnClearQueue" type="button"
+                    class="v2-btn-ghost text-red-700 border-red-200 hover:bg-red-50">
+              ☢ Nuclear: Clear All Pending
+            </button>
+          @endif
+        </div>
+      </div>
+
+      <div class="p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div class="bg-slate-50 border border-slate-200 rounded p-3">
+          <div class="text-[10.5px] text-slate-500 uppercase font-semibold tracking-wide">Pending Jobs</div>
+          <div class="text-3xl font-bold text-slate-900 mt-1" id="qsPending">{{ number_format($queuePending) }}</div>
+          <div class="text-[11px] text-slate-400 mt-0.5">All features that use the queue</div>
+        </div>
+        <div class="bg-red-50 border border-red-200 rounded p-3">
+          <div class="text-[10.5px] text-red-600 uppercase font-semibold tracking-wide">Failed Jobs</div>
+          <div class="text-3xl font-bold text-red-700 mt-1" id="qsFailed">{{ number_format($queueFailed) }}</div>
+          <div class="text-[11px] text-red-400 mt-0.5">Jobs that exhausted retries</div>
+        </div>
+        <div class="bg-emerald-50 border border-emerald-200 rounded p-3" id="activeRunCard"
+             @if(!$activeRun) style="display:none;" @endif>
+          <div class="text-[10.5px] text-emerald-700 uppercase font-semibold tracking-wide">Active Run</div>
+          <div class="flex items-center justify-between mt-1">
+            <div>
+              <div class="text-xl font-bold text-emerald-800" id="qsActiveRun">
+                @if($activeRun)
+                  Run #{{ $activeRun->id }} —
+                  {{ ($activeRun->files_done + $activeRun->files_failed + $activeRun->files_skipped) }}/{{ $activeRun->total_files }}
+                @endif
+              </div>
+              <div class="text-[11px] text-emerald-600" id="qsActiveStatus">
+                @if($activeRun)
+                  Status: {{ strtoupper($activeRun->status) }}
+                @endif
+              </div>
+            </div>
+            @if($activeRun)
+              <div class="flex flex-col gap-1">
+                <a href="/jnt_upload_v2/history/{{ $activeRun->id }}" class="v2-btn-ghost">View</a>
+                <button type="button" class="v2-btn-ghost text-red-600 border-red-200 hover:bg-red-50 cancelRunBtn"
+                        data-run-id="{{ $activeRun->id }}">🛑 Cancel</button>
+              </div>
+            @endif
+          </div>
+        </div>
+      </div>
+    </div>
+
     {{-- Step 1 — File picker --}}
     <div class="v2-card" id="step1">
       <div class="v2-card-header">
@@ -777,5 +832,131 @@
     }
 
     btnNewRun.addEventListener('click', () => location.reload());
+
+    // ===== Queue status — auto-refresh every 5 seconds =====
+    const qsPending      = document.getElementById('qsPending');
+    const qsFailed       = document.getElementById('qsFailed');
+    const qsActiveRun    = document.getElementById('qsActiveRun');
+    const qsActiveStatus = document.getElementById('qsActiveStatus');
+    const activeRunCard  = document.getElementById('activeRunCard');
+
+    async function refreshQueueStatus() {
+      try {
+        const res = await fetch('/jnt_upload_v2/queue-status', {
+          headers: { 'Accept': 'application/json' }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        qsPending.textContent = (data.pending || 0).toLocaleString();
+        qsFailed.textContent  = (data.failed  || 0).toLocaleString();
+
+        if (data.active_run) {
+          activeRunCard.style.display = '';
+          const r = data.active_run;
+          const done = (r.files_done || 0) + (r.files_failed || 0) + (r.files_skipped || 0);
+          qsActiveRun.textContent = `Run #${r.id} — ${done}/${r.total_files}`;
+          qsActiveStatus.textContent = 'Status: ' + (r.status || '').toUpperCase();
+        } else {
+          activeRunCard.style.display = 'none';
+        }
+      } catch (e) {
+        console.warn('queue-status:', e);
+      }
+    }
+
+    setInterval(refreshQueueStatus, 5000);
+
+    // ===== Cancel run button(s) =====
+    document.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.cancelRunBtn');
+      if (!btn) return;
+      const runId = btn.dataset.runId;
+      if (!runId) return;
+      if (!confirm(`Cancel run #${runId}?\n\nThis will stop processing remaining files.\nAlready-processed data will not be reverted.`)) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Cancelling…';
+
+      try {
+        const fd = new FormData();
+        fd.append('_token', csrf);
+        const res = await fetch('/jnt_upload_v2/cancel/' + runId, {
+          method: 'POST',
+          headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+          body: fd
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok) {
+          alert('Cancel failed: ' + (json.message || 'unknown'));
+          btn.disabled = false;
+          btn.textContent = '🛑 Cancel';
+          return;
+        }
+        alert(`Run #${runId} cancelled.\n  ${json.cancelled_files} file(s) marked as cancelled\n  ${json.deleted_jobs} job(s) removed from queue`);
+        refreshQueueStatus();
+        // Refresh page para update yung Recent Runs table
+        setTimeout(() => location.reload(), 800);
+      } catch (err) {
+        alert('Cancel error: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = '🛑 Cancel';
+      }
+    });
+
+    // ===== Nuclear clear-queue button (CEO only) =====
+    const btnClearQueue = document.getElementById('btnClearQueue');
+    if (btnClearQueue) {
+      btnClearQueue.addEventListener('click', async () => {
+        const msg = `☢ NUCLEAR — Clear ALL Pending Jobs system-wide?
+
+This will:
+  • Truncate the entire 'jobs' queue table
+  • Truncate the 'failed_jobs' table
+  • Mark all in-flight V2 runs as cancelled
+  • Affect OTHER FEATURES that use the queue (conversation tracker, etc.)
+
+This is irreversible.
+
+Type "YES" sa next prompt para mag-confirm.`;
+        if (!confirm(msg)) return;
+
+        const typed = prompt('Type YES to confirm nuclear queue clear:');
+        if (typed !== 'YES') {
+          alert('Cancelled — confirmation did not match.');
+          return;
+        }
+
+        btnClearQueue.disabled = true;
+        btnClearQueue.textContent = 'Clearing…';
+
+        try {
+          const fd = new FormData();
+          fd.append('_token', csrf);
+          fd.append('confirm', 'YES_CLEAR_ALL');
+          const res = await fetch('/jnt_upload_v2/clear-queue', {
+            method: 'POST',
+            headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+            body: fd
+          });
+          const json = await res.json();
+          if (!res.ok || !json.ok) {
+            alert('Clear failed: ' + (json.message || 'unknown'));
+            btnClearQueue.disabled = false;
+            btnClearQueue.textContent = '☢ Nuclear: Clear All Pending';
+            return;
+          }
+          alert(`Queue cleared:
+  Pending removed: ${json.pending_cleared.toLocaleString()}
+  Failed removed:  ${json.failed_cleared.toLocaleString()}
+  Runs cancelled:  ${json.runs_cancelled}`);
+          setTimeout(() => location.reload(), 500);
+        } catch (err) {
+          alert('Clear error: ' + err.message);
+          btnClearQueue.disabled = false;
+          btnClearQueue.textContent = '☢ Nuclear: Clear All Pending';
+        }
+      });
+    }
   </script>
 </x-layout>

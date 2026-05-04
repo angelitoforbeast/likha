@@ -30,6 +30,12 @@
         <div class="flex gap-2">
           <a href="/jnt_upload_v2/history" class="v2-btn-ghost">← Back to History</a>
           <a href="/jnt_upload_v2" class="v2-btn-ghost">+ New Upload</a>
+          @if(!empty($canCancel))
+            <button id="btnCancelRun" type="button" data-run-id="{{ $run->id }}"
+                    class="v2-btn-ghost text-red-700 border-red-200 hover:bg-red-50">
+              🛑 Cancel This Run
+            </button>
+          @endif
         </div>
       </div>
       <div class="meta-grid">
@@ -123,4 +129,41 @@
       </div>
     </div>
   </div>
+
+  <script>
+    const csrfToken = '{{ csrf_token() }}';
+    const cancelBtn = document.getElementById('btnCancelRun');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', async () => {
+        const runId = cancelBtn.dataset.runId;
+        if (!confirm(`Cancel run #${runId}?\n\nLahat ng pending at processing files mama-mark as cancelled. Yung mga natapos na, hindi babaliktad.`)) return;
+
+        cancelBtn.disabled = true;
+        cancelBtn.textContent = 'Cancelling…';
+
+        try {
+          const fd = new FormData();
+          fd.append('_token', csrfToken);
+          const res = await fetch('/jnt_upload_v2/cancel/' + runId, {
+            method: 'POST',
+            headers: { 'X-CSRF-TOKEN': csrfToken, 'Accept': 'application/json' },
+            body: fd
+          });
+          const json = await res.json();
+          if (!res.ok || !json.ok) {
+            alert('Cancel failed: ' + (json.message || 'unknown'));
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = '🛑 Cancel This Run';
+            return;
+          }
+          alert(`Run #${runId} cancelled.\n  ${json.cancelled_files} file(s) marked as cancelled\n  ${json.deleted_jobs} job(s) removed from queue`);
+          location.reload();
+        } catch (e) {
+          alert('Cancel error: ' + e.message);
+          cancelBtn.disabled = false;
+          cancelBtn.textContent = '🛑 Cancel This Run';
+        }
+      });
+    }
+  </script>
 </x-layout>

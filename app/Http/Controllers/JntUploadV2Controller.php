@@ -129,15 +129,21 @@ class JntUploadV2Controller extends Controller
             ], 422);
         }
 
-        // Mark remaining file logs as cancelled (queued/processing → cancelled).
-        // Note: 'processing' files yung in-flight workers are running RIGHT NOW.
-        // Yung in-flight job magtatapos pa rin ng kasalukuyang file
-        // (interruption mid-stream may corrupt status_logs). Pero next file
-        // pickup magse-skip na siya dahil may safety check sa job's handle().
+        // 1) Mark remaining file logs as cancelled (safety net so kahit may
+        //    naunang nakuhang job ng worker, mag-eexit immediately).
         $cancelledFiles = UploadLogV2::where('bulk_run_id', $run->id)
             ->whereIn('status', ['queued', 'processing'])
             ->update(['status' => 'cancelled']);
 
+        // 2) Delete ALL ProcessJntUploadV2 jobs from the queue table.
+        //    Note: this kills V2 jobs from any concurrent V2 run as well — but
+        //    safe lang dahil ginagawa lang ng user one big upload at a time.
+        //    Other features (conversation tracker, GPT, etc.) are not affected.
+        $deletedJobs = DB::table('jobs')
+            ->where('payload', 'like', '%ProcessJntUploadV2%')
+            ->delete();
+
+        // 3) Mark the run itself as cancelled
         $run->status      = 'cancelled';
         $run->finished_at = Carbon::now('Asia/Manila');
         $run->message     = trim(($run->message ?: '') . ' [Cancelled by user ' . (Auth::user()?->name ?? 'unknown') . ' at ' . now()->toDateTimeString() . ']');
@@ -145,8 +151,9 @@ class JntUploadV2Controller extends Controller
 
         return response()->json([
             'ok'              => true,
-            'cancelled_files' => $cancelledFiles,
             'run_id'          => $run->id,
+            'cancelled_files' => $cancelledFiles,
+            'deleted_jobs'    => $deletedJobs,
         ]);
     }
 
