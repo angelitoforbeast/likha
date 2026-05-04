@@ -201,94 +201,97 @@
               </template>
             </tr>
           </thead>
-          <tbody>
-            <template x-if="loading">
-              <tr><td :colspan="visibleColumnDefs().length + 1" style="text-align:center;padding:24px;color:#94a3b8;">Loading…</td></tr>
-            </template>
-            <template x-if="!loading && rows.length === 0">
-              <tr><td :colspan="visibleColumnDefs().length + 1" style="text-align:center;padding:36px;color:#94a3b8;">No matching rows.</td></tr>
-            </template>
-            <template x-for="row in rows" :key="row.id">
-              <template>
-                <tr :class="expanded === row.id ? 'expanded' : ''" @click="toggleExpand(row.id)">
-                  <td style="text-align:center;color:#94a3b8;" x-text="expanded === row.id ? '▼' : '▶'"></td>
-                  <template x-for="col in visibleColumnDefs()" :key="col.key + '_' + row.id">
-                    <td>
-                      <template x-if="col.key === 'status'">
-                        <span :class="'badge ' + statusBadgeClass(row.status)" x-text="(row.status || '—').toUpperCase()"></span>
-                      </template>
-                      <template x-if="col.key === 'waybill_number'">
-                        <span style="font-family:ui-monospace,monospace;font-size:11.5px;font-weight:600;color:#0f172a;" x-text="row.waybill_number || '—'"></span>
-                      </template>
-                      <template x-if="col.key === 'cod'">
-                        <span style="font-family:ui-monospace,monospace;color:#15803d;" x-text="row.cod ? '₱' + Number(row.cod).toLocaleString() : '—'"></span>
-                      </template>
-                      <template x-if="col.key === 'total_shipping_cost'">
-                        <span style="font-family:ui-monospace,monospace;" x-text="row.total_shipping_cost ? '₱' + Number(row.total_shipping_cost).toLocaleString() : '—'"></span>
-                      </template>
-                      <template x-if="col.key === 'signingtime' || col.key === 'submission_time' || col.key === 'created_at' || col.key === 'updated_at'">
-                        <span style="font-size:11px;color:#475569;" x-text="fmtDate(row[col.key])"></span>
-                      </template>
-                      <template x-if="!['status','waybill_number','cod','total_shipping_cost','signingtime','submission_time','created_at','updated_at'].includes(col.key)">
-                        <span x-text="row[col.key] || '—'" :title="row[col.key] || ''"></span>
-                      </template>
-                    </td>
-                  </template>
-                </tr>
-                <tr x-show="expanded === row.id">
-                  <td :colspan="visibleColumnDefs().length + 1" class="row-detail">
-                    <h4>📄 Full record — Waybill <code x-text="row.waybill_number"></code></h4>
-                    <div class="grid-2">
-                      <div class="field"><div class="label">ID</div><div class="value" x-text="row.id"></div></div>
-                      <div class="field"><div class="label">Waybill</div><div class="value" x-text="row.waybill_number"></div></div>
-                      <div class="field"><div class="label">Status</div><div class="value"><span :class="'badge ' + statusBadgeClass(row.status)" x-text="(row.status||'—').toUpperCase()"></span></div></div>
-                      <div class="field"><div class="label">Item</div><div class="value" x-text="row.item_name || '—'"></div></div>
-                      <div class="field"><div class="label">Sender</div><div class="value" x-text="row.sender || '—'"></div></div>
-                      <div class="field"><div class="label">Receiver</div><div class="value" x-text="row.receiver || '—'"></div></div>
-                      <div class="field"><div class="label">Phone</div><div class="value" x-text="row.receiver_cellphone || '—'"></div></div>
-                      <div class="field"><div class="label">COD</div><div class="value" x-text="row.cod ? '₱' + Number(row.cod).toLocaleString() : '—'"></div></div>
-                      <div class="field"><div class="label">Submission Time</div><div class="value" x-text="fmtDate(row.submission_time)"></div></div>
-                      <div class="field"><div class="label">Signing Time</div><div class="value" x-text="fmtDate(row.signingtime)"></div></div>
-                      <div class="field"><div class="label">Province</div><div class="value" x-text="row.province || '—'"></div></div>
-                      <div class="field"><div class="label">City</div><div class="value" x-text="row.city || '—'"></div></div>
-                      <div class="field"><div class="label">Barangay</div><div class="value" x-text="row.barangay || '—'"></div></div>
-                      <div class="field"><div class="label">Shipping Cost</div><div class="value" x-text="row.total_shipping_cost ? '₱' + Number(row.total_shipping_cost).toLocaleString() : '—'"></div></div>
-                      <div class="field"><div class="label">RTS Reason</div><div class="value" x-text="row.rts_reason || '—'"></div></div>
-                      <div class="field"><div class="label">Remarks</div><div class="value" x-text="row.remarks || '—'"></div></div>
-                      <div class="field"><div class="label">Last Upload Run</div><div class="value">
-                        <template x-if="row.last_upload_log_id">
-                          <a :href="'/jnt_upload_v2/history?search=' + row.last_upload_log_id" class="text-indigo-600 hover:underline" x-text="'#' + row.last_upload_log_id"></a>
-                        </template>
-                        <template x-if="!row.last_upload_log_id"><span>—</span></template>
-                      </div></div>
-                      <div class="field"><div class="label">Created</div><div class="value" x-text="fmtDate(row.created_at)"></div></div>
-                      <div class="field"><div class="label">Updated</div><div class="value" x-text="fmtDate(row.updated_at)"></div></div>
-                    </div>
-
-                    <h4 class="mt-3">📜 Status timeline</h4>
-                    <div class="timeline">
-                      <template x-if="!row.status_logs || row.status_logs.length === 0">
-                        <div class="text-xs text-slate-500 italic">No status log entries.</div>
-                      </template>
-                      <template x-for="(log, i) in (row.status_logs || [])" :key="i">
-                        <div class="step">
-                          <div class="when" x-text="log.batch_at"></div>
-                          <div>
-                            <span class="text-slate-500" x-text="log.from || '(initial)'"></span>
-                            <span class="arrow"> → </span>
-                            <strong x-text="log.to || '?'"></strong>
-                            <template x-if="log.upload_log_id">
-                              <span class="text-[10.5px] text-slate-400 ml-2" x-text="'(via upload #' + log.upload_log_id + ')'"></span>
-                            </template>
-                          </div>
-                        </div>
-                      </template>
-                    </div>
-                  </td>
-                </tr>
-              </template>
-            </template>
+          {{-- Loading state --}}
+          <tbody x-show="loading">
+            <tr><td :colspan="visibleColumnDefs().length + 1" style="text-align:center;padding:24px;color:#94a3b8;">Loading…</td></tr>
           </tbody>
+
+          {{-- Empty state --}}
+          <tbody x-show="!loading && rows.length === 0">
+            <tr><td :colspan="visibleColumnDefs().length + 1" style="text-align:center;padding:36px;color:#94a3b8;">No matching rows.</td></tr>
+          </tbody>
+
+          {{-- One tbody per row — valid HTML pattern, lets us put main row + expanded detail row together --}}
+          <template x-for="row in rows" :key="row.id">
+            <tbody x-show="!loading">
+              <tr :class="expanded === row.id ? 'expanded' : ''" @click="toggleExpand(row.id)">
+                <td style="text-align:center;color:#94a3b8;" x-text="expanded === row.id ? '▼' : '▶'"></td>
+                <template x-for="col in visibleColumnDefs()" :key="col.key + '_' + row.id">
+                  <td>
+                    <template x-if="col.key === 'status'">
+                      <span :class="'badge ' + statusBadgeClass(row.status)" x-text="(row.status || '—').toUpperCase()"></span>
+                    </template>
+                    <template x-if="col.key === 'waybill_number'">
+                      <span style="font-family:ui-monospace,monospace;font-size:11.5px;font-weight:600;color:#0f172a;" x-text="row.waybill_number || '—'"></span>
+                    </template>
+                    <template x-if="col.key === 'cod'">
+                      <span style="font-family:ui-monospace,monospace;color:#15803d;" x-text="row.cod ? '₱' + Number(row.cod).toLocaleString() : '—'"></span>
+                    </template>
+                    <template x-if="col.key === 'total_shipping_cost'">
+                      <span style="font-family:ui-monospace,monospace;" x-text="row.total_shipping_cost ? '₱' + Number(row.total_shipping_cost).toLocaleString() : '—'"></span>
+                    </template>
+                    <template x-if="col.key === 'signingtime' || col.key === 'submission_time' || col.key === 'created_at' || col.key === 'updated_at'">
+                      <span style="font-size:11px;color:#475569;" x-text="fmtDate(row[col.key])"></span>
+                    </template>
+                    <template x-if="!['status','waybill_number','cod','total_shipping_cost','signingtime','submission_time','created_at','updated_at'].includes(col.key)">
+                      <span x-text="row[col.key] || '—'" :title="row[col.key] || ''"></span>
+                    </template>
+                  </td>
+                </template>
+              </tr>
+              <tr x-show="expanded === row.id" @click.stop>
+                <td :colspan="visibleColumnDefs().length + 1" class="row-detail">
+                  <h4>📄 Full record — Waybill <code x-text="row.waybill_number"></code></h4>
+                  <div class="grid-2">
+                    <div class="field"><div class="label">ID</div><div class="value" x-text="row.id"></div></div>
+                    <div class="field"><div class="label">Waybill</div><div class="value" x-text="row.waybill_number"></div></div>
+                    <div class="field"><div class="label">Status</div><div class="value"><span :class="'badge ' + statusBadgeClass(row.status)" x-text="(row.status||'—').toUpperCase()"></span></div></div>
+                    <div class="field"><div class="label">Item</div><div class="value" x-text="row.item_name || '—'"></div></div>
+                    <div class="field"><div class="label">Sender</div><div class="value" x-text="row.sender || '—'"></div></div>
+                    <div class="field"><div class="label">Receiver</div><div class="value" x-text="row.receiver || '—'"></div></div>
+                    <div class="field"><div class="label">Phone</div><div class="value" x-text="row.receiver_cellphone || '—'"></div></div>
+                    <div class="field"><div class="label">COD</div><div class="value" x-text="row.cod ? '₱' + Number(row.cod).toLocaleString() : '—'"></div></div>
+                    <div class="field"><div class="label">Submission Time</div><div class="value" x-text="fmtDate(row.submission_time)"></div></div>
+                    <div class="field"><div class="label">Signing Time</div><div class="value" x-text="fmtDate(row.signingtime)"></div></div>
+                    <div class="field"><div class="label">Province</div><div class="value" x-text="row.province || '—'"></div></div>
+                    <div class="field"><div class="label">City</div><div class="value" x-text="row.city || '—'"></div></div>
+                    <div class="field"><div class="label">Barangay</div><div class="value" x-text="row.barangay || '—'"></div></div>
+                    <div class="field"><div class="label">Shipping Cost</div><div class="value" x-text="row.total_shipping_cost ? '₱' + Number(row.total_shipping_cost).toLocaleString() : '—'"></div></div>
+                    <div class="field"><div class="label">RTS Reason</div><div class="value" x-text="row.rts_reason || '—'"></div></div>
+                    <div class="field"><div class="label">Remarks</div><div class="value" x-text="row.remarks || '—'"></div></div>
+                    <div class="field"><div class="label">Last Upload Run</div><div class="value">
+                      <template x-if="row.last_upload_log_id">
+                        <a :href="'/jnt_upload_v2/history?search=' + row.last_upload_log_id" class="text-indigo-600 hover:underline" x-text="'#' + row.last_upload_log_id"></a>
+                      </template>
+                      <template x-if="!row.last_upload_log_id"><span>—</span></template>
+                    </div></div>
+                    <div class="field"><div class="label">Created</div><div class="value" x-text="fmtDate(row.created_at)"></div></div>
+                    <div class="field"><div class="label">Updated</div><div class="value" x-text="fmtDate(row.updated_at)"></div></div>
+                  </div>
+
+                  <h4 class="mt-3">📜 Status timeline</h4>
+                  <div class="timeline">
+                    <template x-if="!row.status_logs || row.status_logs.length === 0">
+                      <div class="text-xs text-slate-500 italic">No status log entries.</div>
+                    </template>
+                    <template x-for="(log, i) in (row.status_logs || [])" :key="i">
+                      <div class="step">
+                        <div class="when" x-text="log.batch_at"></div>
+                        <div>
+                          <span class="text-slate-500" x-text="log.from || '(initial)'"></span>
+                          <span class="arrow"> → </span>
+                          <strong x-text="log.to || '?'"></strong>
+                          <template x-if="log.upload_log_id">
+                            <span class="text-[10.5px] text-slate-400 ml-2" x-text="'(via upload #' + log.upload_log_id + ')'"></span>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </template>
         </table>
       </div>
 
