@@ -28,7 +28,9 @@ class ProcessJntUploadV2 implements ShouldQueue
     private int $logId;
     private ?int $userId = null;
 
-    const CHUNK_SIZE      = 2000;
+    // Bumped from 2000 → 5000 for fewer DB round-trips on big batches.
+    // UPDATE_SUBCHUNK still 800 — bumping this stresses MySQL packet size.
+    const CHUNK_SIZE      = 5000;
     const UPDATE_SUBCHUNK = 800;
 
     private array $errors = [];

@@ -101,6 +101,25 @@
         </div>
       </div>
 
+      {{-- Stats breakdown (lalabas after validation done) --}}
+      <div id="statsPanel" class="hidden px-4 py-3 border-b border-slate-100 bg-white">
+        <div class="text-xs font-semibold text-slate-700 mb-2">📊 Validation Summary</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div class="bg-emerald-50 border border-emerald-200 rounded p-2 flex items-center justify-between">
+            <span class="text-sm text-emerald-700 font-semibold">✓ OK</span>
+            <span class="text-2xl font-bold text-emerald-700" id="statsOkCount">0</span>
+          </div>
+          <div class="bg-red-50 border border-red-200 rounded p-2 flex items-center justify-between">
+            <span class="text-sm text-red-700 font-semibold">⚠ With Issues</span>
+            <span class="text-2xl font-bold text-red-700" id="statsBadCount">0</span>
+          </div>
+        </div>
+        <div id="statsBreakdown" class="mt-2 hidden">
+          <div class="text-[11px] font-semibold text-slate-600 mb-1.5 uppercase tracking-wide">Issue breakdown</div>
+          <div id="statsBreakdownRows" class="space-y-1"></div>
+        </div>
+      </div>
+
       <div class="p-0">
         <div class="file-row" style="font-weight:600; background:#f8fafc; border-bottom:2px solid #e2e8f0;">
           <div></div>
@@ -143,10 +162,16 @@
 
         <div>
           <div class="flex items-center justify-between text-xs text-slate-500 mb-1">
-            <span>Overall progress</span>
+            <span>Overall progress (<span id="overallTerminal">0</span> / <span id="overallTotal">0</span> files)</span>
             <span id="overallPct">0%</span>
           </div>
           <div class="progress-bar"><div id="overallBar" style="width:0%"></div></div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-[11px] text-slate-500">
+            <div>⏱ Elapsed: <strong id="overallElapsed" class="text-slate-700">—</strong></div>
+            <div>🎯 ETA: <strong id="overallEta" class="text-slate-700">—</strong></div>
+            <div>⚡ Avg: <strong id="overallAvg" class="text-slate-700">—</strong> /file</div>
+            <div>👷 Workers: <strong id="overallWorkers" class="text-slate-700">—</strong></div>
+          </div>
         </div>
 
         <div id="liveFiles" class="space-y-2"></div>
@@ -327,6 +352,61 @@
     const validateEta      = document.getElementById('validateEta');
     const okOnlyHint       = document.getElementById('okOnlyHint');
 
+    const statsPanel         = document.getElementById('statsPanel');
+    const statsOkCount       = document.getElementById('statsOkCount');
+    const statsBadCount      = document.getElementById('statsBadCount');
+    const statsBreakdown     = document.getElementById('statsBreakdown');
+    const statsBreakdownRows = document.getElementById('statsBreakdownRows');
+
+    // Issue → count map, accumulated during validation
+    let validateIssueCounts = {};
+
+    function bumpIssue(label) {
+      validateIssueCounts[label] = (validateIssueCounts[label] || 0) + 1;
+    }
+
+    /**
+     * Take a server issue string and split it into one or more grouping labels.
+     * "Missing required column(s): signingtime, status" → ["Missing signingtime", "Missing status"]
+     * Other issues → keep as-is (trimmed).
+     */
+    function expandIssueToLabels(issueText) {
+      const s = String(issueText || '').trim();
+      if (!s) return ['Other issue'];
+
+      const m = s.match(/^Missing required column\(s\):\s*(.+)$/i);
+      if (m) {
+        return m[1].split(',')
+          .map(c => c.trim())
+          .filter(Boolean)
+          .map(c => 'Missing ' + c);
+      }
+      if (/^File is empty/i.test(s)) return ['Empty file'];
+      if (/^Cannot parse file/i.test(s)) return ['Cannot parse file'];
+      if (/^Cannot open ZIP/i.test(s)) return ['Cannot open ZIP'];
+      if (/^No valid CSV\/XLSX inside ZIP/i.test(s)) return ['Empty / invalid ZIP'];
+      if (/^Unsupported file type/i.test(s)) return ['Unsupported file type'];
+      if (/^Read error/i.test(s)) return ['Read error'];
+      if (/^HTTP \d+/i.test(s)) return ['Network / HTTP error'];
+
+      return [s.length > 60 ? s.slice(0, 60) + '…' : s];
+    }
+
+    function renderStatsBreakdown() {
+      const entries = Object.entries(validateIssueCounts).sort((a, b) => b[1] - a[1]);
+      if (entries.length === 0) {
+        statsBreakdown.classList.add('hidden');
+        return;
+      }
+      statsBreakdown.classList.remove('hidden');
+      statsBreakdownRows.innerHTML = entries.map(([label, count]) => `
+        <div class="flex items-center justify-between text-xs px-3 py-1.5 bg-slate-50 border border-slate-200 rounded">
+          <span class="text-slate-700">${escapeHtml(label)}</span>
+          <span class="font-bold text-slate-900">${count.toLocaleString()}</span>
+        </div>
+      `).join('');
+    }
+
     function renderRow(f) {
       const issues = (f.issues && f.issues.length) ? f.issues.join('; ') : '—';
       let innerNote = '';
@@ -383,6 +463,9 @@
       step2.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
       validatePanel.classList.remove('hidden');
+      statsPanel.classList.add('hidden');
+      statsBreakdown.classList.add('hidden');
+      validateIssueCounts = {};
       precheckRows.innerHTML = '';
       precheckSummary.textContent = '';
       okOnlyHint.classList.add('hidden');
@@ -458,14 +541,23 @@
             const reportFile = (json.files && json.files[0]) ? json.files[0] : null;
             if (reportFile) {
               precheckRows.insertAdjacentHTML('beforeend', renderRow(reportFile));
-              if (reportFile.ok) okCount++; else badCount++;
+              if (reportFile.ok) {
+                okCount++;
+              } else {
+                badCount++;
+                const issues = (reportFile.issues && reportFile.issues.length) ? reportFile.issues : ['Unknown issue'];
+                issues.forEach(iss => expandIssueToLabels(iss).forEach(bumpIssue));
+              }
             } else {
               badCount++;
+              bumpIssue('No response from server');
               precheckRows.insertAdjacentHTML('beforeend', renderErrorRow(job.file.name, job.file.size, 'No response from server'));
             }
           } catch (e) {
             badCount++;
-            precheckRows.insertAdjacentHTML('beforeend', renderErrorRow(job.file.name, job.file.size, e.message || 'Upload error'));
+            const msg = e.message || 'Upload error';
+            expandIssueToLabels(msg).forEach(bumpIssue);
+            precheckRows.insertAdjacentHTML('beforeend', renderErrorRow(job.file.name, job.file.size, msg));
           } finally {
             inflight--;
             doneCount++;
@@ -484,6 +576,12 @@
       precheckSummary.textContent = `${okCount.toLocaleString()} OK, ${badCount.toLocaleString()} with issues`;
       btnPrecheck.disabled = false;
       btnPrecheck.textContent = '🔎 Validate Files';
+
+      // Render stats breakdown
+      statsOkCount.textContent = okCount.toLocaleString();
+      statsBadCount.textContent = badCount.toLocaleString();
+      renderStatsBreakdown();
+      statsPanel.classList.remove('hidden');
 
       // Build precheckResult so confirm step works
       precheckResult = { run_id: validateRunId };
@@ -575,6 +673,19 @@
       }
     }
 
+    function fmtDuration(seconds) {
+      if (!isFinite(seconds) || seconds < 0) return '—';
+      seconds = Math.round(seconds);
+      const d = Math.floor(seconds / 86400);
+      const h = Math.floor((seconds % 86400) / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      if (d > 0) return `${d}d ${h}h ${m}m`;
+      if (h > 0) return `${h}h ${m}m`;
+      if (m > 0) return `${m}m ${s}s`;
+      return `${s}s`;
+    }
+
     function renderProgress(data) {
       const r = data.run;
 
@@ -595,9 +706,42 @@
 
       const totalFiles = data.files.length;
       const finishedFiles = data.files.filter(f => ['done','failed','skipped'].includes(f.status)).length;
+      const inflightFiles = data.files.filter(f => f.status === 'processing').length;
       const pct = totalFiles > 0 ? Math.round(finishedFiles / totalFiles * 100) : 0;
       overallPct.textContent = pct + '%';
       overallBar.style.width = pct + '%';
+
+      const overallTerminal = document.getElementById('overallTerminal');
+      const overallTotal    = document.getElementById('overallTotal');
+      const overallElapsed  = document.getElementById('overallElapsed');
+      const overallEta      = document.getElementById('overallEta');
+      const overallAvg      = document.getElementById('overallAvg');
+      const overallWorkers  = document.getElementById('overallWorkers');
+
+      if (overallTerminal) overallTerminal.textContent = finishedFiles.toLocaleString();
+      if (overallTotal)    overallTotal.textContent    = totalFiles.toLocaleString();
+      if (overallWorkers)  overallWorkers.textContent  = inflightFiles > 0 ? `~${inflightFiles}` : '—';
+
+      // Compute ETA from started_at + finishedFiles
+      if (r.started_at) {
+        const startedMs = Date.parse(r.started_at.replace(' ', 'T') + (r.started_at.endsWith('Z') ? '' : '+08:00'));
+        if (!isNaN(startedMs)) {
+          const elapsedSec = (Date.now() - startedMs) / 1000;
+          if (overallElapsed) overallElapsed.textContent = fmtDuration(elapsedSec);
+          if (finishedFiles >= 3 && elapsedSec > 0) {
+            const rate = finishedFiles / elapsedSec; // files per second
+            const remaining = totalFiles - finishedFiles;
+            const etaSec = rate > 0 ? remaining / rate : Infinity;
+            const avgSec = elapsedSec / finishedFiles;
+            if (overallEta) overallEta.textContent = (['done','partial','failed'].includes(r.status))
+              ? '✓ done'
+              : '~' + fmtDuration(etaSec);
+            if (overallAvg) overallAvg.textContent = avgSec >= 1 ? avgSec.toFixed(1) + 's' : (avgSec * 1000).toFixed(0) + 'ms';
+          } else if (overallEta) {
+            overallEta.textContent = 'computing…';
+          }
+        }
+      }
 
       liveFiles.innerHTML = data.files.map(f => {
         const stBadge = ({

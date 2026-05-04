@@ -1,6 +1,6 @@
 <x-layout>
-  <x-slot name="title">Macro Export</x-slot>
-  <x-slot name="heading">Macro Output — Filtered Export</x-slot>
+  <x-slot name="title">Data Export</x-slot>
+  <x-slot name="heading">Filtered Export — {{ $tableConfig['label'] ?? 'Data' }}</x-slot>
 
   <style>
     .field-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
@@ -26,57 +26,149 @@
     input[type=text]:focus, input[type=date]:focus { outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.15); }
     .field-label { display:block; font-size:11px; font-weight:600; color:#6b7280; text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
     .multi-search { width:100%; padding:4px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:11px; margin-bottom:6px; }
+    .table-select { padding:8px 12px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; background:white; min-width:240px; }
+    .table-select:focus { outline:none; border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.15); }
   </style>
 
   <div class="mx-auto px-4 py-4" style="max-width:1280px;" x-data="macroExport()">
 
+    {{-- Source table dropdown — reloads page when changed --}}
     <div class="section">
-      <h3>Date Range (ts_date)</h3>
-      <div class="field-grid">
-        <div>
-          <label class="field-label">Start date</label>
-          <input type="date" x-model="filters.start_date">
-        </div>
-        <div>
-          <label class="field-label">End date</label>
-          <input type="date" x-model="filters.end_date">
-        </div>
+      <h3>📊 Data Source</h3>
+      <div class="flex items-center gap-3 flex-wrap">
+        <label class="field-label" style="margin-bottom:0;">Source table:</label>
+        <select class="table-select" onchange="window.location.href = '{{ route('macro.export') }}?table=' + encodeURIComponent(this.value);">
+          @foreach($tables as $key => $cfg)
+            <option value="{{ $key }}" @selected($table === $key)>{{ $cfg['label'] }}</option>
+          @endforeach
+        </select>
+        <span class="text-xs text-gray-500">
+          Iiba ang available filters at columns depende sa source table.
+        </span>
       </div>
     </div>
 
-    <div class="section">
-      <h3>Page · Item · Status (multi-select)</h3>
-      <div class="field-grid">
-        <div>
-          <label class="field-label">Page <span class="text-gray-400" x-text="filters.pages.length ? '('+filters.pages.length+' selected)' : ''"></span></label>
-          <input type="text" class="multi-search" placeholder="🔍 search pages…" x-model="search.pages">
-          <div class="multi-list">
-            <template x-for="p in distinctPages.filter(x => !search.pages || x.toLowerCase().includes(search.pages.toLowerCase()))" :key="p">
-              <label><input type="checkbox" :value="p" x-model="filters.pages"><span x-text="p"></span></label>
-            </template>
+    {{-- ============================================================== --}}
+    {{-- MACRO_OUTPUT FILTERS                                            --}}
+    {{-- ============================================================== --}}
+    @if($table === 'macro_output')
+      <div class="section">
+        <h3>Date Range (ts_date)</h3>
+        <div class="field-grid">
+          <div>
+            <label class="field-label">Start date</label>
+            <input type="date" x-model="filters.start_date">
           </div>
-        </div>
-        <div>
-          <label class="field-label">Item <span class="text-gray-400" x-text="filters.items.length ? '('+filters.items.length+' selected)' : ''"></span></label>
-          <input type="text" class="multi-search" placeholder="🔍 search items…" x-model="search.items">
-          <div class="multi-list">
-            <template x-for="p in distinctItems.filter(x => !search.items || x.toLowerCase().includes(search.items.toLowerCase()))" :key="p">
-              <label><input type="checkbox" :value="p" x-model="filters.items"><span x-text="p"></span></label>
-            </template>
-          </div>
-        </div>
-        <div>
-          <label class="field-label">Status <span class="text-gray-400" x-text="filters.statuses.length ? '('+filters.statuses.length+' selected)' : ''"></span></label>
-          <input type="text" class="multi-search" placeholder="🔍 search statuses…" x-model="search.statuses">
-          <div class="multi-list">
-            <template x-for="p in distinctStatuses.filter(x => !search.statuses || x.toLowerCase().includes(search.statuses.toLowerCase()))" :key="p">
-              <label><input type="checkbox" :value="p" x-model="filters.statuses"><span x-text="p"></span></label>
-            </template>
+          <div>
+            <label class="field-label">End date</label>
+            <input type="date" x-model="filters.end_date">
           </div>
         </div>
       </div>
-    </div>
 
+      <div class="section">
+        <h3>Page · Item · Status (multi-select)</h3>
+        <div class="field-grid">
+          <div>
+            <label class="field-label">Page <span class="text-gray-400" x-text="filters.pages.length ? '('+filters.pages.length+' selected)' : ''"></span></label>
+            <input type="text" class="multi-search" placeholder="🔍 search pages…" x-model="search.pages">
+            <div class="multi-list">
+              <template x-for="p in distinctPages.filter(x => !search.pages || x.toLowerCase().includes(search.pages.toLowerCase()))" :key="p">
+                <label><input type="checkbox" :value="p" x-model="filters.pages"><span x-text="p"></span></label>
+              </template>
+            </div>
+          </div>
+          <div>
+            <label class="field-label">Item <span class="text-gray-400" x-text="filters.items.length ? '('+filters.items.length+' selected)' : ''"></span></label>
+            <input type="text" class="multi-search" placeholder="🔍 search items…" x-model="search.items">
+            <div class="multi-list">
+              <template x-for="p in distinctItems.filter(x => !search.items || x.toLowerCase().includes(search.items.toLowerCase()))" :key="p">
+                <label><input type="checkbox" :value="p" x-model="filters.items"><span x-text="p"></span></label>
+              </template>
+            </div>
+          </div>
+          <div>
+            <label class="field-label">Status <span class="text-gray-400" x-text="filters.statuses.length ? '('+filters.statuses.length+' selected)' : ''"></span></label>
+            <input type="text" class="multi-search" placeholder="🔍 search statuses…" x-model="search.statuses">
+            <div class="multi-list">
+              <template x-for="p in distinctStatuses.filter(x => !search.statuses || x.toLowerCase().includes(search.statuses.toLowerCase()))" :key="p">
+                <label><input type="checkbox" :value="p" x-model="filters.statuses"><span x-text="p"></span></label>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    @endif
+
+    {{-- ============================================================== --}}
+    {{-- FROM_JNTS / FROM_JNTS_2 FILTERS                                 --}}
+    {{-- ============================================================== --}}
+    @if(in_array($table, ['from_jnts', 'from_jnts_2'], true))
+      <div class="section">
+        <h3>Date Range — Signing Time (delivered/returned)</h3>
+        <div class="field-grid">
+          <div>
+            <label class="field-label">Signing — Start</label>
+            <input type="date" x-model="filters.signing_start">
+          </div>
+          <div>
+            <label class="field-label">Signing — End</label>
+            <input type="date" x-model="filters.signing_end">
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Date Range — Submission Time (pickup)</h3>
+        <div class="field-grid">
+          <div>
+            <label class="field-label">Submission — Start</label>
+            <input type="date" x-model="filters.submission_start">
+          </div>
+          <div>
+            <label class="field-label">Submission — End</label>
+            <input type="date" x-model="filters.submission_end">
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Status · Item · Sender (multi-select)</h3>
+        <div class="field-grid">
+          <div>
+            <label class="field-label">Status <span class="text-gray-400" x-text="filters.statuses.length ? '('+filters.statuses.length+' selected)' : ''"></span></label>
+            <input type="text" class="multi-search" placeholder="🔍 search statuses…" x-model="search.statuses">
+            <div class="multi-list">
+              <template x-for="p in distinctStatuses.filter(x => !search.statuses || x.toLowerCase().includes(search.statuses.toLowerCase()))" :key="p">
+                <label><input type="checkbox" :value="p" x-model="filters.statuses"><span x-text="p"></span></label>
+              </template>
+            </div>
+          </div>
+          <div>
+            <label class="field-label">Item Name <span class="text-gray-400" x-text="filters.items.length ? '('+filters.items.length+' selected)' : ''"></span></label>
+            <input type="text" class="multi-search" placeholder="🔍 search items…" x-model="search.items">
+            <div class="multi-list">
+              <template x-for="p in distinctItems.filter(x => !search.items || x.toLowerCase().includes(search.items.toLowerCase()))" :key="p">
+                <label><input type="checkbox" :value="p" x-model="filters.items"><span x-text="p"></span></label>
+              </template>
+            </div>
+          </div>
+          <div>
+            <label class="field-label">Sender <span class="text-gray-400" x-text="filters.senders.length ? '('+filters.senders.length+' selected)' : ''"></span></label>
+            <input type="text" class="multi-search" placeholder="🔍 search senders…" x-model="search.senders">
+            <div class="multi-list">
+              <template x-for="p in distinctSenders.filter(x => !search.senders || x.toLowerCase().includes(search.senders.toLowerCase()))" :key="p">
+                <label><input type="checkbox" :value="p" x-model="filters.senders"><span x-text="p"></span></label>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    @endif
+
+    {{-- ============================================================== --}}
+    {{-- ADDRESS — shared between all tables                              --}}
+    {{-- ============================================================== --}}
     <div class="section">
       <h3>Address — Cascading Multi-Select</h3>
       <p class="text-xs text-gray-500 mb-2">
@@ -150,64 +242,103 @@
       </div>
     </div>
 
-    <div class="section">
-      <h3>Search · CXD · Waybill</h3>
-      <div class="field-grid">
-        <div>
-          <label class="field-label">Free-text search (Name · Phone · Address · User Input)</label>
-          <input type="text" x-model="filters.search" placeholder="any keyword…">
-        </div>
-        <div>
-          <label class="field-label">CXD (contains)</label>
-          <input type="text" x-model="filters.cxd" placeholder="CXD value">
-        </div>
-        <div>
-          <label class="field-label">Has waybill?</label>
-          <div class="tri-state">
-            <input type="radio" id="wb_any" value="any" x-model="filters.waybill"><label for="wb_any">Any</label>
-            <input type="radio" id="wb_yes" value="yes" x-model="filters.waybill"><label for="wb_yes">Yes</label>
-            <input type="radio" id="wb_no"  value="no"  x-model="filters.waybill"><label for="wb_no">No</label>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="section">
-      <h3>Validate Flags</h3>
-      <div class="field-grid">
-        <template x-for="f in [
-          {key:'validate_1',   label:'validate_1'},
-          {key:'validate_2',   label:'validate_2'},
-          {key:'item_checker', label:'item_checker'},
-        ]" :key="f.key">
+    {{-- ============================================================== --}}
+    {{-- MACRO_OUTPUT extra: search · CXD · waybill                      --}}
+    {{-- ============================================================== --}}
+    @if($table === 'macro_output')
+      <div class="section">
+        <h3>Search · CXD · Waybill</h3>
+        <div class="field-grid">
           <div>
-            <label class="field-label" x-text="f.label"></label>
+            <label class="field-label">Free-text search (Name · Phone · Address · User Input)</label>
+            <input type="text" x-model="filters.search" placeholder="any keyword…">
+          </div>
+          <div>
+            <label class="field-label">CXD (contains)</label>
+            <input type="text" x-model="filters.cxd" placeholder="CXD value">
+          </div>
+          <div>
+            <label class="field-label">Has waybill?</label>
             <div class="tri-state">
-              <input type="radio" :id="f.key+'_any'" value="any" x-model="filters[f.key]"><label :for="f.key+'_any'">Any</label>
-              <input type="radio" :id="f.key+'_yes'" value="yes" x-model="filters[f.key]"><label :for="f.key+'_yes'">Yes</label>
-              <input type="radio" :id="f.key+'_no'"  value="no"  x-model="filters[f.key]"><label :for="f.key+'_no'">No</label>
+              <input type="radio" id="wb_any" value="any" x-model="filters.waybill"><label for="wb_any">Any</label>
+              <input type="radio" id="wb_yes" value="yes" x-model="filters.waybill"><label for="wb_yes">Yes</label>
+              <input type="radio" id="wb_no"  value="no"  x-model="filters.waybill"><label for="wb_no">No</label>
             </div>
           </div>
-        </template>
+        </div>
       </div>
-    </div>
 
-    <div class="section">
-      <h3>Edit-Tracking Flags</h3>
-      <div class="field-grid">
-        <template x-for="f in editFlags" :key="f">
+      <div class="section">
+        <h3>Validate Flags</h3>
+        <div class="field-grid">
+          <template x-for="f in [
+            {key:'validate_1',   label:'validate_1'},
+            {key:'validate_2',   label:'validate_2'},
+            {key:'item_checker', label:'item_checker'},
+          ]" :key="f.key">
+            <div>
+              <label class="field-label" x-text="f.label"></label>
+              <div class="tri-state">
+                <input type="radio" :id="f.key+'_any'" value="any" x-model="filters[f.key]"><label :for="f.key+'_any'">Any</label>
+                <input type="radio" :id="f.key+'_yes'" value="yes" x-model="filters[f.key]"><label :for="f.key+'_yes'">Yes</label>
+                <input type="radio" :id="f.key+'_no'"  value="no"  x-model="filters[f.key]"><label :for="f.key+'_no'">No</label>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Edit-Tracking Flags</h3>
+        <div class="field-grid">
+          <template x-for="f in editFlags" :key="f">
+            <div>
+              <label class="field-label" x-text="f"></label>
+              <div class="tri-state">
+                <input type="radio" :id="f+'_any'" value="any" x-model="filters[f]"><label :for="f+'_any'">Any</label>
+                <input type="radio" :id="f+'_yes'" value="yes" x-model="filters[f]"><label :for="f+'_yes'">Yes</label>
+                <input type="radio" :id="f+'_no'"  value="no"  x-model="filters[f]"><label :for="f+'_no'">No</label>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    @endif
+
+    {{-- ============================================================== --}}
+    {{-- FROM_JNTS extra: search · COD · RTS                              --}}
+    {{-- ============================================================== --}}
+    @if(in_array($table, ['from_jnts', 'from_jnts_2'], true))
+      <div class="section">
+        <h3>Search · COD · RTS</h3>
+        <div class="field-grid">
           <div>
-            <label class="field-label" x-text="f"></label>
+            <label class="field-label">Free-text search (waybill · receiver · phone)</label>
+            <input type="text" x-model="filters.search" placeholder="any keyword…">
+          </div>
+          <div>
+            <label class="field-label">Has COD value?</label>
             <div class="tri-state">
-              <input type="radio" :id="f+'_any'" value="any" x-model="filters[f]"><label :for="f+'_any'">Any</label>
-              <input type="radio" :id="f+'_yes'" value="yes" x-model="filters[f]"><label :for="f+'_yes'">Yes</label>
-              <input type="radio" :id="f+'_no'"  value="no"  x-model="filters[f]"><label :for="f+'_no'">No</label>
+              <input type="radio" id="cod_any" value="any" x-model="filters.cod_state"><label for="cod_any">Any</label>
+              <input type="radio" id="cod_yes" value="yes" x-model="filters.cod_state"><label for="cod_yes">Yes</label>
+              <input type="radio" id="cod_no"  value="no"  x-model="filters.cod_state"><label for="cod_no">No</label>
             </div>
           </div>
-        </template>
+          <div>
+            <label class="field-label">Has RTS reason?</label>
+            <div class="tri-state">
+              <input type="radio" id="rts_any" value="any" x-model="filters.rts_state"><label for="rts_any">Any</label>
+              <input type="radio" id="rts_yes" value="yes" x-model="filters.rts_state"><label for="rts_yes">Yes</label>
+              <input type="radio" id="rts_no"  value="no"  x-model="filters.rts_state"><label for="rts_no">No</label>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    @endif
 
+    {{-- ============================================================== --}}
+    {{-- COLUMNS PICKER — shared                                          --}}
+    {{-- ============================================================== --}}
     <div class="section">
       <div class="flex items-center justify-between mb-2">
         <h3 style="margin-bottom:0;">Columns to Include</h3>
@@ -227,6 +358,9 @@
       </p>
     </div>
 
+    {{-- ============================================================== --}}
+    {{-- DOWNLOAD ACTIONS — shared                                        --}}
+    {{-- ============================================================== --}}
     <div class="section">
       <div class="flex items-center justify-between flex-wrap gap-3">
         <div class="flex items-center gap-3">
@@ -260,31 +394,49 @@
   <script>
   function macroExport() {
     return {
+      table:             @json($table),
       allColumns:        @json($allColumns),
+      defaultColumns:    @json($defaultCols),
+
       distinctPages:     @json($distinctPages),
       distinctItems:     @json($distinctItems),
       distinctStatuses:  @json($distinctStatuses),
+      distinctSenders:   @json($distinctSenders),
       distinctProvinces: @json($distinctProvinces),
       distinctCities:    @json($distinctCities),
       distinctBarangays: @json($distinctBarangays),
-      // Distinct (province, city, barangay) triples for cascading filter.
       addressTriples:    @json($addressTriples),
+
       editFlags: [
         'edited_full_name','edited_phone_number','edited_address',
         'edited_province','edited_city','edited_barangay',
         'edited_cod','edited_item_name',
       ],
-      search: { pages:'', items:'', statuses:'', provinces:'', cities:'', barangays:'' },
+
+      search: {
+        pages:'', items:'', statuses:'', senders:'',
+        provinces:'', cities:'', barangays:'',
+      },
+
       filters: {
+        // Macro date range (ts_date)
         start_date:'', end_date:'',
-        pages:[], items:[], statuses:[],
+        // JNT date ranges
+        signing_start:'', signing_end:'',
+        submission_start:'', submission_end:'',
+        // Multi-selects (shared field names; semantics differ per table)
+        pages:[], items:[], statuses:[], senders:[],
         provinces:[], cities:[], barangays:[],
+        // Free-text + tri-state
         search:'', cxd:'', waybill:'any',
+        cod_state:'any', rts_state:'any',
+        // Macro flags
         validate_1:'any', validate_2:'any', item_checker:'any',
         edited_full_name:'any', edited_phone_number:'any', edited_address:'any',
         edited_province:'any', edited_city:'any', edited_barangay:'any',
         edited_cod:'any', edited_item_name:'any',
       },
+
       selectedColumns: [],
       format: 'csv',
       lastCount: null,
@@ -292,30 +444,19 @@
       downloading: false,
 
       init() {
-        // Default columns — basic shipping fields. User can override.
         this.defaultCols();
       },
 
       selectAllCols() { this.selectedColumns = [...this.allColumns]; },
       clearCols()     { this.selectedColumns = []; },
       defaultCols()   {
-        this.selectedColumns = [
-          'id','ts_date','PAGE','FULL NAME','PHONE NUMBER','ADDRESS',
-          'PROVINCE','CITY','BARANGAY','ITEM_NAME','COD','STATUS','waybill',
-        ].filter(c => this.allColumns.includes(c));
+        this.selectedColumns = this.defaultColumns.filter(c => this.allColumns.includes(c));
       },
 
       // ─── CASCADING ADDRESS FILTERS ────────────────────────────────────
-      // Each cascadedXxx() returns the visible options for that field given
-      // the current selections in the OTHER two fields. The cascade is
-      // bidirectional — picking a Barangay narrows Province + City to only
-      // those that contain it; picking a Province narrows City + Barangay,
-      // and so on. Selected values are always preserved (never disappear).
       _cascadeCache: null,
       _cascadeCacheKey: '',
       _cascadeCompute() {
-        // Memoize across selection changes so a typing burst doesn't re-iterate
-        // tens of thousands of triples on every keystroke.
         const key = JSON.stringify([
           this.filters.provinces.slice().sort(),
           this.filters.cities.slice().sort(),
@@ -328,18 +469,13 @@
         const brgySet = new Set(this.filters.barangays);
         const hasProv = provSet.size > 0, hasCity = citySet.size > 0, hasBrgy = brgySet.size > 0;
 
-        // For each field's cascaded list, ignore that field's own selections
-        // (otherwise picking 1 city would hide all other cities — bad UX).
-        const provList = new Set();   // visible provinces given selected city + brgy
-        const cityList = new Set();   // visible cities given selected prov + brgy
-        const brgyList = new Set();   // visible barangays given selected prov + city
+        const provList = new Set();
+        const cityList = new Set();
+        const brgyList = new Set();
 
         for (const [p, c, b] of this.addressTriples) {
-          // Province visibility — match against city + brgy only.
           if ((!hasCity || citySet.has(c)) && (!hasBrgy || brgySet.has(b))) provList.add(p);
-          // City visibility — match against prov + brgy only.
           if ((!hasProv || provSet.has(p)) && (!hasBrgy || brgySet.has(b))) cityList.add(c);
-          // Barangay visibility — match against prov + city only.
           if ((!hasProv || provSet.has(p)) && (!hasCity || citySet.has(c))) brgyList.add(b);
         }
 
@@ -357,9 +493,6 @@
       cascadedCities()    { return this._cascadeCompute().cities;    },
       cascadedBarangays() { return this._cascadeCompute().barangays; },
 
-      // For huge address lists (e.g. tens of thousands of barangays), only
-      // render up to 500 matching items + always-include the currently-checked
-      // ones so they don't disappear when the user types something else.
       ADDRESS_RENDER_LIMIT: 500,
       visibleAddressList(full, query, selected) {
         const q = (query || '').toLowerCase().trim();
@@ -367,7 +500,6 @@
           ? full.filter(x => x && x.toLowerCase().includes(q))
           : full;
         if (filtered.length <= this.ADDRESS_RENDER_LIMIT) return filtered;
-        // Always include selected items even if they don't match the search.
         const head = filtered.slice(0, this.ADDRESS_RENDER_LIMIT);
         const headSet = new Set(head);
         const extras = (selected || []).filter(s => !headSet.has(s));
@@ -379,24 +511,45 @@
         return matchedCount > this.ADDRESS_RENDER_LIMIT;
       },
 
-      // Build a FormData with all current filter values for POST.
       buildPayload() {
         const fd = new FormData();
         fd.append('_token', '{{ csrf_token() }}');
-        if (this.filters.start_date) fd.append('start_date', this.filters.start_date);
-        if (this.filters.end_date)   fd.append('end_date',   this.filters.end_date);
-        this.filters.pages.forEach(v     => fd.append('pages[]',     v));
-        this.filters.items.forEach(v     => fd.append('items[]',     v));
-        this.filters.statuses.forEach(v  => fd.append('statuses[]',  v));
+        fd.append('table', this.table);
+
+        // Address — shared
         this.filters.provinces.forEach(v => fd.append('provinces[]', v));
         this.filters.cities.forEach(v    => fd.append('cities[]',    v));
         this.filters.barangays.forEach(v => fd.append('barangays[]', v));
-        ['search','cxd','waybill'].forEach(k => {
-          if (this.filters[k] !== '' && this.filters[k] !== 'any') fd.append(k, this.filters[k]);
-          else if (k === 'waybill') fd.append(k, 'any');
-        });
-        ['validate_1','validate_2','item_checker',
-         ...this.editFlags].forEach(k => fd.append(k, this.filters[k]));
+
+        // Search — shared field name
+        if (this.filters.search) fd.append('search', this.filters.search);
+
+        // Macro-specific
+        if (this.table === 'macro_output') {
+          if (this.filters.start_date) fd.append('start_date', this.filters.start_date);
+          if (this.filters.end_date)   fd.append('end_date',   this.filters.end_date);
+          this.filters.pages.forEach(v     => fd.append('pages[]',     v));
+          this.filters.items.forEach(v     => fd.append('items[]',     v));
+          this.filters.statuses.forEach(v  => fd.append('statuses[]',  v));
+          if (this.filters.cxd) fd.append('cxd', this.filters.cxd);
+          fd.append('waybill', this.filters.waybill || 'any');
+          ['validate_1','validate_2','item_checker',
+           ...this.editFlags].forEach(k => fd.append(k, this.filters[k]));
+        }
+
+        // JNT-specific
+        if (this.table === 'from_jnts' || this.table === 'from_jnts_2') {
+          if (this.filters.signing_start)    fd.append('signing_start',    this.filters.signing_start);
+          if (this.filters.signing_end)      fd.append('signing_end',      this.filters.signing_end);
+          if (this.filters.submission_start) fd.append('submission_start', this.filters.submission_start);
+          if (this.filters.submission_end)   fd.append('submission_end',   this.filters.submission_end);
+          this.filters.statuses.forEach(v => fd.append('statuses[]', v));
+          this.filters.items.forEach(v    => fd.append('items[]',    v));
+          this.filters.senders.forEach(v  => fd.append('senders[]',  v));
+          fd.append('cod_state', this.filters.cod_state || 'any');
+          fd.append('rts_state', this.filters.rts_state || 'any');
+        }
+
         this.selectedColumns.forEach(v => fd.append('columns[]', v));
         fd.append('format', this.format);
         return fd;
@@ -424,7 +577,6 @@
       download() {
         if (this.selectedColumns.length === 0) return;
         this.downloading = true;
-        // Submit a real form so the browser handles the streamed download.
         const f = document.createElement('form');
         f.method = 'POST';
         f.action = '{{ route('macro.export.download') }}';
@@ -437,7 +589,6 @@
         }
         document.body.appendChild(f);
         f.submit();
-        // Re-enable button after a short delay (we don't get a JS callback for downloads).
         setTimeout(() => { this.downloading = false; document.body.removeChild(f); }, 3000);
       },
     };
