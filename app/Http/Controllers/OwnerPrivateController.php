@@ -25,10 +25,18 @@ class OwnerPrivateController extends Controller
         }
     }
 
-    /** Stricter check for endpoints that mutate data — CEO-only. */
+    /** Stricter check for endpoints that mutate data — CEO + Marketing-OIC. */
     private function checkWriteAccess(): void
     {
-        if ($this->getNormalizedRole() !== 'CEO') abort(404);
+        $role = $this->getNormalizedRole();
+        if (!in_array($role, ['CEO', 'Marketing - OIC'], true)) abort(404);
+    }
+
+    /** Audit-log viewer — same role gate as write access. */
+    private function checkLogsAccess(): void
+    {
+        $role = $this->getNormalizedRole();
+        if (!in_array($role, ['CEO', 'Marketing - OIC'], true)) abort(404);
     }
 
     /** Canonical role string from the logged-in user's employee profile. */
@@ -1895,8 +1903,8 @@ class OwnerPrivateController extends Controller
 
     public function saveItemSetting(Request $request)
     {
-        // Mutates RTS / item_value — CEO only. Marketing roles can VIEW
-        // /owner/private but cannot edit data integrity fields.
+        // Mutates RTS / item_value — CEO + Marketing-OIC. Marketing role can
+        // VIEW /owner/private but cannot edit data integrity fields.
         $this->checkWriteAccess();
 
         $validated = $request->validate([
@@ -1913,6 +1921,19 @@ class OwnerPrivateController extends Controller
         $pageName  = trim($validated['page_name']);
         $itemName  = trim($validated['item_name']);
         $effDate   = $validated['effective_date'];
+
+        // ── Capture old values for audit log (read BEFORE mutation) ──────────
+        $oldRtsRow = DB::table('page_item_settings')
+            ->where('page_name', $pageName)
+            ->where('item_name', $itemName)
+            ->where('effective_date', $effDate)
+            ->first(['rts_pct']);
+        $oldCogsRow = DB::table('cogs')
+            ->where('item_name', $itemName)
+            ->where('date', $effDate)
+            ->first(['unit_cost']);
+        $oldRts  = $oldRtsRow  ? (float) $oldRtsRow->rts_pct  : null;
+        $oldCogs = $oldCogsRow ? (float) $oldCogsRow->unit_cost : null;
         // When set, ALSO overwrite any existing rows whose date is
         // BETWEEN ($effDate, $applyThrough]. Use case: user clicks
         // "Apply from <earliest>" on a later cell whose date already
@@ -2012,10 +2033,80 @@ class OwnerPrivateController extends Controller
             return response()->json(['ok' => false, 'message' => $e->getMessage()], 500);
         }
 
+        // ── Audit log (best-effort — failure here doesn't block the save) ────
+        try {
+            $action = ($oldRts === null && $oldCogs === null) ? 'create' : 'update';
+            DB::table('page_item_settings_log')->insert([
+                'user_email'         => Auth::user()?->email,
+                'action'             => $action,
+                'page_name'          => $pageName,
+                'item_name'          => $itemName,
+                'effective_date'     => $effDate,
+                'old_rts_pct'        => $oldRts,
+                'new_rts_pct'        => $rtsPct > 0 ? $rtsPct : null,
+                'old_item_value'     => $oldCogs,
+                'new_item_value'     => $itemValue > 0 ? $itemValue : null,
+                'comment'            => $validated['comment'] ?? null,
+                'item_value_comment' => $validated['item_value_comment'] ?? null,
+                'created_at'         => now(),
+                'updated_at'         => now(),
+            ]);
+        } catch (\Throwable $e) {
+            \Log::error('saveItemSetting audit log failed: ' . $e->getMessage());
+        }
+
         return response()->json([
             'ok'            => true,
             'rts_deleted'   => $rtsPct <= 0,
             'cogs_upserted' => $itemValue > 0,
+        ]);
+    }
+
+    /**
+     * GET /owner/private/edit-logs — paginated audit trail of RTS/COGS edits.
+     * CEO + Marketing-OIC only.
+     */
+    public function editLogs(Request $request)
+    {
+        $this->checkLogsAccess();
+
+        $userFilter = trim((string) $request->query('user', ''));
+        $pageFilter = trim((string) $request->query('page', ''));
+        $itemFilter = trim((string) $request->query('item', ''));
+        $fromDate   = trim((string) $request->query('from_date', ''));
+        $toDate     = trim((string) $request->query('to_date', ''));
+
+        $query = DB::table('page_item_settings_log as l')
+            ->leftJoin('users as u', 'u.email', '=', 'l.user_email')
+            ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+            ->select([
+                'l.*',
+                DB::raw('COALESCE(ep.name, u.name) AS user_name'),
+            ])
+            ->orderByDesc('l.id');
+
+        if ($userFilter !== '') $query->where('l.user_email', $userFilter);
+        if ($pageFilter !== '') $query->where('l.page_name', $pageFilter);
+        if ($itemFilter !== '') $query->where('l.item_name', 'like', '%' . $itemFilter . '%');
+        if ($fromDate   !== '') $query->where('l.created_at', '>=', $fromDate . ' 00:00:00');
+        if ($toDate     !== '') $query->where('l.created_at', '<=', $toDate   . ' 23:59:59');
+
+        $rows = $query->paginate(50)->appends($request->query());
+
+        $allUsers = DB::table('page_item_settings_log')
+            ->whereNotNull('user_email')->distinct()->orderBy('user_email')->pluck('user_email');
+        $allPages = DB::table('page_item_settings_log')
+            ->whereNotNull('page_name')->distinct()->orderBy('page_name')->pluck('page_name');
+
+        return view('owner.edit_logs', [
+            'rows'       => $rows,
+            'allUsers'   => $allUsers,
+            'allPages'   => $allPages,
+            'userFilter' => $userFilter,
+            'pageFilter' => $pageFilter,
+            'itemFilter' => $itemFilter,
+            'fromDate'   => $fromDate,
+            'toDate'     => $toDate,
         ]);
     }
 

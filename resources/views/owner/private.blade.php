@@ -331,6 +331,14 @@
          style="background:#1e293b;color:#f87171;border:1px solid #475569;
                 border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
                 cursor:pointer;margin-left:4px;text-decoration:none;">🚫 Excluded</a>
+    @endif
+
+    @if(!empty($isCEO) || !empty($isMarketingOIC))
+      <a href="{{ route('owner.private.edit-logs') }}"
+         title="View RTS / COGS edit history"
+         style="background:#1e293b;color:#86efac;border:1px solid #475569;
+                border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+                cursor:pointer;margin-left:4px;text-decoration:none;">📜 Logs</a>
       <button id="refreshPrimaryBtn"
               @click="refreshPrimary()"
               :disabled="refreshing"

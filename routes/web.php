@@ -30,6 +30,7 @@ use App\Http\Controllers\MacroOutputController;
 use App\Http\Controllers\PageSenderMappingController;
 use App\Http\Controllers\JntCheckerController;
 use App\Http\Controllers\JntUploadController;
+use App\Http\Controllers\JntUploadV2Controller;
 use App\Http\Controllers\PancakeSubscriptionCheckerController;
 use App\Http\Controllers\AdsManagerCampaignsController;
 use App\Http\Controllers\AdsInsightsController;
@@ -511,6 +512,7 @@ Route::post('/owner/private/item-setting', [OwnerPrivateController::class, 'save
 Route::post('/owner/private/refresh-primary-items', [OwnerPrivateController::class, 'refreshPrimaryItems'])->name('owner.private.refresh-primary-items');
 Route::get('/owner/private/page-range-breakdown', [OwnerPrivateController::class, 'pageRangeBreakdown'])->name('owner.private.page-range-breakdown');
 Route::get('/owner/private/breakdown', [OwnerPrivateController::class, 'breakdownPage'])->name('owner.private.breakdown');
+Route::get('/owner/private/edit-logs', [OwnerPrivateController::class, 'editLogs'])->name('owner.private.edit-logs');
 
 Route::get('/summary/overall', [SummaryOverallController::class, 'index'])->name('summary.overall');
 Route::get('/summary/overall/data', [SummaryOverallController::class, 'data'])->name('summary.overall.data');
@@ -774,6 +776,14 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get('/jnt_upload', [JntUploadController::class, 'index'])->name('jnt.upload.index');
     Route::post('/jnt_upload', [JntUploadController::class, 'store'])->name('jnt.upload.store');
     Route::get('/jnt_upload/status/{uploadLog}', [JntUploadController::class, 'status'])->name('jnt.upload.status');
+
+    // /jnt_upload_v2 — multi-file uploader with precheck + history (parallel sa v1)
+    Route::get   ('/jnt_upload_v2',                       [JntUploadV2Controller::class, 'index'])         ->name('jnt.upload.v2.index');
+    Route::post  ('/jnt_upload_v2/precheck',              [JntUploadV2Controller::class, 'precheck'])      ->name('jnt.upload.v2.precheck');
+    Route::post  ('/jnt_upload_v2/start',                 [JntUploadV2Controller::class, 'start'])         ->name('jnt.upload.v2.start');
+    Route::get   ('/jnt_upload_v2/status/{runId}',        [JntUploadV2Controller::class, 'status'])        ->whereNumber('runId')->name('jnt.upload.v2.status');
+    Route::get   ('/jnt_upload_v2/history',               [JntUploadV2Controller::class, 'history'])       ->name('jnt.upload.v2.history');
+    Route::get   ('/jnt_upload_v2/history/{runId}',       [JntUploadV2Controller::class, 'historyDetail']) ->whereNumber('runId')->name('jnt.upload.v2.history.detail');
     Route::view('/jnt_update', 'jnt_update');
     Route::post('/jnt_update', [FromJntController::class, 'updateOrInsert']);
     Route::get('/jnt_rts', [FromJntController::class, 'rtsView']);

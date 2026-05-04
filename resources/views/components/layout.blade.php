@@ -57,6 +57,10 @@
                     <i class="fa-solid fa-bullhorn"></i>
                   </x-navlink>
 
+                  <x-navlink href="/owner/private" :active="request()->is('owner/private*')" label="Marketing Summary">
+                    <i class="fa-solid fa-chart-pie"></i>
+                  </x-navlink>
+
                   <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import*')" label="Likha">
                     <i class="fa-solid fa-store"></i>
                   </x-navlink>
@@ -71,6 +75,10 @@
 
                   <x-navlink href="/jnt_upload" :active="request()->is('jnt_upload*')" label="Waybill">
                     <i class="fa-solid fa-receipt"></i>
+                  </x-navlink>
+
+                  <x-navlink href="/jnt_upload_v2" :active="request()->is('jnt_upload_v2*')" label="Waybill V2">
+                    <i class="fa-solid fa-layer-group"></i>
                   </x-navlink>
 
                   <x-navlink href="/ads_manager/cpp" :active="request()->is('ads_manager/cpp*')" label="CPP">
@@ -235,6 +243,8 @@
       'jnt_rts/*',
       'jnt/supply',
       'jnt/supply/*',
+      'jnt_upload_v2',
+      'jnt_upload_v2/*',
     ]))
       <div class="w-full px-0">
         {{ $slot }}
