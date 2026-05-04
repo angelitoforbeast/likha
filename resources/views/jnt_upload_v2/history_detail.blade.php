@@ -105,7 +105,7 @@
             <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-[11px] text-slate-600">
               <div>⏱ Elapsed: <strong id="overallElapsed" class="text-slate-800">—</strong></div>
               <div>🎯 ETA: <strong id="overallEta" class="text-slate-800">—</strong></div>
-              <div>⚡ Avg: <strong id="overallAvg" class="text-slate-800">—</strong> /file</div>
+              <div>⚡ Speed: <strong id="overallAvg" class="text-slate-800">—</strong></div>
               <div>👷 Workers: <strong id="overallWorkers" class="text-slate-800">—</strong></div>
             </div>
           </div>
@@ -225,6 +225,34 @@
       return `${s}s`;
     }
 
+    function fmtBytesPerSec(bps) {
+      if (!isFinite(bps) || bps <= 0) return '—';
+      if (bps < 1024) return bps.toFixed(0) + ' B/s';
+      if (bps < 1024 * 1024) return (bps / 1024).toFixed(1) + ' KB/s';
+      if (bps < 1024 * 1024 * 1024) return (bps / 1024 / 1024).toFixed(2) + ' MB/s';
+      return (bps / 1024 / 1024 / 1024).toFixed(2) + ' GB/s';
+    }
+
+    // Rolling bytes-snapshot store (5s window for current speed)
+    const ROLL_WINDOW_MS = 5000;
+    let bytesSnapshots = [];
+    function pushBytesSnapshot(now, bytesDone) {
+      bytesSnapshots.push({ t: now, b: bytesDone });
+      while (bytesSnapshots.length > 1 && now - bytesSnapshots[0].t > ROLL_WINDOW_MS) {
+        bytesSnapshots.shift();
+      }
+    }
+    function rollingSpeed(now) {
+      if (bytesSnapshots.length < 2) return null;
+      const oldest = bytesSnapshots[0];
+      const newest = bytesSnapshots[bytesSnapshots.length - 1];
+      const dt = (newest.t - oldest.t) / 1000;
+      const db = newest.b - oldest.b;
+      if (dt <= 0) return null;
+      if (db < 0) return 0;
+      return db / dt;
+    }
+
     function fmtTime(s) {
       if (!s) return '';
       try {
@@ -310,11 +338,12 @@
       const bar = document.getElementById('overallBar');
       if (bar) bar.style.width = pct + '%';
 
-      // ETA — bytes-weighted, filter cancelled
+      // ETA — rolling 5-second bytes speed (more responsive than overall avg)
       if (r.started_at) {
         const startedMs = Date.parse(r.started_at.replace(' ', 'T') + (r.started_at.endsWith('Z') ? '' : '+08:00'));
         if (!isNaN(startedMs)) {
-          const elapsedSec = (Date.now() - startedMs) / 1000;
+          const now = Date.now();
+          const elapsedSec = (now - startedMs) / 1000;
           setText('overallElapsed', fmtDuration(elapsedSec));
 
           const realDone      = terminalFiles.filter(f => f.status !== 'cancelled');
@@ -323,16 +352,26 @@
             .filter(f => !['done','failed','skipped','cancelled'].includes(f.status))
             .reduce((sum, f) => sum + (f.size || 0), 0);
 
-          if (realDone.length >= 3 && realDoneBytes > 0 && elapsedSec > 0) {
-            const bytesPerSec = realDoneBytes / elapsedSec;
-            const etaSec = bytesPerSec > 0 ? remainingBytes / bytesPerSec : Infinity;
-            const avgSec = elapsedSec / realDone.length;
-            setText('overallEta', (['done','partial','failed','cancelled'].includes(r.status))
-              ? '✓ ' + r.status
-              : '~' + fmtDuration(etaSec));
-            setText('overallAvg', avgSec >= 1 ? avgSec.toFixed(1) + 's' : (avgSec * 1000).toFixed(0) + 'ms');
+          pushBytesSnapshot(now, realDoneBytes);
+          const rollSpeed = rollingSpeed(now);
+          const fallbackSpeed = (elapsedSec > 0 && realDoneBytes > 0) ? realDoneBytes / elapsedSec : null;
+          const speed = (rollSpeed !== null && rollSpeed > 0) ? rollSpeed : fallbackSpeed;
+
+          const isTerminal = ['done','partial','failed','cancelled'].includes(r.status);
+
+          if (isTerminal) {
+            setText('overallEta', '✓ ' + r.status);
+          } else if (speed !== null && speed > 0 && remainingBytes >= 0) {
+            const etaSec = remainingBytes / speed;
+            setText('overallEta', '~' + fmtDuration(etaSec));
           } else {
             setText('overallEta', 'computing…');
+          }
+
+          if (speed !== null && speed > 0) {
+            setText('overallAvg', fmtBytesPerSec(speed));
+          } else {
+            setText('overallAvg', '—');
           }
         }
       }

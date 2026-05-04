@@ -176,7 +176,7 @@
           <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 text-[11px] text-slate-500">
             <div>⏱ Elapsed: <strong id="overallElapsed" class="text-slate-700">—</strong></div>
             <div>🎯 ETA: <strong id="overallEta" class="text-slate-700">—</strong></div>
-            <div>⚡ Avg: <strong id="overallAvg" class="text-slate-700">—</strong> /file</div>
+            <div>⚡ Speed: <strong id="overallAvg" class="text-slate-700">—</strong></div>
             <div>👷 Workers: <strong id="overallWorkers" class="text-slate-700">—</strong></div>
           </div>
         </div>
@@ -703,6 +703,37 @@
       return `${s}s`;
     }
 
+    function fmtBytesPerSec(bps) {
+      if (!isFinite(bps) || bps <= 0) return '—';
+      if (bps < 1024) return bps.toFixed(0) + ' B/s';
+      if (bps < 1024 * 1024) return (bps / 1024).toFixed(1) + ' KB/s';
+      if (bps < 1024 * 1024 * 1024) return (bps / 1024 / 1024).toFixed(2) + ' MB/s';
+      return (bps / 1024 / 1024 / 1024).toFixed(2) + ' GB/s';
+    }
+
+    // Rolling bytes-snapshot store — used for current speed (last 5 secs)
+    const ROLL_WINDOW_MS = 5000;
+    let bytesSnapshots = []; // [{ t: ms, b: bytesDone }]
+
+    function pushBytesSnapshot(now, bytesDone) {
+      bytesSnapshots.push({ t: now, b: bytesDone });
+      // Drop snapshots older than window
+      while (bytesSnapshots.length > 1 && now - bytesSnapshots[0].t > ROLL_WINDOW_MS) {
+        bytesSnapshots.shift();
+      }
+    }
+
+    function rollingSpeed(now) {
+      if (bytesSnapshots.length < 2) return null;
+      const oldest = bytesSnapshots[0];
+      const newest = bytesSnapshots[bytesSnapshots.length - 1];
+      const dt = (newest.t - oldest.t) / 1000;
+      const db = newest.b - oldest.b;
+      if (dt <= 0) return null;
+      if (db < 0) return 0; // edge case
+      return db / dt; // bytes per second
+    }
+
     function renderProgress(data) {
       const r = data.run;
 
@@ -740,34 +771,56 @@
       if (overallTotal)    overallTotal.textContent    = totalFiles.toLocaleString();
       if (overallWorkers)  overallWorkers.textContent  = inflightFiles > 0 ? `~${inflightFiles}` : '—';
 
-      // ===== Weighted ETA (Option B) =====
-      // Weight by file size (bytes) instead of treating files as equal.
-      // Filter out cancelled files from rate computation — those are no-op
-      // skips at ~50ms each, would skew average dramatically downward.
+      // ===== ETA: rolling 5-second bytes speed =====
+      // Compute current speed from bytes processed in the last 5 seconds.
+      // Adapts quickly to changes (workers added/dying, big files, etc.) —
+      // unlike overall-average which has too much inertia.
+      // Cancelled files excluded sa "done bytes" para hindi mag-skew ang count.
       if (r.started_at) {
         const startedMs = Date.parse(r.started_at.replace(' ', 'T') + (r.started_at.endsWith('Z') ? '' : '+08:00'));
         if (!isNaN(startedMs)) {
-          const elapsedSec = (Date.now() - startedMs) / 1000;
+          const now = Date.now();
+          const elapsedSec = (now - startedMs) / 1000;
           if (overallElapsed) overallElapsed.textContent = fmtDuration(elapsedSec);
 
-          // Bytes-based: use file sizes as weights
           const realDone = terminalFiles.filter(f => f.status !== 'cancelled');
           const realDoneBytes = realDone.reduce((sum, f) => sum + (f.size || 0), 0);
 
-          // Total bytes that NEED real processing (exclude already-cancelled files)
-          const remainingFiles = data.files.filter(f => !['done','failed','skipped','cancelled'].includes(f.status));
-          const remainingBytes = remainingFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+          // Total bytes na NEED real processing (kasama yung kasalukuyang processing
+          // pati pending; exclude already-terminal/cancelled)
+          const remainingBytes = data.files
+            .filter(f => !['done','failed','skipped','cancelled'].includes(f.status))
+            .reduce((sum, f) => sum + (f.size || 0), 0);
 
-          if (realDone.length >= 3 && realDoneBytes > 0 && elapsedSec > 0) {
-            const bytesPerSec = realDoneBytes / elapsedSec;
-            const etaSec = bytesPerSec > 0 ? remainingBytes / bytesPerSec : Infinity;
-            const avgSec = elapsedSec / realDone.length;
-            if (overallEta) overallEta.textContent = (['done','partial','failed','cancelled'].includes(r.status))
-              ? '✓ ' + r.status
-              : '~' + fmtDuration(etaSec);
-            if (overallAvg) overallAvg.textContent = avgSec >= 1 ? avgSec.toFixed(1) + 's' : (avgSec * 1000).toFixed(0) + 'ms';
-          } else if (overallEta) {
-            overallEta.textContent = 'computing…';
+          // Push current state to rolling window
+          pushBytesSnapshot(now, realDoneBytes);
+
+          // Get rolling speed (bytes/sec from last 5 secs)
+          const rollSpeed = rollingSpeed(now);
+          // Fallback to overall average if window not ready yet
+          const fallbackSpeed = (elapsedSec > 0 && realDoneBytes > 0) ? realDoneBytes / elapsedSec : null;
+          const speed = (rollSpeed !== null && rollSpeed > 0) ? rollSpeed : fallbackSpeed;
+
+          const isTerminal = ['done','partial','failed','cancelled'].includes(r.status);
+
+          if (overallEta) {
+            if (isTerminal) {
+              overallEta.textContent = '✓ ' + r.status;
+            } else if (speed !== null && speed > 0 && remainingBytes >= 0) {
+              const etaSec = remainingBytes / speed;
+              overallEta.textContent = '~' + fmtDuration(etaSec);
+            } else {
+              overallEta.textContent = 'computing…';
+            }
+          }
+
+          // "Avg" cell now shows current SPEED (rolling 5s) — more useful than s/file
+          if (overallAvg) {
+            if (speed !== null && speed > 0) {
+              overallAvg.textContent = fmtBytesPerSec(speed);
+            } else {
+              overallAvg.textContent = '—';
+            }
           }
         }
       }
