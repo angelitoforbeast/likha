@@ -784,6 +784,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get   ('/jnt_upload_v2/status/{runId}',        [JntUploadV2Controller::class, 'status'])        ->whereNumber('runId')->name('jnt.upload.v2.status');
     Route::get   ('/jnt_upload_v2/history',               [JntUploadV2Controller::class, 'history'])       ->name('jnt.upload.v2.history');
     Route::get   ('/jnt_upload_v2/history/{runId}',       [JntUploadV2Controller::class, 'historyDetail']) ->whereNumber('runId')->name('jnt.upload.v2.history.detail');
+    Route::get   ('/jnt_upload_v2/data',                  [JntUploadV2Controller::class, 'dataIndex'])     ->name('jnt.upload.v2.data');
+    Route::get   ('/jnt_upload_v2/data/query',            [JntUploadV2Controller::class, 'dataQuery'])     ->name('jnt.upload.v2.data.query');
     Route::get   ('/jnt_upload_v2/queue-status',          [JntUploadV2Controller::class, 'queueStatus'])   ->name('jnt.upload.v2.queue.status');
     Route::post  ('/jnt_upload_v2/cancel/{runId}',        [JntUploadV2Controller::class, 'cancelRun'])     ->whereNumber('runId')->name('jnt.upload.v2.cancel');
     Route::post  ('/jnt_upload_v2/clear-queue',           [JntUploadV2Controller::class, 'clearQueue'])    ->name('jnt.upload.v2.clear.queue');

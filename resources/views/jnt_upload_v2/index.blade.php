@@ -44,6 +44,7 @@
       <div class="v2-card-header">
         <div class="v2-title">📂 Step 1 — Select files</div>
         <div class="flex gap-2">
+          <a href="/jnt_upload_v2/data" class="v2-btn-ghost">📊 Browse Data</a>
           <a href="/jnt_upload_v2/history" class="v2-btn-ghost">📜 View History</a>
         </div>
       </div>
@@ -55,12 +56,10 @@
           <input id="fileInput" type="file" accept=".zip,.csv,.xlsx" multiple class="hidden" />
         </div>
 
-        <div id="selectedList" class="hidden">
-          <div class="text-xs font-semibold text-slate-600 mb-2">Selected files (<span id="selCount">0</span>):</div>
-          <div id="selectedRows" class="space-y-1 text-sm"></div>
-        </div>
-
-        <div class="flex flex-wrap gap-3 items-end">
+        {{-- Action row — sticky sa taas para laging visible kahit malaki yung file list --}}
+        <div id="actionRow"
+             class="flex flex-wrap gap-3 items-end p-3 bg-white border border-slate-200 rounded-lg"
+             style="position: sticky; top: 70px; z-index: 20; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">Optional Upload Date/Time</label>
             <input id="batchAt" type="datetime-local" class="border border-slate-300 rounded p-2 text-sm" />
@@ -70,6 +69,14 @@
             🔎 Validate Files
           </button>
           <button id="btnReset" type="button" class="v2-btn-ghost">Clear</button>
+          <div class="ml-auto text-xs text-slate-500" id="actionRowSummary"></div>
+        </div>
+
+        {{-- Selected list — scrollable so hindi siya pumapatay ng layout pag malaki --}}
+        <div id="selectedList" class="hidden">
+          <div class="text-xs font-semibold text-slate-600 mb-2">Selected files (<span id="selCount">0</span>):</div>
+          <div id="selectedRows" class="space-y-1 text-sm"
+               style="max-height: 360px; overflow-y: auto; padding-right: 4px;"></div>
         </div>
       </div>
     </div>
@@ -287,15 +294,25 @@
       return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
     }
 
+    const actionRowSummary = document.getElementById('actionRowSummary');
+
     function renderSelectedList() {
       if (selectedFiles.length === 0) {
         selectedList.classList.add('hidden');
         btnPrecheck.disabled = true;
+        if (actionRowSummary) actionRowSummary.textContent = '';
         return;
       }
       selectedList.classList.remove('hidden');
       btnPrecheck.disabled = false;
       selCount.textContent = selectedFiles.length;
+
+      // Total size summary on action row
+      if (actionRowSummary) {
+        const totalBytes = selectedFiles.reduce((s, f) => s + (f.size || 0), 0);
+        actionRowSummary.textContent = `${selectedFiles.length.toLocaleString()} files • ${fmtSize(totalBytes)} total`;
+      }
+
       selectedRows.innerHTML = selectedFiles.map((f, i) => `
         <div class="flex items-center justify-between bg-slate-50 px-3 py-1.5 rounded">
           <span class="truncate">📄 <strong>${f.name}</strong></span>

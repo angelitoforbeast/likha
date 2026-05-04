@@ -8,6 +8,7 @@ use App\Models\UploadLogV2;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -513,6 +514,135 @@ class JntUploadV2Controller extends Controller
             'run'       => $run,
             'files'     => $files,
             'canCancel' => $canCancel,
+        ]);
+    }
+
+    /**
+     * GET /jnt_upload_v2/data — page shell + distinct values for filter dropdowns.
+     */
+    public function dataIndex(Request $request)
+    {
+        $this->checkAccess();
+
+        $distinct = Cache::remember('from_jnts_2.distinct.v1', 600, function () {
+            $distinctOf = function (string $col) {
+                return DB::table('from_jnts_2')
+                    ->whereNotNull($col)->where($col, '!=', '')
+                    ->distinct()->orderBy($col)
+                    ->pluck($col)
+                    ->filter()
+                    ->values()
+                    ->all();
+            };
+            return [
+                'statuses'  => $distinctOf('status'),
+                'items'     => $distinctOf('item_name'),
+                'senders'   => $distinctOf('sender'),
+                'provinces' => $distinctOf('province'),
+                'cities'    => $distinctOf('city'),
+                'barangays' => $distinctOf('barangay'),
+            ];
+        });
+
+        return view('jnt_upload_v2.data', [
+            'distinct' => $distinct,
+        ]);
+    }
+
+    /**
+     * GET /jnt_upload_v2/data/query — filtered/sorted/paginated rows as JSON.
+     */
+    public function dataQuery(Request $request)
+    {
+        $this->checkAccess();
+
+        $q = DB::table('from_jnts_2');
+
+        // Global search across waybill + receiver + phone + item_name
+        $search = trim((string) $request->input('search', ''));
+        if ($search !== '') {
+            $like = '%' . mb_strtolower($search) . '%';
+            $q->where(function ($sub) use ($like) {
+                $sub->whereRaw('LOWER(waybill_number) LIKE ?',     [$like])
+                    ->orWhereRaw('LOWER(receiver) LIKE ?',         [$like])
+                    ->orWhereRaw('LOWER(receiver_cellphone) LIKE ?', [$like])
+                    ->orWhereRaw('LOWER(item_name) LIKE ?',        [$like]);
+            });
+        }
+
+        // Per-column text filters (LIKE %x%)
+        $textCols = ['waybill_number', 'receiver', 'receiver_cellphone', 'cod', 'rts_reason'];
+        foreach ($textCols as $col) {
+            $val = trim((string) $request->input("filter_{$col}", ''));
+            if ($val !== '') {
+                $q->whereRaw("LOWER({$col}) LIKE ?", ['%' . mb_strtolower($val) . '%']);
+            }
+        }
+
+        // Per-column multi-select filters (IN list)
+        $multiCols = ['status', 'item_name', 'sender', 'province', 'city', 'barangay'];
+        foreach ($multiCols as $col) {
+            $vals = (array) $request->input("filter_{$col}", []);
+            $vals = array_values(array_filter(array_map('trim', $vals), fn($s) => $s !== ''));
+            if (!empty($vals)) $q->whereIn($col, $vals);
+        }
+
+        // Date range filters
+        foreach (['signingtime', 'submission_time'] as $col) {
+            $from = trim((string) $request->input("filter_{$col}_from", ''));
+            $to   = trim((string) $request->input("filter_{$col}_to",   ''));
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+                $q->where($col, '>=', $from . ' 00:00:00');
+            }
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+                $q->where($col, '<=', $to . ' 23:59:59');
+            }
+        }
+
+        // Sort — whitelist columns
+        $sortableCols = [
+            'id', 'waybill_number', 'status', 'item_name', 'sender', 'receiver',
+            'receiver_cellphone', 'cod', 'submission_time', 'signingtime',
+            'province', 'city', 'barangay', 'total_shipping_cost', 'rts_reason',
+            'created_at', 'updated_at',
+        ];
+        $sortCol = (string) $request->input('sort', 'id');
+        if (!in_array($sortCol, $sortableCols, true)) $sortCol = 'id';
+        $sortDir = $request->input('dir', 'desc') === 'asc' ? 'asc' : 'desc';
+        $q->orderBy($sortCol, $sortDir);
+
+        // Pagination
+        $page    = max(1, (int) $request->input('page', 1));
+        $perPage = (int) $request->input('per_page', 100);
+        if (!in_array($perPage, [50, 100, 250, 500], true)) $perPage = 100;
+
+        $total = (int) $q->count();
+        $rows  = $q->offset(($page - 1) * $perPage)
+            ->limit($perPage)
+            ->get([
+                'id', 'waybill_number', 'status', 'item_name', 'sender',
+                'receiver', 'receiver_cellphone', 'cod',
+                'submission_time', 'signingtime', 'remarks',
+                'province', 'city', 'barangay',
+                'total_shipping_cost', 'rts_reason',
+                'status_logs', 'last_uploaded_by_user_id', 'last_upload_log_id',
+                'created_at', 'updated_at',
+            ]);
+
+        // Decode status_logs JSON for each row so frontend doesn't need to parse strings
+        $rows = $rows->map(function ($r) {
+            $r->status_logs = is_string($r->status_logs)
+                ? json_decode($r->status_logs, true)
+                : $r->status_logs;
+            return $r;
+        });
+
+        return response()->json([
+            'rows'        => $rows,
+            'total'       => $total,
+            'page'        => $page,
+            'per_page'    => $perPage,
+            'total_pages' => max(1, (int) ceil($total / $perPage)),
         ]);
     }
 
