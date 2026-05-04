@@ -107,15 +107,15 @@
         <span class="text-[10px] text-slate-400">app_settings · owner_private_cols</span>
       </div>
       <p class="note">
-        Per-role column visibility. <b>CEO</b> sees everything (locked ✓). <b>Marketing - OIC</b> at <b>Marketing</b>
-        only see columns explicitly checked. Drag rows to reorder (global — applies to all roles).
+        Per-role column visibility. Toggle the CEO / MOIC / Marketing checkboxes to show or hide each column for that role.
+        Only CEO can edit. Drag rows to reorder (global — applies to all roles).
       </p>
 
       <div class="col-list">
         <div class="role-header">
           <span style="width:18px;"></span>
           <span class="spacer">Column</span>
-          <span class="role-col" title="CEO sees all (always)">CEO</span>
+          <span class="role-col" title="CEO visibility — toggleable">CEO</span>
           @foreach ($nonCeoRoles as $r)
             <span class="role-col" title="{{ $r }}">{{ $r === 'Marketing - OIC' ? 'MOIC' : $r }}</span>
           @endforeach
@@ -130,7 +130,11 @@
                @drop.prevent="drop(idx)">
             <span class="col-handle">⋮⋮</span>
             <span class="col-label" x-text="labelFor(id)"></span>
-            <span class="role-cell ceo" title="CEO always sees all"><span class="ceo-locked">✓</span></span>
+            <span class="role-cell ceo" title="CEO visibility (toggleable)">
+              <input type="checkbox" :checked="isVisibleForCEO(id)"
+                     @change="toggleCEOVisible(id, $event.target.checked)"
+                     class="h-4 w-4">
+            </span>
             <template x-for="role in roles" :key="role">
               <span class="role-cell">
                 <input type="checkbox" :checked="isVisibleForRole(id, role)"
@@ -148,6 +152,8 @@
           <span x-show="saving">Saving…</span>
         </button>
         <button class="reset-btn" @click="resetDefaults()">Reset to defaults</button>
+        <span class="text-xs text-slate-500"
+              x-text="'CEO: ' + visibleCountForCEO() + ' / ' + order.length"></span>
         <template x-for="role in roles" :key="role">
           <span class="text-xs text-slate-500"
                 x-text="role + ': ' + visibleCountForRole(role) + ' / ' + order.length"></span>
@@ -170,7 +176,7 @@
         <div class="role-header">
           <span style="width:18px;"></span>
           <span class="spacer">Column</span>
-          <span class="role-col" title="CEO sees all (always)">CEO</span>
+          <span class="role-col" title="CEO visibility — toggleable">CEO</span>
           @foreach ($nonCeoRoles as $r)
             <span class="role-col" title="{{ $r }}">{{ $r === 'Marketing - OIC' ? 'MOIC' : $r }}</span>
           @endforeach
@@ -185,7 +191,11 @@
                @drop.prevent="drop(idx)">
             <span class="col-handle">⋮⋮</span>
             <span class="col-label" x-text="labelFor(id)"></span>
-            <span class="role-cell ceo" title="CEO always sees all"><span class="ceo-locked">✓</span></span>
+            <span class="role-cell ceo" title="CEO visibility (toggleable)">
+              <input type="checkbox" :checked="isVisibleForCEO(id)"
+                     @change="toggleCEOVisible(id, $event.target.checked)"
+                     class="h-4 w-4">
+            </span>
             <template x-for="role in roles" :key="role">
               <span class="role-cell">
                 <input type="checkbox" :checked="isVisibleForRole(id, role)"
@@ -203,6 +213,8 @@
           <span x-show="saving">Saving…</span>
         </button>
         <button class="reset-btn" @click="resetDefaults()">Reset to defaults</button>
+        <span class="text-xs text-slate-500"
+              x-text="'CEO: ' + visibleCountForCEO() + ' / ' + order.length"></span>
         <template x-for="role in roles" :key="role">
           <span class="text-xs text-slate-500"
                 x-text="role + ': ' + visibleCountForRole(role) + ' / ' + order.length"></span>
@@ -411,6 +423,17 @@
         dragOverIdx: -1,
 
         labelFor(id) { return idToLabel[id] || id; },
+        // CEO visibility = NOT in `hidden` set. Toggleable.
+        isVisibleForCEO(id) { return !this.hidden.has(id); },
+        toggleCEOVisible(id, visible) {
+          if (visible) this.hidden.delete(id);
+          else this.hidden.add(id);
+          // Force reactivity by reassigning.
+          this.hidden = new Set([...this.hidden]);
+        },
+        visibleCountForCEO() {
+          return this.order.filter((id) => !this.hidden.has(id)).length;
+        },
         isVisibleForRole(id, role) {
           return this.visibleByRole[role]?.has(id) === true;
         },
