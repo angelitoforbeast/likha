@@ -77,10 +77,6 @@
                     <i class="fa-solid fa-receipt"></i>
                   </x-navlink>
 
-                  <x-navlink href="/jnt_upload_v2" :active="request()->is('jnt_upload_v2*')" label="Waybill V2">
-                    <i class="fa-solid fa-layer-group"></i>
-                  </x-navlink>
-
                   <x-navlink href="/ads_manager/cpp" :active="request()->is('ads_manager/cpp*')" label="CPP">
                     <i class="fa-solid fa-chart-line"></i>
                   </x-navlink>
@@ -151,6 +147,13 @@
                   </x-navlink>
                   <x-navlink href="/finance" :active="request()->is('finance*')" label="Finance">
                     <i class="fa-solid fa-wallet"></i>
+                  </x-navlink>
+                @endif
+
+                {{-- /jnt_upload_v2 — MOIC + CEO only --}}
+                @if(in_array($role, ['Marketing - OIC', 'CEO']))
+                  <x-navlink href="/jnt_upload_v2" :active="request()->is('jnt_upload_v2*')" label="Waybill V2">
+                    <i class="fa-solid fa-layer-group"></i>
                   </x-navlink>
                 @endif
 

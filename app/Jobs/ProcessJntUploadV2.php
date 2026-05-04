@@ -54,6 +54,16 @@ class ProcessJntUploadV2 implements ShouldQueue
 
         $run = $log->bulk_run_id ? BulkUploadRun::find($log->bulk_run_id) : null;
 
+        // Safety check: skip if log o run was cancelled habang naka-queue.
+        // Mabilis lang itong "no-op" pickup — para hindi sayang yung worker
+        // time sa cancelled rows (kasi di natin tinatanggal sa jobs table).
+        if ($log->status === 'cancelled' || ($run && $run->status === 'cancelled')) {
+            $log->status      = 'cancelled';
+            $log->finished_at = Carbon::now('Asia/Manila');
+            $log->save();
+            return;
+        }
+
         $batchCarbon = null;
         if ($run && !empty($run->batch_at)) {
             try {

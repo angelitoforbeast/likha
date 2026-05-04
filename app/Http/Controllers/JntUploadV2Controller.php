@@ -41,15 +41,157 @@ class JntUploadV2Controller extends Controller
         'rts_reason'     => ['rts reason', 'rts_reason', 'return reason', 'reason for rts'],
     ];
 
+    /** Allow only Marketing - OIC and CEO. */
+    private function checkAccess(): void
+    {
+        $raw  = Auth::user()?->employeeProfile?->role ?? '';
+        $norm = preg_replace('/\s+/u', ' ', trim((string) $raw));
+        $isCEO  = preg_match('/^ceo$/iu', $norm) === 1;
+        $isMOIC = preg_match('/^marketing\s*[-–—]\s*oic$/iu', $norm) === 1;
+        if (!($isCEO || $isMOIC)) abort(404);
+    }
+
+    /** CEO-only — for nuclear-option global queue clear. */
+    private function checkCEO(): void
+    {
+        $raw  = Auth::user()?->employeeProfile?->role ?? '';
+        $norm = preg_replace('/\s+/u', ' ', trim((string) $raw));
+        if (preg_match('/^ceo$/iu', $norm) !== 1) abort(404);
+    }
+
     public function index()
     {
+        $this->checkAccess();
+
         $recentRuns = BulkUploadRun::where('type', 'jnt_v2')
             ->orderByDesc('id')
             ->limit(5)
             ->get();
 
+        // Active run (processing or queued) — used to render the cancel banner
+        $activeRun = BulkUploadRun::where('type', 'jnt_v2')
+            ->whereIn('status', ['processing', 'queued', 'precheck'])
+            ->orderByDesc('id')
+            ->first();
+
+        // System-wide queue depth — covers ALL features that use the Laravel queue
+        $queuePending = (int) DB::table('jobs')->count();
+        $queueFailed  = (int) DB::table('failed_jobs')->count();
+
         return view('jnt_upload_v2.index', [
-            'recentRuns' => $recentRuns,
+            'recentRuns'   => $recentRuns,
+            'activeRun'    => $activeRun,
+            'queuePending' => $queuePending,
+            'queueFailed'  => $queueFailed,
+            'isCEO'        => $this->isCurrentUserCEO(),
+        ]);
+    }
+
+    private function isCurrentUserCEO(): bool
+    {
+        $raw  = Auth::user()?->employeeProfile?->role ?? '';
+        $norm = preg_replace('/\s+/u', ' ', trim((string) $raw));
+        return preg_match('/^ceo$/iu', $norm) === 1;
+    }
+
+    /**
+     * GET /jnt_upload_v2/queue-status — live system-wide queue depth.
+     */
+    public function queueStatus(Request $request)
+    {
+        $this->checkAccess();
+
+        return response()->json([
+            'pending'    => (int) DB::table('jobs')->count(),
+            'failed'     => (int) DB::table('failed_jobs')->count(),
+            'active_run' => BulkUploadRun::where('type', 'jnt_v2')
+                ->whereIn('status', ['processing', 'queued', 'precheck'])
+                ->orderByDesc('id')
+                ->first(['id', 'status', 'total_files', 'files_done', 'files_failed', 'files_skipped']),
+        ]);
+    }
+
+    /**
+     * POST /jnt_upload_v2/cancel/{runId} — mark a run + its files as cancelled.
+     * Workers will skip cancelled rows on pickup; we don't touch the jobs table
+     * to avoid breaking other features that share it.
+     */
+    public function cancelRun(Request $request, int $runId)
+    {
+        $this->checkAccess();
+
+        $run = BulkUploadRun::findOrFail($runId);
+
+        if (in_array($run->status, ['done', 'partial', 'failed', 'cancelled'], true)) {
+            return response()->json([
+                'ok'      => false,
+                'message' => 'Run is already in terminal state: ' . $run->status,
+            ], 422);
+        }
+
+        // Mark remaining file logs as cancelled (queued/processing → cancelled).
+        // Note: 'processing' files yung in-flight workers are running RIGHT NOW.
+        // Yung in-flight job magtatapos pa rin ng kasalukuyang file
+        // (interruption mid-stream may corrupt status_logs). Pero next file
+        // pickup magse-skip na siya dahil may safety check sa job's handle().
+        $cancelledFiles = UploadLogV2::where('bulk_run_id', $run->id)
+            ->whereIn('status', ['queued', 'processing'])
+            ->update(['status' => 'cancelled']);
+
+        $run->status      = 'cancelled';
+        $run->finished_at = Carbon::now('Asia/Manila');
+        $run->message     = trim(($run->message ?: '') . ' [Cancelled by user ' . (Auth::user()?->name ?? 'unknown') . ' at ' . now()->toDateTimeString() . ']');
+        $run->save();
+
+        return response()->json([
+            'ok'              => true,
+            'cancelled_files' => $cancelledFiles,
+            'run_id'          => $run->id,
+        ]);
+    }
+
+    /**
+     * POST /jnt_upload_v2/clear-queue — NUCLEAR: truncate the jobs + failed_jobs
+     * tables system-wide. Affects ALL features that use the Laravel queue.
+     * CEO only.
+     */
+    public function clearQueue(Request $request)
+    {
+        $this->checkCEO();
+
+        $request->validate([
+            'confirm' => 'required|in:YES_CLEAR_ALL',
+        ]);
+
+        $pendingBefore = DB::table('jobs')->count();
+        $failedBefore  = DB::table('failed_jobs')->count();
+
+        DB::table('jobs')->truncate();
+        DB::table('failed_jobs')->truncate();
+
+        // Mark all in-flight runs (any feature) as cancelled if they're a v2 run.
+        $runsAffected = BulkUploadRun::where('type', 'jnt_v2')
+            ->whereIn('status', ['processing', 'queued', 'precheck'])
+            ->update([
+                'status'      => 'cancelled',
+                'finished_at' => Carbon::now('Asia/Manila'),
+                'message'     => 'Cancelled — global queue clear by user ' . (Auth::user()?->name ?? 'unknown'),
+            ]);
+
+        UploadLogV2::whereIn('status', ['queued', 'processing'])
+            ->update(['status' => 'cancelled']);
+
+        Log::warning('JntUploadV2: nuclear queue clear by ' . (Auth::user()?->email ?? 'unknown'), [
+            'pending_before' => $pendingBefore,
+            'failed_before'  => $failedBefore,
+            'runs_affected'  => $runsAffected,
+        ]);
+
+        return response()->json([
+            'ok'              => true,
+            'pending_cleared' => $pendingBefore,
+            'failed_cleared'  => $failedBefore,
+            'runs_cancelled'  => $runsAffected,
         ]);
     }
 
@@ -59,6 +201,8 @@ class JntUploadV2Controller extends Controller
      */
     public function precheck(Request $request)
     {
+        $this->checkAccess();
+
         try {
             $request->validate([
                 'files'    => 'required|array|min:1',
@@ -156,6 +300,8 @@ class JntUploadV2Controller extends Controller
      */
     public function start(Request $request)
     {
+        $this->checkAccess();
+
         try {
             $request->validate([
                 'run_id'   => 'required|integer|exists:bulk_upload_runs,id',
@@ -231,6 +377,7 @@ class JntUploadV2Controller extends Controller
      */
     public function status(Request $request, int $runId)
     {
+        $this->checkAccess();
         $run = BulkUploadRun::findOrFail($runId);
 
         $files = UploadLogV2::where('bulk_run_id', $run->id)
@@ -304,6 +451,8 @@ class JntUploadV2Controller extends Controller
 
     public function history(Request $request)
     {
+        $this->checkAccess();
+
         $userFilter   = trim((string) $request->query('user', ''));
         $statusFilter = trim((string) $request->query('status', ''));
         $fromDate     = trim((string) $request->query('from_date', ''));
@@ -345,12 +494,17 @@ class JntUploadV2Controller extends Controller
 
     public function historyDetail(Request $request, int $runId)
     {
+        $this->checkAccess();
+
         $run = BulkUploadRun::with('user')->findOrFail($runId);
         $files = UploadLogV2::where('bulk_run_id', $run->id)->orderBy('id')->get();
 
+        $canCancel = !in_array($run->status, ['done', 'partial', 'failed', 'cancelled'], true);
+
         return view('jnt_upload_v2.history_detail', [
-            'run'   => $run,
-            'files' => $files,
+            'run'       => $run,
+            'files'     => $files,
+            'canCancel' => $canCancel,
         ]);
     }
 
