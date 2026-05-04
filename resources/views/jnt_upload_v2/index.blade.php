@@ -759,8 +759,9 @@
       sSkipped.textContent = r.total_skipped.toLocaleString();
       sErrors.textContent = r.total_errors.toLocaleString();
 
-      const totalFiles = data.files.length;
-      const finishedFiles = data.files.filter(f => ['done','failed','skipped'].includes(f.status)).length;
+      const totalFiles    = data.files.length;
+      const terminalFiles = data.files.filter(f => ['done','failed','skipped','cancelled'].includes(f.status));
+      const finishedFiles = terminalFiles.length;
       const inflightFiles = data.files.filter(f => f.status === 'processing').length;
       const pct = totalFiles > 0 ? Math.round(finishedFiles / totalFiles * 100) : 0;
       overallPct.textContent = pct + '%';
@@ -777,19 +778,30 @@
       if (overallTotal)    overallTotal.textContent    = totalFiles.toLocaleString();
       if (overallWorkers)  overallWorkers.textContent  = inflightFiles > 0 ? `~${inflightFiles}` : '—';
 
-      // Compute ETA from started_at + finishedFiles
+      // ===== Weighted ETA (Option B) =====
+      // Weight by file size (bytes) instead of treating files as equal.
+      // Filter out cancelled files from rate computation — those are no-op
+      // skips at ~50ms each, would skew average dramatically downward.
       if (r.started_at) {
         const startedMs = Date.parse(r.started_at.replace(' ', 'T') + (r.started_at.endsWith('Z') ? '' : '+08:00'));
         if (!isNaN(startedMs)) {
           const elapsedSec = (Date.now() - startedMs) / 1000;
           if (overallElapsed) overallElapsed.textContent = fmtDuration(elapsedSec);
-          if (finishedFiles >= 3 && elapsedSec > 0) {
-            const rate = finishedFiles / elapsedSec; // files per second
-            const remaining = totalFiles - finishedFiles;
-            const etaSec = rate > 0 ? remaining / rate : Infinity;
-            const avgSec = elapsedSec / finishedFiles;
-            if (overallEta) overallEta.textContent = (['done','partial','failed'].includes(r.status))
-              ? '✓ done'
+
+          // Bytes-based: use file sizes as weights
+          const realDone = terminalFiles.filter(f => f.status !== 'cancelled');
+          const realDoneBytes = realDone.reduce((sum, f) => sum + (f.size || 0), 0);
+
+          // Total bytes that NEED real processing (exclude already-cancelled files)
+          const remainingFiles = data.files.filter(f => !['done','failed','skipped','cancelled'].includes(f.status));
+          const remainingBytes = remainingFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+
+          if (realDone.length >= 3 && realDoneBytes > 0 && elapsedSec > 0) {
+            const bytesPerSec = realDoneBytes / elapsedSec;
+            const etaSec = bytesPerSec > 0 ? remainingBytes / bytesPerSec : Infinity;
+            const avgSec = elapsedSec / realDone.length;
+            if (overallEta) overallEta.textContent = (['done','partial','failed','cancelled'].includes(r.status))
+              ? '✓ ' + r.status
               : '~' + fmtDuration(etaSec);
             if (overallAvg) overallAvg.textContent = avgSec >= 1 ? avgSec.toFixed(1) + 's' : (avgSec * 1000).toFixed(0) + 'ms';
           } else if (overallEta) {

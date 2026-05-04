@@ -389,7 +389,7 @@ class JntUploadV2Controller extends Controller
 
         $files = UploadLogV2::where('bulk_run_id', $run->id)
             ->orderBy('id')
-            ->get(['id', 'original_name', 'status', 'total_rows', 'processed_rows',
+            ->get(['id', 'original_name', 'status', 'size', 'total_rows', 'processed_rows',
                    'inserted', 'updated', 'skipped', 'error_rows', 'errors_path',
                    'started_at', 'finished_at', 'error_message']);
 
@@ -441,6 +441,7 @@ class JntUploadV2Controller extends Controller
                     'id'             => $f->id,
                     'original_name'  => $f->original_name,
                     'status'         => $f->status,
+                    'size'           => (int) ($f->size ?? 0),
                     'total_rows'     => $f->total_rows,
                     'processed_rows' => $f->processed_rows,
                     'inserted'       => $f->inserted,
