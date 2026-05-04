@@ -7,7 +7,7 @@
     .col-section h3 { font-size:14px; font-weight:700; color:#0f172a; margin-bottom:6px; }
     .col-section p.note { font-size:11px; color:#64748b; margin-bottom:12px; }
     .col-list { border:1px solid #e2e8f0; border-radius:6px; max-height:420px; overflow-y:auto; background:#f8fafc; }
-    .col-item { display:flex; align-items:center; gap:10px; padding:8px 12px; background:white; border-bottom:1px solid #e2e8f0; cursor:grab; user-select:none; }
+    .col-item { display:flex; align-items:center; gap:8px; padding:8px 12px; background:white; border-bottom:1px solid #e2e8f0; cursor:grab; user-select:none; }
     .col-item:last-child { border-bottom:none; }
     .col-item:hover { background:#f1f5f9; }
     .col-item.dragging { opacity:0.4; }
@@ -16,6 +16,15 @@
     .col-handle:active { cursor:grabbing; }
     .col-label { flex:1; font-size:13px; color:#1e293b; font-weight:500; }
     .col-id { font-family:ui-monospace,monospace; font-size:10px; color:#94a3b8; }
+
+    /* Per-role visibility matrix header + cells */
+    .role-header { display:flex; gap:8px; padding:8px 12px; background:#eef2ff; border-bottom:1px solid #c7d2fe; font-size:10px; font-weight:700; color:#3730a3; text-transform:uppercase; letter-spacing:0.04em; align-items:center; position:sticky; top:0; z-index:1; }
+    .role-header .spacer { flex:1; }
+    .role-header .role-col { width:78px; text-align:center; }
+    .role-cell { width:78px; text-align:center; flex-shrink:0; }
+    .role-cell input[type="checkbox"] { transform:scale(1.1); cursor:pointer; }
+    .role-cell.ceo input[type="checkbox"] { accent-color:#16a34a; }
+    .role-cell .ceo-locked { color:#16a34a; font-size:14px; font-weight:700; }
     .save-btn { background:#2563eb; color:white; padding:8px 18px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; border:none; }
     .save-btn:hover { background:#1d4ed8; }
     .save-btn:disabled { background:#94a3b8; cursor:not-allowed; }
@@ -92,17 +101,25 @@
     ])
 
     {{-- ─── Section 1: /owner/private ──────────────────────────────────────── --}}
-    <div class="col-section" x-data="sectionState('owner_private', @js($savedOwnerPrivate))">
+    <div class="col-section" x-data="sectionState('owner_private', @js($matrixOwnerPrivate), @js($nonCeoRoles))">
       <div class="flex items-baseline justify-between mb-1">
         <h3>📊 /owner/private — Page Summary Table</h3>
         <span class="text-[10px] text-slate-400">app_settings · owner_private_cols</span>
       </div>
       <p class="note">
-        Mga columns na lumalabas sa <code>/owner/private</code> per-page summary row. Page + Item + Actions
-        columns ay laging visible (hindi nila kasama dito).
+        Per-role column visibility. <b>CEO</b> sees everything (locked ✓). <b>Marketing - OIC</b> at <b>Marketing</b>
+        only see columns explicitly checked. Drag rows to reorder (global — applies to all roles).
       </p>
 
       <div class="col-list">
+        <div class="role-header">
+          <span style="width:18px;"></span>
+          <span class="spacer">Column</span>
+          <span class="role-col" title="CEO sees all (always)">CEO</span>
+          @foreach ($nonCeoRoles as $r)
+            <span class="role-col" title="{{ $r }}">{{ $r === 'Marketing - OIC' ? 'MOIC' : $r }}</span>
+          @endforeach
+        </div>
         <template x-for="(id, idx) in order" :key="id">
           <div class="col-item"
                draggable="true"
@@ -112,39 +129,52 @@
                @dragleave="dragLeave($event)"
                @drop.prevent="drop(idx)">
             <span class="col-handle">⋮⋮</span>
-            <input type="checkbox" :checked="!isHidden(id)"
-                   @change="toggleVisible(id, $event.target.checked)"
-                   class="h-4 w-4 cursor-pointer">
             <span class="col-label" x-text="labelFor(id)"></span>
-            <span class="col-id" x-text="id"></span>
+            <span class="role-cell ceo" title="CEO always sees all"><span class="ceo-locked">✓</span></span>
+            <template x-for="role in roles" :key="role">
+              <span class="role-cell">
+                <input type="checkbox" :checked="isVisibleForRole(id, role)"
+                       @change="toggleRoleVisible(id, role, $event.target.checked)"
+                       class="h-4 w-4">
+              </span>
+            </template>
           </div>
         </template>
       </div>
 
-      <div class="flex gap-2 mt-3 items-center">
+      <div class="flex gap-2 mt-3 items-center flex-wrap">
         <button class="save-btn" :disabled="saving" @click="save()">
           <span x-show="!saving">💾 Save</span>
           <span x-show="saving">Saving…</span>
         </button>
         <button class="reset-btn" @click="resetDefaults()">Reset to defaults</button>
-        <span class="text-xs text-slate-500 ml-2"
-              x-text="'Visible: ' + visibleCount() + ' / ' + order.length"></span>
+        <template x-for="role in roles" :key="role">
+          <span class="text-xs text-slate-500"
+                x-text="role + ': ' + visibleCountForRole(role) + ' / ' + order.length"></span>
+        </template>
       </div>
     </div>
 
     {{-- ─── Section 2: /ads_manager/campaigns + expand panel ──────────────── --}}
-    <div class="col-section" x-data="sectionState('campaigns', @js($savedCampaigns))">
+    <div class="col-section" x-data="sectionState('campaigns', @js($matrixCampaigns), @js($nonCeoRoles))">
       <div class="flex items-baseline justify-between mb-1">
         <h3>📈 Campaigns / Ad Sets / Ads Table</h3>
         <span class="text-[10px] text-slate-400">app_settings · campaigns_cols</span>
       </div>
       <p class="note">
-        Same columns ginagamit sa <code>/ads_manager/campaigns</code> at sa inline expand panel
-        sa <code>/owner/private</code>. Bawat tab (Campaigns / Adsets / Ads) gumagamit ng same column set.
-        Pag pinipili mo less columns dito, mas kasya sa viewport — walang horizontal scroll.
+        Same per-role rules. Affects sa <code>/ads_manager/campaigns</code> at sa inline expand panel
+        sa <code>/owner/private</code>.
       </p>
 
       <div class="col-list">
+        <div class="role-header">
+          <span style="width:18px;"></span>
+          <span class="spacer">Column</span>
+          <span class="role-col" title="CEO sees all (always)">CEO</span>
+          @foreach ($nonCeoRoles as $r)
+            <span class="role-col" title="{{ $r }}">{{ $r === 'Marketing - OIC' ? 'MOIC' : $r }}</span>
+          @endforeach
+        </div>
         <template x-for="(id, idx) in order" :key="id">
           <div class="col-item"
                draggable="true"
@@ -154,23 +184,29 @@
                @dragleave="dragLeave($event)"
                @drop.prevent="drop(idx)">
             <span class="col-handle">⋮⋮</span>
-            <input type="checkbox" :checked="!isHidden(id)"
-                   @change="toggleVisible(id, $event.target.checked)"
-                   class="h-4 w-4 cursor-pointer">
             <span class="col-label" x-text="labelFor(id)"></span>
-            <span class="col-id" x-text="id"></span>
+            <span class="role-cell ceo" title="CEO always sees all"><span class="ceo-locked">✓</span></span>
+            <template x-for="role in roles" :key="role">
+              <span class="role-cell">
+                <input type="checkbox" :checked="isVisibleForRole(id, role)"
+                       @change="toggleRoleVisible(id, role, $event.target.checked)"
+                       class="h-4 w-4">
+              </span>
+            </template>
           </div>
         </template>
       </div>
 
-      <div class="flex gap-2 mt-3 items-center">
+      <div class="flex gap-2 mt-3 items-center flex-wrap">
         <button class="save-btn" :disabled="saving" @click="save()">
           <span x-show="!saving">💾 Save</span>
           <span x-show="saving">Saving…</span>
         </button>
         <button class="reset-btn" @click="resetDefaults()">Reset to defaults</button>
-        <span class="text-xs text-slate-500 ml-2"
-              x-text="'Visible: ' + visibleCount() + ' / ' + order.length"></span>
+        <template x-for="role in roles" :key="role">
+          <span class="text-xs text-slate-500"
+                x-text="role + ': ' + visibleCountForRole(role) + ' / ' + order.length"></span>
+        </template>
       </div>
     </div>
   </div>
@@ -353,29 +389,40 @@
       };
     }
 
-    function sectionState(table, saved) {
+    function sectionState(table, matrix, roles) {
       const catalog = COL_CATALOG[table] || [];
       const idToLabel = Object.fromEntries(catalog.map(c => [c.id, c.label]));
-      // Build initial state from saved config (already resolved server-side
-      // so it includes new catalog ids appended at the end).
+      // matrix shape: { order, hidden (CEO's), visible_by_role: {role: [ids]} }
+      // Build initial state — order already resolved server-side incl. new ids.
+      const initVisibleByRole = {};
+      (roles || []).forEach((r) => {
+        const list = matrix?.visible_by_role?.[r] ?? [];
+        initVisibleByRole[r] = new Set(Array.isArray(list) ? list : []);
+      });
+
       return {
         table,
-        order:  Array.isArray(saved.order)  && saved.order.length  ? [...saved.order]  : catalog.map(c => c.id),
-        hidden: new Set(Array.isArray(saved.hidden) ? saved.hidden : []),
+        roles: [...(roles || [])],
+        order:  Array.isArray(matrix?.order)  && matrix.order.length  ? [...matrix.order]  : catalog.map(c => c.id),
+        hidden: new Set(Array.isArray(matrix?.hidden) ? matrix.hidden : []),  // CEO's hidden list
+        visibleByRole: initVisibleByRole,
         saving: false,
         dragIdx: -1,
         dragOverIdx: -1,
 
         labelFor(id) { return idToLabel[id] || id; },
-        isHidden(id) { return this.hidden.has(id); },
-        toggleVisible(id, visible) {
-          if (visible) this.hidden.delete(id);
-          else this.hidden.add(id);
-          // Force reactivity by reassigning the Set.
-          this.hidden = new Set([...this.hidden]);
+        isVisibleForRole(id, role) {
+          return this.visibleByRole[role]?.has(id) === true;
         },
-        visibleCount() {
-          return this.order.filter(id => !this.hidden.has(id)).length;
+        toggleRoleVisible(id, role, visible) {
+          const set = this.visibleByRole[role] || new Set();
+          if (visible) set.add(id); else set.delete(id);
+          // Force reactivity by reassigning.
+          this.visibleByRole = { ...this.visibleByRole, [role]: new Set([...set]) };
+        },
+        visibleCountForRole(role) {
+          const set = this.visibleByRole[role] || new Set();
+          return this.order.filter((id) => set.has(id)).length;
         },
         dragStart(idx, ev) {
           this.dragIdx = idx;
@@ -411,6 +458,10 @@
           this.order  = catalog.map(c => c.id);
           const visible = new Set(COL_DEFAULT_VIS[table] || []);
           this.hidden = new Set(this.order.filter(id => !visible.has(id)));
+          // Per-role: clear all (admin must opt-in).
+          const cleared = {};
+          this.roles.forEach((r) => { cleared[r] = new Set(); });
+          this.visibleByRole = cleared;
         },
         async save() {
           this.saving = true;
@@ -420,6 +471,11 @@
             fd.append('table', this.table);
             this.order.forEach(id => fd.append('order[]', id));
             [...this.hidden].forEach(id => fd.append('hidden[]', id));
+            // Per-role visible lists.
+            this.roles.forEach((role) => {
+              const set = this.visibleByRole[role] || new Set();
+              [...set].forEach((id) => fd.append(`visible_by_role[${role}][]`, id));
+            });
             const r = await fetch(COL_SAVE_URL, { method: 'POST', body: fd });
             const j = await r.json();
             if (!j.ok) throw new Error(j.error || 'Save failed');

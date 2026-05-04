@@ -31,6 +31,13 @@ class OwnerColumnSettingsController extends Controller
 {
     private const KEY_OWNER_PRIVATE = 'owner_private_cols';
     private const KEY_CAMPAIGNS     = 'campaigns_cols';
+
+    /**
+     * Roles (other than CEO) that may view /owner/private. Each gets its own
+     * positive-list of visible columns sa `visible_by_role`.
+     * CEO is implicit — sees everything regardless of `visible_by_role`.
+     */
+    public const NON_CEO_ROLES = ['Marketing - OIC', 'Marketing'];
     // Breakeven CPP target % (single integer/decimal stored as string).
     // Default = 5 (i.e. 5% Proj.% target). Used by /owner/private to label
     // and compute the "Breakeven CPP (N%)" column.
@@ -147,11 +154,12 @@ class OwnerColumnSettingsController extends Controller
         $cfOwner     = $this->loadColFormat('owner_private');
         $cfCampaigns = $this->loadColFormat('campaigns');
         return view('owner.column_settings', [
-            'catalog'          => self::CATALOG,
-            'defaultVisible'   => self::DEFAULT_VISIBLE,
-            'savedOwnerPrivate'=> $this->loadConfig('owner_private'),
-            'savedCampaigns'   => $this->loadConfig('campaigns'),
-            'breakevenTargetPct' => $this->loadBreakevenTargetPct(),
+            'catalog'                   => self::CATALOG,
+            'defaultVisible'            => self::DEFAULT_VISIBLE,
+            'nonCeoRoles'               => self::NON_CEO_ROLES,
+            'matrixOwnerPrivate'        => $this->loadConfigMatrix('owner_private'),
+            'matrixCampaigns'           => $this->loadConfigMatrix('campaigns'),
+            'breakevenTargetPct'        => $this->loadBreakevenTargetPct(),
             // Editor uses the groups shape (shared rules across columns) — one per table.
             'colFormatGroups'           => $cfOwner['groups'] ?? [],
             'campaignsColFormatGroups'  => $cfCampaigns['groups'] ?? [],
@@ -432,7 +440,20 @@ class OwnerColumnSettingsController extends Controller
         $order  = $clean((array) $request->input('order',  []));
         $hidden = $clean((array) $request->input('hidden', []));
 
-        $payload = ['order' => $order, 'hidden' => $hidden];
+        // Per-role visibility (positive list per non-CEO role).
+        $visibleByRoleInput = (array) $request->input('visible_by_role', []);
+        $visibleByRole = [];
+        foreach (self::NON_CEO_ROLES as $r) {
+            $list = $visibleByRoleInput[$r] ?? [];
+            if (!is_array($list)) $list = [];
+            $visibleByRole[$r] = $clean($list);
+        }
+
+        $payload = [
+            'order'           => $order,
+            'hidden'          => $hidden,
+            'visible_by_role' => $visibleByRole,
+        ];
 
         $key = $this->keyFor($table);
         DB::table('app_settings')->updateOrInsert(
@@ -444,11 +465,16 @@ class OwnerColumnSettingsController extends Controller
     }
 
     /**
-     * Load resolved config for a given table — applies catalog filtering and
-     * fills in defaults so callers can rely on the shape even when no row
-     * has been saved yet.
+     * Load resolved config for a given table, optionally filtered by role.
+     *
+     * - CEO (or null role): returns the global `hidden` list as-is. CEO sees
+     *   everything except what they explicitly hid.
+     * - Non-CEO role: `hidden` list = complement of `visible_by_role[role]`,
+     *   so the role only sees columns explicitly granted by CEO.
+     *
+     * Order is global (shared across all roles).
      */
-    public function loadConfig(string $table): array
+    public function loadConfig(string $table, ?string $role = null): array
     {
         if (!array_key_exists($table, self::CATALOG)) {
             return ['order' => [], 'hidden' => []];
@@ -459,7 +485,8 @@ class OwnerColumnSettingsController extends Controller
         $allowedSet = array_flip($allowedIds);
 
         $order = $allowedIds; // default: catalog order
-        $hidden = [];
+        $hiddenCEO = [];
+        $visibleByRole = [];
 
         if ($row && $row->value) {
             $decoded = json_decode($row->value, true);
@@ -478,17 +505,104 @@ class OwnerColumnSettingsController extends Controller
                 }
                 if (!empty($decoded['hidden']) && is_array($decoded['hidden'])) {
                     foreach ($decoded['hidden'] as $id) {
-                        if (is_string($id) && isset($allowedSet[$id])) $hidden[] = $id;
+                        if (is_string($id) && isset($allowedSet[$id])) $hiddenCEO[] = $id;
+                    }
+                }
+                if (!empty($decoded['visible_by_role']) && is_array($decoded['visible_by_role'])) {
+                    foreach (self::NON_CEO_ROLES as $r) {
+                        $list = $decoded['visible_by_role'][$r] ?? null;
+                        if (is_array($list)) {
+                            $clean = [];
+                            foreach ($list as $id) {
+                                if (is_string($id) && isset($allowedSet[$id])) $clean[] = $id;
+                            }
+                            $visibleByRole[$r] = array_values(array_unique($clean));
+                        }
                     }
                 }
             }
         } else {
-            // Nothing saved → derive `hidden` from default-visible list.
+            // Nothing saved → derive CEO hidden from default-visible list,
+            // and start non-CEO roles with empty visibility (must opt in).
+            $vis = array_flip(self::DEFAULT_VISIBLE[$table] ?? $allowedIds);
+            $hiddenCEO = array_values(array_filter($allowedIds, fn($id) => !isset($vis[$id])));
+        }
+
+        // Resolve the hidden list per role.
+        if ($role === null || $role === 'CEO') {
+            $hidden = $hiddenCEO;
+        } else {
+            $visible = $visibleByRole[$role] ?? [];
+            $vSet = array_flip($visible);
+            $hidden = array_values(array_filter($allowedIds, fn($id) => !isset($vSet[$id])));
+        }
+
+        return ['order' => $order, 'hidden' => array_values(array_unique($hidden))];
+    }
+
+    /**
+     * Load full settings matrix for a table — used by the settings page UI.
+     * Returns the global order, CEO's hidden list, and the visible_by_role map.
+     */
+    public function loadConfigMatrix(string $table): array
+    {
+        if (!array_key_exists($table, self::CATALOG)) {
+            return ['order' => [], 'hidden' => [], 'visible_by_role' => []];
+        }
+        $row = DB::table('app_settings')->where('key', $this->keyFor($table))->first(['value']);
+        $allowedIds = array_column(self::CATALOG[$table], 'id');
+        $allowedSet = array_flip($allowedIds);
+
+        $order = $allowedIds;
+        $hidden = [];
+        $visibleByRole = [];
+
+        if ($row && $row->value) {
+            $decoded = json_decode($row->value, true);
+            if (is_array($decoded)) {
+                if (!empty($decoded['order']) && is_array($decoded['order'])) {
+                    $valid = [];
+                    foreach ($decoded['order'] as $id) {
+                        if (is_string($id) && isset($allowedSet[$id])) $valid[] = $id;
+                    }
+                    foreach ($allowedIds as $id) {
+                        if (!in_array($id, $valid, true)) $valid[] = $id;
+                    }
+                    $order = $valid;
+                }
+                if (!empty($decoded['hidden']) && is_array($decoded['hidden'])) {
+                    foreach ($decoded['hidden'] as $id) {
+                        if (is_string($id) && isset($allowedSet[$id])) $hidden[] = $id;
+                    }
+                }
+                if (!empty($decoded['visible_by_role']) && is_array($decoded['visible_by_role'])) {
+                    foreach (self::NON_CEO_ROLES as $r) {
+                        $list = $decoded['visible_by_role'][$r] ?? [];
+                        if (is_array($list)) {
+                            $clean = [];
+                            foreach ($list as $id) {
+                                if (is_string($id) && isset($allowedSet[$id])) $clean[] = $id;
+                            }
+                            $visibleByRole[$r] = array_values(array_unique($clean));
+                        }
+                    }
+                }
+            }
+        } else {
             $vis = array_flip(self::DEFAULT_VISIBLE[$table] ?? $allowedIds);
             $hidden = array_values(array_filter($allowedIds, fn($id) => !isset($vis[$id])));
         }
 
-        return ['order' => $order, 'hidden' => array_values(array_unique($hidden))];
+        // Ensure each non-CEO role has an entry (empty list = nothing visible).
+        foreach (self::NON_CEO_ROLES as $r) {
+            if (!array_key_exists($r, $visibleByRole)) $visibleByRole[$r] = [];
+        }
+
+        return [
+            'order'           => $order,
+            'hidden'          => array_values(array_unique($hidden)),
+            'visible_by_role' => $visibleByRole,
+        ];
     }
 
     private function keyFor(string $table): string

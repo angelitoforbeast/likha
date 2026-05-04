@@ -12,12 +12,34 @@ use App\Models\SupplyExcludedPage;
 
 class OwnerPrivateController extends Controller
 {
+    /**
+     * Allow CEO + Marketing-OIC + Marketing for VIEW endpoints.
+     * Write endpoints (saveItemSetting, refreshPrimaryItems) call
+     * checkWriteAccess() instead — CEO-only.
+     */
     private function checkAccess(): void
     {
-        $roleRaw  = Auth::user()?->employeeProfile?->role ?? '';
-        $roleNorm = preg_replace('/\s+/u', ' ', trim((string) $roleRaw));
-        $isCEO    = preg_match('/^ceo$/iu', $roleNorm) === 1;
-        if (!$isCEO) abort(404);
+        $role = $this->getNormalizedRole();
+        if (!in_array($role, ['CEO', 'Marketing - OIC', 'Marketing'], true)) {
+            abort(404);
+        }
+    }
+
+    /** Stricter check for endpoints that mutate data — CEO-only. */
+    private function checkWriteAccess(): void
+    {
+        if ($this->getNormalizedRole() !== 'CEO') abort(404);
+    }
+
+    /** Canonical role string from the logged-in user's employee profile. */
+    private function getNormalizedRole(): string
+    {
+        $raw  = Auth::user()?->employeeProfile?->role ?? '';
+        $norm = preg_replace('/\s+/u', ' ', trim((string) $raw));
+        if (preg_match('/^ceo$/iu', $norm)) return 'CEO';
+        if (preg_match('/^marketing\s*[-–—]\s*oic$/iu', $norm)) return 'Marketing - OIC';
+        if (preg_match('/^marketing$/iu', $norm)) return 'Marketing';
+        return $norm;
     }
 
     public function index()
@@ -35,17 +57,16 @@ class OwnerPrivateController extends Controller
             ->pluck('page_name')
             ->toArray();
 
-        $userRoleRaw    = Auth::user()?->employeeProfile?->role ?? '';
-        $roleNorm       = preg_replace('/\s+/u', ' ', trim((string)$userRoleRaw));
-        $isMarketingOIC = preg_match('/^marketing\s*[-–—]\s*oic$/iu', $roleNorm) === 1;
-        $isCEO          = preg_match('/^ceo$/iu', $roleNorm) === 1;
+        $role           = $this->getNormalizedRole();
+        $isCEO          = $role === 'CEO';
+        $isMarketingOIC = $role === 'Marketing - OIC';
 
         // Column visibility/order configs (CEO-managed via /owner/column-settings).
-        // Both injected so the inline campaigns expand panel shares the same
-        // saved visibility as /ads_manager/campaigns.
+        // Per-role filtering is applied — CEO sees all; Marketing/MOIC see only
+        // columns explicitly granted in visible_by_role.
         $colsCtrl = new \App\Http\Controllers\OwnerColumnSettingsController();
-        $ownerPrivateColsConfig = $colsCtrl->loadConfig('owner_private');
-        $campaignsColsConfig    = $colsCtrl->loadConfig('campaigns');
+        $ownerPrivateColsConfig = $colsCtrl->loadConfig('owner_private', $role);
+        $campaignsColsConfig    = $colsCtrl->loadConfig('campaigns', $role);
         // Computed-column settings (also CEO-managed in the same page).
         $breakevenTargetPct     = $colsCtrl->loadBreakevenTargetPct();    // e.g. 5.0
         // loadColFormat($table) returns ['groups' => [...], 'byCol' => {...}].
@@ -1874,7 +1895,9 @@ class OwnerPrivateController extends Controller
 
     public function saveItemSetting(Request $request)
     {
-        $this->checkAccess();
+        // Mutates RTS / item_value — CEO only. Marketing roles can VIEW
+        // /owner/private but cannot edit data integrity fields.
+        $this->checkWriteAccess();
 
         $validated = $request->validate([
             'page_name'      => 'required|string|max:255',
@@ -2002,7 +2025,7 @@ class OwnerPrivateController extends Controller
      */
     public function refreshPrimaryItems(Request $request)
     {
-        $this->checkAccess();
+        $this->checkWriteAccess();
 
         $tz    = new \DateTimeZone('Asia/Manila');
         $today = (new \DateTime('now', $tz))->format('Y-m-d');
