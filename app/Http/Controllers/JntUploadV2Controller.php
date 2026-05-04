@@ -64,6 +64,7 @@ class JntUploadV2Controller extends Controller
                 'files'    => 'required|array|min:1',
                 'files.*'  => 'file|mimes:zip,csv,xlsx|max:1048576', // 1GB per file
                 'batch_at' => 'nullable|string',
+                'run_id'   => 'nullable|integer|exists:bulk_upload_runs,id',
             ]);
 
             $batchAt = $this->parseBatchAt($request->input('batch_at'));
@@ -72,17 +73,26 @@ class JntUploadV2Controller extends Controller
             $disk   = config('filesystems.default') ?: 'local';
             $folder = 'uploads/jnt_v2/' . now()->format('Y-m-d');
 
-            $run = BulkUploadRun::create([
-                'type'        => 'jnt_v2',
-                'user_id'     => $userId,
-                'status'      => 'precheck',
-                'total_files' => 0,
-                'batch_at'    => $batchAt,
-            ]);
+            // Reuse existing run kapag may run_id; otherwise create new.
+            $runId = $request->input('run_id');
+            if ($runId) {
+                $run = BulkUploadRun::findOrFail((int) $runId);
+                if ($batchAt && empty($run->batch_at)) {
+                    $run->batch_at = $batchAt;
+                    $run->save();
+                }
+            } else {
+                $run = BulkUploadRun::create([
+                    'type'        => 'jnt_v2',
+                    'user_id'     => $userId,
+                    'status'      => 'precheck',
+                    'total_files' => 0,
+                    'batch_at'    => $batchAt,
+                ]);
+            }
 
             $files = $request->file('files');
             $report = [];
-            $totalFiles = 0;
 
             foreach ($files as $file) {
                 if (!$file || !$file->isValid()) continue;
@@ -90,7 +100,7 @@ class JntUploadV2Controller extends Controller
                 $original = $file->getClientOriginalName();
                 $ext      = strtolower($file->getClientOriginalExtension());
                 $basename = Str::slug(pathinfo($original, PATHINFO_FILENAME));
-                $stored   = $basename . '__' . now()->format('His') . '_' . Str::random(4) . '.' . $ext;
+                $stored   = $basename . '__' . now()->format('His') . '_' . Str::random(6) . '.' . $ext;
                 $path     = $file->storeAs($folder, $stored, $disk);
 
                 $log = UploadLogV2::create([
@@ -113,23 +123,23 @@ class JntUploadV2Controller extends Controller
                 $log->save();
 
                 $report[] = [
-                    'log_id'        => $log->id,
-                    'original_name' => $original,
-                    'size'          => $file->getSize(),
-                    'ok'            => $check['ok'],
-                    'issues'        => $check['issues'] ?? [],
-                    'inner_files'   => $check['inner_files'] ?? null,
+                    'log_id'           => $log->id,
+                    'original_name'    => $original,
+                    'size'             => $file->getSize(),
+                    'ok'               => $check['ok'],
+                    'issues'           => $check['issues'] ?? [],
+                    'inner_files'      => $check['inner_files'] ?? null,
                     'detected_headers' => $check['detected_headers'] ?? [],
                 ];
-                $totalFiles++;
             }
 
-            $run->total_files = $totalFiles;
+            // Recount total files in this run (handles incremental adds)
+            $run->total_files = UploadLogV2::where('bulk_run_id', $run->id)->count();
             $run->save();
 
             return response()->json([
                 'run_id'      => $run->id,
-                'total_files' => $totalFiles,
+                'total_files' => $run->total_files,
                 'files'       => $report,
             ]);
         } catch (\Throwable $e) {

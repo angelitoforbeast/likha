@@ -80,6 +80,27 @@
         <div class="v2-title">🧪 Step 2 — Pre-check report</div>
         <div id="precheckSummary" class="text-xs text-slate-500"></div>
       </div>
+
+      {{-- Validation progress panel (live habang nagva-validate) --}}
+      <div id="validatePanel" class="px-4 py-3 border-b border-slate-100 bg-slate-50">
+        <div class="flex items-center justify-between text-xs mb-1.5">
+          <span class="font-semibold text-slate-700" id="validateLabel">Validating…</span>
+          <span class="text-slate-500">
+            <span id="validateDone">0</span> / <span id="validateTotal">0</span>
+            (<span id="validatePct">0%</span>)
+          </span>
+        </div>
+        <div class="progress-bar"><div id="validateBar" style="width:0%; background:#6366f1;"></div></div>
+        <div class="text-[11px] text-slate-500 mt-1.5">
+          ✓ <span id="validateOk" class="text-emerald-700 font-semibold">0</span> OK
+          &nbsp;•&nbsp;
+          ⚠ <span id="validateBad" class="text-red-600 font-semibold">0</span> with issues
+          &nbsp;•&nbsp;
+          🌀 <span id="validateInflight" class="text-slate-700 font-semibold">0</span> in-flight
+          <span id="validateEta" class="text-slate-400"></span>
+        </div>
+      </div>
+
       <div class="p-0">
         <div class="file-row" style="font-weight:600; background:#f8fafc; border-bottom:2px solid #e2e8f0;">
           <div></div>
@@ -89,13 +110,18 @@
           <div>ISSUES</div>
           <div>ACTION</div>
         </div>
-        <div id="precheckRows"></div>
+        <div id="precheckRows" style="max-height: 480px; overflow-y: auto;"></div>
       </div>
-      <div class="p-3 border-t border-slate-200 flex gap-3 justify-end">
-        <button id="btnCancel" type="button" class="v2-btn-ghost">Cancel</button>
-        <button id="btnConfirm" type="button" class="v2-btn">
-          🚀 Confirm &amp; Process <span id="processCount">0</span> files
-        </button>
+      <div class="p-3 border-t border-slate-200 flex gap-3 justify-between items-center">
+        <div class="text-xs text-slate-500">
+          <span id="okOnlyHint" class="hidden">Only OK files will be processed. Uncheck any you want to skip.</span>
+        </div>
+        <div class="flex gap-3">
+          <button id="btnCancel" type="button" class="v2-btn-ghost">Cancel</button>
+          <button id="btnConfirm" type="button" class="v2-btn" disabled>
+            🚀 Confirm &amp; Process <span id="processCount">0</span> files
+          </button>
+        </div>
       </div>
     </div>
 
@@ -284,71 +310,189 @@
       renderSelectedList();
     });
 
+    // ===== PER-FILE concurrent precheck (5 in-flight max) =====
+    const CONCURRENCY = 5;
+    let validateAbort = false;
+    let validateRunId = null;
+
+    const validatePanel    = document.getElementById('validatePanel');
+    const validateLabel    = document.getElementById('validateLabel');
+    const validateDone     = document.getElementById('validateDone');
+    const validateTotal    = document.getElementById('validateTotal');
+    const validatePct      = document.getElementById('validatePct');
+    const validateBar      = document.getElementById('validateBar');
+    const validateOk       = document.getElementById('validateOk');
+    const validateBad      = document.getElementById('validateBad');
+    const validateInflight = document.getElementById('validateInflight');
+    const validateEta      = document.getElementById('validateEta');
+    const okOnlyHint       = document.getElementById('okOnlyHint');
+
+    function renderRow(f) {
+      const issues = (f.issues && f.issues.length) ? f.issues.join('; ') : '—';
+      let innerNote = '';
+      if (f.inner_files && f.inner_files.length) {
+        const innerOk = f.inner_files.filter(i => i.ok).length;
+        innerNote = `<div class="text-[10.5px] text-slate-400 mt-0.5">ZIP: ${innerOk}/${f.inner_files.length} inner files OK</div>`;
+      }
+      const checked = f.ok ? 'checked' : '';
+      const disabled = f.ok ? '' : 'disabled';
+      const rowClass = f.ok ? '' : 'bad';
+      const statusBadge = f.ok
+        ? '<span class="badge ok">OK</span>'
+        : '<span class="badge bad">FAIL</span>';
+      return `
+        <div class="file-row ${rowClass}" data-log-id="${f.log_id || ''}">
+          <div><input type="checkbox" class="precheckSel" data-id="${f.log_id}" ${checked} ${disabled} /></div>
+          <div><div class="name">${escapeHtml(f.original_name)}</div>${innerNote}</div>
+          <div class="size">${fmtSize(f.size)}</div>
+          <div>${statusBadge}</div>
+          <div class="issues">${escapeHtml(issues)}</div>
+          <div></div>
+        </div>
+      `;
+    }
+
+    function renderErrorRow(name, size, errMsg) {
+      return `
+        <div class="file-row bad">
+          <div></div>
+          <div><div class="name">${escapeHtml(name)}</div></div>
+          <div class="size">${fmtSize(size)}</div>
+          <div><span class="badge bad">FAIL</span></div>
+          <div class="issues">${escapeHtml(errMsg)}</div>
+          <div></div>
+        </div>
+      `;
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+      }[c]));
+    }
+
     btnPrecheck.addEventListener('click', async () => {
+      if (selectedFiles.length === 0) return;
+
       btnPrecheck.disabled = true;
       btnPrecheck.textContent = '🔎 Validating…';
 
-      const fd = new FormData();
-      selectedFiles.forEach(f => fd.append('files[]', f));
-      const batchAt = document.getElementById('batchAt').value;
-      if (batchAt) fd.append('batch_at', batchAt);
-
-      try {
-        const res = await fetch('/jnt_upload_v2/precheck', {
-          method: 'POST',
-          headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
-          body: fd
-        });
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(`Precheck failed (${res.status}): ${t.slice(0,200)}`);
-        }
-        const json = await res.json();
-        precheckResult = json;
-        renderPrecheck(json);
-      } catch (e) {
-        alert(e.message || 'Precheck error');
-        btnPrecheck.disabled = false;
-        btnPrecheck.textContent = '🔎 Validate Files';
-      }
-    });
-
-    function renderPrecheck(data) {
-      const okCount = data.files.filter(f => f.ok).length;
-      const badCount = data.files.length - okCount;
-      precheckSummary.textContent = `${okCount} OK, ${badCount} with issues`;
-
-      precheckRows.innerHTML = data.files.map(f => {
-        const issues = (f.issues && f.issues.length) ? f.issues.join('; ') : '—';
-        let innerNote = '';
-        if (f.inner_files && f.inner_files.length) {
-          const innerOk = f.inner_files.filter(i => i.ok).length;
-          innerNote = `<div class="text-[10.5px] text-slate-400 mt-0.5">ZIP: ${innerOk}/${f.inner_files.length} inner files OK</div>`;
-        }
-        const checked = f.ok ? 'checked' : '';
-        const disabled = f.ok ? '' : 'disabled';
-        const rowClass = f.ok ? '' : 'bad';
-        const statusBadge = f.ok ? '<span class="badge ok">OK</span>' : '<span class="badge bad">FAIL</span>';
-
-        return `
-          <div class="file-row ${rowClass}">
-            <div><input type="checkbox" class="precheckSel" data-id="${f.log_id}" ${checked} ${disabled} /></div>
-            <div><div class="name">${f.original_name}</div>${innerNote}</div>
-            <div class="size">${fmtSize(f.size)}</div>
-            <div>${statusBadge}</div>
-            <div class="issues">${issues}</div>
-            <div></div>
-          </div>
-        `;
-      }).join('');
-
+      // Switch to step2 with progress panel
       step1.classList.add('hidden');
       step2.classList.remove('hidden');
-      step2.scrollIntoView({ behavior:'smooth', block:'start' });
+      step2.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-      updateConfirmCount();
+      validatePanel.classList.remove('hidden');
+      precheckRows.innerHTML = '';
+      precheckSummary.textContent = '';
+      okOnlyHint.classList.add('hidden');
+
+      const total = selectedFiles.length;
+      validateTotal.textContent = total.toLocaleString();
+      validateDone.textContent = '0';
+      validatePct.textContent = '0%';
+      validateBar.style.width = '0%';
+      validateOk.textContent = '0';
+      validateBad.textContent = '0';
+      validateInflight.textContent = '0';
+      validateEta.textContent = '';
+      validateLabel.textContent = 'Validating…';
+      validateAbort = false;
+      validateRunId = null;
+
+      const batchAt = document.getElementById('batchAt').value || '';
+
+      let okCount = 0, badCount = 0, doneCount = 0, inflight = 0;
+      const startedAt = Date.now();
+
+      function updateStats() {
+        validateDone.textContent = doneCount.toLocaleString();
+        const pct = total > 0 ? Math.round(doneCount / total * 100) : 0;
+        validatePct.textContent = pct + '%';
+        validateBar.style.width = pct + '%';
+        validateOk.textContent = okCount.toLocaleString();
+        validateBad.textContent = badCount.toLocaleString();
+        validateInflight.textContent = inflight.toLocaleString();
+        if (doneCount >= 5) {
+          const elapsed = (Date.now() - startedAt) / 1000;
+          const rate = doneCount / elapsed; // files per second
+          const remaining = total - doneCount;
+          const etaSec = remaining > 0 && rate > 0 ? Math.ceil(remaining / rate) : 0;
+          if (etaSec > 0) {
+            const m = Math.floor(etaSec / 60);
+            const s = etaSec % 60;
+            validateEta.textContent = ` • ETA ~${m}m ${s}s`;
+          }
+        }
+      }
+
+      // Worker pool
+      const queue = selectedFiles.map((f, i) => ({ idx: i, file: f }));
+      let nextIdx = 0;
+
+      async function worker() {
+        while (!validateAbort) {
+          const job = queue[nextIdx++];
+          if (!job) return;
+          inflight++;
+          updateStats();
+          try {
+            const fd = new FormData();
+            fd.append('files[]', job.file);
+            if (batchAt) fd.append('batch_at', batchAt);
+            if (validateRunId) fd.append('run_id', validateRunId);
+
+            const res = await fetch('/jnt_upload_v2/precheck', {
+              method: 'POST',
+              headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+              body: fd
+            });
+
+            if (!res.ok) {
+              const t = await res.text();
+              throw new Error(`HTTP ${res.status}: ${t.slice(0, 120)}`);
+            }
+            const json = await res.json();
+            if (!validateRunId) validateRunId = json.run_id;
+
+            const reportFile = (json.files && json.files[0]) ? json.files[0] : null;
+            if (reportFile) {
+              precheckRows.insertAdjacentHTML('beforeend', renderRow(reportFile));
+              if (reportFile.ok) okCount++; else badCount++;
+            } else {
+              badCount++;
+              precheckRows.insertAdjacentHTML('beforeend', renderErrorRow(job.file.name, job.file.size, 'No response from server'));
+            }
+          } catch (e) {
+            badCount++;
+            precheckRows.insertAdjacentHTML('beforeend', renderErrorRow(job.file.name, job.file.size, e.message || 'Upload error'));
+          } finally {
+            inflight--;
+            doneCount++;
+            updateStats();
+          }
+        }
+      }
+
+      const workers = [];
+      for (let i = 0; i < CONCURRENCY; i++) workers.push(worker());
+      await Promise.all(workers);
+
+      // Done
+      validateLabel.textContent = '✓ Validation complete';
+      validateBar.style.background = '#22c55e';
+      precheckSummary.textContent = `${okCount.toLocaleString()} OK, ${badCount.toLocaleString()} with issues`;
+      btnPrecheck.disabled = false;
+      btnPrecheck.textContent = '🔎 Validate Files';
+
+      // Build precheckResult so confirm step works
+      precheckResult = { run_id: validateRunId };
+
+      // Wire checkboxes + auto-update confirm count
       precheckRows.querySelectorAll('.precheckSel').forEach(cb => cb.addEventListener('change', updateConfirmCount));
-    }
+      okOnlyHint.classList.remove('hidden');
+      updateConfirmCount();
+    });
 
     function updateConfirmCount() {
       const n = precheckRows.querySelectorAll('.precheckSel:checked').length;
@@ -357,9 +501,13 @@
     }
 
     btnCancel.addEventListener('click', () => {
+      validateAbort = true;
       step2.classList.add('hidden');
       step1.classList.remove('hidden');
       precheckResult = null;
+      validateRunId = null;
+      validateBar.style.background = '#6366f1';
+      validateLabel.textContent = 'Validating…';
       btnPrecheck.disabled = false;
       btnPrecheck.textContent = '🔎 Validate Files';
     });
