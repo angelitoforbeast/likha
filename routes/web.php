@@ -787,6 +787,14 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get   ('/jnt_upload_v2/queue-status',          [JntUploadV2Controller::class, 'queueStatus'])   ->name('jnt.upload.v2.queue.status');
     Route::post  ('/jnt_upload_v2/cancel/{runId}',        [JntUploadV2Controller::class, 'cancelRun'])     ->whereNumber('runId')->name('jnt.upload.v2.cancel');
     Route::post  ('/jnt_upload_v2/clear-queue',           [JntUploadV2Controller::class, 'clearQueue'])    ->name('jnt.upload.v2.clear.queue');
+
+    // /queue-manager — system-wide queue dashboard (CEO + MOIC)
+    Route::get   ('/queue-manager',                       [\App\Http\Controllers\QueueManagerController::class, 'index'])           ->name('queue.manager.index');
+    Route::get   ('/queue-manager/data',                  [\App\Http\Controllers\QueueManagerController::class, 'data'])            ->name('queue.manager.data');
+    Route::post  ('/queue-manager/restart-workers',       [\App\Http\Controllers\QueueManagerController::class, 'restartWorkers']) ->name('queue.manager.restart');
+    Route::post  ('/queue-manager/clear-pending',         [\App\Http\Controllers\QueueManagerController::class, 'clearPending'])    ->name('queue.manager.clear.pending');
+    Route::post  ('/queue-manager/clear-failed',          [\App\Http\Controllers\QueueManagerController::class, 'clearFailed'])     ->name('queue.manager.clear.failed');
+    Route::post  ('/queue-manager/nuclear-reset',         [\App\Http\Controllers\QueueManagerController::class, 'nuclearReset'])    ->name('queue.manager.nuclear');
     Route::view('/jnt_update', 'jnt_update');
     Route::post('/jnt_update', [FromJntController::class, 'updateOrInsert']);
     Route::get('/jnt_rts', [FromJntController::class, 'rtsView']);

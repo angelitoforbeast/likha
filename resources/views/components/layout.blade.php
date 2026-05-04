@@ -150,10 +150,14 @@
                   </x-navlink>
                 @endif
 
-                {{-- /jnt_upload_v2 — MOIC + CEO only --}}
+                {{-- /jnt_upload_v2 + /queue-manager — MOIC + CEO only --}}
                 @if(in_array($role, ['Marketing - OIC', 'CEO']))
                   <x-navlink href="/jnt_upload_v2" :active="request()->is('jnt_upload_v2*')" label="Waybill V2">
                     <i class="fa-solid fa-layer-group"></i>
+                  </x-navlink>
+
+                  <x-navlink href="/queue-manager" :active="request()->is('queue-manager*')" label="Queue">
+                    <i class="fa-solid fa-list-check"></i>
                   </x-navlink>
                 @endif
 
@@ -248,6 +252,8 @@
       'jnt/supply/*',
       'jnt_upload_v2',
       'jnt_upload_v2/*',
+      'queue-manager',
+      'queue-manager/*',
     ]))
       <div class="w-full px-0">
         {{ $slot }}
