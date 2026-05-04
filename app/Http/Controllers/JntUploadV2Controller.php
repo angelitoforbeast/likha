@@ -317,6 +317,21 @@ class JntUploadV2Controller extends Controller
                 'log_ids.*'=> 'integer',
             ]);
 
+            // Cleanup orphaned 'processing' files mula sa nakaraang failed runs.
+            // Pag may worker na namatay mid-flight (SIGKILL, OOM), naiiwan yung
+            // file as 'processing' kahit walang job na talagang nag-pprocess.
+            // Mark them as 'failed' kung 30+ mins na walang update.
+            UploadLogV2::where('status', 'processing')
+                ->where(function ($q) {
+                    $q->where('started_at', '<', now()->subMinutes(30))
+                      ->orWhereNull('started_at');
+                })
+                ->update([
+                    'status'        => 'failed',
+                    'error_message' => 'Orphaned — worker died mid-flight (cleaned up on next run)',
+                    'finished_at'   => now(),
+                ]);
+
             $run = BulkUploadRun::findOrFail($request->integer('run_id'));
 
             $logs = UploadLogV2::where('bulk_run_id', $run->id)

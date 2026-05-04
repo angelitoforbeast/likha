@@ -28,9 +28,9 @@ class ProcessJntUploadV2 implements ShouldQueue
     private int $logId;
     private ?int $userId = null;
 
-    // Bumped from 2000 → 5000 for fewer DB round-trips on big batches.
-    // UPDATE_SUBCHUNK still 800 — bumping this stresses MySQL packet size.
-    const CHUNK_SIZE      = 5000;
+    // Match V1's proven config — 5000 caused deadlock on concurrent workers.
+    // Smaller chunks = smaller transactions = less InnoDB lock contention.
+    const CHUNK_SIZE      = 2000;
     const UPDATE_SUBCHUNK = 800;
 
     private array $errors = [];
@@ -122,11 +122,32 @@ class ProcessJntUploadV2 implements ShouldQueue
             $log->save();
         } catch (\Throwable $e) {
             $log->status        = 'failed';
-            $log->error_message = $e->getMessage();
+            $log->error_message = mb_substr($e->getMessage(), 0, 500);
             $log->finished_at   = Carbon::now('Asia/Manila');
             $log->save();
 
             throw $e;
+        }
+    }
+
+    /**
+     * Laravel queue lifecycle hook — called when job permanently fails
+     * (after all retries exhausted, or on SIGKILL/timeout).
+     * Hindi nakaabot dito yung try/catch sa handle() pag SIGKILL ang nag-fire.
+     * This is the safety net para hindi maiwan ang file as 'processing' forever.
+     */
+    public function failed(\Throwable $exception): void
+    {
+        try {
+            $log = UploadLogV2::find($this->logId);
+            if ($log && in_array($log->status, ['queued', 'processing'], true)) {
+                $log->status        = 'failed';
+                $log->error_message = mb_substr('Job failed: ' . $exception->getMessage(), 0, 500);
+                $log->finished_at   = Carbon::now('Asia/Manila');
+                $log->save();
+            }
+        } catch (\Throwable $e) {
+            \Log::error('JntV2 failed() handler error: ' . $e->getMessage());
         }
     }
 
@@ -535,37 +556,47 @@ class ProcessJntUploadV2 implements ShouldQueue
                     DB::statement($sql);
                     $this->updatedCt += count($chunkKeys);
                 }
+            }
+        });
 
-                if (!empty($statusInfo)) {
-                    $wbKeys = array_keys($statusInfo);
+        // === STATUS_LOGS UPDATES — OUTSIDE transaction ===
+        // Moved out of the DB::transaction() above para hindi deadlock-prone.
+        // Sa V1 same pattern — row-by-row save() but walang enclosing transaction.
+        // Concurrent workers updating different waybills hindi mag-fight sa locks.
+        if (!empty($statusInfo)) {
+            $wbKeys = array_keys($statusInfo);
 
-                    $rowsForLogs = FromJnt2::whereIn('waybill_number', $wbKeys)
-                        ->select(['id', 'waybill_number', 'status_logs'])
-                        ->get();
+            $rowsForLogs = FromJnt2::whereIn('waybill_number', $wbKeys)
+                ->select(['id', 'waybill_number', 'status_logs'])
+                ->get();
 
-                    foreach ($rowsForLogs as $row) {
-                        $wb = $row->waybill_number;
-                        if (!isset($statusInfo[$wb])) continue;
+            foreach ($rowsForLogs as $row) {
+                $wb = $row->waybill_number;
+                if (!isset($statusInfo[$wb])) continue;
 
-                        $oldStatus = $statusInfo[$wb]['from'];
-                        $newStatus = $statusInfo[$wb]['to'];
+                $oldStatus = $statusInfo[$wb]['from'];
+                $newStatus = $statusInfo[$wb]['to'];
 
-                        $logs = $row->status_logs ?: [];
-                        if (!is_array($logs)) {
-                            $decoded = json_decode($logs, true);
-                            $logs = is_array($decoded) ? $decoded : [];
-                        }
+                $logs = $row->status_logs ?: [];
+                if (!is_array($logs)) {
+                    $decoded = json_decode($logs, true);
+                    $logs = is_array($decoded) ? $decoded : [];
+                }
 
-                        $newLogs = $this->appendStatusLog($logs, $oldStatus, $newStatus, $batchAtCarbon);
+                $newLogs = $this->appendStatusLog($logs, $oldStatus, $newStatus, $batchAtCarbon);
 
-                        if ($newLogs !== $logs) {
-                            $row->status_logs = $newLogs;
-                            $row->save();
-                        }
+                if ($newLogs !== $logs) {
+                    $row->status_logs = $newLogs;
+                    try {
+                        $row->save();
+                    } catch (\Throwable $e) {
+                        // Don't let a single status_logs save fail the whole chunk.
+                        // Worst case: one row's history is incomplete.
+                        \Log::warning('JntV2: status_logs save failed for waybill ' . $wb . ': ' . $e->getMessage());
                     }
                 }
             }
-        });
+        }
     }
 
     private function appendStatusLog($currentLogs, ?string $oldStatusRaw, ?string $newStatusRaw, Carbon $batchAt): array
