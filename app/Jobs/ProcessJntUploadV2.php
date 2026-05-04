@@ -25,13 +25,6 @@ class ProcessJntUploadV2 implements ShouldQueue
     public $timeout = 1800; // 30 minutes
     public $tries   = 3;
 
-    /**
-     * Dedicated queue para hindi mag-block sa other features (Conversation Tracker
-     * imports, GPT generator, Likha imports, etc.) habang may malaking V2 batch.
-     * Worker na nagli-listen dito: configured sa Supervisor program `likha-queue-jnt-v2`.
-     */
-    public $queue = 'jnt_v2';
-
     private int $logId;
     private ?int $userId = null;
 
@@ -51,6 +44,11 @@ class ProcessJntUploadV2 implements ShouldQueue
     public function __construct(int $logId)
     {
         $this->logId = $logId;
+        // Dedicated queue para hindi mag-block sa other features sa default queue.
+        // Worker listening dito: Supervisor program `likha-queue-jnt-v2`.
+        // Use onQueue() instead of public $queue property — yung property
+        // ay defined na sa Queueable trait, conflicts sa PHP 8.x strict.
+        $this->onQueue('jnt_v2');
     }
 
     public function handle(): void
