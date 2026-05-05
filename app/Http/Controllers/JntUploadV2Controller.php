@@ -533,6 +533,75 @@ class JntUploadV2Controller extends Controller
     }
 
     /**
+     * GET /jnt_upload_v2/coverage — find missing days sa submission_time.
+     * Identifies kung anong araw walang J&T pickups (zero entries).
+     */
+    public function coverageIndex(Request $request)
+    {
+        $this->checkAccess();
+
+        $currentYear = (int) now('Asia/Manila')->format('Y');
+        $year = (int) $request->query('year', $currentYear);
+
+        // Validate year — keep within reasonable range
+        $minYear = 2020;
+        $maxYear = $currentYear;
+        if ($year < $minYear || $year > $maxYear) {
+            $year = $currentYear;
+        }
+
+        // Determine date range for the selected year
+        $startDate = Carbon::create($year, 1, 1, 0, 0, 0, 'Asia/Manila');
+        if ($year === $currentYear) {
+            $endDate = now('Asia/Manila')->endOfDay();
+        } else {
+            $endDate = Carbon::create($year, 12, 31, 23, 59, 59, 'Asia/Manila');
+        }
+
+        // Get all distinct DATE(submission_time) sa range na may data
+        $datesWithData = DB::table('from_jnts_2')
+            ->whereNotNull('submission_time')
+            ->where('submission_time', '>=', $startDate->format('Y-m-d H:i:s'))
+            ->where('submission_time', '<=', $endDate->format('Y-m-d H:i:s'))
+            ->selectRaw('DATE(submission_time) AS d, COUNT(*) AS cnt')
+            ->groupBy('d')
+            ->orderBy('d')
+            ->get()
+            ->keyBy('d');
+
+        // Generate all dates in range, find missing
+        $missing = [];
+        $totalDays = 0;
+        $daysWithData = 0;
+
+        $cursor = $startDate->copy();
+        while ($cursor->lte($endDate)) {
+            $dateStr = $cursor->format('Y-m-d');
+            $totalDays++;
+            if (isset($datesWithData[$dateStr])) {
+                $daysWithData++;
+            } else {
+                $missing[] = [
+                    'date'     => $dateStr,
+                    'day_name' => $cursor->format('D'),  // Mon, Tue, etc.
+                    'is_weekend' => in_array($cursor->dayOfWeek, [0, 6], true),
+                ];
+            }
+            $cursor->addDay();
+        }
+
+        return view('jnt_upload_v2.coverage', [
+            'year'         => $year,
+            'currentYear'  => $currentYear,
+            'minYear'      => $minYear,
+            'totalDays'    => $totalDays,
+            'daysWithData' => $daysWithData,
+            'daysMissing'  => count($missing),
+            'missing'      => $missing,
+        ]);
+    }
+
+    /**
      * GET /jnt_upload_v2/data — page shell + distinct values for filter dropdowns.
      */
     public function dataIndex(Request $request)

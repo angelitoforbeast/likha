@@ -45,6 +45,7 @@
         <div class="v2-title">📂 Step 1 — Select files</div>
         <div class="flex gap-2">
           <a href="/jnt_upload_v2/data" class="v2-btn-ghost">📊 Browse Data</a>
+          <a href="/jnt_upload_v2/coverage" class="v2-btn-ghost">📅 Date Coverage</a>
           <a href="/jnt_upload_v2/history" class="v2-btn-ghost">📜 View History</a>
         </div>
       </div>
