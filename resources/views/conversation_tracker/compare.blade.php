@@ -142,8 +142,98 @@
         </div>
       </div>
 
-      {{-- Per-flow comparison sections --}}
-      @forelse ($comparison as $row)
+      @php
+        // Pre-build a lookup ng picked variants para sa special handling
+        $variantsUpper = array_map(fn($v) => strtoupper(trim($v)), $variants);
+
+        // Map: variant name (uppercase) → comparison row
+        $variantRowsByName = [];
+        foreach ($comparison as $row) {
+          $rowFlowUpper = strtoupper(trim($row['flow']));
+          if (in_array($rowFlowUpper, $variantsUpper, true)) {
+            $variantRowsByName[$rowFlowUpper] = $row;
+          }
+        }
+
+        // Other (non-picked) rows
+        $otherRows = array_values(array_filter($comparison, function ($r) use ($variantsUpper) {
+          return !in_array(strtoupper(trim($r['flow'])), $variantsUpper, true);
+        }));
+
+        $metricsToShow = [
+          'total'         => 'Total',
+          'replied'       => 'Replied',
+          'replied_cells' => 'Replied Cells',
+          'ordered'       => 'Customer Ordered',
+          'reply_rate'    => 'Reply rate',
+          'conv_total'    => 'Conv rate (vs total)',
+          'conv_replied'  => 'Conv rate (vs replied)',
+        ];
+        $isPctMetric = ['reply_rate', 'conv_total', 'conv_replied'];
+      @endphp
+
+      {{-- ═════════════════════════════════════════════
+           PICKED VARIANTS COMPARISON — Each set's column
+           shows THAT set's own variant data (not cross-comparison)
+           ═════════════════════════════════════════════ --}}
+      @if (!empty($variantsUpper))
+        <div class="compare-section" style="border:2px solid #3b82f6;">
+          <div class="compare-section-header" style="background:#eff6ff;">
+            <span class="pill-flow main">📊 Picked variants comparison</span>
+            <span class="text-xs text-slate-500 font-normal">— each column shows that set's own variant data</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Metric</th>
+                @foreach ($sets as $idx => $s)
+                  <th>Set {{ chr(65 + $idx) }} — {{ $s['variant'] }}</th>
+                @endforeach
+              </tr>
+            </thead>
+            <tbody>
+              @foreach ($metricsToShow as $key => $label)
+                @php
+                  // For each set, get THAT set's data sa ITS OWN variant
+                  $perSetValues = [];
+                  foreach ($sets as $idx => $s) {
+                    $variantUpper = strtoupper(trim($s['variant']));
+                    $variantRow = $variantRowsByName[$variantUpper] ?? null;
+                    $perSetValues[] = $variantRow ? $variantRow['sets'][$idx][$key] : null;
+                  }
+                  $nonNullValues = array_filter($perSetValues, fn($v) => $v !== null);
+                  $max = !empty($nonNullValues) ? max($nonNullValues) : null;
+                  $hasMultipleNonNull = count($nonNullValues) > 1;
+                @endphp
+                <tr>
+                  <td class="metric-label">{{ $label }}</td>
+                  @foreach ($perSetValues as $val)
+                    @php
+                      $isWinner = $hasMultipleNonNull && $val !== null && $val == $max && $val > 0;
+                      $isPct = in_array($key, $isPctMetric);
+                    @endphp
+                    <td class="num {{ $isWinner ? 'winner' : '' }}">
+                      @if ($val === null)
+                        <span class="empty-cell">—</span>
+                      @elseif ($isPct)
+                        {{ number_format($val, 1) }}%{{ $isWinner ? ' 🏆' : '' }}
+                      @else
+                        {{ number_format($val) }}{{ $isWinner ? ' 🏆' : '' }}
+                      @endif
+                    </td>
+                  @endforeach
+                </tr>
+              @endforeach
+            </tbody>
+          </table>
+        </div>
+      @endif
+
+      {{-- ═════════════════════════════════════════════
+           OTHER FLOWS (non-picked) — cross-comparison
+           Same flow name across sets, side-by-side metrics
+           ═════════════════════════════════════════════ --}}
+      @forelse ($otherRows as $row)
         @php
           $flow = $row['flow'];
           $cls = 'other';
@@ -151,7 +241,6 @@
           elseif (str_starts_with($flow, 'MAIN')) $cls = 'main';
           elseif (str_starts_with($flow, 'SEQ'))  $cls = 'seq';
 
-          // Check if any set has data for this flow (skip flow if all empty)
           $anyData = false;
           foreach ($row['sets'] as $sd) {
             if ($sd['has_data']) { $anyData = true; break; }
@@ -169,27 +258,13 @@
                 <tr>
                   <th>Metric</th>
                   @foreach ($row['sets'] as $idx => $sd)
-                    <th class="num">Set {{ chr(65 + $idx) }} — {{ $sd['variant'] }}</th>
+                    <th>Set {{ chr(65 + $idx) }} — {{ $sd['variant'] }}</th>
                   @endforeach
                 </tr>
               </thead>
               <tbody>
-                @php
-                  $metricsToShow = [
-                    'total'         => 'Total',
-                    'replied'       => 'Replied',
-                    'replied_cells' => 'Replied Cells',
-                    'ordered'       => 'Customer Ordered',
-                    'reply_rate'    => 'Reply rate',
-                    'conv_total'    => 'Conv rate (vs total)',
-                    'conv_replied'  => 'Conv rate (vs replied)',
-                  ];
-                  $isPctMetric = ['reply_rate', 'conv_total', 'conv_replied'];
-                @endphp
-
                 @foreach ($metricsToShow as $key => $label)
                   @php
-                    // Find max value for "winner" highlighting
                     $values = array_map(fn($sd) => $sd[$key], $row['sets']);
                     $valuesNonNull = array_filter($values, fn($v) => $v !== null);
                     $max = !empty($valuesNonNull) ? max($valuesNonNull) : null;
@@ -220,9 +295,11 @@
           </div>
         @endif
       @empty
-        <div class="ct-card text-center text-slate-500 py-8">
-          No data found for selected variants. Adjust filters or pick different variants.
-        </div>
+        @if (empty($variantsUpper))
+          <div class="ct-card text-center text-slate-500 py-8">
+            No data found for selected variants. Adjust filters or pick different variants.
+          </div>
+        @endif
       @endforelse
     @endif
 

@@ -214,16 +214,18 @@ class ImportConversationTrackerFromGoogleSheet implements ShouldQueue
     }
 
     /**
-     * Parse subscription date string (multi-format) to Y-m-d H:i:s.
+     * Universal date parser — handles ALL date formats in one place.
      * Public+static so the controller / tests can reuse it.
      *
      * Supports:
-     *   - Excel serial numbers (e.g., "46146.87917" → 2026-05-04 21:06)
-     *   - "May 2, 2026 6:35 PM"  (Month Day, Year h:mm AM/PM)
-     *   - "4 May 2026 17:57"     (Day Month Year HH:mm)
-     *   - "4/May/2026 18:35"     (Day/Month/Year HH:mm)
-     *   - "02/May/2026 23:48"    (DD/Month/YYYY HH:mm)
-     *   - "03/05/2026 20:13"     (DD/MM/YYYY — heuristic-disambiguated)
+     *   - Unix timestamp seconds  (e.g., "1777743727" → 2026-05-02 ...)
+     *   - Unix timestamp milliseconds (13+ digits)
+     *   - Excel serial numbers    (e.g., "46146.87917" → 2026-05-04 21:06)
+     *   - "May 2, 2026 6:35 PM"   (Month Day, Year h:mm AM/PM)
+     *   - "4 May 2026 17:57"      (Day Month Year HH:mm)
+     *   - "4/May/2026 18:35"      (Day/Month/Year HH:mm)
+     *   - "02/May/2026 23:48"     (DD/Month/YYYY HH:mm)
+     *   - "03/05/2026 20:13"      (DD/MM/YYYY — heuristic-disambiguated)
      *   - "15 January 2026 14:53"
      *   - ISO formats (Y-m-d H:i:s)
      *   - Lenient \DateTime fallback for unrecognized formats
@@ -238,20 +240,34 @@ class ImportConversationTrackerFromGoogleSheet implements ShouldQueue
         $s = trim($raw);
         if ($s === '') return null;
 
-        // ─── Excel serial number detection ───
-        // Excel epoch: 1900-01-01 (with 1900 leap year bug accounted for)
-        // Range: 25569 (1970-01-01) to ~100000 (year 2173) is plausible for real data
+        // ─── Numeric detection (Unix timestamps + Excel serials) ───
         if (is_numeric($s)) {
             $n = (float) $s;
-            if ($n >= 25569 && $n <= 100000) {
-                $unix = (int) round(($n - 25569) * 86400);
-                try {
+
+            try {
+                // Unix timestamp in milliseconds (13+ digits)
+                if ($n >= 1_000_000_000_000 && $n <= 9_999_999_999_999) {
+                    return Carbon::createFromTimestamp((int) ($n / 1000))
+                        ->setTimezone('Asia/Manila')
+                        ->format('Y-m-d H:i:s');
+                }
+
+                // Unix timestamp in seconds (10 digits, ~year 2001 onwards)
+                if ($n >= 1_000_000_000 && $n <= 9_999_999_999) {
+                    return Carbon::createFromTimestamp((int) $n)
+                        ->setTimezone('Asia/Manila')
+                        ->format('Y-m-d H:i:s');
+                }
+
+                // Excel serial number (range 25569 = 1970, 100000 ≈ 2173)
+                if ($n >= 25569 && $n <= 100000) {
+                    $unix = (int) round(($n - 25569) * 86400);
                     return Carbon::createFromTimestamp($unix)
                         ->setTimezone('Asia/Manila')
                         ->format('Y-m-d H:i:s');
-                } catch (\Throwable $e) {
-                    // fall through to other format attempts
                 }
+            } catch (\Throwable $e) {
+                // fall through to format string attempts
             }
         }
 
@@ -353,19 +369,14 @@ class ImportConversationTrackerFromGoogleSheet implements ShouldQueue
         return [$a, $b];
     }
 
-    /** Parse Unix-seconds integer to PH-time DATETIME. */
+    /**
+     * Parse upload date — now delegates sa parseSubscriptionDate (universal parser).
+     * Both subscription_date at upload_date columns ngayon ay handled
+     * pareho — Unix timestamp, Excel serial, at all date string formats.
+     */
     public static function parseUploadDate(?string $raw): ?string
     {
-        if (!$raw) return null;
-        $n = (int) trim($raw);
-        if ($n <= 0) return null;
-        // ms safety: if it's a 13+ digit number, assume milliseconds.
-        if ($n > 9_999_999_999) {
-            $n = (int) ($n / 1000);
-        }
-        return Carbon::createFromTimestamp($n)
-            ->setTimezone('Asia/Manila')
-            ->format('Y-m-d H:i:s');
+        return self::parseSubscriptionDate($raw);
     }
 
     /** Normalize phone: digits only; prepend 0 if 10 digits start with 9. */
