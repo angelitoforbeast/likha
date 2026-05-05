@@ -109,6 +109,9 @@
               <div>⚡ Speed: <strong id="overallAvg" class="text-slate-800">—</strong></div>
               <div>👷 Workers: <strong id="overallWorkers" class="text-slate-800">—</strong></div>
             </div>
+            <div id="autoSkippedHint" class="hidden text-[11px] text-amber-700 mt-1 italic">
+              ℹ <span id="autoSkippedCount">0</span> files auto-skipped (already imported / failed precheck) — hindi kasama sa progress count
+            </div>
           </div>
 
           {{-- Staging stats — visible only during processing/consolidating --}}
@@ -366,11 +369,26 @@
         }
       }
 
-      const totalFiles    = data.files.length;
-      // Include precheck_duplicate + precheck_failed as terminal — fixes
-      // misleading progress count (e.g., 1/6 even when 5 are auto-skipped duplicates).
-      const terminalFiles = data.files.filter(f => ['done','failed','skipped','cancelled','precheck_duplicate','precheck_failed'].includes(f.status));
-      const finishedFiles = terminalFiles.length;
+      // Real processing target — exclude files that don't need actual work
+      // (auto-skipped duplicates, precheck failures, manually skipped/cancelled).
+      const noWorkStatuses = ['precheck_duplicate', 'precheck_failed', 'skipped', 'cancelled'];
+      const workFiles      = data.files.filter(f => !noWorkStatuses.includes(f.status));
+      const totalFiles     = workFiles.length;
+      const terminalFiles  = workFiles.filter(f => ['done','failed'].includes(f.status));
+      const finishedFiles  = terminalFiles.length;
+      const autoSkippedCount = data.files.filter(f => noWorkStatuses.includes(f.status)).length;
+
+      // Show auto-skipped hint
+      const autoHint = document.getElementById('autoSkippedHint');
+      const autoCnt = document.getElementById('autoSkippedCount');
+      if (autoHint && autoCnt) {
+        if (autoSkippedCount > 0) {
+          autoHint.classList.remove('hidden');
+          autoCnt.textContent = autoSkippedCount.toLocaleString();
+        } else {
+          autoHint.classList.add('hidden');
+        }
+      }
       const inflightFiles = data.files.filter(f => f.status === 'processing').length;
       const pct = totalFiles > 0 ? Math.round(finishedFiles / totalFiles * 100) : 0;
       setText('overallPct',      pct + '%');

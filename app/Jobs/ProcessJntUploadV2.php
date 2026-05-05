@@ -44,11 +44,11 @@ class ProcessJntUploadV2 implements ShouldQueue
     public function __construct(int $logId)
     {
         $this->logId = $logId;
-        // Dedicated queue para hindi mag-block sa other features sa default queue.
-        // Worker listening dito: Supervisor program `likha-queue-jnt-v2`.
-        // Use onQueue() instead of public $queue property — yung property
-        // ay defined na sa Queueable trait, conflicts sa PHP 8.x strict.
-        $this->onQueue('jnt_v2');
+        // Dedicated parse queue para sa parallel xlsx parsing. 5 workers
+        // configured sa Supervisor program `likha-queue-jnt-v2-parse`.
+        // Pure INSERT to from_jnts_2_staging — walang lock contention sa
+        // from_jnts_2 dahil hindi siya hinihimas dito.
+        $this->onQueue('jnt_v2_parse');
     }
 
     public function handle(): void

@@ -38,7 +38,10 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
     public function __construct(int $bulkRunId)
     {
         $this->bulkRunId = $bulkRunId;
-        $this->onQueue('jnt_v2');
+        // Dedicated consolidate queue (1 worker only) — atomic merge sa
+        // from_jnts_2. Hindi sila magkokontensya sa parse workers (different queue).
+        // Across batches: 1 worker = sequential consolidate (safe vs deadlocks).
+        $this->onQueue('jnt_v2_consolidate');
     }
 
     public function handle(): void
@@ -131,30 +134,47 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
         $skipped  = 0;
         $uniqueCount = 0;
 
-        // Step A: get unique waybills + their latest row from staging.
-        // We use a subquery to pick the latest row per waybill
-        // (latest by signingtime DESC, then by id DESC as tiebreaker).
+        // Step A: get unique waybills + their winning row from staging.
         //
-        // SQL pattern:
-        //   SELECT s.* FROM from_jnts_2_staging s
-        //   INNER JOIN (
-        //     SELECT waybill_number, MAX(id) as max_id
-        //     FROM from_jnts_2_staging
-        //     WHERE bulk_run_id = ?
-        //     GROUP BY waybill_number
-        //   ) latest ON s.id = latest.max_id
+        // Sorting rules (locked with user):
+        //   Priority 1: status = "returned"  (TOP — even kung may "delivered" entry)
+        //   Priority 2: status = "delivered"
+        //   Priority 3: any other status (in transit, delivering, pickup, etc.)
+        //
+        // Tiebreaker within same priority: highest id wins (latest insertion to staging)
+        //
+        // Two-step subquery approach (compatible across MySQL/MariaDB):
+        //   1. Per waybill, find the minimum priority (best status)
+        //   2. Within that priority, pick the row with MAX(id)
         //
         // Stream this in chunks para hindi mag-OOM kahit milyong rows.
 
+        $runId = (int) $this->bulkRunId;
         $latestQuery = DB::table('from_jnts_2_staging as s')
-            ->join(DB::raw('(
-                SELECT waybill_number, MAX(id) as max_id
-                FROM from_jnts_2_staging
-                WHERE bulk_run_id = ' . (int) $this->bulkRunId . '
-                  AND waybill_number IS NOT NULL
-                  AND waybill_number != \'\'
-                GROUP BY waybill_number
-            ) as latest'), 's.id', '=', 'latest.max_id');
+            ->join(DB::raw("(
+                SELECT inner_s.waybill_number, MAX(inner_s.id) as winner_id
+                FROM from_jnts_2_staging inner_s
+                INNER JOIN (
+                    SELECT waybill_number,
+                        MIN(CASE LOWER(TRIM(COALESCE(status, '')))
+                            WHEN 'returned'  THEN 1
+                            WHEN 'delivered' THEN 2
+                            ELSE 3
+                        END) AS best_priority
+                    FROM from_jnts_2_staging
+                    WHERE bulk_run_id = {$runId}
+                      AND waybill_number IS NOT NULL
+                      AND waybill_number != ''
+                    GROUP BY waybill_number
+                ) priorities ON inner_s.waybill_number = priorities.waybill_number
+                    AND CASE LOWER(TRIM(COALESCE(inner_s.status, '')))
+                        WHEN 'returned'  THEN 1
+                        WHEN 'delivered' THEN 2
+                        ELSE 3
+                    END = priorities.best_priority
+                WHERE inner_s.bulk_run_id = {$runId}
+                GROUP BY inner_s.waybill_number
+            ) as latest"), 's.id', '=', 'latest.winner_id');
 
         // Process in chunks of 2000 waybills at a time
         $latestQuery->orderBy('s.id')->chunk(self::MERGE_CHUNK, function ($rows) use (&$inserted, &$updated, &$skipped, &$uniqueCount) {
