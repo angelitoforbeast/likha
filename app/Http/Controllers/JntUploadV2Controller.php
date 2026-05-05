@@ -475,28 +475,44 @@ class JntUploadV2Controller extends Controller
         $run->save();
 
         // Staging stats — only meaningful during processing/consolidating.
-        // Cached 3 secs para hindi mag-overload sa frequent polls.
+        // Cache 30s — yung COUNT queries sa milyon-milyong rows ay mabigat,
+        // di pwedeng every-3s polls. Plus yung COUNT(DISTINCT waybill_number)
+        // sa malaking table (>1M rows) ay 100+ seconds — skip kapag ganon
+        // kalaki para hindi ma-saturate ang MySQL.
         $stagingStats = [
             'total_rows'       => 0,
             'unique_waybills'  => 0,
             'duplicates'       => 0,
             'enabled'          => false,
+            'unique_skipped'   => false,
         ];
         if (in_array($run->status, ['processing', 'consolidating', 'queued'], true)) {
             $cacheKey = 'jnt_v2_staging_stats_run_' . $run->id;
-            $stagingStats = Cache::remember($cacheKey, 3, function () use ($run) {
+            $stagingStats = Cache::remember($cacheKey, 30, function () use ($run) {
                 $totalRows = (int) DB::table('from_jnts_2_staging')
                     ->where('bulk_run_id', $run->id)
                     ->count();
-                $uniqueWaybills = (int) DB::table('from_jnts_2_staging')
-                    ->where('bulk_run_id', $run->id)
-                    ->distinct('waybill_number')
-                    ->count('waybill_number');
+
+                // Skip expensive COUNT(DISTINCT) sa malalaking staging tables.
+                // Threshold 1M rows — beyond this, query takes >30 seconds at
+                // mag-cause ng thundering herd kapag dami ng concurrent polls.
+                $uniqueWaybills = 0;
+                $uniqueSkipped  = false;
+                if ($totalRows > 0 && $totalRows <= 1_000_000) {
+                    $uniqueWaybills = (int) DB::table('from_jnts_2_staging')
+                        ->where('bulk_run_id', $run->id)
+                        ->distinct('waybill_number')
+                        ->count('waybill_number');
+                } elseif ($totalRows > 1_000_000) {
+                    $uniqueSkipped = true;
+                }
+
                 return [
                     'total_rows'      => $totalRows,
                     'unique_waybills' => $uniqueWaybills,
-                    'duplicates'      => max(0, $totalRows - $uniqueWaybills),
+                    'duplicates'      => $uniqueSkipped ? 0 : max(0, $totalRows - $uniqueWaybills),
                     'enabled'         => true,
+                    'unique_skipped'  => $uniqueSkipped,
                 ];
             });
         }
