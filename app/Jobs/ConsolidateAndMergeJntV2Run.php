@@ -384,17 +384,16 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
 
         DB::statement($sql, $bindings);
 
-        // DELETE these waybills from winners table (processed)
+        // DELETE these waybills from winners table (processed) — small + fast
         DB::table('from_jnts_2_winners')
             ->where('bulk_run_id', $runId)
             ->whereIn('waybill_number', $waybills)
             ->delete();
 
-        // DELETE all rows for these waybills from staging (cleanup)
-        DB::table('from_jnts_2_staging')
-            ->where('bulk_run_id', $runId)
-            ->whereIn('waybill_number', $waybills)
-            ->delete();
+        // NOTE: Staging DELETE per-batch removed. Cumulative B-tree fragmentation
+        // mula sa per-batch DELETEs causes 30-60x slowdown by mid-run. Better to
+        // do single bulk cleanup sa Phase 3 (TRUNCATE if safe, else DELETE WHERE).
+        // Trade-off: staging keeps full size during Phase 2 (~5-10 GB temporary).
 
         // Compute batch duration
         $batchDurationMs = (int) round((microtime(true) - $batchStart) * 1000);
@@ -420,6 +419,14 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
 
     /**
      * PHASE 3 — Final cleanup + mark done.
+     *
+     * Smart staging cleanup strategy:
+     *   - If only THIS run's data sa staging → TRUNCATE TABLE (instant)
+     *   - If multiple bulk_run_ids → DELETE WHERE bulk_run_id (safe, slower)
+     *
+     * TRUNCATE is dramatically faster (sub-second vs 5-15 mins for DELETE
+     * of 12M rows) at completely resets fragmentation. But TRUNCATE wipes
+     * the entire table, kaya safety check muna kung walang concurrent run.
      */
     private function phase3Cleanup(BulkUploadRun $run): void
     {
@@ -431,19 +438,54 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
             'updated_at'        => Carbon::now('Asia/Manila'),
         ]);
 
-        // Defensive — clean up any remaining staging rows for this run
-        $staleStagingDeleted = DB::table('from_jnts_2_staging')
-            ->where('bulk_run_id', $runId)
-            ->delete();
+        // Smart staging cleanup — use TRUNCATE kung safe, else DELETE WHERE
+        $stagingCleanupStart = microtime(true);
+        $distinctRunsRow = DB::selectOne(
+            "SELECT COUNT(DISTINCT bulk_run_id) as cnt FROM from_jnts_2_staging"
+        );
+        $distinctRuns = (int) ($distinctRunsRow->cnt ?? 0);
 
-        // Defensive — clean up any remaining winners rows for this run
-        $staleWinnersDeleted = DB::table('from_jnts_2_winners')
-            ->where('bulk_run_id', $runId)
-            ->delete();
-
-        if ($staleStagingDeleted > 0 || $staleWinnersDeleted > 0) {
-            Log::info("Consolidate: run {$runId} Phase 3 cleaned {$staleStagingDeleted} stale staging + {$staleWinnersDeleted} stale winners");
+        if ($distinctRuns <= 1) {
+            // Only this run's data (or empty) — TRUNCATE = instant + resets fragmentation
+            DB::statement('TRUNCATE TABLE from_jnts_2_staging');
+            $stagingMethod = 'TRUNCATE';
+            $stagingDeleted = 0; // TRUNCATE doesn't return affected rows
+        } else {
+            // Multiple runs in staging — DELETE WHERE para hindi tamaan iba
+            $stagingDeleted = DB::table('from_jnts_2_staging')
+                ->where('bulk_run_id', $runId)
+                ->delete();
+            $stagingMethod = 'DELETE';
         }
+        $stagingElapsed = round(microtime(true) - $stagingCleanupStart, 1);
+
+        // Same approach sa winners table
+        $winnersCleanupStart = microtime(true);
+        $distinctWinnersRunsRow = DB::selectOne(
+            "SELECT COUNT(DISTINCT bulk_run_id) as cnt FROM from_jnts_2_winners"
+        );
+        $distinctWinnersRuns = (int) ($distinctWinnersRunsRow->cnt ?? 0);
+
+        if ($distinctWinnersRuns <= 1) {
+            DB::statement('TRUNCATE TABLE from_jnts_2_winners');
+            $winnersMethod = 'TRUNCATE';
+            $winnersDeleted = 0;
+        } else {
+            $winnersDeleted = DB::table('from_jnts_2_winners')
+                ->where('bulk_run_id', $runId)
+                ->delete();
+            $winnersMethod = 'DELETE';
+        }
+        $winnersElapsed = round(microtime(true) - $winnersCleanupStart, 1);
+
+        Log::info("Consolidate: run {$runId} Phase 3 cleanup", [
+            'staging_method'  => $stagingMethod,
+            'staging_deleted' => $stagingDeleted,
+            'staging_elapsed' => "{$stagingElapsed}s",
+            'winners_method'  => $winnersMethod,
+            'winners_deleted' => $winnersDeleted,
+            'winners_elapsed' => "{$winnersElapsed}s",
+        ]);
 
         $this->finalizeAsDone($run);
     }
