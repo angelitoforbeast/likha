@@ -61,6 +61,7 @@
               'failed' => 'bad',
               'cancelled' => 'bad',
               'processing' => 'info',
+              'consolidating' => 'info',
               default => 'info',
             };
           @endphp
@@ -268,7 +269,9 @@
         'skipped': 'warn',
         'cancelled': 'warn',
         'precheck_failed': 'bad',
+        'precheck_duplicate': 'warn',
         'processing': 'info',
+        'consolidating': 'info',
         'queued': 'info',
         'partial': 'warn',
       })[status] || 'info';

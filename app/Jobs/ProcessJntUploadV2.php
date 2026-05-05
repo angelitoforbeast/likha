@@ -125,6 +125,10 @@ class ProcessJntUploadV2 implements ShouldQueue
             $log->status         = 'done';
             $log->finished_at    = Carbon::now('Asia/Manila');
             $log->save();
+
+            // Check if this was the LAST file to finish in the run.
+            // If yes, dispatch the consolidation job.
+            $this->maybeDispatchConsolidate($log->bulk_run_id);
         } catch (\Throwable $e) {
             $log->status        = 'failed';
             $log->error_message = mb_substr($e->getMessage(), 0, 500);
@@ -151,9 +155,48 @@ class ProcessJntUploadV2 implements ShouldQueue
                 $log->finished_at   = Carbon::now('Asia/Manila');
                 $log->save();
             }
+
+            // Even sa permanent failure, ang consolidate job ay dapat tumakbo
+            // kasi baka ito yung huling file ng batch — gusto pa rin natin
+            // ma-merge yung successful files na natapos.
+            if ($log && $log->bulk_run_id) {
+                $this->maybeDispatchConsolidate($log->bulk_run_id);
+            }
         } catch (\Throwable $e) {
             \Log::error('JntV2 failed() handler error: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Check kung huling file ng batch ito at dispatch consolidate job kung yes.
+     * Idempotent — safe to call multiple times sa same run; consolidate job
+     * itself will guard with atomic compare-and-set sa status.
+     */
+    private function maybeDispatchConsolidate(?int $runId): void
+    {
+        if (!$runId) return;
+
+        // Count files na hindi pa terminal (still queued/processing)
+        $stillRunning = UploadLogV2::where('bulk_run_id', $runId)
+            ->whereIn('status', ['queued', 'processing'])
+            ->where('id', '!=', $this->logId) // exclude self (just finished)
+            ->count();
+
+        if ($stillRunning > 0) {
+            return; // may iba pa file na in-flight, skip dispatch
+        }
+
+        // Atomic guard: only dispatch if run is still in 'processing' state
+        $run = BulkUploadRun::find($runId);
+        if (!$run) return;
+
+        if (!in_array($run->status, ['processing', 'queued'], true)) {
+            // Already consolidating, done, or in some terminal state
+            return;
+        }
+
+        // Dispatch consolidate job
+        \App\Jobs\ConsolidateAndMergeJntV2Run::dispatch($runId);
     }
 
     private function processZip(UploadLogV2 $log, string $disk): void
@@ -412,196 +455,68 @@ class ProcessJntUploadV2 implements ShouldQueue
         ];
     }
 
+    /**
+     * Bulk insert chunk into the staging table (from_jnts_2_staging).
+     *
+     * Per-file workers no longer write directly to from_jnts_2 — they just
+     * dump parsed rows into staging. The ConsolidateAndMergeJntV2Run job
+     * (Stage 3) is responsible for the actual merge to from_jnts_2 with
+     * skip rule + status_logs maintenance.
+     *
+     * Yung skippedCt counter ngayon ay symbolic — true per-file skip count
+     * mahihirapan natin ma-determine without the from_jnts_2 lookup. Pero
+     * all rows are tracked sa staging anyway, so consolidation step yung
+     * mag-detect ng terminal-state skips.
+     */
     private function persistChunk(array $rows, UploadLogV2 $log): void
     {
         if (empty($rows)) return;
 
+        // Dedupe within chunk (last-wins by waybill — matches old behavior)
         $byWb = [];
         foreach ($rows as $r) {
             $byWb[$r['waybill_number']] = $r;
         }
         $rows = array_values($byWb);
 
-        $waybills = array_column($rows, 'waybill_number');
+        // Build staging rows
+        $now = Carbon::now('Asia/Manila')->format('Y-m-d H:i:s');
+        $stagingRows = array_map(function ($r) use ($now) {
+            return [
+                'bulk_run_id'        => $this->bulkRunId(),
+                'upload_log_id'      => $this->logId,
+                'submission_time'    => $r['submission_time'],
+                'waybill_number'     => $r['waybill_number'],
+                'receiver'           => $r['receiver'],
+                'receiver_cellphone' => $r['receiver_cellphone'],
+                'sender'             => $r['sender'],
+                'item_name'          => $r['item_name'],
+                'cod'                => $r['cod'],
+                'remarks'            => $r['remarks'],
+                'status'             => $r['status'],
+                'signingtime'        => $r['signingtime'],
+                'province'           => $r['province'],
+                'city'               => $r['city'],
+                'barangay'           => $r['barangay'],
+                'total_shipping_cost'=> $r['total_shipping_cost'],
+                'rts_reason'         => $r['rts_reason'],
+                'parsed_at'          => $now,
+            ];
+        }, $rows);
 
-        $existing = FromJnt2::query()
-            ->select(['waybill_number','status','status_logs','rts_reason'])
-            ->whereIn('waybill_number', $waybills)
-            ->get()
-            ->keyBy('waybill_number');
+        // Bulk insert to staging — fast, no upsert checks, no DB locks on from_jnts_2
+        DB::table('from_jnts_2_staging')->insert($stagingRows);
+        $this->inserted += count($stagingRows);
+    }
 
-        $toInsert   = [];
-        $toUpdate   = [];
-        $statusInfo = [];
-
-        $batchAtStr    = $this->batchAt ?: Carbon::now('Asia/Manila')->format('Y-m-d H:i:s');
-        $batchAtCarbon = Carbon::parse($batchAtStr, 'Asia/Manila');
-
-        foreach ($rows as $r) {
-            $wb = $r['waybill_number'];
-
-            if (isset($existing[$wb])) {
-                $oldStatusRaw = (string) ($existing[$wb]->status ?: '');
-                $cur = strtolower($oldStatusRaw);
-
-                if (in_array($cur, ['delivered', 'returned'], true)) {
-                    $this->skippedCt++;
-                    continue;
-                }
-
-                $newStatusRaw = (string) $r['status'];
-
-                $toUpdate[$wb] = [
-                    'status'      => $newStatusRaw,
-                    'signingtime' => $r['signingtime'],
-                    'updated_at'  => Carbon::now('Asia/Manila')->format('Y-m-d H:i:s'),
-                ];
-
-                $newRts = trim((string)($r['rts_reason'] ?? ''));
-                if ($newRts !== '') {
-                    $toUpdate[$wb]['rts_reason'] = $newRts;
-                }
-
-                $statusInfo[$wb] = ['from' => $oldStatusRaw, 'to' => $newStatusRaw];
-            } else {
-                $initialLogs = [[
-                    'batch_at'      => $batchAtCarbon->format('Y-m-d H:i:s'),
-                    'upload_log_id' => $this->logId,
-                    'user_id'       => $this->userId,
-                    'from'          => null,
-                    'to'            => (string) $r['status'],
-                ]];
-
-                $toInsert[] = [
-                    'waybill_number'     => $r['waybill_number'],
-                    'sender'             => $r['sender'],
-                    'cod'                => $r['cod'],
-                    'status'             => $r['status'],
-                    'item_name'          => $r['item_name'],
-                    'submission_time'    => $r['submission_time'],
-                    'receiver'           => $r['receiver'],
-                    'receiver_cellphone' => $r['receiver_cellphone'],
-                    'signingtime'        => $r['signingtime'],
-                    'remarks'            => $r['remarks'],
-                    'province'           => $r['province'],
-                    'city'               => $r['city'],
-                    'barangay'           => $r['barangay'],
-                    'total_shipping_cost'=> $r['total_shipping_cost'],
-                    'rts_reason'         => $r['rts_reason'],
-                    'status_logs'        => json_encode($initialLogs),
-                    'last_uploaded_by_user_id' => $this->userId,
-                    'last_upload_log_id' => $this->logId,
-                    'created_at'         => $r['created_at'],
-                    'updated_at'         => $r['updated_at'],
-                ];
-            }
-        }
-
-        DB::transaction(function () use ($toInsert, $toUpdate, $statusInfo, $batchAtCarbon) {
-            if (!empty($toInsert)) {
-                FromJnt2::insert($toInsert);
-                $this->inserted += count($toInsert);
-            }
-
-            if (!empty($toUpdate)) {
-                $keys = array_keys($toUpdate);
-
-                foreach (array_chunk($keys, self::UPDATE_SUBCHUNK) as $chunkKeys) {
-                    $statusCase = "CASE waybill_number\n";
-                    $timeCase   = "CASE waybill_number\n";
-                    $rtsCase    = "CASE waybill_number\n";
-                    $hasRts     = false;
-
-                    foreach ($chunkKeys as $wb) {
-                        $s = str_replace("'", "''", (string) $toUpdate[$wb]['status']);
-                        $t = $toUpdate[$wb]['signingtime'];
-                        $tSql  = $t ? ("'" . str_replace("'", "''", $t) . "'") : "NULL";
-                        $wbSql = "'" . str_replace("'", "''", $wb) . "'";
-
-                        $statusCase .= "WHEN {$wbSql} THEN '{$s}'\n";
-                        $timeCase   .= "WHEN {$wbSql} THEN {$tSql}\n";
-
-                        if (isset($toUpdate[$wb]['rts_reason'])) {
-                            $hasRts = true;
-                            $rr = str_replace("'", "''", (string) $toUpdate[$wb]['rts_reason']);
-                            $rtsCase .= "WHEN {$wbSql} THEN '{$rr}'\n";
-                        }
-                    }
-
-                    $statusCase .= "ELSE status END";
-                    $timeCase   .= "ELSE signingtime END";
-                    $rtsCase    .= "ELSE rts_reason END";
-
-                    $inList = implode(',', array_map(function ($wb) {
-                        return "'" . str_replace("'", "''", $wb) . "'";
-                    }, $chunkKeys));
-
-                    $userIdSql = $this->userId !== null ? (int) $this->userId : 'NULL';
-                    $logIdSql  = (int) $this->logId;
-
-                    $setParts = [
-                        "status = {$statusCase}",
-                        "signingtime = {$timeCase}",
-                        "updated_at = NOW()",
-                        "last_uploaded_by_user_id = {$userIdSql}",
-                        "last_upload_log_id = {$logIdSql}",
-                    ];
-
-                    if ($hasRts) {
-                        $setParts[] = "rts_reason = {$rtsCase}";
-                    }
-
-                    $sql = "
-                        UPDATE " . DB::getTablePrefix() . (new FromJnt2)->getTable() . "
-                        SET " . implode(",\n                            ", $setParts) . "
-                        WHERE waybill_number IN ({$inList})
-                          AND LOWER(status) NOT IN ('delivered','returned')
-                    ";
-
-                    DB::statement($sql);
-                    $this->updatedCt += count($chunkKeys);
-                }
-            }
-        });
-
-        // === STATUS_LOGS UPDATES — OUTSIDE transaction ===
-        // Moved out of the DB::transaction() above para hindi deadlock-prone.
-        // Sa V1 same pattern — row-by-row save() but walang enclosing transaction.
-        // Concurrent workers updating different waybills hindi mag-fight sa locks.
-        if (!empty($statusInfo)) {
-            $wbKeys = array_keys($statusInfo);
-
-            $rowsForLogs = FromJnt2::whereIn('waybill_number', $wbKeys)
-                ->select(['id', 'waybill_number', 'status_logs'])
-                ->get();
-
-            foreach ($rowsForLogs as $row) {
-                $wb = $row->waybill_number;
-                if (!isset($statusInfo[$wb])) continue;
-
-                $oldStatus = $statusInfo[$wb]['from'];
-                $newStatus = $statusInfo[$wb]['to'];
-
-                $logs = $row->status_logs ?: [];
-                if (!is_array($logs)) {
-                    $decoded = json_decode($logs, true);
-                    $logs = is_array($decoded) ? $decoded : [];
-                }
-
-                $newLogs = $this->appendStatusLog($logs, $oldStatus, $newStatus, $batchAtCarbon);
-
-                if ($newLogs !== $logs) {
-                    $row->status_logs = $newLogs;
-                    try {
-                        $row->save();
-                    } catch (\Throwable $e) {
-                        // Don't let a single status_logs save fail the whole chunk.
-                        // Worst case: one row's history is incomplete.
-                        \Log::warning('JntV2: status_logs save failed for waybill ' . $wb . ': ' . $e->getMessage());
-                    }
-                }
-            }
-        }
+    /** Cached bulk_run_id lookup. */
+    private ?int $cachedBulkRunId = null;
+    private function bulkRunId(): ?int
+    {
+        if ($this->cachedBulkRunId !== null) return $this->cachedBulkRunId;
+        $log = UploadLogV2::find($this->logId);
+        $this->cachedBulkRunId = $log ? (int) $log->bulk_run_id : null;
+        return $this->cachedBulkRunId;
     }
 
     private function appendStatusLog($currentLogs, ?string $oldStatusRaw, ?string $newStatusRaw, Carbon $batchAt): array

@@ -462,17 +462,14 @@ class JntUploadV2Controller extends Controller
             'total_errors'    => (int) $files->sum('error_rows'),
         ];
 
-        // If processing and all files reached terminal state, finalize
-        if ($run->status === 'processing') {
-            $terminal = $files->whereIn('status', ['done', 'failed', 'skipped'])->count();
-            if ($terminal === $files->count() && $files->count() > 0) {
-                $allDone = $files->whereIn('status', ['done', 'skipped'])->count() === $files->count();
-                $run->status = $allDone
-                    ? ($totals['files_failed'] > 0 ? 'partial' : 'done')
-                    : ($totals['files_done'] > 0 ? 'partial' : 'failed');
-                $run->finished_at = Carbon::now('Asia/Manila');
-            }
-        }
+        // Note: Do NOT auto-finalize 'processing' runs here anymore.
+        // The ConsolidateAndMergeJntV2Run job handles finalization after
+        // staging rows are merged to from_jnts_2. Status transitions:
+        //   processing → consolidating → done/partial/failed
+        //
+        // If all files are terminal but run is still 'processing' (consolidate
+        // hasn't been dispatched yet), leave as-is so the trigger from
+        // ProcessJntUploadV2::maybeDispatchConsolidate can fire.
 
         $run->fill($totals);
         $run->save();

@@ -758,6 +758,7 @@
         'partial': 'warn',
         'failed': 'bad',
         'processing': 'info',
+        'consolidating': 'info',
       }[r.status] || 'info');
 
       sFilesDone.textContent = r.files_done;
