@@ -45,6 +45,7 @@
           <a href="/conversation/tracker" class="ct-btn-ghost">← Back to Import</a>
           <a href="/conversation/tracker/view" class="ct-btn-ghost">📋 View Records</a>
           <a href="/conversation/tracker/flows" class="ct-btn-ghost">🎯 Flows</a>
+          <a href="/conversation/tracker/compare" class="ct-btn-ghost">📊 Compare</a>
         </div>
       </div>
 

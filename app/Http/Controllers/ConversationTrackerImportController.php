@@ -349,8 +349,27 @@ class ConversationTrackerImportController extends Controller
                 array_keys($s['flow_ordered'])
             ));
         }
-        // Sort: LOOP first, then MAIN, then SEQUENCE, then alphabetical
-        usort($allFlows, function ($a, $b) {
+        // Sort: picked variants FIRST (in user's picking order), then the rest
+        // (LOOP → MAIN → SEQUENCE → alphabetical).
+        $variantPositions = [];
+        foreach ($variants as $idx => $v) {
+            $variantPositions[strtoupper(trim($v))] = $idx;
+        }
+
+        usort($allFlows, function ($a, $b) use ($variantPositions) {
+            $aU = strtoupper(trim($a));
+            $bU = strtoupper(trim($b));
+            $aIsPicked = isset($variantPositions[$aU]);
+            $bIsPicked = isset($variantPositions[$bU]);
+
+            // Picked variants come first
+            if ($aIsPicked && !$bIsPicked) return -1;
+            if (!$aIsPicked && $bIsPicked) return 1;
+            if ($aIsPicked && $bIsPicked) {
+                return $variantPositions[$aU] <=> $variantPositions[$bU];
+            }
+
+            // Both unpicked — apply standard category sort
             $weight = function (string $f): array {
                 if (preg_match('/^LOOP\s*0*(\d+)$/i', $f, $m))     return [0, (int) $m[1], $f];
                 if (preg_match('/^MAIN\s*FLOW/i', $f))                return [1, 0, $f];

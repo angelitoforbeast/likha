@@ -22,10 +22,11 @@
     .compare-section { background:#fff; border:1px solid #e5e7eb; border-radius:12px; margin-bottom:14px; overflow:hidden; }
     .compare-section-header { background:#f8fafc; padding:8px 14px; border-bottom:1px solid #e2e8f0; font-weight:600; font-size:13px; color:#0f172a; display:flex; gap:8px; align-items:center; }
     .compare-section table { width:100%; font-size:13px; border-collapse:collapse; }
-    .compare-section th, .compare-section td { padding:8px 12px; border-bottom:1px solid #f1f5f9; text-align:left; }
-    .compare-section th { background:#f8fafc; font-size:11px; color:#475569; text-transform:uppercase; letter-spacing:0.05em; }
-    .compare-section td.num { text-align:right; font-variant-numeric:tabular-nums; }
-    .compare-section td.metric-label { color:#475569; font-weight:500; min-width:140px; }
+    .compare-section th, .compare-section td { padding:8px 12px; border-bottom:1px solid #f1f5f9; }
+    .compare-section th { background:#f8fafc; font-size:11px; color:#475569; text-transform:uppercase; letter-spacing:0.05em; text-align:center; }
+    .compare-section th:first-child, .compare-section td:first-child { text-align:left; }
+    .compare-section td.num { text-align:center; font-variant-numeric:tabular-nums; }
+    .compare-section td.metric-label { color:#475569; font-weight:500; min-width:140px; text-align:left; }
     .compare-section .winner { background:#f0fdf4; color:#15803d; font-weight:700; }
     .compare-section .empty-cell { color:#94a3b8; font-style:italic; }
 
