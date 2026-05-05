@@ -196,6 +196,9 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
         $runId    = $this->bulkRunId;
         $now      = Carbon::now('Asia/Manila')->format('Y-m-d H:i:s');
 
+        // Track batch start time for duration calculation
+        $batchStart = microtime(true);
+
         // Pre-count existing waybills sa from_jnts_2 para matrack nang accurate
         // ang inserted vs updated counters (UPSERT row counts ay malabo).
         // Lightweight query — uses unique index.
@@ -315,18 +318,24 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
             ->whereIn('waybill_number', $waybills)
             ->delete();
 
-        // Update progress
+        // Compute batch duration (ms)
+        $batchDurationMs = (int) round((microtime(true) - $batchStart) * 1000);
+
+        // Update progress + batch tracking
         DB::table('bulk_upload_runs')
             ->where('id', $this->bulkRunId)
             ->update([
-                'consolidate_processed' => DB::raw('consolidate_processed + ' . $count),
-                'total_inserted'        => DB::raw('total_inserted + ' . $newCount),
-                'total_updated'         => DB::raw('total_updated + ' . $existingCount),
-                'message'               => sprintf(
-                    'Consolidating... %s waybills processed (UPSERT mode)',
-                    number_format(($run->consolidate_processed ?? 0) + $count)
+                'consolidate_processed'  => DB::raw('consolidate_processed + ' . $count),
+                'total_inserted'         => DB::raw('total_inserted + ' . $newCount),
+                'total_updated'          => DB::raw('total_updated + ' . $existingCount),
+                'last_batch_at'          => Carbon::now('Asia/Manila'),
+                'last_batch_duration_ms' => $batchDurationMs,
+                'message'                => sprintf(
+                    'Consolidating... %s waybills processed (last batch: %ss)',
+                    number_format(($run->consolidate_processed ?? 0) + $count),
+                    number_format($batchDurationMs / 1000, 1)
                 ),
-                'updated_at'            => Carbon::now('Asia/Manila'),
+                'updated_at'             => Carbon::now('Asia/Manila'),
             ]);
     }
 

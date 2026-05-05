@@ -26,6 +26,8 @@ class BulkUploadRun extends Model
         'consolidate_total',
         'consolidate_processed',
         'consolidate_started_at',
+        'last_batch_at',
+        'last_batch_duration_ms',
         'paused_at',
         'cancel_requested_at',
         'batch_at',
@@ -41,6 +43,7 @@ class BulkUploadRun extends Model
         'paused_at'               => 'datetime',
         'cancel_requested_at'     => 'datetime',
         'consolidate_started_at'  => 'datetime',
+        'last_batch_at'           => 'datetime',
     ];
 
     public function files(): HasMany

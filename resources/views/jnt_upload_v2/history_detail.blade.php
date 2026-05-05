@@ -158,7 +158,18 @@
               <div>🎯 ETA: <strong id="mergeEta" class="text-slate-800">—</strong></div>
               <div>⚡ Rate: <strong id="mergeRate" class="text-slate-800">—</strong></div>
             </div>
-            <div id="mergeMessage" class="text-[11px] text-slate-600 mt-1.5 italic">—</div>
+
+            {{-- Per-batch tracking — useful for stuck/slow detection --}}
+            <div class="mt-3 pt-2 border-t border-blue-100">
+              <div class="text-[10.5px] text-slate-500 uppercase font-semibold mb-1.5">📊 Batch tracking</div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px] text-slate-600">
+                <div>Last batch: <strong id="lastBatchAt" class="text-slate-800">—</strong></div>
+                <div>Last duration: <strong id="lastBatchDuration" class="text-slate-800">—</strong></div>
+                <div>Current batch: <strong id="currentBatchElapsed" class="text-slate-800">—</strong></div>
+              </div>
+            </div>
+
+            <div id="mergeMessage" class="text-[11px] text-slate-600 mt-2 italic">—</div>
           </div>
 
           {{-- Manual control buttons --}}
@@ -496,6 +507,71 @@
             setText('mergeEta', 'computing…');
           } else {
             setText('mergeEta', '—');
+          }
+
+          // ===== Batch tracking =====
+          // 1) Last batch finish time + relative
+          const lastBatchAtEl     = document.getElementById('lastBatchAt');
+          const lastBatchDurEl    = document.getElementById('lastBatchDuration');
+          const currentBatchEl    = document.getElementById('currentBatchElapsed');
+
+          if (lastBatchAtEl) {
+            if (r.last_batch_at) {
+              const secsAgo = r.seconds_since_last_batch;
+              const timeStr = fmtTime(r.last_batch_at);
+              const agoStr = (secsAgo !== null && secsAgo !== undefined)
+                ? ` (${fmtDuration(secsAgo)} ago)`
+                : '';
+              lastBatchAtEl.textContent = timeStr + agoStr;
+              lastBatchAtEl.className = 'text-slate-800';
+            } else {
+              lastBatchAtEl.textContent = 'never';
+              lastBatchAtEl.className = 'text-slate-400';
+            }
+          }
+
+          if (lastBatchDurEl) {
+            if (r.last_batch_duration_ms !== null && r.last_batch_duration_ms !== undefined) {
+              const dur = r.last_batch_duration_ms / 1000;
+              if (dur < 1) {
+                lastBatchDurEl.textContent = Math.round(r.last_batch_duration_ms) + 'ms';
+              } else {
+                lastBatchDurEl.textContent = dur.toFixed(1) + 's';
+              }
+              lastBatchDurEl.className = 'text-slate-800';
+            } else {
+              lastBatchDurEl.textContent = '—';
+              lastBatchDurEl.className = 'text-slate-400';
+            }
+          }
+
+          if (currentBatchEl) {
+            // Edge cases first
+            if (r.paused_at) {
+              currentBatchEl.textContent = '— (paused)';
+              currentBatchEl.className = 'text-amber-700';
+            } else if (r.cancel_requested_at) {
+              currentBatchEl.textContent = '— (cancelling)';
+              currentBatchEl.className = 'text-red-700';
+            } else if (r.status !== 'consolidating') {
+              currentBatchEl.textContent = '—';
+              currentBatchEl.className = 'text-slate-400';
+            } else if (r.seconds_since_last_batch !== null && r.seconds_since_last_batch !== undefined) {
+              const secs = r.seconds_since_last_batch;
+              currentBatchEl.textContent = fmtDuration(secs) + ' running';
+              // Highlight kung stuck (>60 sec)
+              if (secs > 60) {
+                currentBatchEl.className = 'text-red-700 font-bold';
+              } else if (secs > 30) {
+                currentBatchEl.className = 'text-amber-700';
+              } else {
+                currentBatchEl.className = 'text-slate-800';
+              }
+            } else {
+              // Just started, walang last batch pa
+              currentBatchEl.textContent = 'starting…';
+              currentBatchEl.className = 'text-slate-400';
+            }
           }
 
           const mmsg = document.getElementById('mergeMessage');
