@@ -525,20 +525,32 @@ class JntUploadV2Controller extends Controller
             ? min(100, round(($consolidateProcessed / $consolidateTotal) * 100, 1))
             : 0;
 
-        // Elapsed + ETA computation (only meaningful during consolidate phase)
+        // Elapsed + ETA computation (only meaningful during consolidate phase).
+        // Force Asia/Manila timezone interpretation kasi yung consolidate_started_at
+        // ay nai-store as local Manila time (legacy quirk ng job timestamps).
+        // Using Unix timestamps avoids any timezone-cast confusion.
         $consolidateElapsedSec = null;
         $consolidateEtaSec     = null;
-        $consolidateRate       = null; // waybills per second
+        $consolidateRate       = null;
         if ($run->consolidate_started_at !== null) {
-            $now = Carbon::now('Asia/Manila');
-            $consolidateElapsedSec = max(0, $now->diffInSeconds($run->consolidate_started_at));
+            $startedStr = $run->consolidate_started_at instanceof \Carbon\CarbonInterface
+                ? $run->consolidate_started_at->format('Y-m-d H:i:s')
+                : (string) $run->consolidate_started_at;
+            try {
+                $startedTs = Carbon::parse($startedStr, 'Asia/Manila')->timestamp;
+                $nowTs     = Carbon::now('Asia/Manila')->timestamp;
+                $consolidateElapsedSec = max(0, $nowTs - $startedTs);
 
-            if ($consolidateProcessed > 0 && $consolidateElapsedSec > 0) {
-                $consolidateRate = round($consolidateProcessed / $consolidateElapsedSec, 2);
-                $remaining = max(0, $consolidateTotal - $consolidateProcessed);
-                if ($consolidateRate > 0 && $remaining > 0) {
-                    $consolidateEtaSec = (int) round($remaining / $consolidateRate);
+                if ($consolidateProcessed > 0 && $consolidateElapsedSec > 0) {
+                    $consolidateRate = round($consolidateProcessed / $consolidateElapsedSec, 2);
+                    $remaining = max(0, $consolidateTotal - $consolidateProcessed);
+                    if ($consolidateRate > 0 && $remaining > 0) {
+                        $consolidateEtaSec = (int) round($remaining / $consolidateRate);
+                    }
                 }
+            } catch (\Throwable $e) {
+                // Defensive — if timestamp parsing fails, leave as null
+                $consolidateElapsedSec = null;
             }
         }
 

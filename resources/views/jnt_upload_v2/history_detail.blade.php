@@ -327,6 +327,28 @@
       return db / dt;
     }
 
+    // Rolling consolidate progress (60s window) — mas tumpak na rate kaysa
+    // cumulative average since start. Per-batch is ~5000 waybills sabay-sabay,
+    // so kailangan bigger window para meaningful yung delta.
+    const MERGE_ROLL_WINDOW_MS = 60000;
+    let mergeSnapshots = [];
+    function pushMergeSnapshot(now, processed) {
+      mergeSnapshots.push({ t: now, p: processed });
+      while (mergeSnapshots.length > 1 && now - mergeSnapshots[0].t > MERGE_ROLL_WINDOW_MS) {
+        mergeSnapshots.shift();
+      }
+    }
+    function rollingMergeRate(now) {
+      if (mergeSnapshots.length < 2) return null;
+      const oldest = mergeSnapshots[0];
+      const newest = mergeSnapshots[mergeSnapshots.length - 1];
+      const dt = (newest.t - oldest.t) / 1000;
+      const dp = newest.p - oldest.p;
+      if (dt <= 0) return null;
+      if (dp < 0) return 0;
+      return dp / dt;  // waybills per second (recent)
+    }
+
     function fmtTime(s) {
       if (!s) return '';
       try {
@@ -433,28 +455,47 @@
           const mb = document.getElementById('mergeBar');
           if (mb) mb.style.width = pct + '%';
 
-          // Elapsed / ETA / Rate
+          // Elapsed (server-computed, since consolidate_started_at)
           const elapsed = r.consolidate_elapsed_sec;
-          const eta     = r.consolidate_eta_sec;
-          const rate    = r.consolidate_rate;
           setText('mergeElapsed', elapsed !== null && elapsed !== undefined ? fmtDuration(elapsed) : '—');
+
+          // Rate + ETA — use ROLLING (60s window) for recent speed,
+          // not cumulative since start. Mas tumpak para sa current pace.
+          const nowMs = Date.now();
+          pushMergeSnapshot(nowMs, processed);
+          const rollRate = rollingMergeRate(nowMs);
+          // Fallback to server cumulative rate kung wala pang rolling data
+          const cumRate = r.consolidate_rate;
+          const effectiveRate = (rollRate !== null && rollRate > 0) ? rollRate
+                              : (cumRate !== null && cumRate !== undefined && cumRate > 0 ? cumRate : null);
+
+          // Rate display
+          if (effectiveRate !== null && effectiveRate > 0) {
+            const ratePerMin = effectiveRate * 60;
+            if (effectiveRate >= 100) {
+              setText('mergeRate', Math.round(effectiveRate).toLocaleString() + ' wb/s');
+            } else if (effectiveRate >= 10) {
+              setText('mergeRate', effectiveRate.toFixed(1) + ' wb/s');
+            } else {
+              setText('mergeRate', Math.round(ratePerMin).toLocaleString() + ' wb/min');
+            }
+          } else {
+            setText('mergeRate', '—');
+          }
+
+          // ETA — based on rolling rate kung available, else cumulative
           if (r.cancel_requested_at) {
             setText('mergeEta', '— (cancelling)');
           } else if (r.paused_at) {
             setText('mergeEta', '— (paused)');
-          } else if (eta !== null && eta !== undefined && eta > 0) {
-            setText('mergeEta', '~' + fmtDuration(eta));
-          } else if (processed > 0 && total === 0) {
-            setText('mergeEta', '—');
+          } else if (effectiveRate !== null && effectiveRate > 0 && total > 0) {
+            const remaining = Math.max(0, total - processed);
+            const etaSec = remaining / effectiveRate;
+            setText('mergeEta', '~' + fmtDuration(etaSec));
           } else if (processed === 0) {
             setText('mergeEta', 'computing…');
           } else {
             setText('mergeEta', '—');
-          }
-          if (rate !== null && rate !== undefined && rate > 0) {
-            setText('mergeRate', rate.toLocaleString() + ' wb/s');
-          } else {
-            setText('mergeRate', '—');
           }
 
           const mmsg = document.getElementById('mergeMessage');
