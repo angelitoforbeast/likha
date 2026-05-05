@@ -406,6 +406,8 @@
       if (/^Unsupported file type/i.test(s)) return ['Unsupported file type'];
       if (/^Read error/i.test(s)) return ['Read error'];
       if (/^HTTP \d+/i.test(s)) return ['Network / HTTP error'];
+      if (/^Already imported/i.test(s)) return ['Duplicate (already imported)'];
+      if (/^Duplicate of run/i.test(s)) return ['Duplicate (already imported)'];
 
       return [s.length > 60 ? s.slice(0, 60) + '…' : s];
     }
@@ -432,12 +434,24 @@
         const innerOk = f.inner_files.filter(i => i.ok).length;
         innerNote = `<div class="text-[10.5px] text-slate-400 mt-0.5">ZIP: ${innerOk}/${f.inner_files.length} inner files OK</div>`;
       }
-      const checked = f.ok ? 'checked' : '';
-      const disabled = f.ok ? '' : 'disabled';
-      const rowClass = f.ok ? '' : 'bad';
-      const statusBadge = f.ok
-        ? '<span class="badge ok">OK</span>'
-        : '<span class="badge bad">FAIL</span>';
+
+      // Duplicate detection — file already imported successfully before
+      const isDuplicate = !!f.duplicate;
+      const checked = (f.ok && !isDuplicate) ? 'checked' : '';
+      const disabled = (f.ok && !isDuplicate) ? '' : 'disabled';
+      let rowClass = '';
+      let statusBadge;
+
+      if (isDuplicate) {
+        rowClass = 'bad'; // reuse warning row style
+        statusBadge = '<span class="badge warn" style="background:#fef3c7;color:#92400e;">DUPLICATE</span>';
+      } else if (f.ok) {
+        statusBadge = '<span class="badge ok">OK</span>';
+      } else {
+        rowClass = 'bad';
+        statusBadge = '<span class="badge bad">FAIL</span>';
+      }
+
       return `
         <div class="file-row ${rowClass}" data-log-id="${f.log_id || ''}">
           <div><input type="checkbox" class="precheckSel" data-id="${f.log_id}" ${checked} ${disabled} /></div>

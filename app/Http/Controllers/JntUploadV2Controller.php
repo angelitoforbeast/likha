@@ -267,7 +267,47 @@ class JntUploadV2Controller extends Controller
                     'status'        => 'queued',
                 ]);
 
-                // Run precheck on this file
+                // Filename-based duplicate detection — kung may existing successful
+                // upload na same filename, mark as duplicate, skip processing.
+                // Simple at fast — uses existing original_name column, no extra storage.
+                $duplicate = UploadLogV2::where('original_name', $original)
+                    ->where('id', '!=', $log->id)
+                    ->where('status', 'done')
+                    ->orderByDesc('id')
+                    ->first(['id', 'bulk_run_id', 'original_name', 'created_at', 'finished_at']);
+
+                if ($duplicate) {
+                    $duplicateMessage = sprintf(
+                        'Already imported on %s in run #%d',
+                        \Carbon\Carbon::parse($duplicate->finished_at ?: $duplicate->created_at)->format('M j, Y g:i A'),
+                        $duplicate->bulk_run_id
+                    );
+
+                    $log->precheck_report = [
+                        'ok'                  => false,
+                        'duplicate'           => true,
+                        'issues'              => ['Duplicate of run #' . $duplicate->bulk_run_id],
+                        'duplicate_of_run_id' => $duplicate->bulk_run_id,
+                        'duplicate_message'   => $duplicateMessage,
+                    ];
+                    $log->status        = 'precheck_duplicate';
+                    $log->error_message = $duplicateMessage;
+                    $log->save();
+
+                    $report[] = [
+                        'log_id'             => $log->id,
+                        'original_name'      => $original,
+                        'size'               => $file->getSize(),
+                        'ok'                 => false,
+                        'duplicate'          => true,
+                        'issues'             => [$duplicateMessage],
+                        'inner_files'        => null,
+                        'detected_headers'   => [],
+                    ];
+                    continue;
+                }
+
+                // Not a duplicate — run normal precheck on this file
                 $check = $this->precheckFile($disk, $path, $ext, $original);
 
                 $log->precheck_report = $check;
@@ -279,6 +319,7 @@ class JntUploadV2Controller extends Controller
                     'original_name'    => $original,
                     'size'             => $file->getSize(),
                     'ok'               => $check['ok'],
+                    'duplicate'        => false,
                     'issues'           => $check['issues'] ?? [],
                     'inner_files'      => $check['inner_files'] ?? null,
                     'detected_headers' => $check['detected_headers'] ?? [],
