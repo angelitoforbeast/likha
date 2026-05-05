@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Models\BulkUploadRun;
-use App\Models\FromJnt2;
 use App\Models\UploadLogV2;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
@@ -15,50 +14,37 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Stage 3 of the batch upload pipeline — per-batch incremental consolidate.
+ * Stage 3 — high-throughput per-batch consolidate using INSERT ... ON DUPLICATE KEY UPDATE.
  *
- * Approach (after the chunk()-with-OFFSET disaster):
- *   1. Get next batch of N unique waybills from staging (cursor-based)
- *   2. Pick winner per waybill in PHP (priority + MAX id)
- *   3. INSERT/UPDATE/SKIP sa from_jnts_2 (with skip rule)
- *   4. DELETE these waybills from staging (na-process na, di na need)
- *   5. Update consolidate_processed counter
- *   6. Check pause/cancel flags — if set, exit gracefully (resumable)
- *   7. Loop until staging empty for this run
+ * Architecture:
+ *   1. Get next batch ng N unique waybills (cursor-based via DISTINCT LIMIT)
+ *   2. SINGLE UPSERT SQL na nag-fetch winners + writes to from_jnts_2
+ *      with skip rule + status_logs append handled all in SQL
+ *   3. DELETE these waybills from staging
+ *   4. Update progress counter
+ *   5. Check pause/cancel — if set, exit gracefully (resumable)
+ *   6. Loop until staging empty
  *
- * Why this approach (vs the broken chunk()):
- *   - Walang complex 3-level nested GROUP BY na re-runs sa bawat chunk
- *   - Staging shrinks visibly — natural progress signal
- *   - Pausable / resumable / cancelable
- *   - Simple winner-picking sa PHP, walang fancy SQL
+ * Why this is much faster than the previous PHP-loop version:
+ *   - 1 SQL per batch instead of 4-5 (SELECT staging, SELECT existing, INSERT, UPDATE, status_logs save loop)
+ *   - No PHP-side row decoding/processing
+ *   - Status_logs handled inline via JSON_ARRAY_APPEND
+ *   - INSERT/UPDATE merged via UNIQUE INDEX + ON DUPLICATE KEY UPDATE
+ *   - Larger batch size (5000 vs 1000) — amortizes per-batch overhead
  *
- * Coordination: only 1 consolidate worker — no parallel races.
- * Idempotent: pwede mag-retry from any point. Yung skip rule sa from_jnts_2
- * handles na yung mga na-merge na waybills.
+ * Required: from_jnts_2 must have UNIQUE INDEX on waybill_number.
  */
 class ConsolidateAndMergeJntV2Run implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $timeout = 7200; // 2 hours per slice — pero job mismo pwede pausable
+    public $timeout = 7200;
     public $tries   = 3;
 
     private int $bulkRunId;
 
-    /**
-     * Per-batch size — how many unique waybills processed per loop iteration.
-     * Smaller = mas frequent progress updates pero more overhead per batch.
-     * Bigger = mas konting trips pero rougher pause granularity.
-     * 1000 ay sweet spot — ~5-10 sec per batch.
-     */
-    const BATCH_WAYBILLS = 1000;
-
-    /**
-     * Update progress UI every N batches (avoid hot updates sa bulk_upload_runs).
-     * 1 = update every batch (most responsive)
-     * 5 = update every 5 batches (less DB writes)
-     */
-    const PROGRESS_UPDATE_EVERY = 1;
+    /** Per-batch size — larger ngayon kasi single SQL per batch. */
+    const BATCH_WAYBILLS = 5000;
 
     public function __construct(int $bulkRunId)
     {
@@ -74,20 +60,17 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
             return;
         }
 
-        // Skip if already in terminal state
         if (in_array($run->status, ['done', 'partial', 'cancelled', 'failed'], true)) {
             Log::info("Consolidate: run {$this->bulkRunId} already terminal ({$run->status})");
             return;
         }
 
-        // Skip if user paused
         if ($run->paused_at !== null) {
             Log::info("Consolidate: run {$this->bulkRunId} is paused — skipping");
             return;
         }
 
-        // Atomic transition para isang job lang ang nag-cclaim ng "consolidating" status
-        // Pero — kung naka-consolidating na (resumed work), OK lang i-continue
+        // Atomic transition processing → consolidating
         if ($run->status !== 'consolidating') {
             $transitioned = BulkUploadRun::where('id', $this->bulkRunId)
                 ->whereIn('status', ['processing', 'queued'])
@@ -104,15 +87,13 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
             $run->refresh();
         }
 
-        // Backfill consolidate_started_at if NULL (e.g., run #91 na nasimulan na bago to dineploy)
         if ($run->consolidate_started_at === null) {
             $run->consolidate_started_at = Carbon::now('Asia/Manila');
             $run->save();
         }
 
         try {
-            // Compute total kung wala pa (one-time, mahal-mahal pero OK kasi
-            // useful para sa progress bar). Skip if already computed.
+            // Compute total kung wala pa
             if ($run->consolidate_total === null) {
                 $total = $this->computeTotalUniqueWaybills();
                 $run->consolidate_total = $total;
@@ -123,7 +104,7 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
 
             $this->processInBatches($run);
 
-            // Final state — kung nakatapos lahat (staging empty for this run)
+            // Final state
             $remaining = DB::table('from_jnts_2_staging')
                 ->where('bulk_run_id', $this->bulkRunId)
                 ->count();
@@ -131,14 +112,12 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
             if ($remaining === 0) {
                 $this->finalizeAsDone($run);
             } else {
-                // May naiwan — pause or cancel ang nangyari
                 $run->refresh();
                 if ($run->cancel_requested_at !== null) {
                     $run->status = 'cancelled';
                     $run->finished_at = Carbon::now('Asia/Manila');
                     $run->message = 'Cancelled by user — ' . number_format($remaining) . ' staging rows remaining';
                     $run->save();
-                    Log::info("Consolidate: run {$this->bulkRunId} cancelled with {$remaining} rows left");
                 } elseif ($run->paused_at !== null) {
                     $run->message = sprintf(
                         'Paused at %s / %s waybills',
@@ -146,7 +125,6 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
                         number_format($run->consolidate_total ?? 0)
                     );
                     $run->save();
-                    Log::info("Consolidate: run {$this->bulkRunId} paused");
                 }
             }
         } catch (\Throwable $e) {
@@ -161,10 +139,6 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
         }
     }
 
-    /**
-     * One-time count para sa progress bar denominator.
-     * Mahal sa malaking staging (1-2 min sa 14M rows) pero need lang isang beses.
-     */
     private function computeTotalUniqueWaybills(): int
     {
         return (int) DB::table('from_jnts_2_staging')
@@ -175,20 +149,11 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
             ->count('waybill_number');
     }
 
-    /**
-     * Main loop — keep grabbing batches of waybills, process them,
-     * delete from staging. Exit when:
-     *   - Staging empty for this run (success)
-     *   - User paused (return gracefully — resumable)
-     *   - User requested cancel (return gracefully — finalize as cancelled)
-     *   - Job timeout reached (Laravel will retry)
-     */
     private function processInBatches(BulkUploadRun $run): void
     {
         $batchCount = 0;
 
         while (true) {
-            // Check pause/cancel flags fresh every batch
             $run->refresh();
             if ($run->paused_at !== null) {
                 Log::info("Consolidate: run {$this->bulkRunId} pause requested — exiting at batch {$batchCount}");
@@ -199,7 +164,6 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
                 return;
             }
 
-            // Get next batch of distinct waybills
             $waybills = DB::table('from_jnts_2_staging')
                 ->where('bulk_run_id', $this->bulkRunId)
                 ->whereNotNull('waybill_number')
@@ -212,295 +176,160 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
                 ->all();
 
             if (empty($waybills)) {
-                // Tapos na — staging empty for this run
                 return;
             }
 
-            $this->processBatch($run, $waybills);
-
+            $this->processBatchUpsert($run, $waybills);
             $batchCount++;
-            if ($batchCount % self::PROGRESS_UPDATE_EVERY === 0) {
-                // Already updated counter sa loob ng processBatch
-                // pero pwede ko rin ilipat dito kung mas mabilis yung processing
-            }
         }
     }
 
     /**
-     * Process a batch of N unique waybills:
-     *   1. SELECT all rows from staging for these waybills (multiple per wb)
-     *   2. Pick winner per waybill in PHP (priority + MAX id)
-     *   3. SELECT existing rows from from_jnts_2 for these waybills
-     *   4. Categorize: insert / update / skip (terminal status)
-     *   5. INSERT new + UPDATE existing in from_jnts_2
-     *   6. DELETE these waybills from staging
-     *   7. Append status_logs (outside transaction)
-     *   8. Increment progress counter
+     * Batch UPSERT — single SQL na nag-INSERT new + UPDATE existing
+     * (with skip rule for terminal status) + appends sa status_logs.
+     *
+     * Required schema: UNIQUE INDEX sa from_jnts_2.waybill_number.
      */
-    private function processBatch(BulkUploadRun $run, array $waybills): void
+    private function processBatchUpsert(BulkUploadRun $run, array $waybills): void
     {
-        $count = count($waybills);
+        $count    = count($waybills);
+        $runId    = $this->bulkRunId;
+        $now      = Carbon::now('Asia/Manila')->format('Y-m-d H:i:s');
 
-        // Step 1 — get all staging rows for these waybills
-        $stagingRows = DB::table('from_jnts_2_staging')
+        // Pre-count existing waybills sa from_jnts_2 para matrack nang accurate
+        // ang inserted vs updated counters (UPSERT row counts ay malabo).
+        // Lightweight query — uses unique index.
+        $existingCount = (int) DB::table('from_jnts_2')
+            ->whereIn('waybill_number', $waybills)
+            ->count();
+        $newCount = $count - $existingCount;
+
+        // Build placeholder string for IN clause
+        $placeholders = implode(',', array_fill(0, $count, '?'));
+
+        // Bindings:
+        //   2x batch_at literal for status_logs (insert + update branches)
+        //   2x runId for status_logs JSON_OBJECT (insert + update branches)
+        //   2x runId for the WHERE bulk_run_id clauses
+        //   2x waybills array for the IN clauses
+        //
+        // SQL has placeholders in this order:
+        //   1. JSON_ARRAY for new INSERT status_logs: NOW(), ?bulk_run_id
+        //   2. inner priority WHERE bulk_run_id = ?, waybill_number IN (?...)
+        //   3. outer winners WHERE bulk_run_id = ?, waybill_number IN (?...)
+        //   4. ON DUPLICATE KEY status_logs JSON_OBJECT: ?bulk_run_id (for "from old" update branch)
+        $bindings = array_merge(
+            [$runId],            // 1. JSON_OBJECT bulk_run_id sa SELECT (new inserts)
+            [$runId],            // 2. inner priorities WHERE bulk_run_id
+            $waybills,           // 2. inner priorities IN (waybills)
+            [$runId],            // 3. outer winners WHERE bulk_run_id
+            $waybills,           // 3. outer winners IN (waybills)
+            [$runId]             // 4. status_logs ON DUPLICATE KEY (update branch)
+        );
+
+        $sql = "
+            INSERT INTO from_jnts_2 (
+                waybill_number, status, signingtime, sender, cod, item_name,
+                submission_time, receiver, receiver_cellphone, remarks,
+                province, city, barangay, total_shipping_cost, rts_reason,
+                status_logs, created_at, updated_at
+            )
+            SELECT
+                s.waybill_number, s.status, s.signingtime, s.sender, s.cod, s.item_name,
+                s.submission_time, s.receiver, s.receiver_cellphone, s.remarks,
+                s.province, s.city, s.barangay, s.total_shipping_cost, s.rts_reason,
+                JSON_ARRAY(JSON_OBJECT(
+                    'batch_at', NOW(),
+                    'bulk_run_id', ?,
+                    'from', NULL,
+                    'to', s.status
+                )),
+                NOW(), NOW()
+            FROM from_jnts_2_staging s
+            INNER JOIN (
+                SELECT inner_s.waybill_number, MAX(inner_s.id) AS winner_id
+                FROM from_jnts_2_staging inner_s
+                INNER JOIN (
+                    SELECT waybill_number,
+                        MIN(CASE LOWER(TRIM(COALESCE(status, '')))
+                            WHEN 'returned' THEN 1
+                            WHEN 'delivered' THEN 2
+                            ELSE 3
+                        END) AS best_priority
+                    FROM from_jnts_2_staging
+                    WHERE bulk_run_id = ?
+                      AND waybill_number IN ({$placeholders})
+                    GROUP BY waybill_number
+                ) priorities
+                  ON inner_s.waybill_number = priorities.waybill_number
+                  AND CASE LOWER(TRIM(COALESCE(inner_s.status, '')))
+                        WHEN 'returned' THEN 1
+                        WHEN 'delivered' THEN 2
+                        ELSE 3
+                      END = priorities.best_priority
+                WHERE inner_s.bulk_run_id = ?
+                  AND inner_s.waybill_number IN ({$placeholders})
+                GROUP BY inner_s.waybill_number
+            ) winners ON s.id = winners.winner_id
+            ON DUPLICATE KEY UPDATE
+                status = CASE
+                    WHEN LOWER(from_jnts_2.status) IN ('delivered', 'returned')
+                    THEN from_jnts_2.status
+                    ELSE VALUES(status)
+                END,
+                signingtime = CASE
+                    WHEN LOWER(from_jnts_2.status) IN ('delivered', 'returned')
+                    THEN from_jnts_2.signingtime
+                    ELSE VALUES(signingtime)
+                END,
+                rts_reason = CASE
+                    WHEN LOWER(from_jnts_2.status) IN ('delivered', 'returned')
+                    THEN from_jnts_2.rts_reason
+                    ELSE COALESCE(VALUES(rts_reason), from_jnts_2.rts_reason)
+                END,
+                status_logs = CASE
+                    WHEN LOWER(from_jnts_2.status) IN ('delivered', 'returned')
+                    THEN from_jnts_2.status_logs
+                    WHEN from_jnts_2.status = VALUES(status)
+                        AND VALUES(signingtime) IS NULL
+                    THEN from_jnts_2.status_logs
+                    ELSE JSON_ARRAY_APPEND(
+                        COALESCE(from_jnts_2.status_logs, JSON_ARRAY()),
+                        '$',
+                        JSON_OBJECT(
+                            'batch_at', NOW(),
+                            'bulk_run_id', ?,
+                            'from', from_jnts_2.status,
+                            'to', VALUES(status)
+                        )
+                    )
+                END,
+                updated_at = NOW()
+        ";
+
+        DB::statement($sql, $bindings);
+
+        // DELETE these waybills from staging
+        DB::table('from_jnts_2_staging')
             ->where('bulk_run_id', $this->bulkRunId)
             ->whereIn('waybill_number', $waybills)
-            ->orderBy('id')
-            ->get();
+            ->delete();
 
-        if ($stagingRows->isEmpty()) {
-            // Should not happen pero safety lang
-            return;
-        }
-
-        // Step 2 — pick winner per waybill (priority CASE + MAX id)
-        $winners = [];
-        foreach ($stagingRows->groupBy('waybill_number') as $wb => $rows) {
-            $winners[$wb] = $this->pickWinner($rows);
-        }
-
-        // Step 3 — get existing from_jnts_2 rows for these waybills
-        $existing = FromJnt2::query()
-            ->select(['waybill_number', 'status', 'status_logs'])
-            ->whereIn('waybill_number', array_keys($winners))
-            ->get()
-            ->keyBy('waybill_number');
-
-        // Step 4 — categorize
-        $toInsert    = [];
-        $toUpdate    = [];
-        $statusInfo  = [];
-        $skippedHere = 0;
-        $now         = Carbon::now('Asia/Manila')->format('Y-m-d H:i:s');
-
-        foreach ($winners as $wb => $r) {
-            if (isset($existing[$wb])) {
-                $oldStatusRaw = (string) ($existing[$wb]->status ?: '');
-                $cur = strtolower($oldStatusRaw);
-
-                // Skip rule — terminal status di na ina-update
-                if (in_array($cur, ['delivered', 'returned'], true)) {
-                    $skippedHere++;
-                    continue;
-                }
-
-                $newStatusRaw = (string) ($r->status ?? '');
-                if ($oldStatusRaw === $newStatusRaw && $r->signingtime === null) {
-                    $skippedHere++;
-                    continue;
-                }
-
-                $toUpdate[$wb] = [
-                    'status'      => $newStatusRaw,
-                    'signingtime' => $r->signingtime,
-                    'rts_reason'  => trim((string) ($r->rts_reason ?? '')),
-                    'updated_at'  => $now,
-                ];
-                $statusInfo[$wb] = [
-                    'from' => $oldStatusRaw,
-                    'to'   => $newStatusRaw,
-                ];
-            } else {
-                $toInsert[] = [
-                    'waybill_number'     => $r->waybill_number,
-                    'sender'             => $r->sender,
-                    'cod'                => $r->cod,
-                    'status'             => $r->status,
-                    'item_name'          => $r->item_name,
-                    'submission_time'    => $r->submission_time,
-                    'receiver'           => $r->receiver,
-                    'receiver_cellphone' => $r->receiver_cellphone,
-                    'signingtime'        => $r->signingtime,
-                    'remarks'            => $r->remarks,
-                    'province'           => $r->province,
-                    'city'               => $r->city,
-                    'barangay'           => $r->barangay,
-                    'total_shipping_cost'=> $r->total_shipping_cost,
-                    'rts_reason'         => $r->rts_reason,
-                    'status_logs'        => json_encode([[
-                        'batch_at'    => $now,
-                        'bulk_run_id' => $this->bulkRunId,
-                        'from'        => null,
-                        'to'          => (string) $r->status,
-                    ]]),
-                    'last_uploaded_by_user_id' => null,
-                    'last_upload_log_id' => null,
-                    'created_at'         => $now,
-                    'updated_at'         => $now,
-                ];
-            }
-        }
-
-        // Step 5 — bulk INSERT + bulk UPDATE inside transaction
-        DB::transaction(function () use ($toInsert, $toUpdate, $waybills) {
-            if (!empty($toInsert)) {
-                FromJnt2::insert($toInsert);
-            }
-
-            if (!empty($toUpdate)) {
-                $this->bulkUpdateFromJnts2($toUpdate);
-            }
-
-            // Step 6 — DELETE processed waybills from staging
-            // After successful merge — staging shrinks visibly
-            DB::table('from_jnts_2_staging')
-                ->where('bulk_run_id', $this->bulkRunId)
-                ->whereIn('waybill_number', $waybills)
-                ->delete();
-        });
-
-        // Step 7 — append status_logs (outside transaction, same pattern as V1)
-        if (!empty($statusInfo)) {
-            $this->appendStatusLogs($statusInfo);
-        }
-
-        // Step 8 — update progress
-        $insertedHere = count($toInsert);
-        $updatedHere  = count($toUpdate);
-
+        // Update progress
         DB::table('bulk_upload_runs')
             ->where('id', $this->bulkRunId)
             ->update([
                 'consolidate_processed' => DB::raw('consolidate_processed + ' . $count),
-                'total_inserted'        => DB::raw('total_inserted + ' . $insertedHere),
-                'total_updated'         => DB::raw('total_updated + ' . $updatedHere),
-                'total_skipped'         => DB::raw('total_skipped + ' . $skippedHere),
+                'total_inserted'        => DB::raw('total_inserted + ' . $newCount),
+                'total_updated'         => DB::raw('total_updated + ' . $existingCount),
                 'message'               => sprintf(
-                    'Consolidating... %s waybills processed',
+                    'Consolidating... %s waybills processed (UPSERT mode)',
                     number_format(($run->consolidate_processed ?? 0) + $count)
                 ),
                 'updated_at'            => Carbon::now('Asia/Manila'),
             ]);
     }
 
-    /**
-     * Pick winner from a collection of staging rows for a single waybill.
-     * Priority: returned > delivered > others.
-     * Tiebreaker: MAX(id) — last INSERT wins.
-     */
-    private function pickWinner($rows)
-    {
-        $best = null;
-        $bestPriority = PHP_INT_MAX;
-        $bestId = -1;
-
-        foreach ($rows as $r) {
-            $statusLower = strtolower(trim((string) ($r->status ?? '')));
-            $priority = match ($statusLower) {
-                'returned'  => 1,
-                'delivered' => 2,
-                default     => 3,
-            };
-
-            if ($priority < $bestPriority || ($priority === $bestPriority && (int) $r->id > $bestId)) {
-                $best = $r;
-                $bestPriority = $priority;
-                $bestId = (int) $r->id;
-            }
-        }
-
-        return $best;
-    }
-
-    /**
-     * Bulk UPDATE sa from_jnts_2 using CASE expression — single SQL per chunk
-     * of 500 waybills (avoids gigantic single SQL strings).
-     */
-    private function bulkUpdateFromJnts2(array $toUpdate): void
-    {
-        foreach (array_chunk(array_keys($toUpdate), 500) as $chunkKeys) {
-            $statusCase = "CASE waybill_number\n";
-            $timeCase   = "CASE waybill_number\n";
-            $rtsCase    = "CASE waybill_number\n";
-            $hasRts     = false;
-
-            foreach ($chunkKeys as $wb) {
-                $u = $toUpdate[$wb];
-                $s = str_replace("'", "''", (string) $u['status']);
-                $t = $u['signingtime'];
-                $tSql  = $t ? ("'" . str_replace("'", "''", $t) . "'") : "NULL";
-                $wbSql = "'" . str_replace("'", "''", $wb) . "'";
-
-                $statusCase .= "WHEN {$wbSql} THEN '{$s}'\n";
-                $timeCase   .= "WHEN {$wbSql} THEN {$tSql}\n";
-
-                if (!empty($u['rts_reason'])) {
-                    $hasRts = true;
-                    $rr = str_replace("'", "''", (string) $u['rts_reason']);
-                    $rtsCase .= "WHEN {$wbSql} THEN '{$rr}'\n";
-                }
-            }
-
-            $statusCase .= "ELSE status END";
-            $timeCase   .= "ELSE signingtime END";
-            $rtsCase    .= "ELSE rts_reason END";
-
-            $inList = implode(',', array_map(function ($wb) {
-                return "'" . str_replace("'", "''", $wb) . "'";
-            }, $chunkKeys));
-
-            $setParts = [
-                "status = {$statusCase}",
-                "signingtime = {$timeCase}",
-                "updated_at = NOW()",
-            ];
-            if ($hasRts) {
-                $setParts[] = "rts_reason = {$rtsCase}";
-            }
-
-            $sql = "UPDATE " . (new FromJnt2)->getTable() . "
-                    SET " . implode(",\n                        ", $setParts) . "
-                    WHERE waybill_number IN ({$inList})
-                      AND LOWER(status) NOT IN ('delivered','returned')";
-            DB::statement($sql);
-        }
-    }
-
-    /**
-     * Append entries sa from_jnts_2.status_logs JSON column.
-     * Done outside the main transaction para hindi mag-block ng main writes.
-     */
-    private function appendStatusLogs(array $statusInfo): void
-    {
-        $rows = FromJnt2::whereIn('waybill_number', array_keys($statusInfo))
-            ->select(['id', 'waybill_number', 'status_logs'])
-            ->get();
-
-        $batchAt = Carbon::now('Asia/Manila');
-        foreach ($rows as $row) {
-            $wb = $row->waybill_number;
-            if (!isset($statusInfo[$wb])) continue;
-
-            $oldStatus = $statusInfo[$wb]['from'];
-            $newStatus = $statusInfo[$wb]['to'];
-
-            $logs = $row->status_logs ?: [];
-            if (!is_array($logs)) {
-                $decoded = json_decode($logs, true);
-                $logs = is_array($decoded) ? $decoded : [];
-            }
-
-            if ($oldStatus !== $newStatus) {
-                $logs[] = [
-                    'batch_at'    => $batchAt->format('Y-m-d H:i:s'),
-                    'bulk_run_id' => $this->bulkRunId,
-                    'from'        => $oldStatus,
-                    'to'          => $newStatus,
-                ];
-                $row->status_logs = $logs;
-                try {
-                    $row->save();
-                } catch (\Throwable $e) {
-                    Log::warning('JntV2 consolidate: status_logs save failed for waybill ' . $wb . ': ' . $e->getMessage());
-                }
-            }
-        }
-    }
-
-    /**
-     * Mark the run as done after staging is fully drained.
-     * Updates totals from per-file aggregates + the consolidate-level counters.
-     */
     private function finalizeAsDone(BulkUploadRun $run): void
     {
         $files = UploadLogV2::where('bulk_run_id', $this->bulkRunId)->get();
@@ -513,11 +342,10 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
         $run->files_skipped  = $files->whereIn('status', ['skipped', 'cancelled', 'precheck_duplicate'])->count();
         $run->finished_at    = Carbon::now('Asia/Manila');
         $run->message        = sprintf(
-            'Consolidated %s unique waybills: %s inserted, %s updated, %s skipped',
+            'Consolidated %s unique waybills: %s inserted, %s updated',
             number_format($run->consolidate_total ?? $run->consolidate_processed ?? 0),
             number_format($run->total_inserted ?? 0),
-            number_format($run->total_updated ?? 0),
-            number_format($run->total_skipped ?? 0)
+            number_format($run->total_updated ?? 0)
         );
         $run->save();
 
@@ -525,7 +353,6 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
             'unique'   => $run->consolidate_total,
             'inserted' => $run->total_inserted,
             'updated'  => $run->total_updated,
-            'skipped'  => $run->total_skipped,
         ]);
     }
 
