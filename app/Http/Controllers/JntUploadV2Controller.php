@@ -570,6 +570,7 @@ class JntUploadV2Controller extends Controller
                 'consolidate_total'        => $consolidateTotal,
                 'consolidate_processed'    => $consolidateProcessed,
                 'consolidate_percent'      => $consolidatePercent,
+                'consolidate_phase'        => $run->consolidate_phase,
                 'consolidate_started_at'   => optional($run->consolidate_started_at)->toDateTimeString(),
                 'consolidate_elapsed_sec'  => $consolidateElapsedSec,
                 'consolidate_eta_sec'      => $consolidateEtaSec,

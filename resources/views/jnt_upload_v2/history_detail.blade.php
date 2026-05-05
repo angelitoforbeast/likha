@@ -577,14 +577,20 @@
           const mmsg = document.getElementById('mergeMessage');
           if (mmsg) mmsg.textContent = r.message || '—';
 
-          // Status badge — handle paused / cancelling override
+          // Status badge — handle paused / cancelling override + phase indicator
           const isPaused     = !!r.paused_at;
           const isCancelling = !!r.cancel_requested_at;
+          const phase        = r.consolidate_phase;
           const msb = document.getElementById('mergeStatusBadge');
           if (msb) {
             if (isCancelling)    { msb.textContent = 'CANCELLING'; msb.className = 'badge bad'; }
             else if (isPaused)   { msb.textContent = 'PAUSED';     msb.className = 'badge warn'; }
-            else if (r.status === 'consolidating') { msb.textContent = 'CONSOLIDATING'; msb.className = 'badge info'; }
+            else if (r.status === 'consolidating') {
+              if (phase === 'materializing')   { msb.textContent = 'PHASE 1/3 — MATERIALIZING'; msb.className = 'badge info'; }
+              else if (phase === 'merging')    { msb.textContent = 'PHASE 2/3 — MERGING'; msb.className = 'badge info'; }
+              else if (phase === 'cleanup')    { msb.textContent = 'PHASE 3/3 — CLEANUP'; msb.className = 'badge info'; }
+              else                             { msb.textContent = 'CONSOLIDATING'; msb.className = 'badge info'; }
+            }
             else                 { msb.textContent = 'WAITING TO START'; msb.className = 'badge warn'; }
           }
 

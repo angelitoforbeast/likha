@@ -25,6 +25,7 @@ class BulkUploadRun extends Model
         'total_errors',
         'consolidate_total',
         'consolidate_processed',
+        'consolidate_phase',
         'consolidate_started_at',
         'last_batch_at',
         'last_batch_duration_ms',
