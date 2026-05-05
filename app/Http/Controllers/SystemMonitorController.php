@@ -159,10 +159,12 @@ class SystemMonitorController extends Controller
         return Cache::remember('sysmon_database', 60, function () {
             $dbName = config('database.connections.mysql.database');
 
+            // Use explicit aliases para hindi mag-rely sa case ng information_schema
+            // (some MySQL configs return TABLE_NAME uppercase)
             $tables = DB::select("
                 SELECT
-                    table_name,
-                    table_rows,
+                    table_name AS tname,
+                    table_rows AS trows,
                     ROUND(data_length / 1024 / 1024, 2) AS data_mb,
                     ROUND(index_length / 1024 / 1024, 2) AS index_mb,
                     ROUND((data_length + index_length) / 1024 / 1024, 2) AS total_mb
@@ -187,8 +189,8 @@ class SystemMonitorController extends Controller
                 'total_rows'    => (int) ($totalRow->total_rows ?? 0),
                 'tables'        => array_map(function ($t) {
                     return [
-                        'name'      => $t->table_name,
-                        'rows'      => (int) ($t->table_rows ?? 0),
+                        'name'      => $t->tname ?? '',
+                        'rows'      => (int) ($t->trows ?? 0),
                         'data_mb'   => (float) ($t->data_mb ?? 0),
                         'index_mb'  => (float) ($t->index_mb ?? 0),
                         'total_mb'  => (float) ($t->total_mb ?? 0),

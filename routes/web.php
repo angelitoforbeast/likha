@@ -641,6 +641,8 @@ Route::delete('/conversation/tracker/view/{id}', [\App\Http\Controllers\Conversa
     ->name('conversation.tracker.row.delete');
 Route::get('/conversation/tracker/stats', [\App\Http\Controllers\ConversationTrackerImportController::class, 'stats'])
     ->name('conversation.tracker.stats');
+Route::get('/conversation/tracker/compare', [\App\Http\Controllers\ConversationTrackerImportController::class, 'compare'])
+    ->name('conversation.tracker.compare');
 
 // Flow Templates editor (per-page bubble library)
 Route::get ('/conversation/tracker/flows', [\App\Http\Controllers\ConversationTrackerImportController::class, 'flowsIndex'])

@@ -216,6 +216,21 @@ class ImportConversationTrackerFromGoogleSheet implements ShouldQueue
     /**
      * Parse subscription date string (multi-format) to Y-m-d H:i:s.
      * Public+static so the controller / tests can reuse it.
+     *
+     * Supports:
+     *   - Excel serial numbers (e.g., "46146.87917" → 2026-05-04 21:06)
+     *   - "May 2, 2026 6:35 PM"  (Month Day, Year h:mm AM/PM)
+     *   - "4 May 2026 17:57"     (Day Month Year HH:mm)
+     *   - "4/May/2026 18:35"     (Day/Month/Year HH:mm)
+     *   - "02/May/2026 23:48"    (DD/Month/YYYY HH:mm)
+     *   - "03/05/2026 20:13"     (DD/MM/YYYY — heuristic-disambiguated)
+     *   - "15 January 2026 14:53"
+     *   - ISO formats (Y-m-d H:i:s)
+     *   - Lenient \DateTime fallback for unrecognized formats
+     *
+     * For DD/MM/YYYY ambiguity (both ≤ 12), heuristic prefers PAST dates
+     * and CLOSER-TO-TODAY interpretation. PH context = DD/MM is preferred
+     * when otherwise ambiguous.
      */
     public static function parseSubscriptionDate(?string $raw): ?string
     {
@@ -223,23 +238,119 @@ class ImportConversationTrackerFromGoogleSheet implements ShouldQueue
         $s = trim($raw);
         if ($s === '') return null;
 
-        $formats = [
+        // ─── Excel serial number detection ───
+        // Excel epoch: 1900-01-01 (with 1900 leap year bug accounted for)
+        // Range: 25569 (1970-01-01) to ~100000 (year 2173) is plausible for real data
+        if (is_numeric($s)) {
+            $n = (float) $s;
+            if ($n >= 25569 && $n <= 100000) {
+                $unix = (int) round(($n - 25569) * 86400);
+                try {
+                    return Carbon::createFromTimestamp($unix)
+                        ->setTimezone('Asia/Manila')
+                        ->format('Y-m-d H:i:s');
+                } catch (\Throwable $e) {
+                    // fall through to other format attempts
+                }
+            }
+        }
+
+        // ─── Unambiguous formats first ───
+        $unambiguousFormats = [
             'F j, Y g:i A',  // "May 2, 2026 6:35 PM"
             'F j, Y h:i A',  // padded variant
+            'F j, Y H:i',    // "May 2, 2026 18:35"
+            'j F Y H:i',     // "4 May 2026 17:57"
+            'j F Y G:i',     // single-digit hour
+            'd F Y H:i',     // "15 January 2026 14:53"
             'j/M/Y H:i',     // "2/May/2026 18:35"
             'j/M/Y G:i',     // single-digit hour
+            'd/M/Y H:i',     // "02/May/2026 23:48"
             'Y-m-d H:i:s',
             'Y-m-d H:i',
+            'Y-m-d\TH:i:s',  // ISO-8601
         ];
-        foreach ($formats as $fmt) {
+        foreach ($unambiguousFormats as $fmt) {
             $dt = \DateTime::createFromFormat($fmt, $s);
-            if ($dt !== false) return $dt->format('Y-m-d H:i:s');
+            if ($dt !== false && \DateTime::getLastErrors() === false) {
+                return $dt->format('Y-m-d H:i:s');
+            }
         }
+
+        // ─── Ambiguous DD/MM/YYYY vs MM/DD/YYYY (numeric slashes) ───
+        // Pattern: NN/NN/YYYY [HH:mm[:ss]]
+        if (preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$#', $s, $m)) {
+            $a    = (int) $m[1];
+            $b    = (int) $m[2];
+            $year = (int) $m[3];
+            $hour = isset($m[4]) ? (int) $m[4] : 0;
+            $min  = isset($m[5]) ? (int) $m[5] : 0;
+            $sec  = isset($m[6]) ? (int) $m[6] : 0;
+
+            $picked = self::pickAmbiguousDayMonth($a, $b, $year);
+            if ($picked !== null) {
+                [$day, $mon] = $picked;
+                if (checkdate($mon, $day, $year)) {
+                    $time = sprintf('%04d-%02d-%02d %02d:%02d:%02d', $year, $mon, $day, $hour, $min, $sec);
+                    return $time;
+                }
+            }
+        }
+
+        // ─── Lenient \DateTime fallback ───
         try {
-            return (new \DateTime($s))->format('Y-m-d H:i:s');
+            $dt = new \DateTime($s);
+            return $dt->format('Y-m-d H:i:s');
         } catch (\Throwable $e) {
             return null;
         }
+    }
+
+    /**
+     * Disambiguate "NN/NN/YYYY" — return [day, month] tuple.
+     *
+     * Logic:
+     *   - If only one interpretation valid (e.g., "15/05" — 15 is not a month),
+     *     pick that one automatically.
+     *   - If both valid (both ≤ 12), apply heuristics:
+     *       Rule 1: Prefer PAST date (subscriptions are past events)
+     *       Rule 2: Among past, prefer CLOSER to today
+     *       Fallback: Prefer DD/MM (PH context)
+     *
+     * Returns null if neither interpretation is valid.
+     */
+    private static function pickAmbiguousDayMonth(int $a, int $b, int $year): ?array
+    {
+        // Try as DD/MM (PH)
+        $phValid = ($a >= 1 && $a <= 31) && ($b >= 1 && $b <= 12);
+        // Try as MM/DD (US)
+        $usValid = ($a >= 1 && $a <= 12) && ($b >= 1 && $b <= 31);
+
+        // Filter by valid actual dates (e.g., Feb 30 invalid)
+        $phReal = $phValid && checkdate($b, $a, $year);
+        $usReal = $usValid && checkdate($a, $b, $year);
+
+        if (!$phReal && !$usReal) return null;
+        if ($phReal && !$usReal) return [$a, $b];      // [day, month] — PH order
+        if (!$phReal && $usReal) return [$b, $a];      // PH order returned: [day, month]
+
+        // Both real — apply heuristic
+        $phTs = mktime(0, 0, 0, $b, $a, $year); // PH: month=$b, day=$a
+        $usTs = mktime(0, 0, 0, $a, $b, $year); // US: month=$a, day=$b
+        $today = time();
+
+        $phPast = $phTs <= $today;
+        $usPast = $usTs <= $today;
+
+        if ($phPast && !$usPast) return [$a, $b];      // PH past, US future → PH
+        if (!$phPast && $usPast) return [$b, $a];      // US past, PH future → US
+        if ($phPast && $usPast) {
+            // Both past — closer to today wins
+            return abs($today - $phTs) <= abs($today - $usTs) ? [$a, $b] : [$b, $a];
+        }
+
+        // Both future — prefer PH (Philippine context default)
+        return [$a, $b];
     }
 
     /** Parse Unix-seconds integer to PH-time DATETIME. */

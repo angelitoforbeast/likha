@@ -125,7 +125,8 @@
               <th data-sort="replied_cells" data-type="num" class="num">Replied Cells</th>
               <th data-sort="ordered" data-type="num" class="num">Customer Ordered</th>
               <th data-sort="rate" data-type="num" class="num" title="Replied Cells / Total">Reply rate</th>
-              <th data-sort="conv" data-type="num" class="num" title="Customer Ordered / Replied Cells">Conv rate</th>
+              <th data-sort="conv_total" data-type="num" class="num" title="Customer Ordered / Total">Conv rate (vs total)</th>
+              <th data-sort="conv_reply" data-type="num" class="num" title="Customer Ordered / Replied Cells">Conv rate (vs replied)</th>
             </tr>
           </thead>
           <tbody id="statsBody">
@@ -136,20 +137,22 @@
                 if (str_starts_with($flow, 'LOOP'))     $cls .= ' loop';
                 elseif ($flow === 'MAIN FLOW')           $cls .= ' main';
                 elseif (str_starts_with($flow, 'SEQUENCE')) $cls .= ' seq';
-                $rate = $r['total'] > 0 ? ($r['replied_cells'] / $r['total'] * 100) : null;
-                $conv = $r['replied_cells'] > 0 ? ($r['ordered'] / $r['replied_cells'] * 100) : null;
+                $rate     = $r['total'] > 0 ? ($r['replied_cells'] / $r['total'] * 100) : null;
+                $convTotal = $r['total'] > 0 ? ($r['ordered'] / $r['total'] * 100) : null;
+                $convReply = $r['replied_cells'] > 0 ? ($r['ordered'] / $r['replied_cells'] * 100) : null;
               @endphp
-              <tr data-flow="{{ $flow }}" data-total="{{ $r['total'] }}" data-replied="{{ $r['replied'] }}" data-replied_cells="{{ $r['replied_cells'] }}" data-ordered="{{ $r['ordered'] }}" data-rate="{{ $rate ?? -1 }}" data-conv="{{ $conv ?? -1 }}">
+              <tr data-flow="{{ $flow }}" data-total="{{ $r['total'] }}" data-replied="{{ $r['replied'] }}" data-replied_cells="{{ $r['replied_cells'] }}" data-ordered="{{ $r['ordered'] }}" data-rate="{{ $rate ?? -1 }}" data-conv_total="{{ $convTotal ?? -1 }}" data-conv_reply="{{ $convReply ?? -1 }}">
                 <td><span class="{{ $cls }}">{{ $flow }}</span></td>
                 <td class="num">{{ number_format($r['total']) }}</td>
                 <td class="num">{{ number_format($r['replied']) }}</td>
                 <td class="num">{{ number_format($r['replied_cells']) }}</td>
                 <td class="num" style="color:#16a34a;font-weight:600;">{{ number_format($r['ordered']) }}</td>
                 <td class="num" style="color:#64748b;">{{ $rate !== null ? number_format($rate, 1) . '%' : '—' }}</td>
-                <td class="num" style="color:#64748b;">{{ $conv !== null ? number_format($conv, 1) . '%' : '—' }}</td>
+                <td class="num" style="color:#0f766e;font-weight:600;">{{ $convTotal !== null ? number_format($convTotal, 1) . '%' : '—' }}</td>
+                <td class="num" style="color:#64748b;">{{ $convReply !== null ? number_format($convReply, 1) . '%' : '—' }}</td>
               </tr>
             @empty
-              <tr><td colspan="7" style="text-align:center;padding:36px;color:#94a3b8;">No flows found. Adjust filters or import some records first.</td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:36px;color:#94a3b8;">No flows found. Adjust filters or import some records first.</td></tr>
             @endforelse
           </tbody>
         </table>

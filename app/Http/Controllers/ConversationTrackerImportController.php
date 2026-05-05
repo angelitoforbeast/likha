@@ -254,6 +254,194 @@ class ConversationTrackerImportController extends Controller
     }
 
     /**
+     * GET /conversation/tracker/compare
+     *
+     * Side-by-side comparison ng up to 4 flow variants. User picks 2-4
+     * flow names (e.g., MAIN FLOW vs MAIN FLOW2, or SEQUENCE 1.1 vs 1.2)
+     * → backend partitions data by which variant each row triggered →
+     * returns per-set per-flow stats for sectional comparison.
+     */
+    public function compare(Request $request)
+    {
+        $pageName  = trim((string) $request->query('page_name', ''));
+        $fromDate  = trim((string) $request->query('from_date', ''));
+        $toDate    = trim((string) $request->query('to_date', ''));
+        $replyFlag = strtoupper(trim((string) $request->query('reply_flag', 'CUSTOMER_REPLY')));
+        $orderFlag = strtoupper(trim((string) $request->query('order_flag', 'CUSTOMER ORDERED')));
+        if ($replyFlag === '') $replyFlag = 'CUSTOMER_REPLY';
+        if ($orderFlag === '') $orderFlag = 'CUSTOMER ORDERED';
+
+        // Variants from query: ?variants[]=MAIN+FLOW&variants[]=MAIN+FLOW2
+        $variants = $request->query('variants', []);
+        if (!is_array($variants)) $variants = [];
+        $variants = array_values(array_filter(array_map(fn($v) => trim((string) $v), $variants), fn($v) => $v !== ''));
+        $variants = array_slice($variants, 0, 4); // cap at 4 sets
+
+        // Build base query (shared filters apply to all sets)
+        $baseQuery = function () use ($pageName, $fromDate, $toDate) {
+            $q = ConversationTracker::query()
+                ->whereNotNull('response_tracker')
+                ->where('response_tracker', '<>', '');
+            if ($pageName !== '' && strtolower($pageName) !== 'all') {
+                $q->where('page_name', $pageName);
+            }
+            if ($fromDate !== '') $q->where('subscription_date', '>=', $fromDate . ' 00:00:00');
+            if ($toDate !== '')   $q->where('subscription_date', '<=', $toDate . ' 23:59:59');
+            return $q;
+        };
+
+        // For each variant, partition rows + compute stats
+        $sets = [];
+        foreach ($variants as $variant) {
+            $variantU = strtoupper($variant);
+            $stats = [
+                'flow_total'         => [],
+                'flow_replied'       => [],
+                'flow_replied_cells' => [],
+                'flow_ordered'       => [],
+                'rows_in_set'        => 0,
+            ];
+
+            $baseQuery()
+                ->select('response_tracker')
+                ->orderBy('id')
+                ->chunk(500, function ($chunk) use (&$stats, $variantU, $replyFlag, $orderFlag) {
+                    foreach ($chunk as $row) {
+                        $rt = (string) $row->response_tracker;
+                        // Set membership: row contains the variant flow tag
+                        if (stripos($rt, '[' . $variantU . ']') === false) continue;
+                        $stats['rows_in_set']++;
+
+                        $parsed = self::parseResponseTracker($rt, $replyFlag, $orderFlag);
+                        foreach ($parsed['unique_flows'] as $f) {
+                            $stats['flow_total'][$f] = ($stats['flow_total'][$f] ?? 0) + 1;
+                        }
+                        foreach ($parsed['replied_events'] as $f) {
+                            $stats['flow_replied'][$f] = ($stats['flow_replied'][$f] ?? 0) + 1;
+                        }
+                        foreach ($parsed['replied_unique'] as $f) {
+                            $stats['flow_replied_cells'][$f] = ($stats['flow_replied_cells'][$f] ?? 0) + 1;
+                        }
+                        foreach ($parsed['ordered_events'] as $f) {
+                            $stats['flow_ordered'][$f] = ($stats['flow_ordered'][$f] ?? 0) + 1;
+                        }
+                    }
+                });
+
+            $sets[] = [
+                'variant'  => $variant,
+                'rows'     => $stats['rows_in_set'],
+                'flow_total'         => $stats['flow_total'],
+                'flow_replied'       => $stats['flow_replied'],
+                'flow_replied_cells' => $stats['flow_replied_cells'],
+                'flow_ordered'       => $stats['flow_ordered'],
+            ];
+        }
+
+        // Combine all flows seen across sets — alphabetical sort
+        $allFlows = [];
+        foreach ($sets as $s) {
+            $allFlows = array_unique(array_merge(
+                $allFlows,
+                array_keys($s['flow_total']),
+                array_keys($s['flow_replied']),
+                array_keys($s['flow_replied_cells']),
+                array_keys($s['flow_ordered'])
+            ));
+        }
+        // Sort: LOOP first, then MAIN, then SEQUENCE, then alphabetical
+        usort($allFlows, function ($a, $b) {
+            $weight = function (string $f): array {
+                if (preg_match('/^LOOP\s*0*(\d+)$/i', $f, $m))     return [0, (int) $m[1], $f];
+                if (preg_match('/^MAIN\s*FLOW/i', $f))                return [1, 0, $f];
+                if (preg_match('/^SEQUENCE\s*0*(\d+(?:\.\d+)?)$/i', $f, $m)) return [2, (float) $m[1] * 100, $f];
+                return [3, 0, $f];
+            };
+            $wa = $weight($a); $wb = $weight($b);
+            if ($wa[0] !== $wb[0]) return $wa[0] <=> $wb[0];
+            if ($wa[1] !== $wb[1]) return $wa[1] <=> $wb[1];
+            return strcmp($wa[2], $wb[2]);
+        });
+
+        // Build the comparison matrix: per flow, per set, with all metrics
+        $comparison = [];
+        foreach ($allFlows as $flow) {
+            $row = ['flow' => $flow, 'sets' => []];
+            foreach ($sets as $s) {
+                $total       = $s['flow_total'][$flow] ?? 0;
+                $replied     = $s['flow_replied'][$flow] ?? 0;
+                $repliedCell = $s['flow_replied_cells'][$flow] ?? 0;
+                $ordered     = $s['flow_ordered'][$flow] ?? 0;
+                $row['sets'][] = [
+                    'variant'        => $s['variant'],
+                    'total'          => $total,
+                    'replied'        => $replied,
+                    'replied_cells'  => $repliedCell,
+                    'ordered'        => $ordered,
+                    'reply_rate'     => $total > 0 ? round($repliedCell / $total * 100, 1) : null,
+                    'conv_total'     => $total > 0 ? round($ordered / $total * 100, 1) : null,
+                    'conv_replied'   => $repliedCell > 0 ? round($ordered / $repliedCell * 100, 1) : null,
+                    'has_data'       => ($total + $replied + $repliedCell + $ordered) > 0,
+                ];
+            }
+            $comparison[] = $row;
+        }
+
+        // Get all unique flow names sa entire dataset for dropdown
+        $allFlowNames = $this->getAllFlowNames($pageName, $fromDate, $toDate, $replyFlag, $orderFlag);
+
+        // Pages list para sa filter dropdown
+        $pages = ConversationTracker::select('page_name')
+            ->whereNotNull('page_name')->distinct()->orderBy('page_name')->pluck('page_name');
+
+        return view('conversation_tracker.compare', [
+            'comparison'   => $comparison,
+            'sets'         => $sets,
+            'allFlowNames' => $allFlowNames,
+            'pages'        => $pages,
+            'pageName'     => $pageName,
+            'fromDate'     => $fromDate,
+            'toDate'       => $toDate,
+            'replyFlag'    => $replyFlag,
+            'orderFlag'    => $orderFlag,
+            'variants'     => $variants,
+        ]);
+    }
+
+    /**
+     * Detect all unique flow names sa response_tracker — for compare dropdown.
+     * Cached briefly kasi expensive (full scan of response_tracker column).
+     */
+    private function getAllFlowNames(string $pageName, string $fromDate, string $toDate, string $replyFlag, string $orderFlag): array
+    {
+        $cacheKey = 'ct_compare_flow_names:' . md5("{$pageName}|{$fromDate}|{$toDate}|{$replyFlag}|{$orderFlag}");
+        return \Illuminate\Support\Facades\Cache::remember($cacheKey, 60, function () use ($pageName, $fromDate, $toDate, $replyFlag, $orderFlag) {
+            $q = ConversationTracker::query()
+                ->whereNotNull('response_tracker')
+                ->where('response_tracker', '<>', '');
+            if ($pageName !== '' && strtolower($pageName) !== 'all') {
+                $q->where('page_name', $pageName);
+            }
+            if ($fromDate !== '') $q->where('subscription_date', '>=', $fromDate . ' 00:00:00');
+            if ($toDate !== '')   $q->where('subscription_date', '<=', $toDate . ' 23:59:59');
+
+            $allFlows = [];
+            $q->select('response_tracker')->chunk(500, function ($chunk) use (&$allFlows, $replyFlag, $orderFlag) {
+                foreach ($chunk as $row) {
+                    $parsed = self::parseResponseTracker((string) $row->response_tracker, $replyFlag, $orderFlag);
+                    foreach ($parsed['unique_flows'] as $f) {
+                        $allFlows[$f] = true;
+                    }
+                }
+            });
+
+            $names = array_keys($allFlows);
+            sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+            return $names;
+        });
+    }
+
+    /**
      * Parse a single response_tracker text block into events. Mirrors the
      * GSheets formula's logic line-by-line.
      *
