@@ -31,6 +31,7 @@ use App\Http\Controllers\PageSenderMappingController;
 use App\Http\Controllers\JntCheckerController;
 use App\Http\Controllers\JntUploadController;
 use App\Http\Controllers\JntUploadV2Controller;
+use App\Http\Controllers\SystemMonitorController;
 use App\Http\Controllers\PancakeSubscriptionCheckerController;
 use App\Http\Controllers\AdsManagerCampaignsController;
 use App\Http\Controllers\AdsInsightsController;
@@ -790,6 +791,10 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get   ('/jnt_upload_v2/queue-status',          [JntUploadV2Controller::class, 'queueStatus'])   ->name('jnt.upload.v2.queue.status');
     Route::post  ('/jnt_upload_v2/cancel/{runId}',        [JntUploadV2Controller::class, 'cancelRun'])     ->whereNumber('runId')->name('jnt.upload.v2.cancel');
     Route::post  ('/jnt_upload_v2/clear-queue',           [JntUploadV2Controller::class, 'clearQueue'])    ->name('jnt.upload.v2.clear.queue');
+
+    // /system-monitor — CEO-only system + DB + storage health dashboard
+    Route::get   ('/system-monitor',         [SystemMonitorController::class, 'index']) ->name('system.monitor');
+    Route::get   ('/system-monitor/data',    [SystemMonitorController::class, 'data'])  ->name('system.monitor.data');
 
     // Consolidate/merge controls per-run (manual button + pause/resume/cancel)
     Route::post  ('/jnt_upload_v2/run/{runId}/start-merge',    [JntUploadV2Controller::class, 'startMerge'])         ->whereNumber('runId')->name('jnt.upload.v2.merge.start');
