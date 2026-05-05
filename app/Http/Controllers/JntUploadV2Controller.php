@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\ConsolidateAndMergeJntV2Run;
 use App\Jobs\ProcessJntUploadV2;
 use App\Models\BulkUploadRun;
 use App\Models\UploadLogV2;
@@ -517,21 +518,34 @@ class JntUploadV2Controller extends Controller
             });
         }
 
+        // Consolidate progress (for the new per-batch merge approach)
+        $consolidateTotal     = (int) ($run->consolidate_total ?? 0);
+        $consolidateProcessed = (int) ($run->consolidate_processed ?? 0);
+        $consolidatePercent   = $consolidateTotal > 0
+            ? min(100, round(($consolidateProcessed / $consolidateTotal) * 100, 1))
+            : 0;
+
         return response()->json([
             'run' => [
-                'id'              => $run->id,
-                'status'          => $run->status,
-                'total_files'     => $run->total_files,
-                'files_done'      => $run->files_done,
-                'files_failed'    => $run->files_failed,
-                'files_skipped'   => $run->files_skipped,
-                'total_processed' => $run->total_processed,
-                'total_inserted'  => $run->total_inserted,
-                'total_updated'   => $run->total_updated,
-                'total_skipped'   => $run->total_skipped,
-                'total_errors'    => $run->total_errors,
-                'started_at'      => optional($run->started_at)->toDateTimeString(),
-                'finished_at'     => optional($run->finished_at)->toDateTimeString(),
+                'id'                    => $run->id,
+                'status'                => $run->status,
+                'total_files'           => $run->total_files,
+                'files_done'            => $run->files_done,
+                'files_failed'          => $run->files_failed,
+                'files_skipped'         => $run->files_skipped,
+                'total_processed'       => $run->total_processed,
+                'total_inserted'        => $run->total_inserted,
+                'total_updated'         => $run->total_updated,
+                'total_skipped'         => $run->total_skipped,
+                'total_errors'          => $run->total_errors,
+                'consolidate_total'     => $consolidateTotal,
+                'consolidate_processed' => $consolidateProcessed,
+                'consolidate_percent'   => $consolidatePercent,
+                'paused_at'             => optional($run->paused_at)->toDateTimeString(),
+                'cancel_requested_at'   => optional($run->cancel_requested_at)->toDateTimeString(),
+                'message'               => $run->message,
+                'started_at'            => optional($run->started_at)->toDateTimeString(),
+                'finished_at'           => optional($run->finished_at)->toDateTimeString(),
             ],
             'staging' => $stagingStats,
             'files' => $files->map(function ($f) {
@@ -1067,5 +1081,135 @@ class JntUploadV2Controller extends Controller
             else @unlink($p);
         }
         @rmdir($dir);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  CONSOLIDATE / MERGE CONTROLS — manual button + pause/resume/cancel
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * POST /jnt_upload_v2/run/{runId}/start-merge
+     * Manually dispatch yung consolidate job para sa run.
+     * Useful kung:
+     *   - Auto-trigger nag-fail at gusto mong i-retry
+     *   - Re-run after fixing a bug
+     *   - Stuck run that never auto-triggered
+     */
+    public function startMerge(Request $request, int $runId)
+    {
+        $this->checkAccess();
+        $run = BulkUploadRun::findOrFail($runId);
+
+        if (in_array($run->status, ['done', 'cancelled'], true)) {
+            return response()->json([
+                'ok'      => false,
+                'message' => 'Run is already in terminal state: ' . $run->status,
+            ], 422);
+        }
+
+        // Clear pause/cancel flags para fresh start
+        $run->paused_at = null;
+        $run->cancel_requested_at = null;
+        $run->save();
+
+        // Delete any orphaned consolidate jobs for safety (kung may stuck job)
+        DB::table('jobs')->where('queue', 'jnt_v2_consolidate')->delete();
+
+        // Dispatch fresh
+        ConsolidateAndMergeJntV2Run::dispatch($run->id);
+
+        Log::info("JntV2: manual start-merge by user " . (Auth::id() ?? 'unknown') . " for run #{$run->id}");
+
+        return response()->json([
+            'ok'      => true,
+            'run_id'  => $run->id,
+            'message' => 'Merge job dispatched',
+        ]);
+    }
+
+    /**
+     * POST /jnt_upload_v2/run/{runId}/pause
+     * Sets paused_at — yung consolidate worker mag-eexit gracefully sa
+     * pinakasunod na batch boundary. Pwedeng i-resume.
+     */
+    public function pauseRun(Request $request, int $runId)
+    {
+        $this->checkAccess();
+        $run = BulkUploadRun::findOrFail($runId);
+
+        if ($run->status !== 'consolidating') {
+            return response()->json([
+                'ok'      => false,
+                'message' => 'Can only pause runs that are currently consolidating. Current: ' . $run->status,
+            ], 422);
+        }
+
+        $run->paused_at = Carbon::now('Asia/Manila');
+        $run->save();
+
+        return response()->json([
+            'ok'      => true,
+            'run_id'  => $run->id,
+            'message' => 'Pause requested — worker will exit at next batch boundary',
+        ]);
+    }
+
+    /**
+     * POST /jnt_upload_v2/run/{runId}/resume
+     * Clears paused_at + dispatches a fresh consolidate job.
+     * Picks up where it left off (staging is shrunken na, may consolidate_processed).
+     */
+    public function resumeRun(Request $request, int $runId)
+    {
+        $this->checkAccess();
+        $run = BulkUploadRun::findOrFail($runId);
+
+        if ($run->paused_at === null) {
+            return response()->json([
+                'ok'      => false,
+                'message' => 'Run is not paused',
+            ], 422);
+        }
+
+        $run->paused_at = null;
+        $run->cancel_requested_at = null;
+        $run->save();
+
+        ConsolidateAndMergeJntV2Run::dispatch($run->id);
+
+        return response()->json([
+            'ok'      => true,
+            'run_id'  => $run->id,
+            'message' => 'Resumed — merge job dispatched',
+        ]);
+    }
+
+    /**
+     * POST /jnt_upload_v2/run/{runId}/request-cancel
+     * Sets cancel_requested_at — worker mag-eexit gracefully + mark cancelled.
+     * Iba ito sa cancelRun() na nag-cancel ng entire run before consolidate —
+     * ito ay specific sa consolidate phase.
+     */
+    public function requestCancelMerge(Request $request, int $runId)
+    {
+        $this->checkAccess();
+        $run = BulkUploadRun::findOrFail($runId);
+
+        if (in_array($run->status, ['done', 'cancelled', 'failed'], true)) {
+            return response()->json([
+                'ok'      => false,
+                'message' => 'Run is already terminal: ' . $run->status,
+            ], 422);
+        }
+
+        $run->cancel_requested_at = Carbon::now('Asia/Manila');
+        $run->paused_at = null; // override pause kung naka-pause
+        $run->save();
+
+        return response()->json([
+            'ok'      => true,
+            'run_id'  => $run->id,
+            'message' => 'Cancel requested — worker will exit at next batch and mark run as cancelled',
+        ]);
     }
 }

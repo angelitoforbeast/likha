@@ -23,6 +23,10 @@ class BulkUploadRun extends Model
         'total_updated',
         'total_skipped',
         'total_errors',
+        'consolidate_total',
+        'consolidate_processed',
+        'paused_at',
+        'cancel_requested_at',
         'batch_at',
         'started_at',
         'finished_at',
@@ -30,9 +34,11 @@ class BulkUploadRun extends Model
     ];
 
     protected $casts = [
-        'batch_at'    => 'datetime',
-        'started_at'  => 'datetime',
-        'finished_at' => 'datetime',
+        'batch_at'             => 'datetime',
+        'started_at'           => 'datetime',
+        'finished_at'          => 'datetime',
+        'paused_at'            => 'datetime',
+        'cancel_requested_at'  => 'datetime',
     ];
 
     public function files(): HasMany

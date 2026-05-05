@@ -791,6 +791,12 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post  ('/jnt_upload_v2/cancel/{runId}',        [JntUploadV2Controller::class, 'cancelRun'])     ->whereNumber('runId')->name('jnt.upload.v2.cancel');
     Route::post  ('/jnt_upload_v2/clear-queue',           [JntUploadV2Controller::class, 'clearQueue'])    ->name('jnt.upload.v2.clear.queue');
 
+    // Consolidate/merge controls per-run (manual button + pause/resume/cancel)
+    Route::post  ('/jnt_upload_v2/run/{runId}/start-merge',    [JntUploadV2Controller::class, 'startMerge'])         ->whereNumber('runId')->name('jnt.upload.v2.merge.start');
+    Route::post  ('/jnt_upload_v2/run/{runId}/pause',          [JntUploadV2Controller::class, 'pauseRun'])           ->whereNumber('runId')->name('jnt.upload.v2.merge.pause');
+    Route::post  ('/jnt_upload_v2/run/{runId}/resume',         [JntUploadV2Controller::class, 'resumeRun'])          ->whereNumber('runId')->name('jnt.upload.v2.merge.resume');
+    Route::post  ('/jnt_upload_v2/run/{runId}/request-cancel', [JntUploadV2Controller::class, 'requestCancelMerge']) ->whereNumber('runId')->name('jnt.upload.v2.merge.cancel');
+
     // /queue-manager — system-wide queue dashboard (CEO + MOIC)
     Route::get   ('/queue-manager',                       [\App\Http\Controllers\QueueManagerController::class, 'index'])           ->name('queue.manager.index');
     Route::get   ('/queue-manager/data',                  [\App\Http\Controllers\QueueManagerController::class, 'data'])            ->name('queue.manager.data');

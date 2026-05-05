@@ -139,6 +139,47 @@
           </div>
         </div>
       </div>
+
+      {{-- MERGE PROGRESS CARD (Stage 2 — staging → from_jnts_2) --}}
+      <div class="v2-card" id="mergeProgressCard" style="display:none; border:1px solid #93c5fd; background:linear-gradient(90deg, #eff6ff 0%, #ffffff 100%);">
+        <div class="v2-card-header" style="background:transparent; border-bottom:1px solid #bfdbfe;">
+          <div class="v2-title">🔄 Stage 2 — Merging staging → from_jnts_2</div>
+          <span id="mergeStatusBadge" class="badge info">CONSOLIDATING</span>
+        </div>
+        <div class="p-4 space-y-3">
+          <div>
+            <div class="flex items-center justify-between text-xs text-slate-700 mb-1">
+              <span>Waybills merged: <strong id="mergeProcessed">0</strong> / <strong id="mergeTotal">—</strong></span>
+              <span id="mergePct" class="font-semibold">0%</span>
+            </div>
+            <div class="progress-bar"><div id="mergeBar" style="width:0%; background:#3b82f6;"></div></div>
+            <div id="mergeMessage" class="text-[11px] text-slate-600 mt-1.5 italic">—</div>
+          </div>
+
+          {{-- Manual control buttons --}}
+          <div class="flex gap-2 flex-wrap pt-2 border-t border-blue-100">
+            <button id="btnStartMerge" type="button" style="display:none;"
+                    class="v2-btn-ghost text-blue-700 border-blue-300 hover:bg-blue-50 font-semibold">
+              ▶ Start Merge Now
+            </button>
+            <button id="btnPauseMerge" type="button" style="display:none;"
+                    class="v2-btn-ghost text-amber-700 border-amber-300 hover:bg-amber-50 font-semibold">
+              ⏸ Pause Merge
+            </button>
+            <button id="btnResumeMerge" type="button" style="display:none;"
+                    class="v2-btn-ghost text-green-700 border-green-300 hover:bg-green-50 font-semibold">
+              ▶ Resume Merge
+            </button>
+            <button id="btnCancelMerge" type="button" style="display:none;"
+                    class="v2-btn-ghost text-red-700 border-red-300 hover:bg-red-50 font-semibold">
+              🛑 Cancel Merge
+            </button>
+          </div>
+          <div class="text-[10.5px] text-slate-500 italic">
+            ℹ Merge ay pausable/resumable per batch. Cancel = mark run as cancelled, staging stays for inspection.
+          </div>
+        </div>
+      </div>
     @endif
 
     <div class="v2-card">
@@ -369,6 +410,57 @@
         }
       }
 
+      // ===== Merge progress card (Stage 2 — staging → from_jnts_2) =====
+      const mergeCard = document.getElementById('mergeProgressCard');
+      if (mergeCard) {
+        const showMerge = ['processing', 'consolidating'].includes(r.status);
+        if (showMerge) {
+          mergeCard.style.display = '';
+
+          const total     = r.consolidate_total || 0;
+          const processed = r.consolidate_processed || 0;
+          const pct       = r.consolidate_percent || 0;
+
+          setText('mergeProcessed', processed.toLocaleString());
+          setText('mergeTotal',     total > 0 ? total.toLocaleString() : '—');
+          setText('mergePct',       pct + '%');
+
+          const mb = document.getElementById('mergeBar');
+          if (mb) mb.style.width = pct + '%';
+
+          const mmsg = document.getElementById('mergeMessage');
+          if (mmsg) mmsg.textContent = r.message || '—';
+
+          // Status badge — handle paused / cancelling override
+          const isPaused     = !!r.paused_at;
+          const isCancelling = !!r.cancel_requested_at;
+          const msb = document.getElementById('mergeStatusBadge');
+          if (msb) {
+            if (isCancelling)    { msb.textContent = 'CANCELLING'; msb.className = 'badge bad'; }
+            else if (isPaused)   { msb.textContent = 'PAUSED';     msb.className = 'badge warn'; }
+            else if (r.status === 'consolidating') { msb.textContent = 'CONSOLIDATING'; msb.className = 'badge info'; }
+            else                 { msb.textContent = 'WAITING TO START'; msb.className = 'badge warn'; }
+          }
+
+          // Button visibility logic
+          const btnStart  = document.getElementById('btnStartMerge');
+          const btnPause  = document.getElementById('btnPauseMerge');
+          const btnResume = document.getElementById('btnResumeMerge');
+          const btnCancel = document.getElementById('btnCancelMerge');
+
+          // Start: when status='processing' (not yet consolidating) — manual trigger
+          if (btnStart) btnStart.style.display = (r.status === 'processing' && !isPaused) ? '' : 'none';
+          // Pause: only while actively consolidating + not paused + not cancelling
+          if (btnPause) btnPause.style.display = (r.status === 'consolidating' && !isPaused && !isCancelling) ? '' : 'none';
+          // Resume: when paused
+          if (btnResume) btnResume.style.display = isPaused ? '' : 'none';
+          // Cancel: when consolidating (regardless of paused state)
+          if (btnCancel) btnCancel.style.display = (r.status === 'consolidating') ? '' : 'none';
+        } else {
+          mergeCard.style.display = 'none';
+        }
+      }
+
       // Real processing target — exclude files that don't need actual work
       // (auto-skipped duplicates, precheck failures, manually skipped/cancelled).
       const noWorkStatuses = ['precheck_duplicate', 'precheck_failed', 'skipped', 'cancelled'];
@@ -481,6 +573,66 @@
         }
       });
     }
+
+    // ===== Merge control buttons =====
+    async function postMergeAction(endpoint, confirmMsg, btn) {
+      if (confirmMsg && !confirm(confirmMsg)) return;
+      const orig = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = '...'; }
+      try {
+        const fd = new FormData();
+        fd.append('_token', csrfToken);
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'X-CSRF-TOKEN': csrfToken, 'Accept': 'application/json' },
+          body: fd
+        });
+        const json = await res.json();
+        if (!res.ok || !json.ok) {
+          alert('Action failed: ' + (json.message || 'unknown'));
+        } else {
+          // Re-poll para mag-update agad yung UI
+          pollRun();
+          // Restart polling kung naka-stop (e.g., right after Start)
+          if (!pollTimer) {
+            pollTimer = setInterval(pollRun, 2000);
+          }
+        }
+      } catch (e) {
+        alert('Error: ' + e.message);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = orig; }
+      }
+    }
+
+    document.getElementById('btnStartMerge')?.addEventListener('click', e => {
+      postMergeAction(
+        `/jnt_upload_v2/run/${RUN_ID}/start-merge`,
+        `Trigger merge for run #${RUN_ID}?\n\nThis will dispatch a fresh consolidate job. Yung mga existing jobs sa queue ay i-cclear muna.`,
+        e.currentTarget
+      );
+    });
+    document.getElementById('btnPauseMerge')?.addEventListener('click', e => {
+      postMergeAction(
+        `/jnt_upload_v2/run/${RUN_ID}/pause`,
+        'Pause merge?\n\nWorker mag-eexit sa pinaka-sunod na batch boundary. Pwede mong i-resume later.',
+        e.currentTarget
+      );
+    });
+    document.getElementById('btnResumeMerge')?.addEventListener('click', e => {
+      postMergeAction(
+        `/jnt_upload_v2/run/${RUN_ID}/resume`,
+        `Resume merge for run #${RUN_ID}?`,
+        e.currentTarget
+      );
+    });
+    document.getElementById('btnCancelMerge')?.addEventListener('click', e => {
+      postMergeAction(
+        `/jnt_upload_v2/run/${RUN_ID}/request-cancel`,
+        'Cancel merge?\n\nYung na-merge na waybills sa from_jnts_2 ay mananatili. Yung remaining staging rows ay hindi mabubura — pwede mo silang inspect or re-trigger merge later.',
+        e.currentTarget
+      );
+    });
 
     if (IS_LIVE) {
       pollTimer = setInterval(pollRun, 2000);
