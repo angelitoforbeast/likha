@@ -153,6 +153,11 @@
               <span id="mergePct" class="font-semibold">0%</span>
             </div>
             <div class="progress-bar"><div id="mergeBar" style="width:0%; background:#3b82f6;"></div></div>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2 text-[11px] text-slate-600">
+              <div>⏱ Elapsed: <strong id="mergeElapsed" class="text-slate-800">—</strong></div>
+              <div>🎯 ETA: <strong id="mergeEta" class="text-slate-800">—</strong></div>
+              <div>⚡ Rate: <strong id="mergeRate" class="text-slate-800">—</strong></div>
+            </div>
             <div id="mergeMessage" class="text-[11px] text-slate-600 mt-1.5 italic">—</div>
           </div>
 
@@ -427,6 +432,30 @@
 
           const mb = document.getElementById('mergeBar');
           if (mb) mb.style.width = pct + '%';
+
+          // Elapsed / ETA / Rate
+          const elapsed = r.consolidate_elapsed_sec;
+          const eta     = r.consolidate_eta_sec;
+          const rate    = r.consolidate_rate;
+          setText('mergeElapsed', elapsed !== null && elapsed !== undefined ? fmtDuration(elapsed) : '—');
+          if (r.cancel_requested_at) {
+            setText('mergeEta', '— (cancelling)');
+          } else if (r.paused_at) {
+            setText('mergeEta', '— (paused)');
+          } else if (eta !== null && eta !== undefined && eta > 0) {
+            setText('mergeEta', '~' + fmtDuration(eta));
+          } else if (processed > 0 && total === 0) {
+            setText('mergeEta', '—');
+          } else if (processed === 0) {
+            setText('mergeEta', 'computing…');
+          } else {
+            setText('mergeEta', '—');
+          }
+          if (rate !== null && rate !== undefined && rate > 0) {
+            setText('mergeRate', rate.toLocaleString() + ' wb/s');
+          } else {
+            setText('mergeRate', '—');
+          }
 
           const mmsg = document.getElementById('mergeMessage');
           if (mmsg) mmsg.textContent = r.message || '—';

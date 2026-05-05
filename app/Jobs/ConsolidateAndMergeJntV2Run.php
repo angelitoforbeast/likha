@@ -92,8 +92,9 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
             $transitioned = BulkUploadRun::where('id', $this->bulkRunId)
                 ->whereIn('status', ['processing', 'queued'])
                 ->update([
-                    'status'  => 'consolidating',
-                    'message' => 'Consolidating waybills across files...',
+                    'status'                 => 'consolidating',
+                    'consolidate_started_at' => Carbon::now('Asia/Manila'),
+                    'message'                => 'Consolidating waybills across files...',
                 ]);
 
             if (!$transitioned) {
@@ -101,6 +102,12 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
                 return;
             }
             $run->refresh();
+        }
+
+        // Backfill consolidate_started_at if NULL (e.g., run #91 na nasimulan na bago to dineploy)
+        if ($run->consolidate_started_at === null) {
+            $run->consolidate_started_at = Carbon::now('Asia/Manila');
+            $run->save();
         }
 
         try {

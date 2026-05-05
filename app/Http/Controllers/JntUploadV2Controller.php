@@ -525,6 +525,23 @@ class JntUploadV2Controller extends Controller
             ? min(100, round(($consolidateProcessed / $consolidateTotal) * 100, 1))
             : 0;
 
+        // Elapsed + ETA computation (only meaningful during consolidate phase)
+        $consolidateElapsedSec = null;
+        $consolidateEtaSec     = null;
+        $consolidateRate       = null; // waybills per second
+        if ($run->consolidate_started_at !== null) {
+            $now = Carbon::now('Asia/Manila');
+            $consolidateElapsedSec = max(0, $now->diffInSeconds($run->consolidate_started_at));
+
+            if ($consolidateProcessed > 0 && $consolidateElapsedSec > 0) {
+                $consolidateRate = round($consolidateProcessed / $consolidateElapsedSec, 2);
+                $remaining = max(0, $consolidateTotal - $consolidateProcessed);
+                if ($consolidateRate > 0 && $remaining > 0) {
+                    $consolidateEtaSec = (int) round($remaining / $consolidateRate);
+                }
+            }
+        }
+
         return response()->json([
             'run' => [
                 'id'                    => $run->id,
@@ -538,11 +555,15 @@ class JntUploadV2Controller extends Controller
                 'total_updated'         => $run->total_updated,
                 'total_skipped'         => $run->total_skipped,
                 'total_errors'          => $run->total_errors,
-                'consolidate_total'     => $consolidateTotal,
-                'consolidate_processed' => $consolidateProcessed,
-                'consolidate_percent'   => $consolidatePercent,
-                'paused_at'             => optional($run->paused_at)->toDateTimeString(),
-                'cancel_requested_at'   => optional($run->cancel_requested_at)->toDateTimeString(),
+                'consolidate_total'        => $consolidateTotal,
+                'consolidate_processed'    => $consolidateProcessed,
+                'consolidate_percent'      => $consolidatePercent,
+                'consolidate_started_at'   => optional($run->consolidate_started_at)->toDateTimeString(),
+                'consolidate_elapsed_sec'  => $consolidateElapsedSec,
+                'consolidate_eta_sec'      => $consolidateEtaSec,
+                'consolidate_rate'         => $consolidateRate,
+                'paused_at'                => optional($run->paused_at)->toDateTimeString(),
+                'cancel_requested_at'      => optional($run->cancel_requested_at)->toDateTimeString(),
                 'message'               => $run->message,
                 'started_at'            => optional($run->started_at)->toDateTimeString(),
                 'finished_at'           => optional($run->finished_at)->toDateTimeString(),
