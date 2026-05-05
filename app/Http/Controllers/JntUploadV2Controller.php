@@ -474,6 +474,33 @@ class JntUploadV2Controller extends Controller
         $run->fill($totals);
         $run->save();
 
+        // Staging stats — only meaningful during processing/consolidating.
+        // Cached 3 secs para hindi mag-overload sa frequent polls.
+        $stagingStats = [
+            'total_rows'       => 0,
+            'unique_waybills'  => 0,
+            'duplicates'       => 0,
+            'enabled'          => false,
+        ];
+        if (in_array($run->status, ['processing', 'consolidating', 'queued'], true)) {
+            $cacheKey = 'jnt_v2_staging_stats_run_' . $run->id;
+            $stagingStats = Cache::remember($cacheKey, 3, function () use ($run) {
+                $totalRows = (int) DB::table('from_jnts_2_staging')
+                    ->where('bulk_run_id', $run->id)
+                    ->count();
+                $uniqueWaybills = (int) DB::table('from_jnts_2_staging')
+                    ->where('bulk_run_id', $run->id)
+                    ->distinct('waybill_number')
+                    ->count('waybill_number');
+                return [
+                    'total_rows'      => $totalRows,
+                    'unique_waybills' => $uniqueWaybills,
+                    'duplicates'      => max(0, $totalRows - $uniqueWaybills),
+                    'enabled'         => true,
+                ];
+            });
+        }
+
         return response()->json([
             'run' => [
                 'id'              => $run->id,
@@ -490,6 +517,7 @@ class JntUploadV2Controller extends Controller
                 'started_at'      => optional($run->started_at)->toDateTimeString(),
                 'finished_at'     => optional($run->finished_at)->toDateTimeString(),
             ],
+            'staging' => $stagingStats,
             'files' => $files->map(function ($f) {
                 return [
                     'id'             => $f->id,

@@ -162,7 +162,7 @@
         <div class="stat-grid">
           <div class="stat-cell"><div class="label">Files Done</div><div class="value" id="sFilesDone">0</div></div>
           <div class="stat-cell"><div class="label">Files Failed</div><div class="value" id="sFilesFailed">0</div></div>
-          <div class="stat-cell"><div class="label">Inserted</div><div class="value" id="sInserted">0</div></div>
+          <div class="stat-cell"><div class="label" id="sInsertedLabel">Inserted</div><div class="value" id="sInserted">0</div></div>
           <div class="stat-cell"><div class="label">Updated</div><div class="value" id="sUpdated">0</div></div>
           <div class="stat-cell"><div class="label">Skipped</div><div class="value" id="sSkipped">0</div></div>
           <div class="stat-cell"><div class="label">Errors</div><div class="value" id="sErrors">0</div></div>
@@ -179,6 +179,30 @@
             <div>🎯 ETA: <strong id="overallEta" class="text-slate-700">—</strong></div>
             <div>⚡ Speed: <strong id="overallAvg" class="text-slate-700">—</strong></div>
             <div>👷 Workers: <strong id="overallWorkers" class="text-slate-700">—</strong></div>
+          </div>
+        </div>
+
+        {{-- Staging stats — visible only during processing/consolidating --}}
+        <div id="stagingStatsCard" class="hidden border border-indigo-200 bg-indigo-50 rounded-lg p-3">
+          <div class="text-xs font-semibold text-indigo-700 mb-2 uppercase tracking-wide">
+            🗂 Staging Status (live count habang nag-pparse)
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-xs">
+            <div class="bg-white border border-indigo-100 rounded p-2">
+              <div class="text-[10px] text-slate-500 uppercase font-semibold">Total Staging Rows</div>
+              <div class="text-lg font-bold text-indigo-700 mt-0.5" id="stgTotalRows">0</div>
+            </div>
+            <div class="bg-white border border-indigo-100 rounded p-2">
+              <div class="text-[10px] text-slate-500 uppercase font-semibold">Unique Waybills</div>
+              <div class="text-lg font-bold text-emerald-700 mt-0.5" id="stgUniqueWaybills">0</div>
+            </div>
+            <div class="bg-white border border-indigo-100 rounded p-2">
+              <div class="text-[10px] text-slate-500 uppercase font-semibold">Duplicates Within Batch</div>
+              <div class="text-lg font-bold text-amber-700 mt-0.5" id="stgDuplicates">0</div>
+            </div>
+          </div>
+          <div class="text-[10.5px] text-slate-500 mt-2 italic">
+            Duplicates = same waybill na lumalabas sa multiple files. Magko-consolidate yan sa Stage 2 (Consolidating).
           </div>
         </div>
 
@@ -768,8 +792,33 @@
       sSkipped.textContent = r.total_skipped.toLocaleString();
       sErrors.textContent = r.total_errors.toLocaleString();
 
+      // Rename "Inserted" → "Staging Rows" during processing/consolidating
+      // After consolidate done, becomes actual "Inserted" count.
+      const sInsertedLabel = document.getElementById('sInsertedLabel');
+      if (sInsertedLabel) {
+        sInsertedLabel.textContent =
+          (r.status === 'processing' || r.status === 'consolidating' || r.status === 'queued')
+            ? 'Staging Rows' : 'Inserted';
+      }
+
+      // Staging stats card — visible only when staging.enabled
+      const stagingCard = document.getElementById('stagingStatsCard');
+      if (stagingCard && data.staging) {
+        if (data.staging.enabled) {
+          stagingCard.classList.remove('hidden');
+          const setStg = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = (val || 0).toLocaleString(); };
+          setStg('stgTotalRows',      data.staging.total_rows);
+          setStg('stgUniqueWaybills', data.staging.unique_waybills);
+          setStg('stgDuplicates',     data.staging.duplicates);
+        } else {
+          stagingCard.classList.add('hidden');
+        }
+      }
+
       const totalFiles    = data.files.length;
-      const terminalFiles = data.files.filter(f => ['done','failed','skipped','cancelled'].includes(f.status));
+      // Include precheck_duplicate + precheck_failed as terminal — fixes
+      // misleading progress count (e.g., 1/6 even when 5 are auto-skipped duplicates).
+      const terminalFiles = data.files.filter(f => ['done','failed','skipped','cancelled','precheck_duplicate','precheck_failed'].includes(f.status));
       const finishedFiles = terminalFiles.length;
       const inflightFiles = data.files.filter(f => f.status === 'processing').length;
       const pct = totalFiles > 0 ? Math.round(finishedFiles / totalFiles * 100) : 0;
