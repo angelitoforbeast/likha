@@ -42,8 +42,13 @@
             <div class="font-semibold text-red-800">Shipping Fee Anomaly Detected</div>
             <div class="text-sm text-red-700 mt-1">
               <strong>{{ $totals['sf_anomaly_count'] }}</strong> order(s) have a shipping fee that does not match the expected rate
-              @if($rates['expected_ship_fee'] !== null)
-                of <strong>₱{{ number_format($rates['expected_ship_fee'], 2) }}</strong>
+              @if(!empty($rates['unique_sf_rates']))
+                @if(count($rates['unique_sf_rates']) === 1)
+                  of <strong>₱{{ number_format($rates['unique_sf_rates'][0], 2) }}</strong>
+                @else
+                  (rate varies in this range:
+                  @foreach($rates['unique_sf_rates'] as $r)<strong>₱{{ number_format($r, 2) }}</strong>@if(!$loop->last), @endif @endforeach)
+                @endif
               @endif
               . Check the rows highlighted in red below.
             </div>
@@ -105,17 +110,21 @@
                   ₱{{ number_format($r['ship_cost'], 2) }}
                 </td>
                 <td class="px-3 py-2 border-b text-right text-[11px]">
+                  @php $expectedForRow = $rates['by_date'][$r['date']]['shipping_fee_per_order'] ?? null; @endphp
                   @if($hasAnomaly)
                     <div class="text-red-700 font-semibold">
                       ⚠️ {{ $r['sf_anomaly_count'] }} wrong
                     </div>
+                    @if($expectedForRow !== null)
+                      <div class="text-[10px] text-red-500 mt-0.5">expected ₱{{ number_format($expectedForRow, 2) }}</div>
+                    @endif
                     <div class="text-red-600 mt-0.5">
                       @foreach($r['sf_anomalies'] as $a)
                         <span class="inline-block bg-red-100 px-1 rounded">₱{{ number_format($a['sf_value'], 2) }} x{{ $a['count'] }}</span>
                       @endforeach
                     </div>
-                  @elseif($rates['expected_ship_fee'] !== null)
-                    <span class="text-green-700">✅ OK</span>
+                  @elseif($expectedForRow !== null)
+                    <span class="text-green-700" title="Expected: ₱{{ number_format($expectedForRow, 2) }}">✅ OK</span>
                   @else
                     <span class="text-gray-400">—</span>
                   @endif
@@ -203,8 +212,14 @@
         COD Fee VAT = <code>{{ $rates['cod_vat_rate'] * 100 }}% x COD Fee</code> •
         Shipping = <code>actual total_shipping_cost from DB</code> •
         Remittance = <code>COD sum - COD Fee - COD Fee VAT - Shipping</code>
-        @if($rates['expected_ship_fee'] !== null)
-          • Expected SF per order: <code>₱{{ number_format($rates['expected_ship_fee'], 2) }}</code>
+        @if(!empty($rates['unique_sf_rates']))
+          • Expected SF per order:
+          @if(count($rates['unique_sf_rates']) === 1)
+            <code>₱{{ number_format($rates['unique_sf_rates'][0], 2) }}</code>
+          @else
+            @foreach($rates['unique_sf_rates'] as $r)<code>₱{{ number_format($r, 2) }}</code>@if(!$loop->last), @endif @endforeach
+            <span class="text-amber-700">(varies by date — see per-row "Expected" tooltip)</span>
+          @endif
         @endif
       </div>
     </section>
