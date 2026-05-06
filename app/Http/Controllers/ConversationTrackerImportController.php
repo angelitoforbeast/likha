@@ -275,7 +275,7 @@ class ConversationTrackerImportController extends Controller
         $variants = $request->query('variants', []);
         if (!is_array($variants)) $variants = [];
         $variants = array_values(array_filter(array_map(fn($v) => trim((string) $v), $variants), fn($v) => $v !== ''));
-        $variants = array_slice($variants, 0, 4); // cap at 4 sets
+        // Walang cap — pwedeng unlimited sets
 
         // Build base query (shared filters apply to all sets)
         $baseQuery = function () use ($pageName, $fromDate, $toDate) {
@@ -413,17 +413,29 @@ class ConversationTrackerImportController extends Controller
         $pages = ConversationTracker::select('page_name')
             ->whereNotNull('page_name')->distinct()->orderBy('page_name')->pluck('page_name');
 
+        // Fetch flow content (bubbles) per picked variant — para ipakita sa header
+        $bubblesByVariant = [];
+        if (!empty($variants) && $pageName !== '' && strtolower($pageName) !== 'all') {
+            $contents = \App\Models\ConversationFlowContent::where('page_name', $pageName)
+                ->whereIn('flow_name', $variants)
+                ->get();
+            foreach ($contents as $c) {
+                $bubblesByVariant[$c->flow_name] = is_array($c->bubbles) ? $c->bubbles : [];
+            }
+        }
+
         return view('conversation_tracker.compare', [
-            'comparison'   => $comparison,
-            'sets'         => $sets,
-            'allFlowNames' => $allFlowNames,
-            'pages'        => $pages,
-            'pageName'     => $pageName,
-            'fromDate'     => $fromDate,
-            'toDate'       => $toDate,
-            'replyFlag'    => $replyFlag,
-            'orderFlag'    => $orderFlag,
-            'variants'     => $variants,
+            'comparison'        => $comparison,
+            'sets'              => $sets,
+            'allFlowNames'      => $allFlowNames,
+            'pages'             => $pages,
+            'pageName'          => $pageName,
+            'fromDate'          => $fromDate,
+            'toDate'            => $toDate,
+            'replyFlag'         => $replyFlag,
+            'orderFlag'         => $orderFlag,
+            'variants'          => $variants,
+            'bubblesByVariant'  => $bubblesByVariant,
         ]);
     }
 

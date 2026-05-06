@@ -23,12 +23,28 @@
     .compare-section-header { background:#f8fafc; padding:8px 14px; border-bottom:1px solid #e2e8f0; font-weight:600; font-size:13px; color:#0f172a; display:flex; gap:8px; align-items:center; }
     .compare-section table { width:100%; font-size:13px; border-collapse:collapse; }
     .compare-section th, .compare-section td { padding:8px 12px; border-bottom:1px solid #f1f5f9; }
-    .compare-section th { background:#f8fafc; font-size:11px; color:#475569; text-transform:uppercase; letter-spacing:0.05em; text-align:center; }
+    .compare-section th { background:#f8fafc; font-size:11px; color:#475569; text-transform:uppercase; letter-spacing:0.05em; text-align:center; vertical-align:top; }
     .compare-section th:first-child, .compare-section td:first-child { text-align:left; }
     .compare-section td.num { text-align:center; font-variant-numeric:tabular-nums; }
     .compare-section td.metric-label { color:#475569; font-weight:500; min-width:140px; text-align:left; }
-    .compare-section .winner { background:#f0fdf4; color:#15803d; font-weight:700; }
+    /* Conditional formatting — only for rate columns: bold + green bg */
+    .compare-section td.rate-winner { background:#00ff00; font-weight:700; color:#000; }
     .compare-section .empty-cell { color:#94a3b8; font-style:italic; }
+
+    /* Set summary header in picked-variants table */
+    .set-header-cell { padding:10px 12px; background:#f1f5f9; vertical-align:top; min-width:200px; }
+    .set-header-label { font-size:10.5px; font-weight:700; color:#3730a3; text-transform:uppercase; letter-spacing:0.05em; }
+    .set-header-name { font-size:14px; font-weight:700; color:#0f172a; margin-top:2px; }
+    .set-header-rows { font-size:11px; color:#64748b; margin-top:2px; }
+
+    /* Bubbles preview sa baba ng set summary */
+    .bubbles-cell { padding:10px 12px; background:#fafafa; vertical-align:top; max-width:300px; }
+    .bubble-preview { background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:6px 8px; margin-bottom:4px; font-size:11px; color:#334155; line-height:1.4; }
+    .bubble-preview .bubble-type-label { font-size:10px; font-weight:600; color:#1e40af; margin-bottom:3px; display:block; }
+    .bubble-preview img, .bubble-preview video { max-width:100%; max-height:80px; border-radius:4px; }
+    .bubble-preview .bubble-text { white-space:pre-wrap; word-break:break-word; max-height:60px; overflow:auto; }
+    .bubble-preview .bubble-caption { font-size:10px; color:#64748b; font-style:italic; margin-top:2px; }
+    .no-bubbles { color:#94a3b8; font-style:italic; font-size:11px; text-align:center; padding:12px; }
 
     .pill-flow { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:600; }
     .pill-flow.loop { background:#fef3c7; color:#92400e; }
@@ -128,19 +144,7 @@
         Pumili ng 2 or more variants sa taas para sa comparison.
       </div>
     @else
-      {{-- Set summary header --}}
-      <div class="ct-card">
-        <div class="text-xs uppercase font-semibold text-slate-500 mb-2">Set summary</div>
-        <div class="grid grid-cols-1 md:grid-cols-{{ min(count($sets), 4) }} gap-3">
-          @foreach ($sets as $idx => $s)
-            <div class="bg-slate-50 rounded-lg p-3 border border-slate-200">
-              <div class="text-xs font-semibold text-blue-700 mb-1">Set {{ chr(65 + $idx) }}</div>
-              <div class="text-sm font-bold text-slate-800">{{ $s['variant'] }}</div>
-              <div class="text-xs text-slate-500 mt-1">{{ number_format($s['rows']) }} rows in this set</div>
-            </div>
-          @endforeach
-        </div>
-      </div>
+      {{-- Set summary card replaced by integrated header sa picked variants table below --}}
 
       @php
         // Pre-build a lookup ng picked variants para sa special handling
@@ -173,8 +177,11 @@
       @endphp
 
       {{-- ═════════════════════════════════════════════
-           PICKED VARIANTS COMPARISON — Each set's column
-           shows THAT set's own variant data (not cross-comparison)
+           PICKED VARIANTS COMPARISON — Integrated table:
+             Header row 1: Set summary (label + variant name + row count)
+             Header row 2: Flow content (bubbles preview)
+             Body: Per-metric values (rates have conditional formatting)
+           Each set's column shows THAT set's own variant data.
            ═════════════════════════════════════════════ --}}
       @if (!empty($variantsUpper))
         <div class="compare-section" style="border:2px solid #3b82f6;">
@@ -184,6 +191,64 @@
           </div>
           <table>
             <thead>
+              {{-- Set summary row (was a separate card) --}}
+              <tr>
+                <th class="set-header-cell" style="background:#f1f5f9;">
+                  <div class="set-header-label">Set summary</div>
+                </th>
+                @foreach ($sets as $idx => $s)
+                  <th class="set-header-cell">
+                    <div class="set-header-label">Set {{ chr(65 + $idx) }}</div>
+                    <div class="set-header-name">{{ $s['variant'] }}</div>
+                    <div class="set-header-rows">{{ number_format($s['rows']) }} rows in this set</div>
+                  </th>
+                @endforeach
+              </tr>
+              {{-- Flow content (bubbles) row --}}
+              <tr>
+                <th class="bubbles-cell" style="background:#fafafa;">
+                  <div class="set-header-label" style="color:#475569;">Content</div>
+                </th>
+                @foreach ($sets as $idx => $s)
+                  <th class="bubbles-cell">
+                    @php
+                      $bubbles = $bubblesByVariant[$s['variant']] ?? [];
+                    @endphp
+                    @if (empty($bubbles))
+                      <div class="no-bubbles">No bubbles saved for this flow</div>
+                    @else
+                      @foreach ($bubbles as $b)
+                        @php
+                          $btype    = $b['type'] ?? 'text';
+                          $btext    = $b['text'] ?? '';
+                          $burl     = $b['url']  ?? '';
+                          $bcaption = $b['caption'] ?? '';
+                        @endphp
+                        <div class="bubble-preview">
+                          <span class="bubble-type-label">
+                            @if ($btype === 'text') 📝 Text
+                            @elseif ($btype === 'image') 🖼️ Image
+                            @else 🎥 Video
+                            @endif
+                          </span>
+                          @if ($btype === 'text')
+                            <div class="bubble-text">{{ $btext }}</div>
+                          @elseif ($btype === 'image' && $burl)
+                            <img src="{{ $burl }}" alt="">
+                            @if ($bcaption)<div class="bubble-caption">{{ $bcaption }}</div>@endif
+                          @elseif ($btype === 'video' && $burl)
+                            <video controls src="{{ $burl }}"></video>
+                            @if ($bcaption)<div class="bubble-caption">{{ $bcaption }}</div>@endif
+                          @else
+                            <div class="bubble-text" style="color:#94a3b8;">— no content —</div>
+                          @endif
+                        </div>
+                      @endforeach
+                    @endif
+                  </th>
+                @endforeach
+              </tr>
+              {{-- Metric column header --}}
               <tr>
                 <th>Metric</th>
                 @foreach ($sets as $idx => $s)
@@ -204,21 +269,23 @@
                   $nonNullValues = array_filter($perSetValues, fn($v) => $v !== null);
                   $max = !empty($nonNullValues) ? max($nonNullValues) : null;
                   $hasMultipleNonNull = count($nonNullValues) > 1;
+                  $isPct = in_array($key, $isPctMetric);
                 @endphp
                 <tr>
                   <td class="metric-label">{{ $label }}</td>
                   @foreach ($perSetValues as $val)
                     @php
                       $isWinner = $hasMultipleNonNull && $val !== null && $val == $max && $val > 0;
-                      $isPct = in_array($key, $isPctMetric);
+                      // Apply conditional formatting only sa rate columns
+                      $applyWinner = $isWinner && $isPct;
                     @endphp
-                    <td class="num {{ $isWinner ? 'winner' : '' }}">
+                    <td class="num {{ $applyWinner ? 'rate-winner' : '' }}">
                       @if ($val === null)
                         <span class="empty-cell">—</span>
                       @elseif ($isPct)
-                        {{ number_format($val, 1) }}%{{ $isWinner ? ' 🏆' : '' }}
+                        {{ number_format($val, 1) }}%
                       @else
-                        {{ number_format($val) }}{{ $isWinner ? ' 🏆' : '' }}
+                        {{ number_format($val) }}
                       @endif
                     </td>
                   @endforeach
@@ -269,6 +336,7 @@
                     $valuesNonNull = array_filter($values, fn($v) => $v !== null);
                     $max = !empty($valuesNonNull) ? max($valuesNonNull) : null;
                     $hasMultipleNonNull = count($valuesNonNull) > 1;
+                    $isPct = in_array($key, $isPctMetric);
                   @endphp
                   <tr>
                     <td class="metric-label">{{ $label }}</td>
@@ -276,15 +344,16 @@
                       @php
                         $val = $sd[$key];
                         $isWinner = $hasMultipleNonNull && $val !== null && $val == $max && $val > 0;
-                        $isPct = in_array($key, $isPctMetric);
+                        // Conditional formatting only sa rate columns
+                        $applyWinner = $isWinner && $isPct;
                       @endphp
-                      <td class="num {{ $isWinner ? 'winner' : '' }}">
+                      <td class="num {{ $applyWinner ? 'rate-winner' : '' }}">
                         @if ($val === null)
                           <span class="empty-cell">—</span>
                         @elseif ($isPct)
-                          {{ number_format($val, 1) }}%{{ $isWinner ? ' 🏆' : '' }}
+                          {{ number_format($val, 1) }}%
                         @else
-                          {{ number_format($val) }}{{ $isWinner ? ' 🏆' : '' }}
+                          {{ number_format($val) }}
                         @endif
                       </td>
                     @endforeach
@@ -312,18 +381,23 @@
       const existingCards = container.querySelectorAll('.set-card');
       const idx = existingCards.length;
 
-      if (idx >= 4) return;
+      // No limit — pwedeng unlimited sets
 
       // Get all flow options from existing dropdown (clone)
       const firstSelect = container.querySelector('select[name="variants[]"]');
       if (!firstSelect) return;
       const optionsHtml = firstSelect.innerHTML;
 
+      // Compute label: A-Z then AA, AB, ... for >26 sets
+      const label = (idx < 26)
+        ? String.fromCharCode(65 + idx)
+        : String.fromCharCode(65 + Math.floor(idx / 26) - 1) + String.fromCharCode(65 + (idx % 26));
+
       const newCard = document.createElement('div');
       newCard.className = 'set-card';
       newCard.innerHTML = `
         <div class="set-card-header">
-          <span>Set ${String.fromCharCode(65 + idx)}</span>
+          <span>Set ${label}</span>
           <button type="button" class="ct-btn danger" style="font-size:11px;padding:2px 8px;" onclick="removeSet(this)">×</button>
         </div>
         <select name="variants[]" class="ct-input">${optionsHtml}</select>
@@ -333,24 +407,23 @@
       newSelect.value = '';
 
       container.insertBefore(newCard, addBtn);
+    }
 
-      if (idx + 1 >= 4) {
-        addBtn.style.display = 'none';
-      }
+    function setLabel(idx) {
+      // A-Z for first 26, then AA, AB, ... AZ, BA, BB ... for 26+
+      if (idx < 26) return String.fromCharCode(65 + idx);
+      return String.fromCharCode(65 + Math.floor(idx / 26) - 1) + String.fromCharCode(65 + (idx % 26));
     }
 
     function removeSet(btn) {
       const card = btn.closest('.set-card');
       if (card) {
         card.remove();
-        // Re-show add button kung naka-hide
-        const addBtn = document.getElementById('addSetBtn');
-        if (addBtn) addBtn.style.display = '';
-        // Re-label remaining cards (Set A, Set B, Set C, ...)
+        // Re-label remaining cards
         const cards = document.querySelectorAll('#setCards .set-card');
         cards.forEach((c, i) => {
           const header = c.querySelector('.set-card-header span');
-          if (header) header.textContent = 'Set ' + String.fromCharCode(65 + i);
+          if (header) header.textContent = 'Set ' + setLabel(i);
         });
       }
     }
