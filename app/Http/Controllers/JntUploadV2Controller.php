@@ -1148,6 +1148,21 @@ class JntUploadV2Controller extends Controller
             ], 422);
         }
 
+        // Para sa retry ng FAILED runs: i-reset yung consolidate state at i-clear
+        // yung partial winners. Otherwise yung consolidate job ay mag-eexit early
+        // kasi status='failed' siya treated as terminal.
+        $isRetryAfterFail = ($run->status === 'failed');
+        if ($isRetryAfterFail) {
+            $run->status                 = 'processing';
+            $run->consolidate_phase      = null;
+            $run->consolidate_started_at = null;
+            $run->finished_at            = null;
+            $run->message                = 'Retry merge requested by user';
+
+            // Defensive: clear any partial winners from previous failed attempt
+            DB::table('from_jnts_2_winners')->where('bulk_run_id', $run->id)->delete();
+        }
+
         // Clear pause/cancel flags para fresh start
         $run->paused_at = null;
         $run->cancel_requested_at = null;
@@ -1159,12 +1174,12 @@ class JntUploadV2Controller extends Controller
         // Dispatch fresh
         ConsolidateAndMergeJntV2Run::dispatch($run->id);
 
-        Log::info("JntV2: manual start-merge by user " . (Auth::id() ?? 'unknown') . " for run #{$run->id}");
+        Log::info("JntV2: manual start-merge by user " . (Auth::id() ?? 'unknown') . " for run #{$run->id} (retry={$isRetryAfterFail})");
 
         return response()->json([
             'ok'      => true,
             'run_id'  => $run->id,
-            'message' => 'Merge job dispatched',
+            'message' => $isRetryAfterFail ? 'Retry merge dispatched (winners cleared)' : 'Merge job dispatched',
         ]);
     }
 
