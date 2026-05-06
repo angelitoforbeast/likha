@@ -572,10 +572,32 @@
       const queue = selectedFiles.map((f, i) => ({ idx: i, file: f }));
       let nextIdx = 0;
 
+      // Barrier para race-free run_id init. Walang `validateRunId` muna sa
+      // unang batch ng parallel workers, kaya isa lang dapat ang elected
+      // initializer; yung iba mag-await sa gate hangga't naset na ang run_id.
+      // Without this: 5 parallel workers each create their own BulkUploadRun
+      // sa precheck endpoint, files end up scattered across multiple runs,
+      // tapos sa Start "No files selected" kasi log_ids ≠ chosen run_id.
+      let runIdGate = null;
+      let runIdGateResolve = null;
+
       async function worker() {
         while (!validateAbort) {
           const job = queue[nextIdx++];
           if (!job) return;
+
+          // If run_id wala pa AND may ibang worker na nag-iinit, hintayin
+          let isInitializer = false;
+          if (!validateRunId) {
+            if (runIdGate) {
+              await runIdGate;
+            } else {
+              // Mag-elect as initializer (synchronous, walang race sa JS)
+              runIdGate = new Promise(r => { runIdGateResolve = r; });
+              isInitializer = true;
+            }
+          }
+
           inflight++;
           updateStats();
           try {
@@ -618,6 +640,12 @@
             expandIssueToLabels(msg).forEach(bumpIssue);
             precheckRows.insertAdjacentHTML('beforeend', renderErrorRow(job.file.name, job.file.size, msg));
           } finally {
+            // Pag ako ang initializer, palayain yung ibang workers (kahit failed pa) —
+            // otherwise mag-aantay sila forever.
+            if (isInitializer && runIdGateResolve) {
+              runIdGateResolve();
+              runIdGateResolve = null;
+            }
             inflight--;
             doneCount++;
             updateStats();
