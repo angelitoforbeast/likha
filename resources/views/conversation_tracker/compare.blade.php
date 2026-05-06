@@ -40,11 +40,13 @@
     /* Bubbles preview sa baba ng set summary — Messenger style */
     .bubbles-cell { padding:10px 12px; background:#fafafa; vertical-align:top; max-width:320px; }
     /* Full-width row toggle for Content section */
-    .content-row-toggle { cursor:pointer; background:#f8fafc; padding:10px 12px; text-align:left !important; user-select:none; font-weight:400 !important; }
+    .content-row-toggle { cursor:pointer; background:#f8fafc; padding:10px 12px; text-align:left !important; user-select:none; font-weight:400 !important; text-transform:none !important; letter-spacing:normal !important; }
     .content-row-toggle:hover { background:#f1f5f9; }
-    .content-row-toggle .label { font-size:12px; font-weight:400; color:#475569; }
+    .content-row-toggle .label { font-size:12px; font-weight:400; color:#475569; text-transform:none; letter-spacing:normal; }
     .content-row-toggle .arrow { font-size:11px; color:#475569; transition:transform 0.15s; float:right; }
     .content-row-toggle.expanded .arrow { transform:rotate(90deg); }
+    /* Bubbles row cells — override th defaults (bold, uppercase, center) */
+    .content-bubbles-row th { font-weight:normal !important; text-transform:none !important; letter-spacing:normal !important; text-align:left !important; background:#fafafa !important; }
     .bubbles-content { max-height:400px; overflow-y:auto; }
     /* Messenger-style chat bubble */
     .bubble-preview { background:#f1f5f9; border-radius:18px; padding:8px 12px; margin-bottom:6px; font-size:12px; color:#0f172a; line-height:1.4; max-width:85%; word-wrap:break-word; }
