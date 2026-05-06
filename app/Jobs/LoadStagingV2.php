@@ -86,9 +86,10 @@ class LoadStagingV2 implements ShouldQueue
                 ->where('upload_log_id', $this->logId)
                 ->count();
 
-            $log->inserted    = $rowsLoaded;
-            $log->status      = 'done';
-            $log->finished_at = Carbon::now('Asia/Manila');
+            $log->inserted      = $rowsLoaded;
+            $log->status        = 'done';
+            $log->error_message = null; // Clear stale error galing previous failed retries
+            $log->finished_at   = Carbon::now('Asia/Manila');
             $log->save();
 
             // Cleanup CSV — load successful, hindi na kailangan
@@ -114,9 +115,15 @@ class LoadStagingV2 implements ShouldQueue
 
             $log = UploadLogV2::find($this->logId);
             if ($log && in_array($log->status, ['queued', 'processing', 'loading'], true)) {
-                $log->status        = 'failed';
-                $log->error_message = mb_substr('Load job failed: ' . $exception->getMessage(), 0, 500);
-                $log->finished_at   = Carbon::now('Asia/Manila');
+                $log->status      = 'failed';
+                $log->finished_at = Carbon::now('Asia/Manila');
+
+                // Wag i-overwrite kung may laman na (catch block sa handle() has
+                // more useful actual error vs this wrapper exception).
+                if (empty($log->error_message)) {
+                    $log->error_message = mb_substr('Load job failed: ' . $exception->getMessage(), 0, 500);
+                }
+
                 $log->save();
             }
 

@@ -39,7 +39,12 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            // CRITICAL: retry_after must be LARGER than the longest job's $timeout.
+            // Otherwise queue manager will re-release "stuck" jobs to other workers,
+            // causing race conditions (multiple workers processing same job).
+            // ProcessJntUploadV2 has $timeout=1800 (30 min) — kaya 1900s ang lagay
+            // dito (slight buffer). Pag may bago job na mas matagal pa, bumpan pa.
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 1900),
             'after_commit' => false,
         ],
 

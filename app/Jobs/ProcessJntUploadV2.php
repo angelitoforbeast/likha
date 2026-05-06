@@ -179,9 +179,18 @@ class ProcessJntUploadV2 implements ShouldQueue
 
             $log = UploadLogV2::find($this->logId);
             if ($log && in_array($log->status, ['queued', 'processing'], true)) {
-                $log->status        = 'failed';
-                $log->error_message = mb_substr('Job failed: ' . $exception->getMessage(), 0, 500);
-                $log->finished_at   = Carbon::now('Asia/Manila');
+                $log->status      = 'failed';
+                $log->finished_at = Carbon::now('Asia/Manila');
+
+                // IMPORTANT: do NOT overwrite error_message kung naka-set na from
+                // the catch block sa handle(). Yung catch block has the ACTUAL
+                // exception message (e.g. memory exhausted, file read error),
+                // habang ang $exception dito ay yung outer wrapper lang
+                // (MaxAttemptsExceededException). Replace lang kapag walang laman.
+                if (empty($log->error_message)) {
+                    $log->error_message = mb_substr('Job failed: ' . $exception->getMessage(), 0, 500);
+                }
+
                 $log->save();
             }
 
