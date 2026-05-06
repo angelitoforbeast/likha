@@ -39,11 +39,13 @@
 
     /* Bubbles preview sa baba ng set summary — Messenger style */
     .bubbles-cell { padding:10px 12px; background:#fafafa; vertical-align:top; max-width:320px; }
-    .bubbles-toggle { width:100%; background:#fff; border:1px solid #cbd5e1; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:11px; font-weight:600; color:#475569; text-align:left; display:flex; align-items:center; justify-content:space-between; gap:6px; }
-    .bubbles-toggle:hover { background:#f1f5f9; border-color:#94a3b8; }
-    .bubbles-toggle .arrow { font-size:10px; transition:transform 0.15s; }
-    .bubbles-toggle.expanded .arrow { transform:rotate(90deg); }
-    .bubbles-content { margin-top:8px; max-height:400px; overflow-y:auto; }
+    /* Full-width row toggle for Content section */
+    .content-row-toggle { cursor:pointer; background:#f8fafc; padding:10px 12px; text-align:left !important; user-select:none; }
+    .content-row-toggle:hover { background:#f1f5f9; }
+    .content-row-toggle .label { font-size:11px; font-weight:500; color:#475569; text-transform:uppercase; letter-spacing:0.05em; }
+    .content-row-toggle .arrow { font-size:11px; color:#475569; transition:transform 0.15s; float:right; }
+    .content-row-toggle.expanded .arrow { transform:rotate(90deg); }
+    .bubbles-content { max-height:400px; overflow-y:auto; }
     /* Messenger-style chat bubble */
     .bubble-preview { background:#f1f5f9; border-radius:18px; padding:8px 12px; margin-bottom:6px; font-size:12px; color:#0f172a; line-height:1.4; max-width:85%; word-wrap:break-word; }
     .bubble-preview img, .bubble-preview video { max-width:100%; max-height:160px; border-radius:12px; display:block; }
@@ -211,26 +213,24 @@
                   </th>
                 @endforeach
               </tr>
-              {{-- Flow content (bubbles) row — Messenger-style + expandable --}}
+              {{-- Flow content (bubbles) — single full-width row toggle, expands to bubbles row --}}
               <tr>
-                <th class="bubbles-cell" style="background:#fafafa;">
-                  <div class="set-header-label" style="color:#475569;">Content</div>
+                <th colspan="{{ count($sets) + 1 }}" class="content-row-toggle" onclick="toggleContentRow(this)">
+                  <span class="label">Content</span>
+                  <span class="arrow">▶</span>
                 </th>
+              </tr>
+              <tr class="content-bubbles-row" style="display:none;">
+                <th class="bubbles-cell" style="background:#fafafa;"></th>
                 @foreach ($sets as $idx => $s)
                   <th class="bubbles-cell">
                     @php
                       $bubbles = $bubblesByVariant[$s['variant']] ?? [];
-                      $bubbleCount = count($bubbles);
-                      $contentId = 'content-' . $idx . '-' . md5($s['variant']);
                     @endphp
                     @if (empty($bubbles))
                       <div class="no-bubbles">No bubbles saved for this flow</div>
                     @else
-                      <button type="button" class="bubbles-toggle" onclick="toggleContent('{{ $contentId }}', this)">
-                        <span>Show content ({{ $bubbleCount }} bubble{{ $bubbleCount === 1 ? '' : 's' }})</span>
-                        <span class="arrow">▶</span>
-                      </button>
-                      <div class="bubbles-content" id="{{ $contentId }}" style="display:none;">
+                      <div class="bubbles-content">
                         @foreach ($bubbles as $b)
                           @php
                             $btype    = $b['type'] ?? 'text';
@@ -390,21 +390,13 @@
   </div>
 
   <script>
-    function toggleContent(id, btn) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const isHidden = el.style.display === 'none' || el.style.display === '';
-      if (isHidden) {
-        el.style.display = 'block';
-        btn.classList.add('expanded');
-        const labelSpan = btn.querySelector('span:first-child');
-        if (labelSpan) labelSpan.textContent = labelSpan.textContent.replace('Show content', 'Hide content');
-      } else {
-        el.style.display = 'none';
-        btn.classList.remove('expanded');
-        const labelSpan = btn.querySelector('span:first-child');
-        if (labelSpan) labelSpan.textContent = labelSpan.textContent.replace('Hide content', 'Show content');
-      }
+    function toggleContentRow(headerCell) {
+      const toggleRow = headerCell.closest('tr');
+      const bubblesRow = toggleRow ? toggleRow.nextElementSibling : null;
+      if (!bubblesRow) return;
+      const isHidden = bubblesRow.style.display === 'none' || bubblesRow.style.display === '';
+      bubblesRow.style.display = isHidden ? '' : 'none';
+      headerCell.classList.toggle('expanded', isHidden);
     }
 
     function addSet() {
