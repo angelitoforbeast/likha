@@ -9,6 +9,7 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 use App\Models\MacroOutput;
 use App\Models\PageSenderMapping;
 use App\Models\FeeSetting;
+use Carbon\Carbon;
 
 class JntCheckerController extends Controller
 {
@@ -43,7 +44,8 @@ class JntCheckerController extends Controller
         Log::info('📥 Entered upload() function');
 
         $request->validate([
-            'excel_file' => 'required|mimes:xlsx,xls,zip',
+            'excel_file'        => 'required|mimes:xlsx,xls,zip',
+            'filter_date_start' => 'required|date',
         ]);
 
         $uploaded = $request->file('excel_file');
@@ -145,7 +147,8 @@ class JntCheckerController extends Controller
         // Step SF: Get expected shipping fee from Fee Settings
         // =========================
         $host = strtolower((string) $request->getHost());
-        $refDate = $request->input('filter_date_start') ?? date('Y-m-d');
+        // SF lookup uses filter_date_start + 1 day (e.g. checking May 5 orders → look up May 6 rate)
+        $refDate = Carbon::parse($request->input('filter_date_start'))->addDay()->toDateString();
         $expectedSF = FeeSetting::getRate('shipping_fee_per_order', $host, $refDate);
 
         // Compare shipping fee for each row

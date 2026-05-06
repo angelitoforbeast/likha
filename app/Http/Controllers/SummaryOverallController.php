@@ -45,12 +45,20 @@ class SummaryOverallController extends Controller
         $driver = DB::getDriverName(); // 'mysql' | 'pgsql'
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
 
-        // === FEE SETTINGS (from database with effective date) ===
+        // === FEE SETTINGS (from database with effective date) — no fallback ===
         $host = strtolower((string) $request->getHost());
         $refDate = $end ?? $start ?? $today;
-        $COD_FEE_RATE    = FeeSetting::getRate('cod_fee_rate', $host, $refDate) ?? 0.015;
-        $COD_FEE_VAT_RATE = FeeSetting::getRate('cod_fee_vat_rate', $host, $refDate) ?? 0.12;
-        $SHIPPING_PER_SHIPPED = 37.0; // fallback for projected calculations
+        $COD_FEE_RATE         = FeeSetting::getRate('cod_fee_rate',           $host, $refDate);
+        $COD_FEE_VAT_RATE     = FeeSetting::getRate('cod_fee_vat_rate',       $host, $refDate);
+        $SHIPPING_PER_SHIPPED = FeeSetting::getRate('shipping_fee_per_order', $host, $refDate);
+        if ($COD_FEE_RATE === null || $COD_FEE_VAT_RATE === null || $SHIPPING_PER_SHIPPED === null) {
+            $missing = array_filter([
+                $COD_FEE_RATE         === null ? 'cod_fee_rate'           : null,
+                $COD_FEE_VAT_RATE     === null ? 'cod_fee_vat_rate'       : null,
+                $SHIPPING_PER_SHIPPED === null ? 'shipping_fee_per_order' : null,
+            ]);
+            abort(422, "Missing fee_settings for {$refDate} (host: {$host}): " . implode(', ', $missing) . ". Configure at /jnt/fee-settings.");
+        }
         $DEFAULT_RTS_PCT      = 30.0;
 
         // helpers

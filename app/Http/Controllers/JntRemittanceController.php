@@ -17,23 +17,48 @@ class JntRemittanceController extends Controller
         // Host-based scope
         $host = strtolower((string) $request->getHost());
 
-        // Default: yesterday (single day)
         $start = $request->input('start_date');
         $end   = $request->input('end_date');
 
-        if (!$start && !$end) {
-            $yesterday = Carbon::yesterday($tz)->toDateString();
-            $start = $yesterday;
-            $end   = $yesterday;
-        } else {
-            if ($start && !$end)  $end = $start;
-            if (!$start && $end)  $start = $end;
+        // Empty state — no dates picked yet, walang i-co-compute
+        if (!$start) {
+            return view('jnt.remittance', [
+                'rows'   => [],
+                'totals' => [
+                    'delivered' => 0, 'cod_sum' => 0.0, 'cod_fee' => 0.0, 'cod_fee_vat' => 0.0,
+                    'picked' => 0, 'ship_cost' => 0.0, 'remittance' => 0.0, 'sf_anomaly_count' => 0,
+                ],
+                'start'  => null,
+                'end'    => null,
+                'rates'  => [
+                    'host'              => $host,
+                    'cod_fee_rate'      => null,
+                    'cod_vat_rate'      => null,
+                    'expected_ship_fee' => null,
+                ],
+            ]);
         }
 
-        // Get rates from Fee Settings (with fallback to hardcoded)
-        $codRate    = FeeSetting::getRate('cod_fee_rate', $host, $start) ?? (str_contains($host, 'incepxion') ? 0.01 : 0.015);
-        $codVatRate = FeeSetting::getRate('cod_fee_vat_rate', $host, $start) ?? 0.12;
+        $request->validate([
+            'start_date' => 'required|date',
+            'end_date'   => 'nullable|date',
+        ]);
+
+        $end = $end ?: $start;
+
+        // Get rates from Fee Settings — no fallback, must be configured at /jnt/fee-settings
+        $codRate    = FeeSetting::getRate('cod_fee_rate', $host, $start);
+        $codVatRate = FeeSetting::getRate('cod_fee_vat_rate', $host, $start);
         $expectedSF = FeeSetting::getRate('shipping_fee_per_order', $host, $start);
+
+        if ($codRate === null || $codVatRate === null || $expectedSF === null) {
+            $missing = array_filter([
+                $codRate    === null ? 'cod_fee_rate'           : null,
+                $codVatRate === null ? 'cod_fee_vat_rate'       : null,
+                $expectedSF === null ? 'shipping_fee_per_order' : null,
+            ]);
+            abort(422, "Missing fee_settings for {$start} (host: {$host}): " . implode(', ', $missing) . ". Configure at /jnt/fee-settings.");
+        }
 
         // Driver-specific SQL bits
         $dateSignExpr = $driver === 'pgsql' ? "CAST(signingtime AS DATE)"      : "DATE(signingtime)";

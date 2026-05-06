@@ -159,12 +159,20 @@ class OwnerPrivateController extends Controller
         $driver = DB::getDriverName(); // 'mysql' | 'pgsql'
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
 
-        // === FEE SETTINGS (from database with effective date) ===
+        // === FEE SETTINGS (from database with effective date) — no fallback ===
         $host = strtolower((string) $request->getHost());
         $refDate = $end ?? $start ?? $today;
-        $COD_FEE_RATE    = FeeSetting::getRate('cod_fee_rate', $host, $refDate) ?? 0.015;
-        $COD_FEE_VAT_RATE = FeeSetting::getRate('cod_fee_vat_rate', $host, $refDate) ?? 0.12;
-        $SHIPPING_PER_SHIPPED = 37.0;
+        $COD_FEE_RATE         = FeeSetting::getRate('cod_fee_rate', $host, $refDate);
+        $COD_FEE_VAT_RATE     = FeeSetting::getRate('cod_fee_vat_rate', $host, $refDate);
+        $SHIPPING_PER_SHIPPED = FeeSetting::getRate('shipping_fee_per_order', $host, $refDate);
+        if ($COD_FEE_RATE === null || $COD_FEE_VAT_RATE === null || $SHIPPING_PER_SHIPPED === null) {
+            $missing = array_filter([
+                $COD_FEE_RATE         === null ? 'cod_fee_rate'           : null,
+                $COD_FEE_VAT_RATE     === null ? 'cod_fee_vat_rate'       : null,
+                $SHIPPING_PER_SHIPPED === null ? 'shipping_fee_per_order' : null,
+            ]);
+            abort(422, "Missing fee_settings for {$refDate} (host: {$host}): " . implode(', ', $missing) . ". Configure at /jnt/fee-settings.");
+        }
         $DEFAULT_RTS_PCT      = 30.0;
 
         // helpers
@@ -1370,10 +1378,18 @@ class OwnerPrivateController extends Controller
             }
         }
 
-        // ── fee rates ─────────────────────────────────────────────────────────
-        $codFeeRate    = FeeSetting::getRate('cod_fee_rate',     $host, $date) ?? 0.015;
-        $codFeeVatRate = FeeSetting::getRate('cod_fee_vat_rate', $host, $date) ?? 0.12;
-        $shippingFee   = FeeSetting::getRate('shipping_per_order', $host, $date) ?? 37.0;
+        // ── fee rates ─ no fallback ──────────────────────────────────────────
+        $codFeeRate    = FeeSetting::getRate('cod_fee_rate',           $host, $date);
+        $codFeeVatRate = FeeSetting::getRate('cod_fee_vat_rate',       $host, $date);
+        $shippingFee   = FeeSetting::getRate('shipping_fee_per_order', $host, $date);
+        if ($codFeeRate === null || $codFeeVatRate === null || $shippingFee === null) {
+            $missing = array_filter([
+                $codFeeRate    === null ? 'cod_fee_rate'           : null,
+                $codFeeVatRate === null ? 'cod_fee_vat_rate'       : null,
+                $shippingFee   === null ? 'shipping_fee_per_order' : null,
+            ]);
+            abort(422, "Missing fee_settings for {$date} (host: {$host}): " . implode(', ', $missing) . ". Configure at /jnt/fee-settings.");
+        }
 
         // ── COD column detection ───────────────────────────────────────────────
         $codCol   = $pickCol('macro_output', ['COD','cod','Cod']) ?? 'COD';
@@ -2365,10 +2381,20 @@ class OwnerPrivateController extends Controller
             $adsMap[(string)$r->pg][(string)$r->d] = (float)$r->spent;
         }
 
-        // 3) Fee constants (match /jnt/supply)
-        $SHIPPING_PER_SHIPPED = 37.0;
-        $COD_FEE_RATE         = 0.015;
-        $COD_FEE_VAT_RATE     = 0.12;
+        // 3) Fee settings — no fallback, must be configured at /jnt/fee-settings
+        $host    = strtolower((string) request()->getHost());
+        $refDate = $endDate ?? $startDate;
+        $SHIPPING_PER_SHIPPED = FeeSetting::getRate('shipping_fee_per_order', $host, $refDate);
+        $COD_FEE_RATE         = FeeSetting::getRate('cod_fee_rate',           $host, $refDate);
+        $COD_FEE_VAT_RATE     = FeeSetting::getRate('cod_fee_vat_rate',       $host, $refDate);
+        if ($SHIPPING_PER_SHIPPED === null || $COD_FEE_RATE === null || $COD_FEE_VAT_RATE === null) {
+            $missing = array_filter([
+                $SHIPPING_PER_SHIPPED === null ? 'shipping_fee_per_order' : null,
+                $COD_FEE_RATE         === null ? 'cod_fee_rate'           : null,
+                $COD_FEE_VAT_RATE     === null ? 'cod_fee_vat_rate'       : null,
+            ]);
+            abort(422, "Missing fee_settings for {$refDate} (host: {$host}): " . implode(', ', $missing) . ". Configure at /jnt/fee-settings.");
+        }
 
         // Group by page
         $pages = []; // page_key => [label, matrix[date] => row, anchor_item_key, distinct_items set]

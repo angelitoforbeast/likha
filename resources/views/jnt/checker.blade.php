@@ -27,15 +27,18 @@
         </label>
 
         <label class="block">
-            <span class="text-gray-700">Filter by Date (range optional)</span>
+            <span class="text-gray-700">Filter by Date <span class="text-red-600">*required</span> (end date optional)</span>
             <div class="flex gap-2 mt-1">
-                <input type="date" name="filter_date_start"
+                <input type="date" name="filter_date_start" required
                        value="{{ old('filter_date_start', $filter_date_start ?? '') }}"
                        class="border border-gray-300 px-3 py-2 rounded w-full">
                 <span class="self-center">to</span>
                 <input type="date" name="filter_date_end"
                        value="{{ old('filter_date_end', $filter_date_end ?? '') }}"
                        class="border border-gray-300 px-3 py-2 rounded w-full">
+            </div>
+            <div class="text-xs text-gray-500 mt-1">
+                Note: Shipping fee reference is looked up using <strong>From date + 1 day</strong>. Configure rates at <a href="{{ route('fee-settings.index') }}" class="text-blue-600 underline">Fee Settings</a>.
             </div>
         </label>
 

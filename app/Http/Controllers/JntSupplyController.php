@@ -613,11 +613,19 @@ class JntSupplyController extends Controller
             }
         }
 
-        // Fee settings
+        // Fee settings — no fallback, must be configured at /jnt/fee-settings
         $host = strtolower((string) $request->getHost());
-        $COD_FEE_RATE         = FeeSetting::getRate('cod_fee_rate', $host, $asOfDate) ?? 0.015;
-        $COD_FEE_VAT_RATE     = FeeSetting::getRate('cod_fee_vat_rate', $host, $asOfDate) ?? 0.12;
-        $SHIPPING_PER_SHIPPED = 37.0;
+        $COD_FEE_RATE         = FeeSetting::getRate('cod_fee_rate',           $host, $asOfDate);
+        $COD_FEE_VAT_RATE     = FeeSetting::getRate('cod_fee_vat_rate',       $host, $asOfDate);
+        $SHIPPING_PER_SHIPPED = FeeSetting::getRate('shipping_fee_per_order', $host, $asOfDate);
+        if ($COD_FEE_RATE === null || $COD_FEE_VAT_RATE === null || $SHIPPING_PER_SHIPPED === null) {
+            $missing = array_filter([
+                $COD_FEE_RATE         === null ? 'cod_fee_rate'           : null,
+                $COD_FEE_VAT_RATE     === null ? 'cod_fee_vat_rate'       : null,
+                $SHIPPING_PER_SHIPPED === null ? 'shipping_fee_per_order' : null,
+            ]);
+            abort(422, "Missing fee_settings for {$asOfDate} (host: {$host}): " . implode(', ', $missing) . ". Configure at /jnt/fee-settings.");
+        }
 
         // Build a lookup of class_key → window_days (from loaded rules)
         $classWindowMap = [];
