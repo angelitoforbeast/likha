@@ -137,12 +137,16 @@ class JntUploadV2Controller extends Controller
             ->whereIn('status', ['queued', 'processing'])
             ->update(['status' => 'cancelled']);
 
-        // 2) Delete ALL ProcessJntUploadV2 jobs from the queue table.
-        //    Note: this kills V2 jobs from any concurrent V2 run as well — but
-        //    safe lang dahil ginagawa lang ng user one big upload at a time.
-        //    Other features (conversation tracker, GPT, etc.) are not affected.
+        // 2) Delete ALL V2 pipeline jobs from the queue table — both parser
+        //    (ProcessJntUploadV2) at loader (LoadStagingV2). Note: this kills V2
+        //    jobs from any concurrent V2 run as well — but safe lang dahil
+        //    ginagawa lang ng user one big upload at a time. Other features
+        //    (conversation tracker, GPT, etc.) are not affected.
         $deletedJobs = DB::table('jobs')
-            ->where('payload', 'like', '%ProcessJntUploadV2%')
+            ->where(function ($q) {
+                $q->where('payload', 'like', '%ProcessJntUploadV2%')
+                  ->orWhere('payload', 'like', '%LoadStagingV2%');
+            })
             ->delete();
 
         // 3) Mark the run itself as cancelled

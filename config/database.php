@@ -59,6 +59,9 @@ return [
             'engine' => null,
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+                // Required by App\Jobs\LoadStagingV2 for `LOAD DATA LOCAL INFILE`.
+                // Server-side `local_infile=1` must also be enabled in MySQL config.
+                PDO::MYSQL_ATTR_LOCAL_INFILE => true,
             ]) : [],
         ],
 

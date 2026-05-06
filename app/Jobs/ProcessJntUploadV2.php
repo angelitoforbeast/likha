@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Models\BulkUploadRun;
-use App\Models\FromJnt2;
 use App\Models\UploadLogV2;
 use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
@@ -11,7 +10,6 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use OpenSpout\Reader\CSV\Reader as CsvReaderV4;
 use OpenSpout\Reader\Common\Creator\ReaderEntityFactory;
@@ -23,31 +21,39 @@ class ProcessJntUploadV2 implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public $timeout = 1800; // 30 minutes
-    public $tries   = 3;
+    public $tries   = 1;    // Fail fast — parsing failures are deterministic, walang point sa retry.
 
     private int $logId;
     private ?int $userId = null;
 
-    // Match V1's proven config — 5000 caused deadlock on concurrent workers.
-    // Smaller chunks = smaller transactions = less InnoDB lock contention.
+    // Producer-consumer arkitektura: parsing dito, LOAD DATA INFILE sa LoadStagingV2.
+    // Walang DB writes from this job — pure XLSX/CSV parsing → CSV file on disk.
+    // Yung CHUNK_SIZE ay para sa flushing buffer to file (memory cap), hindi for DB.
     const CHUNK_SIZE      = 2000;
-    const UPDATE_SUBCHUNK = 800;
 
     private array $errors = [];
     private int $processed = 0;
-    private int $inserted  = 0;
+    private int $inserted  = 0;   // Ineupdate ng LoadStagingV2 after LOAD success; dito 0 lang
     private int $updatedCt = 0;
     private int $skippedCt = 0;
 
     private ?string $batchAt = null;
+    private ?string $csvPath = null;
+    private $csvHandle = null;
 
     public function __construct(int $logId)
     {
         $this->logId = $logId;
-        // Dedicated parse queue para sa parallel xlsx parsing. 5 workers
-        // configured sa Supervisor program `likha-queue-jnt-v2-parse`.
-        // Pure INSERT to from_jnts_2_staging — walang lock contention sa
-        // from_jnts_2 dahil hindi siya hinihimas dito.
+        // Dedicated parse queue para sa parallel xlsx parsing.
+        // Recommended: 3 workers (numprocs=3) sa Supervisor program `likha-queue-jnt-v2-parse`
+        // for a 4-core server (3 parsers + 1 loader = 4 active = matches CPU).
+        //
+        // ARCHITECTURE NOTE — Producer-Consumer:
+        // This job (PRODUCER) parses XLSX → writes CSV file sa storage/app/jnt_v2_csv/.
+        // Walang DB writes from this job. After parse done, dispatches LoadStagingV2
+        // (CONSUMER, single worker sa jnt_v2_load queue) which uses LOAD DATA INFILE.
+        // Result: zero deadlock by design (only 1 writer to from_jnts_2_staging),
+        // and ~5-10x faster bulk insert than chunked INSERT.
         $this->onQueue('jnt_v2_parse');
     }
 
@@ -86,6 +92,11 @@ class ProcessJntUploadV2 implements ShouldQueue
         $log->started_at = Carbon::now('Asia/Manila');
         $log->save();
 
+        // Open CSV output file (gagamitin ng LoadStagingV2 para sa LOAD DATA INFILE).
+        // Path is deterministic per upload_log_id, so retry idempotent.
+        $this->csvPath = $this->makeCsvPath($log->id);
+        $this->openCsv();
+
         $disk = $this->resolveDisk($log);
         $path = $log->path;
         $ext  = strtolower(pathinfo($path, PATHINFO_EXTENSION));
@@ -104,6 +115,9 @@ class ProcessJntUploadV2 implements ShouldQueue
                 throw new \RuntimeException('Unsupported file type: ' . $ext);
             }
 
+            // Close CSV cleanly
+            $this->closeCsv();
+
             if (!empty($this->errors)) {
                 $errorsPath = 'uploads/jnt_v2/errors/upload_' . $log->id . '_' . date('Ymd_His') . '.csv';
                 $tmpErr = $this->makeTmpPath('errors_v2_' . $log->id, 'csv');
@@ -118,22 +132,32 @@ class ProcessJntUploadV2 implements ShouldQueue
                 $log->error_rows  = count($this->errors);
             }
 
+            // Save progress; status remains 'processing' until LoadStagingV2 finishes.
             $log->processed_rows = $this->processed;
-            $log->inserted       = $this->inserted;
             $log->updated        = $this->updatedCt;
             $log->skipped        = $this->skippedCt;
-            $log->status         = 'done';
-            $log->finished_at    = Carbon::now('Asia/Manila');
             $log->save();
 
-            // Check if this was the LAST file to finish in the run.
-            // If yes, dispatch the consolidation job.
-            $this->maybeDispatchConsolidate($log->bulk_run_id);
+            // Hand-off sa loader queue. LoadStagingV2 will:
+            //   - DELETE existing staging rows for this upload_log_id (idempotency)
+            //   - LOAD DATA LOCAL INFILE → from_jnts_2_staging
+            //   - Mark log as 'done', delete CSV, dispatch consolidate kung huling file
+            \App\Jobs\LoadStagingV2::dispatch($this->logId);
         } catch (\Throwable $e) {
+            // Cleanup CSV on parse failure (don't leave stale files)
+            $this->closeCsv();
+            if ($this->csvPath && file_exists($this->csvPath)) {
+                @unlink($this->csvPath);
+            }
+
             $log->status        = 'failed';
             $log->error_message = mb_substr($e->getMessage(), 0, 500);
             $log->finished_at   = Carbon::now('Asia/Manila');
             $log->save();
+
+            // Even on parse failure, dispatch consolidate so other successful files
+            // sa same batch ay matuloy. Same behavior as before.
+            $this->maybeDispatchConsolidate($log->bulk_run_id);
 
             throw $e;
         }
@@ -148,6 +172,11 @@ class ProcessJntUploadV2 implements ShouldQueue
     public function failed(\Throwable $exception): void
     {
         try {
+            // Cleanup orphaned CSV file kung naiwan (parse died mid-write)
+            if ($this->csvPath && file_exists($this->csvPath)) {
+                @unlink($this->csvPath);
+            }
+
             $log = UploadLogV2::find($this->logId);
             if ($log && in_array($log->status, ['queued', 'processing'], true)) {
                 $log->status        = 'failed';
@@ -456,17 +485,12 @@ class ProcessJntUploadV2 implements ShouldQueue
     }
 
     /**
-     * Bulk insert chunk into the staging table (from_jnts_2_staging).
+     * Write parsed chunk to the CSV file (consumed later by LoadStagingV2 via LOAD DATA INFILE).
      *
-     * Per-file workers no longer write directly to from_jnts_2 — they just
-     * dump parsed rows into staging. The ConsolidateAndMergeJntV2Run job
-     * (Stage 3) is responsible for the actual merge to from_jnts_2 with
-     * skip rule + status_logs maintenance.
-     *
-     * Yung skippedCt counter ngayon ay symbolic — true per-file skip count
-     * mahihirapan natin ma-determine without the from_jnts_2 lookup. Pero
-     * all rows are tracked sa staging anyway, so consolidation step yung
-     * mag-detect ng terminal-state skips.
+     * Walang DB writes dito — pure file write. Yan ang core ng producer-consumer
+     * design: hindi lumalapit ang parser sa DB, kaya walang lock contention.
+     * Yung LoadStagingV2 (single worker sa jnt_v2_load queue) ang sole writer
+     * sa from_jnts_2_staging — predictable, deadlock-free.
      */
     private function persistChunk(array $rows, UploadLogV2 $log): void
     {
@@ -479,34 +503,102 @@ class ProcessJntUploadV2 implements ShouldQueue
         }
         $rows = array_values($byWb);
 
-        // Build staging rows
         $now = Carbon::now('Asia/Manila')->format('Y-m-d H:i:s');
-        $stagingRows = array_map(function ($r) use ($now) {
-            return [
-                'bulk_run_id'        => $this->bulkRunId(),
-                'upload_log_id'      => $this->logId,
-                'submission_time'    => $r['submission_time'],
-                'waybill_number'     => $r['waybill_number'],
-                'receiver'           => $r['receiver'],
-                'receiver_cellphone' => $r['receiver_cellphone'],
-                'sender'             => $r['sender'],
-                'item_name'          => $r['item_name'],
-                'cod'                => $r['cod'],
-                'remarks'            => $r['remarks'],
-                'status'             => $r['status'],
-                'signingtime'        => $r['signingtime'],
-                'province'           => $r['province'],
-                'city'               => $r['city'],
-                'barangay'           => $r['barangay'],
-                'total_shipping_cost'=> $r['total_shipping_cost'],
-                'rts_reason'         => $r['rts_reason'],
-                'parsed_at'          => $now,
-            ];
-        }, $rows);
+        $bulkRunId = $this->bulkRunId();
 
-        // Bulk insert to staging — fast, no upsert checks, no DB locks on from_jnts_2
-        DB::table('from_jnts_2_staging')->insert($stagingRows);
-        $this->inserted += count($stagingRows);
+        foreach ($rows as $r) {
+            // Column order MUST match LoadStagingV2's LOAD DATA column list exactly.
+            $this->writeCsvRow([
+                $bulkRunId,
+                $this->logId,
+                $r['submission_time'],
+                $r['waybill_number'],
+                $r['receiver'],
+                $r['receiver_cellphone'],
+                $r['sender'],
+                $r['item_name'],
+                $r['cod'],
+                $r['remarks'],
+                $r['status'],
+                $r['signingtime'],
+                $r['province'],
+                $r['city'],
+                $r['barangay'],
+                $r['total_shipping_cost'],
+                $r['rts_reason'],
+                $now,
+            ]);
+        }
+
+        $this->inserted += count($rows);
+    }
+
+    /**
+     * Path para sa intermediate CSV file na binabasa ng LoadStagingV2.
+     * Deterministic per upload_log_id para idempotent ang retry — pag may existing
+     * file sa retry, overwrite (truncated mode 'wb' sa openCsv).
+     */
+    private function makeCsvPath(int $logId): string
+    {
+        $dir = storage_path('app/jnt_v2_csv');
+        if (!is_dir($dir)) @mkdir($dir, 0775, true);
+        return $dir . DIRECTORY_SEPARATOR . 'upload_' . $logId . '.csv';
+    }
+
+    private function openCsv(): void
+    {
+        if (!$this->csvPath) {
+            throw new \RuntimeException('csvPath not set before openCsv()');
+        }
+        $this->csvHandle = fopen($this->csvPath, 'wb');
+        if (!$this->csvHandle) {
+            throw new \RuntimeException('Cannot open CSV for writing: ' . $this->csvPath);
+        }
+        // Write header row — kailangan tugma sa column list ng LOAD DATA sa LoadStagingV2.
+        // LOAD DATA's "IGNORE 1 LINES" will skip this; existence lang ang importante for human inspection.
+        fwrite($this->csvHandle,
+            'bulk_run_id,upload_log_id,submission_time,waybill_number,receiver,'
+            . 'receiver_cellphone,sender,item_name,cod,remarks,status,signingtime,'
+            . 'province,city,barangay,total_shipping_cost,rts_reason,parsed_at'
+            . "\n"
+        );
+    }
+
+    private function closeCsv(): void
+    {
+        if (is_resource($this->csvHandle)) {
+            fclose($this->csvHandle);
+            $this->csvHandle = null;
+        }
+    }
+
+    /**
+     * CSV row writer optimized for LOAD DATA INFILE.
+     * Strategy:
+     *   - Lahat na string field ay double-quoted, with internal " doubled to ""
+     *   - NULL values written as empty unquoted (will be NULLIF-converted in LoadStagingV2)
+     *   - Newlines/CR sa data ay ireplace ng space para hindi mag-break ng row
+     */
+    private function writeCsvRow(array $row): void
+    {
+        if (!is_resource($this->csvHandle)) {
+            throw new \RuntimeException('CSV handle not open');
+        }
+        $parts = [];
+        foreach ($row as $val) {
+            if ($val === null || $val === '') {
+                // Empty unquoted — LoadStagingV2 will NULLIF this para sa nullable columns
+                $parts[] = '';
+            } else {
+                $s = (string) $val;
+                // Strip CR/LF para hindi sumira ng row delimiter
+                $s = str_replace(["\r", "\n"], ' ', $s);
+                // Escape quotes by doubling
+                $s = str_replace('"', '""', $s);
+                $parts[] = '"' . $s . '"';
+            }
+        }
+        fwrite($this->csvHandle, implode(',', $parts) . "\n");
     }
 
     /** Cached bulk_run_id lookup. */
