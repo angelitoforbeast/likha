@@ -40,9 +40,9 @@
     /* Bubbles preview sa baba ng set summary — Messenger style */
     .bubbles-cell { padding:10px 12px; background:#fafafa; vertical-align:top; max-width:320px; }
     /* Full-width row toggle for Content section */
-    .content-row-toggle { cursor:pointer; background:#f8fafc; padding:10px 12px; text-align:left !important; user-select:none; }
+    .content-row-toggle { cursor:pointer; background:#f8fafc; padding:10px 12px; text-align:left !important; user-select:none; font-weight:400 !important; }
     .content-row-toggle:hover { background:#f1f5f9; }
-    .content-row-toggle .label { font-size:11px; font-weight:500; color:#475569; text-transform:uppercase; letter-spacing:0.05em; }
+    .content-row-toggle .label { font-size:11px; font-weight:400; color:#475569; text-transform:uppercase; letter-spacing:0.05em; }
     .content-row-toggle .arrow { font-size:11px; color:#475569; transition:transform 0.15s; float:right; }
     .content-row-toggle.expanded .arrow { transform:rotate(90deg); }
     .bubbles-content { max-height:400px; overflow-y:auto; }
