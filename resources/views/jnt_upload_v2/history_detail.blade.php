@@ -176,7 +176,7 @@
           <div class="flex gap-2 flex-wrap pt-2 border-t border-blue-100">
             <button id="btnStartMerge" type="button" style="display:none;"
                     class="v2-btn-ghost text-blue-700 border-blue-300 hover:bg-blue-50 font-semibold">
-              ▶ Start Merge Now
+              <span id="btnStartMergeLabel">▶ Start Merge Now</span>
             </button>
             <button id="btnPauseMerge" type="button" style="display:none;"
                     class="v2-btn-ghost text-amber-700 border-amber-300 hover:bg-amber-50 font-semibold">
@@ -451,7 +451,8 @@
       // ===== Merge progress card (Stage 2 — staging → from_jnts_2) =====
       const mergeCard = document.getElementById('mergeProgressCard');
       if (mergeCard) {
-        const showMerge = ['processing', 'consolidating'].includes(r.status);
+        // Show merge card kahit 'failed' para makita user yung Retry button
+        const showMerge = ['processing', 'consolidating', 'failed'].includes(r.status);
         if (showMerge) {
           mergeCard.style.display = '';
 
@@ -600,8 +601,16 @@
           const btnResume = document.getElementById('btnResumeMerge');
           const btnCancel = document.getElementById('btnCancelMerge');
 
-          // Start: when status='processing' (not yet consolidating) — manual trigger
-          if (btnStart) btnStart.style.display = (r.status === 'processing' && !isPaused) ? '' : 'none';
+          // Start: when status='processing' (not yet consolidating) OR 'failed' (retry after fix)
+          if (btnStart) {
+            const canStart = (r.status === 'processing' && !isPaused) || r.status === 'failed';
+            btnStart.style.display = canStart ? '' : 'none';
+            // Relabel for failed runs: "Retry Merge" instead of "Start Merge"
+            const label = document.getElementById('btnStartMergeLabel');
+            if (label) {
+              label.textContent = (r.status === 'failed') ? '🔁 Retry Merge' : '▶ Start Merge Now';
+            }
+          }
           // Pause: only while actively consolidating + not paused + not cancelling
           if (btnPause) btnPause.style.display = (r.status === 'consolidating' && !isPaused && !isCancelling) ? '' : 'none';
           // Resume: when paused
