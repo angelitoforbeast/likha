@@ -37,13 +37,20 @@
     .set-header-name { font-size:14px; font-weight:700; color:#0f172a; margin-top:2px; }
     .set-header-rows { font-size:11px; color:#64748b; margin-top:2px; }
 
-    /* Bubbles preview sa baba ng set summary */
-    .bubbles-cell { padding:10px 12px; background:#fafafa; vertical-align:top; max-width:300px; }
-    .bubble-preview { background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:6px 8px; margin-bottom:4px; font-size:11px; color:#334155; line-height:1.4; }
-    .bubble-preview .bubble-type-label { font-size:10px; font-weight:600; color:#1e40af; margin-bottom:3px; display:block; }
-    .bubble-preview img, .bubble-preview video { max-width:100%; max-height:80px; border-radius:4px; }
-    .bubble-preview .bubble-text { white-space:pre-wrap; word-break:break-word; max-height:60px; overflow:auto; }
-    .bubble-preview .bubble-caption { font-size:10px; color:#64748b; font-style:italic; margin-top:2px; }
+    /* Bubbles preview sa baba ng set summary — Messenger style */
+    .bubbles-cell { padding:10px 12px; background:#fafafa; vertical-align:top; max-width:320px; }
+    .bubbles-toggle { width:100%; background:#fff; border:1px solid #cbd5e1; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:11px; font-weight:600; color:#475569; text-align:left; display:flex; align-items:center; justify-content:space-between; gap:6px; }
+    .bubbles-toggle:hover { background:#f1f5f9; border-color:#94a3b8; }
+    .bubbles-toggle .arrow { font-size:10px; transition:transform 0.15s; }
+    .bubbles-toggle.expanded .arrow { transform:rotate(90deg); }
+    .bubbles-content { margin-top:8px; max-height:400px; overflow-y:auto; }
+    /* Messenger-style chat bubble */
+    .bubble-preview { background:#f1f5f9; border-radius:18px; padding:8px 12px; margin-bottom:6px; font-size:12px; color:#0f172a; line-height:1.4; max-width:85%; word-wrap:break-word; }
+    .bubble-preview img, .bubble-preview video { max-width:100%; max-height:160px; border-radius:12px; display:block; }
+    .bubble-preview .bubble-text { white-space:pre-wrap; word-break:break-word; }
+    .bubble-preview .bubble-caption { font-size:10.5px; color:#64748b; font-style:italic; margin-top:4px; padding-left:2px; }
+    .bubble-preview.media { background:transparent; padding:0; }
+    .bubble-preview.media .bubble-caption { padding:0 2px; margin-top:2px; }
     .no-bubbles { color:#94a3b8; font-style:italic; font-size:11px; text-align:center; padding:12px; }
 
     .pill-flow { display:inline-flex; align-items:center; padding:2px 10px; border-radius:999px; font-size:11px; font-weight:600; }
@@ -204,7 +211,7 @@
                   </th>
                 @endforeach
               </tr>
-              {{-- Flow content (bubbles) row --}}
+              {{-- Flow content (bubbles) row — Messenger-style + expandable --}}
               <tr>
                 <th class="bubbles-cell" style="background:#fafafa;">
                   <div class="set-header-label" style="color:#475569;">Content</div>
@@ -213,37 +220,45 @@
                   <th class="bubbles-cell">
                     @php
                       $bubbles = $bubblesByVariant[$s['variant']] ?? [];
+                      $bubbleCount = count($bubbles);
+                      $contentId = 'content-' . $idx . '-' . md5($s['variant']);
                     @endphp
                     @if (empty($bubbles))
                       <div class="no-bubbles">No bubbles saved for this flow</div>
                     @else
-                      @foreach ($bubbles as $b)
-                        @php
-                          $btype    = $b['type'] ?? 'text';
-                          $btext    = $b['text'] ?? '';
-                          $burl     = $b['url']  ?? '';
-                          $bcaption = $b['caption'] ?? '';
-                        @endphp
-                        <div class="bubble-preview">
-                          <span class="bubble-type-label">
-                            @if ($btype === 'text') 📝 Text
-                            @elseif ($btype === 'image') 🖼️ Image
-                            @else 🎥 Video
-                            @endif
-                          </span>
+                      <button type="button" class="bubbles-toggle" onclick="toggleContent('{{ $contentId }}', this)">
+                        <span>Show content ({{ $bubbleCount }} bubble{{ $bubbleCount === 1 ? '' : 's' }})</span>
+                        <span class="arrow">▶</span>
+                      </button>
+                      <div class="bubbles-content" id="{{ $contentId }}" style="display:none;">
+                        @foreach ($bubbles as $b)
+                          @php
+                            $btype    = $b['type'] ?? 'text';
+                            $btext    = $b['text'] ?? '';
+                            $burl     = $b['url']  ?? '';
+                            $bcaption = $b['caption'] ?? '';
+                          @endphp
                           @if ($btype === 'text')
-                            <div class="bubble-text">{{ $btext }}</div>
+                            <div class="bubble-preview">
+                              <div class="bubble-text">{{ $btext }}</div>
+                            </div>
                           @elseif ($btype === 'image' && $burl)
-                            <img src="{{ $burl }}" alt="">
-                            @if ($bcaption)<div class="bubble-caption">{{ $bcaption }}</div>@endif
+                            <div class="bubble-preview media">
+                              <img src="{{ $burl }}" alt="">
+                              @if ($bcaption)<div class="bubble-caption">{{ $bcaption }}</div>@endif
+                            </div>
                           @elseif ($btype === 'video' && $burl)
-                            <video controls src="{{ $burl }}"></video>
-                            @if ($bcaption)<div class="bubble-caption">{{ $bcaption }}</div>@endif
+                            <div class="bubble-preview media">
+                              <video controls src="{{ $burl }}"></video>
+                              @if ($bcaption)<div class="bubble-caption">{{ $bcaption }}</div>@endif
+                            </div>
                           @else
-                            <div class="bubble-text" style="color:#94a3b8;">— no content —</div>
+                            <div class="bubble-preview">
+                              <div class="bubble-text" style="color:#94a3b8;">— no content —</div>
+                            </div>
                           @endif
-                        </div>
-                      @endforeach
+                        @endforeach
+                      </div>
                     @endif
                   </th>
                 @endforeach
@@ -375,6 +390,23 @@
   </div>
 
   <script>
+    function toggleContent(id, btn) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const isHidden = el.style.display === 'none' || el.style.display === '';
+      if (isHidden) {
+        el.style.display = 'block';
+        btn.classList.add('expanded');
+        const labelSpan = btn.querySelector('span:first-child');
+        if (labelSpan) labelSpan.textContent = labelSpan.textContent.replace('Show content', 'Hide content');
+      } else {
+        el.style.display = 'none';
+        btn.classList.remove('expanded');
+        const labelSpan = btn.querySelector('span:first-child');
+        if (labelSpan) labelSpan.textContent = labelSpan.textContent.replace('Hide content', 'Show content');
+      }
+    }
+
     function addSet() {
       const container = document.getElementById('setCards');
       const addBtn = document.getElementById('addSetBtn');
