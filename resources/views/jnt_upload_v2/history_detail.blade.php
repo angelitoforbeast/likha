@@ -795,9 +795,14 @@
       );
     });
 
+    // Initial fire — always run once kahit terminal state, para ma-render yung
+    // button visibility logic (e.g., Retry Merge button para sa failed runs).
+    // Without this, applyUpdate() never runs at all for terminal states.
+    pollRun();
+
+    // Ongoing polling lang sa non-terminal states
     if (IS_LIVE) {
       pollTimer = setInterval(pollRun, 2000);
-      pollRun(); // initial fire
     }
   </script>
 </x-layout>
