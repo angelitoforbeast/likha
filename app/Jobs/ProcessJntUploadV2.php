@@ -437,6 +437,13 @@ class ProcessJntUploadV2 implements ShouldQueue
             $v = trim((string) $v);
             if ($v === '') return null;
 
+            // Sentinel zero-dates (JNT data sometimes has these) — treat as NULL.
+            // MySQL strict mode rejects '0000-00-00 00:00:00' as invalid, kahit
+            // nullable yung column. Catch them dito sa parser para clean ang staging.
+            if (in_array($v, ['0000-00-00', '0000-00-00 00:00:00', '0000-00-00 00:00', '00-00-0000'], true)) {
+                return null;
+            }
+
             if (is_numeric($v)) {
                 try {
                     $base = Carbon::create(1899, 12, 30, 0, 0, 0, 'Asia/Manila');

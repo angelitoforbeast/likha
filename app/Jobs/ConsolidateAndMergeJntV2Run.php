@@ -181,7 +181,11 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
             // Defensive cleanup of partial state for this run
             DB::table('from_jnts_2_winners')->where('bulk_run_id', $runId)->delete();
 
-            // The winner-picking SQL — runs once, materializes ~1M rows
+            // The winner-picking SQL — runs once, materializes ~1M rows.
+            // NULLIF on date columns: JNT data sometimes contains '0000-00-00 00:00:00'
+            // which is invalid under MySQL strict mode (NO_ZERO_DATE). Staging accepts
+            // it because LOAD DATA INFILE is lenient, but from_jnts_2_winners (strict)
+            // rejects it. Convert sentinel-zero dates to actual NULL for nullable columns.
             DB::statement("
                 INSERT INTO from_jnts_2_winners (
                     bulk_run_id, submission_time, waybill_number, receiver, receiver_cellphone,
@@ -189,8 +193,11 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
                     province, city, barangay, total_shipping_cost, rts_reason
                 )
                 SELECT
-                    s.bulk_run_id, s.submission_time, s.waybill_number, s.receiver, s.receiver_cellphone,
-                    s.sender, s.item_name, s.cod, s.remarks, s.status, s.signingtime,
+                    s.bulk_run_id,
+                    NULLIF(s.submission_time, '0000-00-00 00:00:00') AS submission_time,
+                    s.waybill_number, s.receiver, s.receiver_cellphone,
+                    s.sender, s.item_name, s.cod, s.remarks, s.status,
+                    NULLIF(s.signingtime, '0000-00-00 00:00:00') AS signingtime,
                     s.province, s.city, s.barangay, s.total_shipping_cost, s.rts_reason
                 FROM from_jnts_2_staging s
                 INNER JOIN (
