@@ -985,15 +985,15 @@
           { id:'pcpp',       label:'P.CPP',      sort:'proceed_cpp',          align:'center', minw:75  },
           { id:'tcpr',          label:'TCPR',           sort:null,                          align:'center', minw:65  },
           { id:'breakeven_cpp', label:this._breakevenLabel(), sort:null,                    align:'center', minw:115 },
-          { id:'proj_profit',label:'Proj.Profit',sort:'projected_profit',     align:'center', minw:95  },
+          { id:'proj_profit',label:'Prof.Profit',sort:'projected_profit',     align:'center', minw:95  },
           { id:'per_order',  label:'/Order',     sort:'proj_profit_per_order',align:'center', minw:75  },
-          { id:'proj_pct',     label:'Proj.%',         sort:null,                          align:'center', minw:65  },
-          { id:'proj_pct_1d',  label:'Proj.%(1D)',     sort:'proj_pct_last_day',           align:'center', minw:75  },
-          { id:'proj_pct_3d',  label:'Proj.%(3D)',     sort:'proj_pct_last_3d',            align:'center', minw:75  },
-          { id:'proj_pct_7d',  label:'Proj.%(7D)',     sort:'proj_pct_last_7d',            align:'center', minw:75  },
-          { id:'proj_prof_1d', label:'Proj.Profit(1D)',sort:'projected_profit_last_day',   align:'center', minw:105 },
-          { id:'proj_prof_3d', label:'Proj.Profit(3D)',sort:'projected_profit_last_3d',    align:'center', minw:105 },
-          { id:'proj_prof_7d', label:'Proj.Profit(7D)',sort:'projected_profit_last_7d',    align:'center', minw:105 },
+          { id:'proj_pct',     label:'Prof.%(1M)',     sort:'proj_pct_computed',           align:'center', minw:75  },
+          { id:'proj_pct_1d',  label:'Prof.%(1D)',     sort:'proj_pct_last_day',           align:'center', minw:75  },
+          { id:'proj_pct_3d',  label:'Prof.%(3D)',     sort:'proj_pct_last_3d',            align:'center', minw:75  },
+          { id:'proj_pct_7d',  label:'Prof.%(7D)',     sort:'proj_pct_last_7d',            align:'center', minw:75  },
+          { id:'proj_prof_1d', label:'Prof.Profit(1D)',sort:'projected_profit_last_day',   align:'center', minw:105 },
+          { id:'proj_prof_3d', label:'Prof.Profit(3D)',sort:'projected_profit_last_3d',    align:'center', minw:105 },
+          { id:'proj_prof_7d', label:'Prof.Profit(7D)',sort:'projected_profit_last_7d',    align:'center', minw:105 },
           { id:'jnt_rts',      label:'RTS%',           sort:null,                          align:'center', minw:100 },
           { id:'jnt_del',    label:'Del%',       sort:null,                   align:'center', minw:90  },
           { id:'jnt_transit',label:'Transit%',   sort:null,                   align:'center', minw:85  },
@@ -1143,8 +1143,22 @@
         const base = this.filteredRows();
         if(!this.sortCol) return base;
         const c=this.sortCol, d=this.sortDir==='asc'?1:-1;
+
+        // Computed-value sort handler — for columns na hindi naka-stored as direct field
+        // (e.g., proj_pct = projected_profit / gross_sales × 100, computed inline sa view).
+        const computedFor = (row, col) => {
+          if (col === 'proj_pct_computed') {
+            if (row.projected_profit !== null && row.gross_sales > 0) {
+              return row.projected_profit / row.gross_sales * 100;
+            }
+            return null;
+          }
+          return row[col];
+        };
+
         return [...base].sort((a,b)=>{
-          let va=a[c], vb=b[c];
+          let va = computedFor(a, c);
+          let vb = computedFor(b, c);
           if(va==null) va=typeof vb==='string'?'':-Infinity;
           if(vb==null) vb=typeof va==='string'?'':-Infinity;
           if(typeof va==='string') return d*va.localeCompare(vb);
