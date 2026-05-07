@@ -804,6 +804,17 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post  ('/jnt_upload_v2/run/{runId}/resume',         [JntUploadV2Controller::class, 'resumeRun'])          ->whereNumber('runId')->name('jnt.upload.v2.merge.resume');
     Route::post  ('/jnt_upload_v2/run/{runId}/request-cancel', [JntUploadV2Controller::class, 'requestCancelMerge']) ->whereNumber('runId')->name('jnt.upload.v2.merge.cancel');
 
+    // /jnt_upload_v2/pipeline — manual per-phase control with 3-table dashboard.
+    // Run-less (processes whole table) — useful para sa debugging / fallback recovery.
+    Route::get   ('/jnt_upload_v2/pipeline',                    [\App\Http\Controllers\JntV2PipelineController::class, 'index'])      ->name('jnt.upload.v2.pipeline');
+    Route::get   ('/jnt_upload_v2/pipeline/data/staging',       [\App\Http\Controllers\JntV2PipelineController::class, 'dataStaging']);
+    Route::get   ('/jnt_upload_v2/pipeline/data/winners',       [\App\Http\Controllers\JntV2PipelineController::class, 'dataWinners']);
+    Route::get   ('/jnt_upload_v2/pipeline/data/final',         [\App\Http\Controllers\JntV2PipelineController::class, 'dataFinal']);
+    Route::post  ('/jnt_upload_v2/pipeline/run-phase1',         [\App\Http\Controllers\JntV2PipelineController::class, 'runPhase1']);
+    Route::post  ('/jnt_upload_v2/pipeline/run-phase2',         [\App\Http\Controllers\JntV2PipelineController::class, 'runPhase2']);
+    Route::post  ('/jnt_upload_v2/pipeline/clear/{table}',      [\App\Http\Controllers\JntV2PipelineController::class, 'clearTable']);
+    Route::get   ('/jnt_upload_v2/pipeline/progress',           [\App\Http\Controllers\JntV2PipelineController::class, 'progress']);
+
     // /queue-manager — system-wide queue dashboard (CEO + MOIC)
     Route::get   ('/queue-manager',                       [\App\Http\Controllers\QueueManagerController::class, 'index'])           ->name('queue.manager.index');
     Route::get   ('/queue-manager/data',                  [\App\Http\Controllers\QueueManagerController::class, 'data'])            ->name('queue.manager.data');
