@@ -137,10 +137,12 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
             $run->refresh();
             $run->status      = 'failed';
             $run->finished_at = Carbon::now('Asia/Manila');
-            $run->message     = 'Consolidate failed: ' . mb_substr($e->getMessage(), 0, 400);
+            // Include phase sa message para malaman agad kung saan nag-fail (debugging aid).
+            $phaseLabel       = $run->consolidate_phase ?? 'unknown';
+            $run->message     = "Consolidate failed in phase '{$phaseLabel}': " . mb_substr($e->getMessage(), 0, 350);
             $run->save();
 
-            Log::error("Consolidate: run {$this->bulkRunId} FAILED — " . $e->getMessage());
+            Log::error("Consolidate: run {$this->bulkRunId} FAILED in phase '{$phaseLabel}' — " . $e->getMessage());
             throw $e;
         }
     }
@@ -376,11 +378,17 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
                     THEN from_jnts_2.status
                     ELSE VALUES(status)
                 END,
+                -- NULLIF defensive: pag may pre-existing row with bad date '0000-00-00 00:00:00'
+                -- (galing sa old data bago naka-deploy ang Phase 1 NULLIF), strict mode
+                -- mag-r-reject pag dinala ulit yung literal sa UPDATE clause. Convert to NULL.
                 signingtime = CASE
                     WHEN LOWER(from_jnts_2.status) IN ('delivered', 'returned')
-                    THEN from_jnts_2.signingtime
+                    THEN NULLIF(from_jnts_2.signingtime, '0000-00-00 00:00:00')
                     ELSE VALUES(signingtime)
                 END,
+                -- Sanitize submission_time on every UPDATE — old bad values become NULL,
+                -- bagong valid values from VALUES() take precedence kung meron.
+                submission_time = COALESCE(VALUES(submission_time), NULLIF(from_jnts_2.submission_time, '0000-00-00 00:00:00')),
                 rts_reason = CASE
                     WHEN LOWER(from_jnts_2.status) IN ('delivered', 'returned')
                     THEN from_jnts_2.rts_reason
