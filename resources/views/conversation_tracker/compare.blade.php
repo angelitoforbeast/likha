@@ -134,18 +134,17 @@
                     <option value="{{ $pg }}" @if($variantPage === $pg) selected @endif>{{ $pg }}</option>
                   @endforeach
                 </select>
-                {{-- Flow dropdown — populated by JS based on selected page (or shows all if no page picked) --}}
+                {{-- Flow dropdown — populated by JS based on selected page. Empty placeholder
+                     pag walang page picked (forced cascade). --}}
                 <select name="variants[]" class="ct-input cascade-flow" data-set-idx="{{ $idx }}" data-current-flow="{{ $v }}">
-                  <option value="">— Select flow —</option>
                   @if ($variantPage !== '' && isset($flowsByPage[$variantPage]))
+                    <option value="">— Select flow —</option>
                     @foreach ($flowsByPage[$variantPage] as $fn)
                       <option value="{{ $fn }}" @if($v === $fn) selected @endif>{{ $fn }}</option>
                     @endforeach
                   @else
-                    {{-- Walang page picked yet — show all flows --}}
-                    @foreach ($allFlowNames as $fn)
-                      <option value="{{ $fn }}" @if($v === $fn) selected @endif>{{ $fn }}</option>
-                    @endforeach
+                    {{-- Walang page picked — empty (force user to pick page first) --}}
+                    <option value="">— Pick a page first —</option>
                   @endif
                 </select>
               </div>
@@ -429,7 +428,8 @@
 
     /**
      * Repopulate yung Flow dropdown ng isang set card based sa selected Page.
-     * Pag walang Page (empty/all), show ALL flows. Otherwise, only flows from that page.
+     * Forced cascade: pag walang Page selected, Flow dropdown ay empty placeholder lang
+     * (force user to pick Page first).
      */
     function repopulateFlowDropdown(setCard, preserveValue) {
       const pageSel = setCard.querySelector('.cascade-page');
@@ -437,9 +437,15 @@
       if (!pageSel || !flowSel) return;
 
       const selectedPage = pageSel.value;
-      const flowsList = selectedPage && FLOWS_BY_PAGE[selectedPage] ? FLOWS_BY_PAGE[selectedPage] : ALL_FLOW_NAMES;
       const currentFlow = preserveValue !== undefined ? preserveValue : flowSel.value;
 
+      // Walang page picked — show only placeholder, force user to pick page first
+      if (!selectedPage || !FLOWS_BY_PAGE[selectedPage]) {
+        flowSel.innerHTML = '<option value="">— Pick a page first —</option>';
+        return;
+      }
+
+      const flowsList = FLOWS_BY_PAGE[selectedPage];
       let html = '<option value="">— Select flow —</option>';
       flowsList.forEach(fn => {
         const sel = (fn === currentFlow) ? 'selected' : '';
@@ -477,12 +483,9 @@
         pageOptions += `<option value="${safe}">${safe}</option>`;
       });
 
-      // Build Flow dropdown options (default: all flows — pre-cascade)
-      let flowOptions = '<option value="">— Select flow —</option>';
-      ALL_FLOW_NAMES.forEach(fn => {
-        const safe = String(fn).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        flowOptions += `<option value="${safe}">${safe}</option>`;
-      });
+      // Flow dropdown initial state — empty placeholder (forced cascade).
+      // Mag-popula lang pagka pumili ng page (handled by repopulateFlowDropdown).
+      let flowOptions = '<option value="">— Pick a page first —</option>';
 
       const newCard = document.createElement('div');
       newCard.className = 'set-card';
