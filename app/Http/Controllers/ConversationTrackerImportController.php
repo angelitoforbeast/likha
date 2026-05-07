@@ -408,6 +408,7 @@ class ConversationTrackerImportController extends Controller
                 $ordered     = $s['flow_ordered'][$flow] ?? 0;
                 $row['sets'][] = [
                     'variant'        => $s['variant'],
+                    'page'           => $s['page'] ?? '',
                     'total'          => $total,
                     'replied'        => $replied,
                     'replied_cells'  => $repliedCell,

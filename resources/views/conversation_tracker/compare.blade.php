@@ -290,7 +290,13 @@
               <tr>
                 <th>Metric</th>
                 @foreach ($sets as $idx => $s)
-                  <th>Set {{ chr(65 + $idx) }} — {{ $s['variant'] }}</th>
+                  <th>
+                    <div>Set {{ chr(65 + $idx) }}</div>
+                    @if (!empty($s['page']))
+                      <div class="text-[10px] text-slate-500" style="font-style:italic;font-weight:normal;">{{ $s['page'] }}</div>
+                    @endif
+                    <div style="font-weight:600;">{{ $s['variant'] }}</div>
+                  </th>
                 @endforeach
               </tr>
             </thead>
@@ -363,7 +369,13 @@
                 <tr>
                   <th>Metric</th>
                   @foreach ($row['sets'] as $idx => $sd)
-                    <th>Set {{ chr(65 + $idx) }} — {{ $sd['variant'] }}</th>
+                    <th>
+                      <div>Set {{ chr(65 + $idx) }}</div>
+                      @if (!empty($sd['page']))
+                        <div class="text-[10px] text-slate-500" style="font-style:italic;font-weight:normal;">{{ $sd['page'] }}</div>
+                      @endif
+                      <div style="font-weight:600;">{{ $sd['variant'] }}</div>
+                    </th>
                   @endforeach
                 </tr>
               </thead>
