@@ -116,15 +116,9 @@
               while (count($renderVariants) < 2) $renderVariants[] = ''; // always show 2 slots minimum
             @endphp
             @foreach ($renderVariants as $idx => $v)
-              {{-- Pre-determine which page this variant came from (for restoring on reload).
-                   Search lahat ng pages sa $flowsByPage para hanapin yung first match. --}}
+              {{-- Restore variant's page from submitted form data (paired by index) --}}
               @php
-                $variantPage = '';
-                if ($v !== '') {
-                    foreach ($flowsByPage as $pg => $flows) {
-                        if (in_array($v, $flows, true)) { $variantPage = $pg; break; }
-                    }
-                }
+                $variantPage = $variantPages[$idx] ?? '';
               @endphp
               <div class="set-card {{ $v ? 'active' : '' }}">
                 <div class="set-card-header">
@@ -133,9 +127,9 @@
                     <button type="button" class="ct-btn danger" style="font-size:11px;padding:2px 8px;" onclick="removeSet(this)">×</button>
                   @endif
                 </div>
-                {{-- Page dropdown — UI cascade only, NOT submitted (yung global Page filter sa taas ang authoritative) --}}
-                <select class="ct-input cascade-page" data-set-idx="{{ $idx }}" style="margin-bottom:6px;">
-                  <option value="">— Select page —</option>
+                {{-- Page dropdown — submitted as variant_pages[], paired by index sa variants[] --}}
+                <select name="variant_pages[]" class="ct-input cascade-page" data-set-idx="{{ $idx }}" style="margin-bottom:6px;">
+                  <option value="">— Any page (use global filter) —</option>
                   @foreach ($flowsByPage as $pg => $flows)
                     <option value="{{ $pg }}" @if($variantPage === $pg) selected @endif>{{ $pg }}</option>
                   @endforeach
@@ -235,6 +229,9 @@
                 @foreach ($sets as $idx => $s)
                   <th class="set-header-cell">
                     <div class="set-header-label">Set {{ chr(65 + $idx) }}</div>
+                    @if (!empty($s['page']))
+                      <div class="text-[10.5px] text-slate-500" style="font-style:italic;">{{ $s['page'] }}</div>
+                    @endif
                     <div class="set-header-name">{{ $s['variant'] }}</div>
                     <div class="set-header-rows">{{ number_format($s['rows']) }} rows in this set</div>
                   </th>
@@ -474,7 +471,7 @@
         : String.fromCharCode(65 + Math.floor(idx / 26) - 1) + String.fromCharCode(65 + (idx % 26));
 
       // Build Page dropdown options
-      let pageOptions = '<option value="">— Select page —</option>';
+      let pageOptions = '<option value="">— Any page (use global filter) —</option>';
       Object.keys(FLOWS_BY_PAGE).forEach(pg => {
         const safe = String(pg).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         pageOptions += `<option value="${safe}">${safe}</option>`;
@@ -494,7 +491,7 @@
           <span>Set ${label}</span>
           <button type="button" class="ct-btn danger" style="font-size:11px;padding:2px 8px;" onclick="removeSet(this)">×</button>
         </div>
-        <select class="ct-input cascade-page" data-set-idx="${idx}" style="margin-bottom:6px;">${pageOptions}</select>
+        <select name="variant_pages[]" class="ct-input cascade-page" data-set-idx="${idx}" style="margin-bottom:6px;">${pageOptions}</select>
         <select name="variants[]" class="ct-input cascade-flow" data-set-idx="${idx}">${flowOptions}</select>
       `;
 

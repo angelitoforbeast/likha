@@ -272,28 +272,31 @@ class ConversationTrackerImportController extends Controller
         if ($orderFlag === '') $orderFlag = 'CUSTOMER ORDERED';
 
         // Variants from query: ?variants[]=MAIN+FLOW&variants[]=MAIN+FLOW2
-        $variants = $request->query('variants', []);
-        if (!is_array($variants)) $variants = [];
-        $variants = array_values(array_filter(array_map(fn($v) => trim((string) $v), $variants), fn($v) => $v !== ''));
+        // Paired with: ?variant_pages[]=PageA&variant_pages[]=PageB (per-set page filter)
+        $rawVariants     = $request->query('variants', []);
+        $rawVariantPages = $request->query('variant_pages', []);
+        if (!is_array($rawVariants))     $rawVariants = [];
+        if (!is_array($rawVariantPages)) $rawVariantPages = [];
+
+        // Pair variants with pages by index. Drop entries with empty flow.
+        $variants      = [];   // flat list of flow names (preserves backward-compat sa view)
+        $variantPages  = [];   // flat list of page names (paired by index sa $variants)
+        foreach ($rawVariants as $idx => $rv) {
+            $flow = trim((string) $rv);
+            if ($flow === '') continue;
+            $variants[]     = $flow;
+            $variantPages[] = trim((string) ($rawVariantPages[$idx] ?? ''));
+        }
         // Walang cap — pwedeng unlimited sets
 
-        // Build base query (shared filters apply to all sets)
-        $baseQuery = function () use ($pageName, $fromDate, $toDate) {
-            $q = ConversationTracker::query()
-                ->whereNotNull('response_tracker')
-                ->where('response_tracker', '<>', '');
-            if ($pageName !== '' && strtolower($pageName) !== 'all') {
-                $q->where('page_name', $pageName);
-            }
-            if ($fromDate !== '') $q->where('subscription_date', '>=', $fromDate . ' 00:00:00');
-            if ($toDate !== '')   $q->where('subscription_date', '<=', $toDate . ' 23:59:59');
-            return $q;
-        };
-
         // For each variant, partition rows + compute stats
+        // Per-set query may include a per-variant page filter (yung cascade-page)
+        // bukod sa global pageName filter. Pag may variantPage, yan ang gagamitin
+        // (overrides global). Pag wala (empty), fallback sa global pageName.
         $sets = [];
-        foreach ($variants as $variant) {
-            $variantU = strtoupper($variant);
+        foreach ($variants as $idx => $variant) {
+            $variantU    = strtoupper($variant);
+            $variantPage = $variantPages[$idx] ?? '';
             $stats = [
                 'flow_total'         => [],
                 'flow_replied'       => [],
@@ -302,7 +305,18 @@ class ConversationTrackerImportController extends Controller
                 'rows_in_set'        => 0,
             ];
 
-            $baseQuery()
+            // Build per-set query with variant's page filter (or fallback to global)
+            $effectivePage = $variantPage !== '' ? $variantPage : $pageName;
+            $perSetQuery = ConversationTracker::query()
+                ->whereNotNull('response_tracker')
+                ->where('response_tracker', '<>', '');
+            if ($effectivePage !== '' && strtolower($effectivePage) !== 'all') {
+                $perSetQuery->where('page_name', $effectivePage);
+            }
+            if ($fromDate !== '') $perSetQuery->where('subscription_date', '>=', $fromDate . ' 00:00:00');
+            if ($toDate !== '')   $perSetQuery->where('subscription_date', '<=', $toDate . ' 23:59:59');
+
+            $perSetQuery
                 ->select('response_tracker')
                 ->orderBy('id')
                 ->chunk(500, function ($chunk) use (&$stats, $variantU, $replyFlag, $orderFlag) {
@@ -330,6 +344,7 @@ class ConversationTrackerImportController extends Controller
 
             $sets[] = [
                 'variant'  => $variant,
+                'page'     => $variantPage,    // per-set page filter (may be empty)
                 'rows'     => $stats['rows_in_set'],
                 'flow_total'         => $stats['flow_total'],
                 'flow_replied'       => $stats['flow_replied'],
@@ -440,6 +455,7 @@ class ConversationTrackerImportController extends Controller
             'replyFlag'         => $replyFlag,
             'orderFlag'         => $orderFlag,
             'variants'          => $variants,
+            'variantPages'      => $variantPages, // paired by index sa $variants
             'bubblesByVariant'  => $bubblesByVariant,
         ]);
     }
