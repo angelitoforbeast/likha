@@ -69,7 +69,10 @@ class MaterializeWinnersV2Pipeline implements ShouldQueue
 
             // Winner-pick SQL — same priority logic as ConsolidateAndMergeJntV2Run
             // Phase 1, but WITHOUT the bulk_run_id filter (process whole table).
-            // NULLIF for sentinel '0000-00-00' dates to satisfy strict mode.
+            // IMPORTANT: gamit IF(YEAR()=0, NULL, col) instead of NULLIF(col, '0000-00-00 00:00:00').
+            // Strict mode rejects yung literal '0000-00-00 00:00:00' kahit sa loob lang ng
+            // NULLIF expression (parsed before any rows checked). YEAR() returns 0 for sentinel
+            // zero-dates — strict-safe kasi walang bad literal sa SQL.
             DB::statement("
                 INSERT INTO from_jnts_2_winners (
                     bulk_run_id, submission_time, waybill_number, receiver, receiver_cellphone,
@@ -78,10 +81,10 @@ class MaterializeWinnersV2Pipeline implements ShouldQueue
                 )
                 SELECT
                     s.bulk_run_id,
-                    NULLIF(s.submission_time, '0000-00-00 00:00:00') AS submission_time,
+                    IF(YEAR(s.submission_time) = 0, NULL, s.submission_time) AS submission_time,
                     s.waybill_number, s.receiver, s.receiver_cellphone,
                     s.sender, s.item_name, s.cod, s.remarks, s.status,
-                    NULLIF(s.signingtime, '0000-00-00 00:00:00') AS signingtime,
+                    IF(YEAR(s.signingtime) = 0, NULL, s.signingtime) AS signingtime,
                     s.province, s.city, s.barangay, s.total_shipping_cost, s.rts_reason
                 FROM from_jnts_2_staging s
                 INNER JOIN (

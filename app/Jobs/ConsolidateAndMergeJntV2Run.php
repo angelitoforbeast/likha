@@ -196,10 +196,10 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
                 )
                 SELECT
                     s.bulk_run_id,
-                    NULLIF(s.submission_time, '0000-00-00 00:00:00') AS submission_time,
+                    IF(YEAR(s.submission_time) = 0, NULL, s.submission_time) AS submission_time,
                     s.waybill_number, s.receiver, s.receiver_cellphone,
                     s.sender, s.item_name, s.cod, s.remarks, s.status,
-                    NULLIF(s.signingtime, '0000-00-00 00:00:00') AS signingtime,
+                    IF(YEAR(s.signingtime) = 0, NULL, s.signingtime) AS signingtime,
                     s.province, s.city, s.barangay, s.total_shipping_cost, s.rts_reason
                 FROM from_jnts_2_staging s
                 INNER JOIN (
@@ -378,17 +378,15 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
                     THEN from_jnts_2.status
                     ELSE VALUES(status)
                 END,
-                -- NULLIF defensive: pag may pre-existing row with bad date '0000-00-00 00:00:00'
-                -- (galing sa old data bago naka-deploy ang Phase 1 NULLIF), strict mode
-                -- mag-r-reject pag dinala ulit yung literal sa UPDATE clause. Convert to NULL.
+                -- IF(YEAR()=0, NULL, col) instead of NULLIF — strict mode rejects yung
+                -- literal '0000-00-00 00:00:00' kahit sa loob ng NULLIF expression.
+                -- YEAR()=0 detects sentinel zero-dates without using the bad literal.
                 signingtime = CASE
                     WHEN LOWER(from_jnts_2.status) IN ('delivered', 'returned')
-                    THEN NULLIF(from_jnts_2.signingtime, '0000-00-00 00:00:00')
+                    THEN IF(YEAR(from_jnts_2.signingtime) = 0, NULL, from_jnts_2.signingtime)
                     ELSE VALUES(signingtime)
                 END,
-                -- Sanitize submission_time on every UPDATE — old bad values become NULL,
-                -- bagong valid values from VALUES() take precedence kung meron.
-                submission_time = COALESCE(VALUES(submission_time), NULLIF(from_jnts_2.submission_time, '0000-00-00 00:00:00')),
+                submission_time = COALESCE(VALUES(submission_time), IF(YEAR(from_jnts_2.submission_time) = 0, NULL, from_jnts_2.submission_time)),
                 rts_reason = CASE
                     WHEN LOWER(from_jnts_2.status) IN ('delivered', 'returned')
                     THEN from_jnts_2.rts_reason

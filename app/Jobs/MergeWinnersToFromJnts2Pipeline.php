@@ -123,12 +123,13 @@ class MergeWinnersToFromJnts2Pipeline implements ShouldQueue
                             THEN from_jnts_2.status
                             ELSE VALUES(status)
                         END,
+                        -- IF(YEAR()=0, NULL, ...) instead of NULLIF — strict mode safe
                         signingtime = CASE
                             WHEN LOWER(from_jnts_2.status) IN ('delivered', 'returned')
-                            THEN NULLIF(from_jnts_2.signingtime, '0000-00-00 00:00:00')
+                            THEN IF(YEAR(from_jnts_2.signingtime) = 0, NULL, from_jnts_2.signingtime)
                             ELSE VALUES(signingtime)
                         END,
-                        submission_time = COALESCE(VALUES(submission_time), NULLIF(from_jnts_2.submission_time, '0000-00-00 00:00:00')),
+                        submission_time = COALESCE(VALUES(submission_time), IF(YEAR(from_jnts_2.submission_time) = 0, NULL, from_jnts_2.submission_time)),
                         rts_reason = CASE
                             WHEN LOWER(from_jnts_2.status) IN ('delivered', 'returned')
                             THEN from_jnts_2.rts_reason
