@@ -409,6 +409,10 @@ class ConversationTrackerImportController extends Controller
         // Get all unique flow names sa entire dataset for dropdown
         $allFlowNames = $this->getAllFlowNames($pageName, $fromDate, $toDate, $replyFlag, $orderFlag);
 
+        // Build flows-by-page map para sa cascading Page → Flow dropdown sa Set picker.
+        // Format: ['PageX' => ['flow1', 'flow2'], 'PageY' => [...]]
+        $flowsByPage = $this->getFlowsByPage($fromDate, $toDate, $replyFlag, $orderFlag);
+
         // Pages list para sa filter dropdown
         $pages = ConversationTracker::select('page_name')
             ->whereNotNull('page_name')->distinct()->orderBy('page_name')->pluck('page_name');
@@ -428,6 +432,7 @@ class ConversationTrackerImportController extends Controller
             'comparison'        => $comparison,
             'sets'              => $sets,
             'allFlowNames'      => $allFlowNames,
+            'flowsByPage'       => $flowsByPage,
             'pages'             => $pages,
             'pageName'          => $pageName,
             'fromDate'          => $fromDate,
@@ -469,6 +474,50 @@ class ConversationTrackerImportController extends Controller
             $names = array_keys($allFlows);
             sort($names, SORT_NATURAL | SORT_FLAG_CASE);
             return $names;
+        });
+    }
+
+    /**
+     * Build flows-by-page map para sa cascading Page → Flow dropdown sa /compare set picker.
+     *
+     * Walks lahat ng rows (filtered by date + flag), groups by page_name, collects unique
+     * flow names per page. Cached for 60 seconds (same as getAllFlowNames).
+     *
+     * Returns: ['PageX' => ['flow1', 'flow2'], 'PageY' => [...]]
+     */
+    private function getFlowsByPage(string $fromDate, string $toDate, string $replyFlag, string $orderFlag): array
+    {
+        $cacheKey = 'ct_compare_flows_by_page:' . md5("{$fromDate}|{$toDate}|{$replyFlag}|{$orderFlag}");
+        return \Illuminate\Support\Facades\Cache::remember($cacheKey, 60, function () use ($fromDate, $toDate, $replyFlag, $orderFlag) {
+            $q = ConversationTracker::query()
+                ->whereNotNull('response_tracker')
+                ->where('response_tracker', '<>', '')
+                ->whereNotNull('page_name')
+                ->where('page_name', '<>', '');
+            if ($fromDate !== '') $q->where('subscription_date', '>=', $fromDate . ' 00:00:00');
+            if ($toDate !== '')   $q->where('subscription_date', '<=', $toDate . ' 23:59:59');
+
+            $byPage = []; // ['PageName' => ['flow1' => true, 'flow2' => true]]
+            $q->select('page_name', 'response_tracker')->chunk(500, function ($chunk) use (&$byPage, $replyFlag, $orderFlag) {
+                foreach ($chunk as $row) {
+                    $page = trim((string) $row->page_name);
+                    if ($page === '') continue;
+                    $parsed = self::parseResponseTracker((string) $row->response_tracker, $replyFlag, $orderFlag);
+                    foreach ($parsed['unique_flows'] as $f) {
+                        $byPage[$page][$f] = true;
+                    }
+                }
+            });
+
+            // Convert inner sets to sorted arrays
+            $result = [];
+            foreach ($byPage as $page => $flowsSet) {
+                $names = array_keys($flowsSet);
+                sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+                $result[$page] = $names;
+            }
+            ksort($result, SORT_NATURAL | SORT_FLAG_CASE);
+            return $result;
         });
     }
 

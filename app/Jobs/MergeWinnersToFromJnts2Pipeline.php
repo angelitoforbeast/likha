@@ -51,21 +51,25 @@ class MergeWinnersToFromJnts2Pipeline implements ShouldQueue
         }
 
         Cache::put('jnt_v2_pipeline_state', [
-            'phase'      => 'phase2',
-            'status'     => 'running',
-            'processed'  => 0,
-            'total'      => $totalWinners,
-            'pct'        => 0,
-            'message'    => "Phase 2 — merging {$totalWinners} winners → from_jnts_2 in batches of " . self::BATCH_SIZE,
-            'started_at' => Carbon::now('Asia/Manila')->toDateTimeString(),
+            'phase'         => 'phase2',
+            'status'        => 'running',
+            'processed'     => 0,
+            'total'         => $totalWinners,
+            'pct'           => 0,
+            'inserted_count'=> 0,
+            'updated_count' => 0,
+            'skipped_count' => 0,
+            'message'       => "Phase 2 — merging {$totalWinners} winners → from_jnts_2 in batches of " . self::BATCH_SIZE,
+            'started_at'    => Carbon::now('Asia/Manila')->toDateTimeString(),
         ], 7200);
 
         try {
             Log::info("Pipeline Phase 2 START — winners: {$totalWinners}");
 
             $processed = 0;
-            $inserted  = 0;
-            $updated   = 0;
+            $insertedTotal = 0;
+            $updatedTotal  = 0;
+            $skippedTotal  = 0;
             $batchNum  = 0;
 
             while (true) {
@@ -87,6 +91,21 @@ class MergeWinnersToFromJnts2Pipeline implements ShouldQueue
                     $processed += $batch->count();
                     continue;
                 }
+
+                // Pre-batch breakdown — para alam natin per-batch counts ng inserted/updated/skipped.
+                // Existing rows na may status='delivered'/'returned' ay i-pre-preserve ng skip rule (skipped).
+                // Yung iba existing ay ma-overwrite (updated). Yung walang existing ay magiging new INSERT.
+                $existingBreakdown = DB::table('from_jnts_2')
+                    ->whereIn('waybill_number', $waybills)
+                    ->selectRaw("
+                        SUM(CASE WHEN LOWER(status) IN ('delivered','returned') THEN 1 ELSE 0 END) AS skipped_count,
+                        SUM(CASE WHEN LOWER(status) NOT IN ('delivered','returned') THEN 1 ELSE 0 END) AS updated_count
+                    ")
+                    ->first();
+
+                $batchSkipped  = (int) ($existingBreakdown->skipped_count ?? 0);
+                $batchUpdated  = (int) ($existingBreakdown->updated_count ?? 0);
+                $batchInserted = count($waybills) - $batchSkipped - $batchUpdated; // remainder = new rows
 
                 // UPSERT this batch's waybills to from_jnts_2.
                 // Same skip-rule logic as ConsolidateAndMergeJntV2Run Phase 2:
@@ -145,37 +164,50 @@ class MergeWinnersToFromJnts2Pipeline implements ShouldQueue
                     ->whereIn('waybill_number', $waybills)
                     ->delete();
 
-                $processed += $batch->count();
-                $pct        = $totalWinners > 0 ? round($processed / $totalWinners * 100, 1) : 0;
+                $processed     += $batch->count();
+                $insertedTotal += $batchInserted;
+                $updatedTotal  += $batchUpdated;
+                $skippedTotal  += $batchSkipped;
+                $pct = $totalWinners > 0 ? round($processed / $totalWinners * 100, 1) : 0;
 
-                // Update progress every batch
+                // Update progress every batch — keep started_at preserved across ticks
+                $prev      = Cache::get('jnt_v2_pipeline_state', []);
+                $startedAt = $prev['started_at'] ?? Carbon::now('Asia/Manila')->toDateTimeString();
+
                 Cache::put('jnt_v2_pipeline_state', [
-                    'phase'      => 'phase2',
-                    'status'     => 'running',
-                    'processed'  => $processed,
-                    'total'      => $totalWinners,
-                    'pct'        => $pct,
-                    'message'    => "Batch {$batchNum} — {$processed}/{$totalWinners} ({$pct}%)",
-                    'started_at' => Cache::get('jnt_v2_pipeline_state.started_at') ?? Carbon::now('Asia/Manila')->toDateTimeString(),
+                    'phase'          => 'phase2',
+                    'status'         => 'running',
+                    'processed'      => $processed,
+                    'total'          => $totalWinners,
+                    'pct'            => $pct,
+                    'inserted_count' => $insertedTotal,
+                    'updated_count'  => $updatedTotal,
+                    'skipped_count'  => $skippedTotal,
+                    'current_batch'  => $batchNum,
+                    'message'        => "Batch {$batchNum} — {$processed}/{$totalWinners} ({$pct}%)",
+                    'started_at'     => $startedAt,
                 ], 7200);
 
                 if ($batchNum % 10 === 0) {
-                    Log::info("Pipeline Phase 2 progress: batch {$batchNum}, {$processed}/{$totalWinners}");
+                    Log::info("Pipeline Phase 2 progress: batch {$batchNum}, {$processed}/{$totalWinners} (ins={$insertedTotal}, upd={$updatedTotal}, skip={$skippedTotal})");
                 }
             }
 
             $elapsed = round(microtime(true) - $startTs, 1);
-            Log::info("Pipeline Phase 2 DONE — processed {$processed} waybills in {$elapsed}s");
+            Log::info("Pipeline Phase 2 DONE — processed {$processed} waybills in {$elapsed}s (ins={$insertedTotal}, upd={$updatedTotal}, skip={$skippedTotal})");
 
             Cache::put('jnt_v2_pipeline_state', [
-                'phase'      => 'phase2',
-                'status'     => 'done',
-                'processed'  => $processed,
-                'total'      => $totalWinners,
-                'pct'        => 100,
-                'message'    => "Merged {$processed} waybills to from_jnts_2 in {$elapsed}s",
-                'finished_at'=> Carbon::now('Asia/Manila')->toDateTimeString(),
-                'elapsed_s'  => $elapsed,
+                'phase'          => 'phase2',
+                'status'         => 'done',
+                'processed'      => $processed,
+                'total'          => $totalWinners,
+                'pct'            => 100,
+                'inserted_count' => $insertedTotal,
+                'updated_count'  => $updatedTotal,
+                'skipped_count'  => $skippedTotal,
+                'message'        => "Merged {$processed} waybills in {$elapsed}s — ins:{$insertedTotal}, upd:{$updatedTotal}, skip:{$skippedTotal}",
+                'finished_at'    => Carbon::now('Asia/Manila')->toDateTimeString(),
+                'elapsed_s'      => $elapsed,
             ], 86400);
         } catch (\Throwable $e) {
             Log::error('Pipeline Phase 2 FAILED: ' . $e->getMessage());

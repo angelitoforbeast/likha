@@ -107,15 +107,25 @@
           </div>
         </div>
 
-        {{-- Set picker cards --}}
+        {{-- Set picker cards — cascading Page → Flow dropdowns per set --}}
         <div class="mt-4">
-          <label class="ct-label">Variants to compare (max 4)</label>
+          <label class="ct-label">Variants to compare (max 4) — pick a Page first, then the Flow</label>
           <div class="flex flex-wrap gap-3" id="setCards">
             @php
               $renderVariants = $variants;
               while (count($renderVariants) < 2) $renderVariants[] = ''; // always show 2 slots minimum
             @endphp
             @foreach ($renderVariants as $idx => $v)
+              {{-- Pre-determine which page this variant came from (for restoring on reload).
+                   Search lahat ng pages sa $flowsByPage para hanapin yung first match. --}}
+              @php
+                $variantPage = '';
+                if ($v !== '') {
+                    foreach ($flowsByPage as $pg => $flows) {
+                        if (in_array($v, $flows, true)) { $variantPage = $pg; break; }
+                    }
+                }
+              @endphp
               <div class="set-card {{ $v ? 'active' : '' }}">
                 <div class="set-card-header">
                   <span>Set {{ chr(65 + $idx) }}</span>
@@ -123,11 +133,26 @@
                     <button type="button" class="ct-btn danger" style="font-size:11px;padding:2px 8px;" onclick="removeSet(this)">×</button>
                   @endif
                 </div>
-                <select name="variants[]" class="ct-input">
-                  <option value="">— Select flow —</option>
-                  @foreach ($allFlowNames as $fn)
-                    <option value="{{ $fn }}" @if($v === $fn) selected @endif>{{ $fn }}</option>
+                {{-- Page dropdown — UI cascade only, NOT submitted (yung global Page filter sa taas ang authoritative) --}}
+                <select class="ct-input cascade-page" data-set-idx="{{ $idx }}" style="margin-bottom:6px;">
+                  <option value="">— Select page —</option>
+                  @foreach ($flowsByPage as $pg => $flows)
+                    <option value="{{ $pg }}" @if($variantPage === $pg) selected @endif>{{ $pg }}</option>
                   @endforeach
+                </select>
+                {{-- Flow dropdown — populated by JS based on selected page (or shows all if no page picked) --}}
+                <select name="variants[]" class="ct-input cascade-flow" data-set-idx="{{ $idx }}" data-current-flow="{{ $v }}">
+                  <option value="">— Select flow —</option>
+                  @if ($variantPage !== '' && isset($flowsByPage[$variantPage]))
+                    @foreach ($flowsByPage[$variantPage] as $fn)
+                      <option value="{{ $fn }}" @if($v === $fn) selected @endif>{{ $fn }}</option>
+                    @endforeach
+                  @else
+                    {{-- Walang page picked yet — show all flows --}}
+                    @foreach ($allFlowNames as $fn)
+                      <option value="{{ $fn }}" @if($v === $fn) selected @endif>{{ $fn }}</option>
+                    @endforeach
+                  @endif
                 </select>
               </div>
             @endforeach
@@ -401,23 +426,66 @@
       headerCell.classList.toggle('expanded', isHidden);
     }
 
+    // Flows-by-page map para sa cascading dropdown — bigay ng controller
+    const FLOWS_BY_PAGE = @json($flowsByPage ?? []);
+    const ALL_FLOW_NAMES = @json($allFlowNames ?? []);
+
+    /**
+     * Repopulate yung Flow dropdown ng isang set card based sa selected Page.
+     * Pag walang Page (empty/all), show ALL flows. Otherwise, only flows from that page.
+     */
+    function repopulateFlowDropdown(setCard, preserveValue) {
+      const pageSel = setCard.querySelector('.cascade-page');
+      const flowSel = setCard.querySelector('.cascade-flow');
+      if (!pageSel || !flowSel) return;
+
+      const selectedPage = pageSel.value;
+      const flowsList = selectedPage && FLOWS_BY_PAGE[selectedPage] ? FLOWS_BY_PAGE[selectedPage] : ALL_FLOW_NAMES;
+      const currentFlow = preserveValue !== undefined ? preserveValue : flowSel.value;
+
+      let html = '<option value="">— Select flow —</option>';
+      flowsList.forEach(fn => {
+        const sel = (fn === currentFlow) ? 'selected' : '';
+        const safe = String(fn).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        html += `<option value="${safe}" ${sel}>${safe}</option>`;
+      });
+      flowSel.innerHTML = html;
+    }
+
+    // Wire cascade: when Page changes → repopulate Flow dropdown
+    function wireCascade(setCard) {
+      const pageSel = setCard.querySelector('.cascade-page');
+      if (!pageSel) return;
+      pageSel.addEventListener('change', () => repopulateFlowDropdown(setCard));
+    }
+
+    // Wire all existing set cards on page load
+    document.querySelectorAll('#setCards .set-card').forEach(wireCascade);
+
     function addSet() {
       const container = document.getElementById('setCards');
       const addBtn = document.getElementById('addSetBtn');
       const existingCards = container.querySelectorAll('.set-card');
       const idx = existingCards.length;
 
-      // No limit — pwedeng unlimited sets
-
-      // Get all flow options from existing dropdown (clone)
-      const firstSelect = container.querySelector('select[name="variants[]"]');
-      if (!firstSelect) return;
-      const optionsHtml = firstSelect.innerHTML;
-
       // Compute label: A-Z then AA, AB, ... for >26 sets
       const label = (idx < 26)
         ? String.fromCharCode(65 + idx)
         : String.fromCharCode(65 + Math.floor(idx / 26) - 1) + String.fromCharCode(65 + (idx % 26));
+
+      // Build Page dropdown options
+      let pageOptions = '<option value="">— Select page —</option>';
+      Object.keys(FLOWS_BY_PAGE).forEach(pg => {
+        const safe = String(pg).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        pageOptions += `<option value="${safe}">${safe}</option>`;
+      });
+
+      // Build Flow dropdown options (default: all flows — pre-cascade)
+      let flowOptions = '<option value="">— Select flow —</option>';
+      ALL_FLOW_NAMES.forEach(fn => {
+        const safe = String(fn).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        flowOptions += `<option value="${safe}">${safe}</option>`;
+      });
 
       const newCard = document.createElement('div');
       newCard.className = 'set-card';
@@ -426,13 +494,12 @@
           <span>Set ${label}</span>
           <button type="button" class="ct-btn danger" style="font-size:11px;padding:2px 8px;" onclick="removeSet(this)">×</button>
         </div>
-        <select name="variants[]" class="ct-input">${optionsHtml}</select>
+        <select class="ct-input cascade-page" data-set-idx="${idx}" style="margin-bottom:6px;">${pageOptions}</select>
+        <select name="variants[]" class="ct-input cascade-flow" data-set-idx="${idx}">${flowOptions}</select>
       `;
-      // Reset the cloned select's selected value
-      const newSelect = newCard.querySelector('select');
-      newSelect.value = '';
 
       container.insertBefore(newCard, addBtn);
+      wireCascade(newCard);
     }
 
     function setLabel(idx) {

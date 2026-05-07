@@ -54,18 +54,7 @@
       </div>
     </div>
 
-    <!-- Active Phase Banner -->
-    <div id="activePhaseCard" class="pipe-progress-card hidden">
-      <div class="flex items-center justify-between mb-1">
-        <div class="pipe-progress-label">
-          <span id="activePhaseLabel">Phase X — running</span>
-          <span id="activePhaseStatus" class="badge running ml-2">RUNNING</span>
-        </div>
-        <div id="activePhaseElapsed" class="text-xs text-slate-500">—</div>
-      </div>
-      <div class="pipe-progress-bar"><div id="activePhaseBar" style="width:0%;"></div></div>
-      <div class="pipe-progress-text" id="activePhaseMessage">—</div>
-    </div>
+    {{-- Active phase banner removed — progress now shown INSIDE the relevant card (Step 1 or Step 2) --}}
 
     <!-- Card 1: STAGING -->
     <div class="pipe-card" id="cardStaging">
@@ -89,6 +78,22 @@
 
       <div class="text-xs text-slate-500 mt-2 mb-1">Top 5 latest rows:</div>
       <div id="stagingPreview"><div class="pipe-empty">Loading...</div></div>
+
+      {{-- Phase 1 in-card status — shown only when phase1 is active --}}
+      <div id="phase1StatusCard" class="pipe-progress-card hidden mt-3">
+        <div class="flex items-center justify-between mb-1">
+          <div class="pipe-progress-label">
+            <span>Phase 1 — Materialize Winners</span>
+            <span id="phase1Status" class="badge running ml-2">RUNNING</span>
+          </div>
+          <div id="phase1Elapsed" class="text-xs text-slate-500">—</div>
+        </div>
+        <div class="pipe-progress-bar"><div id="phase1Bar" style="width:0%;"></div></div>
+        <div class="pipe-progress-text" id="phase1Message">—</div>
+        <div class="text-[10.5px] text-slate-500 italic mt-1">
+          Note: Phase 1 ay single SQL statement — walang incremental progress hanggang done. Hintayin lang.
+        </div>
+      </div>
 
       <div class="flex gap-2 mt-3 items-center justify-between border-t pt-3">
         <button id="btnClearStaging" class="pipe-btn danger" type="button">🗑 Clear Staging (TRUNCATE)</button>
@@ -120,6 +125,35 @@
 
       <div class="text-xs text-slate-500 mt-2 mb-1">Top 5 latest rows:</div>
       <div id="winnersPreview"><div class="pipe-empty">Loading...</div></div>
+
+      {{-- Phase 2 in-card status with breakdown — shown only when phase2 is active or done --}}
+      <div id="phase2StatusCard" class="pipe-progress-card hidden mt-3">
+        <div class="flex items-center justify-between mb-1">
+          <div class="pipe-progress-label">
+            <span>Phase 2 — Merge to from_jnts_2</span>
+            <span id="phase2Status" class="badge running ml-2">RUNNING</span>
+          </div>
+          <div id="phase2Elapsed" class="text-xs text-slate-500">—</div>
+        </div>
+        <div class="pipe-progress-bar"><div id="phase2Bar" style="width:0%;"></div></div>
+        <div class="pipe-progress-text" id="phase2Message">—</div>
+
+        {{-- Per-status breakdown --}}
+        <div class="grid grid-cols-3 gap-2 mt-2">
+          <div class="bg-green-50 border border-green-200 rounded px-2 py-1.5">
+            <div class="text-[10px] text-green-700 font-semibold uppercase">✅ Inserted (new)</div>
+            <div class="text-base font-bold text-green-900" id="phase2Inserted">0</div>
+          </div>
+          <div class="bg-blue-50 border border-blue-200 rounded px-2 py-1.5">
+            <div class="text-[10px] text-blue-700 font-semibold uppercase">🔄 Updated (existing)</div>
+            <div class="text-base font-bold text-blue-900" id="phase2Updated">0</div>
+          </div>
+          <div class="bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+            <div class="text-[10px] text-amber-700 font-semibold uppercase">⏭ Skipped (delivered/returned)</div>
+            <div class="text-base font-bold text-amber-900" id="phase2Skipped">0</div>
+          </div>
+        </div>
+      </div>
 
       <div class="flex gap-2 mt-3 items-center justify-between border-t pt-3">
         <button id="btnClearWinners" class="pipe-btn danger" type="button">🗑 Clear Winners (TRUNCATE)</button>
@@ -199,39 +233,71 @@
       ]);
     }
 
+    function fmtElapsed(startedAt) {
+      if (!startedAt) return '—';
+      const startTs = new Date(startedAt.replace(' ', 'T'));
+      const elapsedSec = Math.max(0, Math.round((Date.now() - startTs.getTime()) / 1000));
+      const m = Math.floor(elapsedSec / 60);
+      const sec = elapsedSec % 60;
+      return `Elapsed: ${m}m ${sec}s`;
+    }
+
+    function updatePhase1Card(s) {
+      const card    = document.getElementById('phase1StatusCard');
+      const status  = document.getElementById('phase1Status');
+      const bar     = document.getElementById('phase1Bar');
+      const msg     = document.getElementById('phase1Message');
+      const elapsed = document.getElementById('phase1Elapsed');
+
+      // Show kapag may phase1 state (running, done, failed). Hide kapag idle or current is phase2.
+      const showPhase1 = s.phase === 'phase1';
+      if (!showPhase1) { card.classList.add('hidden'); return; }
+      card.classList.remove('hidden');
+
+      status.textContent = (s.status || '').toUpperCase();
+      status.className = 'badge ' + (s.status || 'idle') + ' ml-2';
+      const pct = s.pct ?? (s.status === 'done' ? 100 : 0);
+      bar.style.width = pct + '%';
+      msg.textContent = s.message || '—';
+      elapsed.textContent = s.status === 'running' ? fmtElapsed(s.started_at) :
+                            (s.elapsed_s ? `Elapsed: ${Math.floor(s.elapsed_s/60)}m ${Math.round(s.elapsed_s%60)}s` : '—');
+    }
+
+    function updatePhase2Card(s) {
+      const card    = document.getElementById('phase2StatusCard');
+      const status  = document.getElementById('phase2Status');
+      const bar     = document.getElementById('phase2Bar');
+      const msg     = document.getElementById('phase2Message');
+      const elapsed = document.getElementById('phase2Elapsed');
+      const ins     = document.getElementById('phase2Inserted');
+      const upd     = document.getElementById('phase2Updated');
+      const skp     = document.getElementById('phase2Skipped');
+
+      const showPhase2 = s.phase === 'phase2';
+      if (!showPhase2) { card.classList.add('hidden'); return; }
+      card.classList.remove('hidden');
+
+      status.textContent = (s.status || '').toUpperCase();
+      status.className = 'badge ' + (s.status || 'idle') + ' ml-2';
+      const pct = s.pct ?? (s.status === 'done' ? 100 : 0);
+      bar.style.width = pct + '%';
+      msg.textContent = s.message || '—';
+      elapsed.textContent = s.status === 'running' ? fmtElapsed(s.started_at) :
+                            (s.elapsed_s ? `Elapsed: ${Math.floor(s.elapsed_s/60)}m ${Math.round(s.elapsed_s%60)}s` : '—');
+
+      ins.textContent = fmtNum(s.inserted_count || 0);
+      upd.textContent = fmtNum(s.updated_count || 0);
+      skp.textContent = fmtNum(s.skipped_count || 0);
+    }
+
     async function pollProgress() {
       try {
         const res = await fetch('/jnt_upload_v2/pipeline/progress');
         const s = await res.json();
-        const card = document.getElementById('activePhaseCard');
-        const label = document.getElementById('activePhaseLabel');
-        const status = document.getElementById('activePhaseStatus');
-        const bar = document.getElementById('activePhaseBar');
-        const msg = document.getElementById('activePhaseMessage');
-        const elapsed = document.getElementById('activePhaseElapsed');
 
-        if (!s.phase || s.status === 'idle') {
-          card.classList.add('hidden');
-        } else {
-          card.classList.remove('hidden');
-          const phaseName = s.phase === 'phase1' ? 'Phase 1 — Materialize Winners' : 'Phase 2 — Merge to from_jnts_2';
-          label.textContent = phaseName;
-          status.textContent = (s.status || '').toUpperCase();
-          status.className = 'badge ' + (s.status || 'idle') + ' ml-2';
-          const pct = s.pct ?? (s.status === 'done' ? 100 : 0);
-          bar.style.width = pct + '%';
-          msg.textContent = s.message || '—';
-
-          if (s.started_at) {
-            const startTs = new Date(s.started_at.replace(' ', 'T'));
-            const elapsedSec = Math.max(0, Math.round((Date.now() - startTs.getTime()) / 1000));
-            const m = Math.floor(elapsedSec / 60);
-            const sec = elapsedSec % 60;
-            elapsed.textContent = `Elapsed: ${m}m ${sec}s`;
-          } else {
-            elapsed.textContent = '—';
-          }
-        }
+        // Update both phase cards (one will hide based on current phase)
+        updatePhase1Card(s);
+        updatePhase2Card(s);
 
         // Update count fields with live values
         document.getElementById('stagingCount').textContent = fmtNum(s.stagingCount);
