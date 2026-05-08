@@ -379,10 +379,24 @@
       <table>
         <thead>
           <tr>
-            <!-- Fixed: Page -->
-            <th style="text-align:left;min-width:110px;">Page</th>
-            <!-- Fixed: Item -->
-            <th style="text-align:left;min-width:160px;">Item</th>
+            <!-- Fixed: Page (sortable) -->
+            <th
+              :class="['sortable', ac('page_name') ? 'col-active' : '']"
+              style="text-align:left;min-width:110px;"
+              @click="sb('page_name')"
+            >
+              <span>Page</span>
+              <span x-text="arr('page_name')" style="font-size:10px;"></span>
+            </th>
+            <!-- Fixed: Item (sortable) -->
+            <th
+              :class="['sortable', ac('item_name') ? 'col-active' : '']"
+              style="text-align:left;min-width:160px;"
+              @click="sb('item_name')"
+            >
+              <span>Item</span>
+              <span x-text="arr('item_name')" style="font-size:10px;"></span>
+            </th>
 
             <!-- Draggable/reorderable columns -->
             <template x-for="col in cols" :key="col.id">
