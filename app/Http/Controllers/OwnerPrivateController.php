@@ -2886,6 +2886,32 @@ class OwnerPrivateController extends Controller
             ->whereBetween('ts_date', [$start, $end])
             ->get(['ts_date', 'page_key', 'primary_item_key', 'primary_orders', 'primary_mode_cod']);
 
+        // Q6b: per (date, page_key, item_norm) PROCEED ORDERS from macro_output.
+        // Same logic na ginagamit ng itemSummary's $statRows. Yung sliceProfit
+        // formula gumagamit ng proceed count (status='proceed' lang), HINDI ng
+        // primary_orders (which counts all statuses).
+        $itemColName = $pickCol('macro_output', ['ITEM_NAME','item_name','Product','product_name','ITEM','item']) ?? 'item_name';
+        $moItemQ     = 'mo.' . $quote($itemColName);
+        $itemNormExpr = "LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE($moItemQ,'')),' ',''),'-',''),'_',''))";
+        $pageColName = $pickCol('macro_output', ['PAGE','page','page_name','Page','Page_Name']) ?? 'page_name';
+        $moPageQ     = 'mo.' . $quote($pageColName);
+        $pageKeyExpr = "LOWER($trimFn(COALESCE($moPageQ,'')))";
+
+        $procStatRows = DB::table('macro_output as mo')
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end])
+            ->selectRaw("$dateExpr AS d,
+                $pageKeyExpr AS page_key,
+                $itemNormExpr AS item_key,
+                SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders")
+            ->groupByRaw("$dateExpr, $pageKeyExpr, $itemNormExpr")
+            ->get();
+        // procStatMap[date||page_key||item_key] = proceed count
+        $procStatMap = [];
+        foreach ($procStatRows as $r) {
+            $k = (string)$r->d . '||' . (string)$r->page_key . '||' . (string)$r->item_key;
+            $procStatMap[$k] = (int)$r->proceed_orders;
+        }
+
         // Q7: cogs lookup (uses discovered column names)
         $cogsItemQ = $quote($cogsItemColName);
         $cogsDateQ = $quote($cogsDateColName);
@@ -2960,14 +2986,26 @@ class OwnerPrivateController extends Controller
             return $DEFAULT_RTS_PCT;
         };
 
-        // Compute per-date projections from primary rows (slice formula)
+        // Excluded pages — never participate in profit (matches /owner/private)
+        $excludedSet = array_flip(SupplyExcludedPage::excludedSet());
+
+        // Compute per-date projections from primary rows (slice formula).
+        // KEY: use $proceed_orders from macro_output (status='proceed' count),
+        // NOT primary_orders (which counts all statuses). Matches itemSummary's
+        // sliceProfit formula exactly.
         $perDateProjNet = $perDateProjGross = $perDateProjShip = $perDateProjCogs = [];
         foreach ($primaryRows as $pr) {
             $d        = (string)$pr->ts_date;
             $pageKey  = (string)$pr->page_key;
-            $proceed  = (int)$pr->primary_orders;
             $modeCod  = (float)$pr->primary_mode_cod;
             $itemKey  = (string)$pr->primary_item_key;
+
+            // Skip excluded pages (per /jnt/supply/excluded-pages)
+            if (isset($excludedSet[$pageKey])) continue;
+
+            // Look up proceed count for this exact (date, page, primary_item)
+            $procKey = $d . '||' . $pageKey . '||' . $itemKey;
+            $proceed = (int)($procStatMap[$procKey] ?? 0);
 
             if ($proceed <= 0 || $modeCod <= 0) continue;
 
