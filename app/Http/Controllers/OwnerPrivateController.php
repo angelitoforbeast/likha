@@ -2884,7 +2884,7 @@ class OwnerPrivateController extends Controller
         // Q6: daily_page_primary_item — pre-aggregated per (date, page) primary item
         $primaryRows = DB::table('daily_page_primary_item')
             ->whereBetween('ts_date', [$start, $end])
-            ->get(['ts_date', 'page_key', 'primary_item_key', 'primary_orders', 'primary_mode_cod']);
+            ->get(['ts_date', 'page_key', 'primary_item', 'primary_item_key', 'primary_orders', 'primary_mode_cod']);
 
         // Q6b: per (date, page_key, item_norm) PROCEED ORDERS from macro_output.
         // Same logic na ginagamit ng itemSummary's $statRows. Yung sliceProfit
@@ -2936,7 +2936,30 @@ class OwnerPrivateController extends Controller
             return 0.0;
         };
 
-        // Q8: JNT 60-day RTS stats per (page, item, cod) — cached by end_date
+        // Q7b: page_item_settings — manually-set RTS% per (page_name, item_name).
+        // ITO ang gamit ng /owner/private's projected_profit, HINDI yung JNT 60-day.
+        // Keyed by lower(trim(page_name)) || lower(trim(item_name)).
+        $settingsMap = [];
+        if (Schema::hasTable('page_item_settings')) {
+            $settingRows = DB::table('page_item_settings')
+                ->where('effective_date', '<=', $end)
+                ->orderBy('page_name')
+                ->orderBy('item_name')
+                ->orderByDesc('effective_date')
+                ->orderByDesc('id')
+                ->get(['page_name', 'item_name', 'rts_pct']);
+            foreach ($settingRows as $s) {
+                $k = strtolower(trim((string)$s->page_name)) . '||' . strtolower(trim((string)$s->item_name));
+                if (!isset($settingsMap[$k])) {
+                    $settingsMap[$k] = (float)$s->rts_pct;
+                }
+            }
+        }
+
+        // Q8: JNT 60-day RTS stats per (page, item, cod) — cached by end_date.
+        // Note: ginagamit ito for DISPLAY columns sa main /owner/private (RTS%/Del%/Transit%),
+        // pero PROJECTED PROFIT formula ay gumagamit ng page_item_settings (above).
+        // We still query for consistency, pero hindi na ginagamit sa formula.
         $jntFrom = date('Y-m-d', strtotime("$end -60 days"));
         $jntTo   = date('Y-m-d', strtotime("$end -1 day"));
         $jntCacheKey = "owner_daily_jnt_v2:" . $host . ":" . $end;
@@ -2995,10 +3018,11 @@ class OwnerPrivateController extends Controller
         // sliceProfit formula exactly.
         $perDateProjNet = $perDateProjGross = $perDateProjShip = $perDateProjCogs = [];
         foreach ($primaryRows as $pr) {
-            $d        = (string)$pr->ts_date;
-            $pageKey  = (string)$pr->page_key;
-            $modeCod  = (float)$pr->primary_mode_cod;
-            $itemKey  = (string)$pr->primary_item_key;
+            $d         = (string)$pr->ts_date;
+            $pageKey   = (string)$pr->page_key;
+            $modeCod   = (float)$pr->primary_mode_cod;
+            $itemKey   = (string)$pr->primary_item_key;
+            $itemName  = (string)$pr->primary_item;
 
             // Skip excluded pages (per /jnt/supply/excluded-pages)
             if (isset($excludedSet[$pageKey])) continue;
@@ -3009,7 +3033,12 @@ class OwnerPrivateController extends Controller
 
             if ($proceed <= 0 || $modeCod <= 0) continue;
 
-            $rtsPct        = $lookupRtsPct($pageKey, $itemKey, $modeCod);
+            // RTS% from page_item_settings (NOT JNT 60-day stats).
+            // Same lookup key shape as itemSummary: lower(trim(page))||lower(trim(item)).
+            // Skip page if no settings (matches itemSummary behavior — `if ($rtsPct === null)`)
+            $setKey = $pageKey . '||' . strtolower(trim($itemName));
+            if (!isset($settingsMap[$setKey])) continue;
+            $rtsPct        = $settingsMap[$setKey];
             $deliverFactor = max(0.0, min(1.0, 1.0 - ($rtsPct / 100.0)));
             $itemValue     = $findUnitCost($itemKey, $d);
             $adspent       = $adsByDatePage[$d][$pageKey] ?? 0.0;
