@@ -1607,6 +1607,10 @@
       },
 
       // Generic fetcher into /ads_manager/campaigns/data with passed params.
+      // After fetch, enriches rows with profit_pct CLIENT-SIDE using the
+      // parent page row's settings (rts_pct, price, item_value). Bypasses
+      // server-side enrichment entirely — works regardless of OPcache /
+      // FeeSetting state on server.
       async _fetchCampaignsData(params){
         const qs = new URLSearchParams(Object.assign({
           limit:           1000,
@@ -1617,7 +1621,40 @@
         }, params));
         const res = await fetch('{{ route('ads_manager.campaigns.data') }}?' + qs.toString());
         if (!res.ok) throw new Error('HTTP '+res.status);
-        return await res.json();
+        const j = await res.json();
+
+        // Client-side profit_pct enrichment per row
+        if (Array.isArray(j.rows)) {
+          for (const r of j.rows) {
+            r.profit_pct = this.campaignProfitPct(r);
+          }
+        }
+        return j;
+      },
+
+      // Compute a campaign's projected profit % using the parent page row's
+      // settings (rts_pct, price, item_value). Returns null if any input is
+      // missing — e.g., parent page row not yet loaded, or page has no settings.
+      //
+      // Formula (same as itemSummary's per-page projected_profit, just using
+      // campaign's own CPP instead of the page-aggregated CPP):
+      //   df    = 1 − rts_pct / 100
+      //   profit_per_order = df × (price − item_value − price × 0.0168) − 37 − cpp
+      //   profit_pct       = profit_per_order ÷ price × 100
+      campaignProfitPct(row){
+        const cpp = Number(row?.cpp ?? NaN);
+        if (isNaN(cpp)) return null;
+        const parent = this.pageRowFor(row?.page_name);
+        if (!parent) return null;
+        const price = Number(parent.price ?? 0);
+        const iv    = parent.item_value;
+        const rts   = parent.rts_pct;
+        if (price <= 0 || iv == null || rts == null) return null;
+        const df = 1 - (Number(rts) / 100);
+        const F  = 0.0168;  // cod_fee_rate × (1 + VAT) = 0.015 × 1.12
+        const SF = 37;
+        const profitPerOrder = df * (price - Number(iv) - price * F) - SF - cpp;
+        return Math.round((profitPerOrder / price) * 100 * 100) / 100; // 2 decimals
       },
 
       // Are any visible page rows currently expanded? Used by the
