@@ -84,7 +84,7 @@
 
           jsonData.forEach(row => {
             const rawSpent = parseNumber(row["Amount spent (PHP)"]);
-            const spent = rawSpent > 0 ? rawSpent * 1.12 : 0;
+            const spent = rawSpent > 0 ? rawSpent : 0;
             if (!isNaN(spent) && spent > 0) {
               const rawName = row["Campaign name"] || row["Ad Set Name"] || '';
               const cleanCampaign = rawName.split('|')[0].trim();

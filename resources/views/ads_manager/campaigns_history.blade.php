@@ -229,11 +229,11 @@
                   </template>
                 </div>
               </div>
-              {{-- Spend cell — moved next to Entity per user. Primary value
-                   on top, lifetime efficiency metrics (CPM/CPP/WMR/Conv) as a
-                   compact 2-col grid below. --}}
+              {{-- Spend cell — lifetime cumulative spend (same basis as
+                   CPM/CPP/WMR/Conv below it), pure raw FB amount_spent_php
+                   na walang VAT math. --}}
               <div class="num">
-                <div x-text="peso(e.spend)"></div>
+                <div x-text="peso(e.lifetime_spend)"></div>
                 <div class="lt-metrics">
                   <div class="lt-k" title="Lifetime CPM = Cost per Messaging (spend / messages started)">CPM</div>
                   <div :class="'lt-v' + (e.lifetime_cpm == null ? ' empty' : '')"

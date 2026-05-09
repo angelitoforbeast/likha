@@ -469,8 +469,7 @@ class AdsManagerCampaignsController extends Controller
             return $hit;
         };
 
-        // Stitch into events. Spend (FB amount_spent_php) is divided by 1.12
-        // here too — matches the rest of the app's "ex-VAT" convention.
+        // Stitch into events. Spend = raw FB amount_spent_php (no VAT math).
         //
         // NOTE: in this page "CPM" = COST PER MESSAGING (spend / messages),
         // NOT the standard Cost-Per-Mille (cost per 1,000 impressions). User
@@ -479,7 +478,7 @@ class AdsManagerCampaignsController extends Controller
         foreach ($events as &$e) {
             $life = $resolveLifetime($e['level'], $e['entity_id'], $e['day']);
             if ($life) {
-                $spend = $life['spend'] / 1.12;
+                $spend = $life['spend'];
                 $msgs  = $life['msgs'];
                 $purch = $life['purch'];
                 $lc    = $life['lc'];
@@ -837,17 +836,17 @@ class AdsManagerCampaignsController extends Controller
                     MAX(campaign_name) AS campaign_name,
                     MAX(page_name)     AS page_name,
 
-                    (SUM(amount_spent_php) / 1.12) AS spend,
+                    SUM(amount_spent_php) AS spend,
                     SUM(messaging_conversations_started) AS messages,
                     SUM(purchases) AS purchases,
                     SUM(impressions) AS impressions,
                     SUM(reach) AS reach,
                     SUM(link_clicks) AS link_clicks,
 
-                    CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
-                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
-                    CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
-                    CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
+                    CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
+                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
+                    CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
+                    CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
                     CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
 
@@ -926,17 +925,17 @@ class AdsManagerCampaignsController extends Controller
                     MAX(campaign_name) AS campaign_name,
                     MAX(page_name)     AS page_name,
 
-                    (SUM(amount_spent_php) / 1.12) AS spend,
+                    SUM(amount_spent_php) AS spend,
                     SUM(messaging_conversations_started) AS messages,
                     SUM(purchases) AS purchases,
                     SUM(impressions) AS impressions,
                     SUM(reach) AS reach,
                     SUM(link_clicks) AS link_clicks,
 
-                    CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
-                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
-                    CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
-                    CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
+                    CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
+                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
+                    CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
+                    CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
                     CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
 
@@ -1020,17 +1019,17 @@ class AdsManagerCampaignsController extends Controller
                     MAX(campaign_name) AS campaign_name,
                     MAX(page_name)     AS page_name,
 
-                    (SUM(amount_spent_php) / 1.12) AS spend,
+                    SUM(amount_spent_php) AS spend,
                     SUM(messaging_conversations_started) AS messages,
                     SUM(purchases) AS purchases,
                     SUM(impressions) AS impressions,
                     SUM(reach) AS reach,
                     SUM(link_clicks) AS link_clicks,
 
-                    CASE WHEN SUM(purchases) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(purchases) END AS cpp,
-                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(messaging_conversations_started) END AS cpm_msg,
-                    CASE WHEN SUM(impressions) > 0 THEN ((SUM(amount_spent_php)/1.12)/SUM(impressions))*1000 END AS cpm_1000,
-                    CASE WHEN SUM(results) > 0 THEN (SUM(amount_spent_php)/1.12)/SUM(results) END AS cpr,
+                    CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
+                    CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
+                    CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
+                    CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
                     CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
 
@@ -1149,9 +1148,9 @@ class AdsManagerCampaignsController extends Controller
             $winRows = $winQuery
                 ->selectRaw("
                     $idCol AS id,
-                    SUM(CASE WHEN $dayExpr = ?              THEN amount_spent_php ELSE 0 END) / 1.12 AS spend_today,
-                    SUM(CASE WHEN $dayExpr BETWEEN ? AND ?  THEN amount_spent_php ELSE 0 END) / 1.12 AS spend_3d,
-                    SUM(amount_spent_php) / 1.12                                                       AS spend_7d,
+                    SUM(CASE WHEN $dayExpr = ?              THEN amount_spent_php ELSE 0 END) AS spend_today,
+                    SUM(CASE WHEN $dayExpr BETWEEN ? AND ?  THEN amount_spent_php ELSE 0 END) AS spend_3d,
+                    SUM(amount_spent_php)                                                     AS spend_7d,
                     SUM(CASE WHEN $dayExpr = ?              THEN purchases       ELSE 0 END)           AS purch_today,
                     SUM(CASE WHEN $dayExpr BETWEEN ? AND ?  THEN purchases       ELSE 0 END)           AS purch_3d,
                     SUM(purchases)                                                                     AS purch_7d
@@ -1226,7 +1225,7 @@ class AdsManagerCampaignsController extends Controller
 
         // Totals for current filter (no group)
         $tot = (clone $base)->selectRaw('
-            (COALESCE(SUM(amount_spent_php),0) / 1.12) AS spend,
+            COALESCE(SUM(amount_spent_php),0) AS spend,
             COALESCE(SUM(messaging_conversations_started),0) AS messages,
             COALESCE(SUM(purchases),0) AS purchases,
             COALESCE(SUM(impressions),0) AS impressions,
