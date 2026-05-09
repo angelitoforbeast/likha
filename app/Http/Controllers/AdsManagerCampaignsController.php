@@ -1300,19 +1300,20 @@ class AdsManagerCampaignsController extends Controller
 
                     $set('profit_pct', null);
                     $cpp = $get('cpp');
-                    if ($cpp === null) return $r;
+                    if ($cpp === null) { $set('_profit_debug', 'no_cpp'); return $r; }
                     $pageName = trim((string)($get('page_name') ?? ''));
-                    if ($pageName === '') return $r;
+                    if ($pageName === '') { $set('_profit_debug', 'no_page_name'); return $r; }
                     $pageKey = strtolower($pageName);
                     $info = $pageInfo[$pageKey] ?? null;
-                    if (!$info) return $r;
+                    if (!$info) { $set('_profit_debug', 'no_primary_item:' . $pageKey); return $r; }
                     $modeCod = (float)$info['mode_cod'];
-                    if ($modeCod <= 0) return $r;
+                    if ($modeCod <= 0) { $set('_profit_debug', 'no_mode_cod'); return $r; }
                     $itemKey = strtolower(trim((string)$info['item']));
                     $rtsKey  = $pageKey . '||' . $itemKey;
                     $rts     = $rtsByKey[$rtsKey] ?? null;
                     $iv      = $cogsByItem[$itemKey] ?? null;
-                    if ($rts === null || $iv === null) return $r;
+                    if ($rts === null) { $set('_profit_debug', 'no_rts:' . $rtsKey); return $r; }
+                    if ($iv  === null) { $set('_profit_debug', 'no_cogs:' . $itemKey); return $r; }
 
                     $df             = 1.0 - ((float)$rts / 100.0);
                     $codFeePerUnit  = $modeCod * (float)$COD_RATE * (1.0 + (float)$VAT_RATE);
@@ -1320,6 +1321,7 @@ class AdsManagerCampaignsController extends Controller
                                       - (float)$SHIPPING
                                       - (float)$cpp;
                     $set('profit_pct', round(($profitPerOrder / $modeCod) * 100.0, 2));
+                    $set('_profit_debug', 'ok');
                     return $r;
                 });
             }
