@@ -1232,6 +1232,24 @@ class AdsManagerCampaignsController extends Controller
             $COD_RATE  = \App\Models\FeeSetting::getRate('cod_fee_rate',           $hostName, $endRef);
             $VAT_RATE  = \App\Models\FeeSetting::getRate('cod_fee_vat_rate',       $hostName, $endRef);
 
+            // Always tag every row with diagnostic info so we can see WHY
+            // profit_pct is null (even if the early-skip is hit).
+            $feeMissing = [];
+            if ($SHIPPING === null) $feeMissing[] = 'SHIPPING';
+            if ($COD_RATE === null) $feeMissing[] = 'COD_RATE';
+            if ($VAT_RATE === null) $feeMissing[] = 'VAT_RATE';
+
+            if (!empty($feeMissing)) {
+                $missList = implode(',', $feeMissing);
+                $rows = $rows->map(function ($r) use ($missList, $hostName, $endRef) {
+                    $isArr = is_array($r);
+                    $key   = "no_fee_settings:$missList host=$hostName ref=$endRef";
+                    if ($isArr) { $r['profit_pct'] = null; $r['_profit_debug'] = $key; }
+                    else        { $r->profit_pct   = null; $r->_profit_debug   = $key; }
+                    return $r;
+                });
+            }
+
             if ($SHIPPING !== null && $COD_RATE !== null && $VAT_RATE !== null) {
                 // Collect unique page_names from rows. Some rows may be arrays
                 // or stdClass — handle both.
