@@ -358,7 +358,11 @@
           const src = this.groups[gIdx];
           if (!src) return;
           const clone = JSON.parse(JSON.stringify(src));
-          this.groups.splice(gIdx + 1, 0, clone);
+          this.groups = [
+            ...this.groups.slice(0, gIdx + 1),
+            clone,
+            ...this.groups.slice(gIdx + 1),
+          ];
         },
         labelForCol(colId){
           const c = (this.tableCatalog || []).find(x => x.id === colId);

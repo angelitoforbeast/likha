@@ -53,11 +53,18 @@
         removeGroup(gIdx){ this.groups.splice(gIdx, 1); },
         // Deep-clone an existing group (cols + rules) and append immediately
         // after the source. JSON-roundtrip avoids any reference sharing.
+        // We rebuild the whole array (slice+spread) instead of splice — fixes
+        // an Alpine reactive-key collision where existing groups after the
+        // insertion point would lose their inner state (open chevron, etc.).
         duplicateGroup(gIdx){
           const src = this.groups[gIdx];
           if (!src) return;
           const clone = JSON.parse(JSON.stringify(src));
-          this.groups.splice(gIdx + 1, 0, clone);
+          this.groups = [
+            ...this.groups.slice(0, gIdx + 1),
+            clone,
+            ...this.groups.slice(gIdx + 1),
+          ];
         },
         // Resolve column id → human-readable label using the table's catalog.
         labelForCol(colId){
