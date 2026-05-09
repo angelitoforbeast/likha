@@ -2784,7 +2784,8 @@ class OwnerPrivateController extends Controller
             }
 
             $payload = $resp->getData(true);
-            $allRows = $payload['rows'] ?? [];
+            // data() returns 'ads_daily' key (not 'rows')
+            $allRows = $payload['ads_daily'] ?? [];
 
             // Find TOTAL row + sum per-page rows for projections
             $totalRow = null;
