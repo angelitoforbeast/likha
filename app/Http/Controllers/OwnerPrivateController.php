@@ -2824,7 +2824,9 @@ class OwnerPrivateController extends Controller
             $msgMap[(string)$r->d] = (int)$r->messages;
         }
 
-        // 2) Order counts per day from macro_output
+        // 2) Order counts per day from macro_output (status totals only —
+        //    gross_sales + all_cod are computed later, AFTER from_jnts join,
+        //    para tama: gross = delivered cod, all_cod = shipped cod).
         $mo = DB::table('macro_output as mo')
             ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end]);
 
@@ -2833,21 +2835,18 @@ class OwnerPrivateController extends Controller
                 COUNT(*) AS orders_total,
                 SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_total,
                 SUM(CASE WHEN $statusNorm = 'cannotproceed' THEN 1 ELSE 0 END) AS cannot_total,
-                SUM(CASE WHEN $statusNorm = 'odz' THEN 1 ELSE 0 END) AS odz_total,
-                COALESCE(SUM($moCodClean),0) AS all_cod,
-                COALESCE(SUM(CASE WHEN $statusNorm = 'proceed' THEN $moCodClean ELSE 0 END),0) AS gross_sales")
+                SUM(CASE WHEN $statusNorm = 'odz' THEN 1 ELSE 0 END) AS odz_total")
             ->groupByRaw($dateExpr)
             ->get();
-        $ordersMap = $proceedMap = $cannotMap = $odzMap = $allCodMap = $grossMap = [];
+        $ordersMap = $proceedMap = $cannotMap = $odzMap = [];
         foreach ($orderRows as $r) {
             $d = (string)$r->d;
             $ordersMap[$d]  = (int)$r->orders_total;
             $proceedMap[$d] = (int)$r->proceed_total;
             $cannotMap[$d]  = (int)$r->cannot_total;
             $odzMap[$d]     = (int)$r->odz_total;
-            $allCodMap[$d]  = (float)$r->all_cod;
-            $grossMap[$d]   = (float)$r->gross_sales;
         }
+        $allCodMap = $grossMap = [];
 
         // 3) Shipping/delivery aggregates per day via from_jnts join
         $jSubmitColName = $pickCol('from_jnts', ['submission_time','submitted_at','submission_datetime','submissiondate','submission']) ?? 'submission_time';
@@ -2932,6 +2931,45 @@ class OwnerPrivateController extends Controller
             $actShipMap[$d]   = (float)$r->actual_shipping_total;
         }
 
+        // 3b) Gross Sales (delivered COD) per day — match main /owner/private:
+        //     for each waybill, take MAX(cod_mo) to dedupe, then SUM per date
+        //     restricted to delivered.
+        $deliveredCodInner = DB::table('macro_output as mo')
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end])
+            ->whereNotNull('mo.' . $wbColName)
+            ->where('mo.' . $wbColName, '!=', '')
+            ->join('_jnt_agg_daily as ja', 'mo.' . $wbColName, '=', 'ja.wb')
+            ->whereRaw('ja.is_delivered = 1')
+            ->selectRaw("$dateExpr AS day_key, $moWaybillSql AS wb, MAX($moCodClean) AS cod_mo")
+            ->groupByRaw("$dateExpr, $moWaybillSql");
+
+        $grossRows = DB::query()
+            ->fromSub($deliveredCodInner, 'g')
+            ->selectRaw('day_key, COALESCE(SUM(cod_mo), 0) AS gross_sales')
+            ->groupBy('day_key')
+            ->get();
+        foreach ($grossRows as $r) {
+            $grossMap[(string)$r->day_key] = (float)$r->gross_sales;
+        }
+
+        // 3c) All COD (shipped) per day — same dedup, no delivered filter.
+        $allCodInner = DB::table('macro_output as mo')
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end])
+            ->whereNotNull('mo.' . $wbColName)
+            ->where('mo.' . $wbColName, '!=', '')
+            ->join('_jnt_agg_daily as ja', 'mo.' . $wbColName, '=', 'ja.wb')
+            ->selectRaw("$dateExpr AS day_key, $moWaybillSql AS wb, MAX($moCodClean) AS cod_mo")
+            ->groupByRaw("$dateExpr, $moWaybillSql");
+
+        $allCodRows = DB::query()
+            ->fromSub($allCodInner, 'a')
+            ->selectRaw('day_key, COALESCE(SUM(cod_mo), 0) AS all_cod')
+            ->groupBy('day_key')
+            ->get();
+        foreach ($allCodRows as $r) {
+            $allCodMap[(string)$r->day_key] = (float)$r->all_cod;
+        }
+
         // 4) COGS per day — sum across (proceed orders × unit_cost as of order date)
         $cogsItemColName = $pickCol('cogs', ['item_name','ITEM_NAME','product','Product','Product_Name']) ?? 'item_name';
         $cogsDateColName = $pickCol('cogs', ['effective_date','date','valid_from','cogs_date']) ?? 'effective_date';
@@ -2960,11 +2998,16 @@ class OwnerPrivateController extends Controller
             return 0.0;
         };
 
-        // Per (date, item) proceed counts
+        // Per (date, item) DELIVERED counts — match main /owner/private:
+        // COGS counts only items that were actually delivered, not just
+        // proceed status. Joins with _jnt_agg_daily to get is_delivered flag.
         $cogsAggRows = DB::table('macro_output as mo')
             ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end])
-            ->whereRaw("$statusNorm = 'proceed'")
-            ->selectRaw("$dateExpr AS d, $itemKeyExpr AS item_key, COUNT(*) AS qty")
+            ->whereNotNull('mo.' . $wbColName)
+            ->where('mo.' . $wbColName, '!=', '')
+            ->join('_jnt_agg_daily as ja', 'mo.' . $wbColName, '=', 'ja.wb')
+            ->whereRaw('ja.is_delivered = 1')
+            ->selectRaw("$dateExpr AS d, $itemKeyExpr AS item_key, COUNT(DISTINCT $moWaybillSql) AS qty")
             ->groupByRaw("$dateExpr, $itemKeyExpr")
             ->get();
         $cogsMap = [];
