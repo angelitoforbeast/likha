@@ -1476,6 +1476,14 @@
       _evalRules(rules, value, refRow, sameRow){
         if (!Array.isArray(rules) || rules.length === 0) return '';
         for (const r of rules) {
+          // Active-state filter: skip rule kung mismatch sa row's `on` field.
+          // For rows w/o `on` field (e.g., owner_private page rows) — rule applies regardless.
+          const activeState = r.active_state || 'active';
+          if (activeState !== 'any' && sameRow && Object.prototype.hasOwnProperty.call(sameRow, 'on')) {
+            const isOn = !!sameRow.on;
+            if (activeState === 'active' && !isOn) continue;
+            if (activeState === 'off'    &&  isOn) continue;
+          }
           const t = this.resolveRuleThreshold(r.value, refRow);
           if (isNaN(t)) continue;   // ref couldn't resolve → skip rule
           // Determine what to evaluate: compare_col (sibling) or self

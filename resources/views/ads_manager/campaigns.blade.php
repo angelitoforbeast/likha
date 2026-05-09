@@ -506,6 +506,13 @@
           const rules = (window.__CAMPAIGNS_COL_FORMAT__ || {})[colId];
           if (!Array.isArray(rules) || rules.length === 0) return '';
           for (const r of rules) {
+            // Active-state filter: skip rule based on row's `on` field
+            const activeState = r.active_state || 'active';
+            if (activeState !== 'any' && row && Object.prototype.hasOwnProperty.call(row, 'on')) {
+              const isOn = !!row.on;
+              if (activeState === 'active' && !isOn) continue;
+              if (activeState === 'off'    &&  isOn) continue;
+            }
             // Cross-table ref → skip (no parent context here).
             if (r.value && typeof r.value === 'object' && r.value.type === 'ref') continue;
             const t = Number(r.value);

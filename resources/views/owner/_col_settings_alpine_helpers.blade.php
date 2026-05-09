@@ -74,7 +74,7 @@
         addRuleToGroup(gIdx){
           const g = this.groups[gIdx];
           if (!g) return;
-          g.rules.push({ op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '', compare_col: '' });
+          g.rules.push({ op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '', compare_col: '', active_state: 'active' });
         },
         removeRule(gIdx, rIdx){
           const g = this.groups[gIdx];
@@ -142,13 +142,14 @@
                     value = Number(r.value) || 0;
                   }
                   return {
-                    op:          r.op,
-                    value:       value,
-                    bg:          String(r.bg || '#fee2e2'),
-                    color:       r.color ? String(r.color) : '',
-                    bold:        !!r.bold,
-                    label:       String(r.label || ''),
-                    compare_col: String(r.compare_col || ''),
+                    op:           r.op,
+                    value:        value,
+                    bg:           String(r.bg || '#fee2e2'),
+                    color:        r.color ? String(r.color) : '',
+                    bold:         !!r.bold,
+                    label:        String(r.label || ''),
+                    compare_col:  String(r.compare_col || ''),
+                    active_state: ['active','off','any'].includes(r.active_state) ? r.active_state : 'active',
                   };
                 }),
               }));

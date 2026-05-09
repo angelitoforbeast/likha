@@ -329,23 +329,26 @@ class OwnerColumnSettingsController extends Controller
             if ($val === null) return null;
             $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
             if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
-            // Optional text color override. Defaults to '' (= use the row's
-            // inherited text color, which is black on /owner/private).
             $color = trim((string) ($r['color'] ?? ''));
             if ($color !== '' && !preg_match('/^#[0-9a-fA-F]{6}$/', $color)) $color = '';
-            // NEW: compare_col — if set, evaluate that column's value sa same
-            // row instead of cell's own value. Validates against the section's
-            // catalog. '' or null = self (default behavior).
             $cmpCol = trim((string) ($r['compare_col'] ?? ''));
             if ($cmpCol !== '' && !isset($allowedSet[$cmpCol])) $cmpCol = '';
+            // NEW: active_state — applies rule only when campaign is on/off/any.
+            // Defaults to 'active' (existing rules without this field treated
+            // as Active-only per user preference).
+            $activeState = (string) ($r['active_state'] ?? 'active');
+            if (!in_array($activeState, ['active', 'off', 'any'], true)) {
+                $activeState = 'active';
+            }
             return [
-                'op'          => $op,
-                'value'       => $val,
-                'bg'          => strtolower($bg),
-                'color'       => $color === '' ? '' : strtolower($color),
-                'bold'        => !empty($r['bold']),
-                'label'       => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
-                'compare_col' => $cmpCol,
+                'op'           => $op,
+                'value'        => $val,
+                'bg'           => strtolower($bg),
+                'color'        => $color === '' ? '' : strtolower($color),
+                'bold'         => !empty($r['bold']),
+                'label'        => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
+                'compare_col'  => $cmpCol,
+                'active_state' => $activeState,
             ];
         };
 
@@ -481,14 +484,21 @@ class OwnerColumnSettingsController extends Controller
                 // NEW: compare_col — column whose value to evaluate (default '' = self)
                 $cmpCol = trim((string) ($r['compare_col'] ?? ''));
                 if ($cmpCol !== '' && !isset($allowedSet[$cmpCol])) $cmpCol = '';
+                // NEW: active_state — 'active' | 'off' | 'any'. Default 'active'
+                // (existing rules treated as Active-only).
+                $activeState = (string) ($r['active_state'] ?? 'active');
+                if (!in_array($activeState, ['active', 'off', 'any'], true)) {
+                    $activeState = 'active';
+                }
                 $rules[] = [
-                    'op'          => $op,
-                    'value'       => $val,
-                    'bg'          => strtolower($bg),
-                    'color'       => $color === '' ? '' : strtolower($color),
-                    'bold'        => !empty($r['bold']),
-                    'label'       => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
-                    'compare_col' => $cmpCol,
+                    'op'           => $op,
+                    'value'        => $val,
+                    'bg'           => strtolower($bg),
+                    'color'        => $color === '' ? '' : strtolower($color),
+                    'bold'         => !empty($r['bold']),
+                    'label'        => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
+                    'compare_col'  => $cmpCol,
+                    'active_state' => $activeState,
                 ];
                 if (count($rules) >= 20) break;
             }

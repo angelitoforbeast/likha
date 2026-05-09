@@ -95,6 +95,17 @@
                     @dragover.prevent
                     @drop="ruleDrop(gIdx, rIdx)">⋮⋮</span>
               <span class="text-xs text-slate-500" style="min-width:30px;">if</span>
+              {{-- Active-state filter: rule applies only when campaign is on/off/any.
+                   Existing rules default to 'active' (Active only). --}}
+              <select :value="r.active_state || 'active'"
+                      @change="r.active_state = $event.target.value"
+                      class="border border-slate-300 rounded px-1 py-0.5 text-xs"
+                      style="max-width:130px;"
+                      title="Apply rule only when campaign is in this state">
+                <option value="active">⚡ Active only</option>
+                <option value="off">⏸ Off only</option>
+                <option value="any">✓ Any state</option>
+              </select>
               {{-- Evaluate-against dropdown: "self" (default) or another column
                    sa same table. When set, the rule fires based on THAT column's
                    value sa same row, not yung cell's own value. --}}
