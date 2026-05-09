@@ -17,13 +17,15 @@
     /* 9-column layout (no more Action column — autosave handles persistence).
        Entity + Account narrowed since they're mostly short text — gives more
        room to the editable creative columns. */
-    .ev-row { display:grid; grid-template-columns: 90px 70px minmax(140px,0.65fr) minmax(110px,0.6fr) minmax(180px,1.2fr) minmax(200px,1.4fr) minmax(220px,1.5fr) 100px 70px; gap:8px; align-items:stretch; padding:8px 12px; border-bottom:1px solid #e4e6eb; font-size:12px; }
+    .ev-row { display:grid; grid-template-columns: 90px 70px minmax(140px,0.65fr) 135px minmax(110px,0.6fr) minmax(180px,1.2fr) minmax(200px,1.4fr) minmax(220px,1.5fr) 70px; gap:8px; align-items:stretch; padding:8px 12px; border-bottom:1px solid #e4e6eb; font-size:12px; }
     /* Compact key-value table for the lifetime metrics under Spend. Fixed
        2-col grid so labels at left, values at right, aligned even when "—". */
-    .lt-metrics { display:grid; grid-template-columns: auto auto; column-gap:6px; row-gap:1px; margin-top:4px; padding-top:4px; border-top:1px dashed #cbd5e1; font-size:9px; line-height:1.5; color:#64748b; justify-content:end; }
-    .lt-metrics .lt-k { text-align:right; }
-    .lt-metrics .lt-v { text-align:right; color:#0f172a; font-weight:600; min-width:54px; font-variant-numeric:tabular-nums; }
-    .lt-metrics .lt-v.empty { color:#cbd5e1; font-weight:400; }
+    .lt-metrics { display:grid; grid-template-columns: auto auto; column-gap:6px; row-gap:2px; margin-top:4px; padding-top:4px; border-top:1px dashed #cbd5e1; font-size:9px; line-height:1.4; color:#64748b; justify-content:end; }
+    .lt-metrics .lt-k { text-align:right; font-weight:600; color:#475569; align-self:center; }
+    /* Values are the focal data — bold, pure black, larger font para
+       emphasized siya kumpara sa muted labels sa kaliwa. */
+    .lt-metrics .lt-v { text-align:right; color:#000; font-weight:800; font-size:12px; min-width:60px; font-variant-numeric:tabular-nums; letter-spacing:-0.01em; }
+    .lt-metrics .lt-v.empty { color:#cbd5e1; font-weight:400; font-size:9px; }
     /* Per-input save indicator badge, sits absolute at top-right of each input. */
     .crew-save-flag { position:absolute; top:2px; right:4px; font-size:9px; padding:1px 5px; border-radius:3px; pointer-events:none; opacity:0; transition:opacity 200ms ease; }
     .crew-save-flag.saving { background:#fef3c7; color:#92400e; opacity:1; }
@@ -187,11 +189,11 @@
             <div>Event</div>
             <div>Level</div>
             <div>Entity</div>
+            <div class="num">Spend</div>
             <div>Account</div>
             <div>Body / Headline</div>
             <div>Welcome message</div>
             <div>Quick replies + ad link</div>
-            <div class="num">Spend</div>
             <div class="num">Prev</div>
           </div>
 
@@ -225,6 +227,26 @@
                   <template x-if="!isEditable(e)">
                     <div class="mt-1"><span class="ev-readonly-badge">READ-ONLY · only Turned ON is editable</span></div>
                   </template>
+                </div>
+              </div>
+              {{-- Spend cell — moved next to Entity per user. Primary value
+                   on top, lifetime efficiency metrics (CPM/CPP/WMR/Conv) as a
+                   compact 2-col grid below. --}}
+              <div class="num">
+                <div x-text="peso(e.spend)"></div>
+                <div class="lt-metrics">
+                  <div class="lt-k" title="Lifetime CPM = Cost per Messaging (spend / messages started)">CPM</div>
+                  <div :class="'lt-v' + (e.lifetime_cpm == null ? ' empty' : '')"
+                       x-text="e.lifetime_cpm == null ? '—' : ('₱'+Number(e.lifetime_cpm).toFixed(2))"></div>
+                  <div class="lt-k" title="Lifetime Cost per Purchase">CPP</div>
+                  <div :class="'lt-v' + (e.lifetime_cpp == null ? ' empty' : '')"
+                       x-text="e.lifetime_cpp == null ? '—' : ('₱'+Number(e.lifetime_cpp).toFixed(2))"></div>
+                  <div class="lt-k" title="Lifetime Welcome Message Rate (msgs / link_clicks)">WMR</div>
+                  <div :class="'lt-v' + (e.lifetime_wmr == null ? ' empty' : '')"
+                       x-text="e.lifetime_wmr == null ? '—' : (Number(e.lifetime_wmr).toFixed(1)+'%')"></div>
+                  <div class="lt-k" title="Lifetime Conversion Rate (purchases / msgs)">Conv</div>
+                  <div :class="'lt-v' + (e.lifetime_conv == null ? ' empty' : '')"
+                       x-text="e.lifetime_conv == null ? '—' : (Number(e.lifetime_conv).toFixed(1)+'%')"></div>
                 </div>
               </div>
               {{-- Account (dedicated column) --}}
@@ -323,26 +345,6 @@
                          placeholder="https://… (ad link)">
                   <span :class="'crew-save-flag ' + (e._flag?.ad_link || '')"
                         x-text="flagText(e._flag?.ad_link)"></span>
-                </div>
-              </div>
-              {{-- Spend cell — primary value on top, lifetime efficiency
-                   metrics (CPM/CPP/WMR/Conv) as a compact 2-col grid below.
-                   Fixed grid keeps "—" values aligned with real numbers. --}}
-              <div class="num">
-                <div x-text="peso(e.spend)"></div>
-                <div class="lt-metrics">
-                  <div class="lt-k" title="Lifetime CPM = Cost per Messaging (spend / messages started)">CPM</div>
-                  <div :class="'lt-v' + (e.lifetime_cpm == null ? ' empty' : '')"
-                       x-text="e.lifetime_cpm == null ? '—' : ('₱'+Number(e.lifetime_cpm).toFixed(2))"></div>
-                  <div class="lt-k" title="Lifetime Cost per Purchase">CPP</div>
-                  <div :class="'lt-v' + (e.lifetime_cpp == null ? ' empty' : '')"
-                       x-text="e.lifetime_cpp == null ? '—' : ('₱'+Number(e.lifetime_cpp).toFixed(2))"></div>
-                  <div class="lt-k" title="Lifetime Welcome Message Rate (msgs / link_clicks)">WMR</div>
-                  <div :class="'lt-v' + (e.lifetime_wmr == null ? ' empty' : '')"
-                       x-text="e.lifetime_wmr == null ? '—' : (Number(e.lifetime_wmr).toFixed(1)+'%')"></div>
-                  <div class="lt-k" title="Lifetime Conversion Rate (purchases / msgs)">Conv</div>
-                  <div :class="'lt-v' + (e.lifetime_conv == null ? ' empty' : '')"
-                       x-text="e.lifetime_conv == null ? '—' : (Number(e.lifetime_conv).toFixed(1)+'%')"></div>
                 </div>
               </div>
               <div class="num text-gray-400" x-text="e.prev_spend === null ? '—' : peso(e.prev_spend)"></div>
