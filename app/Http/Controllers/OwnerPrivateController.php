@@ -2705,10 +2705,10 @@ class OwnerPrivateController extends Controller
 
     /**
      * GET /owner/private/daily/data — JSON per-day rows.
-     * Delegates per-date computation to data() (the existing /owner/private
-     * endpoint) so values are guaranteed to match what the user sees on
-     * /owner/private when filtered to that single date. We just iterate days
-     * in the range, call data() once per day, and extract the TOTAL row.
+     * Iterates each day in the range, calls data() with start=end=$day,
+     * page='all', then sums per-page rows of the response. Yung Proj. Net
+     * Profit ay literally yung exact projected_net_profit sum sa /owner/private
+     * pag fina-filter mo doon sa single date.
      */
     public function dailyData(Request $request)
     {
@@ -2724,16 +2724,26 @@ class OwnerPrivateController extends Controller
         if (!$validDate($end))   $end   = $today;
         if ($start > $end) [$start, $end] = [$end, $start];
 
+        // Save original request params, so we can restore at the end
+        $origStart = $request->input('start_date');
+        $origEnd   = $request->input('end_date');
+        $origPage  = $request->input('page_name');
+
+        // Pre-fetch fee setting for shipping (used in proj_shipping computation)
+        $host = strtolower((string) $request->getHost());
+        $SHIPPING_PER_SHIPPED = FeeSetting::getRate('shipping_fee_per_order', $host, $end);
+        if ($SHIPPING_PER_SHIPPED === null) {
+            abort(422, "Missing fee_settings 'shipping_fee_per_order' for {$end} (host: {$host}). Configure at /jnt/fee-settings.");
+        }
+
         $rows   = [];
         $totals = [
             'adspent' => 0.0, 'messages' => 0,
             'orders' => 0, 'proceed' => 0, 'cannot' => 0, 'odz' => 0,
             'shipped' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0, 'in_transit' => 0,
-            'gross_sales' => 0.0,
-            'shipping_fee' => 0.0, 'cod_fee' => 0.0, 'cod_vat' => 0.0, 'cogs' => 0.0,
-            'net_profit' => 0.0,
-            'all_cod' => 0.0,
-            'hold' => 0,
+            'proj_gross' => 0.0, 'proj_shipping' => 0.0, 'proj_cogs' => 0.0,
+            'proj_net_profit' => 0.0,
+            'proceed_cod_sum' => 0.0,
         ];
 
         $cursor = new \DateTime($start);
@@ -2742,28 +2752,43 @@ class OwnerPrivateController extends Controller
             $d = $cursor->format('Y-m-d');
             $cursor->modify('+1 day');
 
-            // Delegate to /owner/private/data for this single date — same
-            // request user makes manually with start_date=end_date=$d, page='all'.
-            $subReq = Request::create('/owner/private/data', 'GET', [
+            // Reuse current $request (with auth/session/etc.) — just override
+            // the date + page filter for this iteration, then call data().
+            $request->merge([
                 'start_date' => $d,
                 'end_date'   => $d,
                 'page_name'  => 'all',
             ]);
-            // Inherit current request's session/auth context
-            $subReq->setLaravelSession($request->session());
-            $subReq->setUserResolver($request->getUserResolver());
 
             try {
-                $resp = $this->data($subReq);
+                $resp = $this->data($request);
             } catch (\Throwable $e) {
                 continue;
             }
             if ($resp->getStatusCode() !== 200) continue;
 
             $payload = $resp->getData(true);
+            $allRows = $payload['rows'] ?? [];
+
+            // Find TOTAL row + sum per-page rows for projections
             $totalRow = null;
-            foreach (($payload['rows'] ?? []) as $r) {
-                if (!empty($r['is_total'])) { $totalRow = $r; break; }
+            $proj_gross = 0.0;
+            $proj_ship  = 0.0;
+            $proj_cogs  = 0.0;
+            $proj_np    = 0.0;
+            $proceed_cod_sum = 0.0;
+            foreach ($allRows as $r) {
+                if (!empty($r['is_total'])) { $totalRow = $r; continue; }
+                $pageRts   = isset($r['actual_rts_pct']) && $r['actual_rts_pct'] !== null ? (float)$r['actual_rts_pct'] : 30.0;
+                $rtsFactor = max(0.0, min(1.0, 1.0 - ($pageRts / 100.0)));
+                $procCod   = (float)($r['proceed_cod_sum']       ?? 0.0);
+                $procUC    = (float)($r['proceed_unit_cost_sum'] ?? 0.0);
+                $procCnt   = (int)  ($r['proceed']               ?? 0);
+                $proj_gross      += $procCod * $rtsFactor;
+                $proj_ship       += $SHIPPING_PER_SHIPPED * $procCnt;
+                $proj_cogs       += $procUC * $rtsFactor;
+                $proj_np         += (float)($r['projected_net_profit'] ?? 0.0);
+                $proceed_cod_sum += $procCod;
             }
             if (!$totalRow) continue;
 
@@ -2772,19 +2797,20 @@ class OwnerPrivateController extends Controller
                 ->whereRaw('DATE(day) = ?', [$d])
                 ->sum('messaging_conversations_started');
 
-            $adspent  = (float)($totalRow['adspent'] ?? 0);
-            $orders   = (int)  ($totalRow['orders'] ?? 0);
-            $proceed  = (int)  ($totalRow['proceed'] ?? 0);
+            $adspent = (float)($totalRow['adspent'] ?? 0);
+            $orders  = (int)  ($totalRow['orders'] ?? 0);
 
-            // Skip empty days
+            // Skip empty days (no spend AND no orders)
             if ($adspent <= 0 && $orders <= 0) continue;
+
+            $proj_net_pct = $proceed_cod_sum > 0 ? ($proj_np / $proceed_cod_sum) * 100.0 : null;
 
             $row = [
                 'date'           => $d,
                 'adspent'        => round($adspent, 2),
                 'messages'       => $messages,
                 'orders'         => $orders,
-                'proceed'        => $proceed,
+                'proceed'        => (int)($totalRow['proceed'] ?? 0),
                 'cannot'         => (int)($totalRow['cannot_proceed'] ?? 0),
                 'odz'            => (int)($totalRow['odz'] ?? 0),
                 'shipped'        => (int)($totalRow['shipped'] ?? 0),
@@ -2795,57 +2821,52 @@ class OwnerPrivateController extends Controller
                 'cpp'            => $totalRow['cpp']         !== null ? round((float)$totalRow['cpp'], 2)         : null,
                 'proceed_cpp'    => $totalRow['proceed_cpp'] !== null ? round((float)$totalRow['proceed_cpp'], 2) : null,
                 'cpm'            => $messages > 0 ? round($adspent / $messages, 2) : null,
-                'tcpr_pct'       => $totalRow['tcpr']           !== null ? round((float)$totalRow['tcpr'], 1) : null,
-                'rts_pct'        => $totalRow['rts_pct']        !== null ? round((float)$totalRow['rts_pct'], 1) : null,
-                'in_transit_pct' => $totalRow['in_transit_pct'] !== null ? round((float)$totalRow['in_transit_pct'], 1) : null,
-                'gross_sales'    => round((float)($totalRow['gross_sales']  ?? 0), 2),
-                'shipping_fee'   => round((float)($totalRow['shipping_fee'] ?? 0), 2),
-                'cod_fee'        => round((float)($totalRow['cod_fee']      ?? 0), 2),
-                'cod_vat'        => round((float)($totalRow['cod_fee_vat']  ?? 0), 2),
-                'cogs'           => round((float)($totalRow['cogs']         ?? 0), 2),
-                'net_profit'     => round((float)($totalRow['net_profit']   ?? 0), 2),
-                'net_profit_pct' => $totalRow['net_profit_pct'] !== null ? round((float)$totalRow['net_profit_pct'], 1) : null,
-                'projected_net_profit_pct' => $totalRow['projected_net_profit_pct'] ?? null,
-                'hold'           => (int)($totalRow['hold'] ?? 0),
-                'all_cod'        => round((float)($totalRow['all_cod'] ?? 0), 2),
+                'tcpr_pct'       => $totalRow['tcpr'] !== null ? round((float)$totalRow['tcpr'], 1) : null,
+                'proj_gross'     => round($proj_gross, 2),
+                'proj_shipping'  => round($proj_ship,  2),
+                'proj_cogs'      => round($proj_cogs,  2),
+                'proj_net_profit'=> round($proj_np,    2),
+                'proj_net_pct'   => $proj_net_pct !== null ? round($proj_net_pct, 1) : null,
             ];
             $rows[] = $row;
 
-            $totals['adspent']      += $row['adspent'];
-            $totals['messages']     += $row['messages'];
-            $totals['orders']       += $row['orders'];
-            $totals['proceed']      += $row['proceed'];
-            $totals['cannot']       += $row['cannot'];
-            $totals['odz']          += $row['odz'];
-            $totals['shipped']      += $row['shipped'];
-            $totals['delivered']    += $row['delivered'];
-            $totals['returned']     += $row['returned'];
-            $totals['for_return']   += $row['for_return'];
-            $totals['in_transit']   += $row['in_transit'];
-            $totals['gross_sales']  += $row['gross_sales'];
-            $totals['shipping_fee'] += $row['shipping_fee'];
-            $totals['cod_fee']      += $row['cod_fee'];
-            $totals['cod_vat']      += $row['cod_vat'];
-            $totals['cogs']         += $row['cogs'];
-            $totals['net_profit']   += $row['net_profit'];
-            $totals['all_cod']      += $row['all_cod'];
-            $totals['hold']         += $row['hold'];
+            $totals['adspent']         += $row['adspent'];
+            $totals['messages']        += $row['messages'];
+            $totals['orders']          += $row['orders'];
+            $totals['proceed']         += $row['proceed'];
+            $totals['cannot']          += $row['cannot'];
+            $totals['odz']             += $row['odz'];
+            $totals['shipped']         += $row['shipped'];
+            $totals['delivered']       += $row['delivered'];
+            $totals['returned']        += $row['returned'];
+            $totals['for_return']      += $row['for_return'];
+            $totals['in_transit']      += $row['in_transit'];
+            $totals['proj_gross']      += $proj_gross;
+            $totals['proj_shipping']   += $proj_ship;
+            $totals['proj_cogs']       += $proj_cogs;
+            $totals['proj_net_profit'] += $proj_np;
+            $totals['proceed_cod_sum'] += $proceed_cod_sum;
         }
 
-        // Sort newest first
+        // Restore original request params
+        $request->merge([
+            'start_date' => $origStart,
+            'end_date'   => $origEnd,
+            'page_name'  => $origPage,
+        ]);
+
         usort($rows, fn($a, $b) => strcmp($b['date'], $a['date']));
 
-        // Round + computed totals
-        foreach (['adspent','gross_sales','shipping_fee','cod_fee','cod_vat','cogs','net_profit','all_cod'] as $k) {
+        foreach (['adspent','proj_gross','proj_shipping','proj_cogs','proj_net_profit','proceed_cod_sum'] as $k) {
             $totals[$k] = round($totals[$k], 2);
         }
-        $totals['cpp']            = $totals['orders']  > 0 ? round($totals['adspent'] / $totals['orders'],  2) : null;
-        $totals['proceed_cpp']    = $totals['proceed'] > 0 ? round($totals['adspent'] / $totals['proceed'], 2) : null;
-        $totals['cpm']            = $totals['messages'] > 0 ? round($totals['adspent'] / $totals['messages'], 2) : null;
-        $totals['tcpr_pct']       = $totals['orders']  > 0 ? round((1 - ($totals['proceed'] / $totals['orders'])) * 100.0, 1) : null;
-        $totals['rts_pct']        = $totals['shipped'] > 0 ? round((($totals['returned'] + $totals['for_return']) / $totals['shipped']) * 100.0, 1) : null;
-        $totals['in_transit_pct'] = $totals['shipped'] > 0 ? round(($totals['in_transit'] / $totals['shipped']) * 100.0, 1) : null;
-        $totals['net_profit_pct'] = $totals['all_cod'] > 0 ? round(($totals['net_profit'] / $totals['all_cod']) * 100.0, 1) : null;
+        $totals['cpp']         = $totals['orders']  > 0 ? round($totals['adspent'] / $totals['orders'],  2) : null;
+        $totals['proceed_cpp'] = $totals['proceed'] > 0 ? round($totals['adspent'] / $totals['proceed'], 2) : null;
+        $totals['cpm']         = $totals['messages'] > 0 ? round($totals['adspent'] / $totals['messages'], 2) : null;
+        $totals['tcpr_pct']    = $totals['orders']  > 0 ? round((1 - ($totals['proceed'] / $totals['orders'])) * 100.0, 1) : null;
+        $totals['proj_net_pct'] = $totals['proceed_cod_sum'] > 0
+            ? round(($totals['proj_net_profit'] / $totals['proceed_cod_sum']) * 100.0, 1)
+            : null;
 
         return response()->json([
             'rows'       => $rows,
