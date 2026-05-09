@@ -129,12 +129,13 @@
                     value = Number(r.value) || 0;
                   }
                   return {
-                    op:    r.op,
-                    value: value,
-                    bg:    String(r.bg || '#fee2e2'),
-                    color: r.color ? String(r.color) : '',
-                    bold:  !!r.bold,
-                    label: String(r.label || ''),
+                    op:          r.op,
+                    value:       value,
+                    bg:          String(r.bg || '#fee2e2'),
+                    color:       r.color ? String(r.color) : '',
+                    bold:        !!r.bold,
+                    label:       String(r.label || ''),
+                    compare_col: String(r.compare_col || ''),
                   };
                 }),
               }));
