@@ -139,12 +139,20 @@
     .fb-table thead th.sortable { cursor:pointer; user-select:none; }
     .fb-table thead th.sortable:hover { background:#e4e6eb; }
     .fb-table thead th.text-right { text-align:right; }
+    /* Force center alignment para sa lahat ng numeric cells + headers,
+       including yung mga in-line styled via Alpine col.align bindings. */
+    .fb-table thead th[style*="text-align:right"],
+    .fb-table tbody td[style*="text-align:right"] { text-align:center !important; }
     .fb-table tbody td {
       border-bottom:1px solid #e4e6eb; padding:8px 10px;
       color:#1c1e21; vertical-align:top; font-size:12px;
     }
     .fb-table tbody tr:hover td { background:#f7f8fa; }
-    .fb-table .num { text-align:right; font-variant-numeric:tabular-nums; }
+    .fb-table .num { text-align:center; font-variant-numeric:tabular-nums; }
+    /* Center-align all numeric cells (.num) sa /owner/private. Header td/th
+       inline `text-align:right` overrides ay overridden via this rule too:
+       higher specificity .fb-table td.num beats default plain `td`. */
+    .fb-table td.num, .fb-table th.num { text-align:center !important; }
     .fb-table .name { color:#1877f2; font-weight:500; }
     .fb-table .name:hover { text-decoration:underline; }
     .fb-table .sub { font-size:10px; color:#65676b; margin-top:1px; }
