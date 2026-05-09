@@ -31,6 +31,7 @@ class OwnerColumnSettingsController extends Controller
 {
     private const KEY_OWNER_PRIVATE = 'owner_private_cols';
     private const KEY_CAMPAIGNS     = 'campaigns_cols';
+    private const KEY_DAILY_SUMMARY = 'daily_summary_cols';
 
     /**
      * Roles (other than CEO) that may view /owner/private. Each gets its own
@@ -51,8 +52,9 @@ class OwnerColumnSettingsController extends Controller
     //   - a number  (literal threshold), OR
     //   - { "type":"ref", "table":"owner_private", "col":"breakeven_cpp" }
     //     (cross-table reference; resolved at render time by the view).
-    private const KEY_COL_FORMAT          = 'owner_private_col_format';
-    private const KEY_CAMPAIGNS_COL_FORMAT = 'campaigns_col_format';
+    private const KEY_COL_FORMAT             = 'owner_private_col_format';
+    private const KEY_CAMPAIGNS_COL_FORMAT    = 'campaigns_col_format';
+    private const KEY_DAILY_SUMMARY_COL_FORMAT = 'daily_summary_col_format';
 
     /**
      * Column catalog: every column the user can show/hide/reorder per table.
@@ -107,6 +109,30 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'conversion_rate',   'label' => 'Conv Rate (%)'],
             ['id' => 'purchases',      'label' => 'Purchases'],
         ],
+        // CEO-only Daily Summary view (/owner/private/daily). One row per date.
+        // Columns mirror those rendered sa private-daily.blade.php.
+        'daily_summary' => [
+            ['id' => 'date',            'label' => 'Date'],
+            ['id' => 'adspent',         'label' => 'Ad Spend'],
+            ['id' => 'messages',        'label' => 'Msgs'],
+            ['id' => 'orders',          'label' => 'Orders'],
+            ['id' => 'proceed',         'label' => 'Proceed'],
+            ['id' => 'cannot',          'label' => 'Cannot'],
+            ['id' => 'odz',             'label' => 'ODZ'],
+            ['id' => 'shipped',         'label' => 'Shipped'],
+            ['id' => 'delivered',       'label' => 'Delivered'],
+            ['id' => 'in_transit',      'label' => 'In Transit'],
+            ['id' => 'rts',             'label' => 'RTS (returned + for_return)'],
+            ['id' => 'cpp',             'label' => 'CPP'],
+            ['id' => 'proceed_cpp',     'label' => 'Proc CPP'],
+            ['id' => 'cpm',             'label' => 'CPM'],
+            ['id' => 'tcpr_pct',        'label' => 'TCPR%'],
+            ['id' => 'proj_gross',      'label' => 'Proj. Gross'],
+            ['id' => 'proj_shipping',   'label' => 'Proj. Shipping'],
+            ['id' => 'proj_cogs',       'label' => 'Proj. COGS'],
+            ['id' => 'proj_net_profit', 'label' => 'Proj. Net Profit'],
+            ['id' => 'proj_net_pct',    'label' => 'Proj. Net %'],
+        ],
     ];
 
     /**
@@ -137,6 +163,15 @@ class OwnerColumnSettingsController extends Controller
             'link_clicks', 'welcome_msg_rate', 'messages', 'conversion_rate',
             'purchases',
         ],
+        'daily_summary' => [
+            // All columns visible by default — CEO can hide via column-settings.
+            'date', 'adspent', 'messages',
+            'orders', 'proceed', 'cannot', 'odz',
+            'shipped', 'delivered', 'in_transit', 'rts',
+            'cpp', 'proceed_cpp', 'cpm', 'tcpr_pct',
+            'proj_gross', 'proj_shipping', 'proj_cogs',
+            'proj_net_profit', 'proj_net_pct',
+        ],
     ];
 
     private function checkAccess(): void
@@ -151,18 +186,21 @@ class OwnerColumnSettingsController extends Controller
     {
         $this->checkAccess();
 
-        $cfOwner     = $this->loadColFormat('owner_private');
-        $cfCampaigns = $this->loadColFormat('campaigns');
+        $cfOwner        = $this->loadColFormat('owner_private');
+        $cfCampaigns    = $this->loadColFormat('campaigns');
+        $cfDailySummary = $this->loadColFormat('daily_summary');
         return view('owner.column_settings', [
-            'catalog'                   => self::CATALOG,
-            'defaultVisible'            => self::DEFAULT_VISIBLE,
-            'nonCeoRoles'               => self::NON_CEO_ROLES,
-            'matrixOwnerPrivate'        => $this->loadConfigMatrix('owner_private'),
-            'matrixCampaigns'           => $this->loadConfigMatrix('campaigns'),
-            'breakevenTargetPct'        => $this->loadBreakevenTargetPct(),
+            'catalog'                       => self::CATALOG,
+            'defaultVisible'                => self::DEFAULT_VISIBLE,
+            'nonCeoRoles'                   => self::NON_CEO_ROLES,
+            'matrixOwnerPrivate'            => $this->loadConfigMatrix('owner_private'),
+            'matrixCampaigns'               => $this->loadConfigMatrix('campaigns'),
+            'matrixDailySummary'            => $this->loadConfigMatrix('daily_summary'),
+            'breakevenTargetPct'            => $this->loadBreakevenTargetPct(),
             // Editor uses the groups shape (shared rules across columns) — one per table.
-            'colFormatGroups'           => $cfOwner['groups'] ?? [],
-            'campaignsColFormatGroups'  => $cfCampaigns['groups'] ?? [],
+            'colFormatGroups'               => $cfOwner['groups']        ?? [],
+            'campaignsColFormatGroups'      => $cfCampaigns['groups']    ?? [],
+            'dailySummaryColFormatGroups'   => $cfDailySummary['groups'] ?? [],
         ]);
     }
 
@@ -298,7 +336,9 @@ class OwnerColumnSettingsController extends Controller
 
     private function colFormatKey(string $table): string
     {
-        return $table === 'campaigns' ? self::KEY_CAMPAIGNS_COL_FORMAT : self::KEY_COL_FORMAT;
+        if ($table === 'campaigns')     return self::KEY_CAMPAIGNS_COL_FORMAT;
+        if ($table === 'daily_summary') return self::KEY_DAILY_SUMMARY_COL_FORMAT;
+        return self::KEY_COL_FORMAT;
     }
 
     /** POST /owner/column-settings/breakeven-pct — single number 0..100. */
@@ -607,6 +647,8 @@ class OwnerColumnSettingsController extends Controller
 
     private function keyFor(string $table): string
     {
-        return $table === 'owner_private' ? self::KEY_OWNER_PRIVATE : self::KEY_CAMPAIGNS;
+        if ($table === 'campaigns')     return self::KEY_CAMPAIGNS;
+        if ($table === 'daily_summary') return self::KEY_DAILY_SUMMARY;
+        return self::KEY_OWNER_PRIVATE;
     }
 }

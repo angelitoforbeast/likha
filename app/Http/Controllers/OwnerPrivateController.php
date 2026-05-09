@@ -2700,9 +2700,19 @@ class OwnerPrivateController extends Controller
         $defaultStart = (new \DateTime('now', $tz))->modify('-30 days')->format('Y-m-d');
         $defaultEnd   = $yesterday;
 
+        // Column visibility/order + conditional formatting (CEO-managed via
+        // /owner/column-settings). Same resolver shape as the rest of the app.
+        $colsCtrl     = new \App\Http\Controllers\OwnerColumnSettingsController();
+        $colsConfig   = $colsCtrl->loadConfig('daily_summary');
+        $colFormatRules = $colsCtrl->loadColFormat('daily_summary')['byCol'] ?? [];
+        $catalog      = \App\Http\Controllers\OwnerColumnSettingsController::CATALOG['daily_summary'] ?? [];
+
         return view('owner.private-daily', [
             'defaultStartDate' => $defaultStart,
             'defaultEndDate'   => $defaultEnd,
+            'colsConfig'       => $colsConfig,
+            'colFormatRules'   => $colFormatRules,
+            'catalog'          => $catalog,
         ]);
     }
 

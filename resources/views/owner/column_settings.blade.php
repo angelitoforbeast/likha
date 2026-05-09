@@ -100,6 +100,17 @@
       'allowRefValues'=> true,
     ])
 
+    {{-- ─── Conditional Formatting: Daily Summary (CEO only) ───────────── --}}
+    @include('owner._col_format_section', [
+      'sectionTitle'  => '🎨 Conditional Formatting · Daily Summary <span class="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded ml-2">CEO only</span>',
+      'sectionKey'    => 'app_settings · daily_summary_col_format',
+      'tableId'       => 'daily_summary',
+      'tableCatalog'  => $catalog['daily_summary'] ?? [],
+      'initialGroups' => $dailySummaryColFormatGroups ?? [],
+      'note'          => 'Applies sa per-day rows ng <code>/owner/private/daily</code>. CEO-only view kaya hindi kailangan ng per-role config.',
+      'allowRefValues'=> false,
+    ])
+
     {{-- ─── Section 1: /owner/private ──────────────────────────────────────── --}}
     <div class="col-section" x-data="sectionState('owner_private', @js($matrixOwnerPrivate), @js($nonCeoRoles))">
       <div class="flex items-baseline justify-between mb-1">
@@ -219,6 +230,54 @@
           <span class="text-xs text-slate-500"
                 x-text="role + ': ' + visibleCountForRole(role) + ' / ' + order.length"></span>
         </template>
+      </div>
+    </div>
+
+    {{-- ─── Section 3: /owner/private/daily — CEO only ──────────────────── --}}
+    <div class="col-section" x-data="sectionState('daily_summary', @js($matrixDailySummary), @js([]))">
+      <div class="flex items-baseline justify-between mb-1">
+        <h3>📅 Daily Summary <span class="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded ml-2">CEO only</span></h3>
+        <span class="text-[10px] text-slate-400">app_settings · daily_summary_cols</span>
+      </div>
+      <p class="note">
+        Per-column visibility + order para sa <code>/owner/private/daily</code>.
+        CEO-only view, kaya walang per-role checkboxes — single CEO toggle lang.
+        Drag rows to reorder.
+      </p>
+
+      <div class="col-list">
+        <div class="role-header">
+          <span style="width:18px;"></span>
+          <span class="spacer">Column</span>
+          <span class="role-col" title="CEO visibility — toggleable">CEO</span>
+        </div>
+        <template x-for="(id, idx) in order" :key="id">
+          <div class="col-item"
+               draggable="true"
+               @dragstart="dragStart(idx, $event)"
+               @dragend="dragEnd($event)"
+               @dragover.prevent="dragOver(idx, $event)"
+               @dragleave="dragLeave($event)"
+               @drop.prevent="drop(idx)">
+            <span class="col-handle">⋮⋮</span>
+            <span class="col-label" x-text="labelFor(id)"></span>
+            <span class="role-cell ceo" title="CEO visibility (toggleable)">
+              <input type="checkbox" :checked="isVisibleForCEO(id)"
+                     @change="toggleCEOVisible(id, $event.target.checked)"
+                     class="h-4 w-4">
+            </span>
+          </div>
+        </template>
+      </div>
+
+      <div class="flex gap-2 mt-3 items-center flex-wrap">
+        <button class="save-btn" :disabled="saving" @click="save()">
+          <span x-show="!saving">💾 Save</span>
+          <span x-show="saving">Saving…</span>
+        </button>
+        <button class="reset-btn" @click="resetDefaults()">Reset to defaults</button>
+        <span class="text-xs text-slate-500"
+              x-text="'CEO: ' + visibleCountForCEO() + ' / ' + order.length"></span>
       </div>
     </div>
   </div>

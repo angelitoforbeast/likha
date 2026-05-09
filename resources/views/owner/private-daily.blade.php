@@ -96,78 +96,29 @@
         <table class="daily-tbl">
           <thead>
             <tr>
-              <th class="text-left">Date</th>
-              <th class="num">Ad Spend</th>
-              <th class="num">Msgs</th>
-              <th class="num">Orders</th>
-              <th class="num">Proceed</th>
-              <th class="num">Cannot</th>
-              <th class="num">ODZ</th>
-              <th class="num">Shipped</th>
-              <th class="num">Delivered</th>
-              <th class="num">In Transit</th>
-              <th class="num">RTS</th>
-              <th class="num">CPP</th>
-              <th class="num">Proc CPP</th>
-              <th class="num">CPM</th>
-              <th class="num">TCPR%</th>
-              <th class="num">Proj. Gross</th>
-              <th class="num">Proj. Shipping</th>
-              <th class="num">Proj. COGS</th>
-              <th class="num">Proj. Net Profit</th>
-              <th class="num">Proj. Net %</th>
+              <template x-for="c in visibleCols()" :key="c.id">
+                <th :class="c.align === 'left' ? 'text-left' : 'num'" x-text="c.label"></th>
+              </template>
             </tr>
           </thead>
           <tbody>
             <template x-for="r in rows" :key="r.date">
               <tr>
-                <td class="text-left font-medium" x-text="fmtDay(r.date)"></td>
-                <td class="num" x-text="peso(r.adspent)"></td>
-                <td class="num" x-text="num(r.messages)"></td>
-                <td class="num" x-text="num(r.orders)"></td>
-                <td class="num" x-text="num(r.proceed)"></td>
-                <td class="num muted" x-text="num(r.cannot)"></td>
-                <td class="num muted" x-text="num(r.odz)"></td>
-                <td class="num" x-text="num(r.shipped)"></td>
-                <td class="num" x-text="num(r.delivered)"></td>
-                <td class="num muted" x-text="num(r.in_transit)"></td>
-                <td class="num" x-text="num(r.returned + r.for_return)"></td>
-                <td class="num" x-text="peso(r.cpp)"></td>
-                <td class="num" x-text="peso(r.proceed_cpp)"></td>
-                <td class="num" x-text="peso(r.cpm)"></td>
-                <td class="num" x-text="pct(r.tcpr_pct)"></td>
-                <td class="num" x-text="peso(r.proj_gross)"></td>
-                <td class="num" x-text="peso(r.proj_shipping)"></td>
-                <td class="num" x-text="peso(r.proj_cogs)"></td>
-                <td :class="'num ' + (r.proj_net_profit >= 0 ? 'pos' : 'neg')" x-text="peso(r.proj_net_profit)"></td>
-                <td :class="'num ' + (r.proj_net_pct == null ? '' : (r.proj_net_pct >= 0 ? 'pos' : 'neg'))"
-                    x-text="pct(r.proj_net_pct)"></td>
+                <template x-for="c in visibleCols()" :key="c.id">
+                  <td :class="cellClass(c, r)"
+                      :style="cellStyle(c.id, rawVal(c, r))"
+                      x-html="cellText(c, r)"></td>
+                </template>
               </tr>
             </template>
           </tbody>
           <tfoot x-show="rows.length > 0">
             <tr>
-              <td class="text-left">TOTAL</td>
-              <td class="num" x-text="peso(totals.adspent)"></td>
-              <td class="num" x-text="num(totals.messages)"></td>
-              <td class="num" x-text="num(totals.orders)"></td>
-              <td class="num" x-text="num(totals.proceed)"></td>
-              <td class="num muted" x-text="num(totals.cannot)"></td>
-              <td class="num muted" x-text="num(totals.odz)"></td>
-              <td class="num" x-text="num(totals.shipped)"></td>
-              <td class="num" x-text="num(totals.delivered)"></td>
-              <td class="num muted" x-text="num(totals.in_transit)"></td>
-              <td class="num" x-text="num(totals.returned + totals.for_return)"></td>
-              <td class="num" x-text="peso(totals.cpp)"></td>
-              <td class="num" x-text="peso(totals.proceed_cpp)"></td>
-              <td class="num" x-text="peso(totals.cpm)"></td>
-              <td class="num" x-text="pct(totals.tcpr_pct)"></td>
-              <td class="num" x-text="peso(totals.proj_gross)"></td>
-              <td class="num" x-text="peso(totals.proj_shipping)"></td>
-              <td class="num" x-text="peso(totals.proj_cogs)"></td>
-              <td :class="'num ' + (totals.proj_net_profit >= 0 ? 'pos' : 'neg')" x-text="peso(totals.proj_net_profit)"></td>
-              <td :class="'num ' + (totals.proj_net_pct == null ? '' : (totals.proj_net_pct >= 0 ? 'pos' : 'neg'))"
-                  x-text="pct(totals.proj_net_pct)"></td>
+              <template x-for="(c, idx) in visibleCols()" :key="c.id">
+                <td :class="c.align === 'left' ? 'text-left' : 'num'"
+                    :style="cellStyle(c.id, rawVal(c, totals))"
+                    x-html="idx === 0 ? 'TOTAL' : totalText(c)"></td>
+              </template>
             </tr>
           </tfoot>
         </table>
@@ -284,6 +235,97 @@
           const dt = new Date(s + 'T00:00:00');
           if (isNaN(dt.getTime())) return s;
           return dt.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' }) + ` (${s})`;
+        },
+
+        // ── Column metadata ─────────────────────────────────────────────
+        // Defines render functions per column id. Used by visibleCols() +
+        // cell/total renderers. raw() returns numeric value para sa
+        // conditional formatting.
+        ALL_COLS: [
+          { id:'date',            label:'Date',           align:'left',
+            cell:(r,h)=>'<span class="font-medium">'+h.fmtDay(r.date)+'</span>',
+            total:()=>'TOTAL', raw:(r)=>null },
+          { id:'adspent',         label:'Ad Spend',       align:'num', cell:(r,h)=>h.peso(r.adspent),    total:(t,h)=>h.peso(t.adspent),    raw:(r)=>r.adspent },
+          { id:'messages',        label:'Msgs',           align:'num', cell:(r,h)=>h.num(r.messages),    total:(t,h)=>h.num(t.messages),    raw:(r)=>r.messages },
+          { id:'orders',          label:'Orders',         align:'num', cell:(r,h)=>h.num(r.orders),      total:(t,h)=>h.num(t.orders),      raw:(r)=>r.orders },
+          { id:'proceed',         label:'Proceed',        align:'num', cell:(r,h)=>h.num(r.proceed),     total:(t,h)=>h.num(t.proceed),     raw:(r)=>r.proceed },
+          { id:'cannot',          label:'Cannot',         align:'num', cell:(r,h)=>'<span class="muted">'+h.num(r.cannot)+'</span>', total:(t,h)=>'<span class="muted">'+h.num(t.cannot)+'</span>', raw:(r)=>r.cannot },
+          { id:'odz',             label:'ODZ',            align:'num', cell:(r,h)=>'<span class="muted">'+h.num(r.odz)+'</span>',    total:(t,h)=>'<span class="muted">'+h.num(t.odz)+'</span>',    raw:(r)=>r.odz },
+          { id:'shipped',         label:'Shipped',        align:'num', cell:(r,h)=>h.num(r.shipped),     total:(t,h)=>h.num(t.shipped),     raw:(r)=>r.shipped },
+          { id:'delivered',       label:'Delivered',      align:'num', cell:(r,h)=>h.num(r.delivered),   total:(t,h)=>h.num(t.delivered),   raw:(r)=>r.delivered },
+          { id:'in_transit',      label:'In Transit',     align:'num', cell:(r,h)=>'<span class="muted">'+h.num(r.in_transit)+'</span>', total:(t,h)=>'<span class="muted">'+h.num(t.in_transit)+'</span>', raw:(r)=>r.in_transit },
+          { id:'rts',             label:'RTS',            align:'num', cell:(r,h)=>h.num((r.returned||0)+(r.for_return||0)), total:(t,h)=>h.num((t.returned||0)+(t.for_return||0)), raw:(r)=>(r.returned||0)+(r.for_return||0) },
+          { id:'cpp',             label:'CPP',            align:'num', cell:(r,h)=>h.peso(r.cpp),         total:(t,h)=>h.peso(t.cpp),         raw:(r)=>r.cpp },
+          { id:'proceed_cpp',     label:'Proc CPP',       align:'num', cell:(r,h)=>h.peso(r.proceed_cpp), total:(t,h)=>h.peso(t.proceed_cpp), raw:(r)=>r.proceed_cpp },
+          { id:'cpm',             label:'CPM',            align:'num', cell:(r,h)=>h.peso(r.cpm),         total:(t,h)=>h.peso(t.cpm),         raw:(r)=>r.cpm },
+          { id:'tcpr_pct',        label:'TCPR%',          align:'num', cell:(r,h)=>h.pct(r.tcpr_pct),     total:(t,h)=>h.pct(t.tcpr_pct),     raw:(r)=>r.tcpr_pct },
+          { id:'proj_gross',      label:'Proj. Gross',    align:'num', cell:(r,h)=>h.peso(r.proj_gross),     total:(t,h)=>h.peso(t.proj_gross),     raw:(r)=>r.proj_gross },
+          { id:'proj_shipping',   label:'Proj. Shipping', align:'num', cell:(r,h)=>h.peso(r.proj_shipping),  total:(t,h)=>h.peso(t.proj_shipping),  raw:(r)=>r.proj_shipping },
+          { id:'proj_cogs',       label:'Proj. COGS',     align:'num', cell:(r,h)=>h.peso(r.proj_cogs),      total:(t,h)=>h.peso(t.proj_cogs),      raw:(r)=>r.proj_cogs },
+          { id:'proj_net_profit', label:'Proj. Net Profit', align:'num',
+            cell:(r,h)=>'<span class="'+(r.proj_net_profit>=0?'pos':'neg')+'">'+h.peso(r.proj_net_profit)+'</span>',
+            total:(t,h)=>'<span class="'+(t.proj_net_profit>=0?'pos':'neg')+'">'+h.peso(t.proj_net_profit)+'</span>',
+            raw:(r)=>r.proj_net_profit },
+          { id:'proj_net_pct',    label:'Proj. Net %',    align:'num',
+            cell:(r,h)=>r.proj_net_pct==null?'—':'<span class="'+(r.proj_net_pct>=0?'pos':'neg')+'">'+h.pct(r.proj_net_pct)+'</span>',
+            total:(t,h)=>t.proj_net_pct==null?'—':'<span class="'+(t.proj_net_pct>=0?'pos':'neg')+'">'+h.pct(t.proj_net_pct)+'</span>',
+            raw:(r)=>r.proj_net_pct },
+        ],
+
+        // Visibility + ordering from /owner/column-settings
+        COLS_CONFIG:    @json($colsConfig),
+        COL_FORMAT:     @json($colFormatRules),
+
+        visibleCols() {
+          const cfg     = this.COLS_CONFIG || {};
+          const order   = Array.isArray(cfg.order)  ? cfg.order  : [];
+          const hidden  = new Set(Array.isArray(cfg.hidden) ? cfg.hidden : []);
+          const all     = this.ALL_COLS;
+          const allMap  = Object.fromEntries(all.map(c => [c.id, c]));
+          // Use saved order first, append any cols not in order
+          const seen    = new Set();
+          const result  = [];
+          for (const id of order) {
+            if (allMap[id] && !hidden.has(id) && !seen.has(id)) {
+              result.push(allMap[id]);
+              seen.add(id);
+            }
+          }
+          for (const c of all) {
+            if (!seen.has(c.id) && !hidden.has(c.id)) result.push(c);
+          }
+          return result;
+        },
+
+        cellClass(c, r) {
+          return c.align === 'left' ? 'text-left' : 'num';
+        },
+        rawVal(c, r) { return c.raw ? c.raw(r) : null; },
+        cellText(c, r) { return c.cell ? c.cell(r, this) : ''; },
+        totalText(c) { return c.total ? c.total(this.totals, this) : ''; },
+
+        // Conditional formatting — applies bg color based on rules
+        cellStyle(colId, value) {
+          if (value == null || isNaN(value)) return '';
+          const rules = (this.COL_FORMAT || {})[colId] || [];
+          for (const r of rules) {
+            const op = r.op;
+            const v  = (typeof r.value === 'number') ? r.value : null;
+            if (v == null) continue;
+            const v0 = Number(value);
+            let match = false;
+            if (op === '>')  match = v0 >  v;
+            if (op === '>=') match = v0 >= v;
+            if (op === '=')  match = v0 == v;
+            if (op === '<=') match = v0 <= v;
+            if (op === '<')  match = v0 <  v;
+            if (match) {
+              const bg    = r.bg    || '#fee2e2';
+              const color = r.color || '';
+              return `background-color:${bg};` + (color ? `color:${color};` : '');
+            }
+          }
+          return '';
         },
       }
     }
