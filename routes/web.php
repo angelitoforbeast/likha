@@ -872,6 +872,9 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     })->name('profit-calculator');
 
     Route::get ('/owner/column-settings',                [\App\Http\Controllers\OwnerColumnSettingsController::class, 'index'])           ->name('owner.column-settings');
+    Route::get ('/owner/column-settings/owner-private',  [\App\Http\Controllers\OwnerColumnSettingsController::class, 'sectionOwnerPrivate'])->name('owner.column-settings.owner-private');
+    Route::get ('/owner/column-settings/campaigns',      [\App\Http\Controllers\OwnerColumnSettingsController::class, 'sectionCampaigns'])    ->name('owner.column-settings.campaigns');
+    Route::get ('/owner/column-settings/daily-summary',  [\App\Http\Controllers\OwnerColumnSettingsController::class, 'sectionDailySummary'])->name('owner.column-settings.daily-summary');
     Route::post('/owner/column-settings/save',           [\App\Http\Controllers\OwnerColumnSettingsController::class, 'save' ])           ->name('owner.column-settings.save');
     Route::post('/owner/column-settings/breakeven-pct',  [\App\Http\Controllers\OwnerColumnSettingsController::class, 'saveBreakevenPct'])->name('owner.column-settings.breakeven-pct');
     Route::post('/owner/column-settings/col-format',     [\App\Http\Controllers\OwnerColumnSettingsController::class, 'saveColFormat'])   ->name('owner.column-settings.col-format');

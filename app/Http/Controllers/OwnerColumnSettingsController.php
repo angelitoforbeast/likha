@@ -182,25 +182,79 @@ class OwnerColumnSettingsController extends Controller
         if (!$isCEO) abort(404);
     }
 
+    /** Default landing — redirects sa first section (Page Summary). */
     public function index()
     {
         $this->checkAccess();
+        return redirect()->route('owner.column-settings.owner-private');
+    }
 
-        $cfOwner        = $this->loadColFormat('owner_private');
-        $cfCampaigns    = $this->loadColFormat('campaigns');
-        $cfDailySummary = $this->loadColFormat('daily_summary');
-        return view('owner.column_settings', [
-            'catalog'                       => self::CATALOG,
-            'defaultVisible'                => self::DEFAULT_VISIBLE,
-            'nonCeoRoles'                   => self::NON_CEO_ROLES,
-            'matrixOwnerPrivate'            => $this->loadConfigMatrix('owner_private'),
-            'matrixCampaigns'               => $this->loadConfigMatrix('campaigns'),
-            'matrixDailySummary'            => $this->loadConfigMatrix('daily_summary'),
-            'breakevenTargetPct'            => $this->loadBreakevenTargetPct(),
-            // Editor uses the groups shape (shared rules across columns) — one per table.
-            'colFormatGroups'               => $cfOwner['groups']        ?? [],
-            'campaignsColFormatGroups'      => $cfCampaigns['groups']    ?? [],
-            'dailySummaryColFormatGroups'   => $cfDailySummary['groups'] ?? [],
+    /** /owner/column-settings/owner-private — Page Summary section. */
+    public function sectionOwnerPrivate()
+    {
+        $this->checkAccess();
+        $cf = $this->loadColFormat('owner_private');
+        return view('owner.column_settings_section', [
+            'sectionId'         => 'owner_private',
+            'sectionTitle'      => '📊 Page Summary Table',
+            'sectionRoute'      => 'app_settings · owner_private_cols',
+            'sectionDesc'       => 'Per-role column visibility. Toggle the CEO / MOIC / Marketing checkboxes to show or hide each column for that role. Drag rows to reorder (global — applies to all roles).',
+            'cfTitle'           => '🎨 Conditional Formatting · Page Summary',
+            'cfNote'            => 'Applies sa <code>/owner/private</code> per-row cells. Rules\' values can be a literal number or a <b>reference</b> to another Page Summary column.',
+            'cfAllowRef'        => true,
+            'showRoleColumns'   => true,
+            'catalog'           => self::CATALOG,
+            'defaultVisible'    => self::DEFAULT_VISIBLE,
+            'nonCeoRoles'       => self::NON_CEO_ROLES,
+            'matrix'            => $this->loadConfigMatrix('owner_private'),
+            'colFormatGroups'   => $cf['groups'] ?? [],
+            'breakevenTargetPct'=> $this->loadBreakevenTargetPct(),
+        ]);
+    }
+
+    /** /owner/column-settings/campaigns — Ads Manager Campaigns section. */
+    public function sectionCampaigns()
+    {
+        $this->checkAccess();
+        $cf = $this->loadColFormat('campaigns');
+        return view('owner.column_settings_section', [
+            'sectionId'         => 'campaigns',
+            'sectionTitle'      => '📈 Campaigns / Ad Sets / Ads Table',
+            'sectionRoute'      => 'app_settings · campaigns_cols',
+            'sectionDesc'       => 'Same per-role rules. Affects sa <code>/ads_manager/campaigns</code> at sa inline expand panel sa <code>/owner/private</code>.',
+            'cfTitle'           => '🎨 Conditional Formatting · Campaigns / Ad Sets / Ads',
+            'cfNote'            => 'Applies sa Campaigns table sa <code>/ads_manager/campaigns</code> at sa inline expand sa <code>/owner/private</code>. <b>Cross-table reference</b> sa Page Summary column gumagana lang sa /owner/private expand panel.',
+            'cfAllowRef'        => true,
+            'showRoleColumns'   => true,
+            'catalog'           => self::CATALOG,
+            'defaultVisible'    => self::DEFAULT_VISIBLE,
+            'nonCeoRoles'       => self::NON_CEO_ROLES,
+            'matrix'            => $this->loadConfigMatrix('campaigns'),
+            'colFormatGroups'   => $cf['groups'] ?? [],
+            'breakevenTargetPct'=> null,
+        ]);
+    }
+
+    /** /owner/column-settings/daily-summary — CEO-only Daily Summary section. */
+    public function sectionDailySummary()
+    {
+        $this->checkAccess();
+        $cf = $this->loadColFormat('daily_summary');
+        return view('owner.column_settings_section', [
+            'sectionId'         => 'daily_summary',
+            'sectionTitle'      => '📅 Daily Summary <span class="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded ml-2">CEO only</span>',
+            'sectionRoute'      => 'app_settings · daily_summary_cols',
+            'sectionDesc'       => 'Per-column visibility + order para sa <code>/owner/private/daily</code>. CEO-only view, kaya walang per-role checkboxes.',
+            'cfTitle'           => '🎨 Conditional Formatting · Daily Summary',
+            'cfNote'            => 'Applies sa per-day rows ng <code>/owner/private/daily</code>.',
+            'cfAllowRef'        => false,
+            'showRoleColumns'   => false,
+            'catalog'           => self::CATALOG,
+            'defaultVisible'    => self::DEFAULT_VISIBLE,
+            'nonCeoRoles'       => [],
+            'matrix'            => $this->loadConfigMatrix('daily_summary'),
+            'colFormatGroups'   => $cf['groups'] ?? [],
+            'breakevenTargetPct'=> null,
         ]);
     }
 
