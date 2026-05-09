@@ -161,8 +161,10 @@
 
     <div class="text-[11px] text-gray-500 px-1">
       Each row = TOTAL ng <code>/owner/private</code> kapag fina-filter sa single date.
-      <strong>Proj. Net Profit</strong> = sum of per-page projected net profit (per-page RTS rate applied),
-      same value mong nakikita sa <code>/owner/private</code>'s TOTAL row.
+      <strong>Proj. Net Profit</strong> = sum of per-page projected_profit (galing sa <code>itemSummary</code>),
+      exact match sa <code>/owner/private</code>'s display.
+      <br><strong>⚠ Note:</strong> 30-day range may take 30–60s first time (cached 30 min after).
+      Stick to 7–14 days for snappy loads. Pag 504 timeout, palitan mo ng mas maliit na range.
     </div>
   </main>
 

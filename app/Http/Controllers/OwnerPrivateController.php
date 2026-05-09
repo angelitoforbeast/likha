@@ -2695,7 +2695,10 @@ class OwnerPrivateController extends Controller
 
         $tz = new \DateTimeZone('Asia/Manila');
         $today = (new \DateTime('now', $tz))->format('Y-m-d');
-        $defaultStart = (new \DateTime('now', $tz))->modify('-29 days')->format('Y-m-d');
+        // 7-day default — keeps response sa loob ng nginx timeout window.
+        // User can manually extend pero possible 504 on first load (cache makes
+        // succeeding loads fast for same dates).
+        $defaultStart = (new \DateTime('now', $tz))->modify('-6 days')->format('Y-m-d');
 
         return view('owner.private-daily', [
             'defaultStartDate' => $defaultStart,
@@ -2713,6 +2716,10 @@ class OwnerPrivateController extends Controller
     public function dailyData(Request $request)
     {
         $this->checkCEOAccess();
+
+        // Each date iteration calls data() + itemSummary(); both heavy.
+        // Bump PHP execution time to 5 minutes para hindi mag-time out.
+        @set_time_limit(300);
 
         $start = $request->input('start_date');
         $end   = $request->input('end_date');
@@ -2771,32 +2778,41 @@ class OwnerPrivateController extends Controller
                 'page_name'  => 'all',
             ]);
 
-            try {
-                $resp = $this->data($request);
-            } catch (\Throwable $e) {
-                $debug['caught_errors'][] = $d . ': data() ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 200);
-                continue;
-            }
-            if ($resp->getStatusCode() !== 200) {
-                $debug['non_200'][] = $d . ': data() status=' . $resp->getStatusCode();
-                continue;
-            }
+            // Cache key per-date — TTL 30 min. Same date queried again skips
+            // recompute. Bust manually via cache:clear if data updates.
+            $cacheKey = "owner_daily_v1:" . strtolower((string)$request->getHost()) . ":" . $d;
 
-            $payload = $resp->getData(true);
-            // data() returns 'ads_daily' key (not 'rows')
-            $allRows = $payload['ads_daily'] ?? [];
+            $cached = \Illuminate\Support\Facades\Cache::remember($cacheKey, 60 * 30, function () use ($request, $d, &$debug) {
+                try {
+                    $resp = $this->data($request);
+                } catch (\Throwable $e) {
+                    $debug['caught_errors'][] = $d . ': data() ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 200);
+                    return null;
+                }
+                if ($resp->getStatusCode() !== 200) {
+                    $debug['non_200'][] = $d . ': data() status=' . $resp->getStatusCode();
+                    return null;
+                }
+                $payload = $resp->getData(true);
 
-            // Also call itemSummary() — yan ang ginagamit ng /owner/private
-            // para sa projected_profit display. Per-page rows have 'projected_profit'
-            // computed using slice formula: revenue - shipping - cogs - adspent - cod_fee.
-            try {
-                $itemResp = $this->itemSummary($request);
-            } catch (\Throwable $e) {
-                $debug['caught_errors'][] = $d . ': itemSummary() ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 200);
-                continue;
-            }
-            $itemPayload = $itemResp->getStatusCode() === 200 ? $itemResp->getData(true) : [];
-            $itemRows    = $itemPayload['rows'] ?? [];
+                try {
+                    $itemResp = $this->itemSummary($request);
+                } catch (\Throwable $e) {
+                    $debug['caught_errors'][] = $d . ': itemSummary() ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 200);
+                    return null;
+                }
+                $itemPayload = $itemResp->getStatusCode() === 200 ? $itemResp->getData(true) : [];
+
+                return [
+                    'ads_daily' => $payload['ads_daily'] ?? [],
+                    'item_rows' => $itemPayload['rows']  ?? [],
+                ];
+            });
+
+            if (!$cached) continue;
+
+            $allRows  = $cached['ads_daily'];
+            $itemRows = $cached['item_rows'];
 
             // Find TOTAL row from data()
             $totalRow = null;
