@@ -1296,22 +1296,42 @@ class AdsManagerCampaignsController extends Controller
 
                 // TCPR per page — for orders_est = purchases / (1 − tcpr/100)
                 // computation. Pulled from macro_output sa selected date range.
+                // Detect actual column names sa macro_output (varies: PAGE/page/page_name)
                 $tcprByPage = [];
                 if (!empty($pageKeys) && $start && $end && Schema::hasTable('macro_output')) {
-                    $tcprRows = DB::table('macro_output')
-                        ->whereRaw("LOWER(TRIM(page_name)) IN ('" . implode("','", array_map(fn($k) => str_replace("'", "''", $k), $pageKeys)) . "')")
-                        ->whereRaw("ts_date BETWEEN ? AND ?", [$start, $end])
-                        ->selectRaw("LOWER(TRIM(page_name)) AS page_key,
-                            COUNT(*) AS orders_total,
-                            SUM(CASE WHEN LOWER(REPLACE(REPLACE(TRIM(status),' ',''),'_','')) = 'proceed' THEN 1 ELSE 0 END) AS proceed_total")
-                        ->groupByRaw('LOWER(TRIM(page_name))')
-                        ->get();
-                    foreach ($tcprRows as $t) {
-                        $orders  = (int)$t->orders_total;
-                        $proceed = (int)$t->proceed_total;
-                        $tcprByPage[(string)$t->page_key] = $orders > 0
-                            ? max(0.0, min(100.0, (1 - ($proceed / $orders)) * 100.0))
-                            : 0.0;
+                    $moPageCol   = null;
+                    foreach (['PAGE','page','page_name','Page','Page_Name'] as $cand) {
+                        if (Schema::hasColumn('macro_output', $cand)) { $moPageCol = $cand; break; }
+                    }
+                    $moStatusCol = null;
+                    foreach (['STATUS','status','Status'] as $cand) {
+                        if (Schema::hasColumn('macro_output', $cand)) { $moStatusCol = $cand; break; }
+                    }
+                    $moDateCol = null;
+                    foreach (['ts_date','date','order_date'] as $cand) {
+                        if (Schema::hasColumn('macro_output', $cand)) { $moDateCol = $cand; break; }
+                    }
+
+                    if ($moPageCol && $moStatusCol && $moDateCol) {
+                        $pq = '`' . $moPageCol   . '`';
+                        $sq = '`' . $moStatusCol . '`';
+                        $dq = '`' . $moDateCol   . '`';
+                        $inList = "'" . implode("','", array_map(fn($k) => str_replace("'", "''", $k), $pageKeys)) . "'";
+                        $tcprRows = DB::table('macro_output')
+                            ->whereRaw("LOWER(TRIM($pq)) IN ($inList)")
+                            ->whereRaw("$dq BETWEEN ? AND ?", [$start, $end])
+                            ->selectRaw("LOWER(TRIM($pq)) AS page_key,
+                                COUNT(*) AS orders_total,
+                                SUM(CASE WHEN LOWER(REPLACE(REPLACE(TRIM($sq),' ',''),'_','')) = 'proceed' THEN 1 ELSE 0 END) AS proceed_total")
+                            ->groupByRaw("LOWER(TRIM($pq))")
+                            ->get();
+                        foreach ($tcprRows as $t) {
+                            $orders  = (int)$t->orders_total;
+                            $proceed = (int)$t->proceed_total;
+                            $tcprByPage[(string)$t->page_key] = $orders > 0
+                                ? max(0.0, min(100.0, (1 - ($proceed / $orders)) * 100.0))
+                                : 0.0;
+                        }
                     }
                 }
 
@@ -1394,8 +1414,8 @@ class AdsManagerCampaignsController extends Controller
         // If `_enrich_version` is missing sa response = OPcache or deploy issue.
         $rows = $rows->map(function ($r) {
             $isArr = is_array($r);
-            if ($isArr) { if (!isset($r['_enrich_version'])) $r['_enrich_version'] = 'v4-tcpr-' . date('His'); }
-            else        { if (!isset($r->_enrich_version))   $r->_enrich_version   = 'v4-tcpr-' . date('His'); }
+            if ($isArr) { if (!isset($r['_enrich_version'])) $r['_enrich_version'] = 'v5-colfix-' . date('His'); }
+            else        { if (!isset($r->_enrich_version))   $r->_enrich_version   = 'v5-colfix-' . date('His'); }
             return $r;
         });
 
