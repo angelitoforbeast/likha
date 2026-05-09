@@ -2760,12 +2760,22 @@ class OwnerPrivateController extends Controller
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
         $quote  = fn(string $col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
 
-        $statusColName = Schema::hasColumn('macro_output', 'STATUS') ? 'STATUS' : 'status';
+        $pickCol = function (string $table, array $candidates) {
+            foreach ($candidates as $c) if (Schema::hasColumn($table, $c)) return $c;
+            return null;
+        };
+
+        $statusColName = $pickCol('macro_output', ['STATUS','status','Status']) ?? 'status';
         $statusNorm    = "LOWER(REPLACE(REPLACE($trimFn(mo." . $quote($statusColName) . "),' ',''),'_',''))";
-        $wbColName     = Schema::hasColumn('macro_output', 'waybill') ? 'waybill' : 'Waybill';
+        $wbColName     = $pickCol('macro_output', ['waybill','Waybill','WAYBILL']) ?? 'waybill';
         $moWaybillSql  = 'mo.' . $quote($wbColName);
         $hasTsDate     = Schema::hasColumn('macro_output', 'ts_date');
         $dateExpr      = $hasTsDate ? 'mo.ts_date' : "DATE(mo.`created_at`)";
+
+        // cogs columns (table varies — discover real names)
+        $cogsItemColName = $pickCol('cogs', ['item_name','ITEM_NAME','product','Product','Product_Name']) ?? 'item_name';
+        $cogsDateColName = $pickCol('cogs', ['effective_date','date','valid_from','cogs_date']) ?? 'effective_date';
+        $cogsUnitColName = $pickCol('cogs', ['unit_cost','cost','unitprice','unit_price','price']) ?? 'unit_cost';
 
         // Q1: per-date macro_output counts
         $orderRows = DB::table('macro_output as mo')
@@ -2866,14 +2876,17 @@ class OwnerPrivateController extends Controller
             ->whereBetween('ts_date', [$start, $end])
             ->get(['ts_date', 'page_key', 'primary_item_key', 'primary_orders', 'primary_mode_cod']);
 
-        // Q7: cogs lookup
+        // Q7: cogs lookup (uses discovered column names)
+        $cogsItemQ = $quote($cogsItemColName);
+        $cogsDateQ = $quote($cogsDateColName);
+        $cogsUnitQ = $quote($cogsUnitColName);
         $cogsAll = DB::table('cogs')
             ->selectRaw("
-                LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(item_name,'')),' ',''),'-',''),'_','')) AS item_key,
-                DATE(effective_date) AS eff_date,
-                CAST(REPLACE(REPLACE(REPLACE(COALESCE(unit_cost,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2)) AS unit_cost
+                LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE($cogsItemQ,'')),' ',''),'-',''),'_','')) AS item_key,
+                DATE($cogsDateQ) AS eff_date,
+                CAST(REPLACE(REPLACE(REPLACE(COALESCE($cogsUnitQ,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2)) AS unit_cost
             ")
-            ->orderByRaw("LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(item_name,'')),' ',''),'-',''),'_','')) ASC, DATE(effective_date) DESC")
+            ->orderByRaw("LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE($cogsItemQ,'')),' ',''),'-',''),'_','')) ASC, DATE($cogsDateQ) DESC")
             ->get();
         $cogsLookup = [];
         foreach ($cogsAll as $r) {
