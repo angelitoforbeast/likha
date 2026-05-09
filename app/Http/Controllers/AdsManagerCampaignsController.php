@@ -1223,8 +1223,11 @@ class AdsManagerCampaignsController extends Controller
             return $r;
         });
 
-        // ── Profit% per row (defensive — ANY exception falls through silently
-        // so the main response doesn't break). profit_pct will simply be NULL.
+        // ── Profit% per row — DISABLED (computed client-side instead).
+        // Yung parent page row's data (price, rts_pct, item_value) is already
+        // loaded sa browser, so client-side compute is more efficient + no
+        // duplicate DB queries. See _campaignProfitPctFromCpp() sa private.blade.
+        if (false) {
         try {
             $endRef    = $end ?? (new \DateTime('now', new \DateTimeZone('Asia/Manila')))->format('Y-m-d');
             $hostName  = strtolower((string) $request->getHost());
@@ -1337,14 +1340,30 @@ class AdsManagerCampaignsController extends Controller
 
                 $cogsByItem = [];
                 if (Schema::hasTable('cogs')) {
-                    $cogsRows = DB::table('cogs')
-                        ->where('effective_date', '<=', $endRef)
-                        ->orderByDesc('effective_date')
-                        ->orderByDesc('id')
-                        ->get(['item_name', 'unit_cost']);
-                    foreach ($cogsRows as $c) {
-                        $k = strtolower(trim((string)$c->item_name));
-                        if (!isset($cogsByItem[$k])) $cogsByItem[$k] = (float)$c->unit_cost;
+                    // Detect actual column names sa cogs (varies by deployment)
+                    $cogsItemCol = null;
+                    foreach (['item_name','ITEM_NAME','product','Product','Product_Name'] as $cand) {
+                        if (Schema::hasColumn('cogs', $cand)) { $cogsItemCol = $cand; break; }
+                    }
+                    $cogsDateCol = null;
+                    foreach (['effective_date','date','valid_from','cogs_date'] as $cand) {
+                        if (Schema::hasColumn('cogs', $cand)) { $cogsDateCol = $cand; break; }
+                    }
+                    $cogsCostCol = null;
+                    foreach (['unit_cost','cost','unitprice','unit_price','price'] as $cand) {
+                        if (Schema::hasColumn('cogs', $cand)) { $cogsCostCol = $cand; break; }
+                    }
+
+                    if ($cogsItemCol && $cogsDateCol && $cogsCostCol) {
+                        $cogsRows = DB::table('cogs')
+                            ->where($cogsDateCol, '<=', $endRef)
+                            ->orderByDesc($cogsDateCol)
+                            ->orderByDesc('id')
+                            ->get([$cogsItemCol . ' as item_name', $cogsCostCol . ' as unit_cost']);
+                        foreach ($cogsRows as $c) {
+                            $k = strtolower(trim((string)$c->item_name));
+                            if (!isset($cogsByItem[$k])) $cogsByItem[$k] = (float)$c->unit_cost;
+                        }
                     }
                 }
 
@@ -1399,25 +1418,9 @@ class AdsManagerCampaignsController extends Controller
                 });
             }
         } catch (\Throwable $e) {
-            // Surface the exception sa response para makita kung saan nag-fail.
-            // Each row gets the error message — no silent failure.
-            $errMsg = 'EX:' . get_class($e) . ':' . mb_substr($e->getMessage(), 0, 120) . '@' . basename($e->getFile()) . ':' . $e->getLine();
-            $rows = $rows->map(function ($r) use ($errMsg) {
-                $isArr = is_array($r);
-                if ($isArr) { $r['profit_pct'] = null; $r['_profit_debug'] = $errMsg; }
-                else        { $r->profit_pct   = null; $r->_profit_debug   = $errMsg; }
-                return $r;
-            });
             \Illuminate\Support\Facades\Log::warning('profit_pct enrichment failed: ' . $e->getMessage());
         }
-        // Always-on marker so we can verify the deployed code is THIS version.
-        // If `_enrich_version` is missing sa response = OPcache or deploy issue.
-        $rows = $rows->map(function ($r) {
-            $isArr = is_array($r);
-            if ($isArr) { if (!isset($r['_enrich_version'])) $r['_enrich_version'] = 'v5-colfix-' . date('His'); }
-            else        { if (!isset($r->_enrich_version))   $r->_enrich_version   = 'v5-colfix-' . date('His'); }
-            return $r;
-        });
+        } // end if(false) — server-side enrichment disabled, computed client-side instead
 
         // Totals for current filter (no group)
         $tot = (clone $base)->selectRaw('

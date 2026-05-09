@@ -1618,7 +1618,10 @@
         return { start_date: start, end_date: end };
       },
 
-      // Server-side enriches profit_pct (4 windows). Just fetch + return.
+      // Fetch campaigns + enrich profit_pct (4 windows) client-side using
+      // PARENT PAGE ROW's already-loaded data (price, rts_pct, item_value).
+      // Walang dagdag na DB query — yung data is already sa browser when
+      // /owner/private renders the page summary.
       async _fetchCampaignsData(params){
         const qs = new URLSearchParams(Object.assign({
           limit:           1000,
@@ -1629,7 +1632,39 @@
         }, params));
         const res = await fetch('{{ route('ads_manager.campaigns.data') }}?' + qs.toString());
         if (!res.ok) throw new Error('HTTP '+res.status);
-        return await res.json();
+        const j = await res.json();
+
+        if (Array.isArray(j.rows)) {
+          for (const r of j.rows) {
+            r.profit_pct       = this._campaignProfitPctFromCpp(r, r.cpp);
+            r.profit_pct_7d    = this._campaignProfitPctFromCpp(r, r.cpp_7d);
+            r.profit_pct_3d    = this._campaignProfitPctFromCpp(r, r.cpp_3d);
+            r.profit_pct_today = this._campaignProfitPctFromCpp(r, r.cpp_today);
+          }
+        }
+        return j;
+      },
+
+      // Compute profit% per campaign using parent page row's data.
+      // Inputs: campaign's cpp + parent.price/rts_pct/item_value + window.__FEES__
+      // Formula:
+      //   df               = 1 − rts_pct/100
+      //   profit_per_order = df × (price − item_value − price × F) − SF − cpp
+      //   profit_pct       = profit_per_order ÷ price × 100
+      _campaignProfitPctFromCpp(row, cppVal){
+        const cpp = Number(cppVal ?? NaN);
+        if (isNaN(cpp)) return null;
+        const parent = this.pageRowFor(row?.page_name);
+        if (!parent) return null;
+        const price = Number(parent.price ?? 0);
+        const iv    = parent.item_value;
+        const rts   = parent.rts_pct;
+        if (price <= 0 || iv == null || rts == null) return null;
+        const df = 1 - (Number(rts) / 100);
+        const F  = Number(window.__FEES__?.F  ?? 0.0168);
+        const SF = Number(window.__FEES__?.SF ?? 37);
+        const profitPerOrder = df * (price - Number(iv) - price * F) - SF - cpp;
+        return Math.round((profitPerOrder / price) * 100 * 100) / 100;
       },
 
       // Are any visible page rows currently expanded? Used by the
