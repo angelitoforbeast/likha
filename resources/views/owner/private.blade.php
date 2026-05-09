@@ -1618,9 +1618,7 @@
         return { start_date: start, end_date: end };
       },
 
-      // Generic fetcher into /ads_manager/campaigns/data with passed params.
-      // profit_pct (and 7D/3D/Today windows) are now ENRICHED SERVER-SIDE
-      // sa AdsManagerCampaignsController.data() — single source of truth.
+      // Server-side enriches profit_pct (4 windows). Just fetch + return.
       async _fetchCampaignsData(params){
         const qs = new URLSearchParams(Object.assign({
           limit:           1000,

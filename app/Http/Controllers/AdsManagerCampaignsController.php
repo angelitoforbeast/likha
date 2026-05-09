@@ -1394,8 +1394,8 @@ class AdsManagerCampaignsController extends Controller
         // If `_enrich_version` is missing sa response = OPcache or deploy issue.
         $rows = $rows->map(function ($r) {
             $isArr = is_array($r);
-            if ($isArr) { if (!isset($r['_enrich_version'])) $r['_enrich_version'] = 'v3-2026-05-09'; }
-            else        { if (!isset($r->_enrich_version))   $r->_enrich_version   = 'v3-2026-05-09'; }
+            if ($isArr) { if (!isset($r['_enrich_version'])) $r['_enrich_version'] = 'v4-tcpr-' . date('His'); }
+            else        { if (!isset($r->_enrich_version))   $r->_enrich_version   = 'v4-tcpr-' . date('His'); }
             return $r;
         });
 
