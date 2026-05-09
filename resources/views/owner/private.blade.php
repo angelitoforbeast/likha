@@ -1067,7 +1067,16 @@
       },
 
       saveCols() {
-        localStorage.setItem('private_col_order_v1', JSON.stringify(this.cols.map(c => c.id)));
+        const order = this.cols.map(c => c.id);
+        localStorage.setItem('private_col_order_v1', JSON.stringify(order));
+        // Persist to DB (partial update — only `order` sent, so `hidden` and
+        // `visible_by_role` saved sa /owner/column-settings are preserved).
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        fetch('{{ route('owner.column-settings.save') }}', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
+          body: JSON.stringify({ table: 'owner_private', order }),
+        }).catch(e => console.warn('saveCols DB sync failed', e));
       },
 
       // ── Column drag-and-drop ──────────────────────────────────────────────

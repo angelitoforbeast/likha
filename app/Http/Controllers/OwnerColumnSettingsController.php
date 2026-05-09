@@ -531,16 +531,33 @@ class OwnerColumnSettingsController extends Controller
             return $out;
         };
 
-        $order  = $clean((array) $request->input('order',  []));
-        $hidden = $clean((array) $request->input('hidden', []));
+        // Partial-update support: only fields actually present in the request
+        // overwrite existing. So drag-to-reorder sa /owner/private (POSTs only
+        // 'order') won't wipe out the saved 'hidden' + 'visible_by_role' lists.
+        $existing = $this->loadConfigMatrix($table); // returns ['order','hidden','visible_by_role']
 
-        // Per-role visibility (positive list per non-CEO role).
-        $visibleByRoleInput = (array) $request->input('visible_by_role', []);
-        $visibleByRole = [];
-        foreach (self::NON_CEO_ROLES as $r) {
-            $list = $visibleByRoleInput[$r] ?? [];
-            if (!is_array($list)) $list = [];
-            $visibleByRole[$r] = $clean($list);
+        if ($request->has('order')) {
+            $order = $clean((array) $request->input('order', []));
+        } else {
+            $order = $existing['order'] ?? [];
+        }
+
+        if ($request->has('hidden')) {
+            $hidden = $clean((array) $request->input('hidden', []));
+        } else {
+            $hidden = $existing['hidden'] ?? [];
+        }
+
+        if ($request->has('visible_by_role')) {
+            $visibleByRoleInput = (array) $request->input('visible_by_role', []);
+            $visibleByRole = [];
+            foreach (self::NON_CEO_ROLES as $r) {
+                $list = $visibleByRoleInput[$r] ?? [];
+                if (!is_array($list)) $list = [];
+                $visibleByRole[$r] = $clean($list);
+            }
+        } else {
+            $visibleByRole = $existing['visible_by_role'] ?? [];
         }
 
         $payload = [

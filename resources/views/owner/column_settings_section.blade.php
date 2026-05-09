@@ -6,7 +6,7 @@
     .col-section { background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:16px; box-shadow:0 1px 2px rgba(0,0,0,0.04); }
     .col-section h3 { font-size:14px; font-weight:700; color:#0f172a; margin-bottom:6px; }
     .col-section p.note { font-size:11px; color:#64748b; margin-bottom:12px; }
-    .col-list { border:1px solid #e2e8f0; border-radius:6px; max-height:520px; overflow-y:auto; background:#f8fafc; }
+    .col-list { border:1px solid #e2e8f0; border-radius:6px; background:#f8fafc; }
     .col-item { display:flex; align-items:center; gap:8px; padding:8px 12px; background:white; border-bottom:1px solid #e2e8f0; cursor:grab; user-select:none; }
     .col-item:last-child { border-bottom:none; }
     .col-item:hover { background:#f1f5f9; }

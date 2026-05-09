@@ -13,7 +13,9 @@
     .num { text-align:right; font-variant-numeric:tabular-nums; }
     table.daily-tbl { width:100%; border-collapse:collapse; font-size:11.5px; }
     table.daily-tbl th, table.daily-tbl td { padding:6px 8px; border-bottom:1px solid #e4e6eb; white-space:nowrap; }
-    table.daily-tbl thead th { background:#1f2937; color:#fff; font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:0.04em; position:sticky; top:0; z-index:2; }
+    table.daily-tbl thead th { background:#1f2937; color:#fff; font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:0.04em; position:sticky; top:0; z-index:2; cursor:grab; user-select:none; }
+    table.daily-tbl thead th:active { cursor:grabbing; }
+    table.daily-tbl thead th.drag-over { box-shadow: inset 3px 0 0 0 #fbbf24; }
     table.daily-tbl tbody tr:hover { background:#f8fafc; }
     table.daily-tbl tfoot td { background:#fef3c7; font-weight:700; border-top:2px solid #f59e0b; }
     .pos { color:#15803d; font-weight:600; }
@@ -97,7 +99,15 @@
           <thead>
             <tr>
               <template x-for="c in visibleCols()" :key="c.id">
-                <th :class="c.align === 'left' ? 'text-left' : 'num'" x-text="c.label"></th>
+                <th :class="(c.align === 'left' ? 'text-left' : 'num') + (dragOverId === c.id ? ' drag-over' : '')"
+                    draggable="true"
+                    :title="'Drag to reorder · ' + c.label"
+                    @dragstart="colDragStart($event, c.id)"
+                    @dragend="dragOverId=null"
+                    @dragover.prevent="dragOverId = c.id"
+                    @dragleave="dragOverId = null"
+                    @drop.prevent="colDrop($event, c.id)"
+                    x-text="c.label"></th>
               </template>
             </tr>
           </thead>
@@ -146,7 +156,46 @@
           start_date: '{{ $defaultStartDate }}',
           end_date:   '{{ $defaultEndDate }}',
         },
+        // Column drag-and-drop state
+        dragSrcId: null,
+        dragOverId: null,
+        // Local order override (when user drags). Falls back to COLS_CONFIG.order.
+        localOrder: null,
         init() { this.reload(); },
+
+        // ── Column drag-and-drop ──────────────────────────────────────────
+        colDragStart(e, colId) {
+          this.dragSrcId = colId;
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', colId);
+        },
+        colDrop(e, targetId) {
+          this.dragOverId = null;
+          if (!this.dragSrcId || this.dragSrcId === targetId) { this.dragSrcId = null; return; }
+          const cur = this.visibleCols().map(c => c.id);
+          const from = cur.indexOf(this.dragSrcId);
+          const to   = cur.indexOf(targetId);
+          if (from < 0 || to < 0) { this.dragSrcId = null; return; }
+          const [moved] = cur.splice(from, 1);
+          cur.splice(to, 0, moved);
+          // Append any cols we didn't see (hidden ones, etc.) in original order
+          const all = this.ALL_COLS.map(c => c.id);
+          const seen = new Set(cur);
+          for (const id of all) if (!seen.has(id)) cur.push(id);
+          this.localOrder = cur;
+          this.saveColOrder(cur);
+          this.dragSrcId = null;
+        },
+        async saveColOrder(order) {
+          const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+          try {
+            await fetch('{{ route('owner.column-settings.save') }}', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf },
+              body: JSON.stringify({ table: 'daily_summary', order }),
+            });
+          } catch (e) { console.warn('saveColOrder failed', e); }
+        },
         // PH timezone "today" derived locally — same logic as backend
         phToday() {
           const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
@@ -278,11 +327,13 @@
 
         visibleCols() {
           const cfg     = this.COLS_CONFIG || {};
-          const order   = Array.isArray(cfg.order)  ? cfg.order  : [];
+          // localOrder (set by drag-reorder) takes precedence over saved config
+          const order   = this.localOrder
+                            ? this.localOrder
+                            : (Array.isArray(cfg.order) ? cfg.order : []);
           const hidden  = new Set(Array.isArray(cfg.hidden) ? cfg.hidden : []);
           const all     = this.ALL_COLS;
           const allMap  = Object.fromEntries(all.map(c => [c.id, c]));
-          // Use saved order first, append any cols not in order
           const seen    = new Set();
           const result  = [];
           for (const id of order) {

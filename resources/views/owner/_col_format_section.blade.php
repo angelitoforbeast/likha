@@ -38,19 +38,22 @@
   </div>
 
   <template x-for="(g, gIdx) in groups" :key="'g-'+gIdx">
-    <div class="rule-group">
-      <div class="rule-group-header">
-        <div class="text-xs font-semibold text-slate-700">
+    <div class="rule-group" x-data="{ open: false }">
+      <div class="rule-group-header" style="cursor:pointer;" @click="open = !open">
+        <div class="text-xs font-semibold text-slate-700 flex items-center gap-2">
+          <span class="cf-chevron" :style="open ? 'transform:rotate(90deg)' : ''" style="transition:transform .15s ease;display:inline-block;">▶</span>
           📑 Group #<span x-text="gIdx + 1"></span>
           <span class="text-slate-500 font-normal" x-show="g.rules.length > 0">·
             <span x-text="g.rules.length"></span> rule(s) ·
             applies to <span x-text="g.cols.length"></span> column(s)
           </span>
+          <span class="text-[10px] text-slate-400" x-show="!open">(click to expand)</span>
         </div>
         <button class="text-red-600 hover:text-red-800 text-xs font-semibold"
-                @click="if(confirm('Delete this group?')) removeGroup(gIdx)">× Delete group</button>
+                @click.stop="if(confirm('Delete this group?')) removeGroup(gIdx)">× Delete group</button>
       </div>
 
+      <div x-show="open" x-transition>
       <div class="rule-group-section">
         <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
           Apply to columns (click to toggle)
@@ -155,6 +158,7 @@
           <button class="reset-btn" @click="addRuleToGroup(gIdx)">+ Add rule to this group</button>
         </div>
       </div>
+      </div> {{-- end x-show=open wrapper --}}
     </div>
   </template>
 </div>
