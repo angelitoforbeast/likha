@@ -82,10 +82,20 @@ class OwnerPrivateController extends Controller
         $colFormatRules           = $colsCtrl->loadColFormat('owner_private')['byCol'] ?? [];
         $campaignsColFormatRules  = $colsCtrl->loadColFormat('campaigns')['byCol']     ?? [];
 
+        // Fee settings — pinapasa sa view as window.__FEES__ kaya yung JS-side
+        // formulas (breakeven_cpp, profit_pct sa campaigns expand) ay hindi na
+        // hardcoded. Latest effective values lang gamit (today's date).
+        $host = strtolower((string) request()->getHost());
+        $today = (new \DateTime('now', new \DateTimeZone('Asia/Manila')))->format('Y-m-d');
+        $feeShipping  = FeeSetting::getRate('shipping_fee_per_order', $host, $today);
+        $feeCodRate   = FeeSetting::getRate('cod_fee_rate',           $host, $today);
+        $feeVatRate   = FeeSetting::getRate('cod_fee_vat_rate',       $host, $today);
+
         return view('owner.private', compact(
             'pages', 'isCEO', 'isMarketingOIC',
             'ownerPrivateColsConfig', 'campaignsColsConfig',
-            'breakevenTargetPct', 'colFormatRules', 'campaignsColFormatRules'
+            'breakevenTargetPct', 'colFormatRules', 'campaignsColFormatRules',
+            'feeShipping', 'feeCodRate', 'feeVatRate'
         ));
     }
 

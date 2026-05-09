@@ -926,6 +926,15 @@
   // Cross-table ref values (e.g. `cpp ≥ breakeven_cpp`) resolved by looking
   // up the parent page-summary row via row.page_name.
   window.__CAMPAIGNS_COL_FORMAT__ = @json($campaignsColFormatRules ?? new \stdClass());
+  // Fee settings — passed from server (FeeSetting::getRate at index time).
+  // Used by breakevenCppFor() + campaignProfitPct() instead of hardcoded.
+  // SF = shipping_fee_per_order, F = cod_fee_rate × (1 + cod_fee_vat_rate).
+  window.__FEES__ = {
+    SF:       {{ is_numeric($feeShipping) ? $feeShipping : 'null' }},
+    COD_RATE: {{ is_numeric($feeCodRate)  ? $feeCodRate  : 'null' }},
+    VAT_RATE: {{ is_numeric($feeVatRate)  ? $feeVatRate  : 'null' }},
+    F:        {{ (is_numeric($feeCodRate) && is_numeric($feeVatRate)) ? ($feeCodRate * (1 + $feeVatRate)) : 'null' }},
+  };
 
   function privateUI() {
     return {
@@ -1388,8 +1397,8 @@
         const procRate = p / o;
         const df       = 1 - (Number(rts) / 100);
         const target   = (Number(window.__BREAKEVEN_PCT__ ?? 5)) / 100;
-        const F = 0.0168;  // cod_fee_rate × (1 + VAT) = 0.015 × 1.12
-        const SF = 37;
+        const F  = Number(window.__FEES__?.F  ?? 0.0168); // cod_fee × (1+VAT)
+        const SF = Number(window.__FEES__?.SF ?? 37);     // shipping_fee_per_order
         return procRate * (df * (price * (1 - F) - Number(iv)) - SF) - target * price;
       },
 
@@ -1662,8 +1671,10 @@
         const rts   = parent.rts_pct;
         if (price <= 0 || iv == null || rts == null) return null;
         const df = 1 - (Number(rts) / 100);
-        const F  = 0.0168;
-        const SF = 37;
+        // Fees from server (window.__FEES__). Fallback to historical defaults
+        // only kung walang fee_settings row sa DB.
+        const F  = Number(window.__FEES__?.F  ?? 0.0168);
+        const SF = Number(window.__FEES__?.SF ?? 37);
         const profitPerOrder = df * (price - Number(iv) - price * F) - SF - cpp;
         return Math.round((profitPerOrder / price) * 100 * 100) / 100; // 2 decimals
       },
