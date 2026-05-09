@@ -2998,9 +2998,37 @@ class OwnerPrivateController extends Controller
             return 0.0;
         };
 
-        // Per (date, item) DELIVERED counts — match main /owner/private:
-        // COGS counts only items that were actually delivered, not just
-        // proceed status. Joins with _jnt_agg_daily to get is_delivered flag.
+        // 4) Proceed COD sum + Proceed unit-cost sum per day (forward-looking,
+        // used sa projected metrics — based sa proceed orders, applies expected
+        // delivery rate later instead of waiting for actual deliveries).
+        $proceedCodRows = DB::table('macro_output as mo')
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end])
+            ->whereRaw("$statusNorm = 'proceed'")
+            ->selectRaw("$dateExpr AS d, COALESCE(SUM($moCodClean), 0) AS proceed_cod_sum")
+            ->groupByRaw($dateExpr)
+            ->get();
+        $proceedCodMap = [];
+        foreach ($proceedCodRows as $r) {
+            $proceedCodMap[(string)$r->d] = (float)$r->proceed_cod_sum;
+        }
+
+        // Per (date, item) PROCEED counts — para sa unit cost sum projection
+        $proceedItemRows = DB::table('macro_output as mo')
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end])
+            ->whereRaw("$statusNorm = 'proceed'")
+            ->selectRaw("$dateExpr AS d, $itemKeyExpr AS item_key, COUNT(*) AS qty")
+            ->groupByRaw("$dateExpr, $itemKeyExpr")
+            ->get();
+        $proceedUnitCostMap = [];
+        foreach ($proceedItemRows as $r) {
+            $d = (string)$r->d;
+            $itemKey = (string)$r->item_key;
+            $qty = (int)$r->qty;
+            $unit = $findUnitCost($itemKey, $d);
+            $proceedUnitCostMap[$d] = ($proceedUnitCostMap[$d] ?? 0.0) + ($qty * $unit);
+        }
+
+        // 5) ACTUAL COGS — for context column (delivered orders only)
         $cogsAggRows = DB::table('macro_output as mo')
             ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end])
             ->whereNotNull('mo.' . $wbColName)
@@ -3019,15 +3047,34 @@ class OwnerPrivateController extends Controller
             $cogsMap[$d] = ($cogsMap[$d] ?? 0.0) + ($qty * $unit);
         }
 
-        // 5) Build per-day rows + total
+        // 6) Effective RTS rate — weighted from "settled" days (in_transit_pct < 3%)
+        // across the entire range. Falls back to default 30% if no settled days.
+        $DEFAULT_RTS_PCT = 30.0;
+        $rtsNum = 0; $rtsDen = 0;
+        foreach ($shippedMap as $d => $shipped) {
+            if ($shipped <= 0) continue;
+            $intrans = $inTransitMap[$d] ?? 0;
+            $intransPct = ($intrans / $shipped) * 100.0;
+            if ($intransPct >= 3.0) continue; // not settled yet
+            $del = $deliveredMap[$d] ?? 0;
+            $ret = $returnedMap[$d]  ?? 0;
+            $fr  = $forReturnMap[$d] ?? 0;
+            $rtsNum += ($ret + $fr);
+            $rtsDen += ($del + $ret + $fr);
+        }
+        $effectiveRtsPct = $rtsDen > 0 ? ($rtsNum / $rtsDen) * 100.0 : $DEFAULT_RTS_PCT;
+        $rtsFactor = max(0.0, min(1.0, 1.0 - ($effectiveRtsPct / 100.0)));
+
+        // 7) Build per-day rows + total
         $rows = [];
         $totals = [
             'adspent' => 0.0, 'messages' => 0,
             'orders' => 0, 'proceed' => 0, 'cannot' => 0, 'odz' => 0,
             'shipped' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0, 'in_transit' => 0,
-            'gross_sales' => 0.0, 'all_cod' => 0.0,
-            'shipping_fee' => 0.0, 'cod_fee' => 0.0, 'cod_vat' => 0.0, 'cogs' => 0.0,
-            'net_profit' => 0.0,
+            'proj_gross' => 0.0, 'proj_shipping_fee' => 0.0,
+            'proj_cod_fee' => 0.0, 'proj_cod_vat' => 0.0, 'proj_cogs' => 0.0,
+            'proj_net_profit' => 0.0,
+            'proceed_cod_sum' => 0.0,
         ];
 
         // Iterate every day in range so days with zero ad spend or zero orders still appear
@@ -3048,18 +3095,31 @@ class OwnerPrivateController extends Controller
             $returned  = $returnedMap[$d]  ?? 0;
             $forRet    = $forReturnMap[$d] ?? 0;
             $inTrans   = $inTransitMap[$d] ?? 0;
-            $gross     = $grossMap[$d]     ?? 0.0;
-            $allCod    = $allCodMap[$d]    ?? 0.0;
             $cogs      = $cogsMap[$d]      ?? 0.0;
             $actShip   = $actShipMap[$d]   ?? 0.0;
+            $procCodSum  = $proceedCodMap[$d]      ?? 0.0;
+            $procUCSum   = $proceedUnitCostMap[$d] ?? 0.0;
 
             // Skip empty days entirely (no ad spend AND no orders)
             if ($adspent <= 0 && $orders <= 0) continue;
 
-            $shipping_fee = $actShip > 0 ? $actShip : ($SHIPPING_PER_SHIPPED * $shipped);
-            $cod_fee      = $gross * $COD_FEE_RATE;
-            $cod_vat      = $cod_fee * $COD_FEE_VAT_RATE;
-            $net_profit   = $gross - $adspent - $shipping_fee - $cod_fee - $cod_vat - $cogs;
+            // Projected metrics — based on PROCEED orders × expected delivery
+            // rate (consistent sa main /owner/private's projected_net_profit).
+            // Formula:
+            //   proj_gross    = proceed_cod_sum × (1 - rts%)
+            //   proj_cogs     = proceed_unit_cost_sum × (1 - rts%)
+            //   proj_cod_fee  = proceed_cod_sum × COD_FEE_RATE
+            //   proj_cod_vat  = proj_cod_fee × COD_FEE_VAT_RATE
+            //   proj_ship_fee = SHIPPING_PER_SHIPPED × proceed_count
+            //   proj_net      = proj_gross - adspent - proj_cod_fee - proj_cod_vat
+            //                   - proj_cogs - proj_ship_fee
+            $proj_gross    = $procCodSum * $rtsFactor;
+            $proj_cod_fee  = $procCodSum * $COD_FEE_RATE;
+            $proj_cod_vat  = $proj_cod_fee * $COD_FEE_VAT_RATE;
+            $proj_cogs     = $procUCSum  * $rtsFactor;
+            $proj_ship_fee = $SHIPPING_PER_SHIPPED * $proceed;
+            $proj_net      = $proj_gross - $adspent - $proj_cod_fee - $proj_cod_vat - $proj_cogs - $proj_ship_fee;
+            $proj_net_pct  = $procCodSum > 0 ? ($proj_net / $procCodSum) * 100.0 : null;
 
             $cpp        = $orders  > 0 ? $adspent / $orders  : null;
             $procCpp    = $proceed > 0 ? $adspent / $proceed : null;
@@ -3067,7 +3127,6 @@ class OwnerPrivateController extends Controller
             $rts_pct    = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
             $tcpr_pct   = $orders  > 0 ? (1 - ($proceed / $orders)) * 100.0 : null;
             $intrans_pct= $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
-            $net_pct    = $allCod  > 0 ? ($net_profit / $allCod) * 100.0 : null;
             $hold       = $proceed - $shipped;
 
             $rows[] = [
@@ -3089,42 +3148,44 @@ class OwnerPrivateController extends Controller
                 'tcpr_pct'     => $tcpr_pct   !== null ? round($tcpr_pct, 1) : null,
                 'rts_pct'      => $rts_pct    !== null ? round($rts_pct, 1) : null,
                 'in_transit_pct' => $intrans_pct !== null ? round($intrans_pct, 1) : null,
-                'gross_sales'  => round($gross, 2),
-                'shipping_fee' => round($shipping_fee, 2),
-                'cod_fee'      => round($cod_fee, 2),
-                'cod_vat'      => round($cod_vat, 2),
-                'cogs'         => round($cogs, 2),
-                'net_profit'   => round($net_profit, 2),
-                'net_profit_pct' => $net_pct !== null ? round($net_pct, 1) : null,
+                // Projected (forward-looking) financial metrics
+                'proj_gross'      => round($proj_gross, 2),
+                'proj_shipping_fee' => round($proj_ship_fee, 2),
+                'proj_cod_fee'    => round($proj_cod_fee, 2),
+                'proj_cod_vat'    => round($proj_cod_vat, 2),
+                'proj_cogs'       => round($proj_cogs, 2),
+                'proj_net_profit' => round($proj_net, 2),
+                'proj_net_pct'    => $proj_net_pct !== null ? round($proj_net_pct, 1) : null,
+                'proceed_cod_sum' => round($procCodSum, 2),
                 'hold'         => $hold,
-                'all_cod'      => round($allCod, 2),
             ];
 
-            $totals['adspent']      += $adspent;
-            $totals['messages']     += $messages;
-            $totals['orders']       += $orders;
-            $totals['proceed']      += $proceed;
-            $totals['cannot']       += $cannot;
-            $totals['odz']          += $odz;
-            $totals['shipped']      += $shipped;
-            $totals['delivered']    += $delivered;
-            $totals['returned']     += $returned;
-            $totals['for_return']   += $forRet;
-            $totals['in_transit']   += $inTrans;
-            $totals['gross_sales']  += $gross;
-            $totals['all_cod']      += $allCod;
-            $totals['shipping_fee'] += $shipping_fee;
-            $totals['cod_fee']      += $cod_fee;
-            $totals['cod_vat']      += $cod_vat;
-            $totals['cogs']         += $cogs;
-            $totals['net_profit']   += $net_profit;
+            $totals['adspent']           += $adspent;
+            $totals['messages']          += $messages;
+            $totals['orders']            += $orders;
+            $totals['proceed']           += $proceed;
+            $totals['cannot']            += $cannot;
+            $totals['odz']               += $odz;
+            $totals['shipped']           += $shipped;
+            $totals['delivered']         += $delivered;
+            $totals['returned']          += $returned;
+            $totals['for_return']        += $forRet;
+            $totals['in_transit']        += $inTrans;
+            $totals['proj_gross']        += $proj_gross;
+            $totals['proj_shipping_fee'] += $proj_ship_fee;
+            $totals['proj_cod_fee']      += $proj_cod_fee;
+            $totals['proj_cod_vat']      += $proj_cod_vat;
+            $totals['proj_cogs']         += $proj_cogs;
+            $totals['proj_net_profit']   += $proj_net;
+            $totals['proceed_cod_sum']   += $procCodSum;
         }
 
         // Sort newest first
         usort($rows, fn($a, $b) => strcmp($b['date'], $a['date']));
 
         // Round totals for response
-        foreach (['adspent','gross_sales','all_cod','shipping_fee','cod_fee','cod_vat','cogs','net_profit'] as $k) {
+        foreach (['adspent','proj_gross','proj_shipping_fee','proj_cod_fee','proj_cod_vat',
+                  'proj_cogs','proj_net_profit','proceed_cod_sum'] as $k) {
             $totals[$k] = round($totals[$k], 2);
         }
         $totals['cpp']           = $totals['orders']  > 0 ? round($totals['adspent'] / $totals['orders'],  2) : null;
@@ -3133,14 +3194,19 @@ class OwnerPrivateController extends Controller
         $totals['tcpr_pct']      = $totals['orders']  > 0 ? round((1 - ($totals['proceed'] / $totals['orders'])) * 100.0, 1) : null;
         $totals['rts_pct']       = $totals['shipped'] > 0 ? round((($totals['returned'] + $totals['for_return']) / $totals['shipped']) * 100.0, 1) : null;
         $totals['in_transit_pct']= $totals['shipped'] > 0 ? round(($totals['in_transit'] / $totals['shipped']) * 100.0, 1) : null;
-        $totals['net_profit_pct']= $totals['all_cod'] > 0 ? round(($totals['net_profit'] / $totals['all_cod']) * 100.0, 1) : null;
+        $totals['proj_net_pct']  = $totals['proceed_cod_sum'] > 0
+            ? round(($totals['proj_net_profit'] / $totals['proceed_cod_sum']) * 100.0, 1)
+            : null;
         $totals['hold']          = $totals['proceed'] - $totals['shipped'];
 
         return response()->json([
-            'rows'       => $rows,
-            'totals'     => $totals,
-            'start_date' => $start,
-            'end_date'   => $end,
+            'rows'              => $rows,
+            'totals'            => $totals,
+            'start_date'        => $start,
+            'end_date'          => $end,
+            'effective_rts_pct' => round($effectiveRtsPct, 2),
+            'rts_factor'        => round($rtsFactor, 4),
+            'rts_basis'         => $rtsDen > 0 ? 'settled-days-weighted' : 'default-30%',
         ]);
     }
 }

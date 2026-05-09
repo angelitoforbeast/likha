@@ -95,13 +95,13 @@
               <th class="num">TCPR%</th>
               <th class="num">RTS%</th>
               <th class="num">In Transit%</th>
-              <th class="num">Gross Sales</th>
-              <th class="num">Shipping Fee</th>
-              <th class="num">COD Fee</th>
-              <th class="num">COD VAT</th>
-              <th class="num">COGS</th>
-              <th class="num">Net Profit</th>
-              <th class="num">Net %</th>
+              <th class="num">Proj. Gross</th>
+              <th class="num">Proj. Shipping</th>
+              <th class="num">Proj. COD Fee</th>
+              <th class="num">Proj. COD VAT</th>
+              <th class="num">Proj. COGS</th>
+              <th class="num">Proj. Net Profit</th>
+              <th class="num">Proj. Net %</th>
               <th class="num">Hold</th>
             </tr>
           </thead>
@@ -125,14 +125,14 @@
                 <td class="num" x-text="pct(r.tcpr_pct)"></td>
                 <td class="num" x-text="pct(r.rts_pct)"></td>
                 <td class="num" x-text="pct(r.in_transit_pct)"></td>
-                <td class="num" x-text="peso(r.gross_sales)"></td>
-                <td class="num" x-text="peso(r.shipping_fee)"></td>
-                <td class="num" x-text="peso(r.cod_fee)"></td>
-                <td class="num" x-text="peso(r.cod_vat)"></td>
-                <td class="num" x-text="peso(r.cogs)"></td>
-                <td :class="'num ' + (r.net_profit >= 0 ? 'pos' : 'neg')" x-text="peso(r.net_profit)"></td>
-                <td :class="'num ' + (r.net_profit_pct == null ? '' : (r.net_profit_pct >= 0 ? 'pos' : 'neg'))"
-                    x-text="pct(r.net_profit_pct)"></td>
+                <td class="num" x-text="peso(r.proj_gross)"></td>
+                <td class="num" x-text="peso(r.proj_shipping_fee)"></td>
+                <td class="num" x-text="peso(r.proj_cod_fee)"></td>
+                <td class="num" x-text="peso(r.proj_cod_vat)"></td>
+                <td class="num" x-text="peso(r.proj_cogs)"></td>
+                <td :class="'num ' + (r.proj_net_profit >= 0 ? 'pos' : 'neg')" x-text="peso(r.proj_net_profit)"></td>
+                <td :class="'num ' + (r.proj_net_pct == null ? '' : (r.proj_net_pct >= 0 ? 'pos' : 'neg'))"
+                    x-text="pct(r.proj_net_pct)"></td>
                 <td class="num" x-text="num(r.hold)"></td>
               </tr>
             </template>
@@ -156,14 +156,14 @@
               <td class="num" x-text="pct(totals.tcpr_pct)"></td>
               <td class="num" x-text="pct(totals.rts_pct)"></td>
               <td class="num" x-text="pct(totals.in_transit_pct)"></td>
-              <td class="num" x-text="peso(totals.gross_sales)"></td>
-              <td class="num" x-text="peso(totals.shipping_fee)"></td>
-              <td class="num" x-text="peso(totals.cod_fee)"></td>
-              <td class="num" x-text="peso(totals.cod_vat)"></td>
-              <td class="num" x-text="peso(totals.cogs)"></td>
-              <td :class="'num ' + (totals.net_profit >= 0 ? 'pos' : 'neg')" x-text="peso(totals.net_profit)"></td>
-              <td :class="'num ' + (totals.net_profit_pct == null ? '' : (totals.net_profit_pct >= 0 ? 'pos' : 'neg'))"
-                  x-text="pct(totals.net_profit_pct)"></td>
+              <td class="num" x-text="peso(totals.proj_gross)"></td>
+              <td class="num" x-text="peso(totals.proj_shipping_fee)"></td>
+              <td class="num" x-text="peso(totals.proj_cod_fee)"></td>
+              <td class="num" x-text="peso(totals.proj_cod_vat)"></td>
+              <td class="num" x-text="peso(totals.proj_cogs)"></td>
+              <td :class="'num ' + (totals.proj_net_profit >= 0 ? 'pos' : 'neg')" x-text="peso(totals.proj_net_profit)"></td>
+              <td :class="'num ' + (totals.proj_net_pct == null ? '' : (totals.proj_net_pct >= 0 ? 'pos' : 'neg'))"
+                  x-text="pct(totals.proj_net_pct)"></td>
               <td class="num" x-text="num(totals.hold)"></td>
             </tr>
           </tfoot>
@@ -172,7 +172,12 @@
     </div>
 
     <div class="text-[11px] text-gray-500 px-1">
-      Ad Spend = raw FB amount_spent_php (no VAT math). Net Profit = Gross − Ad Spend − Shipping − COD Fee − COD VAT − COGS. RTS = returned + for_return.
+      <strong>Ad Spend</strong> = raw FB amount_spent_php (no VAT math).
+      <strong>Projected metrics</strong> = based on PROCEED orders × expected delivery rate (1 − RTS%):
+      Proj. Gross = proceed_cod × (1−rts), Proj. COGS = proceed_unit_cost × (1−rts),
+      Proj. COD Fee = proceed_cod × cod_rate, Proj. Shipping = sf_rate × proceed_count.
+      <strong>Effective RTS</strong>: <span x-text="effectiveRtsPct + '%'"></span>
+      <span x-text="'(' + rtsBasis + ')'" class="muted"></span>
     </div>
   </main>
 
@@ -183,6 +188,8 @@
         error: '',
         rows: [],
         totals: {},
+        effectiveRtsPct: '—',
+        rtsBasis: '',
         filters: {
           start_date: '{{ $defaultStartDate }}',
           end_date:   '{{ $defaultEndDate }}',
@@ -201,14 +208,18 @@
               const t = await res.text();
               this.error = `HTTP ${res.status}: ${t.slice(0, 300)}`;
               this.rows = []; this.totals = {};
+              this.effectiveRtsPct = '—'; this.rtsBasis = '';
             } else {
               const j = await res.json();
               this.rows   = j.rows   || [];
               this.totals = j.totals || {};
+              this.effectiveRtsPct = (j.effective_rts_pct != null) ? Number(j.effective_rts_pct).toFixed(1) : '—';
+              this.rtsBasis = j.rts_basis || '';
             }
           } catch (e) {
             this.error = String(e);
             this.rows = []; this.totals = {};
+            this.effectiveRtsPct = '—'; this.rtsBasis = '';
           } finally {
             this.loading = false;
           }
