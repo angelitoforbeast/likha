@@ -2939,7 +2939,7 @@ class OwnerPrivateController extends Controller
         // Q8: JNT 60-day RTS stats per (page, item, cod) — cached by end_date
         $jntFrom = date('Y-m-d', strtotime("$end -60 days"));
         $jntTo   = date('Y-m-d', strtotime("$end -1 day"));
-        $jntCacheKey = "owner_daily_jnt_v1:" . $host . ":" . $end;
+        $jntCacheKey = "owner_daily_jnt_v2:" . $host . ":" . $end;
         $jntStatsMap = \Illuminate\Support\Facades\Cache::remember($jntCacheKey, 3600, function () use ($jntFrom, $jntTo) {
             $map = [];
             try {
@@ -2959,12 +2959,12 @@ class OwnerPrivateController extends Controller
                     ->whereRaw("TRIM(COALESCE(psm.`PAGE`,'')) != ''")
                     ->selectRaw("
                         LOWER(TRIM(COALESCE(psm.`PAGE`,''))) AS page_key,
-                        LOWER(TRIM(COALESCE(fj.item_name,''))) AS item_key,
+                        LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(fj.item_name,'')),' ',''),'-',''),'_','')) AS item_key,
                         ROUND($jntCodClean) AS cod_val,
                         COUNT(*) AS total,
                         SUM(CASE WHEN LOWER(fj.status) LIKE '%return%' OR LOWER(fj.status) LIKE '%rts%' THEN 1 ELSE 0 END) AS rts_cnt
                     ")
-                    ->groupByRaw("LOWER(TRIM(COALESCE(psm.`PAGE`,''))), LOWER(TRIM(COALESCE(fj.item_name,''))), ROUND($jntCodClean)")
+                    ->groupByRaw("LOWER(TRIM(COALESCE(psm.`PAGE`,''))), LOWER(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(fj.item_name,'')),' ',''),'-',''),'_','')), ROUND($jntCodClean)")
                     ->get();
                 foreach ($jntRows as $r) {
                     $k = (string)$r->page_key . '||' . (string)$r->item_key . '||' . (int)round((float)$r->cod_val);
