@@ -1294,6 +1294,27 @@ class AdsManagerCampaignsController extends Controller
                     }
                 }
 
+                // TCPR per page — for orders_est = purchases / (1 − tcpr/100)
+                // computation. Pulled from macro_output sa selected date range.
+                $tcprByPage = [];
+                if (!empty($pageKeys) && $start && $end && Schema::hasTable('macro_output')) {
+                    $tcprRows = DB::table('macro_output')
+                        ->whereRaw("LOWER(TRIM(page_name)) IN ('" . implode("','", array_map(fn($k) => str_replace("'", "''", $k), $pageKeys)) . "')")
+                        ->whereRaw("ts_date BETWEEN ? AND ?", [$start, $end])
+                        ->selectRaw("LOWER(TRIM(page_name)) AS page_key,
+                            COUNT(*) AS orders_total,
+                            SUM(CASE WHEN LOWER(REPLACE(REPLACE(TRIM(status),' ',''),'_','')) = 'proceed' THEN 1 ELSE 0 END) AS proceed_total")
+                        ->groupByRaw('LOWER(TRIM(page_name))')
+                        ->get();
+                    foreach ($tcprRows as $t) {
+                        $orders  = (int)$t->orders_total;
+                        $proceed = (int)$t->proceed_total;
+                        $tcprByPage[(string)$t->page_key] = $orders > 0
+                            ? max(0.0, min(100.0, (1 - ($proceed / $orders)) * 100.0))
+                            : 0.0;
+                    }
+                }
+
                 $cogsByItem = [];
                 if (Schema::hasTable('cogs')) {
                     $cogsRows = DB::table('cogs')
@@ -1307,7 +1328,7 @@ class AdsManagerCampaignsController extends Controller
                     }
                 }
 
-                $rows = $rows->map(function ($r) use ($pageInfo, $rtsByKey, $cogsByItem, $SHIPPING, $COD_RATE, $VAT_RATE) {
+                $rows = $rows->map(function ($r) use ($pageInfo, $rtsByKey, $cogsByItem, $tcprByPage, $SHIPPING, $COD_RATE, $VAT_RATE) {
                     $isArr = is_array($r);
                     $get   = function ($key) use ($r, $isArr) {
                         return $isArr ? ($r[$key] ?? null) : ($r->$key ?? null);
@@ -1316,9 +1337,12 @@ class AdsManagerCampaignsController extends Controller
                         if ($isArr) $r[$key] = $val; else $r->$key = $val;
                     };
 
+                    // Initialize all 4 windows to null
                     $set('profit_pct', null);
-                    $cpp = $get('cpp');
-                    if ($cpp === null) { $set('_profit_debug', 'no_cpp'); return $r; }
+                    $set('profit_pct_7d', null);
+                    $set('profit_pct_3d', null);
+                    $set('profit_pct_today', null);
+
                     $pageName = trim((string)($get('page_name') ?? ''));
                     if ($pageName === '') { $set('_profit_debug', 'no_page_name'); return $r; }
                     $pageKey = strtolower($pageName);
@@ -1333,12 +1357,23 @@ class AdsManagerCampaignsController extends Controller
                     if ($rts === null) { $set('_profit_debug', 'no_rts:' . $rtsKey); return $r; }
                     if ($iv  === null) { $set('_profit_debug', 'no_cogs:' . $itemKey); return $r; }
 
-                    $df             = 1.0 - ((float)$rts / 100.0);
-                    $codFeePerUnit  = $modeCod * (float)$COD_RATE * (1.0 + (float)$VAT_RATE);
-                    $profitPerOrder = $df * ($modeCod - (float)$iv - $codFeePerUnit)
-                                      - (float)$SHIPPING
-                                      - (float)$cpp;
-                    $set('profit_pct', round(($profitPerOrder / $modeCod) * 100.0, 2));
+                    $df            = 1.0 - ((float)$rts / 100.0);
+                    $codFeePerUnit = $modeCod * (float)$COD_RATE * (1.0 + (float)$VAT_RATE);
+
+                    // Per-window profit_pct using each CPP variant
+                    // profit_per_order = df × (price − iv − cod_fee_unit) − SF − cpp
+                    // profit_pct       = profit_per_order ÷ price × 100
+                    $computePct = function ($cppVal) use ($df, $modeCod, $iv, $codFeePerUnit, $SHIPPING) {
+                        if ($cppVal === null || !is_numeric($cppVal)) return null;
+                        $profit = $df * ($modeCod - (float)$iv - $codFeePerUnit) - (float)$SHIPPING - (float)$cppVal;
+                        return round(($profit / $modeCod) * 100.0, 2);
+                    };
+
+                    $set('profit_pct',       $computePct($get('cpp')));
+                    $set('profit_pct_7d',    $computePct($get('cpp_7d')));
+                    $set('profit_pct_3d',    $computePct($get('cpp_3d')));
+                    $set('profit_pct_today', $computePct($get('cpp_today')));
+
                     $set('_profit_debug', 'ok');
                     return $r;
                 });

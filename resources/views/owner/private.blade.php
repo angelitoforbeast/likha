@@ -1619,10 +1619,8 @@
       },
 
       // Generic fetcher into /ads_manager/campaigns/data with passed params.
-      // After fetch, enriches rows with profit_pct CLIENT-SIDE using the
-      // parent page row's settings (rts_pct, price, item_value). Bypasses
-      // server-side enrichment entirely — works regardless of OPcache /
-      // FeeSetting state on server.
+      // profit_pct (and 7D/3D/Today windows) are now ENRICHED SERVER-SIDE
+      // sa AdsManagerCampaignsController.data() — single source of truth.
       async _fetchCampaignsData(params){
         const qs = new URLSearchParams(Object.assign({
           limit:           1000,
@@ -1633,50 +1631,7 @@
         }, params));
         const res = await fetch('{{ route('ads_manager.campaigns.data') }}?' + qs.toString());
         if (!res.ok) throw new Error('HTTP '+res.status);
-        const j = await res.json();
-
-        // Client-side profit_pct enrichment per row — 4 windows (1M / 7D / 3D / Today)
-        if (Array.isArray(j.rows)) {
-          for (const r of j.rows) {
-            r.profit_pct       = this._campaignProfitPctFromCpp(r, r.cpp);        // 1M (whole range)
-            r.profit_pct_7d    = this._campaignProfitPctFromCpp(r, r.cpp_7d);     // 7D window
-            r.profit_pct_3d    = this._campaignProfitPctFromCpp(r, r.cpp_3d);     // 3D window
-            r.profit_pct_today = this._campaignProfitPctFromCpp(r, r.cpp_today);  // Today
-          }
-        }
-        return j;
-      },
-
-      // Backwards-compat wrapper — `campaignProfitPct(row)` historically used
-      // the row's main `cpp`. Now delegates to the windowed helper.
-      campaignProfitPct(row){
-        return this._campaignProfitPctFromCpp(row, row?.cpp);
-      },
-
-      // Compute profit% for a campaign given a specific CPP value (so we can
-      // reuse for 1M/7D/3D/Today windows). Inputs come from parent page row's
-      // settings (rts_pct, price, item_value). Returns null if any required
-      // input is missing.
-      //
-      //   df               = 1 − rts_pct / 100
-      //   profit_per_order = df × (price − item_value − price × 0.0168) − 37 − cpp
-      //   profit_pct       = profit_per_order ÷ price × 100
-      _campaignProfitPctFromCpp(row, cppVal){
-        const cpp = Number(cppVal ?? NaN);
-        if (isNaN(cpp)) return null;
-        const parent = this.pageRowFor(row?.page_name);
-        if (!parent) return null;
-        const price = Number(parent.price ?? 0);
-        const iv    = parent.item_value;
-        const rts   = parent.rts_pct;
-        if (price <= 0 || iv == null || rts == null) return null;
-        const df = 1 - (Number(rts) / 100);
-        // Fees from server (window.__FEES__). Fallback to historical defaults
-        // only kung walang fee_settings row sa DB.
-        const F  = Number(window.__FEES__?.F  ?? 0.0168);
-        const SF = Number(window.__FEES__?.SF ?? 37);
-        const profitPerOrder = df * (price - Number(iv) - price * F) - SF - cpp;
-        return Math.round((profitPerOrder / price) * 100 * 100) / 100; // 2 decimals
+        return await res.json();
       },
 
       // Are any visible page rows currently expanded? Used by the
