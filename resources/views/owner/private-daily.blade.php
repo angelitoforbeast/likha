@@ -81,7 +81,10 @@
         <div class="p-10 text-center text-gray-500 text-sm">Loading…</div>
       </template>
       <template x-if="!loading && error">
-        <div class="p-10 text-center text-red-600 text-sm" x-text="error"></div>
+        <div class="p-6 text-red-600 text-sm">
+          <div class="font-semibold mb-2">Error:</div>
+          <pre class="text-left text-[11px] bg-red-50 border border-red-200 rounded p-3 overflow-auto whitespace-pre-wrap" x-text="error"></pre>
+        </div>
       </template>
       <template x-if="!loading && !error && rows.length === 0">
         <div class="p-10 text-center text-gray-500 text-sm">
@@ -252,6 +255,9 @@
               this.rows   = j.rows   || [];
               this.totals = j.totals || {};
               this.debug  = j.debug  || null;
+              if (j.error) {
+                this.error = j.error + '\n' + (j.file || '') + '\n' + (j.trace ? j.trace.join('\n') : '');
+              }
             }
           } catch (e) {
             this.error = String(e);

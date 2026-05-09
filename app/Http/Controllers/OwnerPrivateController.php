@@ -2719,6 +2719,21 @@ class OwnerPrivateController extends Controller
         $this->checkCEOAccess();
         @set_time_limit(300);
 
+        try {
+            return $this->dailyDataImpl($request);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'rows' => [],
+                'totals' => [],
+                'error' => get_class($e) . ': ' . $e->getMessage(),
+                'file'  => basename($e->getFile()) . ':' . $e->getLine(),
+                'trace' => array_slice(explode("\n", $e->getTraceAsString()), 0, 6),
+            ], 200);
+        }
+    }
+
+    private function dailyDataImpl(Request $request)
+    {
         $start = $request->input('start_date');
         $end   = $request->input('end_date');
         $tz    = new \DateTimeZone('Asia/Manila');
