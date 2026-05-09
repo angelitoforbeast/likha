@@ -108,7 +108,10 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'messages',       'label' => 'Messages'],
             ['id' => 'conversion_rate',   'label' => 'Conv Rate (%)'],
             ['id' => 'purchases',      'label' => 'Purchases'],
-            ['id' => 'profit_pct',     'label' => 'Profit %'],
+            ['id' => 'profit_pct',       'label' => 'Profit % (1M)'],
+            ['id' => 'profit_pct_7d',    'label' => 'Profit % (7D)'],
+            ['id' => 'profit_pct_3d',    'label' => 'Profit % (3D)'],
+            ['id' => 'profit_pct_today', 'label' => 'Profit % (Today)'],
         ],
         // CEO-only Daily Summary view (/owner/private/daily). One row per date.
         // Columns mirror those rendered sa private-daily.blade.php.
@@ -160,7 +163,7 @@ class OwnerColumnSettingsController extends Controller
             // start hidden — admin can re-enable per the settings page.
             'on', 'name', 'account',
             'first_started', 'days_running', 'latest_started',
-            'spend', 'cpp', 'profit_pct', 'impressions',
+            'spend', 'cpp', 'profit_pct', 'profit_pct_7d', 'profit_pct_3d', 'profit_pct_today', 'impressions',
             'link_clicks', 'welcome_msg_rate', 'messages', 'conversion_rate',
             'purchases',
         ],

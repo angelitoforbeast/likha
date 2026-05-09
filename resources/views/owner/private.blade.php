@@ -1529,7 +1529,10 @@
           { id:'cpm_msg',        label:'Cost per messaging',sort:'cpm_msg',       type:'money',        align:'right', minw:120 },
           { id:'cpr',            label:'Cost per result',  sort:'cpr',            type:'money',        align:'right', minw:120 },
           { id:'cpp',            label:'Cost per purchase',sort:'cpp',            type:'money',        align:'right', minw:130 },
-          { id:'profit_pct',     label:'Profit %',         sort:'profit_pct',     type:'percent',      align:'right', minw:90  },
+          { id:'profit_pct',     label:'Profit % (1M)',    sort:'profit_pct',     type:'percent',      align:'right', minw:90  },
+          { id:'profit_pct_7d',  label:'Profit % (7D)',    sort:'profit_pct_7d',  type:'percent',      align:'right', minw:90  },
+          { id:'profit_pct_3d',  label:'Profit % (3D)',    sort:'profit_pct_3d',  type:'percent',      align:'right', minw:90  },
+          { id:'profit_pct_today',label:'Profit % (Today)',sort:'profit_pct_today',type:'percent',     align:'right', minw:100 },
           { id:'cpp_today',      label:'CPP (today)',      sort:'cpp_today',      type:'money',        align:'right', minw:110 },
           { id:'cpp_3d',         label:'CPP (3d)',         sort:'cpp_3d',         type:'money',        align:'right', minw:100 },
           { id:'cpp_7d',         label:'CPP (7d)',         sort:'cpp_7d',         type:'money',        align:'right', minw:100 },
@@ -1623,26 +1626,34 @@
         if (!res.ok) throw new Error('HTTP '+res.status);
         const j = await res.json();
 
-        // Client-side profit_pct enrichment per row
+        // Client-side profit_pct enrichment per row — 4 windows (1M / 7D / 3D / Today)
         if (Array.isArray(j.rows)) {
           for (const r of j.rows) {
-            r.profit_pct = this.campaignProfitPct(r);
+            r.profit_pct       = this._campaignProfitPctFromCpp(r, r.cpp);        // 1M (whole range)
+            r.profit_pct_7d    = this._campaignProfitPctFromCpp(r, r.cpp_7d);     // 7D window
+            r.profit_pct_3d    = this._campaignProfitPctFromCpp(r, r.cpp_3d);     // 3D window
+            r.profit_pct_today = this._campaignProfitPctFromCpp(r, r.cpp_today);  // Today
           }
         }
         return j;
       },
 
-      // Compute a campaign's projected profit % using the parent page row's
-      // settings (rts_pct, price, item_value). Returns null if any input is
-      // missing — e.g., parent page row not yet loaded, or page has no settings.
+      // Backwards-compat wrapper — `campaignProfitPct(row)` historically used
+      // the row's main `cpp`. Now delegates to the windowed helper.
+      campaignProfitPct(row){
+        return this._campaignProfitPctFromCpp(row, row?.cpp);
+      },
+
+      // Compute profit% for a campaign given a specific CPP value (so we can
+      // reuse for 1M/7D/3D/Today windows). Inputs come from parent page row's
+      // settings (rts_pct, price, item_value). Returns null if any required
+      // input is missing.
       //
-      // Formula (same as itemSummary's per-page projected_profit, just using
-      // campaign's own CPP instead of the page-aggregated CPP):
-      //   df    = 1 − rts_pct / 100
+      //   df               = 1 − rts_pct / 100
       //   profit_per_order = df × (price − item_value − price × 0.0168) − 37 − cpp
       //   profit_pct       = profit_per_order ÷ price × 100
-      campaignProfitPct(row){
-        const cpp = Number(row?.cpp ?? NaN);
+      _campaignProfitPctFromCpp(row, cppVal){
+        const cpp = Number(cppVal ?? NaN);
         if (isNaN(cpp)) return null;
         const parent = this.pageRowFor(row?.page_name);
         if (!parent) return null;
@@ -1651,7 +1662,7 @@
         const rts   = parent.rts_pct;
         if (price <= 0 || iv == null || rts == null) return null;
         const df = 1 - (Number(rts) / 100);
-        const F  = 0.0168;  // cod_fee_rate × (1 + VAT) = 0.015 × 1.12
+        const F  = 0.0168;
         const SF = 37;
         const profitPerOrder = df * (price - Number(iv) - price * F) - SF - cpp;
         return Math.round((profitPerOrder / price) * 100 * 100) / 100; // 2 decimals
