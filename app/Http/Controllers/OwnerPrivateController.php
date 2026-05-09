@@ -2743,7 +2743,6 @@ class OwnerPrivateController extends Controller
             'shipped' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0, 'in_transit' => 0,
             'proj_gross' => 0.0, 'proj_shipping' => 0.0, 'proj_cogs' => 0.0,
             'proj_net_profit' => 0.0,
-            'proceed_cod_sum' => 0.0,
         ];
 
         // Diagnostic accumulator — exposes what happened sa loop kapag walang
@@ -2775,11 +2774,11 @@ class OwnerPrivateController extends Controller
             try {
                 $resp = $this->data($request);
             } catch (\Throwable $e) {
-                $debug['caught_errors'][] = $d . ': ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 200);
+                $debug['caught_errors'][] = $d . ': data() ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 200);
                 continue;
             }
             if ($resp->getStatusCode() !== 200) {
-                $debug['non_200'][] = $d . ': status=' . $resp->getStatusCode();
+                $debug['non_200'][] = $d . ': data() status=' . $resp->getStatusCode();
                 continue;
             }
 
@@ -2787,30 +2786,47 @@ class OwnerPrivateController extends Controller
             // data() returns 'ads_daily' key (not 'rows')
             $allRows = $payload['ads_daily'] ?? [];
 
-            // Find TOTAL row + sum per-page rows for projections
+            // Also call itemSummary() — yan ang ginagamit ng /owner/private
+            // para sa projected_profit display. Per-page rows have 'projected_profit'
+            // computed using slice formula: revenue - shipping - cogs - adspent - cod_fee.
+            try {
+                $itemResp = $this->itemSummary($request);
+            } catch (\Throwable $e) {
+                $debug['caught_errors'][] = $d . ': itemSummary() ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 200);
+                continue;
+            }
+            $itemPayload = $itemResp->getStatusCode() === 200 ? $itemResp->getData(true) : [];
+            $itemRows    = $itemPayload['rows'] ?? [];
+
+            // Find TOTAL row from data()
             $totalRow = null;
-            $proj_gross = 0.0;
-            $proj_ship  = 0.0;
-            $proj_cogs  = 0.0;
-            $proj_np    = 0.0;
-            $proceed_cod_sum = 0.0;
             foreach ($allRows as $r) {
-                if (!empty($r['is_total'])) { $totalRow = $r; continue; }
-                $pageRts   = isset($r['actual_rts_pct']) && $r['actual_rts_pct'] !== null ? (float)$r['actual_rts_pct'] : 30.0;
-                $rtsFactor = max(0.0, min(1.0, 1.0 - ($pageRts / 100.0)));
-                $procCod   = (float)($r['proceed_cod_sum']       ?? 0.0);
-                $procUC    = (float)($r['proceed_unit_cost_sum'] ?? 0.0);
-                $procCnt   = (int)  ($r['proceed']               ?? 0);
-                $proj_gross      += $procCod * $rtsFactor;
-                $proj_ship       += $SHIPPING_PER_SHIPPED * $procCnt;
-                $proj_cogs       += $procUC * $rtsFactor;
-                $proj_np         += (float)($r['projected_net_profit'] ?? 0.0);
-                $proceed_cod_sum += $procCod;
+                if (!empty($r['is_total'])) { $totalRow = $r; break; }
             }
             if (!$totalRow) {
                 $debug['no_total_row'][] = $d . ': rows=' . count($allRows);
                 continue;
             }
+
+            // Sum projected metrics from itemSummary's per-page rows.
+            // projected_profit = revenue - shipping - cogs - adspent - cod_fee (per slice, summed)
+            // gross_sales      = sum of (proceed × mode_cod) per slice
+            $proj_np    = 0.0;
+            $proj_gross = 0.0;
+            foreach ($itemRows as $ir) {
+                $proj_np    += (float)($ir['projected_profit'] ?? 0.0);
+                $proj_gross += (float)($ir['gross_sales']      ?? 0.0);
+            }
+            // Approximate Proj. Shipping + Proj. COGS using totals (not per-page exact,
+            // pero usable as informational breakdowns). Actual Proj. Net Profit comes
+            // from itemSummary's exact per-page sum above.
+            $proceed_total = (int)($totalRow['proceed'] ?? 0);
+            $proj_ship     = $SHIPPING_PER_SHIPPED * $proceed_total;
+            // Proj COGS = revenue - shipping - adspent - cod_fee - proj_net_profit
+            // (rearranging the formula). Useful as derived display value.
+            $adspent_total = (float)($totalRow['adspent'] ?? 0);
+            $proj_cod_fee  = $proj_gross * 0.015 * 1.0; // approximate, exact formula uses VAT
+            $proj_cogs     = max(0.0, $proj_gross - $proj_ship - $adspent_total - $proj_cod_fee - $proj_np);
 
             // Messages from ads_manager_reports (data() doesn't return this)
             $messages = (int) DB::table('ads_manager_reports')
@@ -2827,7 +2843,9 @@ class OwnerPrivateController extends Controller
             }
             $debug['success_count']++;
 
-            $proj_net_pct = $proceed_cod_sum > 0 ? ($proj_np / $proceed_cod_sum) * 100.0 : null;
+            // Proj. Net % = projected_profit / gross_sales × 100
+            // (matches /owner/private's per-row proj_pct display)
+            $proj_net_pct = $proj_gross > 0 ? ($proj_np / $proj_gross) * 100.0 : null;
 
             $row = [
                 'date'           => $d,
@@ -2869,7 +2887,6 @@ class OwnerPrivateController extends Controller
             $totals['proj_shipping']   += $proj_ship;
             $totals['proj_cogs']       += $proj_cogs;
             $totals['proj_net_profit'] += $proj_np;
-            $totals['proceed_cod_sum'] += $proceed_cod_sum;
         }
 
         // Restore original request params
@@ -2881,15 +2898,15 @@ class OwnerPrivateController extends Controller
 
         usort($rows, fn($a, $b) => strcmp($b['date'], $a['date']));
 
-        foreach (['adspent','proj_gross','proj_shipping','proj_cogs','proj_net_profit','proceed_cod_sum'] as $k) {
+        foreach (['adspent','proj_gross','proj_shipping','proj_cogs','proj_net_profit'] as $k) {
             $totals[$k] = round($totals[$k], 2);
         }
         $totals['cpp']         = $totals['orders']  > 0 ? round($totals['adspent'] / $totals['orders'],  2) : null;
         $totals['proceed_cpp'] = $totals['proceed'] > 0 ? round($totals['adspent'] / $totals['proceed'], 2) : null;
         $totals['cpm']         = $totals['messages'] > 0 ? round($totals['adspent'] / $totals['messages'], 2) : null;
         $totals['tcpr_pct']    = $totals['orders']  > 0 ? round((1 - ($totals['proceed'] / $totals['orders'])) * 100.0, 1) : null;
-        $totals['proj_net_pct'] = $totals['proceed_cod_sum'] > 0
-            ? round(($totals['proj_net_profit'] / $totals['proceed_cod_sum']) * 100.0, 1)
+        $totals['proj_net_pct'] = $totals['proj_gross'] > 0
+            ? round(($totals['proj_net_profit'] / $totals['proj_gross']) * 100.0, 1)
             : null;
 
         return response()->json([
