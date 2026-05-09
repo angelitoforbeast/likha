@@ -109,16 +109,23 @@
       <table id="holdTable" class="min-w-full text-sm">
         <thead>
           <tr class="bg-gray-50">
-            <th class="text-left p-2 border-b align-bottom" rowspan="2" style="position: sticky; left: 0; background: #f9fafb;">
+            <th class="text-left p-2 border-b align-bottom hold-sortable" data-sort-col="label" rowspan="2" style="position: sticky; left: 0; background: #f9fafb; cursor:pointer; user-select:none;">
               @if($group === 'item') Item
               @elseif($group === 'page') Page
               @else Item Name @endif
+              <span class="hold-sort-indicator" style="font-size:10px;color:#94a3b8;"></span>
             </th>
-            <th class="text-right p-2 border-b align-bottom" rowspan="2">Total</th>
+            <th class="text-right p-2 border-b align-bottom hold-sortable" data-sort-col="total" rowspan="2" style="cursor:pointer; user-select:none;">
+              Total
+              <span class="hold-sort-indicator" style="font-size:10px;color:#94a3b8;"></span>
+            </th>
             @foreach(($monthGroups ?? []) as $m)
               <th class="text-center p-2 border-b whitespace-nowrap" colspan="{{ $m['count'] ?? 0 }}">{{ $m['label'] ?? '' }}</th>
             @endforeach
-            <th class="text-right p-2 border-b align-bottom" rowspan="2">Within {{ $lookbackDays }}d</th>
+            <th class="text-right p-2 border-b align-bottom hold-sortable" data-sort-col="recent" rowspan="2" style="cursor:pointer; user-select:none;">
+              Within {{ $lookbackDays }}d
+              <span class="hold-sort-indicator" style="font-size:10px;color:#94a3b8;"></span>
+            </th>
           </tr>
           <tr class="bg-gray-50">
             @foreach($dateKeys as $dk)
@@ -127,16 +134,24 @@
           </tr>
         </thead>
 
-        <tbody>
+        <tbody id="holdTableBody">
           @forelse($pivotRows as $row)
-            <tr class="odd:bg-white even:bg-gray-50">
-              <td class="p-2 border-b" style="position: sticky; left: 0; background: white;">{{ $row['label'] ?? '—' }}</td>
-              <td class="p-2 border-b text-right font-semibold">{{ number_format($row['total'] ?? 0) }}</td>
+            @php
+              $rowLabel  = $row['label'] ?? '—';
+              $rowTotal  = (int)($row['total'] ?? 0);
+              $rowRecent = (int)($recentMap[$rowLabel] ?? 0);
+            @endphp
+            <tr class="odd:bg-white even:bg-gray-50"
+                data-label="{{ $rowLabel }}"
+                data-total="{{ $rowTotal }}"
+                data-recent="{{ $rowRecent }}">
+              <td class="p-2 border-b" style="position: sticky; left: 0; background: white;">{{ $rowLabel }}</td>
+              <td class="p-2 border-b text-right font-semibold">{{ number_format($rowTotal) }}</td>
               @foreach($dateKeys as $dk)
                 @php $v = isset($row['dates'][$dk]) ? (int)$row['dates'][$dk] : 0; @endphp
                 <td class="p-2 border-b text-right">{{ $v ? number_format($v) : '' }}</td>
               @endforeach
-              <td class="p-2 border-b text-right">{{ number_format($recentMap[$row['label'] ?? ''] ?? 0) }}</td>
+              <td class="p-2 border-b text-right">{{ number_format($rowRecent) }}</td>
             </tr>
           @empty
             <tr><td class="p-2 text-gray-500" colspan="{{ 3 + count($dateKeys) }}">No results.</td></tr>
@@ -315,6 +330,58 @@
       copyBtn.textContent = 'Copied!';
       setTimeout(() => { copyBtn.textContent = orig; copyBtn.disabled = false; }, 1000);
     });
+  })();
+
+  // ── Sort handler para sa hold table (Total / Within Xd / Label columns) ──
+  (function() {
+    const tbody = document.getElementById('holdTableBody');
+    if (!tbody) return;
+
+    let currentCol = '';
+    let currentDir = 'desc';
+
+    function updateIndicators(activeCol, dir) {
+      document.querySelectorAll('.hold-sortable').forEach(th => {
+        const indicator = th.querySelector('.hold-sort-indicator');
+        if (!indicator) return;
+        if (th.dataset.sortCol === activeCol) {
+          indicator.textContent = dir === 'asc' ? ' ↑' : ' ↓';
+          indicator.style.color = '#1e40af';
+        } else {
+          indicator.textContent = ' ↕';
+          indicator.style.color = '#cbd5e1';
+        }
+      });
+    }
+
+    function sortBy(col) {
+      const dir = (col === currentCol && currentDir === 'desc') ? 'asc' : 'desc';
+      const rows = Array.from(tbody.querySelectorAll('tr')).filter(r => r.dataset[col] !== undefined);
+      const isNumeric = (col === 'total' || col === 'recent');
+
+      rows.sort((a, b) => {
+        let va = a.dataset[col] ?? '';
+        let vb = b.dataset[col] ?? '';
+        if (isNumeric) {
+          va = Number(va) || 0;
+          vb = Number(vb) || 0;
+          return dir === 'asc' ? va - vb : vb - va;
+        }
+        return dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+      });
+
+      // Re-append in sorted order
+      rows.forEach(r => tbody.appendChild(r));
+      currentCol = col; currentDir = dir;
+      updateIndicators(col, dir);
+    }
+
+    document.querySelectorAll('.hold-sortable').forEach(th => {
+      th.addEventListener('click', () => sortBy(th.dataset.sortCol));
+    });
+
+    // Initial indicators (no active column yet)
+    updateIndicators('', 'desc');
   })();
   </script>
 </x-layout>
