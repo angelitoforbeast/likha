@@ -1344,10 +1344,25 @@ class AdsManagerCampaignsController extends Controller
                 });
             }
         } catch (\Throwable $e) {
-            // Silently fall through — profit_pct stays null. Don't break the
-            // main response just because of an enrichment error.
+            // Surface the exception sa response para makita kung saan nag-fail.
+            // Each row gets the error message — no silent failure.
+            $errMsg = 'EX:' . get_class($e) . ':' . mb_substr($e->getMessage(), 0, 120) . '@' . basename($e->getFile()) . ':' . $e->getLine();
+            $rows = $rows->map(function ($r) use ($errMsg) {
+                $isArr = is_array($r);
+                if ($isArr) { $r['profit_pct'] = null; $r['_profit_debug'] = $errMsg; }
+                else        { $r->profit_pct   = null; $r->_profit_debug   = $errMsg; }
+                return $r;
+            });
             \Illuminate\Support\Facades\Log::warning('profit_pct enrichment failed: ' . $e->getMessage());
         }
+        // Always-on marker so we can verify the deployed code is THIS version.
+        // If `_enrich_version` is missing sa response = OPcache or deploy issue.
+        $rows = $rows->map(function ($r) {
+            $isArr = is_array($r);
+            if ($isArr) { if (!isset($r['_enrich_version'])) $r['_enrich_version'] = 'v3-2026-05-09'; }
+            else        { if (!isset($r->_enrich_version))   $r->_enrich_version   = 'v3-2026-05-09'; }
+            return $r;
+        });
 
         // Totals for current filter (no group)
         $tot = (clone $base)->selectRaw('
