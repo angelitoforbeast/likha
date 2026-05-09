@@ -41,15 +41,27 @@
   <main class="px-4 py-4 space-y-4" style="max-width:none;">
 
     <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Preset</label>
+          <select x-model="presetSel" @change="applyPreset()"
+                  class="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-white">
+            <option value="custom">Custom range</option>
+            <option value="last30">Last 30 days (excl today)</option>
+            <option value="last7">Last 7 days (excl today)</option>
+            <option value="thisMonth">This month (excl today)</option>
+            <option value="lastMonth">Last month (full)</option>
+            <option value="yesterday">Yesterday only</option>
+          </select>
+        </div>
         <div>
           <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">From</label>
-          <input type="date" x-model="filters.start_date" @change="reload()"
+          <input type="date" x-model="filters.start_date" @change="presetSel='custom';reload()"
                  class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
         </div>
         <div>
           <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">To</label>
-          <input type="date" x-model="filters.end_date" @change="reload()"
+          <input type="date" x-model="filters.end_date" @change="presetSel='custom';reload()"
                  class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
         </div>
         <div class="flex items-center gap-2">
@@ -160,11 +172,10 @@
     </div>
 
     <div class="text-[11px] text-gray-500 px-1">
-      Each row = TOTAL ng <code>/owner/private</code> kapag fina-filter sa single date.
-      <strong>Proj. Net Profit</strong> = sum of per-page projected_profit (galing sa <code>itemSummary</code>),
-      exact match sa <code>/owner/private</code>'s display.
-      <br><strong>⚠ Note:</strong> 30-day range may take 30–60s first time (cached 30 min after).
-      Stick to 7–14 days for snappy loads. Pag 504 timeout, palitan mo ng mas maliit na range.
+      <strong>Proj. Net Profit</strong> per day = sum of (proceed × mode_cod × deliverFactor − shipping − COGS − adspent − COD fee)
+      across pages, using each page's JNT 60-day RTS rate.
+      Same formula as <code>/owner/private</code>'s itemSummary projected_profit.
+      Default range = last 30 days excl today. JNT stats cached 1 hour.
     </div>
   </main>
 
@@ -176,11 +187,52 @@
         rows: [],
         totals: {},
         debug: null,
+        presetSel: 'last30',
         filters: {
           start_date: '{{ $defaultStartDate }}',
           end_date:   '{{ $defaultEndDate }}',
         },
         init() { this.reload(); },
+        // PH timezone "today" derived locally — same logic as backend
+        phToday() {
+          const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+          return d;
+        },
+        fmt(d) {
+          const p = n => String(n).padStart(2, '0');
+          return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+        },
+        applyPreset() {
+          const today = this.phToday();
+          const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+          let s, e;
+          switch (this.presetSel) {
+            case 'last30':
+              e = yesterday;
+              s = new Date(today); s.setDate(today.getDate() - 30);
+              break;
+            case 'last7':
+              e = yesterday;
+              s = new Date(today); s.setDate(today.getDate() - 7);
+              break;
+            case 'thisMonth':
+              s = new Date(today.getFullYear(), today.getMonth(), 1);
+              e = yesterday;
+              if (e < s) e = s; // edge: today is the 1st
+              break;
+            case 'lastMonth':
+              s = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+              e = new Date(today.getFullYear(), today.getMonth(), 0); // last day of prev month
+              break;
+            case 'yesterday':
+              s = yesterday; e = yesterday;
+              break;
+            default: return;
+          }
+          this.filters.start_date = this.fmt(s);
+          this.filters.end_date   = this.fmt(e);
+          this.reload();
+        },
         async reload() {
           this.loading = true;
           this.error = '';
