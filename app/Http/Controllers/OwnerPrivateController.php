@@ -2677,4 +2677,427 @@ class OwnerPrivateController extends Controller
             'rows'             => $out,
         ]);
     }
+
+    /** CEO-only gate (Daily Summary view). */
+    private function checkCEOAccess(): void
+    {
+        $role = $this->getNormalizedRole();
+        if ($role !== 'CEO') abort(404);
+    }
+
+    /**
+     * GET /owner/private/daily — CEO-only Daily Summary view.
+     * Renders the blade; data is fetched client-side via dailyData() JSON.
+     */
+    public function daily(Request $request)
+    {
+        $this->checkCEOAccess();
+
+        $tz = new \DateTimeZone('Asia/Manila');
+        $today = (new \DateTime('now', $tz))->format('Y-m-d');
+        $defaultStart = (new \DateTime('now', $tz))->modify('-29 days')->format('Y-m-d');
+
+        return view('owner.private-daily', [
+            'defaultStartDate' => $defaultStart,
+            'defaultEndDate'   => $today,
+        ]);
+    }
+
+    /**
+     * GET /owner/private/daily/data — JSON per-day rows.
+     * Each row aggregates ALL pages for that date into one summary.
+     */
+    public function dailyData(Request $request)
+    {
+        $this->checkCEOAccess();
+
+        $start = $request->input('start_date');
+        $end   = $request->input('end_date');
+
+        $tz    = new \DateTimeZone('Asia/Manila');
+        $today = (new \DateTime('now', $tz))->format('Y-m-d');
+        $validDate = fn($s) => is_string($s) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $s);
+        if (!$validDate($start)) $start = (new \DateTime('now', $tz))->modify('-29 days')->format('Y-m-d');
+        if (!$validDate($end))   $end   = $today;
+        if ($start > $end) [$start, $end] = [$end, $start];
+
+        $driver = DB::getDriverName();
+        $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $quote  = fn(string $col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
+
+        // Fee settings — strict, abort 422 if missing (consistent with data())
+        $host = strtolower((string) $request->getHost());
+        $refDate = $end;
+        $COD_FEE_RATE         = FeeSetting::getRate('cod_fee_rate', $host, $refDate);
+        $COD_FEE_VAT_RATE     = FeeSetting::getRate('cod_fee_vat_rate', $host, $refDate);
+        $SHIPPING_PER_SHIPPED = FeeSetting::getRate('shipping_fee_per_order', $host, $refDate);
+        if ($COD_FEE_RATE === null || $COD_FEE_VAT_RATE === null || $SHIPPING_PER_SHIPPED === null) {
+            $missing = array_filter([
+                $COD_FEE_RATE         === null ? 'cod_fee_rate'           : null,
+                $COD_FEE_VAT_RATE     === null ? 'cod_fee_vat_rate'       : null,
+                $SHIPPING_PER_SHIPPED === null ? 'shipping_fee_per_order' : null,
+            ]);
+            abort(422, "Missing fee_settings for {$refDate} (host: {$host}): " . implode(', ', $missing) . ". Configure at /jnt/fee-settings.");
+        }
+
+        $castMoney = function (string $expr) use ($driver) {
+            return $driver === 'pgsql'
+                ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(($expr)::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
+                : "CAST(REPLACE(REPLACE(REPLACE(COALESCE($expr,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
+        };
+
+        $pgColumns = function (string $table) use ($driver): array {
+            if ($driver !== 'pgsql') return [];
+            $rows = DB::select(
+                "SELECT column_name FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = ?",
+                [$table]
+            );
+            return array_map(fn($r) => $r->column_name, $rows);
+        };
+        $pickCol = function (string $table, array $candidates) use ($driver, $pgColumns) {
+            if ($driver === 'pgsql') {
+                $cols = $pgColumns($table);
+                foreach ($candidates as $c) if (in_array($c, $cols, true)) return $c;
+                return null;
+            }
+            foreach ($candidates as $c) if (Schema::hasColumn($table, $c)) return $c;
+            return null;
+        };
+
+        // macro_output column resolution
+        $statusColName = $pickCol('macro_output', ['STATUS','status','Status']) ?? 'status';
+        $statusExpr    = 'mo.' . $quote($statusColName);
+        $statusNorm    = "LOWER(REPLACE(REPLACE($trimFn($statusExpr),' ',''),'_',''))";
+        $wbColName     = $pickCol('macro_output', ['waybill','Waybill','WAYBILL']) ?? 'waybill';
+        $moWaybillSql  = 'mo.' . $quote($wbColName);
+        $moCodColName  = $pickCol('macro_output', ['COD','cod','Cod']) ?? 'COD';
+        $moCodClean    = $castMoney('mo.' . $quote($moCodColName));
+
+        $hasTsDate = Schema::hasColumn('macro_output', 'ts_date');
+        if ($hasTsDate) {
+            $dateExpr = "mo.ts_date";
+        } else {
+            $tsCols = [];
+            foreach (['TIMESTAMP','timestamp'] as $c) if ($pickCol('macro_output', [$c])) $tsCols[] = $c;
+            if ($driver === 'mysql') {
+                if (!empty($tsCols)) {
+                    $ts = 'mo.' . $quote($tsCols[0]);
+                    $dateExpr = "COALESCE(
+                        DATE(STR_TO_DATE($ts, '%H:%i %d-%m-%Y')),
+                        DATE(STR_TO_DATE($ts, '%H:%i %m-%d-%Y')),
+                        DATE(mo.`created_at`)
+                    )";
+                } else {
+                    $dateExpr = "DATE(mo.`created_at`)";
+                }
+            } else {
+                $pgParts = [];
+                foreach ($tsCols as $c) {
+                    $ref = 'mo.' . $quote($c);
+                    $pgParts[] = "TO_TIMESTAMP(NULLIF($ref, ''), 'HH24:MI DD-MM-YYYY')";
+                    $pgParts[] = "TO_TIMESTAMP(NULLIF($ref, ''), 'HH24:MI MM-DD-YYYY')";
+                }
+                $pgParts[] = 'mo."created_at"';
+                $dateExpr  = 'DATE(COALESCE(' . implode(', ', $pgParts) . '))';
+            }
+        }
+
+        $itemColName  = $pickCol('macro_output', ['ITEM_NAME','item_name','Product','product_name','ITEM','item']);
+        $moItemExpr   = $itemColName ? ('mo.' . $quote($itemColName)) : 'NULL';
+        $itemKeyExpr  = $itemColName
+            ? "LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE($moItemExpr,'')),' ',''),'-',''),'_',''))"
+            : "''";
+
+        // 1) Ad spend + messages per day (raw amount_spent_php — walang VAT math)
+        $castSpend = $castMoney('amount_spent_php');
+        $adsRows = DB::table('ads_manager_reports')
+            ->whereRaw('DATE(day) BETWEEN ? AND ?', [$start, $end])
+            ->selectRaw("DATE(day) AS d,
+                COALESCE(SUM($castSpend),0) AS adspent,
+                COALESCE(SUM(messaging_conversations_started),0) AS messages")
+            ->groupByRaw('DATE(day)')
+            ->get();
+        $adsMap = $msgMap = [];
+        foreach ($adsRows as $r) {
+            $adsMap[(string)$r->d] = (float)$r->adspent;
+            $msgMap[(string)$r->d] = (int)$r->messages;
+        }
+
+        // 2) Order counts per day from macro_output
+        $mo = DB::table('macro_output as mo')
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end]);
+
+        $orderRows = (clone $mo)
+            ->selectRaw("$dateExpr AS d,
+                COUNT(*) AS orders_total,
+                SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_total,
+                SUM(CASE WHEN $statusNorm = 'cannotproceed' THEN 1 ELSE 0 END) AS cannot_total,
+                SUM(CASE WHEN $statusNorm = 'odz' THEN 1 ELSE 0 END) AS odz_total,
+                COALESCE(SUM($moCodClean),0) AS all_cod,
+                COALESCE(SUM(CASE WHEN $statusNorm = 'proceed' THEN $moCodClean ELSE 0 END),0) AS gross_sales")
+            ->groupByRaw($dateExpr)
+            ->get();
+        $ordersMap = $proceedMap = $cannotMap = $odzMap = $allCodMap = $grossMap = [];
+        foreach ($orderRows as $r) {
+            $d = (string)$r->d;
+            $ordersMap[$d]  = (int)$r->orders_total;
+            $proceedMap[$d] = (int)$r->proceed_total;
+            $cannotMap[$d]  = (int)$r->cannot_total;
+            $odzMap[$d]     = (int)$r->odz_total;
+            $allCodMap[$d]  = (float)$r->all_cod;
+            $grossMap[$d]   = (float)$r->gross_sales;
+        }
+
+        // 3) Shipping/delivery aggregates per day via from_jnts join
+        $jSubmitColName = $pickCol('from_jnts', ['submission_time','submitted_at','submission_datetime','submissiondate','submission']) ?? 'submission_time';
+
+        // Build _jnt_agg temp table scoped to date range's waybills
+        if ($driver === 'mysql') {
+            DB::statement("DROP TEMPORARY TABLE IF EXISTS _jnt_agg_daily");
+            DB::statement("
+                CREATE TEMPORARY TABLE _jnt_agg_daily AS
+                SELECT
+                    j.waybill_number AS wb,
+                    MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END) AS is_delivered,
+                    MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
+                    MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END) AS is_for_return,
+                    MAX(CASE
+                        WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
+                        WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
+                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
+                        ELSE 1
+                    END) AS is_in_transit,
+                    COALESCE(MAX(CAST(j.total_shipping_cost AS DECIMAL(18,2))), 0) AS actual_shipping_cost
+                FROM from_jnts j
+                WHERE j.waybill_number IN (
+                    SELECT DISTINCT $moWaybillSql
+                    FROM macro_output mo
+                    WHERE $dateExpr BETWEEN ? AND ?
+                      AND $moWaybillSql IS NOT NULL AND $moWaybillSql != ''
+                )
+                GROUP BY j.waybill_number
+            ", [$start, $end]);
+            DB::statement("ALTER TABLE _jnt_agg_daily ADD PRIMARY KEY (wb)");
+        } else {
+            DB::statement("DROP TABLE IF EXISTS _jnt_agg_daily");
+            DB::statement("
+                CREATE TEMPORARY TABLE _jnt_agg_daily AS
+                SELECT
+                    j.waybill_number AS wb,
+                    MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END)::int AS is_delivered,
+                    MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END)::int AS is_returned,
+                    MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END)::int AS is_for_return,
+                    MAX(CASE
+                        WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
+                        WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
+                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
+                        ELSE 1
+                    END)::int AS is_in_transit,
+                    COALESCE(MAX(CAST(j.total_shipping_cost AS DECIMAL(18,2))), 0) AS actual_shipping_cost
+                FROM from_jnts j
+                WHERE j.waybill_number IN (
+                    SELECT DISTINCT $moWaybillSql
+                    FROM macro_output mo
+                    WHERE $dateExpr BETWEEN ? AND ?
+                      AND $moWaybillSql IS NOT NULL AND $moWaybillSql != ''
+                )
+                GROUP BY j.waybill_number
+            ", [$start, $end]);
+            DB::statement("ALTER TABLE _jnt_agg_daily ADD PRIMARY KEY (wb)");
+        }
+
+        $shipRows = DB::table('macro_output as mo')
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end])
+            ->whereNotNull('mo.' . $wbColName)
+            ->where('mo.' . $wbColName, '!=', '')
+            ->join('_jnt_agg_daily as ja', 'mo.' . $wbColName, '=', 'ja.wb')
+            ->selectRaw("$dateExpr AS d,
+                COUNT(DISTINCT $moWaybillSql) AS shipped_total,
+                COUNT(DISTINCT CASE WHEN ja.is_delivered  = 1 THEN $moWaybillSql END) AS delivered_total,
+                COUNT(DISTINCT CASE WHEN ja.is_returned   = 1 THEN $moWaybillSql END) AS returned_total,
+                COUNT(DISTINCT CASE WHEN ja.is_for_return = 1 THEN $moWaybillSql END) AS for_return_total,
+                COUNT(DISTINCT CASE WHEN ja.is_in_transit = 1 THEN $moWaybillSql END) AS in_transit_total,
+                COALESCE(SUM(ja.actual_shipping_cost),0) AS actual_shipping_total")
+            ->groupByRaw($dateExpr)
+            ->get();
+        $shippedMap = $deliveredMap = $returnedMap = $forReturnMap = $inTransitMap = $actShipMap = [];
+        foreach ($shipRows as $r) {
+            $d = (string)$r->d;
+            $shippedMap[$d]   = (int)$r->shipped_total;
+            $deliveredMap[$d] = (int)$r->delivered_total;
+            $returnedMap[$d]  = (int)$r->returned_total;
+            $forReturnMap[$d] = (int)$r->for_return_total;
+            $inTransitMap[$d] = (int)$r->in_transit_total;
+            $actShipMap[$d]   = (float)$r->actual_shipping_total;
+        }
+
+        // 4) COGS per day — sum across (proceed orders × unit_cost as of order date)
+        $cogsItemColName = $pickCol('cogs', ['item_name','ITEM_NAME','product','Product','Product_Name']) ?? 'item_name';
+        $cogsDateColName = $pickCol('cogs', ['effective_date','date','valid_from','cogs_date']) ?? 'effective_date';
+        $cogsUnitColName = $pickCol('cogs', ['unit_cost','cost','unitprice','unit_price','price']) ?? 'unit_cost';
+
+        $cogsAll = DB::table('cogs')
+            ->selectRaw("
+                LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(" . $quote($cogsItemColName) . ",'')),' ',''),'-',''),'_','')) AS item_key,
+                DATE(" . $quote($cogsDateColName) . ") AS eff_date,
+                " . $castMoney($quote($cogsUnitColName)) . " AS unit_cost
+            ")
+            ->orderByRaw("LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(" . $quote($cogsItemColName) . ",'')),' ',''),'-',''),'_','')) ASC, DATE(" . $quote($cogsDateColName) . ") DESC")
+            ->get();
+        $cogsLookup = [];
+        foreach ($cogsAll as $row) {
+            $cogsLookup[(string)$row->item_key][] = [
+                'date' => (string)$row->eff_date,
+                'cost' => (float)$row->unit_cost,
+            ];
+        }
+        $findUnitCost = function(string $itemKey, string $orderDate) use ($cogsLookup): float {
+            if (!isset($cogsLookup[$itemKey])) return 0.0;
+            foreach ($cogsLookup[$itemKey] as $entry) {
+                if ($entry['date'] <= $orderDate) return $entry['cost'];
+            }
+            return 0.0;
+        };
+
+        // Per (date, item) proceed counts
+        $cogsAggRows = DB::table('macro_output as mo')
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end])
+            ->whereRaw("$statusNorm = 'proceed'")
+            ->selectRaw("$dateExpr AS d, $itemKeyExpr AS item_key, COUNT(*) AS qty")
+            ->groupByRaw("$dateExpr, $itemKeyExpr")
+            ->get();
+        $cogsMap = [];
+        foreach ($cogsAggRows as $r) {
+            $d = (string)$r->d;
+            $itemKey = (string)$r->item_key;
+            $qty = (int)$r->qty;
+            $unit = $findUnitCost($itemKey, $d);
+            $cogsMap[$d] = ($cogsMap[$d] ?? 0.0) + ($qty * $unit);
+        }
+
+        // 5) Build per-day rows + total
+        $rows = [];
+        $totals = [
+            'adspent' => 0.0, 'messages' => 0,
+            'orders' => 0, 'proceed' => 0, 'cannot' => 0, 'odz' => 0,
+            'shipped' => 0, 'delivered' => 0, 'returned' => 0, 'for_return' => 0, 'in_transit' => 0,
+            'gross_sales' => 0.0, 'all_cod' => 0.0,
+            'shipping_fee' => 0.0, 'cod_fee' => 0.0, 'cod_vat' => 0.0, 'cogs' => 0.0,
+            'net_profit' => 0.0,
+        ];
+
+        // Iterate every day in range so days with zero ad spend or zero orders still appear
+        $cursor = new \DateTime($start);
+        $endDt  = new \DateTime($end);
+        while ($cursor <= $endDt) {
+            $d = $cursor->format('Y-m-d');
+            $cursor->modify('+1 day');
+
+            $adspent   = $adsMap[$d]       ?? 0.0;
+            $messages  = $msgMap[$d]       ?? 0;
+            $orders    = $ordersMap[$d]    ?? 0;
+            $proceed   = $proceedMap[$d]   ?? 0;
+            $cannot    = $cannotMap[$d]    ?? 0;
+            $odz       = $odzMap[$d]       ?? 0;
+            $shipped   = $shippedMap[$d]   ?? 0;
+            $delivered = $deliveredMap[$d] ?? 0;
+            $returned  = $returnedMap[$d]  ?? 0;
+            $forRet    = $forReturnMap[$d] ?? 0;
+            $inTrans   = $inTransitMap[$d] ?? 0;
+            $gross     = $grossMap[$d]     ?? 0.0;
+            $allCod    = $allCodMap[$d]    ?? 0.0;
+            $cogs      = $cogsMap[$d]      ?? 0.0;
+            $actShip   = $actShipMap[$d]   ?? 0.0;
+
+            // Skip empty days entirely (no ad spend AND no orders)
+            if ($adspent <= 0 && $orders <= 0) continue;
+
+            $shipping_fee = $actShip > 0 ? $actShip : ($SHIPPING_PER_SHIPPED * $shipped);
+            $cod_fee      = $gross * $COD_FEE_RATE;
+            $cod_vat      = $cod_fee * $COD_FEE_VAT_RATE;
+            $net_profit   = $gross - $adspent - $shipping_fee - $cod_fee - $cod_vat - $cogs;
+
+            $cpp        = $orders  > 0 ? $adspent / $orders  : null;
+            $procCpp    = $proceed > 0 ? $adspent / $proceed : null;
+            $cpm_msg    = $messages > 0 ? $adspent / $messages : null;
+            $rts_pct    = $shipped > 0 ? (($returned + $forRet) / $shipped) * 100.0 : null;
+            $tcpr_pct   = $orders  > 0 ? (1 - ($proceed / $orders)) * 100.0 : null;
+            $intrans_pct= $shipped > 0 ? ($inTrans / $shipped) * 100.0 : null;
+            $net_pct    = $allCod  > 0 ? ($net_profit / $allCod) * 100.0 : null;
+            $hold       = $proceed - $shipped;
+
+            $rows[] = [
+                'date'         => $d,
+                'adspent'      => round($adspent, 2),
+                'messages'     => $messages,
+                'orders'       => $orders,
+                'proceed'      => $proceed,
+                'cannot'       => $cannot,
+                'odz'          => $odz,
+                'shipped'      => $shipped,
+                'delivered'    => $delivered,
+                'returned'     => $returned,
+                'for_return'   => $forRet,
+                'in_transit'   => $inTrans,
+                'cpp'          => $cpp        !== null ? round($cpp, 2) : null,
+                'proceed_cpp'  => $procCpp    !== null ? round($procCpp, 2) : null,
+                'cpm'          => $cpm_msg    !== null ? round($cpm_msg, 2) : null,
+                'tcpr_pct'     => $tcpr_pct   !== null ? round($tcpr_pct, 1) : null,
+                'rts_pct'      => $rts_pct    !== null ? round($rts_pct, 1) : null,
+                'in_transit_pct' => $intrans_pct !== null ? round($intrans_pct, 1) : null,
+                'gross_sales'  => round($gross, 2),
+                'shipping_fee' => round($shipping_fee, 2),
+                'cod_fee'      => round($cod_fee, 2),
+                'cod_vat'      => round($cod_vat, 2),
+                'cogs'         => round($cogs, 2),
+                'net_profit'   => round($net_profit, 2),
+                'net_profit_pct' => $net_pct !== null ? round($net_pct, 1) : null,
+                'hold'         => $hold,
+                'all_cod'      => round($allCod, 2),
+            ];
+
+            $totals['adspent']      += $adspent;
+            $totals['messages']     += $messages;
+            $totals['orders']       += $orders;
+            $totals['proceed']      += $proceed;
+            $totals['cannot']       += $cannot;
+            $totals['odz']          += $odz;
+            $totals['shipped']      += $shipped;
+            $totals['delivered']    += $delivered;
+            $totals['returned']     += $returned;
+            $totals['for_return']   += $forRet;
+            $totals['in_transit']   += $inTrans;
+            $totals['gross_sales']  += $gross;
+            $totals['all_cod']      += $allCod;
+            $totals['shipping_fee'] += $shipping_fee;
+            $totals['cod_fee']      += $cod_fee;
+            $totals['cod_vat']      += $cod_vat;
+            $totals['cogs']         += $cogs;
+            $totals['net_profit']   += $net_profit;
+        }
+
+        // Sort newest first
+        usort($rows, fn($a, $b) => strcmp($b['date'], $a['date']));
+
+        // Round totals for response
+        foreach (['adspent','gross_sales','all_cod','shipping_fee','cod_fee','cod_vat','cogs','net_profit'] as $k) {
+            $totals[$k] = round($totals[$k], 2);
+        }
+        $totals['cpp']           = $totals['orders']  > 0 ? round($totals['adspent'] / $totals['orders'],  2) : null;
+        $totals['proceed_cpp']   = $totals['proceed'] > 0 ? round($totals['adspent'] / $totals['proceed'], 2) : null;
+        $totals['cpm']           = $totals['messages'] > 0 ? round($totals['adspent'] / $totals['messages'], 2) : null;
+        $totals['tcpr_pct']      = $totals['orders']  > 0 ? round((1 - ($totals['proceed'] / $totals['orders'])) * 100.0, 1) : null;
+        $totals['rts_pct']       = $totals['shipped'] > 0 ? round((($totals['returned'] + $totals['for_return']) / $totals['shipped']) * 100.0, 1) : null;
+        $totals['in_transit_pct']= $totals['shipped'] > 0 ? round(($totals['in_transit'] / $totals['shipped']) * 100.0, 1) : null;
+        $totals['net_profit_pct']= $totals['all_cod'] > 0 ? round(($totals['net_profit'] / $totals['all_cod']) * 100.0, 1) : null;
+        $totals['hold']          = $totals['proceed'] - $totals['shipped'];
+
+        return response()->json([
+            'rows'       => $rows,
+            'totals'     => $totals,
+            'start_date' => $start,
+            'end_date'   => $end,
+        ]);
+    }
 }

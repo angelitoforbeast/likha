@@ -514,6 +514,8 @@ Route::post('/owner/private/refresh-primary-items', [OwnerPrivateController::cla
 Route::get('/owner/private/page-range-breakdown', [OwnerPrivateController::class, 'pageRangeBreakdown'])->name('owner.private.page-range-breakdown');
 Route::get('/owner/private/breakdown', [OwnerPrivateController::class, 'breakdownPage'])->name('owner.private.breakdown');
 Route::get('/owner/private/edit-logs', [OwnerPrivateController::class, 'editLogs'])->name('owner.private.edit-logs');
+Route::get('/owner/private/daily', [OwnerPrivateController::class, 'daily'])->name('owner.private.daily');
+Route::get('/owner/private/daily/data', [OwnerPrivateController::class, 'dailyData'])->name('owner.private.daily.data');
 
 Route::get('/summary/overall', [SummaryOverallController::class, 'index'])->name('summary.overall');
 Route::get('/summary/overall/data', [SummaryOverallController::class, 'data'])->name('summary.overall.data');

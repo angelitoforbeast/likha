@@ -297,6 +297,15 @@
               cursor:pointer;text-decoration:none;"
        title="View page × date × item matrix for this range">🧭 Matrix</a>
 
+    @if(($isCEO ?? false))
+    <a :href="'{{ route('owner.private.daily') }}?start_date='+startDate+'&end_date='+endDate"
+       target="_blank"
+       style="background:#1e293b;color:#fde68a;border:1px solid #475569;
+              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+              cursor:pointer;text-decoration:none;"
+       title="Per-day overall summary across all pages (CEO)">📅 Daily</a>
+    @endif
+
     <button class="btn-refresh" :class="loading ? 'spinning' : ''" @click="load()" title="Refresh">
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
            fill="none" stroke="currentColor" stroke-width="2.2"
