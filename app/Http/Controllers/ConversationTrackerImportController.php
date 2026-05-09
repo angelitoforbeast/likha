@@ -121,7 +121,8 @@ class ConversationTrackerImportController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%$search%")
                   ->orWhere('phone_number', 'like', "%$search%")
-                  ->orWhere('page_name', 'like', "%$search%");
+                  ->orWhere('page_name', 'like', "%$search%")
+                  ->orWhere('response_tracker', 'like', "%$search%");
             });
         }
 
