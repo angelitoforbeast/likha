@@ -116,7 +116,7 @@
               <tr>
                 <template x-for="c in visibleCols()" :key="c.id">
                   <td :class="cellClass(c, r)"
-                      :style="cellStyle(c.id, rawVal(c, r))"
+                      :style="cellStyle(c.id, rawVal(c, r), r)"
                       x-html="cellText(c, r)"></td>
                 </template>
               </tr>
@@ -126,7 +126,7 @@
             <tr>
               <template x-for="(c, idx) in visibleCols()" :key="c.id">
                 <td :class="c.align === 'left' ? 'text-left' : 'num'"
-                    :style="cellStyle(c.id, rawVal(c, totals))"
+                    :style="cellStyle(c.id, rawVal(c, totals), totals)"
                     x-html="idx === 0 ? 'TOTAL' : totalText(c)"></td>
               </template>
             </tr>
@@ -355,15 +355,21 @@
         cellText(c, r) { return c.cell ? c.cell(r, this) : ''; },
         totalText(c) { return c.total ? c.total(this.totals, this) : ''; },
 
-        // Conditional formatting — applies bg color based on rules
-        cellStyle(colId, value) {
-          if (value == null || isNaN(value)) return '';
+        // Conditional formatting — applies bg color based on rules.
+        // Supports compare_col (rule fires based on sibling column's value).
+        cellStyle(colId, value, row) {
           const rules = (this.COL_FORMAT || {})[colId] || [];
           for (const r of rules) {
             const op = r.op;
             const v  = (typeof r.value === 'number') ? r.value : null;
             if (v == null) continue;
-            const v0 = Number(value);
+            // Pick eval value: compare_col (sibling) or self
+            let evalRaw = value;
+            if (r.compare_col && row && Object.prototype.hasOwnProperty.call(row, r.compare_col)) {
+              evalRaw = row[r.compare_col];
+            }
+            if (evalRaw == null || isNaN(Number(evalRaw))) continue;
+            const v0 = Number(evalRaw);
             let match = false;
             if (op === '>')  match = v0 >  v;
             if (op === '>=') match = v0 >= v;

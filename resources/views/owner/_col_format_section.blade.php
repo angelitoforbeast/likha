@@ -79,7 +79,21 @@
                     @dragstart="ruleDragStart(gIdx, rIdx, $event)"
                     @dragover.prevent
                     @drop="ruleDrop(gIdx, rIdx)">⋮⋮</span>
-              <span class="text-xs text-slate-500" style="min-width:30px;">if &nbsp;value</span>
+              <span class="text-xs text-slate-500" style="min-width:30px;">if</span>
+              {{-- Evaluate-against dropdown: "self" (default) or another column
+                   sa same table. When set, the rule fires based on THAT column's
+                   value sa same row, not yung cell's own value. --}}
+              <select :value="r.compare_col || ''"
+                      @change="r.compare_col = $event.target.value"
+                      class="border border-slate-300 rounded px-1 py-0.5 text-xs"
+                      style="max-width:160px;"
+                      title="Which column's value to evaluate (Self = the cell's own value)">
+                <option value="">Self (own value)</option>
+                <template x-for="tc in tableCatalog" :key="'cmp-'+tc.id">
+                  <option :value="tc.id" x-text="tc.label"></option>
+                </template>
+              </select>
+              <span class="text-xs text-slate-500">value</span>
               <select x-model="r.op" class="border border-slate-300 rounded px-1 py-0.5 text-xs">
                 <option value=">=">≥</option>
                 <option value=">">&gt;</option>

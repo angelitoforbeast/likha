@@ -183,7 +183,7 @@
                   </td>
                   <template x-for="col in visibleCols()" :key="'c-'+col.id">
                     <td :class="(col.align==='right' ? 'num' : '')"
-                        :style="(col.id==='days_running' ? 'white-space:nowrap;' : '') + cellFormatStyle(col.id, row[col.id])">
+                        :style="(col.id==='days_running' ? 'white-space:nowrap;' : '') + cellFormatStyle(col.id, row[col.id], row)">
                       {{-- on: status pill --}}
                       <template x-if="col.type==='on'">
                         <span :class="'fb-pill ' + (row.on ? 'active' : 'off')"
@@ -499,16 +499,22 @@
         // has no /owner/private parent context, so cross-table refs (e.g.
         // `cpp ≥ owner_private:breakeven_cpp`) cannot resolve and are skipped
         // (the rule iteration falls through to the next rule).
-        cellFormatStyle(colId, value){
+        cellFormatStyle(colId, value, row){
           const rules = (window.__CAMPAIGNS_COL_FORMAT__ || {})[colId];
           if (!Array.isArray(rules) || rules.length === 0) return '';
-          if (value == null || isNaN(Number(value))) return '';
-          const v = Number(value);
           for (const r of rules) {
             // Cross-table ref → skip (no parent context here).
             if (r.value && typeof r.value === 'object' && r.value.type === 'ref') continue;
             const t = Number(r.value);
             if (isNaN(t)) continue;
+            // Determine evaluated value: compare_col (sibling) or self.
+            // If compare_col is set, fetch that column's value sa same row.
+            let evalRaw = value;
+            if (r.compare_col && row && Object.prototype.hasOwnProperty.call(row, r.compare_col)) {
+              evalRaw = row[r.compare_col];
+            }
+            if (evalRaw == null || isNaN(Number(evalRaw))) continue;
+            const v = Number(evalRaw);
             let hit = false;
             switch (r.op) {
               case '>=': hit = v >= t; break;
@@ -519,7 +525,6 @@
             }
             if (hit) {
               const bg  = r.bg || '#fee2e2';
-              // Default text = black. Override only when rule sets a color.
               const txt = (r.color && /^#[0-9a-f]{6}$/i.test(r.color)) ? r.color : '#111827';
               return 'background:' + bg + ';color:' + txt + ';' + (r.bold ? 'font-weight:700;' : '');
             }

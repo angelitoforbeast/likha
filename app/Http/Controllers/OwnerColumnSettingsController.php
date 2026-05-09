@@ -318,7 +318,7 @@ class OwnerColumnSettingsController extends Controller
             return null;
         };
 
-        $cleanRule = function ($r) use ($allowedOps, $cleanValue) {
+        $cleanRule = function ($r) use ($allowedOps, $cleanValue, $allowedSet) {
             if (!is_array($r)) return null;
             $op = (string) ($r['op'] ?? '');
             if (!in_array($op, $allowedOps, true)) return null;
@@ -330,13 +330,19 @@ class OwnerColumnSettingsController extends Controller
             // inherited text color, which is black on /owner/private).
             $color = trim((string) ($r['color'] ?? ''));
             if ($color !== '' && !preg_match('/^#[0-9a-fA-F]{6}$/', $color)) $color = '';
+            // NEW: compare_col — if set, evaluate that column's value sa same
+            // row instead of cell's own value. Validates against the section's
+            // catalog. '' or null = self (default behavior).
+            $cmpCol = trim((string) ($r['compare_col'] ?? ''));
+            if ($cmpCol !== '' && !isset($allowedSet[$cmpCol])) $cmpCol = '';
             return [
-                'op'    => $op,
-                'value' => $val,
-                'bg'    => strtolower($bg),
-                'color' => $color === '' ? '' : strtolower($color),
-                'bold'  => !empty($r['bold']),
-                'label' => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
+                'op'          => $op,
+                'value'       => $val,
+                'bg'          => strtolower($bg),
+                'color'       => $color === '' ? '' : strtolower($color),
+                'bold'        => !empty($r['bold']),
+                'label'       => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
+                'compare_col' => $cmpCol,
             ];
         };
 
@@ -469,13 +475,17 @@ class OwnerColumnSettingsController extends Controller
                 if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
                 $color = trim((string) ($r['color'] ?? ''));
                 if ($color !== '' && !preg_match('/^#[0-9a-fA-F]{6}$/', $color)) $color = '';
+                // NEW: compare_col — column whose value to evaluate (default '' = self)
+                $cmpCol = trim((string) ($r['compare_col'] ?? ''));
+                if ($cmpCol !== '' && !isset($allowedSet[$cmpCol])) $cmpCol = '';
                 $rules[] = [
-                    'op'    => $op,
-                    'value' => $val,
-                    'bg'    => strtolower($bg),
-                    'color' => $color === '' ? '' : strtolower($color),
-                    'bold'  => !empty($r['bold']),
-                    'label' => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
+                    'op'          => $op,
+                    'value'       => $val,
+                    'bg'          => strtolower($bg),
+                    'color'       => $color === '' ? '' : strtolower($color),
+                    'bold'        => !empty($r['bold']),
+                    'label'       => mb_substr(trim((string) ($r['label'] ?? '')), 0, 40),
+                    'compare_col' => $cmpCol,
                 ];
                 if (count($rules) >= 20) break;
             }

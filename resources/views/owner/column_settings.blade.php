@@ -364,7 +364,7 @@
         addRuleToGroup(gIdx){
           const g = this.groups[gIdx];
           if (!g) return;
-          g.rules.push({ op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '' });
+          g.rules.push({ op: '>=', value: 0, bg: '#fee2e2', bold: false, label: '', compare_col: '' });
         },
         removeRule(gIdx, rIdx){
           const g = this.groups[gIdx];

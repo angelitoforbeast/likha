@@ -516,7 +516,7 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')+(col.id==='proj_pct_1d'&&row.proj_pct_last_day!==null?rppStyle(row.proj_pct_last_day):'')+(col.id==='proj_pct_3d'&&row.proj_pct_last_3d!==null?rppStyle(row.proj_pct_last_3d):'')+(col.id==='proj_pct_7d'&&row.proj_pct_last_7d!==null?rppStyle(row.proj_pct_last_7d):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row))">
+                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')+(col.id==='proj_pct_1d'&&row.proj_pct_last_day!==null?rppStyle(row.proj_pct_last_day):'')+(col.id==='proj_pct_3d'&&row.proj_pct_last_3d!==null?rppStyle(row.proj_pct_last_3d):'')+(col.id==='proj_pct_7d'&&row.proj_pct_last_7d!==null?rppStyle(row.proj_pct_last_7d):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -1449,17 +1449,25 @@
       },
 
       // Generic rule evaluator. Pass:
-      //   rules  — array of {op, value, bg, bold, label}
-      //   value  — cell numeric value
-      //   refRow — optional row to use when threshold is a ref (page summary
-      //            row in the campaigns expand context; null in standalone)
-      _evalRules(rules, value, refRow){
+      //   rules    — array of {op, value, bg, bold, label, compare_col}
+      //   value    — cell's own numeric value
+      //   refRow   — optional row to use when threshold is a ref (page summary
+      //              row in the campaigns expand context; null in standalone)
+      //   sameRow  — optional row of the cell being evaluated. When rule has
+      //              compare_col set, fetch that column's value sa same row
+      //              instead of cell's own value.
+      _evalRules(rules, value, refRow, sameRow){
         if (!Array.isArray(rules) || rules.length === 0) return '';
-        if (value == null || isNaN(Number(value))) return '';
-        const v = Number(value);
         for (const r of rules) {
           const t = this.resolveRuleThreshold(r.value, refRow);
           if (isNaN(t)) continue;   // ref couldn't resolve → skip rule
+          // Determine what to evaluate: compare_col (sibling) or self
+          let evalRaw = value;
+          if (r.compare_col && sameRow && Object.prototype.hasOwnProperty.call(sameRow, r.compare_col)) {
+            evalRaw = sameRow[r.compare_col];
+          }
+          if (evalRaw == null || isNaN(Number(evalRaw))) continue;
+          const v = Number(evalRaw);
           let hit = false;
           switch (r.op) {
             case '>=': hit = v >= t; break;
@@ -1470,8 +1478,6 @@
           }
           if (hit) {
             const bg  = r.bg || '#fee2e2';
-            // Default text = black. Override only when rule explicitly sets a
-            // color (configured via /owner/column-settings).
             const txt = (r.color && /^#[0-9a-f]{6}$/i.test(r.color)) ? r.color : '#111827';
             return 'background:' + bg + ';color:' + txt + ';' + (r.bold ? 'font-weight:700;' : '');
           }
@@ -1481,11 +1487,12 @@
 
       // Conditional formatting for owner_private rows. Refs (rare here) use
       // the row itself as the ref source.
-      cellFormatStyle(colId, value){
+      cellFormatStyle(colId, value, row){
         const rules = (window.__COL_FORMAT__ || {})[colId];
-        // For owner_private cells there's no "parent" — refs resolve against
-        // the same row (rare use case).
-        return this._evalRules(rules, value, this._currentOwnerRefRow || null);
+        // For owner_private cells the same row is both the ref source AND the
+        // sibling-col source for compare_col. Pass row to _evalRules.
+        const same = row || this._currentOwnerRefRow || null;
+        return this._evalRules(rules, value, same, same);
       },
 
       // Look up a page-summary row by page_name (used by campaigns rules).
@@ -1502,7 +1509,8 @@
         const rules = (window.__CAMPAIGNS_COL_FORMAT__ || {})[colId];
         if (!Array.isArray(rules) || rules.length === 0) return '';
         const refRow = this.pageRowFor(campaignRow?.page_name);
-        return this._evalRules(rules, value, refRow);
+        // Pass campaignRow as sameRow para sa compare_col (sibling column)
+        return this._evalRules(rules, value, refRow, campaignRow);
       },
 
       // ── Campaigns column catalog (mirrors the one in /ads_manager/campaigns)
