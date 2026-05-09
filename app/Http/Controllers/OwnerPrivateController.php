@@ -2746,11 +2746,23 @@ class OwnerPrivateController extends Controller
             'proceed_cod_sum' => 0.0,
         ];
 
+        // Diagnostic accumulator — exposes what happened sa loop kapag walang
+        // rows. Surface ito sa response para makita.
+        $debug = [
+            'iterations'     => 0,
+            'caught_errors'  => [],
+            'non_200'        => [],
+            'no_total_row'   => [],
+            'empty_skipped'  => [],
+            'success_count'  => 0,
+        ];
+
         $cursor = new \DateTime($start);
         $endDt  = new \DateTime($end);
         while ($cursor <= $endDt) {
             $d = $cursor->format('Y-m-d');
             $cursor->modify('+1 day');
+            $debug['iterations']++;
 
             // Reuse current $request (with auth/session/etc.) — just override
             // the date + page filter for this iteration, then call data().
@@ -2763,9 +2775,13 @@ class OwnerPrivateController extends Controller
             try {
                 $resp = $this->data($request);
             } catch (\Throwable $e) {
+                $debug['caught_errors'][] = $d . ': ' . get_class($e) . ': ' . mb_substr($e->getMessage(), 0, 200);
                 continue;
             }
-            if ($resp->getStatusCode() !== 200) continue;
+            if ($resp->getStatusCode() !== 200) {
+                $debug['non_200'][] = $d . ': status=' . $resp->getStatusCode();
+                continue;
+            }
 
             $payload = $resp->getData(true);
             $allRows = $payload['rows'] ?? [];
@@ -2790,7 +2806,10 @@ class OwnerPrivateController extends Controller
                 $proj_np         += (float)($r['projected_net_profit'] ?? 0.0);
                 $proceed_cod_sum += $procCod;
             }
-            if (!$totalRow) continue;
+            if (!$totalRow) {
+                $debug['no_total_row'][] = $d . ': rows=' . count($allRows);
+                continue;
+            }
 
             // Messages from ads_manager_reports (data() doesn't return this)
             $messages = (int) DB::table('ads_manager_reports')
@@ -2801,7 +2820,11 @@ class OwnerPrivateController extends Controller
             $orders  = (int)  ($totalRow['orders'] ?? 0);
 
             // Skip empty days (no spend AND no orders)
-            if ($adspent <= 0 && $orders <= 0) continue;
+            if ($adspent <= 0 && $orders <= 0) {
+                $debug['empty_skipped'][] = $d . ': adspent=' . $adspent . ' orders=' . $orders;
+                continue;
+            }
+            $debug['success_count']++;
 
             $proj_net_pct = $proceed_cod_sum > 0 ? ($proj_np / $proceed_cod_sum) * 100.0 : null;
 
@@ -2873,6 +2896,7 @@ class OwnerPrivateController extends Controller
             'totals'     => $totals,
             'start_date' => $start,
             'end_date'   => $end,
+            'debug'      => $debug,
         ]);
     }
 

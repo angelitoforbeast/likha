@@ -72,7 +72,10 @@
         <div class="p-10 text-center text-red-600 text-sm" x-text="error"></div>
       </template>
       <template x-if="!loading && !error && rows.length === 0">
-        <div class="p-10 text-center text-gray-500 text-sm">No data for selected range.</div>
+        <div class="p-10 text-center text-gray-500 text-sm">
+          <div>No data for selected range.</div>
+          <pre x-show="debug" class="mt-4 text-left text-[11px] bg-gray-50 border border-gray-200 rounded p-3 overflow-auto" x-text="JSON.stringify(debug, null, 2)"></pre>
+        </div>
       </template>
       <template x-if="!loading && !error && rows.length > 0">
         <table class="daily-tbl">
@@ -170,6 +173,7 @@
         error: '',
         rows: [],
         totals: {},
+        debug: null,
         filters: {
           start_date: '{{ $defaultStartDate }}',
           end_date:   '{{ $defaultEndDate }}',
@@ -178,6 +182,7 @@
         async reload() {
           this.loading = true;
           this.error = '';
+          this.debug = null;
           try {
             const qs = new URLSearchParams({
               start_date: this.filters.start_date,
@@ -192,6 +197,7 @@
               const j = await res.json();
               this.rows   = j.rows   || [];
               this.totals = j.totals || {};
+              this.debug  = j.debug  || null;
             }
           } catch (e) {
             this.error = String(e);
