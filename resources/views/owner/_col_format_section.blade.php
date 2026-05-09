@@ -39,18 +39,33 @@
 
   <template x-for="(g, gIdx) in groups" :key="'g-'+gIdx">
     <div class="rule-group" x-data="{ open: false }">
-      <div class="rule-group-header" style="cursor:pointer;" @click="open = !open">
-        <div class="text-xs font-semibold text-slate-700 flex items-center gap-2">
+      <div class="rule-group-header" style="cursor:pointer;align-items:flex-start;flex-wrap:wrap;gap:6px;" @click="open = !open">
+        <div class="text-xs font-semibold text-slate-700 flex items-center flex-wrap gap-2" style="flex:1;">
           <span class="cf-chevron" :style="open ? 'transform:rotate(90deg)' : ''" style="transition:transform .15s ease;display:inline-block;">▶</span>
           📑 Group #<span x-text="gIdx + 1"></span>
           <span class="text-slate-500 font-normal" x-show="g.rules.length > 0">·
             <span x-text="g.rules.length"></span> rule(s) ·
-            applies to <span x-text="g.cols.length"></span> column(s)
           </span>
+          {{-- Show applied column LABELS as chip-like preview (visible even when collapsed) --}}
+          <template x-if="g.cols.length > 0">
+            <span class="flex flex-wrap gap-1 items-center">
+              <span class="text-[10px] text-slate-500">applies to:</span>
+              <template x-for="cid in g.cols" :key="'preview-'+gIdx+'-'+cid">
+                <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                      style="background:#e0e7ff;color:#3730a3;border:1px solid #c7d2fe;"
+                      x-text="labelForCol(cid)"></span>
+              </template>
+            </span>
+          </template>
           <span class="text-[10px] text-slate-400" x-show="!open">(click to expand)</span>
         </div>
-        <button class="text-red-600 hover:text-red-800 text-xs font-semibold"
-                @click.stop="if(confirm('Delete this group?')) removeGroup(gIdx)">× Delete group</button>
+        <div class="flex items-center gap-2">
+          <button class="text-blue-600 hover:text-blue-800 text-xs font-semibold"
+                  @click.stop="duplicateGroup(gIdx)"
+                  title="Duplicate this group with all its columns + rules">📋 Duplicate</button>
+          <button class="text-red-600 hover:text-red-800 text-xs font-semibold"
+                  @click.stop="if(confirm('Delete this group?')) removeGroup(gIdx)">× Delete group</button>
+        </div>
       </div>
 
       <div x-show="open" x-transition>

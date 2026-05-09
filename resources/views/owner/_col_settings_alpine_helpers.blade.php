@@ -51,6 +51,19 @@
 
         addGroup(){ this.groups.push({ cols: [], rules: [] }); },
         removeGroup(gIdx){ this.groups.splice(gIdx, 1); },
+        // Deep-clone an existing group (cols + rules) and append immediately
+        // after the source. JSON-roundtrip avoids any reference sharing.
+        duplicateGroup(gIdx){
+          const src = this.groups[gIdx];
+          if (!src) return;
+          const clone = JSON.parse(JSON.stringify(src));
+          this.groups.splice(gIdx + 1, 0, clone);
+        },
+        // Resolve column id → human-readable label using the table's catalog.
+        labelForCol(colId){
+          const c = (this.tableCatalog || []).find(x => x.id === colId);
+          return c ? c.label : colId;
+        },
         toggleGroupCol(gIdx, colId){
           const g = this.groups[gIdx];
           if (!g) return;
