@@ -1223,113 +1223,110 @@ class AdsManagerCampaignsController extends Controller
             return $r;
         });
 
-        // ── Profit% per row ─────────────────────────────────────────────
-        // Formula:
-        //   df              = 1 − rts_pct / 100
-        //   cod_fee_per_unit = mode_cod × COD_RATE × (1 + VAT_RATE)
-        //   profit_per_order = df × (mode_cod − item_value − cod_fee_per_unit) − SHIPPING − cpp
-        //   profit_pct      = profit_per_order ÷ mode_cod × 100
-        // Inputs:
-        //   cpp        — from row (spend / purchases)
-        //   mode_cod   — daily_page_primary_item.primary_mode_cod (latest ≤ end_date)
-        //   rts_pct    — page_item_settings.rts_pct (latest ≤ end_date, by page+item)
-        //   item_value — cogs.unit_cost (latest ≤ end_date, by item)
-        $endRef    = $end ?? (new \DateTime('now', new \DateTimeZone('Asia/Manila')))->format('Y-m-d');
-        $hostName  = strtolower((string) $request->getHost());
-        $SHIPPING  = \App\Models\FeeSetting::getRate('shipping_fee_per_order', $hostName, $endRef);
-        $COD_RATE  = \App\Models\FeeSetting::getRate('cod_fee_rate',           $hostName, $endRef);
-        $VAT_RATE  = \App\Models\FeeSetting::getRate('cod_fee_vat_rate',       $hostName, $endRef);
+        // ── Profit% per row (defensive — ANY exception falls through silently
+        // so the main response doesn't break). profit_pct will simply be NULL.
+        try {
+            $endRef    = $end ?? (new \DateTime('now', new \DateTimeZone('Asia/Manila')))->format('Y-m-d');
+            $hostName  = strtolower((string) $request->getHost());
+            $SHIPPING  = \App\Models\FeeSetting::getRate('shipping_fee_per_order', $hostName, $endRef);
+            $COD_RATE  = \App\Models\FeeSetting::getRate('cod_fee_rate',           $hostName, $endRef);
+            $VAT_RATE  = \App\Models\FeeSetting::getRate('cod_fee_vat_rate',       $hostName, $endRef);
 
-        if ($SHIPPING !== null && $COD_RATE !== null && $VAT_RATE !== null) {
-            // Collect unique page_names from rows
-            $pageNames = [];
-            foreach ($rows as $r) {
-                $pn = trim((string)($r['page_name'] ?? ''));
-                if ($pn !== '') $pageNames[strtolower($pn)] = true;
-            }
-            $pageKeys = array_keys($pageNames);
+            if ($SHIPPING !== null && $COD_RATE !== null && $VAT_RATE !== null) {
+                // Collect unique page_names from rows. Some rows may be arrays
+                // or stdClass — handle both.
+                $pageNames = [];
+                foreach ($rows as $r) {
+                    $pn = is_array($r) ? ($r['page_name'] ?? '') : ($r->page_name ?? '');
+                    $pn = trim((string)$pn);
+                    if ($pn !== '') $pageNames[strtolower($pn)] = true;
+                }
+                $pageKeys = array_keys($pageNames);
 
-            // Per-page latest primary_item + mode_cod (≤ end_date)
-            $pageInfo = []; // page_key => ['item','item_key','mode_cod']
-            if (!empty($pageKeys)) {
-                $primaryRows = DB::table('daily_page_primary_item')
-                    ->whereIn('page_key', $pageKeys)
-                    ->where('ts_date', '<=', $endRef)
-                    ->orderBy('page_key')
-                    ->orderByDesc('ts_date')
-                    ->get(['page_key', 'primary_item', 'primary_item_key', 'primary_mode_cod']);
-                foreach ($primaryRows as $p) {
-                    $pk = (string)$p->page_key;
-                    if (!isset($pageInfo[$pk])) {
-                        $pageInfo[$pk] = [
-                            'item'     => (string)$p->primary_item,
-                            'item_key' => (string)$p->primary_item_key,
-                            'mode_cod' => $p->primary_mode_cod !== null ? (float)$p->primary_mode_cod : 0.0,
-                        ];
+                $pageInfo = [];
+                if (!empty($pageKeys) && Schema::hasTable('daily_page_primary_item')) {
+                    $primaryRows = DB::table('daily_page_primary_item')
+                        ->whereIn('page_key', $pageKeys)
+                        ->where('ts_date', '<=', $endRef)
+                        ->orderBy('page_key')
+                        ->orderByDesc('ts_date')
+                        ->get(['page_key', 'primary_item', 'primary_item_key', 'primary_mode_cod']);
+                    foreach ($primaryRows as $p) {
+                        $pk = (string)$p->page_key;
+                        if (!isset($pageInfo[$pk])) {
+                            $pageInfo[$pk] = [
+                                'item'     => (string)$p->primary_item,
+                                'item_key' => (string)$p->primary_item_key,
+                                'mode_cod' => $p->primary_mode_cod !== null ? (float)$p->primary_mode_cod : 0.0,
+                            ];
+                        }
                     }
                 }
-            }
 
-            // Per (page, item) rts_pct — page_item_settings
-            $rtsByKey = [];
-            if (\Illuminate\Support\Facades\Schema::hasTable('page_item_settings')) {
-                $settingRows = DB::table('page_item_settings')
-                    ->where('effective_date', '<=', $endRef)
-                    ->orderByDesc('effective_date')
-                    ->orderByDesc('id')
-                    ->get(['page_name', 'item_name', 'rts_pct']);
-                foreach ($settingRows as $s) {
-                    $k = strtolower(trim((string)$s->page_name)) . '||' . strtolower(trim((string)$s->item_name));
-                    if (!isset($rtsByKey[$k])) {
-                        $rtsByKey[$k] = (float)$s->rts_pct;
+                $rtsByKey = [];
+                if (Schema::hasTable('page_item_settings')) {
+                    $settingRows = DB::table('page_item_settings')
+                        ->where('effective_date', '<=', $endRef)
+                        ->orderByDesc('effective_date')
+                        ->orderByDesc('id')
+                        ->get(['page_name', 'item_name', 'rts_pct']);
+                    foreach ($settingRows as $s) {
+                        $k = strtolower(trim((string)$s->page_name)) . '||' . strtolower(trim((string)$s->item_name));
+                        if (!isset($rtsByKey[$k])) $rtsByKey[$k] = (float)$s->rts_pct;
                     }
                 }
-            }
 
-            // Per item cogs unit_cost
-            $cogsByItem = [];
-            $cogsRows = DB::table('cogs')
-                ->where('effective_date', '<=', $endRef)
-                ->orderByDesc('effective_date')
-                ->orderByDesc('id')
-                ->get(['item_name', 'unit_cost']);
-            foreach ($cogsRows as $c) {
-                $k = strtolower(trim((string)$c->item_name));
-                if (!isset($cogsByItem[$k])) {
-                    $cogsByItem[$k] = (float)$c->unit_cost;
+                $cogsByItem = [];
+                if (Schema::hasTable('cogs')) {
+                    $cogsRows = DB::table('cogs')
+                        ->where('effective_date', '<=', $endRef)
+                        ->orderByDesc('effective_date')
+                        ->orderByDesc('id')
+                        ->get(['item_name', 'unit_cost']);
+                    foreach ($cogsRows as $c) {
+                        $k = strtolower(trim((string)$c->item_name));
+                        if (!isset($cogsByItem[$k])) $cogsByItem[$k] = (float)$c->unit_cost;
+                    }
                 }
+
+                $rows = $rows->map(function ($r) use ($pageInfo, $rtsByKey, $cogsByItem, $SHIPPING, $COD_RATE, $VAT_RATE) {
+                    $isArr = is_array($r);
+                    $get   = function ($key) use ($r, $isArr) {
+                        return $isArr ? ($r[$key] ?? null) : ($r->$key ?? null);
+                    };
+                    $set   = function ($key, $val) use (&$r, $isArr) {
+                        if ($isArr) $r[$key] = $val; else $r->$key = $val;
+                    };
+
+                    $set('profit_pct', null);
+                    $cpp = $get('cpp');
+                    if ($cpp === null) return $r;
+                    $pageName = trim((string)($get('page_name') ?? ''));
+                    if ($pageName === '') return $r;
+                    $pageKey = strtolower($pageName);
+                    $info = $pageInfo[$pageKey] ?? null;
+                    if (!$info) return $r;
+                    $modeCod = (float)$info['mode_cod'];
+                    if ($modeCod <= 0) return $r;
+                    $itemKey = strtolower(trim((string)$info['item']));
+                    $rtsKey  = $pageKey . '||' . $itemKey;
+                    $rts     = $rtsByKey[$rtsKey] ?? null;
+                    $iv      = $cogsByItem[$itemKey] ?? null;
+                    if ($rts === null || $iv === null) return $r;
+
+                    $df             = 1.0 - ((float)$rts / 100.0);
+                    $codFeePerUnit  = $modeCod * (float)$COD_RATE * (1.0 + (float)$VAT_RATE);
+                    $profitPerOrder = $df * ($modeCod - (float)$iv - $codFeePerUnit)
+                                      - (float)$SHIPPING
+                                      - (float)$cpp;
+                    $set('profit_pct', round(($profitPerOrder / $modeCod) * 100.0, 2));
+                    return $r;
+                });
             }
-
-            // Enrich each row
-            $rows = $rows->map(function ($r) use ($pageInfo, $rtsByKey, $cogsByItem, $SHIPPING, $COD_RATE, $VAT_RATE) {
-                $r['profit_pct'] = null;
-                $cpp = $r['cpp'] ?? null;
-                if ($cpp === null) return $r;
-
-                $pageName = trim((string)($r['page_name'] ?? ''));
-                if ($pageName === '') return $r;
-                $pageKey = strtolower($pageName);
-
-                $info = $pageInfo[$pageKey] ?? null;
-                if (!$info) return $r;
-
-                $modeCod = (float)$info['mode_cod'];
-                if ($modeCod <= 0) return $r;
-
-                $itemKey = strtolower(trim((string)$info['item']));
-                $rtsKey  = $pageKey . '||' . $itemKey;
-                $rts     = $rtsByKey[$rtsKey] ?? null;
-                $iv      = $cogsByItem[$itemKey] ?? null;
-                if ($rts === null || $iv === null) return $r;
-
-                $df             = 1.0 - ((float)$rts / 100.0);
-                $codFeePerUnit  = $modeCod * (float)$COD_RATE * (1.0 + (float)$VAT_RATE);
-                $profitPerOrder = $df * ($modeCod - (float)$iv - $codFeePerUnit)
-                                  - (float)$SHIPPING
-                                  - (float)$cpp;
-                $r['profit_pct'] = round(($profitPerOrder / $modeCod) * 100.0, 2);
-                return $r;
-            });
+        } catch (\Throwable $e) {
+            // Silently fall through — profit_pct stays null. Don't break the
+            // main response just because of an enrichment error.
+            \Illuminate\Support\Facades\Log::warning('profit_pct enrichment failed: ' . $e->getMessage());
         }
 
         // Totals for current filter (no group)
