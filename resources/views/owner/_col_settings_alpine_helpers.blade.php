@@ -47,15 +47,97 @@
         saving: false,
         dragSrc: null,   // { gIdx, rIdx }
 
+        // Formula autocomplete state — shared across all formula inputs.
+        // Token format: {{col_id}} for same-table, {{op:col_id}} for owner_private cross-ref.
+        autocompleteOpen: false,
+        autocompleteFor: null,        // which rule the dropdown belongs to
+        autocompleteResults: [],      // [{token, label}]
+        autocompleteCaretPos: 0,
+        autocompleteQuery: '',
+        autocompleteInputEl: null,
+
         labelFor(id){ return ID_TO_LABEL[id] || id; },
+
+        // ── Formula autocomplete ────────────────────────────────────────
+        onFormulaInput(rule, ev){
+          const el  = ev.target;
+          const val = String(el.value);
+          const pos = el.selectionStart;
+          // Update rule's expr value
+          rule.value = { type: 'formula', expr: val };
+          // Detect `{{` trigger: walk back from caret looking for `{{` not yet closed
+          let trigger = -1;
+          for (let i = pos - 1; i >= 0 && i >= pos - 50; i--) {
+            const c2 = val.substring(i, i + 2);
+            if (c2 === '}}') break;       // already closed → no autocomplete
+            if (c2 === '{{') { trigger = i; break; }
+          }
+          if (trigger < 0) { this.closeAutocomplete(); return; }
+          this.autocompleteQuery = val.substring(trigger + 2, pos).toLowerCase();
+          this.autocompleteFor   = rule;
+          this.autocompleteCaretPos = pos;
+          this.autocompleteInputEl  = el;
+          this.refreshAutocompleteResults();
+          this.autocompleteOpen = this.autocompleteResults.length > 0;
+        },
+        refreshAutocompleteResults(){
+          const q = (this.autocompleteQuery || '').toLowerCase();
+          const opts = [];
+          // Same-table options first
+          for (const c of (this.tableCatalog || [])) {
+            const t = c.id;
+            if (t.toLowerCase().includes(q) || (c.label || '').toLowerCase().includes(q)) {
+              opts.push({ token: t, label: c.label });
+            }
+          }
+          // Cross-table (owner_private) options with `op:` prefix
+          for (const c of (this.ownerPrivateCatalog || [])) {
+            const t = 'op:' + c.id;
+            if (t.toLowerCase().includes(q) || (c.label || '').toLowerCase().includes(q)) {
+              opts.push({ token: t, label: '↗ ' + (c.label || c.id) + ' (page summary)' });
+            }
+          }
+          this.autocompleteResults = opts.slice(0, 25);
+        },
+        selectAutocomplete(rule, opt){
+          if (!this.autocompleteInputEl) return;
+          const el  = this.autocompleteInputEl;
+          const val = String(el.value);
+          const pos = this.autocompleteCaretPos;
+          // Find the `{{` start
+          let trigger = -1;
+          for (let i = pos - 1; i >= 0 && i >= pos - 50; i--) {
+            if (val.substring(i, i + 2) === '{{') { trigger = i; break; }
+          }
+          if (trigger < 0) { this.closeAutocomplete(); return; }
+          // Insert: [...val before trigger] {{token}} [...val after caret]
+          const before = val.substring(0, trigger);
+          const after  = val.substring(pos);
+          const newVal = before + '{{' + opt.token + '}}' + after;
+          el.value = newVal;
+          rule.value = { type: 'formula', expr: newVal };
+          // Place caret after the `}}`
+          const newCaret = (before + '{{' + opt.token + '}}').length;
+          setTimeout(() => { el.focus(); el.setSelectionRange(newCaret, newCaret); }, 0);
+          this.closeAutocomplete();
+        },
+        acceptFirstAutocomplete(rule){
+          if (this.autocompleteResults.length > 0) {
+            this.selectAutocomplete(rule, this.autocompleteResults[0]);
+          }
+        },
+        closeAutocomplete(){
+          this.autocompleteOpen = false;
+          this.autocompleteFor = null;
+          this.autocompleteInputEl = null;
+        },
 
         addGroup(){ this.groups.push({ cols: [], rules: [] }); },
         removeGroup(gIdx){ this.groups.splice(gIdx, 1); },
         // Deep-clone an existing group (cols + rules) and append immediately
         // after the source. JSON-roundtrip avoids any reference sharing.
-        // We rebuild the whole array (slice+spread) instead of splice — fixes
-        // an Alpine reactive-key collision where existing groups after the
-        // insertion point would lose their inner state (open chevron, etc.).
+        // Auto-saves to DB so the duplicate persists across page refresh
+        // (without requiring user to click Save manually).
         duplicateGroup(gIdx){
           const src = this.groups[gIdx];
           if (!src) return;
@@ -65,6 +147,8 @@
             clone,
             ...this.groups.slice(gIdx + 1),
           ];
+          // Auto-save so duplicate persists immediately
+          if (typeof this.save === 'function') this.save();
         },
         // Resolve column id → human-readable label using the table's catalog.
         labelForCol(colId){
@@ -102,24 +186,32 @@
           this.dragSrc = null;
         },
 
-        // ── Rule value (literal vs ref) helpers ─────────────────────────
+        // ── Rule value (literal | ref | formula) helpers ────────────────
         ruleValueKind(r){
-          if (r && r.value && typeof r.value === 'object' && r.value.type === 'ref') return 'ref';
+          if (r && r.value && typeof r.value === 'object') {
+            if (r.value.type === 'ref')     return 'ref';
+            if (r.value.type === 'formula') return 'formula';
+          }
           return 'literal';
         },
         setRuleValueKind(r, kind){
           if (kind === 'ref') {
-            // Switching to ref — pick first owner_private col as default.
             const firstCol = (this.ownerPrivateCatalog[0] || {}).id || 'breakeven_cpp';
             r.value = { type: 'ref', table: 'owner_private', col: firstCol };
+          } else if (kind === 'formula') {
+            r.value = { type: 'formula', expr: '' };
           } else {
             r.value = 0;
           }
         },
         rulePreviewText(r){
-          if (this.ruleValueKind(r) === 'ref') {
+          const k = this.ruleValueKind(r);
+          if (k === 'ref') {
             const lbl = OP_LABEL_TO_REF_LABEL[r.value.col] || r.value.col;
             return '→ ' + lbl;
+          }
+          if (k === 'formula') {
+            return '🧮 ' + (r.value.expr || '');
           }
           return (r.value ?? 0);
         },
@@ -145,6 +237,8 @@
                   let value;
                   if (r && r.value && typeof r.value === 'object' && r.value.type === 'ref') {
                     value = { type: 'ref', table: 'owner_private', col: String(r.value.col || '') };
+                  } else if (r && r.value && typeof r.value === 'object' && r.value.type === 'formula') {
+                    value = { type: 'formula', expr: String(r.value.expr || '') };
                   } else {
                     value = Number(r.value) || 0;
                   }

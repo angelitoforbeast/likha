@@ -357,11 +357,39 @@
 
         // Conditional formatting — applies bg color based on rules.
         // Supports compare_col (rule fires based on sibling column's value).
+        // Safe formula evaluator (same-table tokens only sa daily view)
+        _evalFormula(expr, sameRow) {
+          if (!expr || !sameRow) return NaN;
+          const tokens = [...expr.matchAll(/\{\{\s*([a-z0-9_:]+)\s*\}\}/gi)];
+          let resolved = expr;
+          for (const m of tokens) {
+            const tok = m[1];
+            if (tok.startsWith('op:')) return NaN;
+            const val = sameRow[tok];
+            if (val == null || isNaN(Number(val))) return NaN;
+            const escaped = m[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            resolved = resolved.replace(new RegExp(escaped, 'g'), '(' + Number(val) + ')');
+          }
+          const cleaned = resolved.replace(/\s+/g, '');
+          if (!/^[\d.+\-*/%()]*$/.test(cleaned) || cleaned === '') return NaN;
+          try {
+            const r = Function('"use strict";return (' + cleaned + ');')();
+            return (typeof r === 'number' && isFinite(r)) ? r : NaN;
+          } catch (e) { return NaN; }
+        },
+
         cellStyle(colId, value, row) {
           const rules = (this.COL_FORMAT || {})[colId] || [];
           for (const r of rules) {
             const op = r.op;
-            const v  = (typeof r.value === 'number') ? r.value : null;
+            // Threshold: literal number OR formula (same-table tokens only)
+            let v = null;
+            if (typeof r.value === 'number') {
+              v = r.value;
+            } else if (r.value && typeof r.value === 'object' && r.value.type === 'formula') {
+              v = this._evalFormula(String(r.value.expr || ''), row);
+              if (isNaN(v)) continue;
+            } else { continue; }
             if (v == null) continue;
             // Pick eval value: compare_col (sibling) or self
             let evalRaw = value;

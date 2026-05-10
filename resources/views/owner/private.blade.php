@@ -524,7 +524,7 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx?(row.rts_pct===null?'background:#fef2f2;':rbStyle(row.rts_pct)):'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')+(col.id==='proj_pct_1d'&&row.proj_pct_last_day!==null?rppStyle(row.proj_pct_last_day):'')+(col.id==='proj_pct_3d'&&row.proj_pct_last_3d!==null?rppStyle(row.proj_pct_last_3d):'')+(col.id==='proj_pct_7d'&&row.proj_pct_last_7d!==null?rppStyle(row.proj_pct_last_7d):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
+                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_pct'&&row.projected_profit!==null&&row.gross_sales>0?rppStyle(row.projected_profit/row.gross_sales*100):'')+(col.id==='proj_pct_1d'&&row.proj_pct_last_day!==null?rppStyle(row.proj_pct_last_day):'')+(col.id==='proj_pct_3d'&&row.proj_pct_last_3d!==null?rppStyle(row.proj_pct_last_3d):'')+(col.id==='proj_pct_7d'&&row.proj_pct_last_7d!==null?rppStyle(row.proj_pct_last_7d):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -1447,11 +1447,12 @@
         }
       },
 
-      // Resolve a rule's threshold value. Numbers pass through. Cross-refs
-      // (`{type:'ref',table:'owner_private',col:'<id>'}`) are looked up via
-      // cellValueFor() on the supplied refRow (typically the parent page
-      // summary row). Returns NaN when ref can't be resolved.
-      resolveRuleThreshold(threshold, refRow){
+      // Resolve a rule's threshold value. Numbers pass through. Refs are
+      // looked up via cellValueFor() on the supplied refRow. Formula expressions
+      // (`{type:'formula',expr:'{{cpp}} + {{op:breakeven_cpp}} - 1'}`) are
+      // evaluated against the cell's own row + parent row. Returns NaN when
+      // anything can't be resolved.
+      resolveRuleThreshold(threshold, refRow, sameRow){
         if (threshold == null) return NaN;
         if (typeof threshold === 'number') return threshold;
         if (typeof threshold === 'object' && threshold.type === 'ref') {
@@ -1460,9 +1461,52 @@
           const v = this.cellValueFor(fakeCol, refRow);
           return (v == null || isNaN(Number(v))) ? NaN : Number(v);
         }
-        // Possibly a numeric-ish string.
+        if (typeof threshold === 'object' && threshold.type === 'formula') {
+          return this._evalFormulaExpr(String(threshold.expr || ''), sameRow, refRow);
+        }
         const n = Number(threshold);
         return isNaN(n) ? NaN : n;
+      },
+
+      // Safe formula evaluator. Tokens: {{col}} (same-table) or {{op:col}}
+      // (owner_private cross-ref). Replace each token with the row's numeric
+      // value. Then validate remaining string contains only digits/operators
+      // (no eval injection risk) and evaluate via Function constructor.
+      // Returns NaN if any token resolves to null/missing or formula is invalid.
+      _evalFormulaExpr(expr, sameRow, refRow){
+        if (!expr) return NaN;
+        // Find all {{token}} matches
+        const tokens = [...expr.matchAll(/\{\{\s*([a-z0-9_:]+)\s*\}\}/gi)];
+        let resolved = expr;
+        for (const m of tokens) {
+          const tok = m[1];
+          let val;
+          if (tok.startsWith('op:')) {
+            // Cross-ref to owner_private (parent page row)
+            if (!refRow) return NaN;
+            const colId = tok.substring(3);
+            const fakeCol = { id: colId, sort: null };
+            val = this.cellValueFor(fakeCol, refRow);
+          } else {
+            // Same-table — use sameRow
+            if (!sameRow) return NaN;
+            val = sameRow[tok];
+          }
+          if (val == null || isNaN(Number(val))) return NaN;
+          // Replace ALL occurrences of this token (regex-escape the original)
+          const escaped = m[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          resolved = resolved.replace(new RegExp(escaped, 'g'), '(' + Number(val) + ')');
+        }
+        // Strip whitespace, then validate: only digits, dot, +, -, *, /, %, parens
+        const cleaned = resolved.replace(/\s+/g, '');
+        if (!/^[\d.+\-*/%()]*$/.test(cleaned)) return NaN;
+        if (cleaned === '') return NaN;
+        try {
+          const result = Function('"use strict";return (' + cleaned + ');')();
+          return (typeof result === 'number' && isFinite(result)) ? result : NaN;
+        } catch (e) {
+          return NaN;
+        }
       },
 
       // Generic rule evaluator. Pass:
@@ -1484,8 +1528,8 @@
             if (activeState === 'active' && !isOn) continue;
             if (activeState === 'off'    &&  isOn) continue;
           }
-          const t = this.resolveRuleThreshold(r.value, refRow);
-          if (isNaN(t)) continue;   // ref couldn't resolve → skip rule
+          const t = this.resolveRuleThreshold(r.value, refRow, sameRow);
+          if (isNaN(t)) continue;   // ref/formula couldn't resolve → skip rule
           // Determine what to evaluate: compare_col (sibling) or self
           let evalRaw = value;
           if (r.compare_col && sameRow && Object.prototype.hasOwnProperty.call(sameRow, r.compare_col)) {

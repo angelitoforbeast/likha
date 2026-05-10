@@ -128,16 +128,17 @@
                 <option value="<">&lt;</option>
               </select>
 
-              {{-- Value input: literal number OR ref-to-Page-Summary col --}}
-              @if(!empty($allowRefValues))
+              {{-- Value input: literal number OR ref OR formula --}}
               <select :value="ruleValueKind(r)"
                       @change="setRuleValueKind(r, $event.target.value)"
                       class="border border-slate-300 rounded px-1 py-0.5 text-xs"
-                      title="Choose: literal number, or reference to Page Summary column">
+                      title="Choose: literal number, ref to Page Summary column, or formula">
                 <option value="literal">📐 Literal</option>
+                @if(!empty($allowRefValues))
                 <option value="ref">🔗 Ref → Page Summary</option>
+                @endif
+                <option value="formula">🧮 Formula</option>
               </select>
-              @endif
 
               <template x-if="ruleValueKind(r) === 'literal'">
                 <input type="number" step="0.01"
@@ -155,6 +156,37 @@
                     <option :value="oc.id" x-text="oc.label"></option>
                   </template>
                 </select>
+              </template>
+              {{-- Formula input with {{column}} autocomplete --}}
+              <template x-if="ruleValueKind(r) === 'formula'">
+                <span class="relative" style="display:inline-block;">
+                  <input type="text"
+                         :value="r.value && r.value.expr ? r.value.expr : ''"
+                         @input="onFormulaInput(r, $event)"
+                         @keydown.escape="closeAutocomplete()"
+                         @keydown.enter.prevent="acceptFirstAutocomplete(r)"
+                         @blur="setTimeout(() => closeAutocomplete(), 150)"
+                         placeholder="e.g., {{rts}} + {{op:cpp}} - 1"
+                         class="border border-slate-300 rounded px-2 py-0.5 text-xs"
+                         style="width:280px;font-family:ui-monospace,monospace;">
+                  {{-- Autocomplete dropdown — shown when user types `{{` --}}
+                  <div x-show="autocompleteOpen && autocompleteFor === r"
+                       x-cloak
+                       class="absolute z-50 bg-white border border-slate-300 shadow-lg rounded mt-1 max-h-48 overflow-auto"
+                       style="min-width:240px;font-size:11px;">
+                    <template x-for="(opt, idx) in autocompleteResults" :key="'ac-'+idx">
+                      <div @mousedown.prevent="selectAutocomplete(r, opt)"
+                           class="px-2 py-1 hover:bg-blue-50 cursor-pointer flex items-center gap-2"
+                           :style="idx === 0 ? 'background:#eff6ff;' : ''">
+                        <code class="text-[10px] text-slate-600" x-text="opt.token"></code>
+                        <span class="text-slate-700" x-text="opt.label"></span>
+                      </div>
+                    </template>
+                    <template x-if="autocompleteResults.length === 0">
+                      <div class="px-2 py-1 text-slate-400 italic">No matches</div>
+                    </template>
+                  </div>
+                </span>
               </template>
 
               <span class="text-xs text-slate-500">→ bg</span>

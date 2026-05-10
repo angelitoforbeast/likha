@@ -502,6 +502,29 @@
         // has no /owner/private parent context, so cross-table refs (e.g.
         // `cpp ≥ owner_private:breakeven_cpp`) cannot resolve and are skipped
         // (the rule iteration falls through to the next rule).
+        // Safe formula evaluator (mirrors the one sa private.blade.php).
+        // Only same-table tokens supported here — no parent page context.
+        // Skips cross-table {{op:...}} refs by returning NaN.
+        _evalFormulaExpr(expr, sameRow){
+          if (!expr || !sameRow) return NaN;
+          const tokens = [...expr.matchAll(/\{\{\s*([a-z0-9_:]+)\s*\}\}/gi)];
+          let resolved = expr;
+          for (const m of tokens) {
+            const tok = m[1];
+            if (tok.startsWith('op:')) return NaN;  // no parent here
+            const val = sameRow[tok];
+            if (val == null || isNaN(Number(val))) return NaN;
+            const escaped = m[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            resolved = resolved.replace(new RegExp(escaped, 'g'), '(' + Number(val) + ')');
+          }
+          const cleaned = resolved.replace(/\s+/g, '');
+          if (!/^[\d.+\-*/%()]*$/.test(cleaned) || cleaned === '') return NaN;
+          try {
+            const result = Function('"use strict";return (' + cleaned + ');')();
+            return (typeof result === 'number' && isFinite(result)) ? result : NaN;
+          } catch (e) { return NaN; }
+        },
+
         cellFormatStyle(colId, value, row){
           const rules = (window.__CAMPAIGNS_COL_FORMAT__ || {})[colId];
           if (!Array.isArray(rules) || rules.length === 0) return '';
@@ -515,7 +538,13 @@
             }
             // Cross-table ref → skip (no parent context here).
             if (r.value && typeof r.value === 'object' && r.value.type === 'ref') continue;
-            const t = Number(r.value);
+            // Formula → evaluate same-table tokens only (no parent ref here)
+            let t;
+            if (r.value && typeof r.value === 'object' && r.value.type === 'formula') {
+              t = this._evalFormulaExpr(String(r.value.expr || ''), row);
+            } else {
+              t = Number(r.value);
+            }
             if (isNaN(t)) continue;
             // Determine evaluated value: compare_col (sibling) or self.
             // If compare_col is set, fetch that column's value sa same row.

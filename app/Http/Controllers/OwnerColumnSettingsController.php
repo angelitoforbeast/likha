@@ -318,6 +318,17 @@ class OwnerColumnSettingsController extends Controller
             ) {
                 return ['type' => 'ref', 'table' => 'owner_private', 'col' => $v['col']];
             }
+            // Formula expression (string with {{column}} tokens + math).
+            // Validation defers to JS side at evaluation time; here we just
+            // ensure the expr is a non-empty string of reasonable length.
+            if (is_array($v)
+                && (($v['type'] ?? null) === 'formula')
+                && is_string($v['expr'] ?? null)
+                && strlen(trim((string)$v['expr'])) > 0
+                && strlen((string)$v['expr']) <= 500
+            ) {
+                return ['type' => 'formula', 'expr' => trim((string)$v['expr'])];
+            }
             return null;
         };
 
@@ -459,6 +470,15 @@ class OwnerColumnSettingsController extends Controller
                 && isset($refTargetSet[$v['col']])
             ) {
                 return ['type' => 'ref', 'table' => 'owner_private', 'col' => $v['col']];
+            }
+            // Formula expression — string with {{column}} tokens + math operators.
+            if (is_array($v)
+                && (($v['type'] ?? null) === 'formula')
+                && is_string($v['expr'] ?? null)
+                && strlen(trim((string)$v['expr'])) > 0
+                && strlen((string)$v['expr']) <= 500
+            ) {
+                return ['type' => 'formula', 'expr' => trim((string)$v['expr'])];
             }
             return null;
         };

@@ -363,6 +363,7 @@
             clone,
             ...this.groups.slice(gIdx + 1),
           ];
+          if (typeof this.save === 'function') this.save();
         },
         labelForCol(colId){
           const c = (this.tableCatalog || []).find(x => x.id === colId);
