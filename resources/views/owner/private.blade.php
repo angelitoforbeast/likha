@@ -1488,9 +1488,11 @@
             const fakeCol = { id: colId, sort: null };
             val = this.cellValueFor(fakeCol, refRow);
           } else {
-            // Same-table — use sameRow
+            // Same-table — use cellValueFor para naka-map sa proper data field
+            // (e.g., col.id 'jnt_rts' → row.jnt_rts_pct via the switch sa cellValueFor)
             if (!sameRow) return NaN;
-            val = sameRow[tok];
+            const fakeCol = { id: tok, sort: null };
+            val = this.cellValueFor(fakeCol, sameRow);
           }
           if (val == null || isNaN(Number(val))) return NaN;
           // Replace ALL occurrences of this token (regex-escape the original)
