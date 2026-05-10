@@ -536,7 +536,7 @@
               <div class="v-cell">
                 <div>
                   <div class="v-field-label">Primary Text</div>
-                  <div class="v-field-block"><div class="v-field-value">${escapeHtml(primary)}</div></div>
+                  <div class="v-field-block"><div class="v-field-value preserve">${escapeHtml(primary)}</div></div>
                 </div>
                 <div>
                   <div class="v-field-label">Headline</div>

@@ -408,9 +408,12 @@ class GPTAdGeneratorController extends Controller
             'HARD CONSTRAINT: Do NOT invent factual details (colors/sizes/fit/materials/variants/bundles/warranty/COD/delivery/promos/price) unless explicitly present in Suggestions or the Product Description.',
             // Diversity — only matters when the request asks for multiple variants.
             'DIVERSITY: When generating MORE than one variant in a single response, EACH variant MUST use a DISTINCT hook angle from this set: (1) curiosity / question hook, (2) fear or safety / pain-point, (3) social proof / others-are-buying, (4) value / sulit / worth-it, (5) urgency / FOMO. No two variants in the same response may share opening words or main hook category. Vary sentence rhythm, emoji placement, and call-to-action style across variants.',
-            // Output shape.
-            'Output EXACTLY one single line with 7 tab-separated fields: Item, Primary Text, Headline, Messaging Template, Quick Reply 1, Quick Reply 2, Quick Reply 3.',
-            'Never add headers, labels, explanations, or extra lines.',
+            // Output shape — 7 tab-separated fields. Line breaks ALLOWED inside Primary Text and Messaging Template only.
+            'Output EXACTLY 7 fields separated by REAL TAB CHARACTERS (ASCII 0x09) in this order: Item, Primary Text, Headline, Messaging Template, Quick Reply 1, Quick Reply 2, Quick Reply 3.',
+            'Within Primary Text and Messaging Template, you MAY use real LF newlines (ASCII 0x0A) to separate the hook from a short bulleted list of benefits — only when it improves readability. Use ✅ or ✔ as bullet markers (mirror the TOP Suggestion examples). Aim for 2–4 bullets max when used.',
+            'Item, Headline, Quick Reply 1, Quick Reply 2, and Quick Reply 3 must each stay on a SINGLE LINE — no internal line breaks.',
+            'NEVER insert TAB characters inside any field — TAB is reserved as the field separator only.',
+            'Never add headers, labels, explanations, or extra commentary around the output.',
         ]);
     }
 
