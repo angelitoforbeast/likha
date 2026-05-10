@@ -48,7 +48,7 @@
         dragSrc: null,   // { gIdx, rIdx }
 
         // Formula autocomplete state — shared across all formula inputs.
-        // Token format: {{col_id}} for same-table, {{op:col_id}} for owner_private cross-ref.
+        // Token format: [[col_id]] for same-table, [[op:col_id]] for owner_private cross-ref.
         autocompleteOpen: false,
         autocompleteFor: null,        // which rule the dropdown belongs to
         autocompleteResults: [],      // [{token, label}]
@@ -65,7 +65,7 @@
           const pos = el.selectionStart;
           // Update rule's expr value
           rule.value = { type: 'formula', expr: val };
-          // Detect `{{` trigger: walk back from caret looking for `{{` not yet closed
+          // Detect [[ trigger: walk back from caret looking for opening token
           let trigger = -1;
           for (let i = pos - 1; i >= 0 && i >= pos - 50; i--) {
             const c2 = val.substring(i, i + 2);
@@ -104,19 +104,19 @@
           const el  = this.autocompleteInputEl;
           const val = String(el.value);
           const pos = this.autocompleteCaretPos;
-          // Find the `{{` start
+          // Find the opening [[ position
           let trigger = -1;
           for (let i = pos - 1; i >= 0 && i >= pos - 50; i--) {
             if (val.substring(i, i + 2) === '[[') { trigger = i; break; }
           }
           if (trigger < 0) { this.closeAutocomplete(); return; }
-          // Insert: [...val before trigger] {{token}} [...val after caret]
+          // Insert: [...val before trigger] [[token]] [...val after caret]
           const before = val.substring(0, trigger);
           const after  = val.substring(pos);
           const newVal = before + '[[' + opt.token + ']]' + after;
           el.value = newVal;
           rule.value = { type: 'formula', expr: newVal };
-          // Place caret after the `}}`
+          // Place caret after the closing ]]
           const newCaret = (before + '[[' + opt.token + ']]').length;
           setTimeout(() => { el.focus(); el.setSelectionRange(newCaret, newCaret); }, 0);
           this.closeAutocomplete();
