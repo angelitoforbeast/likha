@@ -166,7 +166,7 @@
                          @keydown.escape="closeAutocomplete()"
                          @keydown.enter.prevent="acceptFirstAutocomplete(r)"
                          @blur="setTimeout(() => closeAutocomplete(), 150)"
-                         placeholder="e.g., {{rts}} + {{op:cpp}} - 1"
+                         placeholder="e.g., @{{rts}} + @{{op:cpp}} - 1"
                          class="border border-slate-300 rounded px-2 py-0.5 text-xs"
                          style="width:280px;font-family:ui-monospace,monospace;">
                   {{-- Autocomplete dropdown — shown when user types `{{` --}}
