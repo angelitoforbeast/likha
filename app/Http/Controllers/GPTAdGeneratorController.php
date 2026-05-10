@@ -490,9 +490,16 @@ class GPTAdGeneratorController extends Controller
     }
 
     /**
-     * GET /ad-copy-suggestions?page={page|all}&item={item|all}&active_only={0|1}
+     * GET /ad-copy-suggestions
      *
-     * Cached 5 minutes per (page, item, active_only) combo.
+     * Query params:
+     *   page         — page name OR 'all'
+     *   item         — item name OR 'all'
+     *   active_only  — '0' | '1' (default 1)
+     *   from_date    — YYYY-MM-DD (default = today − 30)
+     *   to_date      — YYYY-MM-DD (default = today)
+     *
+     * Cached 5 minutes per full (page, item, active, from, to) combo.
      */
     public function loadAdCopySuggestions(Request $request)
     {
@@ -500,19 +507,30 @@ class GPTAdGeneratorController extends Controller
         $itemParam  = (string) $request->query('item', 'all');
         $activeOnly = (string) $request->query('active_only', '1') === '1';
 
+        // Date range — default last 30 days (PH timezone). Format strict YYYY-MM-DD.
+        $tz       = new \DateTimeZone('Asia/Manila');
+        $today    = (new \DateTime('now', $tz))->format('Y-m-d');
+        $defFrom  = (new \DateTime('now', $tz))->modify('-30 days')->format('Y-m-d');
+        $valid    = fn($s) => is_string($s) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $s);
+        $fromDate = $valid($request->query('from_date')) ? $request->query('from_date') : $defFrom;
+        $toDate   = $valid($request->query('to_date'))   ? $request->query('to_date')   : $today;
+        if ($fromDate > $toDate) [$fromDate, $toDate] = [$toDate, $fromDate];
+
         $pageNorm = $this->normalizePage($pageParam);
         $itemNorm = $this->normalizePage($itemParam);
 
         $cacheKey = sprintf(
-            'gpt_suggestions:%s:%s:%d',
+            'gpt_suggestions:%s:%s:%d:%s:%s',
             mb_strtolower($pageNorm !== '' ? $pageNorm : 'all'),
             mb_strtolower($itemNorm !== '' ? $itemNorm : 'all'),
-            $activeOnly ? 1 : 0
+            $activeOnly ? 1 : 0,
+            $fromDate,
+            $toDate
         );
 
         try {
-            $payload = Cache::remember($cacheKey, 300 /* 5 min */, function () use ($pageNorm, $itemNorm, $activeOnly) {
-                return $this->buildSuggestions($pageNorm, $itemNorm, $activeOnly);
+            $payload = Cache::remember($cacheKey, 300 /* 5 min */, function () use ($pageNorm, $itemNorm, $activeOnly, $fromDate, $toDate) {
+                return $this->buildSuggestions($pageNorm, $itemNorm, $activeOnly, $fromDate, $toDate);
             });
         } catch (\Throwable $e) {
             Log::error('loadAdCopySuggestions cache error', ['msg' => $e->getMessage()]);
@@ -531,54 +549,44 @@ class GPTAdGeneratorController extends Controller
      * When fallback was used (active had no data), also includes
      * 'fallback_used' => true and 'fallback_reason' => string.
      */
-    private function buildSuggestions(string $pageNorm, string $itemNorm, bool $activeOnly): array
+    private function buildSuggestions(string $pageNorm, string $itemNorm, bool $activeOnly, ?string $fromDate = null, ?string $toDate = null): array
     {
         try {
             $applyPage = $pageNorm !== '' && mb_strtolower($pageNorm) !== 'all';
             $applyItem = $itemNorm !== '' && mb_strtolower($itemNorm) !== 'all';
 
-            // Resolve raw page_name strings that normalize to $pageNorm (covers
-            // NBSP / whitespace variants in the DB).
+            // Resolve raw page_name strings that normalize to $pageNorm
             $rawMatches = null;
             if ($applyPage) {
                 $rawPages = DB::table('ads_manager_reports')
                     ->whereNotNull('page_name')
-                    ->select('page_name')
-                    ->distinct()
-                    ->pluck('page_name');
-
+                    ->select('page_name')->distinct()->pluck('page_name');
                 $rawMatches = [];
                 foreach ($rawPages as $rp) {
-                    if ($this->normalizePage($rp) === $pageNorm) {
-                        $rawMatches[] = $rp;
-                    }
+                    if ($this->normalizePage($rp) === $pageNorm) $rawMatches[] = $rp;
                 }
-
                 if (empty($rawMatches)) {
                     return ['output' => "⚠️ No matching page found for “{$pageNorm}”."];
                 }
             }
 
-            // Active-set filter: subquery of ad_set_ids whose ad_set_delivery
-            // is 'active%' on its latest day. Mirrors AdsManagerCampaignsController.
+            // Active-set filter: latest-day delivery = 'active%'
             $activeAdSets = null;
             if ($activeOnly) {
                 $latestAdSetDay = DB::table('ads_manager_reports')
                     ->selectRaw('ad_set_id, MAX(`day`) AS latest_day')
                     ->whereNotNull('ad_set_id')
                     ->groupBy('ad_set_id');
-
                 $activeAdSets = DB::table(DB::raw('ads_manager_reports a'))
                     ->joinSub($latestAdSetDay, 't', function ($j) {
                         $j->on('a.ad_set_id', '=', 't.ad_set_id')
                           ->whereRaw('a.`day` = t.latest_day');
                     })
                     ->whereRaw("LOWER(TRIM(a.ad_set_delivery)) LIKE 'active%'")
-                    ->select('a.ad_set_id')
-                    ->distinct();
+                    ->select('a.ad_set_id')->distinct();
             }
 
-            // 1) Aggregate reports
+            // 1) Aggregate reports — NOW WITH DATE FILTER + link_clicks
             $reports = DB::table('ads_manager_reports as r')
                 ->when($applyPage, fn ($q) => $q->whereIn('r.page_name', $rawMatches))
                 ->when($applyItem, fn ($q) => $q->whereRaw(
@@ -586,63 +594,58 @@ class GPTAdGeneratorController extends Controller
                     ['%'.mb_strtolower($itemNorm).'%']
                 ))
                 ->when($activeAdSets, fn ($q) => $q->whereIn('r.ad_set_id', $activeAdSets))
+                ->when($fromDate, fn ($q) => $q->whereRaw('DATE(r.`day`) >= ?', [$fromDate]))
+                ->when($toDate,   fn ($q) => $q->whereRaw('DATE(r.`day`) <= ?', [$toDate]))
                 ->whereNotNull('r.ad_id')
                 ->where('r.ad_id', '<>', '')
                 ->select([
                     'r.ad_id',
                     DB::raw('SUM(COALESCE(r.amount_spent_php, 0)) AS spend'),
                     DB::raw('SUM(COALESCE(r.messaging_conversations_started, 0)) AS msgs'),
+                    DB::raw('SUM(COALESCE(r.link_clicks, 0)) AS clicks'),
                     DB::raw('MAX(r.page_name) AS page_name'),
                 ])
                 ->groupBy('r.ad_id')
                 ->havingRaw('SUM(COALESCE(r.messaging_conversations_started, 0)) > 0')
                 ->get();
 
-            // Fallback: if active-only returned nothing, retry without the
-            // active filter and tag the response so the UI can show a banner.
+            // Active-only fallback (preserve original behavior)
             if ($reports->isEmpty() && $activeOnly) {
-                $fallback = $this->buildSuggestions($pageNorm, $itemNorm, false);
+                $fallback = $this->buildSuggestions($pageNorm, $itemNorm, false, $fromDate, $toDate);
                 $fallback['fallback_used']   = true;
-                $fallback['fallback_reason'] = 'No active ads found for this scope. Showing all-time data instead.';
+                $fallback['fallback_reason'] = 'No active ads found for this scope. Showing all (active+off) for the same date range.';
                 return $fallback;
             }
 
             if ($reports->isEmpty()) {
                 $scope = $this->scopeLabel($pageNorm, $itemNorm, $activeOnly);
-                return ['output' => "⚠️ No valid ad reports found{$scope}."];
+                $dateLabel = $fromDate && $toDate ? " ({$fromDate} → {$toDate})" : '';
+                return ['output' => "⚠️ No valid ad reports found{$scope}{$dateLabel}."];
             }
 
             // 2) Fetch creatives by ad_id
             $adIds = $reports->pluck('ad_id')->unique()->values()->all();
             $creatives = DB::table('ad_campaign_creatives as c')
                 ->whereIn('c.ad_id', $adIds)
-                ->select([
-                    'c.ad_id',
-                    'c.headline',
-                    'c.body_ad_settings',
-                    'c.welcome_message',
-                    'c.quick_reply_1',
-                    'c.quick_reply_2',
-                    'c.quick_reply_3',
-                ])
-                ->get()
-                ->keyBy('ad_id');
+                ->select(['c.ad_id', 'c.headline', 'c.body_ad_settings', 'c.welcome_message',
+                          'c.quick_reply_1', 'c.quick_reply_2', 'c.quick_reply_3'])
+                ->get()->keyBy('ad_id');
 
-            // 3) Merge + compute CPM; normalize page in PHP
+            // 3) Merge + compute CPM, WMR per ad
             $rows = $reports->map(function ($r) use ($creatives, $applyPage, $pageNorm) {
                 $c = $creatives->get($r->ad_id);
                 if (!$c) return null;
-
                 $headline = $c->headline ? trim($c->headline) : null;
                 $body     = $c->body_ad_settings ? trim($c->body_ad_settings) : null;
                 if ($headline === null || $body === null) return null;
 
-                $msgs  = (float) $r->msgs;
-                $spend = (float) $r->spend;
-                $cpm   = $msgs > 0 ? ($spend / $msgs) : null;
+                $msgs   = (float) $r->msgs;
+                $spend  = (float) $r->spend;
+                $clicks = (float) ($r->clicks ?? 0);
+                $cpm    = $msgs   > 0 ? ($spend / $msgs)            : null;
+                $wmr    = $clicks > 0 ? (($msgs / $clicks) * 100.0) : null;
 
-                $pageOut = $r->page_name ?? ($applyPage ? $pageNorm : 'all');
-                $pageOut = $this->normalizePage($pageOut);
+                $pageOut = $this->normalizePage($r->page_name ?? ($applyPage ? $pageNorm : 'all'));
 
                 return (object) [
                     'ad_id'            => $r->ad_id,
@@ -653,63 +656,108 @@ class GPTAdGeneratorController extends Controller
                     'quick_reply_2'    => $c->quick_reply_2 ? trim($c->quick_reply_2) : null,
                     'quick_reply_3'    => $c->quick_reply_3 ? trim($c->quick_reply_3) : null,
                     'cpm'              => $cpm,
+                    'wmr'              => $wmr,
+                    'spend'            => $spend,
+                    'msgs'             => (int) $msgs,
+                    'clicks'           => (int) $clicks,
                     'page_name'        => $pageOut,
                 ];
-            })
-            ->filter()
-            ->filter(fn ($row) => $row->cpm !== null)
-            ->values();
+            })->filter()->filter(fn ($row) => $row->cpm !== null)->values();
 
             if ($rows->isEmpty()) {
                 $scope = $this->scopeLabel($pageNorm, $itemNorm, $activeOnly);
                 return ['output' => "⚠️ No valid ad data found{$scope}."];
             }
 
-            // 4) Rankings/stats from FILTERED set only
-            $sorted = $rows->sortBy('cpm')->values();
-            $top    = $sorted->take(5);
-            $worst  = $sorted->reverse()->take(5);
+            // 4) Build sections
+            $TOP_N = 10;
+            $byCpmAsc  = $rows->sortBy('cpm')->values();
+            $byCpmDesc = $rows->sortByDesc('cpm')->values();
+            // For WMR sections, only ads with link_clicks > 0 (WMR not null)
+            $rowsWithWmr = $rows->filter(fn ($r) => $r->wmr !== null)->values();
+            $byWmrDesc = $rowsWithWmr->sortByDesc('wmr')->values();
+            $byWmrAsc  = $rowsWithWmr->sortBy('wmr')->values();
 
-            $cpms   = $rows->pluck('cpm')->sort()->values();
-            $count  = $cpms->count();
-            $mean   = $count ? $cpms->avg() : null;
-            $median = $count
-                ? ($count % 2 === 0
-                    ? (($cpms[$count/2 - 1] + $cpms[$count/2]) / 2)
-                    : $cpms[floor($count/2)])
-                : null;
-            $mode   = $count ? $cpms->countBy()->sortDesc()->keys()->first() : null;
-
-            $nearest = function ($value) use ($rows) {
-                if ($value === null) return collect();
-                return $rows->sortBy(fn ($r) => abs($r->cpm - $value))->take(5)->values();
-            };
-
-            $sections = [
-                '🔝 TOP-PERFORMING ADS (Lowest CPM)'     => $top,
-                '🔴 WORST-PERFORMING ADS (Highest CPM)'  => $worst,
-                '🟡 MEAN CPM GROUP'                      => $nearest($mean),
-                '🟣 MEDIAN CPM GROUP'                    => $nearest($median),
-                '🔵 MODE CPM GROUP'                      => $nearest($mode),
+            // Stats header
+            $cpmVals = $rows->pluck('cpm')->filter()->values();
+            $wmrVals = $rowsWithWmr->pluck('wmr')->filter()->values();
+            $stats = [
+                'total_ads'       => $rows->count(),
+                'cpm_min'         => $cpmVals->min(),
+                'cpm_max'         => $cpmVals->max(),
+                'cpm_mean'        => $cpmVals->avg(),
+                'cpm_median'      => $this->median($cpmVals),
+                'wmr_count'       => $wmrVals->count(),
+                'wmr_min'         => $wmrVals->isNotEmpty() ? $wmrVals->min()  : null,
+                'wmr_max'         => $wmrVals->isNotEmpty() ? $wmrVals->max()  : null,
+                'wmr_mean'        => $wmrVals->isNotEmpty() ? $wmrVals->avg()  : null,
+                'wmr_median'      => $this->median($wmrVals),
+                'date_from'       => $fromDate,
+                'date_to'         => $toDate,
             ];
 
-            $out = collect($sections)->map(function ($group, $label) {
+            $sections = [
+                '🔝 TOP CPM (lowest cost per messaging — copy patterns na nag-drives ng cheap engagement)'      => $byCpmAsc->take($TOP_N),
+                '🔴 WORST CPM (highest cost per messaging — patterns to AVOID for headline+body)'              => $byCpmDesc->take($TOP_N),
+                '🟢 TOP WMR (highest welcome-msg conversion — patterns na pinakamagaling makahold ng clickers)' => $byWmrDesc->take($TOP_N),
+                '🟠 WORST WMR (lowest welcome-msg conversion — patterns to AVOID for welcome+QRs)'             => $byWmrAsc->take($TOP_N),
+            ];
+
+            // Build text output for ChatGPT
+            $header = $this->formatStatsHeader($stats, $pageNorm, $itemNorm, $activeOnly);
+            $body = collect($sections)->map(function ($group, $label) {
                 if ($group->isEmpty()) return "{$label}\n  (no data)";
-                $lines = ["{$label}"];
+                $lines = [$label];
                 foreach ($group as $i => $row) {
                     $lines[] = $this->formatSuggestionBlock($i + 1, $row);
                 }
                 return implode("\n", $lines);
             })->values()->implode("\n\n");
 
-            return ['output' => $out, 'fallback_used' => false];
+            $out = $header . "\n\n" . $body;
+
+            return [
+                'output'        => $out,
+                'fallback_used' => false,
+                'stats'         => $stats,
+                'low_data'      => $rows->count() < 5
+                    ? "⚠️ Only {$rows->count()} ad(s) found in the selected date range. Consider extending para sa mas maraming variety."
+                    : null,
+            ];
         } catch (\Throwable $e) {
             Log::error('buildSuggestions error', ['msg' => $e->getMessage()]);
-            return [
-                'output' => '❌ Server error occurred.',
-                'error'  => $e->getMessage(),
-            ];
+            return ['output' => '❌ Server error occurred.', 'error' => $e->getMessage()];
         }
+    }
+
+    /** Compute median sa sorted-or-unsorted Collection (numeric values). */
+    private function median($vals)
+    {
+        $sorted = $vals->sort()->values();
+        $n = $sorted->count();
+        if ($n === 0) return null;
+        if ($n % 2 === 0) return ($sorted[$n/2 - 1] + $sorted[$n/2]) / 2;
+        return $sorted[(int) floor($n / 2)];
+    }
+
+    /** Stats context header for the prompt — gives ChatGPT range awareness. */
+    private function formatStatsHeader(array $s, string $pageNorm, string $itemNorm, bool $activeOnly): string
+    {
+        $f  = fn ($v, $dec = 2) => $v === null ? '—' : ('₱' . number_format((float)$v, $dec));
+        $p  = fn ($v) => $v === null ? '—' : (number_format((float)$v, 1) . '%');
+
+        $page = ($pageNorm !== '' && mb_strtolower($pageNorm) !== 'all') ? $pageNorm : 'All pages';
+        $item = ($itemNorm !== '' && mb_strtolower($itemNorm) !== 'all') ? $itemNorm : 'All items';
+        $act  = $activeOnly ? 'Active only' : 'All (active + off)';
+
+        return "=== CONTEXT ===\n"
+             . "Page: {$page}\n"
+             . "Item: {$item}\n"
+             . "Filter: {$act}\n"
+             . "Date range: {$s['date_from']} → {$s['date_to']}\n"
+             . "Total ads analyzed: {$s['total_ads']}\n"
+             . "CPM range: {$f($s['cpm_min'])} – {$f($s['cpm_max'])} (mean {$f($s['cpm_mean'])}, median {$f($s['cpm_median'])})\n"
+             . "WMR range: {$p($s['wmr_min'])} – {$p($s['wmr_max'])} (mean {$p($s['wmr_mean'])}, median {$p($s['wmr_median'])})  [{$s['wmr_count']} ads with click data]";
     }
 
     /** Human-readable scope label for "no data" warning messages. */
@@ -725,7 +773,11 @@ class GPTAdGeneratorController extends Controller
     /** Helpers */
     private function formatSuggestionBlock(int $index, object $row): string
     {
-        $v = fn ($x) => isset($x) && $x !== '' ? $x : '—';
+        $v   = fn ($x) => isset($x) && $x !== '' ? $x : '—';
+        $cpm = isset($row->cpm) ? '₱' . number_format((float) $row->cpm, 2) : '—';
+        $wmr = isset($row->wmr) && $row->wmr !== null
+                  ? number_format((float) $row->wmr, 1) . '%'
+                  : '—';
 
         $line  = $index . '. Headline: "' . $v($row->headline) . '"';
         $line .= "\n   Body: \"" . $v($row->body_ad_settings) . '"';
@@ -733,7 +785,10 @@ class GPTAdGeneratorController extends Controller
         $line .= "\n   QR1: " . $v($row->quick_reply_1);
         $line .= "\n   QR2: " . $v($row->quick_reply_2);
         $line .= "\n   QR3: " . $v($row->quick_reply_3);
-        $line .= "\n   CPM: ₱" . number_format((float) $row->cpm, 2);
+        $line .= "\n   CPM: {$cpm} | WMR: {$wmr} | spend: ₱"
+                . number_format((float)($row->spend ?? 0), 0)
+                . " | msgs: " . (int)($row->msgs ?? 0)
+                . " | clicks: " . (int)($row->clicks ?? 0);
         $line .= "\n   Page: " . $v($row->page_name);
 
         return $line;

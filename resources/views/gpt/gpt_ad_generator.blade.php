@@ -225,6 +225,30 @@
                 Feed suggestions to GPT
               </label>
             </div>
+
+            {{-- Date range — analyzes ads_manager_reports.day. Default last 30 days --}}
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+              <div>
+                <label class="gpt-label" for="datePreset">📅 Date range</label>
+                <select id="datePreset" class="gpt-select" onchange="applyDatePreset()">
+                  <option value="last7">Last 7 days</option>
+                  <option value="last30" selected>Last 30 days (recommended)</option>
+                  <option value="last60">Last 60 days</option>
+                  <option value="last90">Last 90 days</option>
+                  <option value="thisMonth">This month</option>
+                  <option value="lastMonth">Last month (full)</option>
+                  <option value="custom">Custom range...</option>
+                </select>
+              </div>
+              <div>
+                <label class="gpt-label" for="dateFrom">From</label>
+                <input id="dateFrom" type="date" class="gpt-select" onchange="document.getElementById('datePreset').value='custom'">
+              </div>
+              <div>
+                <label class="gpt-label" for="dateTo">To</label>
+                <input id="dateTo" type="date" class="gpt-select" onchange="document.getElementById('datePreset').value='custom'">
+              </div>
+            </div>
           </div>
 
           <!-- Section: Model + creativity -->
@@ -706,24 +730,57 @@
       }
     }
 
+    // ===== Date preset helper =====
+    function applyDatePreset() {
+      const sel = document.getElementById("datePreset");
+      const from = document.getElementById("dateFrom");
+      const to   = document.getElementById("dateTo");
+      if (!sel || !from || !to) return;
+      const today = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Manila" }));
+      const fmt = d => d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+      let s, e = today;
+      switch (sel.value) {
+        case "last7":      s = new Date(today); s.setDate(today.getDate() - 7); break;
+        case "last30":     s = new Date(today); s.setDate(today.getDate() - 30); break;
+        case "last60":     s = new Date(today); s.setDate(today.getDate() - 60); break;
+        case "last90":     s = new Date(today); s.setDate(today.getDate() - 90); break;
+        case "thisMonth":  s = new Date(today.getFullYear(), today.getMonth(), 1); break;
+        case "lastMonth":
+          s = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+          e = new Date(today.getFullYear(), today.getMonth(), 0);
+          break;
+        case "custom":     return;  // don't auto-fill on custom
+        default:           s = new Date(today); s.setDate(today.getDate() - 30);
+      }
+      from.value = fmt(s);
+      to.value   = fmt(e);
+    }
+    // Initialize default range on page load
+    document.addEventListener("DOMContentLoaded", applyDatePreset);
+
     // ===== Load Suggestions (separate scrollable box, still fed to GPT) =====
     async function loadAdCopySuggestions() {
       const btn = document.getElementById("btnLoadSuggestions");
       const page = (document.getElementById("pageSelect")?.value || "all").trim();
       const item = (document.getElementById("itemSelect")?.value || "all").trim();
       const activeOnly = document.getElementById("activeOnly")?.checked ? "1" : "0";
+      const fromDate = document.getElementById("dateFrom")?.value || "";
+      const toDate   = document.getElementById("dateTo")?.value || "";
 
       const box = document.getElementById("suggestionsBox");
       const raw = document.getElementById("suggestionsRaw");
 
       btn.disabled = true;
-      const scopeLabel = `Page: ${page} · Item: ${item} · ${activeOnly === "1" ? "Active only" : "All-time"}`;
+      const dateLabel  = fromDate && toDate ? `${fromDate} → ${toDate}` : "default";
+      const scopeLabel = `Page: ${page} · Item: ${item} · ${activeOnly === "1" ? "Active only" : "All"} · ${dateLabel}`;
       const header = `=== Suggestions (${scopeLabel}) ===`;
       box.textContent = `⏳ Loading ad copy suggestions for ${scopeLabel}...`;
       raw.value = "";
 
       try {
         const qs = new URLSearchParams({ page, item, active_only: activeOnly });
+        if (fromDate) qs.set("from_date", fromDate);
+        if (toDate)   qs.set("to_date",   toDate);
         const res = await fetch(`/ad-copy-suggestions?${qs.toString()}`, {
           headers: { Accept: "application/json" },
         });
