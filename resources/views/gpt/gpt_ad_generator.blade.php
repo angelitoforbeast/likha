@@ -562,13 +562,21 @@
       }).join("");
     }
 
+    // TSV/Sheets-safe field escaper: kung may tab, newline, CR, or " sa loob,
+    // i-wrap sa "..." at i-double yung internal " — para hindi mag-spill sa GSheet.
+    function tsvEscape(s) {
+      if (s == null) return "";
+      const v = String(s);
+      return /[\t\n\r"]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    }
+
     function copyVariant(idx) {
       const card = document.querySelector(`#gptOutputBody .v-card[data-variant="${idx}"]`);
       if (!card) return;
       const raw = card.dataset.raw || "";
-      // Re-pack into tab-separated 7-field row using actual tabs.
+      // Re-pack into tab-separated 7-field row using actual tabs, with TSV escaping.
       const parts = raw.split("\t");
-      const seven = [0,1,2,3,4,5,6].map(i => parts[i] ?? "").join("\t");
+      const seven = [0,1,2,3,4,5,6].map(i => tsvEscape(parts[i] ?? "")).join("\t");
       navigator.clipboard.writeText(seven).then(() => {
         const btn = card.querySelector("button");
         if (btn) { const old = btn.textContent; btn.textContent = "✅"; setTimeout(() => btn.textContent = old, 800); }
@@ -829,13 +837,14 @@
     }
 
     // Copy ALL variants as multi-line tab-separated (1 row per variant).
+    // Each field is TSV-escaped so multi-line content (bullets, lists) stays sa isang cell sa GSheet.
     function copyOutput() {
       const cards = document.querySelectorAll("#gptOutputBody .v-card[data-variant]");
       if (!cards.length) return alert("Nothing to copy.");
       const lines = [...cards].map((c) => {
         const raw = c.dataset.raw || "";
         const parts = raw.split("\t");
-        return [0,1,2,3,4,5,6].map((i) => parts[i] ?? "").join("\t");
+        return [0,1,2,3,4,5,6].map((i) => tsvEscape(parts[i] ?? "")).join("\t");
       });
       navigator.clipboard.writeText(lines.join("\n")).then(() => {
         alert("✅ Copied " + lines.length + " variant(s) to clipboard!");
