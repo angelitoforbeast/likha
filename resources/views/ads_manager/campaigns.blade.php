@@ -507,7 +507,7 @@
         // Skips cross-table {{op:...}} refs by returning NaN.
         _evalFormulaExpr(expr, sameRow){
           if (!expr || !sameRow) return NaN;
-          const tokens = [...expr.matchAll(/\{\{\s*([a-z0-9_:]+)\s*\}\}/gi)];
+          const tokens = [...expr.matchAll(/\[\[\s*([a-z0-9_:]+)\s*\]\]/gi)];
           let resolved = expr;
           for (const m of tokens) {
             const tok = m[1];

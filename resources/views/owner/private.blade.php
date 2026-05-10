@@ -1449,7 +1449,7 @@
 
       // Resolve a rule's threshold value. Numbers pass through. Refs are
       // looked up via cellValueFor() on the supplied refRow. Formula expressions
-      // (e.g. type=formula, expr="@{{cpp}} + @{{op:breakeven_cpp}} - 1") are
+      // (e.g. type=formula, expr="[[cpp]] + [[op:breakeven_cpp]] - 1") are
       // evaluated against the cell's own row + parent row. Returns NaN when
       // anything can't be resolved.
       resolveRuleThreshold(threshold, refRow, sameRow){
@@ -1468,15 +1468,15 @@
         return isNaN(n) ? NaN : n;
       },
 
-      // Safe formula evaluator. Tokens use double-brace syntax (same-table
-      // or "op:col" cross-ref to owner_private). Replace each token with the
+      // Safe formula evaluator. Tokens use [[col]] (same-table) or
+      // [[op:col]] (cross-ref to owner_private). Replace each token with the
       // row's numeric value, validate remaining string contains only
       // digits/operators (no eval injection), then evaluate via Function.
       // Returns NaN if any token resolves to null/missing or formula invalid.
       _evalFormulaExpr(expr, sameRow, refRow){
         if (!expr) return NaN;
-        // Match double-brace tokens
-        const tokens = [...expr.matchAll(/\{\{\s*([a-z0-9_:]+)\s*\}\}/gi)];
+        // Match [[token]] patterns
+        const tokens = [...expr.matchAll(/\[\[\s*([a-z0-9_:]+)\s*\]\]/gi)];
         let resolved = expr;
         for (const m of tokens) {
           const tok = m[1];

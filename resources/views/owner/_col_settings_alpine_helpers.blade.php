@@ -69,8 +69,8 @@
           let trigger = -1;
           for (let i = pos - 1; i >= 0 && i >= pos - 50; i--) {
             const c2 = val.substring(i, i + 2);
-            if (c2 === '}}') break;       // already closed → no autocomplete
-            if (c2 === '{{') { trigger = i; break; }
+            if (c2 === ']]') break;       // already closed → no autocomplete
+            if (c2 === '[[') { trigger = i; break; }
           }
           if (trigger < 0) { this.closeAutocomplete(); return; }
           this.autocompleteQuery = val.substring(trigger + 2, pos).toLowerCase();
@@ -107,17 +107,17 @@
           // Find the `{{` start
           let trigger = -1;
           for (let i = pos - 1; i >= 0 && i >= pos - 50; i--) {
-            if (val.substring(i, i + 2) === '{{') { trigger = i; break; }
+            if (val.substring(i, i + 2) === '[[') { trigger = i; break; }
           }
           if (trigger < 0) { this.closeAutocomplete(); return; }
           // Insert: [...val before trigger] {{token}} [...val after caret]
           const before = val.substring(0, trigger);
           const after  = val.substring(pos);
-          const newVal = before + '{{' + opt.token + '}}' + after;
+          const newVal = before + '[[' + opt.token + ']]' + after;
           el.value = newVal;
           rule.value = { type: 'formula', expr: newVal };
           // Place caret after the `}}`
-          const newCaret = (before + '{{' + opt.token + '}}').length;
+          const newCaret = (before + '[[' + opt.token + ']]').length;
           setTimeout(() => { el.focus(); el.setSelectionRange(newCaret, newCaret); }, 0);
           this.closeAutocomplete();
         },
