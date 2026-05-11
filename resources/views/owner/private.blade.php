@@ -536,6 +536,11 @@
                     <span style="color:#111;" x-text="num(row.orders)"></span>
                   </template>
 
+                  <!-- orders_1d — orders count on end_date (last day of range) -->
+                  <template x-if="col.id==='orders_1d'">
+                    <span style="color:#111;" x-text="num(row.orders_last_day)"></span>
+                  </template>
+
                   <!-- cpp -->
                   <template x-if="col.id==='cpp'">
                     <span style="color:#111;" x-text="md(row.cpp)"></span>
@@ -847,6 +852,9 @@
                   <template x-if="col.id==='orders'">
                     <span x-text="num(tot().orders)"></span>
                   </template>
+                  <template x-if="col.id==='orders_1d'">
+                    <span x-text="num(tot().orders_last_day)"></span>
+                  </template>
                   <template x-if="col.id==='cpp'">
                     <span style="color:#475569;" x-text="md(tot().cpp)"></span>
                   </template>
@@ -897,7 +905,7 @@
                   <template x-if="col.id==='proj_prof_7d'">
                     <span style="font-weight:700;" x-text="md(tot().projected_profit_last_7d)"></span>
                   </template>
-                  <template x-if="!['adspent','orders','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_3d','proj_prof_7d'].includes(col.id)">
+                  <template x-if="!['adspent','orders','orders_1d','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_3d','proj_prof_7d'].includes(col.id)">
                     <span></span>
                   </template>
                 </td>
@@ -1020,6 +1028,7 @@
         return [
           { id:'adspent',    label:'Adspent',    sort:'adspent',              align:'center', minw:90  },
           { id:'orders',     label:'Orders',     sort:'orders',               align:'center', minw:65  },
+          { id:'orders_1d',  label:'Orders (1D)',sort:'orders_last_day',      align:'center', minw:80  },
           { id:'cpp',        label:'CPP',        sort:'cpp',                  align:'center', minw:75  },
           { id:'proceed',    label:'Proceed',    sort:'proceed_orders',       align:'center', minw:70  },
           { id:'pcpp',       label:'P.CPP',      sort:'proceed_cpp',          align:'center', minw:75  },
@@ -1272,15 +1281,16 @@
 
       // ── Totals ────────────────────────────────────────────────────────────
       tot() {
-        const t = { adspent:0, orders:0, proceed_orders:0, gross_sales:0, projected_profit:null, cpp:null, proceed_cpp:null, proj_profit_per_order:null, proj_pct:null,
+        const t = { adspent:0, orders:0, orders_last_day:0, proceed_orders:0, gross_sales:0, projected_profit:null, cpp:null, proceed_cpp:null, proj_profit_per_order:null, proj_pct:null,
                     projected_profit_last_day:null, gross_sales_last_day:0, proj_pct_1d:null,
                     projected_profit_last_3d:null, gross_sales_last_3d:0, proj_pct_3d:null,
                     projected_profit_last_7d:null, gross_sales_last_7d:0, proj_pct_7d:null };
         let hasP=false, hasG=false, hasP1=false, hasP3=false, hasP7=false;
         for (const r of this.filteredRows()) {
-          t.adspent        += Number(r.adspent        ||0);
-          t.orders         += Number(r.orders         ||0);
-          t.proceed_orders += Number(r.proceed_orders ||0);
+          t.adspent         += Number(r.adspent         ||0);
+          t.orders          += Number(r.orders          ||0);
+          t.orders_last_day += Number(r.orders_last_day ||0);
+          t.proceed_orders  += Number(r.proceed_orders  ||0);
           if (r.gross_sales!=null){ t.gross_sales += Number(r.gross_sales); hasG=true; }
           if (r.projected_profit!=null){ t.projected_profit=(t.projected_profit||0)+r.projected_profit; hasP=true; }
           // Trailing-window totals — only sum rows that had any slice in that window.
@@ -1437,6 +1447,7 @@
           case 'per_order':     return row.proj_profit_per_order;
           case 'adspent':       return row.adspent;
           case 'orders':        return row.orders;
+          case 'orders_1d':     return row.orders_last_day;
           case 'proceed':       return row.proceed_orders;
           case 'price':         return row.price;
           case 'item_val':      return row.item_value;

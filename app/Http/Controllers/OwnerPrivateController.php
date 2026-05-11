@@ -1779,6 +1779,26 @@ class OwnerPrivateController extends Controller
             $endTs      = strtotime($endDate);
             $start3DTs  = max($startTs, strtotime('-2 days', $endTs));   // last 3 days inclusive
             $start7DTs  = max($startTs, strtotime('-6 days', $endTs));   // last 7 days inclusive
+
+            // Orders / proceed for the last-N-day windows — computed UNCONDITIONALLY
+            // (independent of RTS/cogs setup) so the Orders (1D) column (and 3D/7D
+            // siblings) show accurate counts kahit yung page ay walang RTS% or
+            // walang item_value sa cogs. Profit/gross sums stay sa if-block kasi
+            // those need rtsPct + itemValue.
+            if (!empty($includedDatesArr)) {
+                foreach ($includedDatesArr as $d => $slice) {
+                    $dTs       = strtotime((string)$d);
+                    $isLastDay = ((string)$d === (string)$endDate);
+                    $inLast3D  = ($dTs >= $start3DTs && $dTs <= $endTs);
+                    $inLast7D  = ($dTs >= $start7DTs && $dTs <= $endTs);
+                    $ord       = (int)($slice['orders']  ?? 0);
+                    $proc      = (int)($slice['proceed'] ?? 0);
+                    if ($isLastDay) { $ordersLastDay  += $ord; $procOrdersLastDay  += $proc; }
+                    if ($inLast3D)  { $ordersLast3Day += $ord; $procOrdersLast3Day += $proc; }
+                    if ($inLast7D)  { $ordersLast7Day += $ord; $procOrdersLast7Day += $proc; }
+                }
+            }
+
             if ($rtsPct !== null && $itemValue !== null && !empty($includedDatesArr)) {
                 $rts           = $rtsPct / 100.0;
                 $deliverFactor = 1.0 - $rts;
@@ -1796,20 +1816,18 @@ class OwnerPrivateController extends Controller
                     $inLast3D   = ($dTs >= $start3DTs && $dTs <= $endTs);
                     $inLast7D   = ($dTs >= $start7DTs && $dTs <= $endTs);
 
-                    if ($isLastDay) {
-                        $ordersLastDay     += (int)($slice['orders'] ?? 0);
-                        $procOrdersLastDay += $proceedDay;
-                        if ($pDay > 0) $grossSalesLastDay += $pDay * (int)($slice['orders'] ?? 0);
+                    // NOTE: orders/proceed accumulation moved OUT of this if-block
+                    // (to the unconditional pre-loop above) so columns work even
+                    // for pages without RTS/cogs. We only sum gross_sales here
+                    // since it's part of the profit calc that needs rtsPct + itemValue.
+                    if ($isLastDay && $pDay > 0) {
+                        $grossSalesLastDay += $pDay * (int)($slice['orders'] ?? 0);
                     }
-                    if ($inLast3D) {
-                        $ordersLast3Day     += (int)($slice['orders'] ?? 0);
-                        $procOrdersLast3Day += $proceedDay;
-                        if ($pDay > 0) $grossSalesLast3Day += $pDay * (int)($slice['orders'] ?? 0);
+                    if ($inLast3D && $pDay > 0) {
+                        $grossSalesLast3Day += $pDay * (int)($slice['orders'] ?? 0);
                     }
-                    if ($inLast7D) {
-                        $ordersLast7Day     += (int)($slice['orders'] ?? 0);
-                        $procOrdersLast7Day += $proceedDay;
-                        if ($pDay > 0) $grossSalesLast7Day += $pDay * (int)($slice['orders'] ?? 0);
+                    if ($inLast7D && $pDay > 0) {
+                        $grossSalesLast7Day += $pDay * (int)($slice['orders'] ?? 0);
                     }
 
                     if ($pDay <= 0) {

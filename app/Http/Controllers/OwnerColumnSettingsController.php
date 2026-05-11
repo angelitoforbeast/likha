@@ -64,6 +64,7 @@ class OwnerColumnSettingsController extends Controller
         'owner_private' => [
             ['id' => 'adspent',       'label' => 'Adspent'],
             ['id' => 'orders',        'label' => 'Orders'],
+            ['id' => 'orders_1d',     'label' => 'Orders (1D)'],
             ['id' => 'cpp',           'label' => 'CPP'],
             ['id' => 'proceed',       'label' => 'Proceed'],
             ['id' => 'pcpp',          'label' => 'P.CPP'],
@@ -150,7 +151,7 @@ class OwnerColumnSettingsController extends Controller
         'owner_private' => [
             // Initial defaults derived from existing /owner/private layout.
             // Everything is visible by default — admins shrink as needed.
-            'adspent', 'orders', 'cpp', 'proceed', 'pcpp',
+            'adspent', 'orders', 'orders_1d', 'cpp', 'proceed', 'pcpp',
             'tcpr', 'breakeven_cpp',
             'proj_profit', 'per_order', 'proj_pct',
             'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d',
