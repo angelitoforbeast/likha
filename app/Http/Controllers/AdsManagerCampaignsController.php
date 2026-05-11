@@ -565,11 +565,27 @@ class AdsManagerCampaignsController extends Controller
         $start       = $request->input('start_date');         // YYYY-MM-DD
         $end         = $request->input('end_date');           // YYYY-MM-DD
         $pageName    = $request->input('page_name');          // optional (single, legacy)
-        // page_names — BATCH mode (used by /owner/private "Expand all").
-        // Accepts JSON array (POST body) or CSV string. When present, takes
-        // precedence over single page_name and uses a WHERE IN clause so all
-        // pages' campaigns are fetched in one query — eliminating the N+1
-        // pattern of firing one HTTP request per page.
+        // page_scopes — BATCH mode (used by /owner/private "Expand all").
+        // Accepts JSON array of {page_name, start_date, end_date} triples (POST
+        // body). When present, batch-applies PER-PAGE scope via OR clauses so
+        // each page is filtered by its OWN anchor date (avoiding the over-fetch
+        // that a single broadest date range would cause). Takes precedence over
+        // single page_name + global start/end.
+        $pageScopesRaw = $request->input('page_scopes');
+        $pageScopes = [];
+        if (is_array($pageScopesRaw)) {
+            foreach ($pageScopesRaw as $s) {
+                if (!is_array($s)) continue;
+                $name  = isset($s['page_name'])  ? trim((string) $s['page_name'])  : '';
+                $sdate = isset($s['start_date']) ? trim((string) $s['start_date']) : '';
+                $edate = isset($s['end_date'])   ? trim((string) $s['end_date'])   : '';
+                if ($name === '') continue;
+                $pageScopes[] = ['page_name' => $name, 'start_date' => $sdate, 'end_date' => $edate];
+            }
+        }
+        // Legacy page_names (CSV or JSON array) — retained for backwards compat
+        // with anything still calling the old shape. New batch callers should
+        // use page_scopes instead so per-page anchor dates are honored.
         $pageNamesRaw = $request->input('page_names');
         if (is_array($pageNamesRaw)) {
             $pageNames = $pageNamesRaw;
@@ -584,7 +600,7 @@ class AdsManagerCampaignsController extends Controller
         $sortDir     = strtolower($request->input('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
         // Batch mode returns many pages' campaigns in one shot — raise cap to 5000
         // (vs 1000 for single-page) since rows accumulate across pages.
-        $limitCap    = !empty($pageNames) ? 5000 : 1000;
+        $limitCap    = (!empty($pageScopes) || !empty($pageNames)) ? 5000 : 1000;
         $limit       = max(1, min((int) $request->input('limit', 200), $limitCap));
         $export      = $request->input('export');             // 'csv' to export
         // Item-scope filters used by /owner/private inline expand:
@@ -782,22 +798,44 @@ class AdsManagerCampaignsController extends Controller
         // Base (filtered) query for METRICS (date/page/search filters only)
         $base = DB::table('ads_manager_reports');
 
-        // Filters: date range
-        if ($start) $base->whereRaw("$dayExpr >= ?", [$start]);
-        if ($end)   $base->whereRaw("$dayExpr <= ?", [$end]);
+        // ── Filters: date + page ────────────────────────────────────────────
+        // Three modes:
+        //   1. BATCH WITH PER-PAGE SCOPES (preferred for /owner/private expand-all):
+        //      `page_scopes=[{page_name, start_date, end_date}, ...]`
+        //      Each page filtered by its own anchor date. Global start/end
+        //      ignored — each scope brings its own.
+        //
+        //   2. BATCH WITH SHARED SCOPE (legacy, may over-fetch late-anchor pages):
+        //      `page_names=A,B,C` + global start/end. Single IN + range filter.
+        //      Retained for backwards compat; new clients should use mode 1.
+        //
+        //   3. SINGLE-PAGE (or no page filter):
+        //      `page_name=X` + global start/end. Original behavior.
+        if (!empty($pageScopes)) {
+            // Per-page scopes — one OR group per page.
+            $base->where(function ($q) use ($pageScopes, $dayExpr) {
+                foreach ($pageScopes as $s) {
+                    $q->orWhere(function ($sub) use ($s, $dayExpr) {
+                        $sub->whereRaw('LOWER(TRIM(page_name)) = ?', [mb_strtolower($s['page_name'])]);
+                        if ($s['start_date'] !== '') $sub->whereRaw("$dayExpr >= ?", [$s['start_date']]);
+                        if ($s['end_date']   !== '') $sub->whereRaw("$dayExpr <= ?", [$s['end_date']]);
+                    });
+                }
+            });
+        } else {
+            // Modes 2 + 3 — global date range applies.
+            if ($start) $base->whereRaw("$dayExpr >= ?", [$start]);
+            if ($end)   $base->whereRaw("$dayExpr <= ?", [$end]);
 
-        // Page filter (trim + case-insensitive)
-        // Batch mode (page_names): single IN clause across many pages — used by
-        // /owner/private's "Expand all" so we get one heavy SQL pass instead of N.
-        // Falls back to single-page filter (page_name) for the legacy callers.
-        if (!empty($pageNames)) {
-            $lowerNames = array_values(array_unique(array_map(
-                fn($n) => mb_strtolower(trim($n)),
-                $pageNames
-            )));
-            $base->whereIn(DB::raw('LOWER(TRIM(page_name))'), $lowerNames);
-        } elseif ($pageName && $pageName !== 'all') {
-            $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
+            if (!empty($pageNames)) {
+                $lowerNames = array_values(array_unique(array_map(
+                    fn($n) => mb_strtolower(trim($n)),
+                    $pageNames
+                )));
+                $base->whereIn(DB::raw('LOWER(TRIM(page_name))'), $lowerNames);
+            } elseif ($pageName && $pageName !== 'all') {
+                $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
+            }
         }
 
         // Item filter — substring match (case-insensitive) to tolerate

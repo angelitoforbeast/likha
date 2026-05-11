@@ -1746,14 +1746,15 @@
       //
       // BATCHED MODE (optimization for "Expand all"):
       //   Instead of firing N parallel HTTP requests (one per page row), we
-      //   send ONE batched POST with `page_names=[...]`. Server runs the heavy
-      //   global subqueries (latest status, started dates, fresh start, adset
-      //   status, today/3d/7d windows) ONCE instead of N times — eliminating
-      //   ~70% of the redundant query work and bypassing the browser's
-      //   6-concurrent-connections limit.
+      //   send ONE batched POST with `page_scopes=[{page_name, start, end}, ...]`.
+      //   Server runs the heavy global subqueries (latest status, started
+      //   dates, fresh start, adset status, today/3d/7d windows) ONCE instead
+      //   of N times — eliminating ~70% of the redundant query work and
+      //   bypassing the browser's 6-concurrent-connections limit.
       //
-      //   Already-loaded pages keep their cached campaigns (no re-fetch).
-      //   Only the unloaded pages are sent in the batch payload.
+      //   Per-page scope dates ensure each page is filtered by its OWN anchor
+      //   (no over-fetch sa pages na late ang anchor). Already-loaded pages
+      //   keep their cached campaigns; only unloaded pages are batched.
       async toggleAllExpand(){
         const visible = (this.sortedRows ? this.sortedRows() : (this.rows || []));
         if (this.anyExpanded()) {
@@ -1785,23 +1786,20 @@
           this.expandedPages[pn] = { open: true, loading: true, error: null, campaigns: null };
         }
 
-        // Broadest scope: earliest anchor across all fetched pages → global end.
-        // Server returns rows tagged with page_name; we then distribute to each
-        // expandedPages slot. Slight over-fetch sa pages with later anchors —
-        // acceptable tradeoff for the 3–6× speedup.
-        let earliestStart = null;
-        for (const pn of toFetch) {
+        // Per-page scopes — each page gets its OWN anchor date. Server applies
+        // these via OR clauses so each page is filtered by its own anchor
+        // (avoiding the over-fetch a single broadest date range would cause).
+        const pageScopes = toFetch.map(pn => {
           const s = this._pageScopeFor(pn);
-          if (s.start_date && (earliestStart === null || s.start_date < earliestStart)) {
-            earliestStart = s.start_date;
-          }
-        }
-        // Fallback if walang per-page anchor found: use global start filter.
-        if (!earliestStart) earliestStart = this.startDate || this.endDate || '';
-        const scope = { start_date: earliestStart, end_date: this.endDate || '' };
+          return {
+            page_name:  pn,
+            start_date: s.start_date || '',
+            end_date:   s.end_date   || '',
+          };
+        });
 
         try {
-          const j = await this._fetchCampaignsDataBatch(toFetch, scope);
+          const j = await this._fetchCampaignsDataBatch(pageScopes);
           const rows = Array.isArray(j.rows) ? j.rows : [];
 
           // Distribute rows to their owning page — keyed by lowercased+trimmed
@@ -1828,20 +1826,21 @@
         }
       },
 
-      // Batched fetch — POST with JSON body so we sidestep URL length limits
-      // (page_names CSV could otherwise blow past ~8 KB sa many-page setups).
+      // Batched fetch — POST with JSON body so we sidestep URL length limits.
+      // Accepts page_scopes = [{ page_name, start_date, end_date }, ...] so each
+      // page gets its own anchor date (no over-fetch on late-anchor pages).
       // Profit% enrichment is applied client-side per row using the parent
       // page's already-loaded data, same as the single-page _fetchCampaignsData.
-      async _fetchCampaignsDataBatch(pageNames, scope){
-        const body = Object.assign({
+      async _fetchCampaignsDataBatch(pageScopes){
+        const body = {
           level:           'campaigns',
-          page_names:      pageNames,
+          page_scopes:     pageScopes,
           limit:           5000,
           sort_by:         'default',
           sort_dir:        'desc',
           only_with_spend: '1',
           include_windows: '1',
-        }, scope || {});
+        };
 
         const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
         const res = await fetch('{{ route('ads_manager.campaigns.data') }}', {
