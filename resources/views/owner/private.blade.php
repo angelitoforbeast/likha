@@ -1742,19 +1742,8 @@
       },
 
       // Single-button toggle: if any row is open → collapse all visible rows;
-      // otherwise → expand all visible rows.
-      //
-      // BATCHED MODE (optimization for "Expand all"):
-      //   Instead of firing N parallel HTTP requests (one per page row), we
-      //   send ONE batched POST with `page_scopes=[{page_name, start, end}, ...]`.
-      //   Server runs the heavy global subqueries (latest status, started
-      //   dates, fresh start, adset status, today/3d/7d windows) ONCE instead
-      //   of N times — eliminating ~70% of the redundant query work and
-      //   bypassing the browser's 6-concurrent-connections limit.
-      //
-      //   Per-page scope dates ensure each page is filtered by its OWN anchor
-      //   (no over-fetch sa pages na late ang anchor). Already-loaded pages
-      //   keep their cached campaigns; only unloaded pages are batched.
+      // otherwise → expand all visible rows (fires N parallel fetches).
+      // Uses the existing togglePageExpand so cache + load semantics match.
       async toggleAllExpand(){
         const visible = (this.sortedRows ? this.sortedRows() : (this.rows || []));
         if (this.anyExpanded()) {
@@ -1765,105 +1754,16 @@
               this.expandedPages[r.page_name] = Object.assign({}, st, { open: false });
             }
           }
-          return;
-        }
-
-        // Expand-all: split into (already-cached) and (needs-fetching).
-        const toFetch = [];
-        for (const r of visible) {
-          const st = this.expandedPages[r.page_name];
-          if (st && st.campaigns) {
-            // Cached already — just flip open.
-            this.expandedPages[r.page_name] = Object.assign({}, st, { open: true });
-          } else if (r.page_name) {
-            toFetch.push(r.page_name);
+        } else {
+          // Expand all: kick off togglePageExpand for any not-yet-expanded row.
+          // Run in parallel — let each panel resolve independently.
+          const tasks = [];
+          for (const r of visible) {
+            const st = this.expandedPages[r.page_name];
+            if (!st || !st.open) tasks.push(this.togglePageExpand(r.page_name));
           }
+          await Promise.allSettled(tasks);
         }
-        if (toFetch.length === 0) return;
-
-        // Mark all uncached pages as loading immediately for instant UI feedback.
-        for (const pn of toFetch) {
-          this.expandedPages[pn] = { open: true, loading: true, error: null, campaigns: null };
-        }
-
-        // Per-page scopes — each page gets its OWN anchor date. Server applies
-        // these via OR clauses so each page is filtered by its own anchor
-        // (avoiding the over-fetch a single broadest date range would cause).
-        const pageScopes = toFetch.map(pn => {
-          const s = this._pageScopeFor(pn);
-          return {
-            page_name:  pn,
-            start_date: s.start_date || '',
-            end_date:   s.end_date   || '',
-          };
-        });
-
-        try {
-          const j = await this._fetchCampaignsDataBatch(pageScopes);
-          const rows = Array.isArray(j.rows) ? j.rows : [];
-
-          // Distribute rows to their owning page — keyed by lowercased+trimmed
-          // page_name para safe sa case/whitespace mismatches between the
-          // request and the DB's stored values.
-          const norm = (s) => (s || '').toString().toLowerCase().trim();
-          const byPage = {};
-          for (const row of rows) {
-            const k = norm(row.page_name);
-            if (!k) continue;
-            (byPage[k] = byPage[k] || []).push(row);
-          }
-          for (const pn of toFetch) {
-            const campaigns = byPage[norm(pn)] || [];
-            this._markActiveOffDivider(campaigns);
-            this.expandedPages[pn] = { open: true, loading: false, error: null, campaigns };
-          }
-        } catch (e) {
-          // Mark all uncached pages as errored so user sees feedback.
-          const msg = e?.message || 'Failed to load batch';
-          for (const pn of toFetch) {
-            this.expandedPages[pn] = { open: true, loading: false, error: msg, campaigns: [] };
-          }
-        }
-      },
-
-      // Batched fetch — POST with JSON body so we sidestep URL length limits.
-      // Accepts page_scopes = [{ page_name, start_date, end_date }, ...] so each
-      // page gets its own anchor date (no over-fetch on late-anchor pages).
-      // Profit% enrichment is applied client-side per row using the parent
-      // page's already-loaded data, same as the single-page _fetchCampaignsData.
-      async _fetchCampaignsDataBatch(pageScopes){
-        const body = {
-          level:           'campaigns',
-          page_scopes:     pageScopes,
-          limit:           5000,
-          sort_by:         'default',
-          sort_dir:        'desc',
-          only_with_spend: '1',
-          include_windows: '1',
-        };
-
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-        const res = await fetch('{{ route('ads_manager.campaigns.data') }}', {
-          method: 'POST',
-          headers: {
-            'Content-Type':  'application/json',
-            'Accept':        'application/json',
-            'X-CSRF-TOKEN':  csrf,
-          },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const j = await res.json();
-
-        if (Array.isArray(j.rows)) {
-          for (const r of j.rows) {
-            r.profit_pct       = this._campaignProfitPctFromCpp(r, r.cpp);
-            r.profit_pct_7d    = this._campaignProfitPctFromCpp(r, r.cpp_7d);
-            r.profit_pct_3d    = this._campaignProfitPctFromCpp(r, r.cpp_3d);
-            r.profit_pct_today = this._campaignProfitPctFromCpp(r, r.cpp_today);
-          }
-        }
-        return j;
       },
 
       // Toggle the per-page campaigns expand. First open fetches; subsequent
