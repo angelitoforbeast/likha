@@ -781,6 +781,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get('/jnt_upload', [JntUploadController::class, 'index'])->name('jnt.upload.index');
     Route::post('/jnt_upload', [JntUploadController::class, 'store'])->name('jnt.upload.store');
     Route::get('/jnt_upload/status/{uploadLog}', [JntUploadController::class, 'status'])->name('jnt.upload.status');
+    // JSON endpoint para sa client-side refresh ng history table sa bottom ng /jnt_upload.
+    Route::get('/jnt_upload/history', [JntUploadController::class, 'history'])->name('jnt.upload.history');
 
     // /jnt_upload_v2 — multi-file uploader with precheck + history (parallel sa v1)
     Route::get   ('/jnt_upload_v2',                       [JntUploadV2Controller::class, 'index'])         ->name('jnt.upload.v2.index');

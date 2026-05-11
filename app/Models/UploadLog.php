@@ -29,6 +29,8 @@ class UploadLog extends Model
         'started_at',
         'finished_at',
         'batch_at',     // ✅ IMPORTANT
+        'user_id',      // ✅ kung sino nag-upload (nullable for pre-tracking rows)
+        'user_email',   // ✅ persists kahit user gets deleted
     ];
 
     protected $casts = [

@@ -51,6 +51,77 @@
     </div>
   </div>
 
+  {{-- ───────────────────────────────────────────────────────────────────
+       Upload history — permanently visible sa baba. Always shows the latest
+       50 uploads from ALL users. Refreshes automatically after the user's
+       own upload finishes (done/failed).
+       ─────────────────────────────────────────────────────────────────── --}}
+  <div class="mt-10 max-w-6xl">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-base font-semibold text-gray-800">Upload History</h2>
+      <button id="btnRefreshHistory" type="button"
+              class="text-xs text-blue-600 hover:text-blue-800 hover:underline">
+        ↻ Refresh
+      </button>
+    </div>
+    <div class="border border-gray-200 rounded overflow-hidden">
+      <div class="overflow-x-auto" style="max-height:420px;overflow-y:auto;">
+        <table class="min-w-full text-xs">
+          <thead class="bg-gray-50 text-gray-600 sticky top-0">
+            <tr>
+              <th class="text-left  px-3 py-2 font-medium">Uploaded</th>
+              <th class="text-left  px-3 py-2 font-medium">File</th>
+              <th class="text-left  px-3 py-2 font-medium">By</th>
+              <th class="text-left  px-3 py-2 font-medium">Status</th>
+              <th class="text-right px-3 py-2 font-medium">Inserted</th>
+              <th class="text-right px-3 py-2 font-medium">Updated</th>
+              <th class="text-right px-3 py-2 font-medium">Skipped</th>
+              <th class="text-right px-3 py-2 font-medium">Errors</th>
+              <th class="text-right px-3 py-2 font-medium">Total</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody" class="divide-y divide-gray-100 bg-white">
+            @forelse($recentUploads ?? [] as $log)
+              @php
+                $statusClass = match($log->status) {
+                    'done'       => 'bg-green-100 text-green-800',
+                    'processing' => 'bg-blue-100 text-blue-800',
+                    'queued'     => 'bg-gray-100 text-gray-700',
+                    'failed'     => 'bg-red-100 text-red-800',
+                    default      => 'bg-gray-100 text-gray-700',
+                };
+                $when = $log->created_at ? \Carbon\Carbon::parse($log->created_at)->timezone('Asia/Manila')->format('M j, g:i A') : '—';
+                $by   = $log->user_email ?: ($log->user_id ? ('User #' . $log->user_id) : '—');
+              @endphp
+              <tr class="hover:bg-gray-50">
+                <td class="px-3 py-1.5 whitespace-nowrap text-gray-700">{{ $when }}</td>
+                <td class="px-3 py-1.5 text-gray-900 max-w-[280px] truncate" title="{{ $log->original_name }}">
+                  {{ $log->original_name }}
+                </td>
+                <td class="px-3 py-1.5 text-gray-700 max-w-[180px] truncate" title="{{ $by }}">{{ $by }}</td>
+                <td class="px-3 py-1.5">
+                  <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase {{ $statusClass }}">
+                    {{ $log->status }}
+                  </span>
+                </td>
+                <td class="px-3 py-1.5 text-right tabular-nums text-gray-900">{{ number_format($log->inserted ?? 0) }}</td>
+                <td class="px-3 py-1.5 text-right tabular-nums text-gray-900">{{ number_format($log->updated ?? 0) }}</td>
+                <td class="px-3 py-1.5 text-right tabular-nums text-gray-700">{{ number_format($log->skipped ?? 0) }}</td>
+                <td class="px-3 py-1.5 text-right tabular-nums {{ ($log->error_rows ?? 0) > 0 ? 'text-red-700 font-semibold' : 'text-gray-400' }}">
+                  {{ number_format($log->error_rows ?? 0) }}
+                </td>
+                <td class="px-3 py-1.5 text-right tabular-nums text-gray-500">{{ $log->total_rows ? number_format($log->total_rows) : '—' }}</td>
+              </tr>
+            @empty
+              <tr><td colspan="9" class="px-3 py-6 text-center text-gray-400">No uploads yet.</td></tr>
+            @endforelse
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p class="text-[11px] text-gray-500 mt-1">Latest 50 uploads · all users · auto-refreshes after own upload completes</p>
+  </div>
+
   <script>
     const fileInput = document.getElementById('file');
     const btnUpload = document.getElementById('btnUpload');
@@ -181,6 +252,8 @@
             if (s.status === 'done' && !s.total_rows) {
               progressBar.style.width = '100%';
             }
+            // Refresh history para makita yung kakatapos lang na upload.
+            refreshHistory();
           }
         } catch (e) {
           console.error(e);
@@ -190,8 +263,88 @@
           clearInterval(pollTimer);
           pollTimer = null;
           btnUpload.disabled = false;
+          // Refresh kahit may error — baka may partial result na rumehistro.
+          refreshHistory();
         }
       }, 2000);
     }
+
+    // ── History table refresh ──────────────────────────────────────────
+    // Re-renders the tbody#historyBody from /jnt_upload/history JSON. Called
+    // after own upload finishes (done/failed) and via manual refresh button.
+    const historyBody = document.getElementById('historyBody');
+    const btnRefreshHistory = document.getElementById('btnRefreshHistory');
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => (
+        { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]
+      ));
+    }
+    function statusBadgeClass(st) {
+      switch (st) {
+        case 'done':       return 'bg-green-100 text-green-800';
+        case 'processing': return 'bg-blue-100 text-blue-800';
+        case 'queued':     return 'bg-gray-100 text-gray-700';
+        case 'failed':     return 'bg-red-100 text-red-800';
+        default:           return 'bg-gray-100 text-gray-700';
+      }
+    }
+    function formatWhen(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '—';
+      // Display in Asia/Manila (PH) — short month + 12-hour time.
+      return d.toLocaleString('en-US', {
+        timeZone: 'Asia/Manila',
+        month: 'short', day: 'numeric',
+        hour: 'numeric', minute: '2-digit', hour12: true,
+      });
+    }
+    function fmtInt(n) {
+      const v = Number(n || 0);
+      return v.toLocaleString('en-US');
+    }
+
+    async function refreshHistory() {
+      try {
+        const res = await fetch('/jnt_upload/history', {
+          headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        const rows = Array.isArray(json.rows) ? json.rows : [];
+        if (!rows.length) {
+          historyBody.innerHTML = '<tr><td colspan="9" class="px-3 py-6 text-center text-gray-400">No uploads yet.</td></tr>';
+          return;
+        }
+        historyBody.innerHTML = rows.map((r) => {
+          const by = r.user_email || (r.user_id ? ('User #' + r.user_id) : '—');
+          const errorsCls = (Number(r.error_rows) || 0) > 0
+            ? 'text-red-700 font-semibold'
+            : 'text-gray-400';
+          return `
+            <tr class="hover:bg-gray-50">
+              <td class="px-3 py-1.5 whitespace-nowrap text-gray-700">${escapeHtml(formatWhen(r.created_at))}</td>
+              <td class="px-3 py-1.5 text-gray-900 max-w-[280px] truncate" title="${escapeHtml(r.original_name)}">${escapeHtml(r.original_name)}</td>
+              <td class="px-3 py-1.5 text-gray-700 max-w-[180px] truncate" title="${escapeHtml(by)}">${escapeHtml(by)}</td>
+              <td class="px-3 py-1.5">
+                <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${statusBadgeClass(r.status)}">
+                  ${escapeHtml(r.status)}
+                </span>
+              </td>
+              <td class="px-3 py-1.5 text-right tabular-nums text-gray-900">${fmtInt(r.inserted)}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums text-gray-900">${fmtInt(r.updated)}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums text-gray-700">${fmtInt(r.skipped)}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums ${errorsCls}">${fmtInt(r.error_rows)}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums text-gray-500">${r.total_rows ? fmtInt(r.total_rows) : '—'}</td>
+            </tr>
+          `;
+        }).join('');
+      } catch (e) {
+        console.error('refreshHistory failed:', e);
+      }
+    }
+
+    if (btnRefreshHistory) btnRefreshHistory.addEventListener('click', refreshHistory);
   </script>
 </x-layout>

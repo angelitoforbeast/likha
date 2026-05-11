@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use App\Models\UploadLog;
@@ -50,7 +51,7 @@ class JntUploadController extends Controller
 $path = $file->storeAs($folder, $filename, $disk);
 
 
-            // 4) Create UploadLog (status: queued) + ✅ save batch_at
+            // 4) Create UploadLog (status: queued) + ✅ save batch_at + user info
             $log = UploadLog::create([
                 'type'          => 'jnt',
                 'disk'          => $disk,
@@ -60,6 +61,10 @@ $path = $file->storeAs($folder, $filename, $disk);
                 'size'          => $file->getSize(),
                 'status'        => 'queued',
                 'batch_at'      => $batchAt ? $batchAt->format('Y-m-d H:i:s') : null,
+                // Track who uploaded so the history table can show it.
+                // user_email persists kahit yung user record ay ma-delete later.
+                'user_id'       => Auth::id(),
+                'user_email'    => Auth::user()?->email,
             ]);
 
             // 5) Dispatch background job
@@ -82,7 +87,41 @@ $path = $file->storeAs($folder, $filename, $disk);
 
     public function index()
     {
-        return view('jnt_upload'); // resources/views/jnt_upload.blade.php
+        // Latest 50 JNT uploads — visible sa lahat. Always renders sa bottom ng page,
+        // hindi nawawala kahit may ongoing upload. Updates after own upload via
+        // /jnt_upload/history JSON endpoint.
+        $recentUploads = UploadLog::query()
+            ->where('type', 'jnt')
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get([
+                'id', 'original_name', 'status', 'total_rows', 'processed_rows',
+                'inserted', 'updated', 'skipped', 'error_rows',
+                'started_at', 'finished_at', 'batch_at', 'created_at',
+                'user_id', 'user_email',
+            ]);
+
+        return view('jnt_upload', compact('recentUploads'));
+    }
+
+    /**
+     * JSON endpoint para sa client-side refresh ng history table pagkatapos
+     * ng sariling upload. Same query shape as index(), pero JSON na lang.
+     */
+    public function history()
+    {
+        $rows = UploadLog::query()
+            ->where('type', 'jnt')
+            ->orderByDesc('created_at')
+            ->limit(50)
+            ->get([
+                'id', 'original_name', 'status', 'total_rows', 'processed_rows',
+                'inserted', 'updated', 'skipped', 'error_rows',
+                'started_at', 'finished_at', 'batch_at', 'created_at',
+                'user_id', 'user_email',
+            ]);
+
+        return response()->json(['rows' => $rows]);
     }
 
     public function status(UploadLog $uploadLog)
