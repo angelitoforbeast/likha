@@ -12,8 +12,25 @@ use Carbon\Carbon;
 
 class JntUploadController extends Controller
 {
+    /**
+     * Allow only Marketing, Marketing - OIC, and CEO sa /jnt_upload at lahat
+     * ng sub-endpoints. Other roles → 404. Mirrors yung nav-link guard sa
+     * layout.blade.php para consistent kahit i-share/i-direct-access yung URL.
+     */
+    private function checkAccess(): void
+    {
+        $raw  = Auth::user()?->employeeProfile?->role ?? '';
+        $norm = preg_replace('/\s+/u', ' ', trim((string) $raw));
+        $isCEO       = preg_match('/^ceo$/iu', $norm) === 1;
+        $isMOIC      = preg_match('/^marketing\s*[-–—]\s*oic$/iu', $norm) === 1;
+        $isMarketing = preg_match('/^marketing$/iu', $norm) === 1;
+        if (!($isCEO || $isMOIC || $isMarketing)) abort(404);
+    }
+
     public function store(Request $request)
     {
+        $this->checkAccess();
+
         try {
             // 1) Validate file + optional batch_at
             $request->validate([
@@ -87,6 +104,8 @@ $path = $file->storeAs($folder, $filename, $disk);
 
     public function index()
     {
+        $this->checkAccess();
+
         // Latest 50 JNT uploads — visible sa lahat. Always renders sa bottom ng page,
         // hindi nawawala kahit may ongoing upload. Updates after own upload via
         // /jnt_upload/history JSON endpoint.
@@ -110,6 +129,8 @@ $path = $file->storeAs($folder, $filename, $disk);
      */
     public function history()
     {
+        $this->checkAccess();
+
         $rows = UploadLog::query()
             ->where('type', 'jnt')
             ->orderByDesc('created_at')
@@ -126,6 +147,8 @@ $path = $file->storeAs($folder, $filename, $disk);
 
     public function status(UploadLog $uploadLog)
     {
+        $this->checkAccess();
+
         // Simple JSON status (front-end can poll every 2–5s)
         return response()->json([
             'id'              => $uploadLog->id,
