@@ -564,11 +564,28 @@ class AdsManagerCampaignsController extends Controller
         $level       = $request->input('level', 'campaigns'); // campaigns|adsets|ads
         $start       = $request->input('start_date');         // YYYY-MM-DD
         $end         = $request->input('end_date');           // YYYY-MM-DD
-        $pageName    = $request->input('page_name');          // optional
+        $pageName    = $request->input('page_name');          // optional (single, legacy)
+        // page_names — BATCH mode (used by /owner/private "Expand all").
+        // Accepts JSON array (POST body) or CSV string. When present, takes
+        // precedence over single page_name and uses a WHERE IN clause so all
+        // pages' campaigns are fetched in one query — eliminating the N+1
+        // pattern of firing one HTTP request per page.
+        $pageNamesRaw = $request->input('page_names');
+        if (is_array($pageNamesRaw)) {
+            $pageNames = $pageNamesRaw;
+        } elseif (is_string($pageNamesRaw) && $pageNamesRaw !== '') {
+            $pageNames = explode(',', $pageNamesRaw);
+        } else {
+            $pageNames = [];
+        }
+        $pageNames = array_values(array_filter(array_map(fn($n) => trim((string) $n), $pageNames), fn($n) => $n !== ''));
         $q           = $request->input('q');                  // search text
         $sortBy      = $request->input('sort_by', 'default'); // default composite sort
         $sortDir     = strtolower($request->input('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
-        $limit       = max(1, min((int) $request->input('limit', 200), 1000));
+        // Batch mode returns many pages' campaigns in one shot — raise cap to 5000
+        // (vs 1000 for single-page) since rows accumulate across pages.
+        $limitCap    = !empty($pageNames) ? 5000 : 1000;
+        $limit       = max(1, min((int) $request->input('limit', 200), $limitCap));
         $export      = $request->input('export');             // 'csv' to export
         // Item-scope filters used by /owner/private inline expand:
         //   item_name      — exact qty-variant match (e.g. "2 x MINI FLASHLIGHT")
@@ -770,7 +787,16 @@ class AdsManagerCampaignsController extends Controller
         if ($end)   $base->whereRaw("$dayExpr <= ?", [$end]);
 
         // Page filter (trim + case-insensitive)
-        if ($pageName && $pageName !== 'all') {
+        // Batch mode (page_names): single IN clause across many pages — used by
+        // /owner/private's "Expand all" so we get one heavy SQL pass instead of N.
+        // Falls back to single-page filter (page_name) for the legacy callers.
+        if (!empty($pageNames)) {
+            $lowerNames = array_values(array_unique(array_map(
+                fn($n) => mb_strtolower(trim($n)),
+                $pageNames
+            )));
+            $base->whereIn(DB::raw('LOWER(TRIM(page_name))'), $lowerNames);
+        } elseif ($pageName && $pageName !== 'all') {
             $base->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$pageName]);
         }
 

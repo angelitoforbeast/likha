@@ -584,7 +584,9 @@ Route::get('/ads_manager/report/status', [\App\Http\Controllers\AdsManagerReport
 Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'index'])
      ->name('ads_manager.campaigns');
 
-     Route::get('/ads_manager/campaigns/data', [AdsManagerCampaignsController::class, 'data'])
+     // Accept GET (legacy/single-page) + POST (batch w/ JSON page_names array
+     // to bypass URL length limits sa expand-all).
+     Route::match(['get', 'post'], '/ads_manager/campaigns/data', [AdsManagerCampaignsController::class, 'data'])
         ->name('ads_manager.campaigns.data');
 
      // History — daily change log derived from spend transitions.
