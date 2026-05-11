@@ -831,6 +831,12 @@ class AdsManagerCampaignsController extends Controller
                 ->leftJoinSub($campaignFreshStart, 'fs', function ($j) {
                     $j->on('ads_manager_reports.campaign_id', '=', 'fs.id');
                 })
+                // Join the adset latest-status snapshot so we can count distinct
+                // ad_set_ids per campaign whose latest delivery is ACTIVE.
+                // Powers the "Inside" column (active adsets per campaign).
+                ->leftJoinSub($adSetLatestStatus, 'asls', function ($j) {
+                    $j->on('ads_manager_reports.ad_set_id', '=', 'asls.ad_set_id');
+                })
                 ->selectRaw('
                     ads_manager_reports.campaign_id,
                     MAX(campaign_name) AS campaign_name,
@@ -849,6 +855,8 @@ class AdsManagerCampaignsController extends Controller
                     CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
                     CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
+
+                    COUNT(DISTINCT CASE WHEN asls.is_on_latest = 1 THEN ads_manager_reports.ad_set_id END) AS active_subcount,
 
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
@@ -899,6 +907,9 @@ class AdsManagerCampaignsController extends Controller
                     'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
                     'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
                     'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
+                    // "Inside" — count of currently-ACTIVE adsets inside this campaign
+                    // that had activity (any row) within the current filter window.
+                    'active_subcount'  => (int) ($r->active_subcount ?? 0),
                 ];
             });
 
@@ -938,6 +949,11 @@ class AdsManagerCampaignsController extends Controller
                     CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
                     CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
+
+                    -- "Inside" — count of distinct ads inside this adset.
+                    -- Ads inherit ACTIVE state from their parent adset (ls.is_on_latest).
+                    -- Only counts ads where parent adset is currently ACTIVE.
+                    COUNT(DISTINCT CASE WHEN ls.is_on_latest = 1 THEN ads_manager_reports.ad_id END) AS active_subcount,
 
                     COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
                     MAX(sd.first_started)  AS first_started,
@@ -989,6 +1005,8 @@ class AdsManagerCampaignsController extends Controller
                     'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
                     'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
                     'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
+                    // "Inside" — count of currently-ACTIVE ads inside this adset.
+                    'active_subcount'  => (int) ($r->active_subcount ?? 0),
                 ];
             });
 
@@ -1086,6 +1104,8 @@ class AdsManagerCampaignsController extends Controller
                     'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
                     'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
                     'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
+                    // "Inside" — ads are leaf-level, no children to count.
+                    'active_subcount'  => null,
                 ];
             });
         }

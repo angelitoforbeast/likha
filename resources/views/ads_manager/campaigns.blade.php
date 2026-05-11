@@ -444,6 +444,7 @@
             { id:'on',             label:'Off / On',         sort:null,             type:'on',           align:'left',  minw:80  },
             { id:'name',           label:'Name',             sort:null,             type:'name',         align:'left',  minw:200 },
             { id:'account',        label:'Account',          sort:null,             type:'account',      align:'left',  minw:140 },
+            { id:'active_subcount',label:'Inside',           sort:null,             type:'integer',      align:'right', minw:70  },
             { id:'first_started',  label:'First launched',   sort:'first_started',  type:'date',         align:'left',  minw:110 },
             { id:'days_running',   label:'Days running',     sort:'first_started',  type:'days_running', align:'left',  minw:90  },
             { id:'latest_started', label:'Latest start',     sort:'latest_started', type:'date',         align:'left',  minw:110 },

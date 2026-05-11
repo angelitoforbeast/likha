@@ -91,6 +91,7 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'on',             'label' => 'Off / On'],
             ['id' => 'name',           'label' => 'Name (Campaign / Ad set / Ad)'],
             ['id' => 'account',        'label' => 'Account'],
+            ['id' => 'active_subcount','label' => 'Inside'],
             ['id' => 'first_started',  'label' => 'First launched'],
             ['id' => 'days_running',   'label' => 'Days running'],
             ['id' => 'latest_started', 'label' => 'Latest start'],
@@ -161,7 +162,7 @@ class OwnerColumnSettingsController extends Controller
             // Reduced default to keep the inline expand panel within the
             // /owner/private viewport (no horizontal scroll). Heavier columns
             // start hidden — admin can re-enable per the settings page.
-            'on', 'name', 'account',
+            'on', 'name', 'account', 'active_subcount',
             'first_started', 'days_running', 'latest_started',
             'spend', 'cpp', 'profit_pct', 'profit_pct_7d', 'profit_pct_3d', 'profit_pct_today', 'impressions',
             'link_clicks', 'welcome_msg_rate', 'messages', 'conversion_rate',
