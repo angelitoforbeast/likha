@@ -127,6 +127,20 @@
           <label class="block text-xs font-semibold text-gray-600 mb-1">End Date</label>
           <input type="date" x-model="end" @change="preset='custom'" class="border border-gray-300 rounded px-2 py-1 text-sm">
         </div>
+
+        <div>
+          {{-- Cutoff mode affects how inferred orders are counted in cells na
+               walang saved snapshot. Saved cells are unaffected. --}}
+          <label class="block text-xs font-semibold text-gray-600 mb-1"
+                 title="Affects only inferred cells (yellow). Saved cells are immutable.">
+            Inferred Cutoff
+          </label>
+          <select x-model="cutoffMode" @change="reload()" class="border border-gray-300 rounded px-2 py-1 text-sm w-52">
+            <option value="upload">Upload time (ads upload moment)</option>
+            <option value="clock">Clock time (10:00 / 15:00 / 19:00)</option>
+          </select>
+        </div>
+
         <button @click="reload()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded">
           Apply
         </button>
@@ -136,7 +150,7 @@
       </div>
       <div class="mt-3 tl-legend">
         <span><span class="swatch" style="background:#ffffff;"></span> Saved snapshot — Adspent + Orders + CPP</span>
-        <span><span class="swatch" style="background:#fffbeb;"></span> Inferred — Orders only (from macro_output, no saved snapshot)</span>
+        <span><span class="swatch" style="background:#fffbeb;"></span> Inferred — Orders only, cutoff per selected mode</span>
         <span><span class="swatch" style="background:#fafafa;"></span> No data</span>
       </div>
     </div>
@@ -177,10 +191,18 @@
                           <div><span class="label">CPP:</span>     <span class="val" x-text="money(cellOf(b, d).cpp)"></span></div>
                         </template>
                         <template x-if="cellOf(b, d).inferred">
-                          <div class="inferred-badge">⚠ inferred · orders only</div>
+                          <div class="inferred-badge"
+                               x-text="inferredBadgeText(cellOf(b, d))"
+                               :title="cellOf(b, d).cutoff_src === 'clock_fallback' ? 'No ads upload found for this bucket — fell back to clock cutoff' : ''">
+                          </div>
                         </template>
                         <template x-if="!cellOf(b, d).inferred && cellOf(b, d).saved_at">
-                          <div class="saved" x-text="'saved ' + fmtSavedAt(cellOf(b, d).saved_at)"></div>
+                          <div class="saved">
+                            <div x-text="'saved ' + fmtSavedAt(cellOf(b, d).saved_at)"></div>
+                            <template x-if="cellOf(b, d).ads_at">
+                              <div x-text="'ads upload at ' + cellOf(b, d).ads_at"></div>
+                            </template>
+                          </div>
                         </template>
                       </div>
                     </template>
@@ -280,9 +302,10 @@
   <script>
     function cppTimeline() {
       return {
-        start:  @json($start),
-        end:    @json($end),
-        preset: 'last7',
+        start:      @json($start),
+        end:        @json($end),
+        preset:     'last7',
+        cutoffMode: 'upload', // 'upload' | 'clock' — controls inferred cell cutoff
 
         dates:   [],
         buckets: [],
@@ -353,7 +376,11 @@
         async reload() {
           this.loading = true;
           try {
-            const qs = new URLSearchParams({ start: this.start, end: this.end });
+            const qs = new URLSearchParams({
+              start: this.start,
+              end:   this.end,
+              cutoff_mode: this.cutoffMode,
+            });
             const res = await fetch(`{{ route('ads_manager.cpp.timeline.data') }}?${qs.toString()}`);
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const j = await res.json();
@@ -376,6 +403,16 @@
           if (!c) return 'tl-cell-empty';
           if (c.inferred) return 'tl-cell tl-cell-inferred';
           return 'tl-cell';
+        },
+
+        // Compose the inferred-cell badge text — shows the cutoff time used.
+        // Distinguishes between upload-based cutoff vs clock fallback.
+        inferredBadgeText(c) {
+          if (!c) return '';
+          const t = c.cutoff_at || '—';
+          if (c.cutoff_src === 'upload') return `⚠ inferred · as of ${t} (upload)`;
+          if (c.cutoff_src === 'clock_fallback') return `⚠ inferred · as of ${t} (no upload, clock fallback)`;
+          return `⚠ inferred · as of ${t} (clock)`;
         },
 
         async openDetail(date, bucket) {

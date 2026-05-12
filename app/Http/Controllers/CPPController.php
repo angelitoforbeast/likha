@@ -326,7 +326,15 @@ class CPPController extends Controller
         $end   = $request->query('end')   ?: Carbon::now('Asia/Manila')->toDateString();
         if ($start > $end) [$start, $end] = [$end, $start];
 
+        // 'upload' = use latest ads_manager_reports upload time per (date, bucket)
+        //            as the cutoff for inferred orders count.
+        // 'clock'  = use strict bucket clock cutoffs (10:00 / 15:00 / 19:00).
+        // 11:59PM bucket ALWAYS counts all orders (EOD) regardless of mode.
+        $cutoffMode = $request->query('cutoff_mode') === 'clock' ? 'clock' : 'upload';
+
         // ── 1) Existing saved snapshots (have adspent + orders + cpp) ──────
+        // Saved snapshots are immutable — their orders count is fixed at
+        // click-time, independent of cutoff_mode (per Q4).
         $rows = DB::table('cpp_snapshots')
             ->whereBetween('snapshot_date', [$start, $end])
             ->selectRaw('
@@ -339,17 +347,38 @@ class CPPController extends Controller
             ->groupBy('snapshot_date', 'snapshot_bucket')
             ->get();
 
-        // ── 2) Cumulative orders from macro_output per date and bucket
-        //      cutoff. Used to FILL IN cells na walang saved snapshot
-        //      (orders-only — adspent/cpp stays blank for those).
-        //      Bucket cutoff times (PH):
-        //        10AM    → orders with TIMESTAMP < 10:00
-        //        3PM     → orders with TIMESTAMP < 15:00
-        //        7PM     → orders with TIMESTAMP < 19:00
-        //        11:59PM → all orders for that date (no upper cap)
-        //
-        //      macro_output.TIMESTAMP is a STRING in 'H:i d-m-Y' format —
-        //      need engine-specific parsing.
+        // ── 2) Pull ads_manager_reports upload times within range. Used to
+        //      compute per (date, bucket) upload-time cutoffs sa 'upload' mode.
+        $uploadRows = DB::table('upload_logs')
+            ->where('type', 'ads_manager_reports')
+            ->whereBetween(DB::raw('DATE(created_at)'), [$start, $end])
+            ->selectRaw("
+                DATE(created_at) AS d,
+                (HOUR(created_at) * 60 + MINUTE(created_at)) AS mins
+            ")
+            ->get();
+
+        // uploadCutoffs[date][bucket] = latest minute-of-day of upload within
+        // that bucket's window on that date.
+        $uploadCutoffs = [];
+        foreach ($uploadRows as $u) {
+            $m = (int) $u->mins;
+            // Use same bucketing as bucketFor() — anything outside 6AM-onwards
+            // (i.e., 00:00–05:59) is skipped since no ads upload happens then.
+            if      ($m >= 6 * 60    && $m < 12 * 60 + 30) $b = '10AM';
+            elseif  ($m >= 12 * 60 + 30 && $m < 17 * 60 + 30) $b = '3PM';
+            elseif  ($m >= 17 * 60 + 30 && $m < 24 * 60)      $b = '7PM';
+            else continue;
+
+            $d = (string) $u->d;
+            if (!isset($uploadCutoffs[$d][$b]) || $uploadCutoffs[$d][$b] < $m) {
+                $uploadCutoffs[$d][$b] = $m;
+            }
+        }
+
+        // ── 3) Aggregated orders from macro_output per (date, minute_of_day).
+        //      Lets us compute cumulative counts up to ANY cutoff per cell
+        //      in PHP — no need for multiple per-cell SQL queries.
         $driver = DB::connection()->getDriverName();
 
         if ($driver === 'mysql') {
@@ -357,15 +386,9 @@ class CPPController extends Controller
             $tsMins = "(HOUR(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) * 60 + MINUTE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')))";
 
             $orderRows = DB::table('macro_output')
-                ->selectRaw("
-                    $tsDate AS ts_date,
-                    SUM(CASE WHEN $tsMins < " . (10 * 60) . " THEN 1 ELSE 0 END) AS o_10am,
-                    SUM(CASE WHEN $tsMins < " . (15 * 60) . " THEN 1 ELSE 0 END) AS o_3pm,
-                    SUM(CASE WHEN $tsMins < " . (19 * 60) . " THEN 1 ELSE 0 END) AS o_7pm,
-                    COUNT(*) AS o_eod
-                ")
+                ->selectRaw("$tsDate AS ts_date, $tsMins AS ts_min, COUNT(*) AS n")
                 ->whereRaw("$tsDate BETWEEN ? AND ?", [$start, $end])
-                ->groupByRaw("$tsDate")
+                ->groupByRaw("$tsDate, $tsMins")
                 ->get();
         } elseif ($driver === 'pgsql') {
             $tsExpr = "to_timestamp(\"TIMESTAMP\", 'HH24:MI DD-MM-YYYY')";
@@ -373,33 +396,67 @@ class CPPController extends Controller
             $tsMins = "(EXTRACT(HOUR FROM $tsExpr) * 60 + EXTRACT(MINUTE FROM $tsExpr))";
 
             $orderRows = DB::table('macro_output')
-                ->selectRaw("
-                    $tsDate AS ts_date,
-                    SUM(CASE WHEN $tsMins < " . (10 * 60) . " THEN 1 ELSE 0 END) AS o_10am,
-                    SUM(CASE WHEN $tsMins < " . (15 * 60) . " THEN 1 ELSE 0 END) AS o_3pm,
-                    SUM(CASE WHEN $tsMins < " . (19 * 60) . " THEN 1 ELSE 0 END) AS o_7pm,
-                    COUNT(*) AS o_eod
-                ")
+                ->selectRaw("$tsDate AS ts_date, $tsMins AS ts_min, COUNT(*) AS n")
                 ->whereRaw("$tsDate BETWEEN ? AND ?", [$start, $end])
-                ->groupByRaw("$tsDate")
+                ->groupByRaw("$tsDate, $tsMins")
                 ->get();
         } else {
             $orderRows = collect();
         }
 
-        // Map: ordersByDate[date][bucket] = cumulative count by bucket cutoff
-        $ordersByDate = [];
+        // Index by date for fast lookup.
+        $ordersByDate = []; // [date] = [ [ts_min, n], ... ]
         foreach ($orderRows as $r) {
-            $d = (string) $r->ts_date;
-            $ordersByDate[$d] = [
-                '10AM'    => (int) $r->o_10am,
-                '3PM'     => (int) $r->o_3pm,
-                '7PM'     => (int) $r->o_7pm,
-                '11:59PM' => (int) $r->o_eod,
-            ];
+            $ordersByDate[(string) $r->ts_date][] = [(int) $r->ts_min, (int) $r->n];
         }
 
-        // ── 3) Build date list (descending) + cells matrix ────────────────
+        // ── 4) Per (date, bucket) cutoff resolution + cumulative count ────
+        // Clock-time cutoffs (used when mode='clock', or as fallback when
+        // mode='upload' but walang upload for that bucket on that date).
+        $clockCutoffs = [
+            '10AM'    => 10 * 60,
+            '3PM'     => 15 * 60,
+            '7PM'     => 19 * 60,
+            '11:59PM' => 24 * 60, // all minutes = EOD
+        ];
+
+        // Compute cumulative orders + cutoff used per (date, bucket).
+        // inferredByDate[date][bucket] = ['orders' => N, 'cutoff_min' => X, 'cutoff_source' => 'upload'|'clock']
+        $inferredByDate = [];
+        foreach ($ordersByDate as $d => $minRows) {
+            $inferredByDate[$d] = [];
+            foreach (array_keys($clockCutoffs) as $b) {
+                // 11:59PM always uses EOD (no cap) regardless of mode.
+                if ($b === '11:59PM') {
+                    $cutoff = $clockCutoffs['11:59PM'];
+                    $src    = 'clock';
+                } elseif ($cutoffMode === 'upload') {
+                    $cutoff = $uploadCutoffs[$d][$b] ?? null;
+                    if ($cutoff === null) {
+                        // Fallback to strict clock cutoff.
+                        $cutoff = $clockCutoffs[$b];
+                        $src    = 'clock_fallback';
+                    } else {
+                        $src    = 'upload';
+                    }
+                } else {
+                    $cutoff = $clockCutoffs[$b];
+                    $src    = 'clock';
+                }
+
+                $count = 0;
+                foreach ($minRows as [$ts_min, $n]) {
+                    if ($ts_min < $cutoff) $count += $n;
+                }
+                $inferredByDate[$d][$b] = [
+                    'orders'        => $count,
+                    'cutoff_min'    => $cutoff,
+                    'cutoff_source' => $src,
+                ];
+            }
+        }
+
+        // ── 5) Build date list (descending) + cells matrix ────────────────
         $dates = [];
         for ($d = Carbon::parse($end); $d->gte(Carbon::parse($start)); $d->subDay()) {
             $dates[] = $d->format('Y-m-d');
@@ -409,7 +466,18 @@ class CPPController extends Controller
         $cells = [];
         foreach ($buckets as $b) $cells[$b] = [];
 
-        // Pass 1 — populate from saved snapshots (preferred source).
+        // Helper: pretty-format minutes-since-midnight to 'h:mm AM/PM' string.
+        $fmtMin = function (int $mins): string {
+            if ($mins >= 24 * 60) return 'EOD';
+            $h = intdiv($mins, 60);
+            $m = $mins % 60;
+            $ampm = $h >= 12 ? 'PM' : 'AM';
+            $h12  = $h % 12 ?: 12;
+            return sprintf('%d:%02d %s', $h12, $m, $ampm);
+        };
+
+        // Pass 1 — populate from saved snapshots (preferred source). Orders
+        // count is fixed at save-time; cutoff_mode doesn't affect saved cells.
         $snapshotSet = [];
         foreach ($rows as $r) {
             $b = (string) $r->snapshot_bucket;
@@ -418,39 +486,51 @@ class CPPController extends Controller
             $spent  = (float) $r->total_spent;
             $orders = (int)   $r->total_orders;
             $cpp    = $orders > 0 ? round($spent / $orders, 2) : null;
+
+            // For saved cells, also report the ads upload time within that
+            // bucket — useful kung iba sa snapshot_at. Lets the modal show
+            // "saved at X · ads data as of Y" if that's desired later.
+            $adsAt = isset($uploadCutoffs[$d][$b]) ? $fmtMin($uploadCutoffs[$d][$b]) : null;
+
             $cells[$b][$d] = [
-                'spent'    => $spent,
-                'orders'   => $orders,
-                'cpp'      => $cpp,
-                'saved_at' => $r->latest_at,
-                'inferred' => false, // explicit save
+                'spent'        => $spent,
+                'orders'       => $orders,
+                'cpp'          => $cpp,
+                'saved_at'     => $r->latest_at,
+                'ads_at'       => $adsAt,
+                'cutoff_at'    => null,  // n/a — orders is fixed at save
+                'cutoff_src'   => null,
+                'inferred'     => false,
             ];
         }
 
-        // Pass 2 — fill in cells na walang snapshot pero may macro_output
-        // orders. Adspent + CPP stays null (cannot reconstruct).
+        // Pass 2 — fill in cells na walang snapshot, using inferred orders.
         foreach ($dates as $d) {
             foreach ($buckets as $b) {
                 if (isset($snapshotSet["$d|$b"])) continue;
-                $ord = $ordersByDate[$d][$b] ?? 0;
-                if ($ord > 0) {
-                    $cells[$b][$d] = [
-                        'spent'    => null,
-                        'orders'   => $ord,
-                        'cpp'      => null,
-                        'saved_at' => null,
-                        'inferred' => true, // orders inferred from macro_output
-                    ];
-                }
+                $info = $inferredByDate[$d][$b] ?? null;
+                if (!$info || $info['orders'] === 0) continue;
+
+                $cells[$b][$d] = [
+                    'spent'      => null,
+                    'orders'     => $info['orders'],
+                    'cpp'        => null,
+                    'saved_at'   => null,
+                    'ads_at'     => null,
+                    'cutoff_at'  => $fmtMin($info['cutoff_min']),
+                    'cutoff_src' => $info['cutoff_source'], // 'upload' | 'clock' | 'clock_fallback'
+                    'inferred'   => true,
+                ];
             }
         }
 
         return response()->json([
-            'start'   => $start,
-            'end'     => $end,
-            'dates'   => $dates,
-            'buckets' => $buckets,
-            'cells'   => $cells,
+            'start'       => $start,
+            'end'         => $end,
+            'dates'       => $dates,
+            'buckets'     => $buckets,
+            'cutoff_mode' => $cutoffMode,
+            'cells'       => $cells,
         ]);
     }
 
