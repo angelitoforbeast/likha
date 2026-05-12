@@ -132,6 +132,15 @@
       <button type="button" data-preset="this_week" onclick="setQuickDate('this_week')" class="quick-date-btn bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-700 text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">This Week</button>
       <button type="button" data-preset="last_7_days" onclick="setQuickDate('last_7_days')" class="quick-date-btn bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-700 text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">Last 7 Days</button>
       <button type="button" data-preset="this_month" onclick="setQuickDate('this_month')" class="quick-date-btn bg-gray-200 hover:bg-blue-600 hover:text-white text-gray-700 text-sm font-medium px-3 py-1.5 rounded shadow-sm transition">This Month</button>
+
+      {{-- Separator + link to the snapshot timeline (grid of buckets × dates).
+           Snapshots are saved automatically every Copy Table click. --}}
+      <span class="text-gray-300 mx-1">|</span>
+      <a href="{{ route('ads_manager.cpp.timeline') }}"
+         class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-3 py-1.5 rounded shadow-sm transition"
+         title="View saved snapshots over time (auto-saved on Copy Table click)">
+        📈 View Timeline
+      </a>
     </div>
   </div>
 
@@ -584,8 +593,63 @@
       }).join('\n');
 
       navigator.clipboard.writeText(copiedText)
-        .then(() => alert('SUMMARY OF ADS table copied!'))
+        .then(() => {
+          // Also save snapshot to cpp_snapshots — backend re-queries today's
+          // /cpp data and saves per-page rows tagged with the current PH-time
+          // bucket (10AM / 3PM / 7PM). Latest-wins per (date, bucket, page).
+          saveCppSnapshot();
+        })
         .catch(err => console.error('Copy failed:', err));
+    }
+
+    // POST to /ads_manager/cpp/snapshot — auto-save snapshot of today's /cpp
+    // matrix. Called after a successful clipboard write sa Copy Table button.
+    // Shows a small toast so user knows na nai-save (or na may error).
+    function saveCppSnapshot() {
+      const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+      fetch('{{ route('ads_manager.cpp.snapshot') }}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept':       'application/json',
+          'X-CSRF-TOKEN': csrf,
+        },
+        body: '{}',
+      })
+      .then(r => r.json())
+      .then(j => {
+        if (j && j.ok) {
+          showCppToast(`📸 Snapshot saved (${j.snapshot_bucket}) · ${j.pages_saved} pages`, 'ok');
+        } else {
+          showCppToast('⚠ Snapshot save failed', 'err');
+        }
+      })
+      .catch(e => {
+        console.error('Snapshot save error:', e);
+        showCppToast('⚠ Snapshot save failed', 'err');
+      });
+    }
+
+    // Minimal toast helper — fades out after ~2.5s sa bottom-right corner.
+    function showCppToast(msg, kind) {
+      let el = document.getElementById('cpp-snapshot-toast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'cpp-snapshot-toast';
+        el.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;'
+          + 'padding:10px 14px;border-radius:8px;font-size:13px;font-weight:500;'
+          + 'box-shadow:0 4px 16px rgba(0,0,0,0.18);transition:opacity .25s;'
+          + 'pointer-events:none;';
+        document.body.appendChild(el);
+      }
+      const bg = kind === 'err' ? '#fee2e2' : '#dcfce7';
+      const fg = kind === 'err' ? '#991b1b' : '#166534';
+      el.style.background = bg;
+      el.style.color = fg;
+      el.style.opacity = '1';
+      el.textContent = msg;
+      clearTimeout(el._hideTimer);
+      el._hideTimer = setTimeout(() => { el.style.opacity = '0'; }, 2500);
     }
 
     function copySinglePageTable() {

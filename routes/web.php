@@ -576,6 +576,20 @@ Route::get('/ads_manager/report/status', [\App\Http\Controllers\AdsManagerReport
     Route::get('/ads_manager/cpp', [\App\Http\Controllers\CPPController::class, 'index'])->name('ads_manager.cpp');
     Route::get('/ads_manager/cpp/data', [\App\Http\Controllers\CPPController::class, 'data'])
     ->name('ads_manager.cpp.data');
+
+    // Snapshot capture — hit when user clicks the Copy Table button sa /cpp.
+    // Saves the current /cpp matrix (today only) sa cpp_snapshots, bucket
+    // auto-derived from PH-local click time.
+    Route::post('/ads_manager/cpp/snapshot', [\App\Http\Controllers\CPPController::class, 'saveSnapshot'])
+        ->name('ads_manager.cpp.snapshot');
+
+    // Timeline view — grid of buckets × dates with click-to-detail modal.
+    Route::get('/ads_manager/cpp/timeline',        [\App\Http\Controllers\CPPController::class, 'timeline'])
+        ->name('ads_manager.cpp.timeline');
+    Route::get('/ads_manager/cpp/timeline/data',   [\App\Http\Controllers\CPPController::class, 'timelineData'])
+        ->name('ads_manager.cpp.timeline.data');
+    Route::get('/ads_manager/cpp/timeline/detail', [\App\Http\Controllers\CPPController::class, 'timelineDetail'])
+        ->name('ads_manager.cpp.timeline.detail');
     Route::get(
     '/ads_manager/pancake-subscription-checker',
     [PancakeSubscriptionCheckerController::class, 'index']
