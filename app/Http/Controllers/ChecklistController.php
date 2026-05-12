@@ -163,6 +163,28 @@ class ChecklistController extends Controller
 
         $tasks = $taskQuery->orderBy('sort_order')->orderBy('id')->get();
 
+        // ── Frequency filter — mirror ng index() para aligned ang views ──
+        // Kung index() hides a task on this day (e.g., weekly on a wrong day, or
+        // a once-ever task that's already been submitted), the report should
+        // also hide it. Otherwise the report falsely shows "pending" tasks na
+        // hindi naman lalabas sa user's actual checklist.
+        //
+        // For 'once' frequency, treat as DONE when any submission exists with
+        // `date <= reportDate`. This lets past-date reports correctly show
+        // the task as still-pending FOR THAT DAY (kung wala pa submission noon),
+        // and hide it sa days on/after the actual completion.
+        $reportDateStr = $dateObj->toDateString();
+        $tasks = $tasks->filter(function ($t) use ($dateObj, $reportDateStr) {
+            return match($t->frequency ?? 'daily') {
+                'weekly'  => (int) $dateObj->dayOfWeek === (int) $t->frequency_day,
+                'monthly' => (int) $dateObj->day       === (int) $t->frequency_day,
+                'once'    => !ChecklistSubmission::where('checklist_task_id', $t->id)
+                                ->where('date', '<=', $reportDateStr)
+                                ->exists(),
+                default   => true, // daily — show always (per-date submission check happens elsewhere)
+            };
+        })->values();
+
         // Submissions for this date — load all that the user is allowed to see.
         $subQuery = ChecklistSubmission::with(['user', 'files', 'logs.user', 'latestAnalysis.user', 'latestApproval.user'])
             ->withCount(['analysisLogs', 'approvalLogs'])
