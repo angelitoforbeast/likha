@@ -141,6 +141,20 @@
           </select>
         </div>
 
+        <div>
+          {{-- Show/hide the "⚠ inferred · as of HH:MM" badge sa inferred cells.
+               Default Hide para hindi messy yung grid. Cell background tint
+               still shows kung saved or inferred yung cell. --}}
+          <label class="block text-xs font-semibold text-gray-600 mb-1"
+                 title="Show/hide the cutoff time badge sa inferred cells.">
+            Inferred Badge
+          </label>
+          <select x-model="showInferredBadge" class="border border-gray-300 rounded px-2 py-1 text-sm w-28">
+            <option value="hide">Hide</option>
+            <option value="show">Show</option>
+          </select>
+        </div>
+
         <button @click="reload()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded">
           Apply
         </button>
@@ -190,7 +204,7 @@
                         <template x-if="cellOf(b, d).cpp != null">
                           <div><span class="label">CPP:</span>     <span class="val" x-text="money(cellOf(b, d).cpp)"></span></div>
                         </template>
-                        <template x-if="cellOf(b, d).inferred">
+                        <template x-if="cellOf(b, d).inferred && showInferredBadge === 'show'">
                           <div class="inferred-badge"
                                x-text="inferredBadgeText(cellOf(b, d))"
                                :title="cellOf(b, d).cutoff_src === 'clock_fallback' ? 'No ads upload found for this bucket — fell back to clock cutoff' : ''">
@@ -306,6 +320,7 @@
         end:        @json($end),
         preset:     'last7',
         cutoffMode: 'upload', // 'upload' | 'clock' — controls inferred cell cutoff
+        showInferredBadge: 'hide', // 'hide' | 'show' — toggle the ⚠ inferred badge text
 
         dates:   [],
         buckets: [],
