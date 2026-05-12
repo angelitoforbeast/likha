@@ -246,7 +246,9 @@ class ChecklistController extends Controller
         $dept   = $user?->employeeProfile?->department ?? '';
         $userId = $user?->id;
 
-        $query = ChecklistTask::with('assignedUsers')->orderBy('sort_order')->orderBy('id');
+        $query = ChecklistTask::with(['assignedUsers', 'creator'])
+            ->orderBy('sort_order')
+            ->orderBy('id');
 
         if ($role === 'CEO') {
             // sees all — no filter

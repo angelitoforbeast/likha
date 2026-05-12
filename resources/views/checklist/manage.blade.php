@@ -82,9 +82,9 @@
 
       {{-- Row 3: Column headers (synced with body via JS scroll-sync) --}}
       <div class="overflow-x-auto" id="manage-head-scroll">
-        <table class="w-full text-sm border-collapse" style="table-layout:fixed;min-width:1360px">
+        <table class="w-full text-sm border-collapse" style="table-layout:fixed;min-width:1592px">
           <colgroup>
-            <col style="width:32px"><col style="width:48px"><col style="width:20px"><col><col style="width:96px"><col style="width:144px"><col style="width:80px"><col style="width:96px"><col style="width:80px"><col style="width:112px"><col style="width:80px"><col style="width:96px"><col style="width:192px">
+            <col style="width:32px"><col style="width:48px"><col style="width:20px"><col><col style="width:96px"><col style="width:144px"><col style="width:80px"><col style="width:96px"><col style="width:80px"><col style="width:112px"><col style="width:80px"><col style="width:96px"><col style="width:104px"><col style="width:128px"><col style="width:192px">
           </colgroup>
           <thead>
             <tr class="bg-gray-50/60 text-xs text-gray-400 uppercase tracking-wide font-semibold">
@@ -102,6 +102,8 @@
               <th class="text-left px-3 py-2 w-28">Frequency</th>
               <th class="text-left px-3 py-2 w-20">Photos</th>
               <th class="text-left px-3 py-2 w-24">Dept</th>
+              <th class="text-left px-3 py-2 w-28">Created</th>
+              <th class="text-left px-3 py-2 w-32">Created By</th>
               <th class="text-left px-3 py-2 w-48">Actions</th>
             </tr>
           </thead>
@@ -338,7 +340,7 @@
       <div class="overflow-x-auto" id="manage-body-scroll">
         <table id="task-sort-list" class="w-full text-sm border-collapse" style="table-layout:fixed;min-width:1360px">
           <colgroup>
-            <col style="width:32px"><col style="width:48px"><col style="width:20px"><col><col style="width:96px"><col style="width:144px"><col style="width:80px"><col style="width:96px"><col style="width:80px"><col style="width:112px"><col style="width:80px"><col style="width:96px"><col style="width:192px">
+            <col style="width:32px"><col style="width:48px"><col style="width:20px"><col><col style="width:96px"><col style="width:144px"><col style="width:80px"><col style="width:96px"><col style="width:80px"><col style="width:112px"><col style="width:80px"><col style="width:96px"><col style="width:104px"><col style="width:128px"><col style="width:192px">
           </colgroup>
 
           @forelse($allTasks as $index => $t)
@@ -467,6 +469,28 @@
                   @endif
                 </td>
 
+                {{-- Created (date) — PH timezone, short format --}}
+                <td class="px-3 py-3 align-middle whitespace-nowrap">
+                  @if($t->created_at)
+                    <span class="text-xs text-gray-500"
+                          title="{{ $t->created_at->setTimezone('Asia/Manila')->format('M j, Y g:i A') }}">
+                      {{ $t->created_at->setTimezone('Asia/Manila')->format('M j, Y') }}
+                    </span>
+                  @else
+                    <span class="text-gray-300 text-xs">—</span>
+                  @endif
+                </td>
+
+                {{-- Created By — eager-loaded via creator() relationship.
+                     Falls back to "—" for legacy tasks na walang created_by stamp. --}}
+                <td class="px-3 py-3 align-middle">
+                  @if($t->creator)
+                    <span class="text-xs text-gray-600">{{ $t->creator->name }}</span>
+                  @else
+                    <span class="text-gray-300 text-xs">—</span>
+                  @endif
+                </td>
+
                 {{-- Actions --}}
                 <td class="px-3 py-3 align-middle">
                   <div class="flex gap-1 flex-wrap">
@@ -519,7 +543,7 @@
 
               {{-- EDIT ROW --}}
               <tr x-show="editing" x-transition class="border-b border-blue-100 bg-blue-50/20">
-                <td colspan="13" class="px-4 py-3">
+                <td colspan="15" class="px-4 py-3">
                   <form method="POST" action="{{ route('checklist.update-task', $t) }}" class="space-y-2">
                     @csrf @method('PATCH')
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -622,7 +646,7 @@
           @empty
             <tbody>
               <tr>
-                <td colspan="13" class="px-4 py-10 text-center text-sm text-gray-400">No tasks yet. Add one above.</td>
+                <td colspan="15" class="px-4 py-10 text-center text-sm text-gray-400">No tasks yet. Add one above.</td>
               </tr>
             </tbody>
           @endforelse

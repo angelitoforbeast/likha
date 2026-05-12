@@ -719,8 +719,32 @@ class GPTAdGeneratorController extends Controller
 
             $out = $header . "\n\n" . $body;
 
+            // Structured sections for the Table view sa UI — same data as the
+            // text output, just shaped para sa client-side render. Sections
+            // are emitted as a numerically-indexed array to preserve order.
+            $sectionsForUi = collect($sections)->map(function ($group, $label) {
+                $rows = $group->map(function ($r) {
+                    return [
+                        'headline'        => $r->headline        ?? null,
+                        'body'            => $r->body_ad_settings ?? null,
+                        'welcome_message' => $r->welcome_message ?? null,
+                        'quick_reply_1'   => $r->quick_reply_1   ?? null,
+                        'quick_reply_2'   => $r->quick_reply_2   ?? null,
+                        'quick_reply_3'   => $r->quick_reply_3   ?? null,
+                        'cpm'             => isset($r->cpm) ? (float) $r->cpm : null,
+                        'wmr'             => isset($r->wmr) && $r->wmr !== null ? (float) $r->wmr : null,
+                        'spend'           => isset($r->spend)  ? (float) $r->spend  : 0,
+                        'msgs'            => isset($r->msgs)   ? (int)   $r->msgs   : 0,
+                        'clicks'          => isset($r->clicks) ? (int)   $r->clicks : 0,
+                        'page_name'       => $r->page_name ?? null,
+                    ];
+                })->values()->all();
+                return ['label' => $label, 'rows' => $rows];
+            })->values()->all();
+
             return [
                 'output'        => $out,
+                'sections'      => $sectionsForUi,
                 'fallback_used' => false,
                 'stats'         => $stats,
                 'low_data'      => $rows->count() < 5

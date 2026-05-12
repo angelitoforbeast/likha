@@ -338,16 +338,59 @@
             <div class="gpt-card-title">💡 Suggestions <span class="text-slate-400 font-normal">(auto-fed)</span></div>
             <div class="gpt-card-subtitle">CPM-ranked patterns from your existing ads.</div>
           </div>
-          <div class="flex gap-1">
+          <div class="flex gap-1 items-center">
+            {{-- View toggle — Text shows the raw prompt block (what GPT sees);
+                 Table shows the same data as 4 compact tables, easier to scan. --}}
+            <select id="sugViewMode" onchange="setSuggestionsView(this.value)"
+                    class="text-xs border border-gray-300 rounded px-2 py-1">
+              <option value="text">📄 Text</option>
+              <option value="table">📊 Table</option>
+            </select>
             <button onclick="copySuggestions()" class="btn-ghost">📋 Copy</button>
             <button onclick="clearSuggestions()" class="btn-ghost danger">🗑 Clear</button>
           </div>
         </div>
         <div class="flex-1 overflow-hidden p-3">
+          {{-- Text view (default) — preserved as-is so the GPT-fed block at
+               clipboard-copy behavior keep working unchanged. --}}
           <div id="suggestionsBox" class="h-full overflow-auto whitespace-pre-wrap p-3"></div>
+
+          {{-- Table view (hidden by default) — rendered client-side from the
+               structured `sections` field returned by the API. Toggling sa
+               dropdown switches visibility; data is shared between views. --}}
+          <div id="suggestionsTable" class="h-full overflow-auto p-3 hidden"></div>
         </div>
         <textarea id="suggestionsRaw" class="hidden"></textarea>
       </div>
+
+      <style>
+        /* Compact table styling for the Table view ng suggestions. */
+        .sug-tbl-wrap { margin-bottom: 18px; }
+        .sug-tbl-section-label {
+          font-size: 12px; font-weight: 600; color: #334155;
+          margin-bottom: 6px; padding: 6px 10px; background: #f1f5f9;
+          border-radius: 6px;
+        }
+        .sug-tbl {
+          width: 100%; border-collapse: collapse; font-size: 11px;
+          table-layout: fixed;
+        }
+        .sug-tbl th, .sug-tbl td {
+          border: 1px solid #e5e7eb; padding: 4px 6px;
+          vertical-align: top; word-wrap: break-word;
+        }
+        .sug-tbl thead th {
+          background: #f8fafc; color: #475569;
+          font-weight: 600; text-align: left;
+          position: sticky; top: 0; z-index: 1;
+        }
+        .sug-tbl tbody tr:nth-child(even) td { background: #fafafa; }
+        .sug-tbl .num { text-align: right; font-family: ui-monospace, monospace; }
+        .sug-tbl .text-cell {
+          max-height: 60px; overflow: hidden; text-overflow: ellipsis;
+        }
+        .sug-tbl .text-cell:hover { max-height: 240px; overflow: auto; }
+      </style>
     </div>
 
     <!-- Horizontal resize handle between left column and right column -->
@@ -814,10 +857,17 @@
         const finalSug = `${header}\n${fallbackBanner}${data.output ?? "⚠️ No output."}`;
         box.textContent = finalSug;
         raw.value = finalSug; // stored to feed into GPT
+
+        // Cache the structured sections for the Table view toggle.
+        // (Text view above stays the source of truth para sa GPT input.)
+        window.__SUG_SECTIONS__ = Array.isArray(data.sections) ? data.sections : [];
+        renderSuggestionsTable();
       } catch (error) {
         const msg = `⚠️ Error loading suggestions: ${error.message}`;
         box.textContent = msg;
         raw.value = msg;
+        window.__SUG_SECTIONS__ = [];
+        renderSuggestionsTable();
       } finally {
         btn.disabled = false;
         computeLayoutHeights();
@@ -827,7 +877,105 @@
     function clearSuggestions() {
       document.getElementById("suggestionsBox").textContent = "";
       document.getElementById("suggestionsRaw").value = "";
+      window.__SUG_SECTIONS__ = [];
+      renderSuggestionsTable();
       computeLayoutHeights();
+    }
+
+    // ── Suggestions view toggle (Text / Table) ──────────────────────────
+    // Text view is the original whitespace-pre-wrap block na fed sa GPT.
+    // Table view renders the same data sa 4 compact tables for scanning.
+    function setSuggestionsView(mode) {
+      const txt = document.getElementById("suggestionsBox");
+      const tbl = document.getElementById("suggestionsTable");
+      if (mode === "table") {
+        txt.classList.add("hidden");
+        tbl.classList.remove("hidden");
+        renderSuggestionsTable();
+      } else {
+        tbl.classList.add("hidden");
+        txt.classList.remove("hidden");
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => (
+        { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]
+      ));
+    }
+
+    function renderSuggestionsTable() {
+      const tbl = document.getElementById("suggestionsTable");
+      if (!tbl) return;
+      const sections = Array.isArray(window.__SUG_SECTIONS__) ? window.__SUG_SECTIONS__ : [];
+
+      if (!sections.length) {
+        tbl.innerHTML = '<div class="text-sm text-gray-400 text-center py-6">No data — click 💡 Load Suggestions first.</div>';
+        return;
+      }
+
+      const money = (v) => (v == null) ? "—"
+        : "₱" + Number(v).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const pct   = (v) => (v == null) ? "—" : (Number(v).toFixed(1) + "%");
+      const num   = (v) => Number(v ?? 0).toLocaleString("en-PH");
+
+      tbl.innerHTML = sections.map((s) => {
+        if (!s.rows || s.rows.length === 0) {
+          return `
+            <div class="sug-tbl-wrap">
+              <div class="sug-tbl-section-label">${escapeHtml(s.label)}</div>
+              <div class="text-xs text-gray-400 italic px-2">(no data)</div>
+            </div>
+          `;
+        }
+        const rowsHtml = s.rows.map((r, i) => `
+          <tr>
+            <td class="num">${i + 1}</td>
+            <td>${escapeHtml(r.page_name || "—")}</td>
+            <td><div class="text-cell" title="${escapeHtml(r.headline || "")}">${escapeHtml(r.headline || "—")}</div></td>
+            <td><div class="text-cell" title="${escapeHtml(r.body || "")}">${escapeHtml(r.body || "—")}</div></td>
+            <td><div class="text-cell" title="${escapeHtml(r.welcome_message || "")}">${escapeHtml(r.welcome_message || "—")}</div></td>
+            <td><div class="text-cell" title="${escapeHtml(r.quick_reply_1 || "")}">${escapeHtml(r.quick_reply_1 || "—")}</div></td>
+            <td><div class="text-cell" title="${escapeHtml(r.quick_reply_2 || "")}">${escapeHtml(r.quick_reply_2 || "—")}</div></td>
+            <td><div class="text-cell" title="${escapeHtml(r.quick_reply_3 || "")}">${escapeHtml(r.quick_reply_3 || "—")}</div></td>
+            <td class="num">${money(r.cpm)}</td>
+            <td class="num">${pct(r.wmr)}</td>
+            <td class="num">${money(r.spend)}</td>
+            <td class="num">${num(r.msgs)}</td>
+            <td class="num">${num(r.clicks)}</td>
+          </tr>
+        `).join("");
+        return `
+          <div class="sug-tbl-wrap">
+            <div class="sug-tbl-section-label">${escapeHtml(s.label)}</div>
+            <table class="sug-tbl">
+              <colgroup>
+                <col style="width:28px"><col style="width:110px"><col style="width:140px"><col style="width:180px"><col style="width:180px">
+                <col style="width:110px"><col style="width:110px"><col style="width:110px">
+                <col style="width:70px"><col style="width:60px"><col style="width:80px"><col style="width:55px"><col style="width:55px">
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Page</th>
+                  <th>Headline</th>
+                  <th>Body</th>
+                  <th>Welcome Msg</th>
+                  <th>QR1</th>
+                  <th>QR2</th>
+                  <th>QR3</th>
+                  <th class="num">CPM</th>
+                  <th class="num">WMR</th>
+                  <th class="num">Spend</th>
+                  <th class="num">Msgs</th>
+                  <th class="num">Clicks</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+        `;
+      }).join("");
     }
 
     function copySuggestions() {

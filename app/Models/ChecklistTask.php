@@ -31,4 +31,13 @@ class ChecklistTask extends Model
     {
         return $this->belongsToMany(User::class, 'checklist_task_users');
     }
+
+    /**
+     * Who created this task. Nullable for legacy rows na walang created_by
+     * stamp. Used sa /checklist/manage table para makita kung sino nag-add.
+     */
+    public function creator(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
 }
