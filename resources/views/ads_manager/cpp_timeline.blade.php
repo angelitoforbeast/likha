@@ -10,7 +10,7 @@
       padding: 8px 10px;
       vertical-align: top;
       background: white;
-      min-width: 140px;
+      min-width: 150px;
     }
     .tl-grid thead th {
       background: #f1f5f9;
@@ -21,15 +21,15 @@
       z-index: 2;
       text-align: center;
     }
-    .tl-grid th.tl-bucket-col {
+    .tl-grid th.tl-date-col {
       background: #f8fafc;
       color: #475569;
       font-weight: 700;
       position: sticky;
       left: 0;
       z-index: 3;
-      min-width: 90px;
-      text-align: center;
+      min-width: 110px;
+      text-align: left;
     }
     .tl-grid thead th.tl-corner {
       left: 0;
@@ -45,9 +45,21 @@
     .tl-cell:hover { background: #eff6ff; }
     .tl-cell-empty { background: #fafafa; color: #cbd5e1; text-align: center; font-style: italic; cursor: default; }
     .tl-cell-empty:hover { background: #fafafa; }
+    .tl-cell-inferred { background: #fffbeb; }
+    .tl-cell-inferred:hover { background: #fef3c7; }
     .tl-cell .label { font-size: 10px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
     .tl-cell .val   { color: #0f172a; font-weight: 600; }
     .tl-cell .saved { font-size: 10px; color: #94a3b8; margin-top: 4px; }
+    .tl-cell .inferred-badge {
+      display: inline-block;
+      font-size: 9px;
+      color: #92400e;
+      background: #fde68a;
+      padding: 1px 5px;
+      border-radius: 3px;
+      margin-top: 4px;
+      letter-spacing: 0.04em;
+    }
 
     /* Modal */
     .tl-modal-backdrop {
@@ -78,36 +90,62 @@
     .tl-detail-table tbody tr:nth-child(even) td { background: #fafafa; }
     .tl-detail-table tfoot td { background: #f1f5f9; font-weight: 700; }
     .num { text-align: right; font-family: 'SFMono-Regular', Consolas, monospace; }
+
+    .tl-legend {
+      display: inline-flex; align-items: center; gap: 14px;
+      font-size: 11px; color: #64748b;
+    }
+    .tl-legend .swatch {
+      display: inline-block; width: 12px; height: 12px; border-radius: 2px;
+      border: 1px solid #e5e7eb; vertical-align: middle; margin-right: 4px;
+    }
   </style>
 
   <div class="max-w-7xl mx-auto" x-data="cppTimeline()" x-init="init()">
 
     {{-- ── Filter bar ──────────────────────────────────────────────── --}}
-    <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4 flex flex-wrap items-end gap-3">
-      <div>
-        <label class="block text-xs font-semibold text-gray-600 mb-1">Start Date</label>
-        <input type="date" x-model="start" class="border border-gray-300 rounded px-2 py-1 text-sm">
+    <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+      <div class="flex flex-wrap items-end gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Preset</label>
+          <select x-model="preset" @change="applyPreset()" class="border border-gray-300 rounded px-2 py-1 text-sm w-44">
+            <option value="last7">Last 7 Days</option>
+            <option value="last14">Last 14 Days</option>
+            <option value="last30">Last 30 Days</option>
+            <option value="this_month">This Month</option>
+            <option value="last_month">Last Month</option>
+            <option value="last_month_to_date">Last Month-to-Date</option>
+            <option value="this_year">This Year</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Start Date</label>
+          <input type="date" x-model="start" @change="preset='custom'" class="border border-gray-300 rounded px-2 py-1 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">End Date</label>
+          <input type="date" x-model="end" @change="preset='custom'" class="border border-gray-300 rounded px-2 py-1 text-sm">
+        </div>
+        <button @click="reload()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded">
+          Apply
+        </button>
+        <span class="text-xs text-gray-500 ml-auto">
+          Snapshots auto-save sa <a href="{{ route('ads_manager.cpp') }}" class="text-blue-600 hover:underline">/cpp</a> every Copy Table click.
+        </span>
       </div>
-      <div>
-        <label class="block text-xs font-semibold text-gray-600 mb-1">End Date</label>
-        <input type="date" x-model="end" class="border border-gray-300 rounded px-2 py-1 text-sm">
+      <div class="mt-3 tl-legend">
+        <span><span class="swatch" style="background:#ffffff;"></span> Saved snapshot — Adspent + Orders + CPP</span>
+        <span><span class="swatch" style="background:#fffbeb;"></span> Inferred — Orders only (from macro_output, no saved snapshot)</span>
+        <span><span class="swatch" style="background:#fafafa;"></span> No data</span>
       </div>
-      <button @click="reload()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-1.5 rounded">
-        Apply
-      </button>
-      <button @click="preset(7)"  class="bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm px-3 py-1.5 rounded">Last 7d</button>
-      <button @click="preset(14)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm px-3 py-1.5 rounded">Last 14d</button>
-      <button @click="preset(30)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm px-3 py-1.5 rounded">Last 30d</button>
-      <span class="text-xs text-gray-500 ml-auto">
-        Snapshots auto-save sa <a href="{{ route('ads_manager.cpp') }}" class="text-blue-600 hover:underline">/cpp</a> every Copy Table click.
-      </span>
     </div>
 
-    {{-- ── Grid ────────────────────────────────────────────────────── --}}
+    {{-- ── Grid (transposed: rows=date, cols=bucket) ──────────────── --}}
     <div class="bg-white border border-gray-200 rounded-lg p-4">
       <div class="flex items-center justify-between mb-2">
         <div class="text-sm text-gray-600">
-          Rows = snapshot bucket · Columns = date · Click a cell for per-page detail.
+          Rows = date · Columns = snapshot bucket · Click a cell for per-page detail (saved snapshots only).
         </div>
         <div class="text-xs text-gray-500" x-show="loading">⏳ Loading…</div>
       </div>
@@ -116,25 +154,34 @@
         <table class="tl-grid">
           <thead>
             <tr>
-              <th class="tl-corner tl-bucket-col">Bucket</th>
-              <template x-for="d in dates" :key="d">
-                <th x-text="fmtDate(d)"></th>
+              <th class="tl-corner tl-date-col">Date</th>
+              <template x-for="b in buckets" :key="b">
+                <th x-text="b"></th>
               </template>
             </tr>
           </thead>
           <tbody>
-            <template x-for="b in buckets" :key="b">
+            <template x-for="d in dates" :key="d">
               <tr>
-                <th class="tl-bucket-col" x-text="b"></th>
-                <template x-for="d in dates" :key="b + '|' + d">
-                  <td x-bind:class="cellOf(b, d) ? 'tl-cell' : 'tl-cell-empty'"
-                      @click="cellOf(b, d) && openDetail(d, b)">
+                <th class="tl-date-col" x-text="fmtDate(d)"></th>
+                <template x-for="b in buckets" :key="d + '|' + b">
+                  <td x-bind:class="cellClass(b, d)"
+                      @click="cellOf(b, d) && !cellOf(b, d).inferred && openDetail(d, b)">
                     <template x-if="cellOf(b, d)">
                       <div>
-                        <div><span class="label">Adspent:</span> <span class="val" x-text="money(cellOf(b, d).spent)"></span></div>
+                        <template x-if="cellOf(b, d).spent != null">
+                          <div><span class="label">Adspent:</span> <span class="val" x-text="money(cellOf(b, d).spent)"></span></div>
+                        </template>
                         <div><span class="label">Orders:</span>  <span class="val" x-text="num(cellOf(b, d).orders)"></span></div>
-                        <div><span class="label">CPP:</span>     <span class="val" x-text="cellOf(b, d).cpp != null ? money(cellOf(b, d).cpp) : '—'"></span></div>
-                        <div class="saved" x-text="'saved ' + fmtSavedAt(cellOf(b, d).saved_at)"></div>
+                        <template x-if="cellOf(b, d).cpp != null">
+                          <div><span class="label">CPP:</span>     <span class="val" x-text="money(cellOf(b, d).cpp)"></span></div>
+                        </template>
+                        <template x-if="cellOf(b, d).inferred">
+                          <div class="inferred-badge">⚠ inferred · orders only</div>
+                        </template>
+                        <template x-if="!cellOf(b, d).inferred && cellOf(b, d).saved_at">
+                          <div class="saved" x-text="'saved ' + fmtSavedAt(cellOf(b, d).saved_at)"></div>
+                        </template>
                       </div>
                     </template>
                     <template x-if="!cellOf(b, d)">
@@ -235,6 +282,8 @@
       return {
         start:  @json($start),
         end:    @json($end),
+        preset: 'last7',
+
         dates:   [],
         buckets: [],
         cells:   {},
@@ -253,6 +302,54 @@
 
         init() { this.reload(); },
 
+        // PH-local "now" for preset date computation. Server is PH-timed too,
+        // so dates match what `Carbon::now('Asia/Manila')` would produce.
+        phNow() {
+          return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+        },
+        toIso(d) { return d.toISOString().slice(0, 10); },
+
+        applyPreset() {
+          const now = this.phNow();
+          let s, e;
+          switch (this.preset) {
+            case 'last7':
+              e = now; s = new Date(now); s.setDate(s.getDate() - 6);
+              break;
+            case 'last14':
+              e = now; s = new Date(now); s.setDate(s.getDate() - 13);
+              break;
+            case 'last30':
+              e = now; s = new Date(now); s.setDate(s.getDate() - 29);
+              break;
+            case 'this_month':
+              s = new Date(now.getFullYear(), now.getMonth(), 1);
+              e = now;
+              break;
+            case 'last_month':
+              s = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+              e = new Date(now.getFullYear(), now.getMonth(), 0); // last day of prev month
+              break;
+            case 'last_month_to_date':
+              // Last month, from 1st up to today-of-month (e.g., today is May 13 →
+              // Apr 1 to Apr 13). Clamps if last month has fewer days.
+              s = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+              const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+              const tgtDay = Math.min(now.getDate(), lastMonthEnd.getDate());
+              e = new Date(now.getFullYear(), now.getMonth() - 1, tgtDay);
+              break;
+            case 'this_year':
+              s = new Date(now.getFullYear(), 0, 1);
+              e = now;
+              break;
+            case 'custom':
+              return; // do nothing — user picks dates manually
+          }
+          this.start = this.toIso(s);
+          this.end   = this.toIso(e);
+          this.reload();
+        },
+
         async reload() {
           this.loading = true;
           try {
@@ -270,17 +367,15 @@
           }
         },
 
-        preset(days) {
-          const ph = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
-          const end = new Date(ph);
-          const start = new Date(ph); start.setDate(start.getDate() - (days - 1));
-          this.end   = end.toISOString().slice(0, 10);
-          this.start = start.toISOString().slice(0, 10);
-          this.reload();
-        },
-
         cellOf(bucket, date) {
           return (this.cells[bucket] && this.cells[bucket][date]) || null;
+        },
+
+        cellClass(bucket, date) {
+          const c = this.cellOf(bucket, date);
+          if (!c) return 'tl-cell-empty';
+          if (c.inferred) return 'tl-cell tl-cell-inferred';
+          return 'tl-cell';
         },
 
         async openDetail(date, bucket) {
@@ -328,7 +423,7 @@
           if (!iso) return '';
           const [y, m, d] = iso.split('-');
           const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-          return `${months[+m - 1]} ${+d}`;
+          return `${months[+m - 1]} ${+d}, ${y}`;
         },
         fmtSavedAt(iso) {
           if (!iso) return '—';

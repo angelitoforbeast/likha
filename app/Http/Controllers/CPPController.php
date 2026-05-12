@@ -300,9 +300,9 @@ class CPPController extends Controller
     {
         $this->checkAccess();
 
-        // Default: last 30 days ending today (PH).
+        // Default: last 7 days ending today (PH).
         $end   = $request->query('end')   ?: Carbon::now('Asia/Manila')->toDateString();
-        $start = $request->query('start') ?: Carbon::parse($end)->subDays(29)->toDateString();
+        $start = $request->query('start') ?: Carbon::parse($end)->subDays(6)->toDateString();
         if ($start > $end) [$start, $end] = [$end, $start];
 
         return view('ads_manager.cpp_timeline', [
@@ -322,10 +322,11 @@ class CPPController extends Controller
     {
         $this->checkAccess();
 
-        $start = $request->query('start') ?: Carbon::now('Asia/Manila')->subDays(29)->toDateString();
+        $start = $request->query('start') ?: Carbon::now('Asia/Manila')->subDays(6)->toDateString();
         $end   = $request->query('end')   ?: Carbon::now('Asia/Manila')->toDateString();
         if ($start > $end) [$start, $end] = [$end, $start];
 
+        // ── 1) Existing saved snapshots (have adspent + orders + cpp) ──────
         $rows = DB::table('cpp_snapshots')
             ->whereBetween('snapshot_date', [$start, $end])
             ->selectRaw('
@@ -338,27 +339,110 @@ class CPPController extends Controller
             ->groupBy('snapshot_date', 'snapshot_bucket')
             ->get();
 
-        // Build date list (descending — latest first).
+        // ── 2) Cumulative orders from macro_output per date and bucket
+        //      cutoff. Used to FILL IN cells na walang saved snapshot
+        //      (orders-only — adspent/cpp stays blank for those).
+        //      Bucket cutoff times (PH):
+        //        10AM    → orders with TIMESTAMP < 10:00
+        //        3PM     → orders with TIMESTAMP < 15:00
+        //        7PM     → orders with TIMESTAMP < 19:00
+        //        11:59PM → all orders for that date (no upper cap)
+        //
+        //      macro_output.TIMESTAMP is a STRING in 'H:i d-m-Y' format —
+        //      need engine-specific parsing.
+        $driver = DB::connection()->getDriverName();
+
+        if ($driver === 'mysql') {
+            $tsDate = "DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y'))";
+            $tsMins = "(HOUR(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) * 60 + MINUTE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')))";
+
+            $orderRows = DB::table('macro_output')
+                ->selectRaw("
+                    $tsDate AS ts_date,
+                    SUM(CASE WHEN $tsMins < " . (10 * 60) . " THEN 1 ELSE 0 END) AS o_10am,
+                    SUM(CASE WHEN $tsMins < " . (15 * 60) . " THEN 1 ELSE 0 END) AS o_3pm,
+                    SUM(CASE WHEN $tsMins < " . (19 * 60) . " THEN 1 ELSE 0 END) AS o_7pm,
+                    COUNT(*) AS o_eod
+                ")
+                ->whereRaw("$tsDate BETWEEN ? AND ?", [$start, $end])
+                ->groupByRaw("$tsDate")
+                ->get();
+        } elseif ($driver === 'pgsql') {
+            $tsExpr = "to_timestamp(\"TIMESTAMP\", 'HH24:MI DD-MM-YYYY')";
+            $tsDate = "$tsExpr::date";
+            $tsMins = "(EXTRACT(HOUR FROM $tsExpr) * 60 + EXTRACT(MINUTE FROM $tsExpr))";
+
+            $orderRows = DB::table('macro_output')
+                ->selectRaw("
+                    $tsDate AS ts_date,
+                    SUM(CASE WHEN $tsMins < " . (10 * 60) . " THEN 1 ELSE 0 END) AS o_10am,
+                    SUM(CASE WHEN $tsMins < " . (15 * 60) . " THEN 1 ELSE 0 END) AS o_3pm,
+                    SUM(CASE WHEN $tsMins < " . (19 * 60) . " THEN 1 ELSE 0 END) AS o_7pm,
+                    COUNT(*) AS o_eod
+                ")
+                ->whereRaw("$tsDate BETWEEN ? AND ?", [$start, $end])
+                ->groupByRaw("$tsDate")
+                ->get();
+        } else {
+            $orderRows = collect();
+        }
+
+        // Map: ordersByDate[date][bucket] = cumulative count by bucket cutoff
+        $ordersByDate = [];
+        foreach ($orderRows as $r) {
+            $d = (string) $r->ts_date;
+            $ordersByDate[$d] = [
+                '10AM'    => (int) $r->o_10am,
+                '3PM'     => (int) $r->o_3pm,
+                '7PM'     => (int) $r->o_7pm,
+                '11:59PM' => (int) $r->o_eod,
+            ];
+        }
+
+        // ── 3) Build date list (descending) + cells matrix ────────────────
         $dates = [];
         for ($d = Carbon::parse($end); $d->gte(Carbon::parse($start)); $d->subDay()) {
             $dates[] = $d->format('Y-m-d');
         }
 
-        // Build cells map: [bucket][date] = { spent, orders, cpp, saved_at }
-        $cells = [];
         $buckets = ['10AM', '3PM', '7PM', '11:59PM'];
+        $cells = [];
         foreach ($buckets as $b) $cells[$b] = [];
 
+        // Pass 1 — populate from saved snapshots (preferred source).
+        $snapshotSet = [];
         foreach ($rows as $r) {
+            $b = (string) $r->snapshot_bucket;
+            $d = (string) $r->snapshot_date;
+            $snapshotSet["$d|$b"] = true;
             $spent  = (float) $r->total_spent;
             $orders = (int)   $r->total_orders;
             $cpp    = $orders > 0 ? round($spent / $orders, 2) : null;
-            $cells[(string) $r->snapshot_bucket][(string) $r->snapshot_date] = [
+            $cells[$b][$d] = [
                 'spent'    => $spent,
                 'orders'   => $orders,
                 'cpp'      => $cpp,
                 'saved_at' => $r->latest_at,
+                'inferred' => false, // explicit save
             ];
+        }
+
+        // Pass 2 — fill in cells na walang snapshot pero may macro_output
+        // orders. Adspent + CPP stays null (cannot reconstruct).
+        foreach ($dates as $d) {
+            foreach ($buckets as $b) {
+                if (isset($snapshotSet["$d|$b"])) continue;
+                $ord = $ordersByDate[$d][$b] ?? 0;
+                if ($ord > 0) {
+                    $cells[$b][$d] = [
+                        'spent'    => null,
+                        'orders'   => $ord,
+                        'cpp'      => null,
+                        'saved_at' => null,
+                        'inferred' => true, // orders inferred from macro_output
+                    ];
+                }
+            }
         }
 
         return response()->json([
