@@ -683,8 +683,24 @@ class GPTAdGeneratorController extends Controller
             $TOP_N = max(1, min(50, $topN));
             $byCpmAsc  = $rows->sortBy('cpm')->values();
             $byCpmDesc = $rows->sortByDesc('cpm')->values();
-            // For WMR sections, only ads with link_clicks > 0 (WMR not null)
-            $rowsWithWmr = $rows->filter(fn ($r) => $r->wmr !== null)->values();
+
+            // For WMR sections: only ads with link_clicks > 0 (WMR not null) AND
+            // at least one of welcome_message / QR1 / QR2 / QR3 is non-blank.
+            // Why: WMR sections are para sa pagturing kung anong welcome+QR
+            // patterns ang effective (TOP) or to-be-avoided (WORST). Ads na
+            // walang welcome at walang QRs hindi maituturing as either pattern
+            // — wala namang content to evaluate.
+            $hasWelcomeOrQr = function ($r) {
+                $w  = trim((string) ($r->welcome_message ?? ''));
+                $q1 = trim((string) ($r->quick_reply_1   ?? ''));
+                $q2 = trim((string) ($r->quick_reply_2   ?? ''));
+                $q3 = trim((string) ($r->quick_reply_3   ?? ''));
+                return $w !== '' || $q1 !== '' || $q2 !== '' || $q3 !== '';
+            };
+            $rowsWithWmr = $rows
+                ->filter(fn ($r) => $r->wmr !== null)
+                ->filter($hasWelcomeOrQr)
+                ->values();
             $byWmrDesc = $rowsWithWmr->sortByDesc('wmr')->values();
             $byWmrAsc  = $rowsWithWmr->sortBy('wmr')->values();
 
