@@ -292,6 +292,11 @@ class GPTAdGeneratorController extends Controller
             $variants = collect($response['choices'] ?? [])
                 ->map(fn ($c) => trim($c['message']['content'] ?? ''))
                 ->filter()
+                // Server-side safety net — GPT sometimes ignores the "single-line"
+                // rule for QRs (e.g. appends "ProductName" sa likod ng QR with
+                // line breaks). Force-clean para guaranteed single-line yung
+                // Item, Headline, QR1, QR2, QR3 regardless of model behavior.
+                ->map(fn ($v) => $this->sanitizeVariant($v))
                 ->values()
                 ->all();
 
@@ -378,11 +383,13 @@ class GPTAdGeneratorController extends Controller
                 @flush();
             }
 
-            // Persist after stream ends (best-effort).
+            // Persist after stream ends (best-effort). Sanitize same as the
+            // non-streaming path so the saved record has clean single-line QRs
+            // even kung yung live-streamed view sa client was raw.
             try {
                 $accumulated = trim($accumulated);
                 if ($accumulated !== '') {
-                    $this->logGeneration($context, [$accumulated]);
+                    $this->logGeneration($context, [$this->sanitizeVariant($accumulated)]);
                 }
             } catch (\Throwable $e) {
                 Log::error('GPT streaming log error: ' . $e->getMessage());
@@ -815,6 +822,88 @@ class GPTAdGeneratorController extends Controller
              . "Total ads analyzed: {$s['total_ads']}\n"
              . "CPM range: {$f($s['cpm_min'])} – {$f($s['cpm_max'])} (mean {$f($s['cpm_mean'])}, median {$f($s['cpm_median'])})\n"
              . "WMR range: {$p($s['wmr_min'])} – {$p($s['wmr_max'])} (mean {$p($s['wmr_mean'])}, median {$p($s['wmr_median'])})  [{$s['wmr_count']} ads with click data]";
+    }
+
+    /**
+     * Sanitize GPT-generated TSV variant — enforce the single-line + length
+     * constraints on Item / Headline / QR1 / QR2 / QR3 that the prompt
+     * already tells GPT to follow, pero hindi consistent yung compliance.
+     *
+     * What it does per field:
+     *   [0] Item             → strip to first non-blank line, collapse whitespace
+     *   [1] Primary Text     → leave as-is (multi-line allowed)
+     *   [2] Headline         → strip to first non-blank line
+     *   [3] Messaging Template → leave as-is (multi-line allowed)
+     *   [4][5][6] QR1/QR2/QR3 → cleanQuickReply (trims label, takes first
+     *                            question, hard caps at 80 chars)
+     */
+    private function sanitizeVariant(string $variant): string
+    {
+        $parts = explode("\t", $variant);
+        // Pad/truncate to exactly 7 fields
+        while (count($parts) < 7) $parts[] = '';
+        $parts = array_slice($parts, 0, 7);
+
+        $itemName = $this->stripToSingleLine($parts[0]);
+        $parts[0] = $itemName;
+        $parts[2] = $this->stripToSingleLine($parts[2]);
+
+        // Quick replies (positions 4, 5, 6) — strict cleanup
+        foreach ([4, 5, 6] as $i) {
+            $parts[$i] = $this->cleanQuickReply($parts[$i], $itemName);
+        }
+
+        return implode("\t", $parts);
+    }
+
+    /** Take the first non-blank line, collapse internal whitespace. */
+    private function stripToSingleLine(string $s): string
+    {
+        $s = trim($s);
+        if ($s === '') return '';
+        $lines = preg_split('/\r?\n/u', $s);
+        foreach ($lines as $line) {
+            $trim = trim($line);
+            if ($trim !== '') return preg_replace('/\s+/u', ' ', $trim);
+        }
+        return '';
+    }
+
+    /**
+     * Aggressive QR cleanup — guarantees a short, single-line, label-free reply.
+     *   1. Take first non-blank line, collapse spaces.
+     *   2. Strip trailing product-name label (e.g., "Q? Seat Cover" → "Q?").
+     *   3. If multi-question/multi-sentence, take only up to first "?".
+     *   4. Hard cap at 80 chars (with "…" if truncated).
+     */
+    private function cleanQuickReply(string $qr, string $itemName): string
+    {
+        $first = $this->stripToSingleLine($qr);
+        if ($first === '') return '';
+
+        // Drop trailing product-name label if present.
+        // Matches patterns like:
+        //   "Magkano? Seat Cover" or "Magkano? - Seat Cover" or
+        //   "Magkano - Seat Cover" — case-insensitive.
+        $itemName = trim($itemName);
+        if ($itemName !== '') {
+            $escaped = preg_quote($itemName, '/');
+            $first = preg_replace('/[\s\.\?\!\,\-–—:]*\b' . $escaped . '\b\s*$/iu', '', $first);
+            $first = trim($first);
+        }
+
+        // If multiple questions/sentences, take only up to the first "?".
+        $qPos = mb_strpos($first, '?');
+        if ($qPos !== false) {
+            $first = mb_substr($first, 0, $qPos + 1);
+        }
+
+        // Hard cap (defense against marketing-copy bleed-throughs).
+        if (mb_strlen($first) > 80) {
+            $first = rtrim(mb_substr($first, 0, 79)) . '…';
+        }
+
+        return $first;
     }
 
     /** Human-readable scope label for "no data" warning messages. */
