@@ -1329,10 +1329,33 @@ class GPTAdGeneratorController extends Controller
         $content = $res['choices'][0]['message']['content'] ?? '{}';
         $data    = json_decode($content, true) ?: [];
 
+        // Coerce any field to a string — GPT sometimes returns arrays for
+        // fields it thinks should be lists (e.g., description as array of
+        // benefits). DB columns are text/string, so we flatten lists with
+        // bullet markers para human-readable + DB-friendly.
+        $toString = function ($v): ?string {
+            if ($v === null) return null;
+            if (is_string($v)) return $v;
+            if (is_numeric($v) || is_bool($v)) return (string) $v;
+            if (is_array($v)) {
+                // List of scalars → "✅ a\n✅ b\n✅ c" format
+                $isList = array_keys($v) === range(0, count($v) - 1);
+                if ($isList) {
+                    return implode("\n", array_map(function ($x) {
+                        if (is_array($x)) return '✅ ' . json_encode($x, JSON_UNESCAPED_UNICODE);
+                        return '✅ ' . (string) $x;
+                    }, $v));
+                }
+                // Associative array → JSON
+                return json_encode($v, JSON_UNESCAPED_UNICODE);
+            }
+            return (string) $v;
+        };
+
         return [
-            'item_name'   => $data['item_name']   ?? null,
-            'description' => $data['description'] ?? null,
-            'summary'     => $data['summary']     ?? null,
+            'item_name'   => $toString($data['item_name']   ?? null),
+            'description' => $toString($data['description'] ?? null),
+            'summary'     => $toString($data['summary']     ?? null),
         ];
     }
 
