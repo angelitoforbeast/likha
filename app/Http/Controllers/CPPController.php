@@ -466,6 +466,92 @@ class CPPController extends Controller
         $cells = [];
         foreach ($buckets as $b) $cells[$b] = [];
 
+        // ── 5b) HISTORICAL RATIOS — used for projecting TODAY's future buckets.
+        // For each PAST date in range, compute ratios (bucket_B / bucket_A).
+        // Average across all past dates gives a robust "what % growth from
+        // bucket A → bucket B" pattern. Today's actual bucket A count is then
+        // multiplied by ratio to estimate future bucket B.
+        $today      = Carbon::now('Asia/Manila')->toDateString();
+        $nowPhMin   = (int) Carbon::now('Asia/Manila')->format('H') * 60
+                    + (int) Carbon::now('Asia/Manila')->format('i');
+        $bucketMin  = [
+            '10AM'    => 10 * 60,
+            '3PM'     => 15 * 60,
+            '7PM'     => 19 * 60,
+            '11:59PM' => 24 * 60,
+        ];
+        $bucketIsFuture = [
+            '10AM'    => $nowPhMin < $bucketMin['10AM'],
+            '3PM'     => $nowPhMin < $bucketMin['3PM'],
+            '7PM'     => $nowPhMin < $bucketMin['7PM'],
+            '11:59PM' => $nowPhMin < $bucketMin['11:59PM'],
+        ];
+
+        // Clock-based cumulative counts per (date, bucket) — used as the basis
+        // for ratio computation. Independent of cutoffMode (estimates always
+        // use clock semantics for consistent historical comparison).
+        $clockCum = [];
+        foreach ($ordersByDate as $d => $minRows) {
+            foreach ($clockCutoffs as $b => $cutoff) {
+                $count = 0;
+                foreach ($minRows as [$ts_min, $n]) {
+                    if ($ts_min < $cutoff) $count += $n;
+                }
+                $clockCum[$d][$b] = $count;
+            }
+        }
+
+        // Collect ratio samples from past dates only.
+        $ratioSamples = [
+            '3PM_from_10AM'    => [],
+            '7PM_from_3PM'     => [],
+            '7PM_from_10AM'    => [],
+            '11:59PM_from_7PM' => [],
+            '11:59PM_from_3PM' => [],
+            '11:59PM_from_10AM'=> [],
+        ];
+        foreach ($clockCum as $d => $bc) {
+            if ($d >= $today) continue;
+            $c10 = $bc['10AM']    ?? 0;
+            $c15 = $bc['3PM']     ?? 0;
+            $c19 = $bc['7PM']     ?? 0;
+            $cEOD = $bc['11:59PM']?? 0;
+            if ($c10 > 0 && $c15 > 0)  $ratioSamples['3PM_from_10AM'][]    = $c15 / $c10;
+            if ($c15 > 0 && $c19 > 0)  $ratioSamples['7PM_from_3PM'][]     = $c19 / $c15;
+            if ($c10 > 0 && $c19 > 0)  $ratioSamples['7PM_from_10AM'][]    = $c19 / $c10;
+            if ($c19 > 0 && $cEOD > 0) $ratioSamples['11:59PM_from_7PM'][] = $cEOD / $c19;
+            if ($c15 > 0 && $cEOD > 0) $ratioSamples['11:59PM_from_3PM'][] = $cEOD / $c15;
+            if ($c10 > 0 && $cEOD > 0) $ratioSamples['11:59PM_from_10AM'][]= $cEOD / $c10;
+        }
+
+        // Average ratios — need at least 3 samples to avoid noisy projections.
+        $ratioAvg = [];
+        foreach ($ratioSamples as $k => $vals) {
+            $ratioAvg[$k] = count($vals) >= 3 ? array_sum($vals) / count($vals) : null;
+        }
+
+        // Estimate per future bucket — chain from latest available actual
+        // bucket today. Returns [bucket] => ['orders' => N, 'source' => 'from 3PM × 1.45'].
+        $todayCum = $clockCum[$today] ?? [];
+        $todayEstimates = [];
+        foreach (['3PM', '7PM', '11:59PM'] as $b) {
+            if (!$bucketIsFuture[$b]) continue;
+            // Prefer the LATEST past-and-has-data reference bucket.
+            foreach (['7PM', '3PM', '10AM'] as $ref) {
+                if ($bucketMin[$ref] >= $bucketMin[$b])         continue; // ref must be earlier
+                if ($bucketMin[$ref] > $nowPhMin)               continue; // ref must be past now
+                $refCount = $todayCum[$ref] ?? 0;
+                if ($refCount <= 0)                              continue;
+                $ratio = $ratioAvg["{$b}_from_{$ref}"] ?? null;
+                if ($ratio === null)                             continue;
+                $todayEstimates[$b] = [
+                    'orders' => (int) round($refCount * $ratio),
+                    'source' => sprintf('from %s × %.2f', $ref, $ratio),
+                ];
+                break;
+            }
+        }
+
         // Helper: pretty-format minutes-since-midnight to 'h:mm AM/PM' string.
         $fmtMin = function (int $mins): string {
             if ($mins >= 24 * 60) return 'EOD';
@@ -504,22 +590,54 @@ class CPPController extends Controller
             ];
         }
 
-        // Pass 2 — fill in cells na walang snapshot, using inferred orders.
+        // Pass 2 — fill in cells na walang snapshot.
+        //
+        // TODAY's FUTURE buckets get special handling:
+        //   - If we can compute an estimate from earlier-today's actuals × historical ratio
+        //     → emit estimate cell (is_estimate=true)
+        //   - Otherwise → leave empty (don't show misleading partial inferred)
+        //
+        // Past dates + non-future today buckets → existing inferred behavior.
         foreach ($dates as $d) {
             foreach ($buckets as $b) {
                 if (isset($snapshotSet["$d|$b"])) continue;
+
+                $isTodayFutureBucket = ($d === $today) && $bucketIsFuture[$b];
+
+                if ($isTodayFutureBucket) {
+                    $est = $todayEstimates[$b] ?? null;
+                    if ($est !== null && $est['orders'] > 0) {
+                        $cells[$b][$d] = [
+                            'spent'           => null,
+                            'orders'          => $est['orders'],
+                            'cpp'             => null,
+                            'saved_at'        => null,
+                            'ads_at'          => null,
+                            'cutoff_at'       => null,
+                            'cutoff_src'      => 'estimate',
+                            'inferred'        => false,
+                            'is_estimate'     => true,
+                            'estimate_source' => $est['source'],
+                        ];
+                    }
+                    // else: leave empty — no estimate basis, future bucket hidden
+                    continue;
+                }
+
+                // Past date OR today's already-past bucket → normal inferred fill.
                 $info = $inferredByDate[$d][$b] ?? null;
                 if (!$info || $info['orders'] === 0) continue;
 
                 $cells[$b][$d] = [
-                    'spent'      => null,
-                    'orders'     => $info['orders'],
-                    'cpp'        => null,
-                    'saved_at'   => null,
-                    'ads_at'     => null,
-                    'cutoff_at'  => $fmtMin($info['cutoff_min']),
-                    'cutoff_src' => $info['cutoff_source'], // 'upload' | 'clock' | 'clock_fallback'
-                    'inferred'   => true,
+                    'spent'       => null,
+                    'orders'      => $info['orders'],
+                    'cpp'         => null,
+                    'saved_at'    => null,
+                    'ads_at'      => null,
+                    'cutoff_at'   => $fmtMin($info['cutoff_min']),
+                    'cutoff_src'  => $info['cutoff_source'], // 'upload' | 'clock' | 'clock_fallback'
+                    'inferred'    => true,
+                    'is_estimate' => false,
                 ];
             }
         }

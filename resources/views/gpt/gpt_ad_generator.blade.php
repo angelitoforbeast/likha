@@ -180,6 +180,78 @@
         </div>
 
         <div class="flex-1 overflow-auto">
+          {{-- ── Section: Video Source (optional) ──────────────────────────
+               User uploads an ad video here, server analyzes it via ffmpeg +
+               OpenAI Whisper + Vision, returns item_name, description, full
+               summary at audio transcript. Result auto-fills Product Name +
+               Description below (editable). Summary + Transcript get their
+               own panels with "include in GPT prompt" toggles.
+               ────────────────────────────────────────────────────────────── --}}
+          <div class="gpt-section">
+            <div class="gpt-section-label">🎥 Video Source (optional)</div>
+            <div class="space-y-3">
+              <div>
+                <input type="file" id="videoFile" accept="video/*"
+                       onchange="onVideoFilePicked()" class="gpt-input" />
+                <div class="gpt-hint" id="videoFileHint">Pick a video file (mp4, mov, webm). Hashed sa browser para sa dedup.</div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label class="gpt-label" for="videoModel">🤖 Analysis Model</label>
+                  <select id="videoModel" class="gpt-select">
+                    <option value="gpt-4o" selected>GPT-4o (premium, ~$0.15-0.30)</option>
+                    <option value="gpt-4o-mini">GPT-4o mini (cheap, ~$0.02-0.08)</option>
+                    <option value="gpt-4-turbo">GPT-4 Turbo (older)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="gpt-label" for="videoFrameCount">🎞 Frames to extract</label>
+                  <input id="videoFrameCount" type="number" min="3" max="50"
+                         placeholder="auto (adaptive)" class="gpt-input" />
+                  <div class="gpt-hint">Default: adaptive (5–20 based on duration). Editable 3–50.</div>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button id="btnAnalyzeVideo" type="button" onclick="analyzeVideo()"
+                        class="btn-secondary" disabled>🎬 Analyze Video</button>
+                <span id="videoStatus" class="text-xs text-slate-500"></span>
+              </div>
+
+              {{-- Result panels (hidden until analysis succeeds) --}}
+              <div id="videoResults" class="hidden space-y-3 mt-2 pt-3 border-t border-slate-200">
+                <div class="text-xs text-emerald-700 font-medium" id="videoCostNote"></div>
+
+                <details open class="text-sm">
+                  <summary class="cursor-pointer text-slate-600 hover:text-slate-800 text-xs font-medium">▶ Summary (editable)</summary>
+                  <textarea id="videoSummary" class="gpt-textarea text-xs mt-1" rows="4"
+                            placeholder="Video summary will appear here..."></textarea>
+                  <label class="flex items-center gap-1.5 text-xs text-slate-600 mt-1">
+                    <input id="videoIncludeSummary" type="checkbox" class="gpt-check" checked>
+                    Include summary sa GPT prompt
+                  </label>
+                </details>
+
+                <details class="text-sm">
+                  <summary class="cursor-pointer text-slate-600 hover:text-slate-800 text-xs font-medium">▶ Transcript (editable)</summary>
+                  <textarea id="videoTranscript" class="gpt-textarea text-xs mt-1" rows="4"
+                            placeholder="Audio transcript will appear here..."></textarea>
+                  <label class="flex items-center gap-1.5 text-xs text-slate-600 mt-1">
+                    <input id="videoIncludeTranscript" type="checkbox" class="gpt-check">
+                    Include transcript sa GPT prompt
+                  </label>
+                </details>
+              </div>
+
+              {{-- Past analyses history --}}
+              <details class="text-sm mt-2">
+                <summary class="cursor-pointer text-slate-500 hover:text-slate-700 text-xs">📜 Past Video Analyses</summary>
+                <div id="videoHistoryList" class="mt-2 max-h-48 overflow-y-auto border border-slate-200 rounded text-xs">
+                  <div class="px-2 py-2 text-slate-400">Loading…</div>
+                </div>
+              </details>
+            </div>
+          </div>
+
           <!-- Section: Product -->
           <div class="gpt-section">
             <div class="gpt-section-label">Product</div>
@@ -690,11 +762,27 @@
         return;
       }
 
+      // Video context — optional addition to the prompt. User chooses per
+      // toggle whether summary and/or transcript get fed to GPT.
+      const videoSummary    = (document.getElementById("videoSummary")?.value || "").trim();
+      const videoTranscript = (document.getElementById("videoTranscript")?.value || "").trim();
+      const includeVideoSummary    = !!document.getElementById("videoIncludeSummary")?.checked;
+      const includeVideoTranscript = !!document.getElementById("videoIncludeTranscript")?.checked;
+
+      let videoBlock = "";
+      if (includeVideoSummary && videoSummary) {
+        videoBlock += `\n\n=== Video Summary ===\n${videoSummary}`;
+      }
+      if (includeVideoTranscript && videoTranscript) {
+        videoBlock += `\n\n=== Video Transcript ===\n${videoTranscript}`;
+      }
+
       // Final Prompt = base prompt (which already contains STRICT_MODE rules)
-      // + optional suggestions + product info.
+      // + optional suggestions + optional video context + product info.
       const finalPrompt =
         customPrompt +
         (includeSug && suggestions ? `\n\n${suggestions}` : "") +
+        videoBlock +
         `\n\nProduct Name: ${name}\nProduct Description: ${desc}`;
 
       const preview = document.getElementById('finalPromptPreview');
@@ -716,6 +804,8 @@
         page_filter: pageFilter && pageFilter !== "all" ? pageFilter : null,
         item_filter: itemFilter && itemFilter !== "all" ? itemFilter : null,
         active_only: activeOnly,
+        // Link generated output back to the video that inspired it (if any).
+        video_analysis_id: window.__VIDEO_ANALYSIS_ID__ || null,
       };
 
       try {
@@ -1062,6 +1152,177 @@
     }
 
     // Save the custom prompt as a new version sa gpt_prompts table.
+    // ═════════════════════════════════════════════════════════════════════
+    // VIDEO ANALYSIS — upload an ad video, get back item_name + description +
+    // summary + transcript. Auto-fills Product Name + Description (editable),
+    // plus optional Summary/Transcript that can be toggled into GPT prompt.
+    // ═════════════════════════════════════════════════════════════════════
+
+    // Currently-attached video analysis ID, used to link generated outputs.
+    window.__VIDEO_ANALYSIS_ID__ = null;
+
+    // Last-computed SHA-256 of the picked file (for dedup probe + status).
+    let __videoLastHash = null;
+
+    // Triggered when user picks a file. Computes SHA-256 in-browser then
+    // probes server for existing analysis. Enables the Analyze button.
+    async function onVideoFilePicked() {
+      const input = document.getElementById("videoFile");
+      const btn   = document.getElementById("btnAnalyzeVideo");
+      const status = document.getElementById("videoStatus");
+      const hint   = document.getElementById("videoFileHint");
+
+      const file = input.files?.[0];
+      if (!file) {
+        btn.disabled = true;
+        status.textContent = "";
+        return;
+      }
+
+      hint.textContent = `Selected: ${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB · hashing…`;
+      btn.disabled = true;
+
+      try {
+        const buf = await file.arrayBuffer();
+        const digest = await crypto.subtle.digest("SHA-256", buf);
+        const hashHex = Array.from(new Uint8Array(digest))
+          .map(b => b.toString(16).padStart(2, "0")).join("");
+        __videoLastHash = hashHex;
+        hint.textContent = `Selected: ${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB · hash: ${hashHex.slice(0, 12)}…`;
+
+        // Dedup probe
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        const res = await fetch("{{ route('gpt.video.check') }}", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": csrf },
+          body: JSON.stringify({ hash: hashHex }),
+        });
+        const j = await res.json();
+        if (j.ok && j.cached && j.analysis) {
+          status.innerHTML = `⚠️ Na-analyze na ito noong <b>${(j.analysis.analyzed_at || '').slice(0, 16)}</b>. Click Analyze to re-use cached result (free), or pick a different file.`;
+          btn.disabled = false;
+          // Stash cached so Analyze just loads it without re-uploading.
+          window.__VIDEO_CACHED_ANALYSIS__ = j.analysis;
+        } else {
+          status.textContent = "Ready to analyze.";
+          btn.disabled = false;
+          window.__VIDEO_CACHED_ANALYSIS__ = null;
+        }
+      } catch (e) {
+        console.error("Hash compute failed:", e);
+        status.textContent = "⚠️ Could not hash file. Re-pick to retry.";
+        btn.disabled = false;
+      }
+    }
+
+    async function analyzeVideo() {
+      const input  = document.getElementById("videoFile");
+      const btn    = document.getElementById("btnAnalyzeVideo");
+      const status = document.getElementById("videoStatus");
+      const model  = document.getElementById("videoModel").value;
+      const frames = document.getElementById("videoFrameCount").value.trim();
+
+      const file = input.files?.[0];
+      if (!file) { alert("Pick a video file first."); return; }
+
+      // Use cached if available (no upload needed)
+      if (window.__VIDEO_CACHED_ANALYSIS__) {
+        applyVideoAnalysis(window.__VIDEO_CACHED_ANALYSIS__, /* cached= */ true);
+        return;
+      }
+
+      btn.disabled = true;
+      status.textContent = "⏳ Uploading + analyzing (this may take 30–60 sec)...";
+
+      const fd = new FormData();
+      fd.append("video", file);
+      fd.append("model", model);
+      if (frames) fd.append("frame_count", frames);
+
+      try {
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        const res = await fetch("{{ route('gpt.video.analyze') }}", {
+          method: "POST",
+          headers: { "X-CSRF-TOKEN": csrf },
+          body: fd,
+        });
+        const j = await res.json();
+        if (!res.ok || !j.ok) {
+          status.textContent = "❌ " + (j.error || `HTTP ${res.status}`);
+          btn.disabled = false;
+          return;
+        }
+        applyVideoAnalysis(j.analysis, /* cached= */ j.cached || false);
+        loadVideoHistory(); // refresh history list
+      } catch (e) {
+        console.error("Analyze error:", e);
+        status.textContent = "❌ Analysis failed: " + (e.message || "unknown");
+        btn.disabled = false;
+      }
+    }
+
+    function applyVideoAnalysis(a, cached) {
+      // Save the analysis ID so subsequent Generate calls can link to it.
+      window.__VIDEO_ANALYSIS_ID__ = a.id;
+
+      // Auto-fill Product Name + Description (editable)
+      if (a.item_name)   document.getElementById("productName").value        = a.item_name;
+      if (a.description) document.getElementById("productDescription").value = a.description;
+
+      // Fill summary + transcript panels
+      document.getElementById("videoSummary").value    = a.summary    || "";
+      document.getElementById("videoTranscript").value = a.transcript || "";
+
+      // Show results section
+      document.getElementById("videoResults").classList.remove("hidden");
+      document.getElementById("videoCostNote").textContent = cached
+        ? `✅ Cached analysis loaded (free). Originally cost ₱${Number(a.cost_estimate_php || 0).toFixed(2)}.`
+        : `✅ Analysis complete · ${a.frame_count} frames · model: ${a.model_used} · cost: ₱${Number(a.cost_estimate_php || 0).toFixed(2)}`;
+
+      const btn = document.getElementById("btnAnalyzeVideo");
+      btn.disabled = false;
+      document.getElementById("videoStatus").innerHTML = cached ? "♻️ Loaded from cache." : "✅ Done.";
+    }
+
+    async function loadVideoHistory() {
+      const box = document.getElementById("videoHistoryList");
+      if (!box) return;
+      try {
+        const res = await fetch("{{ route('gpt.video.history') }}");
+        const j = await res.json();
+        if (!j.ok || !j.rows || !j.rows.length) {
+          box.innerHTML = '<div class="px-2 py-2 text-slate-400">No past analyses.</div>';
+          return;
+        }
+        box.innerHTML = j.rows.map(r => `
+          <div class="px-2 py-1.5 border-b border-slate-100 hover:bg-slate-50 flex items-center gap-2">
+            <button onclick="loadVideoAnalysisById(${r.id})"
+                    class="text-blue-600 hover:underline text-xs truncate max-w-[260px]"
+                    title="${escapeHtmlAttr(r.file_name)}">${escapeHtmlAttr(r.file_name)}</button>
+            <span class="text-slate-400 text-[10px]">${(r.analyzed_at || '').slice(0, 16)}</span>
+            <span class="text-slate-400 text-[10px] ml-auto">${escapeHtmlAttr(r.item_name || '—')}</span>
+          </div>
+        `).join("");
+      } catch (e) {
+        box.innerHTML = '<div class="px-2 py-2 text-rose-400">Failed to load history.</div>';
+      }
+    }
+    function escapeHtmlAttr(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => (
+        { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]
+      ));
+    }
+    async function loadVideoAnalysisById(id) {
+      try {
+        const res = await fetch(`/gpt-ad-generator/video-analysis/${id}`);
+        const j = await res.json();
+        if (j.ok && j.analysis) applyVideoAnalysis(j.analysis, true);
+      } catch (e) { console.error(e); }
+    }
+
+    // Auto-load history on page load.
+    document.addEventListener("DOMContentLoaded", loadVideoHistory);
+
     async function saveCustomPrompt() {
       const status = document.getElementById("savePromptStatus");
       const prompt = (document.getElementById("prompt")?.value ?? "").trim();

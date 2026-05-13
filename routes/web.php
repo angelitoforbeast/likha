@@ -132,6 +132,21 @@ Route::get('/ad-copy-suggestions', [GPTAdGeneratorController::class, 'loadAdCopy
     ->middleware('throttle:60,1')
     ->name('gpt.suggestions');
 
+// ── Video analysis endpoints for the GPT Ad Generator ──────────────────
+// Hash check (cheap, frequent) — pre-upload dedup probe.
+Route::post('/gpt-ad-generator/check-video-hash', [GPTAdGeneratorController::class, 'checkVideoHash'])
+    ->middleware('throttle:120,1')
+    ->name('gpt.video.check');
+// Heavy endpoint — uploads + runs ffmpeg + OpenAI calls. Tighter throttle.
+Route::post('/gpt-ad-generator/analyze-video', [GPTAdGeneratorController::class, 'analyzeVideo'])
+    ->middleware('throttle:20,60')
+    ->name('gpt.video.analyze');
+Route::get('/gpt-ad-generator/video-analysis/{id}', [GPTAdGeneratorController::class, 'getVideoAnalysis'])
+    ->whereNumber('id')
+    ->name('gpt.video.get');
+Route::get('/gpt-ad-generator/video-history', [GPTAdGeneratorController::class, 'videoHistory'])
+    ->name('gpt.video.history');
+
 // ✅ Ondel Counter
 Route::get('/jnt/ondel', [JntOndelController::class, 'index'])->name('jnt.ondel');
 Route::post('/jnt/ondel/process', [JntOndelController::class, 'process'])->name('jnt.ondel.process');

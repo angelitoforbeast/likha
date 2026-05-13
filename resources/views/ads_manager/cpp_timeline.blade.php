@@ -47,6 +47,18 @@
     .tl-cell-empty:hover { background: #fafafa; }
     .tl-cell-inferred { background: #fffbeb; }
     .tl-cell-inferred:hover { background: #fef3c7; }
+    .tl-cell-estimate { background: #eff6ff; cursor: default; }
+    .tl-cell-estimate:hover { background: #dbeafe; }
+    .tl-cell .est-badge {
+      display: inline-block;
+      font-size: 9px;
+      color: #1e40af;
+      background: #bfdbfe;
+      padding: 1px 5px;
+      border-radius: 3px;
+      margin-top: 4px;
+      letter-spacing: 0.04em;
+    }
     .tl-cell .label { font-size: 10px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
     .tl-cell .val   { color: #0f172a; font-weight: 600; }
     .tl-cell .saved { font-size: 10px; color: #94a3b8; margin-top: 4px; }
@@ -165,6 +177,7 @@
       <div class="mt-3 tl-legend">
         <span><span class="swatch" style="background:#ffffff;"></span> Saved snapshot — Adspent + Orders + CPP</span>
         <span><span class="swatch" style="background:#fffbeb;"></span> Inferred — Orders only, cutoff per selected mode</span>
+        <span><span class="swatch" style="background:#eff6ff;"></span> Estimate — projected from earlier-today × historical ratio</span>
         <span><span class="swatch" style="background:#fafafa;"></span> No data</span>
       </div>
     </div>
@@ -194,15 +207,25 @@
                 <th class="tl-date-col" x-text="fmtDate(d)"></th>
                 <template x-for="b in buckets" :key="d + '|' + b">
                   <td x-bind:class="cellClass(b, d)"
-                      @click="cellOf(b, d) && !cellOf(b, d).inferred && openDetail(d, b)">
+                      @click="cellOf(b, d) && !cellOf(b, d).inferred && !cellOf(b, d).is_estimate && openDetail(d, b)">
                     <template x-if="cellOf(b, d)">
                       <div>
                         <template x-if="cellOf(b, d).spent != null">
                           <div><span class="label">Adspent:</span> <span class="val" x-text="money(cellOf(b, d).spent)"></span></div>
                         </template>
-                        <div><span class="label">Orders:</span>  <span class="val" x-text="num(cellOf(b, d).orders)"></span></div>
+                        <div>
+                          <span class="label" x-text="cellOf(b, d).is_estimate ? 'Est:' : 'Orders:'"></span>
+                          <span class="val" x-text="num(cellOf(b, d).orders)"></span>
+                        </div>
                         <template x-if="cellOf(b, d).cpp != null">
                           <div><span class="label">CPP:</span>     <span class="val" x-text="money(cellOf(b, d).cpp)"></span></div>
+                        </template>
+                        {{-- Estimate badge — always shown so users won't mistake projection for actual --}}
+                        <template x-if="cellOf(b, d).is_estimate">
+                          <div class="est-badge"
+                               :title="'Projection — ' + (cellOf(b, d).estimate_source || '')">
+                            📈 projected
+                          </div>
                         </template>
                         <template x-if="cellOf(b, d).inferred && showInferredBadge === 'show'">
                           <div class="inferred-badge"
@@ -210,7 +233,7 @@
                                :title="cellOf(b, d).cutoff_src === 'clock_fallback' ? 'No ads upload found for this bucket — fell back to clock cutoff' : ''">
                           </div>
                         </template>
-                        <template x-if="!cellOf(b, d).inferred && cellOf(b, d).saved_at">
+                        <template x-if="!cellOf(b, d).inferred && !cellOf(b, d).is_estimate && cellOf(b, d).saved_at">
                           <div class="saved">
                             <div x-text="'saved ' + fmtSavedAt(cellOf(b, d).saved_at)"></div>
                             <template x-if="cellOf(b, d).ads_at">
@@ -416,8 +439,9 @@
         cellClass(bucket, date) {
           const c = this.cellOf(bucket, date);
           if (!c) return 'tl-cell-empty';
-          if (c.inferred) return 'tl-cell tl-cell-inferred';
-          return 'tl-cell';
+          if (c.is_estimate) return 'tl-cell tl-cell-estimate'; // future projection (blue)
+          if (c.inferred)    return 'tl-cell tl-cell-inferred'; // past inferred (amber)
+          return 'tl-cell'; // saved snapshot (white)
         },
 
         // Compose the inferred-cell badge text — shows the cutoff time used.

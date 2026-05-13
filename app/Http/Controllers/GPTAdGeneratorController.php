@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\GptVideoAnalysis;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -9,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class GPTAdGeneratorController extends Controller
@@ -265,6 +267,8 @@ class GPTAdGeneratorController extends Controller
             'variants_requested'  => $n,
             'final_prompt'        => $prompt,
             'model'               => $model,
+            // Optional — links the generation back to a video analysis row.
+            'video_analysis_id'   => $request->input('video_analysis_id') ? (int) $request->input('video_analysis_id') : null,
         ];
 
         if ($stream) {
@@ -432,7 +436,7 @@ class GPTAdGeneratorController extends Controller
     {
         if (!Schema::hasTable('gpt_ad_generations')) return null;
         try {
-            return DB::table('gpt_ad_generations')->insertGetId([
+            $insert = [
                 'user_email'         => Auth::user()?->email,
                 'product_name'       => $context['product_name'] ?? '',
                 'product_description'=> $context['product_description'] ?? '',
@@ -446,7 +450,13 @@ class GPTAdGeneratorController extends Controller
                 'model'              => $context['model'] ?? null,
                 'created_at'         => now(),
                 'updated_at'         => now(),
-            ]);
+            ];
+            // Attach video_analysis_id only if the column has been migrated
+            // (graceful no-op if migration hasn't run yet).
+            if (!empty($context['video_analysis_id']) && Schema::hasColumn('gpt_ad_generations', 'video_analysis_id')) {
+                $insert['video_analysis_id'] = (int) $context['video_analysis_id'];
+            }
+            return DB::table('gpt_ad_generations')->insertGetId($insert);
         } catch (\Throwable $e) {
             Log::error('logGeneration error: ' . $e->getMessage());
             return null;
@@ -948,5 +958,408 @@ class GPTAdGeneratorController extends Controller
         // Collapse multiple spaces
         $s = preg_replace('/\s+/u', ' ', $s);
         return trim($s);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    //  VIDEO ANALYSIS FEATURE
+    //
+    //  Flow:
+    //    1. Client computes file SHA-256 → POST /gpt-ad-generator/check-video-hash
+    //       returns the existing analysis row kung may match (avoids upload).
+    //    2. If new file → POST /gpt-ad-generator/analyze-video with the file.
+    //       Backend extracts frames via ffmpeg, audio via ffmpeg, transcribes
+    //       via OpenAI Whisper, then asks GPT-4o Vision to produce structured
+    //       item_name / description / summary. Result is saved sa
+    //       gpt_video_analyses keyed by sha256 + the temp file is deleted
+    //       immediately after analysis.
+    //    3. GET /gpt-ad-generator/video-analysis/{id} → retrieve full record.
+    //    4. GET /gpt-ad-generator/video-history → list recent analyses.
+    //
+    //  Frame count is adaptive by default (5–20 based on duration) but the
+    //  client can override per upload.
+    // ─────────────────────────────────────────────────────────────────────
+
+    /** Vision-capable OpenAI models the user may pick for video analysis. */
+    public const ALLOWED_VIDEO_MODELS = [
+        'gpt-4o'         => 'GPT-4o (premium) — best vision quality',
+        'gpt-4o-mini'    => 'GPT-4o mini — cheaper, lower vision quality',
+        'gpt-4-turbo'    => 'GPT-4 Turbo — older premium',
+    ];
+
+    /**
+     * POST /gpt-ad-generator/check-video-hash
+     *
+     * Pre-upload dedup probe — returns existing analysis kung may same SHA-256.
+     * Client computes hash sa browser using SubtleCrypto + sends here.
+     */
+    public function checkVideoHash(Request $request)
+    {
+        $hash = (string) $request->input('hash', '');
+        if (!preg_match('/^[a-f0-9]{64}$/i', $hash)) {
+            return response()->json(['ok' => false, 'error' => 'Invalid SHA-256 hash'], 422);
+        }
+        $row = GptVideoAnalysis::where('file_sha256', strtolower($hash))->first();
+        return response()->json([
+            'ok'        => true,
+            'cached'    => $row !== null,
+            'analysis'  => $row,
+        ]);
+    }
+
+    /**
+     * GET /gpt-ad-generator/video-analysis/{id}
+     */
+    public function getVideoAnalysis($id)
+    {
+        $row = GptVideoAnalysis::find((int) $id);
+        if (!$row) return response()->json(['ok' => false, 'error' => 'Not found'], 404);
+        return response()->json(['ok' => true, 'analysis' => $row]);
+    }
+
+    /**
+     * GET /gpt-ad-generator/video-history
+     *
+     * Lists the latest 50 video analyses, scoped sa current user kung non-CEO.
+     * CEO sees everything across users. Used by the History panel sa UI.
+     */
+    public function videoHistory(Request $request)
+    {
+        $user = Auth::user();
+        $role = strtoupper(trim((string)($user?->employeeProfile?->role ?? '')));
+        $isCEO = $role === 'CEO';
+
+        $q = GptVideoAnalysis::query()->orderByDesc('analyzed_at')->limit(50);
+        if (!$isCEO && $user) {
+            $q->where('uploaded_by_user_id', $user->id);
+        }
+        return response()->json([
+            'ok'   => true,
+            'rows' => $q->get([
+                'id', 'file_name', 'file_size_bytes', 'duration_seconds',
+                'item_name', 'description', 'uploaded_by_email',
+                'model_used', 'cost_estimate_php', 'analyzed_at', 'created_at',
+            ]),
+        ]);
+    }
+
+    /**
+     * POST /gpt-ad-generator/analyze-video
+     *
+     * Heavy endpoint: receives a video file, runs ffmpeg + Whisper + Vision,
+     * persists to gpt_video_analyses, returns the analysis. The original file
+     * is deleted right after analysis — only DB metadata + AI outputs survive.
+     */
+    public function analyzeVideo(Request $request)
+    {
+        // ── Validate request ─────────────────────────────────────────────
+        $request->validate([
+            'video'       => 'required|file',
+            'model'       => 'nullable|string',
+            'frame_count' => 'nullable|integer|min:3|max:50',
+        ]);
+
+        $model = (string) $request->input('model', 'gpt-4o');
+        if (!array_key_exists($model, self::ALLOWED_VIDEO_MODELS)) {
+            $model = 'gpt-4o';
+        }
+
+        $file = $request->file('video');
+        if (!$file) {
+            return response()->json(['ok' => false, 'error' => 'No file uploaded'], 422);
+        }
+
+        // ── Verify ffmpeg available ─────────────────────────────────────
+        $ffmpegBin  = trim((string) shell_exec('which ffmpeg 2>/dev/null'));
+        $ffprobeBin = trim((string) shell_exec('which ffprobe 2>/dev/null'));
+        if ($ffmpegBin === '' || $ffprobeBin === '') {
+            return response()->json([
+                'ok' => false,
+                'error' => 'ffmpeg/ffprobe not found on server. Install via: apt install ffmpeg',
+            ], 500);
+        }
+
+        // ── Stash original file + hash ──────────────────────────────────
+        $origName = $file->getClientOriginalName();
+        $hash     = hash_file('sha256', $file->getRealPath());
+
+        // Dedup short-circuit — exact same file already analyzed before.
+        $cached = GptVideoAnalysis::where('file_sha256', $hash)->first();
+        if ($cached) {
+            return response()->json([
+                'ok'        => true,
+                'cached'    => true,
+                'analysis'  => $cached,
+            ]);
+        }
+
+        // Persist temp file under storage/app/temp/videos/{hash}.{ext}
+        $ext      = strtolower($file->getClientOriginalExtension() ?: 'mp4');
+        $tempDir  = storage_path('app/temp/videos');
+        if (!is_dir($tempDir)) @mkdir($tempDir, 0775, true);
+        $videoPath = $tempDir . '/' . $hash . '.' . $ext;
+        $file->move($tempDir, $hash . '.' . $ext);
+
+        // Track files to clean up sa finally block.
+        $tempFiles = [$videoPath];
+        $framePaths = [];
+        $audioPath = null;
+
+        try {
+            // ── Probe duration ────────────────────────────────────────
+            $durationSec = $this->ffprobeDuration($videoPath);
+
+            // ── Adaptive frame count (user override wins) ─────────────
+            $requestedFrames = (int) $request->input('frame_count', 0);
+            $frameCount = $requestedFrames > 0
+                ? $requestedFrames
+                : $this->adaptiveFrameCount($durationSec ?? 30.0);
+            $frameCount = max(3, min(50, $frameCount));
+
+            // ── Extract frames evenly ─────────────────────────────────
+            $framePaths = $this->extractFrames($videoPath, $tempDir, $hash, $frameCount, $durationSec ?? 30.0);
+            $tempFiles  = array_merge($tempFiles, $framePaths);
+
+            // ── Extract audio (if any) ────────────────────────────────
+            $audioPath = $tempDir . '/' . $hash . '.mp3';
+            $this->extractAudio($videoPath, $audioPath);
+            if (is_file($audioPath)) $tempFiles[] = $audioPath;
+
+            // ── Whisper transcription ─────────────────────────────────
+            $transcript = '';
+            if (is_file($audioPath) && filesize($audioPath) > 1024) {
+                try {
+                    $transcript = $this->whisperTranscribe($audioPath);
+                } catch (\Throwable $e) {
+                    Log::warning('Whisper transcription failed', ['err' => $e->getMessage()]);
+                    $transcript = '';
+                }
+            }
+
+            // ── GPT-4o Vision analysis ────────────────────────────────
+            $vision = $this->visionAnalyzeFrames($framePaths, $transcript, $model, $origName);
+
+            // ── Cost estimate (rough) ─────────────────────────────────
+            $costPhp = $this->estimateAnalysisCostPhp($model, count($framePaths), $durationSec ?? 30.0);
+
+            // ── Save to DB ─────────────────────────────────────────────
+            $user = Auth::user();
+            $row = GptVideoAnalysis::create([
+                'file_name'          => $origName,
+                'file_sha256'        => $hash,
+                'file_size_bytes'    => filesize($videoPath) ?: 0,
+                'duration_seconds'   => $durationSec,
+                'frame_count'        => count($framePaths),
+                'uploaded_by_user_id'=> $user?->id,
+                'uploaded_by_email'  => $user?->email,
+                'transcript'         => $transcript ?: null,
+                'summary'            => $vision['summary']     ?? null,
+                'item_name'          => $vision['item_name']   ?? null,
+                'description'        => $vision['description'] ?? null,
+                'model_used'         => $model,
+                'cost_estimate_php'  => $costPhp,
+                'analyzed_at'        => now(),
+            ]);
+
+            return response()->json([
+                'ok'       => true,
+                'cached'   => false,
+                'analysis' => $row,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('analyzeVideo failed', ['msg' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            return response()->json([
+                'ok'    => false,
+                'error' => 'Analysis failed: ' . $e->getMessage(),
+            ], 500);
+        } finally {
+            // Auto-delete temp files (success or fail). DB row already has
+            // everything we need; original file no longer required.
+            foreach ($tempFiles as $tf) {
+                if (is_file($tf)) @unlink($tf);
+            }
+        }
+    }
+
+    // ── ffmpeg / ffprobe helpers ────────────────────────────────────────
+
+    private function ffprobeDuration(string $videoPath): ?float
+    {
+        $cmd = sprintf(
+            'ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 %s 2>/dev/null',
+            escapeshellarg($videoPath)
+        );
+        $out = trim((string) shell_exec($cmd));
+        if ($out === '' || !is_numeric($out)) return null;
+        return (float) $out;
+    }
+
+    /**
+     * Adaptive frame count by duration (seconds):
+     *   < 15s   → 5 frames
+     *   15-30s  → 8 frames
+     *   30-60s  → 10 frames
+     *   60-120s → 15 frames
+     *   > 120s  → 20 frames
+     */
+    private function adaptiveFrameCount(float $durationSec): int
+    {
+        if ($durationSec < 15)   return 5;
+        if ($durationSec < 30)   return 8;
+        if ($durationSec < 60)   return 10;
+        if ($durationSec < 120)  return 15;
+        return 20;
+    }
+
+    /**
+     * Evenly-spaced frame extraction → returns array of JPEG paths.
+     * Uses ffmpeg's "fps" + select expression based on duration.
+     */
+    private function extractFrames(string $videoPath, string $tempDir, string $hash, int $frameCount, float $durationSec): array
+    {
+        $paths = [];
+
+        // Sample N evenly-spaced timestamps and extract one JPEG each.
+        for ($i = 0; $i < $frameCount; $i++) {
+            // Pick midpoint of each segment, not the edges (avoids black frames).
+            $t = ($durationSec * ($i + 0.5)) / $frameCount;
+            $out = sprintf('%s/%s_frame_%02d.jpg', $tempDir, $hash, $i);
+            $cmd = sprintf(
+                'ffmpeg -y -ss %s -i %s -frames:v 1 -q:v 4 -vf "scale=512:-2" %s 2>/dev/null',
+                escapeshellarg(number_format($t, 3, '.', '')),
+                escapeshellarg($videoPath),
+                escapeshellarg($out)
+            );
+            shell_exec($cmd);
+            if (is_file($out) && filesize($out) > 0) $paths[] = $out;
+        }
+
+        return $paths;
+    }
+
+    /** Extract audio track to mp3 mono 16kHz — Whisper-friendly. */
+    private function extractAudio(string $videoPath, string $audioOut): void
+    {
+        $cmd = sprintf(
+            'ffmpeg -y -i %s -vn -ac 1 -ar 16000 -b:a 64k %s 2>/dev/null',
+            escapeshellarg($videoPath),
+            escapeshellarg($audioOut)
+        );
+        shell_exec($cmd);
+    }
+
+    /**
+     * Send audio file to OpenAI Whisper API → returns transcript string.
+     * Whisper auto-detects language; ad audio is often Tagalog/Taglish.
+     */
+    private function whisperTranscribe(string $audioPath): string
+    {
+        $apiKey = env('OPENAI_API_KEY');
+        if (!$apiKey) throw new \RuntimeException('OPENAI_API_KEY not set');
+
+        $res = Http::withToken($apiKey)
+            ->timeout(120)
+            ->attach('file', file_get_contents($audioPath), basename($audioPath))
+            ->asMultipart()
+            ->post('https://api.openai.com/v1/audio/transcriptions', [
+                ['name' => 'model', 'contents' => 'whisper-1'],
+                ['name' => 'response_format', 'contents' => 'text'],
+            ]);
+
+        if (!$res->successful()) {
+            throw new \RuntimeException('Whisper API: ' . substr($res->body(), 0, 500));
+        }
+        return trim((string) $res->body());
+    }
+
+    /**
+     * Send frames (as base64 image_url) + transcript to GPT Vision; ask it to
+     * return STRICT JSON with item_name, description, summary. We parse the
+     * JSON and return the structured array.
+     */
+    private function visionAnalyzeFrames(array $framePaths, string $transcript, string $model, string $fileName): array
+    {
+        $apiKey = env('OPENAI_API_KEY');
+        if (!$apiKey) throw new \RuntimeException('OPENAI_API_KEY not set');
+
+        // Build vision input — sequence of image_url parts.
+        $userParts = [];
+        $userParts[] = [
+            'type' => 'text',
+            'text' => "Suriin ang mga frame na ito ng isang Facebook ads video "
+                . "(file: {$fileName}). " . ($transcript !== ''
+                    ? "May voice-over/audio transcript din:\n\n" . mb_substr($transcript, 0, 3000)
+                    : '(Walang audio transcript available.)')
+                . "\n\nReturn STRICT JSON na may exactly itong keys:"
+                . "\n  - item_name: string (e.g., 'Tactical Flashlight')"
+                . "\n  - description: string (3-6 short benefit phrases, Taglish OK)"
+                . "\n  - summary: string (1-3 paragraphs describing what's happening sa video — visuals + audio cues)"
+                . "\nNo markdown, no extra commentary. JSON only.",
+        ];
+        foreach ($framePaths as $path) {
+            $b64 = base64_encode(file_get_contents($path));
+            $userParts[] = [
+                'type'      => 'image_url',
+                'image_url' => ['url' => 'data:image/jpeg;base64,' . $b64, 'detail' => 'low'],
+            ];
+        }
+
+        $payload = [
+            'model'    => $model,
+            'messages' => [
+                [
+                    'role'    => 'system',
+                    'content' => "You are a product analyst for a Filipino e-commerce store. "
+                        . "Analyze ad videos and extract: product name, key features/benefits, and a narrative summary. "
+                        . "Always return strict JSON only.",
+                ],
+                ['role' => 'user', 'content' => $userParts],
+            ],
+            'temperature'     => 0.3,
+            'response_format' => ['type' => 'json_object'],
+            'max_tokens'      => 1500,
+        ];
+
+        $res = Http::withToken($apiKey)
+            ->timeout(180)
+            ->post('https://api.openai.com/v1/chat/completions', $payload);
+
+        if (!$res->successful()) {
+            throw new \RuntimeException('Vision API: ' . substr($res->body(), 0, 500));
+        }
+        $content = $res['choices'][0]['message']['content'] ?? '{}';
+        $data    = json_decode($content, true) ?: [];
+
+        return [
+            'item_name'   => $data['item_name']   ?? null,
+            'description' => $data['description'] ?? null,
+            'summary'     => $data['summary']     ?? null,
+        ];
+    }
+
+    /**
+     * Rough cost estimate sa PHP — used for tracking/budget alerts.
+     * Numbers based sa OpenAI pricing pages (USD * ~58 conversion).
+     */
+    private function estimateAnalysisCostPhp(string $model, int $frameCount, float $durationSec): float
+    {
+        // Whisper: ~$0.006/min
+        $whisperUsd = ($durationSec / 60) * 0.006;
+
+        // Vision: per-image low-detail ~85 tokens + per-frame analysis tokens.
+        // Estimated 1500 input + 800 output tokens. Pricing per 1M tokens:
+        //   gpt-4o:      $2.50 input / $10.00 output
+        //   gpt-4o-mini: $0.15 input / $0.60 output
+        //   gpt-4-turbo: $10.00 input / $30.00 output
+        $rates = [
+            'gpt-4o'      => ['in' => 2.50,  'out' => 10.00],
+            'gpt-4o-mini' => ['in' => 0.15,  'out' => 0.60],
+            'gpt-4-turbo' => ['in' => 10.00, 'out' => 30.00],
+        ];
+        $r = $rates[$model] ?? $rates['gpt-4o'];
+        $inputTok  = 600 + ($frameCount * 200); // base prompt + per-image overhead
+        $outputTok = 800;
+        $visionUsd = ($inputTok / 1_000_000) * $r['in'] + ($outputTok / 1_000_000) * $r['out'];
+
+        return round(($whisperUsd + $visionUsd) * 58, 4);
     }
 }
