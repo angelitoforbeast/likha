@@ -160,11 +160,15 @@
        [ left column ] [ resize-h ] [ right column ]
        Left column = Settings (top) + resize-v + Suggestions (bottom).
        Right column = GPT Output card (full height). All 3 panels resizable. -->
-  <div id="viewportFit" class="w-full flex overflow-hidden" style="gap:0;">
-    <!-- LEFT COLUMN -->
-    <div id="leftCol" class="flex flex-col overflow-hidden" style="width:42%; min-width:320px;">
-      <!-- Settings card -->
-      <div id="leftCard" class="gpt-card flex flex-col overflow-hidden" style="height:55%; min-height:200px;">
+  <div id="viewportFit" class="w-full flex flex-col overflow-hidden" style="gap:0;">
+    {{-- TOP ROW: Generation Settings (left) + GPT Output (right). Both cards
+         now fill the FULL height ng row para magkapantay sila — clean alignment.
+         Suggestions moved out to a full-width row sa baba (edge-to-edge). --}}
+    <div id="topRow" class="flex overflow-hidden w-full" style="height:62%; min-height:300px;">
+      <!-- LEFT COLUMN — Settings only (suggestions na nasa bottom row na) -->
+      <div id="leftCol" class="flex flex-col overflow-hidden" style="width:42%; min-width:320px;">
+        <!-- Settings card — h-full (was 55% kasi may sugCard sibling dati) -->
+        <div id="leftCard" class="gpt-card flex flex-col overflow-hidden h-full" style="min-height:200px;">
         <div class="gpt-card-header">
           <div>
             <div class="gpt-card-title">⚙️ Generation Settings</div>
@@ -328,11 +332,41 @@
         </div>
       </div>
 
-      <!-- Vertical resize handle between Settings and Suggestions -->
-      <div id="resizeV" class="resize-v" title="Drag to resize"></div>
+      {{-- (Vertical resizeV + sugCard moved out — they're now sa bottom row
+           edge-to-edge, sibling ng topRow. leftCol now contains lang leftCard
+           which fills the full row height.) --}}
+    </div>
 
-      <!-- Suggestions card (lower part of left column) -->
-      <div id="sugCard" class="gpt-card flex flex-col overflow-hidden" style="height:45%; min-height:140px;">
+    <!-- Horizontal resize handle between Settings + GPT Output (inside topRow) -->
+    <div id="resizeH" class="resize-h" title="Drag to resize"></div>
+
+    <!-- RIGHT COLUMN: GPT Output (now matches Settings height — same row) -->
+    <div id="outputWrap" class="flex-1 overflow-hidden">
+      <div id="outputBox" class="gpt-card h-full flex flex-col overflow-hidden">
+        <div class="gpt-card-header">
+          <div>
+            <div class="gpt-card-title">📋 GPT Output</div>
+            <div class="gpt-card-subtitle"><span id="variantCountLabel">0</span> variant(s) generated · click <span class="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded">📋 Use</span> per card to copy, or Copy All for tab-separated rows.</div>
+          </div>
+          <button onclick="copyOutput()" class="btn-secondary">📋 Copy All</button>
+        </div>
+        <div class="flex-1 overflow-auto p-3" id="outputCardsWrap">
+          <div id="gptOutputBody">
+            <div class="v-empty">Click 🚀 Generate to create ad copy variants. They'll appear here as cards.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </div>{{-- /topRow --}}
+
+    <!-- Vertical resize handle between topRow at bottomRow (drag = adjust split) -->
+    <div id="resizeV" class="resize-v" title="Drag to resize"></div>
+
+    {{-- BOTTOM ROW: Suggestions card edge-to-edge (full viewport width).
+         Better visibility for the CPM-ranked patterns — wide horizontal space
+         lets the Table view's many columns render comfortably. --}}
+    <div id="bottomRow" class="w-full overflow-hidden" style="height:38%; min-height:180px;">
+      <div id="sugCard" class="gpt-card flex flex-col overflow-hidden h-full" style="min-height:140px;">
         <div class="gpt-card-header">
           <div>
             <div class="gpt-card-title">💡 Suggestions <span class="text-slate-400 font-normal">(auto-fed)</span></div>
@@ -362,57 +396,36 @@
         </div>
         <textarea id="suggestionsRaw" class="hidden"></textarea>
       </div>
-
-      <style>
-        /* Compact table styling for the Table view ng suggestions. */
-        .sug-tbl-wrap { margin-bottom: 18px; }
-        .sug-tbl-section-label {
-          font-size: 12px; font-weight: 600; color: #334155;
-          margin-bottom: 6px; padding: 6px 10px; background: #f1f5f9;
-          border-radius: 6px;
-        }
-        .sug-tbl {
-          width: 100%; border-collapse: collapse; font-size: 11px;
-          table-layout: fixed;
-        }
-        .sug-tbl th, .sug-tbl td {
-          border: 1px solid #e5e7eb; padding: 4px 6px;
-          vertical-align: top; word-wrap: break-word;
-        }
-        .sug-tbl thead th {
-          background: #f8fafc; color: #475569;
-          font-weight: 600; text-align: left;
-          position: sticky; top: 0; z-index: 1;
-        }
-        .sug-tbl tbody tr:nth-child(even) td { background: #fafafa; }
-        .sug-tbl .num { text-align: right; font-family: ui-monospace, monospace; }
-        .sug-tbl .text-cell {
-          max-height: 60px; overflow: hidden; text-overflow: ellipsis;
-        }
-        .sug-tbl .text-cell:hover { max-height: 240px; overflow: auto; }
-      </style>
     </div>
 
-    <!-- Horizontal resize handle between left column and right column -->
-    <div id="resizeH" class="resize-h" title="Drag to resize"></div>
-
-    <!-- RIGHT COLUMN: GPT Output (full height) -->
-    <div id="outputWrap" class="flex-1 overflow-hidden">
-      <div id="outputBox" class="gpt-card h-full flex flex-col overflow-hidden">
-        <div class="gpt-card-header">
-          <div>
-            <div class="gpt-card-title">📋 GPT Output</div>
-            <div class="gpt-card-subtitle"><span id="variantCountLabel">0</span> variant(s) generated · click <span class="font-mono text-xs bg-slate-100 px-1 py-0.5 rounded">📋 Use</span> per card to copy, or Copy All for tab-separated rows.</div>
-          </div>
-          <button onclick="copyOutput()" class="btn-secondary">📋 Copy All</button>
-        </div>
-        <div class="flex-1 overflow-auto p-3" id="outputCardsWrap">
-          <div id="gptOutputBody">
-            <div class="v-empty">Click 🚀 Generate to create ad copy variants. They'll appear here as cards.</div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <style>
+      /* Compact table styling for the Table view ng suggestions. */
+      .sug-tbl-wrap { margin-bottom: 18px; }
+      .sug-tbl-section-label {
+        font-size: 12px; font-weight: 600; color: #334155;
+        margin-bottom: 6px; padding: 6px 10px; background: #f1f5f9;
+        border-radius: 6px;
+      }
+      .sug-tbl {
+        width: 100%; border-collapse: collapse; font-size: 11px;
+        table-layout: fixed;
+      }
+      .sug-tbl th, .sug-tbl td {
+        border: 1px solid #e5e7eb; padding: 4px 6px;
+        vertical-align: top; word-wrap: break-word;
+      }
+      .sug-tbl thead th {
+        background: #f8fafc; color: #475569;
+        font-weight: 600; text-align: left;
+        position: sticky; top: 0; z-index: 1;
+      }
+      .sug-tbl tbody tr:nth-child(even) td { background: #fafafa; }
+      .sug-tbl .num { text-align: right; font-family: ui-monospace, monospace; }
+      .sug-tbl .text-cell {
+        max-height: 60px; overflow: hidden; text-overflow: ellipsis;
+      }
+      .sug-tbl .text-cell:hover { max-height: 240px; overflow: auto; }
+    </style>
   </div>
 
   <script>
@@ -433,16 +446,24 @@
     }
 
     // ===== Resizable panels =====
+    // Layout after refactor:
+    //   #viewportFit (flex-col)
+    //   ├── #topRow (flex-row): #leftCol | #resizeH | #outputWrap
+    //   ├── #resizeV (horizontal handle)
+    //   └── #bottomRow (full width): #sugCard
+    //
+    // - resizeH: drag = resize leftCol vs outputWrap inside topRow
+    // - resizeV: drag = resize topRow vs bottomRow (vertical split)
     function setupResizers() {
-      const root = document.getElementById('viewportFit');
-      const leftCol = document.getElementById('leftCol');
-      const leftCard = document.getElementById('leftCard');
-      const sugCard = document.getElementById('sugCard');
-      const handleH = document.getElementById('resizeH');
-      const handleV = document.getElementById('resizeV');
+      const root     = document.getElementById('viewportFit');
+      const topRow   = document.getElementById('topRow');
+      const bottomRow = document.getElementById('bottomRow');
+      const leftCol  = document.getElementById('leftCol');
+      const handleH  = document.getElementById('resizeH');
+      const handleV  = document.getElementById('resizeV');
 
-      // Horizontal: drag handleH to resize leftCol vs outputWrap.
-      if (handleH && leftCol && root) {
+      // Horizontal: drag handleH to resize leftCol vs outputWrap inside topRow.
+      if (handleH && leftCol && topRow) {
         let dragging = false;
         handleH.addEventListener('mousedown', (e) => {
           dragging = true;
@@ -452,7 +473,7 @@
         });
         window.addEventListener('mousemove', (e) => {
           if (!dragging) return;
-          const rect = root.getBoundingClientRect();
+          const rect = topRow.getBoundingClientRect();
           const offset = e.clientX - rect.left;
           const min = 280, max = rect.width - 320;
           const newWidth = Math.min(max, Math.max(min, offset));
@@ -466,8 +487,8 @@
         });
       }
 
-      // Vertical: drag handleV inside leftCol to resize leftCard vs sugCard.
-      if (handleV && leftCard && sugCard && leftCol) {
+      // Vertical: drag handleV to resize topRow vs bottomRow.
+      if (handleV && topRow && bottomRow && root) {
         let dragging = false;
         handleV.addEventListener('mousedown', (e) => {
           dragging = true;
@@ -477,14 +498,14 @@
         });
         window.addEventListener('mousemove', (e) => {
           if (!dragging) return;
-          const rect = leftCol.getBoundingClientRect();
+          const rect = root.getBoundingClientRect();
           const offset = e.clientY - rect.top;
           const handleSize = 6;
-          const min = 140, max = rect.height - 140 - handleSize;
+          const min = 200, max = rect.height - 160 - handleSize;
           const topH = Math.min(max, Math.max(min, offset));
           const botH = rect.height - topH - handleSize;
-          leftCard.style.height = topH + 'px';
-          sugCard.style.height = botH + 'px';
+          topRow.style.height    = topH + 'px';
+          bottomRow.style.height = botH + 'px';
         });
         window.addEventListener('mouseup', () => {
           if (!dragging) return;
