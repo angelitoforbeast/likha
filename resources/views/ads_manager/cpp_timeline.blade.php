@@ -3,74 +3,115 @@
   <x-slot name="heading">CPP Snapshot Timeline</x-slot>
 
   <style>
-    .tl-grid-wrap { overflow-x: auto; }
-    .tl-grid { border-collapse: separate; border-spacing: 0; min-width: 100%; font-size: 12px; }
+    /* ── Timeline grid — clean, centered, mostly black text ──────────── */
+    .tl-grid-wrap {
+      overflow-x: auto;
+      display: flex;
+      justify-content: center;
+    }
+    .tl-grid {
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 13px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #000;
+      margin: 0 auto;
+    }
     .tl-grid th, .tl-grid td {
       border: 1px solid #e5e7eb;
-      padding: 8px 10px;
-      vertical-align: top;
+      padding: 10px 14px;
+      vertical-align: middle;
       background: white;
-      min-width: 150px;
+      min-width: 170px;
+      text-align: center;
     }
     .tl-grid thead th {
-      background: #f1f5f9;
-      font-weight: 600;
-      color: #334155;
+      background: #f9fafb;
+      font-weight: 700;
+      color: #000;
       position: sticky;
       top: 0;
       z-index: 2;
-      text-align: center;
+      letter-spacing: 0.04em;
+      font-size: 12px;
+      text-transform: uppercase;
     }
     .tl-grid th.tl-date-col {
-      background: #f8fafc;
-      color: #475569;
+      background: #f9fafb;
+      color: #000;
       font-weight: 700;
       position: sticky;
       left: 0;
       z-index: 3;
-      min-width: 110px;
-      text-align: left;
+      min-width: 140px;
+      text-align: center;
+      letter-spacing: 0.02em;
     }
     .tl-grid thead th.tl-corner {
       left: 0;
       z-index: 4;
-      background: #e2e8f0;
+      background: #f3f4f6;
     }
+    /* Cell base — clickable */
     .tl-cell {
       cursor: pointer;
       transition: background .15s;
-      font-family: 'SFMono-Regular', Consolas, monospace;
-      line-height: 1.45;
+      line-height: 1.5;
     }
-    .tl-cell:hover { background: #eff6ff; }
-    .tl-cell-empty { background: #fafafa; color: #cbd5e1; text-align: center; font-style: italic; cursor: default; }
-    .tl-cell-empty:hover { background: #fafafa; }
-    .tl-cell-inferred { background: #fffbeb; }
-    .tl-cell-inferred:hover { background: #fef3c7; }
-    .tl-cell-estimate { background: #eff6ff; cursor: default; }
-    .tl-cell-estimate:hover { background: #dbeafe; }
+    .tl-cell:hover { background: #fafafa; }
+    /* Empty / no-data */
+    .tl-cell-empty {
+      background: white;
+      color: #d1d5db;
+      cursor: default;
+    }
+    .tl-cell-empty:hover { background: white; }
+    /* Inferred (past) — very light amber, still mostly black text */
+    .tl-cell-inferred { background: #fffdf6; }
+    .tl-cell-inferred:hover { background: #fefce8; }
+    /* Estimate (future today) — very light blue, still mostly black text */
+    .tl-cell-estimate { background: #f8fafc; cursor: default; }
+    .tl-cell-estimate:hover { background: #f1f5f9; }
+    /* Badges — small, low-contrast, informational only */
     .tl-cell .est-badge {
       display: inline-block;
-      font-size: 9px;
-      color: #1e40af;
-      background: #bfdbfe;
-      padding: 1px 5px;
-      border-radius: 3px;
-      margin-top: 4px;
-      letter-spacing: 0.04em;
+      font-size: 10px;
+      color: #6b7280;
+      background: transparent;
+      padding: 0;
+      margin-top: 6px;
+      letter-spacing: 0.02em;
+      font-style: italic;
     }
-    .tl-cell .label { font-size: 10px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
-    .tl-cell .val   { color: #0f172a; font-weight: 600; }
-    .tl-cell .saved { font-size: 10px; color: #94a3b8; margin-top: 4px; }
     .tl-cell .inferred-badge {
       display: inline-block;
-      font-size: 9px;
-      color: #92400e;
-      background: #fde68a;
-      padding: 1px 5px;
-      border-radius: 3px;
-      margin-top: 4px;
-      letter-spacing: 0.04em;
+      font-size: 10px;
+      color: #6b7280;
+      background: transparent;
+      padding: 0;
+      margin-top: 6px;
+      letter-spacing: 0.02em;
+      font-style: italic;
+    }
+    /* Labels (Adspent / Orders / CPP) — black bold */
+    .tl-cell .label {
+      font-size: 11px;
+      color: #000;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    /* Values — black, slightly heavier */
+    .tl-cell .val {
+      color: #000;
+      font-weight: 600;
+      font-family: 'SFMono-Regular', Consolas, monospace;
+    }
+    /* Saved timestamp footer — muted gray */
+    .tl-cell .saved {
+      font-size: 10px;
+      color: #9ca3af;
+      margin-top: 6px;
+      letter-spacing: 0.02em;
     }
 
     /* Modal */
@@ -176,9 +217,9 @@
       </div>
       <div class="mt-3 tl-legend">
         <span><span class="swatch" style="background:#ffffff;"></span> Saved snapshot — Adspent + Orders + CPP</span>
-        <span><span class="swatch" style="background:#fffbeb;"></span> Inferred — Orders only, cutoff per selected mode</span>
-        <span><span class="swatch" style="background:#eff6ff;"></span> Estimate — projected from earlier-today × historical ratio</span>
-        <span><span class="swatch" style="background:#fafafa;"></span> No data</span>
+        <span><span class="swatch" style="background:#fffdf6;"></span> Inferred — Orders only (from macro_output)</span>
+        <span><span class="swatch" style="background:#f8fafc;"></span> Estimate — projected from earlier-today × historical ratio</span>
+        <span><span class="swatch" style="background:#ffffff;border-color:#e5e7eb;"></span> No data</span>
       </div>
     </div>
 
@@ -211,20 +252,20 @@
                     <template x-if="cellOf(b, d)">
                       <div>
                         <template x-if="cellOf(b, d).spent != null">
-                          <div><span class="label">Adspent:</span> <span class="val" x-text="money(cellOf(b, d).spent)"></span></div>
+                          <div><span class="label">Adspent</span> <span class="val" x-text="money(cellOf(b, d).spent)"></span></div>
                         </template>
                         <div>
-                          <span class="label" x-text="cellOf(b, d).is_estimate ? 'Est:' : 'Orders:'"></span>
+                          <span class="label" x-text="cellOf(b, d).is_estimate ? 'Est. Orders' : 'Orders'"></span>
                           <span class="val" x-text="num(cellOf(b, d).orders)"></span>
                         </div>
                         <template x-if="cellOf(b, d).cpp != null">
-                          <div><span class="label">CPP:</span>     <span class="val" x-text="money(cellOf(b, d).cpp)"></span></div>
+                          <div><span class="label">CPP</span> <span class="val" x-text="money(cellOf(b, d).cpp)"></span></div>
                         </template>
-                        {{-- Estimate badge — always shown so users won't mistake projection for actual --}}
+                        {{-- Estimate label — italic muted, always shown for projections --}}
                         <template x-if="cellOf(b, d).is_estimate">
                           <div class="est-badge"
                                :title="'Projection — ' + (cellOf(b, d).estimate_source || '')">
-                            📈 projected
+                            projected
                           </div>
                         </template>
                         <template x-if="cellOf(b, d).inferred && showInferredBadge === 'show'">
