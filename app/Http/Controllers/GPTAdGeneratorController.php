@@ -519,21 +519,27 @@ class GPTAdGeneratorController extends Controller
         $toDate   = $valid($request->query('to_date'))   ? $request->query('to_date')   : $today;
         if ($fromDate > $toDate) [$fromDate, $toDate] = [$toDate, $fromDate];
 
+        // top_n — how many ads to include per section (4 sections × top_n total).
+        // Clamped to 1–50 para hindi mag-blow up sa prompt size at token cost.
+        $topN = (int) $request->query('top_n', 10);
+        $topN = max(1, min(50, $topN));
+
         $pageNorm = $this->normalizePage($pageParam);
         $itemNorm = $this->normalizePage($itemParam);
 
         $cacheKey = sprintf(
-            'gpt_suggestions:%s:%s:%d:%s:%s',
+            'gpt_suggestions:%s:%s:%d:%s:%s:%d',
             mb_strtolower($pageNorm !== '' ? $pageNorm : 'all'),
             mb_strtolower($itemNorm !== '' ? $itemNorm : 'all'),
             $activeOnly ? 1 : 0,
             $fromDate,
-            $toDate
+            $toDate,
+            $topN
         );
 
         try {
-            $payload = Cache::remember($cacheKey, 300 /* 5 min */, function () use ($pageNorm, $itemNorm, $activeOnly, $fromDate, $toDate) {
-                return $this->buildSuggestions($pageNorm, $itemNorm, $activeOnly, $fromDate, $toDate);
+            $payload = Cache::remember($cacheKey, 300 /* 5 min */, function () use ($pageNorm, $itemNorm, $activeOnly, $fromDate, $toDate, $topN) {
+                return $this->buildSuggestions($pageNorm, $itemNorm, $activeOnly, $fromDate, $toDate, $topN);
             });
         } catch (\Throwable $e) {
             Log::error('loadAdCopySuggestions cache error', ['msg' => $e->getMessage()]);
@@ -552,7 +558,7 @@ class GPTAdGeneratorController extends Controller
      * When fallback was used (active had no data), also includes
      * 'fallback_used' => true and 'fallback_reason' => string.
      */
-    private function buildSuggestions(string $pageNorm, string $itemNorm, bool $activeOnly, ?string $fromDate = null, ?string $toDate = null): array
+    private function buildSuggestions(string $pageNorm, string $itemNorm, bool $activeOnly, ?string $fromDate = null, ?string $toDate = null, int $topN = 10): array
     {
         try {
             $applyPage = $pageNorm !== '' && mb_strtolower($pageNorm) !== 'all';
@@ -614,7 +620,7 @@ class GPTAdGeneratorController extends Controller
 
             // Active-only fallback (preserve original behavior)
             if ($reports->isEmpty() && $activeOnly) {
-                $fallback = $this->buildSuggestions($pageNorm, $itemNorm, false, $fromDate, $toDate);
+                $fallback = $this->buildSuggestions($pageNorm, $itemNorm, false, $fromDate, $toDate, $topN);
                 $fallback['fallback_used']   = true;
                 $fallback['fallback_reason'] = 'No active ads found for this scope. Showing all (active+off) for the same date range.';
                 return $fallback;
@@ -672,8 +678,9 @@ class GPTAdGeneratorController extends Controller
                 return ['output' => "⚠️ No valid ad data found{$scope}."];
             }
 
-            // 4) Build sections
-            $TOP_N = 10;
+            // 4) Build sections — $topN passed from caller, defaults to 10.
+            //    Same value applied across all 4 sections (TOP/WORST CPM/WMR).
+            $TOP_N = max(1, min(50, $topN));
             $byCpmAsc  = $rows->sortBy('cpm')->values();
             $byCpmDesc = $rows->sortByDesc('cpm')->values();
             // For WMR sections, only ads with link_clicks > 0 (WMR not null)
@@ -777,7 +784,14 @@ class GPTAdGeneratorController extends Controller
         $item = ($itemNorm !== '' && mb_strtolower($itemNorm) !== 'all') ? $itemNorm : 'All items';
         $act  = $activeOnly ? 'Active only' : 'All (active + off)';
 
-        return "=== CONTEXT ===\n"
+        return "=== GLOSSARY ===\n"
+             . "CPM = cost per message = spend ÷ msgs  (lower = cheaper engagement; ang gusto natin LOW CPM)\n"
+             . "WMR = welcome message rate = msgs ÷ clicks × 100%  (higher = more clickers turned into messengers — yung welcome message + quick replies effective)\n"
+             . "Spend = total adspent for that ad within the date range\n"
+             . "Msgs = total messaging conversations started by that ad\n"
+             . "Clicks = link clicks on that ad (only ads with clicks > 0 have WMR)\n"
+             . "\n"
+             . "=== CONTEXT ===\n"
              . "Page: {$page}\n"
              . "Item: {$item}\n"
              . "Filter: {$act}\n"

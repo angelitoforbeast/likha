@@ -253,6 +253,24 @@
                 <input id="dateTo" type="date" class="gpt-select" onchange="document.getElementById('datePreset').value='custom'">
               </div>
             </div>
+
+            {{-- Top N per section — controls how many ads sa each of 4 sections
+                 (TOP/WORST CPM + TOP/WORST WMR). Same value across sections.
+                 Saved to localStorage so it persists across sessions. --}}
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+              <div>
+                <label class="gpt-label" for="topNPerSection">🎯 Top N per section</label>
+                <select id="topNPerSection" class="gpt-select" onchange="saveTopNPref()">
+                  <option value="5">5</option>
+                  <option value="10" selected>10 (default)</option>
+                  <option value="15">15</option>
+                  <option value="20">20</option>
+                  <option value="30">30</option>
+                  <option value="50">50 (max)</option>
+                </select>
+                <div class="gpt-hint">Each section (TOP/WORST × CPM/WMR) — total = 4 × this. Persists per browser.</div>
+              </div>
+            </div>
           </div>
 
           <!-- Section: Model + creativity -->
@@ -830,6 +848,28 @@
     // Initialize default range on page load
     document.addEventListener("DOMContentLoaded", applyDatePreset);
 
+    // ===== Top N preference — saved/restored via localStorage. =====
+    const TOP_N_STORAGE_KEY = "gpt_ad_generator__top_n_per_section";
+    function loadTopNPref() {
+      const sel = document.getElementById("topNPerSection");
+      if (!sel) return;
+      try {
+        const saved = localStorage.getItem(TOP_N_STORAGE_KEY);
+        if (saved && /^\d+$/.test(saved)) {
+          // Match against available options; fall back to 10 if no match.
+          const opt = [...sel.options].find(o => o.value === saved);
+          if (opt) sel.value = saved;
+        }
+      } catch (e) { /* localStorage might be disabled */ }
+    }
+    function saveTopNPref() {
+      const sel = document.getElementById("topNPerSection");
+      if (!sel) return;
+      try { localStorage.setItem(TOP_N_STORAGE_KEY, sel.value); } catch (e) {}
+    }
+    // Restore preference on page load.
+    document.addEventListener("DOMContentLoaded", loadTopNPref);
+
     // ===== Load Suggestions (separate scrollable box, still fed to GPT) =====
     async function loadAdCopySuggestions() {
       const btn = document.getElementById("btnLoadSuggestions");
@@ -838,19 +878,20 @@
       const activeOnly = document.getElementById("activeOnly")?.checked ? "1" : "0";
       const fromDate = document.getElementById("dateFrom")?.value || "";
       const toDate   = document.getElementById("dateTo")?.value || "";
+      const topN     = (document.getElementById("topNPerSection")?.value || "10").trim();
 
       const box = document.getElementById("suggestionsBox");
       const raw = document.getElementById("suggestionsRaw");
 
       btn.disabled = true;
       const dateLabel  = fromDate && toDate ? `${fromDate} → ${toDate}` : "default";
-      const scopeLabel = `Page: ${page} · Item: ${item} · ${activeOnly === "1" ? "Active only" : "All"} · ${dateLabel}`;
+      const scopeLabel = `Page: ${page} · Item: ${item} · ${activeOnly === "1" ? "Active only" : "All"} · ${dateLabel} · top ${topN} per section`;
       const header = `=== Suggestions (${scopeLabel}) ===`;
       box.textContent = `⏳ Loading ad copy suggestions for ${scopeLabel}...`;
       raw.value = "";
 
       try {
-        const qs = new URLSearchParams({ page, item, active_only: activeOnly });
+        const qs = new URLSearchParams({ page, item, active_only: activeOnly, top_n: topN });
         if (fromDate) qs.set("from_date", fromDate);
         if (toDate)   qs.set("to_date",   toDate);
         const res = await fetch(`/ad-copy-suggestions?${qs.toString()}`, {
