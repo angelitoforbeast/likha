@@ -147,25 +147,26 @@ class AdsManagerReportController extends Controller
             ->get([
                 'id','status','original_name','processed_rows','inserted','updated','skipped','error_rows',
                 'error_message','started_at','finished_at','created_at',
-                'file_created_at','file_modified_at',
+                'file_created_at','file_modified_at','protected_details',
             ]);
 
         return response()->json([
             'logs' => $logs->map(fn($l) => [
-                'id'               => (int) $l->id,
-                'status'           => (string) ($l->status ?? 'idle'),
-                'original_name'    => (string) ($l->original_name ?? ''),
-                'processed_rows'   => (int) ($l->processed_rows ?? 0),
-                'inserted'         => (int) ($l->inserted ?? 0),
-                'updated'          => (int) ($l->updated ?? 0),
-                'skipped'          => (int) ($l->skipped ?? 0),
-                'error_rows'       => (int) ($l->error_rows ?? 0),
-                'error_message'    => (string) ($l->error_message ?? ''),
-                'started_at'       => $l->started_at?->toDateTimeString(),
-                'finished_at'      => $l->finished_at?->toDateTimeString(),
-                'created_at'       => $l->created_at?->toDateTimeString(),
-                'file_created_at'  => $l->file_created_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
-                'file_modified_at' => $l->file_modified_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
+                'id'                 => (int) $l->id,
+                'status'             => (string) ($l->status ?? 'idle'),
+                'original_name'      => (string) ($l->original_name ?? ''),
+                'processed_rows'     => (int) ($l->processed_rows ?? 0),
+                'inserted'           => (int) ($l->inserted ?? 0),
+                'updated'            => (int) ($l->updated ?? 0),
+                'skipped'            => (int) ($l->skipped ?? 0),
+                'error_rows'         => (int) ($l->error_rows ?? 0),
+                'error_message'      => (string) ($l->error_message ?? ''),
+                'started_at'         => $l->started_at?->toDateTimeString(),
+                'finished_at'        => $l->finished_at?->toDateTimeString(),
+                'created_at'         => $l->created_at?->toDateTimeString(),
+                'file_created_at'    => $l->file_created_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
+                'file_modified_at'   => $l->file_modified_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A'),
+                'protected_details'  => $l->protected_details ?? null, // array of {column: count}
             ]),
         ]);
     }

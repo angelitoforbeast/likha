@@ -32,6 +32,14 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
     private int $inserted  = 0;
     private int $updated   = 0;
 
+    /**
+     * Per-field count of "protected" updates — situations where the new
+     * upload value was LOWER than the existing row's value (or null/0) for
+     * a monotonic-increasing field, so the existing value was preserved.
+     * Saved as JSON sa upload_logs.protected_details at end of job.
+     */
+    private array $protectedByField = [];
+
     private const CHUNK_SIZE = 2000;
 
     public function __construct(
@@ -147,23 +155,25 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
 
             if ($log) {
                 $log->update([
-                    'status'         => 'done',
-                    'processed_rows' => $this->processed,
-                    'inserted'       => $this->inserted,
-                    'updated'        => $this->updated,
-                    'skipped'        => $this->skipped,
-                    'finished_at'    => now(),
+                    'status'            => 'done',
+                    'processed_rows'    => $this->processed,
+                    'inserted'          => $this->inserted,
+                    'updated'           => $this->updated,
+                    'skipped'           => $this->skipped,
+                    'protected_details' => !empty($this->protectedByField) ? $this->protectedByField : null,
+                    'finished_at'       => now(),
                 ]);
             }
         } catch (\Throwable $e) {
             if ($log) {
                 $log->update([
-                    'status'         => 'failed',
-                    'processed_rows' => $this->processed,
-                    'inserted'       => $this->inserted,
-                    'updated'        => $this->updated,
-                    'skipped'        => $this->skipped,
-                    'finished_at'    => now(),
+                    'status'            => 'failed',
+                    'processed_rows'    => $this->processed,
+                    'inserted'          => $this->inserted,
+                    'updated'           => $this->updated,
+                    'skipped'           => $this->skipped,
+                    'protected_details' => !empty($this->protectedByField) ? $this->protectedByField : null,
+                    'finished_at'       => now(),
                 ]);
             }
             throw $e;
@@ -508,6 +518,23 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
         }
     }
 
+    /**
+     * Columns na monotonically increasing — Meta cumulative metrics na NEVER
+     * dapat bumababa sa same (day, ad_id) pair. Kung yung new value ay LOWER
+     * kaysa existing → reject, keep existing, track which column got protected.
+     *
+     * Zero/null values are treated as "missing data" — also rejected.
+     */
+    private const MONOTONIC_FIELDS = [
+        'amount_spent_php',
+        'impressions',
+        'reach',
+        'messaging_conversations_started',
+        'purchases',
+        'link_clicks',
+        'results',
+    ];
+
     private function upsertChunk(array $rows): void
     {
         DB::beginTransaction();
@@ -517,7 +544,33 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             // 1) Upsert creatives in a PG-safe way (no exceptions on conflicts)
             $this->upsertCreativesForChunk($rows, $now);
 
-            // 2) Upsert facts into ads_manager_reports keyed by (day + ad_id)
+            // 2) Batch-fetch existing rows for (day, ad_id) pairs sa chunk para
+            //    mai-compare yung monotonic fields nang walang N+1 query.
+            $existingByKey = [];
+            $pairs = [];
+            foreach ($rows as $r) {
+                $day  = $r['day'] ?? null;
+                $adId = isset($r['ad_id']) ? trim((string)$r['ad_id']) : null;
+                if (empty($day) || $adId === '') continue;
+                $pairs[] = ['day' => $day, 'ad_id' => $adId];
+            }
+            if (!empty($pairs)) {
+                // Group by day, query in batches of ad_ids per day to avoid huge WHERE clauses.
+                $byDay = [];
+                foreach ($pairs as $p) $byDay[$p['day']][$p['ad_id']] = true;
+                foreach ($byDay as $day => $adIdMap) {
+                    $adIds = array_keys($adIdMap);
+                    $existing = DB::table('ads_manager_reports')
+                        ->where('day', $day)
+                        ->whereIn('ad_id', $adIds)
+                        ->get(array_merge(['ad_id'], self::MONOTONIC_FIELDS));
+                    foreach ($existing as $row) {
+                        $existingByKey["{$day}|{$row->ad_id}"] = (array) $row;
+                    }
+                }
+            }
+
+            // 3) Upsert facts into ads_manager_reports keyed by (day + ad_id)
             foreach ($rows as $r) {
                 $day  = $r['day'] ?? null;
                 $adId = isset($r['ad_id']) ? trim((string)$r['ad_id']) : null;
@@ -563,6 +616,40 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                 $this->putIfExists($updateData, $r, 'quick_reply_1');
                 $this->putIfExists($updateData, $r, 'quick_reply_2');
                 $this->putIfExists($updateData, $r, 'quick_reply_3');
+
+                // ── PROTECTION: enforce only-up sa monotonic cumulative fields.
+                // If new < existing (or new is 0/null treated as missing),
+                // drop yung field from $updateData so the existing value stays.
+                // Track which column got protected for admin visibility.
+                $existingRow = $existingByKey["{$day}|{$adId}"] ?? null;
+                if ($existingRow !== null) {
+                    foreach (self::MONOTONIC_FIELDS as $field) {
+                        if (!array_key_exists($field, $updateData)) continue;
+
+                        $newVal = $updateData[$field];
+                        $oldVal = $existingRow[$field] ?? null;
+
+                        // Treat null/0 as missing data — never overwrite a non-zero existing.
+                        $newNum = $newVal === null ? null : (float) $newVal;
+                        $oldNum = $oldVal === null ? null : (float) $oldVal;
+
+                        if ($newNum === null || $newNum === 0.0) {
+                            // Skip this field — keep existing value.
+                            if ($oldNum !== null && $oldNum > 0) {
+                                $this->protectedByField[$field] = ($this->protectedByField[$field] ?? 0) + 1;
+                            }
+                            unset($updateData[$field]);
+                            continue;
+                        }
+
+                        if ($oldNum !== null && $newNum < $oldNum) {
+                            // New value is lower → reject, keep existing, track protection.
+                            $this->protectedByField[$field] = ($this->protectedByField[$field] ?? 0) + 1;
+                            unset($updateData[$field]);
+                        }
+                        // else: newNum >= oldNum (or existing is null) → allow update.
+                    }
+                }
 
                 $affected = DB::table('ads_manager_reports')
                     ->where('day', $day)

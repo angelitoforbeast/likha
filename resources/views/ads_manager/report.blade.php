@@ -89,6 +89,7 @@
               <th class="p-2">Updated</th>
               <th class="p-2">Skipped</th>
               <th class="p-2">Errors</th>
+              <th class="p-2" title="Cumulative-metric values na lower kaysa existing — rejected, existing value preserved. Shows count per column.">🛡 Protected</th>
               <th class="p-2">Error message</th>
               <th class="p-2">Started</th>
               <th class="p-2">Finished</th>
@@ -131,6 +132,37 @@
                 <td class="p-2 font-mono" data-col="updated">{{ (int)($log->updated ?? 0) }}</td>
                 <td class="p-2 font-mono" data-col="skipped">{{ (int)($log->skipped ?? 0) }}</td>
                 <td class="p-2 font-mono" data-col="error_rows">{{ (int)($log->error_rows ?? 0) }}</td>
+
+                {{-- Protected column — shows per-field rejection counts. Color-coded
+                     amber when may protections, gray dash when wala. Tooltip lists all. --}}
+                @php
+                  $protections = $log->protected_details ?? null;
+                  $totalProtected = is_array($protections) ? array_sum($protections) : 0;
+                  $protectedTitle = '';
+                  if (is_array($protections) && !empty($protections)) {
+                    $lines = [];
+                    foreach ($protections as $col => $n) $lines[] = "{$col}: {$n}";
+                    $protectedTitle = implode("\n", $lines);
+                  }
+                @endphp
+                <td class="p-2 text-xs" data-col="protected_details">
+                  @if($totalProtected > 0)
+                    <details class="cursor-pointer" title="{{ $protectedTitle }}">
+                      <summary class="text-amber-700 font-medium">⚠ {{ $totalProtected }} protected</summary>
+                      <div class="mt-1 space-y-0.5">
+                        @foreach($protections as $col => $count)
+                          <div class="text-gray-700 text-[10px]">
+                            <span class="font-mono">{{ $col }}</span>:
+                            <span class="font-mono font-semibold">{{ $count }}</span>
+                          </div>
+                        @endforeach
+                      </div>
+                    </details>
+                  @else
+                    <span class="text-gray-300">—</span>
+                  @endif
+                </td>
+
                 <td class="p-2 text-xs text-red-700 max-w-xs whitespace-normal break-words" data-col="error_message">{{ $log->error_message }}</td>
 
                 <td class="p-2 font-mono text-xs" data-col="started_at">{{ $log->started_at }}</td>

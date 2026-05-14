@@ -33,13 +33,15 @@ class UploadLog extends Model
         'user_email',       // ✅ persists kahit user gets deleted
         'file_created_at',  // ✅ dcterms:created mula sa XLSX (kelan in-export)
         'file_modified_at', // ✅ dcterms:modified (kelan last-edited)
+        'protected_details',// ✅ per-field protected counts (JSON)
     ];
 
     protected $casts = [
-        'started_at'       => 'datetime',
-        'finished_at'      => 'datetime',
-        'batch_at'         => 'datetime',  // ✅ para Carbon na pag kinuha sa Job
-        'file_created_at'  => 'datetime',
-        'file_modified_at' => 'datetime',
+        'started_at'        => 'datetime',
+        'finished_at'       => 'datetime',
+        'batch_at'          => 'datetime',  // ✅ para Carbon na pag kinuha sa Job
+        'file_created_at'   => 'datetime',
+        'file_modified_at'  => 'datetime',
+        'protected_details' => 'array',     // ✅ JSON ↔ PHP array
     ];
 }
