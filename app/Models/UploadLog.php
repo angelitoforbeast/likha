@@ -28,14 +28,18 @@ class UploadLog extends Model
         'errors_path',
         'started_at',
         'finished_at',
-        'batch_at',     // ✅ IMPORTANT
-        'user_id',      // ✅ kung sino nag-upload (nullable for pre-tracking rows)
-        'user_email',   // ✅ persists kahit user gets deleted
+        'batch_at',         // ✅ IMPORTANT
+        'user_id',          // ✅ kung sino nag-upload (nullable for pre-tracking rows)
+        'user_email',       // ✅ persists kahit user gets deleted
+        'file_created_at',  // ✅ dcterms:created mula sa XLSX (kelan in-export)
+        'file_modified_at', // ✅ dcterms:modified (kelan last-edited)
     ];
 
     protected $casts = [
-        'started_at'  => 'datetime',
-        'finished_at' => 'datetime',
-        'batch_at'    => 'datetime',  // ✅ para Carbon na pag kinuha sa Job
+        'started_at'       => 'datetime',
+        'finished_at'      => 'datetime',
+        'batch_at'         => 'datetime',  // ✅ para Carbon na pag kinuha sa Job
+        'file_created_at'  => 'datetime',
+        'file_modified_at' => 'datetime',
     ];
 }

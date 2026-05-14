@@ -81,6 +81,8 @@
             <tr class="text-left">
               <th class="p-2">Log ID</th>
               <th class="p-2">File</th>
+              <th class="p-2" title="Source file's internal 'created' date — kelan in-export from Meta Ads Manager">File Created</th>
+              <th class="p-2" title="Source file's internal 'modified' date — kelan last na-edit before upload">File Modified</th>
               <th class="p-2">Status</th>
               <th class="p-2">Processed</th>
               <th class="p-2">Inserted</th>
@@ -109,6 +111,14 @@
               <tr class="border-t" data-log-id="{{ $log->id }}">
                 <td class="p-2 font-mono">#{{ $log->id }}</td>
                 <td class="p-2" data-col="original_name">{{ $log->original_name }}</td>
+
+                {{-- File metadata dates — both null for non-XLSX uploads. --}}
+                <td class="p-2 font-mono text-xs" data-col="file_created_at">
+                  {{ $log->file_created_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A') ?? '—' }}
+                </td>
+                <td class="p-2 font-mono text-xs" data-col="file_modified_at">
+                  {{ $log->file_modified_at?->setTimezone('Asia/Manila')->format('M j, Y g:i A') ?? '—' }}
+                </td>
 
                 <td class="p-2">
                   <span data-col="status_badge" class="px-2 py-0.5 rounded {{ $badgeClass }}">
