@@ -343,6 +343,7 @@
                         'rts_eff_date'=> $cell['rts_eff_date'],
                         'rts_inherited' => !empty($cell['rts_inherited']),
                         'unit_cost'   => $cell['unit_cost'],
+                        'unit_cost_ceo' => $cell['unit_cost_ceo'] ?? null,
                         'earliest_same_date' => $earliestSame,
                     ] : null;
                   @endphp
