@@ -335,6 +335,25 @@
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
               cursor:pointer;text-decoration:none;"
        title="Per-day overall summary across all pages (CEO)">📅 Daily</a>
+
+    {{-- CEO-only profit-source toggle. Switches which cogs table drives the
+         profit formula in this view. Default 'ceo' (= cogs_ceo). Two states
+         rendered as a segmented control so the active value is obvious. --}}
+    <div :title="'Profit formula currently uses ' + (profitSource === 'ceo' ? 'CEO cogs_ceo table' : 'Marketing cogs table') + '. Click to toggle.'"
+         style="display:inline-flex;align-items:center;background:#1e293b;border:1px solid #475569;
+                border-radius:6px;padding:3px;margin-left:4px;gap:2px;">
+      <span style="font-size:10px;color:#94a3b8;font-weight:600;padding:0 6px;">📊 Profit:</span>
+      <button type="button" @click="profitSource !== 'market' && toggleProfitSource()"
+              :style="profitSource === 'market'
+                ? 'background:#f59e0b;color:#0f172a;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:700;'
+                : 'background:transparent;color:#cbd5e1;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:600;'"
+              title="Use Marketing's cogs table for profit calc">Marketing</button>
+      <button type="button" @click="profitSource !== 'ceo' && toggleProfitSource()"
+              :style="profitSource === 'ceo'
+                ? 'background:#6366f1;color:#fff;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:700;'
+                : 'background:transparent;color:#cbd5e1;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:600;'"
+              title="Use CEO's cogs_ceo table for profit calc">🔒 CEO</button>
+    </div>
     @endif
 
     <button class="btn-refresh" :class="loading ? 'spinning' : ''" @click="load()" title="Refresh">
@@ -1096,6 +1115,13 @@
       // CEO-only flag from server — controls the extra cogs_ceo input in modal.
       isCeoView: @json(!empty($isCEO ?? false)),
 
+      // CEO toggle for profit calc source: 'ceo' = cogs_ceo (default), 'market' = cogs.
+      // Initialized from URL ?profit_source= param so refresh preserves choice.
+      profitSource: (function(){
+        const p = (new URLSearchParams(window.location.search).get('profit_source') || '').toLowerCase();
+        return p === 'market' ? 'market' : 'ceo';
+      })(),
+
       // Modal-based edit state. Replaces old inline edit UX. Saves use the
       // same /owner/private/item-setting endpoint as the breakdown matrix
       // modal — including optional `apply_through` for range cascade.
@@ -1259,8 +1285,12 @@
         if (this.startDate && this.endDate && this.startDate > this.endDate) {
           const t = this.startDate; this.startDate = this.endDate; this.endDate = t;
         }
-        // Persist range in URL so refresh restores it
-        const qs = new URLSearchParams({ start_date: this.startDate, end_date: this.endDate });
+        // Persist range + CEO profit-source toggle in URL so refresh restores it.
+        // profit_source only added when 'market' (default 'ceo' for CEO viewers;
+        // ignored server-side for non-CEO).
+        const qsObj = { start_date: this.startDate, end_date: this.endDate };
+        if (this.isCeoView && this.profitSource === 'market') qsObj.profit_source = 'market';
+        const qs = new URLSearchParams(qsObj);
         history.replaceState(null,'','?'+qs.toString());
         try{
           const r = await fetch('{{ route('owner.private.item-summary') }}?'+qs.toString());
@@ -1270,8 +1300,17 @@
           this.skippedPages = j.skipped_pages || [];
           this.isSingleDate = !!j.is_single_date;
           this.rangeDays    = Number(j.range_days || 1);
+          // Sync UI toggle with server's echoed source (CEO only).
+          if (j.is_ceo && j.profit_source) this.profitSource = j.profit_source;
         }catch(e){ console.error(e); }
         finally{ this.loading=false; }
+      },
+
+      // CEO toggle — flips profit_source and reloads. Non-CEO never sees this.
+      toggleProfitSource(){
+        if (!this.isCeoView) return;
+        this.profitSource = this.profitSource === 'ceo' ? 'market' : 'ceo';
+        this.load();
       },
 
       // ── Page breakdown (navigate to separate route) ───────────────────

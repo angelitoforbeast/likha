@@ -205,6 +205,13 @@ class OwnerPrivateController extends Controller
         $start    = $request->input('start_date');
         $end      = $request->input('end_date');
         $pageName = $request->input('page_name', 'all');
+        // CEO-only toggle: which cogs table drives profit calc.
+        // 'ceo'    → use cogs_ceo (default for CEO viewers — current behavior)
+        // 'market' → use cogs (Marketing's table — lets CEO preview Marketing's
+        //            world without losing their separate cogs_ceo values)
+        // Non-CEO viewers: param is ignored, profit always uses cogs.
+        $profitSource = strtolower(trim((string)$request->input('profit_source', 'ceo')));
+        if (!in_array($profitSource, ['ceo', 'market'], true)) $profitSource = 'ceo';
 
         $driver = DB::getDriverName(); // 'mysql' | 'pgsql'
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
@@ -1798,8 +1805,10 @@ class OwnerPrivateController extends Controller
             $settings        = $settingsMap[$settingKey] ?? null;
             $itemValueMarket = $cogsMap[$dominantKey]    ?? null;
             $itemValueCeo    = $cogsCeoMap[$dominantKey] ?? null;
-            // The value used in profit math — picks role's appropriate table.
-            $itemValue       = $isCEO ? $itemValueCeo : $itemValueMarket;
+            // Profit math source — CEO can toggle between Marketing's cogs and
+            // their own cogs_ceo via ?profit_source=. Non-CEO always uses cogs.
+            $useCeoForProfit = $isCEO && $profitSource === 'ceo';
+            $itemValue       = $useCeoForProfit ? $itemValueCeo : $itemValueMarket;
             $rtsPct          = $settings ? (float)$settings['rts_pct'] : null;
             $rtsComment      = $settings ? $settings['comment'] : null;
 
@@ -2017,6 +2026,10 @@ class OwnerPrivateController extends Controller
             'range_days'     => $rangeDays,
             'skipped_count'  => $skippedCount,
             'skipped_pages'  => $skippedPages,
+            // CEO toggle echo — UI uses this to highlight active source.
+            // Non-CEO viewers always get 'market' regardless of param.
+            'profit_source'  => $isCEO ? $profitSource : 'market',
+            'is_ceo'         => $isCEO,
         ]);
     }
 
