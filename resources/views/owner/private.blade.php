@@ -209,6 +209,29 @@
     tbody.page-section-expanded + tbody > tr:first-child > td {
       border-top: 0;
     }
+    /* Edit modal — shared style with /owner/private/breakdown matrix. */
+    .ow-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:80;
+                       display:flex;align-items:center;justify-content:center;padding:1rem;}
+    .ow-modal-card{background:#fff;border-radius:8px;box-shadow:0 10px 25px rgba(0,0,0,0.2);
+                   max-width:480px;width:100%;max-height:90vh;overflow:auto;font-size:13px;}
+    .ow-modal-card label{display:block;font-size:11px;font-weight:700;color:#334155;
+                         text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px;}
+    .ow-modal-card input[type=number],
+    .ow-modal-card input[type=text]{border:1px solid #cbd5e1;border-radius:6px;
+                                    padding:7px 10px;font-size:13px;width:100%;font-family:ui-monospace,monospace;}
+    .ow-modal-card input:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,0.12);}
+    .ow-modal-card .ow-modal-section{padding:14px 18px;border-bottom:1px solid #f1f5f9;}
+    .ow-modal-card .ow-modal-section:last-of-type{border-bottom:0;}
+    .ow-modal-card .ow-modal-footer{padding:11px 18px;background:#f8fafc;border-top:1px solid #e2e8f0;
+                                    display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
+    .ow-modal-card .ow-btn{font-weight:700;font-size:12.5px;padding:8px 14px;border-radius:6px;}
+    .ow-modal-card .ow-btn-cancel{background:transparent;color:#64748b;}
+    .ow-modal-card .ow-btn-cancel:hover{color:#0f172a;}
+    .ow-modal-card .ow-btn-apply{background:#f59e0b;color:#fff;}
+    .ow-modal-card .ow-btn-apply:hover{background:#d97706;}
+    .ow-modal-card .ow-btn-save{background:#2563eb;color:#fff;}
+    .ow-modal-card .ow-btn-save:hover{background:#1d4ed8;}
+    .ow-modal-card .ow-btn:disabled{opacity:0.5;cursor:not-allowed;}
   </style>
 </head>
 <body>
@@ -818,20 +841,12 @@
 
               <!-- Fixed: Actions -->
               <td style="text-align:center;">
-                <template x-if="editIdx === idx">
-                  <span style="display:inline-flex;gap:5px;align-items:center;">
-                    <button class="btn-save" @click="save()" :disabled="saving"
-                            x-text="saving ? '…' : 'Save'"></button>
-                    <button class="btn-cancel" @click="cancel()">✕</button>
-                  </span>
-                </template>
-                <template x-if="editIdx !== idx && row.is_single_date">
-                  <button class="btn-set" @click="startEdit(idx, row)"
-                          x-text="row.has_settings ? 'Edit' : '+ Set'"></button>
-                </template>
-                <template x-if="editIdx !== idx && !row.is_single_date">
-                  <span style="font-size:10px;color:#cbd5e1;" title="Switch From = To to edit">—</span>
-                </template>
+                {{-- Modal-based edit: works in both single-date and range mode.
+                     Saves target end_date by default + cascades from start_date
+                     when "Apply from" is used. --}}
+                <button class="btn-set" @click="openEditModal(row)"
+                        x-text="row.has_settings ? 'Edit' : '+ Set'"
+                        :title="isSingleDate ? 'Edit RTS / Item Value for this date' : ('Edit RTS / Item Value — saves to end_date (' + endDate + '), with optional cascade from start_date (' + startDate + ')')"></button>
               </td>
             </tr>
 
@@ -940,6 +955,89 @@
     </div>
   </div>
 
+  {{-- Edit modal — replaces inline edit, same UX as /owner/private/breakdown.
+       Saves RTS + COGS (+ CEO COGS for CEO viewers) for end_date of visible
+       range, with optional "Apply from start_date" cascade. --}}
+  <template x-if="edit.open">
+    <div class="ow-modal-backdrop" @click.self="edit.open = false">
+      <div class="ow-modal-card">
+        <div class="ow-modal-section" style="border-bottom:1px solid #e2e8f0;">
+          <div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">Edit Row</div>
+          <div style="font-size:16px;font-weight:700;color:#0f172a;margin-top:4px;" x-text="edit.page_name"></div>
+          <div style="font-size:12px;color:#475569;margin-top:2px;">
+            <span x-text="edit.item_name"></span>
+            <span style="color:#94a3b8;"> · </span>
+            <span style="font-family:ui-monospace,monospace;" x-text="edit.date"></span>
+          </div>
+          <div style="font-size:11px;color:#64748b;margin-top:3px;">
+            <span x-text="(edit.orders||0) + ' orders'"></span>
+            <template x-if="edit.price">
+              <span x-text="' @ ₱' + Number(edit.price).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})"></span>
+            </template>
+          </div>
+        </div>
+
+        <div class="ow-modal-section">
+          <label>RTS% <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(per-page, for this date onward)</span></label>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="number" step="0.01" min="0" max="100" x-model="edit.rts_pct" placeholder="e.g. 50">
+            <span style="color:#64748b;">%</span>
+          </div>
+          <template x-if="edit.rts_inherited && edit.rts_eff_date">
+            <div style="font-size:11px;color:#b45309;margin-top:4px;">
+              ⚠ Currently inherited from <span style="font-family:ui-monospace,monospace;" x-text="edit.rts_eff_date"></span>. Saving creates a new override starting this date.
+            </div>
+          </template>
+          <div style="font-size:11px;color:#64748b;margin-top:4px;">Set 0 to remove this date's override (falls back to previous).</div>
+        </div>
+
+        <div class="ow-modal-section">
+          <label>Unit Cost (COGS) <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">— Marketing's table (GLOBAL — affects all pages on this date)</span></label>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="color:#64748b;">₱</span>
+            <input type="number" step="0.01" min="0" x-model="edit.unit_cost" placeholder="e.g. 25">
+          </div>
+          <div style="font-size:11px;color:#64748b;margin-top:4px;">Set 0 to skip. (To delete, use /item/cogs.)</div>
+        </div>
+
+        <template x-if="edit.isCeoView">
+          {{-- CEO-only second cost input — writes sa cogs_ceo separately. --}}
+          <div class="ow-modal-section" style="background:#fafbff;">
+            <label style="color:#3730a3;">🔒 CEO Unit Cost (cogs_ceo) <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">— CEO-only, used in CEO profit calc</span></label>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="color:#64748b;">₱</span>
+              <input type="number" step="0.01" min="0" x-model="edit.unit_cost_ceo" placeholder="e.g. 25"
+                     style="border-color:#c7d2fe;background:#eef2ff80;">
+            </div>
+            <div style="font-size:11px;color:#64748b;margin-top:4px;">Independent from Marketing's value. Marketing never sees this.</div>
+          </div>
+        </template>
+
+        <div class="ow-modal-section">
+          <label>RTS Comment <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(optional)</span></label>
+          <input type="text" x-model="edit.comment" maxlength="500" placeholder="why is this value different?">
+        </div>
+
+        <template x-if="edit.error">
+          <div class="ow-modal-section" style="background:#fef2f2;color:#991b1b;font-size:12px;" x-text="edit.error"></div>
+        </template>
+
+        <div class="ow-modal-footer">
+          <button type="button" class="ow-btn ow-btn-cancel" @click="edit.open = false">Cancel</button>
+          <template x-if="edit.apply_from && edit.apply_from !== edit.date">
+            <button type="button" class="ow-btn ow-btn-apply" @click="submitEdit(edit.apply_from)" :disabled="edit.saving"
+                    :title="'Save with effective_date = ' + edit.apply_from + ', cascading through to ' + edit.date">
+              <span x-text="edit.saving ? 'Saving…' : '⏪ Apply from ' + edit.apply_from"></span>
+            </button>
+          </template>
+          <button type="button" class="ow-btn ow-btn-save" @click="submitEdit()" :disabled="edit.saving">
+            <span x-text="edit.saving ? 'Saving…' : 'Save (this date only)'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </template>
+
   <script>
   // GLOBAL column settings injected by OwnerPrivateController (managed via
   // CEO-only /owner/column-settings). Read in initCols() and the Alpine
@@ -994,6 +1092,21 @@
       rows:[], loading:false, editIdx:-1, editRow:null,
       ev:{ item_value:'', rts_pct:'', comment:'' },
       saving:false, saveMsg:'',
+
+      // CEO-only flag from server — controls the extra cogs_ceo input in modal.
+      isCeoView: @json(!empty($isCEO ?? false)),
+
+      // Modal-based edit state. Replaces old inline edit UX. Saves use the
+      // same /owner/private/item-setting endpoint as the breakdown matrix
+      // modal — including optional `apply_through` for range cascade.
+      edit: {
+        open:false, saving:false, error:null,
+        page_name:'', item_name:'', date:'', orders:0, price:null,
+        rts_pct:'', rts_eff_date:null, rts_inherited:false,
+        unit_cost:'', unit_cost_ceo:'', comment:'',
+        apply_from:null,
+        isCeoView:false,
+      },
       refreshing:false,
       skippedCount:0, skippedPages:[],
       isSingleDate:true, rangeDays:1,
@@ -1248,6 +1361,89 @@
         };
       },
       cancel(){ this.editIdx=-1; this.editRow=null; this.ev={item_value:'',rts_pct:'',comment:'',iv_comment:''}; },
+
+      // ── Modal-based edit (replaces inline). Works for both single-date and
+      // range modes — single-date defaults apply_from=null; range gives the
+      // optional "Apply from start_date" button to cascade backward.
+      openEditModal(row){
+        // Determine RTS inherit status — if settings_date != end_date, it's inherited.
+        const settingsDate = row.settings_date || null;
+        const isInherited = !!(row.has_settings && settingsDate && settingsDate !== this.endDate);
+        this.edit = {
+          open:true, saving:false, error:null,
+          page_name:    row.page_name,
+          item_name:    row.item_name,
+          date:         this.endDate,        // save target = end_date of visible range
+          orders:       row.orders || 0,
+          price:        row.price || null,
+          rts_pct:      row.rts_pct   != null ? row.rts_pct   : '',
+          rts_eff_date: settingsDate,
+          rts_inherited: isInherited,
+          unit_cost:    row.item_value     != null ? row.item_value     : '',
+          unit_cost_ceo:(row.item_value_ceo != null && row.item_value_ceo !== undefined) ? row.item_value_ceo : '',
+          comment:      '',
+          // When in range mode + start_date != end_date, expose "Apply from start_date"
+          // so the user can cascade the new value across the visible range.
+          apply_from:   (this.startDate && this.startDate !== this.endDate) ? this.startDate : null,
+          isCeoView:    this.isCeoView,
+        };
+      },
+
+      async submitEdit(overrideEffectiveDate){
+        this.edit.saving = true; this.edit.error = null;
+        const rts  = parseFloat(this.edit.rts_pct);
+        const cost = parseFloat(this.edit.unit_cost);
+        if (isNaN(rts) || rts < 0 || rts > 100) {
+          this.edit.error = 'RTS% must be 0–100.'; this.edit.saving = false; return;
+        }
+        if (isNaN(cost) || cost < 0) {
+          this.edit.error = 'Unit cost must be ≥ 0.'; this.edit.saving = false; return;
+        }
+        try {
+          const fd = new FormData();
+          fd.append('page_name',      this.edit.page_name);
+          fd.append('item_name',      this.edit.item_name);
+          fd.append('item_value',     cost);
+          fd.append('rts_pct',        rts);
+          fd.append('effective_date', overrideEffectiveDate || this.edit.date);
+          // Cascade window: when "Apply from X" is used, propagate forward
+          // through this row's end_date (server overwrites all existing
+          // overrides in (effective_date, apply_through]).
+          if (overrideEffectiveDate && overrideEffectiveDate !== this.edit.date) {
+            fd.append('apply_through', this.edit.date);
+          }
+          if (this.edit.comment) fd.append('comment', this.edit.comment);
+          // CEO-only: send item_value_ceo when set. Server gates by role.
+          if (this.edit.isCeoView && this.edit.unit_cost_ceo !== '' && this.edit.unit_cost_ceo !== null) {
+            const costCeo = parseFloat(this.edit.unit_cost_ceo);
+            if (!isNaN(costCeo) && costCeo >= 0) {
+              fd.append('item_value_ceo', costCeo);
+            }
+          }
+          const r = await fetch('{{ route('owner.private.item-setting.save') }}', {
+            method:'POST',
+            headers:{'X-CSRF-TOKEN':'{{ csrf_token() }}', 'Accept':'application/json'},
+            body: fd,
+          });
+          let j;
+          try { j = await r.json(); }
+          catch { this.edit.error = 'Server returned non-JSON (HTTP '+r.status+')'; return; }
+          if (!r.ok) {
+            this.edit.error = j.message || (j.errors ? Object.values(j.errors).flat().join('\n') : ('HTTP '+r.status));
+            return;
+          }
+          if (j.ok) {
+            this.edit.open = false;
+            await this.load();
+            this.saveMsg = '✓ Saved!';
+            setTimeout(() => { this.saveMsg = ''; }, 2500);
+          }
+        } catch(e) {
+          console.error(e); this.edit.error = 'Network error: ' + e.message;
+        } finally {
+          this.edit.saving = false;
+        }
+      },
 
       async save(){
         if (!this.isSingleDate) { alert('Switch to single-date mode (From = To) to edit.'); return; }

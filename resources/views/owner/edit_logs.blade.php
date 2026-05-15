@@ -99,6 +99,9 @@
               <th style="width:110px;">Effective</th>
               <th style="width:160px;">RTS%</th>
               <th style="width:160px;">Item Value (COGS)</th>
+              @if (!empty($isCeoView))
+                <th style="width:160px;background:#eef2ff;color:#3730a3;">🔒 Item Value (CEO)</th>
+              @endif
               <th>Comments</th>
             </tr>
           </thead>
@@ -159,6 +162,27 @@
                     <span class="delta-eq">₱{{ number_format($newV, 2) }} (no change)</span>
                   @endif
                 </td>
+                @if (!empty($isCeoView))
+                  {{-- 🔒 CEO Item Value column — only rendered for CEO viewers.
+                       Non-CEO never sees deltas from cogs_ceo. --}}
+                  <td style="background:#fafbff;">
+                    @php
+                      $oldVC = $r->old_item_value_ceo ?? null;
+                      $newVC = $r->new_item_value_ceo ?? null;
+                    @endphp
+                    @if ($oldVC === null && $newVC === null)
+                      <span class="delta-eq">—</span>
+                    @elseif ($oldVC === null)
+                      <span class="delta"><span class="delta-arrow">+</span><span class="delta-new">₱{{ number_format($newVC, 2) }}</span></span>
+                    @elseif ($newVC === null)
+                      <span class="delta"><span class="delta-old">₱{{ number_format($oldVC, 2) }}</span><span class="delta-arrow">→</span><span style="color:#94a3b8;">no change</span></span>
+                    @elseif ((float)$oldVC !== (float)$newVC)
+                      <span class="delta"><span class="delta-old">₱{{ number_format($oldVC, 2) }}</span><span class="delta-arrow">→</span><span class="delta-new">₱{{ number_format($newVC, 2) }}</span></span>
+                    @else
+                      <span class="delta-eq">₱{{ number_format($newVC, 2) }} (no change)</span>
+                    @endif
+                  </td>
+                @endif
                 <td style="font-size:11px;color:#475569;">
                   @if ($r->comment)
                     <div>💬 {{ $r->comment }}</div>
@@ -172,7 +196,7 @@
                 </td>
               </tr>
             @empty
-              <tr><td colspan="9" style="text-align:center;padding:36px;color:#94a3b8;">No edits logged yet.</td></tr>
+              <tr><td colspan="{{ !empty($isCeoView) ? 10 : 9 }}" style="text-align:center;padding:36px;color:#94a3b8;">No edits logged yet.</td></tr>
             @endforelse
           </tbody>
         </table>

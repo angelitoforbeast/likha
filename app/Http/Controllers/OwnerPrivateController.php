@@ -2052,8 +2052,17 @@ class OwnerPrivateController extends Controller
             ->where('item_name', $itemName)
             ->where('date', $effDate)
             ->first(['unit_cost']);
-        $oldRts  = $oldRtsRow  ? (float) $oldRtsRow->rts_pct  : null;
-        $oldCogs = $oldCogsRow ? (float) $oldCogsRow->unit_cost : null;
+        // cogs_ceo (CEO-only audit). Read regardless of role — column gets logged
+        // only when a CEO save touches it, but having the snapshot doesn't hurt.
+        $oldCogsCeoRow = Schema::hasTable('cogs_ceo')
+            ? DB::table('cogs_ceo')
+                ->where('item_name', $itemName)
+                ->where('date', $effDate)
+                ->first(['unit_cost'])
+            : null;
+        $oldRts     = $oldRtsRow     ? (float) $oldRtsRow->rts_pct      : null;
+        $oldCogs    = $oldCogsRow    ? (float) $oldCogsRow->unit_cost   : null;
+        $oldCogsCeo = $oldCogsCeoRow ? (float) $oldCogsCeoRow->unit_cost : null;
         // When set, ALSO overwrite any existing rows whose date is
         // BETWEEN ($effDate, $applyThrough]. Use case: user clicks
         // "Apply from <earliest>" on a later cell whose date already
@@ -2189,8 +2198,15 @@ class OwnerPrivateController extends Controller
 
         // ── Audit log (best-effort — failure here doesn't block the save) ────
         try {
-            $action = ($oldRts === null && $oldCogs === null) ? 'create' : 'update';
-            DB::table('page_item_settings_log')->insert([
+            $action = ($oldRts === null && $oldCogs === null && $oldCogsCeo === null) ? 'create' : 'update';
+            // CEO-only path: if request included item_value_ceo AND user is CEO,
+            // capture the new value. Hidden from non-CEO viewers downstream.
+            $newCogsCeo = null;
+            if ($this->isCEO() && isset($validated['item_value_ceo'])) {
+                $ivCeo = (float) $validated['item_value_ceo'];
+                if ($ivCeo > 0) $newCogsCeo = $ivCeo;
+            }
+            $logRow = [
                 'user_email'         => Auth::user()?->email,
                 'action'             => $action,
                 'page_name'          => $pageName,
@@ -2204,7 +2220,14 @@ class OwnerPrivateController extends Controller
                 'item_value_comment' => $validated['item_value_comment'] ?? null,
                 'created_at'         => now(),
                 'updated_at'         => now(),
-            ]);
+            ];
+            // Only attach CEO columns kung exists na sa schema — backwards-safe
+            // before migration is applied.
+            if (Schema::hasColumn('page_item_settings_log', 'old_item_value_ceo')) {
+                $logRow['old_item_value_ceo'] = $oldCogsCeo;
+                $logRow['new_item_value_ceo'] = $newCogsCeo;
+            }
+            DB::table('page_item_settings_log')->insert($logRow);
         } catch (\Throwable $e) {
             \Log::error('saveItemSetting audit log failed: ' . $e->getMessage());
         }
@@ -2261,6 +2284,9 @@ class OwnerPrivateController extends Controller
             'itemFilter' => $itemFilter,
             'fromDate'   => $fromDate,
             'toDate'     => $toDate,
+            // CEO-only column gate. Non-CEO viewers (e.g., Marketing-OIC) never
+            // see cogs_ceo deltas — they exist sa row pero hindi nire-render.
+            'isCeoView'  => $this->isCEO(),
         ]);
     }
 
