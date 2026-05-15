@@ -1389,6 +1389,14 @@ class OwnerPrivateController extends Controller
         $isSingleDate = ($startDate === $endDate);
         $rangeDays    = (int) ((strtotime($endDate) - strtotime($startDate)) / 86400) + 1;
 
+        // CEO-only toggle: which cogs table drives profit calc.
+        // 'ceo'    → use cogs_ceo (default for CEO viewers — current behavior)
+        // 'market' → use cogs (Marketing's table — lets CEO preview Marketing's
+        //            world without losing their separate cogs_ceo values)
+        // Non-CEO viewers: param is ignored downstream, profit always uses cogs.
+        $profitSource = strtolower(trim((string)$request->input('profit_source', 'ceo')));
+        if (!in_array($profitSource, ['ceo', 'market'], true)) $profitSource = 'ceo';
+
         // Backwards-compat alias: many downstream code paths still reference `$date` for
         // "as-of" snapshots (fee rates, COGS, page_item_settings, JNT stats window).
         // All of those should anchor on END_DATE per spec.
