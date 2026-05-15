@@ -39,6 +39,46 @@ class OwnerPrivateController extends Controller
         if (!in_array($role, ['CEO', 'Marketing - OIC'], true)) abort(404);
     }
 
+    /** True if the current user is the CEO. */
+    private function isCEO(): bool
+    {
+        return $this->getNormalizedRole() === 'CEO';
+    }
+
+    /**
+     * Auto-mirror missing (item_name, date) pairs from `cogs` → `cogs_ceo`.
+     *
+     * Called after Marketing's cogs upsert / cascade. Only inserts rows na wala
+     * pa sa cogs_ceo — existing CEO values stay untouched. Driver-aware (MySQL
+     * uses INSERT IGNORE, Postgres uses ON CONFLICT DO NOTHING).
+     */
+    private function mirrorMissingCogsToCogsCeo(string $itemName): void
+    {
+        try {
+            $driver = DB::connection()->getDriverName();
+            if ($driver === 'pgsql') {
+                DB::statement('
+                    INSERT INTO cogs_ceo (item_name, date, unit_cost, created_at, updated_at)
+                    SELECT item_name, date, unit_cost, NOW(), NOW()
+                    FROM cogs
+                    WHERE item_name = ?
+                    ON CONFLICT (item_name, date) DO NOTHING
+                ', [$itemName]);
+            } else {
+                DB::statement('
+                    INSERT IGNORE INTO cogs_ceo (item_name, date, unit_cost, created_at, updated_at)
+                    SELECT item_name, date, unit_cost, NOW(), NOW()
+                    FROM cogs
+                    WHERE item_name = ?
+                ', [$itemName]);
+            }
+        } catch (\Throwable $e) {
+            \Log::warning('mirrorMissingCogsToCogsCeo failed', [
+                'item' => $itemName, 'err' => $e->getMessage(),
+            ]);
+        }
+    }
+
     /** Canonical role string from the logged-in user's employee profile. */
     private function getNormalizedRole(): string
     {
@@ -488,7 +528,11 @@ class OwnerPrivateController extends Controller
             DB::statement("ALTER TABLE _jnt_agg ADD PRIMARY KEY (wb)");
         }
 
-        $cogsAll = DB::table('cogs')
+        // Role-aware cogs source — CEO uses cogs_ceo, non-CEO uses cogs.
+        // Profit aggregations downstream use $findUnitCost transparently.
+        $cogsTable = ($this->isCEO() && Schema::hasTable('cogs_ceo')) ? 'cogs_ceo' : 'cogs';
+
+        $cogsAll = DB::table($cogsTable)
             ->selectRaw("
                 LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(" . $quote($cogsItemColName) . ",'')),' ',''),'-',''),'_','')) AS item_key,
                 DATE(" . $quote($cogsDateColName) . ") AS eff_date,
@@ -1608,13 +1652,31 @@ class OwnerPrivateController extends Controller
             ->orderByDesc($cogsDateCol)
             ->get([$cogsItemCol, $cogsDateCol, $cogsUnitCol]);
 
-        $cogsMap = []; // normalized_item_name → unit_cost
+        $cogsMap = []; // normalized_item_name → unit_cost (Marketing's view)
         foreach ($cogsRows as $r) {
             $k = strtolower(trim((string)($r->$cogsItemCol ?? '')));
             if (!isset($cogsMap[$k])) {
                 $cogsMap[$k] = (float)($r->$cogsUnitCol ?? 0);
             }
         }
+
+        // ── cogs_ceo: latest entry ≤ date (CEO's separate values) ──────────
+        // Used for profit computations when the viewer is CEO. Falls back to
+        // null per spec — no fallback to cogs sa profit calc.
+        $cogsCeoMap = []; // normalized_item_name → unit_cost (CEO's view)
+        if (Schema::hasTable('cogs_ceo')) {
+            $cogsCeoRows = DB::table('cogs_ceo')
+                ->where('date', '<=', $date)
+                ->orderByDesc('date')
+                ->get(['item_name', 'date', 'unit_cost']);
+            foreach ($cogsCeoRows as $r) {
+                $k = strtolower(trim((string)($r->item_name ?? '')));
+                if (!isset($cogsCeoMap[$k])) {
+                    $cogsCeoMap[$k] = $r->unit_cost !== null ? (float) $r->unit_cost : null;
+                }
+            }
+        }
+        $isCEO = $this->isCEO();
 
         // ── page_item_settings: latest per page+item ≤ date ──────────────────
         // RTS% is per-page. item_value (unit cost) is NOT sourced here anymore —
@@ -1725,12 +1787,21 @@ class OwnerPrivateController extends Controller
                 abs($priceMax - $price) > 0.01
             );
 
-            // Item value = GLOBAL cogs table only (one source of truth per item+date).
-            // RTS% still comes from page_item_settings (per-page).
-            $settings   = $settingsMap[$settingKey] ?? null;
-            $itemValue  = $cogsMap[$dominantKey] ?? null;
-            $rtsPct     = $settings ? (float)$settings['rts_pct'] : null;
-            $rtsComment = $settings ? $settings['comment'] : null;
+            // Item value sourcing — role-dependent:
+            //   • CEO viewer    → profit calc uses cogs_ceo (separate CEO table)
+            //   • non-CEO       → profit calc uses cogs (Marketing's shared table)
+            //
+            // Both maps loaded above. We expose BOTH sa response so the CEO's UI
+            // can show the new "Item Val. (CEO)" column alongside the existing
+            // "Item Val." (Marketing) column. Non-CEO responses strip the CEO field
+            // (see $isCEO check sa response builder below).
+            $settings        = $settingsMap[$settingKey] ?? null;
+            $itemValueMarket = $cogsMap[$dominantKey]    ?? null;
+            $itemValueCeo    = $cogsCeoMap[$dominantKey] ?? null;
+            // The value used in profit math — picks role's appropriate table.
+            $itemValue       = $isCEO ? $itemValueCeo : $itemValueMarket;
+            $rtsPct          = $settings ? (float)$settings['rts_pct'] : null;
+            $rtsComment      = $settings ? $settings['comment'] : null;
 
             // JNT stats — keyed by page_key||item_key||cod_int (from JOIN query above)
             $jntKey   = $pk.'||'.$dominantKey.'||'.(string)(int)round($price);
@@ -1902,9 +1973,13 @@ class OwnerPrivateController extends Controller
                 'price_min'             => ($priceIsRange && $priceMin > 0 && abs($priceMin - $price) > 0.01) ? $priceMin : null,
                 'price_max'             => ($priceIsRange && abs($priceMax - $price) > 0.01) ? $priceMax : null,
                 'price_is_range'        => $priceIsRange,
-                'item_value'            => $itemValue,
-                // After 2026-04-24 redesign: item_value is always sourced from the global cogs table.
-                'item_value_source'     => $itemValue !== null ? 'cogs' : null,
+                // `item_value` ay always shows Marketing's value (from cogs) for
+                // the existing "Item Val." column. CEO additionally gets
+                // `item_value_ceo` (from cogs_ceo) for the new column.
+                // Non-CEO responses NEVER include item_value_ceo (data-layer security).
+                'item_value'            => $itemValueMarket,
+                'item_value_ceo'        => $isCEO ? $itemValueCeo : null,
+                'item_value_source'     => $itemValueMarket !== null ? 'cogs' : null,
                 'shipping_fee'          => $shippingFee,
                 'cod_fee'               => $codFeePerDelivered,
                 'settings_date'         => $settings ? $settings['effective_date'] : null,
@@ -1955,6 +2030,7 @@ class OwnerPrivateController extends Controller
             'page_name'      => 'required|string|max:255',
             'item_name'      => 'required|string|max:255',
             'item_value'     => 'required|numeric|min:0',
+            'item_value_ceo' => 'nullable|numeric|min:0', // CEO-only — written sa cogs_ceo
             'rts_pct'        => 'required|numeric|min:0|max:100',
             'effective_date' => 'required|date',
             'apply_through'        => 'nullable|date',
@@ -2071,8 +2147,42 @@ class OwnerPrivateController extends Controller
                             'updated_at' => now(),
                         ]);
                 }
+
+                // ── Auto-mirror sa cogs_ceo (CEO's separate table) ──
+                // Rule: if cogs_ceo doesn't have entry for (item, date), insert
+                // the cogs value. If cogs_ceo already has entry, leave it alone
+                // (CEO's value stays independent once set).
+                //
+                // Single INSERT-IGNORE-like statement covers both the main row
+                // and any cascade rows in one go — fills in missing (item, date)
+                // pairs for this item.
+                $this->mirrorMissingCogsToCogsCeo($itemName);
             }
             // item_value = 0 → intentionally no-op on cogs. (Delete must go through /item/cogs.)
+
+            // ── CEO-only: write to cogs_ceo if the request included an item_value_ceo.
+            //   Server-side gate: only CEO viewers may save here. If a non-CEO
+            //   somehow sends item_value_ceo, silently ignore (defense in depth).
+            if ($this->isCEO() && isset($validated['item_value_ceo'])) {
+                $itemValueCeo = (float) $validated['item_value_ceo'];
+                if ($itemValueCeo > 0) {
+                    \App\Models\CogsCeo::updateOrCreate(
+                        ['item_name' => $itemName, 'date' => $effDate],
+                        ['unit_cost' => $itemValueCeo]
+                    );
+                    if ($applyThrough) {
+                        DB::table('cogs_ceo')
+                            ->where('item_name', $itemName)
+                            ->where('date', '>', $effDate)
+                            ->where('date', '<=', $applyThrough)
+                            ->update([
+                                'unit_cost'  => $itemValueCeo,
+                                'updated_at' => now(),
+                            ]);
+                    }
+                }
+                // If item_value_ceo == 0 explicitly sent → treated as skip (matches Marketing behavior).
+            }
         } catch (\Throwable $e) {
             return response()->json(['ok' => false, 'message' => $e->getMessage()], 500);
         }
@@ -2309,7 +2419,7 @@ class OwnerPrivateController extends Controller
             return $hit; // ['date'=>..., 'rts_pct'=>...] or null
         };
 
-        // COGS (global per-item-per-date) — used for display only.
+        // COGS (global per-item-per-date) — Marketing's table.
         $cogsRows = Schema::hasTable('cogs')
             ? DB::table('cogs')
                 ->where('date', '<=', $endDate)
@@ -2329,6 +2439,36 @@ class OwnerPrivateController extends Controller
         $resolveCogs = function(string $itemName, string $date) use (&$cogsIdx): ?float {
             $ik = strtolower(trim($itemName));
             $list = $cogsIdx[$ik] ?? null;
+            if (!$list) return null;
+            $hit = null;
+            foreach ($list as $row) {
+                if ($row['date'] <= $date) $hit = $row['unit_cost'];
+                else break;
+            }
+            return $hit;
+        };
+
+        // ── cogs_ceo (CEO's separate table) — only loaded if viewer is CEO.
+        $isCeoView = $this->isCEO();
+        $cogsCeoIdx = [];
+        if ($isCeoView && Schema::hasTable('cogs_ceo')) {
+            $cogsCeoRows = DB::table('cogs_ceo')
+                ->where('date', '<=', $endDate)
+                ->orderBy('date')
+                ->get(['item_name', 'date', 'unit_cost'])
+                ->all();
+            foreach ($cogsCeoRows as $r) {
+                $ik = strtolower(trim((string)$r->item_name));
+                if ($ik === '') continue;
+                $cogsCeoIdx[$ik][] = [
+                    'date'      => (string)$r->date,
+                    'unit_cost' => $r->unit_cost !== null ? (float)$r->unit_cost : null,
+                ];
+            }
+        }
+        $resolveCogsCeo = function(string $itemName, string $date) use (&$cogsCeoIdx): ?float {
+            $ik = strtolower(trim($itemName));
+            $list = $cogsCeoIdx[$ik] ?? null;
             if (!$list) return null;
             $hit = null;
             foreach ($list as $row) {
@@ -2443,14 +2583,19 @@ class OwnerPrivateController extends Controller
             $ik = (string)$r->primary_item_key;
             $cellDate = (string)$r->ts_date;
             $itemName = (string)$r->primary_item;
-            $rtsHit   = $resolveRts($pk, $itemName, $cellDate);
-            $cogsVal  = $resolveCogs($itemName, $cellDate);
+            $rtsHit       = $resolveRts($pk, $itemName, $cellDate);
+            $cogsVal      = $resolveCogs($itemName, $cellDate);
+            // CEO's separate value — null for non-CEO viewers (map stays empty).
+            $cogsCeoVal   = $resolveCogsCeo($itemName, $cellDate);
+            // Cogs value used for profit calc — role-aware. CEO uses cogs_ceo;
+            // non-CEO uses cogs. No fallback for CEO (null → profit shows —).
+            $cogsForProfit = $isCeoView ? $cogsCeoVal : $cogsVal;
 
             // Per-cell PROJ% — only computable when all ingredients are present.
             $proceedHere = (int) ($proceedMap[$pk][$cellDate][mb_strtolower(trim($itemName))] ?? 0);
             $adsHere     = (float) ($adsMap[$pk][$cellDate] ?? 0.0);
             $profitPct   = null;
-            if ($cogsVal !== null
+            if ($cogsForProfit !== null
                 && ($rtsHit['rts_pct'] ?? null) !== null
                 && $r->primary_mode_cod !== null
                 && (int)$r->primary_orders > 0) {
@@ -2460,7 +2605,7 @@ class OwnerPrivateController extends Controller
                 $deliver = max(0.0, 1.0 - $rts / 100.0);
                 $revenue  = $proceedHere * $modeCod * $deliver;
                 $shipping = $proceedHere * $SHIPPING_PER_SHIPPED;
-                $cogsAmt  = $proceedHere * $deliver * (float)$cogsVal;
+                $cogsAmt  = $proceedHere * $deliver * (float)$cogsForProfit;
                 $codFee   = $proceedHere * $deliver * $modeCod * $COD_FEE_RATE * (1 + $COD_FEE_VAT_RATE);
                 $net      = $revenue - $shipping - $cogsAmt - $adsHere - $codFee;
                 $gross    = $modeCod * $orders;
@@ -2479,6 +2624,8 @@ class OwnerPrivateController extends Controller
                 // on a different (earlier) date — so user knows they'd be overriding here.
                 'rts_inherited'  => $rtsHit ? ($rtsHit['date'] !== $cellDate) : false,
                 'unit_cost'      => $cogsVal,
+                // CEO-only column. Strip for non-CEO viewers (null sent → UI hides anyway).
+                'unit_cost_ceo'  => $isCeoView ? $cogsCeoVal : null,
                 'proceed'        => $proceedHere,
                 'ads'            => $adsHere,
                 'profit_pct'     => $profitPct,
@@ -2608,6 +2755,9 @@ class OwnerPrivateController extends Controller
             'pages'         => $pagesList,
             'allItems'      => $allItems,
             'selectedItems' => $itemsFilter,
+            // CEO-only flag — used sa view to render the additional
+            // "Item Val. (CEO)" column + edit input for cogs_ceo.
+            'isCeoView'     => $isCeoView,
         ]);
     }
 

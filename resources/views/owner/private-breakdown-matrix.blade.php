@@ -374,6 +374,15 @@
                         @if($cell['unit_cost'] !== null)
                           <span x-show="vis.cogs" class="badge-cogs" title="unit cost (cogs)">₱{{ rtrim(rtrim(number_format($cell['unit_cost'],2), '0'),'.') }}</span>
                         @endif
+                        @if(!empty($isCeoView) && isset($cell['unit_cost_ceo']) && $cell['unit_cost_ceo'] !== null)
+                          {{-- CEO-only badge — separate from cogs badge, uses indigo tint to distinguish.
+                               Only rendered when isCeoView is true (server-side check) AND cogs_ceo has value. --}}
+                          <span x-show="vis.cogs" class="badge-cogs-ceo"
+                                title="CEO unit cost (cogs_ceo) — used for profit calc when CEO viewing"
+                                style="display:inline-block;padding:1px 4px;border-radius:4px;font-size:9px;font-weight:700;background:#e0e7ff;color:#3730a3;margin-left:2px;">
+                            CEO ₱{{ rtrim(rtrim(number_format($cell['unit_cost_ceo'],2), '0'),'.') }}
+                          </span>
+                        @endif
                         @if($cell['profit_pct'] !== null)
                           @php
                             $pp = (float)$cell['profit_pct'];
@@ -449,7 +458,7 @@
 
           <div>
             <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-              Unit Cost (COGS)
+              Unit Cost (COGS) <span class="text-slate-400 font-normal normal-case">— Marketing's table</span>
               <span class="text-slate-400 font-normal normal-case">(GLOBAL — affects all pages on this date)</span>
             </label>
             <div class="flex items-center gap-2">
@@ -461,6 +470,23 @@
             </div>
             <div class="text-[11px] text-slate-500 mt-1">Set 0 to skip. (To delete, use /item/cogs.)</div>
           </div>
+
+          @if(!empty($isCeoView))
+            {{-- CEO-only second cost input — writes sa cogs_ceo separately. --}}
+            <div class="border-t border-slate-200 pt-3">
+              <label class="block text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">
+                🔒 CEO Unit Cost (cogs_ceo) <span class="text-slate-400 font-normal normal-case">— CEO-only, used in CEO profit calc</span>
+              </label>
+              <div class="flex items-center gap-2">
+                <span class="text-slate-500 text-sm">₱</span>
+                <input type="number" step="0.01" min="0"
+                       x-model="edit.unit_cost_ceo"
+                       class="flex-1 border border-indigo-300 bg-indigo-50/40 rounded px-3 py-2 text-sm font-mono"
+                       placeholder="e.g. 25">
+              </div>
+              <div class="text-[11px] text-slate-500 mt-1">Independent from Marketing's value. Marketing never sees this.</div>
+            </div>
+          @endif
 
           <div>
             <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">RTS Comment (optional)</label>
@@ -514,9 +540,11 @@
         page_key:'', page_label:'', date:'', item_name:'',
         orders:0, mode_cod:null,
         rts_pct:'', rts_eff_date:null, rts_inherited:false,
-        unit_cost:'', comment:'',
+        unit_cost:'', unit_cost_ceo:'', comment:'',
         earliest_same_date:null,
       },
+
+      isCeoView: @json(!empty($isCeoView)),
 
       _syncing:false,
       recomputing:false,
@@ -621,6 +649,8 @@
           rts_eff_date: cell.rts_eff_date,
           rts_inherited:!!cell.rts_inherited,
           unit_cost:    cell.unit_cost !== null ? cell.unit_cost : '',
+          // CEO-only — populated only for CEO viewers, hidden field for others.
+          unit_cost_ceo: (cell.unit_cost_ceo !== undefined && cell.unit_cost_ceo !== null) ? cell.unit_cost_ceo : '',
           comment:      '',
           earliest_same_date: cell.earliest_same_date || null,
         };
@@ -651,6 +681,14 @@
             fd.append('apply_through', this.edit.date);
           }
           if (this.edit.comment) fd.append('comment', this.edit.comment);
+          // CEO-only: include CEO's separate unit cost — server saves it sa
+          // cogs_ceo table independently from cogs. Server validates role.
+          if (this.isCeoView && this.edit.unit_cost_ceo !== '' && this.edit.unit_cost_ceo !== null) {
+            const costCeo = parseFloat(this.edit.unit_cost_ceo);
+            if (!isNaN(costCeo) && costCeo >= 0) {
+              fd.append('item_value_ceo', costCeo);
+            }
+          }
           const r = await fetch('{{ route('owner.private.item-setting.save') }}', {
             method:'POST',
             headers:{'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content, 'Accept':'application/json'},

@@ -394,8 +394,23 @@ class SummaryOverallController extends Controller
         // =====================================================
         // OPTIMIZATION #3: Pre-load cogs into a PHP lookup array
         // (only 116 rows — much faster than correlated subqueries)
+        //
+        // Role-aware: CEO viewer's profit calcs use cogs_ceo (separate table)
+        // while non-CEO viewers use cogs (Marketing's shared table). We just
+        // swap which table populates $cogsLookup — downstream profit math is
+        // untouched.
         // =====================================================
-        $cogsAll = DB::table('cogs')
+        $isCEO = (function () {
+            $raw  = \Illuminate\Support\Facades\Auth::user()?->employeeProfile?->role ?? '';
+            $norm = preg_replace('/\s+/u', ' ', trim((string) $raw));
+            return preg_match('/^ceo$/iu', $norm) === 1;
+        })();
+
+        $cogsTable = ($isCEO && \Illuminate\Support\Facades\Schema::hasTable('cogs_ceo'))
+            ? 'cogs_ceo'
+            : 'cogs';
+
+        $cogsAll = DB::table($cogsTable)
             ->selectRaw("
                 LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE(" . $quote($cogsItemColName) . ",'')),' ',''),'-',''),'_','')) AS item_key,
                 DATE(" . $quote($cogsDateColName) . ") AS eff_date,

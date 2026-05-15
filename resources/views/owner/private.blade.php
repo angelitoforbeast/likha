@@ -789,6 +789,18 @@
                     </span>
                   </template>
 
+                  <!-- item_val_ceo — CEO-only, read-only display (edit goes via /owner/private/breakdown matrix). -->
+                  <template x-if="col.id==='item_val_ceo'">
+                    <span>
+                      <template x-if="row.item_value_ceo !== null && row.item_value_ceo !== undefined">
+                        <span style="color:#111;" x-text="money(row.item_value_ceo)"></span>
+                      </template>
+                      <template x-if="row.item_value_ceo === null || row.item_value_ceo === undefined">
+                        <span style="color:#fca5a5;font-style:italic;font-size:11px;" title="No CEO value set — profit calc shows — for this row.">—</span>
+                      </template>
+                    </span>
+                  </template>
+
                   <!-- ship -->
                   <template x-if="col.id==='ship'">
                     <span style="color:#111;"
@@ -1048,7 +1060,8 @@
           { id:'jnt_transit',label:'Transit%',   sort:null,                   align:'center', minw:85  },
           { id:'rts_set',    label:'Set RTS%',   sort:'rts_pct',              align:'center', minw:110 },
           { id:'price',      label:'Price',      sort:null,                   align:'center', minw:85  },
-          { id:'item_val',   label:'Item Val.',  sort:null,                   align:'center', minw:80  },
+          { id:'item_val',     label:'Item Val.',       sort:null, align:'center', minw:80  },
+          { id:'item_val_ceo', label:'Item Val. (CEO)', sort:null, align:'center', minw:90  },
           { id:'ship',       label:'Ship',       sort:null,                   align:'center', minw:58  },
           { id:'cod_fee',    label:'COD Fee',    sort:null,                   align:'center', minw:72  },
         ];
