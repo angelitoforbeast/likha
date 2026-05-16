@@ -241,6 +241,59 @@
         <span><span class="legend-swatch" style="background:#9ca3af;"></span>Away / off-shift</span>
         <span class="ml-auto">Hover any block for exact timing.</span>
       </div>
+
+      {{-- Chronological ON/OFF block log — line-by-line time ranges with bucket
+           labels. Easier to scan than the Gantt for "anong oras working vs idle". --}}
+      <div class="mt-5 border-t pt-4">
+        <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <div class="font-semibold text-sm">📋 Block Log (chronological)</div>
+          <div class="flex items-center gap-3 text-xs text-gray-500">
+            <label class="inline-flex items-center gap-1">
+              <input type="checkbox" x-model="drill.logHideActive">
+              Hide active blocks
+            </label>
+            <label class="inline-flex items-center gap-1">
+              <input type="checkbox" x-model="drill.logHideAway">
+              Hide away
+            </label>
+          </div>
+        </div>
+        <template x-if="!drill.stats.blocks || drill.stats.blocks.length === 0">
+          <div class="text-xs text-gray-400 italic py-4">Only 1 edit on this day — no blocks to show.</div>
+        </template>
+        <template x-if="drill.stats.blocks && drill.stats.blocks.length > 0">
+          <div class="rounded border overflow-hidden">
+            <table class="w-full text-xs">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-2 py-1.5 text-left w-16">#</th>
+                  <th class="px-2 py-1.5 text-left">Time range</th>
+                  <th class="px-2 py-1.5 text-left">Status</th>
+                  <th class="px-2 py-1.5 text-right">Duration</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(b, i) in filteredBlockLog()" :key="i + '|' + b.from">
+                  <tr :class="i % 2 === 0 ? 'bg-white' : 'bg-gray-50'">
+                    <td class="px-2 py-1 text-gray-400" x-text="(i + 1)"></td>
+                    <td class="px-2 py-1 font-mono">
+                      <span x-text="fmtTime(b.from)"></span>
+                      <span class="text-gray-400">→</span>
+                      <span x-text="fmtTime(b.to)"></span>
+                    </td>
+                    <td class="px-2 py-1">
+                      <span class="inline-block px-1.5 py-0.5 rounded text-white font-semibold"
+                            :style="'background:' + bucketColor(b.bucket) + ';'"
+                            x-text="bucketLabel(b.bucket)"></span>
+                    </td>
+                    <td class="px-2 py-1 text-right font-mono" x-text="fmtDur(b.to - b.from)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </div>
     </section>
 
   </main>
@@ -276,8 +329,11 @@
         // Drilldown state
         drill: {
           open: false, user: '', date: '',
-          stats: { count:0, active:0, idle:0, longBreak:0, away:0, activePct:null, prod:null, firstEdit:'', lastEdit:'' },
+          stats: { count:0, active:0, idle:0, longBreak:0, away:0, activePct:null, prod:null, firstEdit:'', lastEdit:'', blocks:[] },
           blocks: [],
+          // Block log filters (chronological ON/OFF table)
+          logHideActive: false,
+          logHideAway:   false,
         },
 
         init(){
@@ -465,6 +521,33 @@
             });
           }
           return out;
+        },
+
+        // ── Block log helpers (chronological ON/OFF table) ──
+        bucketColor(bucket){
+          return ({
+            active:    '#22c55e',
+            idle:      '#f59e0b',
+            longBreak: '#ef4444',
+            away:      '#9ca3af',
+          }[bucket] || '#9ca3af');
+        },
+        bucketLabel(bucket){
+          return ({
+            active:    'Working',
+            idle:      'Idle break',
+            longBreak: 'Long break',
+            away:      'Away',
+          }[bucket] || bucket);
+        },
+        filteredBlockLog(){
+          // stats.blocks is already sorted ASC (set by statsFor); just filter.
+          const all = this.drill.stats.blocks || [];
+          return all.filter(b => {
+            if (this.drill.logHideActive && b.bucket === 'active') return false;
+            if (this.drill.logHideAway   && b.bucket === 'away')   return false;
+            return true;
+          });
         },
 
         // ── Formatters ──
