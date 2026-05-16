@@ -109,6 +109,17 @@ class OwnerPrivateController extends Controller
         $isCEO          = $role === 'CEO';
         $isMarketingOIC = $role === 'Marketing - OIC';
 
+        // CEO-only "view as" mode. Default 'ceo'. When CEO toggles to 'marketing',
+        // initial render hides CEO-only chrome (Daily, Columns, Excluded, Primary
+        // Items buttons + Item Val. (CEO) column + modal CEO field). The View
+        // toggle itself stays visible so they can switch back. Non-CEO ignores
+        // this param — always rendered as Marketing's view.
+        $viewAs = strtolower(trim((string) request()->input('view_as', 'ceo')));
+        if (!in_array($viewAs, ['ceo', 'marketing'], true)) $viewAs = 'ceo';
+        // Derived flag — convenience for template @if() checks. False when CEO
+        // is previewing Marketing's UI, even if they actually have CEO role.
+        $effectiveIsCEO = $isCEO && $viewAs === 'ceo';
+
         // Column visibility/order configs (CEO-managed via /owner/column-settings).
         // Per-role filtering is applied — CEO sees all; Marketing/MOIC see only
         // columns explicitly granted in visible_by_role.
@@ -132,7 +143,7 @@ class OwnerPrivateController extends Controller
         $feeVatRate   = FeeSetting::getRate('cod_fee_vat_rate',       $host, $today);
 
         return view('owner.private', compact(
-            'pages', 'isCEO', 'isMarketingOIC',
+            'pages', 'isCEO', 'isMarketingOIC', 'viewAs', 'effectiveIsCEO',
             'ownerPrivateColsConfig', 'campaignsColsConfig',
             'breakevenTargetPct', 'colFormatRules', 'campaignsColFormatRules',
             'feeShipping', 'feeCodRate', 'feeVatRate'
@@ -205,13 +216,6 @@ class OwnerPrivateController extends Controller
         $start    = $request->input('start_date');
         $end      = $request->input('end_date');
         $pageName = $request->input('page_name', 'all');
-        // CEO-only toggle: which cogs table drives profit calc.
-        // 'ceo'    → use cogs_ceo (default for CEO viewers — current behavior)
-        // 'market' → use cogs (Marketing's table — lets CEO preview Marketing's
-        //            world without losing their separate cogs_ceo values)
-        // Non-CEO viewers: param is ignored, profit always uses cogs.
-        $profitSource = strtolower(trim((string)$request->input('profit_source', 'ceo')));
-        if (!in_array($profitSource, ['ceo', 'market'], true)) $profitSource = 'ceo';
 
         $driver = DB::getDriverName(); // 'mysql' | 'pgsql'
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
@@ -1389,13 +1393,15 @@ class OwnerPrivateController extends Controller
         $isSingleDate = ($startDate === $endDate);
         $rangeDays    = (int) ((strtotime($endDate) - strtotime($startDate)) / 86400) + 1;
 
-        // CEO-only toggle: which cogs table drives profit calc.
-        // 'ceo'    → use cogs_ceo (default for CEO viewers — current behavior)
-        // 'market' → use cogs (Marketing's table — lets CEO preview Marketing's
-        //            world without losing their separate cogs_ceo values)
-        // Non-CEO viewers: param is ignored downstream, profit always uses cogs.
-        $profitSource = strtolower(trim((string)$request->input('profit_source', 'ceo')));
-        if (!in_array($profitSource, ['ceo', 'market'], true)) $profitSource = 'ceo';
+        // CEO-only "view as" toggle. Replaces the prior profit-only toggle —
+        // now drives BOTH the visible UI mode AND the profit cogs source:
+        //   'ceo'       → full CEO experience: cogs_ceo for profit, CEO column
+        //                 + modal field visible (default for CEO viewers).
+        //   'marketing' → simulate Marketing's view: cogs for profit, CEO column
+        //                 + modal field hidden (lets CEO preview Marketing's UI).
+        // Non-CEO viewers: param is ignored downstream — always 'marketing'.
+        $viewAs = strtolower(trim((string)$request->input('view_as', 'ceo')));
+        if (!in_array($viewAs, ['ceo', 'marketing'], true)) $viewAs = 'ceo';
 
         // Backwards-compat alias: many downstream code paths still reference `$date` for
         // "as-of" snapshots (fee rates, COGS, page_item_settings, JNT stats window).
@@ -1813,9 +1819,10 @@ class OwnerPrivateController extends Controller
             $settings        = $settingsMap[$settingKey] ?? null;
             $itemValueMarket = $cogsMap[$dominantKey]    ?? null;
             $itemValueCeo    = $cogsCeoMap[$dominantKey] ?? null;
-            // Profit math source — CEO can toggle between Marketing's cogs and
-            // their own cogs_ceo via ?profit_source=. Non-CEO always uses cogs.
-            $useCeoForProfit = $isCEO && $profitSource === 'ceo';
+            // Profit math source — gated by both role AND view toggle. CEO viewing
+            // as Marketing falls back to cogs (Marketing's table). Non-CEO always
+            // uses cogs regardless of param.
+            $useCeoForProfit = $isCEO && $viewAs === 'ceo';
             $itemValue       = $useCeoForProfit ? $itemValueCeo : $itemValueMarket;
             $rtsPct          = $settings ? (float)$settings['rts_pct'] : null;
             $rtsComment      = $settings ? $settings['comment'] : null;
@@ -1995,7 +2002,9 @@ class OwnerPrivateController extends Controller
                 // `item_value_ceo` (from cogs_ceo) for the new column.
                 // Non-CEO responses NEVER include item_value_ceo (data-layer security).
                 'item_value'            => $itemValueMarket,
-                'item_value_ceo'        => $isCEO ? $itemValueCeo : null,
+                // CEO column is gated by BOTH actual role AND view toggle. CEO
+                // viewing as Marketing gets null (mirrors what Marketing sees).
+                'item_value_ceo'        => ($isCEO && $viewAs === 'ceo') ? $itemValueCeo : null,
                 'item_value_source'     => $itemValueMarket !== null ? 'cogs' : null,
                 'shipping_fee'          => $shippingFee,
                 'cod_fee'               => $codFeePerDelivered,
@@ -2034,9 +2043,9 @@ class OwnerPrivateController extends Controller
             'range_days'     => $rangeDays,
             'skipped_count'  => $skippedCount,
             'skipped_pages'  => $skippedPages,
-            // CEO toggle echo — UI uses this to highlight active source.
-            // Non-CEO viewers always get 'market' regardless of param.
-            'profit_source'  => $isCEO ? $profitSource : 'market',
+            // CEO view toggle echo — UI uses this to sync the toggle button state.
+            // Non-CEO viewers always get 'marketing' regardless of param.
+            'view_as'        => $isCEO ? $viewAs : 'marketing',
             'is_ceo'         => $isCEO,
         ]);
     }

@@ -328,31 +328,37 @@
               cursor:pointer;text-decoration:none;"
        title="View page × date × item matrix for this range">🧭 Matrix</a>
 
-    @if(($isCEO ?? false))
+    @if(($isCEO ?? false) && ($viewAs ?? 'ceo') === 'ceo')
     <a :href="'{{ route('owner.private.daily') }}?start_date='+startDate+'&end_date='+endDate"
        target="_blank"
        style="background:#1e293b;color:#fde68a;border:1px solid #475569;
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
               cursor:pointer;text-decoration:none;"
        title="Per-day overall summary across all pages (CEO)">📅 Daily</a>
+    @endif
 
-    {{-- CEO-only profit-source toggle. Switches which cogs table drives the
-         profit formula in this view. Default 'ceo' (= cogs_ceo). Two states
-         rendered as a segmented control so the active value is obvious. --}}
-    <div :title="'Profit formula currently uses ' + (profitSource === 'ceo' ? 'CEO cogs_ceo table' : 'Marketing cogs table') + '. Click to toggle.'"
+    @if(($isCEO ?? false))
+    {{-- CEO-only "view as" toggle. Replaces the prior profit-only toggle and
+         drives BOTH the visible UI mode AND the profit cogs source:
+           CEO       → cogs_ceo for profit + CEO column + modal CEO field visible
+           Marketing → cogs for profit + CEO column hidden + modal CEO field hidden
+                       (also hides other CEO-only header buttons — Daily, Columns,
+                        Excluded, Primary Items — so the UI mirrors Marketing's)
+         Toggle itself ALWAYS stays visible to actual CEO so they can switch back. --}}
+    <div :title="'View mode: ' + (viewAs === 'ceo' ? 'CEO — full CEO experience' : 'Marketing — previewing what Marketing sees') + '. Click to toggle.'"
          style="display:inline-flex;align-items:center;background:#1e293b;border:1px solid #475569;
                 border-radius:6px;padding:3px;margin-left:4px;gap:2px;">
-      <span style="font-size:10px;color:#94a3b8;font-weight:600;padding:0 6px;">📊 Profit:</span>
-      <button type="button" @click="profitSource !== 'market' && toggleProfitSource()"
-              :style="profitSource === 'market'
+      <span style="font-size:10px;color:#94a3b8;font-weight:600;padding:0 6px;">👁 View:</span>
+      <button type="button" @click="viewAs !== 'marketing' && toggleViewAs()"
+              :style="viewAs === 'marketing'
                 ? 'background:#f59e0b;color:#0f172a;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:700;'
                 : 'background:transparent;color:#cbd5e1;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:600;'"
-              title="Use Marketing's cogs table for profit calc">Marketing</button>
-      <button type="button" @click="profitSource !== 'ceo' && toggleProfitSource()"
-              :style="profitSource === 'ceo'
+              title="Preview as Marketing — hides CEO-only columns, fields, and buttons; profit uses cogs">Marketing</button>
+      <button type="button" @click="viewAs !== 'ceo' && toggleViewAs()"
+              :style="viewAs === 'ceo'
                 ? 'background:#6366f1;color:#fff;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:700;'
                 : 'background:transparent;color:#cbd5e1;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:600;'"
-              title="Use CEO's cogs_ceo table for profit calc">🔒 CEO</button>
+              title="Full CEO view — shows CEO column + modal field; profit uses cogs_ceo">🔒 CEO</button>
     </div>
     @endif
 
@@ -379,7 +385,10 @@
       <span x-text="anyExpanded() ? '▼ Hide all' : '▶ Expand all'"></span>
     </button>
 
-    @if(!empty($isCEO))
+    {{-- CEO-only chrome — hidden when CEO toggles to Marketing view so the UI
+         truly mirrors what Marketing sees. Actual CEO role still has access via
+         direct URL; this is a view-toggle gate, not an auth gate. --}}
+    @if(!empty($effectiveIsCEO))
       <a href="{{ route('owner.column-settings') }}" target="_blank"
          title="Configure column visibility / order globally for /owner/private and the campaigns expand panel"
          style="background:#1e293b;color:#a5b4fc;border:1px solid #475569;
@@ -392,7 +401,10 @@
                 cursor:pointer;margin-left:4px;text-decoration:none;">🚫 Excluded</a>
     @endif
 
-    @if(!empty($isCEO) || !empty($isMarketingOIC))
+    {{-- Logs + Primary Items: visible to MOIC always; for actual CEO, only in
+         CEO view (Marketing view hides them since plain Marketing doesn't have
+         these buttons either). --}}
+    @if(!empty($effectiveIsCEO) || !empty($isMarketingOIC))
       <a href="{{ route('owner.private.edit-logs') }}"
          title="View RTS / COGS edit history"
          style="background:#1e293b;color:#86efac;border:1px solid #475569;
@@ -1112,15 +1124,21 @@
       ev:{ item_value:'', rts_pct:'', comment:'' },
       saving:false, saveMsg:'',
 
-      // CEO-only flag from server — controls the extra cogs_ceo input in modal.
+      // Actual CEO role from server — used as the auth gate for the View toggle
+      // button visibility and for ANY genuinely-CEO-only behavior (writes, etc.).
       isCeoView: @json(!empty($isCEO ?? false)),
 
-      // CEO toggle for profit calc source: 'ceo' = cogs_ceo (default), 'market' = cogs.
-      // Initialized from URL ?profit_source= param so refresh preserves choice.
-      profitSource: (function(){
-        const p = (new URLSearchParams(window.location.search).get('profit_source') || '').toLowerCase();
-        return p === 'market' ? 'market' : 'ceo';
+      // CEO "view as" toggle: 'ceo' = full CEO mode (default), 'marketing' = simulate
+      // Marketing's UI. Drives cogs source for profit + visibility of CEO column
+      // + modal CEO field. Initialized from URL ?view_as= so refresh preserves it.
+      viewAs: (function(){
+        const p = (new URLSearchParams(window.location.search).get('view_as') || '').toLowerCase();
+        return p === 'marketing' ? 'marketing' : 'ceo';
       })(),
+
+      // Derived: true only when actual CEO AND currently in CEO view mode. Used
+      // for column + modal field visibility downstream. Computed via Alpine getter.
+      get effectiveIsCeo(){ return this.isCeoView && this.viewAs === 'ceo'; },
 
       // Modal-based edit state. Replaces old inline edit UX. Saves use the
       // same /owner/private/item-setting endpoint as the breakdown matrix
@@ -1215,6 +1233,9 @@
         // entire columns; the order array sets the visual sequence.
         const serverCfg = window.__OWNER_PRIVATE_COLS__ || {};
         const hiddenSet = new Set(Array.isArray(serverCfg.hidden) ? serverCfg.hidden : []);
+        // CEO viewing as Marketing: force-hide the CEO-only column regardless of
+        // user prefs (mirrors what Marketing actually sees on their account).
+        if (!this.effectiveIsCeo) hiddenSet.add('item_val_ceo');
 
         let orderedIds;
         if (Array.isArray(serverCfg.order) && serverCfg.order.length) {
@@ -1285,11 +1306,11 @@
         if (this.startDate && this.endDate && this.startDate > this.endDate) {
           const t = this.startDate; this.startDate = this.endDate; this.endDate = t;
         }
-        // Persist range + CEO profit-source toggle in URL so refresh restores it.
-        // profit_source only added when 'market' (default 'ceo' for CEO viewers;
+        // Persist range + CEO view toggle in URL so refresh restores it.
+        // view_as only added when 'marketing' (default 'ceo' for CEO viewers;
         // ignored server-side for non-CEO).
         const qsObj = { start_date: this.startDate, end_date: this.endDate };
-        if (this.isCeoView && this.profitSource === 'market') qsObj.profit_source = 'market';
+        if (this.isCeoView && this.viewAs === 'marketing') qsObj.view_as = 'marketing';
         const qs = new URLSearchParams(qsObj);
         history.replaceState(null,'','?'+qs.toString());
         try{
@@ -1300,17 +1321,23 @@
           this.skippedPages = j.skipped_pages || [];
           this.isSingleDate = !!j.is_single_date;
           this.rangeDays    = Number(j.range_days || 1);
-          // Sync UI toggle with server's echoed source (CEO only).
-          if (j.is_ceo && j.profit_source) this.profitSource = j.profit_source;
+          // Sync UI toggle with server's echoed mode (CEO only).
+          if (j.is_ceo && j.view_as) this.viewAs = j.view_as;
         }catch(e){ console.error(e); }
         finally{ this.loading=false; }
       },
 
-      // CEO toggle — flips profit_source and reloads. Non-CEO never sees this.
-      toggleProfitSource(){
+      // CEO toggle — flips view_as, reloads the data, AND does a full page
+      // reload so server-rendered chrome (Daily/Columns/Excluded/Logs/Primary
+      // Items buttons) re-evaluates with the new $effectiveIsCEO. Non-CEO never
+      // sees the toggle in the first place.
+      toggleViewAs(){
         if (!this.isCeoView) return;
-        this.profitSource = this.profitSource === 'ceo' ? 'market' : 'ceo';
-        this.load();
+        const next = this.viewAs === 'ceo' ? 'marketing' : 'ceo';
+        const url = new URL(window.location.href);
+        if (next === 'marketing') url.searchParams.set('view_as', 'marketing');
+        else                      url.searchParams.delete('view_as');
+        window.location.href = url.toString();
       },
 
       // ── Page breakdown (navigate to separate route) ───────────────────
@@ -1430,7 +1457,9 @@
           // When in range mode + start_date != end_date, expose "Apply from start_date"
           // so the user can cascade the new value across the visible range.
           apply_from:   (this.startDate && this.startDate !== this.endDate) ? this.startDate : null,
-          isCeoView:    this.isCeoView,
+          // Modal CEO field gated by effective view mode — CEO previewing as
+          // Marketing sees Marketing's modal (no CEO Unit Cost field).
+          isCeoView:    this.effectiveIsCeo,
         };
       },
 
