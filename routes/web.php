@@ -538,6 +538,8 @@ Route::get('/summary/overall/daily', [SummaryOverallController::class, 'daily'])
 
 Route::get('/encoder/checker_1/summary', [Checker1SummaryController::class, 'index'])
      ->name('encoder.checker1.summary');
+Route::get('/encoder/checker_1/idle-summary', [App\Http\Controllers\Encoder\Checker1IdleSummaryController::class, 'index'])
+     ->name('encoder.checker1.idle-summary');
 Route::get('/encoder/summary', [App\Http\Controllers\MacroOutputController::class, 'summary'])->name('macro_output.summary');
     Route::get('/encoder/checker_1', [MacroOutputController::class, 'index'])->name('macro_output.index');
 Route::post('/encoder/checker_1/update', [MacroOutputController::class, 'bulkUpdate'])->name('macro_output.bulk_update');

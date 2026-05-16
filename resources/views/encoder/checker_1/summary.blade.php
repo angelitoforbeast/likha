@@ -19,7 +19,14 @@
     <div class="max-w-7xl mx-auto px-4">
       <div class="h-14 flex items-center justify-between">
         <div class="font-semibold text-lg">Checker 1 – Summary</div>
-        <div class="text-sm text-gray-500">Date range: {{ $start }} → {{ $end }}</div>
+        <div class="flex items-center gap-3">
+          <a href="{{ route('encoder.checker1.idle-summary', ['start' => $start, 'end' => $end]) }}"
+             class="text-sm px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700"
+             title="View per-encoder idle / active time analysis based on status log timing">
+            ⏱ Idle Summary
+          </a>
+          <span class="text-sm text-gray-500">Date range: {{ $start }} → {{ $end }}</span>
+        </div>
       </div>
     </div>
   </nav>
