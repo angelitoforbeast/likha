@@ -49,11 +49,14 @@
     .blt-cell-pct { color:#0f172a; }
     .blt-cell-count { color:#64748b; font-weight:500; font-size:10px; }
     .blt-cell-time { font-family:ui-monospace,monospace; font-size:10px; color:#64748b; margin-bottom:4px; }
-    .blt-block-line { display:flex; justify-content:space-between; gap:6px; font-size:10.5px;
-                      padding:1px 0; font-family:ui-monospace,monospace; }
+    .blt-block-line { display:flex; align-items:center; gap:6px; font-size:10.5px;
+                      padding:2px 0; font-family:ui-monospace,monospace; }
     .blt-block-line .blt-block-time { color:#475569; min-width:80px; }
-    .blt-block-line .blt-block-status { font-weight:700; flex:1; padding-left:4px; }
-    .blt-block-line .blt-block-dur { color:#0f172a; font-weight:600; }
+    .blt-block-line .blt-block-pill { flex:1; font-weight:700; color:#fff; padding:1px 6px;
+                                       border-radius:3px; font-family:-apple-system,BlinkMacSystemFont,sans-serif;
+                                       font-size:9.5px; text-align:center; letter-spacing:0.02em;
+                                       text-transform:uppercase; }
+    .blt-block-line .blt-block-dur { color:#0f172a; font-weight:600; min-width:55px; text-align:right; }
   </style>
 </head>
 <body class="text-gray-900">
@@ -122,8 +125,8 @@
             Show metric:
             <select x-model="displayMetric" class="border rounded px-2 py-1 ml-1 text-xs">
               <option value="active_pct">Active %</option>
-              <option value="active_hrs">Active hrs</option>
-              <option value="idle_hrs">Idle hrs</option>
+              <option value="active_hrs">Active time (min)</option>
+              <option value="idle_hrs">Idle time (min)</option>
               <option value="edits">Edits count</option>
               <option value="prod">Edits / active min</option>
               <option value="first_last">First / Last edit</option>
@@ -219,8 +222,8 @@
                       <template x-for="(b, i) in mergedBlocksFor(u, d)" :key="i + '|' + b.from">
                         <div class="blt-block-line">
                           <span class="blt-block-time" x-text="fmtTime(b.from) + '–' + fmtTime(b.to)"></span>
-                          <span class="blt-block-status"
-                                :style="'color:' + bucketColor(b.bucket) + ';'"
+                          <span class="blt-block-pill"
+                                :style="'background:' + bucketColor(b.bucket) + ';'"
                                 x-text="bucketLabel(b.bucket)"></span>
                           <span class="blt-block-dur" x-text="fmtDur(b.to - b.from)"></span>
                         </div>
@@ -693,12 +696,10 @@
           return (s/3600).toFixed(1) + 'h';
         },
         fmtDur(s){
-          if (!s || s <= 0) return '0';
-          if (s < 60) return s + 's';
-          if (s < 3600) return Math.round(s/60) + 'm';
-          const h = Math.floor(s/3600);
-          const m = Math.round((s % 3600) / 60);
-          return h + 'h' + (m > 0 ? ' ' + m + 'm' : '');
+          // All durations in minutes with 1 decimal place (e.g., "107.5m", "0.5m").
+          // User pref — uniform unit easier to compare than mixed h/m/s.
+          if (!s || s <= 0) return '0.0m';
+          return (s / 60).toFixed(1) + 'm';
         },
         fmtTime(unixSec){
           // Convert to PH (UTC+8) HH:MM display.
