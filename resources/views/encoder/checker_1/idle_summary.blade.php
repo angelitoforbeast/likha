@@ -286,7 +286,12 @@
                             :style="'background:' + bucketColor(b.bucket) + ';'"
                             x-text="bucketLabel(b.bucket)"></span>
                     </td>
-                    <td class="px-2 py-1 text-right font-mono" x-text="fmtDur(b.to - b.from)"></td>
+                    <td class="px-2 py-1 text-right font-mono">
+                      <span x-text="fmtDur(b.to - b.from)"></span>
+                      <template x-if="b.bucket === 'active' && b.count > 1">
+                        <span class="text-gray-400 ml-1" x-text="'(' + b.count + ' edits)'"></span>
+                      </template>
+                    </td>
                   </tr>
                 </template>
               </tbody>
@@ -541,9 +546,27 @@
           }[bucket] || bucket);
         },
         filteredBlockLog(){
-          // stats.blocks is already sorted ASC (set by statsFor); just filter.
+          // 1. Merge consecutive same-bucket blocks into one row each. Encoders
+          //    log many micro-edits in a row — without merging, the log explodes
+          //    into hundreds of "Working 20s" lines. Merged, you see clean
+          //    "09:12 → 10:59 Working 1h 47m" sessions punctuated by breaks.
+          // 2. Apply user filters (hide active / hide away).
           const all = this.drill.stats.blocks || [];
-          return all.filter(b => {
+          if (all.length === 0) return [];
+
+          const merged = [];
+          for (const b of all) {
+            const last = merged[merged.length - 1];
+            if (last && last.bucket === b.bucket && last.to === b.from) {
+              // Extend the previous session — same bucket + contiguous.
+              last.to    = b.to;
+              last.count = (last.count || 1) + 1;
+            } else {
+              merged.push({ from: b.from, to: b.to, bucket: b.bucket, count: 1 });
+            }
+          }
+
+          return merged.filter(b => {
             if (this.drill.logHideActive && b.bucket === 'active') return false;
             if (this.drill.logHideAway   && b.bucket === 'away')   return false;
             return true;
