@@ -100,9 +100,9 @@
     <section class="bg-white rounded-xl shadow p-4">
       <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
         <div class="font-semibold">⚙ Activity Thresholds <span class="text-xs text-gray-500 font-normal">(global, applied to all viewers)</span></div>
-        <a href="{{ route('encoder.checker1.idle-thresholds') }}"
+        <a href="{{ route('encoder.checker1.settings') }}"
            class="text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700">
-          ✏ Edit Thresholds
+          ⚙ Settings
         </a>
       </div>
       <div class="text-xs text-gray-600 flex flex-wrap gap-x-4 gap-y-1">

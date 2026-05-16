@@ -104,7 +104,8 @@ class Checker1IdleSummaryController extends Controller
             'byUserDate'  => $byUserDate, // Sent as JSON to Alpine for client-side classification
             // Thresholds loaded from app_settings (managed at /encoder/checker_1/idle-thresholds).
             // Falls back to controller defaults when no saved value exists yet.
-            'thresholds'  => Checker1IdleThresholdsController::load(),
+            'thresholds'  => Checker1SettingsController::loadThresholds(),
+            'shift'       => Checker1SettingsController::loadShift(),
         ]);
     }
 
