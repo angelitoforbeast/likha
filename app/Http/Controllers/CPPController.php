@@ -347,6 +347,28 @@ class CPPController extends Controller
             ->groupBy('snapshot_date', 'snapshot_bucket')
             ->get();
 
+        // ── 2a) Pull EOD adspent totals per date from ads_manager_reports.
+        //       Used to fill 11:59PM cells live (no snapshot needed) since
+        //       end-of-day total = final adspent for that date. Strips ₱ /
+        //       commas / whitespace before casting — same shape used elsewhere
+        //       in this app for amount_spent_php (it's stored as text in some
+        //       imports).
+        $driver = DB::connection()->getDriverName(); // mysql | pgsql
+        $castMoneyAds = $driver === 'pgsql'
+            ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE((amount_spent_php)::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
+            : "CAST(REPLACE(REPLACE(REPLACE(COALESCE(amount_spent_php,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
+
+        $eodAdspentRows = DB::table('ads_manager_reports')
+            ->whereBetween(DB::raw('DATE(day)'), [$start, $end])
+            ->selectRaw("DATE(day) AS d, SUM($castMoneyAds) AS spent")
+            ->groupByRaw('DATE(day)')
+            ->get();
+        // [date string => float spent]
+        $eodAdspentByDate = [];
+        foreach ($eodAdspentRows as $r) {
+            $eodAdspentByDate[(string) $r->d] = (float) $r->spent;
+        }
+
         // ── 2) Pull ads_manager_reports upload times within range. Used to
         //      compute per (date, bucket) upload-time cutoffs sa 'upload' mode.
         $uploadRows = DB::table('upload_logs')
@@ -379,7 +401,7 @@ class CPPController extends Controller
         // ── 3) Aggregated orders from macro_output per (date, minute_of_day).
         //      Lets us compute cumulative counts up to ANY cutoff per cell
         //      in PHP — no need for multiple per-cell SQL queries.
-        $driver = DB::connection()->getDriverName();
+        // ($driver already set above for the adspent query.)
 
         if ($driver === 'mysql') {
             $tsDate = "DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y'))";
@@ -628,10 +650,28 @@ class CPPController extends Controller
                 $info = $inferredByDate[$d][$b] ?? null;
                 if (!$info || $info['orders'] === 0) continue;
 
+                // 11:59PM bucket = end-of-day → adspent is FINAL for the day.
+                // No snapshot needed: compute live from ads_manager_reports.
+                // Only reaches here for past-day cells (today's 11:59PM goes
+                // into the $isTodayFutureBucket branch above and is skipped),
+                // so "wait until the bucket time has passed" semantic matches
+                // the other buckets automatically.
+                $liveSpent = null;
+                $liveCpp   = null;
+                if ($b === '11:59PM') {
+                    $spentForDate = $eodAdspentByDate[$d] ?? null;
+                    if ($spentForDate !== null) {
+                        $liveSpent = $spentForDate;
+                        if ($info['orders'] > 0) {
+                            $liveCpp = round($spentForDate / $info['orders'], 2);
+                        }
+                    }
+                }
+
                 $cells[$b][$d] = [
-                    'spent'       => null,
+                    'spent'       => $liveSpent,
                     'orders'      => $info['orders'],
-                    'cpp'         => null,
+                    'cpp'         => $liveCpp,
                     'saved_at'    => null,
                     'ads_at'      => null,
                     'cutoff_at'   => $fmtMin($info['cutoff_min']),
