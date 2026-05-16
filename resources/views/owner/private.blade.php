@@ -1183,8 +1183,8 @@
           { id:'cpp',        label:'CPP',        sort:'cpp',                  align:'center', minw:75  },
           { id:'proceed',    label:'Proceed',    sort:'proceed_orders',       align:'center', minw:70  },
           { id:'pcpp',       label:'P.CPP',      sort:'proceed_cpp',          align:'center', minw:75  },
-          { id:'tcpr',          label:'TCPR',           sort:null,                          align:'center', minw:65  },
-          { id:'breakeven_cpp', label:this._breakevenLabel(), sort:null,                    align:'center', minw:115 },
+          { id:'tcpr',          label:'TCPR',           sort:'tcpr_computed',               align:'center', minw:65  },
+          { id:'breakeven_cpp', label:this._breakevenLabel(), sort:'breakeven_cpp_computed', align:'center', minw:115 },
           { id:'proj_profit',label:'Prof.Profit',sort:'projected_profit',     align:'center', minw:95  },
           { id:'per_order',  label:'/Order',     sort:'proj_profit_per_order',align:'center', minw:75  },
           { id:'proj_pct',     label:'Prof.%(1M)',     sort:'proj_pct_computed',           align:'center', minw:75  },
@@ -1194,15 +1194,15 @@
           { id:'proj_prof_1d', label:'Prof.Profit(1D)',sort:'projected_profit_last_day',   align:'center', minw:105 },
           { id:'proj_prof_3d', label:'Prof.Profit(3D)',sort:'projected_profit_last_3d',    align:'center', minw:105 },
           { id:'proj_prof_7d', label:'Prof.Profit(7D)',sort:'projected_profit_last_7d',    align:'center', minw:105 },
-          { id:'jnt_rts',      label:'RTS%',           sort:null,                          align:'center', minw:100 },
-          { id:'jnt_del',    label:'Del%',       sort:null,                   align:'center', minw:90  },
-          { id:'jnt_transit',label:'Transit%',   sort:null,                   align:'center', minw:85  },
+          { id:'jnt_rts',      label:'RTS%',           sort:'jnt_rts_pct',                 align:'center', minw:100 },
+          { id:'jnt_del',    label:'Del%',       sort:'jnt_del_pct',          align:'center', minw:90  },
+          { id:'jnt_transit',label:'Transit%',   sort:'jnt_transit_pct',      align:'center', minw:85  },
           { id:'rts_set',    label:'Set RTS%',   sort:'rts_pct',              align:'center', minw:110 },
-          { id:'price',      label:'Price',      sort:null,                   align:'center', minw:85  },
-          { id:'item_val',     label:'Item Val.',       sort:null, align:'center', minw:80  },
-          { id:'item_val_ceo', label:'Item Val. (CEO)', sort:null, align:'center', minw:90  },
-          { id:'ship',       label:'Ship',       sort:null,                   align:'center', minw:58  },
-          { id:'cod_fee',    label:'COD Fee',    sort:null,                   align:'center', minw:72  },
+          { id:'price',      label:'Price',      sort:'price',                align:'center', minw:85  },
+          { id:'item_val',     label:'Item Val.',       sort:'item_value',     align:'center', minw:80  },
+          { id:'item_val_ceo', label:'Item Val. (CEO)', sort:'item_value_ceo', align:'center', minw:90  },
+          { id:'ship',       label:'Ship',       sort:'shipping_fee',         align:'center', minw:58  },
+          { id:'cod_fee',    label:'COD Fee',    sort:'cod_fee',              align:'center', minw:72  },
         ];
       },
 
@@ -1369,6 +1369,7 @@
 
         // Computed-value sort handler — for columns na hindi naka-stored as direct field
         // (e.g., proj_pct = projected_profit / gross_sales × 100, computed inline sa view).
+        const self = this;
         const computedFor = (row, col) => {
           if (col === 'proj_pct_computed') {
             if (row.projected_profit !== null && row.gross_sales > 0) {
@@ -1376,6 +1377,11 @@
             }
             return null;
           }
+          // TCPR + Breakeven CPP: derived sa frontend via Alpine helpers. Sort
+          // uses the same value the column shows; null rows fall to bottom (per
+          // existing null handling sa sort below).
+          if (col === 'tcpr_computed')          return self.tcprFor(row);
+          if (col === 'breakeven_cpp_computed') return self.breakevenCppFor(row);
           return row[col];
         };
 
