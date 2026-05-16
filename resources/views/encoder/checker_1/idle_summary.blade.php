@@ -114,6 +114,10 @@
         <span><span class="legend-swatch" style="background:#ef4444;"></span>Long break ≤ <span class="font-mono font-semibold" x-text="fmtSec(thresholds.long)"></span></span>
         <span><span class="legend-swatch" style="background:#9ca3af;"></span>Away (any gap > long break, excluded from totals)</span>
       </div>
+      <div class="text-xs text-gray-600 mt-2 pt-2 border-t border-gray-100">
+        🕐 Shift window: <span class="font-mono font-semibold" x-text="shift.start"></span> → <span class="font-mono font-semibold" x-text="shift.end"></span>
+        <span class="text-gray-400 ml-2">(time within shift but without edits counts as idle/long/away — pre-shift late starts + post-shift early stops both tracked)</span>
+      </div>
     </section>
 
     {{-- Main matrix --}}
@@ -386,6 +390,9 @@
     // Thresholds are GLOBAL (saved in app_settings via /encoder/checker_1/idle-thresholds).
     // They no longer change client-side — page reloads after admin saves new values.
     const _THRESHOLDS   = @json($thresholds);
+    // Shift window — used to credit pre-shift + post-shift gaps (within the
+    // shift but without edits) as idle/long/away, not silently ignored.
+    const _SHIFT        = @json($shift);
 
     function idleSummaryUI() {
       return {
@@ -396,9 +403,10 @@
         startDate:  _START,
         endDate:    _END,
 
-        // Thresholds loaded from server (managed at /encoder/checker_1/idle-thresholds).
+        // Thresholds loaded from server (managed at /encoder/checker_1/settings).
         // Static during the page lifetime — admin edits in the separate route, refresh applies.
         thresholds: _THRESHOLDS,
+        shift:      _SHIFT, // { start: 'HH:MM', end: 'HH:MM' }
         displayMetric: 'active_pct',
 
         // Drilldown state (cell-click panel below matrix)
@@ -433,6 +441,7 @@
           let active = 0, idle = 0, longBreak = 0, away = 0;
           const blocks = []; // for drilldown timeline
 
+          // ── Inter-edit gaps (existing logic) ──
           if (list.length === 1) {
             active = 30; // edge case: assume 30 sec of active work per spec
           } else {
@@ -447,7 +456,48 @@
             }
           }
 
-          // First + last edit times (HH:MM PH).
+          // ── Pre-shift + post-shift idle credit ──
+          // Goal: time inside the configured shift window but WITHOUT edits
+          // should still be counted (as idle/long/away by duration). Without
+          // this, an encoder who came in at 9:15 for a 9:00 shift looks 100%
+          // active, hiding the 15-min late start.
+          //
+          // Classification skips the "active" bucket — pre/post gaps mean the
+          // person wasn't actually working, so even a 5-min gap = idle, not
+          // active. From idle threshold upward, same rules as inter-edit gaps.
+          const classifyNonWork = (gap) => {
+            if (gap <= 0)     return null;
+            if (gap <= T_I)   return 'idle';
+            if (gap <= T_L)   return 'longBreak';
+            return 'away';
+          };
+          const shiftStartTs = this.shiftBoundaryTs(dateKey, this.shift.start);
+          const shiftEndTs   = this.shiftBoundaryTs(dateKey, this.shift.end);
+
+          if (shiftStartTs !== null && list[0] > shiftStartTs) {
+            const gap = list[0] - shiftStartTs;
+            const bucket = classifyNonWork(gap);
+            if (bucket) {
+              if      (bucket === 'idle')      idle      += gap;
+              else if (bucket === 'longBreak') longBreak += gap;
+              else                              away      += gap;
+              // Insert at START so block ordering stays chronological.
+              blocks.unshift({ from: shiftStartTs, to: list[0], bucket });
+            }
+          }
+          if (shiftEndTs !== null && list[list.length - 1] < shiftEndTs) {
+            const lastTs = list[list.length - 1];
+            const gap    = shiftEndTs - lastTs;
+            const bucket = classifyNonWork(gap);
+            if (bucket) {
+              if      (bucket === 'idle')      idle      += gap;
+              else if (bucket === 'longBreak') longBreak += gap;
+              else                              away      += gap;
+              blocks.push({ from: lastTs, to: shiftEndTs, bucket });
+            }
+          }
+
+          // First + last edit times (HH:MM PH) — based on actual edits, not shift.
           const firstTs = list[0];
           const lastTs  = list[list.length - 1];
           const presence = active + idle + longBreak; // 'away' excluded
@@ -462,6 +512,17 @@
             lastEdit:  this.fmtTime(lastTs),
             blocks,
           };
+        },
+
+        // Returns unix timestamp for "YYYY-MM-DD HH:MM" in Asia/Manila (UTC+8).
+        // Null when shift time is malformed.
+        shiftBoundaryTs(dateKey, hhmm){
+          if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return null;
+          const [y, m, d] = dateKey.split('-').map(Number);
+          const [hh, mm]  = hhmm.split(':').map(Number);
+          if ([y,m,d,hh,mm].some(v => Number.isNaN(v))) return null;
+          // PH (UTC+8) → subtract 8 hours from Date.UTC to anchor to PH time.
+          return Date.UTC(y, m - 1, d, hh, mm, 0) / 1000 - 8 * 3600;
         },
 
         // ── Cell display formatting ──
