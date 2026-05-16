@@ -123,9 +123,14 @@ class OwnerPrivateController extends Controller
         // Column visibility/order configs (CEO-managed via /owner/column-settings).
         // Per-role filtering is applied — CEO sees all; Marketing/MOIC see only
         // columns explicitly granted in visible_by_role.
+        //
+        // CEO in "view_as=marketing" simulates Marketing's column visibility too —
+        // so it's truly mirrors what Marketing sees (not just the cogs_ceo column).
+        // Effective role for column config = 'Marketing' when CEO previews as one.
+        $viewRoleForCols = ($isCEO && $viewAs === 'marketing') ? 'Marketing' : $role;
         $colsCtrl = new \App\Http\Controllers\OwnerColumnSettingsController();
-        $ownerPrivateColsConfig = $colsCtrl->loadConfig('owner_private', $role);
-        $campaignsColsConfig    = $colsCtrl->loadConfig('campaigns', $role);
+        $ownerPrivateColsConfig = $colsCtrl->loadConfig('owner_private', $viewRoleForCols);
+        $campaignsColsConfig    = $colsCtrl->loadConfig('campaigns', $viewRoleForCols);
         // Computed-column settings (also CEO-managed in the same page).
         $breakevenTargetPct     = $colsCtrl->loadBreakevenTargetPct();    // e.g. 5.0
         // loadColFormat($table) returns ['groups' => [...], 'byCol' => {...}].
