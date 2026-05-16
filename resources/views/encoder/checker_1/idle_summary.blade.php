@@ -142,103 +142,118 @@
       </table>
     </section>
 
-    {{-- Flat per-user-per-date table with inline expandable Block Log.
-         Different angle vs the matrix above: easy to scan top-to-bottom across
-         users + dates, and the block log appears in-line when you click expand. --}}
+    {{-- Block Log Table — same matrix layout as the Encoder Activity Matrix
+         above (rows = encoders, cols = dates), but each cell is clickable to
+         expand the merged block log for that specific (user, date) inline. --}}
     <section class="bg-white rounded-xl shadow p-4 overflow-x-auto">
       <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <div class="font-semibold">📋 Block Log Table <span class="text-xs text-gray-500 font-normal">(click ▶ to expand)</span></div>
+        <div class="font-semibold">📋 Block Log Table <span class="text-xs text-gray-500 font-normal">(click any cell to expand its block log inline)</span></div>
         <div class="flex items-center gap-2 text-xs text-gray-500">
-          <button @click="expandAll()" class="px-2 py-1 border rounded hover:bg-gray-50">▼ Expand all</button>
           <button @click="collapseAll()" class="px-2 py-1 border rounded hover:bg-gray-50">▶ Collapse all</button>
         </div>
       </div>
 
-      <table class="matrix" style="border-collapse:separate;border-spacing:0;width:100%;">
+      <table class="matrix" style="border-collapse:separate;border-spacing:0;">
         <thead>
           <tr>
-            <th style="width:30px;"></th>
-            <th class="text-left" style="min-width:130px;">Encoder</th>
-            <th class="text-left" style="min-width:90px;">Date</th>
-            <th class="text-right" style="min-width:60px;">Edits</th>
-            <th class="text-right" style="min-width:80px;">Active</th>
-            <th class="text-right" style="min-width:80px;">Idle</th>
-            <th class="text-right" style="min-width:80px;">Long break</th>
-            <th class="text-right" style="min-width:70px;">Active %</th>
-            <th class="text-left" style="min-width:120px;">First → Last</th>
+            <th class="user-col">Encoder</th>
+            @foreach($prettyDates as $i => $label)
+              <th class="text-center" style="min-width:90px;">{{ $label }}</th>
+            @endforeach
+            <th class="text-center" style="min-width:90px;background:#eff6ff;">Total</th>
           </tr>
         </thead>
         <tbody>
-          <template x-if="flatRows().length === 0">
-            <tr><td colspan="9" class="text-center text-gray-400 py-6">No activity in selected range.</td></tr>
+          <template x-if="users.length === 0">
+            <tr>
+              <td :colspan="dates.length + 2" class="text-center py-12 text-gray-400">No status-log activity in range.</td>
+            </tr>
           </template>
-          <template x-for="row in flatRows()" :key="row.user + '|' + row.date">
+          <template x-for="u in users" :key="'blt-' + u">
             <template x-if="true">
               <tbody style="display:contents;">
-                {{-- Summary row --}}
-                <tr class="cursor-pointer hover:bg-blue-50" @click="toggleFlatRow(row.user, row.date)">
-                  <td class="text-center">
-                    <span class="text-xs text-gray-500" x-text="isFlatExpanded(row.user, row.date) ? '▼' : '▶'"></span>
-                  </td>
-                  <td class="font-semibold" x-text="row.user"></td>
-                  <td class="font-mono text-xs" x-text="row.date"></td>
-                  <td class="text-right font-mono" x-text="row.stats.count"></td>
-                  <td class="text-right font-mono metric-good" x-text="fmtDur(row.stats.active)"></td>
-                  <td class="text-right font-mono metric-warn" x-text="fmtDur(row.stats.idle)"></td>
-                  <td class="text-right font-mono metric-bad" x-text="fmtDur(row.stats.longBreak)"></td>
-                  <td class="text-right font-mono" x-text="row.stats.activePct !== null ? row.stats.activePct.toFixed(0) + '%' : '—'"></td>
-                  <td class="font-mono text-xs">
-                    <span x-text="row.stats.firstEdit"></span>
-                    <span class="text-gray-400">→</span>
-                    <span x-text="row.stats.lastEdit"></span>
-                  </td>
-                </tr>
-
-                {{-- Expanded block log (merged sessions) --}}
-                <template x-if="isFlatExpanded(row.user, row.date)">
-                  <tr>
-                    <td></td>
-                    <td colspan="8" style="padding:8px 12px;background:#fafbff;">
-                      <template x-if="mergedBlocksFor(row.user, row.date).length === 0">
-                        <div class="text-xs text-gray-400 italic py-2">Only 1 edit on this day — no blocks.</div>
+                {{-- Encoder row (matrix-style same as main matrix above) --}}
+                <tr>
+                  <td class="user-col" x-text="u"></td>
+                  <template x-for="d in dates" :key="'blt-cell-' + u + '|' + d">
+                    <td class="cell-num cell-link"
+                        :class="isFlatExpanded(u, d) ? 'bg-blue-50' : ''"
+                        @click="toggleFlatRow(u, d)"
+                        :title="statsFor(u, d) ? 'Click to ' + (isFlatExpanded(u, d) ? 'collapse' : 'expand') + ' block log' : 'No edits'">
+                      <template x-if="statsFor(u, d)">
+                        <span>
+                          <span class="text-xs text-gray-400 mr-1" x-text="isFlatExpanded(u, d) ? '▼' : '▶'"></span>
+                          <span x-html="cellDisplay(u, d)"></span>
+                        </span>
                       </template>
-                      <template x-if="mergedBlocksFor(row.user, row.date).length > 0">
-                        <table class="w-full text-xs">
-                          <thead class="bg-gray-100">
-                            <tr>
-                              <th class="px-2 py-1 text-left" style="width:30px;">#</th>
-                              <th class="px-2 py-1 text-left">Time range</th>
-                              <th class="px-2 py-1 text-left">Status</th>
-                              <th class="px-2 py-1 text-right">Duration</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <template x-for="(b, i) in mergedBlocksFor(row.user, row.date)" :key="i + '|' + b.from">
-                              <tr :class="i % 2 === 0 ? 'bg-white' : 'bg-gray-50'">
-                                <td class="px-2 py-1 text-gray-400" x-text="(i + 1)"></td>
-                                <td class="px-2 py-1 font-mono">
-                                  <span x-text="fmtTime(b.from)"></span>
-                                  <span class="text-gray-400">→</span>
-                                  <span x-text="fmtTime(b.to)"></span>
-                                </td>
-                                <td class="px-2 py-1">
-                                  <span class="inline-block px-1.5 py-0.5 rounded text-white font-semibold"
-                                        :style="'background:' + bucketColor(b.bucket) + ';'"
-                                        x-text="bucketLabel(b.bucket)"></span>
-                                </td>
-                                <td class="px-2 py-1 text-right font-mono">
-                                  <span x-text="fmtDur(b.to - b.from)"></span>
-                                  <template x-if="b.bucket === 'active' && b.count > 1">
-                                    <span class="text-gray-400 ml-1" x-text="'(' + b.count + ' edits)'"></span>
-                                  </template>
-                                </td>
-                              </tr>
-                            </template>
-                          </tbody>
-                        </table>
+                      <template x-if="!statsFor(u, d)">
+                        <span class="metric-muted">—</span>
                       </template>
                     </td>
-                  </tr>
+                  </template>
+                  <td class="cell-num" style="background:#f0f9ff;font-weight:600;" x-html="rowTotalDisplay(u)"></td>
+                </tr>
+
+                {{-- One expansion sub-row per expanded (user, date) cell in this encoder row.
+                     Inserted as additional <tr> spanning the full table width. --}}
+                <template x-for="d in dates" :key="'blt-exp-' + u + '|' + d">
+                  <template x-if="isFlatExpanded(u, d)">
+                    <tr>
+                      <td :colspan="dates.length + 2" style="background:#fafbff;padding:8px 12px;">
+                        <div class="text-xs text-gray-500 mb-2">
+                          <span class="font-semibold" x-text="u"></span>
+                          <span class="text-gray-400 mx-1">·</span>
+                          <span class="font-mono" x-text="d"></span>
+                          <template x-if="statsFor(u, d)">
+                            <span class="ml-3">
+                              First: <span class="font-mono" x-text="statsFor(u, d).firstEdit"></span>
+                              <span class="text-gray-400 mx-1">→</span>
+                              Last: <span class="font-mono" x-text="statsFor(u, d).lastEdit"></span>
+                            </span>
+                          </template>
+                          <button @click="toggleFlatRow(u, d)" class="ml-auto float-right text-blue-600 hover:underline">✕ Close</button>
+                        </div>
+                        <template x-if="mergedBlocksFor(u, d).length === 0">
+                          <div class="text-xs text-gray-400 italic py-2">Only 1 edit on this day — no blocks.</div>
+                        </template>
+                        <template x-if="mergedBlocksFor(u, d).length > 0">
+                          <table class="w-full text-xs">
+                            <thead class="bg-gray-100">
+                              <tr>
+                                <th class="px-2 py-1 text-left" style="width:30px;">#</th>
+                                <th class="px-2 py-1 text-left">Time range</th>
+                                <th class="px-2 py-1 text-left">Status</th>
+                                <th class="px-2 py-1 text-right">Duration</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <template x-for="(b, i) in mergedBlocksFor(u, d)" :key="i + '|' + b.from">
+                                <tr :class="i % 2 === 0 ? 'bg-white' : 'bg-gray-50'">
+                                  <td class="px-2 py-1 text-gray-400" x-text="(i + 1)"></td>
+                                  <td class="px-2 py-1 font-mono">
+                                    <span x-text="fmtTime(b.from)"></span>
+                                    <span class="text-gray-400">→</span>
+                                    <span x-text="fmtTime(b.to)"></span>
+                                  </td>
+                                  <td class="px-2 py-1">
+                                    <span class="inline-block px-1.5 py-0.5 rounded text-white font-semibold"
+                                          :style="'background:' + bucketColor(b.bucket) + ';'"
+                                          x-text="bucketLabel(b.bucket)"></span>
+                                  </td>
+                                  <td class="px-2 py-1 text-right font-mono">
+                                    <span x-text="fmtDur(b.to - b.from)"></span>
+                                    <template x-if="b.bucket === 'active' && b.count > 1">
+                                      <span class="text-gray-400 ml-1" x-text="'(' + b.count + ' edits)'"></span>
+                                    </template>
+                                  </td>
+                                </tr>
+                              </template>
+                            </tbody>
+                          </table>
+                        </template>
+                      </td>
+                    </tr>
+                  </template>
                 </template>
               </tbody>
             </template>
