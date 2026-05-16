@@ -72,48 +72,20 @@
       </form>
     </section>
 
-    {{-- Threshold sliders --}}
+    {{-- Threshold summary (read-only) + link to settings page --}}
     <section class="bg-white rounded-xl shadow p-4">
-      <div class="flex items-center justify-between mb-3">
-        <div class="font-semibold">⚙ Activity Thresholds</div>
-        <button @click="resetThresholds()" class="text-xs text-blue-600 hover:underline">Reset to defaults</button>
+      <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+        <div class="font-semibold">⚙ Activity Thresholds <span class="text-xs text-gray-500 font-normal">(global, applied to all viewers)</span></div>
+        <a href="{{ route('encoder.checker1.idle-thresholds') }}"
+           class="text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700">
+          ✏ Edit Thresholds
+        </a>
       </div>
-      <div class="text-xs text-gray-500 mb-3">
-        Inter-edit gaps are classified into buckets. Adjust sliders to fit your team's workflow — metrics + matrix recalculate instantly.
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
-        <div class="slider-row">
-          <span class="legend-swatch" style="background:#22c55e;"></span>
-          <label class="w-32">Working (≤)</label>
-          <input type="range" min="30" max="900" step="30" x-model.number="thresholds.work">
-          <span class="slider-val" x-text="fmtSec(thresholds.work)"></span>
-        </div>
-        <div class="slider-row">
-          <span class="legend-swatch" style="background:#f59e0b;"></span>
-          <label class="w-32">Idle break (≤)</label>
-          <input type="range" min="600" max="3600" step="60" x-model.number="thresholds.idle">
-          <span class="slider-val" x-text="fmtSec(thresholds.idle)"></span>
-        </div>
-        <div class="slider-row">
-          <span class="legend-swatch" style="background:#ef4444;"></span>
-          <label class="w-32">Long break (≤)</label>
-          <input type="range" min="1800" max="14400" step="300" x-model.number="thresholds.long">
-          <span class="slider-val" x-text="fmtSec(thresholds.long)"></span>
-        </div>
-        <div class="slider-row">
-          <span class="legend-swatch" style="background:#9ca3af;"></span>
-          <label class="w-32">Away / off-shift</label>
-          <span class="text-xs text-gray-500 italic">any gap > long break</span>
-        </div>
-      </div>
-
-      <div class="mt-3 text-xs text-gray-500">
-        <span>Gap interpretation:</span>
-        <span class="ml-2"><span class="legend-swatch" style="background:#22c55e;"></span>≤ <span x-text="fmtSec(thresholds.work)"></span> = active work</span>
-        <span class="ml-2"><span class="legend-swatch" style="background:#f59e0b;"></span>≤ <span x-text="fmtSec(thresholds.idle)"></span> = idle break</span>
-        <span class="ml-2"><span class="legend-swatch" style="background:#ef4444;"></span>≤ <span x-text="fmtSec(thresholds.long)"></span> = long break</span>
-        <span class="ml-2"><span class="legend-swatch" style="background:#9ca3af;"></span>otherwise = away (excluded)</span>
+      <div class="text-xs text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
+        <span><span class="legend-swatch" style="background:#22c55e;"></span>Working ≤ <span class="font-mono font-semibold" x-text="fmtSec(thresholds.work)"></span></span>
+        <span><span class="legend-swatch" style="background:#f59e0b;"></span>Idle break ≤ <span class="font-mono font-semibold" x-text="fmtSec(thresholds.idle)"></span></span>
+        <span><span class="legend-swatch" style="background:#ef4444;"></span>Long break ≤ <span class="font-mono font-semibold" x-text="fmtSec(thresholds.long)"></span></span>
+        <span><span class="legend-swatch" style="background:#9ca3af;"></span>Away (any gap > long break, excluded from totals)</span>
       </div>
     </section>
 
@@ -165,6 +137,111 @@
               </template>
               <td class="cell-num" style="background:#f0f9ff;font-weight:600;" x-html="rowTotalDisplay(u)"></td>
             </tr>
+          </template>
+        </tbody>
+      </table>
+    </section>
+
+    {{-- Flat per-user-per-date table with inline expandable Block Log.
+         Different angle vs the matrix above: easy to scan top-to-bottom across
+         users + dates, and the block log appears in-line when you click expand. --}}
+    <section class="bg-white rounded-xl shadow p-4 overflow-x-auto">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div class="font-semibold">📋 Block Log Table <span class="text-xs text-gray-500 font-normal">(click ▶ to expand)</span></div>
+        <div class="flex items-center gap-2 text-xs text-gray-500">
+          <button @click="expandAll()" class="px-2 py-1 border rounded hover:bg-gray-50">▼ Expand all</button>
+          <button @click="collapseAll()" class="px-2 py-1 border rounded hover:bg-gray-50">▶ Collapse all</button>
+        </div>
+      </div>
+
+      <table class="matrix" style="border-collapse:separate;border-spacing:0;width:100%;">
+        <thead>
+          <tr>
+            <th style="width:30px;"></th>
+            <th class="text-left" style="min-width:130px;">Encoder</th>
+            <th class="text-left" style="min-width:90px;">Date</th>
+            <th class="text-right" style="min-width:60px;">Edits</th>
+            <th class="text-right" style="min-width:80px;">Active</th>
+            <th class="text-right" style="min-width:80px;">Idle</th>
+            <th class="text-right" style="min-width:80px;">Long break</th>
+            <th class="text-right" style="min-width:70px;">Active %</th>
+            <th class="text-left" style="min-width:120px;">First → Last</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-if="flatRows().length === 0">
+            <tr><td colspan="9" class="text-center text-gray-400 py-6">No activity in selected range.</td></tr>
+          </template>
+          <template x-for="row in flatRows()" :key="row.user + '|' + row.date">
+            <template x-if="true">
+              <tbody style="display:contents;">
+                {{-- Summary row --}}
+                <tr class="cursor-pointer hover:bg-blue-50" @click="toggleFlatRow(row.user, row.date)">
+                  <td class="text-center">
+                    <span class="text-xs text-gray-500" x-text="isFlatExpanded(row.user, row.date) ? '▼' : '▶'"></span>
+                  </td>
+                  <td class="font-semibold" x-text="row.user"></td>
+                  <td class="font-mono text-xs" x-text="row.date"></td>
+                  <td class="text-right font-mono" x-text="row.stats.count"></td>
+                  <td class="text-right font-mono metric-good" x-text="fmtDur(row.stats.active)"></td>
+                  <td class="text-right font-mono metric-warn" x-text="fmtDur(row.stats.idle)"></td>
+                  <td class="text-right font-mono metric-bad" x-text="fmtDur(row.stats.longBreak)"></td>
+                  <td class="text-right font-mono" x-text="row.stats.activePct !== null ? row.stats.activePct.toFixed(0) + '%' : '—'"></td>
+                  <td class="font-mono text-xs">
+                    <span x-text="row.stats.firstEdit"></span>
+                    <span class="text-gray-400">→</span>
+                    <span x-text="row.stats.lastEdit"></span>
+                  </td>
+                </tr>
+
+                {{-- Expanded block log (merged sessions) --}}
+                <template x-if="isFlatExpanded(row.user, row.date)">
+                  <tr>
+                    <td></td>
+                    <td colspan="8" style="padding:8px 12px;background:#fafbff;">
+                      <template x-if="mergedBlocksFor(row.user, row.date).length === 0">
+                        <div class="text-xs text-gray-400 italic py-2">Only 1 edit on this day — no blocks.</div>
+                      </template>
+                      <template x-if="mergedBlocksFor(row.user, row.date).length > 0">
+                        <table class="w-full text-xs">
+                          <thead class="bg-gray-100">
+                            <tr>
+                              <th class="px-2 py-1 text-left" style="width:30px;">#</th>
+                              <th class="px-2 py-1 text-left">Time range</th>
+                              <th class="px-2 py-1 text-left">Status</th>
+                              <th class="px-2 py-1 text-right">Duration</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <template x-for="(b, i) in mergedBlocksFor(row.user, row.date)" :key="i + '|' + b.from">
+                              <tr :class="i % 2 === 0 ? 'bg-white' : 'bg-gray-50'">
+                                <td class="px-2 py-1 text-gray-400" x-text="(i + 1)"></td>
+                                <td class="px-2 py-1 font-mono">
+                                  <span x-text="fmtTime(b.from)"></span>
+                                  <span class="text-gray-400">→</span>
+                                  <span x-text="fmtTime(b.to)"></span>
+                                </td>
+                                <td class="px-2 py-1">
+                                  <span class="inline-block px-1.5 py-0.5 rounded text-white font-semibold"
+                                        :style="'background:' + bucketColor(b.bucket) + ';'"
+                                        x-text="bucketLabel(b.bucket)"></span>
+                                </td>
+                                <td class="px-2 py-1 text-right font-mono">
+                                  <span x-text="fmtDur(b.to - b.from)"></span>
+                                  <template x-if="b.bucket === 'active' && b.count > 1">
+                                    <span class="text-gray-400 ml-1" x-text="'(' + b.count + ' edits)'"></span>
+                                  </template>
+                                </td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </template>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </template>
           </template>
         </tbody>
       </table>
@@ -311,6 +388,9 @@
     const _USERS        = @json($users);
     const _START        = @json($start);
     const _END          = @json($end);
+    // Thresholds are GLOBAL (saved in app_settings via /encoder/checker_1/idle-thresholds).
+    // They no longer change client-side — page reloads after admin saves new values.
+    const _THRESHOLDS   = @json($thresholds);
 
     function idleSummaryUI() {
       return {
@@ -321,17 +401,12 @@
         startDate:  _START,
         endDate:    _END,
 
-        // Threshold sliders (seconds). Defaults match what the team agreed on.
-        thresholds: {
-          work: 300,    // ≤ 5 min after last edit = still working/searching
-          idle: 1800,   // ≤ 30 min = idle break (bathroom, food, phone)
-          long: 7200,   // ≤ 2 hrs  = long break (lunch, smoking)
-                        // > long = away (excluded from presence/active totals)
-        },
-        defaults: { work: 300, idle: 1800, long: 7200 },
+        // Thresholds loaded from server (managed at /encoder/checker_1/idle-thresholds).
+        // Static during the page lifetime — admin edits in the separate route, refresh applies.
+        thresholds: _THRESHOLDS,
         displayMetric: 'active_pct',
 
-        // Drilldown state
+        // Drilldown state (cell-click panel below matrix)
         drill: {
           open: false, user: '', date: '',
           stats: { count:0, active:0, idle:0, longBreak:0, away:0, activePct:null, prod:null, firstEdit:'', lastEdit:'', blocks:[] },
@@ -341,12 +416,11 @@
           logHideAway:   false,
         },
 
+        // Block Log Table inline-expand state. Keyed by `${user}|${date}`.
+        flatExpanded: {},
+
         init(){
           // Stays empty — server data already loaded inline.
-        },
-
-        resetThresholds(){
-          this.thresholds = { ...this.defaults };
         },
 
         // ── Core classification ──
@@ -526,6 +600,53 @@
             });
           }
           return out;
+        },
+
+        // ── Block Log Table (flat list w/ inline expand) ──
+        // Builds a flat array of (user, date, stats) for every cell with edits.
+        // Excludes empty cells so the table only shows real activity.
+        flatRows(){
+          const out = [];
+          for (const u of this.users) {
+            for (const d of this.dates) {
+              const s = this.statsFor(u, d);
+              if (!s) continue;
+              out.push({ user: u, date: d, stats: s });
+            }
+          }
+          return out;
+        },
+        flatKey(user, date){ return user + '|' + date; },
+        isFlatExpanded(user, date){ return !!this.flatExpanded[this.flatKey(user, date)]; },
+        toggleFlatRow(user, date){
+          const k = this.flatKey(user, date);
+          if (this.flatExpanded[k]) delete this.flatExpanded[k];
+          else                       this.flatExpanded[k] = true;
+        },
+        expandAll(){
+          const next = {};
+          for (const r of this.flatRows()) next[this.flatKey(r.user, r.date)] = true;
+          this.flatExpanded = next;
+        },
+        collapseAll(){ this.flatExpanded = {}; },
+
+        // Returns merged consecutive same-bucket blocks for (user, date).
+        // Same logic as filteredBlockLog but without the filter checkboxes
+        // (those are drilldown-only, this table shows all blocks).
+        mergedBlocksFor(user, date){
+          const s = this.statsFor(user, date);
+          if (!s || !s.blocks || s.blocks.length === 0) return [];
+          const merged = [];
+          for (const b of s.blocks) {
+            const last = merged[merged.length - 1];
+            if (last && last.bucket === b.bucket && last.to === b.from) {
+              last.to    = b.to;
+              last.count = (last.count || 1) + 1;
+            } else {
+              merged.push({ from: b.from, to: b.to, bucket: b.bucket, count: 1 });
+            }
+          }
+          return merged;
         },
 
         // ── Block log helpers (chronological ON/OFF table) ──

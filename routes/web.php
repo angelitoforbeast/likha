@@ -540,6 +540,10 @@ Route::get('/encoder/checker_1/summary', [Checker1SummaryController::class, 'ind
      ->name('encoder.checker1.summary');
 Route::get('/encoder/checker_1/idle-summary', [App\Http\Controllers\Encoder\Checker1IdleSummaryController::class, 'index'])
      ->name('encoder.checker1.idle-summary');
+Route::get('/encoder/checker_1/idle-thresholds', [App\Http\Controllers\Encoder\Checker1IdleThresholdsController::class, 'index'])
+     ->name('encoder.checker1.idle-thresholds');
+Route::post('/encoder/checker_1/idle-thresholds', [App\Http\Controllers\Encoder\Checker1IdleThresholdsController::class, 'update'])
+     ->name('encoder.checker1.idle-thresholds.update');
 Route::get('/encoder/summary', [App\Http\Controllers\MacroOutputController::class, 'summary'])->name('macro_output.summary');
     Route::get('/encoder/checker_1', [MacroOutputController::class, 'index'])->name('macro_output.index');
 Route::post('/encoder/checker_1/update', [MacroOutputController::class, 'bulkUpdate'])->name('macro_output.bulk_update');
