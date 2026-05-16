@@ -1235,7 +1235,10 @@
         const hiddenSet = new Set(Array.isArray(serverCfg.hidden) ? serverCfg.hidden : []);
         // CEO viewing as Marketing: force-hide the CEO-only column regardless of
         // user prefs (mirrors what Marketing actually sees on their account).
-        if (!this.effectiveIsCeo) hiddenSet.add('item_val_ceo');
+        // Explicit check (not via getter) to avoid any Alpine reactivity timing
+        // issues during initCols which runs before any user interaction.
+        const isEffectivelyCeo = this.isCeoView && this.viewAs === 'ceo';
+        if (!isEffectivelyCeo) hiddenSet.add('item_val_ceo');
 
         let orderedIds;
         if (Array.isArray(serverCfg.order) && serverCfg.order.length) {
