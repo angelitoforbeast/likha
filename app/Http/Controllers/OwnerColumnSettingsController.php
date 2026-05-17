@@ -72,6 +72,7 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'breakeven_cpp', 'label' => 'Breakeven CPP'],
             ['id' => 'proj_profit',   'label' => 'Prof.Profit'],
             ['id' => 'per_order',     'label' => '/Order'],
+            ['id' => 'np_per_order',  'label' => 'NP/O (Net Profit per Order, 1D)'],
             ['id' => 'proj_pct',      'label' => 'Prof.%(1M)'],
             ['id' => 'proj_pct_1d',   'label' => 'Prof.%(1D)'],
             ['id' => 'proj_pct_3d',   'label' => 'Prof.%(3D)'],
@@ -139,6 +140,7 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'proj_cogs',       'label' => 'Proj. COGS'],
             ['id' => 'proj_net_profit', 'label' => 'Proj. Net Profit'],
             ['id' => 'proj_net_pct',    'label' => 'Proj. Net %'],
+            ['id' => 'np_per_order',    'label' => 'NP/O (Proj. Net Profit ÷ Orders)'],
         ],
     ];
 
@@ -154,7 +156,7 @@ class OwnerColumnSettingsController extends Controller
             // Everything is visible by default — admins shrink as needed.
             'adspent', 'orders', 'orders_1d', 'cpp', 'proceed', 'pcpp',
             'tcpr', 'breakeven_cpp',
-            'proj_profit', 'per_order', 'proj_pct',
+            'proj_profit', 'per_order', 'np_per_order', 'proj_pct',
             'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d',
             'proj_prof_1d', 'proj_prof_3d', 'proj_prof_7d',
             'jnt_rts', 'jnt_del', 'jnt_transit',
@@ -177,7 +179,7 @@ class OwnerColumnSettingsController extends Controller
             'shipped', 'delivered', 'in_transit', 'rts',
             'cpp', 'proceed_cpp', 'cpm', 'tcpr_pct',
             'proj_gross', 'proj_shipping', 'proj_cogs',
-            'proj_net_profit', 'proj_net_pct',
+            'proj_net_profit', 'proj_net_pct', 'np_per_order',
         ],
     ];
 

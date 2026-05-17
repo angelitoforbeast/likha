@@ -148,9 +148,22 @@
 
         <tbody id="sheetRows">
           @foreach ($settings as $i => $setting)
-            <tr data-setting-id="{{ $setting->id }}">
+            {{-- Archived sheets stay visible so admin sees they exist, but
+                 won't be picked up by the import job (filtered in import()).
+                 Manage at /macro/gsheet/settings. --}}
+            <tr data-setting-id="{{ $setting->id }}"
+                class="{{ ($setting->is_archived ?? false) ? 'bg-gray-100 text-gray-500' : '' }}">
               <td class="border px-3 py-2">{{ $i + 1 }}</td>
-              <td class="border px-3 py-2 titleCell">{{ $setting->gsheet_name ?? 'N/A' }}</td>
+              <td class="border px-3 py-2 titleCell">
+                {{ $setting->gsheet_name ?? 'N/A' }}
+                @if($setting->is_archived ?? false)
+                  <span class="ml-2 inline-block px-1.5 py-0.5 text-[10px] font-bold uppercase
+                               bg-amber-200 text-amber-900 border border-amber-300 rounded"
+                        title="This sheet is archived — skipped on import. Unarchive at /macro/gsheet/settings.">
+                    📦 Archived
+                  </span>
+                @endif
+              </td>
               <td class="border px-3 py-2">
                 <a href="{{ $setting->sheet_url }}" target="_blank" class="text-blue-600 underline">Open</a>
               </td>
@@ -163,7 +176,13 @@
               </td>
 
               <td class="border px-3 py-2 statusCell">
-                <span class="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700">Idle</span>
+                @if($setting->is_archived ?? false)
+                  {{-- Archived sheets never enter the import job, so Status
+                       stays "Archived" instead of "Idle". --}}
+                  <span class="px-2 py-1 rounded text-xs bg-amber-100 text-amber-800 font-semibold">Archived</span>
+                @else
+                  <span class="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700">Idle</span>
+                @endif
               </td>
               <td class="border px-3 py-2 text-right processedCell">0</td>
               <td class="border px-3 py-2 text-right insertedCell">0</td>

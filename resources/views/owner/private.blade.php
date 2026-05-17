@@ -633,6 +633,22 @@
                     <span style="color:#111;" x-text="md(row.proj_profit_per_order)"></span>
                   </template>
 
+                  {{-- NP/O = projected_profit_last_day ÷ orders_last_day. Single-day
+                       net-profit-per-order snapshot using end_date metrics. Null when
+                       either side missing (no slice on end_date, or missing RTS/cogs). --}}
+                  <template x-if="col.id==='np_per_order'">
+                    @php /* npo computed inline below */ @endphp
+                    <template x-if="row.projected_profit_last_day !== null && row.orders_last_day > 0">
+                      <span style="color:#111;font-weight:600;"
+                            :style="'color:'+pbColor(row.projected_profit_last_day / row.orders_last_day)"
+                            x-text="md(row.projected_profit_last_day / row.orders_last_day)"
+                            :title="'1D net profit ₱'+Number(row.projected_profit_last_day||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(row.orders_last_day||0)+' (end_date only)'"></span>
+                    </template>
+                    <template x-if="!(row.projected_profit_last_day !== null && row.orders_last_day > 0)">
+                      <span style="color:#cbd5e1;" title="Missing 1D profit or orders for end_date">—</span>
+                    </template>
+                  </template>
+
                   <!-- proj_pct = projected_profit ÷ gross_sales × 100 (net margin) -->
                   <template x-if="col.id==='proj_pct'">
                     <span>
@@ -934,6 +950,10 @@
                   <template x-if="col.id==='per_order'">
                     <span style="color:#111;" x-text="md(tot().proj_profit_per_order)"></span>
                   </template>
+                  <template x-if="col.id==='np_per_order'">
+                    <span style="color:#111;font-weight:700;" x-text="tot().np_per_order != null ? md(tot().np_per_order) : '—'"
+                          :title="tot().projected_profit_last_day != null ? '1D net profit ₱'+Number(tot().projected_profit_last_day||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(tot().orders_last_day||0) : ''"></span>
+                  </template>
                   <template x-if="col.id==='proj_pct'">
                     <span style="font-weight:700;color:#111;"
                           x-text="tot().proj_pct!=null ? tot().proj_pct.toFixed(1)+'%' : '—'"
@@ -1205,6 +1225,7 @@
           { id:'breakeven_cpp', label:this._breakevenLabel(), sort:'breakeven_cpp_computed', align:'center', minw:115 },
           { id:'proj_profit',label:'Prof.Profit',sort:'projected_profit',     align:'center', minw:95  },
           { id:'per_order',  label:'/Order',     sort:'proj_profit_per_order',align:'center', minw:75  },
+          { id:'np_per_order', label:'NP/O',     sort:'np_per_order_computed', align:'center', minw:75  },
           { id:'proj_pct',     label:'Prof.%(1M)',     sort:'proj_pct_computed',           align:'center', minw:75  },
           { id:'proj_pct_1d',  label:'Prof.%(1D)',     sort:'proj_pct_last_day',           align:'center', minw:75  },
           { id:'proj_pct_3d',  label:'Prof.%(3D)',     sort:'proj_pct_last_3d',            align:'center', minw:75  },
@@ -1412,6 +1433,13 @@
           // existing null handling sa sort below).
           if (col === 'tcpr_computed')          return self.tcprFor(row);
           if (col === 'breakeven_cpp_computed') return self.breakevenCppFor(row);
+          // NP/O = projected_profit_last_day ÷ orders_last_day (1D snapshot).
+          if (col === 'np_per_order_computed') {
+            if (row.projected_profit_last_day !== null && row.orders_last_day > 0) {
+              return row.projected_profit_last_day / row.orders_last_day;
+            }
+            return null;
+          }
           return row[col];
         };
 
@@ -1610,6 +1638,10 @@
                                     ? (t.projected_profit_last_3d/t.gross_sales_last_3d*100) : null;
         t.proj_pct_7d          = (t.projected_profit_last_7d!=null && t.gross_sales_last_7d>0)
                                     ? (t.projected_profit_last_7d/t.gross_sales_last_7d*100) : null;
+        // NP/O total = 1D projected net profit ÷ 1D orders across all rows.
+        // Sum-of-ratios would skew small-orders rows; ratio-of-sums is correct.
+        t.np_per_order        = (t.projected_profit_last_day != null && t.orders_last_day > 0)
+                                    ? (t.projected_profit_last_day / t.orders_last_day) : null;
         return t;
       },
 
@@ -1738,6 +1770,8 @@
           case 'cpp':           return row.cpp;
           case 'pcpp':          return row.proceed_cpp;
           case 'per_order':     return row.proj_profit_per_order;
+          case 'np_per_order':  return (row.projected_profit_last_day != null && row.orders_last_day > 0)
+                                   ? (row.projected_profit_last_day / row.orders_last_day) : null;
           case 'adspent':       return row.adspent;
           case 'orders':        return row.orders;
           case 'orders_1d':     return row.orders_last_day;

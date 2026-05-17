@@ -31,7 +31,9 @@ class MacroGsheetController extends Controller
                 return back()->with('error', "May running import pa (Run #{$running->id}). Hintayin muna matapos.");
             }
 
-            $settings = MacroGsheetSetting::all();
+            // Skip archived settings — they stay configured but won't be imported.
+            // Manage at /macro/gsheet/settings to archive/unarchive.
+            $settings = MacroGsheetSetting::where('is_archived', false)->get();
 
             $run = MacroImportRun::create([
                 'started_by'        => auth()->id(),
@@ -177,10 +179,31 @@ class MacroGsheetController extends Controller
         return back()->with('success', 'Setting updated and name synced from GSheet.');
     }
 
-    public function settings()
+    public function settings(Request $request)
     {
-        $settings = MacroGsheetSetting::all();
-        return view('macro.gsheet.settings', compact('settings'));
+        // Default: hide archived (cleaner view). Toggle via ?show_archived=1.
+        $showArchived = $request->boolean('show_archived');
+        $settings = MacroGsheetSetting::query()
+            ->when(!$showArchived, fn ($q) => $q->where('is_archived', false))
+            ->orderBy('is_archived')
+            ->orderBy('id')
+            ->get();
+        $archivedCount = MacroGsheetSetting::where('is_archived', true)->count();
+        return view('macro.gsheet.settings', compact('settings', 'showArchived', 'archivedCount'));
+    }
+
+    public function archive($id)
+    {
+        $setting = MacroGsheetSetting::findOrFail($id);
+        $setting->update(['is_archived' => true]);
+        return back()->with('success', '📦 Sheet archived — will be skipped on import.');
+    }
+
+    public function unarchive($id)
+    {
+        $setting = MacroGsheetSetting::findOrFail($id);
+        $setting->update(['is_archived' => false]);
+        return back()->with('success', '↩️ Sheet unarchived — will be included on next import.');
     }
 
     public function storeSetting(Request $request)

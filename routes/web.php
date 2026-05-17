@@ -709,6 +709,8 @@ Route::put('/macro/settings/{id}', [MacroGsheetController::class, 'update'])->na
 Route::get('/macro/gsheet/settings', [MacroGsheetController::class, 'settings'])->name('macro.settings');
 Route::post('/macro/gsheet/settings', [MacroGsheetController::class, 'storeSetting'])->name('macro.settings.store');
 Route::delete('/macro/gsheet/settings/{id}', [MacroGsheetController::class, 'deleteSetting'])->name('macro.settings.delete');
+Route::post('/macro/gsheet/settings/{id}/archive', [MacroGsheetController::class, 'archive'])->name('macro.settings.archive');
+Route::post('/macro/gsheet/settings/{id}/unarchive', [MacroGsheetController::class, 'unarchive'])->name('macro.settings.unarchive');
 // ✅ IMPORT UI (GET)
 Route::get('/macro/gsheet/import', [MacroGsheetController::class, 'showImport'])
     ->name('macro.import.view');

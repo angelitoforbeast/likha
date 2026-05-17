@@ -10,5 +10,10 @@ class MacroGsheetSetting extends Model
         'gsheet_name',
         'sheet_url',
         'sheet_range',
+        'is_archived',
+    ];
+
+    protected $casts = [
+        'is_archived' => 'boolean',
     ];
 }

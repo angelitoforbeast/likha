@@ -319,6 +319,21 @@
             cell:(r,h)=>r.proj_net_pct==null?'—':'<span class="'+(r.proj_net_pct>=0?'pos':'neg')+'">'+h.pct(r.proj_net_pct)+'</span>',
             total:(t,h)=>t.proj_net_pct==null?'—':'<span class="'+(t.proj_net_pct>=0?'pos':'neg')+'">'+h.pct(t.proj_net_pct)+'</span>',
             raw:(r)=>r.proj_net_pct },
+          // NP/O = projected net profit ÷ orders. Per-day on the row level,
+          // ratio-of-sums on the total row (matches how other per-X metrics aggregate).
+          { id:'np_per_order',    label:'NP/O',           align:'num',
+            cell:(r,h) => {
+              const v = (r.orders > 0 && r.proj_net_profit != null) ? (r.proj_net_profit / r.orders) : null;
+              if (v == null) return '—';
+              return '<span class="'+(v>=0?'pos':'neg')+'">'+h.peso(v)+'</span>';
+            },
+            total:(t,h) => {
+              const v = (t.orders > 0 && t.proj_net_profit != null) ? (t.proj_net_profit / t.orders) : null;
+              if (v == null) return '—';
+              return '<span class="'+(v>=0?'pos':'neg')+'">'+h.peso(v)+'</span>';
+            },
+            raw:(r) => (r.orders > 0 && r.proj_net_profit != null) ? (r.proj_net_profit / r.orders) : null,
+          },
         ],
 
         // Visibility + ordering from /owner/column-settings
