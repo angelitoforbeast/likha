@@ -2069,7 +2069,9 @@ class OwnerPrivateController extends Controller
             'rts_pct'        => 'required|numeric|min:0|max:100',
             'effective_date' => 'required|date',
             'apply_through'        => 'nullable|date',
-            'comment'              => 'nullable|string|max:500',
+            // Comment is REQUIRED — every RTS/COGS edit must have an audit reason.
+            // (Was nullable before; tightened so changes are always justified.)
+            'comment'              => 'required|string|min:1|max:500',
             'item_value_comment'   => 'nullable|string|max:500',
         ]);
 

@@ -490,7 +490,7 @@
           @endif
 
           <div>
-            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">RTS Comment (optional)</label>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">RTS Comment <span class="text-red-600">*</span> <span class="text-slate-400 font-normal normal-case">(required)</span></label>
             <input type="text" x-model="edit.comment" maxlength="500"
                    class="w-full border border-slate-300 rounded px-3 py-2 text-sm"
                    placeholder="why is this value different?">
@@ -668,6 +668,12 @@
         if (isNaN(cost) || cost < 0) {
           this.edit.error = 'Unit cost must be ≥ 0.'; this.edit.saving = false; return;
         }
+        // RTS Comment is required — every edit must have an audit reason.
+        const cmt = (this.edit.comment || '').trim();
+        if (!cmt) {
+          this.edit.error = 'RTS Comment is required — please explain the change.';
+          this.edit.saving = false; return;
+        }
         try {
           const fd = new FormData();
           fd.append('page_name',      this.edit.page_label);
@@ -681,7 +687,8 @@
           if (overrideEffectiveDate && overrideEffectiveDate !== this.edit.date) {
             fd.append('apply_through', this.edit.date);
           }
-          if (this.edit.comment) fd.append('comment', this.edit.comment);
+          // Comment is required (validated above) — always send the trimmed value.
+          fd.append('comment', cmt);
           // CEO-only: include CEO's separate unit cost — server saves it sa
           // cogs_ceo table independently from cogs. Server validates role.
           if (this.isCeoView && this.edit.unit_cost_ceo !== '' && this.edit.unit_cost_ceo !== null) {

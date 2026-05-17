@@ -1045,7 +1045,7 @@
         </template>
 
         <div class="ow-modal-section">
-          <label>RTS Comment <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(optional)</span></label>
+          <label>RTS Comment <span style="color:#dc2626;">*</span> <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(required)</span></label>
           <input type="text" x-model="edit.comment" maxlength="500" placeholder="why is this value different?">
         </div>
 
@@ -1476,6 +1476,12 @@
         if (isNaN(cost) || cost < 0) {
           this.edit.error = 'Unit cost must be ≥ 0.'; this.edit.saving = false; return;
         }
+        // RTS Comment is required — every edit must have an audit reason.
+        const cmt = (this.edit.comment || '').trim();
+        if (!cmt) {
+          this.edit.error = 'RTS Comment is required — please explain the change.';
+          this.edit.saving = false; return;
+        }
         try {
           const fd = new FormData();
           fd.append('page_name',      this.edit.page_name);
@@ -1489,7 +1495,8 @@
           if (overrideEffectiveDate && overrideEffectiveDate !== this.edit.date) {
             fd.append('apply_through', this.edit.date);
           }
-          if (this.edit.comment) fd.append('comment', this.edit.comment);
+          // Comment is required (validated above) — always send the trimmed value.
+          fd.append('comment', cmt);
           // CEO-only: send item_value_ceo when set. Server gates by role.
           if (this.edit.isCeoView && this.edit.unit_cost_ceo !== '' && this.edit.unit_cost_ceo !== null) {
             const costCeo = parseFloat(this.edit.unit_cost_ceo);
