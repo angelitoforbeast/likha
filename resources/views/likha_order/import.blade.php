@@ -224,8 +224,12 @@
                 tr.querySelector('.titleCell').textContent = item.spreadsheet_title;
             }
 
-            // ✅ update last imported real-time when done
-            if (item.status === 'done' && item.finished_at) {
+            // ✅ update last imported real-time when done — BUT only if the
+            // run actually processed data. Done-with-zero-processed runs no
+            // longer refresh the cell (matches the server-side filter in
+            // LikhaOrderImportController::index() which only counts processed
+            // > 0 runs as "last imported").
+            if (item.status === 'done' && item.finished_at && (item.processed ?? 0) > 0) {
                 tr.querySelector('.lastImportedCell').textContent = item.finished_at;
             }
         }
