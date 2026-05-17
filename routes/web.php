@@ -659,6 +659,10 @@ Route::get('/likha_order_import/settings', [LikhaOrderSettingController::class, 
 Route::post('/likha_order_import/settings', [LikhaOrderSettingController::class, 'store']);
 Route::put('/likha_order_import/settings/{id}', [LikhaOrderSettingController::class, 'update']);
 Route::delete('/likha_order_import/settings/{id}', [LikhaOrderSettingController::class, 'destroy']);
+Route::post('/likha_order_import/settings/{id}/archive', [LikhaOrderSettingController::class, 'archive'])
+     ->name('likha_order.settings.archive');
+Route::post('/likha_order_import/settings/{id}/unarchive', [LikhaOrderSettingController::class, 'unarchive'])
+     ->name('likha_order.settings.unarchive');
 
 // Existing view page mo (keep)
 Route::match(['get','delete'], '/likha_order/view', [LikhaOrderImportController::class, 'view']);

@@ -89,13 +89,30 @@
 
                             <td class="border px-3 py-2 rangeCell">{{ $s->range }}</td>
 
-                            {{-- ✅ last imported from DB (won’t disappear on refresh) --}}
+                            {{-- ✅ last imported from DB (won't disappear on refresh).
+                                 Now reflects last run that actually processed data
+                                 (processed_count > 0), not just last attempt. --}}
                             <td class="border px-3 py-2 lastImportedCell text-xs text-gray-700">
-                                @php $ts = $lastImportedMap[$s->id] ?? null; @endphp
+                                @php
+                                    $ts = $lastImportedMap[$s->id] ?? null;
+                                    $daysSince = $ts ? \Carbon\Carbon::parse($ts)->diffInDays(now()) : null;
+                                @endphp
                                 @if($ts)
                                     {{ \Carbon\Carbon::parse($ts)->toDateTimeString() }}
+                                    @if($daysSince >= 14)
+                                        {{-- Stale: no actual data in 14+ days. Candidate for archive. --}}
+                                        <div class="mt-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase
+                                                    bg-amber-100 text-amber-800 border border-amber-300"
+                                             title="No new data processed in {{ $daysSince }} days — consider archiving">
+                                            ⚠ Stale {{ $daysSince }}d
+                                        </div>
+                                    @endif
                                 @else
-                                    -
+                                    <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold uppercase
+                                                 bg-gray-200 text-gray-600 border border-gray-300"
+                                          title="No import run has ever processed data from this sheet">
+                                        🚫 Never
+                                    </span>
                                 @endif
                             </td>
 

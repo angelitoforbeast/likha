@@ -9,10 +9,32 @@ use Google_Service_Sheets;
 
 class LikhaOrderSettingController extends Controller
 {
-    public function settings()
+    public function settings(Request $request)
     {
-        $settings = LikhaOrderSetting::orderBy('id')->get();
-        return view('likha_order.import_settings', compact('settings'));
+        // Default: hide archived (cleaner view). User can toggle via ?show_archived=1.
+        $showArchived = $request->boolean('show_archived');
+        $settings = LikhaOrderSetting::query()
+            ->when(!$showArchived, fn ($q) => $q->where('is_archived', false))
+            // Archived rows sort to the bottom when shown.
+            ->orderBy('is_archived')
+            ->orderBy('id')
+            ->get();
+        $archivedCount = LikhaOrderSetting::where('is_archived', true)->count();
+        return view('likha_order.import_settings', compact('settings', 'showArchived', 'archivedCount'));
+    }
+
+    public function archive($id)
+    {
+        $setting = LikhaOrderSetting::findOrFail($id);
+        $setting->update(['is_archived' => true]);
+        return redirect()->back()->with('status', '📦 Sheet archived — will be skipped on import.');
+    }
+
+    public function unarchive($id)
+    {
+        $setting = LikhaOrderSetting::findOrFail($id);
+        $setting->update(['is_archived' => false]);
+        return redirect()->back()->with('status', '↩️ Sheet unarchived — will be included on next import.');
     }
 
     public function store(Request $request)

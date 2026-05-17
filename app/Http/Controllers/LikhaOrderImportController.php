@@ -23,10 +23,14 @@ class LikhaOrderImportController extends Controller
             ->orderByDesc('finished_at')
             ->first();
 
-        // ✅ Per setting: last successful finished_at (map by setting_id)
+        // ✅ Per setting: last finished_at where the run ACTUALLY processed data
+        // (processed_count > 0). Runs that completed but skipped every row
+        // (e.g., dupes only) no longer refresh the timestamp — gives a true
+        // "last time this sheet brought in new data" signal for stale detection.
         $lastImportedMap = LikhaImportRunSheet::query()
             ->where('status', 'done')
             ->whereNotNull('finished_at')
+            ->where('processed_count', '>', 0)
             ->select('setting_id', DB::raw('MAX(finished_at) as last_success_at'))
             ->groupBy('setting_id')
             ->pluck('last_success_at', 'setting_id')
@@ -43,7 +47,10 @@ class LikhaOrderImportController extends Controller
     // AJAX start import
     public function start(Request $request)
     {
-        $settings = LikhaOrderSetting::orderBy('id')->get();
+        // Skip archived settings — they're kept around for reference but no
+        // longer need to be imported. Unarchive sa /likha_order_import/settings
+        // to bring them back into the import job.
+        $settings = LikhaOrderSetting::where('is_archived', false)->orderBy('id')->get();
 
         $run = LikhaImportRun::create([
             'status' => 'running',
