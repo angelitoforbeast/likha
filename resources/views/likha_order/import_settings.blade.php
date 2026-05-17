@@ -84,7 +84,10 @@
                     <button class="text-green-700 hover:underline" title="Bring back into import job">↩️ Unarchive</button>
                   </form>
                 @else
-                  {{-- Active → Archive (soft-skip from imports) or Delete. --}}
+                  {{-- Active → Archive (soft-skip from imports). Delete button
+                       intentionally removed — use Archive instead to retire a
+                       sheet without losing its config. Route still exists for
+                       manual CLI use if a permanent purge is truly needed. --}}
                   <form method="POST" action="/likha_order_import/settings/{{ $s->id }}/archive"
                         onsubmit="return confirm('Archive this sheet? It will stay visible but won\'t be imported until unarchived.')"
                         class="inline">
@@ -92,11 +95,6 @@
                     <button class="text-amber-700 hover:underline" title="Skip from import job — keep config for later">📦 Archive</button>
                   </form>
                 @endif
-                <form method="POST" action="/likha_order_import/settings/{{ $s->id }}" onsubmit="return confirm('Delete permanently?')" class="inline">
-                  @csrf
-                  @method('DELETE')
-                  <button class="text-red-600 hover:underline">Delete</button>
-                </form>
               </td>
             </tr>
           @endforeach

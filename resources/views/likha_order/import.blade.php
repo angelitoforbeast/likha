@@ -73,9 +73,22 @@
 
                 <tbody>
                     @foreach($settings as $index => $s)
-                        <tr data-setting-id="{{ $s->id }}">
+                        {{-- Archived rows greyed out — they stay visible so admin
+                             knows they exist, but won't be picked up by the import
+                             job (filtered in start()). Manage at /likha_order_import/settings. --}}
+                        <tr data-setting-id="{{ $s->id }}"
+                            class="{{ ($s->is_archived ?? false) ? 'bg-gray-100 text-gray-500' : '' }}">
                             <td class="border px-3 py-2">{{ $index + 1 }}</td>
-                            <td class="border px-3 py-2 titleCell">{{ $s->spreadsheet_title ?? '-' }}</td>
+                            <td class="border px-3 py-2 titleCell">
+                                {{ $s->spreadsheet_title ?? '-' }}
+                                @if($s->is_archived ?? false)
+                                    <span class="ml-2 inline-block px-1.5 py-0.5 text-[10px] font-bold uppercase
+                                                 bg-amber-200 text-amber-900 border border-amber-300 rounded"
+                                          title="This sheet is archived — skipped on import. Unarchive at /likha_order_import/settings.">
+                                        📦 Archived
+                                    </span>
+                                @endif
+                            </td>
 
                             <td class="border px-3 py-2 urlCell">
                                 @if($s->sheet_url)
@@ -117,7 +130,13 @@
                             </td>
 
                             <td class="border px-3 py-2 statusCell">
-                                <span class="px-2 py-1 rounded bg-gray-100 text-gray-700">Idle</span>
+                                @if($s->is_archived ?? false)
+                                    {{-- Archived sheets never enter the import job, so their
+                                         Status stays "Archived" instead of "Idle". --}}
+                                    <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 font-semibold">Archived</span>
+                                @else
+                                    <span class="px-2 py-1 rounded bg-gray-100 text-gray-700">Idle</span>
+                                @endif
                             </td>
                             <td class="border px-3 py-2 processedCell">0</td>
                             <td class="border px-3 py-2 insertedCell">0</td>
