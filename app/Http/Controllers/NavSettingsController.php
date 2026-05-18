@@ -68,20 +68,27 @@ class NavSettingsController extends Controller
         $this->checkAccess();
 
         $validated = $request->validate([
-            // visibility[link_id][role] = '1'|'0' (checkbox)
-            'visibility' => 'required|array',
+            // visibility[link_id][role] = '1' (checkbox). Unchecked checkboxes
+            // are NOT submitted by HTML — so the link_id may be missing entirely
+            // from this array when all its checkboxes are off. We compensate by
+            // iterating ALL known nav_links below.
+            'visibility' => 'nullable|array',
             // sort_order[link_id] = integer (from drag-reorder or manual input)
             'sort_order' => 'nullable|array',
             'sort_order.*' => 'nullable|integer|min:0|max:9999',
         ]);
 
-        $visibilityPayload = $validated['visibility'];
+        $visibilityPayload = $validated['visibility'] ?? [];
         $sortPayload       = $validated['sort_order'] ?? [];
         $now = now();
 
         DB::transaction(function () use ($visibilityPayload, $sortPayload, $now) {
-            // Upsert visibility per (link, role). Missing entries treated as false.
-            foreach (array_keys($visibilityPayload) as $linkId) {
+            // Iterate ALL nav_links — para mag-save din yung "all-unchecked" rows.
+            // If the row's id isn't sa $visibilityPayload, we treat it as
+            // "everything false" (which is the correct intent: user unchecked all
+            // boxes for that row).
+            $allLinkIds = NavLink::pluck('id');
+            foreach ($allLinkIds as $linkId) {
                 $perRole = (array) ($visibilityPayload[$linkId] ?? []);
                 foreach (self::ROLES as $role) {
                     $isVisible = !empty($perRole[$role]);

@@ -112,9 +112,11 @@
       boxes.forEach(b => { b.checked = anyUnchecked; });
     }
 
-    // Re-write sort_order inputs in DOM order — call after any drag or number-input change.
-    // Uses gap-10 numbering (10, 20, 30...) so user can insert "in between" by typing e.g. 15.
-    function syncOrderFromDom() {
+    // Renumber rows in DOM order using gap-10 spacing (10, 20, 30...).
+    // ONLY called after drag-reorder — drag has no specific numeric target,
+    // so we assign clean gaps. Number input does NOT call this (keeps user's
+    // typed values exactly as entered, only re-sorting the DOM).
+    function renumberAfterDrag() {
       const rows = document.querySelectorAll('#navRowsBody tr');
       rows.forEach((row, i) => {
         const input = row.querySelector('.order-input');
@@ -122,28 +124,48 @@
       });
     }
 
-    // Triggered when user types a number — re-sort rows in DOM, then renumber.
-    // Tie-break rule: the JUST-CHANGED row WINS the tie (placed BEFORE any other
-    // row with the same value). User intent: typing "2" on a row na originally 31
-    // means "this row IS the new rank 2; push the old rank 2 down to rank 3".
+    // Triggered when user types a number — re-sort rows in DOM by typed value,
+    // KEEPING the user's exact values. No renumber (no times-10 surprise).
+    // Tie-break: just-changed row WINS (placed BEFORE any other row with the
+    // same value). User intent: typing "37" on a row na originally 39 means
+    // "this row IS rank 37"; if another row already has 37, push it down by 1.
     function reorderByInput(changedInput) {
       const changedRow = changedInput ? changedInput.closest('tr') : null;
+      const changedVal = changedInput ? Number(changedInput.value) : null;
+
+      // Bump other rows with the same value by +1 so the changed row "claims" its slot
+      // cleanly and the displaced row doesn't disappear into ambiguous tie ordering.
+      // E.g., row A typed=37, row B already=37 → row B becomes 38, row C 38→39, etc.
+      // Only bumps the contiguous chain that's at the exact tied value.
+      if (changedRow && Number.isFinite(changedVal)) {
+        const rowsAll = Array.from(document.querySelectorAll('#navRowsBody tr .order-input'));
+        let cascadeAt = changedVal;
+        rowsAll.forEach(inp => {
+          if (inp === changedInput) return;
+          if (Number(inp.value) === cascadeAt) {
+            inp.value = cascadeAt + 1;
+            cascadeAt = cascadeAt + 1; // next collision target
+          }
+        });
+      }
+
+      // Re-sort DOM by current values.
       const rows = Array.from(document.querySelectorAll('#navRowsBody tr'));
       rows.sort((a, b) => {
         const av = Number(a.querySelector('.order-input')?.value ?? 0);
         const bv = Number(b.querySelector('.order-input')?.value ?? 0);
         if (av !== bv) return av - bv;
-        // Tie → changed row goes first
         if (changedRow === a) return -1;
         if (changedRow === b) return  1;
-        return 0; // both untouched — keep DOM order (stable sort)
+        return 0;
       });
       const tbody = document.getElementById('navRowsBody');
       rows.forEach(r => tbody.appendChild(r));
-      syncOrderFromDom();
+      // NOTE: no renumber — user's typed values stay as-is.
     }
 
     // Drag-to-reorder via SortableJS, restricted to the drag-handle column.
+    // Drag does renumber (clean 10/20/30 gaps) since drag has no numeric intent.
     document.addEventListener('DOMContentLoaded', () => {
       const tbody = document.getElementById('navRowsBody');
       if (tbody && window.Sortable) {
@@ -151,7 +173,7 @@
           handle: '.drag-handle',
           animation: 150,
           ghostClass: 'bg-yellow-100',
-          onEnd: () => syncOrderFromDom(),
+          onEnd: () => renumberAfterDrag(),
         });
       }
     });
