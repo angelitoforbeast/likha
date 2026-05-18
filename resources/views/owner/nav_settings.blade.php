@@ -57,8 +57,8 @@
                            value="{{ $link->sort_order }}"
                            min="0" max="9999"
                            class="w-16 text-center border border-gray-300 rounded px-1 py-0.5 text-xs font-mono order-input"
-                           onchange="reorderByInput()"
-                           title="Type a number to reorder">
+                           onchange="reorderByInput(this)"
+                           title="Type a number to reorder (tied values: this row wins — old row pushed down)">
                   </td>
                   <td class="px-3 py-2">
                     <div class="flex items-center gap-2">
@@ -123,12 +123,20 @@
     }
 
     // Triggered when user types a number — re-sort rows in DOM, then renumber.
-    function reorderByInput() {
+    // Tie-break rule: the JUST-CHANGED row WINS the tie (placed BEFORE any other
+    // row with the same value). User intent: typing "2" on a row na originally 31
+    // means "this row IS the new rank 2; push the old rank 2 down to rank 3".
+    function reorderByInput(changedInput) {
+      const changedRow = changedInput ? changedInput.closest('tr') : null;
       const rows = Array.from(document.querySelectorAll('#navRowsBody tr'));
       rows.sort((a, b) => {
         const av = Number(a.querySelector('.order-input')?.value ?? 0);
         const bv = Number(b.querySelector('.order-input')?.value ?? 0);
-        return av - bv;
+        if (av !== bv) return av - bv;
+        // Tie → changed row goes first
+        if (changedRow === a) return -1;
+        if (changedRow === b) return  1;
+        return 0; // both untouched — keep DOM order (stable sort)
       });
       const tbody = document.getElementById('navRowsBody');
       rows.forEach(r => tbody.appendChild(r));
