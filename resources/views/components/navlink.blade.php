@@ -3,6 +3,10 @@
   'href',
   'label' => null,
   'icon' => false,
+  // Optional notification badge — int. Renders as red superscript circle
+  // top-right of the icon when > 0. Used by NavBadgeService for "needs
+  // attention" indicators (e.g., unmapped pages on JNT Config link).
+  'badge' => 0,
 ])
 
 @php
@@ -38,8 +42,18 @@
   @endif
 >
   @if($iconOnly)
-    <span class="text-base leading-none">
+    <span class="text-base leading-none relative">
       {{ $slot }}
+      @if((int) $badge > 0)
+        {{-- Messenger-style superscript badge: small red circle, top-right of icon.
+             Auto-shrinks to "99+" when count is large. --}}
+        <span class="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] px-1 rounded-full
+                     bg-red-600 text-white text-[9px] font-bold leading-[16px] text-center
+                     ring-1 ring-gray-800 pointer-events-none"
+              title="{{ (int) $badge }} item(s) need attention">
+          {{ (int) $badge > 99 ? '99+' : (int) $badge }}
+        </span>
+      @endif
     </span>
 
     @if($label)

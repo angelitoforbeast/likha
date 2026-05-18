@@ -11,71 +11,83 @@
     </div>
 
     @php
-      // Card catalog. Add/remove entries here as new JNT config pages appear.
-      // `icon` uses Font Awesome classes already loaded by layout.blade.php.
+      // Notification badges per nav-link key (count of "needs attention" items).
+      $navBadges = \App\Services\NavBadgeService::counts();
+
+      // Card catalog. `nav_key` is the matching nav_links.key — used to look up
+      // its badge count. `icon` uses Font Awesome classes loaded by layout.
       $cards = [
         [
-          'href'  => '/jnt/accounts',
-          'icon'  => 'fa-solid fa-building',
-          'title' => 'JNT Accounts',
-          'desc'  => 'Manage J&T API credentials (customer ID, eccompany ID, secret) — one record per shop / account.',
-          'color' => 'indigo',
+          'href'    => '/jnt/accounts',
+          'nav_key' => 'jnt_accounts',
+          'icon'    => 'fa-solid fa-building',
+          'title'   => 'JNT Accounts',
+          'desc'    => 'Manage J&T API credentials (customer ID, eccompany ID, secret) — one record per shop / account.',
+          'color'   => 'indigo',
         ],
         [
-          'href'  => '/jnt/accounts/mapping',
-          'icon'  => 'fa-solid fa-diagram-project',
-          'title' => 'Page → Account Mapping',
-          'desc'  => 'Assign each page (from macro_output) to a JNT account. Order creation uses this mapping; unmapped pages fall back to .env.',
-          'color' => 'blue',
+          'href'    => '/jnt/accounts/mapping',
+          'nav_key' => 'jnt_acct_mapping',
+          'icon'    => 'fa-solid fa-diagram-project',
+          'title'   => 'Page → Account Mapping',
+          'desc'    => 'Assign each page (from macro_output) to a JNT account. Order creation uses this mapping; unmapped pages fall back to .env.',
+          'color'   => 'blue',
         ],
         [
-          'href'  => '/jnt/sender-name',
-          'icon'  => 'fa-solid fa-signature',
-          'title' => 'Sender Name (Per Page)',
-          'desc'  => 'Set the sender name that appears on waybills for each page.',
-          'color' => 'purple',
+          'href'    => '/jnt/sender-name',
+          'nav_key' => 'jnt_sender_name',
+          'icon'    => 'fa-solid fa-signature',
+          'title'   => 'Sender Name (Per Page)',
+          'desc'    => 'Set the sender name that appears on waybills for each page.',
+          'color'   => 'purple',
         ],
         [
-          'href'  => '/jnt/item-sender-name',
-          'icon'  => 'fa-solid fa-tag',
-          'title' => 'Sender Name (Per Item)',
-          'desc'  => 'Per (page + item) sender name override. More granular than per-page only.',
-          'color' => 'fuchsia',
+          'href'    => '/jnt/item-sender-name',
+          'nav_key' => 'jnt_item_sender',
+          'icon'    => 'fa-solid fa-tag',
+          'title'   => 'Sender Name (Per Item)',
+          'desc'    => 'Per (page + item) sender name override. More granular than per-page only.',
+          'color'   => 'fuchsia',
         ],
         [
-          'href'  => '/jnt/item-types',
-          'icon'  => 'fa-solid fa-boxes-packing',
-          'title' => 'Item Type Mapping',
-          'desc'  => 'Map item names → JNT item type (Document, Goods, etc.) for waybill classification.',
-          'color' => 'emerald',
+          'href'    => '/jnt/item-types',
+          'nav_key' => 'jnt_item_types',
+          'icon'    => 'fa-solid fa-boxes-packing',
+          'title'   => 'Item Type Mapping',
+          'desc'    => 'Map item names → JNT item type (Document, Goods, etc.) for waybill classification.',
+          'color'   => 'emerald',
         ],
         [
-          'href'  => '/jnt/orders',
-          'icon'  => 'fa-solid fa-truck-fast',
-          'title' => 'JNT Orders',
-          'desc'  => 'Bulk-create JNT orders from macro_output and monitor per-run progress.',
-          'color' => 'amber',
+          'href'    => '/jnt/orders',
+          'nav_key' => 'jnt_orders',
+          'icon'    => 'fa-solid fa-truck-fast',
+          'title'   => 'JNT Orders',
+          'desc'    => 'Bulk-create JNT orders from macro_output and monitor per-run progress.',
+          'color'   => 'amber',
         ],
         [
-          'href'  => '/jnt/waybills/print',
-          'icon'  => 'fa-solid fa-print',
-          'title' => 'Waybills Print',
-          'desc'  => 'Generate printable PDFs for one or more waybills. Uses .env account (not per-page).',
-          'color' => 'rose',
+          'href'    => '/jnt/waybills/print',
+          'nav_key' => 'jnt_waybills_print',
+          'icon'    => 'fa-solid fa-print',
+          'title'   => 'Waybills Print',
+          'desc'    => 'Generate printable PDFs for one or more waybills. Uses .env account (not per-page).',
+          'color'   => 'rose',
         ],
         [
-          'href'  => '/jnt/fee-settings',
-          'icon'  => 'fa-solid fa-coins',
-          'title' => 'Fee Settings',
-          'desc'  => 'Shipping fee, COD fee rate, VAT rate — used by all profit / margin calculations across the app.',
-          'color' => 'teal',
+          'href'    => '/jnt/fee-settings',
+          'nav_key' => 'jnt_fee_settings',
+          'icon'    => 'fa-solid fa-coins',
+          'title'   => 'Fee Settings',
+          'desc'    => 'Shipping fee, COD fee rate, VAT rate — used by all profit / margin calculations across the app.',
+          'color'   => 'teal',
         ],
         [
-          'href'  => '/jnt/supply/excluded-pages',
-          'icon'  => 'fa-solid fa-ban',
-          'title' => 'Supply Excluded Pages',
-          'desc'  => 'Pages to skip in /jnt/supply, /owner/private summaries, and related views.',
-          'color' => 'slate',
+          'href'    => '/jnt/supply/excluded-pages',
+          'nav_key' => 'jnt_supply_excluded',
+          'icon'    => 'fa-solid fa-ban',
+          'title'   => 'Supply Excluded Pages',
+          'desc'    => 'Pages to skip in /jnt/supply, /owner/private summaries, and related views.',
+          'color'   => 'slate',
         ],
       ];
       // Color → tailwind classes lookup so the cards render consistently.
@@ -94,9 +106,22 @@
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       @foreach($cards as $c)
-        @php $cls = $tw[$c['color']] ?? $tw['slate']; @endphp
+        @php
+          $cls = $tw[$c['color']] ?? $tw['slate'];
+          $badge = (int) ($navBadges[$c['nav_key']] ?? 0);
+        @endphp
         <a href="{{ $c['href'] }}"
-           class="block border-2 {{ $cls['border'] }} {{ $cls['bg'] }} {{ $cls['hover'] }} rounded-xl p-4 transition shadow-sm hover:shadow-md">
+           class="relative block border-2 {{ $cls['border'] }} {{ $cls['bg'] }} {{ $cls['hover'] }} rounded-xl p-4 transition shadow-sm hover:shadow-md">
+          @if($badge > 0)
+            {{-- Superscript notification badge — small red circle, top-right corner.
+                 Hover to see exact tooltip explaining what needs attention. --}}
+            <span class="absolute -top-2 -right-2 min-w-[24px] h-[24px] px-1.5 rounded-full
+                         bg-red-600 text-white text-xs font-bold leading-[24px] text-center
+                         ring-2 ring-white shadow-md"
+                  title="{{ $badge }} item(s) need attention — click to review">
+              {{ $badge > 99 ? '99+' : $badge }}
+            </span>
+          @endif
           <div class="flex items-center gap-3 mb-2">
             <div class="{{ $cls['icon'] }} text-2xl w-8 text-center">
               <i class="{{ $c['icon'] }}"></i>
@@ -108,6 +133,19 @@
         </a>
       @endforeach
     </div>
+
+    @php
+      $totalBadge = array_sum(array_intersect_key(
+        $navBadges,
+        array_flip(['jnt_acct_mapping', 'jnt_sender_name', 'jnt_item_types', 'jnt_fee_settings', 'jnt_accounts'])
+      ));
+    @endphp
+    @if($totalBadge > 0)
+      <div class="mt-4 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg p-3 text-sm">
+        ⚠ <strong>{{ $totalBadge }} item(s) across these screens need attention.</strong>
+        Tackle the red-badge cards first (unmapped pages, missing fees, etc.) before relying on JNT order creation / waybill printing.
+      </div>
+    @endif
 
     <div class="mt-6 text-xs text-gray-400 text-center">
       Manage which roles see this hub at <a href="{{ route('owner.nav-settings') }}" class="text-blue-600 hover:underline">/owner/nav-settings</a>.

@@ -40,6 +40,13 @@
   } catch (\Throwable $e) {
     $navLinks = collect();
   }
+  // Notification badge counts per nav-link key (red superscript). Safe-default
+  // to empty array if service errors so the nav still renders.
+  try {
+    $navBadges = $effectiveRole ? \App\Services\NavBadgeService::counts() : [];
+  } catch (\Throwable $e) {
+    $navBadges = [];
+  }
 @endphp
 
 <div class="min-h-full">
@@ -69,7 +76,8 @@
                   <x-navlink
                     href="{{ $link->route_url }}"
                     :active="$link->active_pattern ? request()->is($link->active_pattern) : false"
-                    :label="$link->label">
+                    :label="$link->label"
+                    :badge="$navBadges[$link->key] ?? 0">
                     @if($link->icon)
                       <i class="{{ $link->icon }}"></i>
                     @else
