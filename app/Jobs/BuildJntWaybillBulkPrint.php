@@ -64,7 +64,42 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
         $run->fail_count = 0;
         $run->save();
 
-        $client = JntClient::fromConfig();
+        // Per-page J&T client cache. Each waybill picks its account via
+        // JntClient::fromPageOrConfig($page). Items with no resolvable page
+        // (mailno not sa jnt_shipments) fall back to env credentials.
+        // Keyed by string page name; '' key = env-config fallback.
+        $clientsByPage = [];
+        $getClient = function (?string $page) use (&$clientsByPage): JntClient {
+            $key = trim((string) $page);
+            if (!isset($clientsByPage[$key])) {
+                $clientsByPage[$key] = $key !== ''
+                    ? JntClient::fromPageOrConfig($key)
+                    : JntClient::fromConfig();
+            }
+            return $clientsByPage[$key];
+        };
+
+        // Resolve page-per-mailno via JOIN through jnt_shipments → macro_output.
+        // ONE batch query at start of run; cached in $pageByMailno for the
+        // entire print loop. Mailnos with no match → no entry → env fallback.
+        $allMailnos = JntWaybillPrintRunItem::query()
+            ->where('run_id', $run->id)
+            ->where('status', 'pending')
+            ->pluck('mailno')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $pageByMailno = [];
+        if (!empty($allMailnos)) {
+            $pageByMailno = DB::table('jnt_shipments as s')
+                ->join('macro_output as mo', 'mo.id', '=', 's.macro_output_id')
+                ->whereIn('s.mailno', $allMailnos)
+                ->whereNotNull('mo.PAGE')
+                ->select('s.mailno', 'mo.PAGE as page')
+                ->pluck('page', 'mailno')
+                ->all();
+        }
 
         // Chunk size for PDF parts to avoid RAM blowups
         $PART_SIZE = 1000;
@@ -108,6 +143,11 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
                 $mailno = (string) $it->mailno;
 
                 try {
+                    // Pick the right J&T account based on this waybill's source
+                    // page (resolved via pre-built $pageByMailno map). No
+                    // match → fallback to env credentials.
+                    $page   = $pageByMailno[$mailno] ?? null;
+                    $client = $getClient($page);
                     $res = $client->printWaybill($mailno);
 
                     $b64 = data_get($res, 'responseitems.base64Url')

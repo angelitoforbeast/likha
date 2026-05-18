@@ -149,6 +149,9 @@ class JntWaybillPrintController extends Controller
             return back()->with('error', 'No mailno selected.');
         }
 
+        // Page-aware account selection happens at print time inside the job
+        // (BuildJntWaybillBulkPrint::handle resolves page per mailno via
+        // jnt_shipments → macro_output JOIN). No need to snapshot here.
         $seq = 1;
         foreach (array_chunk($mailnos, 1000) as $chunk) {
             $toInsert = [];
