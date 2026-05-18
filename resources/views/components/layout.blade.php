@@ -25,6 +25,15 @@
 
 @php
   $role = Auth::user()?->employeeProfile?->role ?? null;
+  // DB-driven nav — manage at /owner/nav-settings (CEO only).
+  // Falls back to empty list if user has no role or DB query fails (defensive).
+  try {
+    $navLinks = $role
+      ? \App\Models\NavLink::visibleFor($role)
+      : collect();
+  } catch (\Throwable $e) {
+    $navLinks = collect();
+  }
 @endphp
 
 <div class="min-h-full">
@@ -47,141 +56,21 @@
               {{-- no-scrollbar hides the visible scrollbar but still allows horizontal scroll --}}
               <div class="no-scrollbar flex items-center gap-2 whitespace-nowrap overflow-x-auto">
 
-                @if(in_array($role, ['Marketing', 'Marketing - OIC', 'CEO']))
-
-                  <x-navlink href="/ads_manager/payment/upload" :active="request()->is('ads_manager/payment*')" label="Ad Payment">
-                    <i class="fa-solid fa-credit-card"></i>
+                {{-- DB-driven nav — config at /owner/nav-settings (CEO only).
+                     Default visibility seeded from previous hardcoded layout via
+                     migration 2026_05_18_140000. New links go thru that route. --}}
+                @foreach($navLinks as $link)
+                  <x-navlink
+                    href="{{ $link->route_url }}"
+                    :active="$link->active_pattern ? request()->is($link->active_pattern) : false"
+                    :label="$link->label">
+                    @if($link->icon)
+                      <i class="{{ $link->icon }}"></i>
+                    @else
+                      <i class="fa-solid fa-link"></i>
+                    @endif
                   </x-navlink>
-
-                  <x-navlink href="/ads_manager/report" :active="request()->is('ads_manager/report*')" label="Ads">
-                    <i class="fa-solid fa-bullhorn"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/owner/private" :active="request()->is('owner/private*')" label="Marketing Summary">
-                    <i class="fa-solid fa-chart-pie"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/likha_order_import" :active="request()->is('likha_order_import*')" label="Likha">
-                    <i class="fa-solid fa-store"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/conversation/tracker" :active="request()->is('conversation/tracker*')" label="Conv Tracker">
-                    <i class="fa-solid fa-comments"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/*')" label="Macro">
-                    <i class="fa-solid fa-table"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/jnt_upload" :active="request()->is('jnt_upload*')" label="Waybill">
-                    <i class="fa-solid fa-receipt"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/ads_manager/cpp" :active="request()->is('ads_manager/cpp*')" label="CPP">
-                    <i class="fa-solid fa-chart-line"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/jnt_rts" :active="request()->is('jnt_rts*')" label="RTS">
-                    <i class="fa-solid fa-rotate-left"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/jnt/supply" :active="request()->is('jnt/supply*')" label="Supply">
-                    <i class="fa-solid fa-boxes-stacking"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/jnt/checker" :active="request()->is('jnt/checker*')" label="JNT Checker">
-                    <i class="fa-solid fa-circle-check"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/encoded_vs_upload" :active="request()->is('encoded_vs_upload*')" label="Tally Sticker">
-                    <i class="fa-solid fa-layer-group"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/jnt/stickers" :active="request()->is('jnt/stickers*')" label="Tally Sticker 2">
-                    <i class="fa-solid fa-tags"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/encoder/checker_1" :active="request()->is('encoder/checker_1*')" label="Checker 1">
-                    <i class="fa-solid fa-magnifying-glass"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/encoder/summary" :active="request()->is('encoder/summary*')" label="Order Summary">
-                    <i class="fa-solid fa-clipboard-list"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/ads_manager/pancake-subscription-checker" :active="request()->is('ads_manager/pancake-subscription-checker*')" label="Purchases">
-                    <i class="fa-solid fa-bag-shopping"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/jnt/hold" :active="request()->is('jnt/hold*')" label="Hold">
-                    <i class="fa-solid fa-pause"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/pancake/retrieve2" :active="request()->is('pancake/retrieve2*')" label="Retrieve">
-                    <i class="fa-solid fa-download"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/pancake/page-id-mapping" :active="request()->is('pancake/page-id-mapping*')" label="Pancake ID">
-                    <i class="fa-solid fa-id-badge"></i>
-                  </x-navlink>
-
-                @endif
-
-                @if(in_array($role, ['Data Encoder','Data Encoder - OIC']))
-                  <x-navlink href="/data_encoder/mes-segregator" :active="request()->is('data_encoder/mes-segregator*')" label="MES SEG">
-                    <i class="fa-solid fa-scissors"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/encoder/checker_1" :active="request()->is('encoder/checker_1*')" label="Checker 1">
-                    <i class="fa-solid fa-magnifying-glass"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/jnt/address" :active="request()->is('jnt/address*')" label="Address Search">
-                    <i class="fa-solid fa-location-dot"></i>
-                  </x-navlink>
-                @endif
-
-                @if(in_array($role, ['CEO']))
-                  <x-navlink href="/assign-roles" :active="request()->is('assign-roles*')" label="Roles">
-                    <i class="fa-solid fa-user-gear"></i>
-                  </x-navlink>
-                  <x-navlink href="/finance" :active="request()->is('finance*')" label="Finance">
-                    <i class="fa-solid fa-wallet"></i>
-                  </x-navlink>
-                @endif
-
-                {{-- /jnt_upload_v2 + /queue-manager — MOIC + CEO only --}}
-                @if(in_array($role, ['Marketing - OIC', 'CEO']))
-                  <x-navlink href="/jnt_upload_v2" :active="request()->is('jnt_upload_v2*')" label="Waybill V2">
-                    <i class="fa-solid fa-layer-group"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/queue-manager" :active="request()->is('queue-manager*')" label="Queue">
-                    <i class="fa-solid fa-list-check"></i>
-                  </x-navlink>
-                @endif
-
-                @if(Auth::check())
-                  <x-navlink href="/allowed-ips" :active="request()->is('allowed-ips*')" label="IP">
-                    <i class="fa-solid fa-network-wired"></i>
-                  </x-navlink>
-                @endif
-
-                @if(in_array($role, ['Data Encoder - OIC']))
-                  <x-navlink href="/macro/gsheet/import" :active="request()->is('macro/gsheet/*')" label="Import Macro">
-                    <i class="fa-solid fa-file-import"></i>
-                  </x-navlink>
-
-                  <x-navlink href="/encoder/pending-rate" :active="request()->is('encoder/pending-rate*')" label="Pending Rate">
-                    <i class="fa-solid fa-hourglass-half"></i>
-                  </x-navlink>
-                @endif
-
-                @if(in_array($role, ['Data Encoder']))
-                  <x-navlink href="/encoder/checker_1" :active="request()->is('encoder/checker_1*')" label="Checker 1">
-                    <i class="fa-solid fa-magnifying-glass"></i>
-                  </x-navlink>
-                @endif
+                @endforeach
 
               </div>
             </div>
