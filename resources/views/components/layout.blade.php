@@ -40,13 +40,11 @@
   } catch (\Throwable $e) {
     $navLinks = collect();
   }
-  // Notification badge counts per nav-link key (red superscript). Safe-default
-  // to empty array if service errors so the nav still renders.
-  try {
-    $navBadges = $effectiveRole ? \App\Services\NavBadgeService::counts() : [];
-  } catch (\Throwable $e) {
-    $navBadges = [];
-  }
+  // Notification badges DISABLED globally for now — the badge queries (unmapped
+  // pages, items, etc.) are 1+ second on macro_output and would run on every
+  // page load. Only the JNT Config hub page fetches counts directly. Re-enable
+  // here once we add caching to NavBadgeService.
+  $navBadges = [];
 @endphp
 
 <div class="min-h-full">

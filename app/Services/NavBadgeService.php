@@ -95,17 +95,21 @@ class NavBadgeService
 
     /**
      * Count of REQUIRED fee_settings keys that have no record for the current
-     * host. Checks: shipping_fee_per_order, cod_fee_rate, cod_fee_vat_rate.
+     * host scope. Schema columns: `setting_key`, `host_scope` (values are
+     * 'likha' | 'incepxion' | '*' — short identifiers, not full domains).
      */
     private static function missingFeeSettings(): int
     {
         if (!Schema::hasTable('fee_settings')) return 0;
         $required = ['shipping_fee_per_order', 'cod_fee_rate', 'cod_fee_vat_rate'];
+        // Map full hostname → short host_scope token used sa fee_settings rows.
         $host = strtolower((string) request()->getHost());
+        $scope = str_contains($host, 'incepxion') ? 'incepxion'
+                 : (str_contains($host, 'likha') ? 'likha' : 'likha');
         $found = DB::table('fee_settings')
-            ->whereIn('key', $required)
-            ->where('host', $host)
-            ->pluck('key')
+            ->whereIn('setting_key', $required)
+            ->whereIn('host_scope', [$scope, '*'])
+            ->pluck('setting_key')
             ->unique()
             ->all();
         return count($required) - count(array_intersect($required, $found));
