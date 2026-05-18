@@ -56,10 +56,11 @@ class NavSettingsController extends Controller
         }
 
         return view('owner.nav_settings', [
-            'links'         => $links,
-            'roles'         => self::ROLES,
-            'visibilityMap' => $visibilityMap,
-            'saved'         => session('nav_settings_saved', false),
+            'links'              => $links,
+            'roles'              => self::ROLES,
+            'visibilityMap'      => $visibilityMap,
+            'saved'              => session('nav_settings_saved', false),
+            'unregisteredRoutes' => NavLink::unregisteredRoutes(),
         ]);
     }
 
@@ -105,6 +106,70 @@ class NavSettingsController extends Controller
                     ->update(['sort_order' => (int) $order, 'updated_at' => $now]);
             }
         });
+
+        return redirect()
+            ->route('owner.nav-settings')
+            ->with('nav_settings_saved', true);
+    }
+
+    /**
+     * Register a previously-undiscovered route as a NavLink. Defaults the new
+     * link to CEO-only visibility (safest — CEO can grant to other roles via
+     * the matrix). Derives label / key from the URL path; admin can rename
+     * sa /owner/nav-settings later (currently no rename UI but DB-edit works).
+     */
+    public function addRoute(Request $request)
+    {
+        $this->checkAccess();
+
+        $validated = $request->validate([
+            'url'   => 'required|string|max:255',
+            'label' => 'nullable|string|max:100',
+        ]);
+
+        $url = '/' . ltrim($validated['url'], '/');
+        if (str_contains($url, '{')) {
+            return back()->withErrors(['url' => 'Cannot add parameterized routes.']);
+        }
+        // Bail if already exists
+        if (NavLink::where('route_url', $url)->exists()) {
+            return back()->withErrors(['url' => 'Already registered.']);
+        }
+
+        // Derive key from URL: '/foo/bar/baz' → 'foo_bar_baz'
+        $key = strtolower(preg_replace('/[^a-z0-9]+/i', '_', trim($url, '/')));
+        $key = substr($key, 0, 80);
+        // Avoid key collisions: append number suffix if needed.
+        $baseKey = $key;
+        $suffix = 2;
+        while (NavLink::where('key', $key)->exists()) {
+            $key = $baseKey . '_' . $suffix++;
+        }
+
+        // Derive label: capitalize last path segment, replace separators
+        $label = $validated['label'] ?? ucwords(str_replace(['-', '_', '/'], ' ', trim($url, '/')));
+        $label = substr($label, 0, 100);
+
+        $now = now();
+        $maxSort = (int) NavLink::max('sort_order');
+        $link = NavLink::create([
+            'key'            => $key,
+            'label'          => $label,
+            'route_url'      => $url,
+            'icon'           => 'fa-solid fa-link',
+            'active_pattern' => ltrim($url, '/') . '*',
+            'sort_order'     => $maxSort + 1,
+            'is_active'      => true,
+        ]);
+
+        // Default visibility: CEO only
+        foreach (self::ROLES as $role) {
+            NavLinkRoleVisibility::create([
+                'nav_link_id' => $link->id,
+                'role'        => $role,
+                'is_visible'  => $role === 'CEO',
+            ]);
+        }
 
         return redirect()
             ->route('owner.nav-settings')

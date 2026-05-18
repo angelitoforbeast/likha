@@ -920,6 +920,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get ('/owner/nav-settings',  [\App\Http\Controllers\NavSettingsController::class, 'index'])->name('owner.nav-settings');
     Route::post('/owner/nav-settings',  [\App\Http\Controllers\NavSettingsController::class, 'save'])->name('owner.nav-settings.save');
     Route::post('/owner/nav-settings/reset', [\App\Http\Controllers\NavSettingsController::class, 'reset'])->name('owner.nav-settings.reset');
+    Route::post('/owner/nav-settings/add-route', [\App\Http\Controllers\NavSettingsController::class, 'addRoute'])->name('owner.nav-settings.add-route');
     Route::post('/nav/view-as',         [\App\Http\Controllers\NavSettingsController::class, 'setViewAs'])->name('nav.view-as');
     Route::get ('/owner/column-settings',                [\App\Http\Controllers\OwnerColumnSettingsController::class, 'index'])           ->name('owner.column-settings');
     Route::get ('/owner/column-settings/owner-private',  [\App\Http\Controllers\OwnerColumnSettingsController::class, 'sectionOwnerPrivate'])->name('owner.column-settings.owner-private');

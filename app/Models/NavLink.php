@@ -40,6 +40,59 @@ class NavLink extends Model
     }
 
     /**
+     * Discover routes that exist sa router but aren't yet registered as
+     * nav_links. Used by /owner/nav-settings to show "Add to nav" suggestions.
+     *
+     * Filters applied (otherwise the list is too noisy):
+     *   - GET method only
+     *   - No route parameters ({xxx}) — those need a value to render
+     *   - Not /api/* (separate API surface)
+     *   - Not vendor (telescope, horizon, _ignition, sanctum, livewire)
+     *   - Not data/JSON polling endpoints (heuristic: ends in /data, /status,
+     *     /poll, .json — too noisy and not meant for direct navigation)
+     *   - Not already sa nav_links (by route_url)
+     *
+     * Returns array of ['url' => string, 'name' => ?string].
+     */
+    public static function unregisteredRoutes(): array
+    {
+        $registered = static::pluck('route_url')->map(fn ($u) => '/' . ltrim((string) $u, '/'))->all();
+        $registeredSet = array_flip($registered);
+
+        $skipPrefixes = ['/api', '/telescope', '/horizon', '/_ignition', '/_debugbar',
+                         '/sanctum', '/livewire', '/__clockwork', '/log-viewer'];
+        $skipSuffixes = ['/data', '/status', '/poll', '/refresh', '/json',
+                         '/save', '/store', '/update', '/delete', '/destroy'];
+
+        $found = [];
+        foreach (\Route::getRoutes() as $r) {
+            if (!in_array('GET', $r->methods(), true)) continue;
+            $uri = '/' . ltrim($r->uri(), '/');
+            // Skip parameterized routes
+            if (str_contains($uri, '{')) continue;
+            // Skip noisy prefixes
+            foreach ($skipPrefixes as $p) {
+                if (str_starts_with($uri, $p)) continue 2;
+            }
+            // Skip noisy suffixes
+            foreach ($skipSuffixes as $s) {
+                if (str_ends_with($uri, $s)) continue 2;
+            }
+            // Skip if already registered
+            if (isset($registeredSet[$uri])) continue;
+
+            $found[$uri] = [
+                'url'  => $uri,
+                'name' => $r->getName(),
+            ];
+        }
+
+        // Dedup + sort by url
+        ksort($found);
+        return array_values($found);
+    }
+
+    /**
      * Canonical default catalog for nav links. Mirrors the seed in migration
      * 2026_05_18_140000_create_nav_links_and_visibility_tables.php — kept here
      * so the Reset button (NavSettingsController::reset) can re-apply defaults

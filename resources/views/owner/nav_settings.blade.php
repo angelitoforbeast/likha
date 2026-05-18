@@ -118,6 +118,62 @@
       </div>
     </form>
 
+    {{-- Unregistered routes — auto-discovered GET routes not yet sa nav_links.
+         Lets admin quickly promote any route to a navlink. New links default to
+         CEO-only visibility (admin then grants other roles via the matrix above). --}}
+    @if(count($unregisteredRoutes) > 0)
+      <div class="mt-6 pt-4 border-t border-gray-200">
+        <details>
+          <summary class="cursor-pointer select-none flex items-center justify-between hover:bg-gray-50 -mx-2 px-2 py-1 rounded">
+            <div>
+              <div class="text-sm font-semibold text-gray-700">
+                🔎 Unregistered Routes
+                <span class="ml-1 inline-block px-1.5 py-0.5 text-[10px] font-bold bg-blue-100 text-blue-700 rounded">{{ count($unregisteredRoutes) }}</span>
+              </div>
+              <div class="text-xs text-gray-500">GET routes that exist sa app but aren't registered as navlinks. Click to expand and add.</div>
+            </div>
+            <span class="text-xs text-gray-400">▼ Expand</span>
+          </summary>
+
+          <div class="mt-3 bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+            <table class="w-full text-xs">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th class="px-3 py-2 text-left">URL</th>
+                  <th class="px-3 py-2 text-left">Route name</th>
+                  <th class="px-3 py-2 text-center" style="width:140px;">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                @foreach($unregisteredRoutes as $r)
+                  <tr class="border-t border-gray-200">
+                    <td class="px-3 py-2 font-mono">
+                      <a href="{{ $r['url'] }}" target="_blank" class="text-blue-600 hover:underline">{{ $r['url'] }}</a>
+                    </td>
+                    <td class="px-3 py-2 font-mono text-gray-500">{{ $r['name'] ?? '—' }}</td>
+                    <td class="px-3 py-2 text-center">
+                      <form method="POST" action="{{ route('owner.nav-settings.add-route') }}" class="inline">
+                        @csrf
+                        <input type="hidden" name="url" value="{{ $r['url'] }}">
+                        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded px-3 py-1"
+                                title="Register as nav link (CEO-only by default; grant to other roles via matrix above)">
+                          + Add to Nav
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                @endforeach
+              </tbody>
+            </table>
+            <div class="px-3 py-2 text-[11px] text-gray-500 bg-gray-100 border-t border-gray-200">
+              Filter: GET routes only · no parameters · excludes api/, telescope/, save/store/data/status endpoints.
+              New entries default to CEO-only visibility — grant other roles via the matrix above.
+            </div>
+          </div>
+        </details>
+      </div>
+    @endif
+
   </div>
 
   <script>
