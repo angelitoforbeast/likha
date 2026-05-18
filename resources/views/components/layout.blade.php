@@ -24,12 +24,18 @@
 <body class="h-full">
 
 @php
-  $role = Auth::user()?->employeeProfile?->role ?? null;
+  // Actual role from DB — used for AUTH (page access still checked per-route).
+  $actualRole = Auth::user()?->employeeProfile?->role ?? null;
+
+  // CEO-only "view as role" override. Stored sa session via /nav/view-as.
+  // Only honored when actual role is CEO (defense in depth — non-CEO can't fake it).
+  $viewAsRole = ($actualRole === 'CEO') ? session('nav_view_as_role') : null;
+  $effectiveRole = $viewAsRole ?: $actualRole;
+
   // DB-driven nav — manage at /owner/nav-settings (CEO only).
-  // Falls back to empty list if user has no role or DB query fails (defensive).
   try {
-    $navLinks = $role
-      ? \App\Models\NavLink::visibleFor($role)
+    $navLinks = $effectiveRole
+      ? \App\Models\NavLink::visibleFor($effectiveRole)
       : collect();
   } catch (\Throwable $e) {
     $navLinks = collect();
@@ -79,6 +85,33 @@
 
         {{-- RIGHT: PROFILE + LOGOUT --}}
         <div class="hidden md:flex items-center space-x-4">
+
+          {{-- CEO-only "view as role" dropdown. Posts to /nav/view-as which
+               stores in session; layout above re-renders nav per chosen role.
+               Auth/access still based on actual CEO role — this is preview only. --}}
+          @if($actualRole === 'CEO')
+            <form method="POST" action="{{ route('nav.view-as') }}" class="flex items-center gap-1">
+              @csrf
+              <span class="text-xs text-gray-400 hidden lg:inline">View as:</span>
+              <select name="role" onchange="this.form.submit()"
+                      class="bg-gray-700 text-gray-100 text-xs rounded border border-gray-600 px-2 py-1
+                             focus:outline-none focus:border-yellow-400"
+                      title="Preview the top nav as a different role (CEO only)">
+                <option value="" {{ empty($viewAsRole) ? 'selected' : '' }}>CEO (actual)</option>
+                @foreach(['Marketing - OIC', 'Marketing', 'Data Encoder - OIC', 'Data Encoder'] as $r)
+                  <option value="{{ $r }}" {{ $viewAsRole === $r ? 'selected' : '' }}>{{ $r }}</option>
+                @endforeach
+              </select>
+              @if(!empty($viewAsRole))
+                <span class="ml-1 inline-block px-1.5 py-0.5 text-[10px] font-bold uppercase
+                             bg-yellow-400 text-gray-900 rounded"
+                      title="Currently previewing the nav as {{ $viewAsRole }}. Switch back to 'CEO (actual)' to undo.">
+                  PREVIEW
+                </span>
+              @endif
+            </form>
+          @endif
+
           @if(Auth::check())
             <a href="{{ url('/profile') }}" class="flex items-center gap-3 group">
               <div class="text-gray-300 text-sm text-right leading-tight group-hover:text-white">

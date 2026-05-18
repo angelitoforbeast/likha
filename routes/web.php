@@ -919,6 +919,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
 
     Route::get ('/owner/nav-settings',  [\App\Http\Controllers\NavSettingsController::class, 'index'])->name('owner.nav-settings');
     Route::post('/owner/nav-settings',  [\App\Http\Controllers\NavSettingsController::class, 'save'])->name('owner.nav-settings.save');
+    Route::post('/nav/view-as',         [\App\Http\Controllers\NavSettingsController::class, 'setViewAs'])->name('nav.view-as');
     Route::get ('/owner/column-settings',                [\App\Http\Controllers\OwnerColumnSettingsController::class, 'index'])           ->name('owner.column-settings');
     Route::get ('/owner/column-settings/owner-private',  [\App\Http\Controllers\OwnerColumnSettingsController::class, 'sectionOwnerPrivate'])->name('owner.column-settings.owner-private');
     Route::get ('/owner/column-settings/campaigns',      [\App\Http\Controllers\OwnerColumnSettingsController::class, 'sectionCampaigns'])    ->name('owner.column-settings.campaigns');

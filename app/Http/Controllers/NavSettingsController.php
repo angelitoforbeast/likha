@@ -68,18 +68,21 @@ class NavSettingsController extends Controller
         $this->checkAccess();
 
         $validated = $request->validate([
-            // payload[link_id][role] = '1'|'0' (checkbox)
+            // visibility[link_id][role] = '1'|'0' (checkbox)
             'visibility' => 'required|array',
+            // sort_order[link_id] = integer (from drag-reorder or manual input)
+            'sort_order' => 'nullable|array',
+            'sort_order.*' => 'nullable|integer|min:0|max:9999',
         ]);
 
-        $payload = $validated['visibility'];
+        $visibilityPayload = $validated['visibility'];
+        $sortPayload       = $validated['sort_order'] ?? [];
         $now = now();
 
-        // Upsert visibility per (link, role). Missing entries treated as false.
-        DB::transaction(function () use ($payload, $now) {
-            $linkIds = array_keys($payload);
-            foreach ($linkIds as $linkId) {
-                $perRole = (array) ($payload[$linkId] ?? []);
+        DB::transaction(function () use ($visibilityPayload, $sortPayload, $now) {
+            // Upsert visibility per (link, role). Missing entries treated as false.
+            foreach (array_keys($visibilityPayload) as $linkId) {
+                $perRole = (array) ($visibilityPayload[$linkId] ?? []);
                 foreach (self::ROLES as $role) {
                     $isVisible = !empty($perRole[$role]);
                     NavLinkRoleVisibility::updateOrCreate(
@@ -88,10 +91,35 @@ class NavSettingsController extends Controller
                     );
                 }
             }
+
+            // Update sort_order per link. Only touches rows present sa payload.
+            foreach ($sortPayload as $linkId => $order) {
+                NavLink::where('id', (int) $linkId)
+                    ->update(['sort_order' => (int) $order, 'updated_at' => $now]);
+            }
         });
 
         return redirect()
             ->route('owner.nav-settings')
             ->with('nav_settings_saved', true);
+    }
+
+    /**
+     * CEO-only "view as role" toggle for the top nav. Stores in session so
+     * the choice persists across page loads until cleared. The layout reads
+     * this and renders the nav as if the CEO were the chosen role — without
+     * actually changing the CEO's auth/permissions (preview only).
+     */
+    public function setViewAs(Request $request)
+    {
+        $this->checkAccess();
+        $role = (string) $request->input('role', '');
+        if ($role === '' || $role === 'CEO') {
+            // Clear → revert to actual role view.
+            session()->forget('nav_view_as_role');
+        } elseif (in_array($role, self::ROLES, true)) {
+            session(['nav_view_as_role' => $role]);
+        }
+        return back();
     }
 }
