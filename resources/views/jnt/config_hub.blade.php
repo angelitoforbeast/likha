@@ -70,8 +70,16 @@
           'nav_key' => 'jnt_waybills_print',
           'icon'    => 'fa-solid fa-print',
           'title'   => 'Waybills Print',
-          'desc'    => 'Generate printable PDFs for one or more waybills. Uses .env account (not per-page).',
+          'desc'    => 'Generate printable PDFs for one or more waybills. Picks the right J&T account per source page automatically.',
           'color'   => 'rose',
+        ],
+        [
+          'href'    => '/jnt/waybills/files',
+          'nav_key' => 'jnt_waybills_files',
+          'icon'    => 'fa-solid fa-folder-open',
+          'title'   => 'Waybills Files',
+          'desc'    => 'Browse, download, or delete the PDF outputs from previous bulk-print runs.',
+          'color'   => 'cyan',
         ],
         [
           'href'    => '/jnt/fee-settings',
@@ -100,6 +108,7 @@
         'amber'   => ['bg' => 'bg-amber-50',   'text' => 'text-amber-700',   'border' => 'border-amber-200',   'hover' => 'hover:bg-amber-100',   'icon' => 'text-amber-600'],
         'rose'    => ['bg' => 'bg-rose-50',    'text' => 'text-rose-700',    'border' => 'border-rose-200',    'hover' => 'hover:bg-rose-100',    'icon' => 'text-rose-600'],
         'teal'    => ['bg' => 'bg-teal-50',    'text' => 'text-teal-700',    'border' => 'border-teal-200',    'hover' => 'hover:bg-teal-100',    'icon' => 'text-teal-600'],
+        'cyan'    => ['bg' => 'bg-cyan-50',    'text' => 'text-cyan-700',    'border' => 'border-cyan-200',    'hover' => 'hover:bg-cyan-100',    'icon' => 'text-cyan-600'],
         'slate'   => ['bg' => 'bg-slate-50',   'text' => 'text-slate-700',   'border' => 'border-slate-200',   'hover' => 'hover:bg-slate-100',   'icon' => 'text-slate-600'],
       ];
     @endphp
