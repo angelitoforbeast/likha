@@ -345,6 +345,9 @@ Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit')
 Route::get('/jnt/remittance', [JntRemittanceController::class, 'index'])
     ->name('jnt.remittance');
 
+// JNT Config hub — consolidates all JNT config screens into one nav entry.
+Route::get('/jnt/config', [\App\Http\Controllers\JntConfigHubController::class, 'index'])->name('jnt.config');
+
 // JNT Accounts & Page Mapping
 Route::get('/jnt/accounts', [JntAccountController::class, 'index'])->name('jnt.accounts.index');
 Route::post('/jnt/accounts', [JntAccountController::class, 'store'])->name('jnt.accounts.store');
