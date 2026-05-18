@@ -156,7 +156,10 @@ class NavSettingsController extends Controller
             'key'            => $key,
             'label'          => $label,
             'route_url'      => $url,
-            'icon'           => 'fa-solid fa-link',
+            // Auto-guess icon from URL keywords (NavIconGuesser maps common
+            // route segments to Font Awesome classes). Falls back to a generic
+            // chain link when no keyword matches.
+            'icon'           => \App\Services\NavIconGuesser::guess($url),
             'active_pattern' => ltrim($url, '/') . '*',
             'sort_order'     => $maxSort + 1,
             'is_active'      => true,
