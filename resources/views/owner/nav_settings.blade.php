@@ -100,6 +100,24 @@
         <span class="text-xs text-gray-400 ml-3">Tip: drag any row by the ≡ handle or change a number to reorder.</span>
       </div>
     </form>
+
+    {{-- Reset to factory defaults (separate form so it doesn't clash with the
+         main save). Wipes ALL visibility + sort_order and restores from
+         NavLink::defaultData(). Confirm dialog before submit. --}}
+    <form method="POST" action="{{ route('owner.nav-settings.reset') }}" class="mt-6 pt-4 border-t border-gray-200"
+          onsubmit="return confirm('⚠ Reset ALL nav settings to defaults?\n\nThis will:\n  • Restore original visibility per role\n  • Restore original sequential order (1, 2, 3...)\n  • Undo every customization you made\n\nProceed?')">
+      @csrf
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-sm font-semibold text-gray-700">Reset to Defaults</div>
+          <div class="text-xs text-gray-500">Restores original visibility + order from the seed catalog. Any customizations will be lost.</div>
+        </div>
+        <button type="submit" class="bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded px-4 py-2 text-sm">
+          ↺ Reset to Defaults
+        </button>
+      </div>
+    </form>
+
   </div>
 
   <script>

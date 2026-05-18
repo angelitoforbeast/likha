@@ -112,6 +112,58 @@ class NavSettingsController extends Controller
     }
 
     /**
+     * Reset ALL nav settings to factory defaults — pull from
+     * NavLink::defaultData() (canonical seed). Wipes existing visibility +
+     * sort_order, re-inserts. Also adds any links that exist in defaultData
+     * but not yet sa DB (handy after adding a new link to the catalog).
+     *
+     * Existing links NOT in defaultData are LEFT ALONE (e.g., CEO manually
+     * added one via direct DB insert — we don't delete random extras).
+     */
+    public function reset()
+    {
+        $this->checkAccess();
+
+        $defaults = NavLink::defaultData();
+        $now = now();
+        $allRoles = self::ROLES;
+
+        DB::transaction(function () use ($defaults, $now, $allRoles) {
+            $sort = 1;
+            foreach ($defaults as $d) {
+                $visible = $d['visible'];
+                $base = [
+                    'label'          => $d['label'],
+                    'route_url'      => $d['route_url'],
+                    'icon'           => $d['icon'],
+                    'active_pattern' => $d['active_pattern'],
+                    'sort_order'     => $sort,
+                    'is_active'      => true,
+                    'updated_at'     => $now,
+                ];
+                // Upsert by `key` — preserves existing IDs (so audit / references stay valid).
+                $link = NavLink::firstOrNew(['key' => $d['key']]);
+                $link->fill($base);
+                if (!$link->exists) $link->created_at = $now;
+                $link->save();
+
+                // Reset visibility per role: visible if listed sa defaults, else false.
+                foreach ($allRoles as $role) {
+                    NavLinkRoleVisibility::updateOrCreate(
+                        ['nav_link_id' => $link->id, 'role' => $role],
+                        ['is_visible'  => in_array($role, $visible, true), 'updated_at' => $now]
+                    );
+                }
+                $sort++;
+            }
+        });
+
+        return redirect()
+            ->route('owner.nav-settings')
+            ->with('nav_settings_saved', true);
+    }
+
+    /**
      * CEO-only "view as role" toggle for the top nav. Stores in session so
      * the choice persists across page loads until cleared. The layout reads
      * this and renders the nav as if the CEO were the chosen role — without
