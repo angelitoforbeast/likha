@@ -391,6 +391,7 @@ Route::post('/jnt/item-sender-name/save', [\App\Http\Controllers\PageItemSenderM
 Route::post('/jnt/item-sender-name/delete/{id}', [\App\Http\Controllers\PageItemSenderMappingController::class, 'delete']);
 
 Route::get('/jnt/item-types',              [\App\Http\Controllers\ItemTypeMappingController::class, 'index']);
+Route::get('/jnt/item-types/grouped',      [\App\Http\Controllers\ItemTypeMappingController::class, 'grouped'])->name('jnt.item-types.grouped');
 Route::get('/jnt/item-types/inline',       [\App\Http\Controllers\ItemTypeMappingController::class, 'inline']);
 Route::post('/jnt/item-types/save',        [\App\Http\Controllers\ItemTypeMappingController::class, 'save']);
 Route::post('/jnt/item-types/save-one',    [\App\Http\Controllers\ItemTypeMappingController::class, 'saveOne']);

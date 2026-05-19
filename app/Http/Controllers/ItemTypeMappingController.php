@@ -9,6 +9,41 @@ use Illuminate\Support\Facades\DB;
 
 class ItemTypeMappingController extends Controller
 {
+    /**
+     * Read-only consolidated view: each item_type and ALL its mapped item_names
+     * in one row. Below the table, lists every item_name sa macro_output na
+     * walang mapping yet — para makita agad anong items kailangan mappingan.
+     */
+    public function grouped(Request $request)
+    {
+        // Group mappings by item_type — GROUP_CONCAT puts all item_names sa one cell.
+        $grouped = DB::table('item_type_mappings')
+            ->selectRaw("item_type,
+                         COUNT(*) as variant_count,
+                         GROUP_CONCAT(item_name ORDER BY item_name SEPARATOR ' | ') as item_names")
+            ->groupBy('item_type')
+            ->orderBy('item_type')
+            ->get();
+
+        // Unmapped item_names — distinct sa macro_output, not in item_type_mappings.
+        $unmapped = DB::table('macro_output as mo')
+            ->whereNotNull('mo.ITEM_NAME')
+            ->where('mo.ITEM_NAME', '!=', '')
+            ->whereNotExists(function ($q) {
+                $q->select(DB::raw(1))
+                  ->from('item_type_mappings as itm')
+                  ->whereColumn('itm.item_name', 'mo.ITEM_NAME');
+            })
+            ->distinct()
+            ->orderBy('mo.ITEM_NAME')
+            ->pluck('mo.ITEM_NAME');
+
+        return view('jnt.item-types-grouped', [
+            'grouped'  => $grouped,
+            'unmapped' => $unmapped,
+        ]);
+    }
+
     // ── Option 1: Paste from Sheets ─────────────────────────────────────────
     public function index(Request $request)
     {
