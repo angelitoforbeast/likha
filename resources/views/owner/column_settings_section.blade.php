@@ -171,6 +171,49 @@
         @endif
       </div>
     </div>
+
+    {{-- Defaults management — snapshot / restore the entire section's settings
+         (column visibility + conditional formatting in one go). Useful for
+         replicating known-good config across sites (e.g., likha → incepxion). --}}
+    <div class="col-section mt-4">
+      <div class="flex items-baseline justify-between mb-1">
+        <h3>🗄 Defaults Management</h3>
+        <span class="text-[10px] text-slate-400">app_settings · {{ $sectionId }}_cols_default + {{ $sectionId }}_col_format_default</span>
+      </div>
+      <p class="note">
+        Snapshot the current visible config (column visibility + conditional formatting) as the new default,
+        or restore the live config from the saved default. Useful for replicating settings across sites.
+      </p>
+
+      @if(session('status'))
+        <div class="bg-green-50 border border-green-200 text-green-800 rounded p-3 text-sm mb-3">
+          {{ session('status') }}
+        </div>
+      @endif
+
+      <div class="flex items-center gap-3 mt-3 flex-wrap">
+        <form method="POST" action="{{ route('owner.column-settings.save-as-default', ['table' => $sectionId]) }}"
+              onsubmit="return confirm('Snapshot current settings as the new default?\n\nThis overwrites the previously saved default. Reset will revert to this new snapshot going forward.')"
+              class="inline">
+          @csrf
+          <button type="submit" class="save-btn">💾 Save Current as Default</button>
+        </form>
+
+        <form method="POST" action="{{ route('owner.column-settings.reset-to-default', ['table' => $sectionId]) }}"
+              onsubmit="return confirm('⚠ Reset live settings to the saved default?\n\nThis OVERWRITES your current column visibility + conditional formatting for {{ $sectionId }}.\n\nProceed?')"
+              class="inline">
+          @csrf
+          <button type="submit" class="px-4 py-2 rounded text-sm font-semibold bg-amber-500 hover:bg-amber-600 text-white">
+            ↺ Reset to Default
+          </button>
+        </form>
+
+        <div class="text-xs text-slate-500 ml-auto">
+          Restores both <strong>column visibility</strong> and <strong>conditional formatting</strong> for this section.
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <div id="colsToast" class="toast">✓ Saved</div>

@@ -929,6 +929,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/owner/column-settings/save',           [\App\Http\Controllers\OwnerColumnSettingsController::class, 'save' ])           ->name('owner.column-settings.save');
     Route::post('/owner/column-settings/breakeven-pct',  [\App\Http\Controllers\OwnerColumnSettingsController::class, 'saveBreakevenPct'])->name('owner.column-settings.breakeven-pct');
     Route::post('/owner/column-settings/col-format',     [\App\Http\Controllers\OwnerColumnSettingsController::class, 'saveColFormat'])   ->name('owner.column-settings.col-format');
+    Route::post('/owner/column-settings/{table}/save-as-default',  [\App\Http\Controllers\OwnerColumnSettingsController::class, 'saveAsDefault'])  ->name('owner.column-settings.save-as-default');
+    Route::post('/owner/column-settings/{table}/reset-to-default', [\App\Http\Controllers\OwnerColumnSettingsController::class, 'resetToDefault']) ->name('owner.column-settings.reset-to-default');
 
 
     // ✅ Validation Lists (CEO, Marketing, Marketing OIC)

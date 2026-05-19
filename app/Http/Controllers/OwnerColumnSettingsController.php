@@ -771,4 +771,103 @@ class OwnerColumnSettingsController extends Controller
         if ($table === 'daily_summary') return self::KEY_DAILY_SUMMARY;
         return self::KEY_OWNER_PRIVATE;
     }
+
+    /**
+     * Returns the pair of (live, default) app_settings keys that belong to a
+     * table. The "_default" snapshot is what the Reset button restores to.
+     * Includes both the column-config key and its companion col_format key.
+     */
+    private function keysForReset(string $table): array
+    {
+        $colsKey   = $this->keyFor($table);
+        $formatKey = $this->colFormatKey($table);
+        return [
+            'cols'        => $colsKey,
+            'cols_default'  => $colsKey . '_default',
+            'format'      => $formatKey,
+            'format_default'=> $formatKey . '_default',
+        ];
+    }
+
+    /**
+     * POST /owner/column-settings/{table}/save-as-default
+     * Snapshots the CURRENT live column-settings + conditional-formatting
+     * rows as `*_default` keys. Click after tuning the settings to your
+     * liking; the Reset button below will revert to this snapshot.
+     */
+    public function saveAsDefault(string $table)
+    {
+        $this->checkAccess();
+        if (!array_key_exists($table, self::CATALOG)) abort(404);
+
+        $k = $this->keysForReset($table);
+        $now = now();
+
+        // Copy live → default for both cols and col_format. Empty live row →
+        // empty default (consistent).
+        foreach ([['cols', 'cols_default'], ['format', 'format_default']] as [$liveK, $defK]) {
+            $live = DB::table('app_settings')->where('key', $k[$liveK])->first(['value']);
+            $val  = $live?->value;
+            DB::table('app_settings')->updateOrInsert(
+                ['key' => $k[$defK]],
+                ['value' => $val, 'updated_at' => $now, 'created_at' => $now]
+            );
+        }
+
+        return back()->with('status', "✓ Saved current {$table} settings as the new default.");
+    }
+
+    /**
+     * POST /owner/column-settings/{table}/reset-to-default
+     * Restores live column-settings + col_format from the `*_default` snapshot.
+     * If no snapshot exists, falls back to:
+     *   - cols:   DEFAULT_VISIBLE-derived config (CEO-only visibility, no per-role grants)
+     *   - format: deletes the live row (empty rules)
+     */
+    public function resetToDefault(string $table)
+    {
+        $this->checkAccess();
+        if (!array_key_exists($table, self::CATALOG)) abort(404);
+
+        $k = $this->keysForReset($table);
+        $now = now();
+
+        // ── cols ──
+        $colsDefault = DB::table('app_settings')->where('key', $k['cols_default'])->first(['value']);
+        if ($colsDefault && $colsDefault->value) {
+            DB::table('app_settings')->updateOrInsert(
+                ['key' => $k['cols']],
+                ['value' => $colsDefault->value, 'updated_at' => $now, 'created_at' => $now]
+            );
+        } else {
+            // No snapshot → build a sensible code-default: catalog order, hide
+            // anything not in DEFAULT_VISIBLE for that table, no per-role grants.
+            $allowedIds  = array_column(self::CATALOG[$table] ?? [], 'id');
+            $visibleSet  = array_flip(self::DEFAULT_VISIBLE[$table] ?? []);
+            $hidden      = array_values(array_filter($allowedIds, fn ($id) => !isset($visibleSet[$id])));
+            $payload     = json_encode([
+                'order'           => $allowedIds,
+                'hidden'          => $hidden,
+                'visible_by_role' => [],
+            ]);
+            DB::table('app_settings')->updateOrInsert(
+                ['key' => $k['cols']],
+                ['value' => $payload, 'updated_at' => $now, 'created_at' => $now]
+            );
+        }
+
+        // ── col_format ──
+        $formatDefault = DB::table('app_settings')->where('key', $k['format_default'])->first(['value']);
+        if ($formatDefault && $formatDefault->value) {
+            DB::table('app_settings')->updateOrInsert(
+                ['key' => $k['format']],
+                ['value' => $formatDefault->value, 'updated_at' => $now, 'created_at' => $now]
+            );
+        } else {
+            // No snapshot → clear formatting entirely.
+            DB::table('app_settings')->where('key', $k['format'])->delete();
+        }
+
+        return back()->with('status', "↺ Reset {$table} settings to default.");
+    }
 }
