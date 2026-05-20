@@ -801,13 +801,10 @@
                   <template x-if="col.id==='promo'">
                     <span>
                       <template x-if="row.promo">
-                        <span :style="(row.promo.toUpperCase()==='NONE' || row.promo==='-')
-                                ? 'display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:500;background:#f1f5f9;color:#94a3b8;'
-                                : 'display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:#fae8ff;color:#86198f;'"
-                              x-text="(row.promo.toUpperCase()==='NONE' || row.promo==='-') ? '—' : row.promo"></span>
+                        <span x-text="(row.promo.toUpperCase()==='NONE' || row.promo==='-') ? '—' : row.promo"></span>
                       </template>
                       <template x-if="!row.promo">
-                        <span style="color:#cbd5e1;font-size:11px;" title="no promo set yet">—</span>
+                        <span style="color:#cbd5e1;" title="no promo set yet">—</span>
                       </template>
                     </span>
                   </template>

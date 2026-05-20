@@ -1788,7 +1788,12 @@ class OwnerPrivateController extends Controller
                 ->groupByRaw("LOWER(TRIM(COALESCE(psm.`PAGE`,''))) , LOWER(TRIM(COALESCE(fj.item_name,''))), ROUND($jntCodClean)")
                 ->get();
             foreach ($jntRows as $r) {
-                $k = (string)$r->page_key.'||'.(string)$r->item_key.'||'.(string)(int)round((float)$r->cod_val);
+                // Canonicalize item_name via alias resolver — combines variants
+                // (e.g. "ALAGAPAMILYA-II" + "ALAGAPAMILYA-VII") under one bucket
+                // when may mapping sa item_type_mappings. Sa hosts with zero
+                // mappings, canonical == raw normalized → behavior unchanged.
+                $canonItem = $aliases->canonicalKey((string)$r->item_key);
+                $k = (string)$r->page_key.'||'.$canonItem.'||'.(string)(int)round((float)$r->cod_val);
                 // If multiple sender names map to same page+item+cod, SUM their counts
                 if (isset($jntStatsMap[$k])) {
                     $jntStatsMap[$k]['total']       += (int)$r->total;
@@ -1815,8 +1820,12 @@ class OwnerPrivateController extends Controller
 
             $dominant    = $pg['items'][0];
             $secondary   = array_slice($pg['items'], 1);
+            // Settings lookup still uses raw lower+trim (per-variant page_item_settings).
             $dominantKey = strtolower(trim($dominant['item_name']));
             $settingKey  = $pk.'||'.$dominantKey;
+            // JNT stats lookup uses canonical (alias-aware) key — matches the
+            // producer-side aggregation sa jntStatsMap above.
+            $dominantCanonKey = $aliases->canonicalKey($dominant['item_name']);
 
             $adspent       = (float)($pg['adspent_total'] ?? ($adsMap[$pk] ?? 0.0));
             $totalOrders   = (int)$pg['total_orders'];
@@ -1853,8 +1862,9 @@ class OwnerPrivateController extends Controller
             $rtsPct          = $settings ? (float)$settings['rts_pct'] : null;
             $rtsComment      = $settings ? $settings['comment'] : null;
 
-            // JNT stats — keyed by page_key||item_key||cod_int (from JOIN query above)
-            $jntKey   = $pk.'||'.$dominantKey.'||'.(string)(int)round($price);
+            // JNT stats — keyed by page_key||canonical_item_key||cod_int (matches
+            // alias-aware aggregation sa jntStatsMap builder above).
+            $jntKey   = $pk.'||'.$dominantCanonKey.'||'.(string)(int)round($price);
             $jntStats = $jntStatsMap[$jntKey] ?? null;
             $jntRtsPct = $jntDelPct = $jntTransitPct = null;
             $jntRtsCnt = $jntDelCnt = $jntTransitCnt = $jntTotal = null;
