@@ -83,6 +83,7 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'jnt_rts',       'label' => 'RTS%'],
             ['id' => 'jnt_del',       'label' => 'Del%'],
             ['id' => 'jnt_transit',   'label' => 'Transit%'],
+            ['id' => 'frequency',     'label' => 'Frequency (impressions ÷ reach)'],
             ['id' => 'rts_set',       'label' => 'Set RTS%'],
             ['id' => 'promo',         'label' => 'Promo'],
             ['id' => 'price',         'label' => 'Price'],
@@ -161,7 +162,7 @@ class OwnerColumnSettingsController extends Controller
             'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d',
             'proj_prof_1d', 'proj_prof_3d', 'proj_prof_7d',
             'jnt_rts', 'jnt_del', 'jnt_transit',
-            'rts_set', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee',
+            'frequency', 'rts_set', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee',
         ],
         'campaigns' => [
             // Reduced default to keep the inline expand panel within the
