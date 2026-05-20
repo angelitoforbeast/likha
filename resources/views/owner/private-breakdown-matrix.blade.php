@@ -200,6 +200,10 @@
       <label :class="vis.item_name && 'active'">
         <input type="checkbox" x-model="vis.item_name" @change="persist()"> ITEM NAME
       </label>
+      <label :class="vis.show_alias && 'active'" class="!border-violet-400"
+             title="Display the canonical alias-family name instead of the per-day variant. No effect for items without an alias mapping.">
+        <input type="checkbox" x-model="vis.show_alias" @change="persist()"> SHOW ALIAS
+      </label>
       <label :class="vis.count && 'active'">
         <input type="checkbox" x-model="vis.count" @change="persist()"> COUNT
       </label>
@@ -211,6 +215,10 @@
       </label>
       <label :class="vis.cogs && 'active'">
         <input type="checkbox" x-model="vis.cogs" @change="persist()"> COGS
+      </label>
+      <label :class="vis.promo && 'active'" class="!border-fuchsia-400"
+             title="Per-date promo tag (inherits forward like RTS). Required on save.">
+        <input type="checkbox" x-model="vis.promo" @change="persist()"> PROMO
       </label>
       <label :class="vis.proj_pct && 'active'"
              title="Projected profit% per cell (revenue − shipping − cogs − ads − cod fee) / (orders × mode COD)">
@@ -344,6 +352,8 @@
                         'rts_inherited' => !empty($cell['rts_inherited']),
                         'unit_cost'   => $cell['unit_cost'],
                         'unit_cost_ceo' => $cell['unit_cost_ceo'] ?? null,
+                        'promo'         => $cell['promo'] ?? '',
+                        'promo_inherited' => !empty($cell['promo_inherited']),
                         'earliest_same_date' => $earliestSame,
                     ] : null;
                   @endphp
@@ -358,7 +368,8 @@
                       @if(!empty($cell['item_changed']))
                         <span class="badge-new">NEW</span>
                       @endif
-                      <div x-show="vis.item_name" style="font-weight:600;">{{ $cell['item_name'] }}</div>
+                      <div x-show="vis.item_name && !vis.show_alias" style="font-weight:600;">{{ $cell['item_name'] }}</div>
+                      <div x-show="vis.item_name && vis.show_alias" style="font-weight:600;color:#6d28d9;">{{ $cell['item_alias_label'] }}</div>
                       <div x-show="vis.cod" style="font-size:9px;color:#64748b;font-weight:400;">
                         {{ $cell['orders'] }}{{ $cell['mode_cod'] ? ' @ '.number_format($cell['mode_cod'],0) : '' }}
                         @if(!empty($cell['price_changed']) && $cell['price_delta'] !== null)
@@ -374,6 +385,21 @@
                         @endif
                         @if($cell['unit_cost'] !== null)
                           <span x-show="vis.cogs" class="badge-cogs" title="unit cost (cogs)">₱{{ rtrim(rtrim(number_format($cell['unit_cost'],2), '0'),'.') }}</span>
+                        @endif
+                        @if(!empty($cell['promo']))
+                          @php
+                            $promoStr = (string)$cell['promo'];
+                            $isNone   = strcasecmp($promoStr, 'NONE') === 0 || $promoStr === '-';
+                            $promoStyle = $isNone
+                                ? 'background:#f1f5f9;color:#94a3b8;font-weight:500;'
+                                : 'background:#fae8ff;color:#86198f;font-weight:700;';
+                            if (!empty($cell['promo_inherited'])) $promoStyle .= 'opacity:0.7;';
+                            $promoTitle = ($cell['promo_inherited'] ? 'inherited from '.$cell['rts_eff_date'] : 'set on this date');
+                            $promoTitle .= ' · '.$promoStr;
+                          @endphp
+                          <span x-show="vis.promo"
+                                style="display:inline-block;padding:1px 4px;border-radius:3px;font-size:9px;margin-top:1px;margin-left:2px;{{ $promoStyle }}"
+                                title="{{ $promoTitle }}">{{ $isNone ? '—' : $promoStr }}</span>
                         @endif
                         @if(!empty($isCeoView) && isset($cell['unit_cost_ceo']) && $cell['unit_cost_ceo'] !== null)
                           {{-- CEO-only badge — separate from cogs badge, uses indigo tint to distinguish.
@@ -496,6 +522,18 @@
                    placeholder="why is this value different?">
           </div>
 
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">Promo <span class="text-red-600">*</span> <span class="text-slate-400 font-normal normal-case">(required — type NONE if walang promo)</span></label>
+            <input type="text" x-model="edit.promo" maxlength="255"
+                   class="w-full border border-slate-300 rounded px-3 py-2 text-sm font-mono"
+                   placeholder='e.g. "9.9 Sale", "PAYDAY", or "NONE"'>
+            <template x-if="edit.promo_inherited && edit.rts_eff_date">
+              <div class="text-[11px] text-amber-600 mt-1">
+                ⚠ Currently inherited from <span class="font-mono" x-text="edit.rts_eff_date"></span>. Saving creates a new promo state starting this date.
+              </div>
+            </template>
+          </div>
+
           <template x-if="edit.error">
             <div class="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-3 py-2" x-text="edit.error"></div>
           </template>
@@ -527,7 +565,7 @@
     return {
       // Visibility toggles — persisted per route in localStorage.
       // Key includes pathname so ibang page may sariling preference.
-      vis: { item_name:true, count:true, cod:true, rts:true, cogs:true, proj_pct:false, one_item_only:false, only_missing:false },
+      vis: { item_name:true, count:true, cod:true, rts:true, cogs:true, promo:true, proj_pct:false, one_item_only:false, only_missing:false, show_alias:false },
       storageKey: 'matrix_vis:' + location.pathname,
 
       // Item-filter state (server-side; triggers form submit via applyFilter())
@@ -542,6 +580,7 @@
         orders:0, mode_cod:null,
         rts_pct:'', rts_eff_date:null, rts_inherited:false,
         unit_cost:'', unit_cost_ceo:'', comment:'',
+        promo:'', promo_inherited:false,
         earliest_same_date:null,
       },
 
@@ -653,6 +692,8 @@
           // CEO-only — populated only for CEO viewers, hidden field for others.
           unit_cost_ceo: (cell.unit_cost_ceo !== undefined && cell.unit_cost_ceo !== null) ? cell.unit_cost_ceo : '',
           comment:      '',
+          promo:        cell.promo || '',
+          promo_inherited: !!cell.promo_inherited && !!cell.promo,
           earliest_same_date: cell.earliest_same_date || null,
         };
       },
@@ -674,6 +715,12 @@
           this.edit.error = 'RTS Comment is required — please explain the change.';
           this.edit.saving = false; return;
         }
+        // Promo is required — explicit tag ("NONE" allowed for no-promo).
+        const promo = (this.edit.promo || '').trim();
+        if (!promo) {
+          this.edit.error = 'Promo is required — type "NONE" if walang promo.';
+          this.edit.saving = false; return;
+        }
         try {
           const fd = new FormData();
           fd.append('page_name',      this.edit.page_label);
@@ -689,6 +736,7 @@
           }
           // Comment is required (validated above) — always send the trimmed value.
           fd.append('comment', cmt);
+          fd.append('promo',   promo);
           // CEO-only: include CEO's separate unit cost — server saves it sa
           // cogs_ceo table independently from cogs. Server validates role.
           if (this.isCeoView && this.edit.unit_cost_ceo !== '' && this.edit.unit_cost_ceo !== null) {

@@ -1736,7 +1736,7 @@ class OwnerPrivateController extends Controller
                 ->orderBy('item_name')
                 ->orderByDesc('effective_date')
                 ->orderByDesc('id')   // tiebreaker: latest insert wins when same date
-                ->get(['page_name', 'item_name', 'rts_pct', 'effective_date', 'comment', 'item_value_comment']);
+                ->get(['page_name', 'item_name', 'rts_pct', 'effective_date', 'comment', 'item_value_comment', 'promo']);
 
             foreach ($settingRows as $s) {
                 $k = strtolower(trim((string)$s->page_name)).'||'.strtolower(trim((string)$s->item_name));
@@ -1746,6 +1746,7 @@ class OwnerPrivateController extends Controller
                         'effective_date'       => (string)$s->effective_date,
                         'comment'              => (string)($s->comment ?? ''),
                         'item_value_comment'   => (string)($s->item_value_comment ?? ''),
+                        'promo'                => (string)($s->promo ?? ''),
                     ];
                 }
             }
@@ -2037,6 +2038,7 @@ class OwnerPrivateController extends Controller
                 'has_settings'          => $settings !== null,
                 'rts_comment'           => $rtsComment,
                 'item_value_comment'    => $settings ? ($settings['item_value_comment'] ?: null) : null,
+                'promo'                 => $settings ? ($settings['promo'] ?: null) : null,
                 'jnt_rts_pct'           => $jntRtsPct,
                 'jnt_rts_cnt'           => $jntRtsCnt,
                 'jnt_del_pct'           => $jntDelPct,
@@ -2093,6 +2095,10 @@ class OwnerPrivateController extends Controller
             // (Was nullable before; tightened so changes are always justified.)
             'comment'              => 'required|string|min:1|max:500',
             'item_value_comment'   => 'nullable|string|max:500',
+            // Promo (free-text) — required pero acceptable values include 'NONE'
+            // or '-' kung walang promo running. Forces awareness — bawat save
+            // tags ang promo state. Per-date semantics via effective_date.
+            'promo'                => 'required|string|min:1|max:255',
         ]);
 
         $pageName  = trim($validated['page_name']);
@@ -2104,7 +2110,7 @@ class OwnerPrivateController extends Controller
             ->where('page_name', $pageName)
             ->where('item_name', $itemName)
             ->where('effective_date', $effDate)
-            ->first(['rts_pct']);
+            ->first(['rts_pct', 'promo']);
         $oldCogsRow = DB::table('cogs')
             ->where('item_name', $itemName)
             ->where('date', $effDate)
@@ -2118,6 +2124,7 @@ class OwnerPrivateController extends Controller
                 ->first(['unit_cost'])
             : null;
         $oldRts     = $oldRtsRow     ? (float) $oldRtsRow->rts_pct      : null;
+        $oldPromo   = $oldRtsRow     ? (string)($oldRtsRow->promo ?? '') : null;
         $oldCogs    = $oldCogsRow    ? (float) $oldCogsRow->unit_cost   : null;
         $oldCogsCeo = $oldCogsCeoRow ? (float) $oldCogsCeoRow->unit_cost : null;
         // When set, ALSO overwrite any existing rows whose date is
@@ -2148,6 +2155,7 @@ class OwnerPrivateController extends Controller
         // -----------------------------------------------------------------
         try {
             // --- RTS% side (per-page) ---
+            $promo = trim((string) $validated['promo']);
             if ($rtsPct > 0) {
                 // Upsert the per-page RTS override for this (page, item, date).
                 DB::table('page_item_settings')->updateOrInsert(
@@ -2158,6 +2166,7 @@ class OwnerPrivateController extends Controller
                     ],
                     [
                         'rts_pct'            => $rtsPct,
+                        'promo'              => $promo,
                         'comment'            => $validated['comment'] ?? null,
                         'item_value_comment' => $validated['item_value_comment'] ?? null,
                         'updated_at'         => now(),
@@ -2175,6 +2184,7 @@ class OwnerPrivateController extends Controller
                         ->where('effective_date', '<=', $applyThrough)
                         ->update([
                             'rts_pct'    => $rtsPct,
+                            'promo'      => $promo,
                             'updated_at' => now(),
                         ]);
                 }
@@ -2283,6 +2293,11 @@ class OwnerPrivateController extends Controller
             if (Schema::hasColumn('page_item_settings_log', 'old_item_value_ceo')) {
                 $logRow['old_item_value_ceo'] = $oldCogsCeo;
                 $logRow['new_item_value_ceo'] = $newCogsCeo;
+            }
+            // Promo columns — only kung exists na (backwards-safe pre-migration).
+            if (Schema::hasColumn('page_item_settings_log', 'old_promo')) {
+                $logRow['old_promo'] = $oldPromo;
+                $logRow['new_promo'] = $rtsPct > 0 ? trim((string)$validated['promo']) : null;
             }
             DB::table('page_item_settings_log')->insert($logRow);
         } catch (\Throwable $e) {
@@ -2468,17 +2483,20 @@ class OwnerPrivateController extends Controller
         // Excluded pages (managed via /jnt/supply/excluded-pages)
         $excludedSet = array_flip(SupplyExcludedPage::excludedSet());
 
-        // RTS overrides: all rows effective_date ≤ endDate, keyed for per-cell resolution.
-        // We resolve per cell below via "latest effective_date ≤ cell_date".
+        // RTS overrides + promo: all rows effective_date ≤ endDate, keyed for
+        // per-cell resolution. Resolve per cell via "latest effective_date ≤ cell_date".
         $rtsRowsAll = [];
+        $hasPromoCol = Schema::hasColumn('page_item_settings', 'promo');
         if (Schema::hasTable('page_item_settings')) {
+            $cols = ['page_name', 'item_name', 'effective_date', 'rts_pct'];
+            if ($hasPromoCol) $cols[] = 'promo';
             $rtsRowsAll = DB::table('page_item_settings')
                 ->where('effective_date', '<=', $endDate)
                 ->orderBy('effective_date')   // ASC so later overrides overwrite earlier in-place resolution
-                ->get(['page_name', 'item_name', 'effective_date', 'rts_pct'])
+                ->get($cols)
                 ->all();
         }
-        // Index: $rtsIdx[page_key_lower][item_name_lower] = [ [date, rts], ... ] sorted ASC by date
+        // Index: $rtsIdx[page_key_lower][item_name_lower] = [ [date, rts, promo], ... ] sorted ASC by date
         $rtsIdx = [];
         foreach ($rtsRowsAll as $r) {
             $pk = strtolower(trim((string)$r->page_name));
@@ -2487,9 +2505,10 @@ class OwnerPrivateController extends Controller
             $rtsIdx[$pk][$ik][] = [
                 'date'    => (string)$r->effective_date,
                 'rts_pct' => $r->rts_pct !== null ? (float)$r->rts_pct : null,
+                'promo'   => $hasPromoCol ? (string)($r->promo ?? '') : '',
             ];
         }
-        // Helper: resolve RTS for a (page_key, item_name, date)
+        // Helper: resolve RTS + promo for a (page_key, item_name, date)
         $resolveRts = function(string $pk, string $itemName, string $date) use (&$rtsIdx): ?array {
             $ik = strtolower(trim($itemName));
             $list = $rtsIdx[$pk][$ik] ?? null;
@@ -2499,7 +2518,7 @@ class OwnerPrivateController extends Controller
                 if ($row['date'] <= $date) $hit = $row;
                 else break; // sorted ASC
             }
-            return $hit; // ['date'=>..., 'rts_pct'=>...] or null
+            return $hit; // ['date'=>..., 'rts_pct'=>..., 'promo'=>...] or null
         };
 
         // COGS (global per-item-per-date) — Marketing's table.
@@ -2703,22 +2722,29 @@ class OwnerPrivateController extends Controller
             }
 
             $pages[$pk]['cells'][$cellDate] = [
-                'item_name'      => $itemName,
-                'item_key'       => $ik,
-                'orders'         => (int)$r->primary_orders,
-                'mode_cod'       => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
+                'item_name'       => $itemName,
+                // Canonical family label — for the alias toggle. Equals $itemName
+                // for non-aliased items so toggling shows no diff.
+                'item_alias_label'=> $aliases->canonicalLabel($itemName),
+                'item_key'        => $ik,
+                'orders'          => (int)$r->primary_orders,
+                'mode_cod'        => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
                 // Editable RTS state
-                'rts_pct'        => $rtsHit['rts_pct'] ?? null,
-                'rts_eff_date'   => $rtsHit['date'] ?? null,
+                'rts_pct'         => $rtsHit['rts_pct'] ?? null,
+                'rts_eff_date'    => $rtsHit['date'] ?? null,
                 // Resolved from effective_date ≤ cell_date. True if the override was set
                 // on a different (earlier) date — so user knows they'd be overriding here.
-                'rts_inherited'  => $rtsHit ? ($rtsHit['date'] !== $cellDate) : false,
-                'unit_cost'      => $cogsVal,
+                'rts_inherited'   => $rtsHit ? ($rtsHit['date'] !== $cellDate) : false,
+                'unit_cost'       => $cogsVal,
                 // CEO-only column. Strip for non-CEO viewers (null sent → UI hides anyway).
-                'unit_cost_ceo'  => $isCeoView ? $cogsCeoVal : null,
-                'proceed'        => $proceedHere,
-                'ads'            => $adsHere,
-                'profit_pct'     => $profitPct,
+                'unit_cost_ceo'   => $isCeoView ? $cogsCeoVal : null,
+                // Promo (per-date inheritance like RTS). Empty string when no
+                // override yet — UI shows badge as muted/missing.
+                'promo'           => $rtsHit['promo'] ?? '',
+                'promo_inherited' => $rtsHit ? ($rtsHit['date'] !== $cellDate) : false,
+                'proceed'         => $proceedHere,
+                'ads'             => $adsHere,
+                'profit_pct'      => $profitPct,
             ];
             $pages[$pk]['distinct_items'][$ik] = true;
             if ((string)$r->ts_date === $endDate) {

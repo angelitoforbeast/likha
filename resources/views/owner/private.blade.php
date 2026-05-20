@@ -1069,6 +1069,16 @@
           <input type="text" x-model="edit.comment" maxlength="500" placeholder="why is this value different?">
         </div>
 
+        <div class="ow-modal-section">
+          <label>Promo <span style="color:#dc2626;">*</span> <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(required — type NONE if walang promo)</span></label>
+          <input type="text" x-model="edit.promo" maxlength="255" placeholder='e.g. "9.9 Sale", "PAYDAY", or "NONE"'>
+          <template x-if="edit.promo_inherited && edit.rts_eff_date">
+            <div style="font-size:11px;color:#b45309;margin-top:4px;">
+              ⚠ Currently inherited from <span style="font-family:ui-monospace,monospace;" x-text="edit.rts_eff_date"></span>. Saving creates a new promo state starting this date.
+            </div>
+          </template>
+        </div>
+
         <template x-if="edit.error">
           <div class="ow-modal-section" style="background:#fef2f2;color:#991b1b;font-size:12px;" x-text="edit.error"></div>
         </template>
@@ -1485,6 +1495,10 @@
           unit_cost:    row.item_value     != null ? row.item_value     : '',
           unit_cost_ceo:(row.item_value_ceo != null && row.item_value_ceo !== undefined) ? row.item_value_ceo : '',
           comment:      '',
+          // Promo — pre-fill with current value if any (so editor sees what's
+          // inherited). Required on submit (validated below).
+          promo:        row.promo || '',
+          promo_inherited: isInherited && !!row.promo,
           // When in range mode + start_date != end_date, expose "Apply from start_date"
           // so the user can cascade the new value across the visible range.
           apply_from:   (this.startDate && this.startDate !== this.endDate) ? this.startDate : null,
@@ -1510,6 +1524,12 @@
           this.edit.error = 'RTS Comment is required — please explain the change.';
           this.edit.saving = false; return;
         }
+        // Promo is required — explicit tag (use "NONE" if walang promo).
+        const promo = (this.edit.promo || '').trim();
+        if (!promo) {
+          this.edit.error = 'Promo is required — type "NONE" if walang promo.';
+          this.edit.saving = false; return;
+        }
         try {
           const fd = new FormData();
           fd.append('page_name',      this.edit.page_name);
@@ -1525,6 +1545,7 @@
           }
           // Comment is required (validated above) — always send the trimmed value.
           fd.append('comment', cmt);
+          fd.append('promo',   promo);
           // CEO-only: send item_value_ceo when set. Server gates by role.
           if (this.edit.isCeoView && this.edit.unit_cost_ceo !== '' && this.edit.unit_cost_ceo !== null) {
             const costCeo = parseFloat(this.edit.unit_cost_ceo);
@@ -1565,6 +1586,15 @@
         if(isNaN(rts)||rts<0||rts>100) { alert('RTS% needed (0–100). Set both to 0 to delete this date\'s override.'); return; }
 
         const row = this.editRow;
+        // Inline save lacks a promo input — server requires it. Prompt for it,
+        // pre-filling with current row promo (or NONE) so user can Enter-through.
+        const promoDefault = (row && row.promo) ? row.promo : 'NONE';
+        const promo = (prompt('Promo (required — type NONE if walang promo):', promoDefault) || '').trim();
+        if (!promo) { alert('Promo is required.'); return; }
+
+        // Comment is required by server too — fallback to short reason if blank.
+        const cmt = ((this.ev.comment || '').trim()) || 'inline edit';
+
         this.saving = true;
         try {
           const r = await fetch('{{ route('owner.private.item-setting.save') }}', {
@@ -1576,8 +1606,9 @@
               item_value:     itemVal,
               rts_pct:        rts,
               effective_date: this.endDate,
-              comment:              this.ev.comment    || null,
+              comment:              cmt,
               item_value_comment:   this.ev.iv_comment || null,
+              promo:                promo,
             }),
           });
           let j;
