@@ -361,9 +361,9 @@
               <div>
                 <div class="flex items-center justify-between">
                   <label class="gpt-label !mb-0" for="temperature">🎨 Creativity</label>
-                  <span class="text-sm font-mono font-semibold text-indigo-600" id="tempVal">0.5</span>
+                  <span class="text-sm font-mono font-semibold text-indigo-600" id="tempVal">1</span>
                 </div>
-                <input id="temperature" type="range" min="0" max="1" step="0.1" value="0.5"
+                <input id="temperature" type="range" min="0" max="1" step="0.1" value="1"
                        oninput="document.getElementById('tempVal').textContent = this.value;"
                        class="gpt-range mt-2" />
                 <div class="flex justify-between text-[10px] text-slate-400 mt-1 font-medium">
@@ -400,9 +400,9 @@
           <label class="pill-input" title="How many alternative ad copies to generate at once">
             Variants
             <select id="variantsCount" onchange="syncStreamCheckbox()">
-              <option value="1" selected>1</option>
+              <option value="1">1</option>
               <option value="3">3</option>
-              <option value="5">5</option>
+              <option value="5" selected>5</option>
             </select>
           </label>
 
@@ -468,21 +468,21 @@
             <select id="sugViewMode" onchange="setSuggestionsView(this.value)"
                     class="text-xs border border-gray-300 rounded px-2 py-1">
               <option value="text">📄 Text</option>
-              <option value="table">📊 Table</option>
+              <option value="table" selected>📊 Table</option>
             </select>
             <button onclick="copySuggestions()" class="btn-ghost">📋 Copy</button>
             <button onclick="clearSuggestions()" class="btn-ghost danger">🗑 Clear</button>
           </div>
         </div>
         <div class="flex-1 overflow-hidden p-3">
-          {{-- Text view (default) — preserved as-is so the GPT-fed block at
-               clipboard-copy behavior keep working unchanged. --}}
-          <div id="suggestionsBox" class="h-full overflow-auto whitespace-pre-wrap p-3"></div>
+          {{-- Text view (hidden by default) — preserved as-is so the GPT-fed
+               block at clipboard-copy behavior keep working unchanged. --}}
+          <div id="suggestionsBox" class="h-full overflow-auto whitespace-pre-wrap p-3 hidden"></div>
 
-          {{-- Table view (hidden by default) — rendered client-side from the
-               structured `sections` field returned by the API. Toggling sa
-               dropdown switches visibility; data is shared between views. --}}
-          <div id="suggestionsTable" class="h-full overflow-auto p-3 hidden"></div>
+          {{-- Table view (default) — rendered client-side from the structured
+               `sections` field returned by the API. Toggling sa dropdown
+               switches visibility; data is shared between views. --}}
+          <div id="suggestionsTable" class="h-full overflow-auto p-3"></div>
         </div>
         <textarea id="suggestionsRaw" class="hidden"></textarea>
       </div>
