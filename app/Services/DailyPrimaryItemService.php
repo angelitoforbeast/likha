@@ -53,6 +53,12 @@ class DailyPrimaryItemService
         $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
         $quote  = fn(string $col) => $driver === 'pgsql' ? '"' . $col . '"' : '`' . $col . '`';
 
+        // Alias resolver — collapses item_name variants under a canonical
+        // item_type (one row per alias-family per slice). On hosts with zero
+        // mappings (e.g. likha), canonicalKey() returns the raw key → behavior
+        // identical to pre-aliasing.
+        $aliases = new ItemAliasResolver();
+
         // ---- Column detection (mirrors OwnerPrivateController) ------------
         $pickCol = function (string $table, array $candidates) use ($driver) {
             if ($driver === 'pgsql') {
@@ -147,15 +153,29 @@ class DailyPrimaryItemService
         // ---- Aggregate in PHP: per (date, page_key) -----------------------
         // slice[date][page_key] = [
         //   'page_label' => ..,
-        //   'items' => [item_key => ['label'=>..,'count'=>n,'cods'=>[val=>n,...]]]
+        //   'items' => [canonical_key => ['label'=>..,'count'=>n,'cods'=>[val=>n,...],
+        //                                 'variant_counts'=>[raw_label=>n,...]]]
         // ]
+        // Canonical key: alias-family key (item_type) if mapped, else raw key.
+        // Per-variant counts are tracked so we can pick the most-representative
+        // variant label for display once aggregation finishes.
         $slice = [];
         foreach ($rows as $r) {
-            $d   = (string)$r->ts_date;
-            $pk  = (string)$r->page_key;
-            $ik  = (string)$r->item_key;
-            $n   = (int)$r->n;
-            $cod = $r->cod_val !== null ? (float)$r->cod_val : null;
+            $d        = (string)$r->ts_date;
+            $pk       = (string)$r->page_key;
+            $rawKey   = (string)$r->item_key;
+            $rawLabel = (string)$r->item_label;
+            $n        = (int)$r->n;
+            $cod      = $r->cod_val !== null ? (float)$r->cod_val : null;
+
+            // Canonical bucket — collapses aliased variants together.
+            $ik = $aliases->canonicalKey($rawLabel);
+            // Defensive: if raw key differs from canonical normalize() (no
+            // alias hit), prefer the SQL-computed rawKey to stay byte-identical
+            // with pre-aliasing — both should match for non-aliased items.
+            if ($ik === ItemAliasResolver::normalize($rawLabel)) {
+                $ik = $rawKey;
+            }
 
             if (!isset($slice[$d][$pk])) {
                 $slice[$d][$pk] = [
@@ -165,18 +185,46 @@ class DailyPrimaryItemService
             }
             if (!isset($slice[$d][$pk]['items'][$ik])) {
                 $slice[$d][$pk]['items'][$ik] = [
-                    'label' => (string)$r->item_label,
-                    'count' => 0,
-                    'cods'  => [],
+                    'label'          => $rawLabel,
+                    'count'          => 0,
+                    'cods'           => [],
+                    'variant_counts' => [],
                 ];
             }
             $slice[$d][$pk]['items'][$ik]['count'] += $n;
+            $slice[$d][$pk]['items'][$ik]['variant_counts'][$rawLabel]
+                = ($slice[$d][$pk]['items'][$ik]['variant_counts'][$rawLabel] ?? 0) + $n;
             if ($cod !== null && $cod > 0) {
                 $key = number_format($cod, 2, '.', '');
                 $slice[$d][$pk]['items'][$ik]['cods'][$key]
                     = ($slice[$d][$pk]['items'][$ik]['cods'][$key] ?? 0) + $n;
             }
         }
+
+        // After aggregation, pick the most-representative variant label per
+        // bucket — the variant with the most orders on that day. Ties break
+        // alphabetically by raw label for determinism. This keeps the per-day
+        // matrix showing actual variant names while sharing one canonical key.
+        foreach ($slice as $d => &$pgInfo) {
+            foreach ($pgInfo as $pk => &$info) {
+                foreach ($info['items'] as $ik => &$it) {
+                    if (!empty($it['variant_counts'])) {
+                        $vc = $it['variant_counts'];
+                        arsort($vc); // count DESC
+                        $topN = reset($vc);
+                        // Among variants tied at top count, pick alphabetically last
+                        // (typically the most recent variant — VII > II).
+                        $tops = array_keys(array_filter($vc, fn($c) => $c === $topN));
+                        sort($tops);
+                        $it['label'] = end($tops);
+                    }
+                    unset($it['variant_counts']);
+                }
+                unset($it);
+            }
+            unset($info);
+        }
+        unset($pgInfo);
 
         // ---- Resolve primary per slice -----------------------------------
         $now = now();

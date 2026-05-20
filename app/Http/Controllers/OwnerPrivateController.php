@@ -1523,28 +1523,48 @@ class OwnerPrivateController extends Controller
         }
 
         // ── Enrich anchors with proceed_orders + COD range (per date, per page) ───
-        // Query macro_output grouped by (page_key, item_norm, date) across the range so
-        // we can attribute proceed counts to the included dates only.
-        $itemNormExpr = "LOWER(REPLACE(REPLACE(REPLACE($itemTrim,' ',''),'-',''),'_',''))";
+        // Query macro_output grouped by (page_key, raw item label, date) so we can
+        // canonicalize via ItemAliasResolver below — aliased variants collapse into
+        // one canonical bucket, matching the alias-aware primary_item_key stored in
+        // daily_page_primary_item.
         $statRows = DB::table('macro_output as mo')
             ->whereRaw("$dateExpr BETWEEN ? AND ?", [$startDate, $endDate])
             ->whereRaw("$pageTrim != ''")
             ->selectRaw("
                 $dateExpr AS d,
                 $pageKey AS page_key,
-                $itemNormExpr AS item_key,
+                $itemTrim AS item_raw,
                 SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders,
                 MAX($codClean) AS max_cod,
                 MIN(CASE WHEN $codClean > 0 THEN $codClean ELSE NULL END) AS min_cod
             ")
-            ->groupByRaw("$dateExpr, $pageKey, $itemNormExpr")
+            ->groupByRaw("$dateExpr, $pageKey, $itemTrim")
             ->get();
 
-        // statByKeyDate[page_key||item_key][date] = stats row
+        // statByKeyDate[page_key||canonical_item_key][date] = aggregated stats
+        // Canonical key collapses aliased variants (e.g. "II" + "VII" → same family);
+        // on hosts with zero mappings, canonical == raw normalized key → unchanged.
+        $aliases = new \App\Services\ItemAliasResolver();
         $statByKeyDate = [];
         foreach ($statRows as $s) {
-            $k = (string)$s->page_key.'||'.(string)$s->item_key;
-            $statByKeyDate[$k][(string)$s->d] = $s;
+            $canonKey = $aliases->canonicalKey((string)$s->item_raw);
+            $k = (string)$s->page_key.'||'.$canonKey;
+            $d = (string)$s->d;
+            if (!isset($statByKeyDate[$k][$d])) {
+                $statByKeyDate[$k][$d] = (object)[
+                    'proceed_orders' => (int)$s->proceed_orders,
+                    'max_cod'        => $s->max_cod !== null ? (float)$s->max_cod : 0.0,
+                    'min_cod'        => $s->min_cod !== null ? (float)$s->min_cod : null,
+                ];
+            } else {
+                $cur = $statByKeyDate[$k][$d];
+                $cur->proceed_orders += (int)$s->proceed_orders;
+                $cur->max_cod = max($cur->max_cod, $s->max_cod !== null ? (float)$s->max_cod : 0.0);
+                $sMin = $s->min_cod !== null ? (float)$s->min_cod : null;
+                if ($sMin !== null && $sMin > 0) {
+                    $cur->min_cod = $cur->min_cod === null ? $sMin : min($cur->min_cod, $sMin);
+                }
+            }
         }
 
         // ── Count unresolved slices (pages seen in range but no anchor on end_date) ──
@@ -2587,14 +2607,20 @@ class OwnerPrivateController extends Controller
             ->groupByRaw("$moDateExpr, $moPageKey, $moItemTrim")
             ->get();
 
-        // $proceedMap[page_key][date][item_raw_lower] = proceed count
+        // $proceedMap[page_key][date][canonical_key] = SUMmed proceed count
+        // across aliased variants. Canonical key matches the alias-aware
+        // primary_item_key stored in daily_page_primary_item, so per-cell
+        // lookups resolve correctly post-aliasing. On hosts with zero
+        // mappings, canonical == raw normalized → unchanged.
+        $aliases = new \App\Services\ItemAliasResolver();
         $proceedMap = [];
         foreach ($proceedRows as $pr) {
             $pk = (string)$pr->pg;
             $d  = (string)$pr->d;
-            $ir = mb_strtolower(trim((string)$pr->item_raw));
-            if ($pk === '' || $ir === '') continue;
-            $proceedMap[$pk][$d][$ir] = (int)$pr->proceed;
+            $raw = (string)$pr->item_raw;
+            if ($pk === '' || $raw === '') continue;
+            $ck = $aliases->canonicalKey($raw);
+            $proceedMap[$pk][$d][$ck] = ($proceedMap[$pk][$d][$ck] ?? 0) + (int)$pr->proceed;
         }
 
         // 2) Ads per (page_key, date)
@@ -2655,7 +2681,8 @@ class OwnerPrivateController extends Controller
             $cogsForProfit = $isCeoView ? $cogsCeoVal : $cogsVal;
 
             // Per-cell PROJ% — only computable when all ingredients are present.
-            $proceedHere = (int) ($proceedMap[$pk][$cellDate][mb_strtolower(trim($itemName))] ?? 0);
+            // Look up proceed by canonical key (matches alias-aware $proceedMap above).
+            $proceedHere = (int) ($proceedMap[$pk][$cellDate][$ik] ?? 0);
             $adsHere     = (float) ($adsMap[$pk][$cellDate] ?? 0.0);
             $profitPct   = null;
             if ($cogsForProfit !== null
@@ -3127,13 +3154,14 @@ class OwnerPrivateController extends Controller
             ->whereBetween('ts_date', [$start, $end])
             ->get(['ts_date', 'page_key', 'primary_item', 'primary_item_key', 'primary_orders', 'primary_mode_cod']);
 
-        // Q6b: per (date, page_key, item_norm) PROCEED ORDERS from macro_output.
+        // Q6b: per (date, page_key, raw item label) PROCEED ORDERS from macro_output.
         // Same logic na ginagamit ng itemSummary's $statRows. Yung sliceProfit
         // formula gumagamit ng proceed count (status='proceed' lang), HINDI ng
-        // primary_orders (which counts all statuses).
+        // primary_orders (which counts all statuses). Canonicalized in PHP below
+        // so aliased variants collapse into the same bucket as primary_item_key.
         $itemColName = $pickCol('macro_output', ['ITEM_NAME','item_name','Product','product_name','ITEM','item']) ?? 'item_name';
         $moItemQ     = 'mo.' . $quote($itemColName);
-        $itemNormExpr = "LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE($moItemQ,'')),' ',''),'-',''),'_',''))";
+        $itemTrimExpr = "$trimFn(COALESCE($moItemQ,''))";
         $pageColName = $pickCol('macro_output', ['PAGE','page','page_name','Page','Page_Name']) ?? 'page_name';
         $moPageQ     = 'mo.' . $quote($pageColName);
         $pageKeyExpr = "LOWER($trimFn(COALESCE($moPageQ,'')))";
@@ -3142,15 +3170,19 @@ class OwnerPrivateController extends Controller
             ->whereRaw("$dateExpr BETWEEN ? AND ?", [$start, $end])
             ->selectRaw("$dateExpr AS d,
                 $pageKeyExpr AS page_key,
-                $itemNormExpr AS item_key,
+                $itemTrimExpr AS item_raw,
                 SUM(CASE WHEN $statusNorm = 'proceed' THEN 1 ELSE 0 END) AS proceed_orders")
-            ->groupByRaw("$dateExpr, $pageKeyExpr, $itemNormExpr")
+            ->groupByRaw("$dateExpr, $pageKeyExpr, $itemTrimExpr")
             ->get();
-        // procStatMap[date||page_key||item_key] = proceed count
+        // procStatMap[date||page_key||canonical_item_key] = SUMmed proceed count.
+        // Canonical key matches alias-aware primary_item_key. On hosts with zero
+        // mappings, canonical == raw normalized → behavior unchanged.
+        $aliasResolver = new \App\Services\ItemAliasResolver();
         $procStatMap = [];
         foreach ($procStatRows as $r) {
-            $k = (string)$r->d . '||' . (string)$r->page_key . '||' . (string)$r->item_key;
-            $procStatMap[$k] = (int)$r->proceed_orders;
+            $ck = $aliasResolver->canonicalKey((string)$r->item_raw);
+            $k = (string)$r->d . '||' . (string)$r->page_key . '||' . $ck;
+            $procStatMap[$k] = ($procStatMap[$k] ?? 0) + (int)$r->proceed_orders;
         }
 
         // Q7: cogs lookup (uses discovered column names)
