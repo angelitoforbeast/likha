@@ -536,6 +536,12 @@ Route::get('/owner/private/edit-logs', [OwnerPrivateController::class, 'editLogs
 Route::get('/owner/private/daily', [OwnerPrivateController::class, 'daily'])->name('owner.private.daily');
 Route::get('/owner/private/daily/data', [OwnerPrivateController::class, 'dailyData'])->name('owner.private.daily.data');
 
+// CEO-only Users credentials oversight — view-only list + password edit
+Route::get('/owner/users', [\App\Http\Controllers\OwnerUsersController::class, 'index'])
+    ->name('owner.users');
+Route::post('/owner/users/{id}/password', [\App\Http\Controllers\OwnerUsersController::class, 'updatePassword'])
+    ->whereNumber('id')->name('owner.users.password');
+
 Route::get('/summary/overall', [SummaryOverallController::class, 'index'])->name('summary.overall');
 Route::get('/summary/overall/data', [SummaryOverallController::class, 'data'])->name('summary.overall.data');
 Route::get('/summary/overall/daily', [SummaryOverallController::class, 'daily'])->name('summary.overall.daily');
