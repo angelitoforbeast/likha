@@ -83,7 +83,6 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'jnt_rts',       'label' => 'RTS%'],
             ['id' => 'jnt_del',       'label' => 'Del%'],
             ['id' => 'jnt_transit',   'label' => 'Transit%'],
-            ['id' => 'frequency',     'label' => 'Frequency (impressions ÷ reach)'],
             ['id' => 'rts_set',       'label' => 'Set RTS%'],
             ['id' => 'promo',         'label' => 'Promo'],
             ['id' => 'price',         'label' => 'Price'],
@@ -109,6 +108,8 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'cpp_3d',         'label' => 'CPP (3d)'],
             ['id' => 'cpp_7d',         'label' => 'CPP (7d)'],
             ['id' => 'impressions',    'label' => 'Impressions'],
+            ['id' => 'reach',          'label' => 'Reach'],
+            ['id' => 'frequency',      'label' => 'Frequency (impressions ÷ reach)'],
             ['id' => 'link_clicks',       'label' => 'Link clicks'],
             ['id' => 'welcome_msg_rate',  'label' => 'Welcome Msg Rate (%)'],
             ['id' => 'messages',       'label' => 'Messages'],
@@ -162,7 +163,7 @@ class OwnerColumnSettingsController extends Controller
             'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d',
             'proj_prof_1d', 'proj_prof_3d', 'proj_prof_7d',
             'jnt_rts', 'jnt_del', 'jnt_transit',
-            'frequency', 'rts_set', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee',
+            'rts_set', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee',
         ],
         'campaigns' => [
             // Reduced default to keep the inline expand panel within the
@@ -171,6 +172,7 @@ class OwnerColumnSettingsController extends Controller
             'on', 'name', 'account', 'active_subcount',
             'first_started', 'days_running', 'latest_started',
             'spend', 'cpp', 'profit_pct', 'profit_pct_7d', 'profit_pct_3d', 'profit_pct_today', 'impressions',
+            'frequency',
             'link_clicks', 'welcome_msg_rate', 'messages', 'conversion_rate',
             'purchases',
         ],

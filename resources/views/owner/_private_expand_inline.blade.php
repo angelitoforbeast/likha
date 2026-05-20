@@ -122,6 +122,10 @@
                 <template x-if="col.type==='integer'">
                   <span x-text="c[col.id] != null ? num(c[col.id]) : '—'"></span>
                 </template>
+                <template x-if="col.type==='number'">
+                  <span x-text="c[col.id] != null ? Number(c[col.id]).toFixed(2) : '—'"
+                        :title="col.id==='frequency' ? 'impressions ' + (c.impressions||0).toLocaleString('en-PH') + ' / reach ' + (c.reach||0).toLocaleString('en-PH') : ''"></span>
+                </template>
                 <template x-if="col.type==='percent'">
                   <span x-text="c[col.id] != null ? (Number(c[col.id]).toFixed(1) + '%') : '—'"></span>
                 </template>

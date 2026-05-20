@@ -245,6 +245,11 @@
                       <template x-if="col.type==='integer'">
                         <span x-text="row[col.id] != null ? num(row[col.id]) : '—'"></span>
                       </template>
+                      {{-- number: 2-decimal ratio (e.g. frequency = impressions/reach) --}}
+                      <template x-if="col.type==='number'">
+                        <span x-text="row[col.id] != null ? Number(row[col.id]).toFixed(2) : '—'"
+                              :title="col.id==='frequency' ? 'impressions ' + (row.impressions||0).toLocaleString('en-PH') + ' / reach ' + (row.reach||0).toLocaleString('en-PH') : ''"></span>
+                      </template>
                       {{-- account: name + id sub-text. Warning if unmapped. --}}
                       <template x-if="col.type==='account'">
                         <span>
@@ -287,6 +292,9 @@
                     </template>
                     <template x-if="col.type==='integer'">
                       <span x-text="totals[col.id] != null ? num(totals[col.id]) : '—'"></span>
+                    </template>
+                    <template x-if="col.type==='number'">
+                      <span x-text="totals[col.id] != null ? Number(totals[col.id]).toFixed(2) : '—'"></span>
                     </template>
                     <template x-if="col.type==='percent'">
                       <span x-text="totals[col.id] != null ? (Number(totals[col.id]).toFixed(1) + '%') : '—'"></span>
@@ -458,6 +466,8 @@
             { id:'profit_pct_3d',  label:'Profit % (3D)',    sort:'profit_pct_3d',  type:'percent',      align:'right', minw:90  },
             { id:'profit_pct_today',label:'Profit % (Today)',sort:'profit_pct_today',type:'percent',     align:'right', minw:100 },
             { id:'impressions',    label:'Impressions',      sort:null,             type:'integer',      align:'right', minw:100 },
+            { id:'reach',          label:'Reach',            sort:'reach',          type:'integer',      align:'right', minw:90  },
+            { id:'frequency',      label:'Freq',             sort:'frequency',      type:'number',       align:'right', minw:70  },
             { id:'link_clicks',       label:'Link clicks',         sort:'link_clicks',      type:'integer',      align:'right', minw:90  },
             { id:'welcome_msg_rate',  label:'Welcome Msg Rate (%)',sort:'welcome_msg_rate', type:'percent',      align:'right', minw:130 },
             { id:'messages',       label:'Messages',         sort:null,             type:'integer',      align:'right', minw:90  },

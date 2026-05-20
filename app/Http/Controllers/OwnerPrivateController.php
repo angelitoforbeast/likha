@@ -1580,36 +1580,26 @@ class OwnerPrivateController extends Controller
         $skippedPages = array_values(array_diff($pagesSeen, array_keys($anchorByPage)));
         $skippedCount = count($skippedPages);
 
-        // ── Per-page, per-date adspent + impressions + reach (anchor-period gated) ──
-        // Impressions/reach pulled from same ads_manager_reports rows. Frequency
-        // is computed downstream as sum(impressions) / sum(reach) across the
-        // anchor-period dates — mirrors FB's period-frequency formula (treats
-        // each day's reach as additive; acceptable estimate at the page level).
+        // ── Per-page, per-date adspent (for summing across included dates only) ─────
         $castSpend = $castMoney('amount_spent_php');
         $adsRows = DB::table('ads_manager_reports')
             ->whereRaw('DATE(day) BETWEEN ? AND ?', [$startDate, $endDate])
             ->selectRaw("
                 DATE(day) AS d,
                 LOWER($trimFn(COALESCE(page_name,''))) AS page_key,
-                SUM($castSpend) AS adspent,
-                COALESCE(SUM(impressions), 0) AS impressions,
-                COALESCE(SUM(reach), 0)       AS reach
+                SUM($castSpend) AS adspent
             ")
             ->groupByRaw("DATE(day), LOWER($trimFn(COALESCE(page_name,'')))")
             ->get();
-        // adsByDate[page_key][date] = ['adspent','impressions','reach']
+        // adsByDate[page_key][date] = adspent
         $adsByDate = [];
         foreach ($adsRows as $r) {
-            $adsByDate[(string)$r->page_key][(string)$r->d] = [
-                'adspent'     => (float)$r->adspent,
-                'impressions' => (int)$r->impressions,
-                'reach'       => (int)$r->reach,
-            ];
+            $adsByDate[(string)$r->page_key][(string)$r->d] = (float)$r->adspent;
         }
         // adsMap[page_key] = total adspent (used only in single-date back-compat paths below).
         $adsMap = [];
         foreach ($adsByDate as $pk => $byD) {
-            $adsMap[$pk] = array_sum(array_column($byD, 'adspent'));
+            $adsMap[$pk] = array_sum($byD);
         }
 
         // ── Build pageGroups: aggregate over INCLUDED range slices per anchor ──────
@@ -1648,14 +1638,11 @@ class OwnerPrivateController extends Controller
                     }
                 }
 
-                $adsDay = $adsByDate[$pk][$d] ?? null;
                 $includedDates[$d] = [
-                    'orders'      => (int)$slice['orders'],
-                    'mode_cod'    => (float)$slice['mode_cod'],
-                    'adspent'     => $adsDay ? (float)$adsDay['adspent']     : 0.0,
-                    'impressions' => $adsDay ? (int)  $adsDay['impressions'] : 0,
-                    'reach'       => $adsDay ? (int)  $adsDay['reach']       : 0,
-                    'proceed'     => $stat ? (int)$stat->proceed_orders : 0,
+                    'orders'   => (int)$slice['orders'],
+                    'mode_cod' => (float)$slice['mode_cod'],
+                    'adspent'  => (float)($adsByDate[$pk][$d] ?? 0),
+                    'proceed'  => $stat ? (int)$stat->proceed_orders : 0,
                 ];
             }
 
@@ -1685,9 +1672,6 @@ class OwnerPrivateController extends Controller
             // Keep empty array for view safety (existing template iterates row.secondary_items||[]).
             $items = [$primary];
 
-            $impressionsTotal = array_sum(array_column($includedDates, 'impressions'));
-            $reachTotal       = array_sum(array_column($includedDates, 'reach'));
-
             $pageGroups[$pk] = [
                 'page_label'     => (string)$pr->page_label,
                 'page_key'       => $pk,
@@ -1700,12 +1684,6 @@ class OwnerPrivateController extends Controller
                 'distinct_items_in_range'=> $distinctCount,
                 'mixed_primary'          => $mixedPrimary,
                 'adspent_total'          => array_sum(array_column($includedDates, 'adspent')),
-                // Impressions + reach gated by anchor period (same as adspent),
-                // so Frequency = sum(impressions) / sum(reach) reflects only the
-                // active canonical-primary window.
-                'impressions_total'      => $impressionsTotal,
-                'reach_total'            => $reachTotal,
-                'frequency'              => $reachTotal > 0 ? round($impressionsTotal / $reachTotal, 2) : null,
                 'anchor_first_date'      => $streakStart,
             ];
         }
@@ -2088,9 +2066,6 @@ class OwnerPrivateController extends Controller
                 'mixed_primary'          => (bool)($pg['mixed_primary'] ?? false),
                 'anchor_first_date'      => $pg['anchor_first_date'] ?? null,
                 'gross_sales'            => $grossSales > 0 ? $grossSales : null,
-                'impressions'            => (int)($pg['impressions_total'] ?? 0),
-                'reach'                  => (int)($pg['reach_total'] ?? 0),
-                'frequency'              => $pg['frequency'] ?? null,
             ];
         }
 

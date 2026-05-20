@@ -797,19 +797,6 @@
                     </span>
                   </template>
 
-                  <!-- frequency — impressions ÷ reach (anchor-period gated) -->
-                  <template x-if="col.id==='frequency'">
-                    <span>
-                      <template x-if="row.frequency !== null && row.frequency !== undefined">
-                        <span :title="'impressions ' + Number(row.impressions||0).toLocaleString('en-PH') + ' / reach ' + Number(row.reach||0).toLocaleString('en-PH')"
-                              x-text="Number(row.frequency).toFixed(2)"></span>
-                      </template>
-                      <template x-if="row.frequency === null || row.frequency === undefined">
-                        <span style="color:#cbd5e1;" title="no reach data sa anchor period">—</span>
-                      </template>
-                    </span>
-                  </template>
-
                   <!-- promo — per-date inherited from page_item_settings -->
                   <template x-if="col.id==='promo'">
                     <span>
@@ -1271,7 +1258,6 @@
           { id:'jnt_rts',      label:'RTS%',           sort:'jnt_rts_pct',                 align:'center', minw:100 },
           { id:'jnt_del',    label:'Del%',       sort:'jnt_del_pct',          align:'center', minw:90  },
           { id:'jnt_transit',label:'Transit%',   sort:'jnt_transit_pct',      align:'center', minw:85  },
-          { id:'frequency',  label:'Freq',       sort:'frequency',            align:'center', minw:70  },
           { id:'rts_set',    label:'Set RTS%',   sort:'rts_pct',              align:'center', minw:110 },
           { id:'promo',      label:'Promo',      sort:'promo',                align:'center', minw:90  },
           { id:'price',      label:'Price',      sort:'price',                align:'center', minw:85  },
@@ -2005,6 +1991,8 @@
           { id:'cpp_3d',         label:'CPP (3d)',         sort:'cpp_3d',         type:'money',        align:'right', minw:100 },
           { id:'cpp_7d',         label:'CPP (7d)',         sort:'cpp_7d',         type:'money',        align:'right', minw:100 },
           { id:'impressions',    label:'Impressions',      sort:null,             type:'integer',      align:'right', minw:100 },
+          { id:'reach',          label:'Reach',            sort:'reach',          type:'integer',      align:'right', minw:90  },
+          { id:'frequency',      label:'Freq',             sort:'frequency',      type:'number',       align:'right', minw:70  },
           { id:'link_clicks',       label:'Link clicks',         sort:'link_clicks',      type:'integer',      align:'right', minw:90  },
           { id:'welcome_msg_rate',  label:'Welcome Msg Rate (%)',sort:'welcome_msg_rate', type:'percent',      align:'right', minw:130 },
           { id:'messages',       label:'Messages',         sort:null,             type:'integer',      align:'right', minw:90  },

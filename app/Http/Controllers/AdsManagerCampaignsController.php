@@ -852,6 +852,7 @@ class AdsManagerCampaignsController extends Controller
                     CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
                     CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
+                    CASE WHEN SUM(reach) > 0 THEN (SUM(impressions) * 1.0)/SUM(reach) END AS frequency,
                     CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
                     CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
@@ -868,7 +869,7 @@ class AdsManagerCampaignsController extends Controller
             // Drop campaigns with zero spend in the window when caller asked.
             if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
-            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','link_clicks','welcome_msg_rate','conversion_rate','campaign_name','page_name','first_started','latest_started'];
+            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','frequency','link_clicks','welcome_msg_rate','conversion_rate','campaign_name','page_name','first_started','latest_started'];
 
             if ($sortBy === 'default') {
                 $rows = $query->orderByDesc('is_on')
@@ -904,6 +905,7 @@ class AdsManagerCampaignsController extends Controller
                     'purchases'       => (int)   ($r->purchases ?? 0),
                     'impressions'     => (int)   ($r->impressions ?? 0),
                     'reach'           => (int)   ($r->reach ?? 0),
+                    'frequency'       => isset($r->frequency) ? (float) $r->frequency : null,
                     'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
                     'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
                     'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
@@ -946,6 +948,7 @@ class AdsManagerCampaignsController extends Controller
                     CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
                     CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
+                    CASE WHEN SUM(reach) > 0 THEN (SUM(impressions) * 1.0)/SUM(reach) END AS frequency,
                     CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
                     CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
@@ -964,7 +967,7 @@ class AdsManagerCampaignsController extends Controller
 
             if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
-            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','link_clicks','welcome_msg_rate','conversion_rate','ad_set_name','campaign_name','page_name','first_started','latest_started'];
+            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','frequency','link_clicks','welcome_msg_rate','conversion_rate','ad_set_name','campaign_name','page_name','first_started','latest_started'];
 
             if ($sortBy === 'default') {
                 $rows = $query->orderByDesc('is_on')
@@ -1002,6 +1005,7 @@ class AdsManagerCampaignsController extends Controller
                     'purchases'       => (int)   ($r->purchases ?? 0),
                     'impressions'     => (int)   ($r->impressions ?? 0),
                     'reach'           => (int)   ($r->reach ?? 0),
+                    'frequency'       => isset($r->frequency) ? (float) $r->frequency : null,
                     'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
                     'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
                     'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
@@ -1047,6 +1051,7 @@ class AdsManagerCampaignsController extends Controller
                     CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
                     CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
+                    CASE WHEN SUM(reach) > 0 THEN (SUM(impressions) * 1.0)/SUM(reach) END AS frequency,
                     CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
                     CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
                     CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
@@ -1060,7 +1065,7 @@ class AdsManagerCampaignsController extends Controller
 
             if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
 
-            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','link_clicks','welcome_msg_rate','conversion_rate','headline','item_name','first_started','latest_started'];
+            $sortable = ['spend','messages','purchases','cpp','cpm_msg','cpm_1000','cpr','impressions','reach','frequency','link_clicks','welcome_msg_rate','conversion_rate','headline','item_name','first_started','latest_started'];
 
             if ($sortBy === 'default') {
                 $rows = $query->orderByDesc('is_on')
@@ -1101,6 +1106,7 @@ class AdsManagerCampaignsController extends Controller
                     'purchases'       => (int)   ($r->purchases ?? 0),
                     'impressions'     => (int)   ($r->impressions ?? 0),
                     'reach'           => (int)   ($r->reach ?? 0),
+                    'frequency'       => isset($r->frequency) ? (float) $r->frequency : null,
                     'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
                     'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
                     'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
@@ -1463,6 +1469,7 @@ class AdsManagerCampaignsController extends Controller
             'cpp'         => ($tot->purchases ?? 0)   > 0 ? (float) ($tot->spend / $tot->purchases) : null,
             'cpm_msg'     => ($tot->messages ?? 0)    > 0 ? (float) ($tot->spend / $tot->messages)  : null,
             'cpm_1000'    => ($tot->impressions ?? 0) > 0 ? (float) (($tot->spend / $tot->impressions) * 1000) : null,
+            'frequency'   => ($tot->reach ?? 0)       > 0 ? (float) ($tot->impressions / $tot->reach) : null,
             'cpr'         => ($tot->results ?? 0)     > 0 ? (float) ($tot->spend / $tot->results) : null,
             'welcome_msg_rate' => ($tot->link_clicks ?? 0) > 0 ? (float) (($tot->messages * 100.0) / $tot->link_clicks) : null,
             'conversion_rate'  => ($tot->messages ?? 0)    > 0 ? (float) (($tot->purchases * 100.0) / $tot->messages) : null,
