@@ -109,7 +109,7 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'cpp_7d',         'label' => 'CPP (7d)'],
             ['id' => 'impressions',    'label' => 'Impressions'],
             ['id' => 'reach',          'label' => 'Reach'],
-            ['id' => 'frequency',      'label' => 'Frequency (impressions ÷ reach)'],
+            ['id' => 'frequency',      'label' => 'Freq'],
             ['id' => 'link_clicks',       'label' => 'Link clicks'],
             ['id' => 'welcome_msg_rate',  'label' => 'Welcome Msg Rate (%)'],
             ['id' => 'messages',       'label' => 'Messages'],
