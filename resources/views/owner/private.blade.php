@@ -385,6 +385,20 @@
       <span x-text="anyExpanded() ? '▼ Hide all' : '▶ Expand all'"></span>
     </button>
 
+    {{-- Refresh data — available to ALL roles. Bypasses the read cache for
+         /owner/private/data + /item-summary, re-runs the heavy aggregations,
+         and writes the fresh result back to cache. Use this kapag suspect
+         na stale yung values shown. --}}
+    <button type="button" @click="forceRefresh()"
+            :disabled="loading"
+            title="Bypass cache → re-fetch fresh values from database → rewrite cache. Use if you suspect stale data."
+            style="background:#1e293b;color:#7dd3fc;border:1px solid #475569;
+                   border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+                   cursor:pointer;margin-left:4px;">
+      <span x-show="!loading">🔄 Refresh</span>
+      <span x-show="loading">Refreshing…</span>
+    </button>
+
     {{-- CEO-only chrome — hidden when CEO toggles to Marketing view so the UI
          truly mirrors what Marketing sees. Actual CEO role still has access via
          direct URL; this is a view-toggle gate, not an auth gate. --}}
@@ -1347,7 +1361,7 @@
       },
 
       // ── Load ─────────────────────────────────────────────────────────────
-      async load(){
+      async load(forceRefreshFlag){
         this.loading=true; this.editIdx=-1; this.saveMsg='';
         // Normalize: if start > end, swap before query
         if (this.startDate && this.endDate && this.startDate > this.endDate) {
@@ -1358,8 +1372,12 @@
         // ignored server-side for non-CEO).
         const qsObj = { start_date: this.startDate, end_date: this.endDate };
         if (this.isCeoView && this.viewAs === 'marketing') qsObj.view_as = 'marketing';
+        // refresh=1 bypasses the server-side cache for this single request.
+        // History-replaced URL does NOT include refresh — kasi nagdadagdag lang
+        // siya ng noise sa visible address bar.
         const qs = new URLSearchParams(qsObj);
         history.replaceState(null,'','?'+qs.toString());
+        if (forceRefreshFlag) qs.set('refresh', '1');
         try{
           const r = await fetch('{{ route('owner.private.item-summary') }}?'+qs.toString());
           const j = await r.json();
@@ -1370,8 +1388,21 @@
           this.rangeDays    = Number(j.range_days || 1);
           // Sync UI toggle with server's echoed mode (CEO only).
           if (j.is_ceo && j.view_as) this.viewAs = j.view_as;
+          // Show cache freshness in the save banner kapag may explicit refresh.
+          if (forceRefreshFlag) {
+            this.saveMsg = j._cache === 'hit' ? '✓ Cache hit (already fresh)' : '✓ Refreshed from database';
+            setTimeout(() => { this.saveMsg = ''; }, 4000);
+          }
         }catch(e){ console.error(e); }
         finally{ this.loading=false; }
+      },
+
+      // ── Force refresh — user-triggered cache bypass + reload ──────────────
+      // Used by the "🔄 Refresh" header button. Sends ?refresh=1 sa data fetch
+      // so server re-runs the heavy aggregations and rewrites its cache.
+      async forceRefresh(){
+        if (this.loading) return;
+        await this.load(true);
       },
 
       // CEO toggle — flips view_as, reloads the data, AND does a full page

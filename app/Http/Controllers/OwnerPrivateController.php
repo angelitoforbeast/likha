@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Auth;
@@ -88,6 +89,67 @@ class OwnerPrivateController extends Controller
         if (preg_match('/^marketing\s*[-–—]\s*oic$/iu', $norm)) return 'Marketing - OIC';
         if (preg_match('/^marketing$/iu', $norm)) return 'Marketing';
         return $norm;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CACHE LAYER — wraps the heavy data() + itemSummary() endpoints.
+    //
+    // Strategy: read-through cache na may "version" sentinel. Pag may bagong
+    // upload (ads_manager_reports, macro_output, from_jnts) or user saves
+    // (RTS/cogs/promo), bumpVersion() ang tinatawag at lahat ng old cache
+    // entries ay automatically becomes orphans (eventually evicted by backend).
+    //
+    // No TTL — caches live forever or until version bump. User can also
+    // explicitly bypass via ?refresh=1 (re-runs queries + rewrites cache).
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private const CACHE_VERSION_KEY = 'owner_private:cache_version';
+
+    /** Bumps the global version sentinel — all existing cache keys orphaned. */
+    public static function bumpCacheVersion(): void
+    {
+        // Use time() so concurrent bumps don't collide. Resolution: 1 second.
+        Cache::forever(self::CACHE_VERSION_KEY, (string) time());
+    }
+
+    /** Current version sentinel (lazy-init kung blank pa). */
+    private function cacheVersion(): string
+    {
+        $v = Cache::get(self::CACHE_VERSION_KEY);
+        if ($v === null) {
+            $v = (string) time();
+            Cache::forever(self::CACHE_VERSION_KEY, $v);
+        }
+        return (string) $v;
+    }
+
+    /** Build a deterministic cache key for itemSummary() given request params. */
+    private function cacheKeyForItemSummary(Request $request): string
+    {
+        $parts = [
+            'host'  => strtolower((string) $request->getHost()),
+            'start' => (string) $request->input('start_date', ''),
+            'end'   => (string) $request->input('end_date', ''),
+            'date'  => (string) $request->input('date', ''), // legacy single-date param
+            'view'  => strtolower(trim((string) $request->input('view_as', 'ceo'))),
+            'role'  => $this->getNormalizedRole(),
+        ];
+        return 'owner_private:item_summary:v' . $this->cacheVersion()
+             . ':' . md5(json_encode($parts));
+    }
+
+    /** Build a deterministic cache key for data() given request params. */
+    private function cacheKeyForData(Request $request): string
+    {
+        $parts = [
+            'host' => strtolower((string) $request->getHost()),
+            'start'=> (string) $request->input('start_date', ''),
+            'end'  => (string) $request->input('end_date', ''),
+            'page' => (string) $request->input('page_name', 'all'),
+            'role' => $this->getNormalizedRole(),
+        ];
+        return 'owner_private:data:v' . $this->cacheVersion()
+             . ':' . md5(json_encode($parts));
     }
 
     public function index()
@@ -213,6 +275,18 @@ class OwnerPrivateController extends Controller
     public function data(Request $request)
     {
         $this->checkAccess();
+
+        // ── Cache gate ────────────────────────────────────────────────────
+        // Same pattern as itemSummary(). Cached forever until version bump or
+        // explicit ?refresh=1 from user.
+        $cacheKey = $this->cacheKeyForData($request);
+        $bypassCache = (bool) $request->boolean('refresh');
+        if (!$bypassCache) {
+            $cached = Cache::get($cacheKey);
+            if (is_array($cached)) {
+                return response()->json($cached + ['_cache' => 'hit']);
+            }
+        }
 
         // PH timezone (for "Today" label in top summary)
         $phTz  = new \DateTimeZone('Asia/Manila');
@@ -1364,13 +1438,18 @@ class OwnerPrivateController extends Controller
             }
         }
 
-        return response()->json([
+        $payload = [
             'ads_daily'       => $rows,
             'actual_rts_pct'  => $actualRtsPct,
             'top_summary'     => $topSummary,
             'target_cpp'      => $targetCPP,
             'breakeven_cpp'   => $breakevenCPP,
-        ]);
+            'cached_at'       => now()->toIso8601String(),
+        ];
+
+        Cache::forever($cacheKey, $payload);
+
+        return response()->json($payload + ['_cache' => $bypassCache ? 'refresh' : 'miss']);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1380,6 +1459,19 @@ class OwnerPrivateController extends Controller
     public function itemSummary(Request $request)
     {
         $this->checkAccess();
+
+        // ── Cache gate ────────────────────────────────────────────────────
+        // Cached read by default. ?refresh=1 bypasses read pero still writes
+        // fresh data to cache after computing. Cache invalidated by
+        // bumpCacheVersion() (on uploads / saves).
+        $cacheKey = $this->cacheKeyForItemSummary($request);
+        $bypassCache = (bool) $request->boolean('refresh');
+        if (!$bypassCache) {
+            $cached = Cache::get($cacheKey);
+            if (is_array($cached)) {
+                return response()->json($cached + ['_cache' => 'hit']);
+            }
+        }
 
         $phTz = new \DateTimeZone('Asia/Manila');
         $today = (new \DateTime('now', $phTz))->format('Y-m-d');
@@ -2071,7 +2163,7 @@ class OwnerPrivateController extends Controller
 
         usort($result, fn($a, $b) => strcmp((string)$a['page_name'], (string)$b['page_name']));
 
-        return response()->json([
+        $payload = [
             'rows'           => $result,
             'date'           => $date, // back-compat: equals end_date
             'start_date'     => $startDate,
@@ -2084,7 +2176,14 @@ class OwnerPrivateController extends Controller
             // Non-CEO viewers always get 'marketing' regardless of param.
             'view_as'        => $isCEO ? $viewAs : 'marketing',
             'is_ceo'         => $isCEO,
-        ]);
+            'cached_at'      => now()->toIso8601String(),
+        ];
+
+        // Write to cache (read-through). Forever — invalidated only by
+        // bumpCacheVersion() or explicit refresh from user.
+        Cache::forever($cacheKey, $payload);
+
+        return response()->json($payload + ['_cache' => $bypassCache ? 'refresh' : 'miss']);
     }
 
     public function saveItemSetting(Request $request)
@@ -2313,6 +2412,10 @@ class OwnerPrivateController extends Controller
         } catch (\Throwable $e) {
             \Log::error('saveItemSetting audit log failed: ' . $e->getMessage());
         }
+
+        // Invalidate cache — bagong values, all owner_private reads should
+        // refresh on next query. Cheap operation: just bumps a sentinel.
+        self::bumpCacheVersion();
 
         return response()->json([
             'ok'            => true,

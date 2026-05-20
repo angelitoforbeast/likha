@@ -342,6 +342,10 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
                 ]);
             }
         }
+
+        // Bagong orders sa macro → invalidate /owner/private cache so next
+        // reload fetches fresh per-page summary. Cheap sentinel bump.
+        \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();
     }
 
     private function updateRunTotals(MacroImportRun $run, int $processedSettings, int $processed, int $inserted, int $updated, int $skipped): void

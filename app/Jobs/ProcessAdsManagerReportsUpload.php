@@ -164,6 +164,10 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
                     'finished_at'       => now(),
                 ]);
             }
+
+            // Bagong ads data → invalidate /owner/private cache so users see
+            // fresh numbers on next reload. Single sentinel bump, very cheap.
+            \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();
         } catch (\Throwable $e) {
             if ($log) {
                 $log->update([

@@ -555,6 +555,10 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
             'inserted' => $run->total_inserted,
             'updated'  => $run->total_updated,
         ]);
+
+        // Bagong J&T (shipping) data → invalidate /owner/private cache so RTS%/
+        // Del%/Transit% columns refresh on next read. Cheap sentinel bump.
+        \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();
     }
 
     public function failed(\Throwable $exception): void
