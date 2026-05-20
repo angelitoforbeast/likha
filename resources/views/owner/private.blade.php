@@ -797,6 +797,21 @@
                     </span>
                   </template>
 
+                  <!-- promo — per-date inherited from page_item_settings -->
+                  <template x-if="col.id==='promo'">
+                    <span>
+                      <template x-if="row.promo">
+                        <span :style="(row.promo.toUpperCase()==='NONE' || row.promo==='-')
+                                ? 'display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:500;background:#f1f5f9;color:#94a3b8;'
+                                : 'display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:#fae8ff;color:#86198f;'"
+                              x-text="(row.promo.toUpperCase()==='NONE' || row.promo==='-') ? '—' : row.promo"></span>
+                      </template>
+                      <template x-if="!row.promo">
+                        <span style="color:#cbd5e1;font-size:11px;" title="no promo set yet">—</span>
+                      </template>
+                    </span>
+                  </template>
+
                   <!-- price — mode COD, read-only -->
                   <template x-if="col.id==='price'">
                     <span>
@@ -1247,6 +1262,7 @@
           { id:'jnt_del',    label:'Del%',       sort:'jnt_del_pct',          align:'center', minw:90  },
           { id:'jnt_transit',label:'Transit%',   sort:'jnt_transit_pct',      align:'center', minw:85  },
           { id:'rts_set',    label:'Set RTS%',   sort:'rts_pct',              align:'center', minw:110 },
+          { id:'promo',      label:'Promo',      sort:'promo',                align:'center', minw:90  },
           { id:'price',      label:'Price',      sort:'price',                align:'center', minw:85  },
           { id:'item_val',     label:'Item Val.',       sort:'item_value',     align:'center', minw:80  },
           { id:'item_val_ceo', label:'Item Val. (CEO)', sort:'item_value_ceo', align:'center', minw:90  },
