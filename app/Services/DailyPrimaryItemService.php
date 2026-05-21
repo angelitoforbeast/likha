@@ -313,11 +313,77 @@ class DailyPrimaryItemService
             }
         });
 
+        // ---- Backfill page_item_settings.mode_cod_int for NULL rows --------
+        // Uses freshly-computed daily_page_primary_item.primary_mode_cod as the
+        // price reference. Only NULLs sa same date range are touched — already-
+        // tagged rows stay as-is. Rows whose (page, item, date) doesn't match
+        // any primary stay NULL → orphaned (won't apply sa lookups).
+        $backfilled = $this->backfillSettingsPrices($filter);
+
         return [
             'dates'         => count($dateSet),
             'pages'         => $pageCount,
             'rows_upserted' => count($toUpsert),
             'ties_skipped'  => $tiesSkipped,
+            'prices_backfilled' => $backfilled,
         ];
+    }
+
+    /**
+     * Backfill page_item_settings.mode_cod_int for rows where the column is
+     * NULL and effective_date falls within the recompute range.
+     *
+     * Source: daily_page_primary_item.primary_mode_cod (rounded int).
+     * Match join: ts_date = effective_date AND page_key + canonical item_key.
+     *
+     * Returns count of rows updated.
+     */
+    private function backfillSettingsPrices(array $filter): int
+    {
+        if (!Schema::hasTable('page_item_settings')) return 0;
+        if (!Schema::hasColumn('page_item_settings', 'mode_cod_int')) return 0;
+
+        // Date range filter — only touch rows na effective_date is sa same scope
+        // as the recompute.
+        if (isset($filter['range'])) {
+            [$from, $to] = $filter['range'];
+            $dateFilter = "pis.effective_date BETWEEN '" . addslashes($from) . "' AND '" . addslashes($to) . "'";
+        } elseif (isset($filter['dates'])) {
+            $dates = array_map(fn($d) => "'" . addslashes($d) . "'", $filter['dates']);
+            $dateFilter = "pis.effective_date IN (" . implode(',', $dates) . ")";
+        } else {
+            return 0;
+        }
+
+        // Canonical item key normalization matches sa daily_page_primary_item
+        // (LOWER + strip space/dash/underscore from trimmed item_name).
+        // Page key match = lower(trim(page_name)).
+        $driver = DB::getDriverName();
+        if ($driver === 'pgsql') {
+            $itemKeyExpr = "LOWER(REGEXP_REPLACE(BTRIM(pis.item_name), '[ _-]+', '', 'g'))";
+            $pageKeyExpr = "LOWER(BTRIM(pis.page_name))";
+        } else {
+            $itemKeyExpr = "LOWER(REPLACE(REPLACE(REPLACE(TRIM(pis.item_name),' ',''),'-',''),'_',''))";
+            $pageKeyExpr = "LOWER(TRIM(pis.page_name))";
+        }
+
+        $sql = "
+            UPDATE page_item_settings pis
+            INNER JOIN daily_page_primary_item dpi
+                ON dpi.ts_date = pis.effective_date
+               AND dpi.page_key = {$pageKeyExpr}
+               AND dpi.primary_item_key = {$itemKeyExpr}
+            SET pis.mode_cod_int = ROUND(dpi.primary_mode_cod)
+            WHERE pis.mode_cod_int IS NULL
+              AND dpi.primary_mode_cod IS NOT NULL
+              AND {$dateFilter}
+        ";
+
+        try {
+            return (int) DB::affectingStatement($sql);
+        } catch (\Throwable $e) {
+            Log::warning('backfillSettingsPrices failed (non-fatal): ' . $e->getMessage());
+            return 0;
+        }
     }
 }

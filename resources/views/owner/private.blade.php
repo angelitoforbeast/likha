@@ -1647,23 +1647,29 @@
         fd.append('page_name', e.page_name);
         fd.append('item_name', e.item_name);
 
+        // Cell's price tag — required para sa RTS+Promo (price-scoped).
+        // Cogs-only saves skip this (item-global, no price scope).
+        const cellPriceInt = (e.price != null && e.price > 0) ? Math.round(Number(e.price)) : null;
+
         if (scope === 'rts') {
           const rts = parseFloat(e.rts_pct);
           if (isNaN(rts) || rts < 0 || rts > 100) { e.rtsError = 'RTS% must be 0–100.'; return; }
           const cmt = (e.comment || '').trim();
           if (!cmt) { e.rtsError = 'RTS Comment is required.'; return; }
+          if (cellPriceInt === null) { e.rtsError = 'No price detected for this cell. Cannot save.'; return; }
           // Promo NOT sent for scope=rts — server preserves existing promo.
-          // This avoids accidentally overwriting promo with whatever is currently
-          // typed sa Promo section (user may be editing without saving).
           fd.append('rts_pct',        rts);
           fd.append('comment',        cmt);
+          fd.append('mode_cod_int',   cellPriceInt);
           fd.append('effective_date', e.rts_effective_date || e.date);
           if ((e.rts_effective_date || e.date) !== e.date) fd.append('apply_through', e.date);
           e.savingRts = true;
         } else if (scope === 'promo') {
           const promo = (e.promo || '').trim();
           if (!promo) { e.promoError = 'Promo required — type "NONE" if walang promo.'; return; }
+          if (cellPriceInt === null) { e.promoError = 'No price detected for this cell. Cannot save.'; return; }
           fd.append('promo',          promo);
+          fd.append('mode_cod_int',   cellPriceInt);
           fd.append('effective_date', e.promo_effective_date || e.date);
           if ((e.promo_effective_date || e.date) !== e.date) fd.append('apply_through', e.date);
           e.savingPromo = true;

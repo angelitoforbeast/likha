@@ -1846,22 +1846,36 @@ class OwnerPrivateController extends Controller
         }
         $isCEO = $this->isCEO();
 
-        // ── page_item_settings: latest per page+item ≤ date ──────────────────
-        // RTS% is per-page. item_value (unit cost) is NOT sourced here anymore —
-        // it comes from the global `cogs` table (keyed by item_name + date only).
-        // The `price` column was dropped (see migration 2026_04_24_000010).
+        // ── page_item_settings: latest per (page, item, mode_cod_int) ≤ date ──
+        // RTS% + Promo are scoped by (page, item, price). Different price =
+        // independent RTS+Promo period (no cross-price inheritance). Rows na
+        // mode_cod_int IS NULL ay orphaned — skipped sa lookup map below.
+        //
+        // item_value (unit cost) is NOT sourced here — comes from global `cogs`
+        // table (keyed by item_name + date only, no page or price scoping).
         $settingsMap = [];
+        $hasModeCodIntCol = Schema::hasColumn('page_item_settings', 'mode_cod_int');
         if (Schema::hasTable('page_item_settings')) {
+            $cols = ['page_name', 'item_name', 'rts_pct', 'effective_date', 'comment', 'item_value_comment', 'promo'];
+            if ($hasModeCodIntCol) $cols[] = 'mode_cod_int';
+
             $settingRows = DB::table('page_item_settings')
                 ->where('effective_date', '<=', $date)
                 ->orderBy('page_name')
                 ->orderBy('item_name')
                 ->orderByDesc('effective_date')
                 ->orderByDesc('id')   // tiebreaker: latest insert wins when same date
-                ->get(['page_name', 'item_name', 'rts_pct', 'effective_date', 'comment', 'item_value_comment', 'promo']);
+                ->get($cols);
 
             foreach ($settingRows as $s) {
-                $k = strtolower(trim((string)$s->page_name)).'||'.strtolower(trim((string)$s->item_name));
+                $codInt = $hasModeCodIntCol && $s->mode_cod_int !== null
+                    ? (int) $s->mode_cod_int
+                    : null;
+                // Pre-migration / orphan rows na walang price tag → skipped.
+                if ($codInt === null) continue;
+                $k = strtolower(trim((string)$s->page_name))
+                   .'||'.strtolower(trim((string)$s->item_name))
+                   .'||'.$codInt;
                 if (!isset($settingsMap[$k])) {
                     $settingsMap[$k] = [
                         'rts_pct'              => (float)$s->rts_pct,
@@ -1869,6 +1883,7 @@ class OwnerPrivateController extends Controller
                         'comment'              => (string)($s->comment ?? ''),
                         'item_value_comment'   => (string)($s->item_value_comment ?? ''),
                         'promo'                => (string)($s->promo ?? ''),
+                        'mode_cod_int'         => $codInt,
                     ];
                 }
             }
@@ -1942,9 +1957,6 @@ class OwnerPrivateController extends Controller
 
             $dominant    = $pg['items'][0];
             $secondary   = array_slice($pg['items'], 1);
-            // Settings lookup still uses raw lower+trim (per-variant page_item_settings).
-            $dominantKey = strtolower(trim($dominant['item_name']));
-            $settingKey  = $pk.'||'.$dominantKey;
             // JNT stats lookup uses canonical (alias-aware) key — matches the
             // producer-side aggregation sa jntStatsMap above.
             $dominantCanonKey = $aliases->canonicalKey($dominant['item_name']);
@@ -1957,6 +1969,12 @@ class OwnerPrivateController extends Controller
             // Price = mode COD of dominant item (most frequent = real SRP)
             // max_cod / min_cod kept only for range indicator
             $price    = (float)($dominant['mode_cod'] ?? $dominant['max_cod'] ?? 0);
+
+            // Settings lookup key — page+item+rounded price (matches mode_cod_int
+            // sa page_item_settings). Different price = independent RTS+Promo row.
+            $dominantKey  = strtolower(trim($dominant['item_name']));
+            $priceIntForLookup = (int) round($price);
+            $settingKey   = $pk.'||'.$dominantKey.'||'.$priceIntForLookup;
             $priceMin = (float)($dominant['min_cod'] ?? $price);
             $priceMax = (float)($dominant['max_cod'] ?? $price);
             // Show range indicator if min or max differ materially from mode
@@ -2240,6 +2258,9 @@ class OwnerPrivateController extends Controller
             'item_name'      => 'required|string|max:255',
             'effective_date' => 'required|date',
             'apply_through'  => 'nullable|date',
+            // Price tag — required for RTS+Promo saves (sila yung price-scoped).
+            // Frontend sends rounded int from cell's mode_cod.
+            'mode_cod_int'   => 'nullable|integer|min:0',
         ];
         if (in_array($scope, ['all', 'rts'], true)) {
             $rules['rts_pct'] = 'required|numeric|min:0|max:100';
@@ -2256,17 +2277,32 @@ class OwnerPrivateController extends Controller
             $rules['promo'] = 'required|string|min:1|max:255';
         }
         $validated = $request->validate($rules);
+        // Resolve price tag — for RTS+Promo writes, this is required (otherwise
+        // the row becomes orphaned). Cogs-only saves don't need it (item-global).
+        $modeCodInt = isset($validated['mode_cod_int']) ? (int) $validated['mode_cod_int'] : null;
+        $needsPriceTag = in_array($scope, ['all', 'rts', 'promo'], true);
+        if ($needsPriceTag && $modeCodInt === null) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'mode_cod_int (cell price) is required for RTS/Promo saves. Refresh the page and try again.',
+            ], 422);
+        }
 
         $pageName  = trim($validated['page_name']);
         $itemName  = trim($validated['item_name']);
         $effDate   = $validated['effective_date'];
 
         // ── Capture old values for audit log (read BEFORE mutation) ──────────
-        $oldRtsRow = DB::table('page_item_settings')
+        // Match the same composite key na ginagamit ng upsert below — so na-fe-fetch
+        // natin yung right row (per-price for the current price tag).
+        $oldRtsQuery = DB::table('page_item_settings')
             ->where('page_name', $pageName)
             ->where('item_name', $itemName)
-            ->where('effective_date', $effDate)
-            ->first(['rts_pct', 'promo', 'comment', 'item_value_comment']);
+            ->where('effective_date', $effDate);
+        if ($needsPriceTag) {
+            $oldRtsQuery->where('mode_cod_int', $modeCodInt);
+        }
+        $oldRtsRow = $oldRtsQuery->first(['rts_pct', 'promo', 'comment', 'item_value_comment']);
         $oldCogsRow = DB::table('cogs')
             ->where('item_name', $itemName)
             ->where('date', $effDate)
@@ -2347,11 +2383,14 @@ class OwnerPrivateController extends Controller
                     : ($oldRtsRow->item_value_comment ?? null);
 
                 if ($rtsToSave > 0) {
+                    // Upsert keyed by (page, item, price, date) — different price
+                    // creates a separate row, no cross-price overwrite.
                     DB::table('page_item_settings')->updateOrInsert(
                         [
                             'page_name'      => $pageName,
                             'item_name'      => $itemName,
                             'effective_date' => $effDate,
+                            'mode_cod_int'   => $modeCodInt,
                         ],
                         [
                             'rts_pct'            => $rtsToSave,
@@ -2362,18 +2401,16 @@ class OwnerPrivateController extends Controller
                             'created_at'         => now(),
                         ]
                     );
-                    // Cascade — only updates fields in active scope (preserves others
-                    // in target rows). Always touches updated_at.
+                    // Cascade — only same-price rows ang ina-update. Different
+                    // price periods sa target range stay untouched (own scope).
                     if ($applyThrough) {
-                        // Cascade only the fields actively in scope. scope=rts
-                        // does NOT cascade promo (would silently overwrite other
-                        // dates' promos with the preserved one from end_date).
                         $cascade = ['updated_at' => now()];
                         if (in_array($scope, ['all', 'rts'], true))      $cascade['rts_pct'] = $rtsToSave;
                         if (in_array($scope, ['all', 'promo'], true))    $cascade['promo']   = $promoToSave;
                         DB::table('page_item_settings')
                             ->where('page_name', $pageName)
                             ->where('item_name', $itemName)
+                            ->where('mode_cod_int', $modeCodInt)
                             ->where('effective_date', '>', $effDate)
                             ->where('effective_date', '<=', $applyThrough)
                             ->update($cascade);
@@ -2381,17 +2418,19 @@ class OwnerPrivateController extends Controller
                     $rtsPctNew = $rtsToSave;
                     $promoNew  = $promoToSave;
                 } else {
-                    // rts=0 only valid for scope=all or scope=rts → DELETE the override row.
-                    // (scope=promo can't reach here since rtsToSave = oldRts ≥ 0; required-row check above gates standalone promo save.)
+                    // rts=0 → DELETE the override row for this (page, item, price, date).
+                    // Different-price rows on same date stay intact (own scope).
                     DB::table('page_item_settings')
                         ->where('page_name', $pageName)
                         ->where('item_name', $itemName)
+                        ->where('mode_cod_int', $modeCodInt)
                         ->where('effective_date', $effDate)
                         ->delete();
                     if ($applyThrough) {
                         DB::table('page_item_settings')
                             ->where('page_name', $pageName)
                             ->where('item_name', $itemName)
+                            ->where('mode_cod_int', $modeCodInt)
                             ->where('effective_date', '>', $effDate)
                             ->where('effective_date', '<=', $applyThrough)
                             ->delete();
@@ -2667,40 +2706,51 @@ class OwnerPrivateController extends Controller
 
         // RTS overrides + promo: all rows effective_date ≤ endDate, keyed for
         // per-cell resolution. Resolve per cell via "latest effective_date ≤ cell_date".
+        //
+        // Scope: (page_key, item_name_lower, mode_cod_int). Different price =
+        // independent row in the index. NULL-price rows (orphaned, no backfill
+        // hit) are skipped entirely sa lookup.
         $rtsRowsAll = [];
-        $hasPromoCol = Schema::hasColumn('page_item_settings', 'promo');
+        $hasPromoCol     = Schema::hasColumn('page_item_settings', 'promo');
+        $hasModeCodIntCol = Schema::hasColumn('page_item_settings', 'mode_cod_int');
         if (Schema::hasTable('page_item_settings')) {
             $cols = ['page_name', 'item_name', 'effective_date', 'rts_pct'];
-            if ($hasPromoCol) $cols[] = 'promo';
+            if ($hasPromoCol)      $cols[] = 'promo';
+            if ($hasModeCodIntCol) $cols[] = 'mode_cod_int';
             $rtsRowsAll = DB::table('page_item_settings')
                 ->where('effective_date', '<=', $endDate)
-                ->orderBy('effective_date')   // ASC so later overrides overwrite earlier in-place resolution
+                ->orderBy('effective_date')
                 ->get($cols)
                 ->all();
         }
-        // Index: $rtsIdx[page_key_lower][item_name_lower] = [ [date, rts, promo], ... ] sorted ASC by date
+        // Index: $rtsIdx[page_key][item_key][price_int] = [ [date, rts, promo], ... ] sorted ASC by date
         $rtsIdx = [];
         foreach ($rtsRowsAll as $r) {
             $pk = strtolower(trim((string)$r->page_name));
             $ik = strtolower(trim((string)$r->item_name));
             if ($pk === '' || $ik === '') continue;
-            $rtsIdx[$pk][$ik][] = [
+            $codInt = ($hasModeCodIntCol && $r->mode_cod_int !== null) ? (int) $r->mode_cod_int : null;
+            // Orphan rows (NULL price) skipped — pre-migration data needs re-tag via recompute.
+            if ($codInt === null) continue;
+            $rtsIdx[$pk][$ik][$codInt][] = [
                 'date'    => (string)$r->effective_date,
                 'rts_pct' => $r->rts_pct !== null ? (float)$r->rts_pct : null,
                 'promo'   => $hasPromoCol ? (string)($r->promo ?? '') : '',
             ];
         }
-        // Helper: resolve RTS + promo for a (page_key, item_name, date)
-        $resolveRts = function(string $pk, string $itemName, string $date) use (&$rtsIdx): ?array {
+        // Helper: resolve RTS + promo for a (page_key, item_name, price, date)
+        // Strict price match — different price returns null (no inheritance).
+        $resolveRts = function(string $pk, string $itemName, ?int $priceInt, string $date) use (&$rtsIdx): ?array {
+            if ($priceInt === null) return null;
             $ik = strtolower(trim($itemName));
-            $list = $rtsIdx[$pk][$ik] ?? null;
+            $list = $rtsIdx[$pk][$ik][$priceInt] ?? null;
             if (!$list) return null;
             $hit = null;
             foreach ($list as $row) {
                 if ($row['date'] <= $date) $hit = $row;
-                else break; // sorted ASC
+                else break;
             }
-            return $hit; // ['date'=>..., 'rts_pct'=>..., 'promo'=>...] or null
+            return $hit;
         };
 
         // COGS (global per-item-per-date) — Marketing's table.
@@ -2886,7 +2936,11 @@ class OwnerPrivateController extends Controller
             $ik = (string)$r->primary_item_key;
             $cellDate = (string)$r->ts_date;
             $itemName = (string)$r->primary_item;
-            $rtsHit       = $resolveRts($pk, $itemName, $cellDate);
+            // Per-cell price (rounded int) — used to match RTS+Promo rows by price.
+            $cellPriceInt = $r->primary_mode_cod !== null
+                ? (int) round((float) $r->primary_mode_cod)
+                : null;
+            $rtsHit       = $resolveRts($pk, $itemName, $cellPriceInt, $cellDate);
             $cogsVal      = $resolveCogs($itemName, $cellDate);
             // CEO's separate value — null for non-CEO viewers (map stays empty).
             $cogsCeoVal   = $resolveCogsCeo($itemName, $cellDate);
@@ -3482,20 +3536,28 @@ class OwnerPrivateController extends Controller
             return 0.0;
         };
 
-        // Q7b: page_item_settings — manually-set RTS% per (page_name, item_name).
-        // ITO ang gamit ng /owner/private's projected_profit, HINDI yung JNT 60-day.
-        // Keyed by lower(trim(page_name)) || lower(trim(item_name)).
+        // Q7b: page_item_settings — manually-set RTS% per (page, item, price).
+        // ITO ang gamit ng /owner/private's projected_profit (consistent sa main
+        // /owner/private). Keyed by lower(page) || lower(item) || price_int.
+        // NULL-price (orphan) rows skipped.
         $settingsMap = [];
+        $hasModeCodIntColD = Schema::hasColumn('page_item_settings', 'mode_cod_int');
         if (Schema::hasTable('page_item_settings')) {
+            $cols = ['page_name', 'item_name', 'rts_pct'];
+            if ($hasModeCodIntColD) $cols[] = 'mode_cod_int';
             $settingRows = DB::table('page_item_settings')
                 ->where('effective_date', '<=', $end)
                 ->orderBy('page_name')
                 ->orderBy('item_name')
                 ->orderByDesc('effective_date')
                 ->orderByDesc('id')
-                ->get(['page_name', 'item_name', 'rts_pct']);
+                ->get($cols);
             foreach ($settingRows as $s) {
-                $k = strtolower(trim((string)$s->page_name)) . '||' . strtolower(trim((string)$s->item_name));
+                $codInt = ($hasModeCodIntColD && $s->mode_cod_int !== null) ? (int) $s->mode_cod_int : null;
+                if ($codInt === null) continue;  // orphan row, skip
+                $k = strtolower(trim((string)$s->page_name))
+                   . '||' . strtolower(trim((string)$s->item_name))
+                   . '||' . $codInt;
                 if (!isset($settingsMap[$k])) {
                     $settingsMap[$k] = (float)$s->rts_pct;
                 }
@@ -3580,9 +3642,9 @@ class OwnerPrivateController extends Controller
             if ($proceed <= 0 || $modeCod <= 0) continue;
 
             // RTS% from page_item_settings (NOT JNT 60-day stats).
-            // Same lookup key shape as itemSummary: lower(trim(page))||lower(trim(item)).
-            // Skip page if no settings (matches itemSummary behavior — `if ($rtsPct === null)`)
-            $setKey = $pageKey . '||' . strtolower(trim($itemName));
+            // Same lookup shape as itemSummary: lower(page)||lower(item)||price_int.
+            // Strict price match — different price for same (page, item) = no settings hit.
+            $setKey = $pageKey . '||' . strtolower(trim($itemName)) . '||' . (int) round($modeCod);
             if (!isset($settingsMap[$setKey])) continue;
             $rtsPct        = $settingsMap[$setKey];
             $deliverFactor = max(0.0, min(1.0, 1.0 - ($rtsPct / 100.0)));

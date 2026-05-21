@@ -794,20 +794,28 @@
         fd.append('page_name', e.page_label);
         fd.append('item_name', e.item_name);
 
+        // Cell's price tag — required para sa RTS+Promo (price-scoped).
+        // Matrix cells expose price via mode_cod (set sa openEdit from cell payload).
+        const cellPriceInt = (e.mode_cod != null && e.mode_cod > 0) ? Math.round(Number(e.mode_cod)) : null;
+
         if (scope === 'rts') {
           const rts = parseFloat(e.rts_pct);
           if (isNaN(rts) || rts < 0 || rts > 100) { e.rtsError = 'RTS% must be 0–100.'; return; }
           const cmt = (e.comment || '').trim();
           if (!cmt) { e.rtsError = 'RTS Comment is required.'; return; }
+          if (cellPriceInt === null) { e.rtsError = 'No price detected for this cell. Cannot save.'; return; }
           fd.append('rts_pct',        rts);
           fd.append('comment',        cmt);
+          fd.append('mode_cod_int',   cellPriceInt);
           fd.append('effective_date', e.rts_effective_date || e.date);
           if ((e.rts_effective_date || e.date) !== e.date) fd.append('apply_through', e.date);
           e.savingRts = true;
         } else if (scope === 'promo') {
           const promo = (e.promo || '').trim();
           if (!promo) { e.promoError = 'Promo required — type "NONE" if walang promo.'; return; }
+          if (cellPriceInt === null) { e.promoError = 'No price detected for this cell. Cannot save.'; return; }
           fd.append('promo',          promo);
+          fd.append('mode_cod_int',   cellPriceInt);
           fd.append('effective_date', e.promo_effective_date || e.date);
           if ((e.promo_effective_date || e.date) !== e.date) fd.append('apply_through', e.date);
           e.savingPromo = true;
