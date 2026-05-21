@@ -524,6 +524,7 @@ Route::delete('jnt/waybills/sender-address/{senderAddress}', [SenderAddressContr
 Route::get('/item/cogs', [ItemCogsController::class, 'index'])->name('item.cogs.index');
 Route::get('/item/cogs/grid', [ItemCogsController::class, 'grid'])->name('item.cogs.grid');      // JSON grid for month
 Route::post('/item/cogs/update', [ItemCogsController::class, 'update'])->name('item.cogs.update'); // edit one cell
+Route::post('/item/cogs/delete', [ItemCogsController::class, 'delete'])->name('item.cogs.delete'); // delete one explicit cogs row → falls back to inheritance
 
 Route::get('/owner/private', [OwnerPrivateController::class, 'index'])->name('owner.private');
 Route::get('/owner/private/data', [OwnerPrivateController::class, 'data'])->name('owner.private.data');

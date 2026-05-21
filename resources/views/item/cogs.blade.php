@@ -20,16 +20,37 @@
     /* Missing cost highlight */
     .missing-cost { background: #fef2f2 !important; }
     .missing-cost .sticky-col { background: #fef2f2 !important; }
-    /* Anchor marker — explicit cogs row na set ON this day. Purple top border
-       + small 📌 corner indicator. */
-    td.cell-anchor { border-top: 2px solid #7c3aed !important; }
+    /* Anchor marker — explicit cogs row na set ON this day. Soft violet bg
+       fill + top accent border + small 📌 corner indicator. Persistent (no
+       hover required) so anchors are obvious sa malayo. */
+    td.cell-anchor {
+      background: #ede9fe !important;       /* soft violet-50 */
+      border-top: 2px solid #7c3aed !important;
+      font-weight: 600;
+    }
     .anchor-pin {
       position: absolute; top: 1px; right: 2px;
-      font-size: 8px; line-height: 1; color: #7c3aed; opacity: 0.7;
+      font-size: 9px; line-height: 1; color: #7c3aed; opacity: 0.9;
     }
-    /* Change marker — price differs from prior day. Pastel background + delta badge. */
-    td.cell-change-up   { background: #fef3c7 !important; }   /* warm amber */
-    td.cell-change-down { background: #ccfbf1 !important; }   /* cool teal  */
+    /* Delete-anchor button — appears beside the pin on hover, lets user remove
+       redundant anchor rows (e.g., same value as prior day, just inheriting
+       would suffice). Hidden by default; visible on cell hover. */
+    .anchor-delete {
+      position: absolute; top: 1px; right: 16px;
+      font-size: 10px; line-height: 1; padding: 1px 3px;
+      border-radius: 3px; cursor: pointer; border: 1px solid #fca5a5;
+      background: #fef2f2; color: #b91c1c; opacity: 0;
+      transition: opacity 0.15s;
+    }
+    td.cell-anchor:hover .anchor-delete { opacity: 1; }
+    .anchor-delete:hover { background: #ef4444; color: #fff; }
+    /* Change marker — price differs from prior day. Solid pastel bg fill so
+       transitions are obvious sa scan. */
+    td.cell-change-up   { background: #fef3c7 !important; border-left: 3px solid #f59e0b !important; }
+    td.cell-change-down { background: #ccfbf1 !important; border-left: 3px solid #0d9488 !important; }
+    /* Anchor + change combo: anchor's violet bg wins, but keep change's left border accent. */
+    td.cell-anchor.cell-change-up   { background: #ede9fe !important; border-left: 3px solid #f59e0b !important; }
+    td.cell-anchor.cell-change-down { background: #ede9fe !important; border-left: 3px solid #0d9488 !important; }
     .delta-badge {
       position: absolute; bottom: 1px; left: 2px;
       font-size: 8px; line-height: 1; font-weight: 700; padding: 1px 3px;
@@ -169,6 +190,12 @@
                       <template x-if="r.anchor && r.anchor[d]">
                         <span class="anchor-pin" title="Explicit COGS row set on this day">📌</span>
                       </template>
+                      <template x-if="r.anchor && r.anchor[d]">
+                        <button type="button" class="anchor-delete"
+                                @click.stop="deleteAnchor(r.item_name, d)"
+                                contenteditable="false"
+                                title="Delete this COGS row → falls back to inheritance from prior date">✕</button>
+                      </template>
                       <template x-if="r.change && r.change[d] && r.delta && r.delta[d] !== null">
                         <span class="delta-badge" :class="r.delta[d] >= 0 ? 'up' : 'down'"
                               x-text="(r.delta[d] >= 0 ? '+' : '') + Number(r.delta[d]).toFixed(0)"></span>
@@ -300,6 +327,28 @@ function gridApp(initialMonth){
         alert(err.error || 'Save failed');
       }
     },
+
+    // Deletes the explicit cogs row for (item, day). Day falls back to
+    // carry-forward from the prior cogs entry. Use when an anchor is
+    // redundant — same value as prior day, just inheriting would suffice.
+    async deleteAnchor(name, day){
+      const date = new Date(`${this.month}-01`); date.setDate(day);
+      const ymd = date.toISOString().slice(0,10);
+      if (!confirm('Delete COGS row for "' + name + '" on ' + ymd + '?\nThis day will inherit from the prior cogs entry instead.')) return;
+
+      const res = await fetch(`{{ route('item.cogs.delete') }}`, {
+        method:'POST',
+        headers: { 'Content-Type':'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+        body: JSON.stringify({ item_name: name, date: ymd })
+      });
+      if (res.ok) {
+        await this.load();
+      } else {
+        const err = await res.json().catch(()=>({error:'Delete failed'}));
+        alert(err.error || 'Delete failed');
+      }
+    },
+
     async init(){ await this.load(); }
   }
 }

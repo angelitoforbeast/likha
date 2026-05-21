@@ -170,6 +170,31 @@ class ItemCogsController extends Controller
     }
 
     /**
+     * DELETE ONE COGS ROW
+     * - Removes the explicit cogs entry for (item, date).
+     * - That day will inherit from the prior cogs row via carry-forward.
+     * - Use when a manually-set anchor is redundant (same value as prior day).
+     */
+    public function delete(Request $req) {
+        $data = $req->validate([
+            'item_name' => 'required|string',
+            'date'      => 'required|date',
+        ]);
+        $date = Carbon::parse($data['date'])->toDateString();
+        $item = trim($data['item_name']);
+        if ($item === '') {
+            return response()->json(['ok' => false, 'error' => 'Blank item name not allowed.'], 422);
+        }
+
+        $deleted = Cogs::where('item_name', $item)->whereDate('date', $date)->delete();
+
+        return response()->json([
+            'ok'      => true,
+            'deleted' => $deleted,
+        ]);
+    }
+
+    /**
      * Portable date extractor for MySQL and Postgres,
      * including string formats like '21:44 09-06-2025'.
      */
