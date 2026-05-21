@@ -2550,11 +2550,16 @@ class OwnerPrivateController extends Controller
     {
         $this->checkLogsAccess();
 
-        $userFilter = trim((string) $request->query('user', ''));
-        $pageFilter = trim((string) $request->query('page', ''));
-        $itemFilter = trim((string) $request->query('item', ''));
-        $fromDate   = trim((string) $request->query('from_date', ''));
-        $toDate     = trim((string) $request->query('to_date', ''));
+        $userFilter  = trim((string) $request->query('user', ''));
+        $pageFilter  = trim((string) $request->query('page', ''));
+        $itemFilter  = trim((string) $request->query('item', ''));
+        $fromDate    = trim((string) $request->query('from_date', ''));
+        $toDate      = trim((string) $request->query('to_date', ''));
+        // Scope filter: 'rts' | 'promo' | 'cogs' | 'all' (saves all 3) | '' = no filter
+        $scopeFilter = strtolower(trim((string) $request->query('scope', '')));
+        $changedOnly = $request->boolean('changed_only', false);
+
+        $hasScopeCol = Schema::hasColumn('page_item_settings_log', 'scope');
 
         $query = DB::table('page_item_settings_log as l')
             ->leftJoin('users as u', 'u.email', '=', 'l.user_email')
@@ -2571,6 +2576,25 @@ class OwnerPrivateController extends Controller
         if ($fromDate   !== '') $query->where('l.created_at', '>=', $fromDate . ' 00:00:00');
         if ($toDate     !== '') $query->where('l.created_at', '<=', $toDate   . ' 23:59:59');
 
+        if ($scopeFilter !== '' && $hasScopeCol && in_array($scopeFilter, ['rts', 'promo', 'cogs', 'cogs_ceo', 'all'], true)) {
+            $query->where('l.scope', $scopeFilter);
+        }
+
+        // Optional: only rows where SOMETHING actually changed (skip no-ops).
+        // A "change" = any of rts/promo/cogs/cogs_ceo old != new.
+        if ($changedOnly) {
+            $query->where(function ($q) {
+                $q->whereRaw('(old_rts_pct IS NULL) <> (new_rts_pct IS NULL) OR old_rts_pct <> new_rts_pct')
+                  ->orWhereRaw('(old_item_value IS NULL) <> (new_item_value IS NULL) OR old_item_value <> new_item_value');
+                if (Schema::hasColumn('page_item_settings_log', 'old_promo')) {
+                    $q->orWhereRaw('(old_promo IS NULL) <> (new_promo IS NULL) OR old_promo <> new_promo');
+                }
+                if (Schema::hasColumn('page_item_settings_log', 'old_item_value_ceo')) {
+                    $q->orWhereRaw('(old_item_value_ceo IS NULL) <> (new_item_value_ceo IS NULL) OR old_item_value_ceo <> new_item_value_ceo');
+                }
+            });
+        }
+
         $rows = $query->paginate(50)->appends($request->query());
 
         $allUsers = DB::table('page_item_settings_log')
@@ -2579,17 +2603,20 @@ class OwnerPrivateController extends Controller
             ->whereNotNull('page_name')->distinct()->orderBy('page_name')->pluck('page_name');
 
         return view('owner.edit_logs', [
-            'rows'       => $rows,
-            'allUsers'   => $allUsers,
-            'allPages'   => $allPages,
-            'userFilter' => $userFilter,
-            'pageFilter' => $pageFilter,
-            'itemFilter' => $itemFilter,
-            'fromDate'   => $fromDate,
-            'toDate'     => $toDate,
+            'rows'         => $rows,
+            'allUsers'     => $allUsers,
+            'allPages'     => $allPages,
+            'userFilter'   => $userFilter,
+            'pageFilter'   => $pageFilter,
+            'itemFilter'   => $itemFilter,
+            'fromDate'     => $fromDate,
+            'toDate'       => $toDate,
+            'scopeFilter'  => $scopeFilter,
+            'changedOnly'  => $changedOnly,
+            'hasScopeCol'  => $hasScopeCol,
             // CEO-only column gate. Non-CEO viewers (e.g., Marketing-OIC) never
             // see cogs_ceo deltas — they exist sa row pero hindi nire-render.
-            'isCeoView'  => $this->isCEO(),
+            'isCeoView'    => $this->isCEO(),
         ]);
     }
 
