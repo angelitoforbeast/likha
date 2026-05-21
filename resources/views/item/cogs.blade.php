@@ -12,7 +12,7 @@
     /* Sticky first column */
     .sticky-col { position: sticky; left: 0; z-index: 10; }
     /* Editable cell styles */
-    td.editable { cursor: text; transition: background 0.15s; }
+    td.editable { cursor: text; transition: background 0.15s; position: relative; }
     td.editable:hover { background: #eff6ff; }
     td.editing { outline: 2px solid #3b82f6; background: #eef2ff !important; }
     td.saved { background: #d1fae5 !important; transition: background 0.3s; }
@@ -20,6 +20,23 @@
     /* Missing cost highlight */
     .missing-cost { background: #fef2f2 !important; }
     .missing-cost .sticky-col { background: #fef2f2 !important; }
+    /* Anchor marker — explicit cogs row na set ON this day. Purple top border
+       + small 📌 corner indicator. */
+    td.cell-anchor { border-top: 2px solid #7c3aed !important; }
+    .anchor-pin {
+      position: absolute; top: 1px; right: 2px;
+      font-size: 8px; line-height: 1; color: #7c3aed; opacity: 0.7;
+    }
+    /* Change marker — price differs from prior day. Pastel background + delta badge. */
+    td.cell-change-up   { background: #fef3c7 !important; }   /* warm amber */
+    td.cell-change-down { background: #ccfbf1 !important; }   /* cool teal  */
+    .delta-badge {
+      position: absolute; bottom: 1px; left: 2px;
+      font-size: 8px; line-height: 1; font-weight: 700; padding: 1px 3px;
+      border-radius: 2px;
+    }
+    .delta-badge.up   { background: #f59e0b; color: #fff; }
+    .delta-badge.down { background: #0d9488; color: #fff; }
     /* Scrollbar styling */
     .grid-wrapper::-webkit-scrollbar { height: 8px; }
     .grid-wrapper::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -80,6 +97,25 @@
         <span>Items missing cost: <strong class="text-red-600" x-text="missingCount"></strong></span>
         <span class="ml-auto">Rule: Only dates present in <strong>macro_output</strong> are editable. Missing days carry forward from last known price.</span>
       </div>
+
+      <!-- Marker legend -->
+      <div class="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-gray-600 pt-2 border-t border-gray-100">
+        <span class="font-semibold uppercase tracking-wide text-gray-500">Markers:</span>
+        <span class="inline-flex items-center gap-1">
+          <span class="inline-block w-4 h-4 border-t-2 border-violet-600 bg-white"></span>
+          📌 <strong>Anchor</strong> — explicit COGS row set on that day
+        </span>
+        <span class="inline-flex items-center gap-1">
+          <span class="inline-block w-4 h-4 bg-amber-100"></span>
+          <span class="bg-amber-500 text-white px-1 rounded text-[9px] font-bold">+N</span>
+          <strong>Change ↑</strong> — cost went up vs prior day
+        </span>
+        <span class="inline-flex items-center gap-1">
+          <span class="inline-block w-4 h-4 bg-teal-100"></span>
+          <span class="bg-teal-600 text-white px-1 rounded text-[9px] font-bold">−N</span>
+          <strong>Change ↓</strong> — cost went down vs prior day
+        </span>
+      </div>
     </section>
 
     <!-- Grid -->
@@ -114,7 +150,15 @@
                         @blur="onBlur($event, r.item_name, d)"
                         @keydown.enter.prevent="commit($event, r.item_name, d)"
                         class="px-3 py-2 text-right"
-                        x-text="fmt(r.prices[d])">
+                        :title="cellTitle(r, d)">
+                      <span x-text="fmt(r.prices[d])"></span>
+                      <template x-if="r.anchor && r.anchor[d]">
+                        <span class="anchor-pin" title="Explicit COGS row set on this day">📌</span>
+                      </template>
+                      <template x-if="r.change && r.change[d] && r.delta && r.delta[d] !== null">
+                        <span class="delta-badge" :class="r.delta[d] >= 0 ? 'up' : 'down'"
+                              x-text="(r.delta[d] >= 0 ? '+' : '') + Number(r.delta[d]).toFixed(0)"></span>
+                      </template>
                     </td>
                   </template>
                 </tr>
@@ -178,8 +222,27 @@ function gridApp(initialMonth){
 
     cellClass(r, d){
       if (!r.editable[d]) return 'nonpresent';
-      if (r.prices[d] === null || r.prices[d] === undefined) return 'editable bg-yellow-50';
-      return 'editable';
+      const classes = [];
+      if (r.prices[d] === null || r.prices[d] === undefined) classes.push('editable bg-yellow-50');
+      else classes.push('editable');
+      // Anchor marker — explicit cogs row set on this day.
+      if (r.anchor && r.anchor[d]) classes.push('cell-anchor');
+      // Change marker — price differs from prior editable day.
+      if (r.change && r.change[d] && r.delta && r.delta[d] !== null) {
+        classes.push(r.delta[d] >= 0 ? 'cell-change-up' : 'cell-change-down');
+      }
+      return classes.join(' ');
+    },
+
+    cellTitle(r, d){
+      if (!r.editable[d]) return 'No activity on this day';
+      const parts = [];
+      if (r.prices[d] !== null && r.prices[d] !== undefined) parts.push('Cost: ₱' + Number(r.prices[d]).toFixed(2));
+      if (r.anchor && r.anchor[d]) parts.push('📌 COGS explicitly set on this day');
+      if (r.change && r.change[d] && r.delta && r.delta[d] !== null) {
+        parts.push((r.delta[d] >= 0 ? '▲ +' : '▼ ') + Number(r.delta[d]).toFixed(2) + ' vs prior day');
+      }
+      return parts.join(' · ');
     },
 
     async load(){

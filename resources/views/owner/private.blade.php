@@ -108,6 +108,14 @@
     .btn-cancel { font-size:11px; padding:3px 8px; border-radius:5px; cursor:pointer; border:1.5px solid #e2e8f0; background:#f1f5f9; color:#475569; }
     .btn-set    { font-size:11px; padding:3px 9px; border-radius:5px; cursor:pointer; border:1.5px solid #e2e8f0; background:#f8fafc; color:#64748b; }
     .btn-set:hover { border-color:#93c5fd; color:#2563eb; background:#eff6ff; }
+    .cell-edit-icon {
+      font-size:11px; line-height:1; padding:2px 4px; border-radius:3px;
+      cursor:pointer; border:1px solid transparent; background:transparent;
+      color:#94a3b8; opacity:0.5; transition:opacity 0.15s, color 0.15s, background 0.15s;
+      flex-shrink:0;
+    }
+    .cell-edit-icon:hover { opacity:1; color:#2563eb; background:#eff6ff; border-color:#bfdbfe; }
+    tr:hover .cell-edit-icon { opacity:1; }
 
     /* ── Inline campaigns expand: simple chevron toggle ───────────────── */
     /* The Page cell uses a fixed-width "gutter" so the chevron sits at the
@@ -503,20 +511,19 @@
               </th>
             </template>
 
-            <!-- Fixed: Actions -->
-            <th style="text-align:center;min-width:90px;"></th>
+            {{-- Row-level Actions column removed. Per-cell ✎ edit icons na lang. --}}
           </tr>
         </thead>
         <tbody class="msg-tbody">
 
           <template x-if="rows.length === 0 && !loading">
-            <tr><td :colspan="cols.length + 3" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
+            <tr><td :colspan="cols.length + 2" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
               No data for selected date.
             </td></tr>
           </template>
 
           <template x-if="rows.length === 0 && loading">
-            <tr><td :colspan="cols.length + 3" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
+            <tr><td :colspan="cols.length + 2" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
               <span class="spin" style="margin-right:6px;"></span>Loading…
             </td></tr>
           </template>
@@ -774,52 +781,44 @@
                     </span>
                   </template>
 
-                  <!-- rts_set — manually set RTS% (editable) + comment display -->
+                  <!-- rts_set — manually set RTS% (read-only here; click ✎ icon to edit via modal) -->
                   <template x-if="col.id==='rts_set'">
-                    <span>
-                      <template x-if="editIdx === idx">
-                        <div style="display:flex;flex-direction:column;gap:4px;min-width:140px;">
-                          <input class="ii" type="number" step="0.1" min="0" max="100"
-                                 x-model="ev.rts_pct" placeholder="RTS%"
-                                 @keydown.enter="save()" @keydown.escape="cancel()"
-                                 style="width:70px;">
-                          <input class="ii-comment" type="text" maxlength="500"
-                                 x-model="ev.comment" placeholder="Comment (optional)"
-                                 @keydown.enter="save()" @keydown.escape="cancel()">
-                          <div style="font-size:9px;color:#94a3b8;">Both 0 = delete override</div>
-                        </div>
-                      </template>
-                      <template x-if="editIdx !== idx">
-                        <div>
-                          <template x-if="row.rts_pct !== null">
-                            <div>
-                              <span style="font-weight:700;color:#000;"
-                                    x-text="row.rts_pct.toFixed(1)+'%'"></span>
-                              <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
-                                   x-text="'from ' + row.settings_date"></div>
-                              <template x-if="row.rts_comment">
-                                <div style="font-size:9px;color:#64748b;margin-top:1px;font-style:italic;white-space:normal;max-width:120px;"
-                                     x-text="'💬 '+row.rts_comment"></div>
-                              </template>
-                            </div>
-                          </template>
-                          <template x-if="row.rts_pct === null">
-                            <span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>
-                          </template>
-                        </div>
-                      </template>
+                    <span style="display:inline-flex;align-items:flex-start;gap:4px;">
+                      <div style="flex:1;">
+                        <template x-if="row.rts_pct !== null">
+                          <div>
+                            <span style="font-weight:700;color:#000;"
+                                  x-text="row.rts_pct.toFixed(1)+'%'"></span>
+                            <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
+                                 x-text="'from ' + row.settings_date"></div>
+                            <template x-if="row.rts_comment">
+                              <div style="font-size:9px;color:#64748b;margin-top:1px;font-style:italic;white-space:normal;max-width:120px;"
+                                   x-text="'💬 '+row.rts_comment"></div>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="row.rts_pct === null">
+                          <span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>
+                        </template>
+                      </div>
+                      <button type="button" class="cell-edit-icon" @click="openEditModal(row, 'rts')"
+                              title="Edit RTS%">✎</button>
                     </span>
                   </template>
 
-                  <!-- promo — per-date inherited from page_item_settings -->
+                  <!-- promo — per-date inherited; click ✎ to edit via modal -->
                   <template x-if="col.id==='promo'">
-                    <span>
-                      <template x-if="row.promo">
-                        <span x-text="(row.promo.toUpperCase()==='NONE' || row.promo==='-') ? '—' : row.promo"></span>
-                      </template>
-                      <template x-if="!row.promo">
-                        <span style="color:#cbd5e1;" title="no promo set yet">—</span>
-                      </template>
+                    <span style="display:inline-flex;align-items:center;gap:4px;">
+                      <div style="flex:1;">
+                        <template x-if="row.promo">
+                          <span x-text="(row.promo.toUpperCase()==='NONE' || row.promo==='-') ? '—' : row.promo"></span>
+                        </template>
+                        <template x-if="!row.promo">
+                          <span style="color:#cbd5e1;" title="no promo set yet">—</span>
+                        </template>
+                      </div>
+                      <button type="button" class="cell-edit-icon" @click="openEditModal(row, 'promo')"
+                              title="Edit Promo">✎</button>
                     </span>
                   </template>
 
@@ -845,55 +844,48 @@
                     </span>
                   </template>
 
-                  <!-- item_val — editable inline -->
+                  <!-- item_val — Marketing's cogs; click ✎ to edit via modal -->
                   <template x-if="col.id==='item_val'">
-                    <span>
-                      <template x-if="editIdx === idx">
-                        <div style="display:flex;flex-direction:column;gap:4px;min-width:140px;">
-                          <input class="ii" type="number" step="1" min="0"
-                                 x-model="ev.item_value" placeholder="Item Val."
-                                 @keydown.enter="save()" @keydown.escape="cancel()"
-                                 style="width:78px;">
-                          <input class="ii-comment" type="text" maxlength="500"
-                                 x-model="ev.iv_comment" placeholder="Comment (optional)"
-                                 @keydown.enter="save()" @keydown.escape="cancel()">
-                        </div>
-                      </template>
-                      <template x-if="editIdx !== idx">
-                        <span>
-                          <template x-if="row.item_value !== null">
-                            <div>
-                              <span style="color:#111;" x-text="money(row.item_value)"></span>
-                              <template x-if="row.item_value_source === 'cogs'">
-                                <div style="font-size:9px;color:#cbd5e1;">cogs</div>
-                              </template>
-                              <template x-if="row.item_value_source === 'manual' && row.settings_date">
-                                <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
-                                     x-text="'from ' + row.settings_date"></div>
-                              </template>
-                              <template x-if="row.item_value_comment && row.item_value_source === 'manual'">
-                                <div style="font-size:9px;color:#64748b;margin-top:1px;font-style:italic;white-space:normal;max-width:110px;"
-                                     x-text="'💬 '+row.item_value_comment"></div>
-                              </template>
-                            </div>
-                          </template>
-                          <template x-if="row.item_value === null">
-                            <span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>
-                          </template>
-                        </span>
-                      </template>
+                    <span style="display:inline-flex;align-items:flex-start;gap:4px;">
+                      <div style="flex:1;">
+                        <template x-if="row.item_value !== null">
+                          <div>
+                            <span style="color:#111;" x-text="money(row.item_value)"></span>
+                            <template x-if="row.item_value_source === 'cogs'">
+                              <div style="font-size:9px;color:#cbd5e1;">cogs</div>
+                            </template>
+                            <template x-if="row.item_value_source === 'manual' && row.settings_date">
+                              <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
+                                   x-text="'from ' + row.settings_date"></div>
+                            </template>
+                            <template x-if="row.item_value_comment && row.item_value_source === 'manual'">
+                              <div style="font-size:9px;color:#64748b;margin-top:1px;font-style:italic;white-space:normal;max-width:110px;"
+                                   x-text="'💬 '+row.item_value_comment"></div>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="row.item_value === null">
+                          <span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>
+                        </template>
+                      </div>
+                      <button type="button" class="cell-edit-icon" @click="openEditModal(row, 'cogs')"
+                              title="Edit Unit Cost (COGS)">✎</button>
                     </span>
                   </template>
 
-                  <!-- item_val_ceo — CEO-only, read-only display (edit goes via /owner/private/breakdown matrix). -->
+                  <!-- item_val_ceo — CEO-only; click ✎ to edit CEO cogs via modal -->
                   <template x-if="col.id==='item_val_ceo'">
-                    <span>
-                      <template x-if="row.item_value_ceo !== null && row.item_value_ceo !== undefined">
-                        <span style="color:#111;" x-text="money(row.item_value_ceo)"></span>
-                      </template>
-                      <template x-if="row.item_value_ceo === null || row.item_value_ceo === undefined">
-                        <span style="color:#fca5a5;font-style:italic;font-size:11px;" title="No CEO value set — profit calc shows — for this row.">—</span>
-                      </template>
+                    <span style="display:inline-flex;align-items:center;gap:4px;">
+                      <div style="flex:1;">
+                        <template x-if="row.item_value_ceo !== null && row.item_value_ceo !== undefined">
+                          <span style="color:#111;" x-text="money(row.item_value_ceo)"></span>
+                        </template>
+                        <template x-if="row.item_value_ceo === null || row.item_value_ceo === undefined">
+                          <span style="color:#fca5a5;font-style:italic;font-size:11px;" title="No CEO value set — profit calc shows — for this row.">—</span>
+                        </template>
+                      </div>
+                      <button type="button" class="cell-edit-icon" @click="openEditModal(row, 'cogs_ceo')"
+                              title="Edit CEO Unit Cost">✎</button>
                     </span>
                   </template>
 
@@ -912,15 +904,9 @@
                 </td>
               </template>
 
-              <!-- Fixed: Actions -->
-              <td style="text-align:center;">
-                {{-- Modal-based edit: works in both single-date and range mode.
-                     Saves target end_date by default + cascades from start_date
-                     when "Apply from" is used. --}}
-                <button class="btn-set" @click="openEditModal(row)"
-                        x-text="row.has_settings ? 'Edit' : '+ Set'"
-                        :title="isSingleDate ? 'Edit RTS / Item Value for this date' : ('Edit RTS / Item Value — saves to end_date (' + endDate + '), with optional cascade from start_date (' + startDate + ')')"></button>
-              </td>
+              {{-- Row-level Edit button removed. Per-cell ✎ icons sa RTS / Promo /
+                   Item Val / Item Val (CEO) columns ang nag-open ng scoped modal
+                   for that specific field. --}}
             </tr>
 
             {{-- Inline expand row — sits directly after THIS page row when
@@ -931,7 +917,7 @@
                  root child — <tbody> serves as that root). --}}
             <tr x-show="(expandedPages[row.page_name] || {}).open"
                 class="page-expand-row">
-              <td :colspan="(cols.length + 3)" style="padding:0;">
+              <td :colspan="(cols.length + 2)" style="padding:0;">{{-- (cols.length + 2): page + idx-checkbox + cols --}}
                 @include('owner._private_expand_inline')
               </td>
             </tr>
@@ -1014,7 +1000,6 @@
                   </template>
                 </td>
               </template>
-              <td></td>
             </tr>
           </template>
 
@@ -1059,7 +1044,8 @@
         </div>
 
         {{-- ━━━ Section 1: RTS% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ --}}
-        <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#fefce8;">
+        <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#fefce8;"
+             x-show="!edit.focusScope || edit.focusScope === 'rts'">
           <div style="font-size:10.5px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">📊 RTS%</div>
           <label>RTS% <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(per-page, for this date onward)</span></label>
           <div style="display:flex;align-items:center;gap:8px;">
@@ -1104,7 +1090,8 @@
         </div>
 
         {{-- ━━━ Section 2: Promo ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ --}}
-        <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#fdf4ff;">
+        <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#fdf4ff;"
+             x-show="!edit.focusScope || edit.focusScope === 'promo'">
           <div style="font-size:10.5px;color:#86198f;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">🏷 Promo</div>
           <label>Promo <span style="color:#dc2626;">*</span> <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(type NONE if walang promo)</span></label>
           <input type="text" x-model="edit.promo" maxlength="255" placeholder='e.g. "9.9 Sale", "PAYDAY", or "NONE"'>
@@ -1140,7 +1127,8 @@
         </div>
 
         {{-- ━━━ Section 3: COGS (item-global) ━━━━━━━━━━━━━━━━━━━━━━ --}}
-        <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#f0fdf4;">
+        <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#f0fdf4;"
+             x-show="!edit.focusScope || edit.focusScope === 'cogs' || edit.focusScope === 'cogs_ceo'">
           <div style="font-size:10.5px;color:#166534;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">💰 COGS <span style="color:#94a3b8;font-weight:500;">(item-global)</span></div>
           <label>Unit Cost (Marketing) <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">— affects ALL pages on this date</span></label>
           <div style="display:flex;align-items:center;gap:8px;">
@@ -1599,7 +1587,11 @@
       // Default effective_date suggestions:
       //   - RTS, Promo  → anchor_first_date (price+item streak start)
       //   - COGS         → cogs_last_date (latest cogs change for this item)
-      openEditModal(row){
+      //
+      // focusScope: null (show all 3 sections — legacy "Edit All" entry) or
+      //   'rts' / 'promo' / 'cogs' / 'cogs_ceo' (show only that section,
+      //   triggered by per-cell ✎ edit icons).
+      openEditModal(row, focusScope = null){
         const settingsDate = row.settings_date || null;
         const isInherited = !!(row.has_settings && settingsDate && settingsDate !== this.endDate);
         const anchorStart = row.anchor_first_date || null;
@@ -1607,6 +1599,7 @@
 
         this.edit = {
           open:true,
+          focusScope:   focusScope,  // null = show all, 'rts'|'promo'|'cogs'|'cogs_ceo' = show only that section
           // Per-section save state
           savingRts:false, savingPromo:false, savingCogs:false,
           rtsError:null,   promoError:null,   cogsError:null,

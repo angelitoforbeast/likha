@@ -65,32 +65,56 @@ class ItemCogsController extends Controller
             ->get()
             ->groupBy('item_name');
 
-        // 4) Build grid: carry-forward per item using a pointer over sorted COGS rows
+        // 4) Build grid: carry-forward per item using a pointer over sorted COGS rows.
+        //    Adds per-day flags:
+        //      • anchor[d] = true kung may EXPLICIT cogs row for exactly that day
+        //                    (i.e., someone manually set the price on day d).
+        //      • change[d] = true kung price ay differs vs the previous day's price
+        //                    (signal na nagshift yung effective cost on day d).
+        //      • delta[d]  = numeric diff (new − old) when change[d] is true; else null.
         $result = [];
         foreach ($items as $name) {
             $row = [
                 'item_name' => $name,
-                'prices'    => array_fill(1, $days, null),   // display only
-                'editable'  => array_fill(1, $days, false),  // only true if present that day
+                'prices'    => array_fill(1, $days, null),
+                'editable'  => array_fill(1, $days, false),
+                'anchor'    => array_fill(1, $days, false),
+                'change'    => array_fill(1, $days, false),
+                'delta'     => array_fill(1, $days, null),
             ];
 
             $byItem = ($cogs->get($name) ?? collect())->values(); // sorted asc by date
-            $k = 0;                              // pointer into COGS rows
-            $lastKnown = null;                   // carried price as-of current day
+            // Index per-item cogs rows by Y-m-d so we can mark anchor cells.
+            $cogsByDate = [];
+            foreach ($byItem as $c) {
+                $cogsByDate[$c->date->toDateString()] = $c->unit_cost;
+            }
+            $k = 0;
+            $lastKnown = null;
+            $prevDayDisplayed = null;
 
             for ($d = 1; $d <= $days; $d++) {
                 $currDate = $start->copy()->day($d)->toDateString();
                 $isPresent = isset($presence[$name][$d]);
 
-                // advance pointer for all COGS rows whose date <= currDate
                 while ($k < $byItem->count() && $byItem[$k]->date->toDateString() <= $currDate) {
-                    $lastKnown = $byItem[$k]->unit_cost; // exact day overrides; else it becomes carry-forward
+                    $lastKnown = $byItem[$k]->unit_cost;
                     $k++;
                 }
 
-                // Display value ONLY if item is present that day; otherwise blank
                 $row['prices'][$d]   = $isPresent ? $lastKnown : null;
                 $row['editable'][$d] = $isPresent;
+                // Anchor: explicit row na exactly equal sa current day.
+                $row['anchor'][$d]   = $isPresent && array_key_exists($currDate, $cogsByDate);
+
+                // Change marker: this day's displayed price ≠ previous editable day's.
+                if ($isPresent && $lastKnown !== null) {
+                    if ($prevDayDisplayed !== null && abs((float)$prevDayDisplayed - (float)$lastKnown) > 0.001) {
+                        $row['change'][$d] = true;
+                        $row['delta'][$d]  = (float)$lastKnown - (float)$prevDayDisplayed;
+                    }
+                    $prevDayDisplayed = $lastKnown;
+                }
             }
 
             $result[] = $row;
