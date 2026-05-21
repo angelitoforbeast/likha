@@ -1563,6 +1563,19 @@
             skipped_pages: this.skippedPages,
             range_days:    this.rangeDays,
             is_single_date: this.isSingleDate,
+            // Save the user's current column order/visibility so the snapshot
+            // detail view can render columns sa exact same arrangement.
+            cols:          this.cols.map(c => ({
+              id: c.id, label: c.label, sort: c.sort,
+              align: c.align, minw: c.minw,
+            })),
+            sort_col:      this.sortCol,
+            sort_dir:      this.sortDir,
+            start_date:    this.startDate,
+            end_date:      this.endDate,
+            view_as:       this.viewAs || 'ceo',
+            breakeven_target_pct: window.__BREAKEVEN_PCT__ ?? 5,
+            fees:          window.__FEES__ ?? null,
           };
           const r = await fetch('{{ route('owner.private.snapshots.save') }}', {
             method: 'POST',

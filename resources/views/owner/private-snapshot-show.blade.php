@@ -56,11 +56,9 @@
       text-transform:uppercase; letter-spacing:.05em;
       padding:9px 10px; white-space:nowrap;
       border-bottom:2px solid #0f172a;
-      text-align:left;
     }
     thead th:first-child { border-radius:10px 0 0 0; }
     thead th:last-child  { border-radius:0 10px 0 0; }
-    thead th.num { text-align:center; }
 
     tbody td {
       font-size:12.5px; color:#374151;
@@ -68,7 +66,6 @@
       vertical-align:middle;
       border-bottom:1px solid #f1f5f9;
     }
-    tbody td.num { text-align:center; font-variant-numeric:tabular-nums; }
     tbody tr:hover td { background:#f8fafc; }
 
     tr.total-row td {
@@ -79,14 +76,10 @@
 
     .null-cell { background:#fef2f2; }
     .muted { color:#94a3b8; }
-    .pos { color:#16a34a; font-weight:700; }
-    .neg { color:#dc2626; font-weight:700; }
     .small { font-size:9px; color:#94a3b8; margin-top:2px; }
     .comment { font-size:9px; color:#64748b; margin-top:1px; font-style:italic; white-space:normal; max-width:120px; }
 
-    .anchor-tag {
-      font-family:ui-monospace,monospace; font-size:10.5px; color:#7c3aed;
-    }
+    .anchor-tag { font-family:ui-monospace,monospace; font-size:10.5px; color:#7c3aed; }
 
     .table-foot { padding:7px 12px; font-size:10px; color:#94a3b8; border-top:1px solid #f1f5f9; }
   </style>
@@ -96,15 +89,18 @@
 @php
   use Carbon\Carbon;
 
-  // ── Helpers para sa rendering (Blade-only, pure functions) ───────────
-  $money = fn($v) => $v === null || $v === '' ? '—'
-                   : '₱' . number_format((float)$v, 2);
-  $moneyR = fn($v) => $v === null || $v === '' ? '—'
-                    : '₱' . number_format(round((float)$v), 0);
+  // ── Formatters (match live /owner/private behavior) ──────────────────
+  // money() — peso w/ 2 decimals, ',' thousands
+  $money = function($v) {
+    if ($v === null || $v === '') return '—';
+    return '₱' . number_format((float)$v, 2);
+  };
+  // md() — same as money() sa live (peso, 2 decimals). Live uses 2 decimals
+  // for adspent/cpp/profit etc.
+  $md = $money;
   $num   = fn($v) => $v === null || $v === '' ? '—' : number_format((float)$v);
-  $pct1  = fn($v) => $v === null || $v === '' ? '—' : number_format((float)$v, 1) . '%';
 
-  // Profit background color (mimics pbStyle from frontend — green/red intensity)
+  // ── pbStyle / pbColor (proj.profit cell background + text color) ────
   $pbStyle = function($v) {
     if ($v === null || $v === '') return '';
     $v = (float)$v;
@@ -120,7 +116,10 @@
     return '#374151';
   };
 
-  // Proj.% background tint (mimics rppStyle — bands based on margin %)
+  // pbStyleN — same as pbStyle but for N-day variants (1d/3d/7d).
+  $pbStyleN = $pbStyle;
+
+  // rppStyle — proj.% background tint (positive green, negative red, bands).
   $rppStyle = function($v) {
     if ($v === null || $v === '') return '';
     $v = (float)$v;
@@ -135,6 +134,267 @@
   $rows = $payload['rows'] ?? [];
   $rangeDays = $payload['range_days'] ?? (Carbon::parse($snapshot->start_date)->diffInDays(Carbon::parse($snapshot->end_date)) + 1);
   $isSingleDate = $payload['is_single_date'] ?? ($snapshot->start_date === $snapshot->end_date);
+  $breakevenTargetPct = (float) ($payload['breakeven_target_pct'] ?? 5);
+  $fees = $payload['fees'] ?? null;
+  $feeSF = is_array($fees) && isset($fees['SF']) && is_numeric($fees['SF']) ? (float)$fees['SF'] : 37.0;
+  $feeF  = is_array($fees) && isset($fees['F'])  && is_numeric($fees['F'])  ? (float)$fees['F']  : 0.0168;
+
+  // ── Cols — gamitin yung saved cols (kapag walang saved, fallback sa default) ─
+  $defaultCols = [
+    ['id'=>'adspent',    'label'=>'Adspent',    'align'=>'center', 'minw'=>90],
+    ['id'=>'orders',     'label'=>'Orders',     'align'=>'center', 'minw'=>65],
+    ['id'=>'orders_1d',  'label'=>'Orders (1D)','align'=>'center', 'minw'=>80],
+    ['id'=>'cpp',        'label'=>'CPP',        'align'=>'center', 'minw'=>75],
+    ['id'=>'proceed',    'label'=>'Proceed',    'align'=>'center', 'minw'=>70],
+    ['id'=>'pcpp',       'label'=>'P.CPP',      'align'=>'center', 'minw'=>75],
+    ['id'=>'tcpr',       'label'=>'TCPR',       'align'=>'center', 'minw'=>65],
+    ['id'=>'breakeven_cpp','label'=>'Breakeven CPP ('.number_format($breakevenTargetPct,0).'%)','align'=>'center','minw'=>115],
+    ['id'=>'proj_profit','label'=>'Prof.Profit','align'=>'center', 'minw'=>95],
+    ['id'=>'per_order',  'label'=>'/Order',     'align'=>'center', 'minw'=>75],
+    ['id'=>'np_per_order','label'=>'NP/O',      'align'=>'center', 'minw'=>75],
+    ['id'=>'proj_pct',     'label'=>'Prof.%(1M)','align'=>'center','minw'=>75],
+    ['id'=>'proj_pct_1d',  'label'=>'Prof.%(1D)','align'=>'center','minw'=>75],
+    ['id'=>'proj_pct_3d',  'label'=>'Prof.%(3D)','align'=>'center','minw'=>75],
+    ['id'=>'proj_pct_7d',  'label'=>'Prof.%(7D)','align'=>'center','minw'=>75],
+    ['id'=>'proj_prof_1d','label'=>'Prof.Profit(1D)','align'=>'center','minw'=>105],
+    ['id'=>'proj_prof_3d','label'=>'Prof.Profit(3D)','align'=>'center','minw'=>105],
+    ['id'=>'proj_prof_7d','label'=>'Prof.Profit(7D)','align'=>'center','minw'=>105],
+    ['id'=>'jnt_rts',     'label'=>'RTS%',     'align'=>'center', 'minw'=>100],
+    ['id'=>'jnt_del',     'label'=>'Del%',     'align'=>'center', 'minw'=>90],
+    ['id'=>'jnt_transit', 'label'=>'Transit%', 'align'=>'center', 'minw'=>85],
+    ['id'=>'rts_set',     'label'=>'Set RTS%', 'align'=>'center', 'minw'=>110],
+    ['id'=>'promo',       'label'=>'Promo',    'align'=>'center', 'minw'=>90],
+    ['id'=>'price',       'label'=>'Price',    'align'=>'center', 'minw'=>85],
+    ['id'=>'item_val',    'label'=>'Item Val.','align'=>'center', 'minw'=>80],
+    ['id'=>'item_val_ceo','label'=>'Item Val. (CEO)','align'=>'center','minw'=>90],
+    ['id'=>'ship',        'label'=>'Ship',     'align'=>'center', 'minw'=>58],
+    ['id'=>'cod_fee',     'label'=>'COD Fee',  'align'=>'center', 'minw'=>72],
+  ];
+  $cols = (!empty($payload['cols']) && is_array($payload['cols']))
+        ? $payload['cols']
+        : $defaultCols;
+
+  // ── Helper functions for derived values ──────────────────────────────
+  $tcprFor = function($r) {
+    $o = (int)($r['orders'] ?? 0);
+    if ($o <= 0) return null;
+    return (1 - (($r['proceed_orders'] ?? 0) / $o)) * 100;
+  };
+  $projPctFor = function($r) {
+    if (($r['projected_profit'] ?? null) === null) return null;
+    $gs = (float)($r['gross_sales'] ?? 0);
+    if ($gs <= 0) return null;
+    return $r['projected_profit'] / $gs * 100;
+  };
+  $npoFor = function($r) {
+    $ppld = $r['projected_profit_last_day'] ?? null;
+    $old  = (int)($r['orders_last_day'] ?? 0);
+    if ($ppld === null || $old <= 0) return null;
+    return $ppld / $old;
+  };
+  // Breakeven CPP — mirrors frontend formula sa breakevenCppFor():
+  //   procRate × [df × (price × (1 − F) − iv) − SF] − target × price
+  $breakevenCppFor = function($r) use ($breakevenTargetPct, $feeSF, $feeF) {
+    $o     = (int)($r['orders'] ?? 0);
+    $p     = (int)($r['proceed_orders'] ?? 0);
+    $price = (float)($r['price'] ?? 0);
+    $iv    = $r['item_value'] ?? null;
+    $rts   = $r['rts_pct'] ?? null;
+    if ($o <= 0 || $price <= 0 || $iv === null || $rts === null) return null;
+    $procRate = $p / $o;
+    $df       = 1 - ((float)$rts / 100);
+    $target   = $breakevenTargetPct / 100;
+    return $procRate * ($df * ($price * (1 - $feeF) - (float)$iv) - $feeSF) - $target * $price;
+  };
+
+  // ── Renderer per column ──────────────────────────────────────────────
+  $renderCell = function(array $col, array $r) use (
+    $money, $md, $num, $pbStyle, $pbColor, $pbStyleN, $rppStyle,
+    $tcprFor, $projPctFor, $npoFor, $breakevenCppFor
+  ) {
+    $id = $col['id'];
+    $align = $col['align'] ?? 'center';
+
+    // Base style + color tints
+    $tdStyle = "text-align:{$align};";
+    $extraBg = '';
+    if ($id === 'rts_set' && ($r['rts_pct'] ?? null) === null) $extraBg = 'background:#fef2f2;';
+    if ($id === 'item_val' && ($r['item_value'] ?? null) === null) $extraBg = 'background:#fef2f2;';
+    if ($id === 'proj_profit')  $extraBg = $pbStyle($r['projected_profit'] ?? null);
+    if ($id === 'proj_pct')     $extraBg = $rppStyle($projPctFor($r));
+    if ($id === 'proj_pct_1d')  $extraBg = $rppStyle($r['proj_pct_last_day'] ?? null);
+    if ($id === 'proj_pct_3d')  $extraBg = $rppStyle($r['proj_pct_last_3d'] ?? null);
+    if ($id === 'proj_pct_7d')  $extraBg = $rppStyle($r['proj_pct_last_7d'] ?? null);
+    if ($id === 'proj_prof_1d') $extraBg = $pbStyleN($r['projected_profit_last_day'] ?? null);
+    if ($id === 'proj_prof_3d') $extraBg = $pbStyleN($r['projected_profit_last_3d'] ?? null);
+    if ($id === 'proj_prof_7d') $extraBg = $pbStyleN($r['projected_profit_last_7d'] ?? null);
+    $tdStyle .= $extraBg;
+
+    // Numeric center for known num cols (font-variant tabular)
+    $isNumeric = !in_array($id, ['page_name','item_name'], true);
+    if ($isNumeric) $tdStyle .= 'font-variant-numeric:tabular-nums;';
+
+    $html = '';
+    switch ($id) {
+      case 'adspent':
+        $html = '<span style="color:#111;font-weight:500;">'.$money($r['adspent'] ?? null).'</span>';
+        break;
+      case 'orders':
+        $html = '<span style="color:#111;">'.$num($r['orders'] ?? null).'</span>';
+        break;
+      case 'orders_1d':
+        $html = '<span style="color:#111;">'.$num($r['orders_last_day'] ?? null).'</span>';
+        break;
+      case 'cpp':
+        $html = '<span style="color:#111;">'.$md($r['cpp'] ?? null).'</span>';
+        break;
+      case 'proceed':
+        $html = '<span style="color:#111;font-weight:600;">'.$num($r['proceed_orders'] ?? null).'</span>';
+        break;
+      case 'pcpp':
+        $html = '<span style="color:#111;">'.$md($r['proceed_cpp'] ?? null).'</span>';
+        break;
+      case 'tcpr':
+        $t = $tcprFor($r);
+        $html = $t === null ? '—' : number_format($t, 1).'%';
+        break;
+      case 'breakeven_cpp':
+        $be = $breakevenCppFor($r);
+        $html = $be === null ? '<span class="muted">—</span>' : $md($be);
+        break;
+      case 'proj_profit':
+        $v = $r['projected_profit'] ?? null;
+        $html = '<span style="font-weight:700;color:'.$pbColor($v).';">'.$md($v).'</span>';
+        break;
+      case 'per_order':
+        $html = '<span style="color:#111;">'.$md($r['proj_profit_per_order'] ?? null).'</span>';
+        break;
+      case 'np_per_order':
+        $npo = $npoFor($r);
+        if ($npo !== null) {
+          $html = '<span style="font-weight:600;color:'.$pbColor($npo).';">'.$md($npo).'</span>';
+        } else {
+          $html = '<span style="color:#cbd5e1;">—</span>';
+        }
+        break;
+      case 'proj_pct':
+        $pp = $projPctFor($r);
+        $html = $pp === null
+          ? '<span style="color:#cbd5e1;">—</span>'
+          : '<span style="font-weight:700;">'.number_format($pp, 1).'%</span>';
+        break;
+      case 'proj_pct_1d':
+        $v = $r['proj_pct_last_day'] ?? null;
+        $html = $v === null
+          ? '<span style="color:#cbd5e1;">—</span>'
+          : '<span style="font-weight:700;">'.number_format((float)$v, 1).'%</span>';
+        break;
+      case 'proj_pct_3d':
+        $v = $r['proj_pct_last_3d'] ?? null;
+        $html = $v === null
+          ? '<span style="color:#cbd5e1;">—</span>'
+          : '<span style="font-weight:700;">'.number_format((float)$v, 1).'%</span>';
+        break;
+      case 'proj_pct_7d':
+        $v = $r['proj_pct_last_7d'] ?? null;
+        $html = $v === null
+          ? '<span style="color:#cbd5e1;">—</span>'
+          : '<span style="font-weight:700;">'.number_format((float)$v, 1).'%</span>';
+        break;
+      case 'proj_prof_1d':
+        $v = $r['projected_profit_last_day'] ?? null;
+        $html = '<span style="font-weight:700;color:'.$pbColor($v).';">'.$md($v).'</span>';
+        break;
+      case 'proj_prof_3d':
+        $v = $r['projected_profit_last_3d'] ?? null;
+        $html = '<span style="font-weight:700;color:'.$pbColor($v).';">'.$md($v).'</span>';
+        break;
+      case 'proj_prof_7d':
+        $v = $r['projected_profit_last_7d'] ?? null;
+        $html = '<span style="font-weight:700;color:'.$pbColor($v).';">'.$md($v).'</span>';
+        break;
+      case 'jnt_rts':
+        $v = $r['jnt_rts_pct'] ?? null;
+        $html = $v === null
+          ? '<span style="color:#cbd5e1;font-size:11px;">—</span>'
+          : '<span style="color:#111;font-weight:700;font-size:12px;">'.number_format((float)$v,1).'%('.($r['jnt_rts_cnt'] ?? 0).')</span>';
+        break;
+      case 'jnt_del':
+        $v = $r['jnt_del_pct'] ?? null;
+        $html = $v === null
+          ? '<span style="color:#cbd5e1;font-size:11px;">—</span>'
+          : '<span style="color:#111;font-size:12px;">'.number_format((float)$v,1).'%('.($r['jnt_del_cnt'] ?? 0).')</span>';
+        break;
+      case 'jnt_transit':
+        $v = $r['jnt_transit_pct'] ?? null;
+        $html = $v === null
+          ? '<span style="color:#cbd5e1;font-size:11px;">—</span>'
+          : '<span style="color:#111;font-size:12px;">'.number_format((float)$v,1).'%('.($r['jnt_transit_cnt'] ?? 0).')</span>';
+        break;
+      case 'rts_set':
+        $v = $r['rts_pct'] ?? null;
+        if ($v === null) {
+          $html = '<span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>';
+        } else {
+          $h  = '<div><span style="font-weight:700;color:#000;">'.number_format((float)$v,1).'%</span>';
+          if (!empty($r['settings_date'])) $h .= '<div class="small">from '.htmlspecialchars($r['settings_date'], ENT_QUOTES).'</div>';
+          if (!empty($r['rts_comment']))   $h .= '<div class="comment">💬 '.htmlspecialchars($r['rts_comment'], ENT_QUOTES).'</div>';
+          $h .= '</div>';
+          $html = $h;
+        }
+        break;
+      case 'promo':
+        $p = $r['promo'] ?? null;
+        if (!$p || strtoupper($p) === 'NONE' || $p === '-') $html = '<span class="muted">—</span>';
+        else $html = htmlspecialchars($p, ENT_QUOTES);
+        break;
+      case 'price':
+        $v = $r['price'] ?? null;
+        if ($v === null) { $html = '<span class="muted">—</span>'; break; }
+        $h = '<div><span style="color:#374151;">'.$money($v).'</span>';
+        if (($r['price_min'] ?? null) !== null) $h .= '<div class="small">↓ '.$money($r['price_min']).'</div>';
+        if (($r['price_max'] ?? null) !== null) $h .= '<div class="small">↑ '.$money($r['price_max']).'</div>';
+        $h .= '</div>';
+        $html = $h;
+        break;
+      case 'item_val':
+        $v = $r['item_value'] ?? null;
+        if ($v === null) {
+          $html = '<span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>';
+        } else {
+          $h = '<div><span style="color:#111;">'.$money($v).'</span>';
+          $src = $r['item_value_source'] ?? null;
+          if ($src === 'cogs') {
+            $h .= '<div class="small" style="color:#cbd5e1;">cogs</div>';
+          } elseif ($src === 'manual' && !empty($r['settings_date'])) {
+            $h .= '<div class="small">from '.htmlspecialchars($r['settings_date'], ENT_QUOTES).'</div>';
+          }
+          if (!empty($r['item_value_comment']) && $src === 'manual') {
+            $h .= '<div class="comment">💬 '.htmlspecialchars($r['item_value_comment'], ENT_QUOTES).'</div>';
+          }
+          $h .= '</div>';
+          $html = $h;
+        }
+        break;
+      case 'item_val_ceo':
+        $v = $r['item_value_ceo'] ?? null;
+        $html = $v === null
+          ? '<span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>'
+          : '<span style="color:#111;">'.$money($v).'</span>';
+        break;
+      case 'ship':
+        $v = $r['shipping_fee'] ?? null;
+        $html = $v === null ? '—' : '<span style="color:#111;">'.$money($v).'</span>';
+        break;
+      case 'cod_fee':
+        $v = $r['cod_fee'] ?? null;
+        $html = $v === null ? '—' : '<span style="color:#111;">'.$money($v).'</span>';
+        break;
+      default:
+        $html = '';
+    }
+    return '<td style="'.$tdStyle.'">'.$html.'</td>';
+  };
 
   // ── Totals (computed kasi hindi kasama sa current payload structure) ──
   $tot = [
@@ -158,6 +418,49 @@
   $totProjPct7d  = $tot['gross_sales_last_7d'] > 0  ? $tot['projected_profit_last_7d'] / $tot['gross_sales_last_7d'] * 100 : null;
   $totPerOrder   = $tot['orders'] > 0          ? $tot['projected_profit'] / $tot['orders'] : null;
   $totNpPerOrder = $tot['orders_last_day'] > 0 ? $tot['projected_profit_last_day'] / $tot['orders_last_day'] : null;
+
+  // Total cell renderer per col (matches live's total row logic)
+  $renderTotalCell = function(array $col) use (
+    $money, $md, $num, $tot, $totCpp, $totPcpp, $totTcpr,
+    $totProjPct, $totProjPct1d, $totProjPct3d, $totProjPct7d,
+    $totPerOrder, $totNpPerOrder, $pbStyle, $pbColor, $rppStyle
+  ) {
+    $id = $col['id']; $align = $col['align'] ?? 'center';
+    $tdStyle = "text-align:{$align};font-variant-numeric:tabular-nums;";
+    $extraBg = '';
+    if ($id === 'proj_profit')  $extraBg = $pbStyle($tot['projected_profit']);
+    if ($id === 'proj_pct')     $extraBg = $rppStyle($totProjPct);
+    if ($id === 'proj_pct_1d')  $extraBg = $rppStyle($totProjPct1d);
+    if ($id === 'proj_pct_3d')  $extraBg = $rppStyle($totProjPct3d);
+    if ($id === 'proj_pct_7d')  $extraBg = $rppStyle($totProjPct7d);
+    if ($id === 'proj_prof_1d') $extraBg = $pbStyle($tot['projected_profit_last_day']);
+    if ($id === 'proj_prof_3d') $extraBg = $pbStyle($tot['projected_profit_last_3d']);
+    if ($id === 'proj_prof_7d') $extraBg = $pbStyle($tot['projected_profit_last_7d']);
+    $tdStyle .= $extraBg;
+    $h = '';
+    switch ($id) {
+      case 'adspent':       $h = $money($tot['adspent']); break;
+      case 'orders':        $h = $num($tot['orders']); break;
+      case 'orders_1d':     $h = $num($tot['orders_last_day']); break;
+      case 'cpp':           $h = $totCpp !== null ? '<span style="color:#475569;">'.$md($totCpp).'</span>' : '—'; break;
+      case 'proceed':       $h = $num($tot['proceed_orders']); break;
+      case 'pcpp':          $h = $totPcpp !== null ? '<span style="color:#475569;">'.$md($totPcpp).'</span>' : '—'; break;
+      case 'tcpr':          $h = $totTcpr !== null ? number_format($totTcpr, 1).'%' : '—'; break;
+      case 'breakeven_cpp': $h = '<span style="color:#cbd5e1;">—</span>'; break;
+      case 'proj_profit':   $h = '<span style="font-weight:700;">'.$md($tot['projected_profit']).'</span>'; break;
+      case 'per_order':     $h = $totPerOrder !== null ? '<span style="color:#111;">'.$md($totPerOrder).'</span>' : '—'; break;
+      case 'np_per_order':  $h = $totNpPerOrder !== null ? '<span style="color:#111;font-weight:700;">'.$md($totNpPerOrder).'</span>' : '—'; break;
+      case 'proj_pct':      $h = $totProjPct !== null ? '<span style="font-weight:700;color:#111;">'.number_format($totProjPct, 1).'%</span>' : '—'; break;
+      case 'proj_pct_1d':   $h = $totProjPct1d !== null ? '<span style="font-weight:700;color:#111;">'.number_format($totProjPct1d, 1).'%</span>' : '—'; break;
+      case 'proj_pct_3d':   $h = $totProjPct3d !== null ? '<span style="font-weight:700;color:#111;">'.number_format($totProjPct3d, 1).'%</span>' : '—'; break;
+      case 'proj_pct_7d':   $h = $totProjPct7d !== null ? '<span style="font-weight:700;color:#111;">'.number_format($totProjPct7d, 1).'%</span>' : '—'; break;
+      case 'proj_prof_1d':  $h = '<span style="font-weight:700;">'.$md($tot['projected_profit_last_day']).'</span>'; break;
+      case 'proj_prof_3d':  $h = '<span style="font-weight:700;">'.$md($tot['projected_profit_last_3d']).'</span>'; break;
+      case 'proj_prof_7d':  $h = '<span style="font-weight:700;">'.$md($tot['projected_profit_last_7d']).'</span>'; break;
+      default:              $h = '';
+    }
+    return '<td style="'.$tdStyle.'">'.$h.'</td>';
+  };
 @endphp
 
 <div id="nav">
@@ -196,267 +499,40 @@
     <table>
       <thead>
         <tr>
-          <th style="min-width:160px;">Page</th>
-          <th style="min-width:200px;">Item</th>
-          <th class="num" style="min-width:90px;">Adspent</th>
-          <th class="num" style="min-width:65px;">Orders</th>
-          <th class="num" style="min-width:80px;">Orders (1D)</th>
-          <th class="num" style="min-width:75px;">CPP</th>
-          <th class="num" style="min-width:70px;">Proceed</th>
-          <th class="num" style="min-width:75px;">P.CPP</th>
-          <th class="num" style="min-width:65px;">TCPR</th>
-          <th class="num" style="min-width:95px;">Prof.Profit</th>
-          <th class="num" style="min-width:75px;">/Order</th>
-          <th class="num" style="min-width:75px;">NP/O</th>
-          <th class="num" style="min-width:75px;">Prof.%(1M)</th>
-          <th class="num" style="min-width:75px;">Prof.%(1D)</th>
-          <th class="num" style="min-width:75px;">Prof.%(3D)</th>
-          <th class="num" style="min-width:75px;">Prof.%(7D)</th>
-          <th class="num" style="min-width:105px;">Prof.Profit(1D)</th>
-          <th class="num" style="min-width:105px;">Prof.Profit(3D)</th>
-          <th class="num" style="min-width:105px;">Prof.Profit(7D)</th>
-          <th class="num" style="min-width:100px;">RTS%</th>
-          <th class="num" style="min-width:90px;">Del%</th>
-          <th class="num" style="min-width:85px;">Transit%</th>
-          <th class="num" style="min-width:110px;">Set RTS%</th>
-          <th class="num" style="min-width:90px;">Promo</th>
-          <th class="num" style="min-width:85px;">Price</th>
-          <th class="num" style="min-width:80px;">Item Val.</th>
-          <th class="num" style="min-width:90px;">Item Val. (CEO)</th>
-          <th class="num" style="min-width:58px;">Ship</th>
-          <th class="num" style="min-width:72px;">COD Fee</th>
-          <th style="min-width:115px;">Anchor Since</th>
+          <th style="text-align:left;min-width:110px;">Page</th>
+          <th style="text-align:left;min-width:160px;">Item</th>
+          @foreach($cols as $col)
+            <th style="text-align:{{ $col['align'] ?? 'center' }};min-width:{{ $col['minw'] ?? 80 }}px;">
+              {{ $col['label'] ?? $col['id'] }}
+            </th>
+          @endforeach
         </tr>
       </thead>
 
       <tbody>
         @forelse($rows as $r)
-          @php
-            $pp = (isset($r['projected_profit']) && $r['projected_profit'] !== null
-                   && isset($r['gross_sales']) && (float)$r['gross_sales'] > 0)
-                ? ($r['projected_profit'] / $r['gross_sales'] * 100) : null;
-            $npo = (isset($r['projected_profit_last_day']) && $r['projected_profit_last_day'] !== null
-                   && isset($r['orders_last_day']) && (int)$r['orders_last_day'] > 0)
-                 ? ($r['projected_profit_last_day'] / $r['orders_last_day']) : null;
-            $tcpr = (isset($r['orders']) && (int)$r['orders'] > 0)
-                  ? (1 - (($r['proceed_orders'] ?? 0) / $r['orders'])) * 100 : null;
-          @endphp
           <tr>
             <td style="font-weight:600;color:#0f172a;">{{ $r['page_name'] ?? '—' }}</td>
             <td>{{ $r['item_name'] ?? '—' }}</td>
-
-            {{-- Adspent --}}
-            <td class="num">{{ $money($r['adspent'] ?? null) }}</td>
-            {{-- Orders --}}
-            <td class="num">{{ $num($r['orders'] ?? null) }}</td>
-            {{-- Orders (1D) --}}
-            <td class="num">{{ $num($r['orders_last_day'] ?? null) }}</td>
-            {{-- CPP --}}
-            <td class="num">{{ $moneyR($r['cpp'] ?? null) }}</td>
-            {{-- Proceed --}}
-            <td class="num" style="font-weight:600;">{{ $num($r['proceed_orders'] ?? null) }}</td>
-            {{-- P.CPP --}}
-            <td class="num">{{ $moneyR($r['proceed_cpp'] ?? null) }}</td>
-            {{-- TCPR --}}
-            <td class="num">{{ $tcpr === null ? '—' : number_format($tcpr, 1) . '%' }}</td>
-
-            {{-- Prof.Profit --}}
-            <td class="num" style="{{ $pbStyle($r['projected_profit'] ?? null) }}">
-              <span style="font-weight:700;color:{{ $pbColor($r['projected_profit'] ?? null) }};">
-                {{ $moneyR($r['projected_profit'] ?? null) }}
-              </span>
-            </td>
-
-            {{-- /Order --}}
-            <td class="num">{{ $moneyR($r['proj_profit_per_order'] ?? null) }}</td>
-
-            {{-- NP/O --}}
-            <td class="num">
-              @if($npo !== null)
-                <span style="font-weight:600;color:{{ $pbColor($npo) }};">{{ $moneyR($npo) }}</span>
-              @else
-                <span class="muted">—</span>
-              @endif
-            </td>
-
-            {{-- Prof.%(1M) --}}
-            <td class="num" style="{{ $rppStyle($pp) }}">
-              @if($pp !== null)
-                <span style="font-weight:700;">{{ number_format($pp, 1) }}%</span>
-              @else
-                <span class="muted">—</span>
-              @endif
-            </td>
-
-            {{-- Prof.%(1D) --}}
-            <td class="num" style="{{ $rppStyle($r['proj_pct_last_day'] ?? null) }}">
-              @if(($r['proj_pct_last_day'] ?? null) !== null)
-                <span style="font-weight:700;">{{ number_format((float)$r['proj_pct_last_day'], 1) }}%</span>
-              @else <span class="muted">—</span> @endif
-            </td>
-
-            {{-- Prof.%(3D) --}}
-            <td class="num" style="{{ $rppStyle($r['proj_pct_last_3d'] ?? null) }}">
-              @if(($r['proj_pct_last_3d'] ?? null) !== null)
-                <span style="font-weight:700;">{{ number_format((float)$r['proj_pct_last_3d'], 1) }}%</span>
-              @else <span class="muted">—</span> @endif
-            </td>
-
-            {{-- Prof.%(7D) --}}
-            <td class="num" style="{{ $rppStyle($r['proj_pct_last_7d'] ?? null) }}">
-              @if(($r['proj_pct_last_7d'] ?? null) !== null)
-                <span style="font-weight:700;">{{ number_format((float)$r['proj_pct_last_7d'], 1) }}%</span>
-              @else <span class="muted">—</span> @endif
-            </td>
-
-            {{-- Prof.Profit(1D/3D/7D) --}}
-            <td class="num" style="{{ $pbStyle($r['projected_profit_last_day'] ?? null) }}">
-              <span style="font-weight:700;color:{{ $pbColor($r['projected_profit_last_day'] ?? null) }};">
-                {{ $moneyR($r['projected_profit_last_day'] ?? null) }}
-              </span>
-            </td>
-            <td class="num" style="{{ $pbStyle($r['projected_profit_last_3d'] ?? null) }}">
-              <span style="font-weight:700;color:{{ $pbColor($r['projected_profit_last_3d'] ?? null) }};">
-                {{ $moneyR($r['projected_profit_last_3d'] ?? null) }}
-              </span>
-            </td>
-            <td class="num" style="{{ $pbStyle($r['projected_profit_last_7d'] ?? null) }}">
-              <span style="font-weight:700;color:{{ $pbColor($r['projected_profit_last_7d'] ?? null) }};">
-                {{ $moneyR($r['projected_profit_last_7d'] ?? null) }}
-              </span>
-            </td>
-
-            {{-- RTS% (JNT) --}}
-            <td class="num">
-              @if(($r['jnt_rts_pct'] ?? null) !== null)
-                <span style="font-weight:700;">{{ number_format((float)$r['jnt_rts_pct'], 1) }}%<span style="color:#64748b;">({{ $r['jnt_rts_cnt'] ?? 0 }})</span></span>
-              @else <span class="muted">—</span> @endif
-            </td>
-            {{-- Del% --}}
-            <td class="num">
-              @if(($r['jnt_del_pct'] ?? null) !== null)
-                {{ number_format((float)$r['jnt_del_pct'], 1) }}%<span style="color:#64748b;">({{ $r['jnt_del_cnt'] ?? 0 }})</span>
-              @else <span class="muted">—</span> @endif
-            </td>
-            {{-- Transit% --}}
-            <td class="num">
-              @if(($r['jnt_transit_pct'] ?? null) !== null)
-                {{ number_format((float)$r['jnt_transit_pct'], 1) }}%<span style="color:#64748b;">({{ $r['jnt_transit_cnt'] ?? 0 }})</span>
-              @else <span class="muted">—</span> @endif
-            </td>
-
-            {{-- Set RTS% --}}
-            <td class="num {{ ($r['rts_pct'] ?? null) === null ? 'null-cell' : '' }}">
-              @if(($r['rts_pct'] ?? null) !== null)
-                <div><span style="font-weight:700;color:#000;">{{ number_format((float)$r['rts_pct'], 1) }}%</span></div>
-                @if(!empty($r['settings_date']))
-                  <div class="small">from {{ $r['settings_date'] }}</div>
-                @endif
-                @if(!empty($r['rts_comment']))
-                  <div class="comment">💬 {{ $r['rts_comment'] }}</div>
-                @endif
-              @else
-                <span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>
-              @endif
-            </td>
-
-            {{-- Promo --}}
-            <td class="num">
-              @php $promoVal = $r['promo'] ?? null; @endphp
-              @if($promoVal && strtoupper($promoVal) !== 'NONE' && $promoVal !== '-')
-                {{ $promoVal }}
-              @else
-                <span class="muted">—</span>
-              @endif
-            </td>
-
-            {{-- Price --}}
-            <td class="num">
-              @if(($r['price'] ?? null) !== null)
-                <div>{{ $money($r['price']) }}</div>
-                @if(($r['price_min'] ?? null) !== null)
-                  <div class="small">↓ {{ $money($r['price_min']) }}</div>
-                @endif
-                @if(($r['price_max'] ?? null) !== null)
-                  <div class="small">↑ {{ $money($r['price_max']) }}</div>
-                @endif
-              @else
-                <span class="muted">—</span>
-              @endif
-            </td>
-
-            {{-- Item Val. --}}
-            <td class="num {{ ($r['item_value'] ?? null) === null ? 'null-cell' : '' }}">
-              @if(($r['item_value'] ?? null) !== null)
-                <div>{{ $money($r['item_value']) }}</div>
-                @if(($r['item_value_source'] ?? null) === 'cogs')
-                  <div class="small" style="color:#cbd5e1;">cogs</div>
-                @elseif(($r['item_value_source'] ?? null) === 'manual' && !empty($r['settings_date']))
-                  <div class="small">from {{ $r['settings_date'] }}</div>
-                @endif
-                @if(!empty($r['item_value_comment']) && ($r['item_value_source'] ?? null) === 'manual')
-                  <div class="comment">💬 {{ $r['item_value_comment'] }}</div>
-                @endif
-              @else
-                <span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>
-              @endif
-            </td>
-
-            {{-- Item Val. (CEO) --}}
-            <td class="num">
-              @if(($r['item_value_ceo'] ?? null) !== null)
-                {{ $money($r['item_value_ceo']) }}
-              @else
-                <span style="color:#fca5a5;font-style:italic;font-size:11px;">—</span>
-              @endif
-            </td>
-
-            {{-- Ship --}}
-            <td class="num">{{ ($r['shipping_fee'] ?? null) !== null ? $money($r['shipping_fee']) : '—' }}</td>
-            {{-- COD Fee --}}
-            <td class="num">{{ ($r['cod_fee'] ?? null) !== null ? $money($r['cod_fee']) : '—' }}</td>
-
-            {{-- Anchor Since --}}
-            <td>
-              @if(!empty($r['anchor_first_date']))
-                <span class="anchor-tag">▸ {{ $r['anchor_first_date'] }}</span>
-              @else
-                <span class="muted">—</span>
-              @endif
-            </td>
+            @foreach($cols as $col)
+              {!! $renderCell($col, $r) !!}
+            @endforeach
           </tr>
         @empty
           <tr>
-            <td colspan="30" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
+            <td colspan="{{ count($cols) + 2 }}" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
               Empty snapshot — walang rows na na-save.
             </td>
           </tr>
         @endforelse
 
-        @if($hasAnyVal)
+        @if($hasAnyVal && count($rows) > 0)
           <tr class="total-row">
             <td>TOTAL</td>
             <td></td>
-            <td class="num">{{ $money($tot['adspent']) }}</td>
-            <td class="num">{{ $num($tot['orders']) }}</td>
-            <td class="num">{{ $num($tot['orders_last_day']) }}</td>
-            <td class="num">{{ $totCpp !== null ? $moneyR($totCpp) : '—' }}</td>
-            <td class="num">{{ $num($tot['proceed_orders']) }}</td>
-            <td class="num">{{ $totPcpp !== null ? $moneyR($totPcpp) : '—' }}</td>
-            <td class="num">{{ $totTcpr !== null ? number_format($totTcpr, 1) . '%' : '—' }}</td>
-            <td class="num" style="{{ $pbStyle($tot['projected_profit']) }}">
-              <span style="font-weight:700;color:{{ $pbColor($tot['projected_profit']) }};">{{ $moneyR($tot['projected_profit']) }}</span>
-            </td>
-            <td class="num">{{ $totPerOrder !== null ? $moneyR($totPerOrder) : '—' }}</td>
-            <td class="num">{{ $totNpPerOrder !== null ? $moneyR($totNpPerOrder) : '—' }}</td>
-            <td class="num" style="{{ $rppStyle($totProjPct) }}">{{ $totProjPct !== null ? number_format($totProjPct, 1) . '%' : '—' }}</td>
-            <td class="num" style="{{ $rppStyle($totProjPct1d) }}">{{ $totProjPct1d !== null ? number_format($totProjPct1d, 1) . '%' : '—' }}</td>
-            <td class="num" style="{{ $rppStyle($totProjPct3d) }}">{{ $totProjPct3d !== null ? number_format($totProjPct3d, 1) . '%' : '—' }}</td>
-            <td class="num" style="{{ $rppStyle($totProjPct7d) }}">{{ $totProjPct7d !== null ? number_format($totProjPct7d, 1) . '%' : '—' }}</td>
-            <td class="num" style="{{ $pbStyle($tot['projected_profit_last_day']) }}">{{ $moneyR($tot['projected_profit_last_day']) }}</td>
-            <td class="num" style="{{ $pbStyle($tot['projected_profit_last_3d']) }}">{{ $moneyR($tot['projected_profit_last_3d']) }}</td>
-            <td class="num" style="{{ $pbStyle($tot['projected_profit_last_7d']) }}">{{ $moneyR($tot['projected_profit_last_7d']) }}</td>
-            <td colspan="11"></td>
+            @foreach($cols as $col)
+              {!! $renderTotalCell($col) !!}
+            @endforeach
           </tr>
         @endif
       </tbody>
@@ -466,7 +542,7 @@
       📸 Frozen capture — values reflect what /owner/private displayed at
       <strong>{{ Carbon::parse($snapshot->snapshot_at)->format('Y-m-d H:i:s') }}</strong>.
       Underlying data (orders, RTS settings, COGS, JNT updates) may have changed since.
-      One row per page · Same column set + color coding ng live /owner/private.
+      One row per page · Same column arrangement + color coding ng live /owner/private at save-time.
     </div>
   </div>
 </div>
