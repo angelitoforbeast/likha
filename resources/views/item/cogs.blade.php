@@ -117,6 +117,16 @@
             <span class="text-red-600 font-medium">Show missing cost only</span>
             <span class="bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-full font-semibold" x-text="missingCount"></span>
           </label>
+
+          {{-- Bulk-clean button — scans visible month sa lahat ng items, deletes
+               anchors na same value lang sa prior inheritance. --}}
+          <button type="button"
+                  class="bg-violet-100 hover:bg-violet-200 text-violet-800 border border-violet-300 rounded px-3 py-1.5 text-xs font-semibold disabled:opacity-50 inline-flex items-center gap-1"
+                  @click="cleanRedundantAnchors()" :disabled="cleaning"
+                  title="Delete all anchors sa visible month na same value lang sa prior inheritance (no-op rows).">
+            <span x-show="!cleaning">🧹 Clean redundant anchors</span>
+            <span x-show="cleaning">Cleaning…</span>
+          </button>
         </div>
       </div>
 
@@ -245,6 +255,8 @@ function gridApp(initialMonth){
     // the row + column-header get tinted blue (spreadsheet-style scan helper).
     hoverItem: null,
     hoverDay:  null,
+    // Cleanup state — disables the bulk-clean button while a sweep runs.
+    cleaning: false,
 
     get missingCount(){
       return this.rows.filter(r => r._hasMissing).length;
@@ -346,6 +358,52 @@ function gridApp(initialMonth){
       } else {
         const err = await res.json().catch(()=>({error:'Delete failed'}));
         alert(err.error || 'Delete failed');
+      }
+    },
+
+    // Bulk-clean redundant anchors sa visible month. Two-step:
+    //   1) preview=1 → server counts how many rows would be deleted
+    //   2) Show confirm with count → user accepts → preview=0 → actually delete
+    async cleanRedundantAnchors(){
+      if (this.cleaning) return;
+      this.cleaning = true;
+      try {
+        // Step 1: preview
+        const previewRes = await fetch(`{{ route('item.cogs.clean-redundant') }}`, {
+          method:'POST',
+          headers: { 'Content-Type':'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+          body: JSON.stringify({ month: this.month, preview: '1' })
+        });
+        const previewJson = await previewRes.json();
+        if (!previewRes.ok || !previewJson.ok) {
+          alert(previewJson.error || 'Preview failed');
+          return;
+        }
+        const count = previewJson.redundant_found || 0;
+        if (count === 0) {
+          alert('Walang redundant anchors found sa ' + this.month + '. Wala nang ilililinis. ✓');
+          return;
+        }
+        if (!confirm('Delete ' + count + ' redundant anchor(s) sa ' + this.month + '?\n\nIto yung mga cogs rows na same value lang sa prior inheritance (no-op rows). Inherited values per day will stay the same after deletion.\n\nScanned ' + previewJson.items_scanned + ' item(s).')) return;
+
+        // Step 2: actually delete
+        const delRes = await fetch(`{{ route('item.cogs.clean-redundant') }}`, {
+          method:'POST',
+          headers: { 'Content-Type':'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content },
+          body: JSON.stringify({ month: this.month, preview: '0' })
+        });
+        const delJson = await delRes.json();
+        if (!delRes.ok || !delJson.ok) {
+          alert(delJson.error || 'Cleanup failed');
+          return;
+        }
+        alert('✓ Deleted ' + delJson.deleted + ' redundant anchor(s). Refreshing grid…');
+        await this.load();
+      } catch(e) {
+        console.error(e);
+        alert('Network error: ' + e.message);
+      } finally {
+        this.cleaning = false;
       }
     },
 

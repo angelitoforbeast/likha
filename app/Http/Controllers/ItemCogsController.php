@@ -195,6 +195,74 @@ class ItemCogsController extends Controller
     }
 
     /**
+     * BULK DELETE REDUNDANT ANCHORS
+     * - Scope: cogs rows within [month_start, month_end] for items that have
+     *   at least one row in that range.
+     * - "Redundant" = the row's unit_cost equals the prior cogs entry's value
+     *   (whether that prior entry is within the month or earlier). Deleting
+     *   doesn't change the displayed/inherited value for that day — it just
+     *   removes the no-op explicit row.
+     * - Modes:
+     *     ?preview=1  → returns the count without deleting (for confirm UI)
+     *     (default)   → actually deletes + returns the count
+     */
+    public function cleanRedundant(Request $req) {
+        $data = $req->validate([
+            'month'   => 'required|date_format:Y-m',
+            'preview' => 'nullable|in:0,1',
+        ]);
+        $preview = !empty($data['preview']);
+
+        $month = Carbon::parse($data['month'] . '-01');
+        $start = $month->copy()->startOfMonth()->toDateString();
+        $end   = $month->copy()->endOfMonth()->toDateString();
+
+        // Items na may at least one row sa visible month — limits the scan.
+        $items = Cogs::whereBetween('date', [$start, $end])
+            ->select('item_name')->distinct()->pluck('item_name');
+
+        $toDelete = [];
+        foreach ($items as $item) {
+            // Baseline = latest cogs row BEFORE the month — yan ang inheritance
+            // value coming into the month. Used to detect first-day redundancy.
+            $baseline = Cogs::where('item_name', $item)
+                ->where('date', '<', $start)
+                ->orderByDesc('date')
+                ->first(['unit_cost']);
+            $prev = $baseline ? (float) $baseline->unit_cost : null;
+
+            // Walk through this month's rows in date order, marking redundant.
+            $rows = Cogs::where('item_name', $item)
+                ->whereBetween('date', [$start, $end])
+                ->orderBy('date')
+                ->get(['id', 'unit_cost']);
+
+            foreach ($rows as $r) {
+                if ($prev !== null && abs($prev - (float)$r->unit_cost) < 0.001) {
+                    $toDelete[] = $r->id;
+                    // prev stays same — the value didn't actually change
+                } else {
+                    $prev = (float) $r->unit_cost;
+                }
+            }
+        }
+
+        $count = count($toDelete);
+        if (!$preview && $count > 0) {
+            Cogs::whereIn('id', $toDelete)->delete();
+        }
+
+        return response()->json([
+            'ok'             => true,
+            'preview'        => $preview,
+            'deleted'        => $preview ? 0 : $count,
+            'redundant_found'=> $count,
+            'items_scanned'  => $items->count(),
+            'month'          => $month->format('Y-m'),
+        ]);
+    }
+
+    /**
      * Portable date extractor for MySQL and Postgres,
      * including string formats like '21:44 09-06-2025'.
      */

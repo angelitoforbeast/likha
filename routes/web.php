@@ -525,6 +525,7 @@ Route::get('/item/cogs', [ItemCogsController::class, 'index'])->name('item.cogs.
 Route::get('/item/cogs/grid', [ItemCogsController::class, 'grid'])->name('item.cogs.grid');      // JSON grid for month
 Route::post('/item/cogs/update', [ItemCogsController::class, 'update'])->name('item.cogs.update'); // edit one cell
 Route::post('/item/cogs/delete', [ItemCogsController::class, 'delete'])->name('item.cogs.delete'); // delete one explicit cogs row → falls back to inheritance
+Route::post('/item/cogs/clean-redundant', [ItemCogsController::class, 'cleanRedundant'])->name('item.cogs.clean-redundant'); // bulk-delete redundant anchors (same value as prior inheritance) sa visible month
 
 Route::get('/owner/private', [OwnerPrivateController::class, 'index'])->name('owner.private');
 Route::get('/owner/private/data', [OwnerPrivateController::class, 'data'])->name('owner.private.data');
