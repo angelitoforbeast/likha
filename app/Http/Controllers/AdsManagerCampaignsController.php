@@ -1318,6 +1318,8 @@ class AdsManagerCampaignsController extends Controller
                         ->orderByDesc('id')
                         ->get(['page_name', 'item_name', 'rts_pct']);
                     foreach ($settingRows as $s) {
+                        // Skip rows with NULL rts_pct (promo-only saves post-2026-05-21).
+                        if ($s->rts_pct === null) continue;
                         $k = strtolower(trim((string)$s->page_name)) . '||' . strtolower(trim((string)$s->item_name));
                         if (!isset($rtsByKey[$k])) $rtsByKey[$k] = (float)$s->rts_pct;
                     }

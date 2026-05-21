@@ -1877,8 +1877,11 @@ class OwnerPrivateController extends Controller
                    .'||'.strtolower(trim((string)$s->item_name))
                    .'||'.$codInt;
                 if (!isset($settingsMap[$k])) {
+                    // rts_pct can be NULL post-2026-05-21 (promo-only saves
+                    // pwedeng walang RTS yet). Preserve null para mahandle
+                    // properly sa profit calc downstream + cell display.
                     $settingsMap[$k] = [
-                        'rts_pct'              => (float)$s->rts_pct,
+                        'rts_pct'              => $s->rts_pct !== null ? (float)$s->rts_pct : null,
                         'effective_date'       => (string)$s->effective_date,
                         'comment'              => (string)($s->comment ?? ''),
                         'item_value_comment'   => (string)($s->item_value_comment ?? ''),
@@ -1999,7 +2002,9 @@ class OwnerPrivateController extends Controller
             // uses cogs regardless of param.
             $useCeoForProfit = $isCEO && $viewAs === 'ceo';
             $itemValue       = $useCeoForProfit ? $itemValueCeo : $itemValueMarket;
-            $rtsPct          = $settings ? (float)$settings['rts_pct'] : null;
+            // rts_pct can be NULL (promo-only saves walang RTS pa) — preserve null
+            // para sa profit calc downstream (null → no profit shown, hindi 0%).
+            $rtsPct          = ($settings && $settings['rts_pct'] !== null) ? (float)$settings['rts_pct'] : null;
             $rtsComment      = $settings ? $settings['comment'] : null;
 
             // JNT stats — keyed by page_key||canonical_item_key||cod_int (matches
@@ -2352,85 +2357,62 @@ class OwnerPrivateController extends Controller
             //   scope=promo → writes promo only (preserves rts + comment; requires row)
             //   scope=all   → writes everything (backward-compat)
             if (in_array($scope, ['all', 'rts', 'promo'], true)) {
-                // For scope=promo when no row exists at this exact date,
-                // inherit RTS from the NEAREST PRIOR row (same page/item/price).
-                // This mirrors the frontend's "inherited from {date}" display:
-                // user is setting a promo starting at $effDate, and we propagate
-                // the currently-effective RTS forward so the new row is valid.
+                // RTS and Promo are INDEPENDENT per (page, item, price) reference.
+                // Either can be saved standalone. The other field is preserved
+                // from existing row (if any) or left NULL.
                 //
-                // If no prior row exists either (truly no RTS ever set for this
-                // page+item+price), THEN error — because we'd be inserting an
-                // orphaned promo row with rts=0, which breaks profit math.
-                $inheritedRtsRow = null;
-                if ($scope === 'promo' && !$oldRtsRow) {
-                    // 1st try: nearest PRIOR row (standard inheritance direction)
-                    $priorQuery = DB::table('page_item_settings')
-                        ->where('page_name', $pageName)
-                        ->where('item_name', $itemName)
-                        ->where('effective_date', '<', $effDate);
-                    if ($needsPriceTag) {
-                        $priorQuery->where('mode_cod_int', $modeCodInt);
-                    }
-                    $inheritedRtsRow = $priorQuery
-                        ->orderByDesc('effective_date')
-                        ->first(['rts_pct', 'promo', 'comment', 'item_value_comment']);
-
-                    // 2nd try: nearest LATER row (user back-dating to anchor —
-                    // walang prior pa, pero may newer row na pwedeng kopyahin
-                    // yung RTS para hindi orphan yung promo na ise-set natin).
-                    if (!$inheritedRtsRow) {
-                        $laterQuery = DB::table('page_item_settings')
-                            ->where('page_name', $pageName)
-                            ->where('item_name', $itemName)
-                            ->where('effective_date', '>', $effDate);
-                        if ($needsPriceTag) {
-                            $laterQuery->where('mode_cod_int', $modeCodInt);
-                        }
-                        $inheritedRtsRow = $laterQuery
-                            ->orderBy('effective_date')
-                            ->first(['rts_pct', 'promo', 'comment', 'item_value_comment']);
-                    }
-
-                    if (!$inheritedRtsRow) {
-                        return response()->json([
-                            'ok' => false,
-                            'message' => 'Cannot save promo — walang RTS pa for (page, item, price). Set RTS% muna sa modal bago mag-save ng Promo.',
-                        ], 422);
-                    }
-                }
-
-                // Resolve final values — mix validated input with existing-row
-                // (or inherited) preservation. For scope=promo with no exact
-                // row, $inheritedRtsRow takes the place of $oldRtsRow.
-                $effectiveRtsRow = $oldRtsRow ?: $inheritedRtsRow;
-                $effectiveOldRts = $effectiveRtsRow ? (float) $effectiveRtsRow->rts_pct : ($oldRts ?? 0);
-                $effectiveOldPromo = $effectiveRtsRow ? (string) ($effectiveRtsRow->promo ?? '') : ($oldPromo ?? '');
-
+                // Resolve final values per scope:
+                //   - scope=rts   → use validated rts_pct + comment; preserve promo
+                //   - scope=promo → use validated promo; preserve rts_pct + comment
+                //   - scope=all   → use all validated values (backward-compat)
+                //
+                // If no row exists at exact date, $oldRts/$oldPromo are NULL —
+                // preserved field stays NULL (and that's OK now that rts_pct
+                // column is nullable).
                 $rtsToSave = in_array($scope, ['all', 'rts'], true)
                     ? (float) $validated['rts_pct']
-                    : $effectiveOldRts;
+                    : ($oldRts);  // null if no existing row — that's fine
 
-                // Promo write rule:
-                //   scope=all / scope=promo  → use validated input (required)
-                //   scope=rts                 → preserve existing promo (ignore any
-                //                                client value to avoid accidental
-                //                                overwrites while editing promo
-                //                                without saving)
                 $promoToSave = in_array($scope, ['all', 'promo'], true)
                     ? trim((string) ($validated['promo'] ?? ''))
-                    : ($effectiveOldPromo ?: 'NONE');
+                    : ($oldPromo ?: 'NONE');
 
                 $commentToSave = in_array($scope, ['all', 'rts'], true)
                     ? ($validated['comment'] ?? null)
-                    : ($effectiveRtsRow->comment ?? null);
+                    : ($oldRtsRow->comment ?? null);
 
                 $ivCommentToSave = in_array($scope, ['all', 'cogs'], true)
                     ? ($validated['item_value_comment'] ?? null)
-                    : ($effectiveRtsRow->item_value_comment ?? null);
+                    : ($oldRtsRow->item_value_comment ?? null);
 
-                if ($rtsToSave > 0) {
+                // DELETE branch: only fires when user EXPLICITLY sets rts=0 via
+                // scope=rts or scope=all (clearing the RTS override). Promo-only
+                // saves never delete — they always upsert with rts preserved.
+                $userExplicitlyClearedRts = in_array($scope, ['all', 'rts'], true)
+                    && $rtsToSave !== null && (float)$rtsToSave === 0.0;
+
+                if ($userExplicitlyClearedRts) {
+                    // rts=0 (explicit clear) → DELETE override row for (page, item, price, date).
+                    // Different-price rows on same date stay intact (own scope).
+                    DB::table('page_item_settings')
+                        ->where('page_name', $pageName)
+                        ->where('item_name', $itemName)
+                        ->where('mode_cod_int', $modeCodInt)
+                        ->where('effective_date', $effDate)
+                        ->delete();
+                    if ($applyThrough) {
+                        DB::table('page_item_settings')
+                            ->where('page_name', $pageName)
+                            ->where('item_name', $itemName)
+                            ->where('mode_cod_int', $modeCodInt)
+                            ->where('effective_date', '>', $effDate)
+                            ->where('effective_date', '<=', $applyThrough)
+                            ->delete();
+                    }
+                } else {
                     // Upsert keyed by (page, item, price, date) — different price
                     // creates a separate row, no cross-price overwrite.
+                    // rts_pct may be null (promo-only save sa brand-new scope).
                     DB::table('page_item_settings')->updateOrInsert(
                         [
                             'page_name'      => $pageName,
@@ -2439,7 +2421,7 @@ class OwnerPrivateController extends Controller
                             'mode_cod_int'   => $modeCodInt,
                         ],
                         [
-                            'rts_pct'            => $rtsToSave,
+                            'rts_pct'            => $rtsToSave,  // nullable
                             'promo'              => $promoToSave,
                             'comment'            => $commentToSave,
                             'item_value_comment' => $ivCommentToSave,
@@ -2463,24 +2445,6 @@ class OwnerPrivateController extends Controller
                     }
                     $rtsPctNew = $rtsToSave;
                     $promoNew  = $promoToSave;
-                } else {
-                    // rts=0 → DELETE the override row for this (page, item, price, date).
-                    // Different-price rows on same date stay intact (own scope).
-                    DB::table('page_item_settings')
-                        ->where('page_name', $pageName)
-                        ->where('item_name', $itemName)
-                        ->where('mode_cod_int', $modeCodInt)
-                        ->where('effective_date', $effDate)
-                        ->delete();
-                    if ($applyThrough) {
-                        DB::table('page_item_settings')
-                            ->where('page_name', $pageName)
-                            ->where('item_name', $itemName)
-                            ->where('mode_cod_int', $modeCodInt)
-                            ->where('effective_date', '>', $effDate)
-                            ->where('effective_date', '<=', $applyThrough)
-                            ->delete();
-                    }
                 }
             }
 
@@ -3605,7 +3569,8 @@ class OwnerPrivateController extends Controller
                    . '||' . strtolower(trim((string)$s->item_name))
                    . '||' . $codInt;
                 if (!isset($settingsMap[$k])) {
-                    $settingsMap[$k] = (float)$s->rts_pct;
+                    // rts_pct nullable post-2026-05-21 — preserve null
+                    $settingsMap[$k] = $s->rts_pct !== null ? (float)$s->rts_pct : null;
                 }
             }
         }
@@ -3693,6 +3658,9 @@ class OwnerPrivateController extends Controller
             $setKey = $pageKey . '||' . strtolower(trim($itemName)) . '||' . (int) round($modeCod);
             if (!isset($settingsMap[$setKey])) continue;
             $rtsPct        = $settingsMap[$setKey];
+            // rts_pct nullable post-2026-05-21 — skip slice if walang RTS pa
+            // (promo-only saves; profit calc requires RTS). Same as itemSummary.
+            if ($rtsPct === null) continue;
             $deliverFactor = max(0.0, min(1.0, 1.0 - ($rtsPct / 100.0)));
             $itemValue     = $findUnitCost($itemKey, $d);
             $adspent       = $adsByDatePage[$d][$pageKey] ?? 0.0;
