@@ -7,6 +7,7 @@ use App\Models\AdsManagerReport;
 use App\Models\MacroOutput;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class CPPController extends Controller
@@ -398,19 +399,49 @@ class CPPController extends Controller
             }
         }
 
-        // ── 3) Aggregated orders from macro_output per (date, minute_of_day).
-        //      Lets us compute cumulative counts up to ANY cutoff per cell
+        // ── 2c) Build set of (date, page_key) na may adspent > 0 sa ads_manager_reports.
+        //       Used as a strict filter sa Pass-3 orders query — orders from
+        //       pages na WALANG adspent that date are excluded from the CPP
+        //       denominator. Without this, organic / non-ad pages dilute CPP
+        //       (denominator grows pero numerator stays = artificially low CPP).
+        $adsPagesRows = DB::table('ads_manager_reports')
+            ->whereBetween(DB::raw('DATE(day)'), [$start, $end])
+            ->selectRaw("DATE(day) AS d, LOWER(TRIM(COALESCE(page_name,''))) AS pk, SUM($castMoneyAds) AS spent")
+            ->groupByRaw("DATE(day), LOWER(TRIM(COALESCE(page_name,'')))")
+            ->havingRaw("SUM($castMoneyAds) > 0")
+            ->get();
+        // adsPagesByDate[date][page_key] = true (just a presence check)
+        $adsPagesByDate = [];
+        foreach ($adsPagesRows as $r) {
+            $d = (string) $r->d;
+            $pk = (string) $r->pk;
+            if ($pk === '') continue;
+            $adsPagesByDate[$d][$pk] = true;
+        }
+
+        // ── 3) Aggregated orders from macro_output per (date, page_key, minute).
+        //      Includes the page_name so we can filter out pages without adspent
+        //      below. Lets us compute cumulative counts up to ANY cutoff per cell
         //      in PHP — no need for multiple per-cell SQL queries.
         // ($driver already set above for the adspent query.)
+
+        // Detect macro_output page column (varies: PAGE / page / page_name).
+        $moPageCol = null;
+        foreach (['PAGE', 'page', 'page_name', 'Page', 'Page_Name'] as $cand) {
+            if (Schema::hasColumn('macro_output', $cand)) { $moPageCol = $cand; break; }
+        }
+        $moPageExpr = $moPageCol
+            ? ($driver === 'pgsql' ? "LOWER(BTRIM(COALESCE(\"$moPageCol\",'')))" : "LOWER(TRIM(COALESCE(`$moPageCol`,'')))")
+            : "''";
 
         if ($driver === 'mysql') {
             $tsDate = "DATE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y'))";
             $tsMins = "(HOUR(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')) * 60 + MINUTE(STR_TO_DATE(`TIMESTAMP`, '%H:%i %d-%m-%Y')))";
 
             $orderRows = DB::table('macro_output')
-                ->selectRaw("$tsDate AS ts_date, $tsMins AS ts_min, COUNT(*) AS n")
+                ->selectRaw("$tsDate AS ts_date, $moPageExpr AS pk, $tsMins AS ts_min, COUNT(*) AS n")
                 ->whereRaw("$tsDate BETWEEN ? AND ?", [$start, $end])
-                ->groupByRaw("$tsDate, $tsMins")
+                ->groupByRaw("$tsDate, $moPageExpr, $tsMins")
                 ->get();
         } elseif ($driver === 'pgsql') {
             $tsExpr = "to_timestamp(\"TIMESTAMP\", 'HH24:MI DD-MM-YYYY')";
@@ -418,18 +449,24 @@ class CPPController extends Controller
             $tsMins = "(EXTRACT(HOUR FROM $tsExpr) * 60 + EXTRACT(MINUTE FROM $tsExpr))";
 
             $orderRows = DB::table('macro_output')
-                ->selectRaw("$tsDate AS ts_date, $tsMins AS ts_min, COUNT(*) AS n")
+                ->selectRaw("$tsDate AS ts_date, $moPageExpr AS pk, $tsMins AS ts_min, COUNT(*) AS n")
                 ->whereRaw("$tsDate BETWEEN ? AND ?", [$start, $end])
-                ->groupByRaw("$tsDate, $tsMins")
+                ->groupByRaw("$tsDate, $moPageExpr, $tsMins")
                 ->get();
         } else {
             $orderRows = collect();
         }
 
-        // Index by date for fast lookup.
-        $ordersByDate = []; // [date] = [ [ts_min, n], ... ]
+        // Index by date for fast lookup. PAGE-FILTERED — only orders from pages
+        // na may adspent > 0 sa same date count. Sum counts from multiple pages
+        // sharing the same ts_min sa one entry.
+        $ordersByDate = []; // [date] = [ [ts_min, n], ... ] — multiple entries possible at same ts_min
         foreach ($orderRows as $r) {
-            $ordersByDate[(string) $r->ts_date][] = [(int) $r->ts_min, (int) $r->n];
+            $d  = (string) $r->ts_date;
+            $pk = (string) $r->pk;
+            // Skip pages na walang adspent sa that date — they shouldn't dilute CPP.
+            if ($pk === '' || empty($adsPagesByDate[$d][$pk])) continue;
+            $ordersByDate[$d][] = [(int) $r->ts_min, (int) $r->n];
         }
 
         // ── 4) Per (date, bucket) cutoff resolution + cumulative count ────
