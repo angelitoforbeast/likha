@@ -325,7 +325,9 @@
                         if ($anchorCod === null && $cellCod === null) {
                             $matchesAnchor = true;
                         } elseif ($anchorCod !== null && $cellCod !== null) {
-                            $matchesAnchor = abs((float)$anchorCod - (float)$cellCod) < 0.01;
+                            // Same ±₱1 tolerance as Fix A's resolveAnchorStreakStart —
+                            // small rounding diff (₱199.49 vs ₱199.99) treated as same.
+                            $matchesAnchor = abs((int)round((float)$anchorCod) - (int)round((float)$cellCod)) <= 1;
                         }
                     }
                     // Earliest date in the current range where THIS page has the SAME item.
@@ -354,6 +356,10 @@
                         'unit_cost_ceo' => $cell['unit_cost_ceo'] ?? null,
                         'promo'         => $cell['promo'] ?? '',
                         'promo_inherited' => !empty($cell['promo_inherited']),
+                        // Per-cell anchor start (price+item-aware, walks back from THIS cell).
+                        'anchor_first_date' => $cell['anchor_first_date'] ?? $d,
+                        // Last date COGS was set for this item ≤ cell date.
+                        'cogs_last_date'    => $cell['cogs_last_date'] ?? null,
                         'earliest_same_date' => $earliestSame,
                     ] : null;
                   @endphp
@@ -365,8 +371,17 @@
                     @if($cell)
                       <template x-if="!vis.one_item_only || {{ $matchesAnchor ? 'true' : 'false' }}">
                         <div>
-                      @if(!empty($cell['item_changed']))
-                        <span class="badge-new">NEW</span>
+                      @if(!empty($cell['item_changed']) || !empty($cell['price_changed']))
+                        @php
+                          // Single NEW badge for ANY anchor break (item OR price change).
+                          // Tooltip distinguishes which kind so user can hover for context.
+                          $newReason = !empty($cell['item_changed'])
+                              ? 'NEW item vs previous day'
+                              : 'NEW price vs previous day (Δ '
+                                  . ($cell['price_delta']>=0?'+':'')
+                                  . round($cell['price_delta']) . ')';
+                        @endphp
+                        <span class="badge-new" title="{{ $newReason }}">NEW</span>
                       @endif
                       <div x-show="vis.item_name && !vis.show_alias" style="font-weight:600;">{{ $cell['item_name'] }}</div>
                       <div x-show="vis.item_name && vis.show_alias" style="font-weight:600;color:#6d28d9;">{{ $cell['item_alias_label'] }}</div>
@@ -442,10 +457,11 @@
     @endif
   </div>
 
-  <!-- Edit Modal -->
+  <!-- Edit Modal — 3-section design (RTS / Promo / COGS), each with own editable
+       effective_date + scoped Save button. Mirrors /owner/private's Edit Row. -->
   <template x-if="edit.open">
     <div class="modal-backdrop" @click.self="edit.open = false">
-      <div class="modal-card">
+      <div class="modal-card" style="max-width:520px;">
         <div class="px-5 py-4 border-b border-slate-200">
           <div class="text-xs text-slate-500 uppercase tracking-wide font-bold">Edit Cell</div>
           <div class="text-lg font-bold text-slate-900 mt-1" x-text="edit.page_label"></div>
@@ -459,102 +475,153 @@
             <template x-if="edit.mode_cod">
               <span x-text="' @ ₱' + Number(edit.mode_cod).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2})"></span>
             </template>
+            <template x-if="edit.anchor_first_date">
+              <span class="text-violet-700 font-semibold ml-2"
+                    x-text="'▸ anchor since ' + edit.anchor_first_date"></span>
+            </template>
           </div>
         </div>
 
-        <div class="px-5 py-4 space-y-4">
-          <div>
-            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-              RTS%
-              <span class="text-slate-400 font-normal normal-case">(per-page, for this date onward)</span>
-            </label>
-            <div class="flex items-center gap-2">
-              <input type="number" step="0.01" min="0" max="100"
-                     x-model="edit.rts_pct"
-                     class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm font-mono"
-                     placeholder="e.g. 50">
-              <span class="text-slate-500 text-sm">%</span>
-            </div>
-            <template x-if="edit.rts_inherited && edit.rts_eff_date">
-              <div class="text-[11px] text-amber-600 mt-1">
-                ⚠ Currently inherited from <span class="font-mono" x-text="edit.rts_eff_date"></span>. Saving creates a new override starting this date.
-              </div>
-            </template>
-            <div class="text-[11px] text-slate-500 mt-1">Set 0 to remove this date's override (falls back to previous).</div>
+        {{-- ━━━ Section 1: RTS% ━━━━━━━━━━━━━━━━━━━━━━━━━━ --}}
+        <div class="px-5 py-4 border-t border-slate-200" style="background:#fefce8;">
+          <div class="text-[11px] font-bold text-amber-800 uppercase tracking-wide mb-2">📊 RTS%</div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">RTS% <span class="text-slate-400 font-normal normal-case">(per-page, for this date onward)</span></label>
+          <div class="flex items-center gap-2">
+            <input type="number" step="0.01" min="0" max="100"
+                   x-model="edit.rts_pct"
+                   class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm font-mono"
+                   placeholder="e.g. 50">
+            <span class="text-slate-500 text-sm">%</span>
+          </div>
+          <template x-if="edit.rts_inherited && edit.rts_eff_date">
+            <div class="text-[11px] text-amber-600 mt-1">⚠ Currently inherited from <span class="font-mono" x-text="edit.rts_eff_date"></span>.</div>
+          </template>
+
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1 mt-3">RTS Comment <span class="text-red-600">*</span></label>
+          <input type="text" x-model="edit.comment" maxlength="500"
+                 class="w-full border border-slate-300 rounded px-3 py-2 text-sm"
+                 placeholder="why is this value different?">
+
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1 mt-3">Effective from</label>
+          <div class="flex items-center gap-2 flex-wrap">
+            <input type="date" x-model="edit.rts_effective_date"
+                   class="border border-slate-300 rounded px-2 py-1 text-sm font-mono">
+            <button type="button" class="bg-indigo-100 text-indigo-800 rounded px-2 py-1 text-[11px] font-bold disabled:opacity-50"
+                    @click="edit.rts_effective_date = edit.anchor_first_date || edit.date"
+                    :disabled="!edit.anchor_first_date">↶ anchor</button>
+            <button type="button" class="bg-slate-100 text-slate-600 rounded px-2 py-1 text-[11px] font-bold"
+                    @click="edit.rts_effective_date = edit.date">↶ this date</button>
           </div>
 
-          <div>
-            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-              Unit Cost (COGS) <span class="text-slate-400 font-normal normal-case">— Marketing's table</span>
-              <span class="text-slate-400 font-normal normal-case">(GLOBAL — affects all pages on this date)</span>
-            </label>
-            <div class="flex items-center gap-2">
-              <span class="text-slate-500 text-sm">₱</span>
-              <input type="number" step="0.01" min="0"
-                     x-model="edit.unit_cost"
-                     class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm font-mono"
-                     placeholder="e.g. 25">
-            </div>
-            <div class="text-[11px] text-slate-500 mt-1">Set 0 to skip. (To delete, use /item/cogs.)</div>
+          <template x-if="edit.rtsError">
+            <div class="bg-red-50 text-red-700 text-xs rounded px-2 py-1 mt-2" x-text="edit.rtsError"></div>
+          </template>
+          <template x-if="edit.rtsSaved">
+            <div class="bg-green-50 text-green-700 text-xs rounded px-2 py-1 mt-2" x-text="edit.rtsSaved"></div>
+          </template>
+          <div class="text-right mt-2">
+            <button type="button" @click="submitScoped('rts')" :disabled="edit.savingRts"
+                    class="bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1.5 text-xs font-bold disabled:opacity-50">
+              <span x-text="edit.savingRts ? 'Saving…' : '💾 Save RTS'"></span>
+            </button>
+          </div>
+        </div>
+
+        {{-- ━━━ Section 2: Promo ━━━━━━━━━━━━━━━━━━━━━━━━━ --}}
+        <div class="px-5 py-4 border-t border-slate-200" style="background:#fdf4ff;">
+          <div class="text-[11px] font-bold text-fuchsia-800 uppercase tracking-wide mb-2">🏷 Promo</div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Promo <span class="text-red-600">*</span> <span class="text-slate-400 font-normal normal-case">(type NONE if walang promo)</span></label>
+          <input type="text" x-model="edit.promo" maxlength="255"
+                 class="w-full border border-slate-300 rounded px-3 py-2 text-sm font-mono"
+                 placeholder='e.g. "9.9 Sale", "PAYDAY", or "NONE"'>
+          <template x-if="edit.promo_inherited && edit.rts_eff_date">
+            <div class="text-[11px] text-amber-600 mt-1">⚠ Currently inherited from <span class="font-mono" x-text="edit.rts_eff_date"></span>.</div>
+          </template>
+
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1 mt-3">Effective from</label>
+          <div class="flex items-center gap-2 flex-wrap">
+            <input type="date" x-model="edit.promo_effective_date"
+                   class="border border-slate-300 rounded px-2 py-1 text-sm font-mono">
+            <button type="button" class="bg-indigo-100 text-indigo-800 rounded px-2 py-1 text-[11px] font-bold disabled:opacity-50"
+                    @click="edit.promo_effective_date = edit.anchor_first_date || edit.date"
+                    :disabled="!edit.anchor_first_date">↶ anchor</button>
+            <button type="button" class="bg-slate-100 text-slate-600 rounded px-2 py-1 text-[11px] font-bold"
+                    @click="edit.promo_effective_date = edit.date">↶ this date</button>
+          </div>
+
+          <template x-if="edit.promoError">
+            <div class="bg-red-50 text-red-700 text-xs rounded px-2 py-1 mt-2" x-text="edit.promoError"></div>
+          </template>
+          <template x-if="edit.promoSaved">
+            <div class="bg-green-50 text-green-700 text-xs rounded px-2 py-1 mt-2" x-text="edit.promoSaved"></div>
+          </template>
+          <div class="text-right mt-2">
+            <button type="button" @click="submitScoped('promo')" :disabled="edit.savingPromo"
+                    class="bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1.5 text-xs font-bold disabled:opacity-50">
+              <span x-text="edit.savingPromo ? 'Saving…' : '💾 Save Promo'"></span>
+            </button>
+          </div>
+        </div>
+
+        {{-- ━━━ Section 3: COGS (item-global) ━━━━━━━━━━━━━ --}}
+        <div class="px-5 py-4 border-t border-slate-200" style="background:#f0fdf4;">
+          <div class="text-[11px] font-bold text-emerald-800 uppercase tracking-wide mb-2">💰 COGS <span class="text-slate-400 font-normal">(item-global)</span></div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Unit Cost (Marketing) <span class="text-slate-400 font-normal normal-case">— affects ALL pages on this date</span></label>
+          <div class="flex items-center gap-2">
+            <span class="text-slate-500 text-sm">₱</span>
+            <input type="number" step="0.01" min="0"
+                   x-model="edit.unit_cost"
+                   class="flex-1 border border-slate-300 rounded px-3 py-2 text-sm font-mono"
+                   placeholder="e.g. 25">
           </div>
 
           @if(!empty($isCeoView))
-            {{-- CEO-only second cost input — writes sa cogs_ceo separately. --}}
-            <div class="border-t border-slate-200 pt-3">
-              <label class="block text-xs font-bold text-indigo-700 uppercase tracking-wide mb-1">
-                🔒 CEO Unit Cost (cogs_ceo) <span class="text-slate-400 font-normal normal-case">— CEO-only, used in CEO profit calc</span>
-              </label>
-              <div class="flex items-center gap-2">
-                <span class="text-slate-500 text-sm">₱</span>
-                <input type="number" step="0.01" min="0"
-                       x-model="edit.unit_cost_ceo"
-                       class="flex-1 border border-indigo-300 bg-indigo-50/40 rounded px-3 py-2 text-sm font-mono"
-                       placeholder="e.g. 25">
-              </div>
-              <div class="text-[11px] text-slate-500 mt-1">Independent from Marketing's value. Marketing never sees this.</div>
+            <label class="block text-xs font-bold text-indigo-700 uppercase mb-1 mt-3">🔒 CEO Unit Cost <span class="text-slate-400 font-normal normal-case">— CEO-only</span></label>
+            <div class="flex items-center gap-2">
+              <span class="text-slate-500 text-sm">₱</span>
+              <input type="number" step="0.01" min="0"
+                     x-model="edit.unit_cost_ceo"
+                     class="flex-1 border border-indigo-300 bg-indigo-50/40 rounded px-3 py-2 text-sm font-mono"
+                     placeholder="e.g. 25">
             </div>
           @endif
 
-          <div>
-            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">RTS Comment <span class="text-red-600">*</span> <span class="text-slate-400 font-normal normal-case">(required)</span></label>
-            <input type="text" x-model="edit.comment" maxlength="500"
-                   class="w-full border border-slate-300 rounded px-3 py-2 text-sm"
-                   placeholder="why is this value different?">
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1 mt-3">Effective from</label>
+          <div class="flex items-center gap-2 flex-wrap">
+            <input type="date" x-model="edit.cogs_effective_date"
+                   class="border border-slate-300 rounded px-2 py-1 text-sm font-mono">
+            <button type="button" class="bg-slate-100 text-slate-600 rounded px-2 py-1 text-[11px] font-bold"
+                    @click="edit.cogs_effective_date = edit.date">↶ this date</button>
+            <button type="button" class="bg-emerald-100 text-emerald-800 rounded px-2 py-1 text-[11px] font-bold disabled:opacity-50"
+                    @click="edit.cogs_effective_date = edit.cogs_last_date || edit.date"
+                    :disabled="!edit.cogs_last_date">↶ last cogs change</button>
           </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">Promo <span class="text-red-600">*</span> <span class="text-slate-400 font-normal normal-case">(required — type NONE if walang promo)</span></label>
-            <input type="text" x-model="edit.promo" maxlength="255"
-                   class="w-full border border-slate-300 rounded px-3 py-2 text-sm font-mono"
-                   placeholder='e.g. "9.9 Sale", "PAYDAY", or "NONE"'>
-            <template x-if="edit.promo_inherited && edit.rts_eff_date">
-              <div class="text-[11px] text-amber-600 mt-1">
-                ⚠ Currently inherited from <span class="font-mono" x-text="edit.rts_eff_date"></span>. Saving creates a new promo state starting this date.
-              </div>
+          <div class="text-[11px] text-slate-500 mt-1">
+            <template x-if="edit.cogs_last_date">
+              <span>Last COGS change for this item: <span class="font-mono" x-text="edit.cogs_last_date"></span></span>
+            </template>
+            <template x-if="!edit.cogs_last_date">
+              <span>No prior COGS set for this item yet.</span>
             </template>
           </div>
 
-          <template x-if="edit.error">
-            <div class="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-3 py-2" x-text="edit.error"></div>
+          <template x-if="edit.cogsError">
+            <div class="bg-red-50 text-red-700 text-xs rounded px-2 py-1 mt-2" x-text="edit.cogsError"></div>
           </template>
+          <template x-if="edit.cogsSaved">
+            <div class="bg-green-50 text-green-700 text-xs rounded px-2 py-1 mt-2" x-text="edit.cogsSaved"></div>
+          </template>
+          <div class="text-right mt-2">
+            <button type="button" @click="submitScoped('cogs')" :disabled="edit.savingCogs"
+                    class="bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1.5 text-xs font-bold disabled:opacity-50">
+              <span x-text="edit.savingCogs ? 'Saving…' : '💾 Save COGS'"></span>
+            </button>
+          </div>
         </div>
 
-        <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 flex-wrap">
-          <button type="button" @click="edit.open = false"
-                  class="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900">Cancel</button>
-          <template x-if="edit.earliest_same_date && edit.earliest_same_date !== edit.date">
-            <button type="button" @click="submit(edit.earliest_same_date)"
-                    :disabled="edit.saving"
-                    class="bg-amber-500 hover:bg-amber-400 text-white rounded px-4 py-2 text-sm font-bold disabled:opacity-50"
-                    :title="'Save with effective_date = ' + edit.earliest_same_date + ' so the RTS cascades forward to every day with the same item'">
-              <span x-text="edit.saving ? 'Saving…' : '⏪ Apply from ' + edit.earliest_same_date"></span>
-            </button>
-          </template>
-          <button type="button" @click="submit()"
-                  :disabled="edit.saving"
-                  class="bg-blue-600 hover:bg-blue-500 text-white rounded px-4 py-2 text-sm font-bold disabled:opacity-50">
-            <span x-text="edit.saving ? 'Saving…' : 'Save (this date only)'"></span>
-          </button>
+        <div class="px-5 py-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+          <button type="button" @click="closeEditModal()"
+                  class="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900">Close</button>
         </div>
       </div>
     </div>
@@ -575,13 +642,16 @@
       itemFilterSearch: '',
 
       edit: {
-        open:false, saving:false, error:null,
+        open:false,
+        savingRts:false, savingPromo:false, savingCogs:false,
+        rtsError:null,   promoError:null,   cogsError:null,
+        rtsSaved:null,   promoSaved:null,   cogsSaved:null,
         page_key:'', page_label:'', date:'', item_name:'',
         orders:0, mode_cod:null,
-        rts_pct:'', rts_eff_date:null, rts_inherited:false,
-        unit_cost:'', unit_cost_ceo:'', comment:'',
-        promo:'', promo_inherited:false,
-        earliest_same_date:null,
+        anchor_first_date:null, cogs_last_date:null,
+        rts_pct:'', rts_eff_date:null, rts_inherited:false, rts_effective_date:'', comment:'',
+        promo:'', promo_inherited:false, promo_effective_date:'',
+        unit_cost:'', unit_cost_ceo:'', cogs_effective_date:'',
       },
 
       isCeoView: @json(!empty($isCeoView)),
@@ -677,90 +747,122 @@
       },
 
       openEdit(cell){
+        const anchorStart  = cell.anchor_first_date || cell.date;
+        const cogsLastDate = cell.cogs_last_date || null;
         this.edit = {
-          open:true, saving:false, error:null,
+          open:true,
+          savingRts:false, savingPromo:false, savingCogs:false,
+          rtsError:null,   promoError:null,   cogsError:null,
+          rtsSaved:null,   promoSaved:null,   cogsSaved:null,
+
           page_key:     cell.page_key,
           page_label:   cell.page_label,
           date:         cell.date,
           item_name:    cell.item_name,
           orders:       cell.orders,
           mode_cod:     cell.mode_cod,
-          rts_pct:      cell.rts_pct !== null ? cell.rts_pct : '',
-          rts_eff_date: cell.rts_eff_date,
-          rts_inherited:!!cell.rts_inherited,
-          unit_cost:    cell.unit_cost !== null ? cell.unit_cost : '',
-          // CEO-only — populated only for CEO viewers, hidden field for others.
-          unit_cost_ceo: (cell.unit_cost_ceo !== undefined && cell.unit_cost_ceo !== null) ? cell.unit_cost_ceo : '',
-          comment:      '',
-          promo:        cell.promo || '',
-          promo_inherited: !!cell.promo_inherited && !!cell.promo,
-          earliest_same_date: cell.earliest_same_date || null,
+          anchor_first_date: anchorStart,
+          cogs_last_date:    cogsLastDate,
+
+          // RTS section
+          rts_pct:             cell.rts_pct !== null ? cell.rts_pct : '',
+          rts_eff_date:        cell.rts_eff_date,
+          rts_inherited:       !!cell.rts_inherited,
+          rts_effective_date:  anchorStart,
+          comment:             '',
+
+          // Promo section
+          promo:                cell.promo || '',
+          promo_inherited:      !!cell.promo_inherited && !!cell.promo,
+          promo_effective_date: anchorStart,
+
+          // COGS section
+          unit_cost:            cell.unit_cost !== null ? cell.unit_cost : '',
+          unit_cost_ceo:       (cell.unit_cost_ceo !== undefined && cell.unit_cost_ceo !== null) ? cell.unit_cost_ceo : '',
+          cogs_effective_date:  cogsLastDate || cell.date,
         };
       },
-      // effective_date override: pass the earliest-same-item date to backfill.
-      // When omitted, saves for this cell's date only (original behavior).
-      async submit(overrideEffectiveDate){
-        this.edit.saving = true; this.edit.error = null;
-        const rts  = parseFloat(this.edit.rts_pct);
-        const cost = parseFloat(this.edit.unit_cost);
-        if (isNaN(rts) || rts < 0 || rts > 100) {
-          this.edit.error = 'RTS% must be 0–100.'; this.edit.saving = false; return;
-        }
-        if (isNaN(cost) || cost < 0) {
-          this.edit.error = 'Unit cost must be ≥ 0.'; this.edit.saving = false; return;
-        }
-        // RTS Comment is required — every edit must have an audit reason.
-        const cmt = (this.edit.comment || '').trim();
-        if (!cmt) {
-          this.edit.error = 'RTS Comment is required — please explain the change.';
-          this.edit.saving = false; return;
-        }
-        // Promo is required — explicit tag ("NONE" allowed for no-promo).
-        const promo = (this.edit.promo || '').trim();
-        if (!promo) {
-          this.edit.error = 'Promo is required — type "NONE" if walang promo.';
-          this.edit.saving = false; return;
-        }
-        try {
-          const fd = new FormData();
-          fd.append('page_name',      this.edit.page_label);
-          fd.append('item_name',      this.edit.item_name);
-          fd.append('item_value',     cost);
+
+      // Submit one scope (rts/promo/cogs) — same pattern as /owner/private modal.
+      async submitScoped(scope){
+        const e = this.edit;
+        e.rtsError = e.promoError = e.cogsError = null;
+        e.rtsSaved = e.promoSaved = e.cogsSaved = null;
+
+        const fd = new FormData();
+        fd.append('scope',     scope);
+        fd.append('page_name', e.page_label);
+        fd.append('item_name', e.item_name);
+
+        if (scope === 'rts') {
+          const rts = parseFloat(e.rts_pct);
+          if (isNaN(rts) || rts < 0 || rts > 100) { e.rtsError = 'RTS% must be 0–100.'; return; }
+          const cmt = (e.comment || '').trim();
+          if (!cmt) { e.rtsError = 'RTS Comment is required.'; return; }
           fd.append('rts_pct',        rts);
-          fd.append('effective_date', overrideEffectiveDate || this.edit.date);
-          // When using "Apply from X" on a cell whose own date already has a
-          // row, also propagate the new value forward through the cell's date
-          // (overwrites every existing row in [from, cellDate]).
-          if (overrideEffectiveDate && overrideEffectiveDate !== this.edit.date) {
-            fd.append('apply_through', this.edit.date);
+          fd.append('comment',        cmt);
+          fd.append('effective_date', e.rts_effective_date || e.date);
+          if ((e.rts_effective_date || e.date) !== e.date) fd.append('apply_through', e.date);
+          e.savingRts = true;
+        } else if (scope === 'promo') {
+          const promo = (e.promo || '').trim();
+          if (!promo) { e.promoError = 'Promo required — type "NONE" if walang promo.'; return; }
+          fd.append('promo',          promo);
+          fd.append('effective_date', e.promo_effective_date || e.date);
+          if ((e.promo_effective_date || e.date) !== e.date) fd.append('apply_through', e.date);
+          e.savingPromo = true;
+        } else if (scope === 'cogs') {
+          const cost = parseFloat(e.unit_cost);
+          if (isNaN(cost) || cost < 0) { e.cogsError = 'Unit cost must be ≥ 0.'; return; }
+          fd.append('item_value', cost);
+          if (this.isCeoView && e.unit_cost_ceo !== '' && e.unit_cost_ceo !== null) {
+            const costCeo = parseFloat(e.unit_cost_ceo);
+            if (!isNaN(costCeo) && costCeo >= 0) fd.append('item_value_ceo', costCeo);
           }
-          // Comment is required (validated above) — always send the trimmed value.
-          fd.append('comment', cmt);
-          fd.append('promo',   promo);
-          // CEO-only: include CEO's separate unit cost — server saves it sa
-          // cogs_ceo table independently from cogs. Server validates role.
-          if (this.isCeoView && this.edit.unit_cost_ceo !== '' && this.edit.unit_cost_ceo !== null) {
-            const costCeo = parseFloat(this.edit.unit_cost_ceo);
-            if (!isNaN(costCeo) && costCeo >= 0) {
-              fd.append('item_value_ceo', costCeo);
-            }
-          }
+          fd.append('effective_date', e.cogs_effective_date || e.date);
+          if ((e.cogs_effective_date || e.date) !== e.date) fd.append('apply_through', e.date);
+          e.savingCogs = true;
+        } else { return; }
+
+        try {
           const r = await fetch('{{ route('owner.private.item-setting.save') }}', {
             method:'POST',
             headers:{'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content, 'Accept':'application/json'},
             body: fd,
           });
-          const j = await r.json();
-          if (!j.ok) { this.edit.error = j.message || 'Save failed.'; this.edit.saving = false; return; }
-          // In-place refresh: re-fetch current page, swap just the matrix container's
-          // HTML, then re-scan with Alpine so x-show/x-if bindings in the new DOM work.
-          // Keeps scroll position + open panel state + toggles intact.
-          await this.refreshMatrix();
-          this.edit.open  = false;
-          this.edit.saving = false;
-        } catch(e) {
-          console.error(e); this.edit.error = 'Network error.'; this.edit.saving = false;
+          let j;
+          try { j = await r.json(); }
+          catch { this._setScopeError(scope, 'Server returned non-JSON (HTTP '+r.status+')'); return; }
+          if (!r.ok || !j.ok) {
+            this._setScopeError(scope, j.message || (j.errors ? Object.values(j.errors).flat().join('\n') : ('HTTP '+r.status)));
+            return;
+          }
+          this._setScopeSuccess(scope, '✓ Saved (eff_date: ' + fd.get('effective_date') + ')');
+          setTimeout(() => { this._setScopeSuccess(scope, null); }, 4000);
+        } catch (ex) {
+          console.error(ex);
+          this._setScopeError(scope, 'Network error: ' + ex.message);
+        } finally {
+          e.savingRts = e.savingPromo = e.savingCogs = false;
         }
+      },
+
+      _setScopeError(scope, msg){
+        const e = this.edit;
+        if (scope === 'rts')   e.rtsError = msg;
+        if (scope === 'promo') e.promoError = msg;
+        if (scope === 'cogs')  e.cogsError = msg;
+      },
+      _setScopeSuccess(scope, msg){
+        const e = this.edit;
+        if (scope === 'rts')   e.rtsSaved = msg;
+        if (scope === 'promo') e.promoSaved = msg;
+        if (scope === 'cogs')  e.cogsSaved = msg;
+      },
+
+      async closeEditModal(){
+        this.edit.open = false;
+        await this.refreshMatrix();
       },
       async refreshMatrix(){
         try {

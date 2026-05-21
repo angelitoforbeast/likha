@@ -2731,6 +2731,19 @@ class OwnerPrivateController extends Controller
             }
             return $hit;
         };
+        // Resolver para sa "kelan last na-update yung COGS for this item ≤ this date"
+        // — used as the COGS section's default effective_date sa Edit Cell modal.
+        $resolveCogsLastDate = function(string $itemName, string $date) use (&$cogsIdx): ?string {
+            $ik = strtolower(trim($itemName));
+            $list = $cogsIdx[$ik] ?? null;
+            if (!$list) return null;
+            $hit = null;
+            foreach ($list as $row) {
+                if ($row['date'] <= $date) $hit = $row['date'];
+                else break;
+            }
+            return $hit;
+        };
 
         // ── cogs_ceo (CEO's separate table) — only loaded if viewer is CEO.
         $isCeoView = $this->isCEO();
@@ -2918,6 +2931,9 @@ class OwnerPrivateController extends Controller
                 // on a different (earlier) date — so user knows they'd be overriding here.
                 'rts_inherited'   => $rtsHit ? ($rtsHit['date'] !== $cellDate) : false,
                 'unit_cost'       => $cogsVal,
+                // Last date COGS was set for this item ≤ cell_date — used as the
+                // COGS section's default effective_date sa Edit Cell modal.
+                'cogs_last_date'  => $resolveCogsLastDate($itemName, $cellDate),
                 // CEO-only column. Strip for non-CEO viewers (null sent → UI hides anyway).
                 'unit_cost_ceo'   => $isCeoView ? $cogsCeoVal : null,
                 // Promo (per-date inheritance like RTS). Empty string when no
@@ -3007,6 +3023,33 @@ class OwnerPrivateController extends Controller
                 $prev = $c;
             }
             unset($c);
+
+            // Per-cell anchor_first_date — walks back from each cell through
+            // page cells, stops at item_key change OR mode_cod diff > ₱1.
+            // Used by Edit Cell modal's "Apply from anchor" quick-pick so each
+            // cell knows its OWN anchor period (page-level anchor only covers
+            // end_date's anchor). In-memory walk = no extra DB calls.
+            $dates  = array_keys($p['cells']);   // already ksort'd above
+            $cellsArr = $p['cells'];
+            foreach ($dates as $i => $d) {
+                $c = $cellsArr[$d];
+                $cAnchorKey = $c['item_key'];
+                $cAnchorCod = $c['mode_cod'] !== null
+                    ? (int) round((float) $c['mode_cod'])
+                    : null;
+                $start = $d;
+                for ($j = $i - 1; $j >= 0; $j--) {
+                    $prevD = $dates[$j];
+                    $pc = $cellsArr[$prevD];
+                    if ($pc['item_key'] !== $cAnchorKey) break;
+                    if ($cAnchorCod !== null && $pc['mode_cod'] !== null) {
+                        $pcCodInt = (int) round((float) $pc['mode_cod']);
+                        if (abs($pcCodInt - $cAnchorCod) > 1) break;
+                    }
+                    $start = $prevD;
+                }
+                $p['cells'][$d]['anchor_first_date'] = $start;
+            }
             // Count transitions for header summary
             $itemChanges = 0; $priceChanges = 0;
             foreach ($p['cells'] as $c) {
