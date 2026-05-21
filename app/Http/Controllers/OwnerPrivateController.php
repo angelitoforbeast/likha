@@ -219,12 +219,15 @@ class OwnerPrivateController extends Controller
 
     /**
      * Resolve the start date of the most recent uninterrupted streak where
-     * this page's primary == $anchorKey, walking backward day-by-day from
-     * $endDate through daily_page_primary_item.
+     * this page's primary == $anchorKey AND mode_cod ≈ $anchorCodInt,
+     * walking backward day-by-day from $endDate through daily_page_primary_item.
      *
      * Tie/missing days (no row for that date) are skipped transparently —
      * they don't break the streak. Only an explicitly different primary
-     * stops the walk.
+     * OR a price change > ₱1 (rounded integer comparison) stops the walk.
+     *
+     * Pass $anchorCodInt = null to disable price-based anchor (legacy
+     * item-only mode, for callers na walang COD info).
      *
      * Walks past the user's start_date up to $maxDaysBack total. Returns
      * YYYY-MM-DD or null if anchor doesn't match $endDate's primary.
@@ -232,6 +235,7 @@ class OwnerPrivateController extends Controller
     private function resolveAnchorStreakStart(
         string $pageKey,
         string $anchorKey,
+        ?int $anchorCodInt,
         string $endDate,
         int $maxDaysBack = 400
     ): ?string {
@@ -242,16 +246,30 @@ class OwnerPrivateController extends Controller
         $rows = DB::table('daily_page_primary_item')
             ->where('page_key', $pageKey)
             ->whereBetween('ts_date', [$earliestQuery, $endDate])
-            ->get(['ts_date', 'primary_item_key']);
+            ->get(['ts_date', 'primary_item_key', 'primary_mode_cod']);
 
         $byDate = [];
         foreach ($rows as $r) {
-            $byDate[(string)$r->ts_date] = (string)$r->primary_item_key;
+            $codInt = $r->primary_mode_cod !== null ? (int) round((float) $r->primary_mode_cod) : null;
+            $byDate[(string)$r->ts_date] = [
+                'item_key' => (string)$r->primary_item_key,
+                'cod_int'  => $codInt,
+            ];
         }
 
-        if (($byDate[$endDate] ?? null) !== $anchorKey) {
+        $end = $byDate[$endDate] ?? null;
+        if ($end === null || $end['item_key'] !== $anchorKey) {
             return null;
         }
+
+        // Match helper — compares both item_key and (rounded) mode_cod.
+        // Price tolerance: same anchor if rounded ints differ by ≤ 1 peso.
+        // Skips price check when either side is null (no price data).
+        $matchesAnchor = function (array $day) use ($anchorKey, $anchorCodInt): bool {
+            if ($day['item_key'] !== $anchorKey) return false;
+            if ($anchorCodInt === null || $day['cod_int'] === null) return true;
+            return abs($day['cod_int'] - $anchorCodInt) <= 1;
+        };
 
         $streakStart = $endDate;
         $cursor = (new \DateTime($endDate))->modify('-1 day');
@@ -260,7 +278,7 @@ class OwnerPrivateController extends Controller
         while ($cursor >= $stop) {
             $d = $cursor->format('Y-m-d');
             if (isset($byDate[$d])) {
-                if ($byDate[$d] === $anchorKey) {
+                if ($matchesAnchor($byDate[$d])) {
                     $streakStart = $d;
                 } else {
                     break;
@@ -1700,10 +1718,13 @@ class OwnerPrivateController extends Controller
         // (walks backward from endDate, tolerating tie/missing days). May predate startDate.
         $pageGroups = [];
         foreach ($anchorByPage as $pk => $pr) {
-            $anchorKey = (string)$pr->primary_item_key;
+            $anchorKey   = (string)$pr->primary_item_key;
+            $anchorCodInt = $pr->primary_mode_cod !== null
+                ? (int) round((float) $pr->primary_mode_cod)
+                : null;
             $perDate   = $rangeByPage[$pk] ?? [];
 
-            $streakStart = $this->resolveAnchorStreakStart($pk, $anchorKey, $endDate);
+            $streakStart = $this->resolveAnchorStreakStart($pk, $anchorKey, $anchorCodInt, $endDate);
             if ($streakStart === null) continue; // anchor not on end_date for this page
 
             $metricsFrom = $streakStart < $startDate ? $startDate : $streakStart;
@@ -1718,6 +1739,12 @@ class OwnerPrivateController extends Controller
             foreach ($perDate as $d => $slice) {
                 if ($d < $metricsFrom) continue;                 // before streak window
                 if ($slice['item_key'] !== $anchorKey) continue; // defensive: tie/different day
+                // Price-based anchor: also skip days where mode_cod differs from
+                // anchor's by > ₱1 (rounded). Matches resolveAnchorStreakStart logic.
+                if ($anchorCodInt !== null && $slice['mode_cod'] !== null) {
+                    $sliceCodInt = (int) round((float) $slice['mode_cod']);
+                    if (abs($sliceCodInt - $anchorCodInt) > 1) continue;
+                }
                 $totalOrders += (int)$slice['orders'];
 
                 $stat = $statByKeyDate[$statKey][$d] ?? null;
@@ -1791,10 +1818,13 @@ class OwnerPrivateController extends Controller
             ->get([$cogsItemCol, $cogsDateCol, $cogsUnitCol]);
 
         $cogsMap = []; // normalized_item_name → unit_cost (Marketing's view)
+        $cogsLastDateMap = []; // normalized_item_name → YYYY-MM-DD of latest cogs row
         foreach ($cogsRows as $r) {
             $k = strtolower(trim((string)($r->$cogsItemCol ?? '')));
             if (!isset($cogsMap[$k])) {
                 $cogsMap[$k] = (float)($r->$cogsUnitCol ?? 0);
+                // Latest date is first-seen kasi sorted DESC by date sa query above.
+                $cogsLastDateMap[$k] = substr((string)($r->$cogsDateCol ?? ''), 0, 10);
             }
         }
 
@@ -2157,6 +2187,10 @@ class OwnerPrivateController extends Controller
                 'distinct_items_in_range'=> (int)($pg['distinct_items_in_range'] ?? 0),
                 'mixed_primary'          => (bool)($pg['mixed_primary'] ?? false),
                 'anchor_first_date'      => $pg['anchor_first_date'] ?? null,
+                // Last date sa `cogs` table where this item's price was set
+                // (latest effective_date ≤ end_date). Used as default
+                // "Apply from" suggestion sa Edit Row modal's COGS section.
+                'cogs_last_date'         => $cogsLastDateMap[$dominantKey] ?? null,
                 'gross_sales'            => $grossSales > 0 ? $grossSales : null,
             ];
         }
@@ -2192,23 +2226,36 @@ class OwnerPrivateController extends Controller
         // VIEW /owner/private but cannot edit data integrity fields.
         $this->checkWriteAccess();
 
-        $validated = $request->validate([
+        // Scope param controls which fields get validated + saved:
+        //   'rts'   → only rts_pct + comment (preserves existing promo)
+        //   'promo' → only promo (preserves existing rts + comment; requires existing row)
+        //   'cogs'  → only item_value + item_value_ceo (touches cogs/cogs_ceo, NOT page_item_settings)
+        //   'all'   → backward-compat (used by inline edit + matrix modal) — saves everything
+        $scope = strtolower(trim((string) $request->input('scope', 'all')));
+        if (!in_array($scope, ['all', 'rts', 'promo', 'cogs'], true)) $scope = 'all';
+
+        // Conditional validation per scope.
+        $rules = [
             'page_name'      => 'required|string|max:255',
             'item_name'      => 'required|string|max:255',
-            'item_value'     => 'required|numeric|min:0',
-            'item_value_ceo' => 'nullable|numeric|min:0', // CEO-only — written sa cogs_ceo
-            'rts_pct'        => 'required|numeric|min:0|max:100',
             'effective_date' => 'required|date',
-            'apply_through'        => 'nullable|date',
-            // Comment is REQUIRED — every RTS/COGS edit must have an audit reason.
-            // (Was nullable before; tightened so changes are always justified.)
-            'comment'              => 'required|string|min:1|max:500',
-            'item_value_comment'   => 'nullable|string|max:500',
-            // Promo (free-text) — required pero acceptable values include 'NONE'
-            // or '-' kung walang promo running. Forces awareness — bawat save
-            // tags ang promo state. Per-date semantics via effective_date.
-            'promo'                => 'required|string|min:1|max:255',
-        ]);
+            'apply_through'  => 'nullable|date',
+        ];
+        if (in_array($scope, ['all', 'rts'], true)) {
+            $rules['rts_pct'] = 'required|numeric|min:0|max:100';
+            $rules['comment'] = 'required|string|min:1|max:500';
+        }
+        if (in_array($scope, ['all', 'cogs'], true)) {
+            $rules['item_value']         = 'required|numeric|min:0';
+            $rules['item_value_ceo']     = 'nullable|numeric|min:0';
+            $rules['item_value_comment'] = 'nullable|string|max:500';
+        }
+        if (in_array($scope, ['all', 'promo'], true)) {
+            // Promo free-text — required only when scope explicitly touches promo.
+            // For scope=rts, server preserves existing promo (no client input needed).
+            $rules['promo'] = 'required|string|min:1|max:255';
+        }
+        $validated = $request->validate($rules);
 
         $pageName  = trim($validated['page_name']);
         $itemName  = trim($validated['item_name']);
@@ -2219,13 +2266,11 @@ class OwnerPrivateController extends Controller
             ->where('page_name', $pageName)
             ->where('item_name', $itemName)
             ->where('effective_date', $effDate)
-            ->first(['rts_pct', 'promo']);
+            ->first(['rts_pct', 'promo', 'comment', 'item_value_comment']);
         $oldCogsRow = DB::table('cogs')
             ->where('item_name', $itemName)
             ->where('date', $effDate)
             ->first(['unit_cost']);
-        // cogs_ceo (CEO-only audit). Read regardless of role — column gets logged
-        // only when a CEO save touches it, but having the snapshot doesn't hurt.
         $oldCogsCeoRow = Schema::hasTable('cogs_ceo')
             ? DB::table('cogs_ceo')
                 ->where('item_name', $itemName)
@@ -2236,16 +2281,15 @@ class OwnerPrivateController extends Controller
         $oldPromo   = $oldRtsRow     ? (string)($oldRtsRow->promo ?? '') : null;
         $oldCogs    = $oldCogsRow    ? (float) $oldCogsRow->unit_cost   : null;
         $oldCogsCeo = $oldCogsCeoRow ? (float) $oldCogsCeoRow->unit_cost : null;
-        // When set, ALSO overwrite any existing rows whose date is
-        // BETWEEN ($effDate, $applyThrough]. Use case: user clicks
-        // "Apply from <earliest>" on a later cell whose date already
-        // has its own row → both endpoints + everything in between
-        // should pick up the new value.
         $applyThrough = !empty($validated['apply_through']) && $validated['apply_through'] > $effDate
             ? $validated['apply_through']
             : null;
-        $itemValue = (float)$validated['item_value'];
-        $rtsPct    = (float)$validated['rts_pct'];
+
+        // Track new values for audit log — set only when scope writes them.
+        $rtsPctNew       = null;
+        $promoNew        = null;
+        $itemValueNew    = null;
+        $itemValueCeoNew = null;
 
         // -----------------------------------------------------------------
         // New clean model (2026-04-24):
@@ -2263,110 +2307,138 @@ class OwnerPrivateController extends Controller
         //     my override" for that field's scope (see above).
         // -----------------------------------------------------------------
         try {
-            // --- RTS% side (per-page) ---
-            $promo = trim((string) $validated['promo']);
-            if ($rtsPct > 0) {
-                // Upsert the per-page RTS override for this (page, item, date).
-                DB::table('page_item_settings')->updateOrInsert(
-                    [
-                        'page_name'      => $pageName,
-                        'item_name'      => $itemName,
-                        'effective_date' => $effDate,
-                    ],
-                    [
-                        'rts_pct'            => $rtsPct,
-                        'promo'              => $promo,
-                        'comment'            => $validated['comment'] ?? null,
-                        'item_value_comment' => $validated['item_value_comment'] ?? null,
-                        'updated_at'         => now(),
-                        'created_at'         => now(),
-                    ]
-                );
-                // When "Apply from" is used on a cell whose own date already
-                // has its own override row, propagate forward by overwriting
-                // every existing override in (effDate, applyThrough].
-                if ($applyThrough) {
-                    DB::table('page_item_settings')
-                        ->where('page_name', $pageName)
-                        ->where('item_name', $itemName)
-                        ->where('effective_date', '>', $effDate)
-                        ->where('effective_date', '<=', $applyThrough)
-                        ->update([
-                            'rts_pct'    => $rtsPct,
-                            'promo'      => $promo,
-                            'updated_at' => now(),
-                        ]);
+            // ─── RTS / Promo → page_item_settings ──────────────────────────────
+            //
+            // Scope-aware merge: only fields in the active scope are overwritten.
+            // Outside-of-scope fields are preserved from the existing row.
+            //
+            //   scope=rts   → writes rts_pct + comment (preserves existing promo)
+            //   scope=promo → writes promo only (preserves rts + comment; requires row)
+            //   scope=all   → writes everything (backward-compat)
+            if (in_array($scope, ['all', 'rts', 'promo'], true)) {
+                if ($scope === 'promo' && !$oldRtsRow) {
+                    return response()->json([
+                        'ok' => false,
+                        'message' => 'Cannot save promo standalone — set RTS first on this date.',
+                    ], 422);
                 }
-            } else {
-                // rts_pct = 0 → drop the per-page override for this date only.
-                // Falls back to the previous effective_date (or item-wide default).
-                DB::table('page_item_settings')
-                    ->where('page_name', $pageName)
-                    ->where('item_name', $itemName)
-                    ->where('effective_date', $effDate)
-                    ->delete();
-                if ($applyThrough) {
+
+                // Resolve final values — mix validated input with existing-row preservation.
+                $rtsToSave = in_array($scope, ['all', 'rts'], true)
+                    ? (float) $validated['rts_pct']
+                    : ($oldRts ?? 0);
+
+                // Promo write rule:
+                //   scope=all / scope=promo  → use validated input (required)
+                //   scope=rts                 → preserve existing promo (ignore any
+                //                                client value to avoid accidental
+                //                                overwrites while editing promo
+                //                                without saving)
+                $promoToSave = in_array($scope, ['all', 'promo'], true)
+                    ? trim((string) ($validated['promo'] ?? ''))
+                    : ($oldPromo ?: 'NONE');
+
+                $commentToSave = in_array($scope, ['all', 'rts'], true)
+                    ? ($validated['comment'] ?? null)
+                    : ($oldRtsRow->comment ?? null);
+
+                $ivCommentToSave = in_array($scope, ['all', 'cogs'], true)
+                    ? ($validated['item_value_comment'] ?? null)
+                    : ($oldRtsRow->item_value_comment ?? null);
+
+                if ($rtsToSave > 0) {
+                    DB::table('page_item_settings')->updateOrInsert(
+                        [
+                            'page_name'      => $pageName,
+                            'item_name'      => $itemName,
+                            'effective_date' => $effDate,
+                        ],
+                        [
+                            'rts_pct'            => $rtsToSave,
+                            'promo'              => $promoToSave,
+                            'comment'            => $commentToSave,
+                            'item_value_comment' => $ivCommentToSave,
+                            'updated_at'         => now(),
+                            'created_at'         => now(),
+                        ]
+                    );
+                    // Cascade — only updates fields in active scope (preserves others
+                    // in target rows). Always touches updated_at.
+                    if ($applyThrough) {
+                        // Cascade only the fields actively in scope. scope=rts
+                        // does NOT cascade promo (would silently overwrite other
+                        // dates' promos with the preserved one from end_date).
+                        $cascade = ['updated_at' => now()];
+                        if (in_array($scope, ['all', 'rts'], true))      $cascade['rts_pct'] = $rtsToSave;
+                        if (in_array($scope, ['all', 'promo'], true))    $cascade['promo']   = $promoToSave;
+                        DB::table('page_item_settings')
+                            ->where('page_name', $pageName)
+                            ->where('item_name', $itemName)
+                            ->where('effective_date', '>', $effDate)
+                            ->where('effective_date', '<=', $applyThrough)
+                            ->update($cascade);
+                    }
+                    $rtsPctNew = $rtsToSave;
+                    $promoNew  = $promoToSave;
+                } else {
+                    // rts=0 only valid for scope=all or scope=rts → DELETE the override row.
+                    // (scope=promo can't reach here since rtsToSave = oldRts ≥ 0; required-row check above gates standalone promo save.)
                     DB::table('page_item_settings')
                         ->where('page_name', $pageName)
                         ->where('item_name', $itemName)
-                        ->where('effective_date', '>', $effDate)
-                        ->where('effective_date', '<=', $applyThrough)
+                        ->where('effective_date', $effDate)
                         ->delete();
+                    if ($applyThrough) {
+                        DB::table('page_item_settings')
+                            ->where('page_name', $pageName)
+                            ->where('item_name', $itemName)
+                            ->where('effective_date', '>', $effDate)
+                            ->where('effective_date', '<=', $applyThrough)
+                            ->delete();
+                    }
                 }
             }
 
-            // --- COGS side (global, upsert-only) ---
-            if ($itemValue > 0) {
-                Cogs::updateOrCreate(
-                    ['item_name' => $itemName, 'date' => $effDate],
-                    ['unit_cost' => $itemValue]
-                );
-                // Cascade through any existing same-item rows in the apply range.
-                if ($applyThrough) {
-                    DB::table('cogs')
-                        ->where('item_name', $itemName)
-                        ->where('date', '>', $effDate)
-                        ->where('date', '<=', $applyThrough)
-                        ->update([
-                            'unit_cost'  => $itemValue,
-                            'updated_at' => now(),
-                        ]);
-                }
-
-                // ── Auto-mirror sa cogs_ceo (CEO's separate table) ──
-                // Rule: if cogs_ceo doesn't have entry for (item, date), insert
-                // the cogs value. If cogs_ceo already has entry, leave it alone
-                // (CEO's value stays independent once set).
-                //
-                // Single INSERT-IGNORE-like statement covers both the main row
-                // and any cascade rows in one go — fills in missing (item, date)
-                // pairs for this item.
-                $this->mirrorMissingCogsToCogsCeo($itemName);
-            }
-            // item_value = 0 → intentionally no-op on cogs. (Delete must go through /item/cogs.)
-
-            // ── CEO-only: write to cogs_ceo if the request included an item_value_ceo.
-            //   Server-side gate: only CEO viewers may save here. If a non-CEO
-            //   somehow sends item_value_ceo, silently ignore (defense in depth).
-            if ($this->isCEO() && isset($validated['item_value_ceo'])) {
-                $itemValueCeo = (float) $validated['item_value_ceo'];
-                if ($itemValueCeo > 0) {
-                    \App\Models\CogsCeo::updateOrCreate(
+            // ─── COGS / CEO COGS → cogs + cogs_ceo (global, upsert-only) ───────
+            if (in_array($scope, ['all', 'cogs'], true)) {
+                $itemValue = (float) ($validated['item_value'] ?? 0);
+                if ($itemValue > 0) {
+                    Cogs::updateOrCreate(
                         ['item_name' => $itemName, 'date' => $effDate],
-                        ['unit_cost' => $itemValueCeo]
+                        ['unit_cost' => $itemValue]
                     );
                     if ($applyThrough) {
-                        DB::table('cogs_ceo')
+                        DB::table('cogs')
                             ->where('item_name', $itemName)
                             ->where('date', '>', $effDate)
                             ->where('date', '<=', $applyThrough)
-                            ->update([
-                                'unit_cost'  => $itemValueCeo,
-                                'updated_at' => now(),
-                            ]);
+                            ->update(['unit_cost' => $itemValue, 'updated_at' => now()]);
+                    }
+                    // Auto-mirror sa cogs_ceo: fill missing (item, date) pairs only;
+                    // never overwrites existing CEO values.
+                    $this->mirrorMissingCogsToCogsCeo($itemName);
+                    $itemValueNew = $itemValue;
+                }
+                // item_value = 0 → intentionally no-op on cogs. (Delete via /item/cogs.)
+
+                // CEO-only: write item_value_ceo if present + role check passes.
+                if ($this->isCEO() && isset($validated['item_value_ceo'])) {
+                    $itemValueCeo = (float) $validated['item_value_ceo'];
+                    if ($itemValueCeo > 0) {
+                        \App\Models\CogsCeo::updateOrCreate(
+                            ['item_name' => $itemName, 'date' => $effDate],
+                            ['unit_cost' => $itemValueCeo]
+                        );
+                        if ($applyThrough) {
+                            DB::table('cogs_ceo')
+                                ->where('item_name', $itemName)
+                                ->where('date', '>', $effDate)
+                                ->where('date', '<=', $applyThrough)
+                                ->update(['unit_cost' => $itemValueCeo, 'updated_at' => now()]);
+                        }
+                        $itemValueCeoNew = $itemValueCeo;
                     }
                 }
-                // If item_value_ceo == 0 explicitly sent → treated as skip (matches Marketing behavior).
             }
         } catch (\Throwable $e) {
             return response()->json(['ok' => false, 'message' => $e->getMessage()], 500);
@@ -2375,13 +2447,6 @@ class OwnerPrivateController extends Controller
         // ── Audit log (best-effort — failure here doesn't block the save) ────
         try {
             $action = ($oldRts === null && $oldCogs === null && $oldCogsCeo === null) ? 'create' : 'update';
-            // CEO-only path: if request included item_value_ceo AND user is CEO,
-            // capture the new value. Hidden from non-CEO viewers downstream.
-            $newCogsCeo = null;
-            if ($this->isCEO() && isset($validated['item_value_ceo'])) {
-                $ivCeo = (float) $validated['item_value_ceo'];
-                if ($ivCeo > 0) $newCogsCeo = $ivCeo;
-            }
             $logRow = [
                 'user_email'         => Auth::user()?->email,
                 'action'             => $action,
@@ -2389,24 +2454,24 @@ class OwnerPrivateController extends Controller
                 'item_name'          => $itemName,
                 'effective_date'     => $effDate,
                 'old_rts_pct'        => $oldRts,
-                'new_rts_pct'        => $rtsPct > 0 ? $rtsPct : null,
+                'new_rts_pct'        => $rtsPctNew,
                 'old_item_value'     => $oldCogs,
-                'new_item_value'     => $itemValue > 0 ? $itemValue : null,
+                'new_item_value'     => $itemValueNew,
                 'comment'            => $validated['comment'] ?? null,
                 'item_value_comment' => $validated['item_value_comment'] ?? null,
                 'created_at'         => now(),
                 'updated_at'         => now(),
             ];
-            // Only attach CEO columns kung exists na sa schema — backwards-safe
-            // before migration is applied.
             if (Schema::hasColumn('page_item_settings_log', 'old_item_value_ceo')) {
                 $logRow['old_item_value_ceo'] = $oldCogsCeo;
-                $logRow['new_item_value_ceo'] = $newCogsCeo;
+                $logRow['new_item_value_ceo'] = $itemValueCeoNew;
             }
-            // Promo columns — only kung exists na (backwards-safe pre-migration).
             if (Schema::hasColumn('page_item_settings_log', 'old_promo')) {
                 $logRow['old_promo'] = $oldPromo;
-                $logRow['new_promo'] = $rtsPct > 0 ? trim((string)$validated['promo']) : null;
+                $logRow['new_promo'] = $promoNew;
+            }
+            if (Schema::hasColumn('page_item_settings_log', 'scope')) {
+                $logRow['scope'] = $scope;
             }
             DB::table('page_item_settings_log')->insert($logRow);
         } catch (\Throwable $e) {
@@ -2419,8 +2484,12 @@ class OwnerPrivateController extends Controller
 
         return response()->json([
             'ok'            => true,
-            'rts_deleted'   => $rtsPct <= 0,
-            'cogs_upserted' => $itemValue > 0,
+            'scope'         => $scope,
+            'rts_deleted'   => in_array($scope, ['all', 'rts'], true) && $rtsPctNew === null,
+            'cogs_upserted' => $itemValueNew !== null,
+            'new_rts_pct'   => $rtsPctNew,
+            'new_promo'     => $promoNew,
+            'new_item_value'=> $itemValueNew,
         ]);
     }
 
@@ -2880,9 +2949,13 @@ class OwnerPrivateController extends Controller
             $p['anchor_first_date'] = null;
             $p['anchor_included_days'] = 0;
             if ($p['anchor_item_key'] !== null) {
+                $anchorCodInt = $p['anchor_mode_cod'] !== null
+                    ? (int) round((float) $p['anchor_mode_cod'])
+                    : null;
                 $p['anchor_first_date'] = $this->resolveAnchorStreakStart(
                     $p['page_key'],
                     $p['anchor_item_key'],
+                    $anchorCodInt,
                     $endDate
                 );
                 if ($p['anchor_first_date'] !== null) {
@@ -2890,9 +2963,14 @@ class OwnerPrivateController extends Controller
                         ? $startDate
                         : $p['anchor_first_date'];
                     foreach ($p['cells'] as $d => $c) {
-                        if ($d >= $metricsFrom && $c['item_key'] === $p['anchor_item_key']) {
-                            $p['anchor_included_days']++;
+                        if ($d < $metricsFrom) continue;
+                        if ($c['item_key'] !== $p['anchor_item_key']) continue;
+                        // Price-aware: also require mode_cod match within ₱1.
+                        if ($anchorCodInt !== null && $c['mode_cod'] !== null) {
+                            $cellCodInt = (int) round((float) $c['mode_cod']);
+                            if (abs($cellCodInt - $anchorCodInt) > 1) continue;
                         }
+                        $p['anchor_included_days']++;
                     }
                 }
             }
@@ -3017,6 +3095,11 @@ class OwnerPrivateController extends Controller
             ->first(['primary_item', 'primary_item_key', 'primary_orders', 'primary_mode_cod']);
 
         $anchorItemKey = $anchor ? (string)$anchor->primary_item_key : null;
+        // Price-aware anchor: also pin to end_date's mode_cod (rounded int).
+        // is_anchor flag below requires BOTH item_key match AND price within ₱1.
+        $anchorCodInt = $anchor && $anchor->primary_mode_cod !== null
+            ? (int) round((float) $anchor->primary_mode_cod)
+            : null;
 
         // All primary rows for this page across the range
         $rows = DB::table('daily_page_primary_item')
@@ -3043,6 +3126,14 @@ class OwnerPrivateController extends Controller
             $r = $byDate[$d] ?? null;
             if ($r) {
                 $ik = (string)$r->primary_item_key;
+                $cellCodInt = $r->primary_mode_cod !== null
+                    ? (int) round((float) $r->primary_mode_cod)
+                    : null;
+                // Price-aware: is_anchor requires item_key match AND mode_cod within ₱1.
+                $itemMatches  = $anchorItemKey !== null && $ik === $anchorItemKey;
+                $priceMatches = ($anchorCodInt === null || $cellCodInt === null)
+                    ? true
+                    : (abs($cellCodInt - $anchorCodInt) <= 1);
                 $out[] = [
                     'date'             => $d,
                     'primary_item'     => (string)$r->primary_item,
@@ -3052,7 +3143,7 @@ class OwnerPrivateController extends Controller
                     'mode_cod'         => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
                     'second_item'      => $r->second_item ? (string)$r->second_item : null,
                     'second_orders'    => $r->second_orders !== null ? (int)$r->second_orders : null,
-                    'is_anchor'        => $anchorItemKey !== null && $ik === $anchorItemKey,
+                    'is_anchor'        => $itemMatches && $priceMatches,
                     'has_data'         => true,
                 ];
             } else {
