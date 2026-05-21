@@ -443,6 +443,25 @@
         <span x-show="refreshing">Recomputing…</span>
       </button>
     @endif
+
+    {{-- 📸 Snapshots — CEO-only freeze + browse archive. --}}
+    @if(!empty($effectiveIsCEO))
+      <button id="saveSnapshotBtn"
+              @click="saveSnapshot()"
+              :disabled="savingSnapshot || loading"
+              title="Save current /owner/private view as a snapshot (frozen capture, viewable later)"
+              style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;
+                     border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+                     cursor:pointer;margin-left:4px;">
+        <span x-show="!savingSnapshot">📸 Save Snapshot</span>
+        <span x-show="savingSnapshot">Saving…</span>
+      </button>
+      <a href="{{ route('owner.private.snapshots.index') }}"
+         title="Browse saved snapshots archive"
+         style="background:#1e293b;color:#a5b4fc;border:1px solid #475569;
+                border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+                cursor:pointer;margin-left:4px;text-decoration:none;">📂 Snapshots</a>
+    @endif
   </div>
 
   <!-- Selected item pills -->
@@ -1270,6 +1289,7 @@
         isCeoView:false,
       },
       refreshing:false,
+      savingSnapshot:false,
       skippedCount:0, skippedPages:[],
       isSingleDate:true, rangeDays:1,
       sortCol:'', sortDir:'desc',
@@ -1519,6 +1539,60 @@
           alert('Network error');
         } finally {
           this.refreshing = false;
+        }
+      },
+
+      // ── CEO: save current /owner/private view as a snapshot ──────────────
+      // Captures the exact rendered rows + totals + filter state as JSON,
+      // stored sa owner_private_snapshots. Viewable later sa
+      // /owner/private/snapshots/{id}.
+      async saveSnapshot(){
+        if (this.savingSnapshot) return;
+        if (!this.rows || this.rows.length === 0) {
+          if (!confirm('Walang rows na visible ngayon — save anyway as an empty snapshot?')) return;
+        }
+        if (!confirm('Save snapshot for ' + this.startDate + ' → ' + this.endDate + '?\n\nFreezes the current view ng /owner/private. Viewable later sa /owner/private/snapshots.')) return;
+
+        this.savingSnapshot = true; this.saveMsg = '';
+        try {
+          const payload = {
+            // Mirrors yung itemSummary response shape — keeps the snapshot
+            // self-contained at viewable independently of live data.
+            rows:          this.rows,
+            skipped_count: this.skippedCount,
+            skipped_pages: this.skippedPages,
+            range_days:    this.rangeDays,
+            is_single_date: this.isSingleDate,
+          };
+          const r = await fetch('{{ route('owner.private.snapshots.save') }}', {
+            method: 'POST',
+            headers: {
+              'Content-Type':'application/json',
+              'Accept':'application/json',
+              'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+            },
+            body: JSON.stringify({
+              start_date:    this.startDate,
+              end_date:      this.endDate,
+              view_as:       this.viewAs || 'ceo',
+              rows_count:    this.rows.length,
+              skipped_count: this.skippedCount,
+              payload:       payload,
+            }),
+          });
+          const j = await r.json();
+          if (!r.ok || !j.ok) { alert(j.message || 'Snapshot save failed'); return; }
+          this.saveMsg = '✓ Snapshot #' + j.id + ' saved!';
+          setTimeout(() => this.saveMsg = '', 5000);
+          // Optional: open the snapshot detail in new tab
+          if (confirm('Snapshot #' + j.id + ' saved! Open detail view?')) {
+            window.open(j.view_url, '_blank');
+          }
+        } catch(e) {
+          console.error(e);
+          alert('Network error: ' + e.message);
+        } finally {
+          this.savingSnapshot = false;
         }
       },
 

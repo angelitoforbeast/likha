@@ -535,6 +535,16 @@ Route::post('/owner/private/refresh-primary-items', [OwnerPrivateController::cla
 Route::get('/owner/private/page-range-breakdown', [OwnerPrivateController::class, 'pageRangeBreakdown'])->name('owner.private.page-range-breakdown');
 Route::get('/owner/private/breakdown', [OwnerPrivateController::class, 'breakdownPage'])->name('owner.private.breakdown');
 Route::get('/owner/private/edit-logs', [OwnerPrivateController::class, 'editLogs'])->name('owner.private.edit-logs');
+
+// /owner/private snapshots — CEO-only frozen captures of the rendered state.
+Route::get('/owner/private/snapshots',         [\App\Http\Controllers\OwnerPrivateSnapshotsController::class, 'index'])
+    ->name('owner.private.snapshots.index');
+Route::post('/owner/private/snapshots',        [\App\Http\Controllers\OwnerPrivateSnapshotsController::class, 'save'])
+    ->name('owner.private.snapshots.save');
+Route::get('/owner/private/snapshots/{id}',    [\App\Http\Controllers\OwnerPrivateSnapshotsController::class, 'show'])
+    ->whereNumber('id')->name('owner.private.snapshots.show');
+Route::delete('/owner/private/snapshots/{id}', [\App\Http\Controllers\OwnerPrivateSnapshotsController::class, 'destroy'])
+    ->whereNumber('id')->name('owner.private.snapshots.destroy');
 Route::get('/owner/private/daily', [OwnerPrivateController::class, 'daily'])->name('owner.private.daily');
 Route::get('/owner/private/daily/data', [OwnerPrivateController::class, 'dailyData'])->name('owner.private.daily.data');
 

@@ -105,6 +105,16 @@ return new class extends Migration
             \Log::error('[backfill_mode_cod_int_alias_aware] failed: ' . $e->getMessage());
             throw $e;
         }
+
+        // Bump /owner/private cache version so live users see the fresh-tagged
+        // data immediately without manually clicking the Refresh button.
+        if (class_exists(\App\Http\Controllers\OwnerPrivateController::class)) {
+            try {
+                \App\Http\Controllers\OwnerPrivateController::bumpCacheVersion();
+            } catch (\Throwable $e) {
+                // Non-fatal — cache will expire eventually or user can click Refresh.
+            }
+        }
     }
 
     public function down(): void
