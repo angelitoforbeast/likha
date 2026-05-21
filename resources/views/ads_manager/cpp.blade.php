@@ -354,10 +354,14 @@
       }
 
       // MULTI-PAGE layout (all-pages or 2+ selected). Same chrome as legacy
-      // 'all' branch; just filtered when pageSet non-empty.
+      // 'all' branch; just filtered when pageSet non-empty. Keep #singlePageLayout
+      // visible (lg:flex) so the chart panel sa kaliwa remains rendered.
       {
         singlePageLayout.classList.add('hidden');
         multiPageTables.classList.remove('hidden');
+        // Reset any inline display set elsewhere — let CSS classes control it.
+        singlePageLayout.style.display = '';
+        multiPageTables.style.display  = '';
 
         const itemLabel = itemFilter ? ` · ${itemFilter}` : '';
         const pageLabel = isFiltered ? ` · ${selectedPages.length} page${selectedPages.length>1?'s':''}` : '';
@@ -537,13 +541,11 @@
 
         dateHtml += `</tbody></table>`;
 
-        // Multi-page / all-pages render — fills #multiPageTables (main column).
-        // Also force-hide #singlePageLayout (its `lg:flex` class would otherwise
-        // override our .hidden on desktop, leaving a stale chart panel visible).
-        singlePageLayout.style.display = 'none';
-        multiPageTables.style.display  = 'block';
-        multiPageTables.innerHTML = summaryHtml + dateHtml;
-        tableRight.innerHTML = ''; // clear stale legacy content
+        // Legacy routing: content goes to #rightTableContainer (sa loob ng
+        // #singlePageLayout). Charts stay sa kaliwa. #multiPageTables is
+        // toggled-visible but kept empty (matches original behavior).
+        tableRight.innerHTML = summaryHtml + dateHtml;
+        multiPageTables.innerHTML = '';
       }
     }
 
@@ -551,9 +553,6 @@
     function renderSinglePage(filteredDates, pageFilter) {
       const titleStart = filteredDates[0];
       const titleEnd   = filteredDates[filteredDates.length - 1];
-      // Reset inline display set by multi-page branch (back to CSS classes).
-      multiPageTables.style.display  = '';
-      singlePageLayout.style.display = '';
       multiPageTables.classList.add('hidden');
       singlePageLayout.classList.remove('hidden');
 
@@ -689,26 +688,23 @@
       if (!dates.length) {
         if (cppChart) cppChart.destroy();
         if (cpmChart) cpmChart.destroy();
-        singlePageLayout.style.display = 'none';
-        multiPageTables.style.display  = 'block';
-        multiPageTables.innerHTML = `
+        singlePageLayout.classList.add('hidden');
+        multiPageTables.classList.remove('hidden');
+        tableRight.innerHTML = `
           <div class="p-4 border rounded bg-yellow-50 text-yellow-800">
             No data with ad spend &gt; 0 for the selected dates / pages.
           </div>`;
         return;
       }
 
-      // Charts only render meaningfully sa single-page mode. For multi-select
-      // or all-pages mode, the matrix table already conveys per-date metrics.
+      // Charts: averaged across selected pages (or all if [] selected).
+      // Same logic as legacy "all" branch — just respects pageSet filter.
       let cppData = [], cpmData = [];
       if (selectedPages.length === 1) {
         const sel = rawData[selectedPages[0]] || {};
         cppData = dates.map(d => sel[d]?.cpp ?? null);
         cpmData = dates.map(d => sel[d]?.cpm ?? null);
-        renderCPPChart(dates, cppData);
-        renderCPMChart(dates, cpmData);
       } else {
-        // Aggregate (avg) across selected pages for chart trend lines.
         dates.forEach(date => {
           let sumCpp = 0, cntCpp = 0, sumCpm = 0, cntCpm = 0;
           Object.entries(rawData).forEach(([page, d]) => {
@@ -720,9 +716,10 @@
           cppData.push(cntCpp ? sumCpp / cntCpp : null);
           cpmData.push(cntCpm ? sumCpm / cntCpm : null);
         });
-        // No charts in multi-page mode (singlePageLayout hidden) — skip render
       }
 
+      renderCPPChart(dates, cppData);
+      renderCPMChart(dates, cpmData);
       renderTables(dates, selectedPages);
     }
 
