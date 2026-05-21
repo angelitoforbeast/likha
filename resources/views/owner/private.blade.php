@@ -808,8 +808,10 @@
                           <div>
                             <span style="font-weight:700;color:#000;"
                                   x-text="row.rts_pct.toFixed(1)+'%'"></span>
-                            <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
-                                 x-text="'from ' + row.settings_date"></div>
+                            <template x-if="row.anchor_first_date">
+                              <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
+                                   x-text="'since ' + row.anchor_first_date"></div>
+                            </template>
                             <template x-if="row.rts_comment">
                               <div style="font-size:9px;color:#64748b;margin-top:1px;font-style:italic;white-space:normal;max-width:120px;"
                                    x-text="'💬 '+row.rts_comment"></div>
@@ -873,9 +875,9 @@
                             <template x-if="row.item_value_source === 'cogs'">
                               <div style="font-size:9px;color:#cbd5e1;">cogs</div>
                             </template>
-                            <template x-if="row.item_value_source === 'manual' && row.settings_date">
+                            <template x-if="row.item_value_source === 'manual' && row.anchor_first_date">
                               <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
-                                   x-text="'from ' + row.settings_date"></div>
+                                   x-text="'since ' + row.anchor_first_date"></div>
                             </template>
                             <template x-if="row.item_value_comment && row.item_value_source === 'manual'">
                               <div style="font-size:9px;color:#64748b;margin-top:1px;font-style:italic;white-space:normal;max-width:110px;"
@@ -1066,33 +1068,20 @@
         <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#fefce8;"
              x-show="!edit.focusScope || edit.focusScope === 'rts'">
           <div style="font-size:10.5px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">📊 RTS%</div>
-          <label>RTS% <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(per-page, for this date onward)</span></label>
+          <label>RTS% <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(per page, item & price reference)</span></label>
           <div style="display:flex;align-items:center;gap:8px;">
             <input type="number" step="0.01" min="0" max="100" x-model="edit.rts_pct" placeholder="e.g. 50">
             <span style="color:#64748b;">%</span>
           </div>
-          <template x-if="edit.rts_inherited && edit.rts_eff_date">
-            <div style="font-size:11px;color:#b45309;margin-top:4px;">
-              ⚠ Currently inherited from <span style="font-family:ui-monospace,monospace;" x-text="edit.rts_eff_date"></span>.
-            </div>
-          </template>
 
           <label style="margin-top:10px;">RTS Comment <span style="color:#dc2626;">*</span></label>
           <input type="text" x-model="edit.comment" maxlength="500" placeholder="why is this value different?">
 
-          <label style="margin-top:10px;">Effective from <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(editable)</span></label>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <input type="date" x-model="edit.rts_effective_date">
-            <button type="button" class="ow-btn"
-                    style="background:#e0e7ff;color:#3730a3;font-size:10.5px;padding:4px 8px;"
-                    @click="edit.rts_effective_date = edit.anchor_first_date || edit.date"
-                    :disabled="!edit.anchor_first_date">↶ anchor</button>
-            <button type="button" class="ow-btn"
-                    style="background:#f1f5f9;color:#475569;font-size:10.5px;padding:4px 8px;"
-                    @click="edit.rts_effective_date = edit.date">↶ this date</button>
-          </div>
-          <div style="font-size:11px;color:#64748b;margin-top:3px;">
-            Suggested = anchor start. Pwede mong palitan ng any date.
+          <div style="font-size:11px;color:#64748b;margin-top:6px;">
+            Scope: <strong x-text="edit.page_name"></strong> · <span x-text="edit.item_name"></span> @ <span x-text="edit.price ? '₱' + Number(edit.price).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'"></span>
+            <template x-if="edit.anchor_first_date">
+              <span style="color:#7c3aed;font-weight:600;"> · anchored since <span x-text="edit.anchor_first_date"></span></span>
+            </template>
           </div>
 
           <template x-if="edit.rtsError">
@@ -1114,22 +1103,12 @@
           <div style="font-size:10.5px;color:#86198f;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">🏷 Promo</div>
           <label>Promo <span style="color:#dc2626;">*</span> <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(type NONE if walang promo)</span></label>
           <input type="text" x-model="edit.promo" maxlength="255" placeholder='e.g. "9.9 Sale", "PAYDAY", or "NONE"'>
-          <template x-if="edit.promo_inherited && edit.rts_eff_date">
-            <div style="font-size:11px;color:#b45309;margin-top:4px;">
-              ⚠ Currently inherited from <span style="font-family:ui-monospace,monospace;" x-text="edit.rts_eff_date"></span>.
-            </div>
-          </template>
 
-          <label style="margin-top:10px;">Effective from <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(editable)</span></label>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <input type="date" x-model="edit.promo_effective_date">
-            <button type="button" class="ow-btn"
-                    style="background:#e0e7ff;color:#3730a3;font-size:10.5px;padding:4px 8px;"
-                    @click="edit.promo_effective_date = edit.anchor_first_date || edit.date"
-                    :disabled="!edit.anchor_first_date">↶ anchor</button>
-            <button type="button" class="ow-btn"
-                    style="background:#f1f5f9;color:#475569;font-size:10.5px;padding:4px 8px;"
-                    @click="edit.promo_effective_date = edit.date">↶ this date</button>
+          <div style="font-size:11px;color:#64748b;margin-top:6px;">
+            Scope: <strong x-text="edit.page_name"></strong> · <span x-text="edit.item_name"></span> @ <span x-text="edit.price ? '₱' + Number(edit.price).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'"></span>
+            <template x-if="edit.anchor_first_date">
+              <span style="color:#7c3aed;font-weight:600;"> · anchored since <span x-text="edit.anchor_first_date"></span></span>
+            </template>
           </div>
 
           <template x-if="edit.promoError">
@@ -1679,8 +1658,6 @@
       //   'rts' / 'promo' / 'cogs' / 'cogs_ceo' (show only that section,
       //   triggered by per-cell ✎ edit icons).
       openEditModal(row, focusScope = null){
-        const settingsDate = row.settings_date || null;
-        const isInherited = !!(row.has_settings && settingsDate && settingsDate !== this.endDate);
         const anchorStart = row.anchor_first_date || null;
         const cogsLastDate = row.cogs_last_date || null;
 
@@ -1700,17 +1677,12 @@
           anchor_first_date: anchorStart,
           cogs_last_date:    cogsLastDate,
 
-          // RTS section
+          // RTS section — eff_date auto-anchored sa backend (no user picker)
           rts_pct:             row.rts_pct != null ? row.rts_pct : '',
-          rts_eff_date:        settingsDate,
-          rts_inherited:       isInherited,
-          rts_effective_date:  anchorStart || this.endDate,
           comment:             '',
 
-          // Promo section
+          // Promo section — eff_date auto-anchored sa backend (no user picker)
           promo:                row.promo || '',
-          promo_inherited:      isInherited && !!row.promo,
-          promo_effective_date: anchorStart || this.endDate,
 
           // COGS section
           unit_cost:            row.item_value     != null ? row.item_value     : '',
@@ -1738,6 +1710,13 @@
         // Cogs-only saves skip this (item-global, no price scope).
         const cellPriceInt = (e.price != null && e.price > 0) ? Math.round(Number(e.price)) : null;
 
+        // Auto-anchor: effective_date = anchor_first_date (start ng price streak).
+        // Fallback to cell.date kung walang anchor (rare — e.g., bagong page+item
+        // without any historical data sa daily_page_primary_item). apply_through
+        // = cell.date para cascade-update lahat ng existing rows sa scope, so
+        // user's value reflects sa current view kahit may legacy intermediate rows.
+        const anchorEff = e.anchor_first_date || e.date;
+
         if (scope === 'rts') {
           const rts = parseFloat(e.rts_pct);
           if (isNaN(rts) || rts < 0 || rts > 100) { e.rtsError = 'RTS% must be 0–100.'; return; }
@@ -1748,8 +1727,8 @@
           fd.append('rts_pct',        rts);
           fd.append('comment',        cmt);
           fd.append('mode_cod_int',   cellPriceInt);
-          fd.append('effective_date', e.rts_effective_date || e.date);
-          if ((e.rts_effective_date || e.date) !== e.date) fd.append('apply_through', e.date);
+          fd.append('effective_date', anchorEff);
+          if (anchorEff !== e.date) fd.append('apply_through', e.date);
           e.savingRts = true;
         } else if (scope === 'promo') {
           const promo = (e.promo || '').trim();
@@ -1757,8 +1736,8 @@
           if (cellPriceInt === null) { e.promoError = 'No price detected for this cell. Cannot save.'; return; }
           fd.append('promo',          promo);
           fd.append('mode_cod_int',   cellPriceInt);
-          fd.append('effective_date', e.promo_effective_date || e.date);
-          if ((e.promo_effective_date || e.date) !== e.date) fd.append('apply_through', e.date);
+          fd.append('effective_date', anchorEff);
+          if (anchorEff !== e.date) fd.append('apply_through', e.date);
           e.savingPromo = true;
         } else if (scope === 'cogs') {
           const cost = parseFloat(e.unit_cost);
@@ -1786,7 +1765,7 @@
             this._setScopeError(scope, j.message || (j.errors ? Object.values(j.errors).flat().join('\n') : ('HTTP '+r.status)));
             return;
           }
-          this._setScopeSuccess(scope, '✓ Saved (eff_date: ' + fd.get('effective_date') + ')');
+          this._setScopeSuccess(scope, '✓ Saved (anchored: ' + fd.get('effective_date') + ')');
           // Auto-clear success message after 4s
           setTimeout(() => { this._setScopeSuccess(scope, null); }, 4000);
         } catch (ex) {

@@ -2394,7 +2394,7 @@ class OwnerPrivateController extends Controller
                     if (!$inheritedRtsRow) {
                         return response()->json([
                             'ok' => false,
-                            'message' => 'Cannot save promo — walang existing RTS row para sa page+item+price na ito. Set RTS muna.',
+                            'message' => 'Cannot save promo — walang RTS pa for (page, item, price). Set RTS% muna sa modal bago mag-save ng Promo.',
                         ], 422);
                     }
                 }
