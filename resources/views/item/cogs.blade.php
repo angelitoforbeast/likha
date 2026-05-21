@@ -41,6 +41,15 @@
     .grid-wrapper::-webkit-scrollbar { height: 8px; }
     .grid-wrapper::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
     .grid-wrapper::-webkit-scrollbar-track { background: #f1f5f9; }
+    /* Coordinate highlight — when user hovers a cell, the entire row + the
+       corresponding date column header + the item-name sticky-col get tinted
+       blue so it's obvious which item/date intersection ang naka-cursor. */
+    tbody tr.coord-row td { background-color: #dbeafe !important; }
+    tbody tr.coord-row td.sticky-col { background-color: #93c5fd !important; color: #1e3a8a; font-weight: 700; }
+    thead th.coord-col { background-color: #93c5fd !important; color: #1e3a8a; }
+    /* Restore anchor/change marker visibility on coord-highlighted rows. */
+    tbody tr.coord-row td.cell-change-up   { background-color: #fde68a !important; }
+    tbody tr.coord-row td.cell-change-down { background-color: #99f6e4 !important; }
   </style>
 </head>
 <body class="bg-gray-100 text-gray-900" x-data="gridApp('{{ $month }}')" x-cloak>
@@ -127,13 +136,16 @@
               <tr class="bg-gray-100 text-gray-600">
                 <th class="sticky-col bg-gray-100 px-4 py-3 text-left font-semibold border-b border-r min-w-[260px]">ITEM NAME</th>
                 <template x-for="d in days" :key="'h'+d">
-                  <th class="px-3 py-3 text-center font-semibold border-b min-w-[72px]" x-text="d"></th>
+                  <th class="px-3 py-3 text-center font-semibold border-b min-w-[72px]"
+                      :class="hoverDay === d ? 'coord-col' : ''"
+                      x-text="d"></th>
                 </template>
               </tr>
             </thead>
             <tbody>
               <template x-for="r in filteredRows" :key="r.item_name">
-                <tr class="border-b hover:bg-gray-50 transition-colors" :class="r._hasMissing ? 'missing-cost' : ''">
+                <tr class="border-b transition-colors"
+                    :class="(r._hasMissing ? 'missing-cost ' : '') + (hoverItem === r.item_name ? 'coord-row' : '')">
                   <td class="sticky-col bg-white px-4 py-2 font-medium border-r whitespace-nowrap"
                       :class="r._hasMissing ? 'bg-red-50 text-red-700' : ''">
                     <div class="flex items-center gap-2">
@@ -149,6 +161,8 @@
                         @focus="onFocus($event)"
                         @blur="onBlur($event, r.item_name, d)"
                         @keydown.enter.prevent="commit($event, r.item_name, d)"
+                        @mouseenter="hoverItem = r.item_name; hoverDay = d"
+                        @mouseleave="hoverItem = null; hoverDay = null"
                         class="px-3 py-2 text-right"
                         :title="cellTitle(r, d)">
                       <span x-text="fmt(r.prices[d])"></span>
@@ -200,6 +214,10 @@ function gridApp(initialMonth){
     rows: [],
     searchQuery: '',
     showMissingOnly: false,
+    // Coordinate highlight — tracks which (item, day) cell is hovered, so
+    // the row + column-header get tinted blue (spreadsheet-style scan helper).
+    hoverItem: null,
+    hoverDay:  null,
 
     get missingCount(){
       return this.rows.filter(r => r._hasMissing).length;
