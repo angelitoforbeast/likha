@@ -2352,17 +2352,63 @@ class OwnerPrivateController extends Controller
             //   scope=promo → writes promo only (preserves rts + comment; requires row)
             //   scope=all   → writes everything (backward-compat)
             if (in_array($scope, ['all', 'rts', 'promo'], true)) {
+                // For scope=promo when no row exists at this exact date,
+                // inherit RTS from the NEAREST PRIOR row (same page/item/price).
+                // This mirrors the frontend's "inherited from {date}" display:
+                // user is setting a promo starting at $effDate, and we propagate
+                // the currently-effective RTS forward so the new row is valid.
+                //
+                // If no prior row exists either (truly no RTS ever set for this
+                // page+item+price), THEN error — because we'd be inserting an
+                // orphaned promo row with rts=0, which breaks profit math.
+                $inheritedRtsRow = null;
                 if ($scope === 'promo' && !$oldRtsRow) {
-                    return response()->json([
-                        'ok' => false,
-                        'message' => 'Cannot save promo standalone — set RTS first on this date.',
-                    ], 422);
+                    // 1st try: nearest PRIOR row (standard inheritance direction)
+                    $priorQuery = DB::table('page_item_settings')
+                        ->where('page_name', $pageName)
+                        ->where('item_name', $itemName)
+                        ->where('effective_date', '<', $effDate);
+                    if ($needsPriceTag) {
+                        $priorQuery->where('mode_cod_int', $modeCodInt);
+                    }
+                    $inheritedRtsRow = $priorQuery
+                        ->orderByDesc('effective_date')
+                        ->first(['rts_pct', 'promo', 'comment', 'item_value_comment']);
+
+                    // 2nd try: nearest LATER row (user back-dating to anchor —
+                    // walang prior pa, pero may newer row na pwedeng kopyahin
+                    // yung RTS para hindi orphan yung promo na ise-set natin).
+                    if (!$inheritedRtsRow) {
+                        $laterQuery = DB::table('page_item_settings')
+                            ->where('page_name', $pageName)
+                            ->where('item_name', $itemName)
+                            ->where('effective_date', '>', $effDate);
+                        if ($needsPriceTag) {
+                            $laterQuery->where('mode_cod_int', $modeCodInt);
+                        }
+                        $inheritedRtsRow = $laterQuery
+                            ->orderBy('effective_date')
+                            ->first(['rts_pct', 'promo', 'comment', 'item_value_comment']);
+                    }
+
+                    if (!$inheritedRtsRow) {
+                        return response()->json([
+                            'ok' => false,
+                            'message' => 'Cannot save promo — walang existing RTS row para sa page+item+price na ito. Set RTS muna.',
+                        ], 422);
+                    }
                 }
 
-                // Resolve final values — mix validated input with existing-row preservation.
+                // Resolve final values — mix validated input with existing-row
+                // (or inherited) preservation. For scope=promo with no exact
+                // row, $inheritedRtsRow takes the place of $oldRtsRow.
+                $effectiveRtsRow = $oldRtsRow ?: $inheritedRtsRow;
+                $effectiveOldRts = $effectiveRtsRow ? (float) $effectiveRtsRow->rts_pct : ($oldRts ?? 0);
+                $effectiveOldPromo = $effectiveRtsRow ? (string) ($effectiveRtsRow->promo ?? '') : ($oldPromo ?? '');
+
                 $rtsToSave = in_array($scope, ['all', 'rts'], true)
                     ? (float) $validated['rts_pct']
-                    : ($oldRts ?? 0);
+                    : $effectiveOldRts;
 
                 // Promo write rule:
                 //   scope=all / scope=promo  → use validated input (required)
@@ -2372,15 +2418,15 @@ class OwnerPrivateController extends Controller
                 //                                without saving)
                 $promoToSave = in_array($scope, ['all', 'promo'], true)
                     ? trim((string) ($validated['promo'] ?? ''))
-                    : ($oldPromo ?: 'NONE');
+                    : ($effectiveOldPromo ?: 'NONE');
 
                 $commentToSave = in_array($scope, ['all', 'rts'], true)
                     ? ($validated['comment'] ?? null)
-                    : ($oldRtsRow->comment ?? null);
+                    : ($effectiveRtsRow->comment ?? null);
 
                 $ivCommentToSave = in_array($scope, ['all', 'cogs'], true)
                     ? ($validated['item_value_comment'] ?? null)
-                    : ($oldRtsRow->item_value_comment ?? null);
+                    : ($effectiveRtsRow->item_value_comment ?? null);
 
                 if ($rtsToSave > 0) {
                     // Upsert keyed by (page, item, price, date) — different price
