@@ -60,41 +60,87 @@
       font-size: 0.8rem;
       color: #6b7280;
     }
+    /* Multi-select checkbox styling for #pageDd items only */
+    #pageDd .page-dd-item {
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    #pageDd .page-dd-item input[type="checkbox"] {
+      flex-shrink: 0; cursor: pointer; width: 14px; height: 14px;
+      accent-color: #2563eb;
+    }
+    #pageDd .page-dd-item-label { flex: 1; min-width: 0; }
+    #pageDd .page-dd-actions {
+      display: flex; gap: 6px; padding-top: 8px; margin-top: 8px;
+      border-top: 1px solid #f3f4f6;
+    }
+    #pageDd .page-dd-btn-apply {
+      flex: 1; background: #2563eb; color: white;
+      font-size: 12.5px; font-weight: 600; padding: 6px 10px;
+      border-radius: 5px; border: none; cursor: pointer;
+    }
+    #pageDd .page-dd-btn-apply:hover { background: #1d4ed8; }
+    #pageDd .page-dd-btn-clear {
+      background: #f1f5f9; color: #475569;
+      font-size: 12.5px; padding: 6px 10px;
+      border-radius: 5px; border: 1px solid #e2e8f0; cursor: pointer;
+    }
+    #pageDd .page-dd-btn-clear:hover { background: #e2e8f0; }
+    #pageDd .page-dd-count {
+      font-size: 11px; color: #64748b; padding: 4px 0 6px;
+    }
   </style>
 
   {{-- Filter Controls --}}
   <div class="mt-4 mb-6 flex flex-wrap items-end gap-4">
     <div class="page-dd" id="pageDd">
-      <label class="block font-semibold mb-1">Select Page:</label>
+      <label class="block font-semibold mb-1">Select Pages:</label>
 
-      {{-- ✅ This is the value you use everywhere in JS --}}
-      <input type="hidden" id="pageHidden" value="{{ request('ui_page', 'all') }}">
+      {{-- Multi-select state: comma-separated page names, or 'all' for everything.
+           Backwards-compat — accepts legacy ?ui_page= if ?pages= is missing. --}}
+      @php
+        $selPages = $selectedPages ?? [];
+        if (empty($selPages) && request()->filled('ui_page') && request('ui_page') !== 'all') {
+          $selPages = [request('ui_page')];
+        }
+        $hiddenVal = empty($selPages) ? 'all' : implode(',', $selPages);
+        $btnLabel  = empty($selPages)
+          ? 'All Pages'
+          : (count($selPages) === 1 ? $selPages[0] : count($selPages) . ' pages selected');
+      @endphp
+      <input type="hidden" id="pageHidden" value="{{ $hiddenVal }}">
 
       <button type="button" class="page-dd-btn" id="pageDdBtn" aria-haspopup="listbox" aria-expanded="false">
-        <span id="pageDdLabel">
-          {{ request('ui_page', 'all') === 'all' ? 'All Pages' : request('ui_page') }}
-        </span>
+        <span id="pageDdLabel">{{ $btnLabel }}</span>
       </button>
 
       <div class="page-dd-panel" id="pageDdPanel">
         <input type="text" class="page-dd-search" id="pageDdSearch" placeholder="Type to filter..." autocomplete="off">
 
+        <div class="page-dd-count" id="pageDdCount"></div>
+
         <div class="page-dd-list" id="pageDdList" role="listbox">
-          <div class="page-dd-item {{ request('ui_page', 'all') === 'all' ? 'selected' : '' }}" data-value="all">
-            All Pages
+          <div class="page-dd-item" data-value="all">
+            <input type="checkbox" id="page-cb-all" {{ empty($selPages) ? 'checked' : '' }}>
+            <span class="page-dd-item-label"><strong>All Pages</strong></span>
           </div>
 
           @foreach (array_keys($matrix) as $page)
-            <div class="page-dd-item {{ request('ui_page') === $page ? 'selected' : '' }}" data-value="{{ $page }}">
-              {{ $page }}
+            <div class="page-dd-item" data-value="{{ $page }}">
+              <input type="checkbox" {{ in_array($page, $selPages, true) ? 'checked' : '' }}>
+              <span class="page-dd-item-label">{{ $page }}</span>
             </div>
           @endforeach
 
           <div class="page-dd-empty hidden" id="pageDdEmpty">No matches.</div>
         </div>
 
+        <div class="page-dd-actions">
+          <button type="button" class="page-dd-btn-clear" id="pageDdBtnClear" title="Uncheck all selections">Clear</button>
+          <button type="button" class="page-dd-btn-apply" id="pageDdBtnApply">Apply selected</button>
+        </div>
+
         <div class="text-[11px] text-gray-500 mt-2">
-          Click dropdown shows all. Type to filter.
+          Check para mag-add ng page. Pag walang naka-check = All Pages. URL persists via ?pages=.
         </div>
       </div>
     </div>
@@ -189,8 +235,23 @@
     let cppChart, cpmChart;
 
     // --- Helpers ---
+    // Multi-select: returns ARRAY of page names, or [] meaning "all pages".
+    // pageHidden.value format: 'all' OR 'Page1,Page2,Page3' (comma-joined).
+    function getSelectedPages() {
+      const raw = (pageHidden?.value || 'all').trim();
+      if (raw === '' || raw.toLowerCase() === 'all') return [];
+      return raw.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    function getSelectedPagesSet() { return new Set(getSelectedPages()); }
+    function isAllPagesMode() { return getSelectedPages().length === 0; }
+
+    // Backwards-compat: returns 'all' or the single page name.
+    // Used by parts of legacy code that still expect single-page semantics.
     function getSelectedPage() {
-      return (pageHidden?.value || 'all').trim() || 'all';
+      const sel = getSelectedPages();
+      if (sel.length === 0) return 'all';
+      if (sel.length === 1) return sel[0];
+      return 'all'; // Multiple selected → fallback to all behavior + frontend filter
     }
 
     function fmtISO(iso) {
@@ -208,16 +269,19 @@
     }
 
     // ---- helpers para i-filter dates na may spend > 0 ----
-    function totalSpendAllPagesOn(date) {
+    // Multi-select aware: kung walang selected pages → all pages contribute.
+    // Kung may filter → only those pages.
+    function totalSpendAcross(date, pageSet) {
       let sum = 0;
-      Object.values(rawData).forEach(data => {
+      Object.entries(rawData).forEach(([page, data]) => {
+        if (pageSet && pageSet.size > 0 && !pageSet.has(page)) return;
         const r = data[date] || {};
         if (typeof r.spent === 'number') sum += r.spent;
       });
       return sum;
     }
-    function datesWithSpendAllPages(dates) {
-      return dates.filter(d => totalSpendAllPagesOn(d) > 0);
+    function datesWithSpendFiltered(dates, pageSet) {
+      return dates.filter(d => totalSpendAcross(d, pageSet) > 0);
     }
     function datesWithSpendForPage(dates, page) {
       const data = rawData[page] || {};
@@ -233,7 +297,11 @@
       const url = new URL("{{ route('ads_manager.cpp') }}", window.location.origin);
       url.searchParams.set('start', s);
       url.searchParams.set('end',   e);
-      url.searchParams.set('ui_page', getSelectedPage());
+      // Multi-select: ?pages=A,B,C (or omit for all)
+      const sel = getSelectedPages();
+      if (sel.length > 0) {
+        url.searchParams.set('pages', sel.join(','));
+      }
       window.location.assign(url.toString());
     }
 
@@ -270,19 +338,32 @@
     }
 
     // --- Render tables ---
-    function renderTables(filteredDates, pageFilter) {
+    // selectedPages: [] = all, [one] = single-page layout, [many] = multi w/ TOTAL.
+    function renderTables(filteredDates, selectedPages) {
       const itemFilter = getSelectedItemName(); // '' = all
       const titleStart = filteredDates[0];
       const titleEnd   = filteredDates[filteredDates.length - 1];
+      const pageSet    = new Set(selectedPages);
+      const isFiltered = selectedPages.length > 0;
+      const isSinglePage = selectedPages.length === 1;
 
-      if (pageFilter === 'all') {
+      // SINGLE-PAGE layout when exactly one page is selected (legacy behavior).
+      if (isSinglePage) {
+        renderSinglePage(filteredDates, selectedPages[0]);
+        return;
+      }
+
+      // MULTI-PAGE layout (all-pages or 2+ selected). Same chrome as legacy
+      // 'all' branch; just filtered when pageSet non-empty.
+      {
         singlePageLayout.classList.add('hidden');
         multiPageTables.classList.remove('hidden');
 
         const itemLabel = itemFilter ? ` · ${itemFilter}` : '';
+        const pageLabel = isFiltered ? ` · ${selectedPages.length} page${selectedPages.length>1?'s':''}` : '';
         const title = (titleStart !== titleEnd)
-          ? `SUMMARY OF ADS - ${fmtISO(titleStart)} to ${fmtISO(titleEnd)}${itemLabel}`
-          : `SUMMARY OF ADS - ${fmtISO(titleStart)}${itemLabel}`;
+          ? `SUMMARY OF ADS - ${fmtISO(titleStart)} to ${fmtISO(titleEnd)}${itemLabel}${pageLabel}`
+          : `SUMMARY OF ADS - ${fmtISO(titleStart)}${itemLabel}${pageLabel}`;
 
         // 1) Summary by Page — EXCLUDE pages with total spend == 0
         let summaryHtml = `
@@ -306,7 +387,17 @@
             <tbody>
         `;
 
+        // Running totals across all rendered rows (for the TOTAL footer when
+        // multi-select is active). Same numerator/denominator structure as the
+        // per-row math so the TOTAL CPP/CPI/CPM/TCPR are correct.
+        let totalSpent = 0, totalOrders = 0, totalWImps = 0, totalWCPI = 0, totalTcprFail = 0;
+        let pagesShown = 0;
+        const totalItemArrays = [];
+
         Object.entries(rawData).forEach(([page, data]) => {
+          // Multi-select filter: only render pages in the selected set.
+          if (isFiltered && !pageSet.has(page)) return;
+
           // If item filter active, skip pages that never have that item in filtered dates
           if (itemFilter !== '') {
             const hasItem = filteredDates.some(d => ((data[d] || {}).item_names || []).includes(itemFilter));
@@ -346,8 +437,38 @@
                 <td class="border px-2 py-1 whitespace-pre-line">${pageItemContent}</td>
               </tr>
             `;
+
+            totalSpent    += sumSpent;
+            totalOrders   += sumOrders;
+            totalWImps    += wImps;
+            totalWCPI     += wCPI;
+            totalTcprFail += tcprFail;
+            pagesShown++;
+            totalItemArrays.push(...pageItemArrays);
           }
         });
+
+        // TOTAL footer row — only shown when multi-select is active (>= 2 pages).
+        // For all-pages mode + single-page mode we keep the legacy layout (no total).
+        if (isFiltered && pagesShown >= 2) {
+          const tCpp  = totalOrders > 0 ? totalSpent / totalOrders : null;
+          const tCpi  = totalWCPI  > 0  ? totalSpent / totalWCPI   : null;
+          const tCpm  = totalWImps > 0  ? totalSpent / totalWImps  : null;
+          const tTcpr = totalOrders > 0 ? (totalTcprFail / totalOrders) : null;
+          const totalItems = prioritizedItems(totalItemArrays).slice(0, 8).join('\n') || '—';
+          summaryHtml += `
+            <tr class="bg-blue-50 font-bold border-t-2 border-blue-300">
+              <td class="border px-2 py-1">TOTAL (${pagesShown} pages)</td>
+              <td class="border px-2 py-1">₱${totalSpent.toFixed(2)}</td>
+              <td class="border px-2 py-1">${totalOrders}</td>
+              <td class="border px-2 py-1">${tCpp != null ? `₱${tCpp.toFixed(2)}` : '—'}</td>
+              <td class="border px-2 py-1">${tCpi != null ? `₱${tCpi.toFixed(2)}` : '—'}</td>
+              <td class="border px-2 py-1">${tCpm != null ? `₱${tCpm.toFixed(2)}` : '—'}</td>
+              <td class="border px-2 py-1">${tTcpr != null ? tcprBadge(tTcpr * 100) : '—'}</td>
+              <td class="border px-2 py-1 whitespace-pre-line">${totalItems}</td>
+            </tr>
+          `;
+        }
 
         summaryHtml += `</tbody></table>`;
 
@@ -370,17 +491,20 @@
         `;
 
         filteredDates.forEach(date => {
-          // If item filter active, skip dates where no page has that item
+          // If item filter active, skip dates where no page has that item (within selected pages)
           if (itemFilter !== '') {
-            const anyHas = Object.values(rawData).some(data =>
-              ((data[date] || {}).item_names || []).includes(itemFilter)
-            );
+            const anyHas = Object.entries(rawData).some(([page, data]) => {
+              if (isFiltered && !pageSet.has(page)) return false;
+              return ((data[date] || {}).item_names || []).includes(itemFilter);
+            });
             if (!anyHas) return;
           }
 
           let sumSpent=0, sumOrders=0, wImps=0, wCPI=0, tcprFail=0;
 
-          Object.entries(rawData).forEach(([, data]) => {
+          Object.entries(rawData).forEach(([page, data]) => {
+            // Multi-select filter
+            if (isFiltered && !pageSet.has(page)) return;
             // If item filter active, only sum pages that have the item on this date
             if (itemFilter !== '' && !((data[date] || {}).item_names || []).includes(itemFilter)) return;
             const r = data[date] || {};
@@ -413,16 +537,29 @@
 
         dateHtml += `</tbody></table>`;
 
-        // Render both tables in the same container
-        tableRight.innerHTML = summaryHtml + dateHtml;
+        // Multi-page / all-pages render — fills #multiPageTables (main column).
+        // Also force-hide #singlePageLayout (its `lg:flex` class would otherwise
+        // override our .hidden on desktop, leaving a stale chart panel visible).
+        singlePageLayout.style.display = 'none';
+        multiPageTables.style.display  = 'block';
+        multiPageTables.innerHTML = summaryHtml + dateHtml;
+        tableRight.innerHTML = ''; // clear stale legacy content
+      }
+    }
 
-      } else {
-        multiPageTables.classList.add('hidden');
-        singlePageLayout.classList.remove('hidden');
+    // Single-page layout (1 page selected) — legacy behavior.
+    function renderSinglePage(filteredDates, pageFilter) {
+      const titleStart = filteredDates[0];
+      const titleEnd   = filteredDates[filteredDates.length - 1];
+      // Reset inline display set by multi-page branch (back to CSS classes).
+      multiPageTables.style.display  = '';
+      singlePageLayout.style.display = '';
+      multiPageTables.classList.add('hidden');
+      singlePageLayout.classList.remove('hidden');
 
-        const data = rawData[pageFilter] || {};
+      const data = rawData[pageFilter] || {};
 
-        let html = `
+      let html = `
           <div class="flex justify-between items-center mb-2">
             <h2 class="font-bold text-lg">${pageFilter} – Performance by Date (${fmtISO(titleStart)} to ${fmtISO(titleEnd)})</h2>
             <button onclick="copySinglePageTable()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">Copy Table</button>
@@ -503,7 +640,6 @@
 
         html += `</tbody></table>`;
         tableRight.innerHTML = html;
-      }
     }
 
     // Charts
@@ -536,12 +672,16 @@
     }
 
     function refreshAll() {
-      const page  = getSelectedPage();
+      const selectedPages = getSelectedPages(); // [] = all
+      const pageSet = new Set(selectedPages);
       const baseDates = filterDates();
 
-      const dates = (page === 'all')
-        ? datesWithSpendAllPages(baseDates)
-        : datesWithSpendForPage(baseDates, page);
+      // Date filtering respects selected pages (only show dates where at least
+      // one selected page has spend > 0). Single-page mode uses legacy helper
+      // for backwards-compat (no behavior change).
+      const dates = (selectedPages.length === 1)
+        ? datesWithSpendForPage(baseDates, selectedPages[0])
+        : datesWithSpendFiltered(baseDates, pageSet);
 
       // Repopulate item dropdown based on current date range
       populateItemDropdown(dates);
@@ -549,20 +689,30 @@
       if (!dates.length) {
         if (cppChart) cppChart.destroy();
         if (cpmChart) cpmChart.destroy();
-        singlePageLayout.classList.add('hidden');
-        multiPageTables.classList.remove('hidden');
-        tableRight.innerHTML = `
+        singlePageLayout.style.display = 'none';
+        multiPageTables.style.display  = 'block';
+        multiPageTables.innerHTML = `
           <div class="p-4 border rounded bg-yellow-50 text-yellow-800">
-            No data with ad spend &gt; 0 for the selected dates.
+            No data with ad spend &gt; 0 for the selected dates / pages.
           </div>`;
         return;
       }
 
+      // Charts only render meaningfully sa single-page mode. For multi-select
+      // or all-pages mode, the matrix table already conveys per-date metrics.
       let cppData = [], cpmData = [];
-      if (page === 'all') {
+      if (selectedPages.length === 1) {
+        const sel = rawData[selectedPages[0]] || {};
+        cppData = dates.map(d => sel[d]?.cpp ?? null);
+        cpmData = dates.map(d => sel[d]?.cpm ?? null);
+        renderCPPChart(dates, cppData);
+        renderCPMChart(dates, cpmData);
+      } else {
+        // Aggregate (avg) across selected pages for chart trend lines.
         dates.forEach(date => {
           let sumCpp = 0, cntCpp = 0, sumCpm = 0, cntCpm = 0;
-          Object.values(rawData).forEach(d => {
+          Object.entries(rawData).forEach(([page, d]) => {
+            if (pageSet.size > 0 && !pageSet.has(page)) return;
             const r = d[date];
             if (r && r.spent && r.cpp != null) { sumCpp += r.cpp; cntCpp++; }
             if (r && r.spent && r.cpm != null) { sumCpm += r.cpm; cntCpm++; }
@@ -570,15 +720,10 @@
           cppData.push(cntCpp ? sumCpp / cntCpp : null);
           cpmData.push(cntCpm ? sumCpm / cntCpm : null);
         });
-      } else {
-        const sel = rawData[page] || {};
-        cppData = dates.map(d => sel[d]?.cpp ?? null);
-        cpmData = dates.map(d => sel[d]?.cpm ?? null);
+        // No charts in multi-page mode (singlePageLayout hidden) — skip render
       }
 
-      renderCPPChart(dates, cppData);
-      renderCPMChart(dates, cpmData);
-      renderTables(dates, page);
+      renderTables(dates, selectedPages);
     }
 
     function copySummaryOfAds() {
@@ -668,9 +813,15 @@
         .catch(err => console.error('Copy failed:', err));
     }
 
-    // ✅ Dropdown behavior: click shows ALL, typing filters only
+    // ✅ Multi-select dropdown: checkbox-based, Apply / Clear buttons.
+    // "All Pages" checkbox is a synthetic toggle: checking it unchecks all
+    // page items (no filter). Checking any page unchecks "All Pages".
     (function initPageDropdown(){
       if (!pageDd) return;
+      const cbAll      = document.getElementById('page-cb-all');
+      const btnApply   = document.getElementById('pageDdBtnApply');
+      const btnClear   = document.getElementById('pageDdBtnClear');
+      const countLabel = document.getElementById('pageDdCount');
 
       function norm(s) {
         return (s || '')
@@ -684,61 +835,90 @@
       function open() {
         pageDd.classList.add('open');
         pageDdBtn.setAttribute('aria-expanded', 'true');
-
-        // click open -> show ALL
         pageDdSearch.value = '';
         filter('');
-
+        updateCountLabel();
         setTimeout(() => pageDdSearch.focus(), 0);
       }
-
       function close() {
         pageDd.classList.remove('open');
         pageDdBtn.setAttribute('aria-expanded', 'false');
       }
-
       function filter(q) {
         const query = norm(q);
         let shown = 0;
-
         const items = Array.from(pageDdList.querySelectorAll('.page-dd-item'));
         items.forEach(item => {
-          const text = norm(item.textContent);
+          // Never hide "All Pages" via search (it's a control row).
+          if (item.dataset.value === 'all') { item.style.display = 'flex'; return; }
+          const text = norm(item.querySelector('.page-dd-item-label')?.textContent || '');
           const isMatch = query === '' ? true : text.includes(query);
-          item.style.display = isMatch ? 'block' : 'none';
+          item.style.display = isMatch ? 'flex' : 'none';
           if (isMatch) shown++;
         });
-
         pageDdEmpty?.classList.toggle('hidden', shown > 0);
       }
 
-      function setSelected(val, labelText) {
-        pageHidden.value = val;
-        pageDdLabel.textContent = (val === 'all' ? 'All Pages' : labelText);
+      // Currently checked PAGE items (excludes "All Pages" toggle).
+      function checkedPages() {
+        return Array.from(pageDdList.querySelectorAll('.page-dd-item'))
+          .filter(i => i.dataset.value !== 'all')
+          .filter(i => i.querySelector('input[type="checkbox"]')?.checked)
+          .map(i => i.dataset.value);
+      }
 
-        pageDdList.querySelectorAll('.page-dd-item').forEach(i => i.classList.remove('selected'));
-        const selectedEl = Array.from(pageDdList.querySelectorAll('.page-dd-item'))
-          .find(i => (i.dataset.value ?? '') === val);
-        if (selectedEl) selectedEl.classList.add('selected');
+      function updateCountLabel() {
+        const sel = checkedPages();
+        if (sel.length === 0)      countLabel.textContent = 'All pages will be shown (no filter active)';
+        else if (sel.length === 1) countLabel.textContent = `1 page selected · ${sel[0]}`;
+        else                       countLabel.textContent = `${sel.length} pages selected`;
+      }
 
+      function applyAndClose() {
+        const sel = checkedPages();
+        const newVal = sel.length === 0 ? 'all' : sel.join(',');
+        const currentVal = pageHidden.value;
+        pageHidden.value = newVal;
+        pageDdLabel.textContent = sel.length === 0
+          ? 'All Pages'
+          : (sel.length === 1 ? sel[0] : `${sel.length} pages selected`);
         close();
-
-        // ✅ Do NOT navigate server; just refresh client-side
-        refreshAll();
+        // Persist via URL (?pages=A,B,C) → full reload so the link is shareable.
+        if (newVal !== currentVal) navigateWithBothDates();
       }
 
       pageDdBtn.addEventListener('click', (e) => {
         e.preventDefault();
-        if (pageDd.classList.contains('open')) close();
-        else open();
+        if (pageDd.classList.contains('open')) close(); else open();
       });
-
       pageDdSearch.addEventListener('input', () => filter(pageDdSearch.value));
 
+      // Clicking anywhere in an item toggles its checkbox.
       pageDdList.addEventListener('click', (e) => {
         const item = e.target.closest('.page-dd-item');
         if (!item) return;
-        setSelected(item.dataset.value ?? 'all', item.textContent.trim());
+        const cb = item.querySelector('input[type="checkbox"]');
+        if (!cb) return;
+        if (e.target !== cb) cb.checked = !cb.checked;
+
+        if (item.dataset.value === 'all') {
+          if (cb.checked) {
+            pageDdList.querySelectorAll('.page-dd-item input[type="checkbox"]').forEach(c => {
+              if (c !== cb) c.checked = false;
+            });
+          }
+        } else {
+          if (cb.checked && cbAll) cbAll.checked = false;
+          if (!cb.checked && checkedPages().length === 0 && cbAll) cbAll.checked = true;
+        }
+        updateCountLabel();
+      });
+
+      btnApply?.addEventListener('click', applyAndClose);
+      btnClear?.addEventListener('click', () => {
+        pageDdList.querySelectorAll('.page-dd-item input[type="checkbox"]').forEach(c => c.checked = false);
+        if (cbAll) cbAll.checked = true;
+        updateCountLabel();
       });
 
       // close on outside click
@@ -747,11 +927,12 @@
         if (pageDd.contains(e.target)) return;
         close();
       });
-
       // close on ESC
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && pageDd.classList.contains('open')) close();
       });
+
+      updateCountLabel();
     })();
 
     // ✅ Item Name Dropdown behavior

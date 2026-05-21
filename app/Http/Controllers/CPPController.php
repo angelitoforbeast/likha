@@ -65,11 +65,22 @@ class CPPController extends Controller
 
         [$matrix, $dateRange] = $this->buildData($start, $end);
 
+        // Multi-page selection (?pages=A,B,C — comma-separated). Empty/missing
+        // means "all". Backwards-compat: ?ui_page= still works as single-page
+        // shortcut. Validation pre-fills the dropdown's selected state without
+        // affecting backend filtering — the frontend handles row hiding.
+        $rawPages = trim((string) $request->query('pages', ''));
+        $selectedPages = [];
+        if ($rawPages !== '' && strtolower($rawPages) !== 'all') {
+            $selectedPages = array_values(array_filter(array_map('trim', explode(',', $rawPages)), fn($p) => $p !== ''));
+        }
+
         return view('ads_manager.cpp', [
-            'matrix'   => $matrix,
-            'allDates' => $dateRange, // full chosen range
-            'start'    => $start,
-            'end'      => $end,
+            'matrix'         => $matrix,
+            'allDates'       => $dateRange, // full chosen range
+            'start'          => $start,
+            'end'            => $end,
+            'selectedPages'  => $selectedPages, // pre-fill multi-select checkboxes
         ]);
     }
 
