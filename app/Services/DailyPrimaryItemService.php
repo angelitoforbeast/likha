@@ -355,29 +355,67 @@ class DailyPrimaryItemService
             return 0;
         }
 
-        // Canonical item key normalization matches sa daily_page_primary_item
-        // (LOWER + strip space/dash/underscore from trimmed item_name).
-        // Page key match = lower(trim(page_name)).
+        // Alias-aware canonical key resolution. Sa hosts with item_type_mappings
+        // (e.g., incepxion), pis.item_name (raw variant like "ALAGAPAMILYA-II")
+        // gets canonicalized to its alias key (e.g., "1alagangpamilya") na
+        // matches daily_page_primary_item.primary_item_key. Sa hosts without
+        // mappings (likha), falls back to raw normalized key.
         $driver = DB::getDriverName();
-        if ($driver === 'pgsql') {
-            $itemKeyExpr = "LOWER(REGEXP_REPLACE(BTRIM(pis.item_name), '[ _-]+', '', 'g'))";
-            $pageKeyExpr = "LOWER(BTRIM(pis.page_name))";
-        } else {
-            $itemKeyExpr = "LOWER(REPLACE(REPLACE(REPLACE(TRIM(pis.item_name),' ',''),'-',''),'_',''))";
-            $pageKeyExpr = "LOWER(TRIM(pis.page_name))";
-        }
+        $hasAliases = Schema::hasTable('item_type_mappings');
 
-        $sql = "
-            UPDATE page_item_settings pis
-            INNER JOIN daily_page_primary_item dpi
-                ON dpi.ts_date = pis.effective_date
-               AND dpi.page_key = {$pageKeyExpr}
-               AND dpi.primary_item_key = {$itemKeyExpr}
-            SET pis.mode_cod_int = ROUND(dpi.primary_mode_cod)
-            WHERE pis.mode_cod_int IS NULL
-              AND dpi.primary_mode_cod IS NOT NULL
-              AND {$dateFilter}
-        ";
+        if ($driver === 'pgsql') {
+            $rawNorm = "LOWER(REGEXP_REPLACE(BTRIM(pis.item_name), '[ _-]+', '', 'g'))";
+            $pageKeyExpr = "LOWER(BTRIM(pis.page_name))";
+
+            $itemKeyExpr = $hasAliases
+                ? "COALESCE(
+                       (SELECT LOWER(REGEXP_REPLACE(BTRIM(itm.item_type), '[ _-]+', '', 'g'))
+                        FROM item_type_mappings itm
+                        WHERE LOWER(REGEXP_REPLACE(BTRIM(itm.item_name), '[ _-]+', '', 'g'))
+                            = {$rawNorm}
+                        LIMIT 1),
+                       {$rawNorm}
+                   )"
+                : $rawNorm;
+
+            $sql = "
+                UPDATE page_item_settings AS pis
+                SET mode_cod_int = ROUND(dpi.primary_mode_cod)
+                FROM daily_page_primary_item AS dpi
+                WHERE dpi.ts_date = pis.effective_date
+                  AND dpi.page_key = {$pageKeyExpr}
+                  AND dpi.primary_item_key = {$itemKeyExpr}
+                  AND pis.mode_cod_int IS NULL
+                  AND dpi.primary_mode_cod IS NOT NULL
+                  AND {$dateFilter}
+            ";
+        } else {
+            $rawNorm = "LOWER(REPLACE(REPLACE(REPLACE(TRIM(pis.item_name),' ',''),'-',''),'_',''))";
+            $pageKeyExpr = "LOWER(TRIM(pis.page_name))";
+
+            $itemKeyExpr = $hasAliases
+                ? "COALESCE(
+                       (SELECT LOWER(REPLACE(REPLACE(REPLACE(TRIM(itm.item_type),' ',''),'-',''),'_',''))
+                        FROM item_type_mappings itm
+                        WHERE LOWER(REPLACE(REPLACE(REPLACE(TRIM(itm.item_name),' ',''),'-',''),'_',''))
+                            = {$rawNorm}
+                        LIMIT 1),
+                       {$rawNorm}
+                   )"
+                : $rawNorm;
+
+            $sql = "
+                UPDATE page_item_settings pis
+                INNER JOIN daily_page_primary_item dpi
+                    ON dpi.ts_date = pis.effective_date
+                   AND dpi.page_key = {$pageKeyExpr}
+                   AND dpi.primary_item_key = {$itemKeyExpr}
+                SET pis.mode_cod_int = ROUND(dpi.primary_mode_cod)
+                WHERE pis.mode_cod_int IS NULL
+                  AND dpi.primary_mode_cod IS NOT NULL
+                  AND {$dateFilter}
+            ";
+        }
 
         try {
             return (int) DB::affectingStatement($sql);
