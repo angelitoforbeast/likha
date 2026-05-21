@@ -485,7 +485,7 @@
         {{-- ━━━ Section 1: RTS% ━━━━━━━━━━━━━━━━━━━━━━━━━━ --}}
         <div class="px-5 py-4 border-t border-slate-200" style="background:#fefce8;">
           <div class="text-[11px] font-bold text-amber-800 uppercase tracking-wide mb-2">📊 RTS%</div>
-          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">RTS% <span class="text-slate-400 font-normal normal-case">(per page, item & price reference)</span></label>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">RTS% <span class="text-slate-400 font-normal normal-case">(effective for chosen period)</span></label>
           <div class="flex items-center gap-2">
             <input type="number" step="0.01" min="0" max="100"
                    x-model="edit.rts_pct"
@@ -493,17 +493,24 @@
                    placeholder="e.g. 50">
             <span class="text-slate-500 text-sm">%</span>
           </div>
+          <template x-if="edit.rts_inherited && edit.rts_eff_date">
+            <div class="text-[11px] text-amber-600 mt-1">⚠ Current value inherited from <span class="font-mono" x-text="edit.rts_eff_date"></span>.</div>
+          </template>
 
           <label class="block text-xs font-bold text-slate-700 uppercase mb-1 mt-3">RTS Comment <span class="text-red-600">*</span></label>
           <input type="text" x-model="edit.comment" maxlength="500"
                  class="w-full border border-slate-300 rounded px-3 py-2 text-sm"
                  placeholder="why is this value different?">
 
-          <div class="text-[11px] text-slate-500 mt-2">
-            Scope: <strong x-text="edit.page_name"></strong> · <span x-text="edit.item_name"></span>
-            <template x-if="edit.anchor_first_date">
-              <span class="text-violet-600 font-semibold"> · anchored since <span x-text="edit.anchor_first_date"></span></span>
-            </template>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1 mt-3">Effective from</label>
+          <div class="flex items-center gap-2 flex-wrap">
+            <input type="date" x-model="edit.rts_effective_date"
+                   class="border border-slate-300 rounded px-2 py-1 text-sm font-mono">
+            <button type="button" class="bg-indigo-100 text-indigo-800 rounded px-2 py-1 text-[11px] font-bold disabled:opacity-50"
+                    @click="edit.rts_effective_date = edit.anchor_first_date || edit.date"
+                    :disabled="!edit.anchor_first_date">↶ anchor</button>
+            <button type="button" class="bg-slate-100 text-slate-600 rounded px-2 py-1 text-[11px] font-bold"
+                    @click="edit.rts_effective_date = edit.date">↶ this date</button>
           </div>
 
           <template x-if="edit.rtsError">
@@ -527,12 +534,19 @@
           <input type="text" x-model="edit.promo" maxlength="255"
                  class="w-full border border-slate-300 rounded px-3 py-2 text-sm font-mono"
                  placeholder='e.g. "9.9 Sale", "PAYDAY", or "NONE"'>
+          <template x-if="edit.promo_inherited && edit.rts_eff_date">
+            <div class="text-[11px] text-amber-600 mt-1">⚠ Current value inherited from <span class="font-mono" x-text="edit.rts_eff_date"></span>.</div>
+          </template>
 
-          <div class="text-[11px] text-slate-500 mt-2">
-            Scope: <strong x-text="edit.page_name"></strong> · <span x-text="edit.item_name"></span>
-            <template x-if="edit.anchor_first_date">
-              <span class="text-violet-600 font-semibold"> · anchored since <span x-text="edit.anchor_first_date"></span></span>
-            </template>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1 mt-3">Effective from</label>
+          <div class="flex items-center gap-2 flex-wrap">
+            <input type="date" x-model="edit.promo_effective_date"
+                   class="border border-slate-300 rounded px-2 py-1 text-sm font-mono">
+            <button type="button" class="bg-indigo-100 text-indigo-800 rounded px-2 py-1 text-[11px] font-bold disabled:opacity-50"
+                    @click="edit.promo_effective_date = edit.anchor_first_date || edit.date"
+                    :disabled="!edit.anchor_first_date">↶ anchor</button>
+            <button type="button" class="bg-slate-100 text-slate-600 rounded px-2 py-1 text-[11px] font-bold"
+                    @click="edit.promo_effective_date = edit.date">↶ this date</button>
           </div>
 
           <template x-if="edit.promoError">
@@ -635,8 +649,8 @@
         page_key:'', page_label:'', page_name:'', date:'', item_name:'',
         orders:0, mode_cod:null,
         anchor_first_date:null, cogs_last_date:null,
-        rts_pct:'', comment:'',
-        promo:'',
+        rts_pct:'', rts_eff_date:null, rts_inherited:false, rts_effective_date:'', comment:'',
+        promo:'', promo_inherited:false, promo_effective_date:'',
         unit_cost:'', unit_cost_ceo:'', cogs_effective_date:'',
       },
 
@@ -751,12 +765,18 @@
           anchor_first_date: anchorStart,
           cogs_last_date:    cogsLastDate,
 
-          // RTS section — eff_date auto-anchored sa backend (no user picker)
+          // RTS section
           rts_pct:             cell.rts_pct !== null ? cell.rts_pct : '',
+          rts_eff_date:        cell.rts_eff_date,
+          rts_inherited:       !!cell.rts_inherited,
+          // Default = current settings row's date kung may existing, else cell date.
+          rts_effective_date:  cell.rts_eff_date || cell.date,
           comment:             '',
 
-          // Promo section — eff_date auto-anchored sa backend (no user picker)
+          // Promo section
           promo:                cell.promo || '',
+          promo_inherited:      !!cell.promo_inherited && !!cell.promo,
+          promo_effective_date: cell.rts_eff_date || cell.date,
 
           // COGS section
           unit_cost:            cell.unit_cost !== null ? cell.unit_cost : '',
@@ -780,11 +800,6 @@
         // Matrix cells expose price via mode_cod (set sa openEdit from cell payload).
         const cellPriceInt = (e.mode_cod != null && e.mode_cod > 0) ? Math.round(Number(e.mode_cod)) : null;
 
-        // Auto-anchor: effective_date = anchor_first_date (start ng price streak).
-        // apply_through = cell.date so cascade updates lahat ng intermediate
-        // rows sa scope; user's value reflects sa current view kahit may legacy rows.
-        const anchorEff = e.anchor_first_date || e.date;
-
         if (scope === 'rts') {
           const rts = parseFloat(e.rts_pct);
           if (isNaN(rts) || rts < 0 || rts > 100) { e.rtsError = 'RTS% must be 0–100.'; return; }
@@ -794,8 +809,8 @@
           fd.append('rts_pct',        rts);
           fd.append('comment',        cmt);
           fd.append('mode_cod_int',   cellPriceInt);
-          fd.append('effective_date', anchorEff);
-          if (anchorEff !== e.date) fd.append('apply_through', e.date);
+          fd.append('effective_date', e.rts_effective_date || e.date);
+          if ((e.rts_effective_date || e.date) !== e.date) fd.append('apply_through', e.date);
           e.savingRts = true;
         } else if (scope === 'promo') {
           const promo = (e.promo || '').trim();
@@ -803,8 +818,8 @@
           if (cellPriceInt === null) { e.promoError = 'No price detected for this cell. Cannot save.'; return; }
           fd.append('promo',          promo);
           fd.append('mode_cod_int',   cellPriceInt);
-          fd.append('effective_date', anchorEff);
-          if (anchorEff !== e.date) fd.append('apply_through', e.date);
+          fd.append('effective_date', e.promo_effective_date || e.date);
+          if ((e.promo_effective_date || e.date) !== e.date) fd.append('apply_through', e.date);
           e.savingPromo = true;
         } else if (scope === 'cogs') {
           const cost = parseFloat(e.unit_cost);
@@ -832,7 +847,7 @@
             this._setScopeError(scope, j.message || (j.errors ? Object.values(j.errors).flat().join('\n') : ('HTTP '+r.status)));
             return;
           }
-          this._setScopeSuccess(scope, '✓ Saved (anchored: ' + fd.get('effective_date') + ')');
+          this._setScopeSuccess(scope, '✓ Saved (effective ' + fd.get('effective_date') + ')');
           setTimeout(() => { this._setScopeSuccess(scope, null); }, 4000);
         } catch (ex) {
           console.error(ex);
