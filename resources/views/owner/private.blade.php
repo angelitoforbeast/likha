@@ -689,6 +689,45 @@
                     </template>
                   </template>
 
+                  {{-- NP/O (3D) = projected_profit_last_3d ÷ orders_last_3d --}}
+                  <template x-if="col.id==='np_per_order_3d'">
+                    <template x-if="row.projected_profit_last_3d !== null && row.orders_last_3d > 0">
+                      <span style="font-weight:600;"
+                            :style="'color:'+pbColor(row.projected_profit_last_3d / row.orders_last_3d)"
+                            x-text="md(row.projected_profit_last_3d / row.orders_last_3d)"
+                            :title="'3D net profit ₱'+Number(row.projected_profit_last_3d||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(row.orders_last_3d||0)+' (last 3 days)'"></span>
+                    </template>
+                    <template x-if="!(row.projected_profit_last_3d !== null && row.orders_last_3d > 0)">
+                      <span style="color:#cbd5e1;" title="Missing 3D profit or orders">—</span>
+                    </template>
+                  </template>
+
+                  {{-- NP/O (7D) = projected_profit_last_7d ÷ orders_last_7d --}}
+                  <template x-if="col.id==='np_per_order_7d'">
+                    <template x-if="row.projected_profit_last_7d !== null && row.orders_last_7d > 0">
+                      <span style="font-weight:600;"
+                            :style="'color:'+pbColor(row.projected_profit_last_7d / row.orders_last_7d)"
+                            x-text="md(row.projected_profit_last_7d / row.orders_last_7d)"
+                            :title="'7D net profit ₱'+Number(row.projected_profit_last_7d||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(row.orders_last_7d||0)+' (last 7 days)'"></span>
+                    </template>
+                    <template x-if="!(row.projected_profit_last_7d !== null && row.orders_last_7d > 0)">
+                      <span style="color:#cbd5e1;" title="Missing 7D profit or orders">—</span>
+                    </template>
+                  </template>
+
+                  {{-- NP/O (1M, entire selected range) = projected_profit ÷ orders --}}
+                  <template x-if="col.id==='np_per_order_1m'">
+                    <template x-if="row.projected_profit !== null && row.orders > 0">
+                      <span style="font-weight:600;"
+                            :style="'color:'+pbColor(row.projected_profit / row.orders)"
+                            x-text="md(row.projected_profit / row.orders)"
+                            :title="'Range net profit ₱'+Number(row.projected_profit||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(row.orders||0)+' (entire selected range)'"></span>
+                    </template>
+                    <template x-if="!(row.projected_profit !== null && row.orders > 0)">
+                      <span style="color:#cbd5e1;" title="Missing range profit or orders">—</span>
+                    </template>
+                  </template>
+
                   <!-- proj_pct = projected_profit ÷ gross_sales × 100 (net margin) -->
                   <template x-if="col.id==='proj_pct'">
                     <span>
@@ -987,6 +1026,18 @@
                     <span style="color:#111;font-weight:700;" x-text="tot().np_per_order != null ? md(tot().np_per_order) : '—'"
                           :title="tot().projected_profit_last_day != null ? '1D net profit ₱'+Number(tot().projected_profit_last_day||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(tot().orders_last_day||0) : ''"></span>
                   </template>
+                  <template x-if="col.id==='np_per_order_3d'">
+                    <span style="font-weight:700;color:#111;" x-text="tot().np_per_order_3d != null ? md(tot().np_per_order_3d) : '—'"
+                          :title="tot().projected_profit_last_3d != null ? '3D net profit ₱'+Number(tot().projected_profit_last_3d||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(tot().orders_last_3d||0) : ''"></span>
+                  </template>
+                  <template x-if="col.id==='np_per_order_7d'">
+                    <span style="font-weight:700;color:#111;" x-text="tot().np_per_order_7d != null ? md(tot().np_per_order_7d) : '—'"
+                          :title="tot().projected_profit_last_7d != null ? '7D net profit ₱'+Number(tot().projected_profit_last_7d||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(tot().orders_last_7d||0) : ''"></span>
+                  </template>
+                  <template x-if="col.id==='np_per_order_1m'">
+                    <span style="font-weight:700;color:#111;" x-text="tot().np_per_order_1m != null ? md(tot().np_per_order_1m) : '—'"
+                          :title="tot().projected_profit != null ? 'Range net profit ₱'+Number(tot().projected_profit||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(tot().orders||0)+' (entire range)' : ''"></span>
+                  </template>
                   <template x-if="col.id==='proj_pct'">
                     <span style="font-weight:700;color:#111;"
                           x-text="tot().proj_pct!=null ? tot().proj_pct.toFixed(1)+'%' : '—'"
@@ -1016,7 +1067,7 @@
                   <template x-if="col.id==='proj_prof_7d'">
                     <span style="font-weight:700;" x-text="md(tot().projected_profit_last_7d)"></span>
                   </template>
-                  <template x-if="!['adspent','orders','orders_1d','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_3d','proj_prof_7d'].includes(col.id)">
+                  <template x-if="!['adspent','orders','orders_1d','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','np_per_order','np_per_order_3d','np_per_order_7d','np_per_order_1m','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_3d','proj_prof_7d'].includes(col.id)">
                     <span></span>
                   </template>
                 </td>
@@ -1351,7 +1402,10 @@
           { id:'breakeven_cpp', label:this._breakevenLabel(), sort:'breakeven_cpp_computed', align:'center', minw:115 },
           { id:'proj_profit',label:'Prof.Profit',sort:'projected_profit',     align:'center', minw:95  },
           { id:'per_order',  label:'/Order',     sort:'proj_profit_per_order',align:'center', minw:75  },
-          { id:'np_per_order', label:'NP/O',     sort:'np_per_order_computed', align:'center', minw:75  },
+          { id:'np_per_order',    label:'NP/O',     sort:'np_per_order_computed',    align:'center', minw:75  },
+          { id:'np_per_order_3d', label:'NP/O(3D)', sort:'np_per_order_3d_computed', align:'center', minw:80  },
+          { id:'np_per_order_7d', label:'NP/O(7D)', sort:'np_per_order_7d_computed', align:'center', minw:80  },
+          { id:'np_per_order_1m', label:'NP/O(1M)', sort:'np_per_order_1m_computed', align:'center', minw:80  },
           { id:'proj_pct',     label:'Prof.%(1M)',     sort:'proj_pct_computed',           align:'center', minw:75  },
           { id:'proj_pct_1d',  label:'Prof.%(1D)',     sort:'proj_pct_last_day',           align:'center', minw:75  },
           { id:'proj_pct_3d',  label:'Prof.%(3D)',     sort:'proj_pct_last_3d',            align:'center', minw:75  },
@@ -1644,12 +1698,22 @@
           // existing null handling sa sort below).
           if (col === 'tcpr_computed')          return self.tcprFor(row);
           if (col === 'breakeven_cpp_computed') return self.breakevenCppFor(row);
-          // NP/O = projected_profit_last_day ÷ orders_last_day (1D snapshot).
+          // NP/O variants — ratio per row using matching profit + orders window.
           if (col === 'np_per_order_computed') {
-            if (row.projected_profit_last_day !== null && row.orders_last_day > 0) {
-              return row.projected_profit_last_day / row.orders_last_day;
-            }
-            return null;
+            return (row.projected_profit_last_day !== null && row.orders_last_day > 0)
+              ? (row.projected_profit_last_day / row.orders_last_day) : null;
+          }
+          if (col === 'np_per_order_3d_computed') {
+            return (row.projected_profit_last_3d !== null && row.orders_last_3d > 0)
+              ? (row.projected_profit_last_3d / row.orders_last_3d) : null;
+          }
+          if (col === 'np_per_order_7d_computed') {
+            return (row.projected_profit_last_7d !== null && row.orders_last_7d > 0)
+              ? (row.projected_profit_last_7d / row.orders_last_7d) : null;
+          }
+          if (col === 'np_per_order_1m_computed') {
+            return (row.projected_profit !== null && row.orders > 0)
+              ? (row.projected_profit / row.orders) : null;
           }
           return row[col];
         };
@@ -1881,7 +1945,7 @@
 
       // ── Totals ────────────────────────────────────────────────────────────
       tot() {
-        const t = { adspent:0, orders:0, orders_last_day:0, proceed_orders:0, gross_sales:0, projected_profit:null, cpp:null, proceed_cpp:null, proj_profit_per_order:null, proj_pct:null,
+        const t = { adspent:0, orders:0, orders_last_day:0, orders_last_3d:0, orders_last_7d:0, proceed_orders:0, gross_sales:0, projected_profit:null, cpp:null, proceed_cpp:null, proj_profit_per_order:null, proj_pct:null,
                     projected_profit_last_day:null, gross_sales_last_day:0, proj_pct_1d:null,
                     projected_profit_last_3d:null, gross_sales_last_3d:0, proj_pct_3d:null,
                     projected_profit_last_7d:null, gross_sales_last_7d:0, proj_pct_7d:null };
@@ -1890,6 +1954,8 @@
           t.adspent         += Number(r.adspent         ||0);
           t.orders          += Number(r.orders          ||0);
           t.orders_last_day += Number(r.orders_last_day ||0);
+          t.orders_last_3d  += Number(r.orders_last_3d  ||0);
+          t.orders_last_7d  += Number(r.orders_last_7d  ||0);
           t.proceed_orders  += Number(r.proceed_orders  ||0);
           if (r.gross_sales!=null){ t.gross_sales += Number(r.gross_sales); hasG=true; }
           if (r.projected_profit!=null){ t.projected_profit=(t.projected_profit||0)+r.projected_profit; hasP=true; }
@@ -1917,10 +1983,16 @@
                                     ? (t.projected_profit_last_3d/t.gross_sales_last_3d*100) : null;
         t.proj_pct_7d          = (t.projected_profit_last_7d!=null && t.gross_sales_last_7d>0)
                                     ? (t.projected_profit_last_7d/t.gross_sales_last_7d*100) : null;
-        // NP/O total = 1D projected net profit ÷ 1D orders across all rows.
+        // NP/O total = projected net profit ÷ orders across all rows.
         // Sum-of-ratios would skew small-orders rows; ratio-of-sums is correct.
         t.np_per_order        = (t.projected_profit_last_day != null && t.orders_last_day > 0)
                                     ? (t.projected_profit_last_day / t.orders_last_day) : null;
+        t.np_per_order_3d     = (t.projected_profit_last_3d != null && t.orders_last_3d > 0)
+                                    ? (t.projected_profit_last_3d / t.orders_last_3d) : null;
+        t.np_per_order_7d     = (t.projected_profit_last_7d != null && t.orders_last_7d > 0)
+                                    ? (t.projected_profit_last_7d / t.orders_last_7d) : null;
+        t.np_per_order_1m     = (t.projected_profit != null && t.orders > 0)
+                                    ? (t.projected_profit / t.orders) : null;
         return t;
       },
 
@@ -2049,8 +2121,14 @@
           case 'cpp':           return row.cpp;
           case 'pcpp':          return row.proceed_cpp;
           case 'per_order':     return row.proj_profit_per_order;
-          case 'np_per_order':  return (row.projected_profit_last_day != null && row.orders_last_day > 0)
-                                   ? (row.projected_profit_last_day / row.orders_last_day) : null;
+          case 'np_per_order':    return (row.projected_profit_last_day != null && row.orders_last_day > 0)
+                                     ? (row.projected_profit_last_day / row.orders_last_day) : null;
+          case 'np_per_order_3d': return (row.projected_profit_last_3d != null && row.orders_last_3d > 0)
+                                     ? (row.projected_profit_last_3d / row.orders_last_3d) : null;
+          case 'np_per_order_7d': return (row.projected_profit_last_7d != null && row.orders_last_7d > 0)
+                                     ? (row.projected_profit_last_7d / row.orders_last_7d) : null;
+          case 'np_per_order_1m': return (row.projected_profit != null && row.orders > 0)
+                                     ? (row.projected_profit / row.orders) : null;
           case 'adspent':       return row.adspent;
           case 'orders':        return row.orders;
           case 'orders_1d':     return row.orders_last_day;

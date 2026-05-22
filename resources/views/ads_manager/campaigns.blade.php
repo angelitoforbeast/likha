@@ -515,7 +515,9 @@
         // (the rule iteration falls through to the next rule).
         // Safe formula evaluator (mirrors the one sa private.blade.php).
         // Only same-table tokens supported here — no parent page context.
-        // Skips cross-table {{op:...}} refs by returning NaN.
+        // Skips cross-table [[op:...]] refs by returning NaN.
+        // (Comment uses square brackets kasi Blade also parses double-brace
+        // echos inside script comments — would trigger a PHP ParseError.)
         _evalFormulaExpr(expr, sameRow){
           if (!expr || !sameRow) return NaN;
           const tokens = [...expr.matchAll(/\[\[\s*([a-z0-9_:]+)\s*\]\]/gi)];
