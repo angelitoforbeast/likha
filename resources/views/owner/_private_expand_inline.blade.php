@@ -84,7 +84,14 @@
                 </template>
                 <template x-if="col.type==='name'">
                   <div>
-                    <div class="name" x-text="campRowName(c, 'campaigns')"></div>
+                    {{-- Clickable: opens creative preview modal (FB post + welcome msg). --}}
+                    <a href="#" @click.prevent="openCreativePreview('campaign', c.campaign_id, campRowName(c, 'campaigns'), row.page_name)"
+                       class="name"
+                       title="Click para makita creative preview (FB post + Messenger flow)"
+                       style="color:#1877f2;text-decoration:none;cursor:pointer;"
+                       onmouseover="this.style.textDecoration='underline';"
+                       onmouseout="this.style.textDecoration='none';"
+                       x-text="campRowName(c, 'campaigns')"></a>
                   </div>
                 </template>
                 <template x-if="col.type==='date'">
@@ -204,7 +211,13 @@
                                     x-text="aset.on ? 'Active' : 'Off'"></span>
                             </template>
                             <template x-if="col.type==='name'">
-                              <div class="name" x-text="campRowName(aset, 'adsets')"></div>
+                              <a href="#" @click.prevent="openCreativePreview('adset', aset.ad_set_id, campRowName(aset, 'adsets'), row.page_name)"
+                                 class="name"
+                                 title="Click para makita creative preview (FB post + Messenger flow)"
+                                 style="color:#1877f2;text-decoration:none;cursor:pointer;"
+                                 onmouseover="this.style.textDecoration='underline';"
+                                 onmouseout="this.style.textDecoration='none';"
+                                 x-text="campRowName(aset, 'adsets')"></a>
                             </template>
                             <template x-if="col.type==='date'">
                               <span>
@@ -308,7 +321,13 @@
                                         </template>
                                         <template x-if="col.type==='name'">
                                           <div>
-                                            <div class="name" x-text="campRowName(ad, 'ads')"></div>
+                                            <a href="#" @click.prevent="openCreativePreview('ad', ad.ad_id, campRowName(ad, 'ads'), row.page_name)"
+                                               class="name"
+                                               title="Click para makita creative preview (FB post + Messenger flow)"
+                                               style="color:#1877f2;text-decoration:none;cursor:pointer;"
+                                               onmouseover="this.style.textDecoration='underline';"
+                                               onmouseout="this.style.textDecoration='none';"
+                                               x-text="campRowName(ad, 'ads')"></a>
                                             <template x-if="ad.item_name">
                                               <div class="sub" x-text="ad.item_name"></div>
                                             </template>

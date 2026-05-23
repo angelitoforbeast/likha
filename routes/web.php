@@ -644,6 +644,11 @@ Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'ind
      Route::get('/ads_manager/campaigns/data', [AdsManagerCampaignsController::class, 'data'])
         ->name('ads_manager.campaigns.data');
 
+     // Creative preview popup (FB post embed + welcome msg / quick replies preview).
+     // Used by /owner/private expanded-campaigns panel.
+     Route::get('/ads_manager/creative-preview', [AdsManagerCampaignsController::class, 'creativePreview'])
+        ->name('ads_manager.creative-preview');
+
      // History — daily change log derived from spend transitions.
      Route::get('/ads_manager/campaigns/history',      [AdsManagerCampaignsController::class, 'history'])
         ->name('ads_manager.campaigns.history');

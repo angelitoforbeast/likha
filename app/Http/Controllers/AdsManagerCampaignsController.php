@@ -558,6 +558,145 @@ class AdsManagerCampaignsController extends Controller
         return response()->json(['ok' => true, 'events' => $events, 'by_day' => $byDay]);
     }
 
+    /**
+     * GET /ads_manager/creative-preview
+     *
+     * Returns creative content (body, headline, welcome_message, quick replies,
+     * ad_link) + page context for a single campaign/adset/ad. Used by the
+     * /owner/private expanded-campaigns popup para mag-preview ng FB post +
+     * Messenger conversation flow without leaving the page.
+     *
+     * Params:
+     *   - level: 'campaign' | 'adset' | 'ad'
+     *   - id:    campaign_id | ad_set_id | ad_id (string)
+     *
+     * Lookup strategy:
+     *   - level=ad:       try ad_campaign_creatives.ad_id first; fallback campaign_id
+     *   - level=adset:    join ads_manager_reports.ad_set_id → first matching ad_id
+     *                     → look up via ad_campaign_creatives (or campaign_id if walang ad-level row)
+     *   - level=campaign: ad_campaign_creatives.campaign_id (first match)
+     */
+    public function creativePreview(Request $request)
+    {
+        $level = strtolower(trim((string) $request->input('level', '')));
+        $id    = trim((string) $request->input('id', ''));
+
+        if (!in_array($level, ['campaign', 'adset', 'ad'], true) || $id === '') {
+            return response()->json(['ok' => false, 'message' => 'Invalid level or id'], 422);
+        }
+
+        // Short cache — creative blobs rarely change; bumps along with owner cache.
+        $cacheKey = "ads_mgr_creative_preview:{$level}:{$id}";
+        $cached = \Illuminate\Support\Facades\Cache::get($cacheKey);
+        if (is_array($cached)) {
+            return response()->json($cached + ['_cache' => 'hit']);
+        }
+
+        $cre = null;
+        $entityName = null;
+        $pageName = null;
+        $campaignName = null;
+        $adSetName = null;
+
+        if ($level === 'ad') {
+            // Try by ad_id first
+            $cre = DB::table('ad_campaign_creatives')
+                ->where('ad_id', $id)
+                ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
+                         'body_ad_settings', 'headline', 'welcome_message',
+                         'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
+            // Fallback: lookup via reports for headline + campaign info
+            $report = DB::table('ads_manager_reports')
+                ->where('ad_id', $id)
+                ->orderByDesc('day')
+                ->first(['headline', 'campaign_id', 'campaign_name', 'ad_set_name', 'page_name']);
+            if ($report) {
+                $entityName   = $report->headline ?: ('Ad ' . $id);
+                $pageName     = $report->page_name;
+                $campaignName = $report->campaign_name;
+                $adSetName    = $report->ad_set_name;
+            }
+            // If walang ad-level creative, try campaign-level fallback
+            if (!$cre && $report && $report->campaign_id) {
+                $cre = DB::table('ad_campaign_creatives')
+                    ->where('campaign_id', $report->campaign_id)
+                    ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
+                             'body_ad_settings', 'headline', 'welcome_message',
+                             'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
+            }
+        } elseif ($level === 'adset') {
+            // Fetch ad_set context from reports
+            $report = DB::table('ads_manager_reports')
+                ->where('ad_set_id', $id)
+                ->orderByDesc('day')
+                ->first(['ad_set_name', 'campaign_id', 'campaign_name', 'page_name', 'ad_id']);
+            if ($report) {
+                $entityName   = $report->ad_set_name ?: ('Ad Set ' . $id);
+                $pageName     = $report->page_name;
+                $campaignName = $report->campaign_name;
+            }
+            // Try to find the creative — adsets don't directly map sa
+            // ad_campaign_creatives, so go via any matching ad_id, fallback campaign_id.
+            if ($report && $report->ad_id) {
+                $cre = DB::table('ad_campaign_creatives')
+                    ->where('ad_id', $report->ad_id)
+                    ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
+                             'body_ad_settings', 'headline', 'welcome_message',
+                             'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
+            }
+            if (!$cre && $report && $report->campaign_id) {
+                $cre = DB::table('ad_campaign_creatives')
+                    ->where('campaign_id', $report->campaign_id)
+                    ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
+                             'body_ad_settings', 'headline', 'welcome_message',
+                             'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
+            }
+        } else {
+            // level=campaign
+            $cre = DB::table('ad_campaign_creatives')
+                ->where('campaign_id', $id)
+                ->first(['campaign_id', 'ad_id', 'page_name', 'campaign_name',
+                         'body_ad_settings', 'headline', 'welcome_message',
+                         'quick_reply_1', 'quick_reply_2', 'quick_reply_3', 'ad_link']);
+            $report = DB::table('ads_manager_reports')
+                ->where('campaign_id', $id)
+                ->orderByDesc('day')
+                ->first(['campaign_name', 'page_name']);
+            if ($report) {
+                $entityName = $report->campaign_name ?: ('Campaign ' . $id);
+                $pageName   = $report->page_name;
+            }
+        }
+
+        // Use creative's page_name as fallback if reports didn't yield one.
+        if (!$pageName && $cre) $pageName = $cre->page_name ?? null;
+        if (!$entityName && $cre) {
+            $entityName = $cre->campaign_name ?? ($cre->headline ?? '');
+        }
+
+        $payload = [
+            'ok'         => true,
+            'level'      => $level,
+            'id'         => $id,
+            'entity_name'=> $entityName ?: ucfirst($level) . ' ' . $id,
+            'page_name'  => $pageName ?: '',
+            'campaign_name' => $campaignName ?: ($cre->campaign_name ?? ''),
+            'ad_set_name'   => $adSetName ?: '',
+            'creative'   => [
+                'body'            => $cre->body_ad_settings ?? '',
+                'headline'        => $cre->headline         ?? '',
+                'welcome_message' => $cre->welcome_message  ?? '',
+                'quick_reply_1'   => $cre->quick_reply_1    ?? '',
+                'quick_reply_2'   => $cre->quick_reply_2    ?? '',
+                'quick_reply_3'   => $cre->quick_reply_3    ?? '',
+                'ad_link'         => $cre->ad_link          ?? '',
+            ],
+        ];
+
+        \Illuminate\Support\Facades\Cache::put($cacheKey, $payload, 300); // 5 min
+        return response()->json($payload + ['_cache' => 'miss']);
+    }
+
     public function data(Request $request)
     {
         // Inputs

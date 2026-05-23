@@ -1265,6 +1265,184 @@
     </div>
   </template>
 
+  {{-- ━━━ Creative Preview Modal ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       Opens when user clicks a campaign / ad set / ad name sa expanded
+       campaigns panel. Lazy-fetches creative data via /ads_manager/creative-
+       preview. Three sections:
+         1. Facebook post embed (iframe + fallback link)
+         2. Primary Text + Headline (backup info)
+         3. Messenger preview (Page + welcome msg + quick replies mockup)
+  --}}
+  <template x-if="creativeModal.open">
+    <div class="ow-modal-backdrop" @click.self="creativeModal.open = false" style="z-index:90;">
+      <div class="ow-modal-card" style="max-width:560px;max-height:90vh;overflow-y:auto;">
+        <div class="ow-modal-section" style="border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;"
+                 x-text="(creativeModal.level || '') + ' preview'"></div>
+            <div style="font-size:16px;font-weight:700;color:#0f172a;margin-top:4px;line-height:1.3;word-break:break-word;"
+                 x-text="creativeModal.data?.entity_name || 'Loading…'"></div>
+            <div style="font-size:11px;color:#475569;margin-top:2px;">
+              <span x-text="creativeModal.data?.page_name || ''"></span>
+              <template x-if="creativeModal.data?.campaign_name && creativeModal.level !== 'campaign'">
+                <span> · <span x-text="creativeModal.data.campaign_name"></span></span>
+              </template>
+              <template x-if="creativeModal.data?.ad_set_name && creativeModal.level === 'ad'">
+                <span> / <span x-text="creativeModal.data.ad_set_name"></span></span>
+              </template>
+            </div>
+          </div>
+          <button @click="creativeModal.open = false"
+                  style="background:transparent;border:none;font-size:18px;color:#64748b;cursor:pointer;padding:4px 8px;border-radius:4px;"
+                  onmouseover="this.style.background='#f1f5f9';this.style.color='#0f172a';"
+                  onmouseout="this.style.background='transparent';this.style.color='#64748b';"
+                  title="Close">✕</button>
+        </div>
+
+        <template x-if="creativeModal.loading">
+          <div style="padding:30px;text-align:center;color:#94a3b8;font-size:13px;">
+            <span class="spin" style="margin-right:8px;"></span>Loading creative…
+          </div>
+        </template>
+
+        <template x-if="!creativeModal.loading && creativeModal.error">
+          <div style="padding:20px;background:#fef2f2;color:#991b1b;font-size:12.5px;border-radius:6px;margin:14px;"
+               x-text="'⚠ ' + creativeModal.error"></div>
+        </template>
+
+        <template x-if="!creativeModal.loading && !creativeModal.error && creativeModal.data">
+          <div>
+            {{-- ━━━ Section 1: Facebook Post Embed ━━━━━━━━━━━━━━━━━━━━━━ --}}
+            <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#f0f2f5;">
+              <div style="font-size:10.5px;color:#1e40af;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">
+                📺 Facebook Post
+              </div>
+              <template x-if="creativeModal.data.creative?.ad_link">
+                <div>
+                  {{-- iframe embed via FB plugin URL. Works for posts, reels, videos. --}}
+                  <div style="background:white;border-radius:8px;overflow:hidden;border:1px solid #dadde1;">
+                    <iframe :src="fbEmbedSrc(creativeModal.data.creative.ad_link)"
+                            style="width:100%;height:520px;border:none;display:block;"
+                            scrolling="yes" frameborder="0"
+                            allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                            allowfullscreen="true"></iframe>
+                  </div>
+                  <div style="text-align:center;margin-top:8px;">
+                    <a :href="creativeModal.data.creative.ad_link" target="_blank" rel="noopener"
+                       style="display:inline-block;font-size:11.5px;color:#1877f2;text-decoration:none;padding:6px 12px;border:1px solid #dadde1;border-radius:6px;background:white;"
+                       onmouseover="this.style.background='#f0f2f5';"
+                       onmouseout="this.style.background='white';">
+                      🔗 Open on Facebook ↗
+                    </a>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!creativeModal.data.creative?.ad_link">
+                <div style="background:white;border:1px dashed #cbd5e1;border-radius:8px;padding:24px;text-align:center;color:#94a3b8;font-size:12px;">
+                  No ad link saved yet.<br>
+                  <span style="font-size:10.5px;">Set sa /ads_manager/campaigns/history para mag-preview.</span>
+                </div>
+              </template>
+            </div>
+
+            {{-- ━━━ Section 2: Primary Text + Headline ━━━━━━━━━━━━━━━━━━ --}}
+            <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#fefce8;">
+              <div style="font-size:10.5px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">
+                📝 Primary Text & Headline <span style="color:#a16207;font-weight:500;text-transform:none;letter-spacing:0;">(backup info)</span>
+              </div>
+              <div style="background:white;border:1px solid #fde68a;border-radius:6px;padding:10px;">
+                <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Body / Primary Text</div>
+                <div style="font-size:12px;line-height:1.5;color:#0f172a;white-space:pre-wrap;word-break:break-word;"
+                     x-text="creativeModal.data.creative?.body || '(no body text)'"
+                     :style="creativeModal.data.creative?.body ? '' : 'color:#cbd5e1;font-style:italic;'"></div>
+              </div>
+              <div style="background:white;border:1px solid #fde68a;border-radius:6px;padding:10px;margin-top:8px;">
+                <div style="font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Headline</div>
+                <div style="font-size:13px;font-weight:600;color:#0f172a;word-break:break-word;"
+                     x-text="creativeModal.data.creative?.headline || '(no headline)'"
+                     :style="creativeModal.data.creative?.headline ? '' : 'color:#cbd5e1;font-style:italic;font-weight:400;'"></div>
+              </div>
+            </div>
+
+            {{-- ━━━ Section 3: Messenger Preview ━━━━━━━━━━━━━━━━━━━━━━━━ --}}
+            <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#fdf4ff;">
+              <div style="font-size:10.5px;color:#86198f;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">
+                💬 Messenger Preview
+              </div>
+              {{-- Messenger UI mockup — mimics the FB Messenger business chat layout. --}}
+              <div style="background:white;border-radius:12px;border:1px solid #e4e6eb;overflow:hidden;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;">
+                {{-- Header: avatar + page name + business chat + call/menu icons --}}
+                <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #e4e6eb;background:white;">
+                  <div style="position:relative;flex-shrink:0;">
+                    <div :style="'width:38px;height:38px;border-radius:50%;background:'+avatarColor(creativeModal.data.page_name)+';color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;'"
+                         x-text="pageInitial(creativeModal.data.page_name)"></div>
+                    <span style="position:absolute;bottom:0;right:0;width:11px;height:11px;background:#31a24c;border:2px solid white;border-radius:50%;"></span>
+                  </div>
+                  <div style="flex:1;min-width:0;">
+                    <div style="font-weight:600;font-size:14px;color:#050505;display:flex;align-items:center;gap:4px;">
+                      <span x-text="creativeModal.data.page_name || 'Page'"></span>
+                      <span style="color:#0866ff;font-size:11px;" title="Verified business">✓</span>
+                    </div>
+                    <div style="font-size:11px;color:#65676b;">Business chat</div>
+                  </div>
+                  <div style="display:flex;gap:14px;color:#0866ff;font-size:18px;">
+                    <span title="Call">📞</span>
+                    <span title="Menu">🗂</span>
+                  </div>
+                </div>
+
+                {{-- Conversation area --}}
+                <div style="padding:16px 14px;background:white;min-height:220px;">
+                  <div style="text-align:center;font-size:11px;color:#65676b;padding:8px 16px;line-height:1.4;margin-bottom:12px;">
+                    You opened this conversation through an ad. When you reply,
+                    <span x-text="creativeModal.data.page_name || 'this Page'"></span>
+                    will be able to see your public info and which ad you clicked.
+                  </div>
+
+                  {{-- Welcome message bubble (incoming from page) --}}
+                  <template x-if="creativeModal.data.creative?.welcome_message">
+                    <div style="display:flex;align-items:flex-end;gap:6px;margin-bottom:10px;">
+                      <div :style="'width:24px;height:24px;border-radius:50%;background:'+avatarColor(creativeModal.data.page_name)+';color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0;'"
+                           x-text="pageInitial(creativeModal.data.page_name)"></div>
+                      <div style="background:#f0f0f0;color:#050505;padding:10px 13px;border-radius:18px;font-size:13px;line-height:1.4;max-width:78%;white-space:pre-wrap;word-break:break-word;"
+                           x-text="creativeModal.data.creative.welcome_message"></div>
+                    </div>
+                  </template>
+                  <template x-if="!creativeModal.data.creative?.welcome_message">
+                    <div style="background:#fef3c7;color:#92400e;border-radius:8px;padding:10px;font-size:11px;text-align:center;">
+                      ⚠ No welcome message set
+                    </div>
+                  </template>
+
+                  {{-- Quick reply pills --}}
+                  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-top:14px;">
+                    <template x-for="qr in [creativeModal.data.creative?.quick_reply_1, creativeModal.data.creative?.quick_reply_2, creativeModal.data.creative?.quick_reply_3].filter(Boolean)" :key="qr">
+                      <div style="background:white;color:#0866ff;border:1px solid #0866ff;border-radius:18px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;"
+                           x-text="qr"></div>
+                    </template>
+                    <template x-if="!creativeModal.data.creative?.quick_reply_1 && !creativeModal.data.creative?.quick_reply_2 && !creativeModal.data.creative?.quick_reply_3">
+                      <div style="color:#cbd5e1;font-size:11px;font-style:italic;width:100%;text-align:center;">(no quick replies set)</div>
+                    </template>
+                  </div>
+                </div>
+
+                {{-- Composer footer --}}
+                <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid #e4e6eb;background:#f0f2f5;">
+                  <span style="color:#0866ff;font-size:16px;">📷</span>
+                  <span style="color:#0866ff;font-size:16px;">🖼</span>
+                  <span style="color:#0866ff;font-size:16px;">🎤</span>
+                  <div style="flex:1;background:white;border-radius:18px;padding:6px 12px;font-size:12px;color:#65676b;">Aa</div>
+                  <span style="color:#fbbf24;font-size:16px;">😊</span>
+                  <span style="color:#0866ff;font-size:16px;">👍</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </template>
+
   <script>
   // GLOBAL column settings injected by OwnerPrivateController (managed via
   // CEO-only /owner/column-settings). Read in initCols() and the Alpine
@@ -1349,6 +1527,21 @@
       },
       refreshing:false,
       savingSnapshot:false,
+
+      // Creative preview modal — opened by clicking campaign/adset/ad name
+      // sa expanded campaigns panel. Lazy-fetches creative content via
+      // /ads_manager/creative-preview, then renders 3-section modal:
+      //   1. FB post iframe embed (via ad_link)
+      //   2. Body + headline (text backup)
+      //   3. Messenger UI mockup (page + welcome msg + quick replies)
+      creativeModal: {
+        open: false,
+        loading: false,
+        error: null,
+        level: null,    // 'campaign' | 'adset' | 'ad'
+        id: null,
+        data: null,     // server response payload
+      },
       skippedCount:0, skippedPages:[],
       isSingleDate:true, rangeDays:1,
       sortCol:'', sortDir:'desc',
@@ -1608,6 +1801,64 @@
       // Captures the exact rendered rows + totals + filter state as JSON,
       // stored sa owner_private_snapshots. Viewable later sa
       // /owner/private/snapshots/{id}.
+      // ── Creative preview modal helpers ──────────────────────────────────
+      // Opens the modal at given level/id, fetches creative data, renders.
+      // entityName/pageName are optimistically passed so the header shows
+      // immediately instead of waiting for fetch to finish.
+      async openCreativePreview(level, id, entityName, pageName){
+        if (!level || !id) return;
+        this.creativeModal.open    = true;
+        this.creativeModal.loading = true;
+        this.creativeModal.error   = null;
+        this.creativeModal.level   = level;
+        this.creativeModal.id      = String(id);
+        // Optimistic header (overridden by server response)
+        this.creativeModal.data    = { entity_name: entityName || '', page_name: pageName || '', creative: {} };
+        try {
+          const url = '/ads_manager/creative-preview?level=' + encodeURIComponent(level) + '&id=' + encodeURIComponent(id);
+          const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+          const j = await r.json();
+          if (!r.ok || !j.ok) { this.creativeModal.error = j.message || 'Fetch failed'; return; }
+          this.creativeModal.data = j;
+        } catch (e) {
+          this.creativeModal.error = 'Network error: ' + e.message;
+        } finally {
+          this.creativeModal.loading = false;
+        }
+      },
+
+      // First letter of page name for the avatar circle. Falls back to '?'.
+      pageInitial(pageName) {
+        const s = (pageName || '').trim();
+        return s ? s.charAt(0).toUpperCase() : '?';
+      },
+
+      // Deterministic color per page name — same page always gets same avatar
+      // color. Uses a small HSL palette for variety.
+      avatarColor(pageName) {
+        const s = (pageName || 'Page').toString();
+        let hash = 0;
+        for (let i = 0; i < s.length; i++) hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0;
+        const hue = Math.abs(hash) % 360;
+        return 'hsl(' + hue + ', 55%, 50%)';
+      },
+
+      // Convert an ad_link (FB post / reel / video URL) to the FB plugins
+      // iframe src. Falls back to the original URL if it doesn't match a
+      // known FB pattern (iframe will likely show an error but the "Open
+      // on Facebook" button still works).
+      fbEmbedSrc(adLink) {
+        if (!adLink) return '';
+        // Strip query/hash to normalize
+        const clean = adLink.split('#')[0].split('?')[0];
+        const encoded = encodeURIComponent(adLink);
+        // Reels + videos use the video plugin; posts + photos use post plugin.
+        if (/facebook\.com\/(reel|watch|.*\/videos)/i.test(clean)) {
+          return 'https://www.facebook.com/plugins/video.php?href=' + encoded + '&show_text=false&width=500';
+        }
+        return 'https://www.facebook.com/plugins/post.php?href=' + encoded + '&width=500&show_text=true';
+      },
+
       async saveSnapshot(){
         if (this.savingSnapshot) return;
         if (!this.rows || this.rows.length === 0) {
