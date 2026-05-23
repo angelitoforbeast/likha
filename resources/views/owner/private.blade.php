@@ -240,6 +240,17 @@
     .ow-modal-card .ow-btn-save{background:#2563eb;color:#fff;}
     .ow-modal-card .ow-btn-save:hover{background:#1d4ed8;}
     .ow-modal-card .ow-btn:disabled{opacity:0.5;cursor:not-allowed;}
+
+    /* Creative preview modal — 3-column grid for FB Post / Body+Headline / Messenger.
+       Each section keeps its colored background; right/bottom dividers between them.
+       Collapses to single column under 900px so mobile/narrow viewports still work. */
+    .creative-modal-grid{display:grid;grid-template-columns:1fr 1fr 1fr;align-items:stretch;}
+    .creative-modal-grid > .ow-modal-section{border-top:1px solid #e2e8f0;border-right:1px solid #e2e8f0;border-bottom:0;min-width:0;}
+    .creative-modal-grid > .ow-modal-section:last-child{border-right:0;}
+    @media (max-width: 900px){
+      .creative-modal-grid{grid-template-columns:1fr;}
+      .creative-modal-grid > .ow-modal-section{border-right:0;border-bottom:1px solid #e2e8f0;}
+    }
   </style>
 </head>
 <body>
@@ -1275,7 +1286,7 @@
   --}}
   <template x-if="creativeModal.open">
     <div class="ow-modal-backdrop" @click.self="creativeModal.open = false" style="z-index:90;">
-      <div class="ow-modal-card" style="max-width:560px;max-height:90vh;overflow-y:auto;">
+      <div class="ow-modal-card" style="max-width:1280px;width:96vw;max-height:92vh;overflow-y:auto;">
         <div class="ow-modal-section" style="border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
           <div style="flex:1;min-width:0;">
             <div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;"
@@ -1311,7 +1322,9 @@
         </template>
 
         <template x-if="!creativeModal.loading && !creativeModal.error && creativeModal.data">
-          <div>
+          {{-- 3-column grid: FB Post · Body+Headline · Messenger Preview.
+               Collapses to single column sa narrow screens (< 900px). --}}
+          <div class="creative-modal-grid">
             {{-- ━━━ Section 1: Facebook Post Embed ━━━━━━━━━━━━━━━━━━━━━━ --}}
             <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#f0f2f5;">
               <div style="font-size:10.5px;color:#1e40af;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">
@@ -1322,7 +1335,7 @@
                   {{-- iframe embed via FB plugin URL. Works for posts, reels, videos. --}}
                   <div style="background:white;border-radius:8px;overflow:hidden;border:1px solid #dadde1;">
                     <iframe :src="fbEmbedSrc(creativeModal.data.creative.ad_link)"
-                            style="width:100%;height:520px;border:none;display:block;"
+                            style="width:100%;height:600px;border:none;display:block;"
                             scrolling="yes" frameborder="0"
                             allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
                             allowfullscreen="true"></iframe>
@@ -1852,11 +1865,12 @@
         // Strip query/hash to normalize
         const clean = adLink.split('#')[0].split('?')[0];
         const encoded = encodeURIComponent(adLink);
+        // FB plugin width — narrower (380) para magfit sa 3-col modal layout.
         // Reels + videos use the video plugin; posts + photos use post plugin.
         if (/facebook\.com\/(reel|watch|.*\/videos)/i.test(clean)) {
-          return 'https://www.facebook.com/plugins/video.php?href=' + encoded + '&show_text=false&width=500';
+          return 'https://www.facebook.com/plugins/video.php?href=' + encoded + '&show_text=true&width=380';
         }
-        return 'https://www.facebook.com/plugins/post.php?href=' + encoded + '&width=500&show_text=true';
+        return 'https://www.facebook.com/plugins/post.php?href=' + encoded + '&width=380&show_text=true';
       },
 
       async saveSnapshot(){
