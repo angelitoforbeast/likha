@@ -84,11 +84,13 @@
                 </template>
                 <template x-if="col.type==='name'">
                   <div>
-                    {{-- Clickable: opens creative preview modal (FB post + welcome msg). --}}
+                    {{-- Clickable: opens creative preview modal (FB post + welcome msg).
+                         Color: deep blue kapag may naka-set na ad_link (preview ready);
+                         light blue kapag wala pa (modal still opens, may "no link" placeholder). --}}
                     <a href="#" @click.prevent="openCreativePreview('campaign', c.campaign_id, campRowName(c, 'campaigns'), row.page_name)"
                        class="name"
-                       title="Click para makita creative preview (FB post + Messenger flow)"
-                       style="color:#1877f2;text-decoration:none;cursor:pointer;"
+                       :title="c.has_ad_link ? 'Click para makita creative preview (FB post + Messenger flow)' : 'No ad_link set yet — click to view Messenger preview only'"
+                       :style="'color:' + (c.has_ad_link ? '#1877f2' : '#93c5fd') + ';text-decoration:none;cursor:pointer;'"
                        onmouseover="this.style.textDecoration='underline';"
                        onmouseout="this.style.textDecoration='none';"
                        x-text="campRowName(c, 'campaigns')"></a>
@@ -213,8 +215,8 @@
                             <template x-if="col.type==='name'">
                               <a href="#" @click.prevent="openCreativePreview('adset', aset.ad_set_id, campRowName(aset, 'adsets'), row.page_name)"
                                  class="name"
-                                 title="Click para makita creative preview (FB post + Messenger flow)"
-                                 style="color:#1877f2;text-decoration:none;cursor:pointer;"
+                                 :title="aset.has_ad_link ? 'Click para makita creative preview (FB post + Messenger flow)' : 'No ad_link set yet — click to view Messenger preview only'"
+                                 :style="'color:' + (aset.has_ad_link ? '#1877f2' : '#93c5fd') + ';text-decoration:none;cursor:pointer;'"
                                  onmouseover="this.style.textDecoration='underline';"
                                  onmouseout="this.style.textDecoration='none';"
                                  x-text="campRowName(aset, 'adsets')"></a>
@@ -323,8 +325,8 @@
                                           <div>
                                             <a href="#" @click.prevent="openCreativePreview('ad', ad.ad_id, campRowName(ad, 'ads'), row.page_name)"
                                                class="name"
-                                               title="Click para makita creative preview (FB post + Messenger flow)"
-                                               style="color:#1877f2;text-decoration:none;cursor:pointer;"
+                                               :title="ad.has_ad_link ? 'Click para makita creative preview (FB post + Messenger flow)' : 'No ad_link set yet — click to view Messenger preview only'"
+                                               :style="'color:' + (ad.has_ad_link ? '#1877f2' : '#93c5fd') + ';text-decoration:none;cursor:pointer;'"
                                                onmouseover="this.style.textDecoration='underline';"
                                                onmouseout="this.style.textDecoration='none';"
                                                x-text="campRowName(ad, 'ads')"></a>

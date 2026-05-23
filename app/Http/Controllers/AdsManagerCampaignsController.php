@@ -1616,6 +1616,63 @@ class AdsManagerCampaignsController extends Controller
             'conversion_rate'  => ($tot->messages ?? 0)    > 0 ? (float) (($tot->purchases * 100.0) / $tot->messages) : null,
         ];
 
+        // ── Stitch `has_ad_link` flag para sa /owner/private creative preview UI.
+        // Frontend uses this para mag-display ng dimmed/light-blue name kapag
+        // walang naka-set na ad_link (no preview available yet).
+        //
+        //   - level=campaigns: any creative row with this campaign_id has non-empty ad_link
+        //   - level=adsets:    via the campaign_id of the adset (no direct ad_set fk)
+        //   - level=ads:       ad-level creative has ad_link OR campaign-level fallback
+        $rowsArr = is_array($rows) ? $rows : $rows->all();
+        if (!empty($rowsArr)) {
+            $campaignIdsForLinks = [];
+            $adIdsForLinks       = [];
+            foreach ($rowsArr as $r) {
+                if (!empty($r['campaign_id'])) $campaignIdsForLinks[] = (string)$r['campaign_id'];
+                if (!empty($r['ad_id']))       $adIdsForLinks[]       = (string)$r['ad_id'];
+            }
+            $campaignIdsForLinks = array_values(array_unique($campaignIdsForLinks));
+            $adIdsForLinks       = array_values(array_unique($adIdsForLinks));
+
+            $linkedCampaignIds = [];
+            $linkedAdIds       = [];
+
+            if (!empty($campaignIdsForLinks)) {
+                $linkedCampaignIds = DB::table('ad_campaign_creatives')
+                    ->whereIn('campaign_id', $campaignIdsForLinks)
+                    ->whereNotNull('ad_link')
+                    ->where('ad_link', '!=', '')
+                    ->pluck('campaign_id')
+                    ->map(fn($v) => (string)$v)
+                    ->unique()
+                    ->flip()
+                    ->all();
+            }
+            if (!empty($adIdsForLinks)) {
+                $linkedAdIds = DB::table('ad_campaign_creatives')
+                    ->whereIn('ad_id', $adIdsForLinks)
+                    ->whereNotNull('ad_link')
+                    ->where('ad_link', '!=', '')
+                    ->pluck('ad_id')
+                    ->map(fn($v) => (string)$v)
+                    ->unique()
+                    ->flip()
+                    ->all();
+            }
+
+            $rowsArr = array_map(function ($r) use ($linkedCampaignIds, $linkedAdIds, $level) {
+                $cid = !empty($r['campaign_id']) ? (string)$r['campaign_id'] : null;
+                $aid = !empty($r['ad_id'])       ? (string)$r['ad_id']       : null;
+                $hasLink = false;
+                if ($aid && isset($linkedAdIds[$aid]))            $hasLink = true;
+                elseif ($cid && isset($linkedCampaignIds[$cid]))  $hasLink = true;
+                $r['has_ad_link'] = $hasLink;
+                return $r;
+            }, $rowsArr);
+
+            $rows = $rowsArr;
+        }
+
         // CSV export (optional)
         if ($export === 'csv') {
             return $this->exportCsv($rows, $level);
