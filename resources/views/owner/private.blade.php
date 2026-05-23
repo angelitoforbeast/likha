@@ -1286,7 +1286,7 @@
   --}}
   <template x-if="creativeModal.open">
     <div class="ow-modal-backdrop" @click.self="creativeModal.open = false" style="z-index:90;">
-      <div class="ow-modal-card" style="max-width:1280px;width:96vw;max-height:96vh;overflow-y:auto;">
+      <div class="ow-modal-card" style="max-width:1280px;width:96vw;max-height:90vh;overflow-y:auto;">
         <div class="ow-modal-section" style="border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
           <div style="flex:1;min-width:0;">
             <div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;"
@@ -1334,14 +1334,12 @@
                 <div>
                   {{-- iframe embed via FB plugin URL. Works for posts, reels, videos. --}}
                   <div style="background:white;border-radius:8px;overflow:hidden;border:1px solid #dadde1;">
-                    {{-- Height auto-scales sa viewport: 80vh (fills most of the
-                         modal height), capped at 1000px para hindi laging full-screen
-                         sa malalaking monitors. min 500px so small screens still usable.
-                         Para sa portrait reels (1080x1920) — needs ~870px+ to show full
-                         video + FB chrome without internal scroll. Landscape 1920x1080
-                         fits easily sa 500px+. --}}
+                    {{-- Height balanced: ~65vh — enough para sa landscape (1920x1080)
+                         na may post text + reactions visible. Portrait reels may
+                         maliit na internal scroll pero acceptable. Capped to keep
+                         the modal manageable. --}}
                     <iframe :src="fbEmbedSrc(creativeModal.data.creative.ad_link)"
-                            style="width:100%;height:min(1100px, max(560px, 85vh));border:none;display:block;"
+                            style="width:100%;height:min(780px, max(450px, 65vh));border:none;display:block;"
                             scrolling="yes" frameborder="0"
                             allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
                             allowfullscreen="true"></iframe>
@@ -2710,8 +2708,15 @@
       },
 
       // Single-button toggle: if any row is open → collapse all visible rows;
-      // otherwise → expand all visible rows (fires N parallel fetches).
-      // Uses the existing togglePageExpand so cache + load semantics match.
+      // otherwise → expand all visible rows.
+      //
+      // FAST PATH: single batched HTTP call fetching ALL pages' campaigns at
+      // once via /ads_manager/campaigns/batch-data. Brings expand-all from
+      // ~minutes (40+ parallel calls) down to ~seconds (1 query).
+      //
+      // FALLBACK: if batch fails for any reason (network, server error, schema
+      // mismatch, etc.), automatically falls back to old per-page parallel
+      // method (togglePageExpand). Walang feature loss.
       async toggleAllExpand(){
         const visible = (this.sortedRows ? this.sortedRows() : (this.rows || []));
         if (this.anyExpanded()) {
@@ -2722,16 +2727,81 @@
               this.expandedPages[r.page_name] = Object.assign({}, st, { open: false });
             }
           }
-        } else {
-          // Expand all: kick off togglePageExpand for any not-yet-expanded row.
-          // Run in parallel — let each panel resolve independently.
-          const tasks = [];
-          for (const r of visible) {
-            const st = this.expandedPages[r.page_name];
-            if (!st || !st.open) tasks.push(this.togglePageExpand(r.page_name));
-          }
-          await Promise.allSettled(tasks);
+          return;
         }
+        // Try batched fast path first
+        try {
+          await this._toggleAllExpandBatch(visible);
+        } catch (e) {
+          console.warn('[expand-all] Batch path failed, falling back to per-page:', e);
+          await this._toggleAllExpandPerPage(visible);
+        }
+      },
+
+      // FAST PATH — single POST to /ads_manager/campaigns/batch-data with all
+      // pages' (name, start_date). Server returns map keyed by page_name.
+      async _toggleAllExpandBatch(visible){
+        const pages = [];
+        // Mark all loading first so spinners show
+        for (const r of visible) {
+          const st = this.expandedPages[r.page_name];
+          if (!st || !st.open) {
+            this.expandedPages[r.page_name] = { open: true, loading: true, error: null, campaigns: null };
+            const scope = this._pageScopeFor(r.page_name);
+            pages.push({ name: r.page_name, start_date: scope.start_date });
+          }
+        }
+        if (pages.length === 0) return;
+
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        const res = await fetch('{{ route('ads_manager.campaigns.batch-data') }}', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept':       'application/json',
+            'X-CSRF-TOKEN': csrf,
+          },
+          body: JSON.stringify({
+            end_date: this.endDate,
+            pages,
+            only_with_spend: true,
+            include_windows: true,
+            limit_per_page: 1000,
+          }),
+        });
+        if (!res.ok) throw new Error('Batch HTTP ' + res.status);
+        const j = await res.json();
+        if (!j || !j.ok || !j.by_page) throw new Error('Invalid batch response');
+
+        // Distribute results back into expandedPages map.
+        for (const p of pages) {
+          const bucket = j.by_page[p.name] || { rows: [], totals: {} };
+          const campaigns = Array.isArray(bucket.rows) ? bucket.rows : [];
+          // Enrich profit_pct client-side using parent row's data — same logic
+          // as the per-page _fetchCampaignsData() does.
+          for (const r of campaigns) {
+            r.profit_pct       = this._campaignProfitPctFromCpp(r, r.cpp);
+            r.profit_pct_7d    = this._campaignProfitPctFromCpp(r, r.cpp_7d);
+            r.profit_pct_3d    = this._campaignProfitPctFromCpp(r, r.cpp_3d);
+            r.profit_pct_today = this._campaignProfitPctFromCpp(r, r.cpp_today);
+          }
+          this._markActiveOffDivider(campaigns);
+          this.expandedPages[p.name] = {
+            open: true, loading: false, error: null, campaigns
+          };
+        }
+      },
+
+      // FALLBACK PATH — original behavior: N parallel HTTP calls via togglePageExpand.
+      async _toggleAllExpandPerPage(visible){
+        const tasks = [];
+        for (const r of visible) {
+          const st = this.expandedPages[r.page_name];
+          if (!st || !st.open || st.error) {
+            tasks.push(this.togglePageExpand(r.page_name));
+          }
+        }
+        await Promise.allSettled(tasks);
       },
 
       // Toggle the per-page campaigns expand. First open fetches; subsequent

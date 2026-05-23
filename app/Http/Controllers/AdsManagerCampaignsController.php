@@ -697,6 +697,354 @@ class AdsManagerCampaignsController extends Controller
         return response()->json($payload + ['_cache' => 'miss']);
     }
 
+    /**
+     * POST /ads_manager/campaigns/batch-data
+     *
+     * Batched version ng data() na pwedeng tawagin once para sa multiple pages
+     * with PER-PAGE start_dates. Used by /owner/private's "Expand all" para
+     * mawala yung 40+ parallel HTTP calls bug.
+     *
+     * Request body:
+     *   {
+     *     "end_date": "2026-05-22",
+     *     "pages": [
+     *       { "name": "Tracy Velasquez", "start_date": "2026-05-18" },
+     *       { "name": "Maria Celeste",   "start_date": "2026-01-25" },
+     *       ...
+     *     ],
+     *     "limit_per_page": 1000,   // optional
+     *     "only_with_spend": true,  // optional, default true
+     *     "include_windows": true   // optional, default true (today/3d/7d CPPs)
+     *   }
+     *
+     * Response:
+     *   {
+     *     "by_page": {
+     *       "Tracy Velasquez": { rows: [campaigns…], totals: {…} },
+     *       "Maria Celeste":   { rows: [campaigns…], totals: {…} },
+     *       ...
+     *     },
+     *     "level": "campaigns"
+     *   }
+     *
+     * Only supports level=campaigns (which is what expand-all uses). Adsets/ads
+     * remain on their existing per-call data() endpoint — those are loaded
+     * on-demand sa nested drill-down.
+     */
+    public function batchData(Request $request)
+    {
+        $endDate = trim((string) $request->input('end_date', ''));
+        $pages   = $request->input('pages', []);
+        $onlyWithSpend  = $request->boolean('only_with_spend', true);
+        $includeWindows = $request->boolean('include_windows', true);
+        $limitPerPage   = (int) $request->input('limit_per_page', 1000);
+
+        if ($endDate === '' || !is_array($pages) || empty($pages)) {
+            return response()->json(['ok' => false, 'message' => 'end_date and non-empty pages[] required'], 422);
+        }
+
+        // Validate + normalize: each page must have name + start_date
+        $pageList = [];
+        foreach ($pages as $p) {
+            $name  = isset($p['name']) ? trim((string) $p['name']) : '';
+            $start = isset($p['start_date']) ? trim((string) $p['start_date']) : '';
+            if ($name === '' || $start === '') continue;
+            $pageList[] = ['name' => $name, 'start' => $start];
+        }
+        if (empty($pageList)) {
+            return response()->json(['ok' => false, 'message' => 'No valid pages'], 422);
+        }
+
+        $driver  = DB::getDriverName();
+        $dayExpr = $driver === 'pgsql'
+            ? 'COALESCE(day, DATE(reporting_starts))'
+            : 'COALESCE(`day`, DATE(`reporting_starts`))';
+
+        // Subqueries (GLOBAL, hindi nakaka-depende sa page filter — reused
+        // sa main data() endpoint. Mas mabuti i-run sila once per batch.)
+        $latestCampaignDay = DB::table('ads_manager_reports')
+            ->selectRaw("campaign_id, MAX($dayExpr) AS latest_day")
+            ->groupBy('campaign_id');
+
+        $campaignLatestStatus = DB::table('ads_manager_reports as a')
+            ->joinSub($latestCampaignDay, 'lcd', function ($j) use ($dayExpr) {
+                $j->on('a.campaign_id', '=', 'lcd.campaign_id')
+                  ->whereRaw("COALESCE(a.day, DATE(a.reporting_starts)) = lcd.latest_day");
+            })
+            ->selectRaw("a.campaign_id, MAX(CASE WHEN LOWER(COALESCE(a.campaign_delivery,'')) LIKE 'active%' THEN 1 ELSE 0 END) AS is_on_latest")
+            ->groupBy('a.campaign_id');
+
+        $latestAdSetDay = DB::table('ads_manager_reports')
+            ->selectRaw("ad_set_id, MAX($dayExpr) AS latest_day")
+            ->groupBy('ad_set_id');
+
+        $adSetLatestStatus = DB::table('ads_manager_reports as a')
+            ->joinSub($latestAdSetDay, 'lad', function ($j) {
+                $j->on('a.ad_set_id', '=', 'lad.ad_set_id')
+                  ->whereRaw("COALESCE(a.day, DATE(a.reporting_starts)) = lad.latest_day");
+            })
+            ->selectRaw("a.ad_set_id, MAX(CASE WHEN LOWER(COALESCE(a.ad_set_delivery,'')) LIKE 'active%' THEN 1 ELSE 0 END) AS is_on_latest")
+            ->groupBy('a.ad_set_id');
+
+        // First-started dates per campaign (global, no date filter).
+        // Includes running_at_start flag — true if earliest day = MIN(day in DB).
+        $campaignStartedDates = DB::table('ads_manager_reports')
+            ->selectRaw("campaign_id AS id, MIN($dayExpr) AS first_started,
+                         CASE WHEN MIN($dayExpr) = (SELECT MIN($dayExpr) FROM ads_manager_reports) THEN 1 ELSE 0 END AS running_at_start")
+            ->groupBy('campaign_id');
+
+        // Latest "fresh start" detection — using MAX day of last active streak.
+        // For simplicity in batch, use MAX day per campaign with spend > 0.
+        $campaignFreshStart = DB::table('ads_manager_reports')
+            ->selectRaw("campaign_id AS id, MAX($dayExpr) AS latest_started")
+            ->where('amount_spent_php', '>', 0)
+            ->groupBy('campaign_id');
+
+        // ── Main aggregation: per (page, campaign) for all requested pages ──
+        // Using orWhere groups for per-page date filtering. MySQL handles this
+        // with index_merge if (page_name, day) index exists; otherwise still
+        // faster than 40+ separate roundtrips.
+        $query = DB::table('ads_manager_reports')
+            ->leftJoinSub($campaignLatestStatus, 'ls', function ($j) {
+                $j->on('ads_manager_reports.campaign_id', '=', 'ls.campaign_id');
+            })
+            ->leftJoinSub($campaignStartedDates, 'sd', function ($j) {
+                $j->on('ads_manager_reports.campaign_id', '=', 'sd.id');
+            })
+            ->leftJoinSub($campaignFreshStart, 'fs', function ($j) {
+                $j->on('ads_manager_reports.campaign_id', '=', 'fs.id');
+            })
+            ->leftJoinSub($adSetLatestStatus, 'asls', function ($j) {
+                $j->on('ads_manager_reports.ad_set_id', '=', 'asls.ad_set_id');
+            })
+            ->where(function ($q) use ($pageList, $endDate) {
+                foreach ($pageList as $p) {
+                    $q->orWhere(function ($qq) use ($p, $endDate) {
+                        $qq->whereRaw('LOWER(TRIM(page_name)) = LOWER(TRIM(?))', [$p['name']])
+                           ->whereBetween('day', [$p['start'], $endDate]);
+                    });
+                }
+            })
+            ->selectRaw('
+                ads_manager_reports.page_name,
+                ads_manager_reports.campaign_id,
+                MAX(campaign_name) AS campaign_name,
+
+                SUM(amount_spent_php) AS spend,
+                SUM(messaging_conversations_started) AS messages,
+                SUM(purchases) AS purchases,
+                SUM(impressions) AS impressions,
+                SUM(reach) AS reach,
+                SUM(link_clicks) AS link_clicks,
+
+                CASE WHEN SUM(purchases) > 0 THEN SUM(amount_spent_php)/SUM(purchases) END AS cpp,
+                CASE WHEN SUM(messaging_conversations_started) > 0 THEN SUM(amount_spent_php)/SUM(messaging_conversations_started) END AS cpm_msg,
+                CASE WHEN SUM(impressions) > 0 THEN (SUM(amount_spent_php)/SUM(impressions))*1000 END AS cpm_1000,
+                CASE WHEN SUM(reach) > 0 THEN (SUM(impressions) * 1.0)/SUM(reach) END AS frequency,
+                CASE WHEN SUM(results) > 0 THEN SUM(amount_spent_php)/SUM(results) END AS cpr,
+                CASE WHEN SUM(link_clicks) > 0 THEN (SUM(messaging_conversations_started)*100.0)/SUM(link_clicks) END AS welcome_msg_rate,
+                CASE WHEN SUM(messaging_conversations_started) > 0 THEN (SUM(purchases)*100.0)/SUM(messaging_conversations_started) END AS conversion_rate,
+
+                COUNT(DISTINCT CASE WHEN asls.is_on_latest = 1 THEN ads_manager_reports.ad_set_id END) AS active_subcount,
+                COALESCE(MAX(ls.is_on_latest), 0) AS is_on,
+                MAX(sd.first_started)  AS first_started,
+                MAX(sd.running_at_start) AS running_at_start,
+                MAX(fs.latest_started) AS latest_started
+            ')
+            ->groupBy('ads_manager_reports.page_name', 'ads_manager_reports.campaign_id');
+
+        if ($onlyWithSpend) $query->havingRaw('COALESCE(SUM(amount_spent_php),0) > 0');
+
+        // Default sort: active first, then by spend desc.
+        $rawRows = $query->orderByDesc('is_on')
+                         ->orderBy('campaign_name', 'asc')
+                         ->orderByDesc('spend')
+                         ->get();
+
+        // ── Windowed CPPs (today / 3d / 7d) — batched query ──
+        // Reuses the same per-page WHERE pattern. Trailing 7-day window ending
+        // sa end_date. Skipped if !$includeWindows.
+        $windowMap = []; // [page_name][campaign_id] => [cpp_today, cpp_3d, cpp_7d]
+        if ($includeWindows) {
+            $endObj    = new \DateTime($endDate);
+            $endStr    = $endObj->format('Y-m-d');
+            $endMinus2 = (clone $endObj)->modify('-2 days')->format('Y-m-d');
+            $endMinus6 = (clone $endObj)->modify('-6 days')->format('Y-m-d');
+
+            $winQuery = DB::table('ads_manager_reports')
+                ->where(function ($q) use ($pageList, $endMinus6, $endStr) {
+                    // For windowed, all pages share same 7-day window (end-6 .. end).
+                    // Page filter still per-page (via OR).
+                    $pageNames = array_column($pageList, 'name');
+                    $q->whereRaw('LOWER(TRIM(page_name)) IN (' . implode(',', array_fill(0, count($pageNames), 'LOWER(TRIM(?))')) . ')', $pageNames)
+                      ->whereBetween('day', [$endMinus6, $endStr]);
+                })
+                ->selectRaw("
+                    page_name, campaign_id,
+                    SUM(CASE WHEN $dayExpr = ?             THEN amount_spent_php ELSE 0 END) AS spend_today,
+                    SUM(CASE WHEN $dayExpr BETWEEN ? AND ? THEN amount_spent_php ELSE 0 END) AS spend_3d,
+                    SUM(amount_spent_php)                                                    AS spend_7d,
+                    SUM(CASE WHEN $dayExpr = ?             THEN purchases       ELSE 0 END)  AS purch_today,
+                    SUM(CASE WHEN $dayExpr BETWEEN ? AND ? THEN purchases       ELSE 0 END)  AS purch_3d,
+                    SUM(purchases)                                                            AS purch_7d
+                ", [$endStr, $endMinus2, $endStr, $endStr, $endMinus2, $endStr])
+                ->groupBy('page_name', 'campaign_id')
+                ->get();
+
+            foreach ($winQuery as $w) {
+                $pn = (string) $w->page_name;
+                $cid = (string) $w->campaign_id;
+                $windowMap[$pn][$cid] = [
+                    'cpp_today' => ((int)$w->purch_today > 0) ? ((float)$w->spend_today / (int)$w->purch_today) : null,
+                    'cpp_3d'    => ((int)$w->purch_3d    > 0) ? ((float)$w->spend_3d    / (int)$w->purch_3d)    : null,
+                    'cpp_7d'    => ((int)$w->purch_7d    > 0) ? ((float)$w->spend_7d    / (int)$w->purch_7d)    : null,
+                ];
+            }
+        }
+
+        // ── Stitch has_ad_link + account info (batched lookups) ──
+        $allCampaignIds = $rawRows->pluck('campaign_id')->filter()->unique()->values()->all();
+
+        $linkedCampaignIds = [];
+        if (!empty($allCampaignIds)) {
+            $linkedCampaignIds = DB::table('ad_campaign_creatives')
+                ->whereIn('campaign_id', $allCampaignIds)
+                ->whereNotNull('ad_link')
+                ->where('ad_link', '!=', '')
+                ->pluck('campaign_id')
+                ->map(fn($v) => (string)$v)
+                ->unique()
+                ->flip()
+                ->all();
+        }
+
+        $accountByCampaign = [];
+        if (!empty($allCampaignIds) && Schema::hasColumn('ad_campaign_creatives', 'account_id')) {
+            $accountByCampaign = DB::table('ad_campaign_creatives')
+                ->whereIn('campaign_id', $allCampaignIds)
+                ->whereNotNull('account_id')
+                ->where('account_id', '!=', '')
+                ->selectRaw('campaign_id, MAX(account_id) AS account_id')
+                ->groupBy('campaign_id')
+                ->pluck('account_id', 'campaign_id')
+                ->all();
+        }
+
+        $accountNameMap = [];
+        if (!empty($accountByCampaign) && Schema::hasTable('ad_accounts')) {
+            $accountNameMap = DB::table('ad_accounts')
+                ->whereIn('ad_account_id', array_values($accountByCampaign))
+                ->pluck('name', 'ad_account_id')
+                ->all();
+        }
+
+        // ── Bucket rows per page_name + map to expected response shape ──
+        $byPage = [];
+        foreach ($pageList as $p) {
+            // Initialize empty entry for every requested page so frontend can
+            // detect "0 campaigns" vs "page missing" cases. Empty totals too.
+            $byPage[$p['name']] = [
+                'rows'   => [],
+                'totals' => [
+                    'spend'           => 0, 'messages'  => 0, 'purchases' => 0,
+                    'impressions'     => 0, 'reach'     => 0, 'link_clicks' => 0,
+                    'cpp'             => null, 'cpm_msg' => null, 'cpm_1000' => null,
+                    'frequency'       => null, 'cpr'     => null,
+                    'welcome_msg_rate' => null, 'conversion_rate' => null,
+                ],
+            ];
+        }
+
+        // Build a normalized page name lookup so we can route DB result rows
+        // back to original page names (DB returns trimmed/cased original).
+        $normToOrig = [];
+        foreach ($pageList as $p) {
+            $normToOrig[strtolower(trim($p['name']))] = $p['name'];
+        }
+
+        foreach ($rawRows as $r) {
+            $dbPage = (string) ($r->page_name ?? '');
+            $norm   = strtolower(trim($dbPage));
+            $origPage = $normToOrig[$norm] ?? $dbPage;
+
+            $cid = (string) $r->campaign_id;
+            $aid = isset($accountByCampaign[$cid]) ? (string)$accountByCampaign[$cid] : null;
+
+            $row = [
+                'level'            => 'campaign',
+                'campaign_id'      => $r->campaign_id,
+                'campaign_name'    => $r->campaign_name,
+                'page_name'        => $r->page_name,
+                'on'               => (bool) ($r->is_on ?? 0),
+
+                'first_started'    => $r->first_started ?? null,
+                'running_at_start' => (int) ($r->running_at_start ?? 0) === 1,
+                'latest_started'   => $r->latest_started ?? null,
+
+                'account_id'       => $aid,
+                'account_name'     => ($aid && isset($accountNameMap[$aid])) ? (string)$accountNameMap[$aid] : null,
+
+                'spend'            => (float) ($r->spend ?? 0),
+                'cpm_1000'         => isset($r->cpm_1000) ? (float) $r->cpm_1000 : null,
+                'cpm_msg'          => isset($r->cpm_msg)  ? (float) $r->cpm_msg  : null,
+                'cpp'              => isset($r->cpp)      ? (float) $r->cpp      : null,
+                'cpr'              => isset($r->cpr)      ? (float) $r->cpr      : null,
+                'messages'         => (int)   ($r->messages ?? 0),
+                'purchases'        => (int)   ($r->purchases ?? 0),
+                'impressions'      => (int)   ($r->impressions ?? 0),
+                'reach'            => (int)   ($r->reach ?? 0),
+                'frequency'        => isset($r->frequency) ? (float) $r->frequency : null,
+                'link_clicks'      => $r->link_clicks !== null ? (int) $r->link_clicks : null,
+                'welcome_msg_rate' => isset($r->welcome_msg_rate) ? (float) $r->welcome_msg_rate : null,
+                'conversion_rate'  => isset($r->conversion_rate)  ? (float) $r->conversion_rate  : null,
+                'active_subcount'  => (int) ($r->active_subcount ?? 0),
+                'has_ad_link'      => isset($linkedCampaignIds[$cid]),
+            ];
+
+            // Stitch windowed CPPs
+            if (isset($windowMap[$dbPage][$cid])) {
+                $row['cpp_today'] = $windowMap[$dbPage][$cid]['cpp_today'];
+                $row['cpp_3d']    = $windowMap[$dbPage][$cid]['cpp_3d'];
+                $row['cpp_7d']    = $windowMap[$dbPage][$cid]['cpp_7d'];
+            }
+
+            $byPage[$origPage]['rows'][] = $row;
+
+            // Accumulate totals per page
+            $t = &$byPage[$origPage]['totals'];
+            $t['spend']       += $row['spend'];
+            $t['messages']    += $row['messages'];
+            $t['purchases']   += $row['purchases'];
+            $t['impressions'] += $row['impressions'];
+            $t['reach']       += $row['reach'];
+            $t['link_clicks'] += ($row['link_clicks'] ?? 0);
+            unset($t);
+        }
+
+        // Apply per-page limit + compute derived totals (ratios)
+        foreach ($byPage as $pn => &$bucket) {
+            // Limit rows per page
+            if (count($bucket['rows']) > $limitPerPage) {
+                $bucket['rows'] = array_slice($bucket['rows'], 0, $limitPerPage);
+            }
+            $t = &$bucket['totals'];
+            $t['cpp']     = $t['purchases']    > 0 ? (float) ($t['spend'] / $t['purchases'])    : null;
+            $t['cpm_msg'] = $t['messages']     > 0 ? (float) ($t['spend'] / $t['messages'])     : null;
+            $t['cpm_1000']= $t['impressions']  > 0 ? (float) ($t['spend'] / $t['impressions']) * 1000 : null;
+            $t['frequency']= $t['reach']       > 0 ? (float) ($t['impressions'] / $t['reach']) : null;
+            $t['welcome_msg_rate'] = $t['link_clicks'] > 0 ? (float) (($t['messages'] * 100.0) / $t['link_clicks']) : null;
+            $t['conversion_rate']  = $t['messages']    > 0 ? (float) (($t['purchases'] * 100.0) / $t['messages'])  : null;
+            unset($t);
+        }
+        unset($bucket);
+
+        return response()->json([
+            'ok'      => true,
+            'level'   => 'campaigns',
+            'by_page' => $byPage,
+        ]);
+    }
+
     public function data(Request $request)
     {
         // Inputs

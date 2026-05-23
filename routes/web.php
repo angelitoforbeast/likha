@@ -644,6 +644,12 @@ Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'ind
      Route::get('/ads_manager/campaigns/data', [AdsManagerCampaignsController::class, 'data'])
         ->name('ads_manager.campaigns.data');
 
+     // Batched data endpoint — fetches multiple pages' campaigns in ONE request.
+     // Used by /owner/private "Expand all" para mawala yung N parallel HTTP calls.
+     // Frontend falls back to per-page data() endpoint kung mag-fail.
+     Route::post('/ads_manager/campaigns/batch-data', [AdsManagerCampaignsController::class, 'batchData'])
+        ->name('ads_manager.campaigns.batch-data');
+
      // Creative preview popup (FB post embed + welcome msg / quick replies preview).
      // Used by /owner/private expanded-campaigns panel.
      Route::get('/ads_manager/creative-preview', [AdsManagerCampaignsController::class, 'creativePreview'])
