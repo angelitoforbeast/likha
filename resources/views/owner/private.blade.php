@@ -1286,7 +1286,7 @@
   --}}
   <template x-if="creativeModal.open">
     <div class="ow-modal-backdrop" @click.self="creativeModal.open = false" style="z-index:90;">
-      <div class="ow-modal-card" style="max-width:1280px;width:96vw;max-height:92vh;overflow-y:auto;">
+      <div class="ow-modal-card" style="max-width:1280px;width:96vw;max-height:96vh;overflow-y:auto;">
         <div class="ow-modal-section" style="border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
           <div style="flex:1;min-width:0;">
             <div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;"
@@ -1334,8 +1334,14 @@
                 <div>
                   {{-- iframe embed via FB plugin URL. Works for posts, reels, videos. --}}
                   <div style="background:white;border-radius:8px;overflow:hidden;border:1px solid #dadde1;">
+                    {{-- Height auto-scales sa viewport: 80vh (fills most of the
+                         modal height), capped at 1000px para hindi laging full-screen
+                         sa malalaking monitors. min 500px so small screens still usable.
+                         Para sa portrait reels (1080x1920) — needs ~870px+ to show full
+                         video + FB chrome without internal scroll. Landscape 1920x1080
+                         fits easily sa 500px+. --}}
                     <iframe :src="fbEmbedSrc(creativeModal.data.creative.ad_link)"
-                            style="width:100%;height:600px;border:none;display:block;"
+                            style="width:100%;height:min(1100px, max(560px, 85vh));border:none;display:block;"
                             scrolling="yes" frameborder="0"
                             allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
                             allowfullscreen="true"></iframe>
