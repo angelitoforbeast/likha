@@ -655,6 +655,11 @@ Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'ind
      Route::get('/ads_manager/creative-preview', [AdsManagerCampaignsController::class, 'creativePreview'])
         ->name('ads_manager.creative-preview');
 
+     // Read-only catalog viewer (ad_catalog table). Mini Ads Manager-style table
+     // showing hierarchy + lifecycle dates per ad. Auto-maintained sa uploads.
+     Route::get('/ads_manager/catalog', [\App\Http\Controllers\AdsManagerCatalogController::class, 'index'])
+        ->name('ads_manager.catalog');
+
      // History — daily change log derived from spend transitions.
      Route::get('/ads_manager/campaigns/history',      [AdsManagerCampaignsController::class, 'history'])
         ->name('ads_manager.campaigns.history');

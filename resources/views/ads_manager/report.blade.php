@@ -2,6 +2,19 @@
   <x-slot name="heading">Import Ads Manager Reports</x-slot>
 
   <div class="max-w-6xl mt-6 space-y-6">
+    {{-- Quick links sa related pages --}}
+    <div class="flex gap-2 flex-wrap">
+      <a href="/ads_manager/catalog"
+         class="inline-flex items-center gap-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 text-sm font-medium px-3 py-1.5 rounded">
+        📋 View Ad Catalog
+        <span class="text-[10px] text-indigo-600">(auto-maintained from uploads)</span>
+      </a>
+      <a href="/ads_manager/campaigns"
+         class="inline-flex items-center gap-1 bg-gray-100 hover:bg-gray-200 text-gray-800 text-sm font-medium px-3 py-1.5 rounded">
+        📊 Campaigns Manager
+      </a>
+    </div>
+
     @if (session('status'))
       <div class="rounded bg-green-100 text-green-800 px-4 py-2">
         {{ session('status') }}

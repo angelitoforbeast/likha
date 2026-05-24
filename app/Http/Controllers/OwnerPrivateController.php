@@ -302,7 +302,12 @@ class OwnerPrivateController extends Controller
         if (!$bypassCache) {
             $cached = Cache::get($cacheKey);
             if (is_array($cached)) {
-                return response()->json($cached + ['_cache' => 'hit']);
+                // Easy-to-spot cache status sa DevTools Network → Headers tab.
+                // Plus diagnostic headers para makita kung bakit nagca-cache (or hindi).
+                return response()->json($cached + ['_cache' => 'hit'])
+                    ->header('X-Cache-Status', 'HIT')
+                    ->header('X-Cache-Key',    $cacheKey)
+                    ->header('X-Cache-Version', $this->cacheVersion());
             }
         }
 
@@ -1467,7 +1472,10 @@ class OwnerPrivateController extends Controller
 
         Cache::forever($cacheKey, $payload);
 
-        return response()->json($payload + ['_cache' => $bypassCache ? 'refresh' : 'miss']);
+        return response()->json($payload + ['_cache' => $bypassCache ? 'refresh' : 'miss'])
+            ->header('X-Cache-Status', $bypassCache ? 'REFRESH' : 'MISS')
+            ->header('X-Cache-Key',    $cacheKey)
+            ->header('X-Cache-Version', $this->cacheVersion());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
