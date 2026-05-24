@@ -548,6 +548,14 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
             // 1) Upsert creatives in a PG-safe way (no exceptions on conflicts)
             $this->upsertCreativesForChunk($rows, $now);
 
+            // 1b) Upsert ad_catalog (hierarchy + lifecycle dates) per chunk.
+            //     Maintains the small lookup table that replaces the slow
+            //     full-table-scan subqueries sa AdsManagerCampaignsController.
+            //     Idempotent: re-uploads ng same day = no-op (LEAST keeps earliest).
+            //     Out-of-order uploads (e.g., May then Jan) = first_started gets
+            //     updated to the EARLIER date.
+            $this->upsertAdCatalogForChunk($rows, $now);
+
             // 2) Batch-fetch existing rows for (day, ad_id) pairs sa chunk para
             //    mai-compare yung monotonic fields nang walang N+1 query.
             $existingByKey = [];
@@ -820,6 +828,142 @@ class ProcessAdsManagerReportsUpload implements ShouldQueue
     {
         if (array_key_exists($key, $source) && $source[$key] !== null) {
             $dest[$key] = $source[$key];
+        }
+    }
+
+    /**
+     * Upsert `ad_catalog` (denormalized ads hierarchy + lifecycle dates) for
+     * each row in the chunk. Replaces the slow per-request subqueries sa
+     * AdsManagerCampaignsController.
+     *
+     * Behavior:
+     *   - New ad_id  → INSERT with first_started = row's day
+     *   - Existing   → UPDATE only kung row's day is EARLIER than current
+     *                  first_started (handles out-of-order uploads)
+     *   - first_spend_day → similar, plus only set kung spend > 0
+     *   - Hierarchy fields (campaign/adset names, etc.) → backfill if currently null
+     *
+     * Uses single batched MySQL INSERT ... ON DUPLICATE KEY UPDATE para sa
+     * efficiency (one DB roundtrip per chunk vs N roundtrips). Skip silently
+     * kung walang ad_id (orphan row) or kung ad_catalog table doesn't exist
+     * (e.g., pre-migration state).
+     */
+    private function upsertAdCatalogForChunk(array $rows, string $now): void
+    {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('ad_catalog')) return;
+
+        // Collect unique (ad_id → row data) — last row wins for hierarchy fields
+        // (latest upload date typically has the most current campaign/adset names).
+        $byAdId = [];
+        foreach ($rows as $r) {
+            $adId = isset($r['ad_id']) ? trim((string)$r['ad_id']) : '';
+            if ($adId === '') continue;
+
+            $day = $r['day'] ?? null;
+            if (empty($day)) continue;
+
+            $spend = (float) ($r['amount_spent_php'] ?? 0);
+
+            // Aggregate per ad_id sa chunk para isang upsert lang per ad.
+            // Take MIN(day) sa chunk + propagate latest hierarchy values.
+            if (!isset($byAdId[$adId])) {
+                $byAdId[$adId] = [
+                    'ad_id'           => $adId,
+                    'ad_set_id'       => $r['ad_set_id']     ?? null,
+                    'ad_set_name'     => $r['ad_set_name']   ?? null,
+                    'campaign_id'     => $r['campaign_id']   ?? null,
+                    'campaign_name'   => $r['campaign_name'] ?? null,
+                    'page_name'       => $r['page_name']     ?? null,
+                    'ad_name'         => $r['headline']      ?? null,
+                    'first_started'   => $day,
+                    'first_spend_day' => $spend > 0 ? $day : null,
+                ];
+            } else {
+                $b = &$byAdId[$adId];
+                // Earliest day wins
+                if ($day < $b['first_started']) $b['first_started'] = $day;
+                if ($spend > 0) {
+                    if ($b['first_spend_day'] === null || $day < $b['first_spend_day']) {
+                        $b['first_spend_day'] = $day;
+                    }
+                }
+                // Backfill hierarchy if missing
+                foreach (['ad_set_id','ad_set_name','campaign_id','campaign_name','page_name','ad_name'] as $f) {
+                    $src = $f === 'ad_name' ? ($r['headline'] ?? null) : ($r[$f] ?? null);
+                    if (empty($b[$f]) && !empty($src)) $b[$f] = $src;
+                }
+                unset($b);
+            }
+        }
+
+        if (empty($byAdId)) return;
+
+        $driver = DB::getDriverName();
+
+        // Batched MySQL: INSERT ... VALUES (?), (?), ... ON DUPLICATE KEY UPDATE
+        if ($driver === 'mysql') {
+            $valuesSql = [];
+            $bindings  = [];
+            foreach ($byAdId as $b) {
+                $valuesSql[] = '(?,?,?,?,?,?,?,?,?,?,?)';
+                $bindings    = array_merge($bindings, [
+                    $b['ad_id'],
+                    $b['ad_set_id'],
+                    $b['ad_set_name'],
+                    $b['campaign_id'],
+                    $b['campaign_name'],
+                    $b['page_name'],
+                    $b['ad_name'],
+                    $b['first_started'],
+                    $b['first_spend_day'],
+                    $now, $now, // created_at, updated_at
+                ]);
+            }
+            $sql = "
+                INSERT INTO ad_catalog (
+                    ad_id, ad_set_id, ad_set_name, campaign_id, campaign_name,
+                    page_name, ad_name, first_started, first_spend_day,
+                    created_at, updated_at
+                ) VALUES " . implode(',', $valuesSql) . "
+                ON DUPLICATE KEY UPDATE
+                    ad_set_id       = COALESCE(ad_catalog.ad_set_id,     VALUES(ad_set_id)),
+                    ad_set_name     = COALESCE(ad_catalog.ad_set_name,   VALUES(ad_set_name)),
+                    campaign_id     = COALESCE(ad_catalog.campaign_id,   VALUES(campaign_id)),
+                    campaign_name   = COALESCE(ad_catalog.campaign_name, VALUES(campaign_name)),
+                    page_name       = COALESCE(ad_catalog.page_name,     VALUES(page_name)),
+                    ad_name         = COALESCE(ad_catalog.ad_name,       VALUES(ad_name)),
+                    first_started   = LEAST(COALESCE(ad_catalog.first_started, VALUES(first_started)), VALUES(first_started)),
+                    first_spend_day = LEAST(
+                                        COALESCE(ad_catalog.first_spend_day, VALUES(first_spend_day), '9999-12-31'),
+                                        COALESCE(VALUES(first_spend_day),    ad_catalog.first_spend_day, '9999-12-31')
+                                      ),
+                    updated_at      = VALUES(updated_at)
+            ";
+            DB::statement($sql, $bindings);
+        } else {
+            // Postgres / others — fallback to per-row updateOrInsert (slower but works)
+            foreach ($byAdId as $b) {
+                $existing = DB::table('ad_catalog')->where('ad_id', $b['ad_id'])->first();
+                if (!$existing) {
+                    DB::table('ad_catalog')->insert(array_merge($b, [
+                        'created_at' => $now, 'updated_at' => $now,
+                    ]));
+                } else {
+                    $updates = ['updated_at' => $now];
+                    // Backfill nulls
+                    foreach (['ad_set_id','ad_set_name','campaign_id','campaign_name','page_name','ad_name'] as $f) {
+                        if (empty($existing->$f) && !empty($b[$f])) $updates[$f] = $b[$f];
+                    }
+                    // Earliest day wins
+                    if ($b['first_started'] && (!$existing->first_started || $b['first_started'] < $existing->first_started)) {
+                        $updates['first_started'] = $b['first_started'];
+                    }
+                    if ($b['first_spend_day'] && (!$existing->first_spend_day || $b['first_spend_day'] < $existing->first_spend_day)) {
+                        $updates['first_spend_day'] = $b['first_spend_day'];
+                    }
+                    DB::table('ad_catalog')->where('ad_id', $b['ad_id'])->update($updates);
+                }
+            }
         }
     }
 }

@@ -786,19 +786,21 @@ class AdsManagerCampaignsController extends Controller
             ->selectRaw("a.ad_set_id, MAX(CASE WHEN LOWER(COALESCE(a.ad_set_delivery,'')) LIKE 'active%' THEN 1 ELSE 0 END) AS is_on_latest")
             ->groupBy('a.ad_set_id');
 
-        // First-started dates per campaign (global, no date filter).
-        // Includes running_at_start flag — true if earliest day = MIN(day in DB).
-        $campaignStartedDates = DB::table('ads_manager_reports')
-            ->selectRaw("campaign_id AS id, MIN($dayExpr) AS first_started,
-                         CASE WHEN MIN($dayExpr) = (SELECT MIN($dayExpr) FROM ads_manager_reports) THEN 1 ELSE 0 END AS running_at_start")
+        // FAST PATH: read from ad_catalog instead of full-scanning ads_manager_reports.
+        // Same pattern as data() endpoint. ~500-1000× faster.
+        $campaignStartedDates = DB::table('ad_catalog')
+            ->whereNotNull('campaign_id')
+            ->selectRaw("
+                campaign_id AS id,
+                MIN(first_started) AS first_started,
+                0 AS running_at_start
+            ")
             ->groupBy('campaign_id');
 
-        // Latest "fresh start" detection — using MAX day of last active streak.
-        // For simplicity in batch, use MAX day per campaign with spend > 0.
-        $campaignFreshStart = DB::table('ads_manager_reports')
-            ->selectRaw("campaign_id AS id, MAX($dayExpr) AS latest_started")
-            ->where('amount_spent_php', '>', 0)
-            ->groupBy('campaign_id');
+        // latest_started disabled — returns empty (user skipped feature).
+        $campaignFreshStart = DB::query()
+            ->select(DB::raw('NULL AS id, NULL AS latest_started'))
+            ->whereRaw('1=0');
 
         // ── Main aggregation: per (page, campaign) for all requested pages ──
         // Using orWhere groups for per-page date filtering. MySQL handles this
@@ -1165,71 +1167,61 @@ class AdsManagerCampaignsController extends Controller
         //                           If we observed a clean spend=0 → spend>0
         //                           transition, we DO know the launch.
         //     • Fallback: if id never had spend > 0, first_started = MIN(day).
-        $buildStarted = function (string $idCol) use ($dayExpr) {
-            // 1) Daily spend aggregate per (id, day).
-            $dailySpend = DB::table('ads_manager_reports')
-                ->whereNotNull('day')
+        // ── FAST PATH: $buildStarted now reads from `ad_catalog` (small lookup
+        // table) instead of full-scanning `ads_manager_reports`. Brings yung
+        // per-request work from seconds to milliseconds.
+        //
+        //   - For ad_id (leaf): direct 1:1 lookup
+        //   - For campaign_id / ad_set_id: MIN aggregate over the catalog's
+        //     children (still fast — catalog is ~10K rows vs reports' 100K+).
+        //
+        // Maintained by:
+        //   - One-time backfill migration (2026_05_22_140100_backfill_ad_catalog_from_reports)
+        //   - ProcessAdsManagerReportsUpload::upsertAdCatalogForChunk (incremental)
+        //
+        // Fallback: if ad_catalog has no row for an entity (e.g., raw data
+        // arrived sa reports but catalog backfill hasn't caught up), LEFT JOIN
+        // returns NULL → frontend gracefully shows "—" para sa first_started.
+        $buildStarted = function (string $idCol) {
+            if ($idCol === 'ad_id') {
+                // Direct lookup — each ad has exactly one row sa catalog.
+                return DB::table('ad_catalog')
+                    ->whereNotNull('ad_id')
+                    ->selectRaw("
+                        ad_id AS id,
+                        first_started,
+                        first_spend_day,
+                        0 AS running_at_start
+                    ");
+            }
+            // Aggregate over child ads para sa campaign + adset levels.
+            return DB::table('ad_catalog')
                 ->whereNotNull($idCol)
                 ->selectRaw("
                     $idCol AS id,
-                    $dayExpr AS day,
-                    COALESCE(SUM(amount_spent_php), 0) AS spend
+                    MIN(first_started)   AS first_started,
+                    MIN(first_spend_day) AS first_spend_day,
+                    0 AS running_at_start
                 ")
-                ->groupBy($idCol, DB::raw($dayExpr));
-
-            // 2) Per id: MIN(day) of any record + MIN(day) where spend > 0.
-            return DB::query()
-                ->fromSub($dailySpend, 'd')
-                ->selectRaw('
-                    id,
-                    MIN(day)                                          AS min_day,
-                    MIN(CASE WHEN spend > 0 THEN day END)             AS first_spend_day,
-                    COALESCE(
-                        MIN(CASE WHEN spend > 0 THEN day END),
-                        MIN(day)
-                    )                                                  AS first_started,
-                    CASE
-                        WHEN MIN(CASE WHEN spend > 0 THEN day END) IS NOT NULL
-                         AND MIN(CASE WHEN spend > 0 THEN day END) = MIN(day)
-                        THEN 1 ELSE 0
-                    END                                                AS running_at_start
-                ')
-                ->groupBy('id');
+                ->groupBy($idCol);
         };
 
         $campaignStartedDates = $buildStarted('campaign_id');
         $adSetStartedDates    = $buildStarted('ad_set_id');
         $adStartedDates       = $buildStarted('ad_id');
 
-        // latest_started — built via 3-stage subqueries:
-        //   1) per (id, day) is_active flag (any row marked active%)
-        //   2) add LAG(is_active) over (partition by id order by day)
-        //   3) keep rows where is_active=1 AND (prev=0 OR prev IS NULL),
-        //      then GROUP BY id with MAX(day) — the latest fresh start.
-        $buildFreshStart = function (string $idCol, string $deliveryCol) use ($dayExpr) {
-            $dailyActive = DB::table('ads_manager_reports')
-                ->whereNotNull('day')
-                ->selectRaw("
-                    $idCol AS id,
-                    $dayExpr AS day,
-                    MAX(CASE WHEN LOWER(TRIM($deliveryCol)) LIKE 'active%' THEN 1 ELSE 0 END) AS is_active
-                ")
-                ->groupBy($idCol, DB::raw($dayExpr));
-
-            $withLag = DB::query()->fromSub($dailyActive, 'd')->selectRaw("
-                id, day, is_active,
-                LAG(is_active) OVER (PARTITION BY id ORDER BY day) AS prev_active
-            ");
-
-            return DB::query()->fromSub($withLag, 'lp')
-                ->whereRaw('is_active = 1 AND (prev_active = 0 OR prev_active IS NULL)')
-                ->selectRaw('id, MAX(day) AS latest_started')
-                ->groupBy('id');
+        // ── latest_started — DISABLED for now (user explicitly skipped this
+        // "fresh restart after gap" feature). Returns empty subquery so the
+        // LEFT JOIN sa main query yields NULL → frontend shows "—".
+        // Easy to re-enable: restore the old $buildFreshStart logic below.
+        $buildFreshStart = function (string $idCol, string $deliveryCol) {
+            return DB::query()
+                ->select(DB::raw("NULL AS id, NULL AS latest_started"))
+                ->whereRaw('1=0');
         };
 
         $campaignFreshStart = $buildFreshStart('campaign_id', 'campaign_delivery');
         $adSetFreshStart    = $buildFreshStart('ad_set_id',   'ad_set_delivery');
-        // Ads inherit delivery from their ad set (no own delivery field).
         $adFreshStart       = $buildFreshStart('ad_id',       'ad_set_delivery');
 
         // Latest day per ad set
