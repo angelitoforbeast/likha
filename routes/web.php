@@ -655,10 +655,15 @@ Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'ind
      Route::get('/ads_manager/creative-preview', [AdsManagerCampaignsController::class, 'creativePreview'])
         ->name('ads_manager.creative-preview');
 
-     // Read-only catalog viewer (ad_catalog table). Mini Ads Manager-style table
-     // showing hierarchy + lifecycle dates per ad. Auto-maintained sa uploads.
-     Route::get('/ads_manager/catalog', [\App\Http\Controllers\AdsManagerCatalogController::class, 'index'])
+     // Read-only catalog viewer (ad_catalog table). Mini Ads Manager-style tree
+     // (Campaign → Ad Set → Ad) lazy-loaded on expand. Data from ad_catalog only.
+     // Auto-maintained sa uploads.
+     Route::get('/ads_manager/catalog',          [\App\Http\Controllers\AdsManagerCatalogController::class, 'index'])
         ->name('ads_manager.catalog');
+     Route::get('/ads_manager/catalog/adsets',   [\App\Http\Controllers\AdsManagerCatalogController::class, 'adsets'])
+        ->name('ads_manager.catalog.adsets');
+     Route::get('/ads_manager/catalog/ads',      [\App\Http\Controllers\AdsManagerCatalogController::class, 'ads'])
+        ->name('ads_manager.catalog.ads');
 
      // History — daily change log derived from spend transitions.
      Route::get('/ads_manager/campaigns/history',      [AdsManagerCampaignsController::class, 'history'])
