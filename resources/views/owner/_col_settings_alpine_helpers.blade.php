@@ -205,6 +205,10 @@
           }
         },
         rulePreviewText(r){
+          // Null-check ops have no value to preview — show placeholder text.
+          if (r && (r.op === 'is_null' || r.op === 'is_not_null')) {
+            return r.op === 'is_null' ? '∅ empty' : '✓ not empty';
+          }
           const k = this.ruleValueKind(r);
           if (k === 'ref') {
             const lbl = OP_LABEL_TO_REF_LABEL[r.value.col] || r.value.col;
@@ -234,8 +238,12 @@
               .map(g => ({
                 cols: [...new Set(g.cols)],
                 rules: g.rules.map(r => {
+                  const isNullOp = (r.op === 'is_null' || r.op === 'is_not_null');
                   let value;
-                  if (r && r.value && typeof r.value === 'object' && r.value.type === 'ref') {
+                  if (isNullOp) {
+                    // Null-check ops don't need a value — backend allows null.
+                    value = null;
+                  } else if (r && r.value && typeof r.value === 'object' && r.value.type === 'ref') {
                     value = { type: 'ref', table: 'owner_private', col: String(r.value.col || '') };
                   } else if (r && r.value && typeof r.value === 'object' && r.value.type === 'formula') {
                     value = { type: 'formula', expr: String(r.value.expr || '') };

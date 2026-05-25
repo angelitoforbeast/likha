@@ -440,9 +440,15 @@
               .map(g => ({
                 cols: [...new Set(g.cols)],
                 rules: g.rules.map(r => {
+                  const isNullOp = (r.op === 'is_null' || r.op === 'is_not_null');
                   let value;
-                  if (r && r.value && typeof r.value === 'object' && r.value.type === 'ref') {
+                  if (isNullOp) {
+                    // Null-check ops don't need a value — backend allows null/missing.
+                    value = null;
+                  } else if (r && r.value && typeof r.value === 'object' && r.value.type === 'ref') {
                     value = { type: 'ref', table: 'owner_private', col: String(r.value.col || '') };
+                  } else if (r && r.value && typeof r.value === 'object' && r.value.type === 'formula') {
+                    value = { type: 'formula', expr: String(r.value.expr || '') };
                   } else {
                     value = Number(r.value) || 0;
                   }

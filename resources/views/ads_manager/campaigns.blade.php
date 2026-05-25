@@ -552,28 +552,34 @@
             // Cross-table ref → skip (no parent context here).
             if (r.value && typeof r.value === 'object' && r.value.type === 'ref') continue;
             // Formula → evaluate same-table tokens only (no parent ref here)
-            let t;
-            if (r.value && typeof r.value === 'object' && r.value.type === 'formula') {
-              t = this._evalFormulaExpr(String(r.value.expr || ''), row);
-            } else {
-              t = Number(r.value);
-            }
-            if (isNaN(t)) continue;
             // Determine evaluated value: compare_col (sibling) or self.
-            // If compare_col is set, fetch that column's value sa same row.
             let evalRaw = value;
             if (r.compare_col && row && Object.prototype.hasOwnProperty.call(row, r.compare_col)) {
               evalRaw = row[r.compare_col];
             }
-            if (evalRaw == null || isNaN(Number(evalRaw))) continue;
-            const v = Number(evalRaw);
+
+            // NULL-CHECK OPS — fire BEFORE numeric guard. Strict: null/undefined/'' = empty.
             let hit = false;
-            switch (r.op) {
-              case '>=': hit = v >= t; break;
-              case '>':  hit = v >  t; break;
-              case '=':  hit = v == t; break;
-              case '<=': hit = v <= t; break;
-              case '<':  hit = v <  t; break;
+            if (r.op === 'is_null' || r.op === 'is_not_null') {
+              const isEmpty = (evalRaw === null || evalRaw === undefined || evalRaw === '');
+              hit = (r.op === 'is_null') ? isEmpty : !isEmpty;
+            } else {
+              let t;
+              if (r.value && typeof r.value === 'object' && r.value.type === 'formula') {
+                t = this._evalFormulaExpr(String(r.value.expr || ''), row);
+              } else {
+                t = Number(r.value);
+              }
+              if (isNaN(t)) continue;
+              if (evalRaw == null || isNaN(Number(evalRaw))) continue;
+              const v = Number(evalRaw);
+              switch (r.op) {
+                case '>=': hit = v >= t; break;
+                case '>':  hit = v >  t; break;
+                case '=':  hit = v == t; break;
+                case '<=': hit = v <= t; break;
+                case '<':  hit = v <  t; break;
+              }
             }
             if (hit) {
               const bg  = r.bg || '#fee2e2';

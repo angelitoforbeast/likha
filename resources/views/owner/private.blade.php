@@ -2494,22 +2494,30 @@
             if (activeState === 'active' && !isOn) continue;
             if (activeState === 'off'    &&  isOn) continue;
           }
-          const t = this.resolveRuleThreshold(r.value, refRow, sameRow);
-          if (isNaN(t)) continue;   // ref/formula couldn't resolve → skip rule
           // Determine what to evaluate: compare_col (sibling) or self
           let evalRaw = value;
           if (r.compare_col && sameRow && Object.prototype.hasOwnProperty.call(sameRow, r.compare_col)) {
             evalRaw = sameRow[r.compare_col];
           }
-          if (evalRaw == null || isNaN(Number(evalRaw))) continue;
-          const v = Number(evalRaw);
+
+          // NULL-CHECK OPS — fire FIRST, before isNaN guard. Strict null scope:
+          // null, undefined, or empty string count as "empty".
           let hit = false;
-          switch (r.op) {
-            case '>=': hit = v >= t; break;
-            case '>':  hit = v >  t; break;
-            case '=':  hit = v == t; break;
-            case '<=': hit = v <= t; break;
-            case '<':  hit = v <  t; break;
+          if (r.op === 'is_null' || r.op === 'is_not_null') {
+            const isEmpty = (evalRaw === null || evalRaw === undefined || evalRaw === '');
+            hit = (r.op === 'is_null') ? isEmpty : !isEmpty;
+          } else {
+            const t = this.resolveRuleThreshold(r.value, refRow, sameRow);
+            if (isNaN(t)) continue;   // ref/formula couldn't resolve → skip rule
+            if (evalRaw == null || isNaN(Number(evalRaw))) continue;
+            const v = Number(evalRaw);
+            switch (r.op) {
+              case '>=': hit = v >= t; break;
+              case '>':  hit = v >  t; break;
+              case '=':  hit = v == t; break;
+              case '<=': hit = v <= t; break;
+              case '<':  hit = v <  t; break;
+            }
           }
           if (hit) {
             const bg  = r.bg || '#fee2e2';

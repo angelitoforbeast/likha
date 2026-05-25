@@ -397,28 +397,36 @@
           const rules = (this.COL_FORMAT || {})[colId] || [];
           for (const r of rules) {
             const op = r.op;
-            // Threshold: literal number OR formula (same-table tokens only)
-            let v = null;
-            if (typeof r.value === 'number') {
-              v = r.value;
-            } else if (r.value && typeof r.value === 'object' && r.value.type === 'formula') {
-              v = this._evalFormula(String(r.value.expr || ''), row);
-              if (isNaN(v)) continue;
-            } else { continue; }
-            if (v == null) continue;
             // Pick eval value: compare_col (sibling) or self
             let evalRaw = value;
             if (r.compare_col && row && Object.prototype.hasOwnProperty.call(row, r.compare_col)) {
               evalRaw = row[r.compare_col];
             }
-            if (evalRaw == null || isNaN(Number(evalRaw))) continue;
-            const v0 = Number(evalRaw);
+
+            // NULL-CHECK OPS — fire BEFORE numeric checks. Strict: null/undef/'' = empty.
             let match = false;
-            if (op === '>')  match = v0 >  v;
-            if (op === '>=') match = v0 >= v;
-            if (op === '=')  match = v0 == v;
-            if (op === '<=') match = v0 <= v;
-            if (op === '<')  match = v0 <  v;
+            if (op === 'is_null' || op === 'is_not_null') {
+              const isEmpty = (evalRaw === null || evalRaw === undefined || evalRaw === '');
+              match = (op === 'is_null') ? isEmpty : !isEmpty;
+            } else {
+              // Threshold: literal number OR formula (same-table tokens only)
+              let v = null;
+              if (typeof r.value === 'number') {
+                v = r.value;
+              } else if (r.value && typeof r.value === 'object' && r.value.type === 'formula') {
+                v = this._evalFormula(String(r.value.expr || ''), row);
+                if (isNaN(v)) continue;
+              } else { continue; }
+              if (v == null) continue;
+              if (evalRaw == null || isNaN(Number(evalRaw))) continue;
+              const v0 = Number(evalRaw);
+              if (op === '>')  match = v0 >  v;
+              if (op === '>=') match = v0 >= v;
+              if (op === '=')  match = v0 == v;
+              if (op === '<=') match = v0 <= v;
+              if (op === '<')  match = v0 <  v;
+            }
+
             if (match) {
               const bg    = r.bg    || '#fee2e2';
               const color = r.color || '';

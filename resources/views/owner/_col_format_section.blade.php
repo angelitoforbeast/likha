@@ -119,46 +119,53 @@
                   <option :value="tc.id" x-text="tc.label"></option>
                 </template>
               </select>
-              <span class="text-xs text-slate-500">value</span>
+              <span class="text-xs text-slate-500" x-text="(r.op === 'is_null' || r.op === 'is_not_null') ? '' : 'value'"></span>
               <select x-model="r.op" class="border border-slate-300 rounded px-1 py-0.5 text-xs">
                 <option value=">=">≥</option>
                 <option value=">">&gt;</option>
                 <option value="=">=</option>
                 <option value="<=">≤</option>
                 <option value="<">&lt;</option>
+                <option value="is_null">∅ is empty / null</option>
+                <option value="is_not_null">✓ is not empty</option>
               </select>
 
-              {{-- Value input: literal number OR ref OR formula --}}
-              <select :value="ruleValueKind(r)"
-                      @change="setRuleValueKind(r, $event.target.value)"
-                      class="border border-slate-300 rounded px-1 py-0.5 text-xs"
-                      title="Choose: literal number, ref to Page Summary column, or formula">
-                <option value="literal">📐 Literal</option>
-                @if(!empty($allowRefValues))
-                <option value="ref">🔗 Ref → Page Summary</option>
-                @endif
-                <option value="formula">🧮 Formula</option>
-              </select>
+              {{-- Value input / kind selector — HIDDEN for null-check ops
+                   (is_null / is_not_null don't compare against any value). --}}
+              <template x-if="r.op !== 'is_null' && r.op !== 'is_not_null'">
+                <span class="inline-flex items-center gap-1" style="flex-wrap:wrap;">
+                  <select :value="ruleValueKind(r)"
+                          @change="setRuleValueKind(r, $event.target.value)"
+                          class="border border-slate-300 rounded px-1 py-0.5 text-xs"
+                          title="Choose: literal number, ref to Page Summary column, or formula">
+                    <option value="literal">📐 Literal</option>
+                    @if(!empty($allowRefValues))
+                    <option value="ref">🔗 Ref → Page Summary</option>
+                    @endif
+                    <option value="formula">🧮 Formula</option>
+                  </select>
 
-              <template x-if="ruleValueKind(r) === 'literal'">
-                <input type="number" step="0.01"
-                       :value="r.value"
-                       @input="r.value = ($event.target.value === '' ? 0 : parseFloat($event.target.value))"
-                       class="border border-slate-300 rounded px-2 py-0.5 text-xs w-24 text-right">
-              </template>
-              <template x-if="ruleValueKind(r) === 'ref'">
-                <select :value="r.value && r.value.col ? r.value.col : ''"
-                        @change="r.value = { type:'ref', table:'owner_private', col:$event.target.value }"
-                        class="border border-slate-300 rounded px-1 py-0.5 text-xs"
-                        style="max-width:180px;">
-                  <option value="" disabled>— pick column —</option>
-                  <template x-for="oc in ownerPrivateCatalog" :key="'ref-'+oc.id">
-                    <option :value="oc.id" x-text="oc.label"></option>
+                  <template x-if="ruleValueKind(r) === 'literal'">
+                    <input type="number" step="0.01"
+                           :value="r.value"
+                           @input="r.value = ($event.target.value === '' ? 0 : parseFloat($event.target.value))"
+                           class="border border-slate-300 rounded px-2 py-0.5 text-xs w-24 text-right">
                   </template>
-                </select>
+                  <template x-if="ruleValueKind(r) === 'ref'">
+                    <select :value="r.value && r.value.col ? r.value.col : ''"
+                            @change="r.value = { type:'ref', table:'owner_private', col:$event.target.value }"
+                            class="border border-slate-300 rounded px-1 py-0.5 text-xs"
+                            style="max-width:180px;">
+                      <option value="" disabled>— pick column —</option>
+                      <template x-for="oc in ownerPrivateCatalog" :key="'ref-'+oc.id">
+                        <option :value="oc.id" x-text="oc.label"></option>
+                      </template>
+                    </select>
+                  </template>
+                </span>
               </template>
-              {{-- Formula input with {{column}} autocomplete --}}
-              <template x-if="ruleValueKind(r) === 'formula'">
+              {{-- Formula input with [[column]] autocomplete. Hidden for null ops. --}}
+              <template x-if="(r.op !== 'is_null' && r.op !== 'is_not_null') && ruleValueKind(r) === 'formula'">
                 <span class="relative" style="display:inline-block;">
                   <input type="text"
                          :value="r.value && r.value.expr ? r.value.expr : ''"
@@ -169,7 +176,7 @@
                          placeholder="e.g., [[rts]] + [[op:cpp]] - 1"
                          class="border border-slate-300 rounded px-2 py-0.5 text-xs"
                          style="width:280px;font-family:ui-monospace,monospace;">
-                  {{-- Autocomplete dropdown — shown when user types `{{` --}}
+                  {{-- Autocomplete dropdown — shown when user types double-brackets --}}
                   <div x-show="autocompleteOpen && autocompleteFor === r"
                        x-cloak
                        class="absolute z-50 bg-white border border-slate-300 shadow-lg rounded mt-1 max-h-48 overflow-auto"

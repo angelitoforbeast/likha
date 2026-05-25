@@ -313,7 +313,8 @@ class OwnerColumnSettingsController extends Controller
 
         $allowedIds   = array_column(self::CATALOG[$table], 'id');
         $allowedSet   = array_flip($allowedIds);
-        $allowedOps   = ['>', '>=', '=', '<=', '<'];
+        // Numeric comparison ops + null-check ops. Null ops don't need a value.
+        $allowedOps   = ['>', '>=', '=', '<=', '<', 'is_null', 'is_not_null'];
         // Cross-ref values can target any owner_private column id.
         $refTargetIds = array_column(self::CATALOG['owner_private'], 'id');
         $refTargetSet = array_flip($refTargetIds);
@@ -348,8 +349,13 @@ class OwnerColumnSettingsController extends Controller
             if (!is_array($r)) return null;
             $op = (string) ($r['op'] ?? '');
             if (!in_array($op, $allowedOps, true)) return null;
-            $val = $cleanValue($r['value'] ?? null);
-            if ($val === null) return null;
+            // Null-check ops don't need a `value` field — skip value validation.
+            $isNullOp = ($op === 'is_null' || $op === 'is_not_null');
+            $val = null;
+            if (!$isNullOp) {
+                $val = $cleanValue($r['value'] ?? null);
+                if ($val === null) return null;
+            }
             $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
             if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
             $color = trim((string) ($r['color'] ?? ''));
@@ -469,7 +475,8 @@ class OwnerColumnSettingsController extends Controller
 
         $allowedIds   = array_column(self::CATALOG[$table], 'id');
         $allowedSet   = array_flip($allowedIds);
-        $allowedOps   = ['>', '>=', '=', '<=', '<'];
+        // Numeric ops + null-check ops. is_null/is_not_null skip value validation.
+        $allowedOps   = ['>', '>=', '=', '<=', '<', 'is_null', 'is_not_null'];
         $refTargetIds = array_column(self::CATALOG['owner_private'], 'id');
         $refTargetSet = array_flip($refTargetIds);
 
@@ -507,8 +514,13 @@ class OwnerColumnSettingsController extends Controller
                 if (!is_array($r)) continue;
                 $op = (string) ($r['op'] ?? '');
                 if (!in_array($op, $allowedOps, true)) continue;
-                $val = $cleanValue($r['value'] ?? null);
-                if ($val === null) continue;
+                // Null-check ops don't need a value.
+                $isNullOp = ($op === 'is_null' || $op === 'is_not_null');
+                $val = null;
+                if (!$isNullOp) {
+                    $val = $cleanValue($r['value'] ?? null);
+                    if ($val === null) continue;
+                }
                 $bg = trim((string) ($r['bg'] ?? '#fee2e2'));
                 if (!preg_match('/^#[0-9a-fA-F]{6}$/', $bg)) $bg = '#fee2e2';
                 $color = trim((string) ($r['color'] ?? ''));
