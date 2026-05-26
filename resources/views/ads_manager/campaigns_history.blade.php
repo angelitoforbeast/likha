@@ -85,8 +85,12 @@
         <span class="text-gray-300">·</span>
         <h1 class="font-semibold text-base">⏱ Daily Change History</h1>
       </div>
-      <div class="text-xs text-gray-500">
-        Derived from spend transitions in <code>ads_manager_reports</code>
+      <div class="flex items-center gap-3 text-xs">
+        <a href="{{ route('ads_manager.campaigns.assignments.log') }}"
+           class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 px-3 py-1.5 rounded font-medium">
+          📜 View Assignment Log
+        </a>
+        <span class="text-gray-500">Derived from spend transitions in <code>ads_manager_reports</code></span>
       </div>
     </div>
   </nav>
@@ -256,11 +260,12 @@
                       <span style="font-size:11px;color:#dc2626;font-weight:600;" :title="assignError[e.entity_id] || ''">⚠ failed</span>
                     </template>
 
-                    <button type="button" @click="openHistoryModal(e.entity_id, e.entity_name)"
-                            style="font-size:11px;color:#1877f2;background:transparent;border:none;cursor:pointer;padding:2px 6px;border-radius:3px;"
-                            onmouseover="this.style.background='#eef2ff';"
-                            onmouseout="this.style.background='transparent';"
-                            title="View assignment history">📜 history</button>
+                    <a :href="'/ads_manager/campaigns/assignments/log?campaign=' + encodeURIComponent(e.entity_id)"
+                       target="_blank"
+                       style="font-size:11px;color:#1877f2;text-decoration:none;padding:2px 6px;border-radius:3px;"
+                       onmouseover="this.style.background='#eef2ff';"
+                       onmouseout="this.style.background='transparent';"
+                       title="View assignment history sa new tab">📜 history ↗</a>
 
                     <template x-if="assignments[e.entity_id]?.note">
                       <span style="font-size:11px;color:#65676b;font-style:italic;" :title="assignments[e.entity_id]?.note">💬 has note</span>
@@ -428,15 +433,6 @@
         // Write permission flag — set from server config (mirrors backend role check).
         // Computed sa $canWriteAssignment variable above (PHP scope).
         canWriteAssignment: @json($canWriteAssignment ?? false),
-        // History modal state
-        historyModal: {
-          open: false,
-          loading: false,
-          campaign_id: null,
-          campaign_name: '',
-          entries: [],
-          error: null,
-        },
         filters: (function(){
           // Default: this calendar month (PH), level=campaigns. Reads URL
           // query params first so a refresh/share preserves the user's state.
@@ -687,33 +683,6 @@
           }
         },
 
-        // History modal
-        async openHistoryModal(campaignId, campaignName){
-          this.historyModal = {
-            open: true, loading: true, error: null,
-            campaign_id: campaignId, campaign_name: campaignName || '',
-            entries: [],
-          };
-          try {
-            const url = '{{ route('ads_manager.campaigns.assignments.history') }}?campaign_id=' + encodeURIComponent(campaignId);
-            const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
-            const j = await r.json();
-            if (!j.ok) {
-              this.historyModal.error = j.message || 'Fetch failed';
-            } else {
-              this.historyModal.entries = j.history || [];
-            }
-          } catch (e) {
-            this.historyModal.error = 'Network: ' + e.message;
-          } finally {
-            this.historyModal.loading = false;
-          }
-        },
-
-        closeHistoryModal(){
-          this.historyModal.open = false;
-        },
-
         // Relative time helper — "5 min ago", "2 hours ago"
         fmtRelative(dt){
           if (!dt) return '';
@@ -730,75 +699,6 @@
       };
     }
 
-    // After reload() completes, fetch assignments. Hooked via Alpine's $watch in DOM.
   </script>
-
-  {{-- ── ASSIGNMENT HISTORY MODAL ─────────────────────────────────────── --}}
-  <template x-teleport="body">
-  <div x-show="historyModal.open"
-       x-transition.opacity
-       @click.self="closeHistoryModal()"
-       style="position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;">
-    <div style="background:white;border-radius:10px;max-width:600px;width:100%;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;">
-      <div style="padding:14px 18px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">📜 Assignment History</div>
-          <div style="font-size:14px;font-weight:700;color:#0f172a;margin-top:3px;word-break:break-word;" x-text="historyModal.campaign_name || historyModal.campaign_id"></div>
-          <div style="font-size:11px;color:#94a3b8;margin-top:2px;font-family:ui-monospace,monospace;" x-text="historyModal.campaign_id"></div>
-        </div>
-        <button @click="closeHistoryModal()"
-                style="background:transparent;border:none;font-size:18px;color:#64748b;cursor:pointer;padding:4px 8px;">✕</button>
-      </div>
-
-      <div style="overflow-y:auto;flex:1;padding:14px 18px;">
-        <template x-if="historyModal.loading">
-          <div style="text-align:center;color:#65676b;padding:30px;font-size:13px;">⏳ Loading history…</div>
-        </template>
-        <template x-if="historyModal.error">
-          <div style="background:#fef2f2;color:#991b1b;padding:10px;border-radius:6px;font-size:12px;" x-text="'⚠ ' + historyModal.error"></div>
-        </template>
-        <template x-if="!historyModal.loading && !historyModal.error && historyModal.entries.length === 0">
-          <div style="text-align:center;color:#94a3b8;padding:30px;font-size:12px;font-style:italic;">No changes recorded yet.</div>
-        </template>
-        <template x-if="!historyModal.loading && !historyModal.error && historyModal.entries.length > 0">
-          <div style="display:flex;flex-direction:column;gap:8px;">
-            <template x-for="entry in historyModal.entries" :key="entry.id">
-              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;">
-                <div style="font-size:12.5px;color:#0f172a;line-height:1.4;">
-                  <template x-if="!entry.old_employee_name && entry.new_employee_name">
-                    <span><strong style="color:#15803d;">Assigned</strong> to <strong x-text="entry.new_employee_name"></strong>
-                      <span style="color:#65676b;font-size:11px;" x-text="entry.new_employee_role ? ('(' + entry.new_employee_role + ')') : ''"></span>
-                    </span>
-                  </template>
-                  <template x-if="entry.old_employee_name && entry.new_employee_name">
-                    <span><strong style="color:#1d4ed8;">Reassigned</strong> from <strong x-text="entry.old_employee_name"></strong>
-                      to <strong x-text="entry.new_employee_name"></strong>
-                      <span style="color:#65676b;font-size:11px;" x-text="entry.new_employee_role ? ('(' + entry.new_employee_role + ')') : ''"></span>
-                    </span>
-                  </template>
-                  <template x-if="entry.old_employee_name && !entry.new_employee_name">
-                    <span><strong style="color:#dc2626;">Unassigned</strong> from <strong x-text="entry.old_employee_name"></strong></span>
-                  </template>
-                </div>
-                <template x-if="entry.note">
-                  <div style="font-size:11.5px;color:#475569;margin-top:4px;font-style:italic;">💬 <span x-text="entry.note"></span></div>
-                </template>
-                <div style="font-size:10.5px;color:#94a3b8;margin-top:4px;">
-                  by <strong style="color:#64748b;" x-text="entry.changed_by_name || '(unknown)'"></strong>
-                  · <span x-text="entry.created_at"></span>
-                </div>
-              </div>
-            </template>
-          </div>
-        </template>
-      </div>
-
-      <div style="padding:10px 18px;border-top:1px solid #e2e8f0;text-align:right;">
-        <button @click="closeHistoryModal()"
-                style="background:#e2e8f0;color:#475569;font-size:12px;padding:6px 14px;border-radius:6px;border:none;cursor:pointer;font-weight:600;">Close</button>
-      </div>
-    </div>
-  </div>
-  </template>
 </body>
 </html>

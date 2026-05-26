@@ -678,6 +678,9 @@ Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'ind
         ->name('ads_manager.campaigns.assignments.save');
      Route::get ('/ads_manager/campaigns/assignments/history', [\App\Http\Controllers\CampaignAssignmentController::class, 'history'])
         ->name('ads_manager.campaigns.assignments.history');
+     // Full audit log page (with filters + pagination)
+     Route::get ('/ads_manager/campaigns/assignments/log', [\App\Http\Controllers\CampaignAssignmentController::class, 'logPage'])
+        ->name('ads_manager.campaigns.assignments.log');
      Route::get ('/ads_manager/employees',                     [\App\Http\Controllers\CampaignAssignmentController::class, 'employees'])
         ->name('ads_manager.employees');
 

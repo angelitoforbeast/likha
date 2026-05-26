@@ -242,6 +242,113 @@ class CampaignAssignmentController extends Controller
     }
 
     /**
+     * GET /ads_manager/campaigns/assignments/log
+     *
+     * Full audit log page for ALL campaigns with filters + pagination.
+     * Read-only viewer. Replaces yung in-page modal.
+     */
+    public function logPage(Request $request)
+    {
+        $this->checkReadAccess();
+
+        $campaignFilter   = trim((string) $request->query('campaign', ''));
+        $employeeFilter   = (int)         $request->query('employee_id', 0);
+        $changedByFilter  = (int)         $request->query('changed_by', 0);
+        $actionFilter     = (string)      $request->query('action', '');  // 'assigned'|'reassigned'|'unassigned'|''
+        $fromDate         = trim((string) $request->query('from_date', ''));
+        $toDate           = trim((string) $request->query('to_date', ''));
+
+        $allEmployees = collect();
+        $allChangers  = collect();
+        $rows = collect();
+        $total = 0;
+
+        if (Schema::hasTable('campaign_assignments_log')) {
+            $query = DB::table('campaign_assignments_log as l')
+                ->leftJoin('employee_profiles as oep', 'oep.id', '=', 'l.old_employee_id')
+                ->leftJoin('employee_profiles as nep', 'nep.id', '=', 'l.new_employee_id')
+                ->leftJoin('users as u', 'u.id', '=', 'l.changed_by_user_id')
+                ->leftJoin('employee_profiles as ebp', 'ebp.user_id', '=', 'u.id')
+                ->leftJoin('campaign_assignments as ca', 'ca.campaign_id', '=', 'l.campaign_id')
+                // Need campaign_name from somewhere — try latest entity_name sa ads_manager_reports
+                ->leftJoin(DB::raw('(SELECT campaign_id, MAX(campaign_name) AS name FROM ads_manager_reports GROUP BY campaign_id) AS cn'), 'cn.campaign_id', '=', 'l.campaign_id')
+                ->select([
+                    'l.id',
+                    'l.campaign_id',
+                    'l.old_employee_id',
+                    'l.new_employee_id',
+                    'l.note',
+                    'l.created_at',
+                    'oep.name as old_employee_name',
+                    'oep.role as old_employee_role',
+                    'nep.name as new_employee_name',
+                    'nep.role as new_employee_role',
+                    DB::raw('COALESCE(ebp.name, u.name) as changed_by_name'),
+                    'u.email as changed_by_email',
+                    'cn.name as campaign_name',
+                ]);
+
+            if ($campaignFilter !== '') {
+                $like = '%' . $campaignFilter . '%';
+                $query->where(function ($q) use ($like, $campaignFilter) {
+                    $q->where('l.campaign_id', $campaignFilter)
+                      ->orWhere('cn.name', 'like', $like);
+                });
+            }
+            if ($employeeFilter > 0) {
+                $query->where(function ($q) use ($employeeFilter) {
+                    $q->where('l.old_employee_id', $employeeFilter)
+                      ->orWhere('l.new_employee_id', $employeeFilter);
+                });
+            }
+            if ($changedByFilter > 0) {
+                $query->where('l.changed_by_user_id', $changedByFilter);
+            }
+            if ($actionFilter === 'assigned') {
+                $query->whereNull('l.old_employee_id')->whereNotNull('l.new_employee_id');
+            } elseif ($actionFilter === 'reassigned') {
+                $query->whereNotNull('l.old_employee_id')->whereNotNull('l.new_employee_id');
+            } elseif ($actionFilter === 'unassigned') {
+                $query->whereNotNull('l.old_employee_id')->whereNull('l.new_employee_id');
+            }
+            if ($fromDate !== '') $query->where('l.created_at', '>=', $fromDate . ' 00:00:00');
+            if ($toDate   !== '') $query->where('l.created_at', '<=', $toDate   . ' 23:59:59');
+
+            $rows = $query->orderByDesc('l.id')->paginate(50)->appends($request->query());
+            $total = $rows->total();
+
+            // Dropdown options
+            if (Schema::hasTable('employee_profiles')) {
+                $allEmployees = DB::table('employee_profiles')
+                    ->whereRaw("LOWER(TRIM(REGEXP_REPLACE(role, '\\\\s+', ' '))) REGEXP '^(ceo|marketing\\\\s*[-–—]\\\\s*oic|marketing)$'")
+                    ->orderBy('name')
+                    ->get(['id', 'name', 'role']);
+            }
+            $allChangers = DB::table('campaign_assignments_log as l')
+                ->leftJoin('users as u', 'u.id', '=', 'l.changed_by_user_id')
+                ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+                ->whereNotNull('l.changed_by_user_id')
+                ->select('l.changed_by_user_id as id', DB::raw('COALESCE(ep.name, u.name) as name'))
+                ->distinct()
+                ->orderBy('name')
+                ->get();
+        }
+
+        return view('ads_manager.assignment_history', [
+            'rows'             => $rows,
+            'total'            => $total,
+            'allEmployees'     => $allEmployees,
+            'allChangers'      => $allChangers,
+            'campaignFilter'   => $campaignFilter,
+            'employeeFilter'   => $employeeFilter,
+            'changedByFilter'  => $changedByFilter,
+            'actionFilter'     => $actionFilter,
+            'fromDate'         => $fromDate,
+            'toDate'           => $toDate,
+        ]);
+    }
+
+    /**
      * GET /ads_manager/employees
      *
      * Returns list of employees na pwedeng i-assign — filtered to roles:
