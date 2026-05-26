@@ -3224,9 +3224,12 @@ class OwnerPrivateController extends Controller
             // Used by Edit Cell modal's "Apply from anchor" quick-pick so each
             // cell knows its OWN anchor period (page-level anchor only covers
             // end_date's anchor). In-memory walk = no extra DB calls.
-            $dates  = array_keys($p['cells']);   // already ksort'd above
-            $cellsArr = $p['cells'];
-            foreach ($dates as $i => $d) {
+            //
+            // ⚠️ Use $cellDates (NOT $dates) to avoid shadowing the outer
+            // $dates variable (full range spine) — the outer is passed sa view.
+            $cellDates = array_keys($p['cells']);   // already ksort'd above
+            $cellsArr  = $p['cells'];
+            foreach ($cellDates as $i => $d) {
                 $c = $cellsArr[$d];
                 $cAnchorKey = $c['item_key'];
                 $cAnchorCod = $c['mode_cod'] !== null
@@ -3234,7 +3237,7 @@ class OwnerPrivateController extends Controller
                     : null;
                 $start = $d;
                 for ($j = $i - 1; $j >= 0; $j--) {
-                    $prevD = $dates[$j];
+                    $prevD = $cellDates[$j];
                     $pc = $cellsArr[$prevD];
                     if ($pc['item_key'] !== $cAnchorKey) break;
                     if ($cAnchorCod !== null && $pc['mode_cod'] !== null) {
