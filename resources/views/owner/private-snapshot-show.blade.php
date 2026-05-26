@@ -463,19 +463,36 @@
   };
 @endphp
 
+@php
+  // partial_date may live sa snapshot column (newer) or sa payload (older
+  // snapshots saved before the column was added). Try column first, fall
+  // back to payload.
+  $snapPartialDate = $snapshot->partial_date ?? ($payload['partial_date'] ?? null);
+  $snapPartialDate = $snapPartialDate ?: null;
+
+  $liveQs = http_build_query(array_filter([
+    'start_date'   => $snapshot->start_date,
+    'end_date'     => $snapshot->end_date,
+    'partial_date' => $snapPartialDate,
+  ]));
+@endphp
+
 <div id="nav">
   <div>
     <div class="nav-title">📸 Snapshot #{{ $snapshot->id }} <span style="color:#fbbf24;">(frozen view)</span></div>
     <div class="nav-meta">
-      {{ $snapshot->start_date }} → {{ $snapshot->end_date }} ·
-      saved {{ Carbon::parse($snapshot->snapshot_at)->format('Y-m-d H:i') }} ·
+      {{ $snapshot->start_date }} → {{ $snapshot->end_date }}
+      @if($snapPartialDate)
+        · <span style="color:#fbbf24;">1D: {{ $snapPartialDate }}</span>
+      @endif
+      · saved {{ Carbon::parse($snapshot->snapshot_at)->format('Y-m-d H:i') }} ·
       {{ Carbon::parse($snapshot->snapshot_at)->diffForHumans() }}
     </div>
   </div>
   <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
     <a href="{{ route('owner.private.snapshots.index') }}">📂 All Snapshots</a>
-    <a href="/owner/private?start_date={{ $snapshot->start_date }}&end_date={{ $snapshot->end_date }}"
-       class="primary" title="Open /owner/private with same date range — compare vs live">↗ Open live</a>
+    <a href="/owner/private?{{ $liveQs }}"
+       class="primary" title="Open /owner/private with same date range{{ $snapPartialDate ? ' + 1D overlay' : '' }} — compare vs live">↗ Open live</a>
   </div>
 </div>
 
@@ -483,6 +500,11 @@
   <span class="item">🆔 <strong>#{{ $snapshot->id }}</strong></span>
   <span class="item">📅 <strong>{{ $snapshot->start_date }} → {{ $snapshot->end_date }}</strong>
     ({{ $rangeDays }} day{{ $rangeDays > 1 ? 's' : '' }}{{ $isSingleDate ? ', single-date' : '' }})</span>
+  @if($snapPartialDate)
+    <span class="item">🎯
+      <span class="pill" style="background:#fef3c7;color:#92400e;">1D: {{ $snapPartialDate }}</span>
+    </span>
+  @endif
   <span class="item">👁
     @php $va = strtolower((string)($snapshot->view_as ?? 'ceo')); @endphp
     <span class="pill {{ $va === 'marketing' ? 'pill-mkt' : 'pill-ceo' }}">{{ strtoupper($va) }}</span>

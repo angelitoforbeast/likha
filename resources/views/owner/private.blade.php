@@ -1923,6 +1923,7 @@
             sort_dir:      this.sortDir,
             start_date:    this.startDate,
             end_date:      this.endDate,
+            partial_date:  this.partialDate || null,
             view_as:       this.viewAs || 'ceo',
             breakeven_target_pct: window.__BREAKEVEN_PCT__ ?? 5,
             fees:          window.__FEES__ ?? null,
@@ -1937,6 +1938,7 @@
             body: JSON.stringify({
               start_date:    this.startDate,
               end_date:      this.endDate,
+              partial_date:  this.partialDate || null,
               view_as:       this.viewAs || 'ceo',
               rows_count:    this.rows.length,
               skipped_count: this.skippedCount,

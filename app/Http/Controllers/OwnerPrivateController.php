@@ -1537,10 +1537,14 @@ class OwnerPrivateController extends Controller
         // Default null = no override, current behavior preserved.
         //
         // When set:
+        //   - Page roster anchored sa partial_date kapag > end_date (instead of
+        //     end_date) — para consistent ang totals sa "extended range" view.
         //   - Main aggregations + 3D/7D windows unchanged (use [startDate, endDate])
         //   - 1D column OVERRIDDEN: uses partial_date's actual orders + adspent
-        //   - 1D Projected Profit uses AGGREGATED HISTORICAL TCPR for projection
-        //     (since partial_date's actual proceed_orders is unreliable)
+        //   - 1D Projected Profit + Proceed use AGGREGATED HISTORICAL TCPR for
+        //     projection (since partial_date's actual proceed_orders is unreliable
+        //     when partial_date is "today"). Proceed_1D and Profit_1D derive from
+        //     the SAME projection so TCPR(1D) is internally consistent.
         $partialDateRaw = trim((string) $request->input('partial_date', ''));
         $partialDate    = $validDate($partialDateRaw) ? $partialDateRaw : null;
 
@@ -1618,11 +1622,17 @@ class OwnerPrivateController extends Controller
         $moCod    = 'mo.'.$quote($codCol);
         $codClean = $castMoney($moCod);
 
-        // ── ANCHOR PRIMARY ITEMS (end_date only) ─────────────────────────────
-        // Per spec: use the primary_item resolved on END_DATE per page as the "anchor".
-        // Ties at end_date → no anchor row → page is skipped from the table.
+        // ── ANCHOR PRIMARY ITEMS ─────────────────────────────────────────────
+        // Anchor on END_DATE by default. Kapag may $partialDate at nasa future
+        // ng $endDate, anchor doon — para yung page roster pareho ng kung
+        // na-extend lang ang range hanggang partial_date (consistent totals
+        // between "range + 1D" view at "extended range" view).
+        // Ties sa anchor date → no anchor row → page is skipped from the table.
+        $anchorDate = ($partialDate !== null && $partialDate > $endDate)
+            ? $partialDate
+            : $endDate;
         $anchorRows = DB::table('daily_page_primary_item')
-            ->where('ts_date', $endDate)
+            ->where('ts_date', $anchorDate)
             ->get([
                 'page_label', 'page_key', 'primary_item', 'primary_item_key',
                 'primary_orders', 'total_orders_all', 'primary_mode_cod',
@@ -1638,7 +1648,8 @@ class OwnerPrivateController extends Controller
             if (isset($excludedSet[$pk])) continue;
             $anchorByPage[$pk] = $pr;
         }
-        // Back-compat alias used downstream; semantic = "the anchor (end_date) primary per page".
+        // Back-compat alias used downstream; semantic = "the anchor primary per page"
+        // (resolved at $anchorDate = partial_date kung set & > end_date, else end_date).
         $primaryByPage = $anchorByPage;
 
         // ── RANGE PRIMARY ITEMS (for mixed-primary flag + included-slice filter) ───
@@ -1710,9 +1721,11 @@ class OwnerPrivateController extends Controller
             }
         }
 
-        // ── Count unresolved slices (pages seen in range but no anchor on end_date) ──
+        // ── Count unresolved slices (pages seen in range but no anchor) ──
+        // Range extended to $loadEnd so pages na may activity sa partial_date
+        // (but tied/unresolved sa anchor date) ay tama pa rin ang skipped count.
         $pagesSeenRows = DB::table('macro_output as mo')
-            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$startDate, $endDate])
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$loadStart, $loadEnd])
             ->whereRaw("$pageTrim != ''")
             ->selectRaw("$pageKey AS page_key")
             ->groupByRaw("$pageKey")
@@ -1759,8 +1772,10 @@ class OwnerPrivateController extends Controller
                 : null;
             $perDate   = $rangeByPage[$pk] ?? [];
 
-            $streakStart = $this->resolveAnchorStreakStart($pk, $anchorKey, $anchorCodInt, $endDate);
-            if ($streakStart === null) continue; // anchor not on end_date for this page
+            // Walk back from $anchorDate (= partial_date if set & > end_date,
+            // else end_date) para consistent yung roster check sa anchor lookup.
+            $streakStart = $this->resolveAnchorStreakStart($pk, $anchorKey, $anchorCodInt, $anchorDate);
+            if ($streakStart === null) continue; // anchor primary not found at $anchorDate for this page
 
             $metricsFrom = $streakStart < $startDate ? $startDate : $streakStart;
 
@@ -2173,12 +2188,17 @@ class OwnerPrivateController extends Controller
             }
 
             // ── 1D PARTIAL-DATE OVERRIDE ─────────────────────────────────────
-            // Pag may $partialDate set, replace 1D values with that date's data.
+            // Pag may $partialDate set, i-override yung 1D row values gamit yung
+            // date's actual orders + adspent + mode_cod, PERO yung proceed at
+            // profit ay i-project gamit ang HISTORICAL TCPR (from main range
+            // aggregate). Ginagawa to para internally consistent yung TCPR(1D),
+            // proceed_1D, at profit_1D — lahat sila derived sa same historical
+            // proceed rate.
             // Walang baguhin sa main aggregation + 3D + 7D.
             //
-            // Lookup that date's slice via $rangeByPage[$pk] (loaded sa main range
-            // pre-loop). Apply same anchor-filter rules as the aggregation.
-            // Compute projected profit using HISTORICAL aggregated TCPR (from main range).
+            // Lookup yung partial_date's slice via $rangeByPage[$pk] (loaded sa
+            // pre-loop, extended to $loadEnd). Apply same anchor-filter rules
+            // as the main aggregation.
             if ($partialDate !== null) {
                 // Re-derive anchor info para sa this scope (pageGroups loop —
                 // walang $anchorKey/$anchorCodInt local vars dito unlike sa
@@ -2195,22 +2215,22 @@ class OwnerPrivateController extends Controller
                         || abs((int)round((float)$pdSlice['mode_cod']) - $pdAnchorCodI) <= 1);
 
                 if ($pdAnchorMatch) {
-                    $pdStat       = $statByKeyDate[$pdStatKey][$partialDate] ?? null;
                     $pdOrders     = (int)   ($pdSlice['orders'] ?? 0);
-                    $pdProceed    = $pdStat ? (int)$pdStat->proceed_orders : 0;
                     $pdAdspent    = (float) ($adsByDate[$pk][$partialDate] ?? 0);
                     $pdModeCod    = (float) ($pdSlice['mode_cod'] ?? 0);
 
-                    // Override 1D displayed orders + proceed (actual partial values)
+                    // Project proceed using HISTORICAL TCPR (aggregated from main range).
+                    //   proceed = orders × (1 − pending_rate)
+                    //           = orders × (historical_proceed / historical_orders)
+                    // Display proceed_1D + profit_1D derive from the SAME projection so
+                    // TCPR(1D) = main range TCPR (internally consistent).
+                    $historicalProceedRate = $totalOrders > 0 ? $proceedOrders / $totalOrders : 0.0;
+                    $projectedProceedPd    = $pdOrders * $historicalProceedRate;
+
                     $ordersLastDay     = $pdOrders;
-                    $procOrdersLastDay = $pdProceed;
+                    $procOrdersLastDay = (int) round($projectedProceedPd);
 
-                    // Compute projected profit for partial_date using HISTORICAL TCPR.
-                    // Historical TCPR = aggregated (1 - proceed/orders) ratio from main range.
-                    if ($rtsPct !== null && $itemValue !== null && $pdModeCod > 0 && $totalOrders > 0) {
-                        $historicalProceedRate = $proceedOrders / $totalOrders; // 0..1
-                        $projectedProceedPd    = $pdOrders * $historicalProceedRate;
-
+                    if ($rtsPct !== null && $itemValue !== null && $pdModeCod > 0) {
                         $rts           = $rtsPct / 100.0;
                         $deliverFactor = 1.0 - $rts;
                         $codFeeDay     = $pdModeCod * $codFeeRate * (1.0 + $codFeeVatRate);

@@ -72,6 +72,10 @@
                 </td>
                 <td style="font-family:ui-monospace,monospace;font-size:11.5px;">
                   {{ $s->start_date }} → {{ $s->end_date }}
+                  @if(!empty($s->partial_date ?? null))
+                    <span style="display:inline-block;background:#fef3c7;color:#92400e;font-size:9.5px;font-weight:600;padding:1px 6px;border-radius:9999px;margin-left:4px;"
+                          title="Saved with 1D overlay on {{ $s->partial_date }}">1D: {{ $s->partial_date }}</span>
+                  @endif
                   <div style="font-size:10px;color:#94a3b8;">
                     {{ \Carbon\Carbon::parse($s->start_date)->diffInDays(\Carbon\Carbon::parse($s->end_date)) + 1 }} day(s)
                   </div>

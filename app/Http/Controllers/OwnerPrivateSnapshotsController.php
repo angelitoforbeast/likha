@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Snapshots ng /owner/private rendered state. CEO-only — both viewing at saving.
@@ -32,6 +33,7 @@ class OwnerPrivateSnapshotsController extends Controller
         $validated = $request->validate([
             'start_date'    => 'required|date_format:Y-m-d',
             'end_date'      => 'required|date_format:Y-m-d',
+            'partial_date'  => 'nullable|date_format:Y-m-d',
             'view_as'       => 'nullable|string|in:ceo,marketing',
             'rows_count'    => 'nullable|integer|min:0',
             'skipped_count' => 'nullable|integer|min:0',
@@ -40,7 +42,14 @@ class OwnerPrivateSnapshotsController extends Controller
             'payload'       => 'required|array',
         ]);
 
-        $id = DB::table('owner_private_snapshots')->insertGetId([
+        // partial_date column may be missing kung hindi pa na-migrate yung db.
+        // Detect at insert conditionally para hindi mag-break ang save() flow.
+        $hasPartialCol = Schema::hasColumn('owner_private_snapshots', 'partial_date');
+        $partialDate   = $validated['partial_date']
+            ?? ($validated['payload']['partial_date'] ?? null);
+        $partialDate   = $partialDate ?: null;
+
+        $row = [
             'user_id'       => Auth::id(),
             'user_email'    => Auth::user()?->email,
             'snapshot_at'   => now(),
@@ -52,7 +61,12 @@ class OwnerPrivateSnapshotsController extends Controller
             'payload'       => json_encode($validated['payload']),
             'created_at'    => now(),
             'updated_at'    => now(),
-        ]);
+        ];
+        if ($hasPartialCol) {
+            $row['partial_date'] = $partialDate;
+        }
+
+        $id = DB::table('owner_private_snapshots')->insertGetId($row);
 
         return response()->json([
             'ok'           => true,
@@ -67,11 +81,16 @@ class OwnerPrivateSnapshotsController extends Controller
     {
         $this->checkAccess();
 
+        // partial_date column may or may not exist (added by migration
+        // 2026_05_27_140000). Skip if not present para backwards-compatible.
+        $cols = ['id', 'user_email', 'snapshot_at', 'start_date', 'end_date',
+                 'view_as', 'rows_count', 'skipped_count'];
+        if (Schema::hasColumn('owner_private_snapshots', 'partial_date')) {
+            $cols[] = 'partial_date';
+        }
+
         $snapshots = DB::table('owner_private_snapshots')
-            ->select([
-                'id', 'user_email', 'snapshot_at', 'start_date', 'end_date',
-                'view_as', 'rows_count', 'skipped_count',
-            ])
+            ->select($cols)
             ->orderByDesc('snapshot_at')
             ->paginate(50);
 
