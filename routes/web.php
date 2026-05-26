@@ -671,6 +671,16 @@ Route::get('/ads_manager/campaigns', [AdsManagerCampaignsController::class, 'ind
      Route::get('/ads_manager/campaigns/history/data', [AdsManagerCampaignsController::class, 'historyData'])
         ->name('ads_manager.campaigns.history.data');
 
+     // Manual campaign ownership tagging — used by history page dropdown.
+     Route::get ('/ads_manager/campaigns/assignments',         [\App\Http\Controllers\CampaignAssignmentController::class, 'list'])
+        ->name('ads_manager.campaigns.assignments.list');
+     Route::post('/ads_manager/campaigns/assignments',         [\App\Http\Controllers\CampaignAssignmentController::class, 'save'])
+        ->name('ads_manager.campaigns.assignments.save');
+     Route::get ('/ads_manager/campaigns/assignments/history', [\App\Http\Controllers\CampaignAssignmentController::class, 'history'])
+        ->name('ads_manager.campaigns.assignments.history');
+     Route::get ('/ads_manager/employees',                     [\App\Http\Controllers\CampaignAssignmentController::class, 'employees'])
+        ->name('ads_manager.employees');
+
      // TEMP diagnostic — verify earliest day / starts in DB. Remove after debug.
      Route::get('/ads_manager/campaigns/_diag', [AdsManagerCampaignsController::class, 'diag'])
         ->name('ads_manager.campaigns.diag');
