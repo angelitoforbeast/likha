@@ -1544,6 +1544,12 @@ class OwnerPrivateController extends Controller
         $partialDateRaw = trim((string) $request->input('partial_date', ''));
         $partialDate    = $validDate($partialDateRaw) ? $partialDateRaw : null;
 
+        // For DATA LOADING queries, extend range to include partial_date if it
+        // falls outside the main range. Aggregation still scoped to [startDate, endDate]
+        // — the extra rows beyond endDate are filtered out sa aggregation loop.
+        $loadStart = ($partialDate !== null && $partialDate < $startDate) ? $partialDate : $startDate;
+        $loadEnd   = ($partialDate !== null && $partialDate > $endDate)   ? $partialDate : $endDate;
+
         // Backwards-compat alias: many downstream code paths still reference `$date` for
         // "as-of" snapshots (fee rates, COGS, page_item_settings, JNT stats window).
         // All of those should anchor on END_DATE per spec.
@@ -1637,8 +1643,9 @@ class OwnerPrivateController extends Controller
 
         // ── RANGE PRIMARY ITEMS (for mixed-primary flag + included-slice filter) ───
         // Only needed when start != end; but we always query it (cheap, indexed by ts_date).
+        // Extended to $loadEnd so partial_date data (if outside main range) is loaded too.
         $rangePrimaryRows = DB::table('daily_page_primary_item')
-            ->whereBetween('ts_date', [$startDate, $endDate])
+            ->whereBetween('ts_date', [$loadStart, $loadEnd])
             ->get([
                 'ts_date', 'page_key', 'primary_item_key', 'primary_orders', 'primary_mode_cod',
             ]);
@@ -1664,7 +1671,7 @@ class OwnerPrivateController extends Controller
         // one canonical bucket, matching the alias-aware primary_item_key stored in
         // daily_page_primary_item.
         $statRows = DB::table('macro_output as mo')
-            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$startDate, $endDate])
+            ->whereRaw("$dateExpr BETWEEN ? AND ?", [$loadStart, $loadEnd])
             ->whereRaw("$pageTrim != ''")
             ->selectRaw("
                 $dateExpr AS d,
@@ -1717,9 +1724,11 @@ class OwnerPrivateController extends Controller
         $skippedCount = count($skippedPages);
 
         // ── Per-page, per-date adspent (for summing across included dates only) ─────
+        // Loaded for $loadStart..$loadEnd to include partial_date data if outside range.
+        // Aggregation loop filters down to [startDate, endDate] sums.
         $castSpend = $castMoney('amount_spent_php');
         $adsRows = DB::table('ads_manager_reports')
-            ->whereRaw('DATE(day) BETWEEN ? AND ?', [$startDate, $endDate])
+            ->whereRaw('DATE(day) BETWEEN ? AND ?', [$loadStart, $loadEnd])
             ->selectRaw("
                 DATE(day) AS d,
                 LOWER($trimFn(COALESCE(page_name,''))) AS page_key,
@@ -1764,6 +1773,7 @@ class OwnerPrivateController extends Controller
 
             foreach ($perDate as $d => $slice) {
                 if ($d < $metricsFrom) continue;                 // before streak window
+                if ($d > $endDate)    continue;                  // beyond main range (partial_date data excluded from aggregation)
                 if ($slice['item_key'] !== $anchorKey) continue; // defensive: tie/different day
                 // Price-based anchor: also skip days where mode_cod differs from
                 // anchor's by > ₱1 (rounded). Matches resolveAnchorStreakStart logic.
