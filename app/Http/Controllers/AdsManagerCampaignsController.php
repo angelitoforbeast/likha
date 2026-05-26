@@ -137,7 +137,14 @@ class AdsManagerCampaignsController extends Controller
             ->distinct()->orderBy('page_name')
             ->pluck('page_name')->toArray();
 
-        return view('ads_manager.campaigns_history', compact('pages'));
+        // Write permission for assignment tagger — CEO + Marketing-OIC only.
+        // Computed here para hindi mag-complex inline PHP sa Blade view.
+        $roleRaw  = \Illuminate\Support\Facades\Auth::user()?->employeeProfile?->role ?? '';
+        $roleNorm = preg_replace('/\s+/u', ' ', trim((string) $roleRaw));
+        $canWriteAssignment = (preg_match('/^ceo$/iu', $roleNorm) === 1)
+                           || (preg_match('/^marketing\s*[-–—]\s*oic$/iu', $roleNorm) === 1);
+
+        return view('ads_manager.campaigns_history', compact('pages', 'canWriteAssignment'));
     }
 
     /**

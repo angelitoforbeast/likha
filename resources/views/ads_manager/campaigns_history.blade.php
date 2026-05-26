@@ -425,12 +425,9 @@
         // Per-campaign save flags: 'saving' | 'saved' | 'error'
         assignFlag: {},
         assignError: {},
-        // Write permission flag — set from server config (mirrors backend role check)
-        canWriteAssignment: @json(in_array(
-            preg_replace('/\s+/u', ' ', trim((string) (auth()->user()?->employeeProfile?->role ?? ''))),
-            ['CEO', 'Marketing - OIC', 'Marketing-OIC', 'Marketing-Oic'],
-            true
-        ) || preg_match('/^(ceo|marketing\s*[-–—]\s*oic)$/iu', preg_replace('/\s+/u', ' ', trim((string) (auth()->user()?->employeeProfile?->role ?? '')))) === 1),
+        // Write permission flag — set from server config (mirrors backend role check).
+        // Computed sa $canWriteAssignment variable above (PHP scope).
+        canWriteAssignment: @json($canWriteAssignment ?? false),
         // History modal state
         historyModal: {
           open: false,
