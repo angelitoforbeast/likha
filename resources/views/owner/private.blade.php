@@ -339,6 +339,20 @@
     <input type="date" x-model="endDate" @change="load()"
            style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;
                   border-radius:6px;padding:5px 10px;font-size:13px;outline:none;cursor:pointer;">
+
+    {{-- Partial date picker — opt-in 1D column override. Empty by default.
+         Use case: spot-check today's (or any specific date's) partial data sa
+         1D column while keeping the main range as the reliable historical baseline.
+         TCPR for 1D projection uses the aggregated historical average. --}}
+    <span style="color:#fbbf24;font-size:11px;font-weight:600;margin-left:6px;" title="Optional — overrides 1D column with this date's data, uses historical TCPR for projection">1D Date</span>
+    <input type="date" x-model="partialDate" @change="load()"
+           :title="partialDate ? '1D column shows '+partialDate+' data with historical TCPR projection' : 'Leave empty for default behavior (1D = last day of range)'"
+           style="background:#0f172a;color:#fde68a;border:1px solid #d97706;
+                  border-radius:6px;padding:5px 10px;font-size:13px;outline:none;cursor:pointer;">
+    <button type="button" @click="partialDate=''; load();" x-show="partialDate"
+            title="Clear partial date — back to default 1D behavior"
+            style="background:#0f172a;color:#94a3b8;border:1px solid #475569;
+                   border-radius:6px;padding:3px 8px;font-size:12px;cursor:pointer;">✕</button>
     <a :href="'{{ route('owner.private.breakdown') }}?start_date='+startDate+'&end_date='+endDate"
        target="_blank"
        x-show="!isSingleDate"
@@ -1508,7 +1522,10 @@
         else if (urlDate && re.test(urlDate)) { s = urlDate; e = urlDate; }
         else { s = defaultStart; e = yesterday; }
         if (s > e) { const t = s; s = e; e = t; }
-        return { startDate: s, endDate: e };
+        // Partial date — optional opt-in 1D override. Empty default.
+        const urlPartial = qs.get('partial_date');
+        const partialDate = (urlPartial && re.test(urlPartial)) ? urlPartial : '';
+        return { startDate: s, endDate: e, partialDate };
       })(),
 
       rows:[], loading:false, editIdx:-1, editRow:null,
@@ -1726,6 +1743,8 @@
         // ignored server-side for non-CEO).
         const qsObj = { start_date: this.startDate, end_date: this.endDate };
         if (this.isCeoView && this.viewAs === 'marketing') qsObj.view_as = 'marketing';
+        // partial_date — only added when explicitly set by user (opt-in 1D override)
+        if (this.partialDate) qsObj.partial_date = this.partialDate;
         // refresh=1 bypasses the server-side cache for this single request.
         // History-replaced URL does NOT include refresh — kasi nagdadagdag lang
         // siya ng noise sa visible address bar.

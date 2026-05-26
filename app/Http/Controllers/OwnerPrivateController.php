@@ -133,6 +133,9 @@ class OwnerPrivateController extends Controller
             'date'  => (string) $request->input('date', ''), // legacy single-date param
             'view'  => strtolower(trim((string) $request->input('view_as', 'ceo'))),
             'role'  => $this->getNormalizedRole(),
+            // Optional 1D override (?partial_date=YYYY-MM-DD). Null default = no override.
+            // Included sa cache key so different partial dates get separate cache entries.
+            'partial' => (string) $request->input('partial_date', ''),
         ];
         return 'owner_private:item_summary:v' . $this->cacheVersion()
              . ':' . md5(json_encode($parts));
@@ -1526,6 +1529,21 @@ class OwnerPrivateController extends Controller
         $viewAs = strtolower(trim((string)$request->input('view_as', 'ceo')));
         if (!in_array($viewAs, ['ceo', 'marketing'], true)) $viewAs = 'ceo';
 
+        // ── Partial-date 1D override (opt-in via ?partial_date=YYYY-MM-DD) ─
+        // User picks a separate "partial/today" date to spot-check via 1D column.
+        // Decouples the main historical range from the partial date — kaya pwedeng
+        // mag-view ka sa 2am at pumili pa rin ng yesterday/today bilang partial.
+        //
+        // Default null = no override, current behavior preserved.
+        //
+        // When set:
+        //   - Main aggregations + 3D/7D windows unchanged (use [startDate, endDate])
+        //   - 1D column OVERRIDDEN: uses partial_date's actual orders + adspent
+        //   - 1D Projected Profit uses AGGREGATED HISTORICAL TCPR for projection
+        //     (since partial_date's actual proceed_orders is unreliable)
+        $partialDateRaw = trim((string) $request->input('partial_date', ''));
+        $partialDate    = $validDate($partialDateRaw) ? $partialDateRaw : null;
+
         // Backwards-compat alias: many downstream code paths still reference `$date` for
         // "as-of" snapshots (fee rates, COGS, page_item_settings, JNT stats window).
         // All of those should anchor on END_DATE per spec.
@@ -2143,6 +2161,72 @@ class OwnerPrivateController extends Controller
                 if ($anyPriceLast3Day) $projProfitLast3Day = $sumProfitLast3Day;
                 if ($anyPriceLast7Day) $projProfitLast7Day = $sumProfitLast7Day;
             }
+
+            // ── 1D PARTIAL-DATE OVERRIDE ─────────────────────────────────────
+            // Pag may $partialDate set, replace 1D values with that date's data.
+            // Walang baguhin sa main aggregation + 3D + 7D.
+            //
+            // Lookup that date's slice via $rangeByPage[$pk] (loaded sa main range
+            // pre-loop). Apply same anchor-filter rules as the aggregation.
+            // Compute projected profit using HISTORICAL aggregated TCPR (from main range).
+            if ($partialDate !== null) {
+                // Re-derive anchor info para sa this scope (pageGroups loop —
+                // walang $anchorKey/$anchorCodInt local vars dito unlike sa
+                // outer anchor loop)
+                $pdAnchorKey   = $dominant['item_key'] ?? '';
+                $pdAnchorMode  = (float) ($dominant['mode_cod'] ?? 0);
+                $pdAnchorCodI  = $pdAnchorMode > 0 ? (int) round($pdAnchorMode) : null;
+                $pdStatKey     = $pk . '||' . $pdAnchorKey;
+
+                $pdSlice = $rangeByPage[$pk][$partialDate] ?? null;
+                $pdAnchorMatch = $pdSlice
+                    && $pdSlice['item_key'] === $pdAnchorKey
+                    && ($pdAnchorCodI === null || $pdSlice['mode_cod'] === null
+                        || abs((int)round((float)$pdSlice['mode_cod']) - $pdAnchorCodI) <= 1);
+
+                if ($pdAnchorMatch) {
+                    $pdStat       = $statByKeyDate[$pdStatKey][$partialDate] ?? null;
+                    $pdOrders     = (int)   ($pdSlice['orders'] ?? 0);
+                    $pdProceed    = $pdStat ? (int)$pdStat->proceed_orders : 0;
+                    $pdAdspent    = (float) ($adsByDate[$pk][$partialDate] ?? 0);
+                    $pdModeCod    = (float) ($pdSlice['mode_cod'] ?? 0);
+
+                    // Override 1D displayed orders + proceed (actual partial values)
+                    $ordersLastDay     = $pdOrders;
+                    $procOrdersLastDay = $pdProceed;
+
+                    // Compute projected profit for partial_date using HISTORICAL TCPR.
+                    // Historical TCPR = aggregated (1 - proceed/orders) ratio from main range.
+                    if ($rtsPct !== null && $itemValue !== null && $pdModeCod > 0 && $totalOrders > 0) {
+                        $historicalProceedRate = $proceedOrders / $totalOrders; // 0..1
+                        $projectedProceedPd    = $pdOrders * $historicalProceedRate;
+
+                        $rts           = $rtsPct / 100.0;
+                        $deliverFactor = 1.0 - $rts;
+                        $codFeeDay     = $pdModeCod * $codFeeRate * (1.0 + $codFeeVatRate);
+
+                        $projProfitLastDay =
+                            $projectedProceedPd * $pdModeCod * $deliverFactor       // revenue
+                            - $projectedProceedPd * $shippingFee                     // shipping
+                            - $projectedProceedPd * $deliverFactor * $itemValue      // COGS
+                            - $pdAdspent                                              // adspent
+                            - $projectedProceedPd * $deliverFactor * $codFeeDay;     // COD fee
+                        $grossSalesLastDay = $pdModeCod * $pdOrders;
+                    } else {
+                        // Missing inputs — null out profit projection but keep orders display
+                        $projProfitLastDay = null;
+                        $grossSalesLastDay = $pdModeCod > 0 ? $pdModeCod * $pdOrders : 0.0;
+                    }
+                } else {
+                    // partial_date has no slice for this page+item (no data that day,
+                    // or different primary item). Reset 1D to 0 / null.
+                    $ordersLastDay     = 0;
+                    $procOrdersLastDay = 0;
+                    $projProfitLastDay = null;
+                    $grossSalesLastDay = 0.0;
+                }
+            }
+
             // Window %s. Null when den ≤ 0 (no orders / no price) or RTS/cogs missing.
             $projPctLastDay  = ($projProfitLastDay  !== null && $grossSalesLastDay  > 0) ? ($projProfitLastDay  / $grossSalesLastDay)  * 100.0 : null;
             $projPctLast3Day = ($projProfitLast3Day !== null && $grossSalesLast3Day > 0) ? ($projProfitLast3Day / $grossSalesLast3Day) * 100.0 : null;
@@ -2242,6 +2326,8 @@ class OwnerPrivateController extends Controller
             'view_as'        => $isCEO ? $viewAs : 'marketing',
             'is_ceo'         => $isCEO,
             'cached_at'      => now()->toIso8601String(),
+            // Echo back partial_date param so frontend can sync UI state + show hint
+            'partial_date'   => $partialDate,
         ];
 
         // Write to cache (read-through). Forever — invalidated only by

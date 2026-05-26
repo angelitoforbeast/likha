@@ -234,10 +234,13 @@
                 </div>
 
                 {{-- ── ASSIGNMENT TAGGER ─────────────────────────────────────
-                     Campaign-level rows: editable dropdown + history button
+                     Only shows for TURNED ON campaign-level events (matches
+                     isEditable() pattern — yung other events like turned_off,
+                     created, created_with_spend ay read-only sa ibang fields,
+                     same dapat sa assignment tagging).
                      Ad set / ad rows: read-only "via campaign: X" inherit display
                 --}}
-                <template x-if="e.level === 'campaign' && e.entity_id">
+                <template x-if="e.level === 'campaign' && e.entity_id && e.event === 'turned_on'">
                   <div class="assignment-row" style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                     <span style="font-size:11px;color:#65676b;">👤 Created by:</span>
                     <select :value="assignments[e.entity_id]?.employee_id || ''"
@@ -279,8 +282,9 @@
                   </div>
                 </template>
 
-                {{-- Adset / Ad — inherit display (read-only) --}}
-                <template x-if="(e.level === 'adset' || e.level === 'ad') && e.campaign_id && assignments[e.campaign_id]?.employee_id">
+                {{-- Adset / Ad — inherit display (read-only). Same restriction:
+                     only show on Turned ON events for consistency. --}}
+                <template x-if="(e.level === 'adset' || e.level === 'ad') && e.event === 'turned_on' && e.campaign_id && assignments[e.campaign_id]?.employee_id">
                   <div style="margin-top:4px;font-size:11px;color:#94a3b8;font-style:italic;">
                     👤 via campaign: <span x-text="assignments[e.campaign_id]?.employee_name || '(deleted)'"></span>
                     <template x-if="assignments[e.campaign_id]?.employee_role">
