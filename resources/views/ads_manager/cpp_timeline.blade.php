@@ -309,12 +309,24 @@
                 <span x-text="fmtDate(modal.date)"></span> · <span x-text="modal.bucket"></span> Snapshot
               </div>
               <div class="tl-modal-sub">
-                <span x-text="modal.rows.length"></span> pages
+                <span x-text="modalVisibleRows().length"></span> ad-spending pages
+                <template x-if="modal.zeroSpentCount > 0 && modal.hideZeroSpent">
+                  <span> · <span x-text="modal.zeroSpentCount"></span> hidden (0 adspent)</span>
+                </template>
                 <template x-if="modal.savedAt"><span> · saved <span x-text="fmtSavedAt(modal.savedAt)"></span></span></template>
                 <template x-if="modal.savedBy.length"><span> · by <span x-text="modal.savedBy.join(', ')"></span></span></template>
               </div>
             </div>
             <div class="flex items-center gap-2">
+              <template x-if="modal.zeroSpentCount > 0">
+                <button @click="modal.hideZeroSpent = !modal.hideZeroSpent"
+                        class="text-sm px-3 py-1.5 rounded border"
+                        :class="modal.hideZeroSpent ? 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' : 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'"
+                        :title="modal.hideZeroSpent ? 'Pull up the '+modal.zeroSpentCount+' page(s) with 0 adspent' : 'Hide the 0-adspent rows back (default view)'">
+                  <span x-show="modal.hideZeroSpent">👁 Show 0-adspent (<span x-text="modal.zeroSpentCount"></span>)</span>
+                  <span x-show="!modal.hideZeroSpent">🙈 Hide 0-adspent</span>
+                </button>
+              </template>
               <button @click="copyDetail()" class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1.5 rounded">📋 Copy</button>
               <button @click="closeDetail()" class="tl-modal-close">✕ Close</button>
             </div>
@@ -339,8 +351,9 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <template x-for="r in modal.rows" :key="r.page_name">
-                    <tr>
+                  <template x-for="r in modalVisibleRows()" :key="r.page_name">
+                    <tr :class="Number(r.amount_spent ?? 0) === 0 ? 'opacity-60 italic' : ''"
+                        :title="Number(r.amount_spent ?? 0) === 0 ? 'Excluded from CPP totals (0 adspent)' : ''">
                       <td x-text="r.page_name"></td>
                       <td x-text="r.item_names || '—'"></td>
                       <td class="num" x-text="money(r.amount_spent)"></td>
@@ -352,8 +365,15 @@
                       <td class="num" x-text="r.tcpr_pct != null ? (Number(r.tcpr_pct).toFixed(1) + '%') : '—'"></td>
                     </tr>
                   </template>
-                  <template x-if="modal.rows.length === 0">
-                    <tr><td colspan="9" class="text-center text-gray-400 py-6">Walang rows sa snapshot na ito.</td></tr>
+                  <template x-if="modalVisibleRows().length === 0">
+                    <tr><td colspan="9" class="text-center text-gray-400 py-6">
+                      <template x-if="modal.rows.length === 0">
+                        <span>Walang rows sa snapshot na ito.</span>
+                      </template>
+                      <template x-if="modal.rows.length > 0">
+                        <span>Lahat ng <span x-text="modal.zeroSpentCount"></span> rows ay walang adspent — click "Show 0-adspent" sa taas para makita.</span>
+                      </template>
+                    </td></tr>
                   </template>
                 </tbody>
                 <tfoot>
@@ -400,6 +420,21 @@
           totals: { amount_spent: 0, orders: 0, proceed_orders: 0, cpp: null },
           savedAt: null,
           savedBy: [],
+          // 0-adspent rows are hidden by default — wala silang contribution
+          // sa CPP calc kaya noise lang sila. User can toggle them on
+          // anytime via the "Show 0-adspent" button para makita yung organic
+          // pages na may orders pero walang ads na that bucket.
+          hideZeroSpent: true,
+          zeroSpentCount: 0,
+        },
+
+        // Filtered row list for the modal table. When hideZeroSpent is on
+        // (default), drops rows where amount_spent == 0. Totals are always
+        // computed sa backend from the ad-spending subset regardless of
+        // visibility toggle.
+        modalVisibleRows() {
+          if (!this.modal.hideZeroSpent) return this.modal.rows;
+          return this.modal.rows.filter(r => Number(r.amount_spent ?? 0) > 0);
         },
 
         init() { this.reload(); },
@@ -507,10 +542,14 @@
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const j = await res.json();
             if (j.ok) {
-              this.modal.rows    = j.rows || [];
-              this.modal.totals  = j.totals || this.modal.totals;
-              this.modal.savedAt = j.saved_at || null;
-              this.modal.savedBy = j.saved_by || [];
+              this.modal.rows           = j.rows || [];
+              this.modal.totals         = j.totals || this.modal.totals;
+              this.modal.savedAt        = j.saved_at || null;
+              this.modal.savedBy        = j.saved_by || [];
+              this.modal.zeroSpentCount = Number(j.zero_spent_count || 0);
+              // Reset toggle to default (hide) every fresh detail load para
+              // walang carry-over state from previous modal session.
+              this.modal.hideZeroSpent  = true;
             }
           } catch (e) {
             console.error('Detail load failed:', e);

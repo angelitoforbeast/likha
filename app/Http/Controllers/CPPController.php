@@ -347,8 +347,13 @@ class CPPController extends Controller
         // ── 1) Existing saved snapshots (have adspent + orders + cpp) ──────
         // Saved snapshots are immutable — their orders count is fixed at
         // click-time, independent of cutoff_mode (per Q4).
+        //
+        // FILTER: amount_spent > 0 — rows with 0 adspent (organic / non-ad
+        // pages) should not dilute the cell totals. Their orders are not
+        // attributable to ad spend, so excluding them keeps CPP accurate.
         $rows = DB::table('cpp_snapshots')
             ->whereBetween('snapshot_date', [$start, $end])
+            ->where('amount_spent', '>', 0)
             ->selectRaw('
                 snapshot_date,
                 snapshot_bucket,
@@ -768,10 +773,16 @@ class CPPController extends Controller
                 'snapshot_at', 'saved_by_user_email',
             ]);
 
-        // Totals
-        $totSpent  = (float) $rows->sum('amount_spent');
-        $totOrders = (int)   $rows->sum('orders');
-        $totProc   = (int)   $rows->sum('proceed_orders');
+        // Totals — exclude 0-adspent rows so CPP isn't diluted by organic /
+        // non-ad page orders. Frontend keeps the full row list available so
+        // user can toggle them on for reference, but totals always derive from
+        // the ad-spending subset.
+        $adsRows         = $rows->filter(fn ($r) => (float) $r->amount_spent > 0);
+        $zeroSpentCount  = $rows->count() - $adsRows->count();
+
+        $totSpent  = (float) $adsRows->sum('amount_spent');
+        $totOrders = (int)   $adsRows->sum('orders');
+        $totProc   = (int)   $adsRows->sum('proceed_orders');
         $totCpp    = $totOrders > 0 ? round($totSpent / $totOrders, 2) : null;
 
         return response()->json([
@@ -779,6 +790,9 @@ class CPPController extends Controller
             'date'    => $date,
             'bucket'  => $bucket,
             'rows'    => $rows,
+            // Count of 0-adspent rows na hidden by default sa frontend — used
+            // for the "X hidden" badge + toggle label.
+            'zero_spent_count' => $zeroSpentCount,
             'totals'  => [
                 'amount_spent'   => $totSpent,
                 'orders'         => $totOrders,

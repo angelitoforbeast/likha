@@ -1539,12 +1539,15 @@ class OwnerPrivateController extends Controller
         // When set:
         //   - Page roster anchored sa partial_date kapag > end_date (instead of
         //     end_date) — para consistent ang totals sa "extended range" view.
-        //   - Main aggregations + 3D/7D windows unchanged (use [startDate, endDate])
-        //   - 1D column OVERRIDDEN: uses partial_date's actual orders + adspent
-        //   - 1D Projected Profit + Proceed use AGGREGATED HISTORICAL TCPR for
-        //     projection (since partial_date's actual proceed_orders is unreliable
-        //     when partial_date is "today"). Proceed_1D and Profit_1D derive from
-        //     the SAME projection so TCPR(1D) is internally consistent.
+        //   - Main aggregations + 3D/7D windows EXTEND to include partial_date
+        //     (effective end = $loadEnd). Per-row main + TOTAL row therefore
+        //     match what an extended-range query would show.
+        //   - 1D column OVERRIDDEN: uses partial_date's actual orders + adspent,
+        //     but proceed + profit projected using AGGREGATED HISTORICAL TCPR
+        //     (per user spec — projection lets you spot-check "today live"
+        //     scenarios where actual proceed_orders is unreliable). Proceed_1D
+        //     and Profit_1D derive from the SAME projection so TCPR(1D) is
+        //     internally consistent with the displayed historical rate.
         $partialDateRaw = trim((string) $request->input('partial_date', ''));
         $partialDate    = $validDate($partialDateRaw) ? $partialDateRaw : null;
 
@@ -1788,7 +1791,7 @@ class OwnerPrivateController extends Controller
 
             foreach ($perDate as $d => $slice) {
                 if ($d < $metricsFrom) continue;                 // before streak window
-                if ($d > $endDate)    continue;                  // beyond main range (partial_date data excluded from aggregation)
+                if ($d > $loadEnd)    continue;                  // beyond effective main range (= partial_date kapag set & > end_date)
                 if ($slice['item_key'] !== $anchorKey) continue; // defensive: tie/different day
                 // Price-based anchor: also skip days where mode_cod differs from
                 // anchor's by > ₱1 (rounded). Matches resolveAnchorStreakStart logic.
@@ -1820,7 +1823,7 @@ class OwnerPrivateController extends Controller
             $distinctCount = isset($distinctItemsByPage[$pk]) ? count($distinctItemsByPage[$pk]) : 0;
             $mixedPrimary  = $distinctCount >= 2;
 
-            // Anchor price = end_date's primary_mode_cod (per spec).
+            // Anchor price = anchor date's primary_mode_cod (= partial_date if set & > end_date, else end_date).
             $anchorModeCod = $pr->primary_mode_cod !== null ? (float)$pr->primary_mode_cod : 0.0;
             if ($maxCod <= 0) $maxCod = $anchorModeCod;
             if ($minCod === null || $minCod <= 0) $minCod = $anchorModeCod;
@@ -2102,8 +2105,10 @@ class OwnerPrivateController extends Controller
 
             // Window lower bounds (clamped to startDate so we never reach outside the
             // user's range — keeps the calc deterministic when range is shorter than N).
+            // Anchor sa $loadEnd (= partial_date if set & > end_date, else end_date)
+            // so trailing-N-day windows include the partial_date day.
             $startTs    = strtotime($startDate);
-            $endTs      = strtotime($endDate);
+            $endTs      = strtotime($loadEnd);
             $start3DTs  = max($startTs, strtotime('-2 days', $endTs));   // last 3 days inclusive
             $start7DTs  = max($startTs, strtotime('-6 days', $endTs));   // last 7 days inclusive
 
@@ -2115,7 +2120,7 @@ class OwnerPrivateController extends Controller
             if (!empty($includedDatesArr)) {
                 foreach ($includedDatesArr as $d => $slice) {
                     $dTs       = strtotime((string)$d);
-                    $isLastDay = ((string)$d === (string)$endDate);
+                    $isLastDay = ((string)$d === (string)$loadEnd);   // = partial_date kapag set & > end_date
                     $inLast3D  = ($dTs >= $start3DTs && $dTs <= $endTs);
                     $inLast7D  = ($dTs >= $start7DTs && $dTs <= $endTs);
                     $ord       = (int)($slice['orders']  ?? 0);
@@ -2139,7 +2144,7 @@ class OwnerPrivateController extends Controller
                     $proceedDay = (int)($slice['proceed'] ?? 0);
                     $adsDay     = (float)($slice['adspent'] ?? 0);
                     $dTs        = strtotime((string)$d);
-                    $isLastDay  = ((string)$d === (string)$endDate);
+                    $isLastDay  = ((string)$d === (string)$loadEnd);   // = partial_date kapag set & > end_date
                     $inLast3D   = ($dTs >= $start3DTs && $dTs <= $endTs);
                     $inLast7D   = ($dTs >= $start7DTs && $dTs <= $endTs);
 
