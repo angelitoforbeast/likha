@@ -423,6 +423,14 @@
           <span id="item-checker-status" class="text-sm text-gray-600"></span>
         @endif
 
+        {{-- AI Checker (CHECKER_11_1 PHP port) — drives MacroCheckerController --}}
+        <button type="button" id="aiCheckerBtn"
+                class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+                title="Run AI Checker on all rows na may blank na FULL NAME / PHONE / ADDRESS / PROVINCE / CITY / BARANGAY sa current view filter."
+                disabled>
+          🤖 AI Checker <span id="aiCheckerCount" class="ml-1 text-xs opacity-80">(…)</span>
+        </button>
+
         <button type="button" id="validate1-btn" class="bg-indigo-700 text-white px-4 py-2 rounded hover:bg-indigo-800">
           Validate 1
         </button>
@@ -1582,6 +1590,258 @@ function markWarn(id, field) {
           if (typeof scheduleRefreshValidatedBadges === 'function') scheduleRefreshValidatedBadges();
         });
       });
+    })();
+  </script>
+
+  {{-- ─── AI Checker (CHECKER_11_1 PHP port) UI ─────────────────────────── --}}
+  {{-- Modal --}}
+  <div id="aiCheckerModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-bold text-gray-900">🤖 AI Checker — Batch Run</h3>
+        <button type="button" id="aiCheckerCloseBtn" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+      </div>
+
+      <div id="aiCheckerStatusBox" class="bg-slate-50 border border-slate-200 rounded p-3 text-sm mb-3">
+        <div id="aiCheckerStatusLine" class="font-semibold text-slate-800">Initializing…</div>
+        <div id="aiCheckerCounts" class="mt-1 text-xs text-slate-600">—</div>
+      </div>
+
+      <div class="w-full bg-slate-200 rounded-full h-2 mb-3">
+        <div id="aiCheckerProgressBar" class="bg-red-600 h-2 rounded-full transition-all" style="width:0%"></div>
+      </div>
+
+      <div id="aiCheckerMessage" class="text-xs text-slate-500 mb-3"></div>
+
+      <div class="flex justify-end gap-2">
+        <button type="button" id="aiCheckerStopBtn"
+                class="bg-yellow-600 text-white px-3 py-1.5 rounded text-sm hover:bg-yellow-700">
+          Stop
+        </button>
+        <button type="button" id="aiCheckerRefreshBtn"
+                class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700 hidden">
+          Refresh page
+        </button>
+        <button type="button" id="aiCheckerDoneBtn"
+                class="bg-gray-600 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-700">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const URL_COUNT   = "{{ route('macro_checker.count') }}";
+      const URL_START   = "{{ route('macro_checker.start') }}";
+      const URL_STATUS  = "{{ route('macro_checker.status') }}";
+      const URL_STOP    = "{{ route('macro_checker.stop') }}";
+      const URL_RUN_ROW = "{{ url('/encoder/checker_1/ai-checker/run-row') }}"; // + /{id}
+      const CSRF        = "{{ csrf_token() }}";
+
+      const btn       = document.getElementById('aiCheckerBtn');
+      const countEl   = document.getElementById('aiCheckerCount');
+      const modal     = document.getElementById('aiCheckerModal');
+      const statusLn  = document.getElementById('aiCheckerStatusLine');
+      const countsEl  = document.getElementById('aiCheckerCounts');
+      const barEl     = document.getElementById('aiCheckerProgressBar');
+      const msgEl     = document.getElementById('aiCheckerMessage');
+      const stopBtn   = document.getElementById('aiCheckerStopBtn');
+      const closeBtn  = document.getElementById('aiCheckerCloseBtn');
+      const doneBtn   = document.getElementById('aiCheckerDoneBtn');
+      const refreshBtn= document.getElementById('aiCheckerRefreshBtn');
+
+      let currentRunId = null;
+      let pollTimer    = null;
+
+      // Build the count URL with current filter context (date, PAGE).
+      function filterQuery() {
+        const qs = new URLSearchParams();
+        const u = new URL(window.location.href);
+        const date = u.searchParams.get('date') || '';
+        const page = u.searchParams.get('PAGE') || '';
+        if (date) qs.set('date', date);
+        if (page) qs.set('PAGE', page);
+        return qs.toString();
+      }
+
+      async function refreshCount() {
+        try {
+          const r = await fetch(`${URL_COUNT}?${filterQuery()}`, { headers: { 'Accept': 'application/json' } });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const j = await r.json();
+          if (j.ok) {
+            const n = Number(j.count || 0);
+            countEl.textContent = '(' + n + ')';
+            btn.disabled = (n === 0);
+            btn.title = n > 0
+              ? `Run AI Checker on ${n} pending row(s).`
+              : 'No blank rows in current view. Filter to a date with pending rows.';
+          }
+        } catch (e) {
+          countEl.textContent = '(err)';
+          btn.disabled = true;
+        }
+      }
+
+      function showModal() {
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      }
+      function hideModal() {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        clearInterval(pollTimer); pollTimer = null;
+      }
+
+      function renderProgress(run) {
+        const total     = Number(run.total || 0);
+        const processed = Number(run.processed || 0);
+        const fixed     = Number(run.fixed || 0);
+        const partial   = Number(run.partial || 0);
+        const failed    = Number(run.failed || 0);
+        const pct       = total > 0 ? Math.round(processed / total * 100) : 0;
+
+        statusLn.textContent = `${run.status.toUpperCase()} — ${processed} / ${total}`;
+        countsEl.textContent = `✅ Fixed: ${fixed}  ·  ⚠ Partial: ${partial}  ·  ❌ Failed: ${failed}  ·  ${pct}%`;
+        barEl.style.width = pct + '%';
+        msgEl.textContent = run.message || '';
+
+        if (run.status === 'done' || run.status === 'failed' || run.status === 'stopped') {
+          clearInterval(pollTimer); pollTimer = null;
+          stopBtn.classList.add('hidden');
+          refreshBtn.classList.remove('hidden');
+        }
+      }
+
+      async function pollStatus() {
+        if (!currentRunId) return;
+        try {
+          const r = await fetch(`${URL_STATUS}?run_id=${encodeURIComponent(currentRunId)}`, { headers: { 'Accept': 'application/json' } });
+          const j = await r.json();
+          if (j.ok && j.run) renderProgress(j.run);
+        } catch (e) {
+          // swallow — just retry next tick
+        }
+      }
+
+      async function startBatch() {
+        const n = parseInt((countEl.textContent.match(/\d+/) || [0])[0], 10);
+        if (n === 0) { alert('Walang blank rows na pwedeng i-process.'); return; }
+        if (!confirm(`Process ${n} row(s) sa AI Checker?\n\nEst. cost: ~₱${(n * 0.40).toFixed(2)} (5 OpenAI calls × ~₱0.08 per row).`)) return;
+
+        btn.disabled = true;
+        showModal();
+        stopBtn.classList.remove('hidden');
+        refreshBtn.classList.add('hidden');
+        statusLn.textContent = 'Starting…';
+
+        try {
+          const body = new URLSearchParams(filterQuery());
+          const r = await fetch(URL_START, {
+            method: 'POST',
+            headers: {
+              'X-CSRF-TOKEN': CSRF,
+              'Accept': 'application/json',
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: body.toString(),
+          });
+          const j = await r.json();
+          if (!r.ok || !j.ok) {
+            statusLn.textContent = 'Failed to start.';
+            msgEl.textContent = j.error || ('HTTP ' + r.status);
+            stopBtn.classList.add('hidden');
+            return;
+          }
+          currentRunId = j.run_id;
+          pollStatus();
+          pollTimer = setInterval(pollStatus, 1500);
+        } catch (e) {
+          statusLn.textContent = 'Failed to start.';
+          msgEl.textContent = e.message;
+          stopBtn.classList.add('hidden');
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      async function stopBatch() {
+        if (!currentRunId) return;
+        if (!confirm('Stop the AI Checker batch? Yung remaining rows hindi na ma-process.')) return;
+        stopBtn.disabled = true;
+        try {
+          const body = new URLSearchParams({ run_id: currentRunId });
+          await fetch(URL_STOP, {
+            method: 'POST',
+            headers: {
+              'X-CSRF-TOKEN': CSRF,
+              'Accept': 'application/json',
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: body.toString(),
+          });
+        } finally {
+          stopBtn.disabled = false;
+        }
+      }
+
+      // Per-row "🤖 Fix" button — injected sa each tr[data-id] (temporary per user spec)
+      function injectPerRowButtons() {
+        const rows = document.querySelectorAll('tr[data-id]');
+        rows.forEach((tr) => {
+          if (tr.querySelector('.ai-fix-row-btn')) return; // already injected
+          const id = tr.getAttribute('data-id');
+          const lastTd = tr.querySelector('td:last-child');
+          if (!lastTd) return;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'ai-fix-row-btn bg-red-100 hover:bg-red-200 text-red-700 text-xs px-2 py-0.5 rounded ml-1';
+          btn.title = 'AI fix this row (CHECKER_11_1 logic)';
+          btn.innerHTML = '🤖';
+          btn.addEventListener('click', () => runOneRow(id, btn));
+          lastTd.appendChild(btn);
+        });
+      }
+
+      async function runOneRow(id, button) {
+        const orig = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = '⏳';
+        try {
+          const r = await fetch(`${URL_RUN_ROW}/${encodeURIComponent(id)}`, {
+            method: 'POST',
+            headers: {
+              'X-CSRF-TOKEN': CSRF,
+              'Accept': 'application/json',
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+          });
+          const j = await r.json();
+          if (!r.ok || !j.ok) {
+            button.innerHTML = '❌';
+            alert('Row #' + id + ' failed: ' + (j.error || ('HTTP ' + r.status)));
+            setTimeout(() => { button.innerHTML = orig; button.disabled = false; }, 2000);
+            return;
+          }
+          button.innerHTML = j.result.final_code === '✅' ? '✅' : '⚠';
+          button.title = 'Result: ' + (j.result.final_code || '—') + ' — reload to see changes';
+        } catch (e) {
+          button.innerHTML = '❌';
+          alert('Row #' + id + ' error: ' + e.message);
+          setTimeout(() => { button.innerHTML = orig; button.disabled = false; }, 2000);
+        }
+      }
+
+      // ── Wire up ───────────────────────────────────────────────────────
+      btn.addEventListener('click', startBatch);
+      stopBtn.addEventListener('click', stopBatch);
+      closeBtn.addEventListener('click', hideModal);
+      doneBtn.addEventListener('click', hideModal);
+      refreshBtn.addEventListener('click', () => window.location.reload());
+
+      refreshCount();
+      injectPerRowButtons();
     })();
   </script>
 

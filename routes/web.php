@@ -572,6 +572,19 @@ Route::get('/encoder/summary', [App\Http\Controllers\MacroOutputController::clas
 Route::post('/encoder/checker_1/update', [MacroOutputController::class, 'bulkUpdate'])->name('macro_output.bulk_update');
 Route::post('/encoder/checker_1/update-field', [MacroOutputController::class, 'updateField'])->name('macro_output.update_field');
 Route::post('/macro_output/validate', [MacroOutputController::class, 'validateAddresses'])->name('macro_output.validate');
+
+// ✅ AI Checker — CHECKER_11_1 macro port (PHP). Drives the /encoder/checker_1 toolbar button.
+Route::get ('/encoder/checker_1/ai-checker/count',  [\App\Http\Controllers\MacroCheckerController::class, 'count'])
+    ->name('macro_checker.count');
+Route::post('/encoder/checker_1/ai-checker/start',  [\App\Http\Controllers\MacroCheckerController::class, 'start'])
+    ->name('macro_checker.start');
+Route::get ('/encoder/checker_1/ai-checker/status', [\App\Http\Controllers\MacroCheckerController::class, 'status'])
+    ->name('macro_checker.status');
+Route::post('/encoder/checker_1/ai-checker/stop',   [\App\Http\Controllers\MacroCheckerController::class, 'stop'])
+    ->name('macro_checker.stop');
+Route::post('/encoder/checker_1/ai-checker/run-row/{id}', [\App\Http\Controllers\MacroCheckerController::class, 'runRow'])
+    ->whereNumber('id')
+    ->name('macro_checker.run_row');
 Route::get('/macro_output/download', [MacroOutputController::class, 'download'])->name('macro_output.download');
 Route::post('/macro_output/validate-items', [MacroOutputController::class, 'validateItems']);
 Route::post('/macro_output/validate1', [MacroOutputController::class, 'validateCheckerToFix'])
