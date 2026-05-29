@@ -1100,12 +1100,37 @@ class MacroOutputController extends Controller
         // ✅ Status counts (same filter as records)
         $STATUS = $wrap('STATUS');
 
+        // INCOMPLETE = row has chat (all_user_input) pero may blank kahit isa
+        // sa FULL NAME / PHONE NUMBER / ADDRESS / PROVINCE / CITY / BARANGAY.
+        // Used by AI Checker as its target set.
+        $FULLNAME   = $wrap('FULL NAME');
+        $PHONE      = $wrap('PHONE NUMBER');
+        $ADDR       = $wrap('ADDRESS');
+        $PROV       = $wrap('PROVINCE');
+        $CITY       = $wrap('CITY');
+        $BRGY       = $wrap('BARANGAY');
+        $ALLINPUT   = $wrap('all_user_input');
+
+        $incompleteCondition = "
+            {$ALLINPUT} IS NOT NULL
+            AND TRIM({$ALLINPUT}) <> ''
+            AND (
+                {$FULLNAME} IS NULL OR TRIM({$FULLNAME}) = ''
+             OR {$PHONE}    IS NULL OR TRIM({$PHONE})    = ''
+             OR {$ADDR}     IS NULL OR TRIM({$ADDR})     = ''
+             OR {$PROV}     IS NULL OR TRIM({$PROV})     = ''
+             OR {$CITY}     IS NULL OR TRIM({$CITY})     = ''
+             OR {$BRGY}     IS NULL OR TRIM({$BRGY})     = ''
+            )
+        ";
+
         $c = (clone $baseQuery)->selectRaw("
             COUNT(*) as total,
             SUM(CASE WHEN {$STATUS} = 'PROCEED' THEN 1 ELSE 0 END) as proceed,
             SUM(CASE WHEN {$STATUS} = 'CANNOT PROCEED' THEN 1 ELSE 0 END) as cannot_proceed,
             SUM(CASE WHEN {$STATUS} = 'ODZ' THEN 1 ELSE 0 END) as odz,
-            SUM(CASE WHEN {$STATUS} IS NULL OR {$STATUS} = '' THEN 1 ELSE 0 END) as blank
+            SUM(CASE WHEN {$STATUS} IS NULL OR {$STATUS} = '' THEN 1 ELSE 0 END) as blank,
+            SUM(CASE WHEN {$incompleteCondition} THEN 1 ELSE 0 END) as incomplete
         ")->first();
 
         $statusCounts = [
@@ -1114,6 +1139,7 @@ class MacroOutputController extends Controller
             'CANNOT PROCEED' => (int) ($c->cannot_proceed ?? 0),
             'ODZ'            => (int) ($c->odz ?? 0),
             'BLANK'          => (int) ($c->blank ?? 0),
+            'INCOMPLETE'     => (int) ($c->incomplete ?? 0),
         ];
 
         // ✅ Records query
@@ -1124,6 +1150,9 @@ class MacroOutputController extends Controller
                 $recordQuery->where(function ($q) {
                     $q->whereNull('STATUS')->orWhere('STATUS', '');
                 });
+            } elseif ($request->status_filter === 'INCOMPLETE') {
+                // Rows na may chat pero may blank na address/name/phone — AI Checker target
+                $recordQuery->whereRaw($incompleteCondition);
             } else {
                 $recordQuery->where('STATUS', $request->status_filter);
             }

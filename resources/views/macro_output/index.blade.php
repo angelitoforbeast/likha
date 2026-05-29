@@ -385,6 +385,7 @@
           'CANNOT PROCEED' => 'bg-red-200',
           'ODZ' => 'bg-yellow-200',
           'BLANK' => 'bg-blue-200',
+          'INCOMPLETE' => 'bg-orange-200',
         ];
       @endphp
 
@@ -1786,21 +1787,25 @@ function markWarn(id, field) {
         }
       }
 
-      // Per-row "🤖 Fix" button — injected sa each tr[data-id] (temporary per user spec)
+      // Per-row "🤖 AI Fix" button — injected sa first td ng each tr[data-id]
+      // (temporary per user spec — aalisin pag stable na yung batch flow)
       function injectPerRowButtons() {
         const rows = document.querySelectorAll('tr[data-id]');
         rows.forEach((tr) => {
           if (tr.querySelector('.ai-fix-row-btn')) return; // already injected
           const id = tr.getAttribute('data-id');
-          const lastTd = tr.querySelector('td:last-child');
-          if (!lastTd) return;
+          const firstTd = tr.querySelector('td:first-child');
+          if (!firstTd) return;
+
           const btn = document.createElement('button');
           btn.type = 'button';
-          btn.className = 'ai-fix-row-btn bg-red-100 hover:bg-red-200 text-red-700 text-xs px-2 py-0.5 rounded ml-1';
-          btn.title = 'AI fix this row (CHECKER_11_1 logic)';
-          btn.innerHTML = '🤖';
+          btn.className = 'ai-fix-row-btn block w-full mb-1 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-2 py-1 rounded shadow-sm';
+          btn.title = 'AI Fix this row — runs CHECKER_11_1 logic (PROV → CITY → BRGY → NAME+ADDR → VERIFY)';
+          btn.innerHTML = '🤖 AI Fix';
           btn.addEventListener('click', () => runOneRow(id, btn));
-          lastTd.appendChild(btn);
+
+          // Prepend so the button sits at the top of the FULL NAME cell
+          firstTd.insertBefore(btn, firstTd.firstChild);
         });
       }
 
