@@ -1100,9 +1100,12 @@ class MacroOutputController extends Controller
         // ✅ Status counts (same filter as records)
         $STATUS = $wrap('STATUS');
 
-        // INCOMPLETE = row has chat (all_user_input) pero may blank kahit isa
-        // sa FULL NAME / PHONE NUMBER / ADDRESS / PROVINCE / CITY / BARANGAY.
-        // Used by AI Checker as its target set.
+        // INCOMPLETE = row has chat (all_user_input), STATUS is blank, AND may
+        // blank kahit isa sa FULL NAME / PHONE NUMBER / ADDRESS / PROVINCE /
+        // CITY / BARANGAY. Used by AI Checker as its target set.
+        //
+        // STATUS blank requirement: huwag i-touch yung PROCEED/CANNOT PROCEED/
+        // ODZ rows — finalized na yon, hindi na dapat i-rerun ng AI.
         $FULLNAME   = $wrap('FULL NAME');
         $PHONE      = $wrap('PHONE NUMBER');
         $ADDR       = $wrap('ADDRESS');
@@ -1114,6 +1117,7 @@ class MacroOutputController extends Controller
         $incompleteCondition = "
             {$ALLINPUT} IS NOT NULL
             AND TRIM({$ALLINPUT}) <> ''
+            AND ({$STATUS} IS NULL OR TRIM({$STATUS}) = '')
             AND (
                 {$FULLNAME} IS NULL OR TRIM({$FULLNAME}) = ''
              OR {$PHONE}    IS NULL OR TRIM({$PHONE})    = ''

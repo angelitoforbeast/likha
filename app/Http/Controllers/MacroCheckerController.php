@@ -64,8 +64,20 @@ class MacroCheckerController extends Controller
             $q->where('PAGE', $request->PAGE);
         }
 
-        // Skip criteria (per user): process row kung ANY of these is blank.
+        // Skip criteria (per user): process row kung
+        //   1. may chat (all_user_input non-empty)
+        //   2. STATUS is blank (huwag galawin yung PROCEED/CANNOT PROCEED/ODZ)
+        //   3. ANY of (FULL NAME/PHONE/ADDRESS/PROVINCE/CITY/BARANGAY) is blank
+        // Matches the INCOMPLETE pill filter sa /encoder/checker_1 view.
         $wrap = fn (string $col) => DB::getQueryGrammar()->wrap($col);
+
+        $q->whereNotNull('all_user_input')->where('all_user_input', '<>', '');
+
+        $STATUS = $wrap('STATUS');
+        $q->where(function ($s) use ($STATUS) {
+            $s->whereNull('STATUS')->orWhereRaw("TRIM({$STATUS}) = ''");
+        });
+
         $q->where(function ($a) use ($wrap) {
             $cols = ['PROVINCE', 'CITY', 'BARANGAY', 'PHONE NUMBER', 'FULL NAME'];
             foreach ($cols as $c) {
@@ -73,10 +85,6 @@ class MacroCheckerController extends Controller
                 $a->orWhereNull($c)->orWhereRaw("TRIM({$w}) = ''");
             }
         });
-
-        // Also require non-empty all_user_input — walang ibig sabihin yung row
-        // pag walang chat na pwede i-parse.
-        $q->whereNotNull('all_user_input')->where('all_user_input', '<>', '');
 
         return $q;
     }
