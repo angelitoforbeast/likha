@@ -840,7 +840,7 @@
 
       if (response.status === 429) {
         document.getElementById("gptOutputBody").innerHTML = `
-          <tr><td colspan="8" class="text-orange-600 px-3 py-2">⏳ Rate limit hit — 20 generations per hour max. Try again later.</td></tr>
+          <tr><td colspan="8" class="text-orange-600 px-3 py-2">⏳ Rate limit hit — 100 generations per hour max. Try again later.</td></tr>
         `;
         return;
       }
@@ -862,7 +862,7 @@
 
       if (response.status === 429) {
         document.getElementById("gptOutputBody").innerHTML = `
-          <tr><td colspan="8" class="text-orange-600 px-3 py-2">⏳ Rate limit hit — 20 generations per hour max. Try again later.</td></tr>
+          <tr><td colspan="8" class="text-orange-600 px-3 py-2">⏳ Rate limit hit — 100 generations per hour max. Try again later.</td></tr>
         `;
         return;
       }

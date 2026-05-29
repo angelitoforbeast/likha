@@ -105,9 +105,10 @@ Route::post('/logout', [LoginController::class, 'logout'])->name('logout')->midd
 Route::get('/assign-roles', [RoleAssignmentController::class, 'index']);
 Route::post('/assign-roles/{id}', [RoleAssignmentController::class, 'update']);
 
-// 20 GPT generations per hour per IP — protects OpenAI billing from runaway loops.
+// 100 GPT generations per hour per IP — protects OpenAI billing from runaway loops.
+// Bumped from 20 → 100 (5x) per user request — limit was hitting normal users.
 Route::post('/api/generate-gpt-summary', [GPTAdGeneratorController::class, 'generate'])
-    ->middleware('throttle:20,60');
+    ->middleware('throttle:100,60');
 Route::get('/gpt-ad-generator', [GPTAdGeneratorController::class, 'showGeneratorForm']);
 Route::get('/gpt-ad-generator/history', [GPTAdGeneratorController::class, 'history'])
     ->name('gpt.history');
