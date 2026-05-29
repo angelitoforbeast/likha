@@ -424,13 +424,16 @@
           <span id="item-checker-status" class="text-sm text-gray-600"></span>
         @endif
 
-        {{-- AI Checker (CHECKER_11_1 PHP port) — drives MacroCheckerController --}}
+        @if(!empty($canUseAiChecker))
+        {{-- AI Checker (CHECKER_11_1 PHP port) — drives MacroCheckerController.
+             Role-gated: visible lang for CEO / Marketing / Marketing - OIC. --}}
         <button type="button" id="aiCheckerBtn"
                 class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
                 title="Run AI Checker on all rows na may blank na FULL NAME / PHONE / ADDRESS / PROVINCE / CITY / BARANGAY sa current view filter."
                 disabled>
           🤖 AI Checker <span id="aiCheckerCount" class="ml-1 text-xs opacity-80">(…)</span>
         </button>
+        @endif
 
         <button type="button" id="validate1-btn" class="bg-indigo-700 text-white px-4 py-2 rounded hover:bg-indigo-800">
           Validate 1
@@ -1594,7 +1597,11 @@ function markWarn(id, field) {
     })();
   </script>
 
-  {{-- ─── AI Checker (CHECKER_11_1 PHP port) UI ─────────────────────────── --}}
+  @if(!empty($canUseAiChecker))
+  {{-- ─── AI Checker (CHECKER_11_1 PHP port) UI ───────────────────────────
+       Wrapped sa @if($canUseAiChecker) — only CEO / Marketing / Marketing - OIC
+       see/use this. Other roles: walang button, walang sticky bar, walang
+       per-row 🤖 AI Fix button (JS doesn't run). --}}
   <style>
     /* Green flash sa cells na in-update ng AI Fix per-row button */
     .ai-just-updated {
@@ -2009,5 +2016,6 @@ function markWarn(id, field) {
       injectPerRowButtons();
     })();
   </script>
+  @endif {{-- canUseAiChecker --}}
 
 </x-layout>

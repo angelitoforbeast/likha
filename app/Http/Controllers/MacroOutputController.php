@@ -1228,8 +1228,14 @@ class MacroOutputController extends Controller
             $canAccessWhitelist = true;
         }
 
+        // ✅ AI Checker + AI Fix access: same 3 roles (CEO, Marketing, Marketing OIC)
+        // Other roles (Encoders, Data Encoders, etc.) hindi nakikita yung
+        // toolbar button / per-row button / sticky progress bar.
+        $canUseAiChecker = (bool) preg_match('/^(ceo|marketing|marketing\s*[-–—]\s*oic)$/iu', $userRole);
+
         return view('macro_output.index', compact(
-            'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll', 'canAccessWhitelist'
+            'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll', 'canAccessWhitelist',
+            'canUseAiChecker'
         ));
     }
 

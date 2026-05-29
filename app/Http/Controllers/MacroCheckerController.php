@@ -6,6 +6,7 @@ use App\Models\MacroOutput;
 use App\Services\MacroChecker;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -24,6 +25,23 @@ use Illuminate\Support\Facades\Schema;
  */
 class MacroCheckerController extends Controller
 {
+    /**
+     * Role gate — AI Checker + AI Fix endpoints are limited sa CEO / Marketing /
+     * Marketing - OIC. Iba pa roles get 403. Same pattern as canAccessWhitelist.
+     * Returns null if allowed, else a 403 JsonResponse to be returned by caller.
+     */
+    private function checkRole()
+    {
+        $role = preg_replace('/\s+/u', ' ', trim((string) (Auth::user()?->employeeProfile?->role ?? '')));
+        if (preg_match('/^(ceo|marketing|marketing\s*[-–—]\s*oic)$/iu', $role)) {
+            return null; // allowed
+        }
+        return response()->json([
+            'ok'    => false,
+            'error' => 'Forbidden — AI Checker is limited to Marketing, Marketing - OIC, at CEO.',
+        ], 403);
+    }
+
     /**
      * Build the "blank rows" base query using the same date/PAGE filters
      * as MacroOutputController::index() so the user is operating on the
@@ -88,6 +106,8 @@ class MacroCheckerController extends Controller
     /** GET /encoder/checker_1/ai-checker/count?date=YYYY-MM-DD[&PAGE=…] */
     public function count(Request $request)
     {
+        if ($r = $this->checkRole()) return $r;
+
         return response()->json([
             'ok'    => true,
             'count' => $this->blankRowsQuery($request)->count(),
@@ -104,6 +124,8 @@ class MacroCheckerController extends Controller
      */
     public function start(Request $request)
     {
+        if ($r = $this->checkRole()) return $r;
+
         $explicitIds = $request->input('ids');
         if (is_array($explicitIds) && !empty($explicitIds)) {
             $ids = array_values(array_unique(array_filter(array_map('intval', $explicitIds), fn ($v) => $v > 0)));
@@ -137,6 +159,8 @@ class MacroCheckerController extends Controller
      */
     public function runRow($id)
     {
+        if ($r = $this->checkRole()) return $r;
+
         $row = MacroOutput::find((int) $id);
         if (!$row) {
             return response()->json(['ok' => false, 'error' => 'Row not found'], 404);
