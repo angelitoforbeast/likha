@@ -1231,7 +1231,15 @@ class MacroOutputController extends Controller
         // ✅ AI Checker + AI Fix access: same 3 roles (CEO, Marketing, Marketing OIC)
         // Other roles (Encoders, Data Encoders, etc.) hindi nakikita yung
         // toolbar button / per-row button / sticky progress bar.
-        $canUseAiChecker = (bool) preg_match('/^(ceo|marketing|marketing\s*[-–—]\s*oic)$/iu', $userRole);
+        //
+        // Uses EFFECTIVE role — honors CEO's "View as <role>" override
+        // (session('nav_view_as_role')) so kapag CEO is previewing as Data
+        // Encoder, AI Checker UI also hides. Same pattern as layout.blade.php.
+        $actualRoleRaw = Auth::user()?->employeeProfile?->role ?? null;
+        $viewAsRole    = ($actualRoleRaw === 'CEO') ? session('nav_view_as_role') : null;
+        $effectiveRole = preg_replace('/\s+/u', ' ', trim((string) ($viewAsRole ?: $actualRoleRaw)));
+
+        $canUseAiChecker = (bool) preg_match('/^(ceo|marketing|marketing\s*[-–—]\s*oic)$/iu', $effectiveRole);
 
         return view('macro_output.index', compact(
             'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll', 'canAccessWhitelist',

@@ -27,13 +27,22 @@ class MacroCheckerController extends Controller
 {
     /**
      * Role gate — AI Checker + AI Fix endpoints are limited sa CEO / Marketing /
-     * Marketing - OIC. Iba pa roles get 403. Same pattern as canAccessWhitelist.
+     * Marketing - OIC. Iba pa roles get 403.
+     *
+     * Uses EFFECTIVE role — honors CEO's "View as <role>" override
+     * (session('nav_view_as_role')) so when CEO is previewing as Data Encoder,
+     * backend ALSO blocks (matches what the previewed role would see).
+     * Same pattern as layout.blade.php at MacroOutputController::index.
+     *
      * Returns null if allowed, else a 403 JsonResponse to be returned by caller.
      */
     private function checkRole()
     {
-        $role = preg_replace('/\s+/u', ' ', trim((string) (Auth::user()?->employeeProfile?->role ?? '')));
-        if (preg_match('/^(ceo|marketing|marketing\s*[-–—]\s*oic)$/iu', $role)) {
+        $actualRoleRaw = Auth::user()?->employeeProfile?->role ?? null;
+        $viewAsRole    = ($actualRoleRaw === 'CEO') ? session('nav_view_as_role') : null;
+        $effectiveRole = preg_replace('/\s+/u', ' ', trim((string) ($viewAsRole ?: $actualRoleRaw)));
+
+        if (preg_match('/^(ceo|marketing|marketing\s*[-–—]\s*oic)$/iu', $effectiveRole)) {
             return null; // allowed
         }
         return response()->json([
