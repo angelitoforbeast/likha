@@ -47,6 +47,8 @@ class MacroChecker
      *     'provincesSet'     => ['abra' => 'ABRA', ...] (normalized key → display label)
      *     'citiesByProv'     => ['abra' => ['BANGUED', 'BUCAY', ...], ...]
      *     'brgysByCityProv'  => ['bangued|abra' => ['BARANGAY 1', ...], ...]
+     *     'provincesByCity'  => ['cabanatuan city' => ['NUEVA ECIJA'], ...]
+     *                          ↑ reverse lookup for the "implied province" patch
      *   ]
      *
      * Called ONCE per batch job — kept in memory, passed to processRow().
@@ -60,12 +62,14 @@ class MacroChecker
                 'provincesSet'    => [],
                 'citiesByProv'    => [],
                 'brgysByCityProv' => [],
+                'provincesByCity' => [],
             ];
         }
 
         $provincesSet    = [];   // normKey => label
         $citiesByProv    = [];   // provNormKey => Set<cityLabel>
         $brgysByCityProv = [];   // cityNormKey|provNormKey => Set<brgyLabel>
+        $provincesByCity = [];   // cityNormKey => Set<provLabel>
 
         $lines = file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
         foreach ($lines as $line) {
@@ -87,6 +91,9 @@ class MacroChecker
 
             $key = $cityKey . '|' . $provKey;
             $brgysByCityProv[$key][$brgyLabel] = true;
+
+            // Reverse: which provinces contain this city?
+            $provincesByCity[$cityKey][$provLabel] = true;
         }
 
         // Flatten Sets to sorted arrays
@@ -100,6 +107,9 @@ class MacroChecker
             sort($list, SORT_STRING | SORT_FLAG_CASE);
             $brgysByCityProv[$k] = $list;
         }
+        foreach ($provincesByCity as $c => $set) {
+            $provincesByCity[$c] = array_keys($set);
+        }
 
         $provNames = array_values($provincesSet);
         sort($provNames, SORT_STRING | SORT_FLAG_CASE);
@@ -109,6 +119,7 @@ class MacroChecker
             'provincesSet'    => $provincesSet,
             'citiesByProv'    => $citiesByProv,
             'brgysByCityProv' => $brgysByCityProv,
+            'provincesByCity' => $provincesByCity,
         ];
     }
 
@@ -193,17 +204,39 @@ class MacroChecker
         }
         $this->sleepMs();
 
-        // ── 4b. PHONE NUMBER (regex first; only fall back if needed) ─────
+        // ── 4b. PHONE NUMBER ─────────────────────────────────────────────
+        // Order: regex first (cheap, fast), fallback to AI-extracted (from
+        // NAMEADDR step above) kung di nakuha ng regex. AI handles formats
+        // like '0923 422 1422' or '+63 917-123-4567' na hindi macatch ng
+        // contiguous-digit regex.
         $phoneCur = trim((string) $row->{'PHONE NUMBER'});
         if ($phoneCur === '') {
             $phone = $this->extractPhone($chat);
-            if ($phone !== null) {
+            if ($phone === null && !empty($nameAddr['phone_number'])) {
+                $phone = $nameAddr['phone_number']; // already normalized in extractNameAddr
+            }
+            if ($phone !== null && $phone !== '') {
                 $updates['PHONE NUMBER'] = $phone;
             }
         }
 
         // ── 5. VERIFYK ───────────────────────────────────────────────────
         $verdict = $this->verifyAddress($chat, $effectiveProv, $effectiveCity, $effectiveBrgy, $apiKey);
+
+        // ✅ IMPLIED PROVINCE PATCH — same pattern as macro's implied-city patch.
+        // Kung city_ok && barangay_ok pero !province_ok, AT yung current city ay
+        // unique sa current province sa jnt_address.txt, then province is implied
+        // (e.g., "Cabanatuan City" → only in Nueva Ecija → province_ok = true).
+        if (!empty($verdict['city_ok']) && !empty($verdict['barangay_ok']) && empty($verdict['province_ok'])) {
+            $impliedProvs = $this->inferProvinceFromCity($effectiveCity, $maps);
+            if (count($impliedProvs) === 1) {
+                $implied = $impliedProvs[0];
+                if (self::normProv($implied) === self::normProv($effectiveProv)) {
+                    $verdict['province_ok'] = true;
+                }
+            }
+        }
+
         $statusCode = $this->computeStatusCode($verdict);
         $updates['APP SCRIPT CHECKER'] = $statusCode;
         if ($statusCode === '✅') {
@@ -301,15 +334,19 @@ class MacroChecker
         return $parsed;
     }
 
-    /** Name + Address Line 1 extraction — same as macro's NAMEADDR_*. */
+    /**
+     * Name + Address Line 1 + Phone extraction — extends macro's NAMEADDR_*.
+     * Added `phone_number` field for AI fallback when regex misses formats with
+     * separators (spaces/dashes), per user request.
+     */
     public function extractNameAddr(string $chat, string $nameOld, string $addrOld, string $prov, string $city, string $brgy, string $apiKey): array
     {
-        if (trim($chat) === '') return ['full_name' => '', 'address_line1' => ''];
+        if (trim($chat) === '') return ['full_name' => '', 'address_line1' => '', 'phone_number' => ''];
 
-        $system = "You extract and normalize Philippine customer name and Address Line 1 from messy chat logs.\n\n"
+        $system = "You extract and normalize Philippine customer name, Address Line 1, and phone number from messy chat logs.\n\n"
                 . "You will receive RAW_CUSTOMER_CHAT and CURRENT values.\n\n"
                 . "Output STRICT JSON only:\n"
-                . "{\"full_name\":\"...\",\"address_line1\":\"...\"}\n\n"
+                . "{\"full_name\":\"...\",\"address_line1\":\"...\",\"phone_number\":\"...\"}\n\n"
                 . "Rules for full_name:\n"
                 . "- Choose the customer's real name if clearly stated (often after 'Name:' or in order confirmation).\n"
                 . "- Ignore page/persona names (e.g., seller, admin) unless the customer is clearly that person.\n"
@@ -320,6 +357,14 @@ class MacroChecker
                 . "- If chat has only 'Brgy, City, Province' and no other details, return empty string for address_line1.\n"
                 . "- Prefer details near address lines, or after words like 'address', 'landmark', 'purok', 'street', 'subd', 'blk', 'lot'.\n"
                 . "- If there are conflicting address details, pick the most complete and most recent one.\n\n"
+                . "Rules for phone_number:\n"
+                . "- Extract the Philippine mobile number (must be a real 10- or 11-digit cell number).\n"
+                . "- Look for 'Phone Number:' label, OR any number that looks like 09XXXXXXXXX / +639XXXXXXXXX.\n"
+                . "- Handle inline formats with spaces/dashes/parens (e.g., '0923 422 1422', '+63 917-123-4567').\n"
+                . "- Normalize to 11-digit format starting with 09 (e.g., '09234221422'). Strip all non-digit characters.\n"
+                . "- If +63 or 63 prefix, replace with 0. If only 10 digits starting with 9, prepend 0.\n"
+                . "- Skip placeholders like '9123456789' or numbers that aren't valid PH mobile.\n"
+                . "- If no phone found, return empty string.\n\n"
                 . "Return JSON only. No extra text.";
 
         $prompt = "RAW_CUSTOMER_CHAT:\n<<<\n" . $chat . "\n>>>\n\n"
@@ -330,25 +375,42 @@ class MacroChecker
             . "CURRENT_BARANGAY: " . $brgy . "\n\n"
             . "Task:\n"
             . "1) Extract best FULL NAME.\n"
-            . "2) Extract best ADDRESS LINE 1 (exclude barangay/city/province).\n\n"
+            . "2) Extract best ADDRESS LINE 1 (exclude barangay/city/province).\n"
+            . "3) Extract PHONE NUMBER as 11-digit 09XXXXXXXXX (handle spaces/dashes).\n\n"
             . "Return STRICT JSON only:\n"
-            . "{\"full_name\":\"...\",\"address_line1\":\"...\"}\n";
+            . "{\"full_name\":\"...\",\"address_line1\":\"...\",\"phone_number\":\"...\"}\n";
 
         $raw = $this->callOpenAI($apiKey, $system, $prompt);
 
         $obj = $this->parseJsonObject($raw);
-        $name = isset($obj['full_name']) ? trim((string) $obj['full_name']) : '';
-        $addr = isset($obj['address_line1']) ? trim((string) $obj['address_line1']) : '';
+        $name  = isset($obj['full_name'])     ? trim((string) $obj['full_name'])     : '';
+        $addr  = isset($obj['address_line1']) ? trim((string) $obj['address_line1']) : '';
+        $phone = isset($obj['phone_number'])  ? trim((string) $obj['phone_number'])  : '';
 
         // Strip out brgy/city/prov from address_line1 (defensive, per macro)
         $addr = $this->stripLocations($addr, $brgy, $city, $prov);
         $addr = trim(preg_replace('/\s*,\s*/', ', ', preg_replace('/\s+/', ' ', $addr) ?? '') ?? '');
         $addr = trim($addr, ", \t\n\r\0\x0B");
 
+        // Normalize AI-extracted phone — just in case AI didn't strip separators
+        $phone = $this->normalizePhone($phone);
+
         return [
             'full_name'     => $name,
             'address_line1' => $addr,
+            'phone_number'  => $phone ?? '',
         ];
+    }
+
+    /** Normalize a phone candidate to 11-digit 09XXXXXXXXX format. Returns null if invalid. */
+    private function normalizePhone(string $raw): ?string
+    {
+        $digits = preg_replace('/\D+/', '', $raw) ?? '';
+        if ($digits === '') return null;
+        if (strlen($digits) === 11 && substr($digits, 0, 2) === '09') return $digits;
+        if (strlen($digits) === 12 && substr($digits, 0, 3) === '639') return '0' . substr($digits, 2);
+        if (strlen($digits) === 10 && $digits[0] === '9') return '0' . $digits;
+        return null;
     }
 
     /** Address verification — same as macro's VERIFYK_*. */
@@ -381,6 +443,20 @@ class MacroChecker
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
+
+    /**
+     * Reverse lookup: given a city, find all provinces na may ganitong city
+     * sa jnt_address.txt. Used by the implied-province patch sa VERIFYK.
+     *
+     * Returns list of province display labels (typically 0 or 1 entries; >1 only
+     * for ambiguous cities like "San Juan" which exists in multiple provinces).
+     */
+    public function inferProvinceFromCity(string $cityNow, array $maps): array
+    {
+        $key = self::normPlace($cityNow);
+        if ($key === '') return [];
+        return $maps['provincesByCity'][$key] ?? [];
+    }
 
     /** Compute the status code that goes into APP SCRIPT CHECKER. */
     public function computeStatusCode(array $verdict): string
