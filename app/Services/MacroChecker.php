@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Models\MacroOutput;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Port of the CHECKER_11_1 Google Apps Script macro into Laravel.
@@ -126,6 +128,14 @@ class MacroChecker
     /**
      * Orchestrator — fix one macro_output row using the macro's full sequence.
      *
+     * 2-PASS RETRY: First pass uses `all_user_input` only (short chat). Pag
+     * hindi naging ✅ yung final verdict, mag-fetch ng `customers_chat` mula
+     * sa `pancake_conversations` table by `fb_name` (= yung nakikita mo pag
+     * cli-click mo yung "See more" link sa UI), tapos i-retry yung fix
+     * sequence with extended context.
+     *
+     * Cost: easy rows = 5 API calls (1 pass), hard rows = 10 API calls (2 passes).
+     *
      * Returns ['status' => string, 'final_code' => string|null, 'message' => string|null]
      */
     public function processRow(int $id, array $maps): array
@@ -145,6 +155,48 @@ class MacroChecker
             return ['status' => 'failed', 'final_code' => null, 'message' => 'No OPENAI_API_KEY'];
         }
 
+        // ── PASS 1: short chat (all_user_input only) ─────────────────────
+        $result = $this->runFixSequence($row, $chat, $maps, $apiKey);
+
+        if ($result['final_code'] === '✅') {
+            return $result;
+        }
+
+        // ── PASS 2: retry with extended chat from pancake_conversations ──
+        $extendedChat = $this->fetchPancakeChat((string) ($row->fb_name ?? ''));
+        if ($extendedChat === '' || $extendedChat === $chat) {
+            return $result; // no extra context available — keep pass 1 result
+        }
+
+        $combinedChat = $chat . "\n\n[ADDITIONAL CHAT HISTORY FROM PANCAKE]:\n" . $extendedChat;
+
+        // Re-load row para makita yung updates ng pass 1
+        $row->refresh();
+        $result2 = $this->runFixSequence($row, $combinedChat, $maps, $apiKey);
+
+        // Use pass 2 only if it's better — never regress (e.g., pass 1 was ✅
+        // pero pass 2 became "Province" → keep pass 1). But since we already
+        // returned early on ✅, here we accept pass 2 if it's ✅, otherwise
+        // keep the pass 1 result (pass 1 already wrote partial data).
+        if ($result2['final_code'] === '✅') {
+            return $result2;
+        }
+
+        // Pass 2 didn't reach ✅ either, but its values may still be better
+        // than pass 1 (e.g., it filled in a field pass 1 left blank). The
+        // runFixSequence already persisted any improvements, so return pass 2.
+        return $result2;
+    }
+
+    /**
+     * Runs the full PROVFIX → CITYFIX → BRGYFIX → NAMEADDR → VERIFYK sequence
+     * on a row using the given chat text. Persists updates. Returns the result.
+     *
+     * Called twice per hard row by processRow (pass 1 = short chat, pass 2 =
+     * combined with pancake_conversations).
+     */
+    private function runFixSequence($row, string $chat, array $maps, string $apiKey): array
+    {
         $updates = [];
 
         // ── 1. PROVFIX ───────────────────────────────────────────────────
@@ -164,11 +216,9 @@ class MacroChecker
 
         // ── 2. CITYFIX ───────────────────────────────────────────────────
         $cityCur = trim((string) $row->CITY);
-        $newCity = $cityCur;
         if ($cityList !== '') {
             $candidate = $this->fixCity($chat, $effectiveProv, $cityCur, $cityList, $apiKey);
             if ($candidate && $this->cityInList($candidate, $cityList) && $candidate !== $cityCur) {
-                $newCity = $candidate;
                 $updates['CITY'] = $candidate;
             }
             $this->sleepMs();
@@ -192,7 +242,7 @@ class MacroChecker
         }
         $effectiveBrgy = $updates['BARANGAY'] ?? $brgyCur;
 
-        // ── 4. NAMEADDR (extract FULL NAME + ADDRESS Line 1) ─────────────
+        // ── 4. NAMEADDR (extract FULL NAME + ADDRESS Line 1 + PHONE) ─────
         $nameCur = trim((string) $row->{'FULL NAME'});
         $addrCur = trim((string) $row->ADDRESS);
         $nameAddr = $this->extractNameAddr($chat, $nameCur, $addrCur, $effectiveProv, $effectiveCity, $effectiveBrgy, $apiKey);
@@ -205,15 +255,13 @@ class MacroChecker
         $this->sleepMs();
 
         // ── 4b. PHONE NUMBER ─────────────────────────────────────────────
-        // Order: regex first (cheap, fast), fallback to AI-extracted (from
-        // NAMEADDR step above) kung di nakuha ng regex. AI handles formats
-        // like '0923 422 1422' or '+63 917-123-4567' na hindi macatch ng
-        // contiguous-digit regex.
+        // Regex first (cheap), AI fallback (from NAMEADDR step) for formats
+        // like '0923 422 1422' / '+63 917-123-4567' na hindi macatch ng regex.
         $phoneCur = trim((string) $row->{'PHONE NUMBER'});
         if ($phoneCur === '') {
             $phone = $this->extractPhone($chat);
             if ($phone === null && !empty($nameAddr['phone_number'])) {
-                $phone = $nameAddr['phone_number']; // already normalized in extractNameAddr
+                $phone = $nameAddr['phone_number']; // already normalized
             }
             if ($phone !== null && $phone !== '') {
                 $updates['PHONE NUMBER'] = $phone;
@@ -225,8 +273,7 @@ class MacroChecker
 
         // ✅ IMPLIED PROVINCE PATCH — same pattern as macro's implied-city patch.
         // Kung city_ok && barangay_ok pero !province_ok, AT yung current city ay
-        // unique sa current province sa jnt_address.txt, then province is implied
-        // (e.g., "Cabanatuan City" → only in Nueva Ecija → province_ok = true).
+        // unique sa current province sa jnt_address.txt, then province is implied.
         if (!empty($verdict['city_ok']) && !empty($verdict['barangay_ok']) && empty($verdict['province_ok'])) {
             $impliedProvs = $this->inferProvinceFromCity($effectiveCity, $maps);
             if (count($impliedProvs) === 1) {
@@ -239,7 +286,29 @@ class MacroChecker
 
         $statusCode = $this->computeStatusCode($verdict);
         $updates['APP SCRIPT CHECKER'] = $statusCode;
-        if ($statusCode === '✅') {
+
+        // ── PROCEED gate ─────────────────────────────────────────────────
+        // Don't auto-PROCEED kahit ✅ ang address verify kung may blank pa
+        // sa required fields. Example: Rodulfo Delposo row may chat na pure
+        // "danglag condolacion cebu" (location names lang) → AI verified
+        // prov/city/brgy as correct ✅, pero ADDRESS Line 1 stays blank
+        // kasi walang house number/street/landmark sa chat. Hindi dapat
+        // PROCEED yan since incomplete pa rin.
+        $finalProv   = $updates['PROVINCE']     ?? $row->PROVINCE;
+        $finalCity   = $updates['CITY']         ?? $row->CITY;
+        $finalBrgy   = $updates['BARANGAY']     ?? $row->BARANGAY;
+        $finalName   = $updates['FULL NAME']    ?? $row->{'FULL NAME'};
+        $finalPhone  = $updates['PHONE NUMBER'] ?? $row->{'PHONE NUMBER'};
+        $finalAddr   = $updates['ADDRESS']      ?? $row->ADDRESS;
+
+        $allFilled = trim((string)$finalProv)  !== ''
+                  && trim((string)$finalCity)  !== ''
+                  && trim((string)$finalBrgy)  !== ''
+                  && trim((string)$finalName)  !== ''
+                  && trim((string)$finalPhone) !== ''
+                  && trim((string)$finalAddr)  !== '';
+
+        if ($statusCode === '✅' && $allFilled) {
             $updates['STATUS'] = 'PROCEED';
         }
 
@@ -249,10 +318,42 @@ class MacroChecker
         }
 
         return [
-            'status'     => $statusCode === '✅' ? 'fixed' : 'partial',
+            'status'     => ($statusCode === '✅' && $allFilled) ? 'fixed' : 'partial',
             'final_code' => $statusCode,
-            'message'    => null,
+            'all_filled' => $allFilled,
+            'message'    => $statusCode === '✅' && !$allFilled
+                ? 'Address verified but may blank na required field (di pa PROCEED)'
+                : null,
         ];
+    }
+
+    /**
+     * Fetch the customer's full chat history from pancake_conversations
+     * (same source as the "See more" link sa /encoder/checker_1). Used as
+     * extended context para sa PASS 2 retry kapag PASS 1 di na-fix nang ✅.
+     *
+     * Returns trimmed chat string, or '' kung walang match.
+     */
+    public function fetchPancakeChat(string $fbName): string
+    {
+        $fbName = trim($fbName);
+        if ($fbName === '') return '';
+        if (!Schema::hasTable('pancake_conversations')) return '';
+
+        $chat = DB::table('pancake_conversations')
+            ->where('full_name', '=', $fbName)
+            ->orderByDesc('id')
+            ->value('customers_chat');
+
+        $chat = trim((string) ($chat ?? ''));
+
+        // Cap at 8000 chars — same safety limit as MacroOutputController::pancakeMore()
+        $max = 8000;
+        if ($chat !== '' && mb_strlen($chat, 'UTF-8') > $max) {
+            $chat = mb_substr($chat, 0, $max, 'UTF-8') . "\n\n[TRUNCATED]";
+        }
+
+        return $chat;
     }
 
     // ── OPENAI PROMPTS — ported 1:1 from CHECKER_11_1 ─────────────────────
@@ -358,13 +459,13 @@ class MacroChecker
                 . "- Prefer details near address lines, or after words like 'address', 'landmark', 'purok', 'street', 'subd', 'blk', 'lot'.\n"
                 . "- If there are conflicting address details, pick the most complete and most recent one.\n\n"
                 . "Rules for phone_number:\n"
-                . "- Extract the Philippine mobile number (must be a real 10- or 11-digit cell number).\n"
-                . "- Look for 'Phone Number:' label, OR any number that looks like 09XXXXXXXXX / +639XXXXXXXXX.\n"
-                . "- Handle inline formats with spaces/dashes/parens (e.g., '0923 422 1422', '+63 917-123-4567').\n"
-                . "- Normalize to 11-digit format starting with 09 (e.g., '09234221422'). Strip all non-digit characters.\n"
-                . "- If +63 or 63 prefix, replace with 0. If only 10 digits starting with 9, prepend 0.\n"
-                . "- Skip placeholders like '9123456789' or numbers that aren't valid PH mobile.\n"
-                . "- If no phone found, return empty string.\n\n"
+                . "- Extract ANY number that LOOKS like a Philippine mobile (even incomplete — proper validation done elsewhere).\n"
+                . "- Look for 'Phone Number:' / 'cell num' / 'mobile' labels, OR any sequence like 09XXXXXXXXX / +639XXXXXXXXX / 0917XXXXXXX.\n"
+                . "- Handle inline formats with spaces/dashes/parens (e.g., '0923 422 1422', '0957 955210', '+63 917-123-4567').\n"
+                . "- Strip all non-digit characters, then normalize to leading 0: if +63/63 prefix replace with 0; if starts with 9 prepend 0.\n"
+                . "- Accept results that are 10-12 digits starting with 0 (e.g., '0957955210', '09171234567'). Return as-is.\n"
+                . "- Skip obvious placeholders like '9123456789' or '1234567890'.\n"
+                . "- If no phone-like sequence found, return empty string.\n\n"
                 . "Return JSON only. No extra text.";
 
         $prompt = "RAW_CUSTOMER_CHAT:\n<<<\n" . $chat . "\n>>>\n\n"
@@ -402,15 +503,14 @@ class MacroChecker
         ];
     }
 
-    /** Normalize a phone candidate to 11-digit 09XXXXXXXXX format. Returns null if invalid. */
+    /**
+     * Normalize phone candidate from AI output. Lenient — accepts 10-12 digit
+     * results so incomplete numbers like '0957955210' still pass through.
+     * Strict format validation happens elsewhere.
+     */
     private function normalizePhone(string $raw): ?string
     {
-        $digits = preg_replace('/\D+/', '', $raw) ?? '';
-        if ($digits === '') return null;
-        if (strlen($digits) === 11 && substr($digits, 0, 2) === '09') return $digits;
-        if (strlen($digits) === 12 && substr($digits, 0, 3) === '639') return '0' . substr($digits, 2);
-        if (strlen($digits) === 10 && $digits[0] === '9') return '0' . $digits;
-        return null;
+        return $this->normalizePhoneLenient($raw);
     }
 
     /** Address verification — same as macro's VERIFYK_*. */
@@ -475,15 +575,60 @@ class MacroChecker
         return 'Full Address';
     }
 
-    /** Extract phone (Philippine 09XX format) via regex from chat. */
+    /**
+     * Lenient phone extraction — catches even incomplete formats (e.g.,
+     * "0957 955210" = 10 digits missing one).
+     *
+     * Per user spec: extract whatever looks phone-ish, kahit invalid. Yung
+     * validation (proper 11-digit 09XXXXXXXXX check) handled separately ng
+     * existing Validate button + the PROCEED gate. Better na may starting
+     * point para sa manual review kaysa blank.
+     */
     public function extractPhone(string $chat): ?string
     {
-        if (preg_match('/(?:\+?63|0)?9\d{9}/', $chat, $m)) {
-            $digits = preg_replace('/\D+/', '', $m[0]);
-            if (strlen($digits) === 10 && $digits[0] === '9') return '0' . $digits;
-            if (strlen($digits) === 11 && substr($digits, 0, 2) === '09') return $digits;
-            if (strlen($digits) === 12 && substr($digits, 0, 3) === '639') return '0' . substr($digits, 2);
+        // First: try with separators allowed (handles "0917 123 4567" etc.)
+        if (preg_match('/(?:\+?63|0)\s?9(?:[\s\-\.\(\)]?\d){7,11}/', $chat, $m)) {
+            $normalized = $this->normalizePhoneLenient($m[0]);
+            if ($normalized !== null) return $normalized;
         }
+
+        // Fallback: strip whitespace then try contiguous 9-13 digit sequence
+        $clean = preg_replace('/\s+/', '', $chat) ?? '';
+        if (preg_match('/(?:\+?63|0)?9\d{7,11}/', $clean, $m)) {
+            $normalized = $this->normalizePhoneLenient($m[0]);
+            if ($normalized !== null) return $normalized;
+        }
+
+        return null;
+    }
+
+    /**
+     * Normalize a phone candidate. Lenient — accepts 10-12 digit results so
+     * "incomplete" numbers (10 digits starting with 09) still get extracted.
+     * Validation of strict 11-digit format is done elsewhere.
+     */
+    private function normalizePhoneLenient(string $raw): ?string
+    {
+        $digits = preg_replace('/\D+/', '', $raw) ?? '';
+        if ($digits === '') return null;
+
+        // Strip +63 / 63 prefix → leading 0
+        if (str_starts_with($digits, '639')) {
+            $digits = '0' . substr($digits, 2);
+        } elseif (str_starts_with($digits, '63') && strlen($digits) >= 12) {
+            $digits = '0' . substr($digits, 2);
+        }
+
+        // If starts with 9, prepend 0
+        if (strlen($digits) >= 9 && $digits[0] === '9') {
+            $digits = '0' . $digits;
+        }
+
+        // Accept anything that ends up as 0XXXXXXXXX with length 10-12
+        if (str_starts_with($digits, '0') && strlen($digits) >= 10 && strlen($digits) <= 12) {
+            return $digits;
+        }
+
         return null;
     }
 

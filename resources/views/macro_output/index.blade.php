@@ -1639,9 +1639,20 @@ function markWarn(id, field) {
         <div id="aiBarProgress" class="bg-red-600 h-2 rounded-full transition-all" style="width:0%"></div>
       </div>
 
+      <button type="button" id="aiBarPauseBtn"
+              class="bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold px-3 py-1 rounded"
+              title="Halt after current row. Pwede ka pa mag-Continue.">
+        ⏸ Pause
+      </button>
+      <button type="button" id="aiBarContinueBtn"
+              class="hidden bg-green-600 hover:bg-green-700 text-white text-xs font-semibold px-3 py-1 rounded"
+              title="Resume from where paused.">
+        ▶ Continue
+      </button>
       <button type="button" id="aiBarStopBtn"
-              class="bg-yellow-600 hover:bg-yellow-700 text-white text-xs font-semibold px-3 py-1 rounded">
-        Stop
+              class="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1 rounded"
+              title="Cancel completely. Remaining rows hindi na ma-process.">
+        ✕ Stop
       </button>
       <button type="button" id="aiBarRefreshBtn"
               class="hidden bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1 rounded">
@@ -1666,20 +1677,23 @@ function markWarn(id, field) {
       const countEl = document.getElementById('aiCheckerCount');
 
       // Sticky top bar elements
-      const bar          = document.getElementById('aiCheckerBar');
-      const barCounts    = document.getElementById('aiBarCounts');
-      const barFixed     = document.getElementById('aiBarFixed');
-      const barPartial   = document.getElementById('aiBarPartial');
-      const barFailed    = document.getElementById('aiBarFailed');
-      const barEta       = document.getElementById('aiBarEta');
-      const barProgress  = document.getElementById('aiBarProgress');
-      const barStopBtn   = document.getElementById('aiBarStopBtn');
-      const barRefreshBtn= document.getElementById('aiBarRefreshBtn');
-      const barCloseBtn  = document.getElementById('aiBarCloseBtn');
+      const bar           = document.getElementById('aiCheckerBar');
+      const barCounts     = document.getElementById('aiBarCounts');
+      const barFixed      = document.getElementById('aiBarFixed');
+      const barPartial    = document.getElementById('aiBarPartial');
+      const barFailed     = document.getElementById('aiBarFailed');
+      const barEta        = document.getElementById('aiBarEta');
+      const barProgress   = document.getElementById('aiBarProgress');
+      const barPauseBtn   = document.getElementById('aiBarPauseBtn');
+      const barContinueBtn= document.getElementById('aiBarContinueBtn');
+      const barStopBtn    = document.getElementById('aiBarStopBtn');
+      const barRefreshBtn = document.getElementById('aiBarRefreshBtn');
+      const barCloseBtn   = document.getElementById('aiBarCloseBtn');
 
       // Batch state (frontend-driven, no backend job)
-      let stopFlag = false;
-      let running  = false;
+      let stopFlag  = false;   // hard cancel — exits loop, can't resume
+      let pauseFlag = false;   // soft pause — loop waits, can resume
+      let running   = false;
 
       // Build the count URL with current filter context (date, PAGE).
       function filterQuery() {
@@ -1804,8 +1818,12 @@ function markWarn(id, field) {
 
         // Step 2: show sticky bar + mark all target rows as queued
         showBar();
+        barPauseBtn.classList.remove('hidden');
+        barContinueBtn.classList.add('hidden');
         barStopBtn.classList.remove('hidden');
         barRefreshBtn.classList.add('hidden');
+        barPauseBtn.disabled = false;
+        barStopBtn.disabled = false;
 
         const state = { total: ids.length, processed: 0, fixed: 0, partial: 0, failed: 0, startedAt: Date.now() };
         updateBar(state);
@@ -1814,6 +1832,12 @@ function markWarn(id, field) {
         // Step 3: loop sequentially through IDs — calls SAME /run-row endpoint
         //         as clicking per-row AI Fix one at a time.
         for (const id of ids) {
+          if (stopFlag) break;
+
+          // Pause loop — wait until pauseFlag clears or stopFlag fires
+          while (pauseFlag && !stopFlag) {
+            await new Promise(res => setTimeout(res, 500));
+          }
           if (stopFlag) break;
 
           setRowButtonState(id, 'fixing');
@@ -1833,9 +1857,14 @@ function markWarn(id, field) {
               if (j.row) applyRowUpdate(id, j.row);
 
               const code = j.result?.final_code || '—';
-              if (code === '✅') {
+              // PROCEED gate: code = ✅ but if all_filled is false, treat as partial
+              const allFilled = j.result?.all_filled !== false; // default true if missing
+              if (code === '✅' && allFilled) {
                 setRowButtonState(id, 'done', '✅ Fixed');
                 state.fixed++;
+              } else if (code === '✅' && !allFilled) {
+                setRowButtonState(id, 'partial', '⚠ ✅ but blank');
+                state.partial++;
               } else {
                 setRowButtonState(id, 'partial', '⚠ ' + code);
                 state.partial++;
@@ -1851,6 +1880,8 @@ function markWarn(id, field) {
         }
 
         // Step 4: done (or stopped)
+        barPauseBtn.classList.add('hidden');
+        barContinueBtn.classList.add('hidden');
         barStopBtn.classList.add('hidden');
         barRefreshBtn.classList.remove('hidden');
         barEta.textContent = stopFlag
@@ -1862,11 +1893,30 @@ function markWarn(id, field) {
         refreshCount();
       }
 
+      function pauseBatch() {
+        if (!running || pauseFlag) return;
+        pauseFlag = true;
+        barPauseBtn.classList.add('hidden');
+        barContinueBtn.classList.remove('hidden');
+        barEta.textContent = `⏸ Paused at ${barCounts.textContent}`;
+      }
+
+      function continueBatch() {
+        if (!running || !pauseFlag) return;
+        pauseFlag = false;
+        barContinueBtn.classList.add('hidden');
+        barPauseBtn.classList.remove('hidden');
+        barEta.textContent = 'Resuming…';
+      }
+
       function stopBatch() {
         if (!running) return;
-        if (!confirm('Stop the AI Checker batch? Yung remaining rows hindi na ma-process.')) return;
+        if (!confirm('Stop the AI Checker batch? Yung remaining rows hindi na ma-process. (Use Pause kung gusto mo lang i-halt for a while.)')) return;
         stopFlag = true;
+        pauseFlag = false; // unfreeze the loop so it can exit
         barEta.textContent = 'Stopping after current row…';
+        barPauseBtn.disabled = true;
+        barContinueBtn.disabled = true;
         barStopBtn.disabled = true;
       }
 
@@ -1949,6 +1999,8 @@ function markWarn(id, field) {
 
       // ── Wire up ───────────────────────────────────────────────────────
       btn.addEventListener('click', startBatch);
+      barPauseBtn.addEventListener('click', pauseBatch);
+      barContinueBtn.addEventListener('click', continueBatch);
       barStopBtn.addEventListener('click', stopBatch);
       barCloseBtn.addEventListener('click', hideBar);
       barRefreshBtn.addEventListener('click', () => window.location.reload());
