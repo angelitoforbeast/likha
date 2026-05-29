@@ -574,14 +574,11 @@ Route::post('/encoder/checker_1/update-field', [MacroOutputController::class, 'u
 Route::post('/macro_output/validate', [MacroOutputController::class, 'validateAddresses'])->name('macro_output.validate');
 
 // ✅ AI Checker — CHECKER_11_1 macro port (PHP). Drives the /encoder/checker_1 toolbar button.
+// Batch is frontend-driven (JS loops calling run-row sequentially) — no background job.
 Route::get ('/encoder/checker_1/ai-checker/count',  [\App\Http\Controllers\MacroCheckerController::class, 'count'])
     ->name('macro_checker.count');
 Route::post('/encoder/checker_1/ai-checker/start',  [\App\Http\Controllers\MacroCheckerController::class, 'start'])
     ->name('macro_checker.start');
-Route::get ('/encoder/checker_1/ai-checker/status', [\App\Http\Controllers\MacroCheckerController::class, 'status'])
-    ->name('macro_checker.status');
-Route::post('/encoder/checker_1/ai-checker/stop',   [\App\Http\Controllers\MacroCheckerController::class, 'stop'])
-    ->name('macro_checker.stop');
 Route::post('/encoder/checker_1/ai-checker/run-row/{id}', [\App\Http\Controllers\MacroCheckerController::class, 'runRow'])
     ->whereNumber('id')
     ->name('macro_checker.run_row');

@@ -1606,41 +1606,51 @@ function markWarn(id, field) {
       40%  { background-color: #bbf7d0; box-shadow: 0 0 0 2px rgba(74,222,128,0.3); }
       100% { background-color: #ecfdf5; box-shadow: 0 0 0 0 rgba(74,222,128,0); }
     }
+    /* Row currently being processed by the batch loop — yellow highlight */
+    tr.ai-row-current {
+      background-color: #fef3c7 !important; /* tailwind yellow-100 */
+      box-shadow: inset 0 0 0 2px #f59e0b;  /* yellow-500 ring */
+    }
+    /* Per-row button states */
+    .ai-fix-row-btn.queued    { background-color: #cbd5e1 !important; color: #475569 !important; }
+    .ai-fix-row-btn.fixing    { background-color: #f59e0b !important; color: #fff !important; }
+    .ai-fix-row-btn.done      { background-color: #16a34a !important; color: #fff !important; }
+    .ai-fix-row-btn.partial   { background-color: #ca8a04 !important; color: #fff !important; }
+    .ai-fix-row-btn.fail      { background-color: #dc2626 !important; color: #fff !important; }
+    @keyframes aiSpin { to { transform: rotate(360deg); } }
+    .ai-spin { display: inline-block; animation: aiSpin 1s linear infinite; }
   </style>
 
-  {{-- Modal --}}
-  <div id="aiCheckerModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-lg font-bold text-gray-900">🤖 AI Checker — Batch Run</h3>
-        <button type="button" id="aiCheckerCloseBtn" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+  {{-- Sticky top bar (replaces modal — table stays visible behind) --}}
+  <div id="aiCheckerBar"
+       class="hidden fixed top-0 left-0 right-0 z-40 bg-white border-b-2 border-red-500 shadow-md px-4 py-2">
+    <div class="max-w-7xl mx-auto flex items-center gap-3 text-sm">
+      <span class="font-bold text-red-700">🤖 AI Checker</span>
+      <span id="aiBarCounts" class="text-slate-700 font-mono">0 / 0</span>
+      <span class="text-slate-300">·</span>
+      <span class="text-green-700">✅ <span id="aiBarFixed">0</span></span>
+      <span class="text-yellow-700">⚠ <span id="aiBarPartial">0</span></span>
+      <span class="text-red-700">❌ <span id="aiBarFailed">0</span></span>
+      <span class="text-slate-300">·</span>
+      <span id="aiBarEta" class="text-slate-500 text-xs">starting…</span>
+
+      {{-- Inline progress bar --}}
+      <div class="flex-1 mx-2 bg-slate-200 rounded-full h-2 min-w-[100px]">
+        <div id="aiBarProgress" class="bg-red-600 h-2 rounded-full transition-all" style="width:0%"></div>
       </div>
 
-      <div id="aiCheckerStatusBox" class="bg-slate-50 border border-slate-200 rounded p-3 text-sm mb-3">
-        <div id="aiCheckerStatusLine" class="font-semibold text-slate-800">Initializing…</div>
-        <div id="aiCheckerCounts" class="mt-1 text-xs text-slate-600">—</div>
-      </div>
-
-      <div class="w-full bg-slate-200 rounded-full h-2 mb-3">
-        <div id="aiCheckerProgressBar" class="bg-red-600 h-2 rounded-full transition-all" style="width:0%"></div>
-      </div>
-
-      <div id="aiCheckerMessage" class="text-xs text-slate-500 mb-3"></div>
-
-      <div class="flex justify-end gap-2">
-        <button type="button" id="aiCheckerStopBtn"
-                class="bg-yellow-600 text-white px-3 py-1.5 rounded text-sm hover:bg-yellow-700">
-          Stop
-        </button>
-        <button type="button" id="aiCheckerRefreshBtn"
-                class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700 hidden">
-          Refresh page
-        </button>
-        <button type="button" id="aiCheckerDoneBtn"
-                class="bg-gray-600 text-white px-3 py-1.5 rounded text-sm hover:bg-gray-700">
-          Close
-        </button>
-      </div>
+      <button type="button" id="aiBarStopBtn"
+              class="bg-yellow-600 hover:bg-yellow-700 text-white text-xs font-semibold px-3 py-1 rounded">
+        Stop
+      </button>
+      <button type="button" id="aiBarRefreshBtn"
+              class="hidden bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1 rounded">
+        Refresh
+      </button>
+      <button type="button" id="aiBarCloseBtn"
+              class="text-slate-400 hover:text-slate-700 text-lg leading-none px-1">
+        &times;
+      </button>
     </div>
   </div>
 
@@ -1648,25 +1658,28 @@ function markWarn(id, field) {
     (function () {
       const URL_COUNT   = "{{ route('macro_checker.count') }}";
       const URL_START   = "{{ route('macro_checker.start') }}";
-      const URL_STATUS  = "{{ route('macro_checker.status') }}";
-      const URL_STOP    = "{{ route('macro_checker.stop') }}";
       const URL_RUN_ROW = "{{ url('/encoder/checker_1/ai-checker/run-row') }}"; // + /{id}
       const CSRF        = "{{ csrf_token() }}";
 
-      const btn       = document.getElementById('aiCheckerBtn');
-      const countEl   = document.getElementById('aiCheckerCount');
-      const modal     = document.getElementById('aiCheckerModal');
-      const statusLn  = document.getElementById('aiCheckerStatusLine');
-      const countsEl  = document.getElementById('aiCheckerCounts');
-      const barEl     = document.getElementById('aiCheckerProgressBar');
-      const msgEl     = document.getElementById('aiCheckerMessage');
-      const stopBtn   = document.getElementById('aiCheckerStopBtn');
-      const closeBtn  = document.getElementById('aiCheckerCloseBtn');
-      const doneBtn   = document.getElementById('aiCheckerDoneBtn');
-      const refreshBtn= document.getElementById('aiCheckerRefreshBtn');
+      // Toolbar button + count
+      const btn     = document.getElementById('aiCheckerBtn');
+      const countEl = document.getElementById('aiCheckerCount');
 
-      let currentRunId = null;
-      let pollTimer    = null;
+      // Sticky top bar elements
+      const bar          = document.getElementById('aiCheckerBar');
+      const barCounts    = document.getElementById('aiBarCounts');
+      const barFixed     = document.getElementById('aiBarFixed');
+      const barPartial   = document.getElementById('aiBarPartial');
+      const barFailed    = document.getElementById('aiBarFailed');
+      const barEta       = document.getElementById('aiBarEta');
+      const barProgress  = document.getElementById('aiBarProgress');
+      const barStopBtn   = document.getElementById('aiBarStopBtn');
+      const barRefreshBtn= document.getElementById('aiBarRefreshBtn');
+      const barCloseBtn  = document.getElementById('aiBarCloseBtn');
+
+      // Batch state (frontend-driven, no backend job)
+      let stopFlag = false;
+      let running  = false;
 
       // Build the count URL with current filter context (date, PAGE).
       function filterQuery() {
@@ -1687,7 +1700,7 @@ function markWarn(id, field) {
           if (j.ok) {
             const n = Number(j.count || 0);
             countEl.textContent = '(' + n + ')';
-            btn.disabled = (n === 0);
+            btn.disabled = (n === 0) || running;
             btn.title = n > 0
               ? `Run AI Checker on ${n} pending row(s).`
               : 'No blank rows in current view. Filter to a date with pending rows.';
@@ -1698,106 +1711,163 @@ function markWarn(id, field) {
         }
       }
 
-      function showModal() {
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-      }
-      function hideModal() {
-        modal.classList.add('hidden');
-        modal.classList.remove('flex');
-        clearInterval(pollTimer); pollTimer = null;
-      }
+      // ── Sticky bar helpers ────────────────────────────────────────────
+      function showBar() { bar.classList.remove('hidden'); document.body.style.paddingTop = '52px'; }
+      function hideBar() { bar.classList.add('hidden'); document.body.style.paddingTop = ''; }
 
-      function renderProgress(run) {
-        const total     = Number(run.total || 0);
-        const processed = Number(run.processed || 0);
-        const fixed     = Number(run.fixed || 0);
-        const partial   = Number(run.partial || 0);
-        const failed    = Number(run.failed || 0);
-        const pct       = total > 0 ? Math.round(processed / total * 100) : 0;
+      function updateBar(state) {
+        const { total, processed, fixed, partial, failed, startedAt } = state;
+        const pct = total > 0 ? Math.round(processed / total * 100) : 0;
+        barCounts.textContent = `${processed} / ${total}`;
+        barFixed.textContent = fixed;
+        barPartial.textContent = partial;
+        barFailed.textContent = failed;
+        barProgress.style.width = pct + '%';
 
-        statusLn.textContent = `${run.status.toUpperCase()} — ${processed} / ${total}`;
-        countsEl.textContent = `✅ Fixed: ${fixed}  ·  ⚠ Partial: ${partial}  ·  ❌ Failed: ${failed}  ·  ${pct}%`;
-        barEl.style.width = pct + '%';
-        msgEl.textContent = run.message || '';
-
-        if (run.status === 'done' || run.status === 'failed' || run.status === 'stopped') {
-          clearInterval(pollTimer); pollTimer = null;
-          stopBtn.classList.add('hidden');
-          refreshBtn.classList.remove('hidden');
+        // ETA: avg time per row × remaining rows
+        if (processed > 0 && processed < total && startedAt) {
+          const elapsedMs = Date.now() - startedAt;
+          const avgPerRowMs = elapsedMs / processed;
+          const remainingMs = avgPerRowMs * (total - processed);
+          barEta.textContent = `${pct}% · ETA ${formatDuration(remainingMs)}`;
+        } else if (processed === total) {
+          barEta.textContent = `${pct}% · done`;
         }
       }
 
-      async function pollStatus() {
-        if (!currentRunId) return;
-        try {
-          const r = await fetch(`${URL_STATUS}?run_id=${encodeURIComponent(currentRunId)}`, { headers: { 'Accept': 'application/json' } });
-          const j = await r.json();
-          if (j.ok && j.run) renderProgress(j.run);
-        } catch (e) {
-          // swallow — just retry next tick
+      function formatDuration(ms) {
+        const sec = Math.round(ms / 1000);
+        if (sec < 60) return sec + 's';
+        const min = Math.floor(sec / 60);
+        const rem = sec % 60;
+        return `${min}m ${rem}s`;
+      }
+
+      // ── Per-row button state helpers ──────────────────────────────────
+      function setRowButtonState(id, state, label) {
+        const tr = document.querySelector(`tr[data-id="${id}"]`);
+        if (!tr) return;
+        const b = tr.querySelector('.ai-fix-row-btn');
+        if (!b) return;
+        b.classList.remove('queued', 'fixing', 'done', 'partial', 'fail');
+        b.classList.add(state);
+        if (state === 'fixing') {
+          tr.classList.add('ai-row-current');
+          b.innerHTML = '<span class="ai-spin">⏳</span> Fixing…';
+          b.disabled = true;
+          // Auto-scroll the current row into view so user can watch it
+          tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+          tr.classList.remove('ai-row-current');
+          b.innerHTML = label;
+          b.disabled = state === 'queued';
         }
       }
 
+      // ── Main batch loop (sequential, frontend-driven) ─────────────────
       async function startBatch() {
         const n = parseInt((countEl.textContent.match(/\d+/) || [0])[0], 10);
         if (n === 0) { alert('Walang blank rows na pwedeng i-process.'); return; }
-        if (!confirm(`Process ${n} row(s) sa AI Checker?\n\nEst. cost: ~₱${(n * 0.40).toFixed(2)} (5 OpenAI calls × ~₱0.08 per row).`)) return;
+        if (!confirm(`Process ${n} row(s) sa AI Checker?\n\nIsa-isa lang yan — same behavior ng per-row AI Fix button, sequential.\nEst. cost: ~₱${(n * 0.40).toFixed(2)} (5 OpenAI calls × ~₱0.08 per row).`)) return;
 
+        running = true;
+        stopFlag = false;
         btn.disabled = true;
-        showModal();
-        stopBtn.classList.remove('hidden');
-        refreshBtn.classList.add('hidden');
-        statusLn.textContent = 'Starting…';
 
+        // Step 1: resolve the list of IDs to process
+        let ids = [];
         try {
           const body = new URLSearchParams(filterQuery());
           const r = await fetch(URL_START, {
             method: 'POST',
-            headers: {
-              'X-CSRF-TOKEN': CSRF,
-              'Accept': 'application/json',
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
+            headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body.toString(),
           });
           const j = await r.json();
           if (!r.ok || !j.ok) {
-            statusLn.textContent = 'Failed to start.';
-            msgEl.textContent = j.error || ('HTTP ' + r.status);
-            stopBtn.classList.add('hidden');
+            alert('Failed to start: ' + (j.error || ('HTTP ' + r.status)));
+            running = false; btn.disabled = false;
             return;
           }
-          currentRunId = j.run_id;
-          pollStatus();
-          pollTimer = setInterval(pollStatus, 1500);
+          ids = j.ids || [];
         } catch (e) {
-          statusLn.textContent = 'Failed to start.';
-          msgEl.textContent = e.message;
-          stopBtn.classList.add('hidden');
-        } finally {
-          btn.disabled = false;
+          alert('Failed to start: ' + e.message);
+          running = false; btn.disabled = false;
+          return;
         }
+
+        if (ids.length === 0) {
+          alert('No rows to process.');
+          running = false; btn.disabled = false;
+          return;
+        }
+
+        // Step 2: show sticky bar + mark all target rows as queued
+        showBar();
+        barStopBtn.classList.remove('hidden');
+        barRefreshBtn.classList.add('hidden');
+
+        const state = { total: ids.length, processed: 0, fixed: 0, partial: 0, failed: 0, startedAt: Date.now() };
+        updateBar(state);
+        ids.forEach((id) => setRowButtonState(id, 'queued', '⏸ Queued'));
+
+        // Step 3: loop sequentially through IDs — calls SAME /run-row endpoint
+        //         as clicking per-row AI Fix one at a time.
+        for (const id of ids) {
+          if (stopFlag) break;
+
+          setRowButtonState(id, 'fixing');
+
+          try {
+            const r = await fetch(`${URL_RUN_ROW}/${encodeURIComponent(id)}`, {
+              method: 'POST',
+              headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+            });
+            const j = await r.json();
+
+            if (!r.ok || !j.ok) {
+              setRowButtonState(id, 'fail', '❌ Failed');
+              state.failed++;
+            } else {
+              // Apply updated cell values (same as per-row click behavior)
+              if (j.row) applyRowUpdate(id, j.row);
+
+              const code = j.result?.final_code || '—';
+              if (code === '✅') {
+                setRowButtonState(id, 'done', '✅ Fixed');
+                state.fixed++;
+              } else {
+                setRowButtonState(id, 'partial', '⚠ ' + code);
+                state.partial++;
+              }
+            }
+          } catch (e) {
+            setRowButtonState(id, 'fail', '❌ ' + e.message.slice(0, 20));
+            state.failed++;
+          }
+
+          state.processed++;
+          updateBar(state);
+        }
+
+        // Step 4: done (or stopped)
+        barStopBtn.classList.add('hidden');
+        barRefreshBtn.classList.remove('hidden');
+        barEta.textContent = stopFlag
+          ? `Stopped after ${state.processed}/${state.total}`
+          : `Done · ${state.processed} processed in ${formatDuration(Date.now() - state.startedAt)}`;
+
+        running = false;
+        btn.disabled = false;
+        refreshCount();
       }
 
-      async function stopBatch() {
-        if (!currentRunId) return;
+      function stopBatch() {
+        if (!running) return;
         if (!confirm('Stop the AI Checker batch? Yung remaining rows hindi na ma-process.')) return;
-        stopBtn.disabled = true;
-        try {
-          const body = new URLSearchParams({ run_id: currentRunId });
-          await fetch(URL_STOP, {
-            method: 'POST',
-            headers: {
-              'X-CSRF-TOKEN': CSRF,
-              'Accept': 'application/json',
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: body.toString(),
-          });
-        } finally {
-          stopBtn.disabled = false;
-        }
+        stopFlag = true;
+        barEta.textContent = 'Stopping after current row…';
+        barStopBtn.disabled = true;
       }
 
       // Per-row "🤖 AI Fix" button — injected sa first td ng each tr[data-id]
@@ -1879,10 +1949,9 @@ function markWarn(id, field) {
 
       // ── Wire up ───────────────────────────────────────────────────────
       btn.addEventListener('click', startBatch);
-      stopBtn.addEventListener('click', stopBatch);
-      closeBtn.addEventListener('click', hideModal);
-      doneBtn.addEventListener('click', hideModal);
-      refreshBtn.addEventListener('click', () => window.location.reload());
+      barStopBtn.addEventListener('click', stopBatch);
+      barCloseBtn.addEventListener('click', hideBar);
+      barRefreshBtn.addEventListener('click', () => window.location.reload());
 
       refreshCount();
       injectPerRowButtons();
