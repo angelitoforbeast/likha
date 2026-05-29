@@ -1595,6 +1595,19 @@ function markWarn(id, field) {
   </script>
 
   {{-- ─── AI Checker (CHECKER_11_1 PHP port) UI ─────────────────────────── --}}
+  <style>
+    /* Green flash sa cells na in-update ng AI Fix per-row button */
+    .ai-just-updated {
+      animation: aiPulse 2.5s ease-out;
+      background-color: #bbf7d0 !important; /* tailwind green-200 */
+    }
+    @keyframes aiPulse {
+      0%   { background-color: #4ade80; box-shadow: 0 0 0 3px rgba(74,222,128,0.6); }
+      40%  { background-color: #bbf7d0; box-shadow: 0 0 0 2px rgba(74,222,128,0.3); }
+      100% { background-color: #ecfdf5; box-shadow: 0 0 0 0 rgba(74,222,128,0); }
+    }
+  </style>
+
   {{-- Modal --}}
   <div id="aiCheckerModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
     <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
@@ -1809,10 +1822,29 @@ function markWarn(id, field) {
         });
       }
 
+      // Update one editable cell sa row + flash green so user sees the change.
+      function applyRowUpdate(id, fields) {
+        // fields = {FULL NAME, PHONE NUMBER, ADDRESS, PROVINCE, CITY, BARANGAY, STATUS, ...}
+        Object.entries(fields).forEach(([field, value]) => {
+          if (value === undefined || value === null) return;
+          // Find the editable input/textarea/select sa same row + field
+          const el = document.querySelector(`tr[data-id="${id}"] [data-id="${id}"][data-field="${field}"]`);
+          if (!el) return;
+          const newVal = String(value);
+          if (el.value === newVal) return; // no change
+          el.value = newVal;
+          // Flash green to highlight the change
+          el.classList.add('ai-just-updated');
+          setTimeout(() => el.classList.remove('ai-just-updated'), 2500);
+          // Trigger any auto-resize handler if present (matches existing editable-input pattern)
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+      }
+
       async function runOneRow(id, button) {
         const orig = button.innerHTML;
         button.disabled = true;
-        button.innerHTML = '⏳';
+        button.innerHTML = '⏳ Fixing…';
         try {
           const r = await fetch(`${URL_RUN_ROW}/${encodeURIComponent(id)}`, {
             method: 'POST',
@@ -1829,8 +1861,15 @@ function markWarn(id, field) {
             setTimeout(() => { button.innerHTML = orig; button.disabled = false; }, 2000);
             return;
           }
-          button.innerHTML = j.result.final_code === '✅' ? '✅' : '⚠';
-          button.title = 'Result: ' + (j.result.final_code || '—') + ' — reload to see changes';
+
+          // ✅ Apply updated values inline — walang reload kailangan
+          if (j.row) applyRowUpdate(id, j.row);
+
+          const code = j.result?.final_code || '—';
+          button.innerHTML = code === '✅' ? '✅ Fixed' : ('⚠ ' + code);
+          button.title = 'AI verdict: ' + code + ' — fields updated inline. Click ulit kung gusto mong i-rerun.';
+          // Re-enable so user can re-trigger if needed
+          setTimeout(() => { button.disabled = false; }, 1500);
         } catch (e) {
           button.innerHTML = '❌';
           alert('Row #' + id + ' error: ' + e.message);
