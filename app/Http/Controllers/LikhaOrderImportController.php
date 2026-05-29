@@ -14,7 +14,10 @@ class LikhaOrderImportController extends Controller
 {
     public function index(Request $request)
     {
-        $settings = LikhaOrderSetting::orderBy('id')->get();
+        // Skip archived settings — kept around for reference sa /likha_order_import/settings
+        // pero hindi na dapat lumabas sa import page para malinis at consistent
+        // with the start() method na hindi rin ipo-process ang archives.
+        $settings = LikhaOrderSetting::where('is_archived', false)->orderBy('id')->get();
 
         // ✅ Global: last attempt + last successful
         $lastAttemptRun = LikhaImportRun::orderByDesc('id')->first();

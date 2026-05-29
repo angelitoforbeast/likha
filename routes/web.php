@@ -759,6 +759,29 @@ Route::get   ('/conversation/tracker/settings/fetch-sheets', [\App\Http\Controll
     ->name('conversation.tracker.fetch-sheets');
 
 
+    // ✅ Cancel Detector (Phase 1: gsheet upload only; Phase 2 will add AI classification)
+Route::get ('/conversation/cancel-detector',        [\App\Http\Controllers\CancelDetectorImportController::class, 'index'])
+    ->name('conversation.cancel-detector');
+Route::post('/conversation/cancel-detector/start',  [\App\Http\Controllers\CancelDetectorImportController::class, 'start'])
+    ->name('conversation.cancel-detector.start');
+Route::get ('/conversation/cancel-detector/status', [\App\Http\Controllers\CancelDetectorImportController::class, 'status'])
+    ->name('conversation.cancel-detector.status');
+Route::match(['get','delete'], '/conversation/cancel-detector/view', [\App\Http\Controllers\CancelDetectorImportController::class, 'view'])
+    ->name('conversation.cancel-detector.view');
+Route::delete('/conversation/cancel-detector/view/{id}', [\App\Http\Controllers\CancelDetectorImportController::class, 'destroyRow'])
+    ->name('conversation.cancel-detector.row.delete');
+
+Route::get   ('/conversation/cancel-detector/settings', [\App\Http\Controllers\CancelDetectorSettingController::class, 'settings'])
+    ->name('conversation.cancel-detector.settings');
+Route::post  ('/conversation/cancel-detector/settings', [\App\Http\Controllers\CancelDetectorSettingController::class, 'store']);
+Route::put   ('/conversation/cancel-detector/settings/{id}', [\App\Http\Controllers\CancelDetectorSettingController::class, 'update']);
+Route::delete('/conversation/cancel-detector/settings/{id}', [\App\Http\Controllers\CancelDetectorSettingController::class, 'destroy']);
+Route::post  ('/conversation/cancel-detector/settings/{id}/toggle-archive', [\App\Http\Controllers\CancelDetectorSettingController::class, 'toggleArchive'])
+    ->name('conversation.cancel-detector.settings.toggle-archive');
+Route::get   ('/conversation/cancel-detector/settings/fetch-sheets', [\App\Http\Controllers\CancelDetectorSettingController::class, 'fetchSheetTabs'])
+    ->name('conversation.cancel-detector.fetch-sheets');
+
+
     // ✅ Macro GSheet
 
 Route::put('/macro/settings/{id}', [MacroGsheetController::class, 'update'])->name('macro.settings.update');
