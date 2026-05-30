@@ -795,11 +795,15 @@ class AdsManagerCampaignsController extends Controller
 
         // FAST PATH: read from ad_catalog instead of full-scanning ads_manager_reports.
         // Same pattern as data() endpoint. ~500-1000× faster.
+        // "First launched" = first ADSPENT day (MIN first_spend_day over child
+        // ads), NOT earliest data appearance (MIN day). FB exports include
+        // spend=0 placeholder rows before an ad actually starts spending, kaya
+        // mali (days too early) ang dating MIN(first_started). NULL → "—".
         $campaignStartedDates = DB::table('ad_catalog')
             ->whereNotNull('campaign_id')
             ->selectRaw("
                 campaign_id AS id,
-                MIN(first_started) AS first_started,
+                MIN(first_spend_day) AS first_started,
                 0 AS running_at_start
             ")
             ->groupBy('campaign_id');
