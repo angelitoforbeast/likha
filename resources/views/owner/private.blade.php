@@ -217,6 +217,31 @@
     tbody.page-section-expanded + tbody > tr:first-child > td {
       border-top: 0;
     }
+
+    /* ── Per-page repeated column header ──────────────────────────────────
+       Shown above each EXPANDED page section so you don't lose track of
+       which column is which while scrolling through expanded campaign
+       panels. Exact copy of the main header (Page | Item | draggable cols),
+       same sort/drag handlers — pero NOT sticky (it's an inline group
+       header per page section). */
+    tr.page-col-header > th {
+      position: static;        /* override the sticky thead th rule */
+      background: #334155;      /* slightly lighter than main header (#1e293b) */
+      color: #cbd5e1;
+      font-size: 10.5px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .05em;
+      padding: 7px 10px; white-space: nowrap;
+      border-top: 2px solid #2563eb;   /* blue accent to mark the section start */
+      border-bottom: 1px solid #1e293b;
+      user-select: none;
+      z-index: 1;
+    }
+    tr.page-col-header > th.sortable { cursor: pointer; }
+    tr.page-col-header > th.sortable:hover { background: #3f4d63; color: #e2e8f0; }
+    tr.page-col-header > th.col-active { color: #60a5fa; }
+    tr.page-col-header > th[draggable="true"] { cursor: grab; }
+    tr.page-col-header > th[draggable="true"]:active { cursor: grabbing; }
+    tr.page-col-header > th.drag-over { box-shadow: inset 2px 0 0 #60a5fa; }
     /* Edit modal — shared style with /owner/private/breakdown matrix. */
     .ow-modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:80;
                        display:flex;align-items:center;justify-content:center;padding:1rem;}
@@ -580,6 +605,42 @@
                pattern when an x-for needs to produce multiple <tr>s. --}}
           <template x-for="(row, idx) in sortedRows()" :key="row.page_key">
           <tbody :class="'page-row-tbody' + ((expandedPages[row.page_name] || {}).open ? ' page-section-expanded' : '')">
+
+            {{-- Per-page repeated column header — shows above each EXPANDED
+                 page section. Exact copy of the main thead row (Page | Item |
+                 draggable cols) using the SAME sort + drag handlers, so
+                 reordering here reorders globally. Hidden when collapsed. --}}
+            <tr x-show="(expandedPages[row.page_name] || {}).open" class="page-col-header">
+              <th :class="['sortable', ac('page_name') ? 'col-active' : '']"
+                  style="text-align:left;min-width:110px;"
+                  @click="sb('page_name')">
+                <span>Page</span>
+                <span x-text="arr('page_name')" style="font-size:10px;"></span>
+              </th>
+              <th :class="['sortable', ac('item_name') ? 'col-active' : '']"
+                  style="text-align:left;min-width:160px;"
+                  @click="sb('item_name')">
+                <span>Item</span>
+                <span x-text="arr('item_name')" style="font-size:10px;"></span>
+              </th>
+              <template x-for="col in cols" :key="'ph-'+row.page_key+'-'+col.id">
+                <th draggable="true"
+                    :class="[col.sort ? 'sortable' : '', col.sort && ac(col.sort) ? 'col-active' : '', dragOver===col.id ? 'drag-over' : '']"
+                    :style="'text-align:'+col.align+';min-width:'+col.minw+'px'"
+                    @click="col.sort && sb(col.sort)"
+                    @dragstart="colDragStart($event, col.id)"
+                    @dragend="colDragEnd($event)"
+                    @dragover.prevent="dragOver=col.id"
+                    @dragleave="dragOver=null"
+                    @drop.prevent="colDrop($event, col.id)">
+                  <span x-text="col.label"></span>
+                  <template x-if="col.sort">
+                    <span x-text="arr(col.sort)" style="font-size:10px;"></span>
+                  </template>
+                </th>
+              </template>
+            </tr>
+
             <tr :class="(editIdx === idx ? 'editing-row ' : '') + ((expandedPages[row.page_name] || {}).open ? 'page-row-expanded' : '')">
 
               <!-- Fixed: Page -->
