@@ -260,6 +260,8 @@ class GPTAdGeneratorController extends Controller
         $context = [
             'product_name'        => (string) $request->input('product_name', ''),
             'product_description' => (string) $request->input('product_description', ''),
+            // page_filter: single string or comma-separated multi-page string.
+            // Stored as-is for history log; buildSuggestions handles the split.
             'page_filter'         => $request->input('page_filter') ?: null,
             'item_filter'         => $request->input('item_filter') ?: null,
             'active_only'         => (bool) $request->input('active_only', true),
@@ -541,12 +543,19 @@ class GPTAdGeneratorController extends Controller
         $topN = (int) $request->query('top_n', 10);
         $topN = max(1, min(50, $topN));
 
-        $pageNorm = $this->normalizePage($pageParam);
-        $itemNorm = $this->normalizePage($itemParam);
+        // page_filter supports multi-page via comma-separated string
+        // e.g. "Annie Reyes,Bella Garcia". Split + normalize each; "all" = no filter.
+        $pageNorms = $this->parseMultiPageParam($pageParam);
+        $itemNorm  = $this->normalizePage($itemParam);
+
+        // For single-page, preserve existing cache path. For multi-page, use
+        // a combined key so we don't pollute the per-page cache entries.
+        $pageKey = count($pageNorms) === 0 ? 'all'
+                 : (count($pageNorms) === 1 ? $pageNorms[0] : 'multi:' . implode('|', $pageNorms));
 
         $cacheKey = sprintf(
             'gpt_suggestions:%s:%s:%d:%s:%s:%d',
-            mb_strtolower($pageNorm !== '' ? $pageNorm : 'all'),
+            mb_strtolower($pageKey),
             mb_strtolower($itemNorm !== '' ? $itemNorm : 'all'),
             $activeOnly ? 1 : 0,
             $fromDate,
@@ -555,8 +564,8 @@ class GPTAdGeneratorController extends Controller
         );
 
         try {
-            $payload = Cache::remember($cacheKey, 300 /* 5 min */, function () use ($pageNorm, $itemNorm, $activeOnly, $fromDate, $toDate, $topN) {
-                return $this->buildSuggestions($pageNorm, $itemNorm, $activeOnly, $fromDate, $toDate, $topN);
+            $payload = Cache::remember($cacheKey, 300 /* 5 min */, function () use ($pageNorms, $itemNorm, $activeOnly, $fromDate, $toDate, $topN) {
+                return $this->buildSuggestions($pageNorms, $itemNorm, $activeOnly, $fromDate, $toDate, $topN);
             });
         } catch (\Throwable $e) {
             Log::error('loadAdCopySuggestions cache error', ['msg' => $e->getMessage()]);
@@ -564,6 +573,21 @@ class GPTAdGeneratorController extends Controller
         }
 
         return response()->json($payload, 200, [], JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * Parse a comma-separated page_filter param into normalized page keys.
+     * Returns empty array when value is "all" or blank (= no page filter).
+     */
+    private function parseMultiPageParam(string $param): array
+    {
+        $trimmed = trim($param);
+        if ($trimmed === '' || mb_strtolower($trimmed) === 'all') return [];
+
+        return array_values(array_filter(
+            array_map(fn($p) => $this->normalizePage(trim($p)), explode(',', $trimmed)),
+            fn($p) => $p !== '' && $p !== 'all'
+        ));
     }
 
     /**
@@ -575,13 +599,22 @@ class GPTAdGeneratorController extends Controller
      * When fallback was used (active had no data), also includes
      * 'fallback_used' => true and 'fallback_reason' => string.
      */
-    private function buildSuggestions(string $pageNorm, string $itemNorm, bool $activeOnly, ?string $fromDate = null, ?string $toDate = null, int $topN = 10): array
+    /**
+     * @param  string|string[] $pageNormOrNorms  normalized page key(s). Empty array = all pages.
+     *         Accepts both a single string (legacy) or an array (multi-page).
+     */
+    private function buildSuggestions($pageNormOrNorms, string $itemNorm, bool $activeOnly, ?string $fromDate = null, ?string $toDate = null, int $topN = 10): array
     {
+        // Normalize to array for unified handling
+        $pageNorms = is_array($pageNormOrNorms) ? $pageNormOrNorms : (
+            ($pageNormOrNorms === '' || mb_strtolower($pageNormOrNorms) === 'all') ? [] : [$pageNormOrNorms]
+        );
+
         try {
-            $applyPage = $pageNorm !== '' && mb_strtolower($pageNorm) !== 'all';
+            $applyPage = count($pageNorms) > 0;
             $applyItem = $itemNorm !== '' && mb_strtolower($itemNorm) !== 'all';
 
-            // Resolve raw page_name strings that normalize to $pageNorm
+            // Resolve raw page_name strings that normalize to any of the $pageNorms
             $rawMatches = null;
             if ($applyPage) {
                 $rawPages = DB::table('ads_manager_reports')
@@ -589,10 +622,13 @@ class GPTAdGeneratorController extends Controller
                     ->select('page_name')->distinct()->pluck('page_name');
                 $rawMatches = [];
                 foreach ($rawPages as $rp) {
-                    if ($this->normalizePage($rp) === $pageNorm) $rawMatches[] = $rp;
+                    if (in_array($this->normalizePage($rp), $pageNorms, true)) {
+                        $rawMatches[] = $rp;
+                    }
                 }
                 if (empty($rawMatches)) {
-                    return ['output' => "⚠️ No matching page found for “{$pageNorm}”."];
+                    $pagesLabel = implode(', ', $pageNorms);
+                    return ['output' => “⚠️ No matching page found for “{$pagesLabel}”.”];
                 }
             }
 

@@ -55,6 +55,17 @@
     /* Pretty checkboxes — keep native, just tint */
     .gpt-check { accent-color:#4f46e5; width:15px; height:15px; }
 
+    /* Multi-page selector tags */
+    .page-tag {
+      display:inline-flex; align-items:center; gap:4px;
+      background:#eef2ff; color:#4338ca; font-size:11.5px; font-weight:500;
+      padding:2px 7px; border-radius:999px; user-select:none;
+    }
+    .page-tag-x {
+      cursor:pointer; color:#6366f1; font-weight:700; font-size:13px; line-height:1;
+    }
+    .page-tag-x:hover { color:#dc2626; }
+
     /* Filter "chips" preview */
     .gpt-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; background:#eef2ff; color:#4338ca; }
 
@@ -272,14 +283,43 @@
           <div class="gpt-section">
             <div class="gpt-section-label">Suggestions Source</div>
             <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="gpt-label" for="pageSelect">📄 Page</label>
-                <select id="pageSelect" class="gpt-select">
-                  <option value="all">All Pages</option>
-                  @foreach ($pages as $p)
-                    <option value="{{ $p }}">{{ $p }}</option>
-                  @endforeach
-                </select>
+              {{-- Multi-page selector — dropdown with removable tags --}}
+              <div class="relative" id="pagePickerWrap">
+                <label class="gpt-label">📄 Page</label>
+
+                {{-- Tags + trigger row --}}
+                <div id="pageTagsRow"
+                     class="gpt-select flex flex-wrap items-center gap-1 min-h-[38px] h-auto cursor-pointer py-1 px-2"
+                     onclick="togglePageDropdown(event)"
+                     title="Click to add / remove pages">
+                  {{-- Selected tags rendered here by JS --}}
+                  <span id="pageTagsPlaceholder" class="text-slate-400 text-sm select-none">All Pages</span>
+                  <span class="ml-auto text-slate-400 text-xs select-none">▾</span>
+                </div>
+
+                {{-- Dropdown panel --}}
+                <div id="pageDropdown"
+                     class="hidden absolute z-50 left-0 top-full mt-1 w-full bg-white border border-slate-300 rounded-lg shadow-lg max-h-64 overflow-y-auto"
+                     onclick="event.stopPropagation()">
+                  <div class="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
+                    <input type="text" id="pageSearch" placeholder="🔎 Search pages…"
+                           class="text-sm border-0 outline-none w-full" oninput="filterPageOptions()">
+                    <button type="button" onclick="clearAllPages()"
+                            class="text-xs text-red-500 hover:text-red-700 whitespace-nowrap ml-2">Clear all</button>
+                  </div>
+                  <div id="pageOptionsList" class="py-1">
+                    @foreach ($pages as $p)
+                      <label class="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-sm page-opt-row">
+                        <input type="checkbox" class="page-checkbox" value="{{ $p }}"
+                               onchange="onPageCheckboxChange()">
+                        <span class="page-opt-label">{{ $p }}</span>
+                      </label>
+                    @endforeach
+                  </div>
+                </div>
+
+                {{-- Hidden consolidated value for JS reads (comma-separated or "all") --}}
+                <input type="hidden" id="pageSelectValue" value="all">
               </div>
               <div>
                 <label class="gpt-label" for="itemSelect">🛒 Item</label>
@@ -748,7 +788,7 @@
       const variantsCount = parseInt(document.getElementById("variantsCount")?.value ?? "1", 10);
       const streamWanted = !!document.getElementById("streamOutput")?.checked && variantsCount === 1;
 
-      const pageFilter   = document.getElementById("pageSelect")?.value ?? "";
+      const pageFilter   = document.getElementById("pageSelectValue")?.value ?? "";
       const itemFilter   = document.getElementById("itemSelect")?.value ?? "";
       const activeOnly   = !!document.getElementById("activeOnly")?.checked;
       const model        = document.getElementById("modelSelect")?.value ?? "";
@@ -960,10 +1000,97 @@
     // Restore preference on page load.
     document.addEventListener("DOMContentLoaded", loadTopNPref);
 
+    // ===== Multi-page selector logic =====
+    (function () {
+      let isOpen = false;
+
+      // Get currently selected pages (empty array = all)
+      function getSelectedPages() {
+        const checkboxes = document.querySelectorAll('.page-checkbox:checked');
+        return Array.from(checkboxes).map(c => c.value);
+      }
+
+      // Render the tags row + update hidden input
+      function renderTags() {
+        const selected = getSelectedPages();
+        const row   = document.getElementById('pageTagsRow');
+        const ph    = document.getElementById('pageTagsPlaceholder');
+        const hidden = document.getElementById('pageSelectValue');
+        if (!row || !ph || !hidden) return;
+
+        // Remove old tags (but not placeholder + chevron span)
+        row.querySelectorAll('.page-tag').forEach(t => t.remove());
+
+        if (selected.length === 0) {
+          ph.style.display = '';
+          hidden.value = 'all';
+        } else {
+          ph.style.display = 'none';
+          hidden.value = selected.join(',');
+
+          // Insert tags before the chevron span
+          const chevron = row.querySelector('span:last-child');
+          selected.forEach(p => {
+            const tag = document.createElement('span');
+            tag.className = 'page-tag';
+            tag.innerHTML = `${escHtml(p)} <span class="page-tag-x" data-page="${escHtml(p)}" onclick="removePage(event, '${escHtml(p)}')">&times;</span>`;
+            row.insertBefore(tag, chevron);
+          });
+        }
+      }
+
+      function escHtml(s) {
+        return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      }
+
+      window.togglePageDropdown = function (e) {
+        e.stopPropagation();
+        const dd = document.getElementById('pageDropdown');
+        if (!dd) return;
+        isOpen = !isOpen;
+        dd.classList.toggle('hidden', !isOpen);
+        if (isOpen) {
+          document.getElementById('pageSearch')?.focus();
+        }
+      };
+
+      window.removePage = function (e, page) {
+        e.stopPropagation();
+        const cb = document.querySelector(`.page-checkbox[value="${CSS.escape(page)}"]`);
+        if (cb) { cb.checked = false; renderTags(); }
+      };
+
+      window.clearAllPages = function () {
+        document.querySelectorAll('.page-checkbox').forEach(c => c.checked = false);
+        renderTags();
+      };
+
+      window.onPageCheckboxChange = function () { renderTags(); };
+
+      window.filterPageOptions = function () {
+        const q = (document.getElementById('pageSearch')?.value || '').toLowerCase();
+        document.querySelectorAll('.page-opt-row').forEach(row => {
+          const label = (row.querySelector('.page-opt-label')?.textContent || '').toLowerCase();
+          row.style.display = label.includes(q) ? '' : 'none';
+        });
+      };
+
+      // Close dropdown when clicking outside
+      document.addEventListener('click', function (e) {
+        if (!document.getElementById('pagePickerWrap')?.contains(e.target)) {
+          document.getElementById('pageDropdown')?.classList.add('hidden');
+          isOpen = false;
+        }
+      });
+
+      // Init
+      renderTags();
+    })();
+
     // ===== Load Suggestions (separate scrollable box, still fed to GPT) =====
     async function loadAdCopySuggestions() {
       const btn = document.getElementById("btnLoadSuggestions");
-      const page = (document.getElementById("pageSelect")?.value || "all").trim();
+      const page = (document.getElementById("pageSelectValue")?.value || "all").trim();
       const item = (document.getElementById("itemSelect")?.value || "all").trim();
       const activeOnly = document.getElementById("activeOnly")?.checked ? "1" : "0";
       const fromDate = document.getElementById("dateFrom")?.value || "";
