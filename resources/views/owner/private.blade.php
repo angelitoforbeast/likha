@@ -38,6 +38,7 @@
       text-transform:uppercase; letter-spacing:.05em;
       padding:9px 10px; white-space:nowrap;
       border-bottom:2px solid #0f172a;
+      border-right:1px solid #334155;   /* vertical column separator (dark, visible on header) */
       user-select:none;
     }
     thead th:first-child { border-radius:10px 0 0 0; }
@@ -55,9 +56,16 @@
       background:#f1f5f9; border-top:2px solid #cbd5e1;
     }
 
-    tbody td { border-bottom:1px solid #f1f5f9; }
+    tbody td {
+      border-bottom:1px solid #f1f5f9;
+      border-right:1px solid #f1f5f9;   /* vertical column separator — same 1px as the horizontal row line */
+    }
     tbody tr:hover td { background:#f8fafc; }
     tbody tr.editing-row td { background:#eff6ff !important; }
+
+    /* Keep the nested campaign panel (.fb-table) clean — no vertical lines there;
+       the column separators are only for the MAIN summary table. */
+    .fb-table thead th, .fb-table tbody td { border-right:0; }
 
     td {
       font-size:12.5px; color:#374151;
@@ -232,6 +240,7 @@
       padding: 7px 10px; white-space: nowrap;
       border-top: 2px solid #2563eb;   /* blue accent to mark the section start */
       border-bottom: 1px solid #1e293b;
+      border-right: 1px solid #475569;  /* vertical column separator (matches main header) */
       user-select: none;
       cursor: default;
       z-index: 1;
