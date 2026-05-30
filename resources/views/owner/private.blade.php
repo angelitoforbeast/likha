@@ -206,7 +206,7 @@
       box-shadow: inset 3px 0 0 #2563eb;
     }
     tbody.page-section-expanded > tr.page-row-expanded > td {
-      background: #f1f5f9;
+      background: #fff;   /* keep white when expanded (was #f1f5f9 gray) */
     }
     tbody.page-section-expanded > tr.page-expand-row > td {
       border-bottom: 4px solid #334155;
