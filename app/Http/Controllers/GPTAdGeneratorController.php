@@ -610,6 +610,11 @@ class GPTAdGeneratorController extends Controller
             ($pageNormOrNorms === '' || mb_strtolower($pageNormOrNorms) === 'all') ? [] : [$pageNormOrNorms]
         );
 
+        // Single display string for scope labels / stats header / fallback page_name.
+        // '' = all pages (so scopeLabel treats it as "All pages"). For multi-page,
+        // comma-join for display. Internal filtering uses the $pageNorms array.
+        $pageNorm = count($pageNorms) === 0 ? '' : implode(', ', $pageNorms);
+
         try {
             $applyPage = count($pageNorms) > 0;
             $applyItem = $itemNorm !== '' && mb_strtolower($itemNorm) !== 'all';
@@ -673,7 +678,9 @@ class GPTAdGeneratorController extends Controller
 
             // Active-only fallback (preserve original behavior)
             if ($reports->isEmpty() && $activeOnly) {
-                $fallback = $this->buildSuggestions($pageNorm, $itemNorm, false, $fromDate, $toDate, $topN);
+                // Pass the ARRAY $pageNorms (not the joined display string) so the
+                // recursive call re-filters by the same multi-page scope correctly.
+                $fallback = $this->buildSuggestions($pageNorms, $itemNorm, false, $fromDate, $toDate, $topN);
                 $fallback['fallback_used']   = true;
                 $fallback['fallback_reason'] = 'No active ads found for this scope. Showing all (active+off) for the same date range.';
                 return $fallback;
