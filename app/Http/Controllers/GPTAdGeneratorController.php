@@ -628,7 +628,7 @@ class GPTAdGeneratorController extends Controller
                 }
                 if (empty($rawMatches)) {
                     $pagesLabel = implode(', ', $pageNorms);
-                    return ['output' => “⚠️ No matching page found for \”{$pagesLabel}\”.”];
+                    return ['output' => "No matching page found for: {$pagesLabel}."];
                 }
             }
 
