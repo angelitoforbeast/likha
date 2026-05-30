@@ -1189,6 +1189,13 @@ class AdsManagerCampaignsController extends Controller
         // Fallback: if ad_catalog has no row for an entity (e.g., raw data
         // arrived sa reports but catalog backfill hasn't caught up), LEFT JOIN
         // returns NULL → frontend gracefully shows "—" para sa first_started.
+        // NOTE: "First launched" displays the FIRST ADSPENT day (first_spend_day),
+        // NOT the earliest data appearance (first_started = MIN day). FB exports
+        // include spend=0 placeholder rows BEFORE an ad actually starts spending,
+        // so MIN(day) was reporting the launch ~days too early. We surface
+        // first_spend_day under the `first_started` alias so ALL downstream code
+        // (outer selects, frontend mapping, days_running, "≥" prefix) uses the
+        // correct date with zero other changes. NULL (ad never spent) → "—".
         $buildStarted = function (string $idCol) {
             if ($idCol === 'ad_id') {
                 // Direct lookup — each ad has exactly one row sa catalog.
@@ -1196,17 +1203,18 @@ class AdsManagerCampaignsController extends Controller
                     ->whereNotNull('ad_id')
                     ->selectRaw("
                         ad_id AS id,
-                        first_started,
+                        first_spend_day AS first_started,
                         first_spend_day,
                         0 AS running_at_start
                     ");
             }
             // Aggregate over child ads para sa campaign + adset levels.
+            // MIN(first_spend_day) = earliest ADSPENT day among the children.
             return DB::table('ad_catalog')
                 ->whereNotNull($idCol)
                 ->selectRaw("
                     $idCol AS id,
-                    MIN(first_started)   AS first_started,
+                    MIN(first_spend_day) AS first_started,
                     MIN(first_spend_day) AS first_spend_day,
                     0 AS running_at_start
                 ")
