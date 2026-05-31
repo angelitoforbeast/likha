@@ -66,13 +66,22 @@
               <th class="text-left px-4 py-2 border-b border-slate-200">Primary Item</th>
               <th class="text-right px-4 py-2 border-b border-slate-200">Orders</th>
               <th class="text-right px-4 py-2 border-b border-slate-200">Mode COD</th>
+              <th class="text-right px-4 py-2 border-b border-slate-200">RTS%</th>
+              <th class="text-right px-4 py-2 border-b border-slate-200">Item Val.</th>
               <th class="text-center px-4 py-2 border-b border-slate-200">Status</th>
             </tr>
           </thead>
           <tbody>
             <template x-for="r in rows" :key="r.date">
               <tr :class="!r.has_data ? 'bg-slate-50 text-slate-400' : (r.is_anchor ? 'bg-blue-50' : 'bg-amber-50')">
-                <td class="px-4 py-2 border-b border-slate-100 font-mono" x-text="r.date"></td>
+                <td class="px-4 py-2 border-b border-slate-100 font-mono">
+                  <span x-text="r.date"></span>
+                  {{-- ⚓ ANCHOR badge sa end-date row (anchor source) --}}
+                  <template x-if="r.is_anchor_date">
+                    <span class="ml-1 inline-block bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded align-middle"
+                          title="Anchor source — end-date primary item ang basehan ng anchor">⚓ ANCHOR</span>
+                  </template>
+                </td>
                 <td class="px-4 py-2 border-b border-slate-100">
                   <span x-text="r.primary_item || '— no data —'"></span>
                   <template x-if="r.second_item">
@@ -84,6 +93,14 @@
                     x-text="r.has_data ? (r.primary_orders + ' / ' + r.total_orders) : '—'"></td>
                 <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
                     x-text="r.mode_cod !== null ? money(r.mode_cod) : '—'"></td>
+                {{-- RTS% — resolved as of this date for this date's primary item --}}
+                <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
+                    :title="r.rts_eff_date ? ('effective from ' + r.rts_eff_date) : 'no RTS setting'"
+                    x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></td>
+                {{-- Item Value (cogs) — resolved as of this date --}}
+                <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
+                    :title="r.item_value_eff ? ('effective from ' + r.item_value_eff) : 'no cogs entry'"
+                    x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></td>
                 <td class="px-4 py-2 border-b border-slate-100 text-center">
                   <template x-if="r.is_anchor"><span class="text-blue-600 font-bold">✓ included</span></template>
                   <template x-if="!r.is_anchor && r.has_data"><span class="text-amber-700 font-semibold">✗ excluded</span></template>
@@ -97,7 +114,9 @@
 
       <div class="px-5 py-3 bg-slate-50 text-xs text-slate-500 border-t border-slate-200">
         Blue = same primary as anchor → counted in totals ·
-        Amber = different primary that day → excluded from totals.
+        Amber = different primary that day → excluded from totals ·
+        ⚓ ANCHOR = end-date row (anchor source) ·
+        RTS% / Item Val. = value effective as of each date (hover for effective date).
       </div>
     </div>
   </div>

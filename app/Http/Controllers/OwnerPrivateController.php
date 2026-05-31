@@ -3384,6 +3384,81 @@ class OwnerPrivateController extends Controller
 
         $pageLabel = $rows->count() ? (string)$rows[0]->page_label : $pageKey;
 
+        // ── Per-date RTS% (page_item_settings) + Item Value (cogs) lookups ────
+        // Both have effective_date semantics → resolve the value effective AS OF
+        // each date. RTS is price-aware (item + mode_cod ±1); item_value is
+        // item-only. Same source/logic as the main /owner/private view.
+        $pageNameNorm = strtolower(trim($pageLabel));
+
+        // RTS: itemLower → [ ['eff'=>date, 'rts'=>float|null, 'cod'=>int|null], ... ] desc by eff
+        $rtsByItem = [];
+        if (Schema::hasTable('page_item_settings')) {
+            $hasCodInt = Schema::hasColumn('page_item_settings', 'mode_cod_int');
+            $rcols = ['item_name', 'rts_pct', 'effective_date'];
+            if ($hasCodInt) $rcols[] = 'mode_cod_int';
+            $srows = DB::table('page_item_settings')
+                ->whereRaw('LOWER(TRIM(page_name)) = ?', [$pageNameNorm])
+                ->where('effective_date', '<=', $endDate)
+                ->orderByDesc('effective_date')->orderByDesc('id')
+                ->get($rcols);
+            foreach ($srows as $s) {
+                $itemLower = strtolower(trim((string)$s->item_name));
+                $rtsByItem[$itemLower][] = [
+                    'eff' => (string)$s->effective_date,
+                    'rts' => $s->rts_pct !== null ? (float)$s->rts_pct : null,
+                    'cod' => ($hasCodInt && $s->mode_cod_int !== null) ? (int)$s->mode_cod_int : null,
+                ];
+            }
+        }
+        $resolveRts = function (string $itemName, ?int $codInt, string $asOf) use ($rtsByItem): array {
+            $itemLower = strtolower(trim($itemName));
+            if (!isset($rtsByItem[$itemLower])) return ['rts' => null, 'eff' => null];
+            $cands = array_values(array_filter($rtsByItem[$itemLower], fn ($e) => $e['eff'] <= $asOf));
+            if (empty($cands)) return ['rts' => null, 'eff' => null];
+            // Prefer price match (±1); list already sorted desc → first match = latest
+            if ($codInt !== null) {
+                foreach ($cands as $e) {
+                    if ($e['cod'] !== null && abs($e['cod'] - $codInt) <= 1) {
+                        return ['rts' => $e['rts'], 'eff' => $e['eff']];
+                    }
+                }
+            }
+            return ['rts' => $cands[0]['rts'], 'eff' => $cands[0]['eff']];
+        };
+
+        // Item value (cogs — Marketing's table, same as main "Item Val." column):
+        // itemNorm → [ ['eff'=>date, 'cost'=>float], ... ] desc by eff
+        $cogsItemCol = Schema::hasColumn('cogs', 'item_name') ? 'item_name'
+                     : (Schema::hasColumn('cogs', 'ITEM_NAME') ? 'ITEM_NAME' : 'item_name');
+        $cogsDateCol = Schema::hasColumn('cogs', 'effective_date') ? 'effective_date'
+                     : (Schema::hasColumn('cogs', 'date') ? 'date' : 'effective_date');
+        $cogsUnitCol = Schema::hasColumn('cogs', 'unit_cost') ? 'unit_cost'
+                     : (Schema::hasColumn('cogs', 'cost') ? 'cost' : 'unit_cost');
+        $normItem = fn (string $s): string => strtolower(preg_replace('/[\s\-_]/', '', trim($s)) ?? '');
+        $cogsByItem = [];
+        if (Schema::hasTable('cogs')) {
+            $crows = DB::table('cogs')
+                ->whereRaw("DATE($cogsDateCol) <= ?", [$endDate])
+                ->orderByDesc($cogsDateCol)
+                ->get([$cogsItemCol, $cogsDateCol, $cogsUnitCol]);
+            foreach ($crows as $c) {
+                $k = $normItem((string)($c->$cogsItemCol ?? ''));
+                if ($k === '') continue;
+                $cogsByItem[$k][] = [
+                    'eff'  => substr((string)($c->$cogsDateCol ?? ''), 0, 10),
+                    'cost' => (float)($c->$cogsUnitCol ?? 0),
+                ];
+            }
+        }
+        $resolveItemVal = function (string $itemName, string $asOf) use ($cogsByItem, $normItem): array {
+            $k = $normItem($itemName);
+            if (!isset($cogsByItem[$k])) return ['val' => null, 'eff' => null];
+            foreach ($cogsByItem[$k] as $e) {
+                if ($e['eff'] <= $asOf) return ['val' => $e['cost'], 'eff' => $e['eff']];
+            }
+            return ['val' => null, 'eff' => null];
+        };
+
         $out = [];
         $cursor = strtotime($startDate);
         $last   = strtotime($endDate);
@@ -3400,6 +3475,12 @@ class OwnerPrivateController extends Controller
                 $priceMatches = ($anchorCodInt === null || $cellCodInt === null)
                     ? true
                     : (abs($cellCodInt - $anchorCodInt) <= 1);
+
+                // Resolve RTS% + Item Value effective AS OF this date for this
+                // date's primary item (price-aware for RTS).
+                $rtsRes = $resolveRts((string)$r->primary_item, $cellCodInt, $d);
+                $ivRes  = $resolveItemVal((string)$r->primary_item, $d);
+
                 $out[] = [
                     'date'             => $d,
                     'primary_item'     => (string)$r->primary_item,
@@ -3409,7 +3490,12 @@ class OwnerPrivateController extends Controller
                     'mode_cod'         => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
                     'second_item'      => $r->second_item ? (string)$r->second_item : null,
                     'second_orders'    => $r->second_orders !== null ? (int)$r->second_orders : null,
+                    'rts_pct'          => $rtsRes['rts'],
+                    'rts_eff_date'     => $rtsRes['eff'],
+                    'item_value'       => $ivRes['val'],
+                    'item_value_eff'   => $ivRes['eff'],
                     'is_anchor'        => $itemMatches && $priceMatches,
+                    'is_anchor_date'   => ($d === $endDate),  // end-date row = anchor source
                     'has_data'         => true,
                 ];
             } else {
@@ -3422,6 +3508,11 @@ class OwnerPrivateController extends Controller
                     'mode_cod'         => null,
                     'second_item'      => null,
                     'second_orders'    => null,
+                    'rts_pct'          => null,
+                    'rts_eff_date'     => null,
+                    'item_value'       => null,
+                    'item_value_eff'   => null,
+                    'is_anchor_date'   => ($d === $endDate),
                     'is_anchor'        => false,
                     'has_data'         => false,
                 ];
