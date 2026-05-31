@@ -3390,12 +3390,17 @@ class OwnerPrivateController extends Controller
         // item-only. Same source/logic as the main /owner/private view.
         $pageNameNorm = strtolower(trim($pageLabel));
 
-        // RTS: itemLower → [ ['eff'=>date, 'rts'=>float|null, 'cod'=>int|null], ... ] desc by eff
+        // Settings (page_item_settings): itemLower → [ ['eff'=>date, 'rts'=>float|null,
+        // 'promo'=>string|null, 'cod'=>int|null], ... ] desc by eff. Holds BOTH the
+        // SET RTS% (manually configured, used in profit calc — NOT the JNT actual
+        // RTS) at the promo label. Price-aware (item + mode_cod ±1).
         $rtsByItem = [];
+        $hasPromoCol = Schema::hasColumn('page_item_settings', 'promo');
         if (Schema::hasTable('page_item_settings')) {
             $hasCodInt = Schema::hasColumn('page_item_settings', 'mode_cod_int');
             $rcols = ['item_name', 'rts_pct', 'effective_date'];
-            if ($hasCodInt) $rcols[] = 'mode_cod_int';
+            if ($hasCodInt)   $rcols[] = 'mode_cod_int';
+            if ($hasPromoCol) $rcols[] = 'promo';
             $srows = DB::table('page_item_settings')
                 ->whereRaw('LOWER(TRIM(page_name)) = ?', [$pageNameNorm])
                 ->where('effective_date', '<=', $endDate)
@@ -3404,27 +3409,35 @@ class OwnerPrivateController extends Controller
             foreach ($srows as $s) {
                 $itemLower = strtolower(trim((string)$s->item_name));
                 $rtsByItem[$itemLower][] = [
-                    'eff' => (string)$s->effective_date,
-                    'rts' => $s->rts_pct !== null ? (float)$s->rts_pct : null,
-                    'cod' => ($hasCodInt && $s->mode_cod_int !== null) ? (int)$s->mode_cod_int : null,
+                    'eff'   => (string)$s->effective_date,
+                    'rts'   => $s->rts_pct !== null ? (float)$s->rts_pct : null,
+                    'promo' => $hasPromoCol ? (($s->promo ?? '') !== '' ? (string)$s->promo : null) : null,
+                    'cod'   => ($hasCodInt && $s->mode_cod_int !== null) ? (int)$s->mode_cod_int : null,
                 ];
             }
         }
-        $resolveRts = function (string $itemName, ?int $codInt, string $asOf) use ($rtsByItem): array {
+        // Resolve a settings field ('rts' or 'promo') effective as of $asOf for
+        // (item, price). Price-aware: prefers a ±1 mode_cod match, else latest.
+        $resolveSetting = function (string $field, string $itemName, ?int $codInt, string $asOf) use ($rtsByItem) {
             $itemLower = strtolower(trim($itemName));
-            if (!isset($rtsByItem[$itemLower])) return ['rts' => null, 'eff' => null];
+            if (!isset($rtsByItem[$itemLower])) return ['val' => null, 'eff' => null];
             $cands = array_values(array_filter($rtsByItem[$itemLower], fn ($e) => $e['eff'] <= $asOf));
-            if (empty($cands)) return ['rts' => null, 'eff' => null];
-            // Prefer price match (±1); list already sorted desc → first match = latest
+            if (empty($cands)) return ['val' => null, 'eff' => null];
             if ($codInt !== null) {
                 foreach ($cands as $e) {
                     if ($e['cod'] !== null && abs($e['cod'] - $codInt) <= 1) {
-                        return ['rts' => $e['rts'], 'eff' => $e['eff']];
+                        return ['val' => $e[$field], 'eff' => $e['eff']];
                     }
                 }
             }
-            return ['rts' => $cands[0]['rts'], 'eff' => $cands[0]['eff']];
+            return ['val' => $cands[0][$field], 'eff' => $cands[0]['eff']];
         };
+        $resolveRts   = fn (string $itemName, ?int $codInt, string $asOf) => (function ($r) {
+            return ['rts' => $r['val'], 'eff' => $r['eff']];
+        })($resolveSetting('rts', $itemName, $codInt, $asOf));
+        $resolvePromo = fn (string $itemName, ?int $codInt, string $asOf) => (function ($r) {
+            return ['promo' => $r['val'], 'eff' => $r['eff']];
+        })($resolveSetting('promo', $itemName, $codInt, $asOf));
 
         // Item value (cogs — Marketing's table, same as main "Item Val." column):
         // itemNorm → [ ['eff'=>date, 'cost'=>float], ... ] desc by eff
@@ -3476,10 +3489,11 @@ class OwnerPrivateController extends Controller
                     ? true
                     : (abs($cellCodInt - $anchorCodInt) <= 1);
 
-                // Resolve RTS% + Item Value effective AS OF this date for this
-                // date's primary item (price-aware for RTS).
-                $rtsRes = $resolveRts((string)$r->primary_item, $cellCodInt, $d);
-                $ivRes  = $resolveItemVal((string)$r->primary_item, $d);
+                // Resolve SET RTS% + Promo + Item Value effective AS OF this date
+                // for this date's primary item (price-aware for RTS+promo).
+                $rtsRes   = $resolveRts((string)$r->primary_item, $cellCodInt, $d);
+                $promoRes = $resolvePromo((string)$r->primary_item, $cellCodInt, $d);
+                $ivRes    = $resolveItemVal((string)$r->primary_item, $d);
 
                 $out[] = [
                     'date'             => $d,
@@ -3492,6 +3506,8 @@ class OwnerPrivateController extends Controller
                     'second_orders'    => $r->second_orders !== null ? (int)$r->second_orders : null,
                     'rts_pct'          => $rtsRes['rts'],
                     'rts_eff_date'     => $rtsRes['eff'],
+                    'promo'            => $promoRes['promo'],
+                    'promo_eff'        => $promoRes['eff'],
                     'item_value'       => $ivRes['val'],
                     'item_value_eff'   => $ivRes['eff'],
                     'is_anchor'        => $itemMatches && $priceMatches,
@@ -3510,6 +3526,8 @@ class OwnerPrivateController extends Controller
                     'second_orders'    => null,
                     'rts_pct'          => null,
                     'rts_eff_date'     => null,
+                    'promo'            => null,
+                    'promo_eff'        => null,
                     'item_value'       => null,
                     'item_value_eff'   => null,
                     'is_anchor_date'   => ($d === $endDate),

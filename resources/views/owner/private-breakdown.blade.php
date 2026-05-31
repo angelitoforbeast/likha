@@ -66,7 +66,8 @@
               <th class="text-left px-4 py-2 border-b border-slate-200">Primary Item</th>
               <th class="text-right px-4 py-2 border-b border-slate-200">Orders</th>
               <th class="text-right px-4 py-2 border-b border-slate-200">Mode COD</th>
-              <th class="text-right px-4 py-2 border-b border-slate-200">RTS%</th>
+              <th class="text-right px-4 py-2 border-b border-slate-200">Set RTS%</th>
+              <th class="text-left px-4 py-2 border-b border-slate-200">Promo</th>
               <th class="text-right px-4 py-2 border-b border-slate-200">Item Val.</th>
               <th class="text-center px-4 py-2 border-b border-slate-200">Status</th>
             </tr>
@@ -93,12 +94,21 @@
                     x-text="r.has_data ? (r.primary_orders + ' / ' + r.total_orders) : '—'"></td>
                 <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
                     x-text="r.mode_cod !== null ? money(r.mode_cod) : '—'"></td>
-                {{-- RTS% — resolved as of this date for this date's primary item --}}
+                {{-- Set RTS% — manually-configured rts_pct (page_item_settings),
+                     resolved as of this date. NOT the JNT actual RTS. Anchor
+                     row (end-date) emphasized — yan ang value na ginamit sa totals. --}}
                 <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
-                    :title="r.rts_eff_date ? ('effective from ' + r.rts_eff_date) : 'no RTS setting'"
+                    :class="r.is_anchor_date ? 'font-bold text-blue-700 bg-blue-100' : ''"
+                    :title="r.rts_eff_date ? ('effective from ' + r.rts_eff_date) : 'no Set RTS'"
                     x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></td>
+                {{-- Promo — label (page_item_settings.promo), resolved as of this date --}}
+                <td class="px-4 py-2 border-b border-slate-100"
+                    :class="r.is_anchor_date ? 'font-bold text-blue-700 bg-blue-100' : ''"
+                    :title="r.promo_eff ? ('effective from ' + r.promo_eff) : 'no promo'"
+                    x-text="(r.promo !== null && r.promo !== undefined && r.promo !== '') ? r.promo : '—'"></td>
                 {{-- Item Value (cogs) — resolved as of this date --}}
                 <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
+                    :class="r.is_anchor_date ? 'font-bold text-blue-700 bg-blue-100' : ''"
                     :title="r.item_value_eff ? ('effective from ' + r.item_value_eff) : 'no cogs entry'"
                     x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></td>
                 <td class="px-4 py-2 border-b border-slate-100 text-center">
@@ -113,10 +123,11 @@
       </template>
 
       <div class="px-5 py-3 bg-slate-50 text-xs text-slate-500 border-t border-slate-200">
-        Blue = same primary as anchor → counted in totals ·
-        Amber = different primary that day → excluded from totals ·
+        Blue row = same primary as anchor → counted in totals ·
+        Amber row = different primary that day → excluded from totals ·
         ⚓ ANCHOR = end-date row (anchor source) ·
-        RTS% / Item Val. = value effective as of each date (hover for effective date).
+        Set RTS% / Promo / Item Val. = value effective as of each date (hover for effective date) ·
+        <span class="font-bold text-blue-700">Highlighted blue cells</span> sa ANCHOR row = ang mismong Set RTS / Promo / Item Value na ginamit sa totals.
       </div>
     </div>
   </div>
