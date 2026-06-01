@@ -30,7 +30,7 @@
   </div>
 
   <!-- Content -->
-  <div class="max-w-4xl mx-auto p-6">
+  <div class="max-w-7xl mx-auto p-6">
     <div class="bg-white rounded-lg shadow overflow-hidden">
       <!-- Title -->
       <div class="px-5 py-4 border-b border-slate-200">
@@ -69,6 +69,11 @@
               <th class="text-right px-4 py-2 border-b border-slate-200">Set RTS%</th>
               <th class="text-left px-4 py-2 border-b border-slate-200">Promo</th>
               <th class="text-right px-4 py-2 border-b border-slate-200">Item Val.</th>
+              <th class="text-right px-4 py-2 border-b border-slate-200 bg-emerald-50">Adspent</th>
+              <th class="text-right px-4 py-2 border-b border-slate-200 bg-emerald-50">Proceed</th>
+              <th class="text-right px-4 py-2 border-b border-slate-200 bg-emerald-50">CPP</th>
+              <th class="text-right px-4 py-2 border-b border-slate-200 bg-emerald-50">Net Profit</th>
+              <th class="text-right px-4 py-2 border-b border-slate-200 bg-emerald-50">Proj%</th>
               <th class="text-center px-4 py-2 border-b border-slate-200">Status</th>
             </tr>
           </thead>
@@ -142,6 +147,32 @@
                     <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.item_value_eff"></span>
                   </template>
                 </td>
+                {{-- ── Financials (per-date, back-fill-aware) ──────────────── --}}
+                {{-- Adspent — ads_manager_reports total for this page that day --}}
+                <td class="px-4 py-2 border-b border-slate-100 text-right font-mono bg-emerald-50/40"
+                    x-text="(r.adspent !== null && r.adspent !== undefined && r.adspent > 0) ? money(r.adspent) : '—'"></td>
+                {{-- Proceed — PROCEED orders for THIS date's primary item --}}
+                <td class="px-4 py-2 border-b border-slate-100 text-right font-mono bg-emerald-50/40"
+                    x-text="(r.proceed !== null && r.proceed !== undefined && r.proceed > 0) ? r.proceed : '—'"></td>
+                {{-- CPP — adspent ÷ proceed (cost per proceed) --}}
+                <td class="px-4 py-2 border-b border-slate-100 text-right font-mono bg-emerald-50/40"
+                    x-text="(r.cpp !== null && r.cpp !== undefined) ? money(r.cpp) : '—'"></td>
+                {{-- Net Profit — per-date formula (RTS/cogs/fees as of this date) --}}
+                <td class="px-4 py-2 border-b border-slate-100 text-right font-mono font-bold bg-emerald-50/40"
+                    :class="(r.net_profit === null || r.net_profit === undefined) ? 'text-slate-300' : (r.net_profit < 0 ? 'text-red-600' : 'text-emerald-700')"
+                    :title="r.net_profit_partial ? 'Adspent-only (kulang ang RTS/cogs/fee/price para sa araw na ito)' : (r.fee_backfilled ? 'May back-filled na fee — tingnan ang Set RTS / cogs / fee' : '')">
+                  <span x-text="(r.net_profit !== null && r.net_profit !== undefined) ? money(r.net_profit) : '—'"></span>
+                  <template x-if="r.net_profit_partial">
+                    <span class="block text-[10px] text-amber-600 font-normal">⚠ adspent-only</span>
+                  </template>
+                  <template x-if="!r.net_profit_partial && r.fee_backfilled && r.net_profit !== null && r.net_profit !== undefined">
+                    <span class="block text-[10px] text-red-500 font-normal">⚠ fee back-filled</span>
+                  </template>
+                </td>
+                {{-- Proj% — net profit ÷ gross sales (price × orders) --}}
+                <td class="px-4 py-2 border-b border-slate-100 text-right font-mono bg-emerald-50/40"
+                    :class="(r.proj_pct === null || r.proj_pct === undefined) ? 'text-slate-300' : (r.proj_pct < 0 ? 'text-red-600' : 'text-slate-700')"
+                    x-text="(r.proj_pct !== null && r.proj_pct !== undefined) ? (Number(r.proj_pct).toFixed(1) + '%') : '—'"></td>
                 <td class="px-4 py-2 border-b border-slate-100 text-center">
                   <template x-if="r.is_anchor"><span class="text-blue-600 font-bold">✓ included</span></template>
                   <template x-if="!r.is_anchor && r.has_data"><span class="text-amber-700 font-semibold">✗ excluded</span></template>
@@ -150,6 +181,28 @@
               </tr>
             </template>
           </tbody>
+          {{-- Totals across the whole range (each row's net profit already nets
+               that day's adspent → sum = page net profit for the range). --}}
+          <tfoot>
+            <tr class="bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300">
+              <td class="px-4 py-2 text-right" colspan="3">TOTAL (range)</td>
+              <td class="px-4 py-2"></td>
+              <td class="px-4 py-2"></td>
+              <td class="px-4 py-2"></td>
+              <td class="px-4 py-2"></td>
+              <td class="px-4 py-2 text-right font-mono bg-emerald-100" x-text="money(totals().adspent)"></td>
+              <td class="px-4 py-2 text-right font-mono bg-emerald-100" x-text="totals().proceed"></td>
+              <td class="px-4 py-2 text-right font-mono bg-emerald-100"
+                  x-text="totals().proceed > 0 ? money(totals().adspent / totals().proceed) : '—'"></td>
+              <td class="px-4 py-2 text-right font-mono bg-emerald-100"
+                  :class="totals().net_profit < 0 ? 'text-red-600' : 'text-emerald-700'"
+                  x-text="money(totals().net_profit)"></td>
+              <td class="px-4 py-2 text-right font-mono bg-emerald-100"
+                  :class="totals().proj_pct < 0 ? 'text-red-600' : 'text-slate-700'"
+                  x-text="totals().gross > 0 ? (totals().proj_pct.toFixed(1) + '%') : '—'"></td>
+              <td class="px-4 py-2"></td>
+            </tr>
+          </tfoot>
         </table>
       </template>
 
@@ -161,6 +214,16 @@
         <span class="font-bold text-blue-700">Blue cell + "↑ effective"</span> = kung saang date NAGSIMULA ang value ·
         <span class="font-bold text-red-700">Red cell + "⚠ back-filled"</span> = walang proper setting para sa araw na yon (hiniram ang earliest — dapat mag-set ka ng tamang value) ·
         "since [date]" = nagsimula bago pa ang range.
+        <span class="block mt-2 pt-2 border-t border-slate-200">
+          <span class="font-bold text-emerald-700">Adspent</span> = total ad spend ng page sa araw na yon ·
+          <span class="font-bold text-emerald-700">Proceed</span> = PROCEED orders para sa primary item ng araw na yon ·
+          <span class="font-bold text-emerald-700">CPP</span> = adspent ÷ proceed ·
+          <span class="font-bold text-emerald-700">Net Profit</span> = per-date formula (RTS/cogs/fees effective as of each date) ·
+          <span class="font-bold text-emerald-700">Proj%</span> = net profit ÷ gross sales (price × orders) ·
+          <span class="text-amber-600">"⚠ adspent-only"</span> = may adspent pero kulang ang setting/price kaya adspent loss lang ang nakuha ·
+          <span class="text-red-500">"⚠ fee back-filled"</span> = ginamit ang earliest fee (tingnan ang fee_settings).
+          <span class="font-semibold">TOTAL</span> row = buong range (lahat ng araw kasama ang excluded — bawat row na may sariling adspent).
+        </span>
       </div>
     </div>
   </div>
@@ -205,6 +268,24 @@
       },
 
       money(v){ return '₱'+Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); },
+
+      // Range totals — sum each row's adspent/proceed/net profit. Net profit
+      // per row already nets that day's adspent, so the sum is the page net
+      // profit for the range. Proj% = totalNetProfit ÷ totalGrossSales.
+      totals(){
+        let adspent = 0, proceed = 0, net = 0, gross = 0;
+        for (const r of this.rows) {
+          if (r.adspent)    adspent += Number(r.adspent);
+          if (r.proceed)    proceed += Number(r.proceed);
+          if (r.net_profit !== null && r.net_profit !== undefined) net += Number(r.net_profit);
+          // gross sales for Proj% denominator: price × primary orders (data rows)
+          if (r.has_data && r.mode_cod) gross += Number(r.mode_cod) * Number(r.primary_orders || 0);
+        }
+        return {
+          adspent, proceed, net_profit: net, gross,
+          proj_pct: gross > 0 ? (net / gross) * 100 : 0,
+        };
+      },
     };
   }
   </script>

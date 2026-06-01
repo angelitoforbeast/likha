@@ -3582,6 +3582,103 @@ class OwnerPrivateController extends Controller
             return ['val' => $earliest['cost'], 'eff' => $earliest['eff'], 'backfilled' => true];
         };
 
+        // ── Financial per-date data: adspent + proceed + fees ───────────────
+        $driver = DB::getDriverName();
+        $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
+        $quote  = fn (string $c) => $driver === 'pgsql' ? '"'.$c.'"' : '`'.$c.'`';
+        $castMoney = fn (string $expr) => $driver === 'pgsql'
+            ? "COALESCE(NULLIF(REGEXP_REPLACE(COALESCE(($expr)::text, ''), '[^0-9\\.\\-]', '', 'g'), '')::numeric, 0)"
+            : "CAST(REPLACE(REPLACE(REPLACE(COALESCE($expr,''), '₱',''), ',', ''), ' ', '') AS DECIMAL(18,2))";
+
+        // Adspent per date — ads_manager_reports by page_name.
+        $adsByDate = [];
+        $castSpend = $castMoney('amount_spent_php');
+        $adsRows = DB::table('ads_manager_reports')
+            ->whereRaw("LOWER($trimFn(COALESCE(page_name,''))) = ?", [$pageNameNorm])
+            ->whereRaw('DATE(day) BETWEEN ? AND ?', [$startDate, $endDate])
+            ->selectRaw("DATE(day) AS d, SUM($castSpend) AS spent")
+            ->groupByRaw('DATE(day)')
+            ->get();
+        foreach ($adsRows as $a) $adsByDate[(string)$a->d] = (float)$a->spent;
+
+        // Proceed per (date, canonical item) — macro_output, status=proceed.
+        // Alias-aware (matches primary_item_key) para tugma sa main view.
+        $moPageCol   = Schema::hasColumn('macro_output', 'PAGE') ? 'PAGE'
+                     : (Schema::hasColumn('macro_output', 'page_name') ? 'page_name'
+                     : (Schema::hasColumn('macro_output', 'page') ? 'page' : 'PAGE'));
+        $moItemCol   = Schema::hasColumn('macro_output', 'ITEM_NAME') ? 'ITEM_NAME'
+                     : (Schema::hasColumn('macro_output', 'item_name') ? 'item_name' : 'ITEM_NAME');
+        $moStatusCol = Schema::hasColumn('macro_output', 'STATUS') ? 'STATUS'
+                     : (Schema::hasColumn('macro_output', 'status') ? 'status' : 'STATUS');
+        $moHasTsDate = Schema::hasColumn('macro_output', 'ts_date');
+
+        if ($moHasTsDate) {
+            $moDateExpr = 'DATE(mo.ts_date)';
+        } else {
+            $moTsCol = Schema::hasColumn('macro_output', 'TIMESTAMP') ? 'TIMESTAMP'
+                     : (Schema::hasColumn('macro_output', 'timestamp') ? 'timestamp' : null);
+            if ($driver === 'mysql') {
+                if ($moTsCol) {
+                    $ts = 'mo.' . $quote($moTsCol);
+                    $moDateExpr = "COALESCE(DATE(STR_TO_DATE($ts,'%H:%i %d-%m-%Y')),DATE(STR_TO_DATE($ts,'%H:%i %m-%d-%Y')),DATE(mo.`created_at`))";
+                } else {
+                    $moDateExpr = 'DATE(mo.`created_at`)';
+                }
+            } else {
+                if ($moTsCol) {
+                    $ts = 'mo.' . $quote($moTsCol);
+                    $moDateExpr = "DATE(COALESCE(TO_TIMESTAMP(NULLIF($ts,''),'HH24:MI DD-MM-YYYY'),TO_TIMESTAMP(NULLIF($ts,''),'HH24:MI MM-DD-YYYY'),mo.\"created_at\"))";
+                } else {
+                    $moDateExpr = 'DATE(mo."created_at")';
+                }
+            }
+        }
+        $moPageKey   = "LOWER($trimFn(COALESCE(mo.".$quote($moPageCol).",'')))";
+        $moItemTrim  = "$trimFn(COALESCE(mo.".$quote($moItemCol).",''))";
+        $moStatusNrm = "LOWER(REPLACE(REPLACE($trimFn(mo.".$quote($moStatusCol)."),' ',''),'_',''))";
+
+        $proceedByDateItem = []; // [date][canonKey] = ['orders'=>int, 'proceed'=>int]
+        $statRows = DB::table('macro_output as mo')
+            ->whereRaw("$moPageKey = ?", [$pageNameNorm])
+            ->whereRaw("$moDateExpr BETWEEN ? AND ?", [$startDate, $endDate])
+            ->selectRaw("
+                $moDateExpr AS d,
+                $moItemTrim AS item_raw,
+                COUNT(*) AS orders,
+                SUM(CASE WHEN $moStatusNrm = 'proceed' THEN 1 ELSE 0 END) AS proceed
+            ")
+            ->groupByRaw("$moDateExpr, $moItemTrim")
+            ->get();
+        $aliases = new \App\Services\ItemAliasResolver();
+        foreach ($statRows as $s) {
+            $canonKey = $aliases->canonicalKey((string)$s->item_raw);
+            $d2 = (string)$s->d;
+            if (!isset($proceedByDateItem[$d2][$canonKey])) {
+                $proceedByDateItem[$d2][$canonKey] = ['orders' => 0, 'proceed' => 0];
+            }
+            $proceedByDateItem[$d2][$canonKey]['orders']  += (int)$s->orders;
+            $proceedByDateItem[$d2][$canonKey]['proceed'] += (int)$s->proceed;
+        }
+
+        // Fees per-date (back-fill aware) — same as main view.
+        $hostBd = strtolower((string) $request->getHost());
+        $feeHistoryBd = [];
+        foreach (\App\Models\FeeSetting::forHost($hostBd) as $f) {
+            $feeHistoryBd[(string)$f->setting_key][] = [
+                'eff' => substr((string)$f->effective_date, 0, 10),
+                'val' => (float)$f->setting_value,
+            ];
+        }
+        $resolveFeeBd = function (string $key, string $asOf) use ($feeHistoryBd): array {
+            $list = $feeHistoryBd[$key] ?? [];
+            if (empty($list)) return ['val' => null, 'backfilled' => false];
+            foreach ($list as $e) {
+                if ($e['eff'] <= $asOf) return ['val' => $e['val'], 'backfilled' => false];
+            }
+            $earliest = $list[count($list) - 1];
+            return ['val' => $earliest['val'], 'backfilled' => true];
+        };
+
         $out = [];
         $cursor = strtotime($startDate);
         $last   = strtotime($endDate);
@@ -3605,6 +3702,42 @@ class OwnerPrivateController extends Controller
                 $promoRes = $resolvePromo((string)$r->primary_item, $cellCodInt, $d);
                 $ivRes    = $resolveItemVal((string)$r->primary_item, $d);
 
+                // ── Financials (per-date, back-fill-aware) ─────────────────
+                // Proceed is matched to THIS date's primary item (alias-aware)
+                // → same basis as profit formula sa main view.
+                $dayAdspent = $adsByDate[$d] ?? 0.0;
+                $stat       = $proceedByDateItem[$d][$ik] ?? null;
+                $dayProceed = $stat ? (int)$stat['proceed'] : 0;
+                $dayPrice   = $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null;
+                $dayRts     = $rtsRes['rts'];   // may be null
+                $dayCost    = $ivRes['val'];    // may be null
+
+                $fCodR = $resolveFeeBd('cod_fee_rate', $d);
+                $fVat  = $resolveFeeBd('cod_fee_vat_rate', $d);
+                $fShip = $resolveFeeBd('shipping_fee_per_order', $d);
+                $feeBackfilled = !empty($fCodR['backfilled']) || !empty($fVat['backfilled']) || !empty($fShip['backfilled']);
+                $feeMissing    = $fCodR['val'] === null || $fVat['val'] === null || $fShip['val'] === null;
+
+                $netProfit = null;
+                $netPartial = false;
+                if ($dayPrice !== null && $dayPrice > 0 && $dayRts !== null && $dayCost !== null && !$feeMissing) {
+                    $deliverFactor = 1.0 - ((float)$dayRts) / 100.0;
+                    $codFeeDay     = $dayPrice * (float)$fCodR['val'] * (1.0 + (float)$fVat['val']);
+                    $netProfit = $dayProceed * $dayPrice * $deliverFactor
+                               - $dayProceed * (float)$fShip['val']
+                               - $dayProceed * $deliverFactor * (float)$dayCost
+                               - $dayAdspent
+                               - $dayProceed * $deliverFactor * $codFeeDay;
+                } elseif ($dayAdspent > 0) {
+                    // Missing setting/price → at least reflect the adspent loss.
+                    $netProfit  = -$dayAdspent;
+                    $netPartial = true;
+                }
+
+                $cpp        = $dayProceed > 0 ? $dayAdspent / $dayProceed : null; // cost per proceed
+                $grossSales = ($dayPrice !== null) ? $dayPrice * (int)$r->primary_orders : 0.0;
+                $projPct    = ($netProfit !== null && $grossSales > 0) ? ($netProfit / $grossSales) * 100.0 : null;
+
                 $out[] = [
                     'date'             => $d,
                     'primary_item'     => (string)$r->primary_item,
@@ -3623,11 +3756,21 @@ class OwnerPrivateController extends Controller
                     'item_value'       => $ivRes['val'],
                     'item_value_eff'   => $ivRes['eff'],
                     'item_value_backfilled' => !empty($ivRes['backfilled']),
+                    // Financials
+                    'adspent'          => round($dayAdspent, 2),
+                    'proceed'          => $dayProceed,
+                    'cpp'              => $cpp !== null ? round($cpp, 2) : null,
+                    'net_profit'       => $netProfit !== null ? round($netProfit, 2) : null,
+                    'net_profit_partial' => $netPartial,
+                    'proj_pct'         => $projPct !== null ? round($projPct, 1) : null,
+                    'fee_backfilled'   => $feeBackfilled,
                     'is_anchor'        => $itemMatches && $priceMatches,
                     'is_anchor_date'   => ($d === $endDate),  // end-date row = anchor source
                     'has_data'         => true,
                 ];
             } else {
+                // No primary-item data this day — but adspent may still exist.
+                $dayAdspent = $adsByDate[$d] ?? 0.0;
                 $out[] = [
                     'date'             => $d,
                     'primary_item'     => null,
@@ -3646,6 +3789,14 @@ class OwnerPrivateController extends Controller
                     'item_value'       => null,
                     'item_value_eff'   => null,
                     'item_value_backfilled' => false,
+                    // Financials
+                    'adspent'          => round($dayAdspent, 2),
+                    'proceed'          => 0,
+                    'cpp'              => null,
+                    'net_profit'       => $dayAdspent > 0 ? round(-$dayAdspent, 2) : null,
+                    'net_profit_partial' => $dayAdspent > 0,
+                    'proj_pct'         => null,
+                    'fee_backfilled'   => false,
                     'is_anchor_date'   => ($d === $endDate),
                     'is_anchor'        => false,
                     'has_data'         => false,
