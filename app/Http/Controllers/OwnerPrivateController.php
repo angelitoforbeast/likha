@@ -3409,7 +3409,9 @@ class OwnerPrivateController extends Controller
             foreach ($srows as $s) {
                 $itemLower = strtolower(trim((string)$s->item_name));
                 $rtsByItem[$itemLower][] = [
-                    'eff'   => (string)$s->effective_date,
+                    // Truncate to YYYY-MM-DD so it matches the per-date row format
+                    // for the frontend's effective-date-row highlighting.
+                    'eff'   => substr((string)$s->effective_date, 0, 10),
                     'rts'   => $s->rts_pct !== null ? (float)$s->rts_pct : null,
                     'promo' => $hasPromoCol ? (($s->promo ?? '') !== '' ? (string)$s->promo : null) : null,
                     'cod'   => ($hasCodInt && $s->mode_cod_int !== null) ? (int)$s->mode_cod_int : null,

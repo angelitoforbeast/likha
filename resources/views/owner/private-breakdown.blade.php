@@ -95,22 +95,44 @@
                 <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
                     x-text="r.mode_cod !== null ? money(r.mode_cod) : '—'"></td>
                 {{-- Set RTS% — manually-configured rts_pct (page_item_settings),
-                     resolved as of this date. NOT the JNT actual RTS. Anchor
-                     row (end-date) emphasized — yan ang value na ginamit sa totals. --}}
+                     resolved as of this date. NOT the JNT actual RTS.
+                     Highlight = EFFECTIVE-DATE row (kung saan nagsimula ang value).
+                     Kung bago pa sa range nagsimula → "since [date]" sa first row. --}}
                 <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
-                    :class="r.is_anchor_date ? 'font-bold text-blue-700 bg-blue-100' : ''"
-                    :title="r.rts_eff_date ? ('effective from ' + r.rts_eff_date) : 'no Set RTS'"
-                    x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></td>
+                    :class="(r.rts_eff_date && r.date === r.rts_eff_date) ? 'font-bold text-blue-700 bg-blue-100' : ''"
+                    :title="r.rts_eff_date ? ('effective from ' + r.rts_eff_date) : 'no Set RTS'">
+                  <span x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></span>
+                  <template x-if="r.rts_eff_date && r.date === r.rts_eff_date">
+                    <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
+                  </template>
+                  <template x-if="r.rts_eff_date && r.rts_eff_date < startDate && r.date === startDate">
+                    <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.rts_eff_date"></span>
+                  </template>
+                </td>
                 {{-- Promo — label (page_item_settings.promo), resolved as of this date --}}
                 <td class="px-4 py-2 border-b border-slate-100"
-                    :class="r.is_anchor_date ? 'font-bold text-blue-700 bg-blue-100' : ''"
-                    :title="r.promo_eff ? ('effective from ' + r.promo_eff) : 'no promo'"
-                    x-text="(r.promo !== null && r.promo !== undefined && r.promo !== '') ? r.promo : '—'"></td>
+                    :class="(r.promo_eff && r.date === r.promo_eff) ? 'font-bold text-blue-700 bg-blue-100' : ''"
+                    :title="r.promo_eff ? ('effective from ' + r.promo_eff) : 'no promo'">
+                  <span x-text="(r.promo !== null && r.promo !== undefined && r.promo !== '') ? r.promo : '—'"></span>
+                  <template x-if="r.promo_eff && r.date === r.promo_eff">
+                    <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
+                  </template>
+                  <template x-if="r.promo_eff && r.promo_eff < startDate && r.date === startDate">
+                    <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.promo_eff"></span>
+                  </template>
+                </td>
                 {{-- Item Value (cogs) — resolved as of this date --}}
                 <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
-                    :class="r.is_anchor_date ? 'font-bold text-blue-700 bg-blue-100' : ''"
-                    :title="r.item_value_eff ? ('effective from ' + r.item_value_eff) : 'no cogs entry'"
-                    x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></td>
+                    :class="(r.item_value_eff && r.date === r.item_value_eff) ? 'font-bold text-blue-700 bg-blue-100' : ''"
+                    :title="r.item_value_eff ? ('effective from ' + r.item_value_eff) : 'no cogs entry'">
+                  <span x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></span>
+                  <template x-if="r.item_value_eff && r.date === r.item_value_eff">
+                    <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
+                  </template>
+                  <template x-if="r.item_value_eff && r.item_value_eff < startDate && r.date === startDate">
+                    <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.item_value_eff"></span>
+                  </template>
+                </td>
                 <td class="px-4 py-2 border-b border-slate-100 text-center">
                   <template x-if="r.is_anchor"><span class="text-blue-600 font-bold">✓ included</span></template>
                   <template x-if="!r.is_anchor && r.has_data"><span class="text-amber-700 font-semibold">✗ excluded</span></template>
@@ -126,8 +148,9 @@
         Blue row = same primary as anchor → counted in totals ·
         Amber row = different primary that day → excluded from totals ·
         ⚓ ANCHOR = end-date row (anchor source) ·
-        Set RTS% / Promo / Item Val. = value effective as of each date (hover for effective date) ·
-        <span class="font-bold text-blue-700">Highlighted blue cells</span> sa ANCHOR row = ang mismong Set RTS / Promo / Item Value na ginamit sa totals.
+        Set RTS% / Promo / Item Val. = value effective as of each date ·
+        <span class="font-bold text-blue-700">Highlighted cell + "↑ effective"</span> = kung saang date NAGSIMULA ang value (effective date) ·
+        "since [date]" sa first row = nagsimula bago pa ang range.
       </div>
     </div>
   </div>
