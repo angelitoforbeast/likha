@@ -2558,6 +2558,40 @@ class OwnerPrivateController extends Controller
         $oldPromo   = $oldRtsRow     ? (string)($oldRtsRow->promo ?? '') : null;
         $oldCogs    = $oldCogsRow    ? (float) $oldCogsRow->unit_cost   : null;
         $oldCogsCeo = $oldCogsCeoRow ? (float) $oldCogsCeoRow->unit_cost : null;
+
+        // ── Carry-forward last-effective RTS + Promo (alias-aware) ───────────
+        // When a save touches only ONE field (scope=rts → promo preserved, or
+        // scope=promo → rts preserved), the OTHER field must CONTINUE whatever
+        // was effective just before $effDate — hindi i-reset. Dati, ang promo ay
+        // nagde-default sa literal 'NONE' kapag walang row sa exact na date,
+        // kaya tahimik na napuputol ang tumatakbong promo (e.g. "pure selling").
+        // Ngayon: hanapin ang HULING effective value (≤ $effDate) sa buong item
+        // family (alias-aware), faithfully carried (kasama ang dating 'NONE').
+        $carryRts   = $oldRts;
+        $carryPromo = ($oldPromo !== null && $oldPromo !== '') ? $oldPromo : null;
+        if ($needsPriceTag) {
+            $aliasesSave = new \App\Services\ItemAliasResolver();
+            $canonTarget = $aliasesSave->canonicalKey($itemName);
+            $histRows = DB::table('page_item_settings')
+                ->where('page_name', $pageName)
+                ->where('effective_date', '<=', $effDate)
+                ->where('mode_cod_int', $modeCodInt)
+                ->orderByDesc('effective_date')->orderByDesc('id')
+                ->get(['item_name', 'rts_pct', 'promo']);
+            $foundRts = $oldRts !== null;
+            $foundPromo = $carryPromo !== null;
+            foreach ($histRows as $h) {
+                if ($foundRts && $foundPromo) break;
+                if ($aliasesSave->canonicalKey((string)$h->item_name) !== $canonTarget) continue;
+                if (!$foundRts && $h->rts_pct !== null) {
+                    $carryRts = (float) $h->rts_pct; $foundRts = true;
+                }
+                if (!$foundPromo && ($h->promo ?? '') !== '') {
+                    $carryPromo = (string) $h->promo; $foundPromo = true;
+                }
+            }
+        }
+
         $applyThrough = !empty($validated['apply_through']) && $validated['apply_through'] > $effDate
             ? $validated['apply_through']
             : null;
@@ -2607,11 +2641,11 @@ class OwnerPrivateController extends Controller
                 // column is nullable).
                 $rtsToSave = in_array($scope, ['all', 'rts'], true)
                     ? (float) $validated['rts_pct']
-                    : ($oldRts);  // null if no existing row — that's fine
+                    : $carryRts;   // carry-forward last-effective RTS (was: exact-date only)
 
                 $promoToSave = in_array($scope, ['all', 'promo'], true)
                     ? trim((string) ($validated['promo'] ?? ''))
-                    : ($oldPromo ?: 'NONE');
+                    : ($carryPromo ?? ''); // carry-forward last-effective promo; '' (NOT NULL col) when wala — was hardcoded 'NONE'
 
                 $commentToSave = in_array($scope, ['all', 'rts'], true)
                     ? ($validated['comment'] ?? null)
