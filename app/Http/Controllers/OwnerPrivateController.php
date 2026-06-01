@@ -2195,7 +2195,8 @@ class OwnerPrivateController extends Controller
             // ── PER-DATE profit: resolve RTS / cogs / fees EFFECTIVE on each day
             // (hindi single end-date value). Back-fill earliest kapag walang
             // setting pa sa araw na yon, at i-track ang mga back-filled dates.
-            $profitBackfillDates = [];   // date → true (used a back-filled value)
+            $profitBackfillDates  = [];   // date → true (used a back-filled value)
+            $profitBackfillFields = [];   // 'rts'|'cost'|'fee' → true (WHICH field/s back-filled)
             $cogsHistForItem = $useCeoForProfit
                 ? ($cogsCeoHistoryMap[$dominantKey] ?? [])
                 : ($cogsHistoryMap[$dominantKey] ?? []);
@@ -2248,10 +2249,16 @@ class OwnerPrivateController extends Controller
                         continue;
                     }
 
-                    // Track back-fill (kahit alin sa 5 values na back-filled).
+                    // Track back-fill — both the dates AND which fields (para
+                    // precise ang warning label: 'RTS' vs 'cost' vs 'fee').
                     if ($rRts['backfilled'] || $rCost['backfilled'] || $rCodR['backfilled']
                         || $rVat['backfilled'] || $rShip['backfilled']) {
                         $profitBackfillDates[(string)$d] = true;
+                        if ($rRts['backfilled'])  $profitBackfillFields['rts']  = true;
+                        if ($rCost['backfilled']) $profitBackfillFields['cost'] = true;
+                        if ($rCodR['backfilled'] || $rVat['backfilled'] || $rShip['backfilled']) {
+                            $profitBackfillFields['fee'] = true;
+                        }
                     }
 
                     $deliverFactor = 1.0 - $dayRts / 100.0;
@@ -2391,6 +2398,7 @@ class OwnerPrivateController extends Controller
                 // earliest. Frontend shows a warning icon. Includes the dates list.
                 'has_backfill'          => !empty($profitBackfillDates),
                 'backfill_dates'        => array_keys($profitBackfillDates),
+                'backfill_fields'       => array_keys($profitBackfillFields), // 'rts'|'cost'|'fee'
                 'price'                 => $price > 0 ? $price : null,
                 'price_min'             => ($priceIsRange && $priceMin > 0 && abs($priceMin - $price) > 0.01) ? $priceMin : null,
                 'price_max'             => ($priceIsRange && abs($priceMax - $price) > 0.01) ? $priceMax : null,
