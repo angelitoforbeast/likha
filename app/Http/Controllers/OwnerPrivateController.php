@@ -1871,10 +1871,13 @@ class OwnerPrivateController extends Controller
             ->orderByDesc($cogsDateCol)
             ->get([$cogsItemCol, $cogsDateCol, $cogsUnitCol]);
 
-        $cogsMap = []; // normalized_item_name → unit_cost (Marketing's view)
-        $cogsLastDateMap = []; // normalized_item_name → YYYY-MM-DD of latest cogs row
+        $cogsMap = []; // canonical_item_key → unit_cost (Marketing's view)
+        $cogsLastDateMap = []; // canonical_item_key → YYYY-MM-DD of latest cogs row
         foreach ($cogsRows as $r) {
-            $k = strtolower(trim((string)($r->$cogsItemCol ?? '')));
+            // Alias-aware: aliased variants collapse into one canonical bucket so
+            // a cost set under any variant applies to the whole item family.
+            $k = $aliases->canonicalKey((string)($r->$cogsItemCol ?? ''));
+            if ($k === '') continue;
             if (!isset($cogsMap[$k])) {
                 $cogsMap[$k] = (float)($r->$cogsUnitCol ?? 0);
                 // Latest date is first-seen kasi sorted DESC by date sa query above.
@@ -1885,14 +1888,15 @@ class OwnerPrivateController extends Controller
         // ── cogs_ceo: latest entry ≤ date (CEO's separate values) ──────────
         // Used for profit computations when the viewer is CEO. Falls back to
         // null per spec — no fallback to cogs sa profit calc.
-        $cogsCeoMap = []; // normalized_item_name → unit_cost (CEO's view)
+        $cogsCeoMap = []; // canonical_item_key → unit_cost (CEO's view)
         if (Schema::hasTable('cogs_ceo')) {
             $cogsCeoRows = DB::table('cogs_ceo')
                 ->where('date', '<=', $date)
                 ->orderByDesc('date')
                 ->get(['item_name', 'date', 'unit_cost']);
             foreach ($cogsCeoRows as $r) {
-                $k = strtolower(trim((string)($r->item_name ?? '')));
+                $k = $aliases->canonicalKey((string)($r->item_name ?? ''));
+                if ($k === '') continue;
                 if (!isset($cogsCeoMap[$k])) {
                     $cogsCeoMap[$k] = $r->unit_cost !== null ? (float) $r->unit_cost : null;
                 }
@@ -1927,8 +1931,9 @@ class OwnerPrivateController extends Controller
                     : null;
                 // Pre-migration / orphan rows na walang price tag → skipped.
                 if ($codInt === null) continue;
+                // Alias-aware item part → variants of one aliased item share a key.
                 $k = strtolower(trim((string)$s->page_name))
-                   .'||'.strtolower(trim((string)$s->item_name))
+                   .'||'.$aliases->canonicalKey((string)$s->item_name)
                    .'||'.$codInt;
                 if (!isset($settingsMap[$k])) {
                     // rts_pct can be NULL post-2026-05-21 (promo-only saves
@@ -1958,17 +1963,18 @@ class OwnerPrivateController extends Controller
         foreach ((isset($settingRows) ? $settingRows : []) as $s) {
             $codIntH = ($hasModeCodIntCol && $s->mode_cod_int !== null) ? (int)$s->mode_cod_int : null;
             if ($codIntH === null) continue;
-            $kH = strtolower(trim((string)$s->page_name)).'||'.strtolower(trim((string)$s->item_name)).'||'.$codIntH;
+            $kH = strtolower(trim((string)$s->page_name)).'||'.$aliases->canonicalKey((string)$s->item_name).'||'.$codIntH;
             $rtsHistoryMap[$kH][] = [
                 'eff' => substr((string)$s->effective_date, 0, 10),
                 'val' => $s->rts_pct !== null ? (float)$s->rts_pct : null,
             ];
         }
 
-        // cogs history (Marketing): strtolower(trim) → [ ['eff'=>date, 'val'=>float], ... ] DESC
+        // cogs history (Marketing): canonical_item_key → [ ['eff'=>date, 'val'=>float], ... ] DESC
         $cogsHistoryMap = [];
         foreach ($cogsRows as $r) {
-            $kH = strtolower(trim((string)($r->$cogsItemCol ?? '')));
+            $kH = $aliases->canonicalKey((string)($r->$cogsItemCol ?? ''));
+            if ($kH === '') continue;
             $cogsHistoryMap[$kH][] = [
                 'eff' => substr((string)($r->$cogsDateCol ?? ''), 0, 10),
                 'val' => (float)($r->$cogsUnitCol ?? 0),
@@ -1977,7 +1983,8 @@ class OwnerPrivateController extends Controller
         // cogs_ceo history
         $cogsCeoHistoryMap = [];
         foreach ((isset($cogsCeoRows) ? $cogsCeoRows : []) as $r) {
-            $kH = strtolower(trim((string)($r->item_name ?? '')));
+            $kH = $aliases->canonicalKey((string)($r->item_name ?? ''));
+            if ($kH === '') continue;
             $cogsCeoHistoryMap[$kH][] = [
                 'eff' => substr((string)($r->date ?? ''), 0, 10),
                 'val' => $r->unit_cost !== null ? (float)$r->unit_cost : null,
@@ -2090,7 +2097,9 @@ class OwnerPrivateController extends Controller
 
             // Settings lookup key — page+item+rounded price (matches mode_cod_int
             // sa page_item_settings). Different price = independent RTS+Promo row.
-            $dominantKey  = strtolower(trim($dominant['item_name']));
+            // Alias-aware: canonical key so a setting under ANY variant of an
+            // aliased item resolves for the whole family (back-fill included).
+            $dominantKey  = $aliases->canonicalKey((string)$dominant['item_name']);
             $priceIntForLookup = (int) round($price);
             $settingKey   = $pk.'||'.$dominantKey.'||'.$priceIntForLookup;
             $priceMin = (float)($dominant['min_cod'] ?? $price);
@@ -3506,6 +3515,11 @@ class OwnerPrivateController extends Controller
         // item-only. Same source/logic as the main /owner/private view.
         $pageNameNorm = strtolower(trim($pageLabel));
 
+        // Alias resolver — shared by settings/cogs/proceed lookups below. RTS /
+        // Promo / cogs are keyed by CANONICAL item key so a setting under any
+        // aliased variant resolves for the whole item family (same as main view).
+        $aliases = new \App\Services\ItemAliasResolver();
+
         // Settings (page_item_settings): itemLower → [ ['eff'=>date, 'rts'=>float|null,
         // 'promo'=>string|null, 'cod'=>int|null], ... ] desc by eff. Holds BOTH the
         // SET RTS% (manually configured, used in profit calc — NOT the JNT actual
@@ -3523,7 +3537,7 @@ class OwnerPrivateController extends Controller
                 ->orderByDesc('effective_date')->orderByDesc('id')
                 ->get($rcols);
             foreach ($srows as $s) {
-                $itemLower = strtolower(trim((string)$s->item_name));
+                $itemLower = $aliases->canonicalKey((string)$s->item_name);
                 $rtsByItem[$itemLower][] = [
                     // Truncate to YYYY-MM-DD so it matches the per-date row format
                     // for the frontend's effective-date-row highlighting.
@@ -3538,8 +3552,8 @@ class OwnerPrivateController extends Controller
         // (item, price). Price-aware: prefers a ±1 mode_cod match, else latest.
         // BACK-FILL: kapag $asOf ay nauna sa earliest setting → gamitin ang
         // earliest + flag backfilled=true (para PUMULA sa breakdown).
-        $resolveSetting = function (string $field, string $itemName, ?int $codInt, string $asOf) use ($rtsByItem) {
-            $itemLower = strtolower(trim($itemName));
+        $resolveSetting = function (string $field, string $itemName, ?int $codInt, string $asOf) use ($rtsByItem, $aliases) {
+            $itemLower = $aliases->canonicalKey($itemName);
             if (!isset($rtsByItem[$itemLower])) return ['val' => null, 'eff' => null, 'backfilled' => false];
             $all   = $rtsByItem[$itemLower]; // DESC by eff
             $cands = array_values(array_filter($all, fn ($e) => $e['eff'] <= $asOf));
@@ -3580,7 +3594,7 @@ class OwnerPrivateController extends Controller
                 ->orderByDesc($cogsDateCol)
                 ->get([$cogsItemCol, $cogsDateCol, $cogsUnitCol]);
             foreach ($crows as $c) {
-                $k = $normItem((string)($c->$cogsItemCol ?? ''));
+                $k = $aliases->canonicalKey((string)($c->$cogsItemCol ?? ''));
                 if ($k === '') continue;
                 $cogsByItem[$k][] = [
                     'eff'  => substr((string)($c->$cogsDateCol ?? ''), 0, 10),
@@ -3588,8 +3602,8 @@ class OwnerPrivateController extends Controller
                 ];
             }
         }
-        $resolveItemVal = function (string $itemName, string $asOf) use ($cogsByItem, $normItem): array {
-            $k = $normItem($itemName);
+        $resolveItemVal = function (string $itemName, string $asOf) use ($cogsByItem, $aliases): array {
+            $k = $aliases->canonicalKey($itemName);
             if (!isset($cogsByItem[$k])) return ['val' => null, 'eff' => null, 'backfilled' => false];
             $all = $cogsByItem[$k]; // DESC by eff
             foreach ($all as $e) {
@@ -3667,7 +3681,6 @@ class OwnerPrivateController extends Controller
             ")
             ->groupByRaw("$moDateExpr, $moItemTrim")
             ->get();
-        $aliases = new \App\Services\ItemAliasResolver();
         foreach ($statRows as $s) {
             $canonKey = $aliases->canonicalKey((string)$s->item_raw);
             $d2 = (string)$s->d;
@@ -3720,6 +3733,12 @@ class OwnerPrivateController extends Controller
                 $promoRes = $resolvePromo((string)$r->primary_item, $cellCodInt, $d);
                 $ivRes    = $resolveItemVal((string)$r->primary_item, $d);
 
+                // Item alias (item_type family). Null when this variant has no
+                // alias mapping → frontend shows "—".
+                $aliasLabel = $aliases->isAliased((string)$r->primary_item)
+                    ? $aliases->canonicalLabel((string)$r->primary_item)
+                    : null;
+
                 // ── Financials (per-date, back-fill-aware) ─────────────────
                 // Proceed is matched to THIS date's primary item (alias-aware)
                 // → same basis as profit formula sa main view.
@@ -3760,6 +3779,7 @@ class OwnerPrivateController extends Controller
                     'date'             => $d,
                     'primary_item'     => (string)$r->primary_item,
                     'primary_item_key' => $ik,
+                    'item_alias'       => $aliasLabel,
                     'primary_orders'   => (int)$r->primary_orders,
                     'total_orders'     => (int)$r->total_orders_all,
                     'mode_cod'         => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
@@ -3793,6 +3813,7 @@ class OwnerPrivateController extends Controller
                     'date'             => $d,
                     'primary_item'     => null,
                     'primary_item_key' => null,
+                    'item_alias'       => null,
                     'primary_orders'   => 0,
                     'total_orders'     => 0,
                     'mode_cod'         => null,

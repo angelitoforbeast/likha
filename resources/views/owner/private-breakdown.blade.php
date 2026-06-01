@@ -68,6 +68,7 @@
         <tr class="text-slate-600 font-bold text-xs uppercase tracking-wide">
           <th class="text-left px-4 py-2 border-b border-slate-200">Date</th>
           <th class="text-left px-4 py-2 border-b border-slate-200">Primary Item</th>
+          <th class="text-left px-4 py-2 border-b border-slate-200">Item Alias</th>
           <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('orders')">Orders</th>
           <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('price')">Mode COD</th>
           <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('rts_set')">Set RTS%</th>
@@ -102,6 +103,11 @@
               <template x-if="r.has_data && !r.is_anchor">
                 <span class="ml-1 text-[10px] text-amber-600">(other primary)</span>
               </template>
+            </td>
+            {{-- Item Alias — canonical item_type family. "—" kapag walang alias. --}}
+            <td class="px-4 py-2 border-b border-slate-100">
+              <span x-show="r.item_alias" class="text-slate-700" x-text="r.item_alias"></span>
+              <span x-show="!r.item_alias" class="text-slate-300">—</span>
             </td>
             {{-- Orders --}}
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
@@ -208,6 +214,7 @@
         <tr class="bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300">
           <td class="px-4 py-2 bg-slate-100"></td>
           <td class="px-4 py-2 bg-slate-100 text-right">TOTAL (range)</td>
+          <td class="px-4 py-2 bg-slate-100"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('orders')"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('price')"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('rts_set')"></td>
