@@ -2536,6 +2536,12 @@ class OwnerPrivateController extends Controller
 
         $pageName  = trim($validated['page_name']);
         $itemName  = trim($validated['item_name']);
+        // Alias resolver — used by the alias-aware carry-forward lookup below.
+        // STORAGE stays per-variant (raw item_name). Ang "same-alias = same" ay
+        // ginagawa sa RESOLUTION side (main / breakdown / matrix / itemSummary)
+        // na canonical-key na — kaya hindi nasisira ang raw-keyed lookups o ang
+        // no-alias case (canonicalKey == normalize kapag walang mapping).
+        $aliasesSave = new \App\Services\ItemAliasResolver();
         $effDate   = $validated['effective_date'];
 
         // ── Capture old values for audit log (read BEFORE mutation) ──────────
@@ -2575,7 +2581,6 @@ class OwnerPrivateController extends Controller
         $carryRts   = $oldRts;
         $carryPromo = ($oldPromo !== null && $oldPromo !== '') ? $oldPromo : null;
         if ($needsPriceTag) {
-            $aliasesSave = new \App\Services\ItemAliasResolver();
             $canonTarget = $aliasesSave->canonicalKey($itemName);
             $histRows = DB::table('page_item_settings')
                 ->where('page_name', $pageName)
@@ -3050,14 +3055,18 @@ class OwnerPrivateController extends Controller
             $rtsRowsAll = DB::table('page_item_settings')
                 ->where('effective_date', '<=', $endDate)
                 ->orderBy('effective_date')
+                ->orderBy('id')   // deterministic same-date order (highest id last → wins)
                 ->get($cols)
                 ->all();
         }
-        // Index: $rtsIdx[page_key][item_key][price_int] = [ [date, rts, promo], ... ] sorted ASC by date
+        // Alias resolver — RTS/promo/cogs keyed by CANONICAL item key (same-alias =
+        // same setting; non-aliased → normalize, walang pagbabago).
+        $aliasesM = new \App\Services\ItemAliasResolver();
+        // Index: $rtsIdx[page_key][canonical_item_key][price_int] = [ [date, rts, promo], ... ] ASC by date
         $rtsIdx = [];
         foreach ($rtsRowsAll as $r) {
             $pk = strtolower(trim((string)$r->page_name));
-            $ik = strtolower(trim((string)$r->item_name));
+            $ik = $aliasesM->canonicalKey((string)$r->item_name);
             if ($pk === '' || $ik === '') continue;
             $codInt = ($hasModeCodIntCol && $r->mode_cod_int !== null) ? (int) $r->mode_cod_int : null;
             // Orphan rows (NULL price) skipped — pre-migration data needs re-tag via recompute.
@@ -3070,9 +3079,9 @@ class OwnerPrivateController extends Controller
         }
         // Helper: resolve RTS + promo for a (page_key, item_name, price, date)
         // Strict price match — different price returns null (no inheritance).
-        $resolveRts = function(string $pk, string $itemName, ?int $priceInt, string $date) use (&$rtsIdx): ?array {
+        $resolveRts = function(string $pk, string $itemName, ?int $priceInt, string $date) use (&$rtsIdx, $aliasesM): ?array {
             if ($priceInt === null) return null;
-            $ik = strtolower(trim($itemName));
+            $ik = $aliasesM->canonicalKey($itemName);
             $list = $rtsIdx[$pk][$ik][$priceInt] ?? null;
             if (!$list) return null;
             $hit = null;
@@ -3093,15 +3102,15 @@ class OwnerPrivateController extends Controller
             : [];
         $cogsIdx = [];
         foreach ($cogsRows as $r) {
-            $ik = strtolower(trim((string)$r->item_name));
+            $ik = $aliasesM->canonicalKey((string)$r->item_name);
             if ($ik === '') continue;
             $cogsIdx[$ik][] = [
                 'date'      => (string)$r->date,
                 'unit_cost' => (float)$r->unit_cost,
             ];
         }
-        $resolveCogs = function(string $itemName, string $date) use (&$cogsIdx): ?float {
-            $ik = strtolower(trim($itemName));
+        $resolveCogs = function(string $itemName, string $date) use (&$cogsIdx, $aliasesM): ?float {
+            $ik = $aliasesM->canonicalKey($itemName);
             $list = $cogsIdx[$ik] ?? null;
             if (!$list) return null;
             $hit = null;
@@ -3113,8 +3122,8 @@ class OwnerPrivateController extends Controller
         };
         // Resolver para sa "kelan last na-update yung COGS for this item ≤ this date"
         // — used as the COGS section's default effective_date sa Edit Cell modal.
-        $resolveCogsLastDate = function(string $itemName, string $date) use (&$cogsIdx): ?string {
-            $ik = strtolower(trim($itemName));
+        $resolveCogsLastDate = function(string $itemName, string $date) use (&$cogsIdx, $aliasesM): ?string {
+            $ik = $aliasesM->canonicalKey($itemName);
             $list = $cogsIdx[$ik] ?? null;
             if (!$list) return null;
             $hit = null;
@@ -3135,7 +3144,7 @@ class OwnerPrivateController extends Controller
                 ->get(['item_name', 'date', 'unit_cost'])
                 ->all();
             foreach ($cogsCeoRows as $r) {
-                $ik = strtolower(trim((string)$r->item_name));
+                $ik = $aliasesM->canonicalKey((string)$r->item_name);
                 if ($ik === '') continue;
                 $cogsCeoIdx[$ik][] = [
                     'date'      => (string)$r->date,
@@ -3143,8 +3152,8 @@ class OwnerPrivateController extends Controller
                 ];
             }
         }
-        $resolveCogsCeo = function(string $itemName, string $date) use (&$cogsCeoIdx): ?float {
-            $ik = strtolower(trim($itemName));
+        $resolveCogsCeo = function(string $itemName, string $date) use (&$cogsCeoIdx, $aliasesM): ?float {
+            $ik = $aliasesM->canonicalKey($itemName);
             $list = $cogsCeoIdx[$ik] ?? null;
             if (!$list) return null;
             $hit = null;
@@ -4147,10 +4156,18 @@ class OwnerPrivateController extends Controller
             ")
             ->orderByRaw("LOWER(REPLACE(REPLACE(REPLACE($trimFn(COALESCE($cogsItemQ,'')),' ',''),'-',''),'_','')) ASC, DATE($cogsDateQ) DESC")
             ->get();
+        // Alias-aware: i-canonicalize ang cogs item key para tumama sa
+        // primary_item_key (na canonical din). Variants ng iisang aliased item →
+        // iisang bucket. Re-sort by date DESC pagkatapos (kasi merged ang lists).
         $cogsLookup = [];
         foreach ($cogsAll as $r) {
-            $cogsLookup[(string)$r->item_key][] = ['date' => (string)$r->eff_date, 'cost' => (float)$r->unit_cost];
+            $ck = $aliasResolver->canonicalKey((string)$r->item_key);
+            $cogsLookup[$ck][] = ['date' => (string)$r->eff_date, 'cost' => (float)$r->unit_cost];
         }
+        foreach ($cogsLookup as &$__list) {
+            usort($__list, fn($a, $b) => strcmp((string)$b['date'], (string)$a['date'])); // date DESC
+        }
+        unset($__list);
         $findUnitCost = function(string $itemKey, string $orderDate) use ($cogsLookup): float {
             if (!isset($cogsLookup[$itemKey])) return 0.0;
             foreach ($cogsLookup[$itemKey] as $entry) {
@@ -4168,18 +4185,18 @@ class OwnerPrivateController extends Controller
         if (Schema::hasTable('page_item_settings')) {
             $cols = ['page_name', 'item_name', 'rts_pct'];
             if ($hasModeCodIntColD) $cols[] = 'mode_cod_int';
+            // Global eff DESC, id DESC (alias-merged consistency — same as main view).
             $settingRows = DB::table('page_item_settings')
                 ->where('effective_date', '<=', $end)
-                ->orderBy('page_name')
-                ->orderBy('item_name')
                 ->orderByDesc('effective_date')
                 ->orderByDesc('id')
                 ->get($cols);
             foreach ($settingRows as $s) {
                 $codInt = ($hasModeCodIntColD && $s->mode_cod_int !== null) ? (int) $s->mode_cod_int : null;
                 if ($codInt === null) continue;  // orphan row, skip
+                // Alias-aware key — variants of one aliased item share a setting.
                 $k = strtolower(trim((string)$s->page_name))
-                   . '||' . strtolower(trim((string)$s->item_name))
+                   . '||' . $aliasResolver->canonicalKey((string)$s->item_name)
                    . '||' . $codInt;
                 if (!isset($settingsMap[$k])) {
                     // rts_pct nullable post-2026-05-21 — preserve null
@@ -4268,7 +4285,7 @@ class OwnerPrivateController extends Controller
             // RTS% from page_item_settings (NOT JNT 60-day stats).
             // Same lookup shape as itemSummary: lower(page)||lower(item)||price_int.
             // Strict price match — different price for same (page, item) = no settings hit.
-            $setKey = $pageKey . '||' . strtolower(trim($itemName)) . '||' . (int) round($modeCod);
+            $setKey = $pageKey . '||' . $aliasResolver->canonicalKey($itemName) . '||' . (int) round($modeCod);
             if (!isset($settingsMap[$setKey])) continue;
             $rtsPct        = $settingsMap[$setKey];
             // rts_pct nullable post-2026-05-21 — skip slice if walang RTS pa
