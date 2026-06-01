@@ -99,37 +99,46 @@
                      Highlight = EFFECTIVE-DATE row (kung saan nagsimula ang value).
                      Kung bago pa sa range nagsimula → "since [date]" sa first row. --}}
                 <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
-                    :class="(r.rts_eff_date && r.date === r.rts_eff_date) ? 'font-bold text-blue-700 bg-blue-100' : ''"
-                    :title="r.rts_eff_date ? ('effective from ' + r.rts_eff_date) : 'no Set RTS'">
+                    :class="r.rts_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.rts_eff_date && r.date === r.rts_eff_date) ? 'font-bold text-blue-700 bg-blue-100' : '')"
+                    :title="r.rts_backfilled ? ('⚠ walang proper Set RTS para sa araw na ito — back-filled mula ' + r.rts_eff_date) : (r.rts_eff_date ? ('effective from ' + r.rts_eff_date) : 'no Set RTS')">
                   <span x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></span>
-                  <template x-if="r.rts_eff_date && r.date === r.rts_eff_date">
+                  <template x-if="r.rts_backfilled">
+                    <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
+                  </template>
+                  <template x-if="!r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date">
                     <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
                   </template>
-                  <template x-if="r.rts_eff_date && r.rts_eff_date < startDate && r.date === startDate">
+                  <template x-if="!r.rts_backfilled && r.rts_eff_date && r.rts_eff_date < startDate && r.date === startDate">
                     <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.rts_eff_date"></span>
                   </template>
                 </td>
                 {{-- Promo — label (page_item_settings.promo), resolved as of this date --}}
                 <td class="px-4 py-2 border-b border-slate-100"
-                    :class="(r.promo_eff && r.date === r.promo_eff) ? 'font-bold text-blue-700 bg-blue-100' : ''"
-                    :title="r.promo_eff ? ('effective from ' + r.promo_eff) : 'no promo'">
+                    :class="r.promo_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.promo_eff && r.date === r.promo_eff) ? 'font-bold text-blue-700 bg-blue-100' : '')"
+                    :title="r.promo_backfilled ? ('⚠ walang proper promo para sa araw na ito — back-filled mula ' + r.promo_eff) : (r.promo_eff ? ('effective from ' + r.promo_eff) : 'no promo')">
                   <span x-text="(r.promo !== null && r.promo !== undefined && r.promo !== '') ? r.promo : '—'"></span>
-                  <template x-if="r.promo_eff && r.date === r.promo_eff">
+                  <template x-if="r.promo_backfilled">
+                    <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
+                  </template>
+                  <template x-if="!r.promo_backfilled && r.promo_eff && r.date === r.promo_eff">
                     <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
                   </template>
-                  <template x-if="r.promo_eff && r.promo_eff < startDate && r.date === startDate">
+                  <template x-if="!r.promo_backfilled && r.promo_eff && r.promo_eff < startDate && r.date === startDate">
                     <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.promo_eff"></span>
                   </template>
                 </td>
                 {{-- Item Value (cogs) — resolved as of this date --}}
                 <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
-                    :class="(r.item_value_eff && r.date === r.item_value_eff) ? 'font-bold text-blue-700 bg-blue-100' : ''"
-                    :title="r.item_value_eff ? ('effective from ' + r.item_value_eff) : 'no cogs entry'">
+                    :class="r.item_value_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.item_value_eff && r.date === r.item_value_eff) ? 'font-bold text-blue-700 bg-blue-100' : '')"
+                    :title="r.item_value_backfilled ? ('⚠ walang proper cogs para sa araw na ito — back-filled mula ' + r.item_value_eff) : (r.item_value_eff ? ('effective from ' + r.item_value_eff) : 'no cogs entry')">
                   <span x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></span>
-                  <template x-if="r.item_value_eff && r.date === r.item_value_eff">
+                  <template x-if="r.item_value_backfilled">
+                    <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
+                  </template>
+                  <template x-if="!r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff">
                     <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
                   </template>
-                  <template x-if="r.item_value_eff && r.item_value_eff < startDate && r.date === startDate">
+                  <template x-if="!r.item_value_backfilled && r.item_value_eff && r.item_value_eff < startDate && r.date === startDate">
                     <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.item_value_eff"></span>
                   </template>
                 </td>
@@ -149,8 +158,9 @@
         Amber row = different primary that day → excluded from totals ·
         ⚓ ANCHOR = end-date row (anchor source) ·
         Set RTS% / Promo / Item Val. = value effective as of each date ·
-        <span class="font-bold text-blue-700">Highlighted cell + "↑ effective"</span> = kung saang date NAGSIMULA ang value (effective date) ·
-        "since [date]" sa first row = nagsimula bago pa ang range.
+        <span class="font-bold text-blue-700">Blue cell + "↑ effective"</span> = kung saang date NAGSIMULA ang value ·
+        <span class="font-bold text-red-700">Red cell + "⚠ back-filled"</span> = walang proper setting para sa araw na yon (hiniram ang earliest — dapat mag-set ka ng tamang value) ·
+        "since [date]" = nagsimula bago pa ang range.
       </div>
     </div>
   </div>

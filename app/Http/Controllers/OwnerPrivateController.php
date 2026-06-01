@@ -1946,6 +1946,67 @@ class OwnerPrivateController extends Controller
             }
         }
 
+        // ── PER-DATE HISTORY MAPS (for per-day RTS / cogs / fees sa profit calc) ──
+        // Profit is computed PER-DAY using the RTS/cogs/fees EFFECTIVE on each
+        // day (hindi single end-date value). Kapag ang araw ay nauna pa sa
+        // pinaka-unang setting → BACK-FILL ang earliest available value + flag
+        // (backfilled=true) para ma-indicate sa UI na walang proper setting doon.
+        // All value keys normalized to 'val' so one generic resolver works.
+
+        // RTS history: (page||item||cod_int) → [ ['eff'=>date, 'val'=>float|null], ... ] DESC
+        $rtsHistoryMap = [];
+        foreach ((isset($settingRows) ? $settingRows : []) as $s) {
+            $codIntH = ($hasModeCodIntCol && $s->mode_cod_int !== null) ? (int)$s->mode_cod_int : null;
+            if ($codIntH === null) continue;
+            $kH = strtolower(trim((string)$s->page_name)).'||'.strtolower(trim((string)$s->item_name)).'||'.$codIntH;
+            $rtsHistoryMap[$kH][] = [
+                'eff' => substr((string)$s->effective_date, 0, 10),
+                'val' => $s->rts_pct !== null ? (float)$s->rts_pct : null,
+            ];
+        }
+
+        // cogs history (Marketing): strtolower(trim) → [ ['eff'=>date, 'val'=>float], ... ] DESC
+        $cogsHistoryMap = [];
+        foreach ($cogsRows as $r) {
+            $kH = strtolower(trim((string)($r->$cogsItemCol ?? '')));
+            $cogsHistoryMap[$kH][] = [
+                'eff' => substr((string)($r->$cogsDateCol ?? ''), 0, 10),
+                'val' => (float)($r->$cogsUnitCol ?? 0),
+            ];
+        }
+        // cogs_ceo history
+        $cogsCeoHistoryMap = [];
+        foreach ((isset($cogsCeoRows) ? $cogsCeoRows : []) as $r) {
+            $kH = strtolower(trim((string)($r->item_name ?? '')));
+            $cogsCeoHistoryMap[$kH][] = [
+                'eff' => substr((string)($r->date ?? ''), 0, 10),
+                'val' => $r->unit_cost !== null ? (float)$r->unit_cost : null,
+            ];
+        }
+
+        // fees history: setting_key → [ ['eff'=>date, 'val'=>float], ... ] DESC
+        $feeHistoryMap = [];
+        foreach (FeeSetting::forHost($host) as $f) {
+            $feeHistoryMap[(string)$f->setting_key][] = [
+                'eff' => substr((string)$f->effective_date, 0, 10),
+                'val' => (float)$f->setting_value,
+            ];
+        }
+
+        // Generic per-date resolver — list is DESC by eff. Returns the value
+        // effective ≤ $asOf; if $asOf is before the earliest entry, back-fills
+        // the earliest (last in DESC list) + flags backfilled=true.
+        $resolveAsOf = function (?array $list, string $asOf): array {
+            if (empty($list)) return ['val' => null, 'eff' => null, 'backfilled' => false];
+            foreach ($list as $e) {
+                if ($e['eff'] <= $asOf) {
+                    return ['val' => $e['val'], 'eff' => $e['eff'], 'backfilled' => false];
+                }
+            }
+            $earliest = $list[count($list) - 1];
+            return ['val' => $earliest['val'], 'eff' => $earliest['eff'], 'backfilled' => true];
+        };
+
         // ── JNT stats: JOIN from_jnts → page_sender_mappings (60-day, excl. selected date) ─
         // One PAGE can have MULTIPLE sender names in page_sender_mappings.
         // The JOIN finds ALL from_jnts records for a page by matching every sender name.
@@ -2131,9 +2192,17 @@ class OwnerPrivateController extends Controller
                 }
             }
 
-            if ($rtsPct !== null && $itemValue !== null && !empty($includedDatesArr)) {
-                $rts           = $rtsPct / 100.0;
-                $deliverFactor = 1.0 - $rts;
+            // ── PER-DATE profit: resolve RTS / cogs / fees EFFECTIVE on each day
+            // (hindi single end-date value). Back-fill earliest kapag walang
+            // setting pa sa araw na yon, at i-track ang mga back-filled dates.
+            $profitBackfillDates = [];   // date → true (used a back-filled value)
+            $cogsHistForItem = $useCeoForProfit
+                ? ($cogsCeoHistoryMap[$dominantKey] ?? [])
+                : ($cogsHistoryMap[$dominantKey] ?? []);
+            $hasRtsHist  = !empty($rtsHistoryMap[$settingKey] ?? []);
+            $hasCostHist = !empty($cogsHistForItem);
+
+            if ($hasRtsHist && $hasCostHist && !empty($includedDatesArr)) {
                 $sumProfit = 0.0;
                 $anyPrice  = false;
                 $sumProfitLastDay  = 0.0; $anyPriceLastDay  = false;
@@ -2148,10 +2217,6 @@ class OwnerPrivateController extends Controller
                     $inLast3D   = ($dTs >= $start3DTs && $dTs <= $endTs);
                     $inLast7D   = ($dTs >= $start7DTs && $dTs <= $endTs);
 
-                    // NOTE: orders/proceed accumulation moved OUT of this if-block
-                    // (to the unconditional pre-loop above) so columns work even
-                    // for pages without RTS/cogs. We only sum gross_sales here
-                    // since it's part of the profit calc that needs rtsPct + itemValue.
                     if ($isLastDay && $pDay > 0) {
                         $grossSalesLastDay += $pDay * (int)($slice['orders'] ?? 0);
                     }
@@ -2162,23 +2227,43 @@ class OwnerPrivateController extends Controller
                         $grossSalesLast7Day += $pDay * (int)($slice['orders'] ?? 0);
                     }
 
-                    if ($pDay <= 0) {
-                        // no price that day → can't compute revenue; still subtract adspent so ROI isn't overstated
+                    // Resolve per-day RTS / cogs / fees (effective as of $d, back-fill earliest).
+                    $rRts  = $resolveAsOf($rtsHistoryMap[$settingKey] ?? [], (string)$d);
+                    $rCost = $resolveAsOf($cogsHistForItem, (string)$d);
+                    $rCodR = $resolveAsOf($feeHistoryMap['cod_fee_rate'] ?? [], (string)$d);
+                    $rVat  = $resolveAsOf($feeHistoryMap['cod_fee_vat_rate'] ?? [], (string)$d);
+                    $rShip = $resolveAsOf($feeHistoryMap['shipping_fee_per_order'] ?? [], (string)$d);
+
+                    $dayRts  = $rRts['val'];   $dayCost = $rCost['val'];
+                    $dayCodR = $rCodR['val'];  $dayVat  = $rVat['val'];  $dayShip = $rShip['val'];
+
+                    // Missing essential value (null) OR no price → can't compute
+                    // revenue; subtract adspent only so ROI isn't overstated.
+                    if ($dayRts === null || $dayCost === null || $dayCodR === null
+                        || $dayVat === null || $dayShip === null || $pDay <= 0) {
                         $sumProfit -= $adsDay;
                         if ($isLastDay) $sumProfitLastDay  -= $adsDay;
                         if ($inLast3D)  $sumProfitLast3Day -= $adsDay;
                         if ($inLast7D)  $sumProfitLast7Day -= $adsDay;
                         continue;
                     }
-                    $anyPrice = true;
-                    $codFeeDay = $pDay * $codFeeRate * (1 + $codFeeVatRate);
+
+                    // Track back-fill (kahit alin sa 5 values na back-filled).
+                    if ($rRts['backfilled'] || $rCost['backfilled'] || $rCodR['backfilled']
+                        || $rVat['backfilled'] || $rShip['backfilled']) {
+                        $profitBackfillDates[(string)$d] = true;
+                    }
+
+                    $deliverFactor = 1.0 - $dayRts / 100.0;
+                    $codFeeDay     = $pDay * $dayCodR * (1.0 + $dayVat);
                     $sliceProfit =
                         $proceedDay * $pDay * $deliverFactor                      // revenue
-                        - $proceedDay * $shippingFee                              // shipping (all proceed)
-                        - $proceedDay * $deliverFactor * $itemValue               // COGS (delivered)
+                        - $proceedDay * $dayShip                                  // shipping (all proceed)
+                        - $proceedDay * $deliverFactor * $dayCost                 // COGS (delivered)
                         - $adsDay                                                 // adspent
                         - $proceedDay * $deliverFactor * $codFeeDay;              // COD fee (delivered)
                     $sumProfit += $sliceProfit;
+                    $anyPrice = true;
                     if ($isLastDay) { $anyPriceLastDay  = true; $sumProfitLastDay  += $sliceProfit; }
                     if ($inLast3D)  { $anyPriceLast3Day = true; $sumProfitLast3Day += $sliceProfit; }
                     if ($inLast7D)  { $anyPriceLast7Day = true; $sumProfitLast7Day += $sliceProfit; }
@@ -2301,6 +2386,11 @@ class OwnerPrivateController extends Controller
                 'proceed_last_7d'           => $procOrdersLast7Day,
                 'gross_sales_last_7d'       => $grossSalesLast7Day,
                 'rts_pct'               => $rtsPct,
+                // Back-fill flag — true kapag may included date na walang proper
+                // RTS/cogs/fee setting (effective date later), kaya hiniram ang
+                // earliest. Frontend shows a warning icon. Includes the dates list.
+                'has_backfill'          => !empty($profitBackfillDates),
+                'backfill_dates'        => array_keys($profitBackfillDates),
                 'price'                 => $price > 0 ? $price : null,
                 'price_min'             => ($priceIsRange && $priceMin > 0 && abs($priceMin - $price) > 0.01) ? $priceMin : null,
                 'price_max'             => ($priceIsRange && abs($priceMax - $price) > 0.01) ? $priceMax : null,
@@ -3420,25 +3510,32 @@ class OwnerPrivateController extends Controller
         }
         // Resolve a settings field ('rts' or 'promo') effective as of $asOf for
         // (item, price). Price-aware: prefers a ±1 mode_cod match, else latest.
+        // BACK-FILL: kapag $asOf ay nauna sa earliest setting → gamitin ang
+        // earliest + flag backfilled=true (para PUMULA sa breakdown).
         $resolveSetting = function (string $field, string $itemName, ?int $codInt, string $asOf) use ($rtsByItem) {
             $itemLower = strtolower(trim($itemName));
-            if (!isset($rtsByItem[$itemLower])) return ['val' => null, 'eff' => null];
-            $cands = array_values(array_filter($rtsByItem[$itemLower], fn ($e) => $e['eff'] <= $asOf));
-            if (empty($cands)) return ['val' => null, 'eff' => null];
-            if ($codInt !== null) {
-                foreach ($cands as $e) {
-                    if ($e['cod'] !== null && abs($e['cod'] - $codInt) <= 1) {
-                        return ['val' => $e[$field], 'eff' => $e['eff']];
+            if (!isset($rtsByItem[$itemLower])) return ['val' => null, 'eff' => null, 'backfilled' => false];
+            $all   = $rtsByItem[$itemLower]; // DESC by eff
+            $cands = array_values(array_filter($all, fn ($e) => $e['eff'] <= $asOf));
+            if (!empty($cands)) {
+                if ($codInt !== null) {
+                    foreach ($cands as $e) {
+                        if ($e['cod'] !== null && abs($e['cod'] - $codInt) <= 1) {
+                            return ['val' => $e[$field], 'eff' => $e['eff'], 'backfilled' => false];
+                        }
                     }
                 }
+                return ['val' => $cands[0][$field], 'eff' => $cands[0]['eff'], 'backfilled' => false];
             }
-            return ['val' => $cands[0][$field], 'eff' => $cands[0]['eff']];
+            // before earliest → back-fill earliest (last in DESC list)
+            $earliest = $all[count($all) - 1];
+            return ['val' => $earliest[$field], 'eff' => $earliest['eff'], 'backfilled' => true];
         };
         $resolveRts   = fn (string $itemName, ?int $codInt, string $asOf) => (function ($r) {
-            return ['rts' => $r['val'], 'eff' => $r['eff']];
+            return ['rts' => $r['val'], 'eff' => $r['eff'], 'backfilled' => $r['backfilled']];
         })($resolveSetting('rts', $itemName, $codInt, $asOf));
         $resolvePromo = fn (string $itemName, ?int $codInt, string $asOf) => (function ($r) {
-            return ['promo' => $r['val'], 'eff' => $r['eff']];
+            return ['promo' => $r['val'], 'eff' => $r['eff'], 'backfilled' => $r['backfilled']];
         })($resolveSetting('promo', $itemName, $codInt, $asOf));
 
         // Item value (cogs — Marketing's table, same as main "Item Val." column):
@@ -3467,11 +3564,14 @@ class OwnerPrivateController extends Controller
         }
         $resolveItemVal = function (string $itemName, string $asOf) use ($cogsByItem, $normItem): array {
             $k = $normItem($itemName);
-            if (!isset($cogsByItem[$k])) return ['val' => null, 'eff' => null];
-            foreach ($cogsByItem[$k] as $e) {
-                if ($e['eff'] <= $asOf) return ['val' => $e['cost'], 'eff' => $e['eff']];
+            if (!isset($cogsByItem[$k])) return ['val' => null, 'eff' => null, 'backfilled' => false];
+            $all = $cogsByItem[$k]; // DESC by eff
+            foreach ($all as $e) {
+                if ($e['eff'] <= $asOf) return ['val' => $e['cost'], 'eff' => $e['eff'], 'backfilled' => false];
             }
-            return ['val' => null, 'eff' => null];
+            // before earliest → back-fill earliest (last in DESC list)
+            $earliest = $all[count($all) - 1];
+            return ['val' => $earliest['cost'], 'eff' => $earliest['eff'], 'backfilled' => true];
         };
 
         $out = [];
@@ -3508,10 +3608,13 @@ class OwnerPrivateController extends Controller
                     'second_orders'    => $r->second_orders !== null ? (int)$r->second_orders : null,
                     'rts_pct'          => $rtsRes['rts'],
                     'rts_eff_date'     => $rtsRes['eff'],
+                    'rts_backfilled'   => !empty($rtsRes['backfilled']),
                     'promo'            => $promoRes['promo'],
                     'promo_eff'        => $promoRes['eff'],
+                    'promo_backfilled' => !empty($promoRes['backfilled']),
                     'item_value'       => $ivRes['val'],
                     'item_value_eff'   => $ivRes['eff'],
+                    'item_value_backfilled' => !empty($ivRes['backfilled']),
                     'is_anchor'        => $itemMatches && $priceMatches,
                     'is_anchor_date'   => ($d === $endDate),  // end-date row = anchor source
                     'has_data'         => true,
@@ -3528,10 +3631,13 @@ class OwnerPrivateController extends Controller
                     'second_orders'    => null,
                     'rts_pct'          => null,
                     'rts_eff_date'     => null,
+                    'rts_backfilled'   => false,
                     'promo'            => null,
                     'promo_eff'        => null,
+                    'promo_backfilled' => false,
                     'item_value'       => null,
                     'item_value_eff'   => null,
+                    'item_value_backfilled' => false,
                     'is_anchor_date'   => ($d === $endDate),
                     'is_anchor'        => false,
                     'has_data'         => false,

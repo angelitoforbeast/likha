@@ -668,6 +668,16 @@
                         </template>
                       </div>
                     </template>
+                    {{-- Back-fill warning — may included date(s) na walang proper
+                         RTS/cogs/fee setting kaya hiniram ang earliest. Click →
+                         breakdown (red cells doon). --}}
+                    <template x-if="row.has_backfill">
+                      <div style="cursor:pointer;font-size:10px;color:#dc2626;font-weight:600;line-height:1.3;margin-top:2px;"
+                           @click="openBreakdown(row)"
+                           :title="'⚠ ' + (row.backfill_dates ? row.backfill_dates.length : 0) + ' date(s) walang proper RTS/cogs/fee setting — back-filled earliest. Click para makita sa breakdown (red cells).'">
+                        ⚠ back-filled RTS/cost
+                      </div>
+                    </template>
                   </div>
                 </div>
               </td>
