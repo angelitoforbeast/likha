@@ -1917,10 +1917,15 @@ class OwnerPrivateController extends Controller
             $cols = ['page_name', 'item_name', 'rts_pct', 'effective_date', 'comment', 'item_value_comment', 'promo'];
             if ($hasModeCodIntCol) $cols[] = 'mode_cod_int';
 
+            // Order GLOBALLY by effective_date DESC (then id DESC) — HINDI naka-group
+            // per item_name. Kritikal ito sa alias-merged canonical buckets: ang
+            // settingsMap (first-wins) at ang rtsHistoryMap (resolveAsOf umaasa sa
+            // global eff DESC) ay dapat kunin ang GLOBALLY-LATEST effective row,
+            // tugma sa breakdown. Dating naka-orderBy('item_name') muna → napi-pick
+            // ang alphabetically-first variant's latest, kaya nag-ka-iba ang
+            // promo/RTS sa breakdown (at mali ang per-date back-fill resolution).
             $settingRows = DB::table('page_item_settings')
                 ->where('effective_date', '<=', $date)
-                ->orderBy('page_name')
-                ->orderBy('item_name')
                 ->orderByDesc('effective_date')
                 ->orderByDesc('id')   // tiebreaker: latest insert wins when same date
                 ->get($cols);
