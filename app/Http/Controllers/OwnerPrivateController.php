@@ -2932,11 +2932,29 @@ class OwnerPrivateController extends Controller
             ->first(['page_label']);
         if ($row) $pageLabel = (string)$row->page_label;
 
+        // Column visibility + conditional formatting — same source/config as the
+        // /owner/private page-summary table (owner_private catalog). Role-aware:
+        // CEO sees all; Marketing/MOIC see only granted columns. CEO can preview
+        // a role via ?view_as=marketing (mirrors the main view).
+        $role   = $this->getNormalizedRole();
+        $isCEO  = $role === 'CEO';
+        $viewAs = strtolower(trim((string) $request->input('view_as', 'ceo')));
+        if (!in_array($viewAs, ['ceo', 'marketing'], true)) $viewAs = 'ceo';
+        $viewRoleForCols = ($isCEO && $viewAs === 'marketing') ? 'Marketing' : $role;
+
+        $colsCtrl       = new \App\Http\Controllers\OwnerColumnSettingsController();
+        $colsConfig     = $colsCtrl->loadConfig('owner_private', $viewRoleForCols);
+        $colFormatRules = $colsCtrl->loadColFormat('owner_private')['byCol'] ?? [];
+        $breakevenPct   = $colsCtrl->loadBreakevenTargetPct();
+
         return view('owner.private-breakdown', [
-            'pageKey'    => $pageKey,
-            'pageLabel'  => $pageLabel,
-            'startDate'  => $startDate,
-            'endDate'    => $endDate,
+            'pageKey'        => $pageKey,
+            'pageLabel'      => $pageLabel,
+            'startDate'      => $startDate,
+            'endDate'        => $endDate,
+            'colsConfig'     => $colsConfig,
+            'colFormatRules' => $colFormatRules,
+            'breakevenPct'   => $breakevenPct,
         ]);
     }
 
