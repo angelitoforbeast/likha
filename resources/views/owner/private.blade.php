@@ -321,15 +321,41 @@
             Filter by item
           </span>
           <span style="font-size:10px;color:#94a3b8;">
-            <span x-text="selectedItems.length" style="color:#2563eb;font-weight:700;"></span>
+            <span x-text="selectedItems.length + selectedAliases.length" style="color:#2563eb;font-weight:700;"></span>
             <span> / </span>
-            <span x-text="uniqueItems().length"></span>
+            <span x-text="uniqueItems().length + uniqueAliases().length"></span>
           </span>
         </div>
         <div style="overflow-y:auto;flex:1;padding:4px;">
-          <template x-if="visibleItems().length === 0">
+          <template x-if="visibleAliases().length === 0 && visibleItems().length === 0">
             <div style="text-align:center;color:#94a3b8;font-size:11px;padding:20px;">No items match.</div>
           </template>
+
+          {{-- Alias (family) groups — isang check = LAHAT ng item names sa family --}}
+          <template x-for="alias in visibleAliases()" :key="'alias:'+alias">
+            <label style="display:flex;align-items:center;gap:10px;padding:6px 10px;cursor:pointer;
+                          border-radius:6px;font-size:12px;color:#0f172a;line-height:1.3;
+                          transition:background .1s;background:#faf5ff;"
+                   onmouseover="this.style.background='#f3e8ff'"
+                   onmouseout="this.style.background='#faf5ff'">
+              <input type="checkbox"
+                     :checked="selectedAliases.includes(alias)"
+                     @change="toggleAlias(alias)"
+                     style="accent-color:#7c3aed;cursor:pointer;width:14px;height:14px;flex-shrink:0;">
+              <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                <span style="display:inline-block;background:#ede9fe;color:#6d28d9;font-size:9px;
+                             font-weight:700;letter-spacing:.3px;padding:1px 5px;border-radius:4px;
+                             margin-right:6px;vertical-align:middle;">FAMILY</span>
+                <span x-text="alias" style="font-weight:700;color:#6d28d9;"></span>
+              </span>
+            </label>
+          </template>
+
+          {{-- divider between families and individual items --}}
+          <template x-if="visibleAliases().length > 0 && visibleItems().length > 0">
+            <div style="height:1px;background:#e9d5ff;margin:5px 8px;"></div>
+          </template>
+
           <template x-for="name in visibleItems()" :key="name">
             <label style="display:flex;align-items:center;gap:10px;padding:6px 10px;cursor:pointer;
                           border-radius:6px;font-size:12px;color:#0f172a;line-height:1.3;
@@ -351,7 +377,7 @@
             </label>
           </template>
         </div>
-        <div x-show="selectedItems.length"
+        <div x-show="selectedItems.length || selectedAliases.length"
              style="border-top:1px solid #f1f5f9;padding:6px 10px;background:#f8fafc;
                     display:flex;justify-content:flex-end;">
           <button type="button" @click="clearItems()"
@@ -524,10 +550,23 @@
   </div>
 
   <!-- Selected item pills -->
-  <div x-show="selectedItems.length" x-cloak
+  <div x-show="selectedItems.length || selectedAliases.length" x-cloak
        style="background:#f1f5f9;border-bottom:1px solid #e2e8f0;padding:6px 12px;
               display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
     <span style="font-size:11px;color:#475569;font-weight:700;margin-right:4px;">Filter:</span>
+    {{-- Alias (family) pills --}}
+    <template x-for="alias in selectedAliases" :key="'apill:'+alias">
+      <span style="display:inline-flex;align-items:center;gap:4px;background:#ede9fe;
+                   color:#6d28d9;border:1px solid #c4b5fd;border-radius:12px;
+                   padding:2px 8px;font-size:11px;font-weight:700;">
+        <span style="font-size:9px;opacity:.8;">FAMILY</span>
+        <span x-text="alias"></span>
+        <button type="button" @click="toggleAlias(alias)"
+                style="background:none;border:none;color:#6d28d9;cursor:pointer;
+                       font-size:14px;line-height:1;padding:0;font-weight:700;"
+                title="Remove">×</button>
+      </span>
+    </template>
     <template x-for="name in selectedItems" :key="name">
       <span style="display:inline-flex;align-items:center;gap:4px;background:#dbeafe;
                    color:#1e3a8a;border:1px solid #93c5fd;border-radius:12px;
@@ -1653,6 +1692,7 @@
 
       // ── Item filter (multi-select) ───────────────────────────────────────
       selectedItems: [],
+      selectedAliases: [],
       itemFilterOpen: false,
       itemFilterSearch: '',
       uniqueItems() {
@@ -1689,11 +1729,38 @@
         if (i>=0) this.selectedItems.splice(i,1);
         else this.selectedItems.push(name);
       },
-      clearItems() { this.selectedItems = []; },
+      // ── Alias (family) as a checkable group ───────────────────────────────
+      // Distinct aliases across rows. One check covers ALL item names sa family.
+      uniqueAliases() {
+        const set = new Set();
+        for (const r of this.rows) { if (r.item_alias) set.add(String(r.item_alias)); }
+        return [...set].sort((a,b)=>a.localeCompare(b));
+      },
+      visibleAliases() {
+        const q = (this.itemFilterSearch||'').toLowerCase().trim();
+        const aliases = this.uniqueAliases();
+        if (!q) return aliases;
+        // Match by alias label, OR if any item name sa family matches the query.
+        const am = this._itemAliasMap();
+        return aliases.filter(a => {
+          if (a.toLowerCase().includes(q)) return true;
+          for (const n in am) { if (am[n] === a && n.toLowerCase().includes(q)) return true; }
+          return false;
+        });
+      },
+      toggleAlias(alias) {
+        const i = this.selectedAliases.indexOf(alias);
+        if (i>=0) this.selectedAliases.splice(i,1);
+        else this.selectedAliases.push(alias);
+      },
+      clearItems() { this.selectedItems = []; this.selectedAliases = []; },
       filteredRows() {
-        if (!this.selectedItems.length) return this.rows;
-        const sel = new Set(this.selectedItems);
-        return this.rows.filter(r => sel.has(r.item_name));
+        if (!this.selectedItems.length && !this.selectedAliases.length) return this.rows;
+        const selI = new Set(this.selectedItems);
+        const selA = new Set(this.selectedAliases);
+        return this.rows.filter(r =>
+          selI.has(r.item_name) || (r.item_alias && selA.has(String(r.item_alias)))
+        );
       },
 
       // ── Column definitions ────────────────────────────────────────────────
