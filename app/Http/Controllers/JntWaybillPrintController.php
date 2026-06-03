@@ -252,33 +252,9 @@ public function download(int $runId)
 
     $filename = "{$filterDatePart}_{$namePart}_{$downloadPart}.{$ext}";
 
-    // ✅ cleanup AFTER the download response is fully sent
-    app()->terminating(function () use ($runId) {
-        try {
-            $run = JntWaybillPrintRun::find($runId);
-            if (!$run) return;
-
-            $baseDir = "jnt_waybills/bulk_runs/run_{$run->id}";
-
-            // delete files/folder
-            Storage::disk('local')->deleteDirectory($baseDir);
-
-            // optional: delete run items (para lumiit DB)
-            DB::table('jnt_waybill_print_run_items')->where('run_id', $run->id)->delete();
-
-            // optional: keep run row but mark cleaned (para di na mag-404 next time)
-            $run->output_path = null;
-            $run->output_type = null;
-            $run->message = 'Downloaded and cleaned.';
-            $run->save();
-        } catch (\Throwable $e) {
-            Log::warning('Waybill cleanup failed', [
-                'run_id' => $runId,
-                'err' => $e->getMessage(),
-            ]);
-        }
-    });
-
+    // NOTE: Hindi na auto-deleted ang file pagkatapos i-download — nananatili ito
+    // sa /jnt/waybills/files (para makita ang timing/metrics at ma-redownload).
+    // Manual delete (per-file o "Delete All 1 day+") na lang ang paglilinis.
     return response()->download($abs, $filename, [
         'Cache-Control' => 'no-store, no-cache',
     ]);

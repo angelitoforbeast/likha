@@ -62,7 +62,14 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
         $run->processed = 0;
         $run->ok_count = 0;
         $run->fail_count = 0;
+        $run->pages = 0;
         $run->save();
+
+        \Illuminate\Support\Facades\Log::info('Waybill bulk print START', [
+            'run_id' => $run->id,
+            'total'  => (int)$run->total,
+            'started_at' => optional($run->started_at)->toDateTimeString(),
+        ]);
 
         // Per-page J&T client cache. Each waybill picks its account via
         // JntClient::fromPageOrConfig($page). Items with no resolvable page
@@ -185,6 +192,7 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
 
                     $run->processed++;
                     $run->ok_count++;
+                    $run->pages += (int) $pageCount;  // total PDF pages (for pages/min)
                     $okInThisPart++;
 
                 } catch (\Throwable $e) {
@@ -308,6 +316,23 @@ class BuildJntWaybillBulkPrint implements ShouldQueue
         $run->message = 'Done.';
         $run->finished_at = now();
         $run->save();
+
+        // ── Timing log (how long the print took + throughput) ───────────────
+        $durSec = ($run->started_at && $run->finished_at)
+            ? max(0, $run->finished_at->diffInSeconds($run->started_at))
+            : null;
+        $ppm = ($durSec && $durSec > 0) ? round(((int)$run->pages) / ($durSec / 60), 1) : null;
+        \Illuminate\Support\Facades\Log::info('Waybill bulk print DONE', [
+            'run_id'        => $run->id,
+            'total'         => (int)$run->total,
+            'ok'            => (int)$run->ok_count,
+            'fail'          => (int)$run->fail_count,
+            'pages'         => (int)$run->pages,
+            'duration_sec'  => $durSec,
+            'pages_per_min' => $ppm,
+            'started_at'    => optional($run->started_at)->toDateTimeString(),
+            'finished_at'   => optional($run->finished_at)->toDateTimeString(),
+        ]);
     }
 
     private function markFail(JntWaybillPrintRun $run, JntWaybillPrintRunItem $it, string $msg): void

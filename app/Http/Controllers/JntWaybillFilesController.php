@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use App\Models\JntWaybillPrintRun;
 
 class JntWaybillFilesController extends Controller
 {
@@ -44,6 +45,31 @@ class JntWaybillFilesController extends Controller
             ->filter()
             ->sortByDesc('mtime')
             ->values();
+
+        // ── Attach per-run timing metrics (start / end / duration / pages / ppm).
+        $runIds = $files->pluck('run_id')->unique()->all();
+        $runs = JntWaybillPrintRun::query()->whereIn('id', $runIds)->get()->keyBy('id');
+
+        $files = $files->map(function ($f) use ($runs) {
+            $run   = $runs->get($f['run_id']);
+            $start = $run?->started_at;
+            $end   = $run?->finished_at;
+            $durSec = ($start && $end) ? max(0, $start->diffInSeconds($end)) : null;
+            $pages  = $run ? (int) ($run->pages ?? 0) : null;
+            $ppm    = ($pages && $durSec && $durSec > 0)
+                ? round($pages / ($durSec / 60), 1)
+                : null;
+
+            $f['started_at']   = $start ? $start->copy()->timezone('Asia/Manila') : null;
+            $f['finished_at']  = $end ? $end->copy()->timezone('Asia/Manila') : null;
+            $f['duration_sec'] = $durSec;
+            $f['pages']        = $pages;
+            $f['ppm']          = $ppm;
+            $f['ok_count']     = $run ? (int) $run->ok_count : null;
+            $f['fail_count']   = $run ? (int) $run->fail_count : null;
+            $f['total']        = $run ? (int) $run->total : null;
+            return $f;
+        });
 
         return view('jnt.waybills.files', [
             'files' => $files,

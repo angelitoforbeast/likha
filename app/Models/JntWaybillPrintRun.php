@@ -10,7 +10,7 @@ class JntWaybillPrintRun extends Model
 
     protected $fillable = [
         'created_by','date','mode','filter_by','filter_value',
-        'total','processed','ok_count','fail_count',
+        'total','processed','ok_count','fail_count','pages',
         'status','message','output_type','output_path',
         'started_at','finished_at',
     ];

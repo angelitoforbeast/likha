@@ -50,7 +50,11 @@
             <th class="px-4 py-3 text-left font-semibold">File</th>
             <th class="px-4 py-3 text-left font-semibold">Type</th>
             <th class="px-4 py-3 text-right font-semibold">Size</th>
-            <th class="px-4 py-3 text-left font-semibold">Last Modified</th>
+            <th class="px-4 py-3 text-left font-semibold">Start</th>
+            <th class="px-4 py-3 text-left font-semibold">End</th>
+            <th class="px-4 py-3 text-right font-semibold">Duration</th>
+            <th class="px-4 py-3 text-right font-semibold">Pages</th>
+            <th class="px-4 py-3 text-right font-semibold">Pages/min</th>
             <th class="px-4 py-3 text-right font-semibold">Actions</th>
           </tr>
         </thead>
@@ -62,7 +66,7 @@
 
           @if ($files->isEmpty())
             <tr>
-              <td colspan="6" class="px-4 py-8 text-center text-gray-500">
+              <td colspan="10" class="px-4 py-8 text-center text-gray-500">
                 No PDF/ZIP/TXT found in storage.
               </td>
             </tr>
@@ -82,6 +86,24 @@
 
                 // last modified format
                 $mtimeText = $mtime ? \Carbon\Carbon::createFromTimestamp($mtime, 'Asia/Manila')->format('Y-m-d H:i:s') : '-';
+
+                // timing metrics (attached by controller from the run row)
+                $startAt = $f['started_at'] ?? null;
+                $endAt   = $f['finished_at'] ?? null;
+                $durSec  = $f['duration_sec'] ?? null;
+                $pages   = $f['pages'] ?? null;
+                $ppm     = $f['ppm'] ?? null;
+
+                $startText = $startAt ? $startAt->format('Y-m-d H:i:s') : '—';
+                $endText   = $endAt ? $endAt->format('H:i:s') : '—';
+                if ($durSec === null) {
+                    $durText = '—';
+                } elseif ($durSec >= 60) {
+                    $m = intdiv($durSec, 60); $s = $durSec % 60;
+                    $durText = "{$m}m {$s}s";
+                } else {
+                    $durText = "{$durSec}s";
+                }
 
                 // badge color by extension
                 $badgeClass = match (strtolower($f['ext'] ?? '')) {
@@ -116,8 +138,24 @@
                   {{ $sizeText }}
                 </td>
 
-                <td class="px-4 py-3 text-gray-700">
-                  {{ $mtimeText }}
+                <td class="px-4 py-3 text-gray-700 whitespace-nowrap" title="Last modified: {{ $mtimeText }}">
+                  {{ $startText }}
+                </td>
+
+                <td class="px-4 py-3 text-gray-700 whitespace-nowrap">
+                  {{ $endText }}
+                </td>
+
+                <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap">
+                  {{ $durText }}
+                </td>
+
+                <td class="px-4 py-3 text-right tabular-nums">
+                  {{ $pages !== null ? number_format($pages) : '—' }}
+                </td>
+
+                <td class="px-4 py-3 text-right tabular-nums font-semibold {{ $ppm !== null ? 'text-emerald-700' : 'text-gray-400' }}">
+                  {{ $ppm !== null ? number_format($ppm, 1) : '—' }}
                 </td>
 
                 <td class="px-4 py-3">
