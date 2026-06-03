@@ -295,7 +295,7 @@
         <input type="text" x-model="itemFilterSearch"
                @focus="itemFilterOpen=true"
                @click="itemFilterOpen=true"
-               placeholder="Search item…"
+               placeholder="Search item or alias…"
                style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;
                       border-radius:6px;padding:5px 28px 5px 28px;font-size:12px;
                       outline:none;width:240px;transition:border-color .15s;"
@@ -340,8 +340,14 @@
                      :checked="selectedItems.includes(name)"
                      @change="toggleItem(name)"
                      style="accent-color:#2563eb;cursor:pointer;width:14px;height:14px;flex-shrink:0;">
-              <span x-text="name"
-                    style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;"></span>
+              <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                <span x-text="name" style="font-weight:500;"></span>
+                <template x-if="aliasOf(name)">
+                  <span x-text="' · ' + aliasOf(name)"
+                        style="font-size:10px;color:#94a3b8;font-weight:400;"
+                        title="Item alias (family)"></span>
+                </template>
+              </span>
             </label>
           </template>
         </div>
@@ -1654,11 +1660,29 @@
         for (const r of this.rows) { if (r.item_name) set.add(r.item_name); }
         return [...set].sort((a,b)=>a.localeCompare(b));
       },
+      // item_name → item_alias (canonical family). Built once from rows.
+      _itemAliasMap() {
+        const m = {};
+        for (const r of this.rows) {
+          if (r.item_name && r.item_alias) m[r.item_name] = String(r.item_alias);
+        }
+        return m;
+      },
+      aliasOf(name) {
+        const a = this._itemAliasMap()[name];
+        return (a && a.toLowerCase() !== String(name).toLowerCase()) ? a : null;
+      },
       visibleItems() {
         const q = (this.itemFilterSearch||'').toLowerCase().trim();
         const items = this.uniqueItems();
         if (!q) return items;
-        return items.filter(n => n.toLowerCase().includes(q));
+        const am = this._itemAliasMap();
+        // Match by item NAME or by item ALIAS (canonical family).
+        return items.filter(n => {
+          if (n.toLowerCase().includes(q)) return true;
+          const a = am[n];
+          return a && a.toLowerCase().includes(q);
+        });
       },
       toggleItem(name) {
         const i = this.selectedItems.indexOf(name);

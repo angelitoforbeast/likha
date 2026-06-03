@@ -2377,6 +2377,12 @@ class OwnerPrivateController extends Controller
                 'page_name'             => $pg['page_label'],
                 'page_key'              => $pk,
                 'item_name'             => $dominant['item_name'],
+                // Canonical alias (item_type family) for the dominant item —
+                // null kapag walang alias mapping. Ginagamit sa item search filter
+                // (masearch by name O alias) sa /owner/private.
+                'item_alias'            => $aliases->isAliased((string)$dominant['item_name'])
+                    ? $aliases->canonicalLabel((string)$dominant['item_name'])
+                    : null,
                 'secondary_items'       => array_map(fn($i) => [
                     'item_name'    => $i['item_name'],
                     'total_orders' => $i['total_orders'],
