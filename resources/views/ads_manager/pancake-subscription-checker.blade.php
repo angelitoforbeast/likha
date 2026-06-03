@@ -46,9 +46,9 @@
   }
 
   $color = '';
-  if ($diff >= 60)      $color = 'bg-red-200';
-  elseif ($diff >= 40)  $color = 'bg-orange-200';
-  elseif ($diff >= 20)  $color = 'bg-yellow-200';
+  if ($diff >= 30)      $color = 'bg-red-200';     // ≥ 30% diff
+  elseif ($diff >= 20)  $color = 'bg-orange-200';  // 20–29.99%
+  elseif ($diff >= 10)  $color = 'bg-yellow-200';  // 10–19.99%
 @endphp
 
           <tr class="{{ $color }}">
