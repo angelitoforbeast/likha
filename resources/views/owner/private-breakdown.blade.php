@@ -336,8 +336,24 @@
           case 'rts_set':      return r.rts_pct;
           case 'item_val':     return r.item_value;
           case 'promo':        return r.promo;
+          // Computed refs so CF rules like "cpp ≥ breakeven_cpp" carry over.
+          case 'tcpr':         return (r.primary_orders > 0)
+                                  ? (1 - (Number(r.proceed||0) / Number(r.primary_orders))) * 100 : null;
+          case 'breakeven_cpp':return this.breakevenCppForRow(r);
           default:             return null;
         }
+      },
+      // Per-date Breakeven CPP — same formula as main view (uses per-date fees).
+      breakevenCppForRow(r){
+        const o = Number(r.primary_orders ?? 0);
+        const p = Number(r.proceed ?? 0);
+        const price = Number(r.mode_cod ?? 0);
+        const iv = r.item_value, rts = r.rts_pct;
+        if (o <= 0 || price <= 0 || iv == null || rts == null || r.be_f == null || r.be_sf == null) return null;
+        const procRate = p / o;
+        const df = 1 - (Number(rts) / 100);
+        const target = (Number(this.breakevenPct ?? 5)) / 100;
+        return procRate * (df * (price * (1 - Number(r.be_f)) - Number(iv)) - Number(r.be_sf)) - target * price;
       },
 
       // ── Conditional formatting (same rule shape + evaluator as main view) ──

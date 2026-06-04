@@ -3914,6 +3914,10 @@ class OwnerPrivateController extends Controller
                     'net_profit_partial' => $netPartial,
                     'proj_pct'         => $projPct !== null ? round($projPct, 1) : null,
                     'fee_backfilled'   => $feeBackfilled,
+                    // Fee components for breakeven_cpp (conditional-formatting refs)
+                    'be_f'             => ($fCodR['val'] !== null && $fVat['val'] !== null)
+                                          ? round((float)$fCodR['val'] * (1.0 + (float)$fVat['val']), 6) : null,
+                    'be_sf'            => $fShip['val'] !== null ? (float)$fShip['val'] : null,
                     // Action note for this date
                     'action_comment'   => $actionByDate[$d]['comment'] ?? null,
                     'action_by'        => $actionByDate[$d]['by'] ?? null,
