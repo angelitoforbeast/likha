@@ -1088,14 +1088,25 @@
                   </template>
 
                   <!-- action — per-(page, end_date) note; click ✎ to edit via modal -->
+                  {{-- action — truncated by default (huwag auto-expand kahit mahaba);
+                       may "more/less" toggle per cell. ✎ → floating edit modal. --}}
                   <template x-if="col.id==='action'">
                     <span style="display:inline-flex;align-items:flex-start;gap:4px;">
-                      <div style="flex:1;text-align:left;">
+                      <div style="flex:1;text-align:left;min-width:0;">
                         <template x-if="row.action_comment">
-                          <div style="font-size:11px;color:#0f172a;white-space:normal;max-width:180px;line-height:1.3;"
-                               :title="(row.action_by ? ('✎ '+row.action_by) : '') + (row.action_at ? (' · '+row.action_at) : '')">
-                            <span x-text="row.action_comment"></span>
-                            <template x-if="row.action_by">
+                          <div :title="row.action_comment">
+                            <div :style="row._actionOpen
+                                          ? 'white-space:normal;max-width:200px;'
+                                          : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;'"
+                                 style="font-size:11px;color:#0f172a;line-height:1.3;">
+                              <span x-text="row.action_comment"></span>
+                            </div>
+                            <template x-if="(row.action_comment||'').length > 24">
+                              <button type="button" @click="row._actionOpen = !row._actionOpen"
+                                      style="background:none;border:none;color:#2563eb;font-size:9px;cursor:pointer;padding:0;font-weight:600;"
+                                      x-text="row._actionOpen ? '▾ less' : '▸ more'"></button>
+                            </template>
+                            <template x-if="row._actionOpen && row.action_by">
                               <div style="font-size:9px;color:#94a3b8;margin-top:1px;"
                                    x-text="'✎ '+row.action_by + (row.action_at ? (' · '+row.action_at) : '')"></div>
                             </template>
@@ -1241,12 +1252,16 @@
   {{-- Edit modal — 3 independent sections (RTS, Promo, COGS) — each has its
        own editable effective_date and Save button. Modal stays open after each
        save so user can do multiple actions; Close button to exit + refresh. --}}
-  {{-- ── Action note modal (per page, end_date) ─────────────────────────── --}}
+  {{-- ── Action note modal (per page, end_date) — floating, draggable ──────
+       Walang madilim na backdrop (viewable ang table sa likod). I-drag via
+       header. Click sa labas (transparent backdrop) → auto-close. --}}
   <template x-if="actionModal.open">
-    <div class="ow-modal-backdrop" @click.self="actionModal.open = false">
-      <div class="ow-modal-card" style="max-width:480px;">
-        <div class="ow-modal-section" style="border-bottom:1px solid #e2e8f0;">
-          <div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">📝 Action Note</div>
+    <div style="position:fixed;inset:0;z-index:9999;background:transparent;" @click.self="actionModal.open = false">
+      <div class="ow-modal-card" style="max-width:460px;width:460px;position:fixed;margin:0;"
+           :style="'left:'+actionModal.x+'px;top:'+actionModal.y+'px'">
+        <div class="ow-modal-section" style="border-bottom:1px solid #e2e8f0;cursor:move;user-select:none;"
+             @mousedown="startActionDrag($event)" title="Drag to move">
+          <div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">📝 Action Note <span style="color:#cbd5e1;font-weight:500;">· drag to move</span></div>
           <div style="font-size:16px;font-weight:700;color:#0f172a;margin-top:4px;" x-text="actionModal.page_name"></div>
           <div style="font-size:12px;color:#475569;margin-top:2px;">
             <span style="font-family:ui-monospace,monospace;" x-text="actionModal.ts_date"></span>
@@ -1749,12 +1764,13 @@
         apply_from:null,
         isCeoView:false,
       },
-      // Action note modal — per (page, end_date) comment.
+      // Action note modal — per (page, end_date) comment. Floating + draggable.
       actionModal: {
         open:false, saving:false, error:null, saved:null,
         page_key:'', page_name:'', ts_date:'', comment:'',
         by:null, at:null, _row:null,
         logsOpen:false, logsLoading:false, logs:[],
+        x:140, y:120, _dragging:false, _dx:0, _dy:0,
       },
       refreshing:false,
       savingSnapshot:false,
@@ -2274,8 +2290,11 @@
       },
       cancel(){ this.editIdx=-1; this.editRow=null; this.ev={item_value:'',rts_pct:'',comment:'',iv_comment:''}; },
 
-      // ── Action note modal (per page, end_date) ──────────────────────────
+      // ── Action note modal (per page, end_date) — floating + draggable ────
       openActionModal(row){
+        const w = 460;
+        const cx = Math.max(20, Math.round((window.innerWidth  - w) / 2));
+        const cy = Math.max(20, Math.round((window.innerHeight - 360) / 2));
         this.actionModal = {
           open:true, saving:false, error:null, saved:null,
           page_key:   row.page_key,
@@ -2286,7 +2305,26 @@
           at:         row.action_at || null,
           _row:       row,
           logsOpen:false, logsLoading:false, logs:[],
+          x: cx, y: cy, _dragging:false, _dx:0, _dy:0,
         };
+      },
+      startActionDrag(e){
+        const m = this.actionModal;
+        m._dragging = true;
+        m._dx = e.clientX - m.x;
+        m._dy = e.clientY - m.y;
+        const move = (ev) => {
+          if (!m._dragging) return;
+          m.x = Math.max(0, ev.clientX - m._dx);
+          m.y = Math.max(0, ev.clientY - m._dy);
+        };
+        const up = () => {
+          m._dragging = false;
+          window.removeEventListener('mousemove', move);
+          window.removeEventListener('mouseup', up);
+        };
+        window.addEventListener('mousemove', move);
+        window.addEventListener('mouseup', up);
       },
       async saveActionNote(){
         const m = this.actionModal;
