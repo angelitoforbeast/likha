@@ -371,7 +371,7 @@ class SalesDeclarationController extends Controller
         }
 
         $allOrders = $query->select([
-                'id', 'submission_time', 'waybill_number', 'receiver',
+                'id', 'submission_time', 'signingtime', 'waybill_number', 'receiver',
                 'receiver_cellphone', 'sender', 'item_name', 'cod',
                 'province', 'city', 'barangay', 'receiver_address', 'total_shipping_cost',
                 'remarks', 'status'
@@ -469,13 +469,14 @@ class SalesDeclarationController extends Controller
         fputcsv($handle, []);
 
         fputcsv($handle, [
-            'DATE', 'WAYBILL', 'RECEIVER', 'PHONE', 'SENDER',
+            'Submission Time', 'Signing Time', 'WAYBILL', 'RECEIVER', 'PHONE', 'SENDER',
             'ITEM', 'COD', 'PROVINCE', 'CITY', 'BARANGAY', 'ADDRESS', 'SHIPPING COST', 'REMARKS'
         ]);
 
         foreach ($selected as $order) {
             fputcsv($handle, [
                 Carbon::parse($order->submission_time)->format('Y-m-d'),
+                $order->signingtime ? Carbon::parse($order->signingtime)->format('Y-m-d') : '',
                 $order->waybill_number,
                 $order->receiver,
                 $order->receiver_cellphone,
@@ -492,7 +493,7 @@ class SalesDeclarationController extends Controller
         }
 
         fputcsv($handle, []);
-        fputcsv($handle, ['', '', '', '', '', 'TOTAL:', $runningTotal]);
+        fputcsv($handle, ['', '', '', '', '', '', 'TOTAL:', $runningTotal]);
 
         rewind($handle);
         $content = stream_get_contents($handle);
