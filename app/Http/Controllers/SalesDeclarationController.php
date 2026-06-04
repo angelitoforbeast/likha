@@ -373,7 +373,8 @@ class SalesDeclarationController extends Controller
         $allOrders = $query->select([
                 'id', 'submission_time', 'waybill_number', 'receiver',
                 'receiver_cellphone', 'sender', 'item_name', 'cod',
-                'province', 'city', 'barangay', 'total_shipping_cost', 'status'
+                'province', 'city', 'barangay', 'receiver_address', 'total_shipping_cost',
+                'remarks', 'status'
             ])
             ->get();
 
@@ -469,7 +470,7 @@ class SalesDeclarationController extends Controller
 
         fputcsv($handle, [
             'DATE', 'WAYBILL', 'RECEIVER', 'PHONE', 'SENDER',
-            'ITEM', 'COD', 'PROVINCE', 'CITY', 'BARANGAY', 'SHIPPING COST'
+            'ITEM', 'COD', 'PROVINCE', 'CITY', 'BARANGAY', 'ADDRESS', 'SHIPPING COST', 'REMARKS'
         ]);
 
         foreach ($selected as $order) {
@@ -484,7 +485,9 @@ class SalesDeclarationController extends Controller
                 $order->province,
                 $order->city,
                 $order->barangay,
+                $order->receiver_address,
                 $order->total_shipping_cost,
+                $order->remarks,
             ]);
         }
 
