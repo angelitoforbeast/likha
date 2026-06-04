@@ -1101,14 +1101,16 @@
                                  style="font-size:11px;color:#0f172a;line-height:1.3;">
                               <span x-text="row.action_comment"></span>
                             </div>
+                            {{-- Editor info — LAGING visible (kahit collapsed) --}}
+                            <template x-if="row.action_by">
+                              <div style="font-size:9px;color:#94a3b8;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;"
+                                   :title="'✎ '+row.action_by + (row.action_at ? (' · '+row.action_at) : '')"
+                                   x-text="'✎ '+row.action_by + (row.action_at ? (' · '+row.action_at) : '')"></div>
+                            </template>
                             <template x-if="(row.action_comment||'').length > 24">
                               <button type="button" @click="row._actionOpen = !row._actionOpen"
                                       style="background:none;border:none;color:#2563eb;font-size:9px;cursor:pointer;padding:0;font-weight:600;"
                                       x-text="row._actionOpen ? '▾ less' : '▸ more'"></button>
-                            </template>
-                            <template x-if="row._actionOpen && row.action_by">
-                              <div style="font-size:9px;color:#94a3b8;margin-top:1px;"
-                                   x-text="'✎ '+row.action_by + (row.action_at ? (' · '+row.action_at) : '')"></div>
                             </template>
                           </div>
                         </template>
