@@ -1091,7 +1091,7 @@
                   {{-- action — truncated by default (huwag auto-expand kahit mahaba);
                        may "more/less" toggle per cell. ✎ → floating edit modal. --}}
                   <template x-if="col.id==='action'">
-                    <span style="display:inline-flex;align-items:flex-start;gap:4px;">
+                    <span style="display:flex;width:100%;align-items:flex-start;justify-content:space-between;gap:6px;">
                       <div style="flex:1;text-align:left;min-width:0;">
                         <template x-if="row.action_comment">
                           <div :title="row.action_comment">
@@ -1116,8 +1116,11 @@
                           <span style="color:#cbd5e1;" title="no action logged">—</span>
                         </template>
                       </div>
-                      <button type="button" class="cell-edit-icon" @click="openActionModal(row)"
-                              title="Edit Action note">✎</button>
+                      {{-- White chip ✎ — visible sa kahit anong cell bg (white o red CF) --}}
+                      <button type="button" @click="openActionModal(row)" title="Edit Action note"
+                              style="flex-shrink:0;align-self:flex-start;background:#fff;border:1px solid #cbd5e1;
+                                     border-radius:5px;color:#334155;font-size:12px;line-height:1;padding:3px 6px;
+                                     cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.2);">✎</button>
                     </span>
                   </template>
 
@@ -1257,10 +1260,10 @@
        header. Click sa labas (transparent backdrop) → auto-close. --}}
   <template x-if="actionModal.open">
     <div style="position:fixed;inset:0;z-index:9999;background:transparent;" @click.self="actionModal.open = false">
-      <div class="ow-modal-card" style="max-width:460px;width:460px;position:fixed;margin:0;"
-           :style="'left:'+actionModal.x+'px;top:'+actionModal.y+'px'">
+      <div class="ow-modal-card"
+           :style="`position:fixed;left:${actionModal.x}px;top:${actionModal.y}px;width:460px;max-width:460px;margin:0;`">
         <div class="ow-modal-section" style="border-bottom:1px solid #e2e8f0;cursor:move;user-select:none;"
-             @mousedown="startActionDrag($event)" title="Drag to move">
+             @mousedown.prevent="startActionDrag($event)" title="Drag to move">
           <div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">📝 Action Note <span style="color:#cbd5e1;font-weight:500;">· drag to move</span></div>
           <div style="font-size:16px;font-weight:700;color:#0f172a;margin-top:4px;" x-text="actionModal.page_name"></div>
           <div style="font-size:12px;color:#475569;margin-top:2px;">
