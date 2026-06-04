@@ -373,10 +373,20 @@ class SalesDeclarationController extends Controller
         $allOrders = $query->select([
                 'id', 'submission_time', 'signingtime', 'waybill_number', 'receiver',
                 'receiver_cellphone', 'sender', 'item_name', 'cod',
-                'province', 'city', 'barangay', 'receiver_address', 'total_shipping_cost',
-                'remarks', 'status'
+                'province', 'city', 'barangay', 'total_shipping_cost', 'remarks', 'status'
             ])
             ->get();
+
+        // Full ADDRESS galing sa macro_output (wala ito sa from_jnts) — lookup by waybill.
+        $addrByWaybill = [];
+        $waybills = $allOrders->pluck('waybill_number')->filter()->unique()->values()->all();
+        if (!empty($waybills)) {
+            $addrByWaybill = DB::table('macro_output')
+                ->whereIn('waybill', $waybills)
+                ->whereNotNull('ADDRESS')
+                ->pluck('ADDRESS', 'waybill')
+                ->all();
+        }
 
         // Use seed for reproducible random
         if ($seed) {
@@ -476,7 +486,7 @@ class SalesDeclarationController extends Controller
         foreach ($selected as $order) {
             fputcsv($handle, [
                 Carbon::parse($order->submission_time)->format('Y-m-d'),
-                $order->signingtime ? Carbon::parse($order->signingtime)->format('Y-m-d') : '',
+                !empty($order->signingtime) ? Carbon::parse($order->signingtime)->format('Y-m-d') : '',
                 $order->waybill_number,
                 $order->receiver,
                 $order->receiver_cellphone,
@@ -486,7 +496,7 @@ class SalesDeclarationController extends Controller
                 $order->province,
                 $order->city,
                 $order->barangay,
-                $order->receiver_address,
+                $addrByWaybill[$order->waybill_number] ?? '',
                 $order->total_shipping_cost,
                 $order->remarks,
             ]);
