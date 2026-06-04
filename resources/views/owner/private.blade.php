@@ -1087,9 +1087,10 @@
                           x-text="row.cod_fee !== null ? money(row.cod_fee) : '—'"></span>
                   </template>
 
-                  <!-- hold — daily HOLD snapshot (units) as-of end_date -->
+                  <!-- hold — daily HOLD snapshot (units) as-of end_date.
+                       Black font; coloring via conditional formatting (column-settings), manual. -->
                   <template x-if="col.id==='hold'">
-                    <span :style="(row.hold_units && row.hold_units > 0) ? 'color:#dc2626;font-weight:700;' : 'color:#cbd5e1;'"
+                    <span style="color:#111;"
                           :title="row.hold_snap_date ? ('HOLD units as-of '+row.hold_snap_date) : 'no hold snapshot yet'"
                           x-text="(row.hold_units !== null && row.hold_units !== undefined) ? num(row.hold_units) : '—'"></span>
                   </template>
