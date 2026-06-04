@@ -967,6 +967,10 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get('/jnt/hold', [JntHoldController::class, 'index'])->name('jnt.hold');
     Route::get('/jnt/hold/download', [JntHoldDownloadController::class, 'index'])->name('jnt.hold.download');
     Route::get('/jnt/hold/export', [JntHoldDownloadController::class, 'export'])->name('jnt.hold.export');
+
+    // Daily HOLD snapshots (units per item) — for /owner/private history + manual test.
+    Route::get ('/jnt/hold-snapshots',     [\App\Http\Controllers\ItemHoldSnapshotController::class, 'index'])->name('jnt.hold-snapshots');
+    Route::post('/jnt/hold-snapshots/run', [\App\Http\Controllers\ItemHoldSnapshotController::class, 'runNow'])->name('jnt.hold-snapshots.run');
     Route::get('/jnt/supply', [\App\Http\Controllers\JntSupplyController::class, 'index'])->name('jnt.supply');
     Route::get('/jnt/supply/config', [\App\Http\Controllers\JntSupplyController::class, 'config'])->name('jnt.supply.config');
     Route::post('/jnt/supply/settings', [\App\Http\Controllers\JntSupplyController::class, 'saveSettings'])->name('jnt.supply.settings');

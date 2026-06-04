@@ -2111,6 +2111,31 @@ class OwnerPrivateController extends Controller
             }
         }
 
+        // ── HOLD snapshot (units per base item) — as-of end_date ───────────────
+        // Per-item HOLD na naka-snapshot daily. Gamitin ang snapshot ng end_date;
+        // kung wala, ang pinaka-bago na ≤ end_date (para di mag-blank sa gap).
+        $holdMap = []; // item_key → hold_units
+        $holdSnapDate = null;
+        if (Schema::hasTable('item_hold_snapshots')) {
+            $holdSnapDate = DB::table('item_hold_snapshots')
+                ->where('snapshot_date', '<=', $endDate)
+                ->max('snapshot_date');
+            if ($holdSnapDate) {
+                $holdMap = DB::table('item_hold_snapshots')
+                    ->where('snapshot_date', $holdSnapDate)
+                    ->pluck('hold_units', 'item_key')
+                    ->map(fn ($v) => (int) $v)
+                    ->all();
+            }
+        }
+        // primary item ("1 x RUBBER COATING SPRAY") → base key ("rubber coating spray")
+        $holdKeyOf = function (string $primaryItem): string {
+            $name = trim($primaryItem);
+            if (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) $name = trim($m[2]);
+            $name = mb_strtolower($name);
+            return preg_replace('/\s+/u', ' ', $name) ?? $name;
+        };
+
         // ── build response ────────────────────────────────────────────────────
         $result = [];
         foreach ($pageGroups as $pk => $pg) {
@@ -2412,6 +2437,9 @@ class OwnerPrivateController extends Controller
                 'action_by'             => $pageActionMap[$pk]['by'] ?? null,
                 'action_at'             => $pageActionMap[$pk]['at'] ?? null,
                 'action_date'           => $endDate,
+                // HOLD units (daily snapshot, as-of end_date) for this page's item.
+                'hold_units'            => $holdMap[$holdKeyOf((string)$dominant['item_name'])] ?? null,
+                'hold_snap_date'        => $holdSnapDate ? substr((string)$holdSnapDate, 0, 10) : null,
                 'item_name'             => $dominant['item_name'],
                 // Canonical alias (item_type family) for the dominant item —
                 // null kapag walang alias mapping. Ginagamit sa item search filter

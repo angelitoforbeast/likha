@@ -1087,6 +1087,13 @@
                           x-text="row.cod_fee !== null ? money(row.cod_fee) : '—'"></span>
                   </template>
 
+                  <!-- hold — daily HOLD snapshot (units) as-of end_date -->
+                  <template x-if="col.id==='hold'">
+                    <span :style="(row.hold_units && row.hold_units > 0) ? 'color:#dc2626;font-weight:700;' : 'color:#cbd5e1;'"
+                          :title="row.hold_snap_date ? ('HOLD units as-of '+row.hold_snap_date) : 'no hold snapshot yet'"
+                          x-text="(row.hold_units !== null && row.hold_units !== undefined) ? num(row.hold_units) : '—'"></span>
+                  </template>
+
                   <!-- action — per-(page, end_date) note; click ✎ to edit via modal -->
                   {{-- action — truncated by default (huwag auto-expand kahit mahaba);
                        may "more/less" toggle per cell. ✎ → floating edit modal. --}}
@@ -1925,6 +1932,7 @@
           { id:'item_val_ceo', label:'Item Val. (CEO)', sort:'item_value_ceo', align:'center', minw:90  },
           { id:'ship',       label:'Ship',       sort:'shipping_fee',         align:'center', minw:58  },
           { id:'cod_fee',    label:'COD Fee',    sort:'cod_fee',              align:'center', minw:72  },
+          { id:'hold',       label:'Hold',       sort:'hold_units',           align:'center', minw:60  },
           { id:'action',     label:'Action',     sort:null,                   align:'left',   minw:160 },
         ];
       },
@@ -2764,6 +2772,7 @@
           case 'proj_prof_3d':  return row.projected_profit_last_3d;
           case 'proj_prof_7d':  return row.projected_profit_last_7d;
           case 'rts_set':       return row.rts_pct;
+          case 'hold':          return row.hold_units ?? null;
           case 'action':        return row.action_comment ?? null;
           case 'jnt_rts':       return row.jnt_rts_pct;
           case 'jnt_del':       return row.jnt_del_pct;
