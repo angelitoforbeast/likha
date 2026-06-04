@@ -1255,42 +1255,53 @@
   {{-- Edit modal — 3 independent sections (RTS, Promo, COGS) — each has its
        own editable effective_date and Save button. Modal stays open after each
        save so user can do multiple actions; Close button to exit + refresh. --}}
-  {{-- ── Action note modal (per page, end_date) — floating, draggable ──────
-       Walang madilim na backdrop (viewable ang table sa likod). I-drag via
-       header. Click sa labas (transparent backdrop) → auto-close. --}}
+  {{-- ── Action note modal — floating; SLIM TOP TAB lang ang draggable ──────
+       Transparent backdrop (viewable ang table). Auto-grow height; walang
+       horizontal scroll (content wraps); capped width + char limit. --}}
   <template x-if="actionModal.open">
     <div style="position:fixed;inset:0;z-index:9999;background:transparent;" @click.self="actionModal.open = false">
       <div class="ow-modal-card"
-           :style="`position:fixed;left:${actionModal.x}px;top:${actionModal.y}px;width:460px;max-width:460px;margin:0;`">
-        <div class="ow-modal-section" style="border-bottom:1px solid #e2e8f0;cursor:move;user-select:none;"
-             @mousedown.prevent="startActionDrag($event)" title="Drag to move">
-          <div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">📝 Action Note <span style="color:#cbd5e1;font-weight:500;">· drag to move</span></div>
-          <div style="font-size:16px;font-weight:700;color:#0f172a;margin-top:4px;" x-text="actionModal.page_name"></div>
-          <div style="font-size:12px;color:#475569;margin-top:2px;">
+           :style="`position:fixed;left:${actionModal.x}px;top:${actionModal.y}px;width:min(92vw,440px);max-width:440px;margin:0;overflow-x:hidden;overflow-y:auto;max-height:90vh;`">
+
+        {{-- Drag tab — ITO LANG ang draggable (parang window title bar) --}}
+        <div @mousedown.prevent="startActionDrag($event)" title="Drag to move"
+             style="cursor:move;user-select:none;background:#0f172a;height:24px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;">
+          <span style="color:#64748b;font-size:12px;letter-spacing:3px;line-height:1;">⠿⠿⠿</span>
+          <span style="color:#94a3b8;font-size:9px;">drag</span>
+          <button type="button" @click="actionModal.open=false" @mousedown.stop
+                  style="background:none;border:none;color:#94a3b8;font-size:15px;line-height:1;cursor:pointer;padding:0 2px;" title="Close">✕</button>
+        </div>
+
+        <div class="ow-modal-section" style="border-bottom:1px solid #e2e8f0;">
+          <div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">📝 Action Note</div>
+          <div style="font-size:16px;font-weight:700;color:#0f172a;margin-top:4px;word-break:break-word;" x-text="actionModal.page_name"></div>
+          <div style="font-size:12px;color:#475569;margin-top:2px;word-break:break-word;">
             <span style="font-family:ui-monospace,monospace;" x-text="actionModal.ts_date"></span>
             <span style="color:#94a3b8;"> · anong aksyon ginawa sa page na ito sa araw na ito</span>
           </div>
         </div>
 
         <div class="ow-modal-section">
-          <label>Action / Comment</label>
-          <textarea x-model="actionModal.comment" rows="4" maxlength="2000"
+          <label>Action / Comment <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;" x-text="'('+(actionModal.comment||'').length+'/1000)'"></span></label>
+          <textarea x-model="actionModal.comment" maxlength="1000"
+                    x-init="$nextTick(() => { $el.style.height='auto'; $el.style.height=Math.min($el.scrollHeight,220)+'px'; })"
+                    @input="$el.style.height='auto'; $el.style.height=Math.min($el.scrollHeight,220)+'px'"
                     placeholder="hal. 'Tinaasan ang budget', 'Pinause ang adset', 'Bagong creative'…"
-                    style="width:100%;border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:13px;resize:vertical;outline:none;"></textarea>
+                    style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:13px;resize:none;outline:none;min-height:58px;white-space:pre-wrap;overflow-wrap:break-word;overflow-y:auto;"></textarea>
 
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;flex-wrap:wrap;">
             <button type="button" @click="loadActionLogs()"
                     style="background:none;border:none;color:#2563eb;font-size:11px;cursor:pointer;font-weight:600;padding:0;">
               <span x-text="actionModal.logsOpen ? '▾ Hide edit history' : '▸ Edit history'"></span>
             </button>
             <template x-if="actionModal.by">
-              <span style="font-size:10px;color:#94a3b8;"
+              <span style="font-size:10px;color:#94a3b8;word-break:break-word;"
                     x-text="'last: '+actionModal.by+(actionModal.at?(' · '+actionModal.at):'')"></span>
             </template>
           </div>
 
           <template x-if="actionModal.logsOpen">
-            <div style="margin-top:8px;border-top:1px solid #f1f5f9;padding-top:8px;max-height:160px;overflow-y:auto;">
+            <div style="margin-top:8px;border-top:1px solid #f1f5f9;padding-top:8px;max-height:160px;overflow-y:auto;overflow-x:hidden;">
               <template x-if="actionModal.logsLoading">
                 <div style="font-size:11px;color:#94a3b8;">Loading…</div>
               </template>
@@ -1298,7 +1309,7 @@
                 <div style="font-size:11px;color:#94a3b8;">Walang edit history pa.</div>
               </template>
               <template x-for="(lg, i) in actionModal.logs" :key="i">
-                <div style="font-size:11px;color:#334155;padding:4px 0;border-bottom:1px solid #f8fafc;">
+                <div style="font-size:11px;color:#334155;padding:4px 0;border-bottom:1px solid #f8fafc;word-break:break-word;">
                   <div style="color:#94a3b8;font-size:10px;" x-text="(lg.by||'—')+' · '+(lg.at||'')"></div>
                   <div x-text="(lg.new || '(cleared)')"></div>
                 </div>
