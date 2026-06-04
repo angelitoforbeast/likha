@@ -98,7 +98,7 @@
   <main class="px-4 py-4 space-y-4" style="max-width:none;">
 
     <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-      <div class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+      <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
         <div>
           <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">From</label>
           <input type="date" x-model="filters.start_date"
@@ -140,6 +140,21 @@
             <option value="on_off">Turned ON + OFF (skip Created)</option>
           </select>
         </div>
+        {{-- Ad Account filter — client-side (instant, walang Apply). Options galing
+             sa naka-load na events (account_id → account_name). --}}
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Ad Account</label>
+          <select x-model="filters.account" @change="_syncUrl()"
+                  class="w-full border border-gray-300 rounded px-3 py-2 text-sm bg-white">
+            <option value="all">All accounts</option>
+            <template x-for="a in accountOptions()" :key="a.id">
+              <option :value="a.id" x-text="a.name"></option>
+            </template>
+            <template x-if="hasNoAccountEvents()">
+              <option value="__none__">(No account)</option>
+            </template>
+          </select>
+        </div>
       </div>
 
       <div class="flex items-center gap-2 mt-4">
@@ -148,18 +163,24 @@
           <span x-show="!loading">🔍 Apply</span>
           <span x-show="loading">Loading…</span>
         </button>
-        <span class="text-xs text-gray-500" x-show="events.length > 0"
-              x-text="events.length + ' event(s) across ' + Object.keys(byDay).length + ' day(s)'"></span>
+        <span class="text-xs text-gray-500" x-show="filteredEvents().length > 0"
+              x-text="filteredEvents().length + ' event(s) across ' + sortedDays().length + ' day(s)'"></span>
       </div>
     </div>
 
     {{-- Event log grouped by day --}}
     <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
 
-      <template x-if="!loading && events.length === 0">
+      <template x-if="!loading && filteredEvents().length === 0">
         <div class="empty-state">
-          Walang change events sa selected date range.<br>
-          <span class="text-[11px]">Try a different page or wider date range.</span>
+          <template x-if="events.length === 0">
+            <span>Walang change events sa selected date range.<br>
+            <span class="text-[11px]">Try a different page or wider date range.</span></span>
+          </template>
+          <template x-if="events.length > 0">
+            <span>Walang events para sa napiling Ad Account.<br>
+            <span class="text-[11px]">Subukan ang ibang account o "All accounts".</span></span>
+          </template>
         </div>
       </template>
 
@@ -174,17 +195,17 @@
               📅 <span x-text="fmtDay(day)"></span>
             </div>
             <div class="chips">
-              <template x-if="byDay[day].turned_on > 0">
+              <template x-if="dayCounts(day).turned_on > 0">
                 <span class="day-chip" style="background:rgba(34,197,94,.25);"
-                      x-text="'▶ ' + byDay[day].turned_on + ' on'"></span>
+                      x-text="'▶ ' + dayCounts(day).turned_on + ' on'"></span>
               </template>
-              <template x-if="byDay[day].turned_off > 0">
+              <template x-if="dayCounts(day).turned_off > 0">
                 <span class="day-chip" style="background:rgba(239,68,68,.25);"
-                      x-text="'■ ' + byDay[day].turned_off + ' off'"></span>
+                      x-text="'■ ' + dayCounts(day).turned_off + ' off'"></span>
               </template>
-              <template x-if="(byDay[day].created + byDay[day].created_with_spend) > 0">
+              <template x-if="dayCounts(day).newCount > 0">
                 <span class="day-chip" style="background:rgba(59,130,246,.25);"
-                      x-text="'🆕 ' + (byDay[day].created + byDay[day].created_with_spend) + ' new'"></span>
+                      x-text="'🆕 ' + dayCounts(day).newCount + ' new'"></span>
               </template>
             </div>
           </div>
@@ -452,6 +473,7 @@
             page_name:  q.get('page_name')  || 'all',
             level:      q.get('level')      || 'campaigns',
             event:      q.get('event')      || 'all',
+            account:    q.get('account')    || 'all',   // client-side ad account filter
           };
         })(),
 
@@ -469,15 +491,53 @@
             set('page_name',  this.filters.page_name);
             set('level',      this.filters.level);
             set('event',      this.filters.event);
+            set('account',    this.filters.account === 'all' ? '' : this.filters.account);
             window.history.replaceState({}, '', url.toString());
           } catch (e) { /* ignore — non-fatal */ }
         },
 
+        // ── Ad Account filter (client-side) ─────────────────────────────────
+        // Distinct accounts from loaded events → dropdown options.
+        accountOptions(){
+          const map = new Map();
+          for (const e of this.events) {
+            if (e.account_id && !map.has(String(e.account_id))) {
+              map.set(String(e.account_id), e.account_name || String(e.account_id));
+            }
+          }
+          return [...map.entries()]
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        },
+        hasNoAccountEvents(){
+          return this.events.some(e => !e.account_id);
+        },
+        // Events after applying the selected ad-account filter.
+        filteredEvents(){
+          const acc = this.filters.account;
+          if (!acc || acc === 'all') return this.events;
+          if (acc === '__none__') return this.events.filter(e => !e.account_id);
+          return this.events.filter(e => String(e.account_id) === String(acc));
+        },
         sortedDays(){
-          return Object.keys(this.byDay).sort((a, b) => b.localeCompare(a));
+          // Days derived from FILTERED events so empty days disappear when an
+          // ad account is selected.
+          const days = new Set(this.filteredEvents().map(e => e.day));
+          return [...days].sort((a, b) => b.localeCompare(a));
         },
         eventsForDay(day){
-          return this.events.filter(e => e.day === day);
+          return this.filteredEvents().filter(e => e.day === day);
+        },
+        // Per-day summary counts from FILTERED events (so the day-header badges
+        // match the rows shown when an ad account is selected).
+        dayCounts(day){
+          let on = 0, off = 0, created = 0;
+          for (const e of this.eventsForDay(day)) {
+            if (e.event === 'turned_on') on++;
+            else if (e.event === 'turned_off') off++;
+            else if (e.event === 'created' || e.event === 'created_with_spend') created++;
+          }
+          return { turned_on: on, turned_off: off, newCount: created };
         },
 
         peso(v){ if (v == null || isNaN(Number(v))) return '—'; return '₱'+Number(v).toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2}); },
