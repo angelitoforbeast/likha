@@ -40,6 +40,13 @@ class OwnerPrivateController extends Controller
         if (!in_array($role, ['CEO', 'Marketing - OIC'], true)) abort(404);
     }
 
+    /** Action note write gate — CEO + Marketing-OIC + Marketing (mas maluwag). */
+    private function checkActionWriteAccess(): void
+    {
+        $role = $this->getNormalizedRole();
+        if (!in_array($role, ['CEO', 'Marketing - OIC', 'Marketing'], true)) abort(403);
+    }
+
     /** True if the current user is the CEO. */
     private function isCEO(): bool
     {
@@ -2080,6 +2087,30 @@ class OwnerPrivateController extends Controller
             // JNT stats non-critical — skip silently
         }
 
+        // ── Action notes (page_day_actions) — END-DATE comment per page ────────
+        // Range view shows the comment tagged sa end_date (anchor date). Per-date
+        // comments are sa breakdown. Latest editor name resolved for hover tooltip.
+        $pageActionMap = []; // page_key → ['comment','by','at']
+        if (Schema::hasTable('page_day_actions')) {
+            $actionRows = DB::table('page_day_actions')
+                ->where('ts_date', $endDate)
+                ->get(['page_key', 'comment', 'updated_by', 'updated_at']);
+            $editorIds = $actionRows->pluck('updated_by')->filter()->unique()->values()->all();
+            $editorNames = !empty($editorIds)
+                ? DB::table('users')->whereIn('id', $editorIds)->pluck('name', 'id')->all()
+                : [];
+            foreach ($actionRows as $ar) {
+                $c = trim((string)($ar->comment ?? ''));
+                if ($c === '') continue;
+                $pageActionMap[(string)$ar->page_key] = [
+                    'comment' => $c,
+                    'by'      => ($ar->updated_by && isset($editorNames[$ar->updated_by]))
+                                 ? (string)$editorNames[$ar->updated_by] : null,
+                    'at'      => $ar->updated_at ? substr((string)$ar->updated_at, 0, 16) : null,
+                ];
+            }
+        }
+
         // ── build response ────────────────────────────────────────────────────
         $result = [];
         foreach ($pageGroups as $pk => $pg) {
@@ -2376,6 +2407,11 @@ class OwnerPrivateController extends Controller
             $result[] = [
                 'page_name'             => $pg['page_label'],
                 'page_key'              => $pk,
+                // Action note (page_day_actions) tied to the END date of the range.
+                'action_comment'        => $pageActionMap[$pk]['comment'] ?? null,
+                'action_by'             => $pageActionMap[$pk]['by'] ?? null,
+                'action_at'             => $pageActionMap[$pk]['at'] ?? null,
+                'action_date'           => $endDate,
                 'item_name'             => $dominant['item_name'],
                 // Canonical alias (item_type family) for the dominant item —
                 // null kapag walang alias mapping. Ginagamit sa item search filter
@@ -3764,6 +3800,28 @@ class OwnerPrivateController extends Controller
             return ['val' => $earliest['val'], 'backfilled' => true];
         };
 
+        // ── Action notes (page_day_actions) per date for THIS page ──────────
+        $actionByDate = []; // 'Y-m-d' → ['comment','by','at']
+        if (Schema::hasTable('page_day_actions')) {
+            $arows = DB::table('page_day_actions')
+                ->where('page_key', $pageKey)
+                ->whereBetween('ts_date', [$startDate, $endDate])
+                ->get(['ts_date', 'comment', 'updated_by', 'updated_at']);
+            $aEditorIds = $arows->pluck('updated_by')->filter()->unique()->values()->all();
+            $aEditorNames = !empty($aEditorIds)
+                ? DB::table('users')->whereIn('id', $aEditorIds)->pluck('name', 'id')->all()
+                : [];
+            foreach ($arows as $ar) {
+                $d2 = substr((string)$ar->ts_date, 0, 10);
+                $actionByDate[$d2] = [
+                    'comment' => trim((string)($ar->comment ?? '')),
+                    'by'      => ($ar->updated_by && isset($aEditorNames[$ar->updated_by]))
+                                 ? (string)$aEditorNames[$ar->updated_by] : null,
+                    'at'      => $ar->updated_at ? substr((string)$ar->updated_at, 0, 16) : null,
+                ];
+            }
+        }
+
         $out = [];
         $cursor = strtotime($startDate);
         $last   = strtotime($endDate);
@@ -3856,6 +3914,10 @@ class OwnerPrivateController extends Controller
                     'net_profit_partial' => $netPartial,
                     'proj_pct'         => $projPct !== null ? round($projPct, 1) : null,
                     'fee_backfilled'   => $feeBackfilled,
+                    // Action note for this date
+                    'action_comment'   => $actionByDate[$d]['comment'] ?? null,
+                    'action_by'        => $actionByDate[$d]['by'] ?? null,
+                    'action_at'        => $actionByDate[$d]['at'] ?? null,
                     'is_anchor'        => $itemMatches && $priceMatches,
                     'is_anchor_date'   => ($d === $endDate),  // end-date row = anchor source
                     'has_data'         => true,
@@ -3890,6 +3952,9 @@ class OwnerPrivateController extends Controller
                     'net_profit_partial' => $dayAdspent > 0,
                     'proj_pct'         => null,
                     'fee_backfilled'   => false,
+                    'action_comment'   => $actionByDate[$d]['comment'] ?? null,
+                    'action_by'        => $actionByDate[$d]['by'] ?? null,
+                    'action_at'        => $actionByDate[$d]['at'] ?? null,
                     'is_anchor_date'   => ($d === $endDate),
                     'is_anchor'        => false,
                     'has_data'         => false,
@@ -3909,6 +3974,120 @@ class OwnerPrivateController extends Controller
             'anchor_mode_cod'  => $anchor && $anchor->primary_mode_cod !== null ? (float)$anchor->primary_mode_cod : null,
             'rows'             => $out,
         ]);
+    }
+
+    /**
+     * POST /owner/private/action — upsert the per-(page, date) Action note.
+     * Body: { page_key, ts_date (Y-m-d), comment }. Writes page_day_actions +
+     * an audit row sa page_day_action_logs. Role: CEO + MOIC + Marketing.
+     */
+    public function saveAction(Request $request)
+    {
+        $this->checkActionWriteAccess();
+
+        $validated = $request->validate([
+            'page_key' => 'required|string|max:255',
+            'ts_date'  => 'required|date',
+            'comment'  => 'nullable|string|max:2000',
+        ]);
+
+        $pageKey = trim((string) $validated['page_key']);
+        $tsDate  = substr((string) $validated['ts_date'], 0, 10);
+        $comment = trim((string) ($validated['comment'] ?? ''));
+
+        $userId   = (int) (auth()->id() ?? 0) ?: null;
+        $userName = (string) (optional(auth()->user())->name ?? '');
+
+        // Old value for the audit log.
+        $existing = DB::table('page_day_actions')
+            ->where('page_key', $pageKey)
+            ->where('ts_date', $tsDate)
+            ->first(['comment']);
+        $oldComment = $existing ? (string) ($existing->comment ?? '') : '';
+
+        if ($comment === '') {
+            // Empty → delete the note (clears the cell).
+            DB::table('page_day_actions')
+                ->where('page_key', $pageKey)
+                ->where('ts_date', $tsDate)
+                ->delete();
+        } elseif ($existing) {
+            DB::table('page_day_actions')
+                ->where('page_key', $pageKey)
+                ->where('ts_date', $tsDate)
+                ->update([
+                    'comment'    => $comment,
+                    'updated_by' => $userId,
+                    'updated_at' => now(),
+                ]);
+        } else {
+            DB::table('page_day_actions')->insert([
+                'page_key'   => $pageKey,
+                'ts_date'    => $tsDate,
+                'comment'    => $comment,
+                'created_by' => $userId,
+                'updated_by' => $userId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        // Audit trail — only kapag may aktwal na pagbabago.
+        if ($oldComment !== $comment) {
+            DB::table('page_day_action_logs')->insert([
+                'page_key'       => $pageKey,
+                'ts_date'        => $tsDate,
+                'old_comment'    => $oldComment !== '' ? $oldComment : null,
+                'new_comment'    => $comment !== '' ? $comment : null,
+                'edited_by'      => $userId,
+                'edited_by_name' => $userName !== '' ? $userName : null,
+                'edited_at'      => now(),
+                'created_at'     => now(),
+                'updated_at'     => now(),
+            ]);
+        }
+
+        // Invalidate owner_private cache so the main view shows the new note.
+        self::bumpCacheVersion();
+
+        return response()->json([
+            'ok'         => true,
+            'page_key'   => $pageKey,
+            'ts_date'    => $tsDate,
+            'comment'    => $comment !== '' ? $comment : null,
+            'updated_by' => $userName !== '' ? $userName : null,
+            'updated_at' => now('Asia/Manila')->format('Y-m-d H:i'),
+        ]);
+    }
+
+    /**
+     * GET /owner/private/action/logs?page_key=&ts_date= — edit history for a
+     * (page, date) Action note. Same role gate as the writer.
+     */
+    public function actionLogs(Request $request)
+    {
+        $this->checkActionWriteAccess();
+
+        $pageKey = trim((string) $request->input('page_key', ''));
+        $tsDate  = substr((string) $request->input('ts_date', ''), 0, 10);
+        if ($pageKey === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $tsDate)) {
+            return response()->json(['ok' => false, 'message' => 'Invalid input'], 422);
+        }
+
+        $logs = DB::table('page_day_action_logs')
+            ->where('page_key', $pageKey)
+            ->where('ts_date', $tsDate)
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get(['old_comment', 'new_comment', 'edited_by_name', 'edited_at'])
+            ->map(fn ($l) => [
+                'old'  => $l->old_comment,
+                'new'  => $l->new_comment,
+                'by'   => $l->edited_by_name,
+                'at'   => $l->edited_at ? substr((string)$l->edited_at, 0, 16) : null,
+            ]);
+
+        return response()->json(['ok' => true, 'logs' => $logs]);
     }
 
     /** CEO-only gate (Daily Summary view). */

@@ -80,6 +80,7 @@
           <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_profit')">Net Profit</th>
           <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_pct')">Proj%</th>
           <th class="text-center px-4 py-2 border-b border-slate-200">Status</th>
+          <th class="text-left px-4 py-2 border-b border-slate-200">Action</th>
         </tr>
       </thead>
       <tbody>
@@ -205,6 +206,23 @@
               <template x-if="!r.is_anchor && r.has_data"><span class="text-amber-700 font-semibold">✗ excluded</span></template>
               <template x-if="!r.has_data"><span class="text-slate-300">—</span></template>
             </td>
+            {{-- Action note (per date) — click ✎ to edit --}}
+            <td class="px-4 py-2 border-b border-slate-100">
+              <div class="flex items-start gap-1">
+                <div class="flex-1 text-left text-xs text-slate-700" style="max-width:220px;white-space:normal;line-height:1.3;">
+                  <template x-if="r.action_comment">
+                    <span>
+                      <span x-text="r.action_comment"></span>
+                      <template x-if="r.action_by">
+                        <span class="block text-[10px] text-slate-400" x-text="'✎ '+r.action_by+(r.action_at?(' · '+r.action_at):'')"></span>
+                      </template>
+                    </span>
+                  </template>
+                  <template x-if="!r.action_comment"><span class="text-slate-300">—</span></template>
+                </div>
+                <button type="button" @click="openAction(r)" class="text-slate-400 hover:text-blue-600 font-bold" title="Edit action note">✎</button>
+              </div>
+            </td>
           </tr>
         </template>
       </tbody>
@@ -231,9 +249,47 @@
               :class="totals().proj_pct < 0 ? 'text-red-600' : 'text-slate-700'"
               x-text="totals().gross > 0 ? (totals().proj_pct.toFixed(1) + '%') : '—'"></td>
           <td class="px-4 py-2 bg-slate-100"></td>
+          <td class="px-4 py-2 bg-slate-100"></td>
         </tr>
       </tfoot>
     </table>
+  </template>
+
+  {{-- Action note modal --}}
+  <template x-if="actionModal.open">
+    <div style="position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:16px;"
+         @click.self="actionModal.open=false">
+      <div style="background:#fff;border-radius:12px;width:100%;max-width:460px;box-shadow:0 20px 50px -10px rgba(15,23,42,.5);overflow:hidden;">
+        <div style="padding:14px 16px;border-bottom:1px solid #e2e8f0;">
+          <div style="font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.04em;">📝 Action Note</div>
+          <div style="font-size:15px;font-weight:700;color:#0f172a;margin-top:3px;" x-text="pageLabel"></div>
+          <div style="font-size:12px;color:#475569;margin-top:2px;font-family:ui-monospace,monospace;" x-text="actionModal.ts_date"></div>
+        </div>
+        <div style="padding:14px 16px;">
+          <label style="font-size:11px;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Action / Comment</label>
+          <textarea x-model="actionModal.comment" rows="4" maxlength="2000"
+                    placeholder="hal. 'Tinaasan ang budget', 'Pinause ang adset'…"
+                    style="width:100%;border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:13px;resize:vertical;outline:none;"></textarea>
+          <template x-if="actionModal.by">
+            <div style="font-size:10px;color:#94a3b8;margin-top:6px;" x-text="'last: '+actionModal.by+(actionModal.at?(' · '+actionModal.at):'')"></div>
+          </template>
+        </div>
+        <div style="padding:12px 16px;border-top:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <div>
+            <template x-if="actionModal.error"><span style="color:#dc2626;font-size:12px;" x-text="actionModal.error"></span></template>
+            <template x-if="actionModal.saved"><span style="color:#16a34a;font-size:12px;font-weight:700;" x-text="actionModal.saved"></span></template>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button type="button" @click="actionModal.open=false"
+                    style="background:#fff;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+            <button type="button" @click="saveActionNote()" :disabled="actionModal.saving"
+                    style="background:#2563eb;border:1px solid #2563eb;color:#fff;border-radius:6px;padding:6px 16px;font-size:13px;font-weight:700;cursor:pointer;">
+              <span x-text="actionModal.saving ? 'Saving…' : 'Save'"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </template>
 
   <div class="px-4 py-3 bg-slate-50 text-xs text-slate-500 border-t border-slate-200">
@@ -264,6 +320,9 @@
       endDate:    @json($endDate),
       rows:[], loading:true,
       anchorItem:null, anchorModeCod:null,
+
+      // Action note modal (per date)
+      actionModal:{ open:false, saving:false, error:null, saved:null, ts_date:'', comment:'', by:null, at:null, _row:null },
 
       // Column visibility + conditional formatting (from /owner/column-settings,
       // owner_private catalog). Same config as the main /owner/private table.
@@ -300,6 +359,40 @@
       },
 
       money(v){ return '₱'+Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); },
+
+      // ── Action note (per date) ───────────────────────────────────────────
+      openAction(r){
+        this.actionModal = {
+          open:true, saving:false, error:null, saved:null,
+          ts_date: r.date, comment: r.action_comment || '',
+          by: r.action_by || null, at: r.action_at || null, _row: r,
+        };
+      },
+      async saveActionNote(){
+        const m = this.actionModal;
+        m.saving = true; m.error = null; m.saved = null;
+        try {
+          const r = await fetch('{{ route('owner.private.action.save') }}', {
+            method:'POST',
+            headers:{
+              'Content-Type':'application/json',
+              'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content || '',
+              'Accept':'application/json',
+            },
+            body: JSON.stringify({ page_key:this.pageKey, ts_date:m.ts_date, comment:m.comment || '' }),
+          });
+          const j = await r.json();
+          if (!r.ok || !j.ok) throw new Error(j.message || ('HTTP '+r.status));
+          if (m._row){
+            m._row.action_comment = j.comment || null;
+            m._row.action_by      = j.updated_by || null;
+            m._row.action_at      = j.updated_at || null;
+          }
+          m.saved = '✓ Saved';
+          setTimeout(()=>{ this.actionModal.open = false; }, 500);
+        } catch(e){ m.error = e.message || 'Save failed'; }
+        finally { m.saving = false; }
+      },
 
       // ── Column visibility ────────────────────────────────────────────────
       // catId === null/'' → always visible (breakdown-specific column).

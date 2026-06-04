@@ -1087,6 +1087,29 @@
                           x-text="row.cod_fee !== null ? money(row.cod_fee) : '—'"></span>
                   </template>
 
+                  <!-- action — per-(page, end_date) note; click ✎ to edit via modal -->
+                  <template x-if="col.id==='action'">
+                    <span style="display:inline-flex;align-items:flex-start;gap:4px;">
+                      <div style="flex:1;text-align:left;">
+                        <template x-if="row.action_comment">
+                          <div style="font-size:11px;color:#0f172a;white-space:normal;max-width:180px;line-height:1.3;"
+                               :title="(row.action_by ? ('✎ '+row.action_by) : '') + (row.action_at ? (' · '+row.action_at) : '')">
+                            <span x-text="row.action_comment"></span>
+                            <template x-if="row.action_by">
+                              <div style="font-size:9px;color:#94a3b8;margin-top:1px;"
+                                   x-text="'✎ '+row.action_by + (row.action_at ? (' · '+row.action_at) : '')"></div>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="!row.action_comment">
+                          <span style="color:#cbd5e1;" title="no action logged">—</span>
+                        </template>
+                      </div>
+                      <button type="button" class="cell-edit-icon" @click="openActionModal(row)"
+                              title="Edit Action note">✎</button>
+                    </span>
+                  </template>
+
                 </td>
               </template>
 
@@ -1218,6 +1241,72 @@
   {{-- Edit modal — 3 independent sections (RTS, Promo, COGS) — each has its
        own editable effective_date and Save button. Modal stays open after each
        save so user can do multiple actions; Close button to exit + refresh. --}}
+  {{-- ── Action note modal (per page, end_date) ─────────────────────────── --}}
+  <template x-if="actionModal.open">
+    <div class="ow-modal-backdrop" @click.self="actionModal.open = false">
+      <div class="ow-modal-card" style="max-width:480px;">
+        <div class="ow-modal-section" style="border-bottom:1px solid #e2e8f0;">
+          <div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;">📝 Action Note</div>
+          <div style="font-size:16px;font-weight:700;color:#0f172a;margin-top:4px;" x-text="actionModal.page_name"></div>
+          <div style="font-size:12px;color:#475569;margin-top:2px;">
+            <span style="font-family:ui-monospace,monospace;" x-text="actionModal.ts_date"></span>
+            <span style="color:#94a3b8;"> · anong aksyon ginawa sa page na ito sa araw na ito</span>
+          </div>
+        </div>
+
+        <div class="ow-modal-section">
+          <label>Action / Comment</label>
+          <textarea x-model="actionModal.comment" rows="4" maxlength="2000"
+                    placeholder="hal. 'Tinaasan ang budget', 'Pinause ang adset', 'Bagong creative'…"
+                    style="width:100%;border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:13px;resize:vertical;outline:none;"></textarea>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
+            <button type="button" @click="loadActionLogs()"
+                    style="background:none;border:none;color:#2563eb;font-size:11px;cursor:pointer;font-weight:600;padding:0;">
+              <span x-text="actionModal.logsOpen ? '▾ Hide edit history' : '▸ Edit history'"></span>
+            </button>
+            <template x-if="actionModal.by">
+              <span style="font-size:10px;color:#94a3b8;"
+                    x-text="'last: '+actionModal.by+(actionModal.at?(' · '+actionModal.at):'')"></span>
+            </template>
+          </div>
+
+          <template x-if="actionModal.logsOpen">
+            <div style="margin-top:8px;border-top:1px solid #f1f5f9;padding-top:8px;max-height:160px;overflow-y:auto;">
+              <template x-if="actionModal.logsLoading">
+                <div style="font-size:11px;color:#94a3b8;">Loading…</div>
+              </template>
+              <template x-if="!actionModal.logsLoading && actionModal.logs.length===0">
+                <div style="font-size:11px;color:#94a3b8;">Walang edit history pa.</div>
+              </template>
+              <template x-for="(lg, i) in actionModal.logs" :key="i">
+                <div style="font-size:11px;color:#334155;padding:4px 0;border-bottom:1px solid #f8fafc;">
+                  <div style="color:#94a3b8;font-size:10px;" x-text="(lg.by||'—')+' · '+(lg.at||'')"></div>
+                  <div x-text="(lg.new || '(cleared)')"></div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+
+        <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <div>
+            <template x-if="actionModal.error"><span style="color:#dc2626;font-size:12px;" x-text="actionModal.error"></span></template>
+            <template x-if="actionModal.saved"><span style="color:#16a34a;font-size:12px;font-weight:700;" x-text="actionModal.saved"></span></template>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button type="button" @click="actionModal.open=false"
+                    style="background:#fff;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+            <button type="button" @click="saveActionNote()" :disabled="actionModal.saving"
+                    style="background:#2563eb;border:1px solid #2563eb;color:#fff;border-radius:6px;padding:6px 16px;font-size:13px;font-weight:700;cursor:pointer;">
+              <span x-text="actionModal.saving ? 'Saving…' : 'Save'"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </template>
+
   <template x-if="edit.open">
     <div class="ow-modal-backdrop" @click.self="edit.open = false">
       <div class="ow-modal-card">
@@ -1660,6 +1749,13 @@
         apply_from:null,
         isCeoView:false,
       },
+      // Action note modal — per (page, end_date) comment.
+      actionModal: {
+        open:false, saving:false, error:null, saved:null,
+        page_key:'', page_name:'', ts_date:'', comment:'',
+        by:null, at:null, _row:null,
+        logsOpen:false, logsLoading:false, logs:[],
+      },
       refreshing:false,
       savingSnapshot:false,
 
@@ -1797,6 +1893,7 @@
           { id:'item_val_ceo', label:'Item Val. (CEO)', sort:'item_value_ceo', align:'center', minw:90  },
           { id:'ship',       label:'Ship',       sort:'shipping_fee',         align:'center', minw:58  },
           { id:'cod_fee',    label:'COD Fee',    sort:'cod_fee',              align:'center', minw:72  },
+          { id:'action',     label:'Action',     sort:null,                   align:'left',   minw:160 },
         ];
       },
 
@@ -2177,6 +2274,67 @@
       },
       cancel(){ this.editIdx=-1; this.editRow=null; this.ev={item_value:'',rts_pct:'',comment:'',iv_comment:''}; },
 
+      // ── Action note modal (per page, end_date) ──────────────────────────
+      openActionModal(row){
+        this.actionModal = {
+          open:true, saving:false, error:null, saved:null,
+          page_key:   row.page_key,
+          page_name:  row.page_name,
+          ts_date:    row.action_date || this.endDate,
+          comment:    row.action_comment || '',
+          by:         row.action_by || null,
+          at:         row.action_at || null,
+          _row:       row,
+          logsOpen:false, logsLoading:false, logs:[],
+        };
+      },
+      async saveActionNote(){
+        const m = this.actionModal;
+        m.saving = true; m.error = null; m.saved = null;
+        try {
+          const r = await fetch('{{ route('owner.private.action.save') }}', {
+            method:'POST',
+            headers:{
+              'Content-Type':'application/json',
+              'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content || '',
+              'Accept':'application/json',
+            },
+            body: JSON.stringify({
+              page_key: m.page_key,
+              ts_date:  m.ts_date,
+              comment:  m.comment || '',
+            }),
+          });
+          const j = await r.json();
+          if (!r.ok || !j.ok) throw new Error(j.message || ('HTTP '+r.status));
+          // Reflect into the row in place (no full reload).
+          if (m._row) {
+            m._row.action_comment = j.comment || null;
+            m._row.action_by      = j.updated_by || null;
+            m._row.action_at      = j.updated_at || null;
+          }
+          m.saved = '✓ Saved';
+          setTimeout(() => { this.actionModal.open = false; }, 500);
+        } catch(e) {
+          m.error = e.message || 'Save failed';
+        } finally {
+          m.saving = false;
+        }
+      },
+      async loadActionLogs(){
+        const m = this.actionModal;
+        m.logsOpen = !m.logsOpen;
+        if (!m.logsOpen || m.logs.length) return;
+        m.logsLoading = true;
+        try {
+          const qs = new URLSearchParams({ page_key:m.page_key, ts_date:m.ts_date });
+          const r = await fetch('{{ route('owner.private.action.logs') }}?'+qs.toString());
+          const j = await r.json();
+          if (j.ok) m.logs = j.logs || [];
+        } catch(e) { /* non-fatal */ }
+        finally { m.logsLoading = false; }
+      },
+
       // ── Modal-based edit — 3-section design (RTS / Promo / COGS) ─────────
       // Each section has its own editable effective_date + Save button. User
       // can save multiple sections per modal open without closing.
@@ -2552,6 +2710,7 @@
           case 'proj_prof_3d':  return row.projected_profit_last_3d;
           case 'proj_prof_7d':  return row.projected_profit_last_7d;
           case 'rts_set':       return row.rts_pct;
+          case 'action':        return row.action_comment ?? null;
           case 'jnt_rts':       return row.jnt_rts_pct;
           case 'jnt_del':       return row.jnt_del_pct;
           case 'jnt_transit':   return row.jnt_transit_pct;

@@ -537,6 +537,10 @@ Route::get('/owner/private/page-range-breakdown', [OwnerPrivateController::class
 Route::get('/owner/private/breakdown', [OwnerPrivateController::class, 'breakdownPage'])->name('owner.private.breakdown');
 Route::get('/owner/private/edit-logs', [OwnerPrivateController::class, 'editLogs'])->name('owner.private.edit-logs');
 
+// Per-(page, date) Action note — CEO + Marketing-OIC + Marketing.
+Route::post('/owner/private/action', [OwnerPrivateController::class, 'saveAction'])->name('owner.private.action.save');
+Route::get('/owner/private/action/logs', [OwnerPrivateController::class, 'actionLogs'])->name('owner.private.action.logs');
+
 // /owner/private snapshots — CEO-only frozen captures of the rendered state.
 Route::get('/owner/private/snapshots',         [\App\Http\Controllers\OwnerPrivateSnapshotsController::class, 'index'])
     ->name('owner.private.snapshots.index');
