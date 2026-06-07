@@ -1970,15 +1970,19 @@ class OwnerPrivateController extends Controller
         // (backfilled=true) para ma-indicate sa UI na walang proper setting doon.
         // All value keys normalized to 'val' so one generic resolver works.
 
-        // RTS history: (page||item||cod_int) → [ ['eff'=>date, 'val'=>float|null], ... ] DESC
+        // RTS history: (page||item||cod_int) → [ ['eff'=>date, 'val'=>float], ... ] DESC
+        // SKIP rows na NULL ang rts_pct (hal. promo-only na row) — kung hindi,
+        // sha-shadow ng maagang promo-only row ang totoong later RTS, at hindi
+        // mag-back-fill. Sa pag-skip, ang earliest na MAY-rts ang magba-back-fill.
         $rtsHistoryMap = [];
         foreach ((isset($settingRows) ? $settingRows : []) as $s) {
+            if ($s->rts_pct === null) continue; // ← null-RTS row: di kasama sa RTS resolution
             $codIntH = ($hasModeCodIntCol && $s->mode_cod_int !== null) ? (int)$s->mode_cod_int : null;
             if ($codIntH === null) continue;
             $kH = strtolower(trim((string)$s->page_name)).'||'.$aliases->canonicalKey((string)$s->item_name).'||'.$codIntH;
             $rtsHistoryMap[$kH][] = [
                 'eff' => substr((string)$s->effective_date, 0, 10),
-                'val' => $s->rts_pct !== null ? (float)$s->rts_pct : null,
+                'val' => (float)$s->rts_pct,
             ];
         }
 
@@ -2272,6 +2276,13 @@ class OwnerPrivateController extends Controller
                 : ($cogsHistoryMap[$dominantKey] ?? []);
             $hasRtsHist  = !empty($rtsHistoryMap[$settingKey] ?? []);
             $hasCostHist = !empty($cogsHistForItem);
+            // RTS only: i-resolve gamit lang ang rows na may totoong rts_pct (skip NULL)
+            // para hindi ma-shadow ng promo-only row ang later na RTS at mag-back-fill
+            // nang tama. $hasRtsHist gate naiwang as-is (walang regression sa items na
+            // talagang walang RTS — adspent-only pa rin sila).
+            $rtsHistForKey = array_values(array_filter(
+                $rtsHistoryMap[$settingKey] ?? [], fn ($e) => $e['val'] !== null
+            ));
 
             if ($hasRtsHist && $hasCostHist && !empty($includedDatesArr)) {
                 $sumProfit = 0.0;
@@ -2299,7 +2310,7 @@ class OwnerPrivateController extends Controller
                     }
 
                     // Resolve per-day RTS / cogs / fees (effective as of $d, back-fill earliest).
-                    $rRts  = $resolveAsOf($rtsHistoryMap[$settingKey] ?? [], (string)$d);
+                    $rRts  = $resolveAsOf($rtsHistForKey, (string)$d);
                     $rCost = $resolveAsOf($cogsHistForItem, (string)$d);
                     $rCodR = $resolveAsOf($feeHistoryMap['cod_fee_rate'] ?? [], (string)$d);
                     $rVat  = $resolveAsOf($feeHistoryMap['cod_fee_vat_rate'] ?? [], (string)$d);
@@ -3674,6 +3685,14 @@ class OwnerPrivateController extends Controller
             $itemLower = $aliases->canonicalKey($itemName);
             if (!isset($rtsByItem[$itemLower])) return ['val' => null, 'eff' => null, 'backfilled' => false];
             $all   = $rtsByItem[$itemLower]; // DESC by eff
+            // RTS only: i-skip ang mga row na NULL ang rts_pct. Iisang row ang RTS%
+            // + promo sa page_item_settings (sparse) — kaya ang promo-only row (walang
+            // RTS) ay huwag hayaang mag-shadow sa later na totoong RTS. Kapag ganito,
+            // mag-back-fill nang tama mula sa earliest na may aktwal na RTS. Promo: walang pagbabago.
+            if ($field === 'rts') {
+                $all = array_values(array_filter($all, fn ($e) => $e['rts'] !== null));
+                if (empty($all)) return ['val' => null, 'eff' => null, 'backfilled' => false];
+            }
             $cands = array_values(array_filter($all, fn ($e) => $e['eff'] <= $asOf));
             if (!empty($cands)) {
                 if ($codInt !== null) {
