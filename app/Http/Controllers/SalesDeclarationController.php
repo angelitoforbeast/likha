@@ -195,11 +195,25 @@ class SalesDeclarationController extends Controller
 
         // Get all qualifying orders
         $allOrders = $query->select([
-                'id', 'submission_time', 'waybill_number', 'receiver',
+                'id', 'submission_time', 'signingtime', 'waybill_number', 'receiver',
                 'receiver_cellphone', 'sender', 'item_name', 'cod',
-                'province', 'city', 'barangay', 'total_shipping_cost', 'status'
+                'province', 'city', 'barangay', 'total_shipping_cost', 'remarks', 'status'
             ])
             ->get();
+
+        // Full ADDRESS galing sa macro_output (wala sa from_jnts) — attach per order.
+        $waybills = $allOrders->pluck('waybill_number')->filter()->unique()->values()->all();
+        $addrByWaybill = [];
+        if (!empty($waybills)) {
+            $addrByWaybill = DB::table('macro_output')
+                ->whereIn('waybill', $waybills)
+                ->whereNotNull('ADDRESS')
+                ->pluck('ADDRESS', 'waybill')
+                ->all();
+        }
+        foreach ($allOrders as $o) {
+            $o->address = $addrByWaybill[$o->waybill_number] ?? '';
+        }
 
         $totalAvailable = $allOrders->count();
 

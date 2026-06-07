@@ -971,6 +971,22 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     // Daily HOLD snapshots (units per item) — for /owner/private history + manual test.
     Route::get ('/jnt/hold-snapshots',     [\App\Http\Controllers\ItemHoldSnapshotController::class, 'index'])->name('jnt.hold-snapshots');
     Route::post('/jnt/hold-snapshots/run', [\App\Http\Controllers\ItemHoldSnapshotController::class, 'runNow'])->name('jnt.hold-snapshots.run');
+
+    // ── Supply Finance (CEO + Marketing-OIC) — suppliers, orders (PO) na may
+    //    lifecycle ordered→delivered→counted(=stock-in), partial payments + resibo.
+    Route::get   ('/finance/supply',                       [\App\Http\Controllers\SupplyFinanceController::class, 'index'])        ->name('finance.supply.index');
+    Route::get   ('/finance/supply/{supplier}',            [\App\Http\Controllers\SupplyFinanceController::class, 'show'])         ->whereNumber('supplier')->name('finance.supply.show');
+    // suppliers
+    Route::post  ('/finance/supply/suppliers',             [\App\Http\Controllers\SupplyFinanceController::class, 'storeSupplier'])->name('finance.supply.suppliers.store');
+    Route::put   ('/finance/supply/suppliers/{supplier}',  [\App\Http\Controllers\SupplyFinanceController::class, 'updateSupplier'])->whereNumber('supplier')->name('finance.supply.suppliers.update');
+    // orders (PO)
+    Route::post  ('/finance/supply/orders',                [\App\Http\Controllers\SupplyFinanceController::class, 'storeOrder'])   ->name('finance.supply.orders.store');
+    Route::post  ('/finance/supply/orders/{order}/deliver',[\App\Http\Controllers\SupplyFinanceController::class, 'markDelivered'])->whereNumber('order')->name('finance.supply.orders.deliver');
+    Route::post  ('/finance/supply/orders/{order}/count',  [\App\Http\Controllers\SupplyFinanceController::class, 'saveCount'])     ->whereNumber('order')->name('finance.supply.orders.count');
+    Route::delete('/finance/supply/orders/{order}',        [\App\Http\Controllers\SupplyFinanceController::class, 'deleteOrder'])   ->whereNumber('order')->name('finance.supply.orders.delete');
+    // payments
+    Route::post  ('/finance/supply/payments',              [\App\Http\Controllers\SupplyFinanceController::class, 'storePayment'])  ->name('finance.supply.payments.store');
+    Route::delete('/finance/supply/payments/{payment}',    [\App\Http\Controllers\SupplyFinanceController::class, 'deletePayment']) ->whereNumber('payment')->name('finance.supply.payments.delete');
     Route::get('/jnt/supply', [\App\Http\Controllers\JntSupplyController::class, 'index'])->name('jnt.supply');
     Route::get('/jnt/supply/config', [\App\Http\Controllers\JntSupplyController::class, 'config'])->name('jnt.supply.config');
     Route::post('/jnt/supply/settings', [\App\Http\Controllers\JntSupplyController::class, 'saveSettings'])->name('jnt.supply.settings');

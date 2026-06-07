@@ -166,7 +166,8 @@
         <thead class="bg-gray-100 text-left">
           <tr>
             <th class="border px-2 py-2">#</th>
-            <th class="border px-2 py-2">DATE</th>
+            <th class="border px-2 py-2">Submission Time</th>
+            <th class="border px-2 py-2">Signing Time</th>
             <th class="border px-2 py-2">WAYBILL</th>
             <th class="border px-2 py-2">RECEIVER</th>
             <th class="border px-2 py-2">PHONE</th>
@@ -176,6 +177,8 @@
             <th class="border px-2 py-2">PROVINCE</th>
             <th class="border px-2 py-2">CITY</th>
             <th class="border px-2 py-2">BARANGAY</th>
+            <th class="border px-2 py-2">ADDRESS</th>
+            <th class="border px-2 py-2">REMARKS</th>
           </tr>
         </thead>
         <tbody id="ordersBody"></tbody>
@@ -377,19 +380,24 @@
           const oBody = document.getElementById('ordersBody');
           oBody.innerHTML = '';
           data.orders.forEach((o, idx) => {
-            const dt = o.submission_time ? o.submission_time.substring(0, 10) : '';
+            const dt = o.submission_time ? String(o.submission_time).substring(0, 10) : '';
+            const st = o.signingtime ? String(o.signingtime).substring(0, 10) : '';
+            const esc = (v) => String(v ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             oBody.innerHTML += `<tr class="hover:bg-gray-50">
               <td class="border px-2 py-1 text-gray-400 text-xs">${idx + 1}</td>
               <td class="border px-2 py-1 text-xs">${dt}</td>
-              <td class="border px-2 py-1 font-mono text-xs">${o.waybill_number || ''}</td>
-              <td class="border px-2 py-1">${o.receiver || ''}</td>
-              <td class="border px-2 py-1">${o.receiver_cellphone || ''}</td>
-              <td class="border px-2 py-1">${o.sender || ''}</td>
-              <td class="border px-2 py-1">${o.item_name || ''}</td>
+              <td class="border px-2 py-1 text-xs">${st}</td>
+              <td class="border px-2 py-1 font-mono text-xs">${esc(o.waybill_number)}</td>
+              <td class="border px-2 py-1">${esc(o.receiver)}</td>
+              <td class="border px-2 py-1">${esc(o.receiver_cellphone)}</td>
+              <td class="border px-2 py-1">${esc(o.sender)}</td>
+              <td class="border px-2 py-1">${esc(o.item_name)}</td>
               <td class="border px-2 py-1 text-right">${Number(o.cod).toLocaleString()}</td>
-              <td class="border px-2 py-1">${o.province || ''}</td>
-              <td class="border px-2 py-1">${o.city || ''}</td>
-              <td class="border px-2 py-1">${o.barangay || ''}</td>
+              <td class="border px-2 py-1">${esc(o.province)}</td>
+              <td class="border px-2 py-1">${esc(o.city)}</td>
+              <td class="border px-2 py-1">${esc(o.barangay)}</td>
+              <td class="border px-2 py-1 text-xs">${esc(o.address)}</td>
+              <td class="border px-2 py-1 text-xs">${esc(o.remarks)}</td>
             </tr>`;
           });
 
