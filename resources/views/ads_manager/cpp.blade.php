@@ -645,16 +645,47 @@
     }
 
     // Charts
+    // Prominent value label: white badge w/ thick colored border above each point.
+    function valueLabel(color, decimals) {
+      return {
+        display: true,
+        anchor: 'end',
+        align: 'top',
+        offset: 6,
+        clamp: true,                 // keep labels inside the canvas
+        color: '#0f172a',
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderColor: color,
+        borderWidth: 2,
+        borderRadius: 6,
+        padding: { top: 3, bottom: 3, left: 6, right: 6 },
+        font: { weight: 'bold', size: 13 },
+        formatter: v => (v || v === 0) ? `₱${Number(v).toFixed(decimals)}` : ''
+      };
+    }
+    // Shared dataset styling so points/line are clearly visible.
+    function lineDataset(label, data, color) {
+      return {
+        label, data, tension: 0.3, spanGaps: true,
+        borderColor: color, backgroundColor: color,
+        borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: color
+      };
+    }
+    function baseOpts(color, decimals, axisText) {
+      return {
+        responsive: true,
+        layout: { padding: { top: 24, right: 12, left: 4 } }, // headroom for top labels
+        plugins: { legend: { display: false }, datalabels: valueLabel(color, decimals) },
+        scales: { y: { beginAtZero: true, title: { display: true, text: axisText }, grace: '12%' } }
+      };
+    }
+
     function renderCPPChart(filteredDates, cppData) {
       if (cppChart) cppChart.destroy();
       cppChart = new Chart(cppCanvas.getContext('2d'), {
         type: 'line',
-        data: { labels: filteredDates, datasets: [{ label: 'CPP', data: cppData, tension: 0.3, spanGaps: true }] },
-        options: {
-          responsive: true,
-          plugins: { datalabels: { display: true, formatter: v => (v || v === 0) ? `₱${Number(v).toFixed(0)}` : '' } },
-          scales: { y: { beginAtZero: true, title: { display: true, text: 'CPP' } } }
-        },
+        data: { labels: filteredDates, datasets: [lineDataset('CPP', cppData, '#2563eb')] },
+        options: baseOpts('#2563eb', 0, 'CPP'),
         plugins: [ChartDataLabels]
       });
     }
@@ -663,12 +694,8 @@
       if (cpmChart) cpmChart.destroy();
       cpmChart = new Chart(cpmCanvas.getContext('2d'), {
         type: 'line',
-        data: { labels: filteredDates, datasets: [{ label: 'CPM', data: cpmData, tension: 0.3, spanGaps: true }] },
-        options: {
-          responsive: true,
-          plugins: { datalabels: { display: true, formatter: v => (v || v === 0) ? `₱${Number(v).toFixed(0)}` : '' } },
-          scales: { y: { beginAtZero: true, title: { display: true, text: 'CPM' } } }
-        },
+        data: { labels: filteredDates, datasets: [lineDataset('CPM', cpmData, '#d97706')] },
+        options: baseOpts('#d97706', 2, 'CPM'),
         plugins: [ChartDataLabels]
       });
     }
@@ -677,12 +704,8 @@
       if (cpiChart) cpiChart.destroy();
       cpiChart = new Chart(cpiCanvas.getContext('2d'), {
         type: 'line',
-        data: { labels: filteredDates, datasets: [{ label: 'CPI', data: cpiData, tension: 0.3, spanGaps: true, borderColor: '#16a34a', backgroundColor: '#16a34a' }] },
-        options: {
-          responsive: true,
-          plugins: { datalabels: { display: true, formatter: v => (v || v === 0) ? `₱${Number(v).toFixed(2)}` : '' } },
-          scales: { y: { beginAtZero: true, title: { display: true, text: 'CPI' } } }
-        },
+        data: { labels: filteredDates, datasets: [lineDataset('CPI', cpiData, '#16a34a')] },
+        options: baseOpts('#16a34a', 2, 'CPI'),
         plugins: [ChartDataLabels]
       });
     }
