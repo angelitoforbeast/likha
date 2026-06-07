@@ -178,11 +178,19 @@
         {{-- order cards --}}
         <div class="space-y-3">
           @forelse ($orders as $o)
+            @php
+              $eSeed = $o->items->map(fn ($it) => [
+                'id'          => $it->id,
+                'item_name'   => $it->item_name,
+                'ordered_qty' => (int) $it->ordered_qty,
+                'unit_cost'   => (float) $it->unit_cost,
+              ])->values();
+            @endphp
             <div class="rounded-xl border border-slate-200 p-4"
                  x-data="{
                    countOpen: false,
                    editOpen: false,
-                   eItems: @json($o->items->map(fn($it)=>['id'=>$it->id,'item_name'=>$it->item_name,'ordered_qty'=>(int)$it->ordered_qty,'unit_cost'=>(float)$it->unit_cost])->values()),
+                   eItems: @js($eSeed),
                    eRemoved: [],
                    eAdd(){ this.eItems.push({id:null,item_name:'',ordered_qty:1,unit_cost:0}); },
                    eRemove(i){ if(this.eItems[i].id) this.eRemoved.push(this.eItems[i].id); this.eItems.splice(i,1); },
