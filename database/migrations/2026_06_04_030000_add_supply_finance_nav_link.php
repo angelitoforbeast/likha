@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * Adds "Supply Finance" nav link → /finance/supply (suppliers, orders,
- * partial payments + receipts). Visible sa CEO + Marketing - OIC lang
+ * partial payments + receipts). Visible sa CEO lang
  * (tugma sa controller access gate).
  *
  * Idempotent: skips kung naka-seed na ang 'supply_finance' key.
@@ -39,7 +39,7 @@ return new class extends Migration
             DB::table('nav_link_role_visibility')->insert([
                 'nav_link_id' => $linkId,
                 'role'        => $role,
-                'is_visible'  => in_array($role, ['CEO', 'Marketing - OIC'], true),
+                'is_visible'  => $role === 'CEO',
                 'created_at'  => $now,
                 'updated_at'  => $now,
             ]);

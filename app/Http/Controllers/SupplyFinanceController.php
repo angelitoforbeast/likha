@@ -35,16 +35,16 @@ class SupplyFinanceController extends Controller
         return $norm;
     }
 
-    /** View gate — CEO + Marketing-OIC (sensitive ang finance). */
+    /** View gate — CEO only (sensitive ang finance). */
     private function checkAccess(): void
     {
-        if (!in_array($this->getNormalizedRole(), ['CEO', 'Marketing - OIC'], true)) abort(404);
+        if ($this->getNormalizedRole() !== 'CEO') abort(404);
     }
 
-    /** Write gate — CEO + Marketing-OIC. */
+    /** Write gate — CEO only. */
     private function checkWriteAccess(): void
     {
-        if (!in_array($this->getNormalizedRole(), ['CEO', 'Marketing - OIC'], true)) abort(403);
+        if ($this->getNormalizedRole() !== 'CEO') abort(403);
     }
 
     /** Normalize item label → key (links stock-in sa cogs/hold). */
@@ -136,7 +136,7 @@ class SupplyFinanceController extends Controller
             'paidThisMonth'   => $paidThisMonth,
             'recentOrders'    => $recentOrders,
             'recentPayments'  => $recentPayments,
-            'canWrite'        => in_array($this->getNormalizedRole(), ['CEO', 'Marketing - OIC'], true),
+            'canWrite'        => $this->getNormalizedRole() === 'CEO',
         ]);
     }
 
@@ -179,7 +179,7 @@ class SupplyFinanceController extends Controller
             'payments' => $payments,
             'bal'      => $bal,
             'stockIn'  => $stockIn,
-            'canWrite' => in_array($this->getNormalizedRole(), ['CEO', 'Marketing - OIC'], true),
+            'canWrite' => $this->getNormalizedRole() === 'CEO',
         ]);
     }
 

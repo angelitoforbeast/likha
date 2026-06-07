@@ -193,9 +193,11 @@
   {{-- Display Area --}}
   <div id="singlePageLayout" class="hidden lg:flex gap-6 mb-10">
     <div class="basis-full lg:basis-1/3 lg:shrink-0">
-      <h2 class="font-bold text-lg mb-2">CPP Chart</h2>
+      <h2 class="font-bold text-lg mb-2">CPP Chart <span class="text-xs font-normal text-gray-400">(cost / order)</span></h2>
       <canvas id="cppChart" height="100" class="mb-8"></canvas>
-      <h2 class="font-bold text-lg mb-2">CPM Chart</h2>
+      <h2 class="font-bold text-lg mb-2">CPI Chart <span class="text-xs font-normal text-gray-400">(cost / 1k impressions)</span></h2>
+      <canvas id="cpiChart" height="100" class="mb-8"></canvas>
+      <h2 class="font-bold text-lg mb-2">CPM Chart <span class="text-xs font-normal text-gray-400">(cost / message)</span></h2>
       <canvas id="cpmChart" height="100"></canvas>
     </div>
     <div class="basis-full lg:basis-2/3 lg:shrink-0 min-w-0 overflow-auto" id="rightTableContainer"></div>
@@ -217,6 +219,7 @@
     const startDateInput   = document.getElementById('startDate');
     const endDateInput     = document.getElementById('endDate');
     const cppCanvas        = document.getElementById('cppChart');
+    const cpiCanvas        = document.getElementById('cpiChart');
     const cpmCanvas        = document.getElementById('cpmChart');
     const tableRight       = document.getElementById('rightTableContainer');
     const multiPageTables  = document.getElementById('multiPageTables');
@@ -232,7 +235,7 @@
     const pageHidden    = document.getElementById('pageHidden');
     const pageDdLabel   = document.getElementById('pageDdLabel');
 
-    let cppChart, cpmChart;
+    let cppChart, cpmChart, cpiChart;
 
     // --- Helpers ---
     // Multi-select: returns ARRAY of page names, or [] meaning "all pages".
@@ -670,6 +673,20 @@
       });
     }
 
+    function renderCPIChart(filteredDates, cpiData) {
+      if (cpiChart) cpiChart.destroy();
+      cpiChart = new Chart(cpiCanvas.getContext('2d'), {
+        type: 'line',
+        data: { labels: filteredDates, datasets: [{ label: 'CPI', data: cpiData, tension: 0.3, spanGaps: true, borderColor: '#16a34a', backgroundColor: '#16a34a' }] },
+        options: {
+          responsive: true,
+          plugins: { datalabels: { display: true, formatter: v => (v || v === 0) ? `₱${Number(v).toFixed(2)}` : '' } },
+          scales: { y: { beginAtZero: true, title: { display: true, text: 'CPI' } } }
+        },
+        plugins: [ChartDataLabels]
+      });
+    }
+
     function refreshAll() {
       const selectedPages = getSelectedPages(); // [] = all
       const pageSet = new Set(selectedPages);
@@ -688,6 +705,7 @@
       if (!dates.length) {
         if (cppChart) cppChart.destroy();
         if (cpmChart) cpmChart.destroy();
+        if (cpiChart) cpiChart.destroy();
         singlePageLayout.classList.add('hidden');
         multiPageTables.classList.remove('hidden');
         tableRight.innerHTML = `
@@ -697,28 +715,38 @@
         return;
       }
 
-      // Charts: averaged across selected pages (or all if [] selected).
-      // Same logic as legacy "all" branch — just respects pageSet filter.
-      let cppData = [], cpmData = [];
+      // Charts: SPEND-WEIGHTED blend across selected pages — same numerator/
+      // denominator as the table TOTAL row, so graph === table.
+      //   CPP = Σspent / Σorders          (cost per order)
+      //   CPI = Σspent / Σ(spent/cpi)     (cost per 1k impressions)
+      //   CPM = Σspent / Σ(spent/cpm)     (cost per message)
+      // (spent/cpi = impressions/1000 ; spent/cpm = messages — exact inverses.)
+      let cppData = [], cpmData = [], cpiData = [];
       if (selectedPages.length === 1) {
         const sel = rawData[selectedPages[0]] || {};
         cppData = dates.map(d => sel[d]?.cpp ?? null);
+        cpiData = dates.map(d => sel[d]?.cpi ?? null);
         cpmData = dates.map(d => sel[d]?.cpm ?? null);
       } else {
         dates.forEach(date => {
-          let sumCpp = 0, cntCpp = 0, sumCpm = 0, cntCpm = 0;
+          let sumSpent = 0, sumOrders = 0, wMsg = 0, wImpK = 0;
           Object.entries(rawData).forEach(([page, d]) => {
             if (pageSet.size > 0 && !pageSet.has(page)) return;
             const r = d[date];
-            if (r && r.spent && r.cpp != null) { sumCpp += r.cpp; cntCpp++; }
-            if (r && r.spent && r.cpm != null) { sumCpm += r.cpm; cntCpm++; }
+            if (!r || !r.spent) return;
+            sumSpent  += r.spent;
+            if (r.orders) sumOrders += r.orders;
+            if (r.cpm)    wMsg      += r.spent / r.cpm;   // messages
+            if (r.cpi)    wImpK     += r.spent / r.cpi;   // impressions / 1000
           });
-          cppData.push(cntCpp ? sumCpp / cntCpp : null);
-          cpmData.push(cntCpm ? sumCpm / cntCpm : null);
+          cppData.push(sumOrders > 0 ? sumSpent / sumOrders : null);
+          cpiData.push(wImpK     > 0 ? sumSpent / wImpK     : null);
+          cpmData.push(wMsg      > 0 ? sumSpent / wMsg      : null);
         });
       }
 
       renderCPPChart(dates, cppData);
+      renderCPIChart(dates, cpiData);
       renderCPMChart(dates, cpmData);
       renderTables(dates, selectedPages);
     }
