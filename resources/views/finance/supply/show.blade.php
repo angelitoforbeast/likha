@@ -2,6 +2,13 @@
   <x-slot name="title">{{ $supplier->name }} — Supply Finance</x-slot>
   <x-slot name="heading">{{ $supplier->name }}</x-slot>
 
+  {{-- Number inputs na walang up/down spinner — free-text itsura, numero lang. --}}
+  <style>
+    .no-spin::-webkit-outer-spin-button,
+    .no-spin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .no-spin { -moz-appearance: textfield; appearance: textfield; }
+  </style>
+
   <div class="max-w-6xl mx-auto p-4"
        x-data="{
          showEdit: false,
@@ -130,9 +137,11 @@
                            list="moItemNames" autocomplete="off"
                            class="col-span-6 border border-slate-300 rounded px-2 py-1.5 text-sm">
                     <input :name="`items[${idx}][ordered_qty]`" x-model.number="it.ordered_qty" type="number" min="0" required
-                           class="col-span-2 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
+                           inputmode="numeric"
+                           class="no-spin col-span-2 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
                     <input :name="`items[${idx}][unit_cost]`" x-model.number="it.unit_cost" type="number" step="0.01" min="0" required
-                           class="col-span-3 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
+                           inputmode="decimal"
+                           class="no-spin col-span-3 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
                     <button type="button" @click="removeRow(idx)" class="col-span-1 text-red-500 hover:text-red-700 text-lg leading-none">×</button>
                   </div>
                 </template>
