@@ -646,7 +646,7 @@
 
     // Charts
     // Prominent value label: white badge w/ thick colored border above each point.
-    function valueLabel(color, decimals) {
+    function valueLabel(color, decimals, prefix = '₱') {
       return {
         display: true,
         anchor: 'end',
@@ -660,7 +660,7 @@
         borderRadius: 6,
         padding: { top: 3, bottom: 3, left: 6, right: 6 },
         font: { weight: 'bold', size: 13 },
-        formatter: v => (v || v === 0) ? `₱${Number(v).toFixed(decimals)}` : ''
+        formatter: v => (v || v === 0) ? `${prefix}${Number(v).toFixed(decimals)}` : ''
       };
     }
     // Shared dataset styling so points/line are clearly visible.
@@ -671,11 +671,11 @@
         borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: color
       };
     }
-    function baseOpts(color, decimals, axisText) {
+    function baseOpts(color, decimals, axisText, prefix = '₱') {
       return {
         responsive: true,
         layout: { padding: { top: 24, right: 12, left: 4 } }, // headroom for top labels
-        plugins: { legend: { display: false }, datalabels: valueLabel(color, decimals) },
+        plugins: { legend: { display: false }, datalabels: valueLabel(color, decimals, prefix) },
         scales: { y: { beginAtZero: true, title: { display: true, text: axisText }, grace: '12%' } }
       };
     }
@@ -695,7 +695,7 @@
       cpmChart = new Chart(cpmCanvas.getContext('2d'), {
         type: 'line',
         data: { labels: filteredDates, datasets: [lineDataset('CPM', cpmData, '#d97706')] },
-        options: baseOpts('#d97706', 2, 'CPM'),
+        options: baseOpts('#d97706', 0, 'CPM', ''),
         plugins: [ChartDataLabels]
       });
     }
@@ -705,7 +705,7 @@
       cpiChart = new Chart(cpiCanvas.getContext('2d'), {
         type: 'line',
         data: { labels: filteredDates, datasets: [lineDataset('CPI', cpiData, '#16a34a')] },
-        options: baseOpts('#16a34a', 2, 'CPI'),
+        options: baseOpts('#16a34a', 0, 'CPI', ''),
         plugins: [ChartDataLabels]
       });
     }
