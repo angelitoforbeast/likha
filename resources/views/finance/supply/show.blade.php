@@ -55,8 +55,9 @@
         @if ($supplier->opening_balance_note)<div class="text-[10px] text-amber-600">{{ $supplier->opening_balance_note }}</div>@endif
       </div>
       <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <div class="text-[11px] font-semibold uppercase text-slate-600">Total Ordered</div>
-        <div class="mt-1 text-xl font-bold text-slate-700">₱{{ number_format($bal['ordered'], 2) }}</div>
+        <div class="text-[11px] font-semibold uppercase text-slate-600">Delivered (utang basis)</div>
+        <div class="mt-1 text-xl font-bold text-slate-700">₱{{ number_format($bal['delivered'], 2) }}</div>
+        <div class="text-[10px] text-slate-400">ordered (lahat): ₱{{ number_format($bal['ordered'], 2) }}</div>
       </div>
       <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
         <div class="text-[11px] font-semibold uppercase text-emerald-700">Total Paid</div>
@@ -68,7 +69,8 @@
       </div>
     </div>
     <div class="text-[11px] text-slate-400 mb-4">
-      Balance = Opening (₱{{ number_format($bal['opening'],2) }}) + Ordered (₱{{ number_format($bal['ordered'],2) }}) − Paid (₱{{ number_format($bal['paid'],2) }})
+      Balance = Opening (₱{{ number_format($bal['opening'],2) }}) + Delivered (₱{{ number_format($bal['delivered'],2) }}) − Paid (₱{{ number_format($bal['paid'],2) }})
+      · <span class="text-slate-400">Orders na "ordered" pa lang (di pa dumating) = HINDI pa kasama sa utang.</span>
     </div>
 
     {{-- Supplier meta + edit --}}

@@ -31,6 +31,7 @@
       <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
         <div class="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Total Ordered</div>
         <div class="mt-1 text-2xl font-bold text-slate-700">₱{{ number_format($totalOrdered, 2) }}</div>
+        <div class="text-[10px] text-slate-400">delivered (utang basis): ₱{{ number_format($totalDelivered, 2) }}</div>
       </div>
       <div class="rounded-xl border border-amber-200 bg-amber-50 p-4">
         <div class="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Opening Balances</div>
@@ -92,6 +93,7 @@
             <th class="px-3 py-2 text-left font-semibold">Terms</th>
             <th class="px-3 py-2 text-right font-semibold">Opening</th>
             <th class="px-3 py-2 text-right font-semibold">Ordered</th>
+            <th class="px-3 py-2 text-right font-semibold">Delivered</th>
             <th class="px-3 py-2 text-right font-semibold">Paid</th>
             <th class="px-3 py-2 text-right font-semibold">Balance</th>
             <th class="px-3 py-2"></th>
@@ -106,7 +108,8 @@
               <td class="px-3 py-2 text-slate-500">{{ $r['contact'] ?: '—' }}</td>
               <td class="px-3 py-2 text-slate-500">{{ $r['terms'] ?: '—' }}</td>
               <td class="px-3 py-2 text-right text-slate-500">₱{{ number_format($r['opening'], 2) }}</td>
-              <td class="px-3 py-2 text-right text-slate-700">₱{{ number_format($r['ordered'], 2) }}</td>
+              <td class="px-3 py-2 text-right text-slate-400">₱{{ number_format($r['ordered'], 2) }}</td>
+              <td class="px-3 py-2 text-right text-slate-700">₱{{ number_format($r['delivered'], 2) }}</td>
               <td class="px-3 py-2 text-right text-emerald-700">₱{{ number_format($r['paid'], 2) }}</td>
               <td class="px-3 py-2 text-right font-bold {{ $r['balance'] > 0 ? 'text-red-600' : 'text-slate-400' }}">
                 ₱{{ number_format($r['balance'], 2) }}
@@ -116,7 +119,7 @@
               </td>
             </tr>
           @empty
-            <tr><td colspan="8" class="px-3 py-8 text-center text-slate-400">Wala pang supplier. Mag-add muna sa taas.</td></tr>
+            <tr><td colspan="9" class="px-3 py-8 text-center text-slate-400">Wala pang supplier. Mag-add muna sa taas.</td></tr>
           @endforelse
         </tbody>
         @if ($rows->count())
@@ -124,7 +127,8 @@
             <tr>
               <td class="px-3 py-2" colspan="3">TOTAL</td>
               <td class="px-3 py-2 text-right">₱{{ number_format($totalOpening, 2) }}</td>
-              <td class="px-3 py-2 text-right">₱{{ number_format($totalOrdered, 2) }}</td>
+              <td class="px-3 py-2 text-right text-slate-400">₱{{ number_format($totalOrdered, 2) }}</td>
+              <td class="px-3 py-2 text-right">₱{{ number_format($totalDelivered, 2) }}</td>
               <td class="px-3 py-2 text-right text-emerald-700">₱{{ number_format($rows->sum('paid'), 2) }}</td>
               <td class="px-3 py-2 text-right text-red-600">₱{{ number_format($totalPayable, 2) }}</td>
               <td></td>

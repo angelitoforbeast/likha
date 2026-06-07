@@ -83,10 +83,19 @@ class SupplyFinanceController extends Controller
         return $names;
     }
 
-    /** Per-supplier rollup: [supplier_id => ['ordered'=>, 'paid'=>, 'balance'=>]]. */
+    /** Per-supplier rollup: [supplier_id => ['ordered','delivered','paid','balance']]. */
     private function balanceMap(): array
     {
+        // ALL orders (informational — kasama pa ang "ordered" na di pa dumating).
         $ordered = SupplyOrder::query()
+            ->groupBy('supplier_id')
+            ->selectRaw('supplier_id, COALESCE(SUM(total_cost),0) as t')
+            ->pluck('t', 'supplier_id');
+
+        // DELIVERED + COUNTED lang ang bumibilang sa UTANG (payable). Ang "ordered"
+        // na status = di pa dumating, kaya HINDI pa utang.
+        $delivered = SupplyOrder::query()
+            ->whereIn('status', ['delivered', 'counted'])
             ->groupBy('supplier_id')
             ->selectRaw('supplier_id, COALESCE(SUM(total_cost),0) as t')
             ->pluck('t', 'supplier_id');
@@ -100,12 +109,14 @@ class SupplyFinanceController extends Controller
         foreach (Supplier::query()->get(['id', 'opening_balance']) as $s) {
             $open = (float) $s->opening_balance;
             $ord  = (float) ($ordered[$s->id] ?? 0);
+            $del  = (float) ($delivered[$s->id] ?? 0);
             $pay  = (float) ($paid[$s->id] ?? 0);
             $map[$s->id] = [
-                'opening' => $open,
-                'ordered' => $ord,
-                'paid'    => $pay,
-                'balance' => $open + $ord - $pay,
+                'opening'   => $open,
+                'ordered'   => $ord,   // lahat ng order (pipeline)
+                'delivered' => $del,   // counts to utang
+                'paid'      => $pay,
+                'balance'   => $open + $del - $pay,   // utang = opening + delivered − paid
             ];
         }
         return $map;
@@ -122,22 +133,24 @@ class SupplyFinanceController extends Controller
         $suppliers = Supplier::query()->orderBy('name')->get();
 
         $rows = $suppliers->map(function ($s) use ($bal) {
-            $b = $bal[$s->id] ?? ['opening' => 0, 'ordered' => 0, 'paid' => 0, 'balance' => 0];
+            $b = $bal[$s->id] ?? ['opening' => 0, 'ordered' => 0, 'delivered' => 0, 'paid' => 0, 'balance' => 0];
             return [
-                'id'       => $s->id,
-                'name'     => $s->name,
-                'contact'  => $s->contact,
-                'terms'    => $s->terms,
-                'opening'  => $b['opening'],
-                'ordered'  => $b['ordered'],
-                'paid'     => $b['paid'],
-                'balance'  => $b['balance'],
+                'id'        => $s->id,
+                'name'      => $s->name,
+                'contact'   => $s->contact,
+                'terms'     => $s->terms,
+                'opening'   => $b['opening'],
+                'ordered'   => $b['ordered'],
+                'delivered' => $b['delivered'],
+                'paid'      => $b['paid'],
+                'balance'   => $b['balance'],
             ];
         });
 
-        $totalPayable = array_sum(array_column($bal, 'balance'));
-        $totalOrdered = array_sum(array_column($bal, 'ordered'));
-        $totalOpening = array_sum(array_column($bal, 'opening'));
+        $totalPayable   = array_sum(array_column($bal, 'balance'));
+        $totalOrdered   = array_sum(array_column($bal, 'ordered'));
+        $totalDelivered = array_sum(array_column($bal, 'delivered'));
+        $totalOpening   = array_sum(array_column($bal, 'opening'));
 
         // Paid this month (PH).
         $monthStart = Carbon::now('Asia/Manila')->startOfMonth()->toDateString();
@@ -161,6 +174,7 @@ class SupplyFinanceController extends Controller
             'rows'            => $rows,
             'totalPayable'    => $totalPayable,
             'totalOrdered'    => $totalOrdered,
+            'totalDelivered'  => $totalDelivered,
             'totalOpening'    => $totalOpening,
             'paidThisMonth'   => $paidThisMonth,
             'recentOrders'    => $recentOrders,
@@ -191,7 +205,7 @@ class SupplyFinanceController extends Controller
                 return $p;
             });
 
-        $bal = $this->balanceMap()[$s->id] ?? ['opening' => 0, 'ordered' => 0, 'paid' => 0, 'balance' => 0];
+        $bal = $this->balanceMap()[$s->id] ?? ['opening' => 0, 'ordered' => 0, 'delivered' => 0, 'paid' => 0, 'balance' => 0];
 
         // Stock-in per item (counted received_qty) for this supplier.
         $stockIn = SupplyOrderItem::query()
