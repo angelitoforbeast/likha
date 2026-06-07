@@ -100,6 +100,13 @@
             <form method="POST" action="{{ route('finance.supply.orders.store') }}">
               @csrf
               <input type="hidden" name="supplier_id" value="{{ $supplier->id }}">
+              {{-- Item suggestions mula sa macro_output (tugma sa /jnt/hold?group=item).
+                   Datalist = autocomplete pero free-text pa rin (pwede mag-type ng bago). --}}
+              <datalist id="moItemNames">
+                @foreach ($itemNames as $nm)
+                  <option value="{{ $nm }}"></option>
+                @endforeach
+              </datalist>
               <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
                 <div><label class="block text-[11px] font-semibold text-indigo-900 mb-1">Order date *</label>
                   <input name="order_date" type="date" required value="{{ \Illuminate\Support\Carbon::now('Asia/Manila')->toDateString() }}" class="w-full border border-indigo-300 rounded px-3 py-2 text-sm bg-white"></div>
@@ -120,6 +127,7 @@
                 <template x-for="(it, idx) in items" :key="idx">
                   <div class="grid grid-cols-12 gap-2 mb-1 items-center">
                     <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name" required
+                           list="moItemNames" autocomplete="off"
                            class="col-span-6 border border-slate-300 rounded px-2 py-1.5 text-sm">
                     <input :name="`items[${idx}][ordered_qty]`" x-model.number="it.ordered_qty" type="number" min="0" required
                            class="col-span-2 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">

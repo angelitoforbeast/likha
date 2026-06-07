@@ -54,6 +54,35 @@ class SupplyFinanceController extends Controller
         return preg_replace('/\s+/u', ' ', $s) ?? $s;
     }
 
+    /**
+     * Distinct BASE item names mula sa macro_output (stripped ng "N x" prefix) —
+     * para mag-suggest ang order item input, tugma sa /jnt/hold?group=item.
+     */
+    private function macroItemNames(): array
+    {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('macro_output')) return [];
+        try {
+            $raw = DB::table('macro_output')->distinct()->pluck('ITEM_NAME');
+        } catch (\Throwable $e) {
+            return [];
+        }
+        $set = [];
+        foreach ($raw as $name) {
+            $name = trim((string) $name);
+            if ($name === '') continue;
+            // Strip "N x" / "N ×" qty prefix → base item (same as /jnt/hold).
+            if (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) {
+                $base = trim($m[2]);
+            } else {
+                $base = $name;
+            }
+            if ($base !== '') $set[$base] = true;
+        }
+        $names = array_keys($set);
+        sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+        return $names;
+    }
+
     /** Per-supplier rollup: [supplier_id => ['ordered'=>, 'paid'=>, 'balance'=>]]. */
     private function balanceMap(): array
     {
@@ -180,6 +209,7 @@ class SupplyFinanceController extends Controller
             'bal'      => $bal,
             'stockIn'  => $stockIn,
             'canWrite' => $this->getNormalizedRole() === 'CEO',
+            'itemNames' => $this->macroItemNames(),
         ]);
     }
 
