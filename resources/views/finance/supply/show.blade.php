@@ -9,6 +9,9 @@
     .no-spin { -moz-appearance: textfield; appearance: textfield; }
   </style>
 
+  {{-- Item names (macro_output base) para sa custom autocomplete --}}
+  <script>window.__supplyItemNames = @json($itemNames);</script>
+
   <div class="max-w-6xl mx-auto p-4"
        x-data="{
          showEdit: false,
@@ -18,7 +21,14 @@
          addRow()    { this.items.push({ item_name:'', ordered_qty:1, unit_cost:0 }); },
          removeRow(i){ if (this.items.length > 1) this.items.splice(i,1); },
          get grandTotal(){ return this.items.reduce((s,it)=> s + (Number(it.ordered_qty)||0)*(Number(it.unit_cost)||0), 0); },
-         peso(n){ return '₱' + Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2, maximumFractionDigits:2}); }
+         peso(n){ return '₱' + Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2, maximumFractionDigits:2}); },
+         allItemNames: (window.__supplyItemNames || []),
+         suggestKey: null,
+         itemMatches(q){
+           q = String(q || '').trim().toLowerCase();
+           if (q.length < 2) return [];   // mag-react lang kapag may 2+ letters
+           return this.allItemNames.filter(n => n.toLowerCase().includes(q)).slice(0, 12);
+         }
        }">
 
     <div class="mb-3">
@@ -107,13 +117,6 @@
             <form method="POST" action="{{ route('finance.supply.orders.store') }}">
               @csrf
               <input type="hidden" name="supplier_id" value="{{ $supplier->id }}">
-              {{-- Item suggestions mula sa macro_output (tugma sa /jnt/hold?group=item).
-                   Datalist = autocomplete pero free-text pa rin (pwede mag-type ng bago). --}}
-              <datalist id="moItemNames">
-                @foreach ($itemNames as $nm)
-                  <option value="{{ $nm }}"></option>
-                @endforeach
-              </datalist>
               <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
                 <div><label class="block text-[11px] font-semibold text-indigo-900 mb-1">Order date *</label>
                   <input name="order_date" type="date" required value="{{ \Illuminate\Support\Carbon::now('Asia/Manila')->toDateString() }}" class="w-full border border-indigo-300 rounded px-3 py-2 text-sm bg-white"></div>
@@ -133,9 +136,19 @@
                 </div>
                 <template x-for="(it, idx) in items" :key="idx">
                   <div class="grid grid-cols-12 gap-2 mb-1 items-center">
-                    <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name" required
-                           list="moItemNames" autocomplete="off"
-                           class="col-span-6 border border-slate-300 rounded px-2 py-1.5 text-sm">
+                    <div class="col-span-6 relative">
+                      <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name" required autocomplete="off"
+                             @focus="suggestKey='c'+idx" @input="suggestKey='c'+idx" @keydown.escape="suggestKey=null"
+                             @blur="setTimeout(()=>{ if(suggestKey==='c'+idx) suggestKey=null }, 150)"
+                             class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
+                      <div x-show="suggestKey==='c'+idx && itemMatches(it.item_name).length" x-cloak
+                           class="absolute z-30 left-0 right-0 mt-0.5 bg-white border border-slate-200 rounded shadow-lg max-h-48 overflow-auto">
+                        <template x-for="(nm,i) in itemMatches(it.item_name)" :key="i">
+                          <button type="button" @mousedown.prevent="it.item_name=nm; suggestKey=null"
+                                  class="block w-full text-left px-2 py-1.5 text-sm hover:bg-indigo-50" x-text="nm"></button>
+                        </template>
+                      </div>
+                    </div>
                     <input :name="`items[${idx}][ordered_qty]`" x-model.number="it.ordered_qty" type="number" min="0" required
                            inputmode="numeric"
                            class="no-spin col-span-2 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
@@ -163,7 +176,16 @@
         {{-- order cards --}}
         <div class="space-y-3">
           @forelse ($orders as $o)
-            <div class="rounded-xl border border-slate-200 p-4" x-data="{ countOpen: false }">
+            <div class="rounded-xl border border-slate-200 p-4"
+                 x-data="{
+                   countOpen: false,
+                   editOpen: false,
+                   eItems: @json($o->items->map(fn($it)=>['id'=>$it->id,'item_name'=>$it->item_name,'ordered_qty'=>(int)$it->ordered_qty,'unit_cost'=>(float)$it->unit_cost])->values()),
+                   eRemoved: [],
+                   eAdd(){ this.eItems.push({id:null,item_name:'',ordered_qty:1,unit_cost:0}); },
+                   eRemove(i){ if(this.eItems[i].id) this.eRemoved.push(this.eItems[i].id); this.eItems.splice(i,1); },
+                   get eTotal(){ return this.eItems.reduce((s,it)=> s+(Number(it.ordered_qty)||0)*(Number(it.unit_cost)||0), 0); }
+                 }">
               <div class="flex items-start justify-between mb-2">
                 <div>
                   <div class="font-semibold text-slate-800">
@@ -236,6 +258,8 @@
                       {{ $o->status === 'counted' ? 'Re-count / Edit' : 'Count / Receive (stock-in)' }}
                     </button>
                   @endif
+                  <button @click="editOpen = !editOpen"
+                          class="rounded-md bg-slate-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700">Edit order</button>
                   <form method="POST" action="{{ route('finance.supply.orders.delete', $o->id) }}" onsubmit="return confirm('Burahin ang order na ito?')" class="ml-auto">
                     @csrf @method('DELETE')
                     <button class="text-xs text-red-500 hover:underline">delete</button>
@@ -260,6 +284,64 @@
                     </div>
                     <div class="flex justify-end mt-3">
                       <button class="rounded-md bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">Save count (stock-in)</button>
+                    </div>
+                  </form>
+                </div>
+
+                {{-- edit-order form (header + items; preserve received counts) --}}
+                <div x-show="editOpen" x-cloak x-transition class="mt-3 rounded-lg border border-slate-300 bg-slate-50 p-3">
+                  <div class="text-[11px] font-semibold text-slate-600 mb-2">I-edit ang order (kung mali ang na-order/na-deliver na bilang o presyo):</div>
+                  <form method="POST" action="{{ route('finance.supply.orders.update', $o->id) }}">
+                    @csrf @method('PUT')
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-2 mb-2">
+                      <div><label class="block text-[10px] font-semibold text-slate-500 mb-1">Order date *</label>
+                        <input name="order_date" type="date" required value="{{ \Illuminate\Support\Carbon::parse($o->order_date)->toDateString() }}" class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white"></div>
+                      <div><label class="block text-[10px] font-semibold text-slate-500 mb-1">PO / ref</label>
+                        <input name="order_no" value="{{ $o->order_no }}" class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white"></div>
+                      <div><label class="block text-[10px] font-semibold text-slate-500 mb-1">Expected delivery</label>
+                        <input name="expected_delivery" type="date" value="{{ $o->expected_delivery ? \Illuminate\Support\Carbon::parse($o->expected_delivery)->toDateString() : '' }}" class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white"></div>
+                    </div>
+
+                    <div class="rounded-lg border border-slate-200 bg-white p-2 mb-2">
+                      <div class="grid grid-cols-12 gap-2 px-1 pb-1 text-[10px] font-semibold uppercase text-slate-400">
+                        <div class="col-span-6">Item</div><div class="col-span-2 text-right">Qty</div><div class="col-span-3 text-right">Unit Cost</div><div class="col-span-1"></div>
+                      </div>
+                      <template x-for="(it, idx) in eItems" :key="idx">
+                        <div class="grid grid-cols-12 gap-2 mb-1 items-center">
+                          <input type="hidden" :name="`items[${idx}][id]`" :value="it.id ?? ''">
+                          <div class="col-span-6 relative">
+                            <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name" required autocomplete="off"
+                                   @focus="suggestKey='e{{ $o->id }}-'+idx" @input="suggestKey='e{{ $o->id }}-'+idx" @keydown.escape="suggestKey=null"
+                                   @blur="setTimeout(()=>{ if(suggestKey==='e{{ $o->id }}-'+idx) suggestKey=null }, 150)"
+                                   class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
+                            <div x-show="suggestKey==='e{{ $o->id }}-'+idx && itemMatches(it.item_name).length" x-cloak
+                                 class="absolute z-30 left-0 right-0 mt-0.5 bg-white border border-slate-200 rounded shadow-lg max-h-48 overflow-auto">
+                              <template x-for="(nm,i) in itemMatches(it.item_name)" :key="i">
+                                <button type="button" @mousedown.prevent="it.item_name=nm; suggestKey=null"
+                                        class="block w-full text-left px-2 py-1.5 text-sm hover:bg-indigo-50" x-text="nm"></button>
+                              </template>
+                            </div>
+                          </div>
+                          <input :name="`items[${idx}][ordered_qty]`" x-model.number="it.ordered_qty" type="number" min="0" required inputmode="numeric"
+                                 class="no-spin col-span-2 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
+                          <input :name="`items[${idx}][unit_cost]`" x-model.number="it.unit_cost" type="number" step="0.01" min="0" required inputmode="decimal"
+                                 class="no-spin col-span-3 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
+                          <button type="button" @click="eRemove(idx)" class="col-span-1 text-red-500 hover:text-red-700 text-lg leading-none">×</button>
+                        </div>
+                      </template>
+                      <div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
+                        <button type="button" @click="eAdd()" class="text-xs font-semibold text-indigo-600 hover:underline">+ add item</button>
+                        <div class="text-sm font-bold text-slate-700">Total: <span x-text="peso(eTotal)"></span></div>
+                      </div>
+                    </div>
+
+                    <template x-for="rid in eRemoved" :key="rid"><input type="hidden" name="remove_ids[]" :value="rid"></template>
+
+                    <div class="mb-2"><label class="block text-[10px] font-semibold text-slate-500 mb-1">Notes</label>
+                      <input name="notes" value="{{ $o->notes }}" class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm bg-white"></div>
+                    <div class="flex justify-end gap-3 items-center">
+                      <button type="button" @click="editOpen=false" class="text-xs text-slate-500 hover:underline">cancel</button>
+                      <button class="rounded-md bg-slate-700 px-4 py-1.5 text-xs font-semibold text-white hover:bg-slate-800">Save changes</button>
                     </div>
                   </form>
                 </div>

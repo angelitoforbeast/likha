@@ -981,6 +981,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::put   ('/finance/supply/suppliers/{supplier}',  [\App\Http\Controllers\SupplyFinanceController::class, 'updateSupplier'])->whereNumber('supplier')->name('finance.supply.suppliers.update');
     // orders (PO)
     Route::post  ('/finance/supply/orders',                [\App\Http\Controllers\SupplyFinanceController::class, 'storeOrder'])   ->name('finance.supply.orders.store');
+    Route::put   ('/finance/supply/orders/{order}',        [\App\Http\Controllers\SupplyFinanceController::class, 'updateOrder'])  ->whereNumber('order')->name('finance.supply.orders.update');
     Route::post  ('/finance/supply/orders/{order}/deliver',[\App\Http\Controllers\SupplyFinanceController::class, 'markDelivered'])->whereNumber('order')->name('finance.supply.orders.deliver');
     Route::post  ('/finance/supply/orders/{order}/count',  [\App\Http\Controllers\SupplyFinanceController::class, 'saveCount'])     ->whereNumber('order')->name('finance.supply.orders.count');
     Route::delete('/finance/supply/orders/{order}',        [\App\Http\Controllers\SupplyFinanceController::class, 'deleteOrder'])   ->whereNumber('order')->name('finance.supply.orders.delete');

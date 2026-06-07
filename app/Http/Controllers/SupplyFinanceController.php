@@ -324,6 +324,83 @@ class SupplyFinanceController extends Controller
             ->with('success', "Order naidagdag (₱" . number_format($order->total_cost, 2) . ").");
     }
 
+    /**
+     * Edit an existing order (header + line items). Existing items na-update
+     * IN PLACE (preserve received_qty); bagong rows ginagawa; tinanggal na rows
+     * (remove_ids) dinedelete. Recompute ang total_cost.
+     */
+    public function updateOrder(Request $request, int $order)
+    {
+        $this->checkWriteAccess();
+        $o = SupplyOrder::query()->with('items')->findOrFail($order);
+
+        $data = $request->validate([
+            'order_date'         => ['required', 'date'],
+            'order_no'           => ['nullable', 'string', 'max:191'],
+            'expected_delivery'  => ['nullable', 'date'],
+            'notes'              => ['nullable', 'string'],
+            'items'              => ['required', 'array', 'min:1'],
+            'items.*.id'         => ['nullable'],
+            'items.*.item_name'  => ['required', 'string', 'max:191'],
+            'items.*.ordered_qty' => ['required', 'integer', 'min:0'],
+            'items.*.unit_cost'  => ['required', 'numeric', 'min:0'],
+            'remove_ids'         => ['nullable', 'array'],
+            'remove_ids.*'       => ['integer'],
+        ]);
+
+        DB::transaction(function () use ($o, $data) {
+            $existing  = $o->items->keyBy('id');
+            $removeIds = array_map('intval', $data['remove_ids'] ?? []);
+
+            if (!empty($removeIds)) {
+                SupplyOrderItem::query()
+                    ->where('supply_order_id', $o->id)
+                    ->whereIn('id', $removeIds)
+                    ->delete();
+            }
+
+            $total = 0.0;
+            foreach ($data['items'] as $it) {
+                $qty  = (int) $it['ordered_qty'];
+                $cost = round((float) $it['unit_cost'], 2);
+                $line = round($qty * $cost, 2);
+                $total += $line;
+                $id = (isset($it['id']) && $it['id'] !== null && $it['id'] !== '') ? (int) $it['id'] : null;
+
+                if ($id !== null && $existing->has($id) && !in_array($id, $removeIds, true)) {
+                    // Update in place — HUWAG galawin ang received_qty.
+                    $existing->get($id)->update([
+                        'item_key'    => $this->itemKey($it['item_name']),
+                        'item_name'   => trim($it['item_name']),
+                        'ordered_qty' => $qty,
+                        'unit_cost'   => $cost,
+                        'line_total'  => $line,
+                    ]);
+                } elseif ($id === null) {
+                    SupplyOrderItem::create([
+                        'supply_order_id' => $o->id,
+                        'item_key'        => $this->itemKey($it['item_name']),
+                        'item_name'       => trim($it['item_name']),
+                        'ordered_qty'     => $qty,
+                        'unit_cost'       => $cost,
+                        'received_qty'    => null,
+                        'line_total'      => $line,
+                    ]);
+                }
+            }
+
+            $o->update([
+                'order_date'        => $data['order_date'],
+                'order_no'          => $data['order_no'] ?? null,
+                'expected_delivery' => $data['expected_delivery'] ?? null,
+                'notes'             => $data['notes'] ?? null,
+                'total_cost'        => round($total, 2),
+            ]);
+        });
+
+        return back()->with('success', 'Order na-update.');
+    }
+
     /** Mark an order delivered (di pa na-count). */
     public function markDelivered(Request $request, int $order)
     {
