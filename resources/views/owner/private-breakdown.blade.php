@@ -126,44 +126,21 @@
                 :class="r.rts_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.rts_eff_date && r.date === r.rts_eff_date) ? 'font-bold text-blue-700 bg-blue-100' : '')"
                 :style="(r.rts_backfilled || (r.rts_eff_date && r.date === r.rts_eff_date)) ? '' : cf('rts_set', r)"
                 :title="r.rts_backfilled ? ('⚠ walang proper Set RTS para sa araw na ito — back-filled mula ' + r.rts_eff_date) : (r.rts_eff_date ? ('effective from ' + r.rts_eff_date) : 'no Set RTS')">
-              <template x-if="canEdit && editing===editKey('rts', r)">
+              <span class="block group">
                 <span class="flex items-center justify-end gap-1">
-                  <input id="bd-edit-input" type="number" step="0.1" min="0" max="100" x-model="editVal"
-                         @keydown.enter.prevent="saveEdit('rts', r)" @keydown.escape="cancelEdit()"
-                         class="w-14 rounded-md border border-indigo-300 px-2 py-1 text-xs text-right focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
-                  <button type="button" @click="saveEdit('rts', r)" :disabled="saving" title="Save"
-                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500 text-white shadow-sm hover:bg-emerald-600 disabled:opacity-50">
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.42 0L3.3 9.7a1 1 0 111.4-1.42l3.07 3.06 6.8-6.8a1 1 0 011.42 0z" clip-rule="evenodd"/></svg>
-                  </button>
-                  <button type="button" @click="cancelEdit()" title="Cancel"
-                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 text-slate-500 hover:bg-slate-200">
-                    <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.3 4.3a1 1 0 011.4 0L10 8.6l4.3-4.3a1 1 0 111.4 1.4L11.4 10l4.3 4.3a1 1 0 01-1.4 1.4L10 11.4l-4.3 4.3a1 1 0 01-1.4-1.4L8.6 10 4.3 5.7a1 1 0 010-1.4z" clip-rule="evenodd"/></svg>
-                  </button>
+                  <span @click="startEdit('rts', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
+                        x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></span>
+                  <template x-if="canEdit">
+                    <button type="button" @click="startEdit('rts', r)" title="Edit"
+                            class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-indigo-600">
+                      <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.59 3.41a1 1 0 011.42 0l1.58 1.58a1 1 0 010 1.42l-1.3 1.3-3-3 1.3-1.3zM3 13.99l7.3-7.3 3 3-7.3 7.3H3v-3z"/></svg>
+                    </button>
+                  </template>
                 </span>
-              </template>
-              <template x-if="!(canEdit && editing===editKey('rts', r))">
-                <span class="block group">
-                  <span class="flex items-center justify-end gap-1">
-                    <span @click="startEdit('rts', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
-                          x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></span>
-                    <template x-if="canEdit">
-                      <button type="button" @click="startEdit('rts', r)" title="Edit"
-                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-indigo-600">
-                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.59 3.41a1 1 0 011.42 0l1.58 1.58a1 1 0 010 1.42l-1.3 1.3-3-3 1.3-1.3zM3 13.99l7.3-7.3 3 3-7.3 7.3H3v-3z"/></svg>
-                      </button>
-                    </template>
-                    <template x-if="canEdit && !r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date">
-                      <button type="button" @click="deleteEdit('rts', r)" title="Delete effective date"
-                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-red-600">
-                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 2a1 1 0 00-1 1v1H4a1 1 0 100 2h12a1 1 0 100-2h-3V3a1 1 0 00-1-1H8zM6 8l.7 8.1a1 1 0 001 .9h4.6a1 1 0 001-.9L14 8H6z" clip-rule="evenodd"/></svg>
-                      </button>
-                    </template>
-                  </span>
-                  <template x-if="r.rts_backfilled"><span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span></template>
-                  <template x-if="!r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date"><span class="block text-[10px] text-blue-600 font-normal">↑ effective</span></template>
-                  <template x-if="!r.rts_backfilled && r.rts_eff_date && r.rts_eff_date < startDate && r.date === startDate"><span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.rts_eff_date"></span></template>
-                </span>
-              </template>
+                <template x-if="r.rts_backfilled"><span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span></template>
+                <template x-if="!r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date"><span class="block text-[10px] text-blue-600 font-normal">↑ effective</span></template>
+                <template x-if="!r.rts_backfilled && r.rts_eff_date && r.rts_eff_date < startDate && r.date === startDate"><span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.rts_eff_date"></span></template>
+              </span>
             </td>
             {{-- Promo --}}
             <td class="px-4 py-2 border-b border-slate-100"
@@ -171,44 +148,21 @@
                 :class="r.promo_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.promo_eff && r.date === r.promo_eff) ? 'font-bold text-blue-700 bg-blue-100' : '')"
                 :style="(r.promo_backfilled || (r.promo_eff && r.date === r.promo_eff)) ? '' : cf('promo', r)"
                 :title="r.promo_backfilled ? ('⚠ walang proper promo para sa araw na ito — back-filled mula ' + r.promo_eff) : (r.promo_eff ? ('effective from ' + r.promo_eff) : 'no promo')">
-              <template x-if="canEdit && editing===editKey('promo', r)">
+              <span class="block group">
                 <span class="flex items-center gap-1">
-                  <input id="bd-edit-input" type="text" x-model="editVal"
-                         @keydown.enter.prevent="saveEdit('promo', r)" @keydown.escape="cancelEdit()"
-                         class="w-32 rounded-md border border-indigo-300 px-2 py-1 text-xs focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
-                  <button type="button" @click="saveEdit('promo', r)" :disabled="saving" title="Save"
-                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500 text-white shadow-sm hover:bg-emerald-600 disabled:opacity-50">
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.42 0L3.3 9.7a1 1 0 111.4-1.42l3.07 3.06 6.8-6.8a1 1 0 011.42 0z" clip-rule="evenodd"/></svg>
-                  </button>
-                  <button type="button" @click="cancelEdit()" title="Cancel"
-                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 text-slate-500 hover:bg-slate-200">
-                    <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.3 4.3a1 1 0 011.4 0L10 8.6l4.3-4.3a1 1 0 111.4 1.4L11.4 10l4.3 4.3a1 1 0 01-1.4 1.4L10 11.4l-4.3 4.3a1 1 0 01-1.4-1.4L8.6 10 4.3 5.7a1 1 0 010-1.4z" clip-rule="evenodd"/></svg>
-                  </button>
+                  <span @click="startEdit('promo', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
+                        x-text="(r.promo !== null && r.promo !== undefined && r.promo !== '') ? r.promo : '—'"></span>
+                  <template x-if="canEdit">
+                    <button type="button" @click="startEdit('promo', r)" title="Edit"
+                            class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-indigo-600">
+                      <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.59 3.41a1 1 0 011.42 0l1.58 1.58a1 1 0 010 1.42l-1.3 1.3-3-3 1.3-1.3zM3 13.99l7.3-7.3 3 3-7.3 7.3H3v-3z"/></svg>
+                    </button>
+                  </template>
                 </span>
-              </template>
-              <template x-if="!(canEdit && editing===editKey('promo', r))">
-                <span class="block group">
-                  <span class="flex items-center gap-1">
-                    <span @click="startEdit('promo', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
-                          x-text="(r.promo !== null && r.promo !== undefined && r.promo !== '') ? r.promo : '—'"></span>
-                    <template x-if="canEdit">
-                      <button type="button" @click="startEdit('promo', r)" title="Edit"
-                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-indigo-600">
-                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.59 3.41a1 1 0 011.42 0l1.58 1.58a1 1 0 010 1.42l-1.3 1.3-3-3 1.3-1.3zM3 13.99l7.3-7.3 3 3-7.3 7.3H3v-3z"/></svg>
-                      </button>
-                    </template>
-                    <template x-if="canEdit && !r.promo_backfilled && r.promo_eff && r.date === r.promo_eff">
-                      <button type="button" @click="deleteEdit('promo', r)" title="Delete effective date"
-                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-red-600">
-                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 2a1 1 0 00-1 1v1H4a1 1 0 100 2h12a1 1 0 100-2h-3V3a1 1 0 00-1-1H8zM6 8l.7 8.1a1 1 0 001 .9h4.6a1 1 0 001-.9L14 8H6z" clip-rule="evenodd"/></svg>
-                      </button>
-                    </template>
-                  </span>
-                  <template x-if="r.promo_backfilled"><span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span></template>
-                  <template x-if="!r.promo_backfilled && r.promo_eff && r.date === r.promo_eff"><span class="block text-[10px] text-blue-600 font-normal">↑ effective</span></template>
-                  <template x-if="!r.promo_backfilled && r.promo_eff && r.promo_eff < startDate && r.date === startDate"><span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.promo_eff"></span></template>
-                </span>
-              </template>
+                <template x-if="r.promo_backfilled"><span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span></template>
+                <template x-if="!r.promo_backfilled && r.promo_eff && r.date === r.promo_eff"><span class="block text-[10px] text-blue-600 font-normal">↑ effective</span></template>
+                <template x-if="!r.promo_backfilled && r.promo_eff && r.promo_eff < startDate && r.date === startDate"><span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.promo_eff"></span></template>
+              </span>
             </td>
             {{-- Item Value (cogs) --}}
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
@@ -216,44 +170,21 @@
                 :class="r.item_value_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.item_value_eff && r.date === r.item_value_eff) ? 'font-bold text-blue-700 bg-blue-100' : '')"
                 :style="(r.item_value_backfilled || (r.item_value_eff && r.date === r.item_value_eff)) ? '' : cf('item_val', r)"
                 :title="r.item_value_backfilled ? ('⚠ walang proper cogs para sa araw na ito — back-filled mula ' + r.item_value_eff) : (r.item_value_eff ? ('effective from ' + r.item_value_eff) : 'no cogs entry')">
-              <template x-if="canEdit && editing===editKey('cogs', r)">
+              <span class="block group">
                 <span class="flex items-center justify-end gap-1">
-                  <input id="bd-edit-input" type="number" step="0.01" min="0" x-model="editVal"
-                         @keydown.enter.prevent="saveEdit('cogs', r)" @keydown.escape="cancelEdit()"
-                         class="w-20 rounded-md border border-indigo-300 px-2 py-1 text-xs text-right focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
-                  <button type="button" @click="saveEdit('cogs', r)" :disabled="saving" title="Save"
-                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500 text-white shadow-sm hover:bg-emerald-600 disabled:opacity-50">
-                    <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.42 0L3.3 9.7a1 1 0 111.4-1.42l3.07 3.06 6.8-6.8a1 1 0 011.42 0z" clip-rule="evenodd"/></svg>
-                  </button>
-                  <button type="button" @click="cancelEdit()" title="Cancel"
-                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 text-slate-500 hover:bg-slate-200">
-                    <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.3 4.3a1 1 0 011.4 0L10 8.6l4.3-4.3a1 1 0 111.4 1.4L11.4 10l4.3 4.3a1 1 0 01-1.4 1.4L10 11.4l-4.3 4.3a1 1 0 01-1.4-1.4L8.6 10 4.3 5.7a1 1 0 010-1.4z" clip-rule="evenodd"/></svg>
-                  </button>
+                  <span @click="startEdit('cogs', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
+                        x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></span>
+                  <template x-if="canEdit">
+                    <button type="button" @click="startEdit('cogs', r)" title="Edit"
+                            class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-indigo-600">
+                      <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.59 3.41a1 1 0 011.42 0l1.58 1.58a1 1 0 010 1.42l-1.3 1.3-3-3 1.3-1.3zM3 13.99l7.3-7.3 3 3-7.3 7.3H3v-3z"/></svg>
+                    </button>
+                  </template>
                 </span>
-              </template>
-              <template x-if="!(canEdit && editing===editKey('cogs', r))">
-                <span class="block group">
-                  <span class="flex items-center justify-end gap-1">
-                    <span @click="startEdit('cogs', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
-                          x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></span>
-                    <template x-if="canEdit">
-                      <button type="button" @click="startEdit('cogs', r)" title="Edit"
-                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-indigo-600">
-                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.59 3.41a1 1 0 011.42 0l1.58 1.58a1 1 0 010 1.42l-1.3 1.3-3-3 1.3-1.3zM3 13.99l7.3-7.3 3 3-7.3 7.3H3v-3z"/></svg>
-                      </button>
-                    </template>
-                    <template x-if="canEdit && !r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff">
-                      <button type="button" @click="deleteEdit('cogs', r)" title="Delete effective date"
-                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-red-600">
-                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 2a1 1 0 00-1 1v1H4a1 1 0 100 2h12a1 1 0 100-2h-3V3a1 1 0 00-1-1H8zM6 8l.7 8.1a1 1 0 001 .9h4.6a1 1 0 001-.9L14 8H6z" clip-rule="evenodd"/></svg>
-                      </button>
-                    </template>
-                  </span>
-                  <template x-if="r.item_value_backfilled"><span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span></template>
-                  <template x-if="!r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff"><span class="block text-[10px] text-blue-600 font-normal">↑ effective</span></template>
-                  <template x-if="!r.item_value_backfilled && r.item_value_eff && r.item_value_eff < startDate && r.date === startDate"><span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.item_value_eff"></span></template>
-                </span>
-              </template>
+                <template x-if="r.item_value_backfilled"><span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span></template>
+                <template x-if="!r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff"><span class="block text-[10px] text-blue-600 font-normal">↑ effective</span></template>
+                <template x-if="!r.item_value_backfilled && r.item_value_eff && r.item_value_eff < startDate && r.date === startDate"><span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.item_value_eff"></span></template>
+              </span>
             </td>
             {{-- ── Financials (white bg; color only via conditional formatting) ── --}}
             {{-- Adspent --}}
@@ -356,6 +287,58 @@
     </span>
   </div>
 
+  {{-- ── Edit modal (Set RTS% / Promo / Item Value) — malaki, hindi sikip ── --}}
+  <div x-show="editField" x-cloak @keydown.escape.window="cancelEdit()" @click.self="cancelEdit()"
+       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div class="w-full max-w-md rounded-xl bg-white shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+        <h3 class="text-base font-semibold text-slate-800" x-text="editTitle()"></h3>
+        <button type="button" @click="cancelEdit()" class="text-slate-400 hover:text-slate-600 text-lg leading-none">&times;</button>
+      </div>
+      <div class="px-5 py-4">
+        <label class="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1" x-text="fieldLabel(editField)"></label>
+        <template x-if="editField==='promo'">
+          <input type="text" x-model="editVal" x-init="$nextTick(()=>$el.focus())" @keydown.enter="saveEdit()"
+                 class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none"
+                 placeholder="hal. 199+60(SF)+40 (INS)= 299">
+        </template>
+        <template x-if="editField==='rts'">
+          <div class="relative">
+            <input type="number" step="0.1" min="0" max="100" x-model="editVal" x-init="$nextTick(()=>$el.focus())" @keydown.enter="saveEdit()"
+                   class="w-full rounded-lg border border-slate-300 px-3 py-2 pr-8 text-sm text-right focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
+            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+          </div>
+        </template>
+        <template x-if="editField==='cogs'">
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">&#8369;</span>
+            <input type="number" step="0.01" min="0" x-model="editVal" x-init="$nextTick(()=>$el.focus())" @keydown.enter="saveEdit()"
+                   class="w-full rounded-lg border border-slate-300 pl-7 pr-3 py-2 text-sm text-right focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
+          </div>
+        </template>
+        <p class="mt-2 text-[11px] text-slate-400">
+          Effective sa <span class="font-semibold text-slate-600" x-text="editRow?.date"></span>
+          &middot; <span x-text="editRow?.primary_item"></span>
+          <template x-if="editField!=='cogs'"><span> &middot; price &#8369;<span x-text="editRow ? Number(editRow.mode_cod||0).toFixed(2) : ''"></span></span></template>
+        </p>
+      </div>
+      <div class="flex items-center justify-between border-t border-slate-100 px-5 py-3">
+        <button type="button" x-show="canDeleteAnchor()" @click="deleteEdit()" :disabled="saving"
+                class="inline-flex items-center gap-1 text-sm font-medium text-red-600 hover:text-red-700 disabled:opacity-50">
+          &#128465; Delete effective date
+        </button>
+        <span x-show="!canDeleteAnchor()"></span>
+        <div class="flex items-center gap-2">
+          <button type="button" @click="cancelEdit()" class="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button type="button" @click="saveEdit()" :disabled="saving"
+                  class="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">
+            <span x-show="!saving">Save</span><span x-show="saving">Saving&hellip;</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
   function breakdownUI(){
     return {
@@ -372,11 +355,12 @@
       colFmt:       @json($colFormatRules ?? new \stdClass()),
       breakevenPct: @json($breakevenPct ?? 5),
 
-      // Inline edit/delete (Set RTS% / Promo / Item Value) — CEO + MOIC lang.
-      canEdit:  @json($canEdit ?? false),
-      editing:  null,   // 'rts:2026-05-08' | 'promo:...' | 'cogs:...'
-      editVal:  '',
-      saving:   false,
+      // Edit/delete (Set RTS% / Promo / Item Value) via MODAL — CEO + MOIC lang.
+      canEdit:   @json($canEdit ?? false),
+      editField: null,   // 'rts' | 'promo' | 'cogs'  (null = modal sarado)
+      editRow:   null,   // ang row na ine-edit
+      editVal:   '',
+      saving:    false,
 
       async init(){ await this.reload(); },
 
@@ -408,21 +392,32 @@
 
       money(v){ return '₱'+Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); },
 
-      // ── Inline edit / delete ng per-date settings ────────────────────────
-      editKey(field, r){ return field+':'+r.date; },
+      // ── Edit / delete per-date settings (via modal) ──────────────────────
+      _csrf(){ return document.querySelector('meta[name=csrf-token]')?.content || ''; },
+      fieldLabel(f){ return f==='rts' ? 'Set RTS%' : f==='promo' ? 'Promo' : 'Item Value (cogs)'; },
+      editTitle(){ return this.editField ? ('Edit ' + this.fieldLabel(this.editField)) : ''; },
       startEdit(field, r){
         if (!this.canEdit) return;
-        this.editing = this.editKey(field, r);
-        this.editVal = (field==='rts')   ? (r.rts_pct ?? '')
-                     : (field==='promo') ? (r.promo ?? '')
-                     :                     (r.item_value ?? '');
-        this.$nextTick(()=>{ const el=document.getElementById('bd-edit-input'); if(el){ el.focus(); if(el.select) el.select(); } });
+        this.editField = field;
+        this.editRow   = r;
+        this.editVal   = (field==='rts')   ? (r.rts_pct ?? '')
+                       : (field==='promo') ? (r.promo ?? '')
+                       :                     (r.item_value ?? '');
       },
-      cancelEdit(){ this.editing=null; this.editVal=''; },
-      _csrf(){ return document.querySelector('meta[name=csrf-token]')?.content || ''; },
-      async saveEdit(field, r){
-        if (this.saving) return;
-        if (field!=='cogs' && (r.mode_cod==null || r.mode_cod==='')){ alert('Walang presyo (mode_cod) ang row — di pwedeng mag-set ng RTS/Promo dito.'); return; }
+      cancelEdit(){ this.editField=null; this.editRow=null; this.editVal=''; },
+      // True kapag ang row ay mismong effective anchor para sa field (pwede burahin).
+      canDeleteAnchor(){
+        const r = this.editRow, f = this.editField;
+        if (!r || !f) return false;
+        if (f==='rts')   return !r.rts_backfilled        && !!r.rts_eff_date    && r.date===r.rts_eff_date;
+        if (f==='promo') return !r.promo_backfilled      && !!r.promo_eff       && r.date===r.promo_eff;
+        if (f==='cogs')  return !r.item_value_backfilled && !!r.item_value_eff  && r.date===r.item_value_eff;
+        return false;
+      },
+      async saveEdit(){
+        if (this.saving || !this.editField) return;
+        const f = this.editField, r = this.editRow;
+        if (f!=='cogs' && (r.mode_cod==null || r.mode_cod==='')){ alert('Walang presyo (mode_cod) ang row na ito — di pwedeng mag-set ng RTS/Promo.'); return; }
         this.saving = true;
         try {
           const fd = new FormData();
@@ -430,23 +425,24 @@
           fd.append('page_name', this.pageLabel);
           fd.append('item_name', r.primary_item);
           fd.append('effective_date', r.date);
-          fd.append('scope', field);
+          fd.append('scope', f);
           if (r.mode_cod != null) fd.append('mode_cod_int', Math.round(Number(r.mode_cod)));
-          if (field==='rts'){ fd.append('rts_pct', this.editVal); fd.append('comment','edited from breakdown'); }
-          else if (field==='promo'){ fd.append('promo', this.editVal); }
+          if (f==='rts'){ fd.append('rts_pct', this.editVal); fd.append('comment','edited from breakdown'); }
+          else if (f==='promo'){ fd.append('promo', this.editVal); }
           else { fd.append('item_value', this.editVal); }
           const res = await fetch('{{ route('owner.private.item-setting.save') }}', {
             method:'POST', headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}, body: fd,
           });
           const j = await res.json().catch(()=>({}));
           if (!res.ok || j.ok===false){ alert(j.message || 'Save failed'); }
-          else { this.editing=null; await this.reload(); }
+          else { this.cancelEdit(); await this.reload(); }
         } catch(e){ console.error(e); alert('Network error'); }
         finally { this.saving=false; }
       },
-      async deleteEdit(field, r){
-        if (!this.canEdit) return;
-        if (!confirm('Burahin ang effective '+field.toUpperCase()+' anchor sa '+r.date+'?\nBabalik ito sa naunang value (inheritance).')) return;
+      async deleteEdit(){
+        if (!this.editField || !this.canDeleteAnchor()) return;
+        const f = this.editField, r = this.editRow;
+        if (!confirm('Burahin ang effective '+this.fieldLabel(f)+' anchor sa '+r.date+'?\nBabalik ito sa naunang value (inheritance).')) return;
         this.saving = true;
         try {
           const fd = new FormData();
@@ -454,14 +450,14 @@
           fd.append('page_name', this.pageLabel);
           fd.append('item_name', r.primary_item);
           fd.append('effective_date', r.date);
-          fd.append('field', field);
+          fd.append('field', f);
           if (r.mode_cod != null) fd.append('mode_cod_int', Math.round(Number(r.mode_cod)));
           const res = await fetch('{{ route('owner.private.item-setting.delete') }}', {
             method:'POST', headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}, body: fd,
           });
           const j = await res.json().catch(()=>({}));
           if (!res.ok || j.ok===false){ alert(j.message || 'Delete failed'); }
-          else { this.editing=null; await this.reload(); }
+          else { this.cancelEdit(); await this.reload(); }
         } catch(e){ console.error(e); alert('Network error'); }
         finally { this.saving=false; }
       },
