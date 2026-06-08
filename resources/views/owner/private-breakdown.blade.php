@@ -16,7 +16,10 @@
     .bd-nav{position:sticky;top:0;z-index:40;height:48px;}
     /* Sticky table header — sits right below the 48px nav. box-shadow used for
        the bottom rule since border-collapse borders don't follow sticky cells. */
-    .bd-table{border-collapse:separate;border-spacing:0;}
+    /* table-layout:fixed + colgroup → GUARANTEED magkapareho ng width ang header
+       at body column (auto-layout kasi nagde-desync ang sticky thead vs tbody). */
+    .bd-table{border-collapse:separate;border-spacing:0;table-layout:fixed;width:100%;}
+    .bd-table th,.bd-table td{word-break:break-word;overflow-wrap:anywhere;}
     .bd-table thead th{position:sticky;top:48px;z-index:30;background:#f8fafc;box-shadow:inset 0 -1px 0 #e2e8f0;}
     .bd-table tfoot td{position:sticky;bottom:0;z-index:20;box-shadow:inset 0 1px 0 #cbd5e1;}
   </style>
@@ -64,6 +67,25 @@
 
   <template x-if="!loading && rows.length > 0">
     <table class="bd-table w-full text-sm">
+      {{-- Fixed column widths — header at body cells parehong susunod dito (aligned).
+           x-show sa hideable columns para tugma sa column-settings (collapse kapag hidden). --}}
+      <colgroup>
+        <col style="width:7%">
+        <col style="width:15%">
+        <col style="width:7%">
+        <col style="width:6%"   x-show="showCol('orders')">
+        <col style="width:6%"   x-show="showCol('price')">
+        <col style="width:6%"   x-show="showCol('rts_set')">
+        <col style="width:11%"  x-show="showCol('promo')">
+        <col style="width:6%"   x-show="showCol('item_val')">
+        <col style="width:7%"   x-show="showCol('adspent')">
+        <col style="width:5.5%" x-show="showCol('proceed')">
+        <col style="width:6%"   x-show="showCol('cpp')">
+        <col style="width:7%"   x-show="showCol('proj_profit')">
+        <col style="width:5.5%" x-show="showCol('proj_pct')">
+        <col style="width:7%">
+        <col style="width:11%">
+      </colgroup>
       <thead>
         <tr class="text-slate-600 font-bold text-xs uppercase tracking-wide">
           <th class="text-left px-4 py-2 border-b border-slate-200">Date</th>
@@ -128,14 +150,14 @@
                 :title="r.rts_backfilled ? ('⚠ walang proper Set RTS para sa araw na ito — back-filled mula ' + r.rts_eff_date) : (r.rts_eff_date ? ('effective from ' + r.rts_eff_date) : 'no Set RTS')">
               <span class="block group">
                 <span class="flex items-center justify-end gap-1">
-                  <span @click="startEdit('rts', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
-                        x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></span>
                   <template x-if="canEdit">
                     <button type="button" @click="startEdit('rts', r)" title="Edit"
                             class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-indigo-600">
                       <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.59 3.41a1 1 0 011.42 0l1.58 1.58a1 1 0 010 1.42l-1.3 1.3-3-3 1.3-1.3zM3 13.99l7.3-7.3 3 3-7.3 7.3H3v-3z"/></svg>
                     </button>
                   </template>
+                  <span @click="startEdit('rts', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
+                        x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></span>
                 </span>
                 <template x-if="r.rts_backfilled"><span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span></template>
                 <template x-if="!r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date"><span class="block text-[10px] text-blue-600 font-normal">↑ effective</span></template>
@@ -172,14 +194,14 @@
                 :title="r.item_value_backfilled ? ('⚠ walang proper cogs para sa araw na ito — back-filled mula ' + r.item_value_eff) : (r.item_value_eff ? ('effective from ' + r.item_value_eff) : 'no cogs entry')">
               <span class="block group">
                 <span class="flex items-center justify-end gap-1">
-                  <span @click="startEdit('cogs', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
-                        x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></span>
                   <template x-if="canEdit">
                     <button type="button" @click="startEdit('cogs', r)" title="Edit"
                             class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-indigo-600">
                       <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.59 3.41a1 1 0 011.42 0l1.58 1.58a1 1 0 010 1.42l-1.3 1.3-3-3 1.3-1.3zM3 13.99l7.3-7.3 3 3-7.3 7.3H3v-3z"/></svg>
                     </button>
                   </template>
+                  <span @click="startEdit('cogs', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
+                        x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></span>
                 </span>
                 <template x-if="r.item_value_backfilled"><span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span></template>
                 <template x-if="!r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff"><span class="block text-[10px] text-blue-600 font-normal">↑ effective</span></template>
