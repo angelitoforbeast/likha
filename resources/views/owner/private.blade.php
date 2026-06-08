@@ -968,26 +968,26 @@
                   <!-- jnt_rdt — combined RTS% / Del% / Transit% (3 stacked rows; % removed, count kept).
                        Per-line: each row shown only kung naka-check sa column-settings (col.members). -->
                   <template x-if="col.id==='jnt_rdt'">
-                    <span style="display:inline-block;line-height:1.5;font-size:12px;white-space:nowrap;">
+                    <span style="display:block;font-size:11.5px;border:1px solid #cbd5e1;border-radius:5px;padding:2px 7px;background:#fff;line-height:1.55;">
                       <template x-if="col.members.includes('jnt_rts')">
-                        <div>
-                          <span style="color:#94a3b8;font-size:9px;font-weight:600;">RTS</span>
-                          <template x-if="row.jnt_rts_pct !== null"><span style="color:#111;font-weight:700;" x-text="' '+row.jnt_rts_pct.toFixed(1)+'('+row.jnt_rts_cnt+')'"></span></template>
-                          <template x-if="row.jnt_rts_pct === null"><span style="color:#cbd5e1;"> —</span></template>
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+                          <span style="color:#64748b;font-size:9px;font-weight:700;">RTS</span>
+                          <span :style="row.jnt_rts_pct===null ? 'color:#cbd5e1' : 'color:#111;font-weight:700'"
+                                x-text="row.jnt_rts_pct!==null ? (row.jnt_rts_pct.toFixed(1)+'%('+row.jnt_rts_cnt+')') : '—'"></span>
                         </div>
                       </template>
                       <template x-if="col.members.includes('jnt_del')">
-                        <div>
-                          <span style="color:#94a3b8;font-size:9px;font-weight:600;">DEL</span>
-                          <template x-if="row.jnt_del_pct !== null"><span style="color:#111;" x-text="' '+row.jnt_del_pct.toFixed(1)+'('+row.jnt_del_cnt+')'"></span></template>
-                          <template x-if="row.jnt_del_pct === null"><span style="color:#cbd5e1;"> —</span></template>
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+                          <span style="color:#64748b;font-size:9px;font-weight:700;">DEL</span>
+                          <span :style="row.jnt_del_pct===null ? 'color:#cbd5e1' : 'color:#111;font-weight:600'"
+                                x-text="row.jnt_del_pct!==null ? (row.jnt_del_pct.toFixed(1)+'%('+row.jnt_del_cnt+')') : '—'"></span>
                         </div>
                       </template>
                       <template x-if="col.members.includes('jnt_transit')">
-                        <div>
-                          <span style="color:#94a3b8;font-size:9px;font-weight:600;">INT</span>
-                          <template x-if="row.jnt_transit_pct !== null"><span style="color:#111;" x-text="' '+row.jnt_transit_pct.toFixed(1)+'('+row.jnt_transit_cnt+')'"></span></template>
-                          <template x-if="row.jnt_transit_pct === null"><span style="color:#cbd5e1;"> —</span></template>
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+                          <span style="color:#64748b;font-size:9px;font-weight:700;">INT</span>
+                          <span :style="row.jnt_transit_pct===null ? 'color:#cbd5e1' : 'color:#111;font-weight:600'"
+                                x-text="row.jnt_transit_pct!==null ? (row.jnt_transit_pct.toFixed(1)+'%('+row.jnt_transit_cnt+')') : '—'"></span>
                         </div>
                       </template>
                     </span>
@@ -2021,7 +2021,7 @@
         const members  = trio.filter(id => present.includes(id)); // forced RTS,DEL,INT
         const firstIdx = ordered.findIndex(c => trio.includes(c.id));
         const insertAt = ordered.slice(0, firstIdx).filter(c => !trio.includes(c.id)).length;
-        const merged   = { id:'jnt_rdt', label:'RTS / DEL / INT', sort:'jnt_rts_pct', align:'center', minw:95, members };
+        const merged   = { id:'jnt_rdt', label:'RTS / DEL / INT', sort:'jnt_rts_pct', align:'center', minw:120, members };
         const out = ordered.filter(c => !trio.includes(c.id));
         out.splice(insertAt, 0, merged);
         return out;
