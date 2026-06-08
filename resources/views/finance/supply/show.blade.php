@@ -141,18 +141,14 @@
                 </div>
                 <template x-for="(it, idx) in items" :key="idx">
                   <div class="grid grid-cols-12 gap-2 mb-1 items-center">
-                    <div class="col-span-6 relative">
-                      <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name" required autocomplete="off"
-                             @focus="suggestKey='c'+idx" @input="suggestKey='c'+idx" @keydown.escape="suggestKey=null"
-                             @blur="setTimeout(()=>{ if(suggestKey==='c'+idx) suggestKey=null }, 150)"
+                    <div class="col-span-6">
+                      <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name (type 2+ letters)" required autocomplete="off"
+                             :list="'dl-c'+idx"
                              class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
-                      <div x-show="suggestKey==='c'+idx && itemMatches(it.item_name).length" x-cloak
-                           class="absolute z-30 left-0 right-0 mt-0.5 bg-white border border-slate-200 rounded shadow-lg max-h-48 overflow-auto">
-                        <template x-for="(nm,i) in itemMatches(it.item_name)" :key="i">
-                          <button type="button" @mousedown.prevent="it.item_name=nm; suggestKey=null"
-                                  class="block w-full text-left px-2 py-1.5 text-sm hover:bg-indigo-50" x-text="nm"></button>
-                        </template>
-                      </div>
+                      {{-- Native datalist — options lang lumalabas kapag 2+ letters (itemMatches → [] kung <2) --}}
+                      <datalist :id="'dl-c'+idx">
+                        <template x-for="(nm,i) in itemMatches(it.item_name)" :key="i"><option :value="nm"></option></template>
+                      </datalist>
                     </div>
                     <input :name="`items[${idx}][ordered_qty]`" x-model.number="it.ordered_qty" type="number" min="0" required
                            inputmode="numeric"
@@ -322,18 +318,13 @@
                       <template x-for="(it, idx) in eItems" :key="idx">
                         <div class="grid grid-cols-12 gap-2 mb-1 items-center">
                           <input type="hidden" :name="`items[${idx}][id]`" :value="it.id ?? ''">
-                          <div class="col-span-6 relative">
-                            <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name" required autocomplete="off"
-                                   @focus="suggestKey='e{{ $o->id }}-'+idx" @input="suggestKey='e{{ $o->id }}-'+idx" @keydown.escape="suggestKey=null"
-                                   @blur="setTimeout(()=>{ if(suggestKey==='e{{ $o->id }}-'+idx) suggestKey=null }, 150)"
+                          <div class="col-span-6">
+                            <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name (type 2+ letters)" required autocomplete="off"
+                                   :list="'dl-e{{ $o->id }}-'+idx"
                                    class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
-                            <div x-show="suggestKey==='e{{ $o->id }}-'+idx && itemMatches(it.item_name).length" x-cloak
-                                 class="absolute z-30 left-0 right-0 mt-0.5 bg-white border border-slate-200 rounded shadow-lg max-h-48 overflow-auto">
-                              <template x-for="(nm,i) in itemMatches(it.item_name)" :key="i">
-                                <button type="button" @mousedown.prevent="it.item_name=nm; suggestKey=null"
-                                        class="block w-full text-left px-2 py-1.5 text-sm hover:bg-indigo-50" x-text="nm"></button>
-                              </template>
-                            </div>
+                            <datalist :id="'dl-e{{ $o->id }}-'+idx">
+                              <template x-for="(nm,i) in itemMatches(it.item_name)" :key="i"><option :value="nm"></option></template>
+                            </datalist>
                           </div>
                           <input :name="`items[${idx}][ordered_qty]`" x-model.number="it.ordered_qty" type="number" min="0" required inputmode="numeric"
                                  class="no-spin col-span-2 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
