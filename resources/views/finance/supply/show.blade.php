@@ -9,11 +9,14 @@
     .no-spin { -moz-appearance: textfield; appearance: textfield; }
   </style>
 
-  {{-- Item names (macro_output base) para sa custom autocomplete.
-       Robust encode: JSON_INVALID_UTF8_SUBSTITUTE para HINDI mag-return ng false
-       (= blangkong script) kapag may malformed byte sa macro_output. JSON_HEX_TAG
-       para script-safe (walang </script> break). --}}
-  <script>window.__supplyItemNames = {!! json_encode($itemNames, JSON_HEX_TAG | JSON_HEX_AMP | JSON_INVALID_UTF8_SUBSTITUTE) !!} || [];</script>
+  {{-- Item-name suggestions (macro_output base). Simpleng native datalist —
+       server-rendered options, gumagana sa lahat ng item input (create + edit).
+       Sanitized na ang $itemNames (valid UTF-8) sa controller. --}}
+  <datalist id="moItemNames">
+    @foreach ($itemNames as $nm)
+      <option value="{{ $nm }}"></option>
+    @endforeach
+  </datalist>
 
   <div class="max-w-6xl mx-auto p-4"
        x-data="{
@@ -142,13 +145,9 @@
                 <template x-for="(it, idx) in items" :key="idx">
                   <div class="grid grid-cols-12 gap-2 mb-1 items-center">
                     <div class="col-span-6">
-                      <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name (type 2+ letters)" required autocomplete="off"
-                             :list="'dl-c'+idx"
+                      <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name" required autocomplete="off"
+                             list="moItemNames"
                              class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
-                      {{-- Native datalist — options lang lumalabas kapag 2+ letters (itemMatches → [] kung <2) --}}
-                      <datalist :id="'dl-c'+idx">
-                        <template x-for="(nm,i) in itemMatches(it.item_name)" :key="i"><option :value="nm"></option></template>
-                      </datalist>
                     </div>
                     <input :name="`items[${idx}][ordered_qty]`" x-model.number="it.ordered_qty" type="number" min="0" required
                            inputmode="numeric"
@@ -319,12 +318,9 @@
                         <div class="grid grid-cols-12 gap-2 mb-1 items-center">
                           <input type="hidden" :name="`items[${idx}][id]`" :value="it.id ?? ''">
                           <div class="col-span-6">
-                            <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name (type 2+ letters)" required autocomplete="off"
-                                   :list="'dl-e{{ $o->id }}-'+idx"
+                            <input :name="`items[${idx}][item_name]`" x-model="it.item_name" placeholder="Item name" required autocomplete="off"
+                                   list="moItemNames"
                                    class="w-full border border-slate-300 rounded px-2 py-1.5 text-sm">
-                            <datalist :id="'dl-e{{ $o->id }}-'+idx">
-                              <template x-for="(nm,i) in itemMatches(it.item_name)" :key="i"><option :value="nm"></option></template>
-                            </datalist>
                           </div>
                           <input :name="`items[${idx}][ordered_qty]`" x-model.number="it.ordered_qty" type="number" min="0" required inputmode="numeric"
                                  class="no-spin col-span-2 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
