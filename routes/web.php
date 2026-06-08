@@ -532,6 +532,7 @@ Route::get('/owner/private', [OwnerPrivateController::class, 'index'])->name('ow
 Route::get('/owner/private/data', [OwnerPrivateController::class, 'data'])->name('owner.private.data');
 Route::get('/owner/private/item-summary', [OwnerPrivateController::class, 'itemSummary'])->name('owner.private.item-summary');
 Route::post('/owner/private/item-setting', [OwnerPrivateController::class, 'saveItemSetting'])->name('owner.private.item-setting.save');
+Route::post('/owner/private/item-setting/delete', [OwnerPrivateController::class, 'deleteItemSetting'])->name('owner.private.item-setting.delete');
 Route::post('/owner/private/refresh-primary-items', [OwnerPrivateController::class, 'refreshPrimaryItems'])->name('owner.private.refresh-primary-items');
 Route::get('/owner/private/page-range-breakdown', [OwnerPrivateController::class, 'pageRangeBreakdown'])->name('owner.private.page-range-breakdown');
 Route::get('/owner/private/breakdown', [OwnerPrivateController::class, 'breakdownPage'])->name('owner.private.breakdown');

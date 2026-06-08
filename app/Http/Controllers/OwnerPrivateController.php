@@ -2904,6 +2904,68 @@ class OwnerPrivateController extends Controller
     }
 
     /**
+     * POST /owner/private/item-setting/delete — burahin ang effective-date anchor
+     * ng ISANG field (rts | promo | cogs) sa (page, item, date[, price]). Babalik
+     * ang value sa naunang effective (inheritance/back-fill). CEO + Marketing-OIC.
+     *
+     * - cogs  → delete ang cogs (+ cogs_ceo) row sa item+date.
+     * - rts/promo → null-out ang field sa page_item_settings row; burahin ang buong
+     *   row kapag pareho nang wala (rts + promo) para malinis.
+     */
+    public function deleteItemSetting(Request $request)
+    {
+        $this->checkWriteAccess();
+
+        $data = $request->validate([
+            'page_name'      => 'required|string|max:255',
+            'item_name'      => 'required|string|max:255',
+            'effective_date' => 'required|date',
+            'mode_cod_int'   => 'nullable|integer|min:0',
+            'field'          => 'required|in:rts,promo,cogs',
+        ]);
+
+        $page  = trim($data['page_name']);
+        $item  = trim($data['item_name']);
+        $eff   = $data['effective_date'];
+        $cod   = isset($data['mode_cod_int']) ? (int) $data['mode_cod_int'] : null;
+        $field = $data['field'];
+
+        if ($field === 'cogs') {
+            DB::table('cogs')->where('item_name', $item)->where('date', $eff)->delete();
+            if (Schema::hasTable('cogs_ceo')) {
+                DB::table('cogs_ceo')->where('item_name', $item)->where('date', $eff)->delete();
+            }
+        } else {
+            $hasPromoCol = Schema::hasColumn('page_item_settings', 'promo');
+            if ($field === 'promo' && !$hasPromoCol) {
+                return response()->json(['ok' => true, 'field' => $field]); // walang promo column
+            }
+
+            $q = DB::table('page_item_settings')
+                ->where('page_name', $page)
+                ->where('item_name', $item)
+                ->where('effective_date', $eff);
+            if ($cod !== null) $q->where('mode_cod_int', $cod);
+
+            foreach ($q->get() as $r) {
+                $newRts     = $field === 'rts'   ? null : ($r->rts_pct ?? null);
+                $newPromo   = $field === 'promo' ? null : ($hasPromoCol ? ($r->promo ?? null) : null);
+                $promoEmpty = ($newPromo === null || $newPromo === '');
+                if ($newRts === null && $promoEmpty) {
+                    DB::table('page_item_settings')->where('id', $r->id)->delete();
+                } else {
+                    DB::table('page_item_settings')->where('id', $r->id)->update([
+                        ($field === 'rts' ? 'rts_pct' : 'promo') => null,
+                    ]);
+                }
+            }
+        }
+
+        self::bumpCacheVersion();
+        return response()->json(['ok' => true, 'field' => $field]);
+    }
+
+    /**
      * GET /owner/private/edit-logs — paginated audit trail of RTS/COGS edits.
      * CEO + Marketing-OIC only.
      */
@@ -3089,6 +3151,8 @@ class OwnerPrivateController extends Controller
             'colsConfig'     => $colsConfig,
             'colFormatRules' => $colFormatRules,
             'breakevenPct'   => $breakevenPct,
+            // Inline edit/delete ng Set RTS% / Promo / Item Value — CEO + MOIC lang.
+            'canEdit'        => in_array($role, ['CEO', 'Marketing - OIC'], true),
         ]);
     }
 

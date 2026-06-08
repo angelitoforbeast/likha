@@ -126,15 +126,32 @@
                 :class="r.rts_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.rts_eff_date && r.date === r.rts_eff_date) ? 'font-bold text-blue-700 bg-blue-100' : '')"
                 :style="(r.rts_backfilled || (r.rts_eff_date && r.date === r.rts_eff_date)) ? '' : cf('rts_set', r)"
                 :title="r.rts_backfilled ? ('⚠ walang proper Set RTS para sa araw na ito — back-filled mula ' + r.rts_eff_date) : (r.rts_eff_date ? ('effective from ' + r.rts_eff_date) : 'no Set RTS')">
-              <span x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></span>
-              <template x-if="r.rts_backfilled">
-                <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
+              <template x-if="canEdit && editing===editKey('rts', r)">
+                <span class="flex items-center justify-end gap-1">
+                  <input id="bd-edit-input" type="number" step="0.1" min="0" max="100" x-model="editVal"
+                         @keydown.enter.prevent="saveEdit('rts', r)" @keydown.escape="cancelEdit()"
+                         class="w-16 border border-slate-300 rounded px-1 py-0.5 text-xs text-right">
+                  <button type="button" @click="saveEdit('rts', r)" :disabled="saving" class="text-emerald-600" title="save">✓</button>
+                  <button type="button" @click="cancelEdit()" class="text-slate-400" title="cancel">✕</button>
+                </span>
               </template>
-              <template x-if="!r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date">
-                <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
-              </template>
-              <template x-if="!r.rts_backfilled && r.rts_eff_date && r.rts_eff_date < startDate && r.date === startDate">
-                <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.rts_eff_date"></span>
+              <template x-if="!(canEdit && editing===editKey('rts', r))">
+                <span>
+                  <span :class="canEdit ? 'cursor-pointer decoration-dotted hover:underline' : ''" @click="startEdit('rts', r)"
+                        x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></span>
+                  <template x-if="canEdit && !r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date">
+                    <button type="button" @click="deleteEdit('rts', r)" class="ml-1 text-red-400 text-[10px]" title="delete effective date">🗑</button>
+                  </template>
+                  <template x-if="r.rts_backfilled">
+                    <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
+                  </template>
+                  <template x-if="!r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date">
+                    <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
+                  </template>
+                  <template x-if="!r.rts_backfilled && r.rts_eff_date && r.rts_eff_date < startDate && r.date === startDate">
+                    <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.rts_eff_date"></span>
+                  </template>
+                </span>
               </template>
             </td>
             {{-- Promo --}}
@@ -143,15 +160,32 @@
                 :class="r.promo_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.promo_eff && r.date === r.promo_eff) ? 'font-bold text-blue-700 bg-blue-100' : '')"
                 :style="(r.promo_backfilled || (r.promo_eff && r.date === r.promo_eff)) ? '' : cf('promo', r)"
                 :title="r.promo_backfilled ? ('⚠ walang proper promo para sa araw na ito — back-filled mula ' + r.promo_eff) : (r.promo_eff ? ('effective from ' + r.promo_eff) : 'no promo')">
-              <span x-text="(r.promo !== null && r.promo !== undefined && r.promo !== '') ? r.promo : '—'"></span>
-              <template x-if="r.promo_backfilled">
-                <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
+              <template x-if="canEdit && editing===editKey('promo', r)">
+                <span class="flex items-center gap-1">
+                  <input id="bd-edit-input" type="text" x-model="editVal"
+                         @keydown.enter.prevent="saveEdit('promo', r)" @keydown.escape="cancelEdit()"
+                         class="w-28 border border-slate-300 rounded px-1 py-0.5 text-xs">
+                  <button type="button" @click="saveEdit('promo', r)" :disabled="saving" class="text-emerald-600" title="save">✓</button>
+                  <button type="button" @click="cancelEdit()" class="text-slate-400" title="cancel">✕</button>
+                </span>
               </template>
-              <template x-if="!r.promo_backfilled && r.promo_eff && r.date === r.promo_eff">
-                <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
-              </template>
-              <template x-if="!r.promo_backfilled && r.promo_eff && r.promo_eff < startDate && r.date === startDate">
-                <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.promo_eff"></span>
+              <template x-if="!(canEdit && editing===editKey('promo', r))">
+                <span>
+                  <span :class="canEdit ? 'cursor-pointer decoration-dotted hover:underline' : ''" @click="startEdit('promo', r)"
+                        x-text="(r.promo !== null && r.promo !== undefined && r.promo !== '') ? r.promo : '—'"></span>
+                  <template x-if="canEdit && !r.promo_backfilled && r.promo_eff && r.date === r.promo_eff">
+                    <button type="button" @click="deleteEdit('promo', r)" class="ml-1 text-red-400 text-[10px]" title="delete effective date">🗑</button>
+                  </template>
+                  <template x-if="r.promo_backfilled">
+                    <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
+                  </template>
+                  <template x-if="!r.promo_backfilled && r.promo_eff && r.date === r.promo_eff">
+                    <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
+                  </template>
+                  <template x-if="!r.promo_backfilled && r.promo_eff && r.promo_eff < startDate && r.date === startDate">
+                    <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.promo_eff"></span>
+                  </template>
+                </span>
               </template>
             </td>
             {{-- Item Value (cogs) --}}
@@ -160,15 +194,32 @@
                 :class="r.item_value_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.item_value_eff && r.date === r.item_value_eff) ? 'font-bold text-blue-700 bg-blue-100' : '')"
                 :style="(r.item_value_backfilled || (r.item_value_eff && r.date === r.item_value_eff)) ? '' : cf('item_val', r)"
                 :title="r.item_value_backfilled ? ('⚠ walang proper cogs para sa araw na ito — back-filled mula ' + r.item_value_eff) : (r.item_value_eff ? ('effective from ' + r.item_value_eff) : 'no cogs entry')">
-              <span x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></span>
-              <template x-if="r.item_value_backfilled">
-                <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
+              <template x-if="canEdit && editing===editKey('cogs', r)">
+                <span class="flex items-center justify-end gap-1">
+                  <input id="bd-edit-input" type="number" step="0.01" min="0" x-model="editVal"
+                         @keydown.enter.prevent="saveEdit('cogs', r)" @keydown.escape="cancelEdit()"
+                         class="w-20 border border-slate-300 rounded px-1 py-0.5 text-xs text-right">
+                  <button type="button" @click="saveEdit('cogs', r)" :disabled="saving" class="text-emerald-600" title="save">✓</button>
+                  <button type="button" @click="cancelEdit()" class="text-slate-400" title="cancel">✕</button>
+                </span>
               </template>
-              <template x-if="!r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff">
-                <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
-              </template>
-              <template x-if="!r.item_value_backfilled && r.item_value_eff && r.item_value_eff < startDate && r.date === startDate">
-                <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.item_value_eff"></span>
+              <template x-if="!(canEdit && editing===editKey('cogs', r))">
+                <span>
+                  <span :class="canEdit ? 'cursor-pointer decoration-dotted hover:underline' : ''" @click="startEdit('cogs', r)"
+                        x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></span>
+                  <template x-if="canEdit && !r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff">
+                    <button type="button" @click="deleteEdit('cogs', r)" class="ml-1 text-red-400 text-[10px]" title="delete effective date">🗑</button>
+                  </template>
+                  <template x-if="r.item_value_backfilled">
+                    <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
+                  </template>
+                  <template x-if="!r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff">
+                    <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
+                  </template>
+                  <template x-if="!r.item_value_backfilled && r.item_value_eff && r.item_value_eff < startDate && r.date === startDate">
+                    <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.item_value_eff"></span>
+                  </template>
+                </span>
               </template>
             </td>
             {{-- ── Financials (white bg; color only via conditional formatting) ── --}}
@@ -288,6 +339,12 @@
       colFmt:       @json($colFormatRules ?? new \stdClass()),
       breakevenPct: @json($breakevenPct ?? 5),
 
+      // Inline edit/delete (Set RTS% / Promo / Item Value) — CEO + MOIC lang.
+      canEdit:  @json($canEdit ?? false),
+      editing:  null,   // 'rts:2026-05-08' | 'promo:...' | 'cogs:...'
+      editVal:  '',
+      saving:   false,
+
       async init(){ await this.reload(); },
 
       async reload(){
@@ -317,6 +374,64 @@
       },
 
       money(v){ return '₱'+Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); },
+
+      // ── Inline edit / delete ng per-date settings ────────────────────────
+      editKey(field, r){ return field+':'+r.date; },
+      startEdit(field, r){
+        if (!this.canEdit) return;
+        this.editing = this.editKey(field, r);
+        this.editVal = (field==='rts')   ? (r.rts_pct ?? '')
+                     : (field==='promo') ? (r.promo ?? '')
+                     :                     (r.item_value ?? '');
+        this.$nextTick(()=>{ const el=document.getElementById('bd-edit-input'); if(el){ el.focus(); if(el.select) el.select(); } });
+      },
+      cancelEdit(){ this.editing=null; this.editVal=''; },
+      _csrf(){ return document.querySelector('meta[name=csrf-token]')?.content || ''; },
+      async saveEdit(field, r){
+        if (this.saving) return;
+        if (field!=='cogs' && (r.mode_cod==null || r.mode_cod==='')){ alert('Walang presyo (mode_cod) ang row — di pwedeng mag-set ng RTS/Promo dito.'); return; }
+        this.saving = true;
+        try {
+          const fd = new FormData();
+          fd.append('_token', this._csrf());
+          fd.append('page_name', this.pageLabel);
+          fd.append('item_name', r.primary_item);
+          fd.append('effective_date', r.date);
+          fd.append('scope', field);
+          if (r.mode_cod != null) fd.append('mode_cod_int', Math.round(Number(r.mode_cod)));
+          if (field==='rts'){ fd.append('rts_pct', this.editVal); fd.append('comment','edited from breakdown'); }
+          else if (field==='promo'){ fd.append('promo', this.editVal); }
+          else { fd.append('item_value', this.editVal); }
+          const res = await fetch('{{ route('owner.private.item-setting.save') }}', {
+            method:'POST', headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}, body: fd,
+          });
+          const j = await res.json().catch(()=>({}));
+          if (!res.ok || j.ok===false){ alert(j.message || 'Save failed'); }
+          else { this.editing=null; await this.reload(); }
+        } catch(e){ console.error(e); alert('Network error'); }
+        finally { this.saving=false; }
+      },
+      async deleteEdit(field, r){
+        if (!this.canEdit) return;
+        if (!confirm('Burahin ang effective '+field.toUpperCase()+' anchor sa '+r.date+'?\nBabalik ito sa naunang value (inheritance).')) return;
+        this.saving = true;
+        try {
+          const fd = new FormData();
+          fd.append('_token', this._csrf());
+          fd.append('page_name', this.pageLabel);
+          fd.append('item_name', r.primary_item);
+          fd.append('effective_date', r.date);
+          fd.append('field', field);
+          if (r.mode_cod != null) fd.append('mode_cod_int', Math.round(Number(r.mode_cod)));
+          const res = await fetch('{{ route('owner.private.item-setting.delete') }}', {
+            method:'POST', headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}, body: fd,
+          });
+          const j = await res.json().catch(()=>({}));
+          if (!res.ok || j.ok===false){ alert(j.message || 'Delete failed'); }
+          else { this.editing=null; await this.reload(); }
+        } catch(e){ console.error(e); alert('Network error'); }
+        finally { this.saving=false; }
+      },
 
       // ── Column visibility ────────────────────────────────────────────────
       // catId === null/'' → always visible (breakdown-specific column).
