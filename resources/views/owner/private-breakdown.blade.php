@@ -130,27 +130,38 @@
                 <span class="flex items-center justify-end gap-1">
                   <input id="bd-edit-input" type="number" step="0.1" min="0" max="100" x-model="editVal"
                          @keydown.enter.prevent="saveEdit('rts', r)" @keydown.escape="cancelEdit()"
-                         class="w-16 border border-slate-300 rounded px-1 py-0.5 text-xs text-right">
-                  <button type="button" @click="saveEdit('rts', r)" :disabled="saving" class="text-emerald-600" title="save">✓</button>
-                  <button type="button" @click="cancelEdit()" class="text-slate-400" title="cancel">✕</button>
+                         class="w-14 rounded-md border border-indigo-300 px-2 py-1 text-xs text-right focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
+                  <button type="button" @click="saveEdit('rts', r)" :disabled="saving" title="Save"
+                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500 text-white shadow-sm hover:bg-emerald-600 disabled:opacity-50">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.42 0L3.3 9.7a1 1 0 111.4-1.42l3.07 3.06 6.8-6.8a1 1 0 011.42 0z" clip-rule="evenodd"/></svg>
+                  </button>
+                  <button type="button" @click="cancelEdit()" title="Cancel"
+                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 text-slate-500 hover:bg-slate-200">
+                    <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.3 4.3a1 1 0 011.4 0L10 8.6l4.3-4.3a1 1 0 111.4 1.4L11.4 10l4.3 4.3a1 1 0 01-1.4 1.4L10 11.4l-4.3 4.3a1 1 0 01-1.4-1.4L8.6 10 4.3 5.7a1 1 0 010-1.4z" clip-rule="evenodd"/></svg>
+                  </button>
                 </span>
               </template>
               <template x-if="!(canEdit && editing===editKey('rts', r))">
-                <span>
-                  <span :class="canEdit ? 'cursor-pointer decoration-dotted hover:underline' : ''" @click="startEdit('rts', r)"
-                        x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></span>
-                  <template x-if="canEdit && !r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date">
-                    <button type="button" @click="deleteEdit('rts', r)" class="ml-1 text-red-400 text-[10px]" title="delete effective date">🗑</button>
-                  </template>
-                  <template x-if="r.rts_backfilled">
-                    <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
-                  </template>
-                  <template x-if="!r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date">
-                    <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
-                  </template>
-                  <template x-if="!r.rts_backfilled && r.rts_eff_date && r.rts_eff_date < startDate && r.date === startDate">
-                    <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.rts_eff_date"></span>
-                  </template>
+                <span class="block group">
+                  <span class="flex items-center justify-end gap-1">
+                    <span @click="startEdit('rts', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
+                          x-text="(r.rts_pct !== null && r.rts_pct !== undefined) ? (Number(r.rts_pct).toFixed(1) + '%') : '—'"></span>
+                    <template x-if="canEdit">
+                      <button type="button" @click="startEdit('rts', r)" title="Edit"
+                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-indigo-600">
+                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.59 3.41a1 1 0 011.42 0l1.58 1.58a1 1 0 010 1.42l-1.3 1.3-3-3 1.3-1.3zM3 13.99l7.3-7.3 3 3-7.3 7.3H3v-3z"/></svg>
+                      </button>
+                    </template>
+                    <template x-if="canEdit && !r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date">
+                      <button type="button" @click="deleteEdit('rts', r)" title="Delete effective date"
+                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-red-600">
+                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 2a1 1 0 00-1 1v1H4a1 1 0 100 2h12a1 1 0 100-2h-3V3a1 1 0 00-1-1H8zM6 8l.7 8.1a1 1 0 001 .9h4.6a1 1 0 001-.9L14 8H6z" clip-rule="evenodd"/></svg>
+                      </button>
+                    </template>
+                  </span>
+                  <template x-if="r.rts_backfilled"><span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span></template>
+                  <template x-if="!r.rts_backfilled && r.rts_eff_date && r.date === r.rts_eff_date"><span class="block text-[10px] text-blue-600 font-normal">↑ effective</span></template>
+                  <template x-if="!r.rts_backfilled && r.rts_eff_date && r.rts_eff_date < startDate && r.date === startDate"><span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.rts_eff_date"></span></template>
                 </span>
               </template>
             </td>
@@ -164,27 +175,38 @@
                 <span class="flex items-center gap-1">
                   <input id="bd-edit-input" type="text" x-model="editVal"
                          @keydown.enter.prevent="saveEdit('promo', r)" @keydown.escape="cancelEdit()"
-                         class="w-28 border border-slate-300 rounded px-1 py-0.5 text-xs">
-                  <button type="button" @click="saveEdit('promo', r)" :disabled="saving" class="text-emerald-600" title="save">✓</button>
-                  <button type="button" @click="cancelEdit()" class="text-slate-400" title="cancel">✕</button>
+                         class="w-32 rounded-md border border-indigo-300 px-2 py-1 text-xs focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
+                  <button type="button" @click="saveEdit('promo', r)" :disabled="saving" title="Save"
+                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500 text-white shadow-sm hover:bg-emerald-600 disabled:opacity-50">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.42 0L3.3 9.7a1 1 0 111.4-1.42l3.07 3.06 6.8-6.8a1 1 0 011.42 0z" clip-rule="evenodd"/></svg>
+                  </button>
+                  <button type="button" @click="cancelEdit()" title="Cancel"
+                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 text-slate-500 hover:bg-slate-200">
+                    <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.3 4.3a1 1 0 011.4 0L10 8.6l4.3-4.3a1 1 0 111.4 1.4L11.4 10l4.3 4.3a1 1 0 01-1.4 1.4L10 11.4l-4.3 4.3a1 1 0 01-1.4-1.4L8.6 10 4.3 5.7a1 1 0 010-1.4z" clip-rule="evenodd"/></svg>
+                  </button>
                 </span>
               </template>
               <template x-if="!(canEdit && editing===editKey('promo', r))">
-                <span>
-                  <span :class="canEdit ? 'cursor-pointer decoration-dotted hover:underline' : ''" @click="startEdit('promo', r)"
-                        x-text="(r.promo !== null && r.promo !== undefined && r.promo !== '') ? r.promo : '—'"></span>
-                  <template x-if="canEdit && !r.promo_backfilled && r.promo_eff && r.date === r.promo_eff">
-                    <button type="button" @click="deleteEdit('promo', r)" class="ml-1 text-red-400 text-[10px]" title="delete effective date">🗑</button>
-                  </template>
-                  <template x-if="r.promo_backfilled">
-                    <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
-                  </template>
-                  <template x-if="!r.promo_backfilled && r.promo_eff && r.date === r.promo_eff">
-                    <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
-                  </template>
-                  <template x-if="!r.promo_backfilled && r.promo_eff && r.promo_eff < startDate && r.date === startDate">
-                    <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.promo_eff"></span>
-                  </template>
+                <span class="block group">
+                  <span class="flex items-center gap-1">
+                    <span @click="startEdit('promo', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
+                          x-text="(r.promo !== null && r.promo !== undefined && r.promo !== '') ? r.promo : '—'"></span>
+                    <template x-if="canEdit">
+                      <button type="button" @click="startEdit('promo', r)" title="Edit"
+                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-indigo-600">
+                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.59 3.41a1 1 0 011.42 0l1.58 1.58a1 1 0 010 1.42l-1.3 1.3-3-3 1.3-1.3zM3 13.99l7.3-7.3 3 3-7.3 7.3H3v-3z"/></svg>
+                      </button>
+                    </template>
+                    <template x-if="canEdit && !r.promo_backfilled && r.promo_eff && r.date === r.promo_eff">
+                      <button type="button" @click="deleteEdit('promo', r)" title="Delete effective date"
+                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-red-600">
+                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 2a1 1 0 00-1 1v1H4a1 1 0 100 2h12a1 1 0 100-2h-3V3a1 1 0 00-1-1H8zM6 8l.7 8.1a1 1 0 001 .9h4.6a1 1 0 001-.9L14 8H6z" clip-rule="evenodd"/></svg>
+                      </button>
+                    </template>
+                  </span>
+                  <template x-if="r.promo_backfilled"><span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span></template>
+                  <template x-if="!r.promo_backfilled && r.promo_eff && r.date === r.promo_eff"><span class="block text-[10px] text-blue-600 font-normal">↑ effective</span></template>
+                  <template x-if="!r.promo_backfilled && r.promo_eff && r.promo_eff < startDate && r.date === startDate"><span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.promo_eff"></span></template>
                 </span>
               </template>
             </td>
@@ -198,27 +220,38 @@
                 <span class="flex items-center justify-end gap-1">
                   <input id="bd-edit-input" type="number" step="0.01" min="0" x-model="editVal"
                          @keydown.enter.prevent="saveEdit('cogs', r)" @keydown.escape="cancelEdit()"
-                         class="w-20 border border-slate-300 rounded px-1 py-0.5 text-xs text-right">
-                  <button type="button" @click="saveEdit('cogs', r)" :disabled="saving" class="text-emerald-600" title="save">✓</button>
-                  <button type="button" @click="cancelEdit()" class="text-slate-400" title="cancel">✕</button>
+                         class="w-20 rounded-md border border-indigo-300 px-2 py-1 text-xs text-right focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
+                  <button type="button" @click="saveEdit('cogs', r)" :disabled="saving" title="Save"
+                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500 text-white shadow-sm hover:bg-emerald-600 disabled:opacity-50">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.42 0L3.3 9.7a1 1 0 111.4-1.42l3.07 3.06 6.8-6.8a1 1 0 011.42 0z" clip-rule="evenodd"/></svg>
+                  </button>
+                  <button type="button" @click="cancelEdit()" title="Cancel"
+                          class="inline-flex h-6 w-6 items-center justify-center rounded-md bg-slate-100 text-slate-500 hover:bg-slate-200">
+                    <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.3 4.3a1 1 0 011.4 0L10 8.6l4.3-4.3a1 1 0 111.4 1.4L11.4 10l4.3 4.3a1 1 0 01-1.4 1.4L10 11.4l-4.3 4.3a1 1 0 01-1.4-1.4L8.6 10 4.3 5.7a1 1 0 010-1.4z" clip-rule="evenodd"/></svg>
+                  </button>
                 </span>
               </template>
               <template x-if="!(canEdit && editing===editKey('cogs', r))">
-                <span>
-                  <span :class="canEdit ? 'cursor-pointer decoration-dotted hover:underline' : ''" @click="startEdit('cogs', r)"
-                        x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></span>
-                  <template x-if="canEdit && !r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff">
-                    <button type="button" @click="deleteEdit('cogs', r)" class="ml-1 text-red-400 text-[10px]" title="delete effective date">🗑</button>
-                  </template>
-                  <template x-if="r.item_value_backfilled">
-                    <span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span>
-                  </template>
-                  <template x-if="!r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff">
-                    <span class="block text-[10px] text-blue-600 font-normal">↑ effective</span>
-                  </template>
-                  <template x-if="!r.item_value_backfilled && r.item_value_eff && r.item_value_eff < startDate && r.date === startDate">
-                    <span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.item_value_eff"></span>
-                  </template>
+                <span class="block group">
+                  <span class="flex items-center justify-end gap-1">
+                    <span @click="startEdit('cogs', r)" :class="canEdit ? 'cursor-pointer rounded px-1 hover:bg-indigo-50' : ''"
+                          x-text="(r.item_value !== null && r.item_value !== undefined) ? money(r.item_value) : '—'"></span>
+                    <template x-if="canEdit">
+                      <button type="button" @click="startEdit('cogs', r)" title="Edit"
+                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-indigo-600">
+                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M13.59 3.41a1 1 0 011.42 0l1.58 1.58a1 1 0 010 1.42l-1.3 1.3-3-3 1.3-1.3zM3 13.99l7.3-7.3 3 3-7.3 7.3H3v-3z"/></svg>
+                      </button>
+                    </template>
+                    <template x-if="canEdit && !r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff">
+                      <button type="button" @click="deleteEdit('cogs', r)" title="Delete effective date"
+                              class="opacity-0 group-hover:opacity-100 transition text-slate-300 hover:text-red-600">
+                        <svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 2a1 1 0 00-1 1v1H4a1 1 0 100 2h12a1 1 0 100-2h-3V3a1 1 0 00-1-1H8zM6 8l.7 8.1a1 1 0 001 .9h4.6a1 1 0 001-.9L14 8H6z" clip-rule="evenodd"/></svg>
+                      </button>
+                    </template>
+                  </span>
+                  <template x-if="r.item_value_backfilled"><span class="block text-[10px] text-red-600 font-normal">⚠ back-filled</span></template>
+                  <template x-if="!r.item_value_backfilled && r.item_value_eff && r.date === r.item_value_eff"><span class="block text-[10px] text-blue-600 font-normal">↑ effective</span></template>
+                  <template x-if="!r.item_value_backfilled && r.item_value_eff && r.item_value_eff < startDate && r.date === startDate"><span class="block text-[10px] text-slate-400 font-normal" x-text="'since ' + r.item_value_eff"></span></template>
                 </span>
               </template>
             </td>

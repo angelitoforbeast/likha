@@ -70,6 +70,11 @@ class SupplyFinanceController extends Controller
         foreach ($raw as $name) {
             $name = trim((string) $name);
             if ($name === '') continue;
+            // Linisin ang invalid UTF-8 — ang macro_output ay pwedeng may malformed
+            // bytes na sumisira sa json_encode (= blangkong autocomplete) at sa /u regex.
+            if (!mb_check_encoding($name, 'UTF-8')) {
+                $name = mb_convert_encoding($name, 'UTF-8', 'UTF-8');
+            }
             // Strip "N x" / "N ×" qty prefix → base item (same as /jnt/hold).
             if (preg_match('/^\s*(\d+)\s*[x×]\s*(.+)$/iu', $name, $m)) {
                 $base = trim($m[2]);

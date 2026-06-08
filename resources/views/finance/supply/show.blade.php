@@ -9,8 +9,11 @@
     .no-spin { -moz-appearance: textfield; appearance: textfield; }
   </style>
 
-  {{-- Item names (macro_output base) para sa custom autocomplete --}}
-  <script>window.__supplyItemNames = @json($itemNames);</script>
+  {{-- Item names (macro_output base) para sa custom autocomplete.
+       Robust encode: JSON_INVALID_UTF8_SUBSTITUTE para HINDI mag-return ng false
+       (= blangkong script) kapag may malformed byte sa macro_output. JSON_HEX_TAG
+       para script-safe (walang </script> break). --}}
+  <script>window.__supplyItemNames = {!! json_encode($itemNames, JSON_HEX_TAG | JSON_HEX_AMP | JSON_INVALID_UTF8_SUBSTITUTE) !!} || [];</script>
 
   <div class="max-w-6xl mx-auto p-4"
        x-data="{
