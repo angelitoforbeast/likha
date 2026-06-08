@@ -19,7 +19,10 @@
     /* table-layout:fixed + colgroup → GUARANTEED magkapareho ng width ang header
        at body column (auto-layout kasi nagde-desync ang sticky thead vs tbody). */
     .bd-table{border-collapse:separate;border-spacing:0;table-layout:fixed;width:100%;}
-    .bd-table th,.bd-table td{word-break:break-word;overflow-wrap:anywhere;}
+    /* Default: HUWAG mababasag ang numero/value (nowrap). Text columns lang (Primary
+       Item, Promo, Action) ang pinapayagang mag-wrap via .bd-wrap. */
+    .bd-table th,.bd-table td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .bd-table td.bd-wrap{white-space:normal;word-break:break-word;overflow:visible;}
     .bd-table thead th{position:sticky;top:48px;z-index:30;background:#f8fafc;box-shadow:inset 0 -1px 0 #e2e8f0;}
     .bd-table tfoot td{position:sticky;bottom:0;z-index:20;box-shadow:inset 0 1px 0 #cbd5e1;}
   </style>
@@ -70,21 +73,21 @@
       {{-- Fixed column widths — header at body cells parehong susunod dito (aligned).
            x-show sa hideable columns para tugma sa column-settings (collapse kapag hidden). --}}
       <colgroup>
-        <col style="width:7%">
-        <col style="width:15%">
-        <col style="width:7%">
-        <col style="width:6%"   x-show="showCol('orders')">
-        <col style="width:6%"   x-show="showCol('price')">
+        <col style="width:6%">                              {{-- Date --}}
+        <col style="width:18%">                             {{-- Primary Item (mahaba) --}}
+        <col style="width:6%">                              {{-- Item Alias --}}
+        <col style="width:5%"   x-show="showCol('orders')">
+        <col style="width:5.5%" x-show="showCol('price')">
         <col style="width:6%"   x-show="showCol('rts_set')">
-        <col style="width:11%"  x-show="showCol('promo')">
-        <col style="width:6%"   x-show="showCol('item_val')">
-        <col style="width:7%"   x-show="showCol('adspent')">
-        <col style="width:5.5%" x-show="showCol('proceed')">
-        <col style="width:6%"   x-show="showCol('cpp')">
-        <col style="width:7%"   x-show="showCol('proj_profit')">
-        <col style="width:5.5%" x-show="showCol('proj_pct')">
-        <col style="width:7%">
-        <col style="width:11%">
+        <col style="width:10%"  x-show="showCol('promo')">
+        <col style="width:5.5%" x-show="showCol('item_val')">
+        <col style="width:6.5%" x-show="showCol('adspent')">
+        <col style="width:4.5%" x-show="showCol('proceed')">
+        <col style="width:5.5%" x-show="showCol('cpp')">
+        <col style="width:6.5%" x-show="showCol('proj_profit')">
+        <col style="width:4.5%" x-show="showCol('proj_pct')">
+        <col style="width:6%">                              {{-- Status --}}
+        <col style="width:11%">                             {{-- Action --}}
       </colgroup>
       <thead>
         <tr class="text-slate-600 font-bold text-xs uppercase tracking-wide">
@@ -116,7 +119,7 @@
                       title="Anchor source — end-date primary item ang basehan ng anchor">⚓ ANCHOR</span>
               </template>
             </td>
-            <td class="px-4 py-2 border-b border-slate-100">
+            <td class="px-4 py-2 border-b border-slate-100 bd-wrap">
               <span x-text="r.primary_item || '— no data —'"></span>
               <template x-if="r.second_item">
                 <span class="text-xs text-slate-400"
@@ -165,7 +168,7 @@
               </span>
             </td>
             {{-- Promo --}}
-            <td class="px-4 py-2 border-b border-slate-100"
+            <td class="px-4 py-2 border-b border-slate-100 bd-wrap"
                 x-show="showCol('promo')"
                 :class="r.promo_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.promo_eff && r.date === r.promo_eff) ? 'font-bold text-blue-700 bg-blue-100' : '')"
                 :style="(r.promo_backfilled || (r.promo_eff && r.date === r.promo_eff)) ? '' : cf('promo', r)"
@@ -245,7 +248,7 @@
             </td>
             {{-- Action note (per date) — VIEW ONLY (auto-expanded full text).
                  Editing happens sa /owner/private (per end_date). --}}
-            <td class="px-4 py-2 border-b border-slate-100">
+            <td class="px-4 py-2 border-b border-slate-100 bd-wrap">
               <div class="text-left text-xs text-slate-700" style="max-width:240px;white-space:normal;line-height:1.3;">
                 <template x-if="r.action_comment">
                   <span>
