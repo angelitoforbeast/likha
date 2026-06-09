@@ -986,6 +986,17 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post  ('/finance/supply/orders/{order}/deliver',[\App\Http\Controllers\SupplyFinanceController::class, 'markDelivered'])->whereNumber('order')->name('finance.supply.orders.deliver');
     Route::post  ('/finance/supply/orders/{order}/count',  [\App\Http\Controllers\SupplyFinanceController::class, 'saveCount'])     ->whereNumber('order')->name('finance.supply.orders.count');
     Route::delete('/finance/supply/orders/{order}',        [\App\Http\Controllers\SupplyFinanceController::class, 'deleteOrder'])   ->whereNumber('order')->name('finance.supply.orders.delete');
+    // ── Playbook (Problem & Solution) — CEO + Marketing-OIC + Marketing ──
+    Route::get   ('/playbook',                   [\App\Http\Controllers\PlaybookController::class, 'index'])  ->name('playbook.index');
+    Route::get   ('/playbook/create',            [\App\Http\Controllers\PlaybookController::class, 'create']) ->name('playbook.create');
+    Route::post  ('/playbook',                   [\App\Http\Controllers\PlaybookController::class, 'store'])  ->name('playbook.store');
+    Route::get   ('/playbook/{problem}',         [\App\Http\Controllers\PlaybookController::class, 'show'])   ->whereNumber('problem')->name('playbook.show');
+    Route::get   ('/playbook/{problem}/edit',    [\App\Http\Controllers\PlaybookController::class, 'edit'])   ->whereNumber('problem')->name('playbook.edit');
+    Route::put   ('/playbook/{problem}',         [\App\Http\Controllers\PlaybookController::class, 'update']) ->whereNumber('problem')->name('playbook.update');
+    Route::delete('/playbook/{problem}',         [\App\Http\Controllers\PlaybookController::class, 'destroy'])->whereNumber('problem')->name('playbook.destroy');
+    Route::post  ('/playbook/{problem}/checklist',  [\App\Http\Controllers\PlaybookController::class, 'updateChecklist'])->whereNumber('problem')->name('playbook.checklist');
+    Route::post  ('/playbook/{problem}/recurrence', [\App\Http\Controllers\PlaybookController::class, 'addRecurrence'])  ->whereNumber('problem')->name('playbook.recurrence');
+
     // payments
     Route::post  ('/finance/supply/payments',              [\App\Http\Controllers\SupplyFinanceController::class, 'storePayment'])  ->name('finance.supply.payments.store');
     Route::put   ('/finance/supply/payments/{payment}',     [\App\Http\Controllers\SupplyFinanceController::class, 'updatePayment']) ->whereNumber('payment')->name('finance.supply.payments.update');
