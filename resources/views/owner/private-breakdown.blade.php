@@ -70,42 +70,23 @@
 
   <template x-if="!loading && rows.length > 0">
     <table class="bd-table w-full text-sm">
-      {{-- Fixed column widths — header at body cells parehong susunod dito (aligned).
-           x-show sa hideable columns para tugma sa column-settings (collapse kapag hidden). --}}
-      <colgroup>
-        <col style="width:6%">                              {{-- Date --}}
-        <col style="width:18%">                             {{-- Primary Item (mahaba) --}}
-        <col style="width:6%">                              {{-- Item Alias --}}
-        <col style="width:5%"   x-show="showCol('orders')">
-        <col style="width:5.5%" x-show="showCol('price')">
-        <col style="width:6%"   x-show="showCol('rts_set')">
-        <col style="width:10%"  x-show="showCol('promo')">
-        <col style="width:5.5%" x-show="showCol('item_val')">
-        <col style="width:6.5%" x-show="showCol('adspent')">
-        <col style="width:4.5%" x-show="showCol('proceed')">
-        <col style="width:5.5%" x-show="showCol('cpp')">
-        <col style="width:6.5%" x-show="showCol('proj_profit')">
-        <col style="width:4.5%" x-show="showCol('proj_pct')">
-        <col style="width:6%">                              {{-- Status --}}
-        <col style="width:11%">                             {{-- Action --}}
-      </colgroup>
       <thead>
         <tr class="text-slate-600 font-bold text-xs uppercase tracking-wide">
-          <th class="text-left px-4 py-2 border-b border-slate-200">Date</th>
-          <th class="text-left px-4 py-2 border-b border-slate-200">Primary Item</th>
-          <th class="text-left px-4 py-2 border-b border-slate-200">Item Alias</th>
-          <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('orders')">Orders</th>
-          <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('price')">Mode COD</th>
-          <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('rts_set')">Set RTS%</th>
-          <th class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('promo')">Promo</th>
-          <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('item_val')">Item Val.</th>
-          <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('adspent')">Adspent</th>
-          <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proceed')">Proceed</th>
-          <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('cpp')">CPP</th>
-          <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_profit')">Net Profit</th>
-          <th class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_pct')">Proj%</th>
-          <th class="text-center px-4 py-2 border-b border-slate-200">Status</th>
-          <th class="text-left px-4 py-2 border-b border-slate-200">Action</th>
+          <th style="width:6%"   class="text-left px-4 py-2 border-b border-slate-200">Date</th>
+          <th style="width:18%"  class="text-left px-4 py-2 border-b border-slate-200">Primary Item</th>
+          <th style="width:6%"   class="text-left px-4 py-2 border-b border-slate-200">Item Alias</th>
+          <th style="width:5%"   class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('orders')">Orders</th>
+          <th style="width:5.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('price')">Mode COD</th>
+          <th style="width:6%"   class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('rts_set')">Set RTS%</th>
+          <th style="width:10%"  class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('promo')">Promo</th>
+          <th style="width:5.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('item_val')">Item Val.</th>
+          <th style="width:6.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('adspent')">Adspent</th>
+          <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proceed')">Proceed</th>
+          <th style="width:5.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('cpp')">CPP</th>
+          <th style="width:6.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_profit')">Net Profit</th>
+          <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_pct')">Proj%</th>
+          <th style="width:6%"   class="text-center px-4 py-2 border-b border-slate-200">Status</th>
+          <th style="width:11%"  class="text-left px-4 py-2 border-b border-slate-200">Action</th>
         </tr>
       </thead>
       <tbody>
