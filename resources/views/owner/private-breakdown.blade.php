@@ -75,13 +75,13 @@
           <th style="width:6%"   class="text-left px-4 py-2 border-b border-slate-200">Date</th>
           <th style="width:18%"  class="text-left px-4 py-2 border-b border-slate-200">Primary Item</th>
           <th style="width:6%"   class="text-left px-4 py-2 border-b border-slate-200">Item Alias</th>
-          <th style="width:5%"   class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('orders')">Orders</th>
+          <th style="width:5%"   class="text-right px-4 py-2 border-b border-slate-200">Orders</th>
           <th style="width:5.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('price')">Mode COD</th>
           <th style="width:6%"   class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('rts_set')">Set RTS%</th>
           <th style="width:10%"  class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('promo')">Promo</th>
           <th style="width:5.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('item_val')">Item Val.</th>
           <th style="width:6.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('adspent')">Adspent</th>
-          <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proceed')">Proceed</th>
+          <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200">Proceed</th>
           <th style="width:5.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('cpp')">CPP</th>
           <th style="width:6.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_profit')">Net Profit</th>
           <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_pct')">Proj%</th>
@@ -118,7 +118,7 @@
             </td>
             {{-- Orders --}}
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
-                x-show="showCol('orders')" :style="cf('orders', r)"
+                :style="cf('orders', r)"
                 x-text="r.has_data ? (r.primary_orders + ' / ' + r.total_orders) : '—'"></td>
             {{-- Mode COD (price) --}}
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
@@ -199,7 +199,7 @@
                 x-text="(r.adspent !== null && r.adspent !== undefined && r.adspent > 0) ? money(r.adspent) : '—'"></td>
             {{-- Proceed --}}
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
-                x-show="showCol('proceed')" :style="cf('proceed', r)"
+                :style="cf('proceed', r)"
                 x-text="(r.proceed !== null && r.proceed !== undefined && r.proceed > 0) ? r.proceed : '—'"></td>
             {{-- CPP (adspent ÷ proceed) --}}
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
@@ -252,13 +252,13 @@
           <td class="px-4 py-2 bg-slate-100"></td>
           <td class="px-4 py-2 bg-slate-100 text-right">TOTAL (range)</td>
           <td class="px-4 py-2 bg-slate-100"></td>
-          <td class="px-4 py-2 bg-slate-100" x-show="showCol('orders')"></td>
+          <td class="px-4 py-2 bg-slate-100"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('price')"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('rts_set')"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('promo')"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('item_val')"></td>
           <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('adspent')" x-text="money(totals().adspent)"></td>
-          <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('proceed')" x-text="totals().proceed"></td>
+          <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-text="totals().proceed"></td>
           <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('cpp')"
               x-text="totals().proceed > 0 ? money(totals().adspent / totals().proceed) : '—'"></td>
           <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('proj_profit')"
