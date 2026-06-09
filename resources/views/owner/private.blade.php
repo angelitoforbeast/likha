@@ -968,29 +968,29 @@
                   <!-- jnt_rdt — combined RTS% / Del% / Transit% (3 stacked rows; % removed, count kept).
                        Per-line: each row shown only kung naka-check sa column-settings (col.members). -->
                   <template x-if="col.id==='jnt_rdt'">
-                    <span style="display:block;font-size:11.5px;">
+                    <div style="font-size:11px;line-height:1.25;">
                       <template x-if="col.members.includes('jnt_rts')">
-                        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;line-height:1.7;border-bottom:1px solid #e2e8f0;">
-                          <span style="color:#64748b;font-size:9px;font-weight:700;">RTS</span>
-                          <span :style="row.jnt_rts_pct===null ? 'color:#cbd5e1' : 'color:#111;font-weight:700'"
-                                x-text="row.jnt_rts_pct!==null ? (row.jnt_rts_pct.toFixed(1)+'%('+row.jnt_rts_cnt+')') : '—'"></span>
+                        <div style="text-align:center;padding:2px 2px 3px;border-bottom:1px solid #cbd5e1;">
+                          <div style="color:#94a3b8;font-size:8.5px;font-weight:700;letter-spacing:0.05em;">RTS</div>
+                          <div :style="row.jnt_rts_pct===null ? 'color:#cbd5e1' : 'color:#111;font-weight:700'"
+                               x-text="row.jnt_rts_pct!==null ? (row.jnt_rts_pct.toFixed(1)+'%('+row.jnt_rts_cnt+')') : '—'"></div>
                         </div>
                       </template>
                       <template x-if="col.members.includes('jnt_del')">
-                        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;line-height:1.7;border-bottom:1px solid #e2e8f0;">
-                          <span style="color:#64748b;font-size:9px;font-weight:700;">DEL</span>
-                          <span :style="row.jnt_del_pct===null ? 'color:#cbd5e1' : 'color:#111;font-weight:600'"
-                                x-text="row.jnt_del_pct!==null ? (row.jnt_del_pct.toFixed(1)+'%('+row.jnt_del_cnt+')') : '—'"></span>
+                        <div style="text-align:center;padding:3px 2px;border-bottom:1px solid #cbd5e1;">
+                          <div style="color:#94a3b8;font-size:8.5px;font-weight:700;letter-spacing:0.05em;">DEL</div>
+                          <div :style="row.jnt_del_pct===null ? 'color:#cbd5e1' : 'color:#111;font-weight:600'"
+                               x-text="row.jnt_del_pct!==null ? (row.jnt_del_pct.toFixed(1)+'%('+row.jnt_del_cnt+')') : '—'"></div>
                         </div>
                       </template>
                       <template x-if="col.members.includes('jnt_transit')">
-                        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;line-height:1.7;">
-                          <span style="color:#64748b;font-size:9px;font-weight:700;">INT</span>
-                          <span :style="row.jnt_transit_pct===null ? 'color:#cbd5e1' : 'color:#111;font-weight:600'"
-                                x-text="row.jnt_transit_pct!==null ? (row.jnt_transit_pct.toFixed(1)+'%('+row.jnt_transit_cnt+')') : '—'"></span>
+                        <div style="text-align:center;padding:3px 2px 2px;">
+                          <div style="color:#94a3b8;font-size:8.5px;font-weight:700;letter-spacing:0.05em;">INT</div>
+                          <div :style="row.jnt_transit_pct===null ? 'color:#cbd5e1' : 'color:#111;font-weight:600'"
+                               x-text="row.jnt_transit_pct!==null ? (row.jnt_transit_pct.toFixed(1)+'%('+row.jnt_transit_cnt+')') : '—'"></div>
                         </div>
                       </template>
-                    </span>
+                    </div>
                   </template>
 
                   <!-- rts_set — manually set RTS% (read-only here; click ✎ icon to edit via modal) -->
