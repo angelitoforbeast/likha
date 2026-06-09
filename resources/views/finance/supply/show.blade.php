@@ -365,7 +365,8 @@
 
         @if ($canWrite)
           <div x-show="showAddPayment" x-cloak x-transition class="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <form method="POST" action="{{ route('finance.supply.payments.store') }}" enctype="multipart/form-data">
+            <form method="POST" action="{{ route('finance.supply.payments.store') }}" enctype="multipart/form-data"
+                  x-data="paymentUpload()" @paste.window="paste($event)">
               @csrf
               <input type="hidden" name="supplier_id" value="{{ $supplier->id }}">
               <div class="mb-2"><label class="block text-[11px] font-semibold text-emerald-900 mb-1">Amount * (partial OK)</label>
@@ -382,8 +383,24 @@
                 </select></div>
               <div class="mb-2"><label class="block text-[11px] font-semibold text-emerald-900 mb-1">Reference no.</label>
                 <input name="reference_no" class="w-full border border-emerald-300 rounded px-3 py-2 text-sm bg-white"></div>
-              <div class="mb-2"><label class="block text-[11px] font-semibold text-emerald-900 mb-1">📎 Resibo (image/PDF)</label>
-                <input name="receipt" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" class="w-full text-xs"></div>
+              {{-- 📎 Resibo — free-input: click / drag-drop / Ctrl+V paste, multiple --}}
+              <div class="mb-2">
+                <label class="block text-[11px] font-semibold text-emerald-900 mb-1">📎 Resibo (multiple — click / drag / Ctrl+V)</label>
+                <div @dragover.prevent @drop.prevent="add($event.dataTransfer.files)" @click="$refs.fileInput.click()"
+                     class="border-2 border-dashed border-emerald-300 rounded-lg p-3 text-center text-[11px] text-emerald-700 bg-white cursor-pointer hover:bg-emerald-100">
+                  📎 I-click, i-drag, o <b>Ctrl+V</b> para mag-paste ng resibo
+                </div>
+                <input type="file" name="receipts[]" multiple accept=".jpg,.jpeg,.png,.webp,.pdf" x-ref="fileInput" class="hidden" @change="add($event.target.files)">
+                <div class="flex flex-wrap gap-2 mt-2" x-show="files.length" x-cloak>
+                  <template x-for="(f,i) in files" :key="i">
+                    <div class="relative">
+                      <template x-if="isImg(f)"><img :src="thumb(f)" class="h-14 w-14 object-cover rounded border border-slate-200"></template>
+                      <template x-if="!isImg(f)"><div class="h-14 w-14 rounded border border-slate-200 flex items-center justify-center text-[9px] text-slate-500 bg-slate-50">PDF</div></template>
+                      <button type="button" @click.stop="remove(i)" class="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-[10px] leading-none flex items-center justify-center">×</button>
+                    </div>
+                  </template>
+                </div>
+              </div>
               <div class="mb-3"><label class="block text-[11px] font-semibold text-emerald-900 mb-1">Notes</label>
                 <input name="notes" class="w-full border border-emerald-300 rounded px-3 py-2 text-sm bg-white"></div>
               <div class="flex justify-end"><button class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Record payment</button></div>
@@ -393,7 +410,8 @@
 
         <div class="space-y-2">
           @forelse ($payments as $p)
-            <div class="rounded-lg border border-slate-200 p-3">
+            @php $rcpts = $p->receipt_list ?? []; @endphp
+            <div class="rounded-lg border border-slate-200 p-3" x-data="{ editOpen:false }">
               <div class="flex items-center justify-between">
                 <div class="font-bold text-emerald-700">₱{{ number_format($p->amount, 2) }}</div>
                 <div class="text-[11px] text-slate-400">{{ \Illuminate\Support\Carbon::parse($p->paid_date)->format('M j, Y') }}</div>
@@ -403,19 +421,101 @@
                 @if ($p->reference_no)<span>· {{ $p->reference_no }}</span>@endif
               </div>
               @if ($p->notes)<div class="text-[11px] text-slate-400 mt-0.5">📝 {{ $p->notes }}</div>@endif
-              <div class="flex items-center justify-between mt-1">
-                @if ($p->receipt_url)
-                  <a href="{{ $p->receipt_url }}" target="_blank" class="text-[11px] text-indigo-600 hover:underline">📎 view receipt</a>
-                @else
-                  <span class="text-[11px] text-slate-300">no receipt</span>
-                @endif
-                @if ($canWrite)
+
+              {{-- Receipt thumbnails (multiple) — click to VIEW full --}}
+              @if (count($rcpts))
+                <div class="flex flex-wrap gap-1.5 mt-2">
+                  @foreach ($rcpts as $rc)
+                    <a href="{{ $rc['url'] }}" target="_blank" title="View receipt">
+                      <img src="{{ $rc['url'] }}" class="h-12 w-12 object-cover rounded border border-slate-200 hover:ring-2 hover:ring-indigo-300"
+                           onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'📎 PDF',className:'text-[10px] text-indigo-600 inline-block h-12 w-12 rounded border border-slate-200 flex items-center justify-center'}))">
+                    </a>
+                  @endforeach
+                </div>
+              @else
+                <div class="text-[11px] text-slate-300 mt-1">no receipt</div>
+              @endif
+
+              @if ($canWrite)
+                <div class="flex items-center justify-end gap-3 mt-2 pt-2 border-t border-slate-100">
+                  <button @click="editOpen=!editOpen" class="text-[11px] text-indigo-600 hover:underline">edit</button>
                   <form method="POST" action="{{ route('finance.supply.payments.delete', $p->id) }}" onsubmit="return confirm('Burahin ang payment?')">
                     @csrf @method('DELETE')
                     <button class="text-[11px] text-red-400 hover:underline">delete</button>
                   </form>
-                @endif
-              </div>
+                </div>
+
+                {{-- Edit form (fields + remove existing receipts + add new via paste/drop/click) --}}
+                <div x-show="editOpen" x-cloak x-transition class="mt-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3"
+                     x-data="paymentUpload()" @paste.window="paste($event)">
+                  <form method="POST" action="{{ route('finance.supply.payments.update', $p->id) }}" enctype="multipart/form-data">
+                    @csrf @method('PUT')
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                      <div><label class="block text-[10px] font-semibold text-indigo-900 mb-1">Amount *</label>
+                        <input name="amount" type="number" step="0.01" min="0.01" required value="{{ $p->amount }}" class="w-full border border-indigo-300 rounded px-2 py-1.5 text-sm bg-white"></div>
+                      <div><label class="block text-[10px] font-semibold text-indigo-900 mb-1">Date *</label>
+                        <input name="paid_date" type="date" required value="{{ \Illuminate\Support\Carbon::parse($p->paid_date)->toDateString() }}" class="w-full border border-indigo-300 rounded px-2 py-1.5 text-sm bg-white"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                      <div><label class="block text-[10px] font-semibold text-indigo-900 mb-1">Method</label>
+                        <select name="method" class="w-full border border-indigo-300 rounded px-2 py-1.5 text-sm bg-white">
+                          <option value="">—</option>
+                          <option value="cash"  @selected($p->method==='cash')>Cash</option>
+                          <option value="gcash" @selected($p->method==='gcash')>GCash</option>
+                          <option value="bank"  @selected($p->method==='bank')>Bank transfer</option>
+                          <option value="check" @selected($p->method==='check')>Check</option>
+                        </select></div>
+                      <div><label class="block text-[10px] font-semibold text-indigo-900 mb-1">Ref</label>
+                        <input name="reference_no" value="{{ $p->reference_no }}" class="w-full border border-indigo-300 rounded px-2 py-1.5 text-sm bg-white"></div>
+                    </div>
+                    <div class="mb-2"><label class="block text-[10px] font-semibold text-indigo-900 mb-1">Notes</label>
+                      <input name="notes" value="{{ $p->notes }}" class="w-full border border-indigo-300 rounded px-2 py-1.5 text-sm bg-white"></div>
+
+                    {{-- existing receipts — click × to mark for removal --}}
+                    @php $existing = array_values(array_filter($rcpts, fn($r) => ($r['id'] ?? 0) > 0)); @endphp
+                    @if (count($existing))
+                      <div class="mb-2">
+                        <div class="text-[10px] font-semibold text-indigo-900 mb-1">Existing receipts (× = alisin):</div>
+                        <div class="flex flex-wrap gap-1.5">
+                          @foreach ($existing as $rc)
+                            <div class="relative" :class="isRemoved({{ $rc['id'] }}) ? 'opacity-30' : ''">
+                              <img src="{{ $rc['url'] }}" class="h-12 w-12 object-cover rounded border border-slate-200">
+                              <button type="button" @click="toggleRemove({{ $rc['id'] }})"
+                                      class="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-[10px] leading-none flex items-center justify-center"
+                                      x-text="isRemoved({{ $rc['id'] }}) ? '↺' : '×'"></button>
+                            </div>
+                          @endforeach
+                        </div>
+                      </div>
+                    @endif
+                    <template x-for="id in removed" :key="id"><input type="hidden" name="remove_receipt_ids[]" :value="id"></template>
+
+                    {{-- add new receipts --}}
+                    <div class="mb-2">
+                      <div class="text-[10px] font-semibold text-indigo-900 mb-1">Magdagdag ng resibo (click / drag / Ctrl+V):</div>
+                      <div @dragover.prevent @drop.prevent="add($event.dataTransfer.files)" @click="$refs.fileInput.click()"
+                           class="border-2 border-dashed border-indigo-300 rounded-lg p-2 text-center text-[10px] text-indigo-700 bg-white cursor-pointer hover:bg-indigo-100">
+                        📎 click / drag / <b>Ctrl+V</b>
+                      </div>
+                      <input type="file" name="receipts[]" multiple accept=".jpg,.jpeg,.png,.webp,.pdf" x-ref="fileInput" class="hidden" @change="add($event.target.files)">
+                      <div class="flex flex-wrap gap-2 mt-2" x-show="files.length" x-cloak>
+                        <template x-for="(f,i) in files" :key="i">
+                          <div class="relative">
+                            <template x-if="isImg(f)"><img :src="thumb(f)" class="h-12 w-12 object-cover rounded border border-slate-200"></template>
+                            <template x-if="!isImg(f)"><div class="h-12 w-12 rounded border border-slate-200 flex items-center justify-center text-[9px] text-slate-500 bg-slate-50">PDF</div></template>
+                            <button type="button" @click.stop="remove(i)" class="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-4 h-4 text-[10px] leading-none flex items-center justify-center">×</button>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
+                    <div class="flex justify-end gap-2">
+                      <button type="button" @click="editOpen=false" class="text-xs text-slate-500 hover:underline">cancel</button>
+                      <button class="rounded-md bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">Save changes</button>
+                    </div>
+                  </form>
+                </div>
+              @endif
             </div>
           @empty
             <div class="rounded-lg border border-dashed border-slate-200 p-6 text-center text-slate-400 text-sm">Wala pang bayad.</div>
@@ -444,4 +544,51 @@
 
     </div>
   </div>
+
+  {{-- Free-input receipt uploader: click / drag-drop / Ctrl+V paste, multiple files.
+       DataTransfer-backed kaya kasama lahat (kahit pasted blobs) sa native form submit
+       via name="receipts[]". --}}
+  <script>
+    function paymentUpload() {
+      return {
+        dt: new DataTransfer(),
+        files: [],
+        removed: [],   // existing receipt ids na tatanggalin (edit form)
+        add(list) {
+          for (const f of (list || [])) {
+            if (f && (f.type.startsWith('image/') || f.type === 'application/pdf')) this.dt.items.add(f);
+          }
+          this.sync();
+        },
+        sync() {
+          if (this.$refs.fileInput) this.$refs.fileInput.files = this.dt.files;
+          this.files = Array.from(this.dt.files);
+        },
+        remove(i) {
+          const n = new DataTransfer();
+          Array.from(this.dt.files).forEach((f, idx) => { if (idx !== i) n.items.add(f); });
+          this.dt = n; this.sync();
+        },
+        paste(e) {
+          if (this.$el.offsetParent === null) return;   // skip kapag hidden ang form
+          const items = e.clipboardData ? e.clipboardData.items : [];
+          let got = false;
+          for (const it of items) {
+            if (it.type && it.type.startsWith('image/')) {
+              const b = it.getAsFile();
+              if (b) { this.dt.items.add(b); got = true; }
+            }
+          }
+          if (got) { e.preventDefault(); this.sync(); }
+        },
+        thumb(f) { return URL.createObjectURL(f); },
+        isImg(f) { return f.type.startsWith('image/'); },
+        toggleRemove(id) {
+          const i = this.removed.indexOf(id);
+          if (i >= 0) this.removed.splice(i, 1); else this.removed.push(id);
+        },
+        isRemoved(id) { return this.removed.includes(id); },
+      };
+    }
+  </script>
 </x-layout>

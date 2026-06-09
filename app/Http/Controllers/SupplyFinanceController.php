@@ -11,6 +11,7 @@ use App\Models\Supplier;
 use App\Models\SupplyOrder;
 use App\Models\SupplyOrderItem;
 use App\Models\SupplyPayment;
+use App\Models\SupplyPaymentReceipt;
 
 /**
  * SupplyFinanceController — finance tracking para sa SUPPLY (mula sa supplier)
@@ -203,10 +204,19 @@ class SupplyFinanceController extends Controller
 
         $payments = SupplyPayment::query()
             ->where('supplier_id', $s->id)
+            ->with('receipts')
             ->orderByDesc('paid_date')->orderByDesc('id')
             ->get()
             ->map(function ($p) {
-                $p->receipt_url = $p->receipt_path ? Storage::disk('public')->url($p->receipt_path) : null;
+                // Multiple receipts → [{id, url}]. Fallback sa legacy receipt_path.
+                $list = $p->receipts->map(fn ($r) => [
+                    'id'  => $r->id,
+                    'url' => Storage::disk('public')->url($r->path),
+                ])->values();
+                if ($list->isEmpty() && $p->receipt_path) {
+                    $list = collect([['id' => 0, 'url' => Storage::disk('public')->url($p->receipt_path)]]);
+                }
+                $p->receipt_list = $list->all();
                 return $p;
             });
 
@@ -484,39 +494,92 @@ class SupplyFinanceController extends Controller
             'method'          => ['nullable', 'string', 'max:30'],
             'reference_no'    => ['nullable', 'string', 'max:191'],
             'notes'           => ['nullable', 'string'],
-            'receipt'         => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:8192'],
+            'receipts'        => ['nullable', 'array'],
+            'receipts.*'      => ['file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:8192'],
         ]);
 
-        $path = null;
-        if ($request->hasFile('receipt')) {
-            $path = $request->file('receipt')->store('supply_receipts', 'public');
-        }
-
-        SupplyPayment::create([
+        $p = SupplyPayment::create([
             'supplier_id'     => $data['supplier_id'],
             'supply_order_id' => $data['supply_order_id'] ?? null,
             'amount'          => round((float) $data['amount'], 2),
             'paid_date'       => $data['paid_date'],
             'method'          => $data['method'] ?? null,
             'reference_no'    => $data['reference_no'] ?? null,
-            'receipt_path'    => $path,
             'notes'           => $data['notes'] ?? null,
             'paid_by'         => Auth::id(),
         ]);
+
+        $this->storeReceiptFiles($request, $p->id);
 
         return redirect()->route('finance.supply.show', $data['supplier_id'])
             ->with('success', "Payment ₱" . number_format((float) $data['amount'], 2) . " naitala.");
     }
 
-    public function deletePayment(Request $request, int $payment)
+    /** Edit an existing payment (fields + add/remove receipts). CEO only. */
+    public function updatePayment(Request $request, int $payment)
     {
         $this->checkWriteAccess();
         $p = SupplyPayment::query()->findOrFail($payment);
+
+        $data = $request->validate([
+            'amount'               => ['required', 'numeric', 'min:0.01'],
+            'paid_date'            => ['required', 'date'],
+            'method'               => ['nullable', 'string', 'max:30'],
+            'reference_no'         => ['nullable', 'string', 'max:191'],
+            'notes'                => ['nullable', 'string'],
+            'receipts'             => ['nullable', 'array'],
+            'receipts.*'           => ['file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:8192'],
+            'remove_receipt_ids'   => ['nullable', 'array'],
+            'remove_receipt_ids.*' => ['integer'],
+        ]);
+
+        $p->update([
+            'amount'       => round((float) $data['amount'], 2),
+            'paid_date'    => $data['paid_date'],
+            'method'       => $data['method'] ?? null,
+            'reference_no' => $data['reference_no'] ?? null,
+            'notes'        => $data['notes'] ?? null,
+        ]);
+
+        // Remove selected receipts (file + row).
+        foreach ($data['remove_receipt_ids'] ?? [] as $rid) {
+            $r = SupplyPaymentReceipt::query()
+                ->where('supply_payment_id', $p->id)->where('id', (int) $rid)->first();
+            if ($r) {
+                try { Storage::disk('public')->delete($r->path); } catch (\Throwable $e) {}
+                $r->delete();
+            }
+        }
+
+        $this->storeReceiptFiles($request, $p->id);
+
+        return redirect()->route('finance.supply.show', $p->supplier_id)
+            ->with('success', 'Payment na-update.');
+    }
+
+    /** Store all uploaded/pasted receipt files (receipts[]) for a payment. */
+    private function storeReceiptFiles(Request $request, int $paymentId): void
+    {
+        if (!$request->hasFile('receipts')) return;
+        foreach ($request->file('receipts') as $file) {
+            if (!$file) continue;
+            $path = $file->store('supply_receipts', 'public');
+            SupplyPaymentReceipt::create(['supply_payment_id' => $paymentId, 'path' => $path]);
+        }
+    }
+
+    public function deletePayment(Request $request, int $payment)
+    {
+        $this->checkWriteAccess();
+        $p = SupplyPayment::query()->with('receipts')->findOrFail($payment);
         $sid = $p->supplier_id;
+        foreach ($p->receipts as $r) {
+            try { Storage::disk('public')->delete($r->path); } catch (\Throwable $e) {}
+        }
         if ($p->receipt_path) {
             try { Storage::disk('public')->delete($p->receipt_path); } catch (\Throwable $e) {}
         }
-        $p->delete();
+        $p->delete(); // cascade receipts rows
         return redirect()->route('finance.supply.show', $sid)->with('success', 'Payment tinanggal.');
     }
 }

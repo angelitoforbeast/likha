@@ -988,6 +988,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::delete('/finance/supply/orders/{order}',        [\App\Http\Controllers\SupplyFinanceController::class, 'deleteOrder'])   ->whereNumber('order')->name('finance.supply.orders.delete');
     // payments
     Route::post  ('/finance/supply/payments',              [\App\Http\Controllers\SupplyFinanceController::class, 'storePayment'])  ->name('finance.supply.payments.store');
+    Route::put   ('/finance/supply/payments/{payment}',     [\App\Http\Controllers\SupplyFinanceController::class, 'updatePayment']) ->whereNumber('payment')->name('finance.supply.payments.update');
     Route::delete('/finance/supply/payments/{payment}',    [\App\Http\Controllers\SupplyFinanceController::class, 'deletePayment']) ->whereNumber('payment')->name('finance.supply.payments.delete');
     Route::get('/jnt/supply', [\App\Http\Controllers\JntSupplyController::class, 'index'])->name('jnt.supply');
     Route::get('/jnt/supply/config', [\App\Http\Controllers\JntSupplyController::class, 'config'])->name('jnt.supply.config');
