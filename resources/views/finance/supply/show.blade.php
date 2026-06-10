@@ -183,6 +183,9 @@
                 'ordered_qty' => (int) $it->ordered_qty,
                 'unit_cost'   => (float) $it->unit_cost,
               ])->values();
+              // Clipboard text para sa "Copy" — DATE tapos ITEM - COUNT per line.
+              $copyText = \Illuminate\Support\Carbon::parse($o->order_date)->format('M j, Y') . "\n"
+                . $o->items->map(fn ($it) => $it->item_name . ' - ' . (int) $it->ordered_qty)->implode("\n");
             @endphp
             <div class="rounded-xl border border-slate-200 p-4"
                  x-data="{
@@ -205,6 +208,9 @@
                   @endif
                 </div>
                 <div class="flex items-center gap-2">
+                  <button type="button" title="Copy order (date + item - count)"
+                          @click="navigator.clipboard.writeText(@js($copyText)).then(()=>{ $el.textContent='✓ Copied'; setTimeout(()=>{ $el.textContent='📋 Copy'; }, 1500); }).catch(()=>alert('Copy failed'))"
+                          class="text-[11px] font-semibold text-indigo-600 hover:underline">📋 Copy</button>
                   <span class="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full
                     {{ $o->status === 'counted' ? 'bg-emerald-100 text-emerald-700' : ($o->status === 'delivered' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600') }}">
                     {{ $o->status }}
