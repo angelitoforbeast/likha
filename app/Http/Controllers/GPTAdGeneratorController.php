@@ -174,22 +174,27 @@ class GPTAdGeneratorController extends Controller
         if (!Auth::check()) {
             return response()->json(['error' => 'Login required.'], 403);
         }
-        $src = DB::table('gpt_prompts')->where('id', $id)->first();
-        if (!$src) return response()->json(['error' => 'Source version not found'], 404);
+        try {
+            $src = DB::table('gpt_prompts')->where('id', $id)->first();
+            if (!$src) return response()->json(['error' => 'Source version not found'], 404);
 
-        $newId = DB::table('gpt_prompts')->insertGetId([
-            'prompt_text'    => $src->prompt_text,
-            'saved_by_email' => Auth::user()?->email,
-            'note'           => 'Restored from version #' . $id,
-            'created_at'     => now(),
-            'updated_at'     => now(),
-        ]);
+            $newId = DB::table('gpt_prompts')->insertGetId([
+                'prompt_text'    => $src->prompt_text,
+                'saved_by_email' => Auth::user()?->email,
+                'note'           => 'Restored from version #' . $id,
+                'created_at'     => now(),
+                'updated_at'     => now(),
+            ]);
 
-        return response()->json([
-            'ok'           => true,
-            'id'           => $newId,
-            'restored_from'=> $id,
-        ]);
+            return response()->json([
+                'ok'           => true,
+                'id'           => $newId,
+                'restored_from'=> $id,
+            ]);
+        } catch (\Throwable $e) {
+            \Log::error('promptRestore failed: ' . $e->getMessage());
+            return response()->json(['error' => 'Restore failed: ' . $e->getMessage()], 500);
+        }
     }
 
     /**

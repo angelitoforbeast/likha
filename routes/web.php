@@ -126,7 +126,7 @@ Route::get('/gpt-ad-generator/prompt-history/{id}', [GPTAdGeneratorController::c
     ->name('gpt.prompt.version');
 Route::post('/gpt-ad-generator/prompt-history/{id}/restore', [GPTAdGeneratorController::class, 'promptRestore'])
     ->whereNumber('id')
-    ->middleware('throttle:10,60')
+    ->middleware('throttle:30,1')
     ->name('gpt.prompt.restore');
 // Suggestions are cached 5min, but still throttle to 60/min/IP for safety.
 Route::get('/ad-copy-suggestions', [GPTAdGeneratorController::class, 'loadAdCopySuggestions'])

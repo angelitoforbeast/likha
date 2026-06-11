@@ -1970,7 +1970,7 @@
           { id:'ship',       label:'Ship',       sort:'shipping_fee',         align:'center', minw:58  },
           { id:'cod_fee',    label:'COD Fee',    sort:'cod_fee',              align:'center', minw:72  },
           { id:'hold',       label:'Hold',       sort:'hold_units',           align:'center', minw:60  },
-          { id:'action',     label:'Action',     sort:null,                   align:'left',   minw:160 },
+          { id:'action',     label:'Action',     sort:'action_at',            align:'left',   minw:160 },
         ];
       },
 

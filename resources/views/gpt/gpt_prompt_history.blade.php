@@ -149,15 +149,26 @@
           try {
             const res = await fetch(`/gpt-ad-generator/prompt-history/${id}/restore`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+              headers: {
+                'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+              },
             });
             if (res.status === 403) { alert('❌ Login required.'); return; }
-            const d = await res.json();
+            if (res.status === 419) { alert('⚠️ Session/CSRF expired — i-refresh ang page (Ctrl+Shift+R), tapos subukan ulit.'); return; }
+            if (res.status === 429) { alert('⚠️ Sobrang bilis — sandali lang tapos subukan ulit (rate limit).'); return; }
+            // Parse defensively — kung HTML (error page) ang nakuha, malinaw na mensahe.
+            let d = null;
+            try { d = await res.json(); } catch (_) {
+              alert('❌ Restore failed (HTTP ' + res.status + '). Kung paulit-ulit, i-refresh ang page o i-clear ang route cache sa server (php artisan route:clear).');
+              return;
+            }
             if (res.ok && d.ok) {
               alert(`✅ Version #${id} restored as new version #${d.id}. Reloading…`);
               window.location.reload();
             } else {
-              alert('❌ Restore failed: ' + (d.error || 'unknown'));
+              alert('❌ Restore failed: ' + (d.error || d.message || ('HTTP ' + res.status)));
             }
           } catch (e) {
             alert('❌ ' + e.message);
