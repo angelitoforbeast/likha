@@ -1919,6 +1919,9 @@ class OwnerPrivateController extends Controller
         // item_value (unit cost) is NOT sourced here — comes from global `cogs`
         // table (keyed by item_name + date only, no page or price scoping).
         $settingsMap = [];
+        // Per-(page||alias) list para sa PRICE-LENIENT na RTS/promo resolution
+        // (tugma sa breakdown): lahat ng row kasama ang null-cod, DESC by eff.
+        $settingsByPair = [];
         $hasModeCodIntCol = Schema::hasColumn('page_item_settings', 'mode_cod_int');
         if (Schema::hasTable('page_item_settings')) {
             $cols = ['page_name', 'item_name', 'rts_pct', 'effective_date', 'comment', 'item_value_comment', 'promo'];
@@ -1941,7 +1944,19 @@ class OwnerPrivateController extends Controller
                 $codInt = $hasModeCodIntCol && $s->mode_cod_int !== null
                     ? (int) $s->mode_cod_int
                     : null;
-                // Pre-migration / orphan rows na walang price tag → skipped.
+                // Per-(page||alias) list — kasama ang null-cod; price (cod) ay field,
+                // hindi key, para ma-resolve nang ±1 + fallback gaya ng breakdown.
+                $pairK = strtolower(trim((string)$s->page_name))
+                       .'||'.$aliases->canonicalKey((string)$s->item_name);
+                $settingsByPair[$pairK][] = [
+                    'rts_pct'            => $s->rts_pct !== null ? (float)$s->rts_pct : null,
+                    'effective_date'     => (string)$s->effective_date,
+                    'comment'            => (string)($s->comment ?? ''),
+                    'item_value_comment' => (string)($s->item_value_comment ?? ''),
+                    'promo'              => (string)($s->promo ?? ''),
+                    'cod'                => $codInt,
+                ];
+                // Pre-migration / orphan rows na walang price tag → skipped sa exact map.
                 if ($codInt === null) continue;
                 // Alias-aware item part → variants of one aliased item share a key.
                 $k = strtolower(trim((string)$s->page_name))
@@ -1963,6 +1978,58 @@ class OwnerPrivateController extends Controller
             }
         }
 
+        // ── Price-lenient RTS/promo resolvers (main view ↔ breakdown consistency) ──
+        // Strict exact-cod dati → nag-nu-null kapag bahagyang nag-drift ang cell price
+        // mula sa naka-save na cod. Ngayon: ±1 cod preference, else latest anuman ang
+        // price (+ back-fill earliest para sa profit) — tugma sa breakdown resolver.
+        //
+        // Display (as-of end date): piliin ang latest na may ±1 cod, else latest.
+        // RTS at promo HIWALAY na nire-resolve (null-rts / empty-promo na rows ay
+        // hindi nagsha-shadow sa totoong value).
+        $pickSettingLenient = function (string $pair, ?int $priceInt) use (&$settingsByPair): ?array {
+            $list = $settingsByPair[$pair] ?? null;   // DESC by eff (latest = una)
+            if (!$list) return null;
+            $pick = function (callable $ok) use ($list, $priceInt): ?array {
+                if ($priceInt !== null) {
+                    foreach ($list as $e) {
+                        if ($ok($e) && $e['cod'] !== null && abs($e['cod'] - $priceInt) <= 1) return $e;
+                    }
+                }
+                foreach ($list as $e) { if ($ok($e)) return $e; }
+                return null;
+            };
+            $rtsRow   = $pick(fn ($e) => $e['rts_pct'] !== null);
+            $promoRow = $pick(fn ($e) => $e['promo'] !== '');
+            if ($rtsRow === null && $promoRow === null) return null;
+            return [
+                'rts_pct'            => $rtsRow['rts_pct'] ?? null,
+                'effective_date'     => $rtsRow['effective_date'] ?? ($promoRow['effective_date'] ?? null),
+                'comment'            => $rtsRow['comment'] ?? '',
+                'item_value_comment' => $rtsRow['item_value_comment'] ?? ($promoRow['item_value_comment'] ?? ''),
+                'promo'              => $promoRow['promo'] ?? '',
+            ];
+        };
+        // Per-date RTS (for profit calc) — price-aware (±1, else latest) + back-fill
+        // earliest kapag mas maaga ang araw sa unang setting. Mirror ng breakdown.
+        $resolveRtsAsOf = function (string $pair, ?int $priceInt, string $asOf) use (&$settingsByPair): array {
+            $list = $settingsByPair[$pair] ?? [];
+            $rtsRows = array_values(array_filter($list, fn ($e) => $e['rts_pct'] !== null));   // DESC by eff
+            if (empty($rtsRows)) return ['val' => null, 'eff' => null, 'backfilled' => false];
+            $cands = array_values(array_filter($rtsRows, fn ($e) => substr($e['effective_date'], 0, 10) <= $asOf));
+            if (!empty($cands)) {
+                if ($priceInt !== null) {
+                    foreach ($cands as $e) {   // DESC → first ±1 match = latest
+                        if ($e['cod'] !== null && abs($e['cod'] - $priceInt) <= 1) {
+                            return ['val' => $e['rts_pct'], 'eff' => substr($e['effective_date'], 0, 10), 'backfilled' => false];
+                        }
+                    }
+                }
+                return ['val' => $cands[0]['rts_pct'], 'eff' => substr($cands[0]['effective_date'], 0, 10), 'backfilled' => false];
+            }
+            $earliest = $rtsRows[count($rtsRows) - 1];   // DESC → last = earliest
+            return ['val' => $earliest['rts_pct'], 'eff' => substr($earliest['effective_date'], 0, 10), 'backfilled' => true];
+        };
+
         // ── PER-DATE HISTORY MAPS (for per-day RTS / cogs / fees sa profit calc) ──
         // Profit is computed PER-DAY using the RTS/cogs/fees EFFECTIVE on each
         // day (hindi single end-date value). Kapag ang araw ay nauna pa sa
@@ -1970,21 +2037,9 @@ class OwnerPrivateController extends Controller
         // (backfilled=true) para ma-indicate sa UI na walang proper setting doon.
         // All value keys normalized to 'val' so one generic resolver works.
 
-        // RTS history: (page||item||cod_int) → [ ['eff'=>date, 'val'=>float], ... ] DESC
-        // SKIP rows na NULL ang rts_pct (hal. promo-only na row) — kung hindi,
-        // sha-shadow ng maagang promo-only row ang totoong later RTS, at hindi
-        // mag-back-fill. Sa pag-skip, ang earliest na MAY-rts ang magba-back-fill.
-        $rtsHistoryMap = [];
-        foreach ((isset($settingRows) ? $settingRows : []) as $s) {
-            if ($s->rts_pct === null) continue; // ← null-RTS row: di kasama sa RTS resolution
-            $codIntH = ($hasModeCodIntCol && $s->mode_cod_int !== null) ? (int)$s->mode_cod_int : null;
-            if ($codIntH === null) continue;
-            $kH = strtolower(trim((string)$s->page_name)).'||'.$aliases->canonicalKey((string)$s->item_name).'||'.$codIntH;
-            $rtsHistoryMap[$kH][] = [
-                'eff' => substr((string)$s->effective_date, 0, 10),
-                'val' => (float)$s->rts_pct,
-            ];
-        }
+        // RTS history → ngayon ay hinahawakan na ng $resolveRtsAsOf (price-aware,
+        // ±1 cod + fallback + back-fill) gamit ang $settingsByPair list sa itaas —
+        // tugma sa breakdown. (Dating $rtsHistoryMap ay strict exact-cod, inalis na.)
 
         // cogs history (Marketing): canonical_item_key → [ ['eff'=>date, 'val'=>float], ... ] DESC
         $cogsHistoryMap = [];
@@ -2183,7 +2238,10 @@ class OwnerPrivateController extends Controller
             // can show the new "Item Val. (CEO)" column alongside the existing
             // "Item Val." (Marketing) column. Non-CEO responses strip the CEO field
             // (see $isCEO check sa response builder below).
-            $settings        = $settingsMap[$settingKey] ?? null;
+            // Price-lenient + alias-aware (±1 cod, else latest) — HINDI na mag-null
+            // ang Set RTS% kapag bahagyang nag-drift ang price mula sa naka-save na cod.
+            // Consistent na ito sa breakdown.
+            $settings        = $pickSettingLenient($pk.'||'.$dominantKey, $priceIntForLookup);
             $itemValueMarket = $cogsMap[$dominantKey]    ?? null;
             $itemValueCeo    = $cogsCeoMap[$dominantKey] ?? null;
             // Profit math source — gated by both role AND view toggle. CEO viewing
@@ -2274,15 +2332,12 @@ class OwnerPrivateController extends Controller
             $cogsHistForItem = $useCeoForProfit
                 ? ($cogsCeoHistoryMap[$dominantKey] ?? [])
                 : ($cogsHistoryMap[$dominantKey] ?? []);
-            $hasRtsHist  = !empty($rtsHistoryMap[$settingKey] ?? []);
-            $hasCostHist = !empty($cogsHistForItem);
-            // RTS only: i-resolve gamit lang ang rows na may totoong rts_pct (skip NULL)
-            // para hindi ma-shadow ng promo-only row ang later na RTS at mag-back-fill
-            // nang tama. $hasRtsHist gate naiwang as-is (walang regression sa items na
-            // talagang walang RTS — adspent-only pa rin sila).
-            $rtsHistForKey = array_values(array_filter(
-                $rtsHistoryMap[$settingKey] ?? [], fn ($e) => $e['val'] !== null
+            // Price-lenient + alias-aware: may RTS history ba ang (page||alias) na ito,
+            // anuman ang price? (Dating strict exact-cod → mali kapag nag-drift ang price.)
+            $hasRtsHist  = !empty(array_filter(
+                $settingsByPair[$pk.'||'.$dominantKey] ?? [], fn ($e) => $e['rts_pct'] !== null
             ));
+            $hasCostHist = !empty($cogsHistForItem);
 
             if ($hasRtsHist && $hasCostHist && !empty($includedDatesArr)) {
                 $sumProfit = 0.0;
@@ -2310,7 +2365,8 @@ class OwnerPrivateController extends Controller
                     }
 
                     // Resolve per-day RTS / cogs / fees (effective as of $d, back-fill earliest).
-                    $rRts  = $resolveAsOf($rtsHistForKey, (string)$d);
+                    // RTS = price-aware (±1 cod, else latest) — tugma sa breakdown + display.
+                    $rRts  = $resolveRtsAsOf($pk.'||'.$dominantKey, $priceIntForLookup, (string)$d);
                     $rCost = $resolveAsOf($cogsHistForItem, (string)$d);
                     $rCodR = $resolveAsOf($feeHistoryMap['cod_fee_rate'] ?? [], (string)$d);
                     $rVat  = $resolveAsOf($feeHistoryMap['cod_fee_vat_rate'] ?? [], (string)$d);
