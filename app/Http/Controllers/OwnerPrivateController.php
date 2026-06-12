@@ -3220,34 +3220,64 @@ class OwnerPrivateController extends Controller
         // Alias resolver — RTS/promo/cogs keyed by CANONICAL item key (same-alias =
         // same setting; non-aliased → normalize, walang pagbabago).
         $aliasesM = new \App\Services\ItemAliasResolver();
-        // Index: $rtsIdx[page_key][canonical_item_key][price_int] = [ [date, rts, promo], ... ] ASC by date
+        // Index: $rtsIdx[page_key][canonical_item_key] = [ [date, rts_pct, promo, cod], ... ] ASC by (date, id)
+        // Iisang flat list per (page, alias) — ang price (cod) ay FIELD, hindi key,
+        // para ma-resolve nang price-aware (±1 preference + fallback) gaya ng breakdown.
+        // Kasama na rin ang null-cod (orphan) rows para hindi mag-null kapag yan lang
+        // ang naka-save — tugma sa breakdown na isinasama rin sila.
         $rtsIdx = [];
         foreach ($rtsRowsAll as $r) {
             $pk = strtolower(trim((string)$r->page_name));
             $ik = $aliasesM->canonicalKey((string)$r->item_name);
             if ($pk === '' || $ik === '') continue;
             $codInt = ($hasModeCodIntCol && $r->mode_cod_int !== null) ? (int) $r->mode_cod_int : null;
-            // Orphan rows (NULL price) skipped — pre-migration data needs re-tag via recompute.
-            if ($codInt === null) continue;
-            $rtsIdx[$pk][$ik][$codInt][] = [
+            $rtsIdx[$pk][$ik][] = [
                 'date'    => (string)$r->effective_date,
                 'rts_pct' => $r->rts_pct !== null ? (float)$r->rts_pct : null,
                 'promo'   => $hasPromoCol ? (string)($r->promo ?? '') : '',
+                'cod'     => $codInt,
             ];
         }
-        // Helper: resolve RTS + promo for a (page_key, item_name, price, date)
-        // Strict price match — different price returns null (no inheritance).
+        // Helper: resolve RTS + promo for a (page_key, item_name, price, date).
+        // Price-aware na TUGMA SA BREAKDOWN: sa mga setting ng SAME alias na
+        // effective ≤ date, piliin ang LATEST na may ±1 cod match; kung wala,
+        // ang LATEST anuman ang price (fallback). Kaya HINDI na mag-null ang main
+        // view kapag bahagyang nag-drift ang cell price mula sa naka-save na cod —
+        // magiging consistent ang Set RTS% sa main view at breakdown.
+        // RTS at promo ay HIWALAY na nire-resolve (null-rts / empty-promo na rows ay
+        // hindi nagsha-shadow sa totoong value).
         $resolveRts = function(string $pk, string $itemName, ?int $priceInt, string $date) use (&$rtsIdx, $aliasesM): ?array {
-            if ($priceInt === null) return null;
             $ik = $aliasesM->canonicalKey($itemName);
-            $list = $rtsIdx[$pk][$ik][$priceInt] ?? null;
+            $list = $rtsIdx[$pk][$ik] ?? null;
             if (!$list) return null;
-            $hit = null;
+            $cands = [];
             foreach ($list as $row) {
-                if ($row['date'] <= $date) $hit = $row;
-                else break;
+                if ($row['date'] <= $date) $cands[] = $row;   // ASC → latest = last
             }
-            return $hit;
+            if (empty($cands)) return null;
+            // Latest candidate matching $ok: ±1 cod preference, else any price.
+            $pick = function(array $cands, callable $ok) use ($priceInt): ?array {
+                if ($priceInt !== null) {
+                    for ($i = count($cands) - 1; $i >= 0; $i--) {
+                        if ($ok($cands[$i]) && $cands[$i]['cod'] !== null
+                            && abs($cands[$i]['cod'] - $priceInt) <= 1) {
+                            return $cands[$i];
+                        }
+                    }
+                }
+                for ($i = count($cands) - 1; $i >= 0; $i--) {
+                    if ($ok($cands[$i])) return $cands[$i];
+                }
+                return null;
+            };
+            $rtsRow   = $pick($cands, fn ($e) => $e['rts_pct'] !== null);
+            $promoRow = $pick($cands, fn ($e) => $e['promo'] !== '');
+            return [
+                'rts_pct'    => $rtsRow['rts_pct'] ?? null,
+                'rts_date'   => $rtsRow['date']    ?? null,
+                'promo'      => $promoRow['promo'] ?? '',
+                'promo_date' => $promoRow['date']  ?? null,
+            ];
         };
 
         // COGS (global per-item-per-date) — Marketing's table.
@@ -3477,10 +3507,10 @@ class OwnerPrivateController extends Controller
                 'mode_cod'        => $r->primary_mode_cod !== null ? (float)$r->primary_mode_cod : null,
                 // Editable RTS state
                 'rts_pct'         => $rtsHit['rts_pct'] ?? null,
-                'rts_eff_date'    => $rtsHit['date'] ?? null,
+                'rts_eff_date'    => $rtsHit['rts_date'] ?? null,
                 // Resolved from effective_date ≤ cell_date. True if the override was set
                 // on a different (earlier) date — so user knows they'd be overriding here.
-                'rts_inherited'   => $rtsHit ? ($rtsHit['date'] !== $cellDate) : false,
+                'rts_inherited'   => (($rtsHit['rts_date'] ?? null) !== null) ? ($rtsHit['rts_date'] !== $cellDate) : false,
                 'unit_cost'       => $cogsVal,
                 // Last date COGS was set for this item ≤ cell_date — used as the
                 // COGS section's default effective_date sa Edit Cell modal.
@@ -3490,7 +3520,7 @@ class OwnerPrivateController extends Controller
                 // Promo (per-date inheritance like RTS). Empty string when no
                 // override yet — UI shows badge as muted/missing.
                 'promo'           => $rtsHit['promo'] ?? '',
-                'promo_inherited' => $rtsHit ? ($rtsHit['date'] !== $cellDate) : false,
+                'promo_inherited' => (($rtsHit['promo_date'] ?? null) !== null) ? ($rtsHit['promo_date'] !== $cellDate) : false,
                 'proceed'         => $proceedHere,
                 'ads'             => $adsHere,
                 'profit_pct'      => $profitPct,
