@@ -1411,8 +1411,11 @@
           <div style="font-size:10.5px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">📊 RTS%</div>
           <label>RTS% <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(per page, item & price · effective for chosen period)</span></label>
           <div style="display:flex;align-items:center;gap:8px;">
-            <input type="number" step="0.01" min="0" max="100" x-model="edit.rts_pct" placeholder="e.g. 50">
+            <input type="number" step="0.01" min="0" max="100" x-model="edit.rts_pct" placeholder="e.g. 50 — blanko = panatilihin">
             <span style="color:#64748b;">%</span>
+          </div>
+          <div style="font-size:11px;color:#64748b;margin-top:3px;">
+            💡 Iwang <b>blanko</b> kung gusto mo lang mag-dagdag ng remark — ipagpapatuloy ang dating RTS (base sa item alias kung meron, kung wala ay sa item name).
           </div>
           <template x-if="edit.rts_inherited && edit.rts_eff_date">
             <div style="font-size:11px;color:#b45309;margin-top:4px;">
@@ -2526,13 +2529,21 @@
         const cellPriceInt = (e.price != null && e.price > 0) ? Math.round(Number(e.price)) : null;
 
         if (scope === 'rts') {
-          const rts = parseFloat(e.rts_pct);
-          if (isNaN(rts) || rts < 0 || rts > 100) { e.rtsError = 'RTS% must be 0–100.'; return; }
+          // Blanko ang RTS = remark-only: huwag ipadala ang rts_pct → carry-forward
+          // ng backend ang dating effective RTS (alias-or-item_name keyed). Kaya
+          // pwedeng mag-dagdag ng bagong remark nang di na nag-eenter ng value.
+          const rtsRaw = (e.rts_pct === null || e.rts_pct === undefined) ? '' : String(e.rts_pct).trim();
+          const rtsBlank = (rtsRaw === '');
+          let rts = null;
+          if (!rtsBlank) {
+            rts = parseFloat(rtsRaw);
+            if (isNaN(rts) || rts < 0 || rts > 100) { e.rtsError = 'RTS% must be 0–100 (o iwang blanko para ipagpatuloy ang dating RTS).'; return; }
+          }
           const cmt = (e.comment || '').trim();
           if (!cmt) { e.rtsError = 'RTS Comment is required.'; return; }
           if (cellPriceInt === null) { e.rtsError = 'No price detected for this cell. Cannot save.'; return; }
           // Promo NOT sent for scope=rts — server preserves existing promo.
-          fd.append('rts_pct',        rts);
+          if (!rtsBlank) fd.append('rts_pct', rts);
           fd.append('comment',        cmt);
           fd.append('mode_cod_int',   cellPriceInt);
           fd.append('effective_date', e.rts_effective_date || e.date);

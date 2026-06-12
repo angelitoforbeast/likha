@@ -2590,7 +2590,10 @@ class OwnerPrivateController extends Controller
             'mode_cod_int'   => 'nullable|integer|min:0',
         ];
         if (in_array($scope, ['all', 'rts'], true)) {
-            $rules['rts_pct'] = 'required|numeric|min:0|max:100';
+            // rts_pct nullable: kapag blanko (remark-only), carry-forward ang dating
+            // effective RTS na naka-key sa page + canonicalKey (alias-or-item_name)
+            // + price — tuloy-tuloy ang effectivity, walang kailangang bagong value.
+            $rules['rts_pct'] = 'nullable|numeric|min:0|max:100';
             $rules['comment'] = 'required|string|min:1|max:500';
         }
         if (in_array($scope, ['all', 'cogs'], true)) {
@@ -2730,8 +2733,15 @@ class OwnerPrivateController extends Controller
                 // If no row exists at exact date, $oldRts/$oldPromo are NULL —
                 // preserved field stays NULL (and that's OK now that rts_pct
                 // column is nullable).
+                // Blanko ang RTS (remark-only save) → carry-forward ang last-effective
+                // RTS ($carryRts), na naka-key sa page + canonicalKey (alias-or-item_name)
+                // + price. Kaya pwede mag-dagdag ng remark nang walang re-entry, at
+                // tuloy-tuloy ang RTS effectivity ng buong alias family.
+                $rtsBlank = !array_key_exists('rts_pct', $validated)
+                    || $validated['rts_pct'] === null
+                    || $validated['rts_pct'] === '';
                 $rtsToSave = in_array($scope, ['all', 'rts'], true)
-                    ? (float) $validated['rts_pct']
+                    ? ($rtsBlank ? $carryRts : (float) $validated['rts_pct'])
                     : $carryRts;   // carry-forward last-effective RTS (was: exact-date only)
 
                 $promoToSave = in_array($scope, ['all', 'promo'], true)
@@ -2749,7 +2759,10 @@ class OwnerPrivateController extends Controller
                 // DELETE branch: only fires when user EXPLICITLY sets rts=0 via
                 // scope=rts or scope=all (clearing the RTS override). Promo-only
                 // saves never delete — they always upsert with rts preserved.
+                // DELETE only kapag SADYANG nag-0 ang user (explicit clear) — HINDI
+                // kapag blanko (remark-only). Blank → carry-forward, never delete.
                 $userExplicitlyClearedRts = in_array($scope, ['all', 'rts'], true)
+                    && !$rtsBlank
                     && $rtsToSave !== null && (float)$rtsToSave === 0.0;
 
                 if ($userExplicitlyClearedRts) {
