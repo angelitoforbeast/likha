@@ -109,11 +109,16 @@ class MacroOrdersController extends Controller
             } else {
                 $baseName = $name;
             }
-            // Group key + display label: by alias (canonical) o by raw base name.
-            if ($aliases) {
-                $key   = $aliases->canonicalKey($baseName);
-                $label = $aliases->canonicalLabel($baseName);
-                if ($key === '') { $key = $baseName; $label = $baseName; }
+            // Group key + display label:
+            //  • by=alias → i-lookup ang BUONG item name (hindi stripped) dahil ang
+            //    item_type_mappings ay naka-key WITH "N x" prefix (hal. "1 x POWER
+            //    COOL FAN" → "1Fan") — eksaktong gawi ng breakdown
+            //    (isAliased/canonicalLabel sa primary_item). Kapag walang alias →
+            //    bumalik sa base name (stripped) tulad ng By Item Name.
+            //  • by=name → base name (tinanggal ang "N x").
+            if ($aliases && $name !== '' && $aliases->isAliased($name)) {
+                $key   = $aliases->canonicalKey($name);
+                $label = $aliases->canonicalLabel($name);
             } else {
                 $key = $baseName; $label = $baseName;
             }
