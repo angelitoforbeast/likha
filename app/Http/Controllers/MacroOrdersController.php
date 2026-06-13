@@ -28,7 +28,7 @@ class MacroOrdersController extends Controller
 
         // Fresh visit (walang params) → default last 7 days EXCLUDING today
         // (today-7 .. today-1 = kahapon pabalik ng 7 araw).
-        if (!$request->hasAny(['date_range', 'q'])) {
+        if (!$request->hasAny(['date_range', 'q', 'by'])) {
             $start = Carbon::now($tz)->subDays(7)->toDateString();
             $end   = Carbon::now($tz)->subDay()->toDateString();
             return redirect()->route('macro.orders', [
@@ -38,6 +38,8 @@ class MacroOrdersController extends Controller
         }
 
         $q      = trim((string) $request->input('q', ''));
+        // Count by raw item name (default) o by ALIAS (merge variants na iisa ang alias).
+        $by     = $request->input('by') === 'alias' ? 'alias' : 'name';
         $driver = DB::getDriverName();                 // 'mysql' | 'pgsql'
         $likeOp = $driver === 'pgsql' ? 'ILIKE' : 'LIKE';
 
@@ -94,7 +96,10 @@ class MacroOrdersController extends Controller
         $numDays = max(1, count($dateKeys));
 
         // ── Strip "N x" prefix → base name; SUMmin ang ORDER count (HINDI ×qty) ──
-        $matrix = [];
+        // by=alias → pagsamahin ang variants na iisa ang canonical alias (ItemAliasResolver).
+        // Sa likha (walang mappings) ang canonicalKey == base name, kaya walang epekto.
+        $aliases = $by === 'alias' ? new \App\Services\ItemAliasResolver() : null;
+        $matrix  = [];
         foreach ($rows as $r) {
             $name = trim((string) ($r->item_name ?? ''));
             if ($name === '') {
@@ -104,9 +109,17 @@ class MacroOrdersController extends Controller
             } else {
                 $baseName = $name;
             }
+            // Group key + display label: by alias (canonical) o by raw base name.
+            if ($aliases) {
+                $key   = $aliases->canonicalKey($baseName);
+                $label = $aliases->canonicalLabel($baseName);
+                if ($key === '') { $key = $baseName; $label = $baseName; }
+            } else {
+                $key = $baseName; $label = $baseName;
+            }
             $dkey = Carbon::parse($r->d)->toDateString();
-            if (!isset($matrix[$baseName])) $matrix[$baseName] = ['label' => $baseName, 'dates' => []];
-            $matrix[$baseName]['dates'][$dkey] = ($matrix[$baseName]['dates'][$dkey] ?? 0) + (int) $r->c;
+            if (!isset($matrix[$key])) $matrix[$key] = ['label' => $label, 'dates' => []];
+            $matrix[$key]['dates'][$dkey] = ($matrix[$key]['dates'][$dkey] ?? 0) + (int) $r->c;
         }
 
         // Pivot rows + per-row Total + Average; column totals.
@@ -114,17 +127,21 @@ class MacroOrdersController extends Controller
         $grandTotal = 0;
         $pivot      = [];
         foreach ($matrix as $item) {
-            $total = 0;
+            $total  = 0;
+            $active = 0;   // bilang ng araw na MAY order (>0) — denominator ng average
             $row = ['label' => $item['label'], 'dates' => []];
             foreach ($dateKeys as $dk) {
                 $v = (int) ($item['dates'][$dk] ?? 0);
                 $row['dates'][$dk] = $v;
                 $total += $v;
+                if ($v > 0) $active++;
                 $colTotals[$dk] = ($colTotals[$dk] ?? 0) + $v;
             }
             $row['total'] = $total;
-            $row['avg']   = round($total / $numDays, 1);
-            $grandTotal  += $total;
+            // Average = Total ÷ ACTIVE days (araw na may order), HINDI lahat ng araw.
+            $row['avg']         = $active > 0 ? round($total / $active, 1) : 0;
+            $row['active_days'] = $active;
+            $grandTotal        += $total;
             $pivot[] = $row;
         }
         usort($pivot, function ($a, $b) {
@@ -143,10 +160,13 @@ class MacroOrdersController extends Controller
             $monthGroups[$mKey]['count']++;
             $dayLabels[$dk] = (int) $c->format('j');
         }
-        $grandAvg = round($grandTotal / $numDays, 1);
+        // Grand average = grandTotal ÷ araw na may kahit anong order (active days).
+        $gActive = 0;
+        foreach ($dateKeys as $dk) { if ((int) ($colTotals[$dk] ?? 0) > 0) $gActive++; }
+        $grandAvg = $gActive > 0 ? round($grandTotal / $gActive, 1) : 0;
 
         return view('macro.orders', compact(
-            'q', 'startStr', 'endStr', 'pivotRows', 'dateKeys',
+            'q', 'by', 'startStr', 'endStr', 'pivotRows', 'dateKeys',
             'colTotals', 'grandTotal', 'grandAvg', 'monthGroups', 'dayLabels', 'numDays'
         ));
     }

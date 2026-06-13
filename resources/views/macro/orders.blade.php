@@ -18,9 +18,10 @@
       .frz tbody tr:nth-child(even) td { background: #f7f8fa; }
       .frz tbody tr:hover td        { background: #eef2ff; }
 
-      /* Header (top-frozen) */
+      /* Header (top-frozen) + Footer Totals (bottom-frozen, laging kita) */
       .frz thead th { position: sticky; top: 0; z-index: 4; background: #eef1f5; }
-      .frz tfoot th { background: #eef1f5; font-weight: 600; }
+      .frz tfoot th { position: sticky; bottom: 0; z-index: 5; background: #eef1f5; font-weight: 600; }
+      .frz tfoot th.col-frz { z-index: 7; } /* bottom + left corner */
 
       /* Left-frozen columns — left offsets set via JS (c1=Item, c2=Total, c3=Average) */
       .frz .col-frz { position: sticky; z-index: 3; }
@@ -43,6 +44,15 @@
              value="{{ $startStr.' to '.$endStr }}"
              class="w-full border rounded-lg px-3 py-2" autocomplete="off"/>
       <p class="text-xs text-gray-500 mt-1">Default: last 7 days, <strong>excluding today</strong>.</p>
+    </div>
+
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Count by</label>
+      <select name="by" onchange="this.form.submit()" class="w-full border rounded-lg px-3 py-2">
+        <option value="name"  {{ $by === 'name'  ? 'selected' : '' }}>Item Name</option>
+        <option value="alias" {{ $by === 'alias' ? 'selected' : '' }}>Item Alias</option>
+      </select>
+      <p class="text-xs text-gray-500 mt-1">Alias = pinagsasama ang variants na iisa ang alias.</p>
     </div>
 
     <div class="flex items-start gap-2 md:mt-7">
@@ -71,7 +81,7 @@
         <tr>
           <th class="text-left p-2 border-b align-bottom col-frz c1" rowspan="2">Item</th>
           <th class="text-right p-2 border-b align-bottom col-frz c2" rowspan="2">Total</th>
-          <th class="text-right p-2 border-b align-bottom col-frz c3" rowspan="2">Average<br><span class="text-[10px] font-normal text-gray-500">/day</span></th>
+          <th class="text-right p-2 border-b align-bottom col-frz c3" rowspan="2">Average<br><span class="text-[10px] font-normal text-gray-500">/active day</span></th>
           @foreach(($monthGroups ?? []) as $m)
             <th class="text-center p-2 border-b whitespace-nowrap" colspan="{{ $m['count'] ?? 0 }}">{{ $m['label'] ?? '' }}</th>
           @endforeach
@@ -111,6 +121,9 @@
         </tr>
       </tfoot>
     </table>
+    </div>
+    <div class="text-xs text-gray-500 mt-2">
+      <strong>Average</strong> = Total ÷ araw na may order (active days). Naka-pin sa baba ang <strong>Totals</strong> (per-date) — item rows lang ang gumagalaw pag nag-scroll.
     </div>
   </div>
 
