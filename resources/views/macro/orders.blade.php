@@ -8,6 +8,24 @@
     <style>
       [x-cloak]{display:none!important}
       th, td { vertical-align: middle; }
+      /* Frozen header (top) + frozen summary columns (Item/Total/Average, left) */
+      .frz-wrap { max-height: calc(100vh - 240px); overflow: auto; }
+      .frz { border-collapse: separate; border-spacing: 0; }
+
+      /* Consistent zebra — opaque bg KADA cell (kasama ang frozen) para pantay ang
+         kulay sa buong row at walang nakikitang laman sa likod ng frozen cells. */
+      .frz tbody tr:nth-child(odd)  td { background: #ffffff; }
+      .frz tbody tr:nth-child(even) td { background: #f7f8fa; }
+      .frz tbody tr:hover td        { background: #eef2ff; }
+
+      /* Header (top-frozen) */
+      .frz thead th { position: sticky; top: 0; z-index: 4; background: #eef1f5; }
+      .frz tfoot th { background: #eef1f5; font-weight: 600; }
+
+      /* Left-frozen columns — left offsets set via JS (c1=Item, c2=Total, c3=Average) */
+      .frz .col-frz { position: sticky; z-index: 3; }
+      .frz thead th.col-frz { z-index: 6; }       /* corner: top + left, ibabaw ng lahat */
+      .frz .c3 { border-right: 2px solid #cbd5e1; } /* divider: frozen block | dates */
     </style>
   @endonce
 
@@ -41,24 +59,24 @@
   </div>
 
   {{-- Pivot table --}}
-  <div class="bg-white rounded-xl shadow p-4 overflow-auto">
+  <div class="bg-white rounded-xl shadow p-4">
     <div class="flex justify-between items-center mb-2">
       <div class="text-sm font-medium">Orders by Item <span class="text-gray-500">(quantity prefix removed, order count)</span></div>
       <button type="button" id="copyBtn" class="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-gray-50">Copy table</button>
     </div>
 
-    <table id="ordersTable" class="min-w-full text-sm">
+    <div class="frz-wrap">
+    <table id="ordersTable" class="min-w-full text-sm frz">
       <thead>
-        <tr class="bg-gray-50">
-          <th class="text-left p-2 border-b align-bottom" rowspan="2"
-              style="position: sticky; left: 0; background: #f9fafb;">Item</th>
+        <tr>
+          <th class="text-left p-2 border-b align-bottom col-frz c1" rowspan="2">Item</th>
+          <th class="text-right p-2 border-b align-bottom col-frz c2" rowspan="2">Total</th>
+          <th class="text-right p-2 border-b align-bottom col-frz c3" rowspan="2">Average<br><span class="text-[10px] font-normal text-gray-500">/day</span></th>
           @foreach(($monthGroups ?? []) as $m)
             <th class="text-center p-2 border-b whitespace-nowrap" colspan="{{ $m['count'] ?? 0 }}">{{ $m['label'] ?? '' }}</th>
           @endforeach
-          <th class="text-right p-2 border-b align-bottom bg-gray-100" rowspan="2" style="border-left:2px solid #e5e7eb;">Total</th>
-          <th class="text-right p-2 border-b align-bottom bg-gray-100" rowspan="2">Average<br><span class="text-[10px] font-normal text-gray-500">/day</span></th>
         </tr>
-        <tr class="bg-gray-50">
+        <tr>
           @foreach($dateKeys as $dk)
             <th class="text-right p-2 border-b whitespace-nowrap">{{ $dayLabels[$dk] ?? '' }}</th>
           @endforeach
@@ -67,39 +85,63 @@
 
       <tbody>
         @forelse($pivotRows as $row)
-          <tr class="odd:bg-white even:bg-gray-50">
-            <td class="p-2 border-b" style="position: sticky; left: 0; background: white;">{{ $row['label'] ?? '—' }}</td>
+          <tr>
+            <td class="p-2 border-b col-frz c1">{{ $row['label'] ?? '—' }}</td>
+            <td class="p-2 border-b text-right font-semibold col-frz c2">{{ number_format($row['total'] ?? 0) }}</td>
+            <td class="p-2 border-b text-right text-gray-600 col-frz c3">{{ number_format($row['avg'] ?? 0, 1) }}</td>
             @foreach($dateKeys as $dk)
               @php $v = (int)($row['dates'][$dk] ?? 0); @endphp
               <td class="p-2 border-b text-right">{{ $v ? number_format($v) : '' }}</td>
             @endforeach
-            <td class="p-2 border-b text-right font-semibold bg-gray-50" style="border-left:2px solid #e5e7eb;">{{ number_format($row['total'] ?? 0) }}</td>
-            <td class="p-2 border-b text-right text-gray-600 bg-gray-50">{{ number_format($row['avg'] ?? 0, 1) }}</td>
           </tr>
         @empty
           <tr><td class="p-2 text-gray-500" colspan="{{ count($dateKeys) + 3 }}">No results para sa range na ito.</td></tr>
         @endforelse
       </tbody>
 
-      <tfoot class="bg-gray-50">
+      <tfoot>
         <tr>
-          <th class="text-left p-2 border-t" style="position: sticky; left: 0; background: #f9fafb;">Totals</th>
+          <th class="text-left p-2 border-t col-frz c1">Totals</th>
+          <th class="text-right p-2 border-t col-frz c2">{{ number_format($grandTotal ?? 0) }}</th>
+          <th class="text-right p-2 border-t col-frz c3">{{ number_format($grandAvg ?? 0, 1) }}</th>
           @foreach($dateKeys as $dk)
             @php $cv = (int)($colTotals[$dk] ?? 0); @endphp
             <th class="text-right p-2 border-t">{{ $cv ? number_format($cv) : '' }}</th>
           @endforeach
-          <th class="text-right p-2 border-t bg-gray-100" style="border-left:2px solid #e5e7eb;">{{ number_format($grandTotal ?? 0) }}</th>
-          <th class="text-right p-2 border-t bg-gray-100">{{ number_format($grandAvg ?? 0, 1) }}</th>
         </tr>
       </tfoot>
     </table>
+    </div>
   </div>
 
   <script>
+    // I-set ang sticky offsets para pixel-perfect ang freeze:
+    //  • top ng 2nd header row (day numbers) = taas ng 1st header row
+    //  • left ng frozen columns: c1=0, c2=lapad(c1), c3=lapad(c1)+lapad(c2)
+    function frzOffsets() {
+      const t = document.getElementById('ordersTable');
+      if (!t) return;
+      // top — 2nd header row sumusunod sa 1st
+      const r1 = t.querySelector('thead tr:first-child');
+      const h  = r1 ? r1.getBoundingClientRect().height : 0;
+      t.querySelectorAll('thead tr:nth-child(2) th').forEach(function (th) { th.style.top = h + 'px'; });
+      // left — base sa lapad ng header cells (uniform ang column width sa buong table)
+      const c1 = t.querySelector('thead .c1');
+      const c2 = t.querySelector('thead .c2');
+      const w1 = c1 ? c1.getBoundingClientRect().width : 0;
+      const w2 = c2 ? c2.getBoundingClientRect().width : 0;
+      t.querySelectorAll('.c1').forEach(function (el) { el.style.left = '0px'; });
+      t.querySelectorAll('.c2').forEach(function (el) { el.style.left = w1 + 'px'; });
+      t.querySelectorAll('.c3').forEach(function (el) { el.style.left = (w1 + w2) + 'px'; });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
       if (window.flatpickr) {
         flatpickr('#date_range', { mode: 'range', dateFormat: 'Y-m-d', allowInput: true });
       }
+      frzOffsets();
+      window.addEventListener('load', frzOffsets);
+      window.addEventListener('resize', frzOffsets);
       const btn = document.getElementById('copyBtn');
       if (btn) btn.addEventListener('click', function () {
         const tbl = document.getElementById('ordersTable');
