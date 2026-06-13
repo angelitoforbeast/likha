@@ -58,8 +58,9 @@
       <p class="text-xs text-gray-500 mt-1">Counts from (as-of − N days) to (as-of − 1 day).</p>
     </div>
 
-    <div class="md:col-span-9">
+    <div class="md:col-span-9 flex items-center gap-3">
       <a href="{{ route('jnt.hold') }}" class="px-4 py-2 rounded-lg border">Reset</a>
+      <a href="{{ route('macro.orders') }}" class="text-sm text-blue-600 hover:underline">→ Orders per item (per date)</a>
     </div>
 
     @if($rangeSta && $rangeEnd)

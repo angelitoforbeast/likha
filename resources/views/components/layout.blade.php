@@ -169,6 +169,7 @@
       'ads_manager/campaigns',
       'ads_manager/cpp',
       'jnt/hold',
+      'macro/orders',
       'pancake/retrieve-orders',
       'jnt/order-management',
       'pancake/index',

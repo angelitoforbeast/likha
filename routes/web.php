@@ -968,6 +968,9 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get('/jnt/hold', [JntHoldController::class, 'index'])->name('jnt.hold');
     Route::get('/jnt/hold/download', [JntHoldDownloadController::class, 'index'])->name('jnt.hold.download');
     Route::get('/jnt/hold/export', [JntHoldDownloadController::class, 'export'])->name('jnt.hold.export');
+    // Orders-per-item (per date) — LAHAT ng orders mula macro_output, base item name,
+    // order count (di units). Hiwalay sa JNT (galing sa macro_output).
+    Route::get('/macro/orders', [\App\Http\Controllers\MacroOrdersController::class, 'index'])->name('macro.orders');
 
     // Daily HOLD snapshots (units per item) — for /owner/private history + manual test.
     Route::get ('/jnt/hold-snapshots',     [\App\Http\Controllers\ItemHoldSnapshotController::class, 'index'])->name('jnt.hold-snapshots');
