@@ -38,8 +38,13 @@ class MacroOrdersController extends Controller
         }
 
         $q      = trim((string) $request->input('q', ''));
-        // Count by raw item name (default) o by ALIAS (merge variants na iisa ang alias).
-        $by     = $request->input('by') === 'alias' ? 'alias' : 'name';
+        // Count by:
+        //   name       → raw item name (tinanggal ang "N x")
+        //   alias      → per item alias (hal. 1Fan / 2Fan magkahiwalay)
+        //   alias_base → alias na tinanggal ang number sa unahan (1Fan + 2Fan → Fan)
+        $by     = in_array($request->input('by'), ['alias', 'alias_base'], true)
+            ? $request->input('by')
+            : 'name';
         $driver = DB::getDriverName();                 // 'mysql' | 'pgsql'
         $likeOp = $driver === 'pgsql' ? 'ILIKE' : 'LIKE';
 
@@ -98,8 +103,9 @@ class MacroOrdersController extends Controller
         // ── Strip "N x" prefix → base name; SUMmin ang ORDER count (HINDI ×qty) ──
         // by=alias → pagsamahin ang variants na iisa ang canonical alias (ItemAliasResolver).
         // Sa likha (walang mappings) ang canonicalKey == base name, kaya walang epekto.
-        $aliases = $by === 'alias' ? new \App\Services\ItemAliasResolver() : null;
-        $matrix  = [];
+        $useAlias = ($by === 'alias' || $by === 'alias_base');
+        $aliases  = $useAlias ? new \App\Services\ItemAliasResolver() : null;
+        $matrix   = [];
         foreach ($rows as $r) {
             $name = trim((string) ($r->item_name ?? ''));
             if ($name === '') {
@@ -117,8 +123,17 @@ class MacroOrdersController extends Controller
             //    bumalik sa base name (stripped) tulad ng By Item Name.
             //  • by=name → base name (tinanggal ang "N x").
             if ($aliases && $name !== '' && $aliases->isAliased($name)) {
-                $key   = $aliases->canonicalKey($name);
-                $label = $aliases->canonicalLabel($name);
+                $aliasLabel = $aliases->canonicalLabel($name);   // hal. "1Fan"
+                if ($by === 'alias_base') {
+                    // Tanggalin ang number sa UNAHAN ng alias → pagsamahin (1Fan + 2Fan → Fan).
+                    $stripped = trim((string) preg_replace('/^\s*\d+\s*/u', '', $aliasLabel));
+                    if ($stripped === '') $stripped = $aliasLabel;   // safety: kung puro number
+                    $key   = mb_strtolower($stripped);
+                    $label = $stripped;
+                } else {
+                    $key   = $aliases->canonicalKey($name);
+                    $label = $aliasLabel;
+                }
             } else {
                 $key = $baseName; $label = $baseName;
             }

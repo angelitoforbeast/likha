@@ -49,10 +49,11 @@
     <div>
       <label class="block text-sm font-medium text-gray-700 mb-1">Count by</label>
       <select name="by" onchange="this.form.submit()" class="w-full border rounded-lg px-3 py-2">
-        <option value="name"  {{ $by === 'name'  ? 'selected' : '' }}>Item Name</option>
-        <option value="alias" {{ $by === 'alias' ? 'selected' : '' }}>Item Alias</option>
+        <option value="name"       {{ $by === 'name'       ? 'selected' : '' }}>Item Name</option>
+        <option value="alias"      {{ $by === 'alias'      ? 'selected' : '' }}>Item Alias (1Fan / 2Fan)</option>
+        <option value="alias_base" {{ $by === 'alias_base' ? 'selected' : '' }}>Item Alias — pinagsama (Fan)</option>
       </select>
-      <p class="text-xs text-gray-500 mt-1">Alias = pinagsasama ang variants na iisa ang alias.</p>
+      <p class="text-xs text-gray-500 mt-1">Pinagsama = tinatanggal ang number sa unahan (1Fan + 2Fan → Fan).</p>
     </div>
 
     <div class="flex items-start gap-2 md:mt-7">
