@@ -61,6 +61,8 @@
          class="sec-tab {{ $sectionId === 'campaigns' ? 'active' : '' }}">📈 Campaigns</a>
       <a href="{{ route('owner.column-settings.daily-summary') }}"
          class="sec-tab {{ $sectionId === 'daily_summary' ? 'active' : '' }}">📅 Daily Summary <span class="text-[9px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded ml-1">CEO</span></a>
+      <a href="{{ route('owner.column-settings.breakdown') }}"
+         class="sec-tab {{ $sectionId === 'breakdown' ? 'active' : '' }}">🧾 Breakdown</a>
     </nav>
 
     @if(($breakevenTargetPct ?? null) !== null)

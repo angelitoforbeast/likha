@@ -3234,8 +3234,10 @@ class OwnerPrivateController extends Controller
         $viewRoleForCols = ($isCEO && $viewAs === 'marketing') ? 'Marketing' : $role;
 
         $colsCtrl       = new \App\Http\Controllers\OwnerColumnSettingsController();
-        $colsConfig     = $colsCtrl->loadConfig('owner_private', $viewRoleForCols);
-        $colFormatRules = $colsCtrl->loadColFormat('owner_private')['byCol'] ?? [];
+        // Sariling 'breakdown' column-settings section (per-role, role-aware) —
+        // hiwalay na sa owner_private. Managed via /owner/column-settings/breakdown.
+        $colsConfig     = $colsCtrl->loadConfig('breakdown', $viewRoleForCols);
+        $colFormatRules = $colsCtrl->loadColFormat('breakdown')['byCol'] ?? [];
         $breakevenPct   = $colsCtrl->loadBreakevenTargetPct();
 
         return view('owner.private-breakdown', [

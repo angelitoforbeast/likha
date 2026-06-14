@@ -72,27 +72,27 @@
     <table class="bd-table w-full text-sm">
       <thead>
         <tr class="text-slate-600 font-bold text-xs uppercase tracking-wide">
-          <th style="width:6%"   class="text-left px-4 py-2 border-b border-slate-200">Date</th>
-          <th style="width:18%"  class="text-left px-4 py-2 border-b border-slate-200">Primary Item</th>
-          <th style="width:6%"   class="text-left px-4 py-2 border-b border-slate-200">Item Alias</th>
-          <th style="width:5%"   class="text-right px-4 py-2 border-b border-slate-200">Orders</th>
+          <th style="width:6%"   class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('date')">Date</th>
+          <th style="width:18%"  class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('primary_item')">Primary Item</th>
+          <th style="width:6%"   class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('item_alias')">Item Alias</th>
+          <th style="width:5%"   class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('orders')">Orders</th>
           <th style="width:5.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('price')">Mode COD</th>
           <th style="width:6%"   class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('rts_set')">Set RTS%</th>
           <th style="width:10%"  class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('promo')">Promo</th>
           <th style="width:5.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('item_val')">Item Val.</th>
           <th style="width:6.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('adspent')">Adspent</th>
-          <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200">Proceed</th>
+          <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proceed')">Proceed</th>
           <th style="width:5.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('cpp')">CPP</th>
           <th style="width:6.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_profit')">Net Profit</th>
           <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_pct')">Proj%</th>
-          <th style="width:6%"   class="text-center px-4 py-2 border-b border-slate-200">Status</th>
-          <th style="width:11%"  class="text-left px-4 py-2 border-b border-slate-200">Action</th>
+          <th style="width:6%"   class="text-center px-4 py-2 border-b border-slate-200" x-show="showCol('status')">Status</th>
+          <th style="width:11%"  class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('action')">Action</th>
         </tr>
       </thead>
       <tbody>
         <template x-for="r in rows" :key="r.date">
           <tr :class="!r.has_data ? 'text-slate-400' : ''">
-            <td class="px-4 py-2 border-b border-slate-100 font-mono">
+            <td class="px-4 py-2 border-b border-slate-100 font-mono" x-show="showCol('date')">
               <span x-text="r.date"></span>
               {{-- ⚓ ANCHOR badge sa end-date row (anchor source) --}}
               <template x-if="r.is_anchor_date">
@@ -100,7 +100,7 @@
                       title="Anchor source — end-date primary item ang basehan ng anchor">⚓ ANCHOR</span>
               </template>
             </td>
-            <td class="px-4 py-2 border-b border-slate-100 bd-wrap">
+            <td class="px-4 py-2 border-b border-slate-100 bd-wrap" x-show="showCol('primary_item')">
               <span x-text="r.primary_item || '— no data —'"></span>
               <template x-if="r.second_item">
                 <span class="text-xs text-slate-400"
@@ -112,13 +112,13 @@
               </template>
             </td>
             {{-- Item Alias — canonical item_type family. "—" kapag walang alias. --}}
-            <td class="px-4 py-2 border-b border-slate-100">
+            <td class="px-4 py-2 border-b border-slate-100" x-show="showCol('item_alias')">
               <span x-show="r.item_alias" class="text-slate-700" x-text="r.item_alias"></span>
               <span x-show="!r.item_alias" class="text-slate-300">—</span>
             </td>
             {{-- Orders --}}
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
-                :style="cf('orders', r)"
+                x-show="showCol('orders')" :style="cf('orders', r)"
                 x-text="r.has_data ? (r.primary_orders + ' / ' + r.total_orders) : '—'"></td>
             {{-- Mode COD (price) --}}
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
@@ -199,7 +199,7 @@
                 x-text="(r.adspent !== null && r.adspent !== undefined && r.adspent > 0) ? money(r.adspent) : '—'"></td>
             {{-- Proceed --}}
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
-                :style="cf('proceed', r)"
+                x-show="showCol('proceed')" :style="cf('proceed', r)"
                 x-text="(r.proceed !== null && r.proceed !== undefined && r.proceed > 0) ? r.proceed : '—'"></td>
             {{-- CPP (adspent ÷ proceed) --}}
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
@@ -222,14 +222,14 @@
                 x-show="showCol('proj_pct')" :style="cf('proj_pct', r)"
                 x-text="(r.proj_pct !== null && r.proj_pct !== undefined) ? (Number(r.proj_pct).toFixed(1) + '%') : '—'"></td>
             {{-- Status --}}
-            <td class="px-4 py-2 border-b border-slate-100 text-center">
+            <td class="px-4 py-2 border-b border-slate-100 text-center" x-show="showCol('status')">
               <template x-if="r.is_anchor"><span class="text-blue-600 font-bold">✓ included</span></template>
               <template x-if="!r.is_anchor && r.has_data"><span class="text-amber-700 font-semibold">✗ excluded</span></template>
               <template x-if="!r.has_data"><span class="text-slate-300">—</span></template>
             </td>
             {{-- Action note (per date) — VIEW ONLY (auto-expanded full text).
                  Editing happens sa /owner/private (per end_date). --}}
-            <td class="px-4 py-2 border-b border-slate-100 bd-wrap">
+            <td class="px-4 py-2 border-b border-slate-100 bd-wrap" x-show="showCol('action')">
               <div class="text-left text-xs text-slate-700" style="max-width:240px;white-space:normal;line-height:1.3;">
                 <template x-if="r.action_comment">
                   <span>
@@ -249,16 +249,16 @@
            that day's adspent → sum = page net profit for the range). --}}
       <tfoot>
         <tr class="bg-slate-100 font-bold text-slate-800 border-t-2 border-slate-300">
-          <td class="px-4 py-2 bg-slate-100"></td>
-          <td class="px-4 py-2 bg-slate-100 text-right">TOTAL (range)</td>
-          <td class="px-4 py-2 bg-slate-100"></td>
-          <td class="px-4 py-2 bg-slate-100"></td>
+          <td class="px-4 py-2 bg-slate-100" x-show="showCol('date')"></td>
+          <td class="px-4 py-2 bg-slate-100 text-right" x-show="showCol('primary_item')">TOTAL (range)</td>
+          <td class="px-4 py-2 bg-slate-100" x-show="showCol('item_alias')"></td>
+          <td class="px-4 py-2 bg-slate-100" x-show="showCol('orders')"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('price')"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('rts_set')"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('promo')"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('item_val')"></td>
           <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('adspent')" x-text="money(totals().adspent)"></td>
-          <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-text="totals().proceed"></td>
+          <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('proceed')" x-text="totals().proceed"></td>
           <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('cpp')"
               x-text="totals().proceed > 0 ? money(totals().adspent / totals().proceed) : '—'"></td>
           <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('proj_profit')"
@@ -267,8 +267,8 @@
           <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('proj_pct')"
               :class="totals().proj_pct < 0 ? 'text-red-600' : 'text-slate-700'"
               x-text="totals().gross > 0 ? (totals().proj_pct.toFixed(1) + '%') : '—'"></td>
-          <td class="px-4 py-2 bg-slate-100"></td>
-          <td class="px-4 py-2 bg-slate-100"></td>
+          <td class="px-4 py-2 bg-slate-100" x-show="showCol('status')"></td>
+          <td class="px-4 py-2 bg-slate-100" x-show="showCol('action')"></td>
         </tr>
       </tfoot>
     </table>

@@ -32,6 +32,7 @@ class OwnerColumnSettingsController extends Controller
     private const KEY_OWNER_PRIVATE = 'owner_private_cols';
     private const KEY_CAMPAIGNS     = 'campaigns_cols';
     private const KEY_DAILY_SUMMARY = 'daily_summary_cols';
+    private const KEY_BREAKDOWN     = 'breakdown_cols';
 
     /**
      * Roles (other than CEO) that may view /owner/private. Each gets its own
@@ -55,6 +56,7 @@ class OwnerColumnSettingsController extends Controller
     private const KEY_COL_FORMAT             = 'owner_private_col_format';
     private const KEY_CAMPAIGNS_COL_FORMAT    = 'campaigns_col_format';
     private const KEY_DAILY_SUMMARY_COL_FORMAT = 'daily_summary_col_format';
+    private const KEY_BREAKDOWN_COL_FORMAT     = 'breakdown_col_format';
 
     /**
      * Column catalog: every column the user can show/hide/reorder per table.
@@ -150,6 +152,25 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'proj_net_pct',    'label' => 'Proj. Net %'],
             ['id' => 'np_per_order',    'label' => 'NP/O (Proj. Net Profit ÷ Orders)'],
         ],
+        // Per-date breakdown view (/owner/private/breakdown). One row per date.
+        // Columns mirror those rendered sa private-breakdown.blade.php.
+        'breakdown' => [
+            ['id' => 'date',         'label' => 'Date'],
+            ['id' => 'primary_item', 'label' => 'Primary Item'],
+            ['id' => 'item_alias',   'label' => 'Item Alias'],
+            ['id' => 'orders',       'label' => 'Orders'],
+            ['id' => 'price',        'label' => 'Mode COD'],
+            ['id' => 'rts_set',      'label' => 'Set RTS%'],
+            ['id' => 'promo',        'label' => 'Promo'],
+            ['id' => 'item_val',     'label' => 'Item Val.'],
+            ['id' => 'adspent',      'label' => 'Adspent'],
+            ['id' => 'proceed',      'label' => 'Proceed'],
+            ['id' => 'cpp',          'label' => 'CPP'],
+            ['id' => 'proj_profit',  'label' => 'Net Profit'],
+            ['id' => 'proj_pct',     'label' => 'Proj%'],
+            ['id' => 'status',       'label' => 'Status'],
+            ['id' => 'action',       'label' => 'Action'],
+        ],
     ];
 
     /**
@@ -189,6 +210,12 @@ class OwnerColumnSettingsController extends Controller
             'cpp', 'proceed_cpp', 'cpm', 'tcpr_pct',
             'proj_gross', 'proj_shipping', 'proj_cogs',
             'proj_net_profit', 'proj_net_pct', 'np_per_order',
+        ],
+        'breakdown' => [
+            // Lahat visible by default — CEO/MOIC/Marketing; i-uncheck per role kung gusto.
+            'date', 'primary_item', 'item_alias', 'orders', 'price', 'rts_set',
+            'promo', 'item_val', 'adspent', 'proceed', 'cpp', 'proj_profit',
+            'proj_pct', 'status', 'action',
         ],
     ];
 
@@ -271,6 +298,29 @@ class OwnerColumnSettingsController extends Controller
             'defaultVisible'    => self::DEFAULT_VISIBLE,
             'nonCeoRoles'       => [],
             'matrix'            => $this->loadConfigMatrix('daily_summary'),
+            'colFormatGroups'   => $cf['groups'] ?? [],
+            'breakevenTargetPct'=> null,
+        ]);
+    }
+
+    /** /owner/column-settings/breakdown — Per-date Breakdown section. */
+    public function sectionBreakdown()
+    {
+        $this->checkAccess();
+        $cf = $this->loadColFormat('breakdown');
+        return view('owner.column_settings_section', [
+            'sectionId'         => 'breakdown',
+            'sectionTitle'      => '🧾 Breakdown (Per Date)',
+            'sectionRoute'      => 'app_settings · breakdown_cols',
+            'sectionDesc'       => 'Per-role column visibility para sa <code>/owner/private/breakdown</code> (per-date view). Toggle the CEO / MOIC / Marketing checkboxes to show or hide each column for that role.',
+            'cfTitle'           => '🎨 Conditional Formatting · Breakdown',
+            'cfNote'            => 'Applies sa per-date rows ng <code>/owner/private/breakdown</code>.',
+            'cfAllowRef'        => false,
+            'showRoleColumns'   => true,
+            'catalog'           => self::CATALOG,
+            'defaultVisible'    => self::DEFAULT_VISIBLE,
+            'nonCeoRoles'       => self::NON_CEO_ROLES,
+            'matrix'            => $this->loadConfigMatrix('breakdown'),
             'colFormatGroups'   => $cf['groups'] ?? [],
             'breakevenTargetPct'=> null,
         ]);
@@ -436,6 +486,7 @@ class OwnerColumnSettingsController extends Controller
     {
         if ($table === 'campaigns')     return self::KEY_CAMPAIGNS_COL_FORMAT;
         if ($table === 'daily_summary') return self::KEY_DAILY_SUMMARY_COL_FORMAT;
+        if ($table === 'breakdown')     return self::KEY_BREAKDOWN_COL_FORMAT;
         return self::KEY_COL_FORMAT;
     }
 
@@ -790,6 +841,7 @@ class OwnerColumnSettingsController extends Controller
     {
         if ($table === 'campaigns')     return self::KEY_CAMPAIGNS;
         if ($table === 'daily_summary') return self::KEY_DAILY_SUMMARY;
+        if ($table === 'breakdown')     return self::KEY_BREAKDOWN;
         return self::KEY_OWNER_PRIVATE;
     }
 
