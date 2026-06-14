@@ -2132,9 +2132,14 @@ class OwnerPrivateController extends Controller
                     LOWER(TRIM(COALESCE(fj.item_name,'')))  AS item_key,
                     ROUND($jntCodClean)                     AS cod_val,
                     COUNT(*) AS total,
-                    SUM(CASE WHEN LOWER(fj.status) LIKE '%return%' OR LOWER(fj.status) LIKE '%rts%' THEN 1 ELSE 0 END) AS rts_cnt,
-                    SUM(CASE WHEN LOWER(fj.status) LIKE '%deliver%'                                  THEN 1 ELSE 0 END) AS del_cnt,
-                    SUM(CASE WHEN LOWER(fj.status) LIKE '%transit%'                                  THEN 1 ELSE 0 END) AS transit_cnt
+                    SUM(CASE
+                        WHEN LOWER(fj.status) LIKE '%return%' OR LOWER(fj.status) LIKE '%rts%' THEN 1
+                        WHEN TRIM(COALESCE(fj.rts_reason,'')) <> ''
+                             AND LOWER(fj.status) NOT LIKE '%delivered%'
+                             AND LOWER(fj.status) NOT LIKE '%returned%' THEN 1
+                        ELSE 0 END) AS rts_cnt,
+                    SUM(CASE WHEN LOWER(fj.status) LIKE '%delivered%' THEN 1 ELSE 0 END) AS del_cnt,
+                    SUM(CASE WHEN LOWER(fj.status) LIKE '%transit%'   THEN 1 ELSE 0 END) AS transit_cnt
                 ")
                 ->groupByRaw("LOWER(TRIM(COALESCE(psm.`PAGE`,''))) , LOWER(TRIM(COALESCE(fj.item_name,''))), ROUND($jntCodClean)")
                 ->get();
@@ -2280,12 +2285,15 @@ class OwnerPrivateController extends Controller
             $jntRtsCnt = $jntDelCnt = $jntTransitCnt = $jntTotal = null;
             if ($jntStats && $jntStats['total'] > 0) {
                 $t = $jntStats['total']; // total = rts + delivered + in-transit
-                $jntRtsPct     = round($jntStats['rts_cnt']     / $t * 100, 1);
-                $jntDelPct     = round($jntStats['del_cnt']      / $t * 100, 1);
-                $jntTransitPct = round($jntStats['transit_cnt']  / $t * 100, 1);
-                $jntRtsCnt     = $jntStats['rts_cnt'];
-                $jntDelCnt     = $jntStats['del_cnt'];
-                $jntTransitCnt = $jntStats['transit_cnt'];
+                $jntRtsCnt     = (int) $jntStats['rts_cnt'];
+                $jntDelCnt     = (int) $jntStats['del_cnt'];
+                // Transit = REMAINDER (total − rts − del) — iwas double-count (hal.
+                // "In Transit + rts_reason" = rts na, hindi na transit) at pumupunta
+                // dito ang "Delivering" na walang rts_reason (di pa final).
+                $jntTransitCnt = max(0, $t - $jntRtsCnt - $jntDelCnt);
+                $jntRtsPct     = round($jntRtsCnt     / $t * 100, 1);
+                $jntDelPct     = round($jntDelCnt     / $t * 100, 1);
+                $jntTransitPct = round($jntTransitCnt / $t * 100, 1);
                 $jntTotal      = $t;
             }
 
