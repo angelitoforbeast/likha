@@ -1318,7 +1318,7 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
             ) as rts_count,
 
             SUM(CASE
-                WHEN LOWER(status) LIKE '%deliver%'
+                WHEN LOWER(status) LIKE '%delivered%'
                 THEN 1 ELSE 0 END
             ) as delivered_count,
 
