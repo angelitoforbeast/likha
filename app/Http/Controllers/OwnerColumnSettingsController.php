@@ -764,7 +764,11 @@ class OwnerColumnSettingsController extends Controller
         if ($role === null || $role === 'CEO') {
             $hidden = $hiddenCEO;
         } else {
-            $visible = $visibleByRole[$role] ?? [];
+            // Breakdown: default = ALL VISIBLE kapag WALA pang naka-save na per-role
+            // config para sa role na ito (per CEO choice). Pag may saved (kahit empty
+            // = sadyang itinago lahat) → gamitin yon. Ibang table = opt-in (empty).
+            $visible = $visibleByRole[$role]
+                ?? (($table === 'breakdown') ? $allowedIds : []);
             $vSet = array_flip($visible);
             $hidden = array_values(array_filter($allowedIds, fn($id) => !isset($vSet[$id])));
         }
@@ -825,9 +829,12 @@ class OwnerColumnSettingsController extends Controller
             $hidden = array_values(array_filter($allowedIds, fn($id) => !isset($vis[$id])));
         }
 
-        // Ensure each non-CEO role has an entry (empty list = nothing visible).
+        // Ensure each non-CEO role has an entry. Breakdown UI default = all-checked
+        // (all visible, per CEO choice); ibang table = empty (opt-in).
         foreach (self::NON_CEO_ROLES as $r) {
-            if (!array_key_exists($r, $visibleByRole)) $visibleByRole[$r] = [];
+            if (!array_key_exists($r, $visibleByRole)) {
+                $visibleByRole[$r] = ($table === 'breakdown') ? $allowedIds : [];
+            }
         }
 
         return [
