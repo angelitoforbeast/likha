@@ -593,11 +593,20 @@ class OwnerPrivateController extends Controller
                     j.waybill_number AS wb,
                     MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END) AS is_delivered,
                     MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END) AS is_returned,
-                    MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END) AS is_for_return,
+                    MAX(CASE
+                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1
+                        WHEN TRIM(COALESCE(j.rts_reason,'')) <> ''
+                             AND LOWER(j.status) NOT LIKE '%delivered%'
+                             AND LOWER(j.status) NOT LIKE '%returned%' THEN 1
+                        ELSE 0
+                    END) AS is_for_return,
                     MAX(CASE
                         WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
                         WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
                         WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
+                        WHEN TRIM(COALESCE(j.rts_reason,'')) <> ''
+                             AND LOWER(j.status) NOT LIKE '%delivered%'
+                             AND LOWER(j.status) NOT LIKE '%returned%' THEN 0
                         ELSE 1
                     END) AS is_in_transit,
                     $jaMinTsExpr AS min_submit_ts,
@@ -629,11 +638,20 @@ class OwnerPrivateController extends Controller
                     j.waybill_number AS wb,
                     MAX(CASE WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 1 ELSE 0 END)::int AS is_delivered,
                     MAX(CASE WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 1 ELSE 0 END)::int AS is_returned,
-                    MAX(CASE WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1 ELSE 0 END)::int AS is_for_return,
+                    MAX(CASE
+                        WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 1
+                        WHEN TRIM(COALESCE(j.rts_reason,'')) <> ''
+                             AND LOWER(j.status) NOT LIKE '%delivered%'
+                             AND LOWER(j.status) NOT LIKE '%returned%' THEN 1
+                        ELSE 0
+                    END)::int AS is_for_return,
                     MAX(CASE
                         WHEN j.status LIKE 'Delivered%'  OR j.status LIKE 'DELIVERED%'  THEN 0
                         WHEN j.status LIKE 'Returned%'   OR j.status LIKE 'RETURNED%'   THEN 0
                         WHEN j.status LIKE 'For Return%' OR j.status LIKE 'FOR RETURN%' THEN 0
+                        WHEN TRIM(COALESCE(j.rts_reason,'')) <> ''
+                             AND LOWER(j.status) NOT LIKE '%delivered%'
+                             AND LOWER(j.status) NOT LIKE '%returned%' THEN 0
                         ELSE 1
                     END)::int AS is_in_transit,
                     $jaMinTsExpr AS min_submit_ts,
