@@ -130,7 +130,7 @@
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
                 x-show="showCol('rts_set')"
                 :class="r.rts_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.rts_eff_date && r.date === r.rts_eff_date) ? 'font-bold text-blue-700 bg-blue-100' : '')"
-                :style="(r.rts_backfilled || (r.rts_eff_date && r.date === r.rts_eff_date)) ? '' : cf('rts_set', r)"
+                :style="(r.rts_backfilled || (r.rts_eff_date && r.date === r.rts_eff_date)) ? {} : cf('rts_set', r)"
                 :title="r.rts_backfilled ? ('⚠ walang proper Set RTS para sa araw na ito — back-filled mula ' + r.rts_eff_date) : (r.rts_eff_date ? ('effective from ' + r.rts_eff_date) : 'no Set RTS')">
               <span class="block group">
                 <span class="flex items-center justify-end gap-1">
@@ -152,7 +152,7 @@
             <td class="px-4 py-2 border-b border-slate-100 bd-wrap"
                 x-show="showCol('promo')"
                 :class="r.promo_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.promo_eff && r.date === r.promo_eff) ? 'font-bold text-blue-700 bg-blue-100' : '')"
-                :style="(r.promo_backfilled || (r.promo_eff && r.date === r.promo_eff)) ? '' : cf('promo', r)"
+                :style="(r.promo_backfilled || (r.promo_eff && r.date === r.promo_eff)) ? {} : cf('promo', r)"
                 :title="r.promo_backfilled ? ('⚠ walang proper promo para sa araw na ito — back-filled mula ' + r.promo_eff) : (r.promo_eff ? ('effective from ' + r.promo_eff) : 'no promo')">
               <span class="block group">
                 <span class="flex items-center gap-1">
@@ -174,7 +174,7 @@
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
                 x-show="showCol('item_val')"
                 :class="r.item_value_backfilled ? 'font-bold text-red-700 bg-red-100' : ((r.item_value_eff && r.date === r.item_value_eff) ? 'font-bold text-blue-700 bg-blue-100' : '')"
-                :style="(r.item_value_backfilled || (r.item_value_eff && r.date === r.item_value_eff)) ? '' : cf('item_val', r)"
+                :style="(r.item_value_backfilled || (r.item_value_eff && r.date === r.item_value_eff)) ? {} : cf('item_val', r)"
                 :title="r.item_value_backfilled ? ('⚠ walang proper cogs para sa araw na ito — back-filled mula ' + r.item_value_eff) : (r.item_value_eff ? ('effective from ' + r.item_value_eff) : 'no cogs entry')">
               <span class="block group">
                 <span class="flex items-center justify-end gap-1">
@@ -507,10 +507,15 @@
       },
 
       // ── Conditional formatting (same rule shape + evaluator as main view) ──
+      // IMPORTANT: returns an OBJECT (not a CSS string). Alpine's :style with a
+      // STRING does el.setAttribute('style', …) which WIPES the entire style attr
+      // — kasama ang display:none na inilagay ng x-show — kaya babalik ang hidden
+      // columns tuwing nag-re-run ito after reload. Object syntax = el.style
+      // .setProperty per-key, hindi hinahawakan ang `display`, kaya x-show wins.
       cf(catId, r){
-        if (!catId) return '';
+        if (!catId) return {};
         const rules = (this.colFmt || {})[catId];
-        if (!Array.isArray(rules) || rules.length === 0) return '';
+        if (!Array.isArray(rules) || rules.length === 0) return {};
         const own = this.catVal(catId, r);
         for (const rule of rules){
           // Determine evaluated value: compare_col (sibling) or self.
@@ -539,10 +544,12 @@
           if (hit){
             const bg  = rule.bg || '#fee2e2';
             const txt = (rule.color && /^#[0-9a-f]{6}$/i.test(rule.color)) ? rule.color : '#111827';
-            return 'background:'+bg+';color:'+txt+';'+(rule.bold ? 'font-weight:700;' : '');
+            const style = { background: bg, color: txt };
+            if (rule.bold) style.fontWeight = '700';
+            return style;
           }
         }
-        return '';
+        return {};
       },
 
       // Literal numbers + same-row refs. Formula/cross-table refs that can't
