@@ -1313,8 +1313,11 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
             MAX(submission_time)     as max_sub,
 
             SUM(CASE
-                WHEN LOWER(status) LIKE '%return%' OR LOWER(status) LIKE '%rts%'
-                THEN 1 ELSE 0 END
+                WHEN LOWER(status) LIKE '%return%' OR LOWER(status) LIKE '%rts%' THEN 1
+                WHEN TRIM(COALESCE(rts_reason,'')) <> ''
+                     AND LOWER(status) NOT LIKE '%delivered%'
+                     AND LOWER(status) NOT LIKE '%returned%' THEN 1
+                ELSE 0 END
             ) as rts_count,
 
             SUM(CASE
