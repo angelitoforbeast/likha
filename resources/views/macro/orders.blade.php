@@ -49,11 +49,12 @@
     <div>
       <label class="block text-sm font-medium text-gray-700 mb-1">Count by</label>
       <select name="by" onchange="this.form.submit()" class="w-full border rounded-lg px-3 py-2">
-        <option value="name"       {{ $by === 'name'       ? 'selected' : '' }}>Item Name</option>
+        <option value="name"       {{ $by === 'name'       ? 'selected' : '' }}>Item Name (stripped — pinagsama)</option>
+        <option value="name_full"  {{ $by === 'name_full'  ? 'selected' : '' }}>Item Name — buo (may "N x")</option>
         <option value="alias"      {{ $by === 'alias'      ? 'selected' : '' }}>Item Alias (1Fan / 2Fan)</option>
         <option value="alias_base" {{ $by === 'alias_base' ? 'selected' : '' }}>Item Alias — pinagsama (Fan)</option>
       </select>
-      <p class="text-xs text-gray-500 mt-1">Pinagsama = tinatanggal ang number sa unahan (1Fan + 2Fan → Fan).</p>
+      <p class="text-xs text-gray-500 mt-1">Buo = hindi tinatanggal ang "N x" (hiwalay ang 1 x / 2 x). Pinagsama = tinatanggal ang number sa unahan (1Fan + 2Fan → Fan).</p>
     </div>
 
     <div class="flex items-start gap-2 md:mt-7">
@@ -72,7 +73,7 @@
   {{-- Pivot table --}}
   <div class="bg-white rounded-xl shadow p-4">
     <div class="flex justify-between items-center mb-2">
-      <div class="text-sm font-medium">Orders by Item <span class="text-gray-500">(quantity prefix removed, order count)</span></div>
+      <div class="text-sm font-medium">Orders by Item <span class="text-gray-500">({{ $by === 'name_full' ? 'buong pangalan, may "N x"' : 'quantity prefix removed' }}, order count)</span></div>
       <button type="button" id="copyBtn" class="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-gray-50">Copy table</button>
     </div>
 

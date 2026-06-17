@@ -39,10 +39,12 @@ class MacroOrdersController extends Controller
 
         $q      = trim((string) $request->input('q', ''));
         // Count by:
-        //   name       → raw item name (tinanggal ang "N x")
+        //   name       → raw item name (tinanggal ang "N x") — pinagsama ang variants
+        //   name_full  → BUONG item name (HINDI tinanggal ang "N x" — magkahiwalay
+        //                ang "1 x FAN" at "2 x FAN")
         //   alias      → per item alias (hal. 1Fan / 2Fan magkahiwalay)
         //   alias_base → alias na tinanggal ang number sa unahan (1Fan + 2Fan → Fan)
-        $by     = in_array($request->input('by'), ['alias', 'alias_base'], true)
+        $by     = in_array($request->input('by'), ['alias', 'alias_base', 'name_full'], true)
             ? $request->input('by')
             : 'name';
         $driver = DB::getDriverName();                 // 'mysql' | 'pgsql'
@@ -122,7 +124,11 @@ class MacroOrdersController extends Controller
             //    (isAliased/canonicalLabel sa primary_item). Kapag walang alias →
             //    bumalik sa base name (stripped) tulad ng By Item Name.
             //  • by=name → base name (tinanggal ang "N x").
-            if ($aliases && $name !== '' && $aliases->isAliased($name)) {
+            if ($by === 'name_full') {
+                // UNSTRIPPED — exact na BUONG item name (kasama ang "N x" prefix);
+                // magkahiwalay na row bawat variant (1 x FAN ≠ 2 x FAN).
+                $key = $label = ($name === '' ? '—' : $name);
+            } elseif ($aliases && $name !== '' && $aliases->isAliased($name)) {
                 $aliasLabel = $aliases->canonicalLabel($name);   // hal. "1Fan"
                 if ($by === 'alias_base') {
                     // Tanggalin ang number sa UNAHAN ng alias → pagsamahin (1Fan + 2Fan → Fan).
