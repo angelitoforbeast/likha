@@ -13,4 +13,5 @@ Artisan::command('inspire', function () {
 Schedule::command('holds:snapshot')
     ->timezone('Asia/Manila')
     ->dailyAt('06:00')
-    ->withoutOverlapping();
+    ->withoutOverlapping()
+    ->appendOutputTo(storage_path('logs/holds-snapshot.log')); // file log ng cron output

@@ -92,6 +92,63 @@ class HoldService
         return ['items' => count($map), 'units' => $totalUnits, 'date' => $end->toDateString()];
     }
 
+    /**
+     * Wrapper sa snapshot() na NAGLO-LOG ng bawat takbo sa hold_snapshot_logs
+     * (para may history kung tumakbo ba ang cron / manual at kung kailan tumigil).
+     * Sini-save ang success O error; ang error ay ire-rethrow pagkatapos i-log.
+     *
+     * $source = 'cron' (scheduled command) | 'manual' (UI button / CLI).
+     */
+    public function snapshotWithLog(string $snapshotDate, int $windowDays, string $source): array
+    {
+        $date = preg_match('/^\d{4}-\d{2}-\d{2}$/', $snapshotDate)
+            ? $snapshotDate
+            : Carbon::now('Asia/Manila')->subDay()->toDateString();
+        if ($windowDays < 1) $windowDays = 60;
+
+        $t0 = microtime(true);
+        try {
+            $res = $this->snapshot($date, $windowDays);
+            $this->writeLog([
+                'snapshot_date' => $res['date'],
+                'window'        => $windowDays,
+                'source'        => $source,
+                'status'        => 'success',
+                'items'         => (int) $res['items'],
+                'units'         => (int) $res['units'],
+                'duration_ms'   => (int) round((microtime(true) - $t0) * 1000),
+                'message'       => "{$res['items']} item(s), {$res['units']} held units (window {$windowDays}d).",
+            ]);
+            return $res;
+        } catch (\Throwable $e) {
+            $this->writeLog([
+                'snapshot_date' => $date,
+                'window'        => $windowDays,
+                'source'        => $source,
+                'status'        => 'error',
+                'items'         => 0,
+                'units'         => 0,
+                'duration_ms'   => (int) round((microtime(true) - $t0) * 1000),
+                'message'       => mb_substr($e->getMessage(), 0, 1000),
+            ]);
+            throw $e;
+        }
+    }
+
+    /** Insert ng isang run-log row — best-effort (di nito sisirain ang snapshot). */
+    private function writeLog(array $data): void
+    {
+        try {
+            DB::table('hold_snapshot_logs')->insert(array_merge($data, [
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]));
+        } catch (\Throwable $e) {
+            // Wala pa siguro ang hold_snapshot_logs table (di pa na-migrate) —
+            // huwag ipa-fail ang snapshot dahil lang dito.
+        }
+    }
+
     /** Held units map for a snapshot_date (item_key => hold_units). */
     public function snapshotMap(string $snapshotDate): array
     {

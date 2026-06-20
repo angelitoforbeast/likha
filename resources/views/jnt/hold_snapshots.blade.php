@@ -90,5 +90,52 @@
       HOLD = orders na may waybill pero wala pa sa J&T (<code>from_jnts</code>) — units per base item.
       Lalabas din ito sa <code>/owner/private</code> HOLD column (mapped sa primary item ng page, gamit ang snapshot ng end_date).
     </div>
+
+    {{-- Run history (logs) — kelan tumakbo ang snapshot, cron/manual, success/error --}}
+    <div class="mt-6">
+      <div class="text-sm font-semibold text-gray-800 mb-2">🧾 Run history (logs)</div>
+      <div class="overflow-x-auto rounded-xl border bg-white shadow-sm">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50 text-gray-700">
+            <tr>
+              <th class="px-3 py-2 text-left font-semibold">Tumakbo (PH)</th>
+              <th class="px-3 py-2 text-left font-semibold">Snapshot date</th>
+              <th class="px-3 py-2 text-left font-semibold">Source</th>
+              <th class="px-3 py-2 text-left font-semibold">Status</th>
+              <th class="px-3 py-2 text-right font-semibold">Items</th>
+              <th class="px-3 py-2 text-right font-semibold">Units</th>
+              <th class="px-3 py-2 text-right font-semibold">Window</th>
+              <th class="px-3 py-2 text-right font-semibold">Tagal</th>
+              <th class="px-3 py-2 text-left font-semibold">Message</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y">
+            @forelse ($logs ?? [] as $lg)
+              <tr class="hover:bg-gray-50/60">
+                <td class="px-3 py-2 text-gray-700 whitespace-nowrap">{{ $lg->created_at ? \Carbon\Carbon::parse($lg->created_at)->timezone('Asia/Manila')->format('Y-m-d H:i') : '—' }}</td>
+                <td class="px-3 py-2 text-gray-700 whitespace-nowrap">{{ \Carbon\Carbon::parse($lg->snapshot_date)->toDateString() }}</td>
+                <td class="px-3 py-2">
+                  <span class="inline-block rounded px-2 py-0.5 text-xs font-semibold {{ $lg->source === 'cron' ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-700' }}">{{ $lg->source }}</span>
+                </td>
+                <td class="px-3 py-2">
+                  <span class="inline-block rounded px-2 py-0.5 text-xs font-semibold {{ $lg->status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700' }}">{{ $lg->status }}</span>
+                </td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ number_format((int) $lg->items) }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ number_format((int) $lg->units) }}</td>
+                <td class="px-3 py-2 text-right tabular-nums">{{ (int) $lg->window }}d</td>
+                <td class="px-3 py-2 text-right tabular-nums text-gray-500">{{ $lg->duration_ms !== null ? number_format((int) $lg->duration_ms).'ms' : '—' }}</td>
+                <td class="px-3 py-2 text-gray-600">{{ $lg->message }}</td>
+              </tr>
+            @empty
+              <tr><td colspan="9" class="px-4 py-6 text-center text-gray-500">Wala pang run log. Tatakbo ito sa susunod na snapshot (cron o manual).</td></tr>
+            @endforelse
+          </tbody>
+        </table>
+      </div>
+      <div class="mt-2 text-xs text-gray-500">
+        Isang row = isang takbo. <strong>cron</strong> = automatic (6 AM PH) · <strong>manual</strong> = "Snapshot now" / CLI.
+        Kung <strong>walang bagong <code>cron</code> rows araw-araw</strong> → hindi naka-setup ang <code>schedule:run</code> sa server crontab.
+      </div>
+    </div>
   </div>
 </x-layout>

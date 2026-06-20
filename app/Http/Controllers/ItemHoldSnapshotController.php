@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 use App\Models\ItemHoldSnapshot;
 use App\Services\HoldService;
@@ -33,12 +35,19 @@ class ItemHoldSnapshotController extends Controller
 
         $defaultDate = Carbon::now('Asia/Manila')->subDay()->toDateString();
 
+        // Run history (logs) — kelan tumakbo ang snapshot (cron/manual), success/error.
+        $logs = collect();
+        if (Schema::hasTable('hold_snapshot_logs')) {
+            $logs = DB::table('hold_snapshot_logs')->orderByDesc('id')->limit(50)->get();
+        }
+
         return view('jnt.hold_snapshots', [
             'dates'        => $dates,
             'selected'     => $selected,
             'rows'         => $rows,
             'totalUnits'   => $totalUnits,
             'defaultDate'  => $defaultDate,
+            'logs'         => $logs,
         ]);
     }
 
@@ -53,7 +62,7 @@ class ItemHoldSnapshotController extends Controller
         if ($window < 1)   $window = 1;
         if ($window > 365) $window = 365;
 
-        $res = $svc->snapshot($date, $window);
+        $res = $svc->snapshotWithLog($date, $window, 'manual');
 
         return redirect()
             ->route('jnt.hold-snapshots', ['date' => $res['date']])

@@ -25,7 +25,7 @@ class SnapshotItemHolds extends Command
         $window = (int) $this->option('window');
         if ($window < 1) $window = 60;
 
-        $res = $svc->snapshot($date, $window);
+        $res = $svc->snapshotWithLog($date, $window, 'cron');
         $this->info("HOLD snapshot {$res['date']}: {$res['items']} items, {$res['units']} units (window {$window}d).");
 
         return self::SUCCESS;
