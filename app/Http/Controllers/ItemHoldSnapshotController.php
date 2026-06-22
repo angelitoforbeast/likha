@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 use App\Models\ItemHoldSnapshot;
+use App\Models\AppSetting;
 use App\Services\HoldService;
 
 class ItemHoldSnapshotController extends Controller
@@ -41,6 +42,8 @@ class ItemHoldSnapshotController extends Controller
             $logs = DB::table('hold_snapshot_logs')->orderByDesc('id')->limit(50)->get();
         }
 
+        $scheduleTime = $this->currentScheduleTime();
+
         return view('jnt.hold_snapshots', [
             'dates'        => $dates,
             'selected'     => $selected,
@@ -48,6 +51,7 @@ class ItemHoldSnapshotController extends Controller
             'totalUnits'   => $totalUnits,
             'defaultDate'  => $defaultDate,
             'logs'         => $logs,
+            'scheduleTime' => $scheduleTime,
         ]);
     }
 
@@ -67,5 +71,37 @@ class ItemHoldSnapshotController extends Controller
         return redirect()
             ->route('jnt.hold-snapshots', ['date' => $res['date']])
             ->with('success', "📸 Snapshot saved para sa {$res['date']} — {$res['items']} item(s), {$res['units']} total held units (window {$window}d).");
+    }
+
+    /** Current configured cron time (HH:MM, Asia/Manila); default 06:00. */
+    private function currentScheduleTime(): string
+    {
+        $t = AppSetting::get('hold_snapshot_time', '06:00');
+        return (is_string($t) && preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $t)) ? $t : '06:00';
+    }
+
+    /** GET /jnt/hold-snapshots/schedule — edit the daily cron time (UI, not hardcoded). */
+    public function scheduleEdit()
+    {
+        return view('jnt.hold_snapshot_schedule', [
+            'time'  => $this->currentScheduleTime(),
+            'nowPh' => Carbon::now('Asia/Manila')->format('H:i'),
+        ]);
+    }
+
+    /** POST /jnt/hold-snapshots/schedule — save the daily cron time. */
+    public function scheduleUpdate(Request $request)
+    {
+        $data = $request->validate([
+            'time' => ['required', 'regex:/^([01]\d|2[0-3]):[0-5]\d$/'],
+        ], [
+            'time.regex' => 'Maling oras — gamitin ang 24-hour HH:MM (00:00–23:59).',
+        ]);
+
+        AppSetting::set('hold_snapshot_time', $data['time']);
+
+        return redirect()
+            ->route('jnt.hold-snapshots.schedule')
+            ->with('success', "✅ Na-set ang cron time sa {$data['time']} (PH). Tatakbo ang holds:snapshot araw-araw sa oras na 'to — basta aktibo ang `schedule:run` sa server crontab.");
     }
 }

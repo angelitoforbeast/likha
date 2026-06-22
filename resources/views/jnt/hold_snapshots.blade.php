@@ -11,6 +11,12 @@
       <div class="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-800">{{ session('error') }}</div>
     @endif
 
+    {{-- Cron time (editable sa UI — hindi hardcoded) --}}
+    <div class="mb-4 flex items-center justify-between rounded-lg border bg-slate-50 px-4 py-2">
+      <div class="text-sm text-slate-700">⏰ Daily cron time: <span class="font-bold">{{ $scheduleTime ?? '06:00' }}</span> <span class="text-slate-400">(PH)</span></div>
+      <a href="{{ route('jnt.hold-snapshots.schedule') }}" class="text-sm font-semibold text-blue-600 hover:underline">✏️ I-edit ang oras →</a>
+    </div>
+
     <div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
       <div class="text-sm font-semibold text-amber-900 mb-1">📸 Manual Snapshot (para makapag-test agad)</div>
       <div class="text-xs text-amber-800 mb-3">

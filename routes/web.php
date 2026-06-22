@@ -975,6 +975,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     // Daily HOLD snapshots (units per item) — for /owner/private history + manual test.
     Route::get ('/jnt/hold-snapshots',     [\App\Http\Controllers\ItemHoldSnapshotController::class, 'index'])->name('jnt.hold-snapshots');
     Route::post('/jnt/hold-snapshots/run', [\App\Http\Controllers\ItemHoldSnapshotController::class, 'runNow'])->name('jnt.hold-snapshots.run');
+    Route::get ('/jnt/hold-snapshots/schedule', [\App\Http\Controllers\ItemHoldSnapshotController::class, 'scheduleEdit'])->name('jnt.hold-snapshots.schedule');
+    Route::post('/jnt/hold-snapshots/schedule', [\App\Http\Controllers\ItemHoldSnapshotController::class, 'scheduleUpdate'])->name('jnt.hold-snapshots.schedule.update');
 
     // ── Supply Finance (CEO + Marketing-OIC) — suppliers, orders (PO) na may
     //    lifecycle ordered→delivered→counted(=stock-in), partial payments + resibo.
