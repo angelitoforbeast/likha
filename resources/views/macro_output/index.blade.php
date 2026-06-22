@@ -1630,7 +1630,7 @@ function markWarn(id, field) {
 
   {{-- Sticky top bar (replaces modal — table stays visible behind) --}}
   <div id="aiCheckerBar"
-       class="hidden fixed top-0 left-0 right-0 z-[60] bg-white border-b-2 border-red-500 shadow-md px-4 py-2">
+       class="hidden fixed bottom-0 left-0 right-0 z-[60] bg-white border-t-2 border-red-500 shadow-lg px-4 py-2">
     <div class="max-w-7xl mx-auto flex items-center gap-3 text-sm">
       <span class="font-bold text-red-700">🤖 AI Checker</span>
       <span id="aiBarCounts" class="text-slate-700 font-mono">0 / 0</span>
@@ -1733,8 +1733,8 @@ function markWarn(id, field) {
       }
 
       // ── Sticky bar helpers ────────────────────────────────────────────
-      function showBar() { bar.classList.remove('hidden'); document.body.style.paddingTop = '52px'; }
-      function hideBar() { bar.classList.add('hidden'); document.body.style.paddingTop = ''; }
+      function showBar() { bar.classList.remove('hidden'); document.body.style.paddingBottom = '60px'; }
+      function hideBar() { bar.classList.add('hidden'); document.body.style.paddingBottom = ''; }
 
       function updateBar(state) {
         const { total, processed, fixed, partial, failed, startedAt } = state;
