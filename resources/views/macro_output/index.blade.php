@@ -1630,7 +1630,7 @@ function markWarn(id, field) {
 
   {{-- Sticky top bar (replaces modal — table stays visible behind) --}}
   <div id="aiCheckerBar"
-       class="hidden fixed top-0 left-0 right-0 z-40 bg-white border-b-2 border-red-500 shadow-md px-4 py-2">
+       class="hidden fixed top-0 left-0 right-0 z-[60] bg-white border-b-2 border-red-500 shadow-md px-4 py-2">
     <div class="max-w-7xl mx-auto flex items-center gap-3 text-sm">
       <span class="font-bold text-red-700">🤖 AI Checker</span>
       <span id="aiBarCounts" class="text-slate-700 font-mono">0 / 0</span>
