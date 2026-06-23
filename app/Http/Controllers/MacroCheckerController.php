@@ -40,17 +40,20 @@ class MacroCheckerController extends Controller
      */
     private function checkRole()
     {
-        $actualRoleRaw = Auth::user()?->employeeProfile?->role ?? null;
-        $viewAsRole    = ($actualRoleRaw === 'CEO') ? session('nav_view_as_role') : null;
-        $effectiveRole = preg_replace('/\s+/u', ' ', trim((string) ($viewAsRole ?: $actualRoleRaw)));
-
-        if (preg_match('/^(ceo|marketing|marketing\s*[-–—]\s*oic)$/iu', $effectiveRole)) {
-            return null; // allowed
+        if (\App\Support\AiCheckerAccess::allows()) {
+            return null; // allowed (default role O nasa extra allowlist)
         }
         return response()->json([
             'ok'    => false,
-            'error' => 'Forbidden — AI Checker is limited to Marketing, Marketing - OIC, at CEO.',
+            'error' => 'Forbidden — AI Checker is limited to Marketing, Marketing - OIC, CEO, at mga pinayagang user.',
         ], 403);
+    }
+
+    /** CEO-only gate (para sa access management — pagbibigay ng permission). */
+    private function isCeo(): bool
+    {
+        $role = preg_replace('/\s+/u', ' ', trim((string) (Auth::user()?->employeeProfile?->role ?? '')));
+        return preg_match('/^ceo$/iu', $role) === 1;
     }
 
     /**
@@ -334,6 +337,50 @@ class MacroCheckerController extends Controller
                 ->get();
         }
 
-        return view('encoder.ai_checker_logs', compact('batches', 'singles'));
+        return view('encoder.ai_checker_logs', [
+            'batches' => $batches,
+            'singles' => $singles,
+            'isCeo'   => $this->isCeo(),   // para sa "Manage access" link (CEO lang)
+        ]);
+    }
+
+    /**
+     * GET /encoder/checker_1/ai-checker/access — CEO-only. Set kung sino-sinong
+     * EXTRA users (bukod sa default roles) ang pwedeng gumamit ng AI Checker.
+     */
+    public function accessEdit()
+    {
+        if (!$this->isCeo()) abort(403);
+
+        $allowedIds = \App\Support\AiCheckerAccess::allowedUserIds();
+
+        $users = \App\Models\User::with('employeeProfile')
+            ->orderBy('name')
+            ->get()
+            ->map(function ($u) use ($allowedIds) {
+                $role = $u->employeeProfile?->role;
+                return (object) [
+                    'id'           => (int) $u->id,
+                    'name'         => $u->name,
+                    'email'        => $u->email,
+                    'role'         => $role,
+                    'role_allowed' => \App\Support\AiCheckerAccess::roleAllowed($role),
+                    'in_allowlist' => in_array((int) $u->id, $allowedIds, true),
+                ];
+            });
+
+        return view('encoder.ai_checker_access', ['users' => $users]);
+    }
+
+    /** POST /encoder/checker_1/ai-checker/access — i-save ang extra allowlist (CEO-only). */
+    public function accessUpdate(Request $request)
+    {
+        if (!$this->isCeo()) abort(403);
+
+        \App\Support\AiCheckerAccess::setAllowedUserIds((array) $request->input('user_ids', []));
+
+        return redirect()
+            ->route('macro_checker.access')
+            ->with('success', '✅ Na-update ang AI Checker access (extra users).');
     }
 }

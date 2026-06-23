@@ -1239,7 +1239,9 @@ class MacroOutputController extends Controller
         $viewAsRole    = ($actualRoleRaw === 'CEO') ? session('nav_view_as_role') : null;
         $effectiveRole = preg_replace('/\s+/u', ' ', trim((string) ($viewAsRole ?: $actualRoleRaw)));
 
-        $canUseAiChecker = (bool) preg_match('/^(ceo|marketing|marketing\s*[-–—]\s*oic)$/iu', $effectiveRole);
+        // Role-based (CEO/Marketing/MOIC) O nasa extra allowlist (per-user, set sa
+        // /encoder/checker_1/ai-checker/access). Single source: AiCheckerAccess.
+        $canUseAiChecker = \App\Support\AiCheckerAccess::allows();
 
         return view('macro_output.index', compact(
             'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll', 'canAccessWhitelist',

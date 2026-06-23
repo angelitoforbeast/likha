@@ -23,10 +23,16 @@
 
   <div class="max-w-7xl mx-auto p-4 space-y-8">
 
-    <p class="text-xs text-gray-500">
-      Bawat processed na order (AI Checker bulk <em>at</em> AI Fix per row) ay nalo-log dito.
-      Naka-prune sa huling <strong>90 araw</strong>. Oras = Asia/Manila.
-    </p>
+    <div class="flex items-start justify-between gap-3">
+      <p class="text-xs text-gray-500">
+        Bawat processed na order (AI Checker bulk <em>at</em> AI Fix per row) ay nalo-log dito.
+        Naka-prune sa huling <strong>90 araw</strong>. Oras = Asia/Manila.
+      </p>
+      @if (!empty($isCeo))
+        <a href="{{ route('macro_checker.access') }}"
+           class="shrink-0 text-sm font-semibold text-blue-600 hover:underline">⚙️ Manage access →</a>
+      @endif
+    </div>
 
     {{-- ════════ AI Checker batches (grouped by batch_id) ════════ --}}
     <div>
