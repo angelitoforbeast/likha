@@ -37,7 +37,7 @@
             <tr>
               <th class="px-3 py-2 text-left font-semibold">Simula (PH)</th>
               <th class="px-3 py-2 text-left font-semibold">Sino</th>
-              <th class="px-3 py-2 text-left font-semibold">Page</th>
+              <th class="px-3 py-2 text-left font-semibold">Page(s)</th>
               <th class="px-3 py-2 text-right font-semibold">Processed / Target</th>
               <th class="px-3 py-2 text-right font-semibold">✅</th>
               <th class="px-3 py-2 text-right font-semibold">⚠</th>
@@ -57,7 +57,16 @@
               <tr class="hover:bg-gray-50/60">
                 <td class="px-3 py-2 whitespace-nowrap text-gray-700">{{ $fmtTs($b->started_at) }}</td>
                 <td class="px-3 py-2 text-gray-700">{{ $b->user_name ?? '—' }}</td>
-                <td class="px-3 py-2 text-gray-600">{{ $b->page ?? '—' }}</td>
+                <td class="px-3 py-2 text-gray-600">
+                  @php $pgs = $b->pages ?? []; @endphp
+                  @if (count($pgs) === 0)
+                    —
+                  @elseif (count($pgs) === 1)
+                    {{ $pgs[0] }}
+                  @else
+                    <span title="{{ implode(', ', $pgs) }}" class="cursor-help underline decoration-dotted">{{ count($pgs) }} pages</span>
+                  @endif
+                </td>
                 <td class="px-3 py-2 text-right tabular-nums font-semibold">{{ $processed }}{{ $target ? ' / '.$target : '' }}</td>
                 <td class="px-3 py-2 text-right tabular-nums text-green-700">{{ (int) $b->fixed }}</td>
                 <td class="px-3 py-2 text-right tabular-nums text-yellow-700">{{ (int) $b->partial }}</td>

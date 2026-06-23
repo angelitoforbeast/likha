@@ -30,7 +30,7 @@ return new class extends Migration
                 $table->unsignedBigInteger('macro_output_id')->nullable()->index();
                 $table->string('page')->nullable();
                 $table->string('item')->nullable();
-                $table->string('final_code', 16)->nullable();
+                $table->string('final_code', 64)->nullable();
                 $table->boolean('all_filled')->default(false);
                 $table->string('outcome', 10)->default('partial');    // fixed | partial | failed
                 $table->unsignedInteger('duration_ms')->nullable();

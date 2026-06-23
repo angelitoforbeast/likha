@@ -8,6 +8,7 @@ use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -251,14 +252,21 @@ class MacroCheckerController extends Controller
     private function writeLog(array $data): void
     {
         try {
+            // Defensive caps — para hindi mag-fail ang insert dahil sa haba ng value.
+            foreach (['final_code' => 64, 'page' => 255, 'item' => 255] as $k => $max) {
+                if (isset($data[$k]) && is_string($data[$k])) {
+                    $data[$k] = mb_substr($data[$k], 0, $max);
+                }
+            }
             DB::table('ai_checker_logs')->insert(array_merge($data, [
                 'user_id'    => Auth::id(),
-                'user_name'  => Auth::user()?->name ?? Auth::user()?->email ?? 'unknown',
+                'user_name'  => mb_substr((string) (Auth::user()?->name ?? Auth::user()?->email ?? 'unknown'), 0, 255),
                 'created_at' => now(),
                 'updated_at' => now(),
             ]));
         } catch (\Throwable $e) {
-            // ai_checker_logs baka wala pa (di pa na-migrate) — huwag ipa-fail ang run.
+            // Huwag ipa-fail ang run-row, pero i-log na (hindi na tahimik) para ma-debug.
+            Log::warning('AI_CHECKER_LOG_FAIL', ['error' => $e->getMessage()]);
         }
     }
 
@@ -294,13 +302,29 @@ class MacroCheckerController extends Controller
                     MIN(created_at) AS started_at,
                     MAX(created_at) AS finished_at,
                     AVG(duration_ms) AS avg_ms,
-                    SUM(duration_ms) AS total_ms,
-                    MAX(page) AS page
+                    SUM(duration_ms) AS total_ms
                 ")
                 ->groupBy('batch_id')
                 ->orderByDesc(DB::raw('MAX(created_at)'))
                 ->limit(100)
                 ->get();
+
+            // Distinct pages per batch (multi-page ang batch kapag walang PAGE filter).
+            // Engine-agnostic — hiwalay na query imbes na GROUP_CONCAT/STRING_AGG.
+            $batchIds = $batches->pluck('batch_id')->filter()->all();
+            $pagesByBatch = [];
+            if (!empty($batchIds)) {
+                $pageRows = DB::table('ai_checker_logs')
+                    ->whereIn('batch_id', $batchIds)
+                    ->whereNotNull('page')->where('page', '<>', '')
+                    ->select('batch_id', 'page')->distinct()->get();
+                foreach ($pageRows as $pr) {
+                    $pagesByBatch[$pr->batch_id][] = $pr->page;
+                }
+            }
+            foreach ($batches as $b) {
+                $b->pages = $pagesByBatch[$b->batch_id] ?? [];
+            }
 
             // Recent single AI Fix entries.
             $singles = DB::table('ai_checker_logs')
