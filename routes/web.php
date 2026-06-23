@@ -587,6 +587,8 @@ Route::post('/encoder/checker_1/ai-checker/start',  [\App\Http\Controllers\Macro
 Route::post('/encoder/checker_1/ai-checker/run-row/{id}', [\App\Http\Controllers\MacroCheckerController::class, 'runRow'])
     ->whereNumber('id')
     ->name('macro_checker.run_row');
+Route::get('/encoder/checker_1/ai-checker/logs', [\App\Http\Controllers\MacroCheckerController::class, 'logs'])
+    ->name('macro_checker.logs');
 Route::get('/macro_output/download', [MacroOutputController::class, 'download'])->name('macro_output.download');
 Route::post('/macro_output/validate-items', [MacroOutputController::class, 'validateItems']);
 Route::post('/macro_output/validate1', [MacroOutputController::class, 'validateCheckerToFix'])

@@ -1797,6 +1797,7 @@ function markWarn(id, field) {
 
         // Step 1: resolve the list of IDs to process
         let ids = [];
+        let batchId = null;   // galing sa start() — para magrupo ang per-batch logs
         try {
           const body = new URLSearchParams(filterQuery());
           const r = await fetch(URL_START, {
@@ -1811,6 +1812,7 @@ function markWarn(id, field) {
             return;
           }
           ids = j.ids || [];
+          batchId = j.batch_id || null;
         } catch (e) {
           alert('Failed to start: ' + e.message);
           running = false; btn.disabled = false;
@@ -1853,6 +1855,7 @@ function markWarn(id, field) {
             const r = await fetch(`${URL_RUN_ROW}/${encodeURIComponent(id)}`, {
               method: 'POST',
               headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({ source: 'batch', batch_id: batchId || '', batch_total: String(ids.length) }).toString(),
             });
             const j = await r.json();
 
@@ -1980,6 +1983,7 @@ function markWarn(id, field) {
               'Accept': 'application/json',
               'Content-Type': 'application/x-www-form-urlencoded',
             },
+            body: new URLSearchParams({ source: 'single' }).toString(),
           });
           const j = await r.json();
           if (!r.ok || !j.ok) {

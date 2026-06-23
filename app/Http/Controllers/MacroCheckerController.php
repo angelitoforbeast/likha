@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 /**
  * Endpoints sa /encoder/checker_1/ai-checker/* — drives the CHECKER_11_1
@@ -154,9 +155,10 @@ class MacroCheckerController extends Controller
         }
 
         return response()->json([
-            'ok'    => true,
-            'ids'   => $ids,
-            'count' => count($ids),
+            'ok'       => true,
+            'ids'      => $ids,
+            'count'    => count($ids),
+            'batch_id' => (string) Str::uuid(),   // ginagamit ng frontend para sa per-batch logs
         ]);
     }
 
@@ -166,7 +168,7 @@ class MacroCheckerController extends Controller
      * SYNC per-row trigger — temporary (per user spec). Processes one row
      * immediately and returns the result. Aalisin pag stable na yung batch.
      */
-    public function runRow($id)
+    public function runRow(Request $request, $id)
     {
         if ($r = $this->checkRole()) return $r;
 
@@ -180,10 +182,35 @@ class MacroCheckerController extends Controller
             return response()->json(['ok' => false, 'error' => 'jnt_address.txt missing or empty'], 500);
         }
 
+        // Logging context — 'batch' (AI Checker) o 'single' (AI Fix per row).
+        $source     = $request->input('source') === 'batch' ? 'batch' : 'single';
+        $batchId    = $request->input('batch_id') ?: null;
+        $batchTotal = (int) $request->input('batch_total', 0);
+        $t0         = microtime(true);
+
         try {
             $result = (new MacroChecker)->processRow((int) $id, $maps);
+            $durationMs = (int) round((microtime(true) - $t0) * 1000);
             // Re-read so frontend gets the actual updated values
             $row = MacroOutput::find((int) $id);
+
+            $code      = (string) ($result['final_code'] ?? '');
+            $allFilled = ($result['all_filled'] ?? true) ? true : false;
+            $outcome   = ($code === '✅' && $allFilled) ? 'fixed' : 'partial';
+
+            $this->writeLog([
+                'source'          => $source,
+                'batch_id'        => $batchId,
+                'batch_total'     => $batchTotal > 0 ? $batchTotal : null,
+                'macro_output_id' => (int) $id,
+                'page'            => $row->PAGE ?? null,
+                'item'            => $row->{'ITEM_NAME'} ?? null,
+                'final_code'      => $code !== '' ? $code : null,
+                'all_filled'      => $allFilled,
+                'outcome'         => $outcome,
+                'duration_ms'     => $durationMs,
+            ]);
+
             return response()->json([
                 'ok'     => true,
                 'result' => $result,
@@ -200,10 +227,89 @@ class MacroCheckerController extends Controller
                 ],
             ]);
         } catch (\Throwable $e) {
+            $durationMs = (int) round((microtime(true) - $t0) * 1000);
+            $this->writeLog([
+                'source'          => $source,
+                'batch_id'        => $batchId,
+                'batch_total'     => $batchTotal > 0 ? $batchTotal : null,
+                'macro_output_id' => (int) $id,
+                'page'            => $row->PAGE ?? null,
+                'item'            => $row->{'ITEM_NAME'} ?? null,
+                'final_code'      => '❌',
+                'all_filled'      => false,
+                'outcome'         => 'failed',
+                'duration_ms'     => $durationMs,
+            ]);
             return response()->json([
                 'ok'    => false,
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /** Insert ng isang per-row AI log — best-effort (di sisirain ang run-row). */
+    private function writeLog(array $data): void
+    {
+        try {
+            DB::table('ai_checker_logs')->insert(array_merge($data, [
+                'user_id'    => Auth::id(),
+                'user_name'  => Auth::user()?->name ?? Auth::user()?->email ?? 'unknown',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]));
+        } catch (\Throwable $e) {
+            // ai_checker_logs baka wala pa (di pa na-migrate) — huwag ipa-fail ang run.
+        }
+    }
+
+    /**
+     * GET /encoder/checker_1/ai-checker/logs — standalone logs page (walang
+     * hyperlink sa checker_1). Per-batch summary (group by batch_id) + recent
+     * single AI Fix entries. Auto-prune: panatilihin ang huling 90 araw.
+     */
+    public function logs(Request $request)
+    {
+        if ($this->checkRole()) abort(403);
+
+        $batches = collect();
+        $singles = collect();
+
+        if (Schema::hasTable('ai_checker_logs')) {
+            // Auto-prune (>90 araw).
+            try {
+                DB::table('ai_checker_logs')->where('created_at', '<', now()->subDays(90))->delete();
+            } catch (\Throwable $e) {}
+
+            // Per-batch summary.
+            $batches = DB::table('ai_checker_logs')
+                ->whereNotNull('batch_id')
+                ->selectRaw("
+                    batch_id,
+                    MAX(user_name) AS user_name,
+                    MAX(batch_total) AS target,
+                    COUNT(*) AS processed,
+                    SUM(CASE WHEN outcome = 'fixed'   THEN 1 ELSE 0 END) AS fixed,
+                    SUM(CASE WHEN outcome = 'partial' THEN 1 ELSE 0 END) AS partial,
+                    SUM(CASE WHEN outcome = 'failed'  THEN 1 ELSE 0 END) AS failed,
+                    MIN(created_at) AS started_at,
+                    MAX(created_at) AS finished_at,
+                    AVG(duration_ms) AS avg_ms,
+                    SUM(duration_ms) AS total_ms,
+                    MAX(page) AS page
+                ")
+                ->groupBy('batch_id')
+                ->orderByDesc(DB::raw('MAX(created_at)'))
+                ->limit(100)
+                ->get();
+
+            // Recent single AI Fix entries.
+            $singles = DB::table('ai_checker_logs')
+                ->whereNull('batch_id')
+                ->orderByDesc('id')
+                ->limit(200)
+                ->get();
+        }
+
+        return view('encoder.ai_checker_logs', compact('batches', 'singles'));
     }
 }
