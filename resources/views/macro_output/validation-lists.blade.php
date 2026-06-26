@@ -22,7 +22,7 @@
     </div>
 
     {{-- Summary Cards --}}
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
       <div class="bg-white rounded-xl border p-4 shadow-sm">
         <div class="text-xs text-gray-500 uppercase tracking-wide">Phone Whitelist</div>
         <div id="stat-phone" class="text-2xl font-bold text-blue-600 mt-1">—</div>
@@ -34,6 +34,10 @@
       <div class="bg-white rounded-xl border p-4 shadow-sm">
         <div class="text-xs text-gray-500 uppercase tracking-wide">Keyword Blacklist</div>
         <div id="stat-keyword" class="text-2xl font-bold text-orange-600 mt-1">—</div>
+      </div>
+      <div class="bg-white rounded-xl border p-4 shadow-sm">
+        <div class="text-xs text-gray-500 uppercase tracking-wide">Address Keyword</div>
+        <div id="stat-addrkw" class="text-2xl font-bold text-purple-600 mt-1">—</div>
       </div>
     </div>
 
@@ -47,6 +51,9 @@
       </button>
       <button class="tab-btn px-5 py-3 text-sm border-b-2 rounded-t-lg" data-tab="keyword" onclick="switchTab('keyword')">
         🔑 Keyword Blacklist
+      </button>
+      <button class="tab-btn px-5 py-3 text-sm border-b-2 rounded-t-lg" data-tab="addrkw" onclick="switchTab('addrkw')">
+        🏠 Address Keyword
       </button>
     </div>
 
@@ -134,12 +141,43 @@
       </div>
     </div>
 
+    {{-- ═══ ADDRESS KEYWORD BLACKLIST TAB ═══ --}}
+    <div id="panel-addrkw" class="tab-panel">
+      <div class="bg-white rounded-b-xl rounded-tr-xl border border-t-0 shadow-sm">
+        <div class="px-5 pt-4 text-xs text-gray-500">
+          Hinahanap sa <strong>ADDRESS (Line 1)</strong> tuwing Validate / Validate 1. Pag may tumama (partial, case-insensitive) → <strong>invalid / TO FIX</strong> ang address. (Blangkong address = invalid din.)
+        </div>
+        {{-- Add form --}}
+        <div class="p-5 border-b bg-gray-50/50">
+          <div class="flex flex-col sm:flex-row gap-3">
+            <input type="text" id="addrkw-input" placeholder="Keyword sa address (hal. 'wala', 'n/a', 'tba')" class="flex-1 border rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none" maxlength="255"/>
+            <input type="text" id="addrkw-reason" placeholder="Reason (optional)" class="flex-1 border rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-purple-300 focus:border-purple-400 outline-none" maxlength="255"/>
+            <button onclick="addAddrkw()" class="bg-purple-600 hover:bg-purple-700 text-white text-sm px-6 py-2.5 rounded-lg font-medium transition-colors whitespace-nowrap">+ Add</button>
+          </div>
+          <div id="addrkw-error" class="text-red-500 text-xs mt-2 hidden"></div>
+          <div id="addrkw-success" class="text-emerald-600 text-xs mt-2 hidden"></div>
+        </div>
+        {{-- Search --}}
+        <div class="px-5 pt-4">
+          <input type="text" id="addrkw-search" placeholder="Search..." class="w-full border rounded-lg px-4 py-2 text-sm focus:ring-2 focus:ring-purple-300 outline-none" oninput="filterList('addrkw')"/>
+        </div>
+        {{-- Count --}}
+        <div class="px-5 pt-3 pb-2">
+          <span id="addrkw-count" class="text-xs text-gray-500">Loading...</span>
+        </div>
+        {{-- List --}}
+        <div id="addrkw-list" class="px-5 pb-5">
+          <div class="text-gray-400 text-sm text-center py-8">Loading...</div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script>
     const csrf = '{{ csrf_token() }}';
-    const listData = { phone: [], fbname: [], keyword: [] };
-    let canDeleteMap = { phone: false, fbname: false, keyword: false };
+    const listData = { phone: [], fbname: [], keyword: [], addrkw: [] };
+    let canDeleteMap = { phone: false, fbname: false, keyword: false, addrkw: false };
 
     /* ─── TABS ─── */
     function switchTab(tab) {
@@ -161,7 +199,9 @@
       }
 
       const labelField = type === 'phone' ? 'phone_number' : (type === 'fbname' ? 'fb_name' : 'keyword');
-      const colorClass = type === 'phone' ? 'bg-blue-50 text-blue-800' : (type === 'fbname' ? 'bg-red-50 text-red-800' : 'bg-orange-50 text-orange-800');
+      const colorClass = type === 'phone' ? 'bg-blue-50 text-blue-800'
+        : (type === 'fbname' ? 'bg-red-50 text-red-800'
+        : (type === 'addrkw' ? 'bg-purple-50 text-purple-800' : 'bg-orange-50 text-orange-800'));
       const canDel = canDeleteMap[type];
 
       listEl.innerHTML = '';
@@ -209,7 +249,7 @@
 
     /* ─── LOAD DATA ─── */
     async function loadAll() {
-      await Promise.all([loadList('phone'), loadList('fbname'), loadList('keyword')]);
+      await Promise.all([loadList('phone'), loadList('fbname'), loadList('keyword'), loadList('addrkw')]);
     }
 
     async function loadList(type) {
@@ -217,6 +257,7 @@
         phone: '/validation-lists/phone/data',
         fbname: '/validation-lists/fbname/data',
         keyword: '/validation-lists/keyword/data',
+        addrkw: '/validation-lists/address-keyword/data',
       };
 
       try {
@@ -254,6 +295,13 @@
         keyword: document.getElementById('keyword-input').value.trim(),
         reason: document.getElementById('keyword-reason').value.trim() || null,
       }, 'keyword-input', 'keyword-reason');
+    }
+
+    async function addAddrkw() {
+      await addEntry('addrkw', '/validation-lists/address-keyword', {
+        keyword: document.getElementById('addrkw-input').value.trim(),
+        reason: document.getElementById('addrkw-reason').value.trim() || null,
+      }, 'addrkw-input', 'addrkw-reason');
     }
 
     async function addEntry(type, url, body, inputId, reasonId) {
@@ -304,6 +352,7 @@
         phone: '/validation-lists/phone/',
         fbname: '/validation-lists/fbname/',
         keyword: '/validation-lists/keyword/',
+        addrkw: '/validation-lists/address-keyword/',
       };
 
       try {
@@ -331,6 +380,9 @@
     });
     ['keyword-input','keyword-reason'].forEach(id => {
       document.getElementById(id)?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addKeyword(); } });
+    });
+    ['addrkw-input','addrkw-reason'].forEach(id => {
+      document.getElementById(id)?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addAddrkw(); } });
     });
 
     /* ─── INIT ─── */

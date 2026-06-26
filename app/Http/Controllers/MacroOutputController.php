@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Schema;
 use App\Models\PhoneWhitelist;
 use App\Models\FbnameBlacklist;
 use App\Models\KeywordBlacklist;
+use App\Models\AddressKeywordBlacklist;
 
 class MacroOutputController extends Controller
 {
@@ -378,7 +379,7 @@ class MacroOutputController extends Controller
 
         $records = MacroOutput::whereIn('id', $ids)->get([
             'id', 'FULL NAME', 'PROVINCE', 'CITY', 'BARANGAY', 'PHONE NUMBER',
-            'fb_name', 'all_user_input'
+            'ADDRESS', 'fb_name', 'all_user_input'
         ]);
 
         // phone duplicate counts within batch
@@ -401,6 +402,13 @@ class MacroOutputController extends Controller
 
         // ✅ Load keyword blacklist (case-insensitive, partial match)
         $keywordBlacklist = KeywordBlacklist::where('host_scope', $hostScope)
+            ->pluck('keyword')
+            ->map(fn($v) => mb_strtolower(trim($v)))
+            ->filter(fn($v) => $v !== '')
+            ->toArray();
+
+        // ✅ Load ADDRESS keyword blacklist (case-insensitive, partial match sa ADDRESS Line 1)
+        $addressKeywordBlacklist = AddressKeywordBlacklist::where('host_scope', $hostScope)
             ->pluck('keyword')
             ->map(fn($v) => mb_strtolower(trim($v)))
             ->filter(fn($v) => $v !== '')
@@ -474,12 +482,25 @@ class MacroOutputController extends Controller
                 }
             }
 
+            // ✅ ADDRESS (Line 1) check — blangko = invalid, O may blacklisted keyword (partial, case-insensitive)
+            $addressVal = trim((string)($record->ADDRESS ?? ''));
+            $addressInvalid = false;
+            if ($addressVal === '') {
+                $addressInvalid = true;
+            } else {
+                $addrLower = mb_strtolower($addressVal);
+                foreach ($addressKeywordBlacklist as $akw) {
+                    if (str_contains($addrLower, $akw)) { $addressInvalid = true; break; }
+                }
+            }
+
             $invalidFields = array_filter([
                 'FULL NAME'    => $fullNameInvalid || $fbNameBlacklisted,
                 'PROVINCE'     => $provInvalid,
                 'CITY'         => $cityInvalid,
                 'BARANGAY'     => $brgyInvalid,
                 'PHONE NUMBER' => $phoneInvalid,
+                'ADDRESS'      => $addressInvalid,
             ]);
 
             // If keyword blacklisted, flag the all_user_input column
@@ -612,6 +633,13 @@ class MacroOutputController extends Controller
         ->filter(fn($v) => $v !== '')
         ->toArray();
 
+    // ✅ Load ADDRESS keyword blacklist (case-insensitive, partial match sa ADDRESS Line 1)
+    $addressKeywordBlacklist = AddressKeywordBlacklist::where('host_scope', $hostScope)
+        ->pluck('keyword')
+        ->map(fn($v) => mb_strtolower(trim($v)))
+        ->filter(fn($v) => $v !== '')
+        ->toArray();
+
     // ✅ only rows with checker = ✅ (or blank/null) are candidates for update
     $CHECKER = $wrap('APP SCRIPT CHECKER');
 
@@ -623,7 +651,7 @@ class MacroOutputController extends Controller
         })
         ->get([
             'id', 'FULL NAME', 'PHONE NUMBER', 'PROVINCE', 'CITY', 'BARANGAY',
-            'ITEM_NAME', 'COD', 'APP SCRIPT CHECKER',
+            'ADDRESS', 'ITEM_NAME', 'COD', 'APP SCRIPT CHECKER',
             'SHOP DETAILS', 'all_user_input', 'fb_name',
         ]);
 
@@ -736,11 +764,24 @@ class MacroOutputController extends Controller
             }
         }
 
+        // ✅ ADDRESS (Line 1) check — blangko = invalid, O may blacklisted keyword
+        $addressVal = trim((string)($r->ADDRESS ?? ''));
+        $addressInvalid = false;
+        if ($addressVal === '') {
+            $addressInvalid = true;
+        } else {
+            $addrLower = mb_strtolower($addressVal);
+            foreach ($addressKeywordBlacklist as $akw) {
+                if (str_contains($addrLower, $akw)) { $addressInvalid = true; break; }
+            }
+        }
+
         $hardIssue =
             $provInvalid || $cityInvalid || $brgyInvalid ||
             $fullNameInvalid || $phoneInvalid ||
             $itemInvalid || $codInvalid ||
-            $fbNameBlacklisted || $keywordBlacklisted;
+            $fbNameBlacklisted || $keywordBlacklisted ||
+            $addressInvalid;
 
         // ✅ SOFT (SHOP DETAILS mismatch) -> checker TO FIX pero wag galawin flags
         $shopText = trim((string)($r->{'SHOP DETAILS'} ?? ''));

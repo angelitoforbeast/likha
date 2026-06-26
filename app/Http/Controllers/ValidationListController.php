@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Auth;
 use App\Models\PhoneWhitelist;
 use App\Models\FbnameBlacklist;
 use App\Models\KeywordBlacklist;
+use App\Models\AddressKeywordBlacklist;
 
 class ValidationListController extends Controller
 {
@@ -201,6 +202,60 @@ class ValidationListController extends Controller
     {
         if (! $this->canDelete()) abort(403);
         $keyword->delete();
+        return response()->json(['ok' => true]);
+    }
+
+    /* ═══════════════════════════════════════════
+     *  ADDRESS KEYWORD BLACKLIST  (JSON API)
+     *  — hinahanap sa ADDRESS (Line 1) tuwing Validate / Validate 1
+     * ═══════════════════════════════════════════ */
+
+    public function addressKeywordData(Request $request)
+    {
+        if (! $this->canAccess()) abort(403);
+
+        $items = AddressKeywordBlacklist::with('creator')
+            ->where('host_scope', $this->scope($request))
+            ->orderByDesc('created_at')
+            ->get();
+
+        return response()->json([
+            'items'      => $items,
+            'can_delete' => $this->canDelete(),
+        ]);
+    }
+
+    public function addressKeywordStore(Request $request)
+    {
+        if (! $this->canAccess()) abort(403);
+
+        $data = $request->validate([
+            'keyword' => 'required|string|max:255',
+            'reason'  => 'nullable|string|max:255',
+        ]);
+
+        $keyword = trim($data['keyword']);
+        $scope   = $this->scope($request);
+
+        if (AddressKeywordBlacklist::whereRaw('LOWER(keyword) = ?', [mb_strtolower($keyword)])->where('host_scope', $scope)->exists()) {
+            return response()->json(['error' => 'Address keyword already blacklisted.'], 422);
+        }
+
+        $item = AddressKeywordBlacklist::create([
+            'keyword'    => $keyword,
+            'reason'     => $data['reason'] ?? null,
+            'host_scope' => $scope,
+            'created_by' => Auth::id(),
+        ]);
+        $item->load('creator');
+
+        return response()->json(['item' => $item], 201);
+    }
+
+    public function addressKeywordDestroy(AddressKeywordBlacklist $addressKeyword)
+    {
+        if (! $this->canDelete()) abort(403);
+        $addressKeyword->delete();
         return response()->json(['ok' => true]);
     }
 }

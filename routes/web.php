@@ -1088,6 +1088,10 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/validation-lists/keyword', [ValidationListController::class, 'keywordStore'])->name('validation-lists.keyword.store');
     Route::delete('/validation-lists/keyword/{keyword}', [ValidationListController::class, 'keywordDestroy'])->name('validation-lists.keyword.destroy');
 
+    Route::get('/validation-lists/address-keyword/data', [ValidationListController::class, 'addressKeywordData'])->name('validation-lists.address-keyword.data');
+    Route::post('/validation-lists/address-keyword', [ValidationListController::class, 'addressKeywordStore'])->name('validation-lists.address-keyword.store');
+    Route::delete('/validation-lists/address-keyword/{addressKeyword}', [ValidationListController::class, 'addressKeywordDestroy'])->name('validation-lists.address-keyword.destroy');
+
     // Redirect old phone-whitelist URL
     Route::get('/phone-whitelist', fn() => redirect()->route('validation-lists.index'));
 

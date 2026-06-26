@@ -60,6 +60,13 @@
           <input id="globalSearch" type="text" placeholder="Search anything…"
                  style="border:1px solid #d1d5db;padding:5px 10px;border-radius:6px;font-size:13px;min-width:200px;">
         </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em;">Item (exact)</label>
+          <input id="itemExact" type="text" placeholder="e.g. 1 x LIP TATTOO"
+                 style="border:1px solid #0d9488;padding:5px 10px;border-radius:6px;font-size:13px;min-width:200px;">
+        </div>
+        <button type="button" id="itemExactBtn"
+                style="background:#0d9488;color:white;padding:6px 16px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:600;">Search Item</button>
         <button type="submit"
                 style="background:#2563eb;color:white;padding:6px 16px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:600;">Apply</button>
         <a href="{{ url('/jnt_rts') }}"
@@ -286,6 +293,30 @@
           dt.search(this.value).draw();
         });
       }
+
+      // ✅ EXACT item search (column-specific) — "1 x LIP TATTOO" ay hindi tatama
+      // sa "11 x LIP TATTOO 2.0". Item column = index 2. Regex ^...$ = exact,
+      // case-insensitive. Blangko = alisin ang filter.
+      const ITEM_COL = 2;
+      const itemExactInput = document.getElementById('itemExact');
+      const itemExactBtn   = document.getElementById('itemExactBtn');
+      function applyExactItem() {
+        const v = (itemExactInput.value || '').trim();
+        if (v === '') {
+          dt.column(ITEM_COL).search('').draw();
+        } else {
+          const esc = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // escape regex specials
+          dt.column(ITEM_COL).search('^' + esc + '$', true, false).draw(); // regex=true, smart=false
+        }
+      }
+      itemExactBtn?.addEventListener('click', applyExactItem);
+      itemExactInput?.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); applyExactItem(); }
+      });
+      // Auto-clear ang exact filter kapag binura ang input
+      itemExactInput?.addEventListener('input', function () {
+        if ((this.value || '').trim() === '') dt.column(ITEM_COL).search('').draw();
+      });
     });
   </script>
 </x-layout>
