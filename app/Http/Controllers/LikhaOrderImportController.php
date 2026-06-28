@@ -77,6 +77,32 @@ class LikhaOrderImportController extends Controller
         ]);
     }
 
+    // AJAX start import — IISANG sheet lang (manual per-gsheet). Gumagawa ng run
+    // na may isang runSheet; ang SAME job ang nag-pro-process (skip ang walang
+    // runSheet), kaya ang sheet na 'to lang ang tatakbo — gamit pa rin ang J1+1
+    // resume logic. Pollable via /status?run_id= (gaya ng bulk).
+    public function startOne(LikhaOrderSetting $setting)
+    {
+        $run = LikhaImportRun::create([
+            'status' => 'running',
+            'total_settings' => 1,
+            'started_at' => now(),
+        ]);
+
+        LikhaImportRunSheet::create([
+            'run_id' => $run->id,
+            'setting_id' => $setting->id,
+            'status' => 'queued',
+        ]);
+
+        ImportLikhaFromGoogleSheet::dispatch($run->id);
+
+        return response()->json([
+            'ok' => true,
+            'run_id' => $run->id,
+        ]);
+    }
+
     // AJAX polling
     public function status(Request $request)
     {

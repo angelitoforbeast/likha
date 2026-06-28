@@ -68,6 +68,7 @@
                         <th class="border px-3 py-2 text-left">Updated</th>
                         <th class="border px-3 py-2 text-left">Skipped</th>
                         <th class="border px-3 py-2 text-left">Message</th>
+                        <th class="border px-3 py-2 text-left">Action</th>
                     </tr>
                 </thead>
 
@@ -143,6 +144,14 @@
                             <td class="border px-3 py-2 updatedCell">0</td>
                             <td class="border px-3 py-2 skippedCell">0</td>
                             <td class="border px-3 py-2 messageCell text-xs text-gray-600">-</td>
+                            <td class="border px-3 py-2">
+                                @if(!($s->is_archived ?? false))
+                                    <button class="sheet-import-btn bg-blue-600 text-white text-xs font-semibold px-3 py-1 rounded hover:bg-blue-700 whitespace-nowrap"
+                                            data-setting-id="{{ $s->id }}">🔄 Import</button>
+                                @else
+                                    <span class="text-gray-400 text-xs">—</span>
+                                @endif
+                            </td>
                         </tr>
                     @endforeach
                 </tbody>
@@ -172,6 +181,13 @@
     <script>
         let currentRunId = null;
         let pollTimer = null;
+
+        // I-disable/enable lahat ng import controls (bulk + per-sheet) habang tumatakbo.
+        function setImportButtonsDisabled(disabled) {
+            const g = document.getElementById('runImportBtn');
+            if (g) g.disabled = disabled;
+            document.querySelectorAll('.sheet-import-btn').forEach(b => b.disabled = disabled);
+        }
 
         function badge(status) {
             const map = {
@@ -248,14 +264,16 @@
             if (data.run && (data.run.status === 'done' || data.run.status === 'failed')) {
                 clearInterval(pollTimer);
                 pollTimer = null;
-                document.getElementById('runImportBtn').disabled = false;
+                setImportButtonsDisabled(false);
                 document.getElementById('runImportBtn').textContent = '🔄 Run Import Now';
+                document.querySelectorAll('.sheet-import-btn').forEach(b => b.textContent = '🔄 Import');
             }
         }
 
         async function startImport() {
+            if (pollTimer) { alert('May import na tumatakbo — hintayin matapos.'); return; }
             const btn = document.getElementById('runImportBtn');
-            btn.disabled = true;
+            setImportButtonsDisabled(true);
             btn.textContent = '⏳ Starting import...';
 
             // reset run UI (✅ DO NOT reset lastImportedCell)
@@ -280,7 +298,7 @@
 
             const data = await res.json();
             if (!data.ok) {
-                btn.disabled = false;
+                setImportButtonsDisabled(false);
                 btn.textContent = '🔄 Run Import Now';
                 alert('Failed to start import');
                 return;
@@ -293,6 +311,53 @@
             pollTimer = setInterval(pollStatus, 1200);
         }
 
+        // Manual import ng IISANG gsheet (Option A) — reuse ng status polling.
+        async function startOneImport(settingId, btn) {
+            if (pollTimer) { alert('May import na tumatakbo — hintayin matapos.'); return; }
+
+            const tr = document.querySelector(`tr[data-setting-id="${settingId}"]`);
+            if (tr) {
+                tr.querySelector('.statusCell').innerHTML = badge('queued');
+                tr.querySelector('.processedCell').textContent = '0';
+                tr.querySelector('.insertedCell').textContent = '0';
+                tr.querySelector('.updatedCell').textContent = '0';
+                tr.querySelector('.skippedCell').textContent = '0';
+                tr.querySelector('.messageCell').textContent = '-';
+            }
+
+            setImportButtonsDisabled(true);
+            if (btn) btn.textContent = '⏳';
+
+            try {
+                const res = await fetch(`/likha_order_import/${settingId}/start`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                    },
+                    body: JSON.stringify({})
+                });
+                const data = await res.json();
+                if (!data.ok) {
+                    setImportButtonsDisabled(false);
+                    if (btn) btn.textContent = '🔄 Import';
+                    alert('Failed to start import');
+                    return;
+                }
+                currentRunId = data.run_id;
+                await pollStatus();
+                pollTimer = setInterval(pollStatus, 1200);
+            } catch (e) {
+                setImportButtonsDisabled(false);
+                if (btn) btn.textContent = '🔄 Import';
+                alert('Network error');
+            }
+        }
+
         document.getElementById('runImportBtn').addEventListener('click', startImport);
+        document.querySelectorAll('.sheet-import-btn').forEach(b => {
+            b.addEventListener('click', () => startOneImport(b.dataset.settingId, b));
+        });
     </script>
 </x-layout>

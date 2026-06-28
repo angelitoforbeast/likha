@@ -731,6 +731,7 @@ Route::post('/task/create-everyday-task', [EverydayTaskController::class, 'store
 
 Route::get('/likha_order_import', [LikhaOrderImportController::class, 'index']);
 Route::post('/likha_order_import/start', [LikhaOrderImportController::class, 'start']);
+Route::post('/likha_order_import/{setting}/start', [LikhaOrderImportController::class, 'startOne'])->whereNumber('setting');
 Route::get('/likha_order_import/status', [LikhaOrderImportController::class, 'status']);
 
 Route::get('/likha_order_import/settings', [LikhaOrderSettingController::class, 'settings']);
