@@ -22,14 +22,17 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
 
     public int $runId;
 
-    /** 1 oras — kayang tapusin ang malalaking sheet (chunked, may sleeps). */
+    /** 1 oras — kayang tapusin ang malalaking sheet. */
     public $timeout = 3600;
 
-    /** Isang attempt lang — chunk-level retry na ang humahawak ng transient. */
+    /** Isang attempt — chunk/call-level retry na ang humahawak ng transient. */
     public $tries = 1;
 
-    /** Bilang ng rows kada fetch/write (bounded → iwas large-op backendError). */
-    private const CHUNK = 500;
+    /** Rows kada read/write chunk (para sa RESUME branch + DONE writes). */
+    private const CHUNK = 5000;
+
+    /** J1 resume formula — last row na may "DONE" sa col I (auto-update). */
+    private const J1_FORMULA = '=ROW(I2)+MATCH(TRUE,INDEX(ISBLANK(I2:I),0),0)-2';
 
     public function __construct(int $runId)
     {
@@ -48,39 +51,42 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
 
         $settings = LikhaOrderSetting::orderBy('id')->get();
 
-        try {
-            foreach ($settings as $setting) {
-                $runSheet = LikhaImportRunSheet::where('run_id', $run->id)
-                    ->where('setting_id', $setting->id)
-                    ->first();
+        foreach ($settings as $setting) {
+            $runSheet = LikhaImportRunSheet::where('run_id', $run->id)
+                ->where('setting_id', $setting->id)
+                ->first();
 
-                if (!$runSheet) continue;
+            if (!$runSheet) continue;
 
-                if (!$setting->sheet_id || !$setting->range) {
-                    $runSheet->update([
-                        'status' => 'failed',
-                        'message' => 'Missing sheet_id or range',
-                        'finished_at' => now(),
-                    ]);
-                    $run->increment('total_failed');
-                    continue;
-                }
-
+            if (!$setting->sheet_id || !$setting->range) {
                 $runSheet->update([
-                    'status' => 'fetching',
-                    'message' => null,
-                    'started_at' => $runSheet->started_at ?? now(),
+                    'status' => 'failed',
+                    'message' => 'Missing sheet_id or range',
+                    'finished_at' => now(),
                 ]);
+                $run->increment('total_failed');
+                continue;
+            }
 
+            // Per-sheet try/catch — isang palpak na sheet ay di sisira sa iba.
+            try {
                 $sheetId   = $setting->sheet_id;
                 $range     = $setting->range;
                 $sheetName = explode('!', $range)[0] ?? '';
 
-                // ── Resume start row mula sa J1 ──────────────────────────────
-                // J1 (sheet formula) = last row na may "DONE" sa col I (last imported).
-                //   fresh (walang DONE) → J1 = 1.  So unang un-imported row = J1 + 1.
-                // Kung blank / #N/A / di-numeric → row 2 (= existing default start).
-                // READ lang ang J1; ang sheet formula mismo ang nag-uupdate nito.
+                $cols     = $this->rangeColumns($range);
+                $startCol = $cols['startCol'];
+                $endCol   = $cols['endCol'];
+
+                $runSheet->update([
+                    'status'     => 'fetching',
+                    'message'    => null,
+                    'started_at' => $runSheet->started_at ?? now(),
+                ]);
+
+                // ── Resume pointer mula sa J1 ────────────────────────────────
+                // J1 = last row na may "DONE" sa col I.  fresh/walang DONE → 1.
+                // startRow = J1 + 1 (unang un-imported). Empty/#N/A/di-numeric → 2.
                 $startRow = 2;
                 try {
                     $j1Ref  = ($sheetName !== '' ? $sheetName . '!' : '') . 'J1';
@@ -90,122 +96,159 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
                         $startRow = (int) $j1Raw + 1;
                     }
                 } catch (\Throwable $e) {
-                    $startRow = 2; // J1 read failed → safe default
+                    $startRow = 2;
                 }
-
-                // Columns mula sa range (start dapat A; preserve end col, default I).
-                $cols     = $this->rangeColumns($range);
-                $startCol = $cols['startCol'];
-                $endCol   = $cols['endCol'];
 
                 $runSheet->update(['status' => 'processing']);
 
-                // ── CHUNKED processing — tig-CHUNK rows ──────────────────────
-                // fetch (bounded) → import → isulat ang DONE PER CHUNK (incremental
-                // progress) → advance. Bounded bawat Google call kaya iwas sa
-                // large-op backendError; at kung pumalya ang isang chunk, naka-save
-                // na ang nauna (walang vicious cycle). + retry/backoff per call.
-                $cursor    = $startRow;
-                $processed = 0;
-                $inserted  = 0;
-                $updated   = 0;
-                $skipped   = 0;
-                $anyRows   = false;
+                $counters = ['processed' => 0, 'inserted' => 0, 'updated' => 0, 'skipped' => 0];
 
-                while (true) {
-                    $endRowChunk = $cursor + self::CHUNK - 1;
-                    $chunkRange  = ($sheetName !== '' ? $sheetName . '!' : '')
-                                 . "{$startCol}{$cursor}:{$endCol}{$endRowChunk}";
+                if ($startRow > 2) {
+                    // ════ RESUME: may na-import na → chunk LANG ang natitira ════
+                    // Maliit lang ang tail (bagong rows) kaya kaunting reads.
+                    $this->importChunked($service, $sheetId, $sheetName, $startCol, $endCol, $startRow, $counters, $runSheet);
+                } else {
+                    // ════ FRESH: walang pa na-import → BUONG fetch (1 read) ════
+                    // Iwas 429 (1 read kaysa daan-daang chunk). Tapos i-set ang J1
+                    // formula → sa susunod, resume na (chunk) — kaunting reads na.
+                    $wholeRange = ($sheetName !== '' ? $sheetName . '!' : '')
+                                . "{$startCol}2:{$endCol}";
 
-                    $values = $this->gWithRetry(
-                        fn() => $service->spreadsheets_values->get($sheetId, $chunkRange)->getValues()
-                    ) ?? [];
-
-                    if (empty($values)) break;   // walang laman → tapos na
-                    $anyRows = true;
-
-                    $updates = [];
-                    foreach ($values as $i => $row) {
-                        $actualRow = $cursor + $i;
-
-                        $doneFlag = strtolower(preg_replace('/\s+/', '', $row[8] ?? ''));
-                        if ($doneFlag === 'done') { $skipped++; continue; }
-
-                        $processed++;
-                        $outcome = $this->importRow($row);          // 'inserted' | 'updated'
-                        if ($outcome === 'inserted')    $inserted++;
-                        elseif ($outcome === 'updated') $updated++;
-
-                        // Mark DONE sa col I gamit ang TOTOONG sheet row.
-                        $updates[] = [
-                            'range'  => "{$sheetName}!I{$actualRow}",
-                            'values' => [['DONE']],
-                        ];
+                    try {
+                        $values = $this->gWithRetry(
+                            fn() => $service->spreadsheets_values->get($sheetId, $wholeRange)->getValues()
+                        ) ?? [];
+                        if (!empty($values)) {
+                            $this->processValues($values, 2, $sheetName, $service, $sheetId, $counters);
+                            $this->saveProgress($runSheet, $counters);
+                        }
+                    } catch (\Throwable $eWhole) {
+                        // Sobrang laki para sa isang read (500) → fallback: CHUNKED from row 2.
+                        $this->importChunked($service, $sheetId, $sheetName, $startCol, $endCol, 2, $counters, $runSheet);
                     }
 
-                    // Isulat ang DONE ng chunk na 'to AGAD (≤CHUNK — bounded write).
-                    if (!empty($updates)) {
-                        $this->gWithRetry(function () use ($service, $sheetId, $updates) {
-                            $batchBody = new Google_Service_Sheets_BatchUpdateValuesRequest([
-                                'valueInputOption' => 'RAW',
-                                'data' => array_map(fn($d) => new Google_Service_Sheets_ValueRange($d), $updates),
-                            ]);
-                            return $service->spreadsheets_values->batchUpdate($sheetId, $batchBody);
-                        });
-                    }
-
-                    // Save progress per chunk (UI alive + persisted).
-                    $runSheet->update([
-                        'status'          => 'processing',
-                        'processed_count' => $processed,
-                        'inserted_count'  => $inserted,
-                        'updated_count'   => $updated,
-                        'skipped_count'   => $skipped,
-                    ]);
-
-                    $rowsFetched = count($values);
-                    $cursor += $rowsFetched;
-                    if ($rowsFetched < self::CHUNK) break;   // umabot na sa dulo ng data
+                    // Lagyan ng J1 formula (self-heal) → next run = resume/chunk.
+                    $this->gWithRetry(fn() => $service->spreadsheets_values->update(
+                        $sheetId,
+                        ($sheetName !== '' ? $sheetName . '!' : '') . 'J1',
+                        new Google_Service_Sheets_ValueRange(['values' => [[self::J1_FORMULA]]]),
+                        ['valueInputOption' => 'USER_ENTERED']
+                    ));
                 }
 
-                // Final update for this sheet
                 $runSheet->update([
                     'status'          => 'done',
-                    'message'         => $anyRows ? null : 'No rows fetched',
-                    'processed_count' => $processed,
-                    'inserted_count'  => $inserted,
-                    'updated_count'   => $updated,
-                    'skipped_count'   => $skipped,
+                    'message'         => $counters['processed'] > 0 ? null : 'No new rows',
+                    'processed_count' => $counters['processed'],
+                    'inserted_count'  => $counters['inserted'],
+                    'updated_count'   => $counters['updated'],
+                    'skipped_count'   => $counters['skipped'],
                     'finished_at'     => now(),
                 ]);
 
-                // Add to run totals
-                $run->increment('total_processed', $processed);
-                $run->increment('total_inserted', $inserted);
-                $run->increment('total_updated', $updated);
-                $run->increment('total_skipped', $skipped);
+                $run->increment('total_processed', $counters['processed']);
+                $run->increment('total_inserted',  $counters['inserted']);
+                $run->increment('total_updated',   $counters['updated']);
+                $run->increment('total_skipped',   $counters['skipped']);
+
+            } catch (\Throwable $e) {
+                $runSheet->update([
+                    'status'      => 'failed',
+                    'message'     => mb_substr($e->getMessage(), 0, 1000),
+                    'finished_at' => now(),
+                ]);
+                $run->increment('total_failed');
             }
+        }
 
-            $run->update([
-                'status' => 'done',
-                'finished_at' => now(),
-            ]);
+        $run->update([
+            'status' => 'done',
+            'finished_at' => now(),
+        ]);
+    }
 
-        } catch (\Throwable $e) {
-            $run->update([
-                'status' => 'failed',
-                'finished_at' => now(),
-                'message' => $e->getMessage(),
-            ]);
+    /**
+     * Process ng isang array ng rows simula sa $baseRow → importRow + tipunin ang
+     * "DONE" marks, tapos isulat nang CHUNKED (iwas large-op + bounded writes).
+     * Mina-mutate ang $counters (processed/inserted/updated/skipped).
+     */
+    private function processValues(array $values, int $baseRow, string $sheetName, Google_Service_Sheets $service, string $sheetId, array &$counters): void
+    {
+        $updates = [];
+        foreach ($values as $i => $row) {
+            $actualRow = $baseRow + $i;
+
+            $doneFlag = strtolower(preg_replace('/\s+/', '', $row[8] ?? ''));
+            if ($doneFlag === 'done') { $counters['skipped']++; continue; }
+
+            $counters['processed']++;
+            $outcome = $this->importRow($row);
+            if ($outcome === 'inserted')    $counters['inserted']++;
+            elseif ($outcome === 'updated') $counters['updated']++;
+
+            $updates[] = [
+                'range'  => "{$sheetName}!I{$actualRow}",
+                'values' => [['DONE']],
+            ];
+        }
+
+        // Isulat ang DONE nang tig-CHUNK (bounded writes).
+        foreach (array_chunk($updates, self::CHUNK) as $batch) {
+            $this->gWithRetry(function () use ($service, $sheetId, $batch) {
+                $body = new Google_Service_Sheets_BatchUpdateValuesRequest([
+                    'valueInputOption' => 'RAW',
+                    'data' => array_map(fn($d) => new Google_Service_Sheets_ValueRange($d), $batch),
+                ]);
+                return $service->spreadsheets_values->batchUpdate($sheetId, $body);
+            });
         }
     }
 
     /**
-     * Retry helper para sa Google API calls — exponential backoff (1s,2s,4s) sa
-     * 5xx / backendError / rate-limit / timeout (transient). Iba pang error →
-     * agad i-throw (huwag i-retry ang non-retryable tulad ng 400/403/404).
+     * Chunked read+process mula sa $startRow hanggang maubos. Bounded bawat read
+     * (CHUNK) + DONE write. Ginagamit ng RESUME branch at ng whole-fetch fallback.
      */
-    private function gWithRetry(callable $fn, int $tries = 4)
+    private function importChunked(Google_Service_Sheets $service, string $sheetId, string $sheetName, string $startCol, string $endCol, int $startRow, array &$counters, LikhaImportRunSheet $runSheet): void
+    {
+        $cursor = $startRow;
+        while (true) {
+            $endRowChunk = $cursor + self::CHUNK - 1;
+            $chunkRange  = ($sheetName !== '' ? $sheetName . '!' : '')
+                         . "{$startCol}{$cursor}:{$endCol}{$endRowChunk}";
+
+            $values = $this->gWithRetry(
+                fn() => $service->spreadsheets_values->get($sheetId, $chunkRange)->getValues()
+            ) ?? [];
+
+            if (empty($values)) break;
+
+            $this->processValues($values, $cursor, $sheetName, $service, $sheetId, $counters);
+            $this->saveProgress($runSheet, $counters);
+
+            $n = count($values);
+            $cursor += $n;
+            if ($n < self::CHUNK) break;
+        }
+    }
+
+    private function saveProgress(LikhaImportRunSheet $runSheet, array $counters): void
+    {
+        $runSheet->update([
+            'status'          => 'processing',
+            'processed_count' => $counters['processed'],
+            'inserted_count'  => $counters['inserted'],
+            'updated_count'   => $counters['updated'],
+            'skipped_count'   => $counters['skipped'],
+        ]);
+    }
+
+    /**
+     * Retry helper para sa Google API calls.
+     *   - Rate limit / quota (429) → per-MINUTE quota → mahabang hintay (20s,40s,60s).
+     *   - 5xx / backendError / timeout → exponential backoff (1s,2s,4s,8s).
+     *   - Iba (400/403/404) → agad i-throw (hindi retryable).
+     */
+    private function gWithRetry(callable $fn, int $tries = 5)
     {
         for ($attempt = 1; ; $attempt++) {
             try {
@@ -213,28 +256,32 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             } catch (\Throwable $e) {
                 $code = (int) $e->getCode();
                 $msg  = strtolower($e->getMessage());
-                $retryable = ($code >= 500 && $code < 600)
+
+                $isRate = $code === 429
+                    || str_contains($msg, 'ratelimit')
+                    || str_contains($msg, 'rate limit')
+                    || str_contains($msg, 'quota')
+                    || str_contains($msg, 'resource_exhausted');
+
+                $isServer = ($code >= 500 && $code < 600)
                     || str_contains($msg, 'backenderror')
                     || str_contains($msg, 'internal error')
-                    || str_contains($msg, 'rate limit')
-                    || str_contains($msg, 'ratelimit')
                     || str_contains($msg, 'try again')
                     || str_contains($msg, 'timeout')
                     || str_contains($msg, 'deadline');
-                if ($attempt >= $tries || !$retryable) {
+
+                if ($attempt >= $tries || !($isRate || $isServer)) {
                     throw $e;
                 }
-                sleep(min(8, 1 << ($attempt - 1))); // 1, 2, 4, 8s
+
+                // Rate limit = per-minute → mas mahabang hintay para mag-reset.
+                sleep($isRate ? min(60, 20 * $attempt) : min(8, 1 << ($attempt - 1)));
             }
         }
     }
 
     /**
-     * Kunin ang start + end column letters mula sa A1 range.
-     *   "Sheet1!A2:I"  → ['startCol'=>'A','endCol'=>'I']
-     *   "Sheet1!A:K"   → ['startCol'=>'A','endCol'=>'K']
-     *   "A2:I1000"     → ['startCol'=>'A','endCol'=>'I']
-     * Default: startCol='A', endCol='I' (col I = DONE flag).
+     * Start + end column letters mula sa A1 range. Default A / I (col I = DONE).
      */
     private function rangeColumns(string $range): array
     {
@@ -252,7 +299,7 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
 
     /**
      * Import ng IISANG row → match by TIMESTAMP+PAGE+fb_name (update) o create
-     * (insert). Returns 'inserted' o 'updated'. (Verbatim ang dating per-row logic.)
+     * (insert). Returns 'inserted' o 'updated'.
      */
     private function importRow(array $row): string
     {
