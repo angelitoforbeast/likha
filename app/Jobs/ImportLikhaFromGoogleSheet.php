@@ -67,7 +67,28 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
                 $range = $setting->range;
                 $sheetName = explode('!', $range)[0] ?? '';
 
-                $response = $service->spreadsheets_values->get($sheetId, $range);
+                // ── Resume start row mula sa J1 ──────────────────────────────
+                // J1 (sheet formula) = last row na may "DONE" sa col I (last imported).
+                //   fresh (walang DONE) → J1 = 1.  So unang un-imported row = J1 + 1.
+                // Kung blank / #N/A / di-numeric → row 2 (= existing default start).
+                // READ lang ang J1; ang sheet formula mismo ang nag-uupdate nito
+                // (dahil isinusulat natin ang "DONE" sa col I sa baba).
+                $startRow = 2;
+                try {
+                    $j1Ref  = ($sheetName !== '' ? $sheetName . '!' : '') . 'J1';
+                    $j1Resp = $service->spreadsheets_values->get($sheetId, $j1Ref);
+                    $j1Raw  = $j1Resp->getValues()[0][0] ?? null;
+                    if (is_numeric($j1Raw) && (int) $j1Raw >= 1) {
+                        $startRow = (int) $j1Raw + 1;
+                    }
+                } catch (\Throwable $e) {
+                    $startRow = 2; // J1 read failed → safe default
+                }
+
+                // Build fetch range na nagsisimula sa $startRow (preserve sheet + columns).
+                $fetchRange = $this->rangeFromStartRow($range, $startRow);
+
+                $response = $service->spreadsheets_values->get($sheetId, $fetchRange);
                 $values = $response->getValues();
 
                 if (empty($values)) {
@@ -207,8 +228,9 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
                         $inserted++;
                     }
 
-                    // Mark DONE in Google Sheet col I
-                    $rowNumber = $index + 2;
+                    // Mark DONE in Google Sheet col I — gamitin ang TOTOONG sheet row
+                    // ($startRow + index), hindi na hardcoded +2. Tama kahit saan magsimula.
+                    $rowNumber = $startRow + $index;
                     $updates[] = [
                         'range'  => "{$sheetName}!I{$rowNumber}",
                         'values' => [['DONE']],
@@ -264,5 +286,29 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
                 'message' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * I-rebuild ang A1 range para magsimula sa $startRow — preserve ang sheet name,
+     * start column, at end (col/row) ng original range.
+     *   "Sheet1!A2:I"     + 5 → "Sheet1!A5:I"
+     *   "Sheet1!A2:I1000" + 5 → "Sheet1!A5:I1000"
+     *   "Sheet1!A:I"      + 5 → "Sheet1!A5:I"
+     */
+    private function rangeFromStartRow(string $range, int $startRow): string
+    {
+        $sheetName = '';
+        $a1 = $range;
+        if (str_contains($range, '!')) {
+            [$sheetName, $a1] = explode('!', $range, 2);
+        }
+
+        $parts    = explode(':', $a1, 2);
+        $startCol = preg_replace('/[^A-Za-z]/', '', $parts[0] ?? 'A');
+        if ($startCol === '') $startCol = 'A';
+        $end      = $parts[1] ?? null;
+
+        $newA1 = $startCol . $startRow . ($end !== null ? (':' . $end) : '');
+        return ($sheetName !== '' ? $sheetName . '!' : '') . $newA1;
     }
 }
