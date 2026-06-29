@@ -747,6 +747,14 @@ Route::post('/likha_order_import/settings/{id}/unarchive', [LikhaOrderSettingCon
 Route::match(['get','delete'], '/likha_order/view', [LikhaOrderImportController::class, 'view']);
 
 
+// ── GSheet Groups (likha → macro → after-macro matrix + live values) ──
+Route::get   ('/gsheet_groups',              [\App\Http\Controllers\GsheetGroupController::class, 'index']);
+Route::post  ('/gsheet_groups',              [\App\Http\Controllers\GsheetGroupController::class, 'store']);
+Route::get   ('/gsheet_groups/{id}/values',  [\App\Http\Controllers\GsheetGroupController::class, 'values'])->whereNumber('id');
+Route::put   ('/gsheet_groups/{id}',         [\App\Http\Controllers\GsheetGroupController::class, 'update'])->whereNumber('id');
+Route::delete('/gsheet_groups/{id}',         [\App\Http\Controllers\GsheetGroupController::class, 'destroy'])->whereNumber('id');
+
+
 // ── Conversation Tracker import ──────────────────────────────────────
 Route::get ('/conversation/tracker',        [\App\Http\Controllers\ConversationTrackerImportController::class, 'index'])
     ->name('conversation.tracker');
