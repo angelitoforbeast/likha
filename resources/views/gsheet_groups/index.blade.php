@@ -58,20 +58,23 @@
                     <div x-show="!edit" class="space-y-2">
                         @php
                             $rows = [
-                                ['Likha', $g->likha_url, 'bg-blue-50 text-blue-800'],
-                                ['Macro', $g->macro_url, 'bg-amber-50 text-amber-800'],
-                                ['After-macro', $g->after_url, 'bg-emerald-50 text-emerald-800'],
+                                ['likha', 'Likha', $g->likha_url, 'bg-blue-50 text-blue-800'],
+                                ['macro', 'Macro', $g->macro_url, 'bg-amber-50 text-amber-800'],
+                                ['after', 'After-macro', $g->after_url, 'bg-emerald-50 text-emerald-800'],
                             ];
                         @endphp
-                        @foreach($rows as [$label, $url, $cls])
-                            <div class="flex items-center gap-2">
-                                <span class="w-24 shrink-0 text-xs font-medium text-center px-2 py-1 rounded {{ $cls }}">{{ $label }}</span>
-                                <input type="text" value="{{ $url }}" readonly
-                                       class="flex-1 min-w-0 text-xs font-mono bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-gray-600">
-                                @if($url)
-                                    <a href="{{ $url }}" target="_blank" rel="noopener"
-                                       class="px-2 py-1.5 text-xs rounded border border-gray-300 hover:bg-gray-50">↗</a>
-                                @endif
+                        @foreach($rows as [$key, $label, $url, $cls])
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <span class="w-24 shrink-0 text-xs font-medium text-center px-2 py-1 rounded {{ $cls }}">{{ $label }}</span>
+                                    <input type="text" value="{{ $url }}" readonly
+                                           class="flex-1 min-w-0 text-xs font-mono bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-gray-600">
+                                    @if($url)
+                                        <a href="{{ $url }}" target="_blank" rel="noopener"
+                                           class="px-2 py-1.5 text-xs rounded border border-gray-300 hover:bg-gray-50">↗</a>
+                                    @endif
+                                </div>
+                                <div class="text-[11px] text-gray-500 mt-1 ml-[6.5rem]" data-title="{{ $key }}">…</div>
                             </div>
                         @endforeach
                     </div>
@@ -196,6 +199,22 @@
             }
         }
 
+        function setTitle(card, key, cell) {
+            const tEl = card.querySelector(`[data-title="${key}"]`);
+            if (!tEl) return;
+            tEl.classList.remove('text-red-600', 'text-gray-500');
+            if (cell && cell.title) {
+                tEl.textContent = '📄 ' + cell.title;
+                tEl.classList.add('text-gray-500');
+            } else if (cell && cell.error) {
+                tEl.textContent = '⚠️ ' + cell.error;
+                tEl.classList.add('text-red-600');
+            } else {
+                tEl.textContent = '—';
+                tEl.classList.add('text-gray-500');
+            }
+        }
+
         async function loadGroupValues(card) {
             const id = card.dataset.group;
             ['likha', 'macro', 'after'].forEach(k => {
@@ -203,6 +222,8 @@
                 if (el) el.textContent = '…';
                 const er = card.querySelector(`[data-err="${k}"]`);
                 if (er) er.classList.add('hidden');
+                const tEl = card.querySelector(`[data-title="${k}"]`);
+                if (tEl) tEl.textContent = '…';
             });
 
             try {
@@ -210,9 +231,10 @@
                     headers: { 'Accept': 'application/json' }
                 });
                 const data = await res.json();
-                setBox(card, 'likha', data.likha);
-                setBox(card, 'macro', data.macro);
-                setBox(card, 'after', data.after);
+                ['likha', 'macro', 'after'].forEach(k => {
+                    setBox(card, k, data[k]);
+                    setTitle(card, k, data[k]);
+                });
             } catch (e) {
                 ['likha', 'macro', 'after'].forEach(k => {
                     const el = card.querySelector(`[data-val="${k}"]`);

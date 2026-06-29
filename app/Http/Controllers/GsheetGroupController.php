@@ -58,9 +58,9 @@ class GsheetGroupController extends Controller
 
         $service = $this->makeSheetsService();
 
-        $likha = $this->readCell($service, $group->likha_url, "'TO ENCODER'!L1");
-        $macro = $this->readCell($service, $group->macro_url, "'LINKS'!E2");
-        $after = $this->readCell($service, $group->after_url, "'DATABASE'!N1");
+        $likha = $this->readSheet($service, $group->likha_url, "'TO ENCODER'!L1");
+        $macro = $this->readSheet($service, $group->macro_url, "'LINKS'!E2");
+        $after = $this->readSheet($service, $group->after_url, "'DATABASE'!N1");
 
         // After-macro = N1 - 1
         if ($after['error'] === null && is_numeric($after['value'])) {
@@ -87,22 +87,33 @@ class GsheetGroupController extends Controller
         return new \Google\Service\Sheets($client);
     }
 
-    private function readCell(\Google\Service\Sheets $service, ?string $url, string $range): array
+    // Reads the spreadsheet TITLE (para ma-verify ang link) + the cell value.
+    private function readSheet(\Google\Service\Sheets $service, ?string $url, string $range): array
     {
         $sheetId = $this->extractSpreadsheetId($url);
         if (!$sheetId) {
-            return ['value' => null, 'error' => 'Walang/maling link'];
+            return ['title' => null, 'value' => null, 'error' => 'Walang/maling link'];
         }
 
+        // 1) spreadsheet title (also surfaces access errors early)
+        $title = null;
+        try {
+            $meta = $service->spreadsheets->get($sheetId, ['fields' => 'properties.title']);
+            $title = $meta->getProperties()->getTitle();
+        } catch (\Throwable $e) {
+            return ['title' => null, 'value' => null, 'error' => $this->friendlyError($e->getMessage())];
+        }
+
+        // 2) cell value
         try {
             $resp = $service->spreadsheets_values->get($sheetId, $range, [
                 'valueRenderOption' => 'UNFORMATTED_VALUE',
             ]);
             $values = $resp->getValues();
             $val = $values[0][0] ?? null;
-            return ['value' => $val, 'error' => null];
+            return ['title' => $title, 'value' => $val, 'error' => null];
         } catch (\Throwable $e) {
-            return ['value' => null, 'error' => $this->friendlyError($e->getMessage())];
+            return ['title' => $title, 'value' => null, 'error' => $this->friendlyError($e->getMessage())];
         }
     }
 
