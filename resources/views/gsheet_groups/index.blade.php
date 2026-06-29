@@ -40,7 +40,18 @@
 
                     <div class="flex items-center justify-between mb-3 gap-2">
                         <div class="font-medium text-gray-800">{{ $g->name }}</div>
-                        <div class="flex gap-2">
+                        <div class="flex gap-2 flex-wrap justify-end">
+                            <form method="POST" action="/gsheet_groups/{{ $g->id }}/stop"
+                                  onsubmit="return confirm('Magsusulat ng STOP sa LINKS!G1 (macro) + API KEY!C1 (after-macro). Tuloy?')">
+                                @csrf
+                                <button type="submit"
+                                        class="px-2.5 py-1 text-xs rounded border border-red-300 text-red-700 hover:bg-red-50">🛑 Stop</button>
+                            </form>
+                            <form method="POST" action="/gsheet_groups/{{ $g->id }}/resume">
+                                @csrf
+                                <button type="submit"
+                                        class="px-2.5 py-1 text-xs rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50">▶️ Resume</button>
+                            </form>
                             <button type="button" onclick="loadGroupValues(this.closest('[data-group]'))"
                                     class="px-2.5 py-1 text-xs rounded border border-gray-300 hover:bg-gray-50">🔄 Refresh</button>
                             <button type="button" @click="edit = !edit"

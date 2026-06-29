@@ -753,6 +753,8 @@ Route::post  ('/gsheet_groups',              [\App\Http\Controllers\GsheetGroupC
 Route::get   ('/gsheet_groups/{id}/values',  [\App\Http\Controllers\GsheetGroupController::class, 'values'])->whereNumber('id');
 Route::put   ('/gsheet_groups/{id}',         [\App\Http\Controllers\GsheetGroupController::class, 'update'])->whereNumber('id');
 Route::delete('/gsheet_groups/{id}',         [\App\Http\Controllers\GsheetGroupController::class, 'destroy'])->whereNumber('id');
+Route::post  ('/gsheet_groups/{id}/stop',    [\App\Http\Controllers\GsheetGroupController::class, 'stop'])->whereNumber('id');
+Route::post  ('/gsheet_groups/{id}/resume',  [\App\Http\Controllers\GsheetGroupController::class, 'resume'])->whereNumber('id');
 
 
 // ── Conversation Tracker import ──────────────────────────────────────

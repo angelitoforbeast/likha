@@ -48,6 +48,24 @@ class GsheetGroupController extends Controller
         return back()->with('success', '🗑️ Group deleted.');
     }
 
+    // Write "STOP" to the flag cells:
+    //  - Macro       → LINKS!G1
+    //  - After-macro → API KEY!C1
+    public function stop($id)
+    {
+        $res = $this->writeFlag($id, 'STOP');
+        $ok = ($res['macro']['ok'] ?? false) && ($res['after']['ok'] ?? false);
+        return back()->with($ok ? 'success' : 'error', $this->summarizeFlag('🛑 STOP sent', $res));
+    }
+
+    // Clear the flag cells (resume).
+    public function resume($id)
+    {
+        $res = $this->writeFlag($id, null);
+        $ok = ($res['macro']['ok'] ?? false) && ($res['after']['ok'] ?? false);
+        return back()->with($ok ? 'success' : 'error', $this->summarizeFlag('▶️ Resume (flags cleared)', $res));
+    }
+
     // AJAX: read the 3 live values for one group.
     //  - Likha       → TO ENCODER!L1   (=importrange(B,"TO ENCODER!L1"))
     //  - Macro       → LINKS!E2        (=importrange(C,"LINKS!e2"))      task count
@@ -76,11 +94,13 @@ class GsheetGroupController extends Controller
 
     // ── helpers ───────────────────────────────────────────────
 
-    private function makeSheetsService(): \Google\Service\Sheets
+    private function makeSheetsService(bool $write = false): \Google\Service\Sheets
     {
         $client = new \Google_Client();
         $client->setApplicationName('Laravel GSheet');
-        $client->setScopes([\Google\Service\Sheets::SPREADSHEETS_READONLY]);
+        $client->setScopes([$write
+            ? \Google\Service\Sheets::SPREADSHEETS
+            : \Google\Service\Sheets::SPREADSHEETS_READONLY]);
         $client->setAuthConfig(storage_path('app/credentials.json'));
         $client->setAccessType('offline');
 
@@ -115,6 +135,51 @@ class GsheetGroupController extends Controller
         } catch (\Throwable $e) {
             return ['title' => $title, 'value' => null, 'error' => $this->friendlyError($e->getMessage())];
         }
+    }
+
+    // Write (or clear if $value === null) the flag cells for one group.
+    private function writeFlag($id, ?string $value): array
+    {
+        GsheetGroup::findOrFail($id); // 404 if missing
+        $group = GsheetGroup::find($id);
+
+        $service = $this->makeSheetsService(true); // write scope
+
+        return [
+            'macro' => $this->writeCell($service, $group->macro_url, "'LINKS'!G1", $value),
+            'after' => $this->writeCell($service, $group->after_url, "'API KEY'!C1", $value),
+        ];
+    }
+
+    private function writeCell(\Google\Service\Sheets $service, ?string $url, string $range, ?string $value): array
+    {
+        $sheetId = $this->extractSpreadsheetId($url);
+        if (!$sheetId) {
+            return ['ok' => false, 'error' => 'Walang/maling link'];
+        }
+
+        try {
+            if ($value === null || $value === '') {
+                $service->spreadsheets_values->clear($sheetId, $range, new \Google_Service_Sheets_ClearValuesRequest());
+            } else {
+                $body = new \Google_Service_Sheets_ValueRange(['values' => [[$value]]]);
+                $service->spreadsheets_values->update($sheetId, $range, $body, ['valueInputOption' => 'RAW']);
+            }
+            return ['ok' => true, 'error' => null];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => $this->friendlyError($e->getMessage())];
+        }
+    }
+
+    private function summarizeFlag(string $prefix, array $res): string
+    {
+        $labels = ['macro' => 'Macro (LINKS!G1)', 'after' => 'After-macro (API KEY!C1)'];
+        $parts = [];
+        foreach ($labels as $k => $label) {
+            $r = $res[$k] ?? ['ok' => false, 'error' => '?'];
+            $parts[] = $label . ': ' . ($r['ok'] ? '✅' : '⚠️ ' . $r['error']);
+        }
+        return $prefix . ' — ' . implode(' · ', $parts);
     }
 
     private function extractSpreadsheetId(?string $url): ?string
