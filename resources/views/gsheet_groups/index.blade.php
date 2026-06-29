@@ -36,7 +36,7 @@
         <div id="groups" class="space-y-4">
             @forelse($groups as $g)
                 <div class="bg-white border rounded-xl p-4 shadow-sm" data-group="{{ $g->id }}"
-                     x-data="{ edit: false }">
+                     x-data="{ edit: false, del: false }">
 
                     <div class="flex items-center justify-between mb-3 gap-2">
                         <div class="font-medium text-gray-800">{{ $g->name }}</div>
@@ -146,6 +146,30 @@
                             <div class="text-[11px] font-mono text-gray-400">DATABASE!N1 &minus; 1</div>
                             <div class="text-2xl font-semibold mt-1 text-gray-800" data-val="after">…</div>
                             <div class="text-[11px] text-red-600 mt-0.5 hidden" data-err="after"></div>
+                        </div>
+                    </div>
+
+                    {{-- ✂️ Delete rows --}}
+                    <div class="mt-4 border-t pt-3">
+                        <button type="button" @click="del = !del"
+                                class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50">✂️ Delete rows…</button>
+
+                        <div x-show="del" x-cloak class="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
+                            <p class="text-xs text-red-800 mb-2">⚠️ I-click muna ang 🛑 Stop at siguraduhing <b>tumigil na</b> ang scripts bago mag-delete.</p>
+                            <form method="POST" action="/gsheet_groups/{{ $g->id }}/delete-rows"
+                                  onsubmit="return confirm('Bubura ng rows 3 hanggang ' + this.end_row.value + ' (shift up) sa: All Orders, TO WEBSITE!I, TO ENCODER!J, DATABASE, DATABASE - MIRRORED!Q. Tuloy?')">
+                                @csrf
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <label class="text-xs text-gray-700">Hanggang anong row?</label>
+                                    <input type="number" name="end_row" min="3" required placeholder="hal. 50"
+                                           class="w-28 text-sm border border-gray-300 rounded px-2 py-1.5">
+                                    <button type="submit" class="px-3 py-1.5 text-sm rounded bg-red-600 text-white hover:bg-red-700">🗑️ Delete rows 3 → X</button>
+                                    <button type="button" @click="del = false" class="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50">Cancel</button>
+                                </div>
+                                <p class="text-[11px] text-gray-500 mt-2">
+                                    Buong rows: <b>All Orders</b>, <b>DATABASE</b> &middot; Column-only (shift up): <b>TO WEBSITE!I</b>, <b>TO ENCODER!J</b>, <b>DATABASE - MIRRORED!Q</b>
+                                </p>
+                            </form>
                         </div>
                     </div>
                 </div>

@@ -155,6 +155,112 @@ class GsheetGroupController extends Controller
         ]);
     }
 
+    // Delete rows 3 → end_row (shift up) across the 5 targets:
+    //  Likha:       All Orders (whole rows) · TO WEBSITE!I (col) · TO ENCODER!J (col)
+    //  After-macro: DATABASE (whole rows)   · DATABASE - MIRRORED!Q (col)
+    // NOTE: walang auto-stop — i-Stop muna ng user ang scripts.
+    public function deleteRows(Request $request, $id)
+    {
+        $data = $request->validate([
+            'end_row' => 'required|integer|min:3',
+        ]);
+        $endRow = (int) $data['end_row'];
+
+        $group = GsheetGroup::findOrFail($id);
+        $service = $this->makeSheetsService(true); // write scope
+
+        $report = [];
+
+        $likhaId = $this->extractSpreadsheetId($group->likha_url);
+        if ($likhaId) {
+            $report[] = $this->deleteInSpreadsheet($service, $likhaId, $endRow, 'Likha', [
+                ['All Orders', 'rows', null],
+                ['TO WEBSITE', 'col', 8],   // column I (0-based)
+                ['TO ENCODER', 'col', 9],   // column J
+            ]);
+        } else {
+            $report[] = 'Likha: ⚠️ walang/maling link';
+        }
+
+        $afterId = $this->extractSpreadsheetId($group->after_url);
+        if ($afterId) {
+            $report[] = $this->deleteInSpreadsheet($service, $afterId, $endRow, 'After-macro', [
+                ['DATABASE', 'rows', null],
+                ['DATABASE - MIRRORED', 'col', 16],  // column Q
+            ]);
+        } else {
+            $report[] = 'After-macro: ⚠️ walang/maling link';
+        }
+
+        return back()->with('success', "🗑️ Delete rows 3–{$endRow} — " . implode(' | ', $report));
+    }
+
+    // $targets: array of [tabName, 'rows'|'col', colIndex|null]
+    private function deleteInSpreadsheet(\Google\Service\Sheets $service, string $sheetId, int $endRow, string $label, array $targets): string
+    {
+        try {
+            $meta = $service->spreadsheets->get($sheetId, [
+                'fields' => 'sheets.properties(sheetId,title,gridProperties.rowCount)',
+            ]);
+
+            $map = [];
+            foreach ($meta->getSheets() as $s) {
+                $p = $s->getProperties();
+                $map[$p->getTitle()] = [
+                    'gid'  => $p->getSheetId(),
+                    'rows' => $p->getGridProperties()->getRowCount(),
+                ];
+            }
+
+            $requests = [];
+            $parts = [];
+
+            foreach ($targets as [$tab, $mode, $col]) {
+                if (!isset($map[$tab])) { $parts[] = "{$tab} ⚠️ not found"; continue; }
+
+                $gid = $map[$tab]['gid'];
+                $end = min($endRow, $map[$tab]['rows']); // clamp sa grid
+                if ($end < 3) { $parts[] = "{$tab} (walang ide-delete)"; continue; }
+
+                if ($mode === 'rows') {
+                    $requests[] = new \Google_Service_Sheets_Request([
+                        'deleteDimension' => [
+                            'range' => [
+                                'sheetId'    => $gid,
+                                'dimension'  => 'ROWS',
+                                'startIndex' => 2,      // row 3 (0-based)
+                                'endIndex'   => $end,   // inclusive ng row $end
+                            ],
+                        ],
+                    ]);
+                } else { // col — delete cells sa isang column, shift ROWS up
+                    $requests[] = new \Google_Service_Sheets_Request([
+                        'deleteRange' => [
+                            'range' => [
+                                'sheetId'          => $gid,
+                                'startRowIndex'    => 2,
+                                'endRowIndex'      => $end,
+                                'startColumnIndex' => $col,
+                                'endColumnIndex'   => $col + 1,
+                            ],
+                            'shiftDimension' => 'ROWS',
+                        ],
+                    ]);
+                }
+                $parts[] = "{$tab} ✅";
+            }
+
+            if (!empty($requests)) {
+                $batch = new \Google_Service_Sheets_BatchUpdateSpreadsheetRequest(['requests' => $requests]);
+                $service->spreadsheets->batchUpdate($sheetId, $batch);
+            }
+
+            return "{$label}: " . implode(' · ', $parts);
+        } catch (\Throwable $e) {
+            return "{$label}: ⚠️ " . $this->friendlyError($e->getMessage());
+        }
+    }
+
     // ── helpers ───────────────────────────────────────────────
 
     private function makeSheetsService(bool $write = false): \Google\Service\Sheets
