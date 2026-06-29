@@ -156,7 +156,12 @@ class GsheetGroupController extends Controller
         $afterB = ['value' => null, 'error' => null];
         $likhaC = ['value' => null, 'error' => null];
         if ($lastRow && $lastRow >= 2) {
-            $afterB = $this->readValue($service, $group->after_url, "'DATABASE'!B{$lastRow}");
+            // After-macro: DATABASE!K{lastRow} → FB NAME lang ang kukunin
+            $afterB = $this->readValue($service, $group->after_url, "'DATABASE'!K{$lastRow}");
+            if ($afterB['error'] === null) {
+                $afterB['value'] = $this->extractFbName($afterB['value']);
+            }
+            // Likha: All Orders!C{lastRow} (raw)
             $likhaC = $this->readValue($service, $group->likha_url, "'All Orders'!C{$lastRow}");
         }
 
@@ -367,7 +372,17 @@ class GsheetGroupController extends Controller
         return $prefix . ' — ' . implode(' · ', $parts);
     }
 
-    // Value-only read (walang title fetch) — para sa per-row peeks (B/C).
+    // Extract "FB NAME: <name>" galing sa Column K chat blob.
+    private function extractFbName(?string $text): ?string
+    {
+        if ($text === null || $text === '') return null;
+        if (preg_match('/FB\s*NAME:\s*([^\r\n]+)/i', (string) $text, $m)) {
+            return rtrim(trim($m[1]), ', ');
+        }
+        return null;
+    }
+
+    // Value-only read (walang title fetch) — para sa per-row peeks.
     private function readValue(\Google\Service\Sheets $service, ?string $url, string $range): array
     {
         $sheetId = $this->extractSpreadsheetId($url);

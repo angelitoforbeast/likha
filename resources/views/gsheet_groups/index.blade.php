@@ -154,7 +154,7 @@
                         <div class="text-xs font-medium text-gray-600 mb-1">🔎 Alignment check — last row <span data-row class="font-mono">…</span></div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                             <div>
-                                <span class="text-gray-500">After-macro · DATABASE!B<span data-rowb class="font-mono"></span>:</span>
+                                <span class="text-gray-500">After-macro · DATABASE!K<span data-rowb class="font-mono"></span> (FB name):</span>
                                 <span class="font-medium text-gray-800" data-val="after_b">…</span>
                                 <span class="text-red-600 hidden" data-err="after_b"></span>
                             </div>
