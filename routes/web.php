@@ -757,6 +757,8 @@ Route::post  ('/gsheet_groups/{id}/stop',    [\App\Http\Controllers\GsheetGroupC
 Route::post  ('/gsheet_groups/{id}/resume',  [\App\Http\Controllers\GsheetGroupController::class, 'resume'])->whereNumber('id');
 Route::post  ('/gsheet_groups/{id}/clear-logs', [\App\Http\Controllers\GsheetGroupController::class, 'clearLogs'])->whereNumber('id');
 Route::post  ('/gsheet_groups/{id}/delete-rows', [\App\Http\Controllers\GsheetGroupController::class, 'deleteRows'])->whereNumber('id');
+Route::get   ('/gsheet_groups/history',          [\App\Http\Controllers\GsheetGroupController::class, 'history']);
+Route::get   ('/gsheet_groups/deletion/{run}/status', [\App\Http\Controllers\GsheetGroupController::class, 'deletionStatus'])->whereNumber('run');
 
 
 // ── Conversation Tracker import ──────────────────────────────────────

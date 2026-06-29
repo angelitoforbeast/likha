@@ -26,10 +26,12 @@
                 <h2 class="text-lg font-semibold text-gray-800">GSheet groups</h2>
                 <p class="text-sm text-gray-500">Likha &rarr; Macro &rarr; After-macro &middot; live values mula sa bawat sheet</p>
             </div>
-            <button type="button" onclick="refreshAllGroups()"
-                    class="inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50">
-                🔄 Refresh all
-            </button>
+            <div class="flex items-center gap-2">
+                <a href="/gsheet_groups/history"
+                   class="inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50">📜 History</a>
+                <button type="button" onclick="refreshAllGroups()"
+                        class="inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50">🔄 Refresh all</button>
+            </div>
         </div>
 
         {{-- ───────── Groups ───────── --}}
@@ -173,7 +175,7 @@
                         <div x-show="del" x-cloak class="mt-2 rounded-lg border border-red-200 bg-red-50 p-3">
                             <p class="text-xs text-red-800 mb-2">⚠️ I-click muna ang 🛑 Stop at siguraduhing <b>tumigil na</b> ang scripts bago mag-delete.</p>
                             <form method="POST" action="/gsheet_groups/{{ $g->id }}/delete-rows"
-                                  onsubmit="return confirm('Bubura ng rows 3 hanggang ' + this.end_row.value + ' (shift up) sa LIKHA (All Orders, TO WEBSITE!I, TO ENCODER!J) + AFTER-MACRO (DATABASE, DATABASE - MIRRORED!Q). Tuloy?')">
+                                  onsubmit="event.preventDefault(); if (confirm('Bubura ng rows 3 hanggang ' + this.end_row.value + ' (shift up) sa LIKHA (All Orders, TO WEBSITE!I, TO ENCODER!J) + AFTER-MACRO (DATABASE, DATABASE - MIRRORED!Q). Tuloy?')) submitDelete(this);">
                                 @csrf
                                 <div class="flex items-center gap-2 flex-wrap">
                                     <label class="text-xs text-gray-700">Hanggang anong row?</label>
@@ -186,6 +188,13 @@
                                     Buong rows: <b>All Orders</b>, <b>DATABASE</b> &middot; Column-only: <b>TO WEBSITE!I</b>, <b>TO ENCODER!J</b>, <b>DATABASE - MIRRORED!Q</b>
                                 </p>
                             </form>
+
+                            {{-- live progress --}}
+                            <div class="mt-3 hidden" data-delprogress>
+                                <div class="text-xs font-medium text-gray-800" data-delstatus></div>
+                                <div class="text-[11px] text-gray-700 mt-1 leading-relaxed" data-delresult></div>
+                                <div class="text-[11px] text-gray-500 mt-1" data-delba></div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -321,6 +330,55 @@
                     if (el) el.textContent = '—';
                 });
             }
+        }
+
+        function delStatusLabel(s) {
+            return ({queued:'⏳ Queued…', running:'⚙️ Running…', done:'✅ Done', done_with_errors:'⚠️ Done with errors', failed:'❌ Failed'})[s] || s;
+        }
+        function delEntryLine(e) {
+            const icon = e.status === 'ok' ? '✅ deleted ' + (e.deleted || 0) + ' (before ' + (e.rows_before ?? '—') + ' rows)'
+                       : e.status === 'error' ? '⚠️ ' + (e.error || 'error')
+                       : e.status === 'not_found' ? 'not found'
+                       : e.status === 'empty' ? 'walang data'
+                       : (e.status || '?');
+            return `${e.spreadsheet} · ${e.tab}: ${icon}`;
+        }
+        function fmtNum(v) { return (v === null || v === undefined || v === '') ? '—' : Number(v).toLocaleString(); }
+
+        async function submitDelete(form) {
+            const card = form.closest('[data-group]');
+            const prog = card.querySelector('[data-delprogress]');
+            const st = card.querySelector('[data-delstatus]');
+            const rs = card.querySelector('[data-delresult]');
+            const ba = card.querySelector('[data-delba]');
+            prog.classList.remove('hidden');
+            st.textContent = '⏳ Dinidispatch…'; rs.innerHTML = ''; ba.textContent = '';
+
+            let runId;
+            try {
+                const res = await fetch(form.action, { method: 'POST', body: new FormData(form), headers: { 'Accept': 'application/json' } });
+                const data = await res.json();
+                runId = data.run_id;
+                if (!runId) throw new Error('no run id');
+            } catch (e) { st.textContent = '❌ Hindi ma-start ang delete.'; return; }
+
+            const poll = async () => {
+                try {
+                    const res = await fetch(`/gsheet_groups/deletion/${runId}/status`, { headers: { 'Accept': 'application/json' } });
+                    const d = await res.json();
+                    st.textContent = delStatusLabel(d.status);
+                    rs.innerHTML = (d.result || []).map(delEntryLine).join('<br>');
+                    if (d.before && d.after) {
+                        ba.textContent = `Last row (after-macro): ${fmtNum(d.before.after_lastrow)} → ${fmtNum(d.after.after_lastrow)} · requested ~${fmtNum(d.deleted_total)} rows`;
+                    }
+                    if (['done', 'done_with_errors', 'failed'].includes(d.status)) {
+                        loadGroupValues(card);
+                        return;
+                    }
+                } catch (e) {}
+                setTimeout(poll, 1500);
+            };
+            poll();
         }
 
         function refreshAllGroups() {

@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\GsheetGroup;
+use App\Models\GsheetDeletionRun;
+use App\Jobs\DeleteGsheetRowsJob;
 
 class GsheetGroupController extends Controller
 {
@@ -175,111 +177,57 @@ class GsheetGroupController extends Controller
         ]);
     }
 
-    // Delete rows 3 → end_row (shift up) across the 5 targets:
-    //  Likha:       All Orders (whole rows) · TO WEBSITE!I (col) · TO ENCODER!J (col)
-    //  After-macro: DATABASE (whole rows)   · DATABASE - MIRRORED!Q (col)
+    // ASYNC: gumawa ng deletion run + i-dispatch ang job. Babalik agad (run_id) para sa polling.
+    //  Likha:       All Orders (rows) · TO WEBSITE!I (col) · TO ENCODER!J (col)
+    //  After-macro: DATABASE (rows)   · DATABASE - MIRRORED!Q (col)
     // NOTE: walang auto-stop — i-Stop muna ng user ang scripts.
     public function deleteRows(Request $request, $id)
     {
         $data = $request->validate([
             'end_row' => 'required|integer|min:3',
         ]);
-        $endRow = (int) $data['end_row'];
 
         $group = GsheetGroup::findOrFail($id);
-        $service = $this->makeSheetsService(true); // write scope
 
-        $report = [];
+        $run = GsheetDeletionRun::create([
+            'group_id'   => $group->id,
+            'group_name' => $group->name,
+            'end_row'    => (int) $data['end_row'],
+            'status'     => 'queued',
+            'user_id'    => optional($request->user())->id,
+            'user_name'  => optional($request->user())->name,
+            'result'     => [],
+        ]);
 
-        // Likha (All Orders rows, TO WEBSITE!I, TO ENCODER!J)
-        $likhaId = $this->extractSpreadsheetId($group->likha_url);
-        $report[] = $likhaId
-            ? $this->deleteInSpreadsheet($service, $likhaId, $endRow, 'Likha', [
-                ['All Orders', 'rows', null],
-                ['TO WEBSITE', 'col', 8],   // column I (0-based)
-                ['TO ENCODER', 'col', 9],   // column J
-            ])
-            : 'Likha: ⚠️ walang/maling link';
+        DeleteGsheetRowsJob::dispatch($run->id);
 
-        // After-macro (DATABASE rows, DATABASE - MIRRORED!Q)
-        $afterId = $this->extractSpreadsheetId($group->after_url);
-        $report[] = $afterId
-            ? $this->deleteInSpreadsheet($service, $afterId, $endRow, 'After-macro', [
-                ['DATABASE', 'rows', null],
-                ['DATABASE - MIRRORED', 'col', 16],  // column Q
-            ])
-            : 'After-macro: ⚠️ walang/maling link';
-
-        return back()->with('success', "🗑️ Delete rows 3–{$endRow} — " . implode(' | ', $report));
+        return response()->json(['ok' => true, 'run_id' => $run->id]);
     }
 
-    // $targets: array of [tabName, 'rows'|'col', colIndex|null]
-    private function deleteInSpreadsheet(\Google\Service\Sheets $service, string $sheetId, int $endRow, string $label, array $targets): string
+    // AJAX polling para sa isang deletion run.
+    public function deletionStatus($run)
     {
-        try {
-            $meta = $service->spreadsheets->get($sheetId, [
-                'fields' => 'sheets.properties(sheetId,title,gridProperties.rowCount)',
-            ]);
-        } catch (\Throwable $e) {
-            return "{$label}: ⚠️ " . $this->friendlyError($e->getMessage());
-        }
+        $r = GsheetDeletionRun::findOrFail($run);
 
-        $map = [];
-        foreach ($meta->getSheets() as $s) {
-            $p = $s->getProperties();
-            $map[$p->getTitle()] = [
-                'gid'  => $p->getSheetId(),
-                'rows' => $p->getGridProperties()->getRowCount(),
-            ];
-        }
+        return response()->json([
+            'id'            => $r->id,
+            'status'        => $r->status,
+            'message'       => $r->message,
+            'end_row'       => $r->end_row,
+            'deleted_total' => $r->deleted_total,
+            'before'        => $r->before,
+            'after'         => $r->after,
+            'result'        => $r->result ?? [],
+            'started_at'    => optional($r->started_at)->toDateTimeString(),
+            'finished_at'   => optional($r->finished_at)->toDateTimeString(),
+        ]);
+    }
 
-        $parts = [];
-
-        foreach ($targets as [$tab, $mode, $col]) {
-            if (!isset($map[$tab])) { $parts[] = "{$tab} ⚠️ not found"; continue; }
-
-            $gid = $map[$tab]['gid'];
-            $end = min($endRow, $map[$tab]['rows']); // clamp sa grid
-            if ($end < 3) { $parts[] = "{$tab} (walang ide-delete)"; continue; }
-
-            if ($mode === 'rows') {
-                $req = new \Google_Service_Sheets_Request([
-                    'deleteDimension' => [
-                        'range' => [
-                            'sheetId'    => $gid,
-                            'dimension'  => 'ROWS',
-                            'startIndex' => 2,      // row 3 (0-based)
-                            'endIndex'   => $end,   // inclusive ng row $end
-                        ],
-                    ],
-                ]);
-            } else { // col — delete cells sa isang column, shift ROWS up
-                $req = new \Google_Service_Sheets_Request([
-                    'deleteRange' => [
-                        'range' => [
-                            'sheetId'          => $gid,
-                            'startRowIndex'    => 2,
-                            'endRowIndex'      => $end,
-                            'startColumnIndex' => $col,
-                            'endColumnIndex'   => $col + 1,
-                        ],
-                        'shiftDimension' => 'ROWS',
-                    ],
-                ]);
-            }
-
-            // ISOLATED per-tab batchUpdate — hindi atomic across tabs, kaya
-            // ang pagpalpak ng isang tab ay HINDI nakaka-apekto sa iba.
-            try {
-                $batch = new \Google_Service_Sheets_BatchUpdateSpreadsheetRequest(['requests' => [$req]]);
-                $service->spreadsheets->batchUpdate($sheetId, $batch);
-                $parts[] = "{$tab} ✅";
-            } catch (\Throwable $e) {
-                $parts[] = "{$tab} ⚠️ " . $this->friendlyError($e->getMessage());
-            }
-        }
-
-        return "{$label}: " . implode(' · ', $parts);
+    // Global history page ng lahat ng deletions.
+    public function history()
+    {
+        $runs = GsheetDeletionRun::orderByDesc('id')->paginate(50);
+        return view('gsheet_groups.history', compact('runs'));
     }
 
     // ── helpers ───────────────────────────────────────────────
