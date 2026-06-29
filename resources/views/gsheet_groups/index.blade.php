@@ -36,7 +36,7 @@
         <div id="groups" class="space-y-4">
             @forelse($groups as $g)
                 <div class="bg-white border rounded-xl p-4 shadow-sm" data-group="{{ $g->id }}"
-                     x-data="{ edit: false, delL: false, delA: false }">
+                     x-data="{ edit: false, del: false }">
 
                     <div class="flex items-center justify-between mb-3 gap-2">
                         <div class="font-medium text-gray-800">{{ $g->name }}</div>
@@ -149,50 +149,43 @@
                         </div>
                     </div>
 
-                    {{-- ✂️ Delete rows (hiwalay per gsheet) --}}
-                    <div class="mt-4 border-t pt-3 space-y-3">
-                        <p class="text-xs text-red-800">⚠️ I-click muna ang 🛑 Stop at siguraduhing <b>tumigil na</b> ang scripts bago mag-delete.</p>
-
-                        {{-- Likha --}}
-                        <div>
-                            <button type="button" @click="delL = !delL"
-                                    class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50">✂️ Delete rows — Likha…</button>
-                            <div x-show="delL" x-cloak class="mt-2 rounded-lg border border-red-200 bg-red-50 p-3">
-                                <form method="POST" action="/gsheet_groups/{{ $g->id }}/delete-rows"
-                                      onsubmit="return confirm('LIKHA — bubura ng rows 3 hanggang ' + this.end_row.value + ' (shift up) sa: All Orders, TO WEBSITE!I, TO ENCODER!J. Tuloy?')">
-                                    @csrf
-                                    <input type="hidden" name="scope" value="likha">
-                                    <div class="flex items-center gap-2 flex-wrap">
-                                        <label class="text-xs text-gray-700">Hanggang anong row?</label>
-                                        <input type="number" name="end_row" min="3" required placeholder="hal. 50"
-                                               class="w-28 text-sm border border-gray-300 rounded px-2 py-1.5">
-                                        <button type="submit" class="px-3 py-1.5 text-sm rounded bg-red-600 text-white hover:bg-red-700">🗑️ Delete (Likha)</button>
-                                        <button type="button" @click="delL = false" class="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50">Cancel</button>
-                                    </div>
-                                    <p class="text-[11px] text-gray-500 mt-2">Buong rows: <b>All Orders</b> &middot; Column-only: <b>TO WEBSITE!I</b>, <b>TO ENCODER!J</b></p>
-                                </form>
+                    {{-- 🔎 Alignment check (last row peek) --}}
+                    <div class="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        <div class="text-xs font-medium text-gray-600 mb-1">🔎 Alignment check — last row <span data-row class="font-mono">…</span></div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                            <div>
+                                <span class="text-gray-500">After-macro · DATABASE!B<span data-rowb class="font-mono"></span>:</span>
+                                <span class="font-medium text-gray-800" data-val="after_b">…</span>
+                                <span class="text-red-600 hidden" data-err="after_b"></span>
+                            </div>
+                            <div>
+                                <span class="text-gray-500">Likha · All Orders!C<span data-rowc class="font-mono"></span>:</span>
+                                <span class="font-medium text-gray-800" data-val="likha_c">…</span>
+                                <span class="text-red-600 hidden" data-err="likha_c"></span>
                             </div>
                         </div>
+                    </div>
 
-                        {{-- After-macro --}}
-                        <div>
-                            <button type="button" @click="delA = !delA"
-                                    class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50">✂️ Delete rows — After-macro…</button>
-                            <div x-show="delA" x-cloak class="mt-2 rounded-lg border border-red-200 bg-red-50 p-3">
-                                <form method="POST" action="/gsheet_groups/{{ $g->id }}/delete-rows"
-                                      onsubmit="return confirm('AFTER-MACRO — bubura ng rows 3 hanggang ' + this.end_row.value + ' (shift up) sa: DATABASE, DATABASE - MIRRORED!Q. Tuloy?')">
-                                    @csrf
-                                    <input type="hidden" name="scope" value="after">
-                                    <div class="flex items-center gap-2 flex-wrap">
-                                        <label class="text-xs text-gray-700">Hanggang anong row?</label>
-                                        <input type="number" name="end_row" min="3" required placeholder="hal. 50"
-                                               class="w-28 text-sm border border-gray-300 rounded px-2 py-1.5">
-                                        <button type="submit" class="px-3 py-1.5 text-sm rounded bg-red-600 text-white hover:bg-red-700">🗑️ Delete (After-macro)</button>
-                                        <button type="button" @click="delA = false" class="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50">Cancel</button>
-                                    </div>
-                                    <p class="text-[11px] text-gray-500 mt-2">Buong rows: <b>DATABASE</b> &middot; Column-only: <b>DATABASE - MIRRORED!Q</b></p>
-                                </form>
-                            </div>
+                    {{-- ✂️ Delete rows (Likha + After-macro sabay) --}}
+                    <div class="mt-3 border-t pt-3">
+                        <button type="button" @click="del = !del"
+                                class="text-xs px-2.5 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50">✂️ Delete rows…</button>
+                        <div x-show="del" x-cloak class="mt-2 rounded-lg border border-red-200 bg-red-50 p-3">
+                            <p class="text-xs text-red-800 mb-2">⚠️ I-click muna ang 🛑 Stop at siguraduhing <b>tumigil na</b> ang scripts bago mag-delete.</p>
+                            <form method="POST" action="/gsheet_groups/{{ $g->id }}/delete-rows"
+                                  onsubmit="return confirm('Bubura ng rows 3 hanggang ' + this.end_row.value + ' (shift up) sa LIKHA (All Orders, TO WEBSITE!I, TO ENCODER!J) + AFTER-MACRO (DATABASE, DATABASE - MIRRORED!Q). Tuloy?')">
+                                @csrf
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <label class="text-xs text-gray-700">Hanggang anong row?</label>
+                                    <input type="number" name="end_row" min="3" required placeholder="hal. 50"
+                                           class="w-28 text-sm border border-gray-300 rounded px-2 py-1.5">
+                                    <button type="submit" class="px-3 py-1.5 text-sm rounded bg-red-600 text-white hover:bg-red-700">🗑️ Delete rows (Likha + After-macro)</button>
+                                    <button type="button" @click="del = false" class="px-3 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50">Cancel</button>
+                                </div>
+                                <p class="text-[11px] text-gray-500 mt-2">
+                                    Buong rows: <b>All Orders</b>, <b>DATABASE</b> &middot; Column-only: <b>TO WEBSITE!I</b>, <b>TO ENCODER!J</b>, <b>DATABASE - MIRRORED!Q</b>
+                                </p>
+                            </form>
                         </div>
                     </div>
                 </div>
@@ -279,9 +272,23 @@
             }
         }
 
+        function setRaw(card, key, cell) {
+            const valEl = card.querySelector(`[data-val="${key}"]`);
+            const errEl = card.querySelector(`[data-err="${key}"]`);
+            if (!valEl) return;
+            if (cell && cell.error) {
+                valEl.textContent = '—';
+                if (errEl) { errEl.textContent = cell.error; errEl.classList.remove('hidden'); }
+                return;
+            }
+            if (errEl) errEl.classList.add('hidden');
+            let v = cell ? cell.value : null;
+            valEl.textContent = (v === null || v === undefined || v === '') ? '—' : String(v);
+        }
+
         async function loadGroupValues(card) {
             const id = card.dataset.group;
-            ['likha', 'macro', 'after'].forEach(k => {
+            ['likha', 'macro', 'after', 'after_b', 'likha_c'].forEach(k => {
                 const el = card.querySelector(`[data-val="${k}"]`);
                 if (el) el.textContent = '…';
                 const er = card.querySelector(`[data-err="${k}"]`);
@@ -299,8 +306,17 @@
                     setBox(card, k, data[k]);
                     setTitle(card, k, data[k]);
                 });
+
+                // alignment check (last row + B + C)
+                const row = data.last_row;
+                const rowTxt = row ? Number(row).toLocaleString() : '—';
+                card.querySelectorAll('[data-row]').forEach(el => el.textContent = rowTxt);
+                card.querySelectorAll('[data-rowb]').forEach(el => el.textContent = row || '');
+                card.querySelectorAll('[data-rowc]').forEach(el => el.textContent = row || '');
+                setRaw(card, 'after_b', data.after_b);
+                setRaw(card, 'likha_c', data.likha_c);
             } catch (e) {
-                ['likha', 'macro', 'after'].forEach(k => {
+                ['likha', 'macro', 'after', 'after_b', 'likha_c'].forEach(k => {
                     const el = card.querySelector(`[data-val="${k}"]`);
                     if (el) el.textContent = '—';
                 });

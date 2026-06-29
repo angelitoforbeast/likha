@@ -143,15 +143,30 @@ class GsheetGroupController extends Controller
         $macro = $this->readSheet($service, $group->macro_url, "'LINKS'!E2");
         $after = $this->readSheet($service, $group->after_url, "'DATABASE'!N1");
 
-        // After-macro = N1 - 1
+        // After-macro last row = DATABASE!N1 - 1
+        $lastRow = null;
         if ($after['error'] === null && is_numeric($after['value'])) {
             $after['value'] = $after['value'] - 1;
+            $lastRow = (int) $after['value'];
+        }
+
+        // Last-row peek + alignment check (same row sa magkabila):
+        //  - After-macro: DATABASE!B{lastRow}
+        //  - Likha:       All Orders!C{lastRow}
+        $afterB = ['value' => null, 'error' => null];
+        $likhaC = ['value' => null, 'error' => null];
+        if ($lastRow && $lastRow >= 2) {
+            $afterB = $this->readValue($service, $group->after_url, "'DATABASE'!B{$lastRow}");
+            $likhaC = $this->readValue($service, $group->likha_url, "'All Orders'!C{$lastRow}");
         }
 
         return response()->json([
-            'likha' => $likha,
-            'macro' => $macro,
-            'after' => $after,
+            'likha'    => $likha,
+            'macro'    => $macro,
+            'after'    => $after,
+            'last_row' => $lastRow,
+            'after_b'  => $afterB,
+            'likha_c'  => $likhaC,
         ]);
     }
 
@@ -162,7 +177,6 @@ class GsheetGroupController extends Controller
     public function deleteRows(Request $request, $id)
     {
         $data = $request->validate([
-            'scope'   => 'required|in:likha,after',
             'end_row' => 'required|integer|min:3',
         ]);
         $endRow = (int) $data['end_row'];
@@ -170,24 +184,28 @@ class GsheetGroupController extends Controller
         $group = GsheetGroup::findOrFail($id);
         $service = $this->makeSheetsService(true); // write scope
 
-        if ($data['scope'] === 'likha') {
-            $sid = $this->extractSpreadsheetId($group->likha_url);
-            if (!$sid) return back()->with('error', '⚠️ Likha: walang/maling link.');
-            $msg = $this->deleteInSpreadsheet($service, $sid, $endRow, 'Likha', [
+        $report = [];
+
+        // Likha (All Orders rows, TO WEBSITE!I, TO ENCODER!J)
+        $likhaId = $this->extractSpreadsheetId($group->likha_url);
+        $report[] = $likhaId
+            ? $this->deleteInSpreadsheet($service, $likhaId, $endRow, 'Likha', [
                 ['All Orders', 'rows', null],
                 ['TO WEBSITE', 'col', 8],   // column I (0-based)
                 ['TO ENCODER', 'col', 9],   // column J
-            ]);
-        } else {
-            $sid = $this->extractSpreadsheetId($group->after_url);
-            if (!$sid) return back()->with('error', '⚠️ After-macro: walang/maling link.');
-            $msg = $this->deleteInSpreadsheet($service, $sid, $endRow, 'After-macro', [
+            ])
+            : 'Likha: ⚠️ walang/maling link';
+
+        // After-macro (DATABASE rows, DATABASE - MIRRORED!Q)
+        $afterId = $this->extractSpreadsheetId($group->after_url);
+        $report[] = $afterId
+            ? $this->deleteInSpreadsheet($service, $afterId, $endRow, 'After-macro', [
                 ['DATABASE', 'rows', null],
                 ['DATABASE - MIRRORED', 'col', 16],  // column Q
-            ]);
-        }
+            ])
+            : 'After-macro: ⚠️ walang/maling link';
 
-        return back()->with('success', "🗑️ Delete rows 3–{$endRow} — {$msg}");
+        return back()->with('success', "🗑️ Delete rows 3–{$endRow} — " . implode(' | ', $report));
     }
 
     // $targets: array of [tabName, 'rows'|'col', colIndex|null]
@@ -347,6 +365,24 @@ class GsheetGroupController extends Controller
             $parts[] = $label . ': ' . ($r['ok'] ? '✅' : '⚠️ ' . $r['error']);
         }
         return $prefix . ' — ' . implode(' · ', $parts);
+    }
+
+    // Value-only read (walang title fetch) — para sa per-row peeks (B/C).
+    private function readValue(\Google\Service\Sheets $service, ?string $url, string $range): array
+    {
+        $sheetId = $this->extractSpreadsheetId($url);
+        if (!$sheetId) {
+            return ['value' => null, 'error' => 'Walang/maling link'];
+        }
+        try {
+            $resp = $service->spreadsheets_values->get($sheetId, $range, [
+                'valueRenderOption' => 'UNFORMATTED_VALUE',
+            ]);
+            $values = $resp->getValues();
+            return ['value' => $values[0][0] ?? null, 'error' => null];
+        } catch (\Throwable $e) {
+            return ['value' => null, 'error' => $this->friendlyError($e->getMessage())];
+        }
     }
 
     private function extractSpreadsheetId(?string $url): ?string
