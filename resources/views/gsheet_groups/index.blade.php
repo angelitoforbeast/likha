@@ -52,6 +52,12 @@
                                 <button type="submit"
                                         class="px-2.5 py-1 text-xs rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50">▶️ Resume</button>
                             </form>
+                            <form method="POST" action="/gsheet_groups/{{ $g->id }}/clear-logs"
+                                  onsubmit="return confirm('Bubura ang rows (row 2 pababa) sa GPT_VERIFY, GPT_DEBUG, GPT_NAMEADDR ng after-macro (3rd) sheet. Tuloy?')">
+                                @csrf
+                                <button type="submit"
+                                        class="px-2.5 py-1 text-xs rounded border border-orange-300 text-orange-700 hover:bg-orange-50">🧹 Clear logs</button>
+                            </form>
                             <button type="button" onclick="loadGroupValues(this.closest('[data-group]'))"
                                     class="px-2.5 py-1 text-xs rounded border border-gray-300 hover:bg-gray-50">🔄 Refresh</button>
                             <button type="button" @click="edit = !edit"

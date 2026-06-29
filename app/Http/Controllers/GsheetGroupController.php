@@ -66,6 +66,69 @@ class GsheetGroupController extends Controller
         return back()->with($ok ? 'success' : 'error', $this->summarizeFlag('▶️ Resume (flags cleared)', $res));
     }
 
+    // Delete rows (row 2 → bottom, keep header) sa log sheets ng AFTER-MACRO (3rd) sheet:
+    //  GPT_VERIFY, GPT_DEBUG, GPT_NAMEADDR  — katumbas ng CLEAR_LOGS() App Script.
+    public function clearLogs($id)
+    {
+        $group = GsheetGroup::findOrFail($id);
+        $sheetId = $this->extractSpreadsheetId($group->after_url);
+        if (!$sheetId) {
+            return back()->with('error', '⚠️ After-macro: walang/maling link.');
+        }
+
+        $targets = ['GPT_VERIFY', 'GPT_DEBUG', 'GPT_NAMEADDR'];
+
+        try {
+            $service = $this->makeSheetsService(true); // write scope
+
+            $meta = $service->spreadsheets->get($sheetId, [
+                'fields' => 'sheets.properties(sheetId,title,gridProperties.rowCount)',
+            ]);
+
+            $requests = [];
+            $report   = [];
+            $found    = [];
+
+            foreach ($meta->getSheets() as $s) {
+                $props = $s->getProperties();
+                $title = $props->getTitle();
+                if (!in_array($title, $targets, true)) continue;
+
+                $found[] = $title;
+                $rowCount = $props->getGridProperties()->getRowCount();
+
+                if ($rowCount > 1) {
+                    $requests[] = new \Google_Service_Sheets_Request([
+                        'deleteDimension' => [
+                            'range' => [
+                                'sheetId'    => $props->getSheetId(),
+                                'dimension'  => 'ROWS',
+                                'startIndex' => 1,          // row 2 (0-based) — keep header
+                                'endIndex'   => $rowCount,  // hanggang dulo
+                            ],
+                        ],
+                    ]);
+                    $report[] = $title . ': 🗑️';
+                } else {
+                    $report[] = $title . ': walang data';
+                }
+            }
+
+            foreach ($targets as $t) {
+                if (!in_array($t, $found, true)) $report[] = $t . ': ⚠️ not found';
+            }
+
+            if (!empty($requests)) {
+                $batch = new \Google_Service_Sheets_BatchUpdateSpreadsheetRequest(['requests' => $requests]);
+                $service->spreadsheets->batchUpdate($sheetId, $batch);
+            }
+
+            return back()->with('success', '🧹 Clear logs (after-macro) — ' . implode(' · ', $report));
+        } catch (\Throwable $e) {
+            return back()->with('error', '⚠️ Clear logs failed: ' . $this->friendlyError($e->getMessage()));
+        }
+    }
+
     // AJAX: read the 3 live values for one group.
     //  - Likha       → TO ENCODER!L1   (=importrange(B,"TO ENCODER!L1"))
     //  - Macro       → LINKS!E2        (=importrange(C,"LINKS!e2"))      task count
