@@ -162,6 +162,7 @@ class GsheetGroupController extends Controller
     public function deleteRows(Request $request, $id)
     {
         $data = $request->validate([
+            'scope'   => 'required|in:likha,after',
             'end_row' => 'required|integer|min:3',
         ]);
         $endRow = (int) $data['end_row'];
@@ -169,30 +170,24 @@ class GsheetGroupController extends Controller
         $group = GsheetGroup::findOrFail($id);
         $service = $this->makeSheetsService(true); // write scope
 
-        $report = [];
-
-        $likhaId = $this->extractSpreadsheetId($group->likha_url);
-        if ($likhaId) {
-            $report[] = $this->deleteInSpreadsheet($service, $likhaId, $endRow, 'Likha', [
+        if ($data['scope'] === 'likha') {
+            $sid = $this->extractSpreadsheetId($group->likha_url);
+            if (!$sid) return back()->with('error', '⚠️ Likha: walang/maling link.');
+            $msg = $this->deleteInSpreadsheet($service, $sid, $endRow, 'Likha', [
                 ['All Orders', 'rows', null],
                 ['TO WEBSITE', 'col', 8],   // column I (0-based)
                 ['TO ENCODER', 'col', 9],   // column J
             ]);
         } else {
-            $report[] = 'Likha: ⚠️ walang/maling link';
-        }
-
-        $afterId = $this->extractSpreadsheetId($group->after_url);
-        if ($afterId) {
-            $report[] = $this->deleteInSpreadsheet($service, $afterId, $endRow, 'After-macro', [
+            $sid = $this->extractSpreadsheetId($group->after_url);
+            if (!$sid) return back()->with('error', '⚠️ After-macro: walang/maling link.');
+            $msg = $this->deleteInSpreadsheet($service, $sid, $endRow, 'After-macro', [
                 ['DATABASE', 'rows', null],
                 ['DATABASE - MIRRORED', 'col', 16],  // column Q
             ]);
-        } else {
-            $report[] = 'After-macro: ⚠️ walang/maling link';
         }
 
-        return back()->with('success', "🗑️ Delete rows 3–{$endRow} — " . implode(' | ', $report));
+        return back()->with('success', "🗑️ Delete rows 3–{$endRow} — {$msg}");
     }
 
     // $targets: array of [tabName, 'rows'|'col', colIndex|null]
@@ -202,63 +197,66 @@ class GsheetGroupController extends Controller
             $meta = $service->spreadsheets->get($sheetId, [
                 'fields' => 'sheets.properties(sheetId,title,gridProperties.rowCount)',
             ]);
-
-            $map = [];
-            foreach ($meta->getSheets() as $s) {
-                $p = $s->getProperties();
-                $map[$p->getTitle()] = [
-                    'gid'  => $p->getSheetId(),
-                    'rows' => $p->getGridProperties()->getRowCount(),
-                ];
-            }
-
-            $requests = [];
-            $parts = [];
-
-            foreach ($targets as [$tab, $mode, $col]) {
-                if (!isset($map[$tab])) { $parts[] = "{$tab} ⚠️ not found"; continue; }
-
-                $gid = $map[$tab]['gid'];
-                $end = min($endRow, $map[$tab]['rows']); // clamp sa grid
-                if ($end < 3) { $parts[] = "{$tab} (walang ide-delete)"; continue; }
-
-                if ($mode === 'rows') {
-                    $requests[] = new \Google_Service_Sheets_Request([
-                        'deleteDimension' => [
-                            'range' => [
-                                'sheetId'    => $gid,
-                                'dimension'  => 'ROWS',
-                                'startIndex' => 2,      // row 3 (0-based)
-                                'endIndex'   => $end,   // inclusive ng row $end
-                            ],
-                        ],
-                    ]);
-                } else { // col — delete cells sa isang column, shift ROWS up
-                    $requests[] = new \Google_Service_Sheets_Request([
-                        'deleteRange' => [
-                            'range' => [
-                                'sheetId'          => $gid,
-                                'startRowIndex'    => 2,
-                                'endRowIndex'      => $end,
-                                'startColumnIndex' => $col,
-                                'endColumnIndex'   => $col + 1,
-                            ],
-                            'shiftDimension' => 'ROWS',
-                        ],
-                    ]);
-                }
-                $parts[] = "{$tab} ✅";
-            }
-
-            if (!empty($requests)) {
-                $batch = new \Google_Service_Sheets_BatchUpdateSpreadsheetRequest(['requests' => $requests]);
-                $service->spreadsheets->batchUpdate($sheetId, $batch);
-            }
-
-            return "{$label}: " . implode(' · ', $parts);
         } catch (\Throwable $e) {
             return "{$label}: ⚠️ " . $this->friendlyError($e->getMessage());
         }
+
+        $map = [];
+        foreach ($meta->getSheets() as $s) {
+            $p = $s->getProperties();
+            $map[$p->getTitle()] = [
+                'gid'  => $p->getSheetId(),
+                'rows' => $p->getGridProperties()->getRowCount(),
+            ];
+        }
+
+        $parts = [];
+
+        foreach ($targets as [$tab, $mode, $col]) {
+            if (!isset($map[$tab])) { $parts[] = "{$tab} ⚠️ not found"; continue; }
+
+            $gid = $map[$tab]['gid'];
+            $end = min($endRow, $map[$tab]['rows']); // clamp sa grid
+            if ($end < 3) { $parts[] = "{$tab} (walang ide-delete)"; continue; }
+
+            if ($mode === 'rows') {
+                $req = new \Google_Service_Sheets_Request([
+                    'deleteDimension' => [
+                        'range' => [
+                            'sheetId'    => $gid,
+                            'dimension'  => 'ROWS',
+                            'startIndex' => 2,      // row 3 (0-based)
+                            'endIndex'   => $end,   // inclusive ng row $end
+                        ],
+                    ],
+                ]);
+            } else { // col — delete cells sa isang column, shift ROWS up
+                $req = new \Google_Service_Sheets_Request([
+                    'deleteRange' => [
+                        'range' => [
+                            'sheetId'          => $gid,
+                            'startRowIndex'    => 2,
+                            'endRowIndex'      => $end,
+                            'startColumnIndex' => $col,
+                            'endColumnIndex'   => $col + 1,
+                        ],
+                        'shiftDimension' => 'ROWS',
+                    ],
+                ]);
+            }
+
+            // ISOLATED per-tab batchUpdate — hindi atomic across tabs, kaya
+            // ang pagpalpak ng isang tab ay HINDI nakaka-apekto sa iba.
+            try {
+                $batch = new \Google_Service_Sheets_BatchUpdateSpreadsheetRequest(['requests' => [$req]]);
+                $service->spreadsheets->batchUpdate($sheetId, $batch);
+                $parts[] = "{$tab} ✅";
+            } catch (\Throwable $e) {
+                $parts[] = "{$tab} ⚠️ " . $this->friendlyError($e->getMessage());
+            }
+        }
+
+        return "{$label}: " . implode(' · ', $parts);
     }
 
     // ── helpers ───────────────────────────────────────────────
@@ -361,12 +359,15 @@ class GsheetGroupController extends Controller
     private function friendlyError(string $msg): string
     {
         $m = strtolower($msg);
-        if (str_contains($m, 'permission') || str_contains($m, '403') || str_contains($m, 'forbidden')) {
-            return 'Walang access ang service account — i-share ang sheet';
+        if (str_contains($m, 'permission') || str_contains($m, '403') || str_contains($m, 'forbidden') || str_contains($m, 'caller does not have permission')) {
+            return 'Walang Editor access ang service account — i-share (Editor) ang sheet';
         }
-        if (str_contains($m, 'unable to parse range') || str_contains($m, 'not found') || str_contains($m, '400')) {
+        if (str_contains($m, 'unable to parse range') || str_contains($m, 'not found') || str_contains($m, '404')) {
             return 'Hindi makita ang sheet/cell (tama ba ang tab name?)';
         }
-        return 'Error sa pagkuha ng value';
+        // Surface a short snippet ng totoong error para sa diagnosis (hal. array/protected range)
+        $short = trim(preg_replace('/\s+/', ' ', $msg));
+        if (strlen($short) > 160) $short = substr($short, 0, 160) . '…';
+        return $short;
     }
 }
