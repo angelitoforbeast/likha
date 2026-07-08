@@ -113,6 +113,17 @@ class ProcessJntUpload implements ShouldQueue
             $log->status         = 'done';
             $log->finished_at    = Carbon::now('Asia/Manila');
             $log->save();
+
+            // ✅ Auto-delete raw source file after SUCCESSFUL import — redundant na
+            //    (nasa FromJnt DB na ang data). Iwas-accumulate sa uploads/jnt.
+            //    Sa success path LANG ito — kung nag-fail/nag-retry, nananatili ang file.
+            try {
+                if ($log->path && Storage::disk($disk)->exists($log->path)) {
+                    Storage::disk($disk)->delete($log->path);
+                }
+            } catch (\Throwable $eDel) {
+                \Log::warning('ProcessJntUpload: di na-delete ang source file after import: ' . $eDel->getMessage());
+            }
         } catch (\Throwable $e) {
             $log->status      = 'failed';
             $log->finished_at = Carbon::now('Asia/Manila');
