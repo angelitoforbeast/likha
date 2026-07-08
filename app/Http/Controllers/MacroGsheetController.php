@@ -25,19 +25,34 @@ class MacroGsheetController extends Controller
         return view('macro.gsheet.import', compact('settings', 'latestRun', 'running'));
     }
 
-    // Force-stop: markahan ang stuck queued/running run(s) bilang failed → maaalis ang harang.
-    // Para sa mga run na na-stall (hal. dahil sa server/disk issue) at hindi natapos.
+    // Cancel/Force-stop ang running/queued run.
+    //  - BUHAY (may kamakailang progress): mag-request ng graceful cancel — hihinto
+    //    ang job sa susunod na sheet (chine-check nito ang cancel_requested).
+    //  - STALE/dead (walang progress nang matagal): i-fail agad — walang worker na
+    //    mag-o-overwrite, kaya diretsong maaalis ang harang.
     public function cancelImport(Request $request)
     {
-        $n = MacroImportRun::whereIn('status', ['queued', 'running'])
-            ->update(['status' => 'failed', 'finished_at' => now()]);
+        $run = MacroImportRun::whereIn('status', ['queued', 'running'])->latest('id')->first();
+        if (!$run) {
+            return back()->with('success', 'Walang running/queued run na na-stop.');
+        }
 
-        MacroImportRunItem::whereIn('status', ['queued', 'running', 'processing'])
-            ->update(['status' => 'failed']);
+        // Palaging mag-request ng cancel (pipiliin ng job kung buhay ito)
+        $run->cancel_requested = true;
+        $run->save();
 
-        return back()->with('success', $n > 0
-            ? "🛑 Na-force-stop ang {$n} stuck run(s). Pwede nang mag-import ulit."
-            : "Walang running/queued run na na-stop.");
+        // Stale? (walang update nang >10 min) → dead na, i-fail agad
+        $stale = $run->updated_at && $run->updated_at->lt(now()->subMinutes(10));
+        if ($stale) {
+            $run->update(['status' => 'failed', 'finished_at' => now()]);
+            MacroImportRunItem::where('run_id', $run->id)
+                ->whereIn('status', ['queued', 'running', 'processing'])
+                ->update(['status' => 'failed']);
+
+            return back()->with('success', "🛑 Force-stopped ang stuck Run #{$run->id} (walang progress nang matagal). Pwede nang mag-import ulit.");
+        }
+
+        return back()->with('success', "🛑 Cancel requested para sa Run #{$run->id} — hihinto ito pagkatapos ng kasalukuyang sheet.");
     }
 
     public function import(Request $request)

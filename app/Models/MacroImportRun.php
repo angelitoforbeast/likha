@@ -11,6 +11,7 @@ class MacroImportRun extends Model
     protected $fillable = [
         'started_by',
         'status',
+        'cancel_requested',
         'started_at',
         'finished_at',
         'total_settings',
@@ -23,8 +24,9 @@ class MacroImportRun extends Model
     ];
 
     protected $casts = [
-        'started_at'  => 'datetime',
-        'finished_at' => 'datetime',
+        'started_at'       => 'datetime',
+        'finished_at'      => 'datetime',
+        'cancel_requested' => 'boolean',
     ];
 
     public function items()

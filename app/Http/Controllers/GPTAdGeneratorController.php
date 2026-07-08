@@ -289,7 +289,7 @@ class GPTAdGeneratorController extends Controller
     private function generateJson(array $payload, array $context)
     {
         try {
-            $response = Http::withToken(env('OPENAI_API_KEY'))
+            $response = Http::withToken(config('services.openai.key'))
                 ->timeout(60)
                 ->post('https://api.openai.com/v1/chat/completions', $payload);
 
@@ -350,7 +350,7 @@ class GPTAdGeneratorController extends Controller
             $accumulated = '';
 
             try {
-                $upstream = Http::withToken(env('OPENAI_API_KEY'))
+                $upstream = Http::withToken(config('services.openai.key'))
                     ->timeout(120)
                     ->withOptions(['stream' => true])
                     ->post('https://api.openai.com/v1/chat/completions', $payload);
@@ -1301,7 +1301,7 @@ class GPTAdGeneratorController extends Controller
      */
     private function whisperTranscribe(string $audioPath): string
     {
-        $apiKey = env('OPENAI_API_KEY');
+        $apiKey = config('services.openai.key');
         if (!$apiKey) throw new \RuntimeException('OPENAI_API_KEY not set');
 
         $res = Http::withToken($apiKey)
@@ -1326,7 +1326,7 @@ class GPTAdGeneratorController extends Controller
      */
     private function visionAnalyzeFrames(array $framePaths, string $transcript, string $model, string $fileName): array
     {
-        $apiKey = env('OPENAI_API_KEY');
+        $apiKey = config('services.openai.key');
         if (!$apiKey) throw new \RuntimeException('OPENAI_API_KEY not set');
 
         // Build vision input — sequence of image_url parts.

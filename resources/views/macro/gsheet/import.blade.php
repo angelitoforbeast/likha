@@ -25,18 +25,29 @@
     </div>
   @endif
 
-  {{-- ⚠️ Stuck / running run — Force stop --}}
+  {{-- Running run banner — kalmadong info kung healthy, warning lang kung STALE --}}
   @if (!empty($running))
-    <div class="bg-red-50 border border-red-200 text-red-800 p-3 rounded mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+    @php
+      // Stale = walang progress-update nang >10 min → malamang stuck/dead
+      $stale = $running->updated_at && $running->updated_at->lt(now()->subMinutes(10));
+    @endphp
+    <div class="p-3 rounded mb-4 border flex flex-col md:flex-row md:items-center md:justify-between gap-3
+                {{ $stale ? 'bg-red-50 border-red-200 text-red-800' : 'bg-blue-50 border-blue-200 text-blue-800' }}">
       <div>
-        ⚠️ May naka-<b>{{ strtoupper($running->status) }}</b> na import (<b>Run #{{ $running->id }}</b>).
-        Kung <b>stuck</b> ito (hal. dahil sa server/disk issue), i-force stop para makapag-import ulit.
+        @if ($stale)
+          ⚠️ Mukhang <b>STUCK</b> ang <b>Run #{{ $running->id }}</b> — walang progress nang mahigit 10 min
+          (hal. dahil sa server/disk issue). I-force stop para makapag-import ulit.
+        @else
+          ⏳ May tumatakbong import (<b>Run #{{ $running->id }}</b>) — <b>normal 'to</b>, hayaan lang matapos.
+          Kung talagang kailangan mong ihinto, pwede i-cancel (hihinto pagkatapos ng kasalukuyang sheet).
+        @endif
       </div>
       <form method="POST" action="{{ route('macro.import.cancel') }}"
-            onsubmit="return confirm('Force-stop Run #{{ $running->id }}? Markahan itong failed para maalis ang harang.')">
+            onsubmit="return confirm('{{ $stale ? 'Force-stop' : 'Cancel' }} Run #{{ $running->id }}?')">
         @csrf
-        <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded whitespace-nowrap">
-          🛑 Force stop Run #{{ $running->id }}
+        <button type="submit"
+                class="text-white px-3 py-2 rounded whitespace-nowrap {{ $stale ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-600 hover:bg-gray-700' }}">
+          {{ $stale ? '🛑 Force stop' : '✋ Cancel' }} Run #{{ $running->id }}
         </button>
       </form>
     </div>

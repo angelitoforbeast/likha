@@ -68,6 +68,21 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
         $touchedDates = [];
 
         foreach ($items as $item) {
+            // ✅ Graceful cancel — bago ang bawat sheet, tingnan kung nag-request ang website.
+            // Basahin LANG ang cancel_requested (di ini-o-overwrite ng job, kaya persistent).
+            if (MacroImportRun::where('id', $run->id)->value('cancel_requested')) {
+                $run->update([
+                    'status'      => 'failed',
+                    'message'     => '🛑 Cancelled by user.',
+                    'finished_at' => now(),
+                ]);
+                MacroImportRunItem::where('run_id', $run->id)
+                    ->whereIn('status', ['queued', 'running', 'processing'])
+                    ->update(['status' => 'failed', 'message' => 'Cancelled by user.']);
+                Log::info("MacroImportRun {$run->id} cancelled by user.");
+                return;
+            }
+
             $setting = $item->setting_id ? ($settings[$item->setting_id] ?? null) : null;
 
             if (!$setting) {
