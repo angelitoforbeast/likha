@@ -836,6 +836,9 @@ Route::post('/macro/gsheet/import', [MacroGsheetController::class, 'import'])
 // ✅ STATUS POLL (GET)
 Route::get('/macro/gsheet/import/status', [MacroGsheetController::class, 'status'])
     ->name('macro.import.status');
+// ✅ FORCE STOP stuck run
+Route::post('/macro/gsheet/import/cancel', [MacroGsheetController::class, 'cancelImport'])
+    ->name('macro.import.cancel');
 Route::get('/macro/gsheet/index', [MacroGsheetController::class, 'index'])->name('macro.index');
 Route::delete('/macro/gsheet/delete-all', [MacroGsheetController::class, 'deleteAll'])->name('macro.deleteAll');
 

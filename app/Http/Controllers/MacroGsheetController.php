@@ -19,7 +19,25 @@ class MacroGsheetController extends Controller
         // Optional: show latest run
         $latestRun = MacroImportRun::latest('id')->first();
 
-        return view('macro.gsheet.import', compact('settings', 'latestRun'));
+        // running/queued run (para sa Force-stop button)
+        $running = MacroImportRun::whereIn('status', ['queued', 'running'])->latest('id')->first();
+
+        return view('macro.gsheet.import', compact('settings', 'latestRun', 'running'));
+    }
+
+    // Force-stop: markahan ang stuck queued/running run(s) bilang failed → maaalis ang harang.
+    // Para sa mga run na na-stall (hal. dahil sa server/disk issue) at hindi natapos.
+    public function cancelImport(Request $request)
+    {
+        $n = MacroImportRun::whereIn('status', ['queued', 'running'])
+            ->update(['status' => 'failed', 'finished_at' => now()]);
+
+        MacroImportRunItem::whereIn('status', ['queued', 'running', 'processing'])
+            ->update(['status' => 'failed']);
+
+        return back()->with('success', $n > 0
+            ? "🛑 Na-force-stop ang {$n} stuck run(s). Pwede nang mag-import ulit."
+            : "Walang running/queued run na na-stop.");
     }
 
     public function import(Request $request)

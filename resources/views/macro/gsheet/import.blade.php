@@ -25,6 +25,23 @@
     </div>
   @endif
 
+  {{-- ⚠️ Stuck / running run — Force stop --}}
+  @if (!empty($running))
+    <div class="bg-red-50 border border-red-200 text-red-800 p-3 rounded mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div>
+        ⚠️ May naka-<b>{{ strtoupper($running->status) }}</b> na import (<b>Run #{{ $running->id }}</b>).
+        Kung <b>stuck</b> ito (hal. dahil sa server/disk issue), i-force stop para makapag-import ulit.
+      </div>
+      <form method="POST" action="{{ route('macro.import.cancel') }}"
+            onsubmit="return confirm('Force-stop Run #{{ $running->id }}? Markahan itong failed para maalis ang harang.')">
+        @csrf
+        <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded whitespace-nowrap">
+          🛑 Force stop Run #{{ $running->id }}
+        </button>
+      </form>
+    </div>
+  @endif
+
   {{-- Controls --}}
   <div class="bg-white rounded shadow p-4 mb-4">
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
