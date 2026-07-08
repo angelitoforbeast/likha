@@ -74,6 +74,8 @@ class JntWaybillFilesController extends Controller
         return view('jnt.waybills.files', [
             'files' => $files,
             'baseDir' => $this->baseDir,
+            'totalBytes' => $files->sum('size'),
+            'totalCount' => $files->count(),
         ]);
     }
 

@@ -20,6 +20,18 @@
     <div class="mb-3 flex items-center justify-between gap-2">
       <div class="text-sm text-gray-600">
         Storage path: <span class="font-mono">{{ $baseDir ?? 'jnt_waybills/bulk_runs' }}</span>
+        @php
+          $tb = $totalBytes ?? 0;
+          $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+          $ui = 0; $uv = $tb;
+          while ($uv >= 1024 && $ui < count($units) - 1) { $uv /= 1024; $ui++; }
+          $totalHuman = number_format($uv, 2) . ' ' . $units[$ui];
+        @endphp
+        <div class="mt-1">
+          <span class="inline-flex items-center rounded-lg border border-gray-300 bg-gray-50 px-2.5 py-1 text-sm font-semibold text-gray-800">
+            📦 Total: {{ number_format($totalCount ?? 0) }} file(s) · {{ $totalHuman }}
+          </span>
+        </div>
       </div>
       <div class="flex items-center gap-2">
         <form
