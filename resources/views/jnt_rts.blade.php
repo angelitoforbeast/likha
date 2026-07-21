@@ -117,7 +117,7 @@
           </div>
           <p style="font-size:11px; color:#9ca3af; margin:2px 0 8px;">Lahat ng shipment sa piniling range (kasama pa ang in-transit).</p>
           <div style="margin-top:46px;">
-            @include('partials.rts-pie', $full)
+            @include('partials.rts-pie', array_merge($full, ['pieId' => 'full']))
           </div>
         </div>
 
@@ -275,6 +275,21 @@
       document.getElementById('tot-rts-pct').textContent     = (rts / t * 100).toFixed(2) + '%';
       document.getElementById('tot-del-pct').textContent     = (del / t * 100).toFixed(2) + '%';
       document.getElementById('tot-transit-pct').textContent = (transit / t * 100).toFixed(2) + '%';
+
+      // ── Live update ng Full Range donut mula sa na-filter/na-search na rows ──
+      const pRts = Math.round(rts / t * 1000) / 10;
+      const pDel = Math.round(del / t * 1000) / 10;
+      const pTr  = Math.round(transit / t * 1000) / 10;
+      const stop2 = pRts + pDel;
+      const donut = document.getElementById('full-donut');
+      if (donut) {
+        donut.style.background = `conic-gradient(#dc2626 0 ${pRts}%, #16a34a ${pRts}% ${stop2}%, #2563eb ${stop2}% 100%)`;
+      }
+      const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      setTxt('full-total',   fmtNum(qty));
+      setTxt('full-pct-rts', pRts.toFixed(1) + '%'); setTxt('full-cnt-rts', '(' + fmtNum(rts) + ')');
+      setTxt('full-pct-del', pDel.toFixed(1) + '%'); setTxt('full-cnt-del', '(' + fmtNum(del) + ')');
+      setTxt('full-pct-tr',  pTr.toFixed(1) + '%');  setTxt('full-cnt-tr',  '(' + fmtNum(transit) + ')');
     }
 
     function updateInfo(dt) {
