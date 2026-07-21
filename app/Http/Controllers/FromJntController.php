@@ -1378,23 +1378,9 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
         ];
     });
 
-    // ── RTS donut charts: full range + projection (partial cohort) ──
-    $totalDays = max(0, Carbon::parse($from, 'Asia/Manila')->diffInDays(Carbon::parse($to, 'Asia/Manila')));
-
-    // partial_days: default = earliest window na may >= 300 shipments (PROJECTION_MIN)
-    $partialDays = $request->input('partial_days');
-    if ($partialDays === null || $partialDays === '') {
-        $nth = DB::table('from_jnts')
-            ->whereBetween('submission_time', [$fromDt, $toDt])
-            ->orderBy('submission_time')
-            ->offset(299)->limit(1)                 // 300th row
-            ->value('submission_time');
-        $partialDays = $nth
-            ? Carbon::parse($from, 'Asia/Manila')->diffInDays(Carbon::parse($nth, 'Asia/Manila'))
-            : $totalDays;
-    }
-    $partialDays = max(0, min($totalDays, (int) $partialDays));
-    $partialTo   = Carbon::parse($from, 'Asia/Manila')->addDays($partialDays)->endOfDay();
+    // ── RTS donut charts: full range + projection (resolved-rate extrapolation) ──
+    $full       = $this->rtsBreakdown($fromDt, $toDt);
+    $projection = $this->projectBreakdown($full);
 
     // Distinct items para sa searchable dropdown (datalist)
     $itemOptions = DB::table('from_jnts')
@@ -1406,13 +1392,36 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
         'results'     => $results,
         'from'        => $from,
         'to'          => $to,
-        'full'        => $this->rtsBreakdown($fromDt, $toDt),
-        'projection'  => $this->rtsBreakdown($fromDt, $partialTo),
-        'totalDays'   => $totalDays,
-        'partialDays' => $partialDays,
-        'partialDate' => $partialTo->toDateString(),
+        'full'        => $full,
+        'projection'  => $projection,
         'itemOptions' => $itemOptions,
     ]);
+}
+
+/**
+ * RTS Projection = i-extrapolate ang in-transit gamit ang RTS rate ng mga
+ * NA-RESOLVE na (RTS + Delivered). Proyeksiyon ng magiging final RTS%.
+ * Laging gumagana kahit naka-filter (walang date-cohort na maaaring mag-empty).
+ */
+private function projectBreakdown(array $b): array
+{
+    $resolved = $b['totalRts'] + $b['totalDelivered'];
+    $rate     = $resolved > 0 ? $b['totalRts'] / $resolved : 0;
+    $total    = (int) $b['total'];
+    $projRts  = (int) round($b['totalRts'] + $b['totalTransit'] * $rate);
+    $projRts  = max(0, min($total, $projRts));
+    $projDel  = max(0, $total - $projRts);
+    $base     = max(1, $total);
+
+    return [
+        'total'          => $total,
+        'totalRts'       => $projRts,
+        'totalDelivered' => $projDel,
+        'totalTransit'   => 0,
+        'pctRts'         => round($projRts / $base * 100, 1),
+        'pctDelivered'   => round($projDel / $base * 100, 1),
+        'pctTransit'     => 0.0,
+    ];
 }
 
 /**
