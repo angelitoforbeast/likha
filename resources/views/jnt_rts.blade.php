@@ -88,9 +88,9 @@
         <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); padding:12px 16px;">
           <div style="display:flex; align-items:center; justify-content:space-between;">
             <h2 style="font-size:13px; font-weight:600; color:#1f2937; margin:0;">🔮 RTS Projection</h2>
-            <span style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#b45309; background:#fef3c7; border-radius:9999px; padding:2px 8px;">Projected</span>
+            <span style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#b45309; background:#fef3c7; border-radius:9999px; padding:2px 8px;">Partial cohort · ≥300</span>
           </div>
-          <p style="font-size:11px; color:#9ca3af; margin:2px 0 10px;">Batay sa <b>na-resolve na</b> (RTS + Delivered): ini-extrapolate ang in-transit sa RTS rate ng settled → proyeksiyon ng magiging final RTS%.</p>
+          <p style="font-size:11px; color:#9ca3af; margin:2px 0 10px;">Batay sa <b>pinakalumang ≥300 shipments</b> (settled na) — ang RTS% nila = proyeksiyon kung saan patungo.</p>
           @include('partials.rts-pie', array_merge($projection, ['pieId' => 'proj']))
         </div>
 
@@ -276,23 +276,39 @@
       setTxt('full-pct-del', pDel.toFixed(1) + '%'); setTxt('full-cnt-del', '(' + fmtNum(del) + ')');
       setTxt('full-pct-tr',  pTr.toFixed(1) + '%');  setTxt('full-cnt-tr',  '(' + fmtNum(transit) + ')');
 
-      // ── Live Projection donut: resolved-rate extrapolation (reactive sa kahit anong filter) ──
-      // Sa mga na-resolve na (rts+del) kunin ang RTS rate, i-apply sa in-transit → final projection.
-      const resolved = rts + del;
-      const rate     = resolved > 0 ? rts / resolved : 0;
-      const projRts  = Math.min(qty, Math.round(rts + transit * rate));
-      const projDel  = Math.max(0, qty - projRts);
-      const jRts = qty > 0 ? Math.round(projRts / qty * 1000) / 10 : 0;
-      const jDel = qty > 0 ? Math.round(projDel / qty * 1000) / 10 : 0;
+      // ── Live Projection donut: PINAKALUMANG >= 300 shipments (partial cohort) ng filtered rows ──
+      const PROJ_MIN = 300;
+      const prows = [];
+      dt.rows({ search: 'applied' }).nodes().each(function (row) {
+        const sc = row.querySelector('td[data-start]');
+        const c  = row.querySelectorAll('td[data-raw]');
+        prows.push({
+          start: sc ? sc.dataset.start : '',
+          qty: parseInt(c[0]?.dataset.raw || 0),
+          rts: parseInt(c[1]?.dataset.raw || 0),
+          del: parseInt(c[2]?.dataset.raw || 0),
+          tr:  parseInt(c[3]?.dataset.raw || 0),
+        });
+      });
+      prows.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));  // pinakaluma muna
+      let pq = 0, prts = 0, pdel = 0, ptr = 0;
+      for (const r of prows) {
+        pq += r.qty; prts += r.rts; pdel += r.del; ptr += r.tr;
+        if (pq >= PROJ_MIN) break;   // umabot na sa >= 300 → hinto
+      }
+      const pb = Math.max(1, pq);
+      const jRts = Math.round(prts / pb * 1000) / 10;
+      const jDel = Math.round(pdel / pb * 1000) / 10;
+      const jTr  = Math.round(ptr  / pb * 1000) / 10;
       const jStop2 = jRts + jDel;
       const projDonut = document.getElementById('proj-donut');
       if (projDonut) {
         projDonut.style.background = `conic-gradient(#dc2626 0 ${jRts}%, #16a34a ${jRts}% ${jStop2}%, #2563eb ${jStop2}% 100%)`;
       }
-      setTxt('proj-total',   fmtNum(qty));
-      setTxt('proj-pct-rts', jRts.toFixed(1) + '%'); setTxt('proj-cnt-rts', '(' + fmtNum(projRts) + ')');
-      setTxt('proj-pct-del', jDel.toFixed(1) + '%'); setTxt('proj-cnt-del', '(' + fmtNum(projDel) + ')');
-      setTxt('proj-pct-tr',  '0.0%');                setTxt('proj-cnt-tr',  '(0)');
+      setTxt('proj-total',   fmtNum(pq));
+      setTxt('proj-pct-rts', jRts.toFixed(1) + '%'); setTxt('proj-cnt-rts', '(' + fmtNum(prts) + ')');
+      setTxt('proj-pct-del', jDel.toFixed(1) + '%'); setTxt('proj-cnt-del', '(' + fmtNum(pdel) + ')');
+      setTxt('proj-pct-tr',  jTr.toFixed(1) + '%');  setTxt('proj-cnt-tr',  '(' + fmtNum(ptr) + ')');
     }
 
     function updateInfo(dt) {

@@ -1378,9 +1378,9 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
         ];
     });
 
-    // ── RTS donut charts: full range + projection (resolved-rate extrapolation) ──
+    // ── RTS donut charts: full range + projection (earliest >= 300 shipments cohort) ──
     $full       = $this->rtsBreakdown($fromDt, $toDt);
-    $projection = $this->projectBreakdown($full);
+    $projection = $this->cohortProjection($results);
 
     // Distinct items para sa searchable dropdown (datalist)
     $itemOptions = DB::table('from_jnts')
@@ -1399,28 +1399,32 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
 }
 
 /**
- * RTS Projection = i-extrapolate ang in-transit gamit ang RTS rate ng mga
- * NA-RESOLVE na (RTS + Delivered). Proyeksiyon ng magiging final RTS%.
- * Laging gumagana kahit naka-filter (walang date-cohort na maaaring mag-empty).
+ * RTS Projection = breakdown ng PINAKALUMANG >= 300 shipments (partial cohort).
+ * Settled na ang mga ito, kaya ang RTS% nila = proyeksiyon kung saan patungo.
+ * Kung < 300 ang kabuuan → gamitin lahat (fallback). Base sa GROUPED rows (results).
  */
-private function projectBreakdown(array $b): array
+private function cohortProjection($results): array
 {
-    $resolved = $b['totalRts'] + $b['totalDelivered'];
-    $rate     = $resolved > 0 ? $b['totalRts'] / $resolved : 0;
-    $total    = (int) $b['total'];
-    $projRts  = (int) round($b['totalRts'] + $b['totalTransit'] * $rate);
-    $projRts  = max(0, min($total, $projRts));
-    $projDel  = max(0, $total - $projRts);
-    $base     = max(1, $total);
+    $rows = collect($results)->sortBy('start')->values();   // pinakaluma muna
 
+    $pq = 0; $prts = 0; $pdel = 0; $ptr = 0;
+    foreach ($rows as $r) {
+        $pq   += (int) $r['quantity'];
+        $prts += (int) $r['rts_count'];
+        $pdel += (int) $r['delivered_count'];
+        $ptr  += (int) $r['transit_count'];
+        if ($pq >= 300) break;   // umabot na sa >= 300 → hinto
+    }
+
+    $base = max(1, $pq);
     return [
-        'total'          => $total,
-        'totalRts'       => $projRts,
-        'totalDelivered' => $projDel,
-        'totalTransit'   => 0,
-        'pctRts'         => round($projRts / $base * 100, 1),
-        'pctDelivered'   => round($projDel / $base * 100, 1),
-        'pctTransit'     => 0.0,
+        'total'          => $pq,
+        'totalRts'       => $prts,
+        'totalDelivered' => $pdel,
+        'totalTransit'   => $ptr,
+        'pctRts'         => round($prts / $base * 100, 1),
+        'pctDelivered'   => round($pdel / $base * 100, 1),
+        'pctTransit'     => round($ptr  / $base * 100, 1),
     ];
 }
 
