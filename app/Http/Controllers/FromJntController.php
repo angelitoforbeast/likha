@@ -1377,11 +1377,79 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
         ];
     });
 
+    // ── RTS donut charts: full range + projection (partial cohort) ──
+    $totalDays = max(0, Carbon::parse($from, 'Asia/Manila')->diffInDays(Carbon::parse($to, 'Asia/Manila')));
+
+    // partial_days: default = earliest window na may >= 300 shipments (PROJECTION_MIN)
+    $partialDays = $request->input('partial_days');
+    if ($partialDays === null || $partialDays === '') {
+        $nth = DB::table('from_jnts')
+            ->whereBetween('submission_time', [$fromDt, $toDt])
+            ->orderBy('submission_time')
+            ->offset(299)->limit(1)                 // 300th row
+            ->value('submission_time');
+        $partialDays = $nth
+            ? Carbon::parse($from, 'Asia/Manila')->diffInDays(Carbon::parse($nth, 'Asia/Manila'))
+            : $totalDays;
+    }
+    $partialDays = max(0, min($totalDays, (int) $partialDays));
+    $partialTo   = Carbon::parse($from, 'Asia/Manila')->addDays($partialDays)->endOfDay();
+
+    // Distinct items para sa searchable dropdown (datalist)
+    $itemOptions = DB::table('from_jnts')
+        ->whereBetween('submission_time', [$fromDt, $toDt])
+        ->whereNotNull('item_name')->where('item_name', '<>', '')
+        ->distinct()->orderBy('item_name')->pluck('item_name')->all();
+
     return view('jnt_rts', [
-        'results' => $results,
-        'from'    => $from,
-        'to'      => $to,
+        'results'     => $results,
+        'from'        => $from,
+        'to'          => $to,
+        'full'        => $this->rtsBreakdown($fromDt, $toDt),
+        'projection'  => $this->rtsBreakdown($fromDt, $partialTo),
+        'totalDays'   => $totalDays,
+        'partialDays' => $partialDays,
+        'partialDate' => $partialTo->toDateString(),
+        'itemOptions' => $itemOptions,
     ]);
+}
+
+/**
+ * Aggregate RTS/Delivered/Transit breakdown para sa isang date window.
+ * Ginagamit ng dalawang donut (full range + projection).
+ * SAME classification sa rtsFiltered table (consistent ang %).
+ */
+private function rtsBreakdown(Carbon $fromDt, Carbon $toDt): array
+{
+    $row = DB::table('from_jnts')
+        ->whereBetween('submission_time', [$fromDt, $toDt])
+        ->selectRaw("
+            COUNT(*) as quantity,
+            SUM(CASE
+                WHEN LOWER(status) LIKE '%return%' OR LOWER(status) LIKE '%rts%' THEN 1
+                WHEN TRIM(COALESCE(rts_reason,'')) <> ''
+                     AND LOWER(status) NOT LIKE '%delivered%'
+                     AND LOWER(status) NOT LIKE '%returned%' THEN 1
+                ELSE 0 END
+            ) as rts,
+            SUM(CASE WHEN LOWER(status) LIKE '%delivered%' THEN 1 ELSE 0 END) as delivered
+        ")->first();
+
+    $qty     = (int) ($row->quantity ?? 0);
+    $rts     = (int) ($row->rts ?? 0);
+    $del     = (int) ($row->delivered ?? 0);
+    $transit = max(0, $qty - $rts - $del);
+    $base    = max(1, $qty);
+
+    return [
+        'total'          => $qty,
+        'totalRts'       => $rts,
+        'totalDelivered' => $del,
+        'totalTransit'   => $transit,
+        'pctRts'         => round($rts / $base * 100, 1),
+        'pctDelivered'   => round($del / $base * 100, 1),
+        'pctTransit'     => round($transit / $base * 100, 1),
+    ];
 }
 
 

@@ -62,8 +62,13 @@
         </div>
         <div>
           <label style="display:block;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em;">Item (exact)</label>
-          <input id="itemExact" type="text" placeholder="e.g. 1 x LIP TATTOO"
+          <input id="itemExact" type="text" list="itemOptionsList" placeholder="Type or pick item…"
                  style="border:1px solid #0d9488;padding:5px 10px;border-radius:6px;font-size:13px;min-width:200px;">
+          <datalist id="itemOptionsList">
+            @foreach(($itemOptions ?? []) as $it)
+              <option value="{{ $it }}"></option>
+            @endforeach
+          </datalist>
         </div>
         <button type="button" id="itemExactBtn"
                 style="background:#0d9488;color:white;padding:6px 16px;border-radius:6px;border:none;cursor:pointer;font-size:13px;font-weight:600;">Search Item</button>
@@ -73,6 +78,52 @@
            style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;color:#374151;font-size:13px;text-decoration:none;background:white;display:inline-flex;align-items:center;">Reset</a>
       </form>
     </div>
+
+    {{-- ── RTS donut charts (Full Range + Projection) — above the table ── --}}
+    @if(!empty($full))
+    <div style="flex-shrink:0; padding:0 16px 8px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+
+        {{-- Chart 1: RTS Projection (partial cohort, slideable) --}}
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); padding:12px 16px;">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <h2 style="font-size:13px; font-weight:600; color:#1f2937; margin:0;">🔮 RTS Projection</h2>
+            <span style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#b45309; background:#fef3c7; border-radius:9999px; padding:2px 8px;">Partial cohort</span>
+          </div>
+          <p style="font-size:11px; color:#9ca3af; margin:2px 0 8px;">Mas settled na ang mas lumang shipments — kaya ang RTS% nila = proyeksiyon kung saan patungo ang buong period.</p>
+          <form method="GET" action="{{ url('/jnt_rts') }}" style="margin-bottom:6px;">
+            <input type="hidden" name="from" value="{{ $from }}">
+            <input type="hidden" name="to"   value="{{ $to }}">
+            <div style="display:flex; align-items:center; justify-content:space-between; font-size:11px; margin-bottom:2px;">
+              <span style="color:#6b7280;">Data up to</span>
+              <span style="font-weight:600; color:#374151;">{{ \Carbon\Carbon::parse($from)->format('M j') }} → {{ \Carbon\Carbon::parse($partialDate)->format('M j, Y') }}</span>
+            </div>
+            <input type="range" name="partial_days" min="0" max="{{ max(1, $totalDays) }}" value="{{ $partialDays }}"
+                   onchange="this.form.submit()" {{ $totalDays === 0 ? 'disabled' : '' }}
+                   style="width:100%; accent-color:#4f46e5; cursor:pointer;">
+            <div style="display:flex; justify-content:space-between; font-size:10px; color:#9ca3af; margin-top:1px;">
+              <span>{{ \Carbon\Carbon::parse($from)->format('M j') }}</span>
+              <span>{{ \Carbon\Carbon::parse($to)->format('M j') }}</span>
+            </div>
+          </form>
+          @include('partials.rts-pie', $projection)
+        </div>
+
+        {{-- Chart 2: Full selected range --}}
+        <div style="background:white; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,.08); padding:12px 16px;">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <h2 style="font-size:13px; font-weight:600; color:#1f2937; margin:0;">📊 Full Range</h2>
+            <span style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:#9ca3af;">{{ \Carbon\Carbon::parse($from)->format('M j') }} → {{ \Carbon\Carbon::parse($to)->format('M j, Y') }}</span>
+          </div>
+          <p style="font-size:11px; color:#9ca3af; margin:2px 0 8px;">Lahat ng shipment sa piniling range (kasama pa ang in-transit).</p>
+          <div style="margin-top:46px;">
+            @include('partials.rts-pie', $full)
+          </div>
+        </div>
+
+      </div>
+    </div>
+    @endif
 
     {{-- Controls: length left, info+pagination right --}}
     <div style="flex-shrink:0; padding:2px 16px 6px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
