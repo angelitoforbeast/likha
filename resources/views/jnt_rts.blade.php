@@ -90,7 +90,19 @@
             <h2 style="font-size:13px; font-weight:600; color:#1f2937; margin:0;">🔮 RTS Projection</h2>
             <span style="font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#b45309; background:#fef3c7; border-radius:9999px; padding:2px 8px;">Partial cohort · ≥300</span>
           </div>
-          <p style="font-size:11px; color:#9ca3af; margin:2px 0 10px;">Batay sa <b>pinakalumang ≥300 shipments</b> (settled na) — ang RTS% nila = proyeksiyon kung saan patungo.</p>
+          <p style="font-size:11px; color:#9ca3af; margin:2px 0 8px;">Default = <b>pinakalumang ≥300 shipments</b> (settled). Pwede mong i-adjust ang cutoff sa slider. Nagre-reset sa bawat filter.</p>
+          <div style="margin-bottom:8px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; font-size:11px; margin-bottom:2px;">
+              <span style="color:#6b7280;">Data up to</span>
+              <span style="font-weight:600; color:#374151;" id="projCutoffLabel">—</span>
+            </div>
+            <input type="range" id="projSlider" min="0" max="100" value="0" oninput="onProjSlider()"
+                   style="width:100%; accent-color:#4f46e5; cursor:pointer;">
+            <div style="display:flex; justify-content:space-between; font-size:10px; color:#9ca3af; margin-top:1px;">
+              <span>{{ \Carbon\Carbon::parse($from)->format('M j') }}</span>
+              <span>{{ \Carbon\Carbon::parse($to)->format('M j') }}</span>
+            </div>
+          </div>
           @include('partials.rts-pie', array_merge($projection, ['pieId' => 'proj']))
         </div>
 
@@ -100,8 +112,8 @@
             <h2 style="font-size:13px; font-weight:600; color:#1f2937; margin:0;">📊 Full Range</h2>
             <span style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:#9ca3af;">{{ \Carbon\Carbon::parse($from)->format('M j') }} → {{ \Carbon\Carbon::parse($to)->format('M j, Y') }}</span>
           </div>
-          <p style="font-size:11px; color:#9ca3af; margin:2px 0 10px;">Lahat ng shipment sa piniling range (kasama pa ang in-transit).</p>
-          <div>
+          <p style="font-size:11px; color:#9ca3af; margin:2px 0 8px;">Lahat ng shipment sa piniling range (kasama pa ang in-transit).</p>
+          <div style="margin-top:44px;">
             @include('partials.rts-pie', array_merge($full, ['pieId' => 'full']))
           </div>
         </div>
@@ -243,14 +255,59 @@
   <script>
     function fmtNum(n) { return Number(n).toLocaleString('en-PH'); }
 
+    // ── Projection slider state + helpers ──
+    let projRows = [];   // filtered rows (start + counts), sorted by date — set kada draw
+    function setEl(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+    function projFromDate() { return (document.getElementById('from') || {}).value || ''; }
+    function offsetToDate(off) {
+      const f = projFromDate(); if (!f) return f;
+      const d = new Date(f + 'T00:00:00'); d.setDate(d.getDate() + off);
+      const p = n => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    }
+    function dateToOffset(ds) {
+      const f = projFromDate(); if (!f || !ds) return 0;
+      return Math.max(0, Math.round((new Date(ds + 'T00:00:00') - new Date(f + 'T00:00:00')) / 86400000));
+    }
+    function default300Offset() {   // earliest date kung saan umabot sa >= 300 shipments
+      let q = 0, last = projFromDate();
+      for (const r of projRows) { q += r.qty; if (r.start) last = r.start; if (q >= 300) break; }
+      return dateToOffset(last);
+    }
+    function renderProjection(cutoff) {   // cohort = rows na start <= cutoff
+      let pq = 0, prts = 0, pdel = 0, ptr = 0;
+      for (const r of projRows) {
+        if (r.start && r.start > cutoff) continue;
+        pq += r.qty; prts += r.rts; pdel += r.del; ptr += r.tr;
+      }
+      const pb = Math.max(1, pq);
+      const a = Math.round(prts / pb * 1000) / 10, b = Math.round(pdel / pb * 1000) / 10, c = Math.round(ptr / pb * 1000) / 10;
+      const s2 = a + b;
+      const d = document.getElementById('proj-donut');
+      if (d) d.style.background = `conic-gradient(#dc2626 0 ${a}%, #16a34a ${a}% ${s2}%, #2563eb ${s2}% 100%)`;
+      setEl('proj-total', fmtNum(pq));
+      setEl('proj-pct-rts', a.toFixed(1) + '%'); setEl('proj-cnt-rts', '(' + fmtNum(prts) + ')');
+      setEl('proj-pct-del', b.toFixed(1) + '%'); setEl('proj-cnt-del', '(' + fmtNum(pdel) + ')');
+      setEl('proj-pct-tr',  c.toFixed(1) + '%'); setEl('proj-cnt-tr',  '(' + fmtNum(ptr) + ')');
+      setEl('projCutoffLabel', cutoff || '—');
+    }
+    function onProjSlider() {   // manual adjust (walang reset)
+      const s = document.getElementById('projSlider');
+      if (s) renderProjection(offsetToDate(parseInt(s.value || 0, 10)));
+    }
+
     function updateTotals(dt) {
       let qty = 0, rts = 0, del = 0, transit = 0;
+      projRows = [];
       dt.rows({ search: 'applied' }).nodes().each(function (row) {
         const cells = row.querySelectorAll('td[data-raw]');
-        qty     += parseInt(cells[0]?.dataset.raw || 0);
-        rts     += parseInt(cells[1]?.dataset.raw || 0);
-        del     += parseInt(cells[2]?.dataset.raw || 0);
-        transit += parseInt(cells[3]?.dataset.raw || 0);
+        const sc = row.querySelector('td[data-start]');
+        const q = parseInt(cells[0]?.dataset.raw || 0),
+              r = parseInt(cells[1]?.dataset.raw || 0),
+              d = parseInt(cells[2]?.dataset.raw || 0),
+              t = parseInt(cells[3]?.dataset.raw || 0);
+        qty += q; rts += r; del += d; transit += t;
+        projRows.push({ start: sc ? sc.dataset.start : '', qty: q, rts: r, del: d, tr: t });
       });
       const t = Math.max(1, qty);
       document.getElementById('tot-qty').textContent         = fmtNum(qty);
@@ -276,39 +333,15 @@
       setTxt('full-pct-del', pDel.toFixed(1) + '%'); setTxt('full-cnt-del', '(' + fmtNum(del) + ')');
       setTxt('full-pct-tr',  pTr.toFixed(1) + '%');  setTxt('full-cnt-tr',  '(' + fmtNum(transit) + ')');
 
-      // ── Live Projection donut: PINAKALUMANG >= 300 shipments (partial cohort) ng filtered rows ──
-      const PROJ_MIN = 300;
-      const prows = [];
-      dt.rows({ search: 'applied' }).nodes().each(function (row) {
-        const sc = row.querySelector('td[data-start]');
-        const c  = row.querySelectorAll('td[data-raw]');
-        prows.push({
-          start: sc ? sc.dataset.start : '',
-          qty: parseInt(c[0]?.dataset.raw || 0),
-          rts: parseInt(c[1]?.dataset.raw || 0),
-          del: parseInt(c[2]?.dataset.raw || 0),
-          tr:  parseInt(c[3]?.dataset.raw || 0),
-        });
-      });
-      prows.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));  // pinakaluma muna
-      let pq = 0, prts = 0, pdel = 0, ptr = 0;
-      for (const r of prows) {
-        pq += r.qty; prts += r.rts; pdel += r.del; ptr += r.tr;
-        if (pq >= PROJ_MIN) break;   // umabot na sa >= 300 → hinto
+      // ── Projection: slider (default = >=300 point), nagre-reset sa bawat filter change ──
+      projRows.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));  // pinakaluma muna
+      const projSlider = document.getElementById('projSlider');
+      if (projSlider) {
+        const maxOff = dateToOffset((document.getElementById('to') || {}).value || '');
+        projSlider.max = Math.max(1, maxOff);
+        projSlider.value = Math.min(default300Offset(), maxOff);   // reset sa bagong >=300 point (2a)
+        renderProjection(offsetToDate(parseInt(projSlider.value, 10)));
       }
-      const pb = Math.max(1, pq);
-      const jRts = Math.round(prts / pb * 1000) / 10;
-      const jDel = Math.round(pdel / pb * 1000) / 10;
-      const jTr  = Math.round(ptr  / pb * 1000) / 10;
-      const jStop2 = jRts + jDel;
-      const projDonut = document.getElementById('proj-donut');
-      if (projDonut) {
-        projDonut.style.background = `conic-gradient(#dc2626 0 ${jRts}%, #16a34a ${jRts}% ${jStop2}%, #2563eb ${jStop2}% 100%)`;
-      }
-      setTxt('proj-total',   fmtNum(pq));
-      setTxt('proj-pct-rts', jRts.toFixed(1) + '%'); setTxt('proj-cnt-rts', '(' + fmtNum(prts) + ')');
-      setTxt('proj-pct-del', jDel.toFixed(1) + '%'); setTxt('proj-cnt-del', '(' + fmtNum(pdel) + ')');
-      setTxt('proj-pct-tr',  jTr.toFixed(1) + '%');  setTxt('proj-cnt-tr',  '(' + fmtNum(ptr) + ')');
     }
 
     function updateInfo(dt) {
