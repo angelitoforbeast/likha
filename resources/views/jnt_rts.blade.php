@@ -106,7 +106,8 @@
               <span>{{ \Carbon\Carbon::parse($to)->format('M j') }}</span>
             </div>
           </form>
-          @include('partials.rts-pie', $projection)
+          <input type="hidden" id="projPartialDate" value="{{ $partialDate }}">
+          @include('partials.rts-pie', array_merge($projection, ['pieId' => 'proj']))
         </div>
 
         {{-- Chart 2: Full selected range --}}
@@ -165,7 +166,7 @@
                 $num = fn($v) => is_numeric($v) ? $v : null;
               @endphp
               <tr class="hover:bg-blue-50 transition-colors" style="background:white;">
-                <td class="px-3 py-1.5 border border-gray-200 whitespace-nowrap text-gray-700 text-xs">{{ $r['date_range'] }}</td>
+                <td class="px-3 py-1.5 border border-gray-200 whitespace-nowrap text-gray-700 text-xs" data-start="{{ $r['start'] }}">{{ $r['date_range'] }}</td>
                 <td class="px-3 py-1.5 border border-gray-200 whitespace-nowrap font-medium text-gray-800 text-xs">{{ $r['sender'] }}</td>
                 <td class="px-3 py-1.5 border border-gray-200 whitespace-nowrap text-gray-700 text-xs">{{ $r['item'] }}</td>
                 <td class="px-3 py-1.5 border border-gray-200 whitespace-nowrap text-gray-700 text-xs">{{ $r['cod'] }}</td>
@@ -290,6 +291,33 @@
       setTxt('full-pct-rts', pRts.toFixed(1) + '%'); setTxt('full-cnt-rts', '(' + fmtNum(rts) + ')');
       setTxt('full-pct-del', pDel.toFixed(1) + '%'); setTxt('full-cnt-del', '(' + fmtNum(del) + ')');
       setTxt('full-pct-tr',  pTr.toFixed(1) + '%');  setTxt('full-cnt-tr',  '(' + fmtNum(transit) + ')');
+
+      // ── Live Projection donut: older cohort (start <= partialDate) ng na-filter na rows ──
+      const partialDate = (document.getElementById('projPartialDate') || {}).value || '9999-12-31';
+      let pq = 0, prts = 0, pdel = 0, ptr = 0;
+      dt.rows({ search: 'applied' }).nodes().each(function (row) {
+        const startCell = row.querySelector('td[data-start]');
+        const start = startCell ? startCell.dataset.start : '';
+        if (!start || start > partialDate) return;          // cohort cutoff (chronological string compare)
+        const c = row.querySelectorAll('td[data-raw]');
+        pq   += parseInt(c[0]?.dataset.raw || 0);
+        prts += parseInt(c[1]?.dataset.raw || 0);
+        pdel += parseInt(c[2]?.dataset.raw || 0);
+        ptr  += parseInt(c[3]?.dataset.raw || 0);
+      });
+      const pb = Math.max(1, pq);
+      const jRts = Math.round(prts / pb * 1000) / 10;
+      const jDel = Math.round(pdel / pb * 1000) / 10;
+      const jTr  = Math.round(ptr  / pb * 1000) / 10;
+      const jStop2 = jRts + jDel;
+      const projDonut = document.getElementById('proj-donut');
+      if (projDonut) {
+        projDonut.style.background = `conic-gradient(#dc2626 0 ${jRts}%, #16a34a ${jRts}% ${jStop2}%, #2563eb ${jStop2}% 100%)`;
+      }
+      setTxt('proj-total',   fmtNum(pq));
+      setTxt('proj-pct-rts', jRts.toFixed(1) + '%'); setTxt('proj-cnt-rts', '(' + fmtNum(prts) + ')');
+      setTxt('proj-pct-del', jDel.toFixed(1) + '%'); setTxt('proj-cnt-del', '(' + fmtNum(pdel) + ')');
+      setTxt('proj-pct-tr',  jTr.toFixed(1) + '%');  setTxt('proj-cnt-tr',  '(' + fmtNum(ptr) + ')');
     }
 
     function updateInfo(dt) {

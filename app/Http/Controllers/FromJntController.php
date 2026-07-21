@@ -1362,6 +1362,7 @@ if ($firstForReturnBa === null && $isForReturnStatus($toRaw) && !$hasForReturnBe
 
         return [
             'date_range'        => $dateRange,
+            'start'             => $fmtDate($r->min_sub),   // para sa client-side projection cohort
             'sender'            => trim((string)$r->sender),
             'item'              => trim((string)$r->item_name),
             'cod'               => trim((string)$r->cod),
