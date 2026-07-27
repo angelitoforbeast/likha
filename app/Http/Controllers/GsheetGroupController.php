@@ -141,7 +141,12 @@ class GsheetGroupController extends Controller
 
         $service = $this->makeSheetsService();
 
-        $likha = $this->readSheet($service, $group->likha_url, "'TO ENCODER'!L1");
+        // Case-insensitive resolve ng LIKHA sheet names (TO ENCODER / All Orders)
+        $likhaSheets = $this->sheetTitles($service, $this->extractSpreadsheetId($group->likha_url));
+        $toEncoder   = $this->pickTitle($likhaSheets, 'TO ENCODER');
+        $allOrders   = $this->pickTitle($likhaSheets, 'All Orders');
+
+        $likha = $this->readSheet($service, $group->likha_url, "'{$toEncoder}'!L1");
         $macro = $this->readSheet($service, $group->macro_url, "'LINKS'!E2");
         $after = $this->readSheet($service, $group->after_url, "'DATABASE'!N1");
 
@@ -163,8 +168,8 @@ class GsheetGroupController extends Controller
             if ($afterB['error'] === null) {
                 $afterB['value'] = $this->extractFbName($afterB['value']);
             }
-            // Likha: All Orders!C{lastRow} (raw)
-            $likhaC = $this->readValue($service, $group->likha_url, "'All Orders'!C{$lastRow}");
+            // Likha: All Orders!C{lastRow} (raw) — case-insensitive na tab name
+            $likhaC = $this->readValue($service, $group->likha_url, "'{$allOrders}'!C{$lastRow}");
         }
 
         return response()->json([
@@ -353,6 +358,31 @@ class GsheetGroupController extends Controller
         if (!$url) return null;
         preg_match('/\/d\/([a-zA-Z0-9-_]+)/', $url, $matches);
         return $matches[1] ?? null;
+    }
+
+    // Lahat ng tab/sheet titles ng isang spreadsheet.
+    private function sheetTitles(\Google\Service\Sheets $service, ?string $sheetId): array
+    {
+        if (!$sheetId) return [];
+        try {
+            $meta = $service->spreadsheets->get($sheetId, ['fields' => 'sheets.properties.title']);
+            $out = [];
+            foreach ($meta->getSheets() as $s) {
+                $out[] = $s->getProperties()->getTitle();
+            }
+            return $out;
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
+    // Case-insensitive match ng sheet name; fallback sa hinanap kung walang tugma.
+    private function pickTitle(array $titles, string $want): string
+    {
+        foreach ($titles as $t) {
+            if (strcasecmp(trim($t), trim($want)) === 0) return $t;
+        }
+        return $want;
     }
 
     private function friendlyError(string $msg): string

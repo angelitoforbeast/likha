@@ -101,24 +101,26 @@ class DeleteGsheetRowsJob implements ShouldQueue
             return;
         }
 
+        // Case-INSENSITIVE map (key = lower/trimmed title) — hindi na apektado ng casing/spacing.
         $map = [];
         foreach ($meta->getSheets() as $s) {
             $p = $s->getProperties();
-            $map[$p->getTitle()] = ['gid' => $p->getSheetId(), 'rows' => $p->getGridProperties()->getRowCount()];
+            $map[strtolower(trim($p->getTitle()))] = ['gid' => $p->getSheetId(), 'rows' => $p->getGridProperties()->getRowCount()];
         }
 
         foreach ($targets as [$tab, $mode, $col]) {
             $entry = ['spreadsheet' => $label, 'tab' => $tab, 'mode' => $mode, 'rows_before' => null, 'deleted' => 0, 'status' => null, 'error' => null];
 
-            if (!isset($map[$tab])) {
+            $key = strtolower(trim($tab));
+            if (!isset($map[$key])) {
                 $entry['status'] = 'not_found';
                 $this->append($run, $entry);
                 continue;
             }
 
-            $gid = $map[$tab]['gid'];
-            $entry['rows_before'] = $map[$tab]['rows'];
-            $end = min($endRow, $map[$tab]['rows']); // clamp sa grid
+            $gid = $map[$key]['gid'];
+            $entry['rows_before'] = $map[$key]['rows'];
+            $end = min($endRow, $map[$key]['rows']); // clamp sa grid
 
             if ($end < 3) {
                 $entry['status'] = 'empty';
