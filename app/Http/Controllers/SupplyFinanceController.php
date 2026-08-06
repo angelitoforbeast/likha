@@ -312,7 +312,8 @@ class SupplyFinanceController extends Controller
             'items'              => ['required', 'array', 'min:1'],
             'items.*.item_name'  => ['required', 'string', 'max:191'],
             'items.*.ordered_qty' => ['required', 'integer', 'min:0'],
-            'items.*.unit_cost'  => ['required', 'numeric', 'min:0'],
+            // unit_cost pwedeng NEGATIVE — para sa discount line (hal. -500).
+            'items.*.unit_cost'  => ['required', 'numeric'],
         ]);
 
         $order = DB::transaction(function () use ($data) {
@@ -372,7 +373,8 @@ class SupplyFinanceController extends Controller
             'items.*.id'         => ['nullable'],
             'items.*.item_name'  => ['required', 'string', 'max:191'],
             'items.*.ordered_qty' => ['required', 'integer', 'min:0'],
-            'items.*.unit_cost'  => ['required', 'numeric', 'min:0'],
+            // unit_cost pwedeng NEGATIVE — para sa discount line (hal. -500).
+            'items.*.unit_cost'  => ['required', 'numeric'],
             'remove_ids'         => ['nullable', 'array'],
             'remove_ids.*'       => ['integer'],
         ]);

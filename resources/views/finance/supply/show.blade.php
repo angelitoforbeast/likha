@@ -152,8 +152,8 @@
                     <input :name="`items[${idx}][ordered_qty]`" x-model.number="it.ordered_qty" type="number" min="0" required
                            inputmode="numeric"
                            class="no-spin col-span-2 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
-                    <input :name="`items[${idx}][unit_cost]`" x-model.number="it.unit_cost" type="number" step="0.01" min="0" required
-                           inputmode="decimal"
+                    <input :name="`items[${idx}][unit_cost]`" x-model.number="it.unit_cost" type="number" step="0.01" required
+                           inputmode="decimal" title="Pwedeng negative para sa discount line (hal. -500)"
                            class="no-spin col-span-3 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
                     <button type="button" @click="removeRow(idx)" class="col-span-1 text-red-500 hover:text-red-700 text-lg leading-none">×</button>
                   </div>
@@ -330,7 +330,7 @@
                           </div>
                           <input :name="`items[${idx}][ordered_qty]`" x-model.number="it.ordered_qty" type="number" min="0" required inputmode="numeric"
                                  class="no-spin col-span-2 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
-                          <input :name="`items[${idx}][unit_cost]`" x-model.number="it.unit_cost" type="number" step="0.01" min="0" required inputmode="decimal"
+                          <input :name="`items[${idx}][unit_cost]`" x-model.number="it.unit_cost" type="number" step="0.01" required inputmode="decimal" title="Pwedeng negative para sa discount line (hal. -500)"
                                  class="no-spin col-span-3 border border-slate-300 rounded px-2 py-1.5 text-sm text-right">
                           <button type="button" @click="eRemove(idx)" class="col-span-1 text-red-500 hover:text-red-700 text-lg leading-none">×</button>
                         </div>

@@ -982,6 +982,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     // /queue-manager — system-wide queue dashboard (CEO + MOIC)
     Route::get   ('/queue-manager',                       [\App\Http\Controllers\QueueManagerController::class, 'index'])           ->name('queue.manager.index');
     Route::get   ('/queue-manager/data',                  [\App\Http\Controllers\QueueManagerController::class, 'data'])            ->name('queue.manager.data');
+    Route::get   ('/queue-manager/history',               [\App\Http\Controllers\QueueManagerController::class, 'history'])         ->name('queue.manager.history');
+    Route::get   ('/queue-manager/history/data',          [\App\Http\Controllers\QueueManagerController::class, 'historyData'])     ->name('queue.manager.history.data');
     Route::post  ('/queue-manager/restart-workers',       [\App\Http\Controllers\QueueManagerController::class, 'restartWorkers']) ->name('queue.manager.restart');
     Route::post  ('/queue-manager/clear-pending',         [\App\Http\Controllers\QueueManagerController::class, 'clearPending'])    ->name('queue.manager.clear.pending');
     Route::post  ('/queue-manager/clear-failed',          [\App\Http\Controllers\QueueManagerController::class, 'clearFailed'])     ->name('queue.manager.clear.failed');

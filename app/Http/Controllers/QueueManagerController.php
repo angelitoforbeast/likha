@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BulkUploadRun;
+use App\Models\QueueManagerLog;
 use App\Models\UploadLogV2;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -45,6 +46,26 @@ class QueueManagerController extends Controller
         $raw  = Auth::user()?->employeeProfile?->role ?? '';
         $norm = preg_replace('/\s+/u', ' ', trim((string) $raw));
         return preg_match('/^ceo$/iu', $norm) === 1;
+    }
+
+    /** Persistent audit row for every destructive/queue action. Never throws. */
+    private function logAction(string $action, array $details = [], ?Request $request = null): void
+    {
+        try {
+            $user = Auth::user();
+            QueueManagerLog::create([
+                'action'     => $action,
+                'user_id'    => $user?->id,
+                'user_name'  => $user?->name,
+                'user_email' => $user?->email,
+                'user_role'  => trim((string) ($user?->employeeProfile?->role ?? '')) ?: null,
+                'ip'         => $request?->ip(),
+                'details'    => $details ?: null,
+            ]);
+        } catch (\Throwable $e) {
+            // Audit failure must never block the actual action.
+            Log::warning('queue-manager: audit log write failed — ' . $e->getMessage());
+        }
     }
 
     public function index()
@@ -171,6 +192,7 @@ class QueueManagerController extends Controller
         try {
             Artisan::call('queue:restart');
             Log::info('queue-manager: workers restart signal sent by ' . (Auth::user()?->email ?? 'unknown'));
+            $this->logAction('restart_workers', ['message' => 'graceful restart signal sent'], $request);
             return response()->json(['ok' => true, 'message' => 'Workers will exit after their current job.']);
         } catch (\Throwable $e) {
             return response()->json(['ok' => false, 'message' => $e->getMessage()], 500);
@@ -199,6 +221,7 @@ class QueueManagerController extends Controller
             ->update(['status' => 'cancelled']);
 
         Log::warning('queue-manager: cleared pending jobs by ' . (Auth::user()?->email ?? 'unknown') . " — {$before} jobs cleared");
+        $this->logAction('clear_pending', ['cleared' => $before, 'runs_cancelled' => $runsAffected], $request);
 
         return response()->json([
             'ok'             => true,
@@ -217,6 +240,7 @@ class QueueManagerController extends Controller
         DB::table('failed_jobs')->truncate();
 
         Log::info('queue-manager: cleared failed jobs by ' . (Auth::user()?->email ?? 'unknown') . " — {$before} jobs cleared");
+        $this->logAction('clear_failed', ['cleared' => $before], $request);
 
         return response()->json(['ok' => true, 'cleared' => $before]);
     }
@@ -251,12 +275,51 @@ class QueueManagerController extends Controller
             'failed_cleared'  => $failedBefore,
             'runs_cancelled'  => $runsAffected,
         ]);
+        $this->logAction('nuclear_reset', [
+            'pending_cleared' => $pendingBefore,
+            'failed_cleared'  => $failedBefore,
+            'runs_cancelled'  => $runsAffected,
+        ], $request);
 
         return response()->json([
             'ok'              => true,
             'pending_cleared' => $pendingBefore,
             'failed_cleared'  => $failedBefore,
             'runs_cancelled'  => $runsAffected,
+        ]);
+    }
+
+    /** GET /queue-manager/history — audit trail UI. */
+    public function history()
+    {
+        $this->checkAccess();
+
+        return view('queue_manager.history', [
+            'logs' => QueueManagerLog::orderByDesc('id')->limit(500)->get(),
+        ]);
+    }
+
+    /** GET /queue-manager/history/data — JSON for live polling. */
+    public function historyData()
+    {
+        $this->checkAccess();
+
+        $rows = QueueManagerLog::orderByDesc('id')->limit(500)->get()
+            ->map(fn ($r) => [
+                'id'         => (int) $r->id,
+                'action'     => $r->action,
+                'user_name'  => $r->user_name,
+                'user_email' => $r->user_email,
+                'user_role'  => $r->user_role,
+                'ip'         => $r->ip,
+                'details'    => $r->details,
+                'created_at' => optional($r->created_at)->format('Y-m-d H:i:s'),
+            ])
+            ->all();
+
+        return response()->json([
+            'rows' => $rows,
+            'now'  => now('Asia/Manila')->toDateTimeString(),
         ]);
     }
 }

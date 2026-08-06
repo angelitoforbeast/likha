@@ -73,6 +73,7 @@
     <div class="qm-card">
       <div class="qm-card-header">
         <div class="qm-title">🚨 Actions</div>
+        <a href="{{ route('queue.manager.history') }}" class="qm-btn-ghost">📜 View Action History</a>
       </div>
       <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
         <div class="border border-slate-200 rounded p-3">
