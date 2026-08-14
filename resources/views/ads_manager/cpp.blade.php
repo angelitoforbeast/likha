@@ -314,7 +314,7 @@
     // Item Names cell (naka-align line-per-line sa price cell).
     function modeItemsText(lines) {
       if (!lines.length) return '—';
-      return lines.map(l => `${l.items.join(', ')}${l.isTie ? ' ⚖️ tie' : ''}  ·  ${fmtShort(l.date)}`).join('\n');
+      return lines.map(l => `${l.items.join(', ')}${l.isTie ? ' ⚖️ tie' : ''} · ${fmtShort(l.date)}`).join('\n');
     }
     // Item Price cell (kaparehong bilang ng linya ng Item Names).
     function modePriceText(lines) {
@@ -452,7 +452,8 @@
             <h2 class="font-bold text-lg">${title}</h2>
             <button onclick="copySummaryOfAds()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">Copy Table</button>
           </div>
-          <table id="summaryOfAdsTable" class="min-w-full border text-sm mb-6">
+          <div class="overflow-x-auto mb-6">
+          <table id="summaryOfAdsTable" class="min-w-full border text-sm">
             <thead class="bg-gray-200">
               <tr>
                 <th class="border px-2 py-1">Page Name</th>
@@ -518,8 +519,8 @@
                 <td class="border px-2 py-1">${cpi != null ? `₱${cpi.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${tcpr != null ? tcprBadge(tcpr * 100) : '—'}</td>
-                <td class="border px-2 py-1 whitespace-pre-line">${pageItemContent}</td>
-                <td class="border px-2 py-1 whitespace-pre-line text-right">${pagePriceContent}</td>
+                <td class="border px-2 py-1 whitespace-pre align-top">${pageItemContent}</td>
+                <td class="border px-2 py-1 whitespace-pre align-top text-right">${pagePriceContent}</td>
               </tr>
             `;
 
@@ -554,13 +555,13 @@
               <td class="border px-2 py-1">${tCpi != null ? `₱${tCpi.toFixed(2)}` : '—'}</td>
               <td class="border px-2 py-1">${tCpm != null ? `₱${tCpm.toFixed(2)}` : '—'}</td>
               <td class="border px-2 py-1">${tTcpr != null ? tcprBadge(tTcpr * 100) : '—'}</td>
-              <td class="border px-2 py-1 whitespace-pre-line">${totalItems}</td>
-              <td class="border px-2 py-1 whitespace-pre-line text-right">${totalPrices}</td>
+              <td class="border px-2 py-1 whitespace-pre align-top">${totalItems}</td>
+              <td class="border px-2 py-1 whitespace-pre align-top text-right">${totalPrices}</td>
             </tr>
           `;
         }
 
-        summaryHtml += `</tbody></table>`;
+        summaryHtml += `</tbody></table></div>`;
 
         // 2) Performance by Date (all pages)
         let dateHtml = `
