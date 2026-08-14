@@ -448,12 +448,12 @@
 
         // 1) Summary by Page — EXCLUDE pages with total spend == 0
         let summaryHtml = `
-          <div class="flex justify-between items-center mb-2">
+          <div class="w-fit max-w-full">
+          <div class="flex justify-between items-center gap-6 mb-2">
             <h2 class="font-bold text-lg">${title}</h2>
-            <button onclick="copySummaryOfAds()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">Copy Table</button>
+            <button onclick="copySummaryOfAds()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600 shrink-0">Copy Table</button>
           </div>
-          <div class="overflow-x-auto mb-6">
-          <table id="summaryOfAdsTable" class="w-auto border text-sm">
+          <table id="summaryOfAdsTable" class="w-full border text-sm mb-6">
             <thead class="bg-gray-200">
               <tr>
                 <th class="border px-2 py-1">Page Name</th>
