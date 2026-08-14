@@ -628,11 +628,11 @@
 
         dateHtml += `</tbody></table>`;
 
-        // Charts (kaliwa) + "Performance by Date" (kanan, 2/3 panel) sa taas;
-        // ang MALAPAD na SUMMARY table (9 columns) ay FULL-WIDTH sa ibaba
-        // (#multiPageTables) — para kasya lahat ng column nang WALANG scroll.
-        tableRight.innerHTML = dateHtml;
-        multiPageTables.innerHTML = summaryHtml;
+        // Summary + Performance-by-Date → right panel (katabi ng charts sa kanan).
+        // Content-width (w-auto) ang summary kaya kasya sa 2/3 panel nang walang
+        // stretch/gap; may overflow-x-auto fallback lang kung sobrang liit ng screen.
+        tableRight.innerHTML = summaryHtml + dateHtml;
+        multiPageTables.innerHTML = '';
       }
     }
 
