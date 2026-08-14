@@ -273,32 +273,70 @@
       return `${months[+m[2]-1]} ${+m[3]}`;
     }
 
-    // Mode(s) for one day's item_counts map: exact names tied for the highest order count.
-    function dayModes(counts) {
-      counts = counts || {};
-      let max = 0;
-      Object.values(counts).forEach(c => { if (c > max) max = c; });
-      if (max <= 0) return [];
-      return Object.keys(counts).filter(n => counts[n] === max);
+    // ── Daily MODE by (item + COD) pair — dala na ang presyo ──
+    function fmtPrice(c) {
+      if (c === '' || c == null) return '—';
+      const n = Number(c);
+      if (!isFinite(n)) return '—';
+      return '₱' + n.toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
     }
 
-    // "Mode per day, latest first, dedup, tie-marked" text from a {date: {item: count}} map.
-    // - bawat item isang beses lang (naka-posisyon sa PINAKA-LATEST na araw na ito ang mode)
-    // - tie (2+ magka-patas sa isang araw) → ipapakita lahat + "⚖️ tie"
-    function dailyModeTextFromCounts(countsByDate, filteredDates) {
+    function pairKey(p) { return p.i + '|||' + p.c; }
+
+    // Mode pair(s) for one day: (item+COD) pairs na patas sa pinakamataas na order count.
+    function dayModePairs(pairs) {
+      pairs = pairs || [];
+      let max = 0;
+      pairs.forEach(p => { if (p.n > max) max = p.n; });
+      if (max <= 0) return [];
+      return pairs.filter(p => p.n === max);
+    }
+
+    // Latest-first, dedup-by-pair, tie-aware na lines mula sa {date: [ {i,c,n} ]} map.
+    // Returns [{ items:[...], cods:[...], isTie, date }] — latest sa unahan.
+    // - dedup by PAIR (item + COD): parehong item+presyo isang beses lang (latest position)
+    // - tie (2+ pair na patas sa isang araw) → lahat ipapakita + "⚖️ tie"
+    function dailyModeLines(pairsByDate, filteredDates) {
       const datesDesc = [...filteredDates].sort().reverse(); // ISO sorts chronologically
       const seen = new Set();
-      const lines = [];
+      const out = [];
       datesDesc.forEach(date => {
-        const modes = dayModes(countsByDate[date]);
+        const modes = dayModePairs(pairsByDate[date]);
         if (!modes.length) return;
-        const fresh = modes.filter(m => !seen.has(m));
+        const fresh = modes.filter(p => !seen.has(pairKey(p)));
         if (!fresh.length) return;
-        fresh.forEach(m => seen.add(m));
-        const tie = fresh.length > 1 ? ' ⚖️ tie' : '';
-        lines.push(`${fresh.join(', ')}${tie}  ·  ${fmtShort(date)}`);
+        fresh.forEach(p => seen.add(pairKey(p)));
+        out.push({ items: fresh.map(p => p.i), cods: fresh.map(p => p.c), isTie: fresh.length > 1, date });
       });
-      return lines.join('\n') || '—';
+      return out;
+    }
+
+    // Item Names cell (naka-align line-per-line sa price cell).
+    function modeItemsText(lines) {
+      if (!lines.length) return '—';
+      return lines.map(l => `${l.items.join(', ')}${l.isTie ? ' ⚖️ tie' : ''}  ·  ${fmtShort(l.date)}`).join('\n');
+    }
+    // Item Price cell (kaparehong bilang ng linya ng Item Names).
+    function modePriceText(lines) {
+      if (!lines.length) return '—';
+      return lines.map(l => l.cods.map(fmtPrice).join(', ')).join('\n');
+    }
+
+    // Pisahin ang pairs ng maraming page bawat araw (para sa TOTAL row).
+    function mergePairsByDate(pageDatas, filteredDates) {
+      const byDate = {};
+      filteredDates.forEach(date => {
+        const acc = {};
+        pageDatas.forEach(pd => {
+          ((pd[date] || {}).item_pairs || []).forEach(p => {
+            const k = pairKey(p);
+            if (!acc[k]) acc[k] = { i: p.i, c: p.c, n: 0 };
+            acc[k].n += p.n;
+          });
+        });
+        byDate[date] = Object.values(acc);
+      });
+      return byDate;
     }
 
     function filterDates() {
@@ -425,6 +463,7 @@
                 <th class="border px-2 py-1">CPM</th>
                 <th class="border px-2 py-1">TCPR</th>
                 <th class="border px-2 py-1">Item Names</th>
+                <th class="border px-2 py-1">Item Price</th>
               </tr>
             </thead>
             <tbody>
@@ -463,10 +502,12 @@
             const cpm  = wImps > 0 ? sumSpent / wImps : null;
             const tcpr = sumOrders > 0 ? (tcprFail / sumOrders) : null;
 
-            // Item Names = daily MODE per day (exact name), latest first, dedup, tie-marked.
-            const pageCountsByDate = {};
-            filteredDates.forEach(d => { pageCountsByDate[d] = ((data[d] || {}).item_counts) || {}; });
-            const pageItemContent = dailyModeTextFromCounts(pageCountsByDate, filteredDates);
+            // Item Names + Item Price = daily MODE per (item + COD) pair, latest first, dedup, tie-marked.
+            const pagePairsByDate = {};
+            filteredDates.forEach(d => { pagePairsByDate[d] = ((data[d] || {}).item_pairs) || []; });
+            const pageModeLines   = dailyModeLines(pagePairsByDate, filteredDates);
+            const pageItemContent = modeItemsText(pageModeLines);
+            const pagePriceContent = modePriceText(pageModeLines);
 
             summaryHtml += `
               <tr>
@@ -478,6 +519,7 @@
                 <td class="border px-2 py-1">${cpm != null ? `₱${cpm.toFixed(2)}` : '—'}</td>
                 <td class="border px-2 py-1">${tcpr != null ? tcprBadge(tcpr * 100) : '—'}</td>
                 <td class="border px-2 py-1 whitespace-pre-line">${pageItemContent}</td>
+                <td class="border px-2 py-1 whitespace-pre-line text-right">${pagePriceContent}</td>
               </tr>
             `;
 
@@ -498,17 +540,11 @@
           const tCpi  = totalWCPI  > 0  ? totalSpent / totalWCPI   : null;
           const tCpm  = totalWImps > 0  ? totalSpent / totalWImps  : null;
           const tTcpr = totalOrders > 0 ? (totalTcprFail / totalOrders) : null;
-          // TOTAL Item Names = per-araw na mode ng LAHAT ng na-render na page (summed counts), latest first.
-          const totalCountsByDate = {};
-          filteredDates.forEach(date => {
-            const m = {};
-            shownPageDatas.forEach(pd => {
-              const c = (pd[date] || {}).item_counts || {};
-              Object.keys(c).forEach(n => { m[n] = (m[n] || 0) + c[n]; });
-            });
-            totalCountsByDate[date] = m;
-          });
-          const totalItems = dailyModeTextFromCounts(totalCountsByDate, filteredDates);
+          // TOTAL Item Names + Price = per-araw na mode ng (item+COD) ng LAHAT ng na-render na page, latest first.
+          const totalPairsByDate = mergePairsByDate(shownPageDatas, filteredDates);
+          const totalModeLines   = dailyModeLines(totalPairsByDate, filteredDates);
+          const totalItems       = modeItemsText(totalModeLines);
+          const totalPrices      = modePriceText(totalModeLines);
           summaryHtml += `
             <tr class="bg-blue-50 font-bold border-t-2 border-blue-300">
               <td class="border px-2 py-1">TOTAL (${pagesShown} pages)</td>
@@ -519,6 +555,7 @@
               <td class="border px-2 py-1">${tCpm != null ? `₱${tCpm.toFixed(2)}` : '—'}</td>
               <td class="border px-2 py-1">${tTcpr != null ? tcprBadge(tTcpr * 100) : '—'}</td>
               <td class="border px-2 py-1 whitespace-pre-line">${totalItems}</td>
+              <td class="border px-2 py-1 whitespace-pre-line text-right">${totalPrices}</td>
             </tr>
           `;
         }

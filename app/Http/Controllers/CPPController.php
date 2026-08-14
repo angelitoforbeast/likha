@@ -169,6 +169,20 @@ class CPPController extends Controller
             $cannotProceed = $orders->filter(fn($o) => strtoupper(trim((string)($o->STATUS ?? ''))) === 'CANNOT PROCEED')->count();
             $proceedCount  = $orders->filter(fn($o) => strtoupper(trim((string)($o->STATUS ?? ''))) === 'PROCEED')->count();
 
+            // (item + COD) pair counts → mode pair per day sa view (dala na ang presyo).
+            $pairCounts = [];
+            foreach ($orders as $o) {
+                $itemName = trim((string) ($o->ITEM_NAME ?? ''));
+                if ($itemName === '') continue;
+                $cod = preg_replace('/[^\d.]/', '', (string) ($o->COD ?? '')); // normalize: digits + dot lang
+                $key = $itemName . '|||' . $cod;
+                if (!isset($pairCounts[$key])) {
+                    $pairCounts[$key] = ['i' => $itemName, 'c' => $cod, 'n' => 0];
+                }
+                $pairCounts[$key]['n']++;
+            }
+            $pairs = array_values($pairCounts);
+
             $summary[] = [
                 'date'           => $date,
                 'page'           => $pageName,
@@ -178,7 +192,7 @@ class CPPController extends Controller
                 'cpm'            => $cpm,
                 'cpi'            => $cpi,
                 'item_names'     => $orders->pluck('ITEM_NAME')->filter()->unique()->values()->all(),
-                'item_counts'    => $orders->pluck('ITEM_NAME')->filter()->countBy()->all(), // exact-name order counts → daily mode sa view
+                'item_pairs'     => $pairs, // [{i:item, c:cod, n:count}] → mode pair (item + presyo)
                 'cods'           => $orders->pluck('COD')->filter()->unique()->values()->all(),
                 'cannot_proceed' => $cannotProceed,
                 'proceed'        => $proceedCount,
@@ -204,7 +218,7 @@ class CPPController extends Controller
                 'cpi'        => $row['cpi'],
                 'spent'      => $row['amount_spent'],
                 'item_names' => $row['item_names'],
-                'item_counts'=> $row['item_counts'],
+                'item_pairs' => $row['item_pairs'],
                 'cods'       => $row['cods'],
                 'tcpr_fail'  => $row['cannot_proceed'],
                 'proceed'    => $row['proceed'],
