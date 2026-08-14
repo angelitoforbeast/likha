@@ -628,11 +628,11 @@
 
         dateHtml += `</tbody></table>`;
 
-        // Legacy routing: content goes to #rightTableContainer (sa loob ng
-        // #singlePageLayout). Charts stay sa kaliwa. #multiPageTables is
-        // toggled-visible but kept empty (matches original behavior).
-        tableRight.innerHTML = summaryHtml + dateHtml;
-        multiPageTables.innerHTML = '';
+        // Charts (kaliwa) + "Performance by Date" (kanan, 2/3 panel) sa taas;
+        // ang MALAPAD na SUMMARY table (9 columns) ay FULL-WIDTH sa ibaba
+        // (#multiPageTables) — para kasya lahat ng column nang WALANG scroll.
+        tableRight.innerHTML = dateHtml;
+        multiPageTables.innerHTML = summaryHtml;
       }
     }
 
