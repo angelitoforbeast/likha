@@ -453,7 +453,7 @@
             <button onclick="copySummaryOfAds()" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">Copy Table</button>
           </div>
           <div class="overflow-x-auto mb-6">
-          <table id="summaryOfAdsTable" class="min-w-full border text-sm">
+          <table id="summaryOfAdsTable" class="w-auto border text-sm">
             <thead class="bg-gray-200">
               <tr>
                 <th class="border px-2 py-1">Page Name</th>
@@ -463,8 +463,8 @@
                 <th class="border px-2 py-1">CPI</th>
                 <th class="border px-2 py-1">CPM</th>
                 <th class="border px-2 py-1">TCPR</th>
-                <th class="border px-2 py-1">Item Names</th>
-                <th class="border px-2 py-1">Item Price</th>
+                <th class="border px-2 py-1 text-left">Item Names</th>
+                <th class="border px-2 py-1 text-right">Item Price</th>
               </tr>
             </thead>
             <tbody>
