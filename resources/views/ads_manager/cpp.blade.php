@@ -265,6 +265,42 @@
       return `${months[mm-1]} ${dd}, ${y}`;
     }
 
+    // Short date label for the mode lines, e.g. "Aug 13".
+    function fmtShort(iso) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+      if (!m) return '';
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return `${months[+m[2]-1]} ${+m[3]}`;
+    }
+
+    // Mode(s) for one day's item_counts map: exact names tied for the highest order count.
+    function dayModes(counts) {
+      counts = counts || {};
+      let max = 0;
+      Object.values(counts).forEach(c => { if (c > max) max = c; });
+      if (max <= 0) return [];
+      return Object.keys(counts).filter(n => counts[n] === max);
+    }
+
+    // "Mode per day, latest first, dedup, tie-marked" text from a {date: {item: count}} map.
+    // - bawat item isang beses lang (naka-posisyon sa PINAKA-LATEST na araw na ito ang mode)
+    // - tie (2+ magka-patas sa isang araw) → ipapakita lahat + "⚖️ tie"
+    function dailyModeTextFromCounts(countsByDate, filteredDates) {
+      const datesDesc = [...filteredDates].sort().reverse(); // ISO sorts chronologically
+      const seen = new Set();
+      const lines = [];
+      datesDesc.forEach(date => {
+        const modes = dayModes(countsByDate[date]);
+        if (!modes.length) return;
+        const fresh = modes.filter(m => !seen.has(m));
+        if (!fresh.length) return;
+        fresh.forEach(m => seen.add(m));
+        const tie = fresh.length > 1 ? ' ⚖️ tie' : '';
+        lines.push(`${fresh.join(', ')}${tie}  ·  ${fmtShort(date)}`);
+      });
+      return lines.join('\n') || '—';
+    }
+
     function filterDates() {
       const start = startDateInput.value || srvStart;
       const end   = endDateInput.value   || srvEnd;
@@ -399,7 +435,7 @@
         // per-row math so the TOTAL CPP/CPI/CPM/TCPR are correct.
         let totalSpent = 0, totalOrders = 0, totalWImps = 0, totalWCPI = 0, totalTcprFail = 0;
         let pagesShown = 0;
-        const totalItemArrays = [];
+        const shownPageDatas = []; // byDate ng bawat na-render na page → para sa TOTAL daily-mode
 
         Object.entries(rawData).forEach(([page, data]) => {
           // Multi-select filter: only render pages in the selected set.
@@ -427,10 +463,10 @@
             const cpm  = wImps > 0 ? sumSpent / wImps : null;
             const tcpr = sumOrders > 0 ? (tcprFail / sumOrders) : null;
 
-            // Item names: collect across all dates for this page, sort by frequency
-            const pageItemArrays = filteredDates.map(d => ((data[d] || {}).item_names || []));
-            const pageItems = prioritizedItems(pageItemArrays);
-            const pageItemContent = pageItems.join('\n') || '—';
+            // Item Names = daily MODE per day (exact name), latest first, dedup, tie-marked.
+            const pageCountsByDate = {};
+            filteredDates.forEach(d => { pageCountsByDate[d] = ((data[d] || {}).item_counts) || {}; });
+            const pageItemContent = dailyModeTextFromCounts(pageCountsByDate, filteredDates);
 
             summaryHtml += `
               <tr>
@@ -451,7 +487,7 @@
             totalWCPI     += wCPI;
             totalTcprFail += tcprFail;
             pagesShown++;
-            totalItemArrays.push(...pageItemArrays);
+            shownPageDatas.push(data);
           }
         });
 
@@ -462,7 +498,17 @@
           const tCpi  = totalWCPI  > 0  ? totalSpent / totalWCPI   : null;
           const tCpm  = totalWImps > 0  ? totalSpent / totalWImps  : null;
           const tTcpr = totalOrders > 0 ? (totalTcprFail / totalOrders) : null;
-          const totalItems = prioritizedItems(totalItemArrays).slice(0, 8).join('\n') || '—';
+          // TOTAL Item Names = per-araw na mode ng LAHAT ng na-render na page (summed counts), latest first.
+          const totalCountsByDate = {};
+          filteredDates.forEach(date => {
+            const m = {};
+            shownPageDatas.forEach(pd => {
+              const c = (pd[date] || {}).item_counts || {};
+              Object.keys(c).forEach(n => { m[n] = (m[n] || 0) + c[n]; });
+            });
+            totalCountsByDate[date] = m;
+          });
+          const totalItems = dailyModeTextFromCounts(totalCountsByDate, filteredDates);
           summaryHtml += `
             <tr class="bg-blue-50 font-bold border-t-2 border-blue-300">
               <td class="border px-2 py-1">TOTAL (${pagesShown} pages)</td>

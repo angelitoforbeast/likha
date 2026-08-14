@@ -178,6 +178,7 @@ class CPPController extends Controller
                 'cpm'            => $cpm,
                 'cpi'            => $cpi,
                 'item_names'     => $orders->pluck('ITEM_NAME')->filter()->unique()->values()->all(),
+                'item_counts'    => $orders->pluck('ITEM_NAME')->filter()->countBy()->all(), // exact-name order counts → daily mode sa view
                 'cods'           => $orders->pluck('COD')->filter()->unique()->values()->all(),
                 'cannot_proceed' => $cannotProceed,
                 'proceed'        => $proceedCount,
@@ -203,6 +204,7 @@ class CPPController extends Controller
                 'cpi'        => $row['cpi'],
                 'spent'      => $row['amount_spent'],
                 'item_names' => $row['item_names'],
+                'item_counts'=> $row['item_counts'],
                 'cods'       => $row['cods'],
                 'tcpr_fail'  => $row['cannot_proceed'],
                 'proceed'    => $row['proceed'],
