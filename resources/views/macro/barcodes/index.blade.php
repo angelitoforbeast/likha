@@ -103,12 +103,13 @@
       return `${months[+m[2]-1]} ${+m[3]}, ${m[1]}`;
     }
 
-    // QR → GIF data URL (qrcode-generator: global `qrcode`, sync). cellSize, margin(px).
+    // QR → GIF data URL (qrcode-generator: global `qrcode`, sync).
+    // cellSize=8 (crisp para sa print); margin naka-default (cellSize*4 = tamang quiet zone).
     function makeQrDataUrl(text){
       const qr = qrcode(0, 'M'); // 0 = auto-size, 'M' = error correction
       qr.addData(String(text));
       qr.make();
-      return qr.createDataURL(5, 8);
+      return qr.createDataURL(8);
     }
 
     flatpickr('#bcDate', { dateFormat: 'Y-m-d', defaultDate: bcDate.value, disableMobile: true, onChange: () => loadData() });
@@ -177,11 +178,13 @@
           catch (e) { img = '<div style="color:#b91c1c;font-size:11px;">[QR error]</div>'; }
           labels.push(`
             <div class="label">
-              ${img}
-              <div class="item">${escapeHtml(b.item_name)}</div>
-              <div class="meta">${escapeHtml(dateNice)}</div>
-              <div class="meta"><strong>COUNT: ${b.count}</strong></div>
-              <div class="code">${escapeHtml(b.barcode)}</div>
+              <div class="qr">${img}</div>
+              <div class="info">
+                <div class="item">${escapeHtml(b.item_name)}</div>
+                <div class="meta">${escapeHtml(dateNice)}</div>
+                <div class="count">COUNT: ${b.count}</div>
+                <div class="code">${escapeHtml(b.barcode)}</div>
+              </div>
             </div>`);
         }
 
@@ -194,20 +197,27 @@
           });
         } catch (e) { /* huwag i-block ang print kahit pumalya ang logging */ }
 
+        // Isang sticker (180 x 100 mm) kada bundle — 1 QR per page.
         const doc = `<!doctype html><html><head><meta charset="utf-8"><title>Bundle Barcodes — ${escapeHtml(dateNice)}</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 12px; }
-            h1 { font-size: 16px; margin: 0 0 12px; }
-            .sheet { display:flex; flex-wrap:wrap; gap:10px; }
-            .label { width:31%; box-sizing:border-box; border:1px solid #000; border-radius:6px; padding:10px; text-align:center; page-break-inside:avoid; }
-            .label img { width:150px; height:150px; }
-            .label .item { font-weight:bold; font-size:13px; margin-top:6px; word-break:break-word; }
-            .label .meta { font-size:12px; color:#333; }
-            .label .code { font-family:monospace; font-size:11px; margin-top:4px; word-break:break-all; color:#111; }
-            @media print { @page { margin: 10mm; } .noprint { display:none; } }
+            @page { size: 180mm 100mm; margin: 0; }
+            html, body { margin:0; padding:0; }
+            * { box-sizing:border-box; }
+            body { font-family: Arial, sans-serif; }
+            .label {
+              width:180mm; height:100mm; page-break-after:always;
+              display:flex; align-items:center; gap:6mm; padding:6mm 8mm; overflow:hidden;
+            }
+            .label:last-child { page-break-after:auto; }
+            .qr { flex-shrink:0; }
+            .qr img { width:82mm; height:82mm; image-rendering:pixelated; display:block; }
+            .info { flex:1; min-width:0; }
+            .info .item  { font-size:26px; font-weight:bold; line-height:1.15; word-break:break-word; }
+            .info .meta  { font-size:17px; color:#333; margin-top:5mm; }
+            .info .count { font-size:24px; font-weight:bold; margin-top:3mm; }
+            .info .code  { font-family:monospace; font-size:16px; margin-top:5mm; word-break:break-all; }
           </style></head><body>
-          <h1>Bundle Barcodes — ${escapeHtml(dateNice)} · ${currentData.totals.bundles} bundles · ${currentData.totals.waybills} waybills</h1>
-          <div class="sheet">${labels.join('')}</div>
+          ${labels.join('')}
           <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
           </body></html>`;
 
