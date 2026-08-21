@@ -1004,6 +1004,12 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/macro/barcodes/print', [\App\Http\Controllers\BarcodeGeneratorController::class, 'logPrint'])->name('macro.barcodes.print');
     Route::get ('/macro/barcodes/logs',  [\App\Http\Controllers\BarcodeGeneratorController::class, 'logs'])    ->name('macro.barcodes.logs');
 
+    // /prompt-generator — Chatbot Sales Prompt Generator (template fill / AI-with-reference)
+    Route::get ('/prompt-generator',              [\App\Http\Controllers\PromptGeneratorController::class, 'index'])        ->name('prompt.generator.index');
+    Route::post('/prompt-generator/generate',     [\App\Http\Controllers\PromptGeneratorController::class, 'generate'])     ->middleware('throttle:40,1')->name('prompt.generator.generate');
+    Route::get ('/prompt-generator/history',      [\App\Http\Controllers\PromptGeneratorController::class, 'history'])      ->name('prompt.generator.history');
+    Route::get ('/prompt-generator/history/{id}', [\App\Http\Controllers\PromptGeneratorController::class, 'historyDetail'])->whereNumber('id')->name('prompt.generator.history.detail');
+
     // Daily HOLD snapshots (units per item) — for /owner/private history + manual test.
     Route::get ('/jnt/hold-snapshots',     [\App\Http\Controllers\ItemHoldSnapshotController::class, 'index'])->name('jnt.hold-snapshots');
     Route::post('/jnt/hold-snapshots/run', [\App\Http\Controllers\ItemHoldSnapshotController::class, 'runNow'])->name('jnt.hold-snapshots.run');
