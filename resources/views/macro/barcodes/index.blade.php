@@ -88,6 +88,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 
   <script>
     const csrf = '{{ csrf_token() }}';
@@ -110,6 +111,13 @@
       qr.addData(String(text));
       qr.make();
       return qr.createDataURL(8);
+    }
+
+    // Code128 1D barcode → PNG data URL (JsBarcode → canvas).
+    function makeBarcodeDataUrl(text){
+      const canvas = document.createElement('canvas');
+      JsBarcode(canvas, String(text), { format: 'CODE128', displayValue: false, width: 2, height: 70, margin: 0 });
+      return canvas.toDataURL('image/png');
     }
 
     flatpickr('#bcDate', { dateFormat: 'Y-m-d', defaultDate: bcDate.value, disableMobile: true, onChange: () => loadData() });
@@ -173,16 +181,24 @@
         const dateNice = fmtNiceDate(currentData.date);
         const labels = [];
         for (const b of currentData.bundles) {
-          let img = '';
-          try { img = `<img src="${makeQrDataUrl(b.barcode)}" alt="qr">`; }
-          catch (e) { img = '<div style="color:#b91c1c;font-size:11px;">[QR error]</div>'; }
+          let qrImg = '';
+          try { qrImg = `<img src="${makeQrDataUrl(b.barcode)}" alt="qr">`; }
+          catch (e) { qrImg = '<div style="color:#b91c1c;font-size:11px;">[QR error]</div>'; }
+          let bcImg = '';
+          try { bcImg = `<img class="bc" src="${makeBarcodeDataUrl(b.barcode)}" alt="barcode">`; }
+          catch (e) { bcImg = '<div style="color:#b91c1c;font-size:11px;">[barcode error]</div>'; }
           labels.push(`
             <div class="label">
-              <div class="qr">${img}</div>
-              <div class="info">
-                <div class="item">${escapeHtml(b.item_name)}</div>
-                <div class="meta">${escapeHtml(dateNice)}</div>
-                <div class="count">COUNT: ${b.count}</div>
+              <div class="top">
+                <div class="qr">${qrImg}</div>
+                <div class="info">
+                  <div class="item">${escapeHtml(b.item_name)}</div>
+                  <div class="meta">${escapeHtml(dateNice)}</div>
+                  <div class="count">COUNT: ${b.count}</div>
+                </div>
+              </div>
+              <div class="bottom">
+                ${bcImg}
                 <div class="code">${escapeHtml(b.barcode)}</div>
               </div>
             </div>`);
@@ -197,7 +213,7 @@
           });
         } catch (e) { /* huwag i-block ang print kahit pumalya ang logging */ }
 
-        // Isang sticker (180 x 100 mm) kada bundle — 1 QR per page.
+        // Isang sticker (180 x 100 mm) kada bundle — QR + Code128 barcode, 1 per page.
         const doc = `<!doctype html><html><head><meta charset="utf-8"><title>Bundle Barcodes — ${escapeHtml(dateNice)}</title>
           <style>
             @page { size: 180mm 100mm; margin: 0; }
@@ -206,16 +222,22 @@
             body { font-family: Arial, sans-serif; }
             .label {
               width:180mm; height:100mm; page-break-after:always;
-              display:flex; align-items:center; gap:6mm; padding:6mm 8mm; overflow:hidden;
+              display:flex; flex-direction:column; padding:5mm 7mm; overflow:hidden;
             }
             .label:last-child { page-break-after:auto; }
-            .qr { flex-shrink:0; }
-            .qr img { width:82mm; height:82mm; image-rendering:pixelated; display:block; }
-            .info { flex:1; min-width:0; }
-            .info .item  { font-size:26px; font-weight:bold; line-height:1.15; word-break:break-word; }
-            .info .meta  { font-size:17px; color:#333; margin-top:5mm; }
-            .info .count { font-size:24px; font-weight:bold; margin-top:3mm; }
-            .info .code  { font-family:monospace; font-size:16px; margin-top:5mm; word-break:break-all; }
+            .top { display:flex; align-items:center; gap:6mm; flex:1; min-height:0; }
+            .top .qr img { width:56mm; height:56mm; image-rendering:pixelated; display:block; }
+            .top .info { flex:1; min-width:0; }
+            .top .info .item  { font-size:24px; font-weight:bold; line-height:1.15; word-break:break-word; }
+            .top .info .meta  { font-size:16px; color:#333; margin-top:4mm; }
+            .top .info .count { font-size:22px; font-weight:bold; margin-top:2mm; }
+            .bottom { text-align:center; }
+            .bottom .bc { width:100%; height:20mm; object-fit:contain; display:block; }
+            .bottom .code { font-family:monospace; font-size:15px; letter-spacing:1px; margin-top:1mm; word-break:break-all; }
+            @media screen {
+              body { background:#e5e7eb; padding:12px; }
+              .label { background:#fff; border:1px solid #9ca3af; margin:0 auto 12px; box-shadow:0 1px 4px rgba(0,0,0,.15); }
+            }
           </style></head><body>
           ${labels.join('')}
           <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
