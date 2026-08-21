@@ -998,6 +998,12 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     // order count (di units). Hiwalay sa JNT (galing sa macro_output).
     Route::get('/macro/orders', [\App\Http\Controllers\MacroOrdersController::class, 'index'])->name('macro.orders');
 
+    // /macro/barcodes — Bundle Barcode Generator (per ITEM_NAME + date; QR labels + copy table)
+    Route::get ('/macro/barcodes',       [\App\Http\Controllers\BarcodeGeneratorController::class, 'index'])   ->name('macro.barcodes.index');
+    Route::get ('/macro/barcodes/data',  [\App\Http\Controllers\BarcodeGeneratorController::class, 'data'])    ->name('macro.barcodes.data');
+    Route::post('/macro/barcodes/print', [\App\Http\Controllers\BarcodeGeneratorController::class, 'logPrint'])->name('macro.barcodes.print');
+    Route::get ('/macro/barcodes/logs',  [\App\Http\Controllers\BarcodeGeneratorController::class, 'logs'])    ->name('macro.barcodes.logs');
+
     // Daily HOLD snapshots (units per item) — for /owner/private history + manual test.
     Route::get ('/jnt/hold-snapshots',     [\App\Http\Controllers\ItemHoldSnapshotController::class, 'index'])->name('jnt.hold-snapshots');
     Route::post('/jnt/hold-snapshots/run', [\App\Http\Controllers\ItemHoldSnapshotController::class, 'runNow'])->name('jnt.hold-snapshots.run');
