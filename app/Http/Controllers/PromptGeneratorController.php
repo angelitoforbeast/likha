@@ -9,22 +9,20 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * /prompt-generator — Chatbot Sales Prompt Generator.
+ * /prompt-generator — Chatbot Sales Prompt Generator (V2).
  *
- * Bumubuo ng "sales prompt" (system prompt para sa BotCake/chatbot) mula sa
- * inputs ng user. Dalawang mode:
- *   - template : deterministic fill ng fixed na template (libre, walang AI cost)
- *   - ai       : OpenAI (gpt-4o) na nirerefine ang template gamit ito bilang reference
+ *  - Ang prompt ay DETERMINISTIC (naka-lock na master template + conditional
+ *    pricing/shipping) na binubuo CLIENT-SIDE (live habang nagta-type).
+ *  - Ang AI ay para LANG sa IMAGE → FORM auto-fill (server-side, gpt-4o vision,
+ *    gamit ang existing OpenAI key natin — walang API key na ilalagay ang user).
+ *  - Ang bawat na-generate na prompt ay naise-save sa history.
  *
  * Access: CEO, Marketing, Marketing - OIC.
  */
 class PromptGeneratorController extends Controller
 {
-    public const ALLOWED_MODELS = [
-        'gpt-4o'      => 'GPT-4o (recommended)',
-        'gpt-4o-mini' => 'GPT-4o mini (cheaper, faster)',
-    ];
-    public const DEFAULT_MODEL = 'gpt-4o';
+    /** Vision-capable model para sa image auto-fill. */
+    public const VISION_MODEL = 'gpt-4o';
 
     private function getNormalizedRole(): string
     {
@@ -45,84 +43,80 @@ class PromptGeneratorController extends Controller
     public function index()
     {
         $this->checkAccess();
-        return view('prompt_generator.index', [
-            'models'       => self::ALLOWED_MODELS,
-            'defaultModel' => self::DEFAULT_MODEL,
-        ]);
+        return view('prompt_generator.index');
     }
 
-    /** POST /prompt-generator/generate */
-    public function generate(Request $request)
+    /**
+     * POST /prompt-generator/analyze-image
+     * Upload product image → gpt-4o vision → structured JSON para i-fill ang form.
+     * Server-side (secure) — walang API key na hinihingi sa user.
+     */
+    public function analyzeImage(Request $request)
     {
         $this->checkAccess();
-
-        $data = $request->validate([
-            'mode'                    => 'required|in:template,ai',
-            'model'                   => 'nullable|string',
-            'language'                => 'nullable|string|max:30',
-            'store_name'              => 'required|string|max:150',
-            'product_name'            => 'required|string|max:250',
-            'product_description'     => 'nullable|string|max:6000',
-            'features'                => 'nullable|string|max:4000',
-            'price'                   => 'nullable|string|max:150',
-            'promo'                   => 'nullable|string|max:600',
-            'delivery_time'           => 'nullable|string|max:400',
-            'payment_method'          => 'nullable|string|max:150',
-            'legitimacy_info'         => 'nullable|string|max:1500',
-            'additional_instructions' => 'nullable|string|max:2000',
+        $request->validate([
+            'image' => 'required|image|mimes:jpg,jpeg,png,webp|max:8192', // 8 MB
         ]);
 
-        $inputs = [
-            'language'                => trim($data['language'] ?? 'Taglish') ?: 'Taglish',
-            'store_name'              => trim($data['store_name']),
-            'product_name'            => trim($data['product_name']),
-            'product_description'     => trim($data['product_description'] ?? ''),
-            'features'                => trim($data['features'] ?? ''),
-            'price'                   => trim($data['price'] ?? ''),
-            'promo'                   => trim($data['promo'] ?? ''),
-            'delivery_time'           => trim($data['delivery_time'] ?? ''),
-            'payment_method'          => trim($data['payment_method'] ?? ''),
-            'legitimacy_info'         => trim($data['legitimacy_info'] ?? ''),
-            'additional_instructions' => trim($data['additional_instructions'] ?? ''),
-        ];
+        $file    = $request->file('image');
+        $b64     = base64_encode(file_get_contents($file->getRealPath()));
+        $dataUrl = 'data:' . $file->getMimeType() . ';base64,' . $b64;
 
-        $mode  = $data['mode'];
-        $model = null;
-        $filled = $this->fillTemplate($inputs);
-        $warning = null;
+        try {
+            $resp = Http::withToken(config('services.openai.key'))
+                ->timeout(90)
+                ->post('https://api.openai.com/v1/chat/completions', [
+                    'model'           => self::VISION_MODEL,
+                    'temperature'     => 0,
+                    'response_format' => ['type' => 'json_object'],
+                    'messages'        => [[
+                        'role'    => 'user',
+                        'content' => [
+                            ['type' => 'text',      'text' => $this->visionInstruction()],
+                            ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]],
+                        ],
+                    ]],
+                ]);
 
-        if ($mode === 'ai') {
-            $model = isset(self::ALLOWED_MODELS[$data['model'] ?? '']) ? $data['model'] : self::DEFAULT_MODEL;
-            [$output, $warning] = $this->aiGenerate($filled, $inputs, $model);
-            if ($output === null) {
-                // Fallback sa template kung pumalya ang AI — may output pa rin ang user.
-                $output  = $filled;
-                $mode    = 'template';
-                $model   = null;
+            if (!$resp->successful()) {
+                Log::warning('PromptGen analyzeImage failed: ' . $resp->status() . ' ' . $resp->body());
+                return response()->json(['ok' => false, 'message' => 'AI failed (' . $resp->status() . ').'], 200);
             }
-        } else {
-            $output = $filled;
+
+            $content = (string) ($resp['choices'][0]['message']['content'] ?? '');
+            $parsed  = json_decode($content, true);
+            if (!is_array($parsed)) {
+                return response()->json(['ok' => false, 'message' => 'Hindi mabasa ang AI result.'], 200);
+            }
+
+            return response()->json(['ok' => true, 'result' => $parsed]);
+        } catch (\Throwable $e) {
+            Log::error('PromptGen analyzeImage exception: ' . $e->getMessage());
+            return response()->json(['ok' => false, 'message' => 'Error: ' . $e->getMessage()], 200);
         }
+    }
+
+    /** POST /prompt-generator/save — i-save ang client-generated prompt sa history. */
+    public function save(Request $request)
+    {
+        $this->checkAccess();
+        $data = $request->validate([
+            'inputs' => 'required|array',
+            'output' => 'required|string',
+        ]);
 
         $gen = PromptGeneration::create([
-            'mode'         => $mode,
-            'model'        => $model,
-            'store_name'   => $inputs['store_name'],
-            'product_name' => $inputs['product_name'],
-            'inputs'       => $inputs,
-            'output'       => $output,
+            'mode'         => 'template',
+            'model'        => null,
+            'store_name'   => (string) ($data['inputs']['STORE_NAME'] ?? '') ?: null,
+            'product_name' => (string) ($data['inputs']['PRODUCT_NAME'] ?? '') ?: null,
+            'inputs'       => $data['inputs'],
+            'output'       => $data['output'],
             'user_id'      => Auth::id(),
             'user_name'    => Auth::user()?->name,
         ]);
 
-        return response()->json([
-            'ok'         => true,
-            'output'     => $output,
-            'mode'       => $mode,
-            'model'      => $model,
-            'warning'    => $warning,
-            'history_id' => $gen->id,
-        ]);
+        return response()->json(['ok' => true, 'id' => $gen->id]);
     }
 
     /** GET /prompt-generator/history */
@@ -138,297 +132,43 @@ class PromptGeneratorController extends Controller
     public function historyDetail(int $id)
     {
         $this->checkAccess();
-        $row = PromptGeneration::findOrFail($id);
-        return view('prompt_generator.detail', ['row' => $row]);
+        return view('prompt_generator.detail', ['row' => PromptGeneration::findOrFail($id)]);
     }
 
-    // ───────────────────────── template ─────────────────────────
-
-    /** Fill ang fixed na template gamit ang inputs (deterministic). */
-    private function fillTemplate(array $in): string
+    /** Instruction para sa vision extraction (JSON only). */
+    private function visionInstruction(): string
     {
-        $addl = trim((string) ($in['additional_instructions'] ?? ''));
-        $addlSection = $addl === '' ? '' : "\n\n---\n\n## Additional Instructions\n\n{$addl}";
-
-        $map = [
-            '{{STORE_NAME}}'         => $in['store_name'] ?: 'Our Store',
-            '{{PRODUCT_NAME}}'       => $in['product_name'] ?: '',
-            '{{PRODUCT_DESCRIPTION}}'=> $in['product_description'] ?: '',
-            '{{FEATURES}}'           => $in['features'] ?: '',
-            '{{PRICE}}'              => $in['price'] ?: '',
-            '{{PROMO}}'              => $in['promo'] ?: '',
-            '{{DELIVERY_TIME}}'      => $in['delivery_time'] ?: '',
-            '{{PAYMENT_METHOD}}'     => $in['payment_method'] ?: 'COD',
-            '{{LEGITIMACY_INFO}}'    => $in['legitimacy_info'] ?: '',
-            '{{LANGUAGE}}'           => $in['language'] ?: 'Taglish',
-            '{{ADDITIONAL_SECTION}}' => $addlSection,
-        ];
-
-        return strtr($this->templateBody(), $map);
-    }
-
-    /** Ang canonical na sales-prompt template (with placeholders). */
-    private function templateBody(): string
-    {
-        return <<<'TPL'
-# {{STORE_NAME}} AI Sales Assistant
-
-You are **{{STORE_NAME}} Seller**, an intelligent AI Sales Assistant for **{{PRODUCT_NAME}}**.
-
-Your job is to understand the customer's intent and generate the most appropriate response instead of relying on fixed templates.
-
-Your main goal is to help customers confidently decide whether to purchase while providing a smooth, natural conversation.
-
----
-
-## Personality
-
-- Friendly
-- Professional
-- Helpful
-- Conversational
-- Natural
-- Never sound robotic
-
-Use simple {{LANGUAGE}} that every Filipino can easily understand.
-
-Keep replies concise, natural, and easy to read.
-
----
-
-## Product Information
-
-**Product Name**
-{{PRODUCT_NAME}}
-
-**Product Information**
-
-{{PRODUCT_DESCRIPTION}}
-
-**Key Features**
-
-{{FEATURES}}
-
-**Price**
-{{PRICE}}
-
----
-
-## Your Responsibilities
-
-Your responsibilities include, but are not limited to:
-
-- Answer customer questions.
-- Understand the customer's real intent before replying.
-- Explain product information clearly.
-- Build customer confidence.
-- Handle objections naturally.
-- Encourage purchases without sounding pushy.
-- Guide customers until they are ready to order.
-- Ask follow-up questions whenever necessary.
-- Decide the best response based on the conversation context instead of following fixed scripts.
-
-Always prioritize understanding the customer's needs before trying to sell.
-
----
-
-## Response Style
-
-Always:
-
-- Reply ONLY in plain, natural conversational text — like a real person chatting on Messenger. NEVER output JSON, code blocks, key-value pairs, quotes around the whole message, or any structured/technical format. Just send the message itself.
-- Be warm and respectful.
-- Sound like a real human.
-- Keep replies between 2–5 short sentences unless a longer explanation is needed.
-- Use simple {{LANGUAGE}}.
-- Add emojis only when appropriate.
-- Adapt your tone depending on the customer.
-- End conversations naturally with a relevant follow-up question whenever appropriate.
-
----
-
-## Important Rules
-
-Never:
-
-- Give medical advice.
-- Promise cures.
-- Exaggerate product benefits.
-- Invent product information.
-- Pressure customers into buying.
-- Repeat the exact same response every time.
-
-If information is unavailable, politely say that you are unsure instead of making up an answer.
-
----
-
-## Ordering Process
-
-If the customer is ready to order, politely collect:
-
-- Full Name
-- Complete Address
-- Contact Number
-- Quantity
-
-After collecting all information, confirm the details before proceeding.
-
----
-
-## Delivery Information
-
-- Delivery is usually around **{{DELIVERY_TIME}}**, depending on the customer's location.
-- Payment method is **{{PAYMENT_METHOD}}** unless stated otherwise.
-
----
-
-## Trust & Legitimacy
-
-If customers ask whether the store is legitimate, explain that:
-
-{{LEGITIMACY_INFO}}
-
----
-
-## Pricing
-
-Whenever customers ask about price, clearly mention:
-
-**{{PRICE}}**
-
----
-
-## Promo / Offer
-
-If there is an active promo, share it naturally when relevant (especially when the customer hesitates on price or is close to ordering):
-
-{{PROMO}}
-
----
-
-## Objection Handling
-
-When customers hesitate, show empathy first.
-
-Examples include:
-
-- Price concerns
-- Still thinking
-- No budget yet
-- Wants to compare
-- Unsure if worth it
-
-Do not use memorized responses.
-
-Instead:
-
-- Acknowledge the concern.
-- Answer honestly.
-- Reinforce available facts.
-- Continue the conversation naturally.
-
----
-
-## Decision Making
-
-For every customer message:
-
-1. Understand the customer's intent.
-2. Identify what information they actually need.
-3. Reply naturally based on the current conversation.
-4. If additional information is needed, ask follow-up questions.
-5. If the customer shows buying interest, naturally guide them toward placing an order.
-6. If the customer is not ready, continue helping without pressure and keep the conversation open.
-
-Avoid template-like replies.
-
-Every response should feel personalized.
-
----
-
-## Primary Goal
-
-Always aim to:
-
-- Answer customer questions clearly and honestly.
-- Build customer confidence and trust.
-- Encourage orders naturally without sounding pushy.
-- Provide a smooth and friendly buying experience.
-- Look for buying signals throughout the conversation.
-- Whenever appropriate, ask whether the customer would like to place an order or how many they would like to order.
-- If the customer shows interest, smoothly transition into the ordering process by collecting their Full Name, Complete Address, Contact Number, and Quantity.
-- If the customer is not yet ready, continue answering their questions and naturally ask again when the conversation leads to it.
-
-## Closing Rule
-
-If the customer's concern has already been answered, do not simply stop.
-
-Always continue by asking a relevant closing question.{{ADDITIONAL_SECTION}}
-TPL;
-    }
-
-    // ───────────────────────── AI mode ─────────────────────────
-
-    /**
-     * OpenAI-refined prompt gamit ang filled template bilang reference.
-     * Returns [output|null, warning|null]. null output = failed (caller mag-fa-fallback).
-     */
-    private function aiGenerate(string $filled, array $inputs, string $model): array
-    {
-        $lang = $inputs['language'] ?: 'Taglish';
-
-        $system = "You are an expert at writing high-converting chatbot SYSTEM PROMPTS for Filipino "
-            . "e-commerce sales assistants (Facebook Messenger / BotCake). You will receive a DRAFT prompt "
-            . "(already structured) plus the product details. Rewrite it into a polished, natural, ready-to-paste "
-            . "system prompt.\n\nRULES:\n"
-            . "- Keep the overall structure and section headings of the draft.\n"
-            . "- Keep EVERY product fact EXACTLY as given — never invent or change product name, price, features, "
-            . "delivery time, payment method, or promo.\n"
-            . "- Instruct the assistant to reply in {$lang}.\n"
-            . "- Output ONLY the final system prompt in Markdown. No preamble, no explanation, no surrounding code fences.";
-
-        $details = "PRODUCT DETAILS:\n"
-            . "- Store name: {$inputs['store_name']}\n"
-            . "- Product name: {$inputs['product_name']}\n"
-            . "- Description: {$inputs['product_description']}\n"
-            . "- Key features:\n{$inputs['features']}\n"
-            . "- Price: {$inputs['price']}\n"
-            . "- Promo: {$inputs['promo']}\n"
-            . "- Delivery time: {$inputs['delivery_time']}\n"
-            . "- Payment method: {$inputs['payment_method']}\n"
-            . "- Legitimacy info: {$inputs['legitimacy_info']}\n"
-            . "- Additional instructions: {$inputs['additional_instructions']}\n"
-            . "- Language: {$lang}\n\n"
-            . "DRAFT PROMPT (reference structure to follow):\n\n" . $filled;
-
-        try {
-            $response = Http::withToken(config('services.openai.key'))
-                ->timeout(90)
-                ->post('https://api.openai.com/v1/chat/completions', [
-                    'model'       => $model,
-                    'temperature' => 0.6,
-                    'messages'    => [
-                        ['role' => 'system', 'content' => $system],
-                        ['role' => 'user',   'content' => $details],
-                    ],
-                ]);
-
-            if (!$response->successful()) {
-                Log::warning('PromptGenerator AI failed: ' . $response->status() . ' ' . $response->body());
-                return [null, 'Nabigo ang AI (' . $response->status() . '). Ipinakita ang Template version.'];
-            }
-
-            $out = trim((string) ($response['choices'][0]['message']['content'] ?? ''));
-            if ($out === '') {
-                return [null, 'Walang nabuong output ang AI. Ipinakita ang Template version.'];
-            }
-            // Alisin ang accidental na code fences kung meron.
-            $out = preg_replace('/^```(?:markdown)?\s*|\s*```$/i', '', $out);
-
-            return [trim($out), null];
-        } catch (\Throwable $e) {
-            Log::error('PromptGenerator AI exception: ' . $e->getMessage());
-            return [null, 'May error sa AI. Ipinakita ang Template version.'];
-        }
+        return <<<'TXT'
+You extract verified sales configuration from ONE uploaded product image for an AI sales-prompt generator.
+
+CRITICAL RULES:
+1. Use ONLY information visibly supported by the image. Do not guess.
+2. If a field is not visible or cannot be safely inferred, return null.
+3. Absence of a shipping statement does NOT mean free shipping and does NOT mean hidden shipping. Return shipping.mode = null unless explicitly supported.
+4. Detect pricing:
+   - mode "single" only when the image clearly shows one official selling price and no bundle structure.
+   - mode "bundles" when it clearly shows multiple quantity/package offers.
+   - otherwise null.
+5. For bundles, return every visible official offer in the same meaning as shown.
+6. Do not invent medical claims, certifications, warranty, delivery times, ingredients, or policies.
+7. assistant_name, order_fields, open_parcel_policy, warranty_policy, payment_method, delivery_time, coverage_area are usually null unless explicitly visible.
+8. shipping.mode allowed values: "free", "declared", "hidden", or null. "hidden" may ONLY be used if the image explicitly says a shipping fee exists but should not be disclosed until asked. Never infer hidden mode from missing shipping text.
+9. shipping.fee_type allowed: "fixed", "location", or null.
+10. Return ONLY valid JSON. No markdown.
+
+JSON SHAPE:
+{
+  "fields": {
+    "STORE_NAME": null, "ASSISTANT_NAME": null, "PRODUCT_NAME": null, "PRODUCT_CATEGORY": null,
+    "PRODUCT_DESCRIPTION": null, "PRIMARY_BENEFIT": null, "PRODUCT_BENEFITS": null, "PRODUCT_FEATURES": null,
+    "INGREDIENTS": null, "HOW_TO_USE": null, "USAGE_TIPS": null, "PRODUCT_ORIGIN": null,
+    "PRODUCT_CERTIFICATION": null, "WARRANTY_POLICY": null, "COVERAGE_AREA": null, "DELIVERY_TIME": null,
+    "PAYMENT_METHOD": null, "OPEN_PARCEL_POLICY": null, "LEGITIMACY_INFO": null, "AVAILABILITY_INFORMATION": null,
+    "PROMO_INFORMATION": null, "UNIT_NAME": null, "ORDER_FIELDS": null
+  },
+  "pricing": { "mode": null, "single_price": null, "bundles": [ {"name": null, "quantity": null, "price": null} ] },
+  "shipping": { "mode": null, "fee_type": null, "amount": null, "location_response": null }
+}
+TXT;
     }
 }
