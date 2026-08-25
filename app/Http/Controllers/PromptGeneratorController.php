@@ -21,8 +21,78 @@ use Illuminate\Support\Facades\Log;
  */
 class PromptGeneratorController extends Controller
 {
-    /** Vision-capable model para sa image auto-fill. */
+    /** Model para sa lahat ng AI calls (vision + text). */
     public const VISION_MODEL = 'gpt-4o';
+    public const TEXT_MODEL   = 'gpt-4o';
+
+    /** Main Flow (opening auto-reply) instruction. {language} replaced at runtime. */
+    public const MAINFLOW_PROMPT = <<<'MF'
+Write ONE warm, complete, high-converting OPENING message that the sales bot sends as its
+FIRST reply to any customer who messages. This is the "main flow" opening. Follow this flow:
+
+1. GREETING first — a friendly, warm rapport line (e.g. "Hi po! 😊 Salamat sa pag-message!").
+2. A short attention hook about the offer (e.g. "LIMITED TIME OFFER na po ito! 🔥").
+3. PRICING + OFFER (ONE line only) — first show the OLD/regular price with a REAL crossed-out line
+   using unicode combining strikethrough characters so it literally looks like this: ₱̶3̶6̶0̶ (each
+   digit has a line through it). Then, on the NEXT line, show the promo price AND the promo/offer
+   deal TOGETHER on ONE single line, emphasized in CAPS with emojis
+   (e.g. "👉 ₱240 NA LANG — BUY 1 TAKE 1! 🎉"). Mention the price ONCE only — do NOT repeat the
+   price on a separate line, and do NOT restate the word "PROMO". If no distinct offer/deal is given,
+   just show the promo price alone on that line. If no old price is given, invent a believable higher
+   one (about 1.5x the promo price).
+4. One punchy hook line about the biggest benefit.
+5. A NUMBERED list of key benefits with emojis (1️⃣, 2️⃣, 3️⃣ ...), each on its own line,
+   benefit-driven (ALL CAPS keywords are okay).
+6. Close with a strong but warm call to action (e.g. "Gusto niyo po bang mag-order? Reply lang po! 😊").
+
+FORMATTING RULES (very important):
+- This is pasted into Facebook Messenger, which does NOT render markdown. NEVER use **asterisks**,
+  ~tildes~, backticks, or markdown of any kind. For emphasis use CAPS, emojis, and REAL unicode
+  strikethrough (combining long stroke overlay) for the old price — never tildes.
+- Use real line breaks. Make it engaging and complete — do NOT make it too short.
+- Write in {language}. Output plain text only (no JSON).
+MF;
+
+    /** Follow-up SEQUENCE instruction. {count} + {language} replaced at runtime. */
+    public const SEQUENCE_PROMPT = <<<'SEQ'
+You are a top Filipino direct-response copywriter writing a Facebook Messenger FOLLOW-UP SEQUENCE
+(BotCake broadcast). Write {count} messages sent one at a time over the next hours/days to re-engage
+a customer who messaged but has NOT yet completed their order, pushing them to finally buy.
+
+LANGUAGE: {language} (Taglish by default) — punchy, kabog, conversational, parang totoong seller na
+hinahabol ang warm lead. Do NOT output pure English unless {language} is exactly "English".
+
+VARY THE PERSUASION ANGLE — every message must use a DIFFERENT framework. Rotate across these
+(don't reuse the same one twice, don't go in a predictable order):
+- SCARCITY / urgency (limited stock, last slots, "hanggang ngayon lang", last day)
+- CURIOSITY (open loop, teaser, "may sorpresa ako sayo", tanong na hindi agad sinasagot)
+- PROBLEM–AGITATE–SOLVE (kilalanin ang sakit/pain point, palakihin, saka i-offer ang solusyon)
+- SOCIAL PROOF (dami nang umorder, ubos-ubos, "grabe ang orders today")
+- FOMO / gentle guilt ("sayang naman", "iba na kukuha ng slot mo")
+- EXCLUSIVITY ("ikaw ang napili", priority, VIP list)
+- VALUE / price-anchor ("sa mall x3 presyo", "parang walang tubo", free shipping)
+- REASSURANCE / objection-handling (COD, legit, easy return — para mawala ang duda)
+
+VARY THE LENGTH — huwag pare-pareho: iba SHORT (1 punchy line + order call), iba MEDIUM (hook + 2-3 lines),
+iba LONGER (hook + 3-5 lines na mini-story/benefits/price-anchor/objection-handling + warm order call).
+
+CALL TO ACTION: end most messages with a natural order/reply prompt in {language}. Vary the wording.
+
+FORMATTING:
+- Messenger does NOT render markdown. Never use **asterisks**, ~tildes~, or backticks. Use CAPS/emojis.
+- Use real line breaks. No fake medical/financial claims.
+
+PLACEHOLDERS — insert these LITERALLY, do NOT replace, translate, or invent values for them.
+These are the ONLY two allowed placeholders — do NOT output any other {{...}} token:
+- {{first_name}}  = the customer's first name (sprinkle naturally, not in every single message)
+- {{PRICING}}     = the promo price / offer
+NEVER write an actual price, number, amount, discount, savings, or a specific deal name
+(e.g. "P299", "299", "Buy 1 Take 1", "B1T1", "50% off"). ANY reference to price, cost,
+discount, or the offer MUST be the literal token {{PRICING}}.
+
+Return ONLY the messages as an array of strings (one full message per array item).
+Do NOT number them and do NOT add any commentary.
+SEQ;
 
     private function getNormalizedRole(): string
     {
@@ -117,6 +187,103 @@ class PromptGeneratorController extends Controller
         ]);
 
         return response()->json(['ok' => true, 'id' => $gen->id]);
+    }
+
+    /** POST /prompt-generator/main-flow — AI opening auto-reply message. */
+    public function mainFlow(Request $request)
+    {
+        $this->checkAccess();
+        $d = $request->validate([
+            'product_name'        => 'required|string|max:250',
+            'product_description' => 'nullable|string|max:6000',
+            'features'            => 'nullable|string|max:4000',
+            'price'               => 'nullable|string|max:300',
+            'promo'               => 'nullable|string|max:2000',
+            'language'            => 'nullable|string|max:30',
+        ]);
+        $lang   = trim($d['language'] ?? 'Taglish') ?: 'Taglish';
+        $system = str_replace('{language}', $lang, self::MAINFLOW_PROMPT);
+        $userMsg = "Product name: {$d['product_name']}\n"
+            . "Product description: " . ($d['product_description'] ?? '') . "\n"
+            . "Key features:\n" . ($d['features'] ?? '') . "\n"
+            . "Promo price: " . ($d['price'] ?? '') . "\n"
+            . "Current promo/offer: " . ($d['promo'] ?? '');
+
+        $text = $this->openaiText($system, $userMsg, 0.85);
+        if ($text === null) return response()->json(['ok' => false, 'message' => 'Nabigo ang AI. Subukan ulit.'], 200);
+        return response()->json(['ok' => true, 'main_flow' => $text]);
+    }
+
+    /** POST /prompt-generator/sequence — AI follow-up broadcast messages (1-10). */
+    public function sequence(Request $request)
+    {
+        $this->checkAccess();
+        $d = $request->validate([
+            'product_name'        => 'required|string|max:250',
+            'product_description' => 'nullable|string|max:6000',
+            'features'            => 'nullable|string|max:4000',
+            'language'            => 'nullable|string|max:30',
+            'count'               => 'required|integer|min:1|max:10',
+        ]);
+        $lang  = trim($d['language'] ?? 'Taglish') ?: 'Taglish';
+        $count = (int) $d['count'];
+        $system = str_replace(['{count}', '{language}'], [(string) $count, $lang], self::SEQUENCE_PROMPT);
+        $userMsg = "Product name: {$d['product_name']}\n"
+            . "Product description: " . ($d['product_description'] ?? '') . "\n"
+            . "Key features:\n" . ($d['features'] ?? '') . "\n\n"
+            . "PRICING RULE: Do NOT write any real price, number, amount, discount, or specific deal name. "
+            . "Whenever a message refers to price/cost/discount/savings/the offer, use the literal token {{PRICING}}.\n\n"
+            . "Write exactly {$count} follow-up messages.";
+
+        $schema = [
+            'type' => 'object', 'additionalProperties' => false, 'required' => ['messages'],
+            'properties' => ['messages' => ['type' => 'array', 'items' => ['type' => 'string']]],
+        ];
+
+        try {
+            $resp = Http::withToken(config('services.openai.key'))->timeout(120)->post('https://api.openai.com/v1/chat/completions', [
+                'model' => self::TEXT_MODEL, 'temperature' => 0.95,
+                'messages' => [['role' => 'system', 'content' => $system], ['role' => 'user', 'content' => $userMsg]],
+                'response_format' => ['type' => 'json_schema', 'json_schema' => ['name' => 'followup_sequence', 'strict' => true, 'schema' => $schema]],
+            ]);
+            if (!$resp->successful()) return response()->json(['ok' => false, 'message' => 'AI failed (' . $resp->status() . ').'], 200);
+            $parsed = json_decode((string) ($resp['choices'][0]['message']['content'] ?? ''), true);
+            $messages = array_values(array_filter(array_map(fn ($m) => trim((string) $m), $parsed['messages'] ?? []), fn ($m) => $m !== ''));
+            return response()->json(['ok' => true, 'messages' => array_slice($messages, 0, $count)]);
+        } catch (\Throwable $e) {
+            Log::error('PromptGen sequence: ' . $e->getMessage());
+            return response()->json(['ok' => false, 'message' => 'Error: ' . $e->getMessage()], 200);
+        }
+    }
+
+    /** POST /prompt-generator/test — run one customer message against a generated prompt. */
+    public function testChat(Request $request)
+    {
+        $this->checkAccess();
+        $d = $request->validate([
+            'system_prompt' => 'required|string|max:60000',
+            'message'       => 'required|string|max:2000',
+        ]);
+        $text = $this->openaiText($d['system_prompt'], $d['message'], 0.7);
+        if ($text === null) return response()->json(['ok' => false, 'message' => 'Nabigo ang AI. Subukan ulit.'], 200);
+        return response()->json(['ok' => true, 'reply' => $text]);
+    }
+
+    /** Shared plain-text OpenAI call (system + user). Returns text or null on failure. */
+    private function openaiText(string $system, string $user, float $temp): ?string
+    {
+        try {
+            $resp = Http::withToken(config('services.openai.key'))->timeout(90)->post('https://api.openai.com/v1/chat/completions', [
+                'model' => self::TEXT_MODEL, 'temperature' => $temp,
+                'messages' => [['role' => 'system', 'content' => $system], ['role' => 'user', 'content' => $user]],
+            ]);
+            if (!$resp->successful()) { Log::warning('PromptGen openaiText failed: ' . $resp->status() . ' ' . $resp->body()); return null; }
+            $t = trim((string) ($resp['choices'][0]['message']['content'] ?? ''));
+            return $t !== '' ? $t : null;
+        } catch (\Throwable $e) {
+            Log::error('PromptGen openaiText exception: ' . $e->getMessage());
+            return null;
+        }
     }
 
     /** GET /prompt-generator/history */

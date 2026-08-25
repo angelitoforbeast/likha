@@ -1008,6 +1008,9 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get ('/prompt-generator',               [\App\Http\Controllers\PromptGeneratorController::class, 'index'])        ->name('prompt.generator.index');
     Route::post('/prompt-generator/analyze-image', [\App\Http\Controllers\PromptGeneratorController::class, 'analyzeImage']) ->middleware('throttle:30,1')->name('prompt.generator.analyze');
     Route::post('/prompt-generator/save',          [\App\Http\Controllers\PromptGeneratorController::class, 'save'])         ->middleware('throttle:120,1')->name('prompt.generator.save');
+    Route::post('/prompt-generator/main-flow',     [\App\Http\Controllers\PromptGeneratorController::class, 'mainFlow'])     ->middleware('throttle:40,1')->name('prompt.generator.mainflow');
+    Route::post('/prompt-generator/sequence',      [\App\Http\Controllers\PromptGeneratorController::class, 'sequence'])     ->middleware('throttle:40,1')->name('prompt.generator.sequence');
+    Route::post('/prompt-generator/test',          [\App\Http\Controllers\PromptGeneratorController::class, 'testChat'])     ->middleware('throttle:60,1')->name('prompt.generator.test');
     Route::get ('/prompt-generator/history',       [\App\Http\Controllers\PromptGeneratorController::class, 'history'])      ->name('prompt.generator.history');
     Route::get ('/prompt-generator/history/{id}',  [\App\Http\Controllers\PromptGeneratorController::class, 'historyDetail'])->whereNumber('id')->name('prompt.generator.history.detail');
 
