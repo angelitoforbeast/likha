@@ -256,7 +256,7 @@
     </div>
   </div>
 
-  {{-- Config (Blade-parsed) — kept OUT of @verbatim so csrf/routes resolve --}}
+  {{-- Config script (Blade-rendered). Kept OUTSIDE the protected block below so csrf/routes resolve. --}}
   <script>
     window.PG_CONFIG = {
       csrf:        '{{ csrf_token() }}',
@@ -268,7 +268,7 @@
     };
   </script>
 
-  {{-- Main script in @verbatim so the {{PLACEHOLDER}} tokens in the master template are NOT parsed by Blade --}}
+  {{-- Main script is wrapped below so the double-brace placeholder tokens in the master template stay literal. --}}
   @verbatim
   <script>
   (function(){
