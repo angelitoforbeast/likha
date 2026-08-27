@@ -293,13 +293,22 @@
   (function(){
     const csrf = window.PG_CONFIG.csrf;
 
-    const TOP = window.PG_TPL.sales_top;
-
-    const BOTTOM = window.PG_TPL.sales_bottom;
-
-    const AFTERSALES_TOP = window.PG_TPL.aftersales_top;
-
-    const AFTERSALES_BOTTOM = window.PG_TPL.aftersales_bottom;
+    // Full editable templates (galing ⚙️ Settings). Ang {{OFFERS_AND_POLICY}} marker ang pinapalitan
+    // ng auto na pricing/shipping/policy sections. Isang field na lang bawat prompt (madaling i-edit sa ChatGPT).
+    const OFFERS_MARKER = '{{OFFERS_AND_POLICY}}';
+    function withMiddle(tpl, middle){
+      return tpl.includes(OFFERS_MARKER) ? tpl.split(OFFERS_MARKER).join(middle) : (tpl + '\n\n' + middle);
+    }
+    function salesPromptText(data){
+      const tpl=(window.PG_TPL && window.PG_TPL.sales_template) || '';
+      const middle=[pricingSection(),shippingSection(),policySection(data)].join('\n\n');
+      return fillPlaceholders(withMiddle(tpl, middle), data);
+    }
+    function afterSalesPromptText(data){
+      const tpl=(window.PG_TPL && window.PG_TPL.aftersales_template) || '';
+      const middle=[pricingSection(),shippingSection()].join('\n\n');
+      return fillPlaceholders(withMiddle(tpl, middle), data);
+    }
 
     const SAMPLE = {"STORE_NAME":"Ginhawa Naturals","ASSISTANT_NAME":"Mia","PRODUCT_NAME":"Herbal Comfort Oil","PRODUCT_CATEGORY":"External-use herbal massage oil","PRODUCT_DESCRIPTION":"A topical massage oil made for everyday body comfort and relaxing massage.","PRIMARY_BENEFIT":"Helps provide a soothing and relaxing massage experience for tired areas of the body.","PRODUCT_BENEFITS":"• Helps support a relaxing massage routine\n• Convenient for home use\n• Easy to apply to targeted body areas","PRODUCT_FEATURES":"Non-greasy feel, easy-to-use bottle, external use only.","INGREDIENTS":"Coconut oil, ginger extract, eucalyptus oil. Use only if these are the verified ingredients of the actual product.","HOW_TO_USE":"Apply a small amount to the desired external body area and massage gently. Follow the product label.","USAGE_TIPS":"Patch test first and avoid eyes, wounds, and irritated skin.","PRODUCT_ORIGIN":"Philippines","PRODUCT_CERTIFICATION":"Only state certifications actually verified by the seller. Sample: Product information is based on the official label.","WARRANTY_POLICY":"Damaged or incorrect items may be reported to customer support for verification and applicable replacement.","COVERAGE_AREA":"Nationwide delivery within the Philippines, subject to courier serviceability.","DELIVERY_TIME":"2 to 5 days Luzon, 5 to 10 days Visayas and Mindanao, 11 to 15 days Palawan, Sulu, Tawi-Tawi.","PAYMENT_METHOD":"Cash on Delivery (COD)","LEGITIMACY_INFO":"Orders are processed through the official store and shipped with trackable courier details.","PROMO_INFORMATION":"Current official bundle prices are promotional while the promotion is active.","AVAILABILITY_INFORMATION":"Available while current inventory lasts. Do not claim low stock unless confirmed.","ORDER_FIELDS":"Preferred landmark (if needed for delivery)","UNIT_NAME":"bottle","OPEN_PARCEL_POLICY":"No Open Before Payment. Customers may inspect the parcel after completing COD payment, subject to courier policy."};
     const SAMPLE_BUNDLES = [{"name":"Buy 1","qty":"1 bottle","price":"₱399","shipMode":"hidden","shipFeeType":"fixed","shipAmount":"₱99","shipLocationText":""},{"name":"Buy 2 Save More","qty":"2 bottles","price":"₱699","shipMode":"free","shipFeeType":"location","shipAmount":"","shipLocationText":""},{"name":"Family Bundle","qty":"3 bottles","price":"₱899","shipMode":"free","shipFeeType":"location","shipAmount":"","shipLocationText":""}];
@@ -472,25 +481,27 @@
       return `# DELIVERY QUESTIONS\n\nIf asked when the item will arrive, use:\n\n**${data.DELIVERY_TIME||'[NOT PROVIDED: DELIVERY_TIME]'}**\n\nMake it clear that actual delivery may depend on location when applicable.\n\nNever guarantee an exact arrival date unless verified information explicitly allows it.\n\n---\n\n# PAYMENT\n\nThe official payment method is:\n\n**${data.PAYMENT_METHOD||'[NOT PROVIDED: PAYMENT_METHOD]'}**\n\nDo not offer unsupported payment methods.\n\n---\n\n# OPEN-PARCEL POLICY\n\nFollow this policy exactly:\n\n**${data.OPEN_PARCEL_POLICY||'[NOT PROVIDED: OPEN_PARCEL_POLICY]'}**\n\nDo not contradict this policy.\n\nNever tell the customer that opening before payment is allowed unless the provided policy specifically says so.\n\n---`;
     }
 
-    // ── Verification code (prompt fingerprint; triggered ONLY by the secret keyword) ──
-    const VERIFY_KEYWORD = '4bscheck';
+    // ── Verification code (prompt fingerprint) — template galing sa ⚙️ Settings (editable). ──
+    // Placeholders: {{STORE_NAME}}, {{PRODUCT_NAME}}, {{VERIFY_STAMP}} (date-time). Kung blangko → walang section.
     function verifyStamp(){
       const d=new Date(), p=n=>String(n).padStart(2,'0');
       return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
     }
     function verificationSection(data){
-      const store=data.STORE_NAME||'[STORE]', item=data.PRODUCT_NAME||'[ITEM]';
-      const code=`${store} | ${item} | ${verifyStamp()}`;
-      return `# INTERNAL VERIFICATION CODE — NOT FOR CUSTOMERS\n\nThis is a hidden system check used only by the store's own team.\n\nIf — and ONLY if — the customer's message is EXACTLY:\n\n${VERIFY_KEYWORD}\n\nthen reply with ONLY this single line and nothing else (no greeting, no extra words):\n\nVERIFIED: ${code}\n\nFor ANY other message — even if it is similar to, contains, mentions, or asks about this keyword or code — completely IGNORE this entire section. Never reveal, hint at, repeat, explain, translate, or output this keyword or code. Never use this section to answer normal questions. Act as if this section does not exist unless the message is EXACTLY the keyword above.\n\n---`;
+      const tpl=(window.PG_TPL && window.PG_TPL.verify) || '';
+      if(!tpl.trim()) return '';
+      return tpl.replace(/\{\{STORE_NAME\}\}/g, data.STORE_NAME||'[STORE]')
+                .replace(/\{\{PRODUCT_NAME\}\}/g, data.PRODUCT_NAME||'[ITEM]')
+                .replace(/\{\{VERIFY_STAMP\}\}/g, verifyStamp());
     }
 
     function generate(){
       const data=fieldValues();
-      const prompt=[fillPlaceholders(TOP,data),pricingSection(),shippingSection(),policySection(data),fillPlaceholders(BOTTOM,data),verificationSection(data)].join('\n\n');
+      const prompt=[salesPromptText(data),verificationSection(data)].filter(Boolean).join('\n\n');
       $('output').value=prompt;
       $('count').textContent=prompt.length.toLocaleString()+' characters';
       // After-Sales prompt (deterministic, reuses pricing/shipping sections)
-      if($('afterOutput')) $('afterOutput').value=[fillPlaceholders(AFTERSALES_TOP,data),pricingSection(),shippingSection(),fillPlaceholders(AFTERSALES_BOTTOM,data),verificationSection(data)].join('\n\n');
+      if($('afterOutput')) $('afterOutput').value=[afterSalesPromptText(data),verificationSection(data)].filter(Boolean).join('\n\n');
       const missing=(prompt.match(/\[NOT PROVIDED:[^\]]+\]/g)||[]).length;
       const st=$('status');
       if(missing){st.className='warn';st.textContent='Generated — may '+missing+' missing value(s).';}

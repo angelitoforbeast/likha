@@ -87,7 +87,7 @@
     @if($sec === 'prompts')
     <div class="pgs-card">
       <div class="pgs-sec-title">✏️ Editable Prompts</div>
-      <div class="pgs-help">I-edit, i-Save (naka-log na version), i-Restore sa naunang version, o Reset sa code default. <strong>Note:</strong> Ang Sales/After-Sales ay hati sa <em>Header</em> at <em>Footer</em> — ang PRICING/SHIPPING/DELIVERY sections ay awtomatikong nakasingit sa pagitan nila. Huwag burahin ang <code>@{{PLACEHOLDER}}</code> tokens (hal. <code>@{{STORE_NAME}}</code>).</div>
+      <div class="pgs-help">I-edit, i-Save (naka-log na version), i-Restore sa naunang version, o Reset sa code default. <strong>Note:</strong> Sa Sales/After-Sales, ang <code>@{{OFFERS_AND_POLICY}}</code> marker ang awtomatikong pinapalitan ng PRICING/SHIPPING/DELIVERY sections (adaptive sa single vs bundle) — huwag itong burahin. Huwag ding burahin ang <code>@{{PLACEHOLDER}}</code> tokens (hal. <code>@{{STORE_NAME}}</code>). Pwede mong kopyahin ang buong template, ipa-edit kay ChatGPT, tapos i-paste pabalik.</div>
       <div id="editablePrompts"></div>
     </div>
     <div class="pgs-card pgs-ref">
