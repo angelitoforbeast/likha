@@ -492,9 +492,12 @@ class GPTAdGeneratorController extends Controller
     {
         $promptText = $this->resolveActivePrompt();
 
-        // Get raw page names, normalize in PHP (avoid SQL REPLACE/UNHEX)
+        // Get raw page names, normalize in PHP (avoid SQL REPLACE/UNHEX).
+        // DISTINCT sa SQL — kung hindi, lahat ng rows (milyon) papasok sa PHP
+        // memory bago mag-unique → nag-o-OOM ang pluck+sort sa malaking table.
         $rawPages = DB::table('ads_manager_reports')
             ->whereNotNull('page_name')
+            ->distinct()
             ->pluck('page_name');
 
         $pages = collect($rawPages)->map(fn ($p) => $this->normalizePage($p))
@@ -505,6 +508,7 @@ class GPTAdGeneratorController extends Controller
         $rawItems = DB::table('ads_manager_reports')
             ->whereNotNull('item_name')
             ->where('item_name', '<>', '')
+            ->distinct()
             ->pluck('item_name');
 
         $items = collect($rawItems)->map(fn ($i) => $this->normalizePage($i))

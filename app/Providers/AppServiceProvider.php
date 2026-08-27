@@ -64,25 +64,25 @@ class AppServiceProvider extends ServiceProvider
             URL::forceScheme('https');
         }
 
-        // Make per-user pending task count available in all views
+        // Make per-user pending task count available in all views.
+        // Memoized per request (keyed by user id) — a composer('*') otherwise
+        // re-runs these 2 count queries for EVERY rendered sub-view/component
+        // (dozens of duplicate queries per page load).
         View::composer('*', function ($view) {
-    $user = Auth::user();
-    $pendingTaskCount = 0;
-    $inProgressTaskCount = 0;
+            static $cache = [];
+            $user = Auth::user();
+            $uid  = $user?->id ?? 0;
 
-    if ($user) {
-        $pendingTaskCount = Task::where('status', 'pending')
-            ->where('user_id', $user->id)
-            ->count();
+            if (! array_key_exists($uid, $cache)) {
+                $cache[$uid] = $user ? [
+                    Task::where('status', 'pending')->where('user_id', $uid)->count(),
+                    Task::where('status', 'in_progress')->where('user_id', $uid)->count(),
+                ] : [0, 0];
+            }
 
-        $inProgressTaskCount = Task::where('status', 'in_progress')
-            ->where('user_id', $user->id)
-            ->count();
-    }
-
-    $view->with('pendingTaskCount', $pendingTaskCount)
-         ->with('inProgressTaskCount', $inProgressTaskCount);
-});
+            $view->with('pendingTaskCount', $cache[$uid][0])
+                 ->with('inProgressTaskCount', $cache[$uid][1]);
+        });
 
     }
 }
