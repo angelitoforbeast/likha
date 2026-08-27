@@ -889,10 +889,12 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       const data=fieldValues();
       if(!data.PRODUCT_NAME){ $('seqStatus').textContent='Kailangan ng Product Name.'; return; }
       const count=parseInt($('seqCount').value,10)||5;
+      const {price,promo}=derivePricePromo();
+      const pricing=[price?('Price: '+price):'', promo?('Offer/Promo: '+promo):''].filter(Boolean).join('\n');
       const btn=$('genSeqBtn'); btn.disabled=true; btn.textContent='Generating…'; $('seqStatus').textContent='AI is writing…';
       try{
         const res=await fetch(window.PG_CONFIG.sequenceUrl,{method:'POST',headers:jhead,
-          body:JSON.stringify({product_name:data.PRODUCT_NAME,product_description:data.PRODUCT_DESCRIPTION,features:data.PRODUCT_FEATURES,language:($('language')||{}).value||'Taglish',count})});
+          body:JSON.stringify({product_name:data.PRODUCT_NAME,product_description:data.PRODUCT_DESCRIPTION,features:data.PRODUCT_FEATURES,language:($('language')||{}).value||'Taglish',pricing,count})});
         const j=await res.json();
         if(!j.ok){ $('seqStatus').textContent=j.message||'Failed'; return; }
         seqMessages=j.messages||[];

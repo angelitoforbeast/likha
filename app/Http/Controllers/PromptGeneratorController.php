@@ -85,13 +85,14 @@ FORMATTING:
 - Messenger does NOT render markdown. Never use **asterisks**, ~tildes~, or backticks. Use CAPS/emojis.
 - Use real line breaks. No fake medical/financial claims.
 
-PLACEHOLDERS — insert these LITERALLY, do NOT replace, translate, or invent values for them.
-These are the ONLY two allowed placeholders — do NOT output any other {{...}} token:
+PLACEHOLDER — insert this LITERALLY, do NOT replace, translate, or invent a value for it:
 - {{user_first_name}}  = the customer's first name (sprinkle naturally, not in every single message)
-- {{PRICING}}     = the promo price / offer
-NEVER write an actual price, number, amount, discount, savings, or a specific deal name
-(e.g. "P299", "299", "Buy 1 Take 1", "B1T1", "50% off"). ANY reference to price, cost,
-discount, or the offer MUST be the literal token {{PRICING}}.
+This is the ONLY {{...}} token allowed — do NOT output any other {{...}} placeholder.
+
+PRICING: Use the ACTUAL price and offer details given in the context below. When a message talks
+about price, cost, savings, or the deal, state the REAL price/offer naturally (e.g. the promo price,
+the bundle deal). Do NOT invent a different price, discount, deal, or savings that is not in the
+provided pricing/offer info. If no price is provided, simply avoid stating a specific number.
 
 Return ONLY the messages as an array of strings (one full message per array item).
 Do NOT number them and do NOT add any commentary.
@@ -226,16 +227,18 @@ SEQ;
             'product_description' => 'nullable|string|max:6000',
             'features'            => 'nullable|string|max:4000',
             'language'            => 'nullable|string|max:30',
+            'pricing'             => 'nullable|string|max:2000',
             'count'               => 'required|integer|min:1|max:10',
         ]);
         $lang  = trim($d['language'] ?? 'Taglish') ?: 'Taglish';
         $count = (int) $d['count'];
+        $pricing = trim($d['pricing'] ?? '');
         $system = str_replace(['{count}', '{language}'], [(string) $count, $lang], self::SEQUENCE_PROMPT);
         $userMsg = "Product name: {$d['product_name']}\n"
             . "Product description: " . ($d['product_description'] ?? '') . "\n"
             . "Key features:\n" . ($d['features'] ?? '') . "\n\n"
-            . "PRICING RULE: Do NOT write any real price, number, amount, discount, or specific deal name. "
-            . "Whenever a message refers to price/cost/discount/savings/the offer, use the literal token {{PRICING}}.\n\n"
+            . "Pricing / Offer details (use these ACTUAL values — do not invent other prices or deals):\n"
+            . ($pricing !== '' ? $pricing : '(none provided — avoid stating a specific price)') . "\n\n"
             . "Write exactly {$count} follow-up messages.";
 
         $schema = [
