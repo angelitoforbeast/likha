@@ -174,14 +174,14 @@ SEQ;
         ];
     }
 
-    /** GET /prompt-generator/settings — current + default protected settings. */
-    public function getSettings()
+    /** GET /prompt-generator/settings — standalone Settings PAGE (UI). */
+    public function settingsPage()
     {
         $this->checkAccess();
-        return response()->json([
-            'ok'       => true,
-            'settings' => $this->settingsMerged(),
-            'defaults' => $this->defaultSettings(),
+        return view('prompt_generator.settings', [
+            'settings'  => $this->settingsMerged(),
+            'defaults'  => $this->defaultSettings(),
+            'promptRef' => $this->promptReference(),
         ]);
     }
 
