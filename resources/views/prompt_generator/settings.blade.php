@@ -18,6 +18,12 @@
     .pgs-sec-title { font-size:14px; font-weight:800; color:#0f172a; margin:2px 0 10px; }
     .pgs-help { font-size:12px; color:#94a3b8; margin-bottom:12px; line-height:1.45; }
     .pgs-ref pre { white-space:pre-wrap; word-break:break-word; font-size:11.5px; background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:10px; max-height:240px; overflow:auto; color:#334155; margin:6px 0 0; }
+    .pgs-lockgroup h4 { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#6366f1; margin:12px 0 6px; font-weight:700; }
+    .pgs-lockrow { display:flex; align-items:center; gap:10px; padding:7px 10px; border:1px solid #eef2f7; border-radius:8px; margin-bottom:5px; background:#fff; }
+    .pgs-lockrow.locked { background:#f5f3ff; border-color:#c7d2fe; }
+    .pgs-lockrow .lbl { flex:1; font-size:12.5px; color:#334155; }
+    .pgs-lockrow .lockicon { font-size:15px; width:20px; text-align:center; }
+    .pgs-lockrow input { width:16px; height:16px; cursor:pointer; margin:0; }
   </style>
 
   <div class="pgs-wrap">
@@ -41,6 +47,16 @@
       </div>
     </div>
 
+    <div class="pgs-card">
+      <div class="pgs-sec-title">🔒 Auto-Fill Protection</div>
+      <div class="pgs-help">I-lock (🔒) ang mga field na <strong>ayaw mong baguhin ng Analyze Image</strong>. Naka-lock = protektado (walang overwrite, walang REVIEW). Hindi naka-lock = pwedeng i-autofill. Pindutin ang <strong>💾 Save Settings</strong> sa taas para i-save.</div>
+      <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+        <button class="pgs-btn ghost" id="lockAll" type="button">🔒 Lock All</button>
+        <button class="pgs-btn ghost" id="unlockAll" type="button">🔓 Unlock All</button>
+      </div>
+      <div id="lockList"></div>
+    </div>
+
     <div class="pgs-card pgs-ref">
       <div class="pgs-sec-title">📋 Generation Prompts &amp; Inputs (reference)</div>
       <div class="pgs-help">Mga system prompt + inputs na ginagamit para mag-generate. Read-only muna.</div>
@@ -56,6 +72,8 @@
       settings:  @json($settings ?? []),
       defaults:  @json($defaults ?? []),
       promptRef: @json($promptRef ?? []),
+      catalog:   @json($catalog ?? (object)[]),
+      locked:    @json($locked ?? []),
     };
   </script>
   <script>
@@ -97,15 +115,41 @@
         d.appendChild(h); d.appendChild(inp); d.appendChild(pre); box.appendChild(d);
       });
     }
+    function renderLocks(){
+      const box=$('lockList'); if(!box) return;
+      const cat=window.PGS.catalog||{}; const locked=new Set(window.PGS.locked||[]);
+      box.innerHTML='';
+      Object.keys(cat).forEach(group=>{
+        const g=document.createElement('div'); g.className='pgs-lockgroup';
+        const h=document.createElement('h4'); h.textContent=group; g.appendChild(h);
+        Object.keys(cat[group]).forEach(key=>{
+          const isLocked=locked.has(key);
+          const row=document.createElement('label'); row.className='pgs-lockrow'+(isLocked?' locked':'');
+          const cb=document.createElement('input'); cb.type='checkbox'; cb.setAttribute('data-lock',key); cb.checked=isLocked;
+          const ic=document.createElement('span'); ic.className='lockicon'; ic.textContent=isLocked?'🔒':'🔓';
+          const lbl=document.createElement('span'); lbl.className='lbl'; lbl.textContent=cat[group][key];
+          cb.addEventListener('change',()=>{ row.classList.toggle('locked',cb.checked); ic.textContent=cb.checked?'🔒':'🔓'; });
+          row.appendChild(cb); row.appendChild(ic); row.appendChild(lbl); g.appendChild(row);
+        });
+        box.appendChild(g);
+      });
+    }
+    function collectLocks(){
+      const out=[]; document.querySelectorAll('[data-lock]').forEach(cb=>{ if(cb.checked) out.push(cb.dataset.lock); }); return out;
+    }
+    function setAllLocks(on){
+      document.querySelectorAll('[data-lock]').forEach(cb=>{ cb.checked=on; cb.dispatchEvent(new Event('change')); });
+    }
     const jhead={'Content-Type':'application/json','Accept':'application/json','X-CSRF-TOKEN':window.PGS.csrf};
     async function save(){
       const st=$('pgsStatus'), btn=$('pgsSave'); btn.disabled=true; btn.textContent='Saving…';
       const payload={}; document.querySelectorAll('[data-setting]').forEach(el=>payload[el.dataset.setting]=el.value);
       try{
-        const res=await fetch(window.PGS.saveUrl,{method:'POST',headers:jhead,body:JSON.stringify({settings:payload})});
+        const res=await fetch(window.PGS.saveUrl,{method:'POST',headers:jhead,body:JSON.stringify({settings:payload, locked:collectLocks()})});
         const j=await res.json();
         if(!j.ok){ st.style.color='#b91c1c'; st.textContent=j.message||'Save failed'; return; }
-        window.PGS.settings=j.settings||payload; renderFields();
+        window.PGS.settings=j.settings||payload; if(j.locked) window.PGS.locked=j.locked;
+        renderFields(); renderLocks();
         st.style.color='#16a34a'; st.textContent='Saved ✅';
       }catch(e){ st.style.color='#b91c1c'; st.textContent='Error: '+e.message; }
       finally{ btn.disabled=false; btn.textContent='💾 Save Settings'; setTimeout(()=>{ st.textContent=''; },4000); }
@@ -117,13 +161,15 @@
         const res=await fetch(window.PGS.resetUrl,{method:'POST',headers:jhead,body:JSON.stringify({})});
         const j=await res.json();
         if(!j.ok){ st.style.color='#b91c1c'; st.textContent=j.message||'Reset failed'; return; }
-        window.PGS.settings=j.settings||window.PGS.defaults; renderFields();
+        window.PGS.settings=j.settings||window.PGS.defaults; if(j.locked) window.PGS.locked=j.locked;
+        renderFields(); renderLocks();
         st.style.color='#16a34a'; st.textContent='Reset to default ✅';
       }catch(e){ st.style.color='#b91c1c'; st.textContent='Error: '+e.message; }
       finally{ btn.disabled=false; btn.textContent='↩︎ Reset to Default'; setTimeout(()=>{ st.textContent=''; },4000); }
     }
-    renderFields(); renderRef();
+    renderFields(); renderRef(); renderLocks();
     $('pgsSave').onclick=save; $('pgsReset').onclick=reset;
+    $('lockAll').onclick=()=>setAllLocks(true); $('unlockAll').onclick=()=>setAllLocks(false);
   })();
   </script>
 </x-layout>

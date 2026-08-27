@@ -124,6 +124,7 @@ SEQ;
             'settings'  => $this->settingsMerged(),
             'defaults'  => $this->defaultSettings(),
             'promptRef' => $this->promptReference(),
+            'locked'    => $this->lockedFields(),
         ]);
     }
 
@@ -163,6 +164,67 @@ SEQ;
         return $settings;
     }
 
+    /** Buong catalog ng prompt fields (grouped) — para sa 🔒 Auto-Fill Protection list. */
+    private function fieldCatalog(): array
+    {
+        return [
+            'Store & Assistant' => [
+                'STORE_NAME' => 'Store Name', 'ASSISTANT_NAME' => 'Assistant Name',
+                'PRODUCT_NAME' => 'Product Name', 'PRODUCT_CATEGORY' => 'Product Category',
+            ],
+            'Product Details' => [
+                'PRODUCT_DESCRIPTION' => 'Product Description', 'PRIMARY_BENEFIT' => 'Primary Benefit',
+                'PRODUCT_BENEFITS' => 'Key Benefits', 'PRODUCT_FEATURES' => 'Key Features',
+                'INGREDIENTS' => 'Ingredients / Materials', 'HOW_TO_USE' => 'How to Use',
+                'USAGE_TIPS' => 'Usage Tips', 'PRODUCT_ORIGIN' => 'Product Origin',
+                'PRODUCT_CERTIFICATION' => 'Certification',
+            ],
+            'Sales & Ordering' => [
+                'PROMO_INFORMATION' => 'Promo Information', 'UNIT_NAME' => 'Unit Name',
+                'QUANTITY_PCS' => 'Quantity (pcs)', 'ORDER_FIELDS' => 'Additional Order Fields',
+            ],
+            'Policies & Delivery' => [
+                'WARRANTY_POLICY' => 'Warranty / Replacement', 'COVERAGE_AREA' => 'Coverage Area',
+                'DELIVERY_TIME' => 'Delivery Time', 'PAYMENT_METHOD' => 'Payment Method',
+                'OPEN_PARCEL_POLICY' => 'Open Parcel Policy', 'LEGITIMACY_INFO' => 'Legitimacy Info',
+                'AVAILABILITY_INFORMATION' => 'Availability Info',
+            ],
+            'Bot Flow Loops' => [
+                'LOOP1' => 'LOOP 1 — Order Form', 'LOOP2' => 'LOOP 2 — Order Confirmation',
+            ],
+        ];
+    }
+
+    /** Flat list ng lahat ng valid field keys mula sa catalog. */
+    private function catalogKeys(): array
+    {
+        $keys = [];
+        foreach ($this->fieldCatalog() as $group) {
+            foreach ($group as $k => $label) $keys[] = $k;
+        }
+        return $keys;
+    }
+
+    /** Mga field na naka-🔒 (protected sa Auto-Fill). Default = policies + loops. */
+    private function lockedFields(): array
+    {
+        $default = array_keys($this->defaultSettings()); // 7 policies + 2 loops
+        try {
+            if (Schema::hasTable('prompt_generator_settings')) {
+                $row = PromptGeneratorSetting::where('key', '_locked_fields')->value('value');
+                if ($row !== null) {
+                    $arr = json_decode($row, true);
+                    if (is_array($arr)) {
+                        return array_values(array_intersect(array_filter($arr, 'is_string'), $this->catalogKeys()));
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // table missing → default locks
+        }
+        return $default;
+    }
+
     /** Read-only reference: anong system prompt + inputs ang ginagamit kada generation. */
     private function promptReference(): array
     {
@@ -182,6 +244,8 @@ SEQ;
             'settings'  => $this->settingsMerged(),
             'defaults'  => $this->defaultSettings(),
             'promptRef' => $this->promptReference(),
+            'catalog'   => $this->fieldCatalog(),
+            'locked'    => $this->lockedFields(),
         ]);
     }
 
@@ -192,13 +256,21 @@ SEQ;
         if (! Schema::hasTable('prompt_generator_settings')) {
             return response()->json(['ok' => false, 'message' => 'Settings table wala pa — patakbuhin muna: php artisan migrate --force'], 200);
         }
-        $data = $request->validate(['settings' => 'required|array']);
+        $data = $request->validate([
+            'settings'   => 'required|array',
+            'locked'     => 'nullable|array',
+            'locked.*'   => 'string',
+        ]);
         $allowed = array_keys($this->defaultSettings());
         foreach ($data['settings'] as $k => $v) {
             if (! in_array($k, $allowed, true)) continue;
             PromptGeneratorSetting::updateOrCreate(['key' => $k], ['value' => is_scalar($v) ? (string) $v : json_encode($v)]);
         }
-        return response()->json(['ok' => true, 'settings' => $this->settingsMerged()]);
+        if (array_key_exists('locked', $data)) {
+            $locked = array_values(array_intersect((array) $data['locked'], $this->catalogKeys()));
+            PromptGeneratorSetting::updateOrCreate(['key' => '_locked_fields'], ['value' => json_encode($locked)]);
+        }
+        return response()->json(['ok' => true, 'settings' => $this->settingsMerged(), 'locked' => $this->lockedFields()]);
     }
 
     /** POST /prompt-generator/settings/reset — burahin ang DB overrides → code defaults. */
@@ -207,8 +279,9 @@ SEQ;
         $this->checkAccess();
         if (Schema::hasTable('prompt_generator_settings')) {
             PromptGeneratorSetting::whereIn('key', array_keys($this->defaultSettings()))->delete();
+            PromptGeneratorSetting::where('key', '_locked_fields')->delete();
         }
-        return response()->json(['ok' => true, 'settings' => $this->defaultSettings()]);
+        return response()->json(['ok' => true, 'settings' => $this->defaultSettings(), 'locked' => array_keys($this->defaultSettings())]);
     }
 
     /**

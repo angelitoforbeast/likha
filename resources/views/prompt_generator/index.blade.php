@@ -283,6 +283,7 @@
     window.PG_SETTINGS  = @json($settings ?? []);
     window.PG_DEFAULTS  = @json($defaults ?? []);
     window.PG_PROMPTREF = @json($promptRef ?? []);
+    window.PG_LOCKED    = @json($locked ?? []);
   </script>
 
   {{-- Main script is wrapped below so the double-brace placeholder tokens in the master template stay literal. --}}
@@ -442,8 +443,9 @@ If the customer's concern has already been resolved, do not simply stop. Always 
     // Protected defaults galing sa server (⚙️ Settings tab, DB-backed). QUANTITY_PCS ay local default.
     // `let` para ma-update kapag nag-save/reset sa Settings.
     let POLICY_DEFAULTS = Object.assign({ QUANTITY_PCS: '1' }, window.PG_SETTINGS || {});
-    // Protected keys — HINDI hinahawakan ng Analyze Image autofill (walang overwrite, walang REVIEW flag).
-    const PROTECTED_KEYS = Object.keys(window.PG_DEFAULTS || {});
+    // Protected (locked) keys — configurable sa ⚙️ Settings. HINDI hinahawakan ng Analyze Image
+    // autofill (walang overwrite, walang REVIEW flag). Galing sa PG_LOCKED (DB-backed).
+    const PROTECTED_KEYS = Array.isArray(window.PG_LOCKED) ? window.PG_LOCKED : Object.keys(window.PG_DEFAULTS || {});
     // force=true: palitan lagi. force=false: punan lang ang blangko (di sinisira ang na-edit ng user).
     function applyPolicyDefaults(force){
       Object.keys(POLICY_DEFAULTS).forEach(k=>{
