@@ -214,7 +214,9 @@
           {{-- SALES --}}
           <div class="pg-pane" data-pane="sales">
             <div class="pane-actions">
-              <button class="btn ghost" id="copyBtn" type="button">Copy</button>
+              <button class="btn ghost" id="copyBtn" type="button">Copy All</button>
+              <button class="btn ghost" id="copyBtn1" type="button">Copy 1</button>
+              <button class="btn ghost" id="copyBtn2" type="button">Copy 2</button>
               <button class="btn ghost" id="downloadBtn" type="button">Download .txt</button>
               <button class="btn ghost" id="generateBtn" type="button">Regenerate</button>
             </div>
@@ -223,7 +225,11 @@
           </div>
           {{-- AFTER-SALES --}}
           <div class="pg-pane pg-hidden" data-pane="aftersales">
-            <div class="pane-actions"><button class="btn ghost" id="copyAfterBtn" type="button">Copy</button></div>
+            <div class="pane-actions">
+              <button class="btn ghost" id="copyAfterBtn" type="button">Copy All</button>
+              <button class="btn ghost" id="copyAfterBtn1" type="button">Copy 1</button>
+              <button class="btn ghost" id="copyAfterBtn2" type="button">Copy 2</button>
+            </div>
             <textarea id="afterOutput" class="output" spellcheck="false" readonly></textarea>
           </div>
           {{-- MAIN FLOW --}}
@@ -713,6 +719,42 @@
     $('clearBtn').onclick=clearFields;
     $('copyBtn').onclick=copyPrompt;
     $('downloadBtn').onclick=downloadPrompt;
+
+    // ── Split copy (Copy 1 = first ~10k up to a clean section boundary; Copy 2 = the rest) ──
+    function splitPromptText(text, target){
+      target=target||10000; text=String(text||'');
+      if(text.length<=target) return [text.trim(), ''];
+      let idx=text.lastIndexOf('\n\n# ', target);        // last section header at/before target
+      if(idx<=0) idx=text.lastIndexOf('\n\n', target);    // fallback: paragraph break
+      if(idx<=0) idx=target;                              // hard fallback
+      return [text.slice(0,idx).trim(), text.slice(idx).trim()];
+    }
+    async function copyText(t){
+      try{ await navigator.clipboard.writeText(t); return true; }
+      catch(e){
+        try{ const ta=document.createElement('textarea'); ta.value=t; ta.style.cssText='position:fixed;top:0;left:0;opacity:0';
+          document.body.appendChild(ta); ta.focus(); ta.select(); const ok=document.execCommand('copy'); document.body.removeChild(ta); return ok; }
+        catch(e2){ return false; }
+      }
+    }
+    function wireCopyPart(btn, getText, part){
+      if(!btn) return;
+      const label='Copy '+part;
+      btn.onclick=async()=>{
+        generate(); // refresh output (+ verification timestamp)
+        const [a,b]=splitPromptText(getText(), 10000);
+        const t = part===1 ? a : b;
+        if(!t){ btn.textContent='(walang part '+part+')'; setTimeout(()=>btn.textContent=label,1600); return; }
+        const ok=await copyText(t);
+        btn.textContent = ok ? ('Copied '+t.length.toLocaleString()+' ✓') : 'Copy failed';
+        setTimeout(()=>btn.textContent=label,1800);
+      };
+    }
+    wireCopyPart($('copyBtn1'), ()=>$('output').value, 1);
+    wireCopyPart($('copyBtn2'), ()=>$('output').value, 2);
+    wireCopyPart($('copyAfterBtn1'), ()=>$('afterOutput').value, 1);
+    wireCopyPart($('copyAfterBtn2'), ()=>$('afterOutput').value, 2);
+
     document.querySelectorAll('[data-key]').forEach(el=>el.addEventListener('input',generate));
 
     // ── Tabs ──
