@@ -229,6 +229,8 @@ SEQ;
     private function promptReference(): array
     {
         return [
+            ['name' => 'Sales Prompt (deterministic — no AI)', 'inputs' => 'Store/Assistant, all Product Details, Pricing/Offers, Shipping, Policies & Delivery defaults', 'prompt' => "Deterministic master template (binubuo client-side, walang API call):\n\n1. TOP — AI Sales Assistant role + buong PRODUCT INFORMATION + Personality + Core Decision Process + Product Info Rule.\n2. PRICING & OFFER RULES — conditional (single price O official bundles + recommended offer).\n3. SHIPPING RULE — conditional (free / declared / hidden-until-asked; per-bundle kapag bundle mode).\n4. DELIVERY / PAYMENT / OPEN-PARCEL — galing sa Policies & Delivery defaults (Default Values tab).\n5. BOTTOM — objection handling, promos, ordering process, order summary, response style, priority rules.\n\nBuong output ay makikita sa \"Sales Prompt\" tab ng generator."],
+            ['name' => 'After-Sales Prompt (deterministic — no AI)', 'inputs' => 'Kapareho ng Sales Prompt (ginagamit muli ang pricing/shipping sections)', 'prompt' => "Deterministic template para sa after-sales support (walang API call):\n\n1. AFTERSALES_TOP — after-sales assistant role + primary goal + closing rule.\n2. PRICING + SHIPPING sections (reused mula sa Sales Prompt logic).\n3. AFTERSALES_BOTTOM — legitimacy, warranty/refund handling, reorder invitation.\n\nBuong output ay makikita sa \"After-Sales\" tab ng generator."],
             ['name' => 'Main Flow (first auto-reply)', 'inputs' => 'product_name, product_description, features, price, promo, language', 'prompt' => self::MAINFLOW_PROMPT],
             ['name' => 'Follow-up Sequence',           'inputs' => 'product_name, product_description, features, pricing (from inputs), price_pct, count, language', 'prompt' => self::SEQUENCE_PROMPT],
             ['name' => 'Image Auto-Fill (Vision)',     'inputs' => 'uploaded product image', 'prompt' => $this->visionInstruction()],
@@ -236,11 +238,18 @@ SEQ;
         ];
     }
 
-    /** GET /prompt-generator/settings — standalone Settings PAGE (UI). */
-    public function settingsPage()
+    /** GET /prompt-generator/settings — Default Values section. */
+    public function settingsPage() { return $this->renderSettings('defaults'); }
+    /** GET /prompt-generator/settings/protection — Auto-Fill Protection section. */
+    public function settingsProtection() { return $this->renderSettings('protection'); }
+    /** GET /prompt-generator/settings/prompts — Generation Prompts reference section. */
+    public function settingsPrompts() { return $this->renderSettings('prompts'); }
+
+    private function renderSettings(string $section)
     {
         $this->checkAccess();
         return view('prompt_generator.settings', [
+            'section'   => $section,
             'settings'  => $this->settingsMerged(),
             'defaults'  => $this->defaultSettings(),
             'promptRef' => $this->promptReference(),
@@ -257,14 +266,16 @@ SEQ;
             return response()->json(['ok' => false, 'message' => 'Settings table wala pa — patakbuhin muna: php artisan migrate --force'], 200);
         }
         $data = $request->validate([
-            'settings'   => 'required|array',
+            'settings'   => 'nullable|array',
             'locked'     => 'nullable|array',
             'locked.*'   => 'string',
         ]);
-        $allowed = array_keys($this->defaultSettings());
-        foreach ($data['settings'] as $k => $v) {
-            if (! in_array($k, $allowed, true)) continue;
-            PromptGeneratorSetting::updateOrCreate(['key' => $k], ['value' => is_scalar($v) ? (string) $v : json_encode($v)]);
+        if (isset($data['settings'])) {
+            $allowed = array_keys($this->defaultSettings());
+            foreach ($data['settings'] as $k => $v) {
+                if (! in_array($k, $allowed, true)) continue;
+                PromptGeneratorSetting::updateOrCreate(['key' => $k], ['value' => is_scalar($v) ? (string) $v : json_encode($v)]);
+            }
         }
         if (array_key_exists('locked', $data)) {
             $locked = array_values(array_intersect((array) $data['locked'], $this->catalogKeys()));
@@ -273,15 +284,14 @@ SEQ;
         return response()->json(['ok' => true, 'settings' => $this->settingsMerged(), 'locked' => $this->lockedFields()]);
     }
 
-    /** POST /prompt-generator/settings/reset — burahin ang DB overrides → code defaults. */
+    /** POST /prompt-generator/settings/reset — ibalik ang VALUES sa code defaults (di hinahawakan ang locks). */
     public function resetSettings(Request $request)
     {
         $this->checkAccess();
         if (Schema::hasTable('prompt_generator_settings')) {
             PromptGeneratorSetting::whereIn('key', array_keys($this->defaultSettings()))->delete();
-            PromptGeneratorSetting::where('key', '_locked_fields')->delete();
         }
-        return response()->json(['ok' => true, 'settings' => $this->defaultSettings(), 'locked' => array_keys($this->defaultSettings())]);
+        return response()->json(['ok' => true, 'settings' => $this->defaultSettings(), 'locked' => $this->lockedFields()]);
     }
 
     /**
