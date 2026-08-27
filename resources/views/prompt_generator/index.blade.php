@@ -45,6 +45,12 @@
     .bundle-title { font-weight:700; font-size:12.5px; color:#0f172a; }
     .bundle-actions { display:flex; gap:6px; }
     .mini-grid { display:grid; grid-template-columns:1.2fr .9fr .9fr; gap:8px; }
+    .ship-row { display:flex; align-items:center; gap:8px; margin-top:8px; }
+    .ship-row .ship-label { font-size:11.5px; color:#475569; font-weight:600; flex:0 0 auto; }
+    .ship-row select, .ship-row input { border:1px solid #d1d5db; border-radius:8px; padding:6px 9px; font-size:12.5px; font-family:inherit; }
+    .ship-row select:focus, .ship-row input:focus { outline:none; border-color:#6366f1; box-shadow:0 0 0 2px rgba(99,102,241,.18); }
+    .ship-row .ship-mode { flex:0 0 auto; width:auto; }
+    .ship-row .ship-amt { flex:0 1 120px; min-width:0; }
     .reco { font-size:9px; font-weight:800; padding:2px 6px; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; margin-left:6px; }
     .dynamic-box { border:1px solid #e5e7eb; background:#f8fafc; border-radius:10px; padding:10px; margin-top:8px; }
     .help { font-size:11px; color:#94a3b8; line-height:1.4; margin-top:4px; }
@@ -418,7 +424,7 @@ Always aim to:
 
 If the customer's concern has already been resolved, do not simply stop. Always continue warmly — confirm they are satisfied, or ask a relevant follow-up (feedback or whether they would like to reorder).`;
 
-    const SAMPLE = {"STORE_NAME":"Ginhawa Naturals","ASSISTANT_NAME":"Mia","PRODUCT_NAME":"Herbal Comfort Oil","PRODUCT_CATEGORY":"External-use herbal massage oil","PRODUCT_DESCRIPTION":"A topical massage oil made for everyday body comfort and relaxing massage.","PRIMARY_BENEFIT":"Helps provide a soothing and relaxing massage experience for tired areas of the body.","PRODUCT_BENEFITS":"• Helps support a relaxing massage routine\n• Convenient for home use\n• Easy to apply to targeted body areas","PRODUCT_FEATURES":"Non-greasy feel, easy-to-use bottle, external use only.","INGREDIENTS":"Coconut oil, ginger extract, eucalyptus oil. Use only if these are the verified ingredients of the actual product.","HOW_TO_USE":"Apply a small amount to the desired external body area and massage gently. Follow the product label.","USAGE_TIPS":"Patch test first and avoid eyes, wounds, and irritated skin.","PRODUCT_ORIGIN":"Philippines","PRODUCT_CERTIFICATION":"Only state certifications actually verified by the seller. Sample: Product information is based on the official label.","WARRANTY_POLICY":"Damaged or incorrect items may be reported to customer support for verification and applicable replacement.","COVERAGE_AREA":"Nationwide delivery within the Philippines, subject to courier serviceability.","DELIVERY_TIME":"Usually 3–7 business days depending on location.","PAYMENT_METHOD":"Cash on Delivery (COD)","LEGITIMACY_INFO":"Orders are processed through the official store and shipped with trackable courier details.","PROMO_INFORMATION":"Current official bundle prices are promotional while the promotion is active.","AVAILABILITY_INFORMATION":"Available while current inventory lasts. Do not claim low stock unless confirmed.","ORDER_FIELDS":"Preferred landmark (if needed for delivery)","UNIT_NAME":"bottle","OPEN_PARCEL_POLICY":"No Open Before Payment. Customers may inspect the parcel after completing COD payment, subject to courier policy."};
+    const SAMPLE = {"STORE_NAME":"Ginhawa Naturals","ASSISTANT_NAME":"Mia","PRODUCT_NAME":"Herbal Comfort Oil","PRODUCT_CATEGORY":"External-use herbal massage oil","PRODUCT_DESCRIPTION":"A topical massage oil made for everyday body comfort and relaxing massage.","PRIMARY_BENEFIT":"Helps provide a soothing and relaxing massage experience for tired areas of the body.","PRODUCT_BENEFITS":"• Helps support a relaxing massage routine\n• Convenient for home use\n• Easy to apply to targeted body areas","PRODUCT_FEATURES":"Non-greasy feel, easy-to-use bottle, external use only.","INGREDIENTS":"Coconut oil, ginger extract, eucalyptus oil. Use only if these are the verified ingredients of the actual product.","HOW_TO_USE":"Apply a small amount to the desired external body area and massage gently. Follow the product label.","USAGE_TIPS":"Patch test first and avoid eyes, wounds, and irritated skin.","PRODUCT_ORIGIN":"Philippines","PRODUCT_CERTIFICATION":"Only state certifications actually verified by the seller. Sample: Product information is based on the official label.","WARRANTY_POLICY":"Damaged or incorrect items may be reported to customer support for verification and applicable replacement.","COVERAGE_AREA":"Nationwide delivery within the Philippines, subject to courier serviceability.","DELIVERY_TIME":"2 to 5 days Luzon, 5 to 10 days Visayas and Mindanao, 11 to 15 days Palawan, Sulu, Tawi-Tawi.","PAYMENT_METHOD":"Cash on Delivery (COD)","LEGITIMACY_INFO":"Orders are processed through the official store and shipped with trackable courier details.","PROMO_INFORMATION":"Current official bundle prices are promotional while the promotion is active.","AVAILABILITY_INFORMATION":"Available while current inventory lasts. Do not claim low stock unless confirmed.","ORDER_FIELDS":"Preferred landmark (if needed for delivery)","UNIT_NAME":"bottle","OPEN_PARCEL_POLICY":"No Open Before Payment. Customers may inspect the parcel after completing COD payment, subject to courier policy."};
     const SAMPLE_BUNDLES = [{"name":"Buy 1","qty":"1 bottle","price":"₱399","shipMode":"fee","shipAmount":"₱99"},{"name":"Buy 2 Save More","qty":"2 bottles","price":"₱699","shipMode":"free","shipAmount":""},{"name":"Family Bundle","qty":"3 bottles","price":"₱899","shipMode":"free","shipAmount":""}];
     const LS_KEY = 'pg_v2_state';
 
@@ -485,15 +491,13 @@ If the customer's concern has already been resolved, do not simply stop. Always 
             <label class="pg-field"><span>Quantity</span><input data-bundle="${b.id}" data-prop="qty" value="${escapeHtml(b.qty)}"></label>
             <label class="pg-field"><span>Price</span><input data-bundle="${b.id}" data-prop="price" value="${escapeHtml(b.price)}"></label>
           </div>
-          <div class="mini-grid" style="grid-template-columns:1fr 1fr;margin-top:6px;">
-            <label class="pg-field"><span>Shipping</span>
-              <select data-bundle="${b.id}" data-prop="shipMode">
-                <option value="free" ${(b.shipMode||'free')==='free'?'selected':''}>Free Shipping</option>
-                <option value="fee" ${b.shipMode==='fee'?'selected':''}>With Shipping Fee</option>
-              </select>
-            </label>
-            <label class="pg-field ${b.shipMode==='fee'?'':'pg-hidden'}"><span>Shipping Fee</span>
-              <input data-bundle="${b.id}" data-prop="shipAmount" value="${escapeHtml(b.shipAmount||'')}" placeholder="e.g. ₱99"></label>
+          <div class="ship-row">
+            <span class="ship-label">Shipping</span>
+            <select class="ship-mode" data-bundle="${b.id}" data-prop="shipMode">
+              <option value="free" ${(b.shipMode||'free')==='free'?'selected':''}>Free Shipping</option>
+              <option value="fee" ${b.shipMode==='fee'?'selected':''}>With Fee</option>
+            </select>
+            <input class="ship-amt ${b.shipMode==='fee'?'':'pg-hidden'}" data-bundle="${b.id}" data-prop="shipAmount" value="${escapeHtml(b.shipAmount||'')}" placeholder="₱99">
           </div>`;
         list.appendChild(card);
       });
