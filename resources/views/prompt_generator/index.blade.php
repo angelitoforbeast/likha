@@ -132,8 +132,8 @@
             </div>
           </section>
 
-          {{-- Shipping --}}
-          <section class="pg-sec">
+          {{-- Shipping (single-price mode only; bundle mode sets shipping per bundle) --}}
+          <section class="pg-sec" id="shippingSetupSection">
             <h3>Shipping Setup</h3>
             <div class="pg-grid">
               <label class="pg-field"><span>Shipping Mode</span>
@@ -419,7 +419,7 @@ Always aim to:
 If the customer's concern has already been resolved, do not simply stop. Always continue warmly — confirm they are satisfied, or ask a relevant follow-up (feedback or whether they would like to reorder).`;
 
     const SAMPLE = {"STORE_NAME":"Ginhawa Naturals","ASSISTANT_NAME":"Mia","PRODUCT_NAME":"Herbal Comfort Oil","PRODUCT_CATEGORY":"External-use herbal massage oil","PRODUCT_DESCRIPTION":"A topical massage oil made for everyday body comfort and relaxing massage.","PRIMARY_BENEFIT":"Helps provide a soothing and relaxing massage experience for tired areas of the body.","PRODUCT_BENEFITS":"• Helps support a relaxing massage routine\n• Convenient for home use\n• Easy to apply to targeted body areas","PRODUCT_FEATURES":"Non-greasy feel, easy-to-use bottle, external use only.","INGREDIENTS":"Coconut oil, ginger extract, eucalyptus oil. Use only if these are the verified ingredients of the actual product.","HOW_TO_USE":"Apply a small amount to the desired external body area and massage gently. Follow the product label.","USAGE_TIPS":"Patch test first and avoid eyes, wounds, and irritated skin.","PRODUCT_ORIGIN":"Philippines","PRODUCT_CERTIFICATION":"Only state certifications actually verified by the seller. Sample: Product information is based on the official label.","WARRANTY_POLICY":"Damaged or incorrect items may be reported to customer support for verification and applicable replacement.","COVERAGE_AREA":"Nationwide delivery within the Philippines, subject to courier serviceability.","DELIVERY_TIME":"Usually 3–7 business days depending on location.","PAYMENT_METHOD":"Cash on Delivery (COD)","LEGITIMACY_INFO":"Orders are processed through the official store and shipped with trackable courier details.","PROMO_INFORMATION":"Current official bundle prices are promotional while the promotion is active.","AVAILABILITY_INFORMATION":"Available while current inventory lasts. Do not claim low stock unless confirmed.","ORDER_FIELDS":"Preferred landmark (if needed for delivery)","UNIT_NAME":"bottle","OPEN_PARCEL_POLICY":"No Open Before Payment. Customers may inspect the parcel after completing COD payment, subject to courier policy."};
-    const SAMPLE_BUNDLES = [{"name":"Buy 1","qty":"1 bottle","price":"₱399"},{"name":"Buy 2 Save More","qty":"2 bottles","price":"₱699"},{"name":"Family Bundle","qty":"3 bottles","price":"₱899"}];
+    const SAMPLE_BUNDLES = [{"name":"Buy 1","qty":"1 bottle","price":"₱399","shipMode":"fee","shipAmount":"₱99"},{"name":"Buy 2 Save More","qty":"2 bottles","price":"₱699","shipMode":"free","shipAmount":""},{"name":"Family Bundle","qty":"3 bottles","price":"₱899","shipMode":"free","shipAmount":""}];
     const LS_KEY = 'pg_v2_state';
 
     // Standard company defaults para sa Policies & Delivery — pre-filled + editable pa rin.
@@ -449,7 +449,7 @@ If the customer's concern has already been resolved, do not simply stop. Always 
 
     function addBundle(data){
       data=data||{name:'',qty:'',price:''};
-      bundles.push({id:crypto.randomUUID(),name:data.name||'',qty:data.qty||'',price:data.price||''});
+      bundles.push({id:crypto.randomUUID(),name:data.name||'',qty:data.qty||'',price:data.price||'',shipMode:data.shipMode||'free',shipAmount:data.shipAmount||''});
       if(manualRecommended===null) autoRecommend();
       renderBundles(); generate();
     }
@@ -484,12 +484,24 @@ If the customer's concern has already been resolved, do not simply stop. Always 
             <label class="pg-field"><span>Name</span><input data-bundle="${b.id}" data-prop="name" value="${escapeHtml(b.name)}"></label>
             <label class="pg-field"><span>Quantity</span><input data-bundle="${b.id}" data-prop="qty" value="${escapeHtml(b.qty)}"></label>
             <label class="pg-field"><span>Price</span><input data-bundle="${b.id}" data-prop="price" value="${escapeHtml(b.price)}"></label>
+          </div>
+          <div class="mini-grid" style="grid-template-columns:1fr 1fr;margin-top:6px;">
+            <label class="pg-field"><span>Shipping</span>
+              <select data-bundle="${b.id}" data-prop="shipMode">
+                <option value="free" ${(b.shipMode||'free')==='free'?'selected':''}>Free Shipping</option>
+                <option value="fee" ${b.shipMode==='fee'?'selected':''}>With Shipping Fee</option>
+              </select>
+            </label>
+            <label class="pg-field ${b.shipMode==='fee'?'':'pg-hidden'}"><span>Shipping Fee</span>
+              <input data-bundle="${b.id}" data-prop="shipAmount" value="${escapeHtml(b.shipAmount||'')}" placeholder="e.g. ₱99"></label>
           </div>`;
         list.appendChild(card);
       });
       list.querySelectorAll('[data-bundle]').forEach(el=>el.addEventListener('input',e=>{
         const b=bundles.find(x=>x.id===e.target.dataset.bundle);
-        if(b) b[e.target.dataset.prop]=e.target.value.trim();
+        if(!b) return;
+        b[e.target.dataset.prop]=e.target.value.trim();
+        if(e.target.dataset.prop==='shipMode'){ renderBundles(); }
         generate();
       }));
       list.querySelectorAll('[data-remove]').forEach(el=>el.onclick=()=>removeBundle(el.dataset.remove));
@@ -516,12 +528,24 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       }
       const clean=bundles.map((b,i)=>({...b,index:i+1}));
       const recommended=clean.find(b=>b.id===manualRecommended) || clean[Math.floor((clean.length-1)/2)];
-      const offers=clean.map(b=>`### Offer ${b.index}\nName: ${b.name||'[NOT PROVIDED]'}\nQuantity: ${b.qty||'[NOT PROVIDED]'}\nPrice: ${b.price||'[NOT PROVIDED]'}${b.id===recommended?.id?'\nStatus: RECOMMENDED OFFER':''}`).join('\n\n');
+      const offers=clean.map(b=>{
+        const ship=(b.shipMode==='fee')?(b.shipAmount||'[NOT PROVIDED]'):'FREE';
+        return `### Offer ${b.index}\nName: ${b.name||'[NOT PROVIDED]'}\nQuantity: ${b.qty||'[NOT PROVIDED]'}\nPrice: ${b.price||'[NOT PROVIDED]'}\nShipping: ${ship}${b.id===recommended?.id?'\nStatus: RECOMMENDED OFFER':''}`;
+      }).join('\n\n');
       const allowed=clean.map(b=>b.qty).filter(Boolean).join(', ') || '[NOT PROVIDED]';
       return `# OFFICIAL OFFERS\n\nOnly use the official offers below.\n\nNever invent a custom bundle, price, quantity, discount, freebie, or promotion.\n\n${offers}\n\n**Allowed Quantity Choices:** ${allowed}\n\n---\n\n# RECOMMENDED OFFER LOGIC\n\nThe preferred offer is:\n\n**${recommended?.name||'Recommended Offer'} — ${recommended?.qty||''} — ${recommended?.price||''}**\n\nWhen the customer:\n- asks which offer is the best value,\n- asks what you recommend,\n- seems undecided between offers,\n- asks which bundle is most practical,\n\nnaturally recommend the preferred offer above.\n\nDo not force the recommended offer when the customer clearly requests another specific quantity or bundle.\n\nNever auto-upgrade the customer's order.\n\nIf the customer asks for a specific quantity, match it only to the official offer that corresponds to that quantity.\n\nIf the requested quantity does not match an official offer, politely explain the available official choices instead of calculating a custom price.\n\n---\n\n# PRICING QUESTIONS\n\nWhen the customer asks:\n- HM\n- How much\n- Magkano\n- Price\n- Presyo\n\nAnswer clearly using only the official offers above.\n\nIf they ask generally and do not specify quantity, you may mention the available offers and naturally highlight the recommended offer.\n\nDo not bury the price inside a long sales message.\n\n---`;
     }
 
     function shippingSection(){
+      // Bundle mode → shipping is defined PER OFFER (set on each bundle card).
+      if($('sellingType').value==='bundles' && bundles.length){
+        const lines=bundles.map(b=>{
+          const ship=(b.shipMode==='fee')?(b.shipAmount||'[NOT PROVIDED]'):'FREE';
+          return `- ${b.name||'[Offer]'} (${b.qty||'?'}): ${ship==='FREE'?'FREE shipping':'shipping fee '+ship}`;
+        }).join('\n');
+        const anyFree=bundles.some(b=>(b.shipMode||'free')!=='fee');
+        return `# SHIPPING RULE\n\nShipping DEPENDS ON THE CHOSEN OFFER. Each official offer has its own shipping:\n\n${lines}\n\nWhen the customer asks about shipping, shipping fee, SF, or delivery fee, give the shipping that matches the SPECIFIC offer they are considering.\n${anyFree?'You may highlight the FREE-shipping offer as an incentive to encourage a bigger bundle, when relevant.\n':''}\nNever quote a shipping fee for the wrong offer. Never invent a shipping fee that is not listed above. Never falsely say shipping is free for an offer that has a fee.\n\n---`;
+      }
       const mode=$('shippingMode').value;
       const feeType=$('shippingFeeType').value;
       const amount=$('shippingAmount').value.trim();
@@ -560,6 +584,8 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       const bundlesMode=$('sellingType').value==='bundles';
       $('bundleMode').classList.toggle('hidden',!bundlesMode);
       $('singlePriceWrap').classList.toggle('hidden',bundlesMode);
+      // In bundle mode, shipping is set per bundle → hide the global Shipping Setup.
+      if($('shippingSetupSection')) $('shippingSetupSection').classList.toggle('hidden',bundlesMode);
       generate();
     }
     function syncShippingUI(){
@@ -599,7 +625,7 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       if(st.shippingLocationText!=null) $('shippingLocationText').value=st.shippingLocationText;
       if(st.language && $('language')) $('language').value=st.language;
       if(st.seqCount && $('seqCount')) $('seqCount').value=st.seqCount;
-      bundles=Array.isArray(st.bundles)?st.bundles.map(b=>({id:b.id||crypto.randomUUID(),name:b.name||'',qty:b.qty||'',price:b.price||''})):[];
+      bundles=Array.isArray(st.bundles)?st.bundles.map(b=>({id:b.id||crypto.randomUUID(),name:b.name||'',qty:b.qty||'',price:b.price||'',shipMode:b.shipMode||'free',shipAmount:b.shipAmount||''})):[];
       manualRecommended=st.manualRecommended||null;
       renderBundles(); syncPricingUI(); syncShippingUI(); generate();
       return true;
@@ -684,7 +710,7 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       if(mode==='bundles' && Array.isArray(p?.bundles) && p.bundles.length){
         selling.value='bundles'; markField(selling,'filled');
         bundles=p.bundles.filter(x=>normalizeKnown(x?.name)||normalizeKnown(x?.quantity)||normalizeKnown(x?.price))
-          .map(x=>({id:crypto.randomUUID(),name:normalizeKnown(x?.name)||'',qty:normalizeKnown(x?.quantity)||'',price:normalizeKnown(x?.price)||''}));
+          .map(x=>{const sf=normalizeKnown(x?.shipping)||normalizeKnown(x?.ship_fee);const hasFee=sf&&!/free/i.test(sf);return {id:crypto.randomUUID(),name:normalizeKnown(x?.name)||'',qty:normalizeKnown(x?.quantity)||'',price:normalizeKnown(x?.price)||'',shipMode:hasFee?'fee':'free',shipAmount:hasFee?sf:''};});
         manualRecommended=null;
         if(bundles.length){ manualRecommended=bundles[Math.floor((bundles.length-1)/2)].id; renderBundles();
           document.querySelectorAll('.bundle-card').forEach(c=>c.classList.add('ai-filled')); syncPricingUI(); return true; }
