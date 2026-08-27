@@ -422,6 +422,24 @@ If the customer's concern has already been resolved, do not simply stop. Always 
     const SAMPLE_BUNDLES = [{"name":"Buy 1","qty":"1 bottle","price":"₱399"},{"name":"Buy 2 Save More","qty":"2 bottles","price":"₱699"},{"name":"Family Bundle","qty":"3 bottles","price":"₱899"}];
     const LS_KEY = 'pg_v2_state';
 
+    // Standard company defaults para sa Policies & Delivery — pre-filled + editable pa rin.
+    const POLICY_DEFAULTS = {
+      WARRANTY_POLICY: 'Damaged or incorrect items may be reported to customer support for verification and applicable replacement.',
+      COVERAGE_AREA: 'Nationwide delivery within the Philippines, subject to courier serviceability.',
+      DELIVERY_TIME: '2 to 5 days Luzon, 5 to 10 days Visayas and Mindanao, 11 to 15 days Palawan, Sulu, Tawi-Tawi.',
+      PAYMENT_METHOD: 'Cash on Delivery (COD)',
+      OPEN_PARCEL_POLICY: 'No Open Before Payment. Customers may inspect the parcel after completing COD payment, subject to courier policy.',
+      LEGITIMACY_INFO: 'Orders are processed through the official store and shipped with trackable courier details.',
+      AVAILABILITY_INFORMATION: 'Available while current inventory lasts. Do not claim low stock unless confirmed.',
+    };
+    // force=true: palitan lagi. force=false: punan lang ang blangko (di sinisira ang na-edit ng user).
+    function applyPolicyDefaults(force){
+      Object.keys(POLICY_DEFAULTS).forEach(k=>{
+        const el=document.querySelector('[data-key="'+k+'"]');
+        if(el && (force || el.value.trim()==='')) el.value=POLICY_DEFAULTS[k];
+      });
+    }
+
     let bundles = [];
     let manualRecommended = null;
     let uploadedImageFile = null;
@@ -594,13 +612,13 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       $('shippingAmount').value='₱99'; $('shippingLocationText').value='May applicable shipping fee po depende sa delivery area ninyo.';
       bundles=[]; SAMPLE_BUNDLES.forEach(x=>bundles.push({id:crypto.randomUUID(),...x}));
       manualRecommended=bundles[Math.floor((bundles.length-1)/2)]?.id||null;
-      renderBundles(); syncPricingUI(); syncShippingUI(); generate();
+      renderBundles(); syncPricingUI(); syncShippingUI(); applyPolicyDefaults(true); generate();
     }
     function clearFields(){
       document.querySelectorAll('[data-key]').forEach(el=>el.value='');
       $('sellingType').value='single'; $('singlePrice').value='';
       $('shippingMode').value='free'; bundles=[]; manualRecommended=null;
-      renderBundles(); syncPricingUI(); syncShippingUI(); generate();
+      renderBundles(); syncPricingUI(); syncShippingUI(); applyPolicyDefaults(true); generate();
     }
 
     async function saveToHistory(){
@@ -828,8 +846,11 @@ If the customer's concern has already been resolved, do not simply stop. Always 
     if($('language')) $('language').addEventListener('change',saveState);
     if($('seqCount')) $('seqCount').addEventListener('change',saveState);
 
-    // init: restore last state, else load sample
+    // init: restore last state, else load sample. Punan ang blangkong Policies & Delivery
+    // ng standard defaults (di sinisira ang na-edit na ng user).
     if(!restoreState()) loadSample();
+    applyPolicyDefaults(false);
+    generate();
   })();
   </script>
   @endverbatim
