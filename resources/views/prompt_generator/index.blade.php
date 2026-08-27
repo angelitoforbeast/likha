@@ -194,18 +194,32 @@
             <label class="pg-field"><span>Unit Name</span><input data-key="UNIT_NAME" type="text"></label>
             <label class="pg-field"><span>Additional Order Fields</span><textarea data-key="ORDER_FIELDS" rows="3"></textarea></label>
           </div></section>
+
+          {{-- Bot Flow templates (para sa GSheet: LOOP 1 = order form, LOOP 2 = confirmation) --}}
+          <section class="pg-sec"><h3>Bot Flow — Loops (for Sheet)</h3>
+            <div class="help" style="margin-bottom:6px;">Fixed templates na isasama sa Copy for Sheet. Editable — may default na.</div>
+            <div class="pg-grid" style="grid-template-columns:1fr;">
+              <label class="pg-field"><span>LOOP 1 — Order Form</span><textarea data-key="LOOP1" rows="6"></textarea></label>
+              <label class="pg-field"><span>LOOP 2 — Order Confirmation</span><textarea data-key="LOOP2" rows="5"></textarea></label>
+            </div>
+          </section>
         </div>
       </div>
 
       {{-- ── RIGHT: OUTPUT (tabbed) ── --}}
       <div class="pg-card flex flex-col lg:flex-1 min-w-0 lg:min-h-0 lg:overflow-hidden">
-        <div class="pg-head">
+        <div class="pg-head" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
           <div class="pg-tabs" id="pgTabs">
             <button class="pg-tab active" type="button" data-tab="sales">Sales Prompt</button>
             <button class="pg-tab" type="button" data-tab="aftersales">After-Sales</button>
             <button class="pg-tab" type="button" data-tab="mainflow">Main Flow</button>
             <button class="pg-tab" type="button" data-tab="sequence">Sequence</button>
             <button class="pg-tab" type="button" data-tab="test">Test</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <button class="btn primary" id="genAllBtn" type="button">⚡ Generate All</button>
+            <button class="btn" id="copySheetBtn" type="button">📋 Copy for Sheet</button>
+            <span id="genAllStatus" class="text-[11px] text-slate-400"></span>
           </div>
         </div>
         <div class="flex-1 lg:min-h-0 p-3">
@@ -238,7 +252,7 @@
             <div class="pane-actions">
               <label class="text-[12px] text-slate-600 font-semibold">Messages:</label>
               <select id="seqCount" class="pg-select" style="width:auto;border:1px solid #d1d5db;border-radius:8px;padding:6px 8px;font-size:12.5px;">
-                <option>1</option><option>2</option><option>3</option><option>4</option><option selected>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
+                <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option selected>10</option>
               </select>
               <button class="btn primary" id="genSeqBtn" type="button">✨ Generate Sequence</button>
               <span id="seqStatus" class="text-[11.5px] text-slate-400"></span>
@@ -438,6 +452,8 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       OPEN_PARCEL_POLICY: 'No Open Before Payment. Customers may inspect the parcel after completing COD payment, subject to courier policy.',
       LEGITIMACY_INFO: 'Orders are processed through the official store and shipped with trackable courier details.',
       AVAILABILITY_INFORMATION: 'Available while current inventory lasts. Do not claim low stock unless confirmed.',
+      LOOP1: `Fill-up niyo lang po ang nasa baba Boss/Ma'am\n\n👉 Name: \n\n👉 Phone number:\n\n👉 Complete Address:\n(House#/Purok /Street, Brgy, Municipality, Province) \n\n👉 Landmark:\n (San malapit? Ex: Brgy Hall, School)`,
+      LOOP2: `Your order has been confirmed and processed na po.\nPakihintay na lang po dumating ang order niyo.\nLuzon: 2 to 3 days\nVisayas and Mindanao: 5 to 7 days\nPalawan: 10 to 15 days`,
     };
     // force=true: palitan lagi. force=false: punan lang ang blangko (di sinisira ang na-edit ng user).
     function applyPolicyDefaults(force){
@@ -450,6 +466,7 @@ If the customer's concern has already been resolved, do not simply stop. Always 
     let bundles = [];
     let manualRecommended = null;
     let uploadedImageFile = null;
+    let seqMessages = [];   // last-generated follow-up sequence (for Copy for Sheet)
     const $ = (id) => document.getElementById(id);
 
     function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
@@ -871,7 +888,8 @@ If the customer's concern has already been resolved, do not simply stop. Always 
           body:JSON.stringify({product_name:data.PRODUCT_NAME,product_description:data.PRODUCT_DESCRIPTION,features:data.PRODUCT_FEATURES,language:($('language')||{}).value||'Taglish',count})});
         const j=await res.json();
         if(!j.ok){ $('seqStatus').textContent=j.message||'Failed'; return; }
-        renderSeq(j.messages||[]); $('seqStatus').textContent='Done — '+((j.messages||[]).length)+' messages ✅';
+        seqMessages=j.messages||[];
+        renderSeq(seqMessages); $('seqStatus').textContent='Done — '+seqMessages.length+' messages ✅';
       }catch(e){ $('seqStatus').textContent='Error: '+e.message; }
       finally{ btn.disabled=false; btn.textContent='✨ Generate Sequence'; }
     }
@@ -892,11 +910,66 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       finally{ btn.disabled=false; btn.textContent='Send'; }
     }
 
+    // ── Generate All + Copy for Sheet (one GSheet row) ──
+    // Column order matches the sheet: Type of Selling, Bundle, Quantity, Item Name,
+    // PROMO, MAIN FLOW, LOOP 1, LOOP 2, Sequence 1..N, then Sales Prompt, After-Sales.
+    function sheetColumns(){
+      const data=fieldValues();
+      const isBundle=$('sellingType').value==='bundles';
+      const count=parseInt($('seqCount').value,10)||10;
+      const cols=[
+        isBundle ? 'Multiple Offers' : 'Single Selling Price',              // Type of Selling
+        isBundle ? bundles.map(b=>b.name).filter(Boolean).join('; ') : '',  // Bundle
+        isBundle ? bundles.map(b=>b.qty).filter(Boolean).join('; ') : (data.UNIT_NAME||''), // Quantity
+        data.PRODUCT_NAME||'',                                              // Item Name
+        (derivePricePromo().price||''),                                     // PROMO (price)
+        $('mainFlowOutput').value||'',                                      // MAIN FLOW
+        data.LOOP1||'',                                                     // LOOP 1
+        data.LOOP2||'',                                                     // LOOP 2
+      ];
+      for(let i=0;i<count;i++) cols.push(seqMessages[i]||'');               // Sequence 1..N
+      cols.push($('output').value||'');                                     // Sales Prompt
+      cols.push($('afterOutput').value||'');                               // After-Sales
+      return cols;
+    }
+    function tsvCell(v){ v=(v==null?'':String(v)); return /[\t\n\r"]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
+    function htmlCell(v){ v=(v==null?'':String(v)); return v.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>'); }
+    async function copyForSheet(){
+      const cols=sheetColumns();
+      const tsv=cols.map(tsvCell).join('\t');
+      const html='<table><tr>'+cols.map(c=>'<td>'+htmlCell(c)+'</td>').join('')+'</tr></table>';
+      const st=$('genAllStatus');
+      try{
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html': new Blob([html],{type:'text/html'}),
+          'text/plain': new Blob([tsv],{type:'text/plain'})
+        })]);
+        st.textContent='Copied! Paste sa "Type of Selling" cell ng row.';
+      }catch(e){
+        try{ await navigator.clipboard.writeText(tsv); st.textContent='Copied (plain text). Paste sa row.'; }
+        catch(e2){ st.textContent='Copy failed: '+e2.message; }
+      }
+      setTimeout(()=>{ if(st) st.textContent=''; }, 4500);
+    }
+    async function generateAll(){
+      const btn=$('genAllBtn'); btn.disabled=true; const label=btn.textContent; btn.textContent='Generating…';
+      const st=$('genAllStatus');
+      try{
+        generate();                                   // Sales Prompt + After-Sales (deterministic)
+        st.textContent='Main Flow…'; await generateMainFlow();
+        st.textContent='Sequence…';  await generateSequence();
+        st.textContent='Tapos ✅ — Copy for Sheet na para i-paste sa GSheet.';
+      }catch(e){ st.textContent='Error: '+e.message; }
+      finally{ btn.disabled=false; btn.textContent=label; }
+    }
+
     // extra wiring
     $('genMainFlowBtn').onclick=generateMainFlow;
     $('copyMainFlowBtn').onclick=()=>{ const v=$('mainFlowOutput').value; if(v) navigator.clipboard.writeText(v); };
     $('genSeqBtn').onclick=generateSequence;
     $('testBtn').onclick=runTest;
+    $('genAllBtn').onclick=generateAll;
+    $('copySheetBtn').onclick=copyForSheet;
     $('copyAfterBtn').onclick=()=>{ const v=$('afterOutput').value; if(v) navigator.clipboard.writeText(v); };
     if($('language')) $('language').addEventListener('change',saveState);
     if($('seqCount')) $('seqCount').addEventListener('change',saveState);
