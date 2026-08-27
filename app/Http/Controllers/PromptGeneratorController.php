@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\PromptGeneration;
 use App\Models\PromptGeneratorSetting;
+use App\Models\PromptGeneratorPromptVersion;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
@@ -238,6 +239,134 @@ SEQ;
         ];
     }
 
+    // ── Editable AI prompts (Main Flow / Sequence / Vision) — DB-backed + version history ──
+
+    private function promptCatalog(): array
+    {
+        return [
+            'mainflow' => 'Main Flow (opening auto-reply)',
+            'sequence' => 'Follow-up Sequence',
+            'vision'   => 'Image Auto-Fill (Vision)',
+        ];
+    }
+
+    private function promptDefault(string $key): string
+    {
+        return match ($key) {
+            'mainflow' => self::MAINFLOW_PROMPT,
+            'sequence' => self::SEQUENCE_PROMPT,
+            'vision'   => $this->visionInstruction(),
+            default    => '',
+        };
+    }
+
+    /** Active prompt = DB override (kung meron) o code default. */
+    private function activePrompt(string $key): string
+    {
+        try {
+            if (Schema::hasTable('prompt_generator_settings')) {
+                $v = PromptGeneratorSetting::where('key', 'PROMPT_' . $key)->value('value');
+                if ($v !== null && $v !== '') return $v;
+            }
+        } catch (\Throwable $e) {
+            // fall through to default
+        }
+        return $this->promptDefault($key);
+    }
+
+    private function promptVersionList(string $key): array
+    {
+        try {
+            if (Schema::hasTable('prompt_generator_prompt_versions')) {
+                return PromptGeneratorPromptVersion::where('prompt_key', $key)->orderByDesc('id')->limit(40)
+                    ->get(['id', 'content', 'created_at'])
+                    ->map(fn ($r) => [
+                        'id'      => $r->id,
+                        'preview' => trim(mb_substr((string) $r->content, 0, 90)),
+                        'len'     => mb_strlen((string) $r->content),
+                        'at'      => optional($r->created_at)->format('Y-m-d H:i'),
+                    ])->all();
+            }
+        } catch (\Throwable $e) {
+        }
+        return [];
+    }
+
+    /** Editable prompts data para sa Settings prompts page. */
+    private function editablePrompts(): array
+    {
+        $out = [];
+        foreach ($this->promptCatalog() as $key => $label) {
+            $current = $this->activePrompt($key);
+            $out[] = [
+                'key'       => $key,
+                'label'     => $label,
+                'current'   => $current,
+                'default'   => $this->promptDefault($key),
+                'isDefault' => $current === $this->promptDefault($key),
+                'versions'  => $this->promptVersionList($key),
+            ];
+        }
+        return $out;
+    }
+
+    /** Read-only info para sa deterministic/dynamic prompts (Sales, After-Sales, Test). */
+    private function infoPrompts(): array
+    {
+        return array_values(array_filter(
+            $this->promptReference(),
+            fn ($r) => str_contains($r['name'], 'deterministic') || str_contains($r['name'], 'Test')
+        ));
+    }
+
+    /** POST /prompt-generator/prompts — i-save ang isang prompt (+ mag-log ng version). */
+    public function savePrompt(Request $request)
+    {
+        $this->checkAccess();
+        if (! Schema::hasTable('prompt_generator_settings')) {
+            return response()->json(['ok' => false, 'message' => 'Settings table wala pa — patakbuhin: php artisan migrate --force'], 200);
+        }
+        $d = $request->validate(['key' => 'required|string|max:60', 'content' => 'required|string|max:60000']);
+        if (! array_key_exists($d['key'], $this->promptCatalog())) {
+            return response()->json(['ok' => false, 'message' => 'Invalid prompt key.'], 200);
+        }
+        PromptGeneratorSetting::updateOrCreate(['key' => 'PROMPT_' . $d['key']], ['value' => $d['content']]);
+        PromptGeneratorPromptVersion::create(['prompt_key' => $d['key'], 'content' => $d['content'], 'user_id' => Auth::id(), 'created_at' => now()]);
+        return response()->json(['ok' => true, 'current' => $this->activePrompt($d['key']), 'versions' => $this->promptVersionList($d['key'])]);
+    }
+
+    /** POST /prompt-generator/prompts/reset — burahin ang override → code default. */
+    public function resetPrompt(Request $request)
+    {
+        $this->checkAccess();
+        $d = $request->validate(['key' => 'required|string|max:60']);
+        if (! array_key_exists($d['key'], $this->promptCatalog())) {
+            return response()->json(['ok' => false, 'message' => 'Invalid prompt key.'], 200);
+        }
+        if (Schema::hasTable('prompt_generator_settings')) {
+            PromptGeneratorSetting::where('key', 'PROMPT_' . $d['key'])->delete();
+        }
+        return response()->json(['ok' => true, 'current' => $this->promptDefault($d['key']), 'versions' => $this->promptVersionList($d['key'])]);
+    }
+
+    /** POST /prompt-generator/prompts/restore — ibalik sa isang naunang version. */
+    public function restorePrompt(Request $request)
+    {
+        $this->checkAccess();
+        if (! Schema::hasTable('prompt_generator_prompt_versions')) {
+            return response()->json(['ok' => false, 'message' => 'Versions table wala pa — patakbuhin: php artisan migrate --force'], 200);
+        }
+        $d = $request->validate(['key' => 'required|string|max:60', 'version_id' => 'required|integer']);
+        if (! array_key_exists($d['key'], $this->promptCatalog())) {
+            return response()->json(['ok' => false, 'message' => 'Invalid prompt key.'], 200);
+        }
+        $v = PromptGeneratorPromptVersion::where('prompt_key', $d['key'])->where('id', $d['version_id'])->first();
+        if (! $v) return response()->json(['ok' => false, 'message' => 'Version not found.'], 200);
+        PromptGeneratorSetting::updateOrCreate(['key' => 'PROMPT_' . $d['key']], ['value' => $v->content]);
+        PromptGeneratorPromptVersion::create(['prompt_key' => $d['key'], 'content' => $v->content, 'user_id' => Auth::id(), 'created_at' => now()]);
+        return response()->json(['ok' => true, 'current' => $this->activePrompt($d['key']), 'versions' => $this->promptVersionList($d['key'])]);
+    }
+
     /** GET /prompt-generator/settings — Default Values section. */
     public function settingsPage() { return $this->renderSettings('defaults'); }
     /** GET /prompt-generator/settings/protection — Auto-Fill Protection section. */
@@ -249,12 +378,14 @@ SEQ;
     {
         $this->checkAccess();
         return view('prompt_generator.settings', [
-            'section'   => $section,
-            'settings'  => $this->settingsMerged(),
-            'defaults'  => $this->defaultSettings(),
-            'promptRef' => $this->promptReference(),
-            'catalog'   => $this->fieldCatalog(),
-            'locked'    => $this->lockedFields(),
+            'section'         => $section,
+            'settings'        => $this->settingsMerged(),
+            'defaults'        => $this->defaultSettings(),
+            'promptRef'       => $this->promptReference(),
+            'catalog'         => $this->fieldCatalog(),
+            'locked'          => $this->lockedFields(),
+            'editablePrompts' => $this->editablePrompts(),
+            'infoPrompts'     => $this->infoPrompts(),
         ]);
     }
 
@@ -320,7 +451,7 @@ SEQ;
                     'messages'        => [[
                         'role'    => 'user',
                         'content' => [
-                            ['type' => 'text',      'text' => $this->visionInstruction()],
+                            ['type' => 'text',      'text' => $this->activePrompt('vision')],
                             ['type' => 'image_url', 'image_url' => ['url' => $dataUrl]],
                         ],
                     ]],
@@ -380,7 +511,7 @@ SEQ;
             'language'            => 'nullable|string|max:30',
         ]);
         $lang   = trim($d['language'] ?? 'Taglish') ?: 'Taglish';
-        $system = str_replace('{language}', $lang, self::MAINFLOW_PROMPT);
+        $system = str_replace('{language}', $lang, $this->activePrompt('mainflow'));
         $userMsg = "Product name: {$d['product_name']}\n"
             . "Product description: " . ($d['product_description'] ?? '') . "\n"
             . "Key features:\n" . ($d['features'] ?? '') . "\n"
@@ -417,7 +548,7 @@ SEQ;
                 : "PRICE FREQUENCY: Mention the actual price/offer in about {$pricePct}% of the messages "
                     . "(~{$priceCount} out of {$count}), spread across the sequence with varied wording. "
                     . "In the remaining messages, use other angles and do NOT state a price.");
-        $system = str_replace(['{count}', '{language}'], [(string) $count, $lang], self::SEQUENCE_PROMPT);
+        $system = str_replace(['{count}', '{language}'], [(string) $count, $lang], $this->activePrompt('sequence'));
         $userMsg = "Product name: {$d['product_name']}\n"
             . "Product description: " . ($d['product_description'] ?? '') . "\n"
             . "Key features:\n" . ($d['features'] ?? '') . "\n\n"

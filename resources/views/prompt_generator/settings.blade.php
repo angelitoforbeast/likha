@@ -28,6 +28,16 @@
     .pgs-lockrow .lbl { flex:1; font-size:12.5px; color:#334155; }
     .pgs-lockrow .lockicon { font-size:15px; width:20px; text-align:center; }
     .pgs-lockrow input { width:16px; height:16px; cursor:pointer; margin:0; }
+    .pgs-prompt { border:1px solid #e5e7eb; border-radius:10px; padding:12px; margin-bottom:12px; background:#fff; }
+    .pgs-prompt-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; flex-wrap:wrap; }
+    .pgs-prompt-title { font-weight:700; font-size:13px; color:#0f172a; }
+    .pgs-badge { font-size:9px; font-weight:800; padding:2px 6px; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; margin-left:6px; }
+    .pgs-prompt textarea { width:100%; border:1px solid #d1d5db; border-radius:8px; padding:9px 11px; font-size:12px; font-family:ui-monospace,Menlo,Consolas,monospace; line-height:1.5; min-height:180px; resize:vertical; }
+    .pgs-verlist { margin-top:8px; }
+    .pgs-verrow { display:flex; align-items:center; gap:8px; padding:6px 8px; border:1px solid #eef2f7; border-radius:8px; margin-bottom:4px; font-size:11.5px; color:#475569; }
+    .pgs-verrow .vpreview { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .pgs-verrow .vmeta { color:#94a3b8; white-space:nowrap; }
+    .pgs-btn.mini { padding:5px 10px; font-size:12px; }
   </style>
 
   @php $sec = $section ?? 'defaults'; @endphp
@@ -75,9 +85,14 @@
     @endif
 
     @if($sec === 'prompts')
+    <div class="pgs-card">
+      <div class="pgs-sec-title">✏️ Editable AI Prompts</div>
+      <div class="pgs-help">Ang mga system prompt na ipinapadala sa AI. I-edit, i-Save (naka-log na version), o i-Restore sa naunang version. Reset = code default.</div>
+      <div id="editablePrompts"></div>
+    </div>
     <div class="pgs-card pgs-ref">
-      <div class="pgs-sec-title">📋 Generation Prompts &amp; Inputs</div>
-      <div class="pgs-help">Mga prompt + inputs na ginagamit para bumuo ng bawat output. Read-only.</div>
+      <div class="pgs-sec-title">📋 Deterministic Prompts (read-only)</div>
+      <div class="pgs-help">Ang Sales Prompt at After-Sales ay binubuo client-side mula sa template + inputs; ang Test ay ginagamit ang na-generate na prompt. Info lang.</div>
       <div id="pgsRef"></div>
     </div>
     @endif
@@ -89,6 +104,11 @@
       section:   @json($sec),
       saveUrl:   '{{ route('prompt.generator.settings.save') }}',
       resetUrl:  '{{ route('prompt.generator.settings.reset') }}',
+      promptSaveUrl:    '{{ route('prompt.generator.prompts.save') }}',
+      promptResetUrl:   '{{ route('prompt.generator.prompts.reset') }}',
+      promptRestoreUrl: '{{ route('prompt.generator.prompts.restore') }}',
+      editablePrompts:  @json($editablePrompts ?? []),
+      infoPrompts:      @json($infoPrompts ?? []),
       settings:  @json($settings ?? []),
       defaults:  @json($defaults ?? []),
       promptRef: @json($promptRef ?? []),
@@ -185,10 +205,82 @@
       finally{ btn.disabled=false; btn.textContent='💾 Save Protection'; setTimeout(()=>{ st.textContent=''; },4000); }
     }
 
-    // ── Generation Prompts reference ──
-    function renderRef(){
+    // ── Editable AI Prompts (+ version history / restore) ──
+    function findPrompt(key){ return (window.PGS.editablePrompts||[]).find(x=>x.key===key); }
+    function renderVersions(box,p){
+      box.innerHTML=''; const vs=p.versions||[];
+      if(!vs.length){ box.innerHTML='<div class="pgs-help" style="margin:4px 0;">Wala pang saved version.</div>'; return; }
+      vs.forEach(v=>{
+        const row=document.createElement('div'); row.className='pgs-verrow';
+        const pv=document.createElement('span'); pv.className='vpreview'; pv.textContent=v.preview||'(blank)';
+        const meta=document.createElement('span'); meta.className='vmeta'; meta.textContent=(v.at||'')+' · '+v.len+' chars';
+        const rb=document.createElement('button'); rb.className='pgs-btn ghost mini'; rb.textContent='Restore';
+        rb.onclick=()=>{ if(confirm('Restore ang '+p.label+' sa version na ito?')) restorePromptFn(p.key,v.id); };
+        row.appendChild(pv); row.appendChild(meta); row.appendChild(rb); box.appendChild(row);
+      });
+    }
+    function promptCard(p){
+      const wrap=document.createElement('div'); wrap.className='pgs-prompt'; wrap.setAttribute('data-prompt',p.key);
+      const head=document.createElement('div'); head.className='pgs-prompt-head';
+      const title=document.createElement('div'); title.className='pgs-prompt-title'; title.textContent=p.label;
+      if(p.isDefault){ const b=document.createElement('span'); b.className='pgs-badge'; b.textContent='DEFAULT'; title.appendChild(b); }
+      const status=document.createElement('span'); status.className='pstatus'; status.style.cssText='font-size:12px;color:#94a3b8;';
+      head.appendChild(title); head.appendChild(status);
+      const ta=document.createElement('textarea'); ta.value=p.current||'';
+      const actions=document.createElement('div'); actions.style.cssText='display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;';
+      const saveB=document.createElement('button'); saveB.className='pgs-btn primary mini'; saveB.textContent='💾 Save';
+      const resetB=document.createElement('button'); resetB.className='pgs-btn ghost mini'; resetB.textContent='↩︎ Reset default';
+      const verB=document.createElement('button'); verB.className='pgs-btn ghost mini'; verB.textContent='🕘 Versions ('+((p.versions||[]).length)+')';
+      actions.appendChild(saveB); actions.appendChild(resetB); actions.appendChild(verB);
+      const verBox=document.createElement('div'); verBox.className='pgs-verlist'; verBox.style.display='none';
+      saveB.onclick=()=>savePromptFn(p.key,ta.value,status);
+      resetB.onclick=()=>{ if(confirm('Reset '+p.label+' sa code default?')) resetPromptFn(p.key,status); };
+      verB.onclick=()=>{ verBox.style.display=verBox.style.display==='none'?'block':'none'; };
+      renderVersions(verBox,p);
+      wrap.appendChild(head); wrap.appendChild(ta); wrap.appendChild(actions); wrap.appendChild(verBox);
+      return wrap;
+    }
+    function refreshCard(key,resp){
+      const p=findPrompt(key); if(!p) return;
+      if(resp.current!=null) p.current=resp.current;
+      if(resp.versions) p.versions=resp.versions;
+      p.isDefault = p.current === (p.default||'');
+      const old=document.querySelector('[data-prompt="'+key+'"]');
+      if(old){ const nw=promptCard(p); old.replaceWith(nw); const s=nw.querySelector('.pstatus'); if(s){ s.style.color='#16a34a'; s.textContent='Saved ✅'; setTimeout(()=>{ s.textContent=''; },3500); } }
+    }
+    async function savePromptFn(key,content,status){
+      status.style.color='#94a3b8'; status.textContent='Saving…';
+      try{
+        const res=await fetch(window.PGS.promptSaveUrl,{method:'POST',headers:jhead,body:JSON.stringify({key,content})});
+        const j=await res.json();
+        if(!j.ok){ status.style.color='#b91c1c'; status.textContent=j.message||'Save failed'; return; }
+        refreshCard(key,j);
+      }catch(e){ status.style.color='#b91c1c'; status.textContent='Error: '+e.message; }
+    }
+    async function resetPromptFn(key,status){
+      status.style.color='#94a3b8'; status.textContent='Resetting…';
+      try{
+        const res=await fetch(window.PGS.promptResetUrl,{method:'POST',headers:jhead,body:JSON.stringify({key})});
+        const j=await res.json();
+        if(!j.ok){ status.style.color='#b91c1c'; status.textContent=j.message||'Reset failed'; return; }
+        refreshCard(key,j);
+      }catch(e){ status.style.color='#b91c1c'; status.textContent='Error: '+e.message; }
+    }
+    async function restorePromptFn(key,versionId){
+      try{
+        const res=await fetch(window.PGS.promptRestoreUrl,{method:'POST',headers:jhead,body:JSON.stringify({key,version_id:versionId})});
+        const j=await res.json();
+        if(!j.ok){ alert(j.message||'Restore failed'); return; }
+        refreshCard(key,j);
+      }catch(e){ alert('Error: '+e.message); }
+    }
+    function renderEditablePrompts(){
+      const box=$('editablePrompts'); if(!box) return; box.innerHTML='';
+      (window.PGS.editablePrompts||[]).forEach(p=>box.appendChild(promptCard(p)));
+    }
+    function renderInfoPrompts(){
       const box=$('pgsRef'); if(!box) return; box.innerHTML='';
-      (window.PGS.promptRef||[]).forEach(r=>{
+      (window.PGS.infoPrompts||[]).forEach(r=>{
         const d=document.createElement('div'); d.style.marginBottom='14px';
         const h=document.createElement('div'); h.style.cssText='font-weight:700;font-size:12.5px;color:#0f172a;'; h.textContent=r.name;
         const inp=document.createElement('div'); inp.style.cssText='font-size:11.5px;color:#94a3b8;margin:2px 0;'; inp.textContent='Inputs: '+(r.inputs||'');
@@ -201,7 +293,7 @@
     const sec=window.PGS.section;
     if(sec==='defaults'){ renderFields(); if($('pgsSave')) $('pgsSave').onclick=saveDefaults; if($('pgsReset')) $('pgsReset').onclick=resetDefaults; }
     else if(sec==='protection'){ renderLocks(); if($('lockSave')) $('lockSave').onclick=saveLocks; if($('lockAll')) $('lockAll').onclick=()=>setAllLocks(true); if($('unlockAll')) $('unlockAll').onclick=()=>setAllLocks(false); }
-    else if(sec==='prompts'){ renderRef(); }
+    else if(sec==='prompts'){ renderEditablePrompts(); renderInfoPrompts(); }
   })();
   </script>
 </x-layout>

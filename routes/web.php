@@ -1014,6 +1014,9 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get ('/prompt-generator/settings',            [\App\Http\Controllers\PromptGeneratorController::class, 'settingsPage'])      ->name('prompt.generator.settings.get');
     Route::get ('/prompt-generator/settings/protection', [\App\Http\Controllers\PromptGeneratorController::class, 'settingsProtection'])->name('prompt.generator.settings.protection');
     Route::get ('/prompt-generator/settings/prompts',    [\App\Http\Controllers\PromptGeneratorController::class, 'settingsPrompts'])   ->name('prompt.generator.settings.prompts');
+    Route::post('/prompt-generator/prompts',             [\App\Http\Controllers\PromptGeneratorController::class, 'savePrompt'])        ->middleware('throttle:60,1')->name('prompt.generator.prompts.save');
+    Route::post('/prompt-generator/prompts/reset',       [\App\Http\Controllers\PromptGeneratorController::class, 'resetPrompt'])       ->middleware('throttle:60,1')->name('prompt.generator.prompts.reset');
+    Route::post('/prompt-generator/prompts/restore',     [\App\Http\Controllers\PromptGeneratorController::class, 'restorePrompt'])     ->middleware('throttle:60,1')->name('prompt.generator.prompts.restore');
     Route::post('/prompt-generator/settings',      [\App\Http\Controllers\PromptGeneratorController::class, 'saveSettings']) ->middleware('throttle:60,1')->name('prompt.generator.settings.save');
     Route::post('/prompt-generator/settings/reset',[\App\Http\Controllers\PromptGeneratorController::class, 'resetSettings'])->middleware('throttle:60,1')->name('prompt.generator.settings.reset');
     Route::get ('/prompt-generator/history',       [\App\Http\Controllers\PromptGeneratorController::class, 'history'])      ->name('prompt.generator.history');
