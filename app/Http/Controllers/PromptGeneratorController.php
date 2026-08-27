@@ -89,10 +89,11 @@ PLACEHOLDER — insert this LITERALLY, do NOT replace, translate, or invent a va
 - {{user_first_name}}  = the customer's first name (sprinkle naturally, not in every single message)
 This is the ONLY {{...}} token allowed — do NOT output any other {{...}} placeholder.
 
-PRICING: Use the ACTUAL price and offer details given in the context below. When a message talks
-about price, cost, savings, or the deal, state the REAL price/offer naturally (e.g. the promo price,
-the bundle deal). Do NOT invent a different price, discount, deal, or savings that is not in the
-provided pricing/offer info. If no price is provided, simply avoid stating a specific number.
+PRICING: Use the ACTUAL price and offer details given in the context below. When a message mentions
+price, use the REAL promo price and, when helpful, the bundle deal (e.g. buy-more savings), woven in
+naturally with VARIED wording. Follow the PRICE FREQUENCY instruction in the context for HOW OFTEN to
+mention price. Do NOT invent a different price, discount, deal, or savings that is not in the provided
+pricing/offer info. If no price is provided, avoid stating a specific number.
 
 Return ONLY the messages as an array of strings (one full message per array item).
 Do NOT number them and do NOT add any commentary.
@@ -228,17 +229,28 @@ SEQ;
             'features'            => 'nullable|string|max:4000',
             'language'            => 'nullable|string|max:30',
             'pricing'             => 'nullable|string|max:2000',
+            'price_pct'           => 'nullable|integer|min:0|max:100',
             'count'               => 'required|integer|min:1|max:10',
         ]);
         $lang  = trim($d['language'] ?? 'Taglish') ?: 'Taglish';
         $count = (int) $d['count'];
         $pricing = trim($d['pricing'] ?? '');
+        $pricePct = isset($d['price_pct']) ? (int) $d['price_pct'] : 30;
+        $priceCount = (int) round($count * $pricePct / 100);
+        $freqLine = $pricePct <= 0
+            ? "PRICE FREQUENCY: Do NOT mention any price, cost, or specific deal in ANY message."
+            : ($pricePct >= 100
+                ? "PRICE FREQUENCY: Mention the actual price/offer in EVERY message, with varied wording."
+                : "PRICE FREQUENCY: Mention the actual price/offer in about {$pricePct}% of the messages "
+                    . "(~{$priceCount} out of {$count}), spread across the sequence with varied wording. "
+                    . "In the remaining messages, use other angles and do NOT state a price.");
         $system = str_replace(['{count}', '{language}'], [(string) $count, $lang], self::SEQUENCE_PROMPT);
         $userMsg = "Product name: {$d['product_name']}\n"
             . "Product description: " . ($d['product_description'] ?? '') . "\n"
             . "Key features:\n" . ($d['features'] ?? '') . "\n\n"
             . "Pricing / Offer details (use these ACTUAL values — do not invent other prices or deals):\n"
             . ($pricing !== '' ? $pricing : '(none provided — avoid stating a specific price)') . "\n\n"
+            . $freqLine . "\n\n"
             . "Write exactly {$count} follow-up messages.";
 
         $schema = [

@@ -255,6 +255,8 @@
               <select id="seqCount" class="pg-select" style="width:auto;border:1px solid #d1d5db;border-radius:8px;padding:6px 8px;font-size:12.5px;">
                 <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option selected>10</option>
               </select>
+              <label class="text-[12px] text-slate-600 font-semibold">Price %:</label>
+              <input id="seqPricePct" type="number" min="0" max="100" value="30" title="Percentage ng messages na babanggit ng presyo" style="width:62px;border:1px solid #d1d5db;border-radius:8px;padding:6px 8px;font-size:12.5px;">
               <button class="btn primary" id="genSeqBtn" type="button">✨ Generate Sequence</button>
               <span id="seqStatus" class="text-[11.5px] text-slate-400"></span>
             </div>
@@ -657,7 +659,8 @@ If the customer's concern has already been resolved, do not simply stop. Always 
           sellingType:$('sellingType').value, singlePrice:$('singlePrice').value,
           shippingMode:$('shippingMode').value, shippingFeeType:$('shippingFeeType').value,
           shippingAmount:$('shippingAmount').value, shippingLocationText:$('shippingLocationText').value,
-          language:($('language')||{}).value, seqCount:($('seqCount')||{}).value };
+          language:($('language')||{}).value, seqCount:($('seqCount')||{}).value,
+          seqPricePct:($('seqPricePct')||{}).value };
         localStorage.setItem(LS_KEY, JSON.stringify(st));
       } catch(e){}
     }
@@ -673,6 +676,7 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       if(st.shippingLocationText!=null) $('shippingLocationText').value=st.shippingLocationText;
       if(st.language && $('language')) $('language').value=st.language;
       if(st.seqCount && $('seqCount')) $('seqCount').value=st.seqCount;
+      if(st.seqPricePct!=null && st.seqPricePct!=='' && $('seqPricePct')) $('seqPricePct').value=st.seqPricePct;
       bundles=Array.isArray(st.bundles)?st.bundles.map(b=>({id:b.id||crypto.randomUUID(),name:b.name||'',qty:b.qty||'',price:b.price||'',shipMode:['free','declared','hidden'].includes(b.shipMode)?b.shipMode:(b.shipMode==='fee'?'declared':'free'),shipFeeType:['fixed','location'].includes(b.shipFeeType)?b.shipFeeType:'location',shipAmount:b.shipAmount||'',shipLocationText:b.shipLocationText||''})):[];
       manualRecommended=st.manualRecommended||null;
       renderBundles(); syncPricingUI(); syncShippingUI(); generate();
@@ -891,10 +895,11 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       const count=parseInt($('seqCount').value,10)||5;
       const {price,promo}=derivePricePromo();
       const pricing=[price?('Price: '+price):'', promo?('Offer/Promo: '+promo):''].filter(Boolean).join('\n');
+      let price_pct=parseInt(($('seqPricePct')||{}).value,10); if(isNaN(price_pct)) price_pct=30; price_pct=Math.max(0,Math.min(100,price_pct));
       const btn=$('genSeqBtn'); btn.disabled=true; btn.textContent='Generating…'; $('seqStatus').textContent='AI is writing…';
       try{
         const res=await fetch(window.PG_CONFIG.sequenceUrl,{method:'POST',headers:jhead,
-          body:JSON.stringify({product_name:data.PRODUCT_NAME,product_description:data.PRODUCT_DESCRIPTION,features:data.PRODUCT_FEATURES,language:($('language')||{}).value||'Taglish',pricing,count})});
+          body:JSON.stringify({product_name:data.PRODUCT_NAME,product_description:data.PRODUCT_DESCRIPTION,features:data.PRODUCT_FEATURES,language:($('language')||{}).value||'Taglish',pricing,price_pct,count})});
         const j=await res.json();
         if(!j.ok){ $('seqStatus').textContent=j.message||'Failed'; return; }
         seqMessages=j.messages||[];
@@ -982,6 +987,7 @@ If the customer's concern has already been resolved, do not simply stop. Always 
     $('copyAfterBtn').onclick=()=>{ const v=$('afterOutput').value; if(v) navigator.clipboard.writeText(v); };
     if($('language')) $('language').addEventListener('change',saveState);
     if($('seqCount')) $('seqCount').addEventListener('change',saveState);
+    if($('seqPricePct')) $('seqPricePct').addEventListener('change',saveState);
 
     // init: restore last state, else load sample. Punan ang blangkong Policies & Delivery
     // ng standard defaults (di sinisira ang na-edit na ng user).
