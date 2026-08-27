@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\PromptGeneration;
+use App\Models\PromptGeneratorSetting;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * /prompt-generator — Chatbot Sales Prompt Generator (V2).
@@ -118,7 +120,95 @@ SEQ;
     public function index()
     {
         $this->checkAccess();
-        return view('prompt_generator.index');
+        return view('prompt_generator.index', [
+            'settings'  => $this->settingsMerged(),
+            'defaults'  => $this->defaultSettings(),
+            'promptRef' => $this->promptReference(),
+        ]);
+    }
+
+    /**
+     * Protected default values (source of truth). Editable sa Settings tab, naka-save sa DB;
+     * ang array na ito ang ginagamit kapag "Reset to Default" o kapag walang DB override.
+     */
+    private function defaultSettings(): array
+    {
+        return [
+            'WARRANTY_POLICY'          => 'Damaged or incorrect items may be reported to customer support for verification and applicable replacement.',
+            'COVERAGE_AREA'            => 'Nationwide delivery within the Philippines, subject to courier serviceability.',
+            'DELIVERY_TIME'            => '2 to 5 days Luzon, 5 to 10 days Visayas and Mindanao, 11 to 15 days Palawan, Sulu, Tawi-Tawi.',
+            'PAYMENT_METHOD'           => 'Cash on Delivery (COD)',
+            'OPEN_PARCEL_POLICY'       => 'No Open Before Payment. Customers may inspect the parcel after completing COD payment, subject to courier policy.',
+            'LEGITIMACY_INFO'          => 'Orders are processed through the official store and shipped with trackable courier details.',
+            'AVAILABILITY_INFORMATION' => 'Available while current inventory lasts. Do not claim low stock unless confirmed.',
+            'LOOP1'                    => "Fill-up niyo lang po ang nasa baba Boss/Ma'am\n\n👉 Name: \n\n👉 Phone number:\n\n👉 Complete Address:\n(House#/Purok /Street, Brgy, Municipality, Province) \n\n👉 Landmark:\n (San malapit? Ex: Brgy Hall, School)",
+            'LOOP2'                    => "Your order has been confirmed and processed na po.\nPakihintay na lang po dumating ang order niyo.\nLuzon: 2 to 3 days\nVisayas and Mindanao: 5 to 7 days\nPalawan: 10 to 15 days",
+        ];
+    }
+
+    /** DEFAULT_SETTINGS overlaid with DB overrides (migration-safe). */
+    private function settingsMerged(): array
+    {
+        $settings = $this->defaultSettings();
+        try {
+            if (Schema::hasTable('prompt_generator_settings')) {
+                $rows = PromptGeneratorSetting::whereIn('key', array_keys($settings))->pluck('value', 'key')->all();
+                foreach ($rows as $k => $v) {
+                    if ($v !== null && $v !== '') $settings[$k] = $v;
+                }
+            }
+        } catch (\Throwable $e) {
+            // table missing / DB error → gamitin ang code defaults
+        }
+        return $settings;
+    }
+
+    /** Read-only reference: anong system prompt + inputs ang ginagamit kada generation. */
+    private function promptReference(): array
+    {
+        return [
+            ['name' => 'Main Flow (first auto-reply)', 'inputs' => 'product_name, product_description, features, price, promo, language', 'prompt' => self::MAINFLOW_PROMPT],
+            ['name' => 'Follow-up Sequence',           'inputs' => 'product_name, product_description, features, pricing (from inputs), price_pct, count, language', 'prompt' => self::SEQUENCE_PROMPT],
+            ['name' => 'Image Auto-Fill (Vision)',     'inputs' => 'uploaded product image', 'prompt' => $this->visionInstruction()],
+            ['name' => 'Test Chat',                    'inputs' => 'the generated Sales/After-Sales prompt (as system) + a customer message', 'prompt' => 'System = the generated Sales or After-Sales prompt shown in those tabs. User = the customer message you type. Temperature 0.7.'],
+        ];
+    }
+
+    /** GET /prompt-generator/settings — current + default protected settings. */
+    public function getSettings()
+    {
+        $this->checkAccess();
+        return response()->json([
+            'ok'       => true,
+            'settings' => $this->settingsMerged(),
+            'defaults' => $this->defaultSettings(),
+        ]);
+    }
+
+    /** POST /prompt-generator/settings — upsert protected defaults to DB. */
+    public function saveSettings(Request $request)
+    {
+        $this->checkAccess();
+        if (! Schema::hasTable('prompt_generator_settings')) {
+            return response()->json(['ok' => false, 'message' => 'Settings table wala pa — patakbuhin muna: php artisan migrate --force'], 200);
+        }
+        $data = $request->validate(['settings' => 'required|array']);
+        $allowed = array_keys($this->defaultSettings());
+        foreach ($data['settings'] as $k => $v) {
+            if (! in_array($k, $allowed, true)) continue;
+            PromptGeneratorSetting::updateOrCreate(['key' => $k], ['value' => is_scalar($v) ? (string) $v : json_encode($v)]);
+        }
+        return response()->json(['ok' => true, 'settings' => $this->settingsMerged()]);
+    }
+
+    /** POST /prompt-generator/settings/reset — burahin ang DB overrides → code defaults. */
+    public function resetSettings(Request $request)
+    {
+        $this->checkAccess();
+        if (Schema::hasTable('prompt_generator_settings')) {
+            PromptGeneratorSetting::whereIn('key', array_keys($this->defaultSettings()))->delete();
+        }
+        return response()->json(['ok' => true, 'settings' => $this->defaultSettings()]);
     }
 
     /**

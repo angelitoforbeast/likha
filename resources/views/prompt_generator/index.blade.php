@@ -216,6 +216,7 @@
             <button class="pg-tab" type="button" data-tab="mainflow">Main Flow</button>
             <button class="pg-tab" type="button" data-tab="sequence">Sequence</button>
             <button class="pg-tab" type="button" data-tab="test">Test</button>
+            <button class="pg-tab" type="button" data-tab="settings">⚙️ Settings</button>
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             <button class="btn primary" id="genAllBtn" type="button">⚡ Generate All</button>
@@ -274,6 +275,21 @@
             <div class="pane-actions" style="margin-top:8px;"><button class="btn primary" id="testBtn" type="button">Send</button></div>
             <div id="testReply" class="reply-box flex-1" style="margin-top:4px;">— AI reply lalabas dito —</div>
           </div>
+          {{-- SETTINGS --}}
+          <div class="pg-pane pg-hidden" data-pane="settings" style="overflow:auto;">
+            <div class="pane-actions">
+              <button class="btn primary" id="saveSettingsBtn" type="button">💾 Save Settings</button>
+              <button class="btn ghost" id="resetSettingsBtn" type="button">↩︎ Reset to Default</button>
+              <span id="settingsStatus" class="text-[11.5px] text-slate-400"></span>
+            </div>
+            <div class="help" style="margin-bottom:8px;">Protected defaults — <strong>hindi hinahawakan ng Analyze Image</strong>. Ito ang default na ginagamit sa form (Policies &amp; Delivery + LOOP 1/2). Naka-save sa database; may Reset to Default.</div>
+            <div id="settingsFields"></div>
+            <details style="margin-top:14px;">
+              <summary style="cursor:pointer;font-weight:700;font-size:13px;color:#334155;">📋 Generation Prompts &amp; Inputs (reference)</summary>
+              <div class="help" style="margin:6px 0 8px;">Ito ang mga system prompt + inputs na ginagamit para mag-generate. Read-only muna.</div>
+              <div id="promptRefBox"></div>
+            </details>
+          </div>
         </div>
       </div>
 
@@ -289,7 +305,13 @@
       mainflowUrl: '{{ route('prompt.generator.mainflow') }}',
       sequenceUrl: '{{ route('prompt.generator.sequence') }}',
       testUrl:     '{{ route('prompt.generator.test') }}',
+      settingsGetUrl:   '{{ route('prompt.generator.settings.get') }}',
+      settingsSaveUrl:  '{{ route('prompt.generator.settings.save') }}',
+      settingsResetUrl: '{{ route('prompt.generator.settings.reset') }}',
     };
+    window.PG_SETTINGS  = @json($settings ?? []);
+    window.PG_DEFAULTS  = @json($defaults ?? []);
+    window.PG_PROMPTREF = @json($promptRef ?? []);
   </script>
 
   {{-- Main script is wrapped below so the double-brace placeholder tokens in the master template stay literal. --}}
@@ -446,19 +468,11 @@ If the customer's concern has already been resolved, do not simply stop. Always 
     const SAMPLE_BUNDLES = [{"name":"Buy 1","qty":"1 bottle","price":"₱399","shipMode":"hidden","shipFeeType":"fixed","shipAmount":"₱99","shipLocationText":""},{"name":"Buy 2 Save More","qty":"2 bottles","price":"₱699","shipMode":"free","shipFeeType":"location","shipAmount":"","shipLocationText":""},{"name":"Family Bundle","qty":"3 bottles","price":"₱899","shipMode":"free","shipFeeType":"location","shipAmount":"","shipLocationText":""}];
     const LS_KEY = 'pg_v2_state';
 
-    // Standard company defaults para sa Policies & Delivery — pre-filled + editable pa rin.
-    const POLICY_DEFAULTS = {
-      WARRANTY_POLICY: 'Damaged or incorrect items may be reported to customer support for verification and applicable replacement.',
-      COVERAGE_AREA: 'Nationwide delivery within the Philippines, subject to courier serviceability.',
-      DELIVERY_TIME: '2 to 5 days Luzon, 5 to 10 days Visayas and Mindanao, 11 to 15 days Palawan, Sulu, Tawi-Tawi.',
-      PAYMENT_METHOD: 'Cash on Delivery (COD)',
-      OPEN_PARCEL_POLICY: 'No Open Before Payment. Customers may inspect the parcel after completing COD payment, subject to courier policy.',
-      LEGITIMACY_INFO: 'Orders are processed through the official store and shipped with trackable courier details.',
-      AVAILABILITY_INFORMATION: 'Available while current inventory lasts. Do not claim low stock unless confirmed.',
-      LOOP1: `Fill-up niyo lang po ang nasa baba Boss/Ma'am\n\n👉 Name: \n\n👉 Phone number:\n\n👉 Complete Address:\n(House#/Purok /Street, Brgy, Municipality, Province) \n\n👉 Landmark:\n (San malapit? Ex: Brgy Hall, School)`,
-      LOOP2: `Your order has been confirmed and processed na po.\nPakihintay na lang po dumating ang order niyo.\nLuzon: 2 to 3 days\nVisayas and Mindanao: 5 to 7 days\nPalawan: 10 to 15 days`,
-      QUANTITY_PCS: '1',
-    };
+    // Protected defaults galing sa server (⚙️ Settings tab, DB-backed). QUANTITY_PCS ay local default.
+    // `let` para ma-update kapag nag-save/reset sa Settings.
+    let POLICY_DEFAULTS = Object.assign({ QUANTITY_PCS: '1' }, window.PG_SETTINGS || {});
+    // Protected keys — HINDI hinahawakan ng Analyze Image autofill (walang overwrite, walang REVIEW flag).
+    const PROTECTED_KEYS = Object.keys(window.PG_DEFAULTS || {});
     // force=true: palitan lagi. force=false: punan lang ang blangko (di sinisira ang na-edit ng user).
     function applyPolicyDefaults(force){
       Object.keys(POLICY_DEFAULTS).forEach(k=>{
@@ -736,7 +750,7 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       setAIStatus('AI review marks cleared.');
     }
     function markAllReview(){
-      document.querySelectorAll('[data-key]').forEach(el=>markField(el,'review'));
+      document.querySelectorAll('[data-key]').forEach(el=>{ if(!PROTECTED_KEYS.includes(el.dataset.key)) markField(el,'review'); });
       ['sellingType','singlePrice','shippingMode','shippingFeeType','shippingAmount','shippingLocationText'].forEach(id=>markField($(id),'review'));
     }
     function normalizeKnown(v){
@@ -785,7 +799,7 @@ If the customer's concern has already been resolved, do not simply stop. Always 
     function applyAIResult(result){
       markAllReview(); let filled=0, review=0;
       const fields=result?.fields||{};
-      Object.keys(fields).forEach(k=>{ if(applySimpleAIField(k,fields[k])) filled++; });
+      Object.keys(fields).forEach(k=>{ if(PROTECTED_KEYS.includes(k)) return; if(applySimpleAIField(k,fields[k])) filled++; });
       if(applyPricingAI(result?.pricing||{})) filled++;
       if(applyShippingAI(result?.shipping||{})) filled++;
       document.querySelectorAll('.pg-field.review').forEach(()=>review++);
@@ -977,6 +991,72 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       finally{ btn.disabled=false; btn.textContent=label; }
     }
 
+    // ── Settings: protected defaults (DB-backed) + prompt reference ──
+    const SETTINGS_FIELDS = [
+      ['WARRANTY_POLICY','Warranty / Replacement Policy'],
+      ['COVERAGE_AREA','Coverage Area'],
+      ['DELIVERY_TIME','Delivery Time'],
+      ['PAYMENT_METHOD','Payment Method'],
+      ['OPEN_PARCEL_POLICY','Open Parcel Policy'],
+      ['LEGITIMACY_INFO','Legitimacy Information'],
+      ['AVAILABILITY_INFORMATION','Availability Information'],
+      ['LOOP1','LOOP 1 — Order Form'],
+      ['LOOP2','LOOP 2 — Order Confirmation'],
+    ];
+    function renderSettingsFields(){
+      const box=$('settingsFields'); if(!box) return;
+      const s=window.PG_SETTINGS||{}; box.innerHTML='';
+      SETTINGS_FIELDS.forEach(([key,label])=>{
+        const wrap=document.createElement('label'); wrap.className='pg-field'; wrap.style.cssText='display:block;margin-bottom:10px;';
+        const span=document.createElement('span'); span.textContent=label; span.style.cssText='display:block;margin-bottom:3px;';
+        const ta=document.createElement('textarea'); ta.setAttribute('data-setting',key); ta.rows=(key==='LOOP1'?6:(key==='LOOP2'?5:2));
+        ta.style.cssText='width:100%;border:1px solid #d1d5db;border-radius:8px;padding:7px 9px;font-size:12.5px;font-family:inherit;';
+        ta.value = s[key]!=null ? s[key] : '';
+        wrap.appendChild(span); wrap.appendChild(ta); box.appendChild(wrap);
+      });
+    }
+    function renderPromptRef(){
+      const box=$('promptRefBox'); if(!box) return;
+      const ref=window.PG_PROMPTREF||[]; box.innerHTML='';
+      ref.forEach(r=>{
+        const d=document.createElement('div'); d.className='seq-item';
+        const h=document.createElement('div'); h.style.cssText='font-weight:700;font-size:12.5px;color:#0f172a;margin-bottom:2px;'; h.textContent=r.name;
+        const inp=document.createElement('div'); inp.className='help'; inp.style.marginTop='0'; inp.textContent='Inputs: '+(r.inputs||'');
+        const pre=document.createElement('pre'); pre.textContent=r.prompt||'';
+        pre.style.cssText='white-space:pre-wrap;word-break:break-word;font-size:11.5px;margin:6px 0 0;color:#334155;max-height:220px;overflow:auto;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:8px;';
+        d.appendChild(h); d.appendChild(inp); d.appendChild(pre); box.appendChild(d);
+      });
+    }
+    function applySettingsToForm(){
+      POLICY_DEFAULTS = Object.assign({ QUANTITY_PCS:(POLICY_DEFAULTS.QUANTITY_PCS||'1') }, window.PG_SETTINGS||{});
+      Object.keys(window.PG_SETTINGS||{}).forEach(k=>{ const el=document.querySelector('[data-key="'+k+'"]'); if(el) el.value=window.PG_SETTINGS[k]; });
+      generate();
+    }
+    async function saveSettingsToServer(){
+      const st=$('settingsStatus'), btn=$('saveSettingsBtn'); btn.disabled=true; btn.textContent='Saving…';
+      const payload={}; document.querySelectorAll('#settingsFields [data-setting]').forEach(el=>payload[el.dataset.setting]=el.value);
+      try{
+        const res=await fetch(window.PG_CONFIG.settingsSaveUrl,{method:'POST',headers:jhead,body:JSON.stringify({settings:payload})});
+        const j=await res.json();
+        if(!j.ok){ st.style.color='#b91c1c'; st.textContent=j.message||'Save failed'; return; }
+        window.PG_SETTINGS=j.settings||payload; renderSettingsFields(); applySettingsToForm();
+        st.style.color='#16a34a'; st.textContent='Saved ✅';
+      }catch(e){ st.style.color='#b91c1c'; st.textContent='Error: '+e.message; }
+      finally{ btn.disabled=false; btn.textContent='💾 Save Settings'; setTimeout(()=>{ if(st) st.textContent=''; },4000); }
+    }
+    async function resetSettingsToServer(){
+      if(!confirm('Reset lahat ng protected defaults sa original values?')) return;
+      const st=$('settingsStatus'), btn=$('resetSettingsBtn'); btn.disabled=true; btn.textContent='Resetting…';
+      try{
+        const res=await fetch(window.PG_CONFIG.settingsResetUrl,{method:'POST',headers:jhead,body:JSON.stringify({})});
+        const j=await res.json();
+        if(!j.ok){ st.style.color='#b91c1c'; st.textContent=j.message||'Reset failed'; return; }
+        window.PG_SETTINGS=j.settings||window.PG_DEFAULTS; renderSettingsFields(); applySettingsToForm();
+        st.style.color='#16a34a'; st.textContent='Reset to default ✅';
+      }catch(e){ st.style.color='#b91c1c'; st.textContent='Error: '+e.message; }
+      finally{ btn.disabled=false; btn.textContent='↩︎ Reset to Default'; setTimeout(()=>{ if(st) st.textContent=''; },4000); }
+    }
+
     // extra wiring
     $('genMainFlowBtn').onclick=generateMainFlow;
     $('copyMainFlowBtn').onclick=()=>{ const v=$('mainFlowOutput').value; if(v) navigator.clipboard.writeText(v); };
@@ -984,6 +1064,9 @@ If the customer's concern has already been resolved, do not simply stop. Always 
     $('testBtn').onclick=runTest;
     $('genAllBtn').onclick=generateAll;
     $('copySheetBtn').onclick=copyForSheet;
+    if($('saveSettingsBtn')) $('saveSettingsBtn').onclick=saveSettingsToServer;
+    if($('resetSettingsBtn')) $('resetSettingsBtn').onclick=resetSettingsToServer;
+    renderSettingsFields(); renderPromptRef();
     $('copyAfterBtn').onclick=()=>{ const v=$('afterOutput').value; if(v) navigator.clipboard.writeText(v); };
     if($('language')) $('language').addEventListener('change',saveState);
     if($('seqCount')) $('seqCount').addEventListener('change',saveState);

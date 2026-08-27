@@ -1011,6 +1011,9 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/prompt-generator/main-flow',     [\App\Http\Controllers\PromptGeneratorController::class, 'mainFlow'])     ->middleware('throttle:40,1')->name('prompt.generator.mainflow');
     Route::post('/prompt-generator/sequence',      [\App\Http\Controllers\PromptGeneratorController::class, 'sequence'])     ->middleware('throttle:40,1')->name('prompt.generator.sequence');
     Route::post('/prompt-generator/test',          [\App\Http\Controllers\PromptGeneratorController::class, 'testChat'])     ->middleware('throttle:60,1')->name('prompt.generator.test');
+    Route::get ('/prompt-generator/settings',      [\App\Http\Controllers\PromptGeneratorController::class, 'getSettings'])  ->name('prompt.generator.settings.get');
+    Route::post('/prompt-generator/settings',      [\App\Http\Controllers\PromptGeneratorController::class, 'saveSettings']) ->middleware('throttle:60,1')->name('prompt.generator.settings.save');
+    Route::post('/prompt-generator/settings/reset',[\App\Http\Controllers\PromptGeneratorController::class, 'resetSettings'])->middleware('throttle:60,1')->name('prompt.generator.settings.reset');
     Route::get ('/prompt-generator/history',       [\App\Http\Controllers\PromptGeneratorController::class, 'history'])      ->name('prompt.generator.history');
     Route::get ('/prompt-generator/history/{id}',  [\App\Http\Controllers\PromptGeneratorController::class, 'historyDetail'])->whereNumber('id')->name('prompt.generator.history.detail');
 
