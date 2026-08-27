@@ -87,7 +87,7 @@ FORMATTING:
 
 PLACEHOLDERS — insert these LITERALLY, do NOT replace, translate, or invent values for them.
 These are the ONLY two allowed placeholders — do NOT output any other {{...}} token:
-- {{first_name}}  = the customer's first name (sprinkle naturally, not in every single message)
+- {{user_first_name}}  = the customer's first name (sprinkle naturally, not in every single message)
 - {{PRICING}}     = the promo price / offer
 NEVER write an actual price, number, amount, discount, savings, or a specific deal name
 (e.g. "P299", "299", "Buy 1 Take 1", "B1T1", "50% off"). ANY reference to price, cost,
