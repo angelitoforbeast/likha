@@ -192,6 +192,7 @@
           <section class="pg-sec"><h3>Sales &amp; Ordering</h3><div class="pg-grid">
             <label class="pg-field"><span>Promo Information</span><textarea data-key="PROMO_INFORMATION" rows="3"></textarea></label>
             <label class="pg-field"><span>Unit Name</span><input data-key="UNIT_NAME" type="text"></label>
+            <label class="pg-field"><span>Quantity (pcs) — Sheet</span><input data-key="QUANTITY_PCS" type="text" placeholder="1"></label>
             <label class="pg-field"><span>Additional Order Fields</span><textarea data-key="ORDER_FIELDS" rows="3"></textarea></label>
           </div></section>
 
@@ -454,6 +455,7 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       AVAILABILITY_INFORMATION: 'Available while current inventory lasts. Do not claim low stock unless confirmed.',
       LOOP1: `Fill-up niyo lang po ang nasa baba Boss/Ma'am\n\n👉 Name: \n\n👉 Phone number:\n\n👉 Complete Address:\n(House#/Purok /Street, Brgy, Municipality, Province) \n\n👉 Landmark:\n (San malapit? Ex: Brgy Hall, School)`,
       LOOP2: `Your order has been confirmed and processed na po.\nPakihintay na lang po dumating ang order niyo.\nLuzon: 2 to 3 days\nVisayas and Mindanao: 5 to 7 days\nPalawan: 10 to 15 days`,
+      QUANTITY_PCS: '1',
     };
     // force=true: palitan lagi. force=false: punan lang ang blangko (di sinisira ang na-edit ng user).
     function applyPolicyDefaults(force){
@@ -920,7 +922,7 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       const cols=[
         isBundle ? 'Multiple Offers' : 'Single Selling Price',              // Type of Selling
         isBundle ? bundles.map(b=>b.name).filter(Boolean).join('; ') : '',  // Bundle
-        isBundle ? bundles.map(b=>b.qty).filter(Boolean).join('; ') : (data.UNIT_NAME||''), // Quantity
+        data.QUANTITY_PCS||'1',                                            // Quantity (pieces)
         data.PRODUCT_NAME||'',                                              // Item Name
         (derivePricePromo().price||''),                                     // PROMO (price)
         $('mainFlowOutput').value||'',                                      // MAIN FLOW
