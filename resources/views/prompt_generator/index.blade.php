@@ -848,6 +848,8 @@ If the customer's concern has already been resolved, do not simply stop. Always 
       return { price:(rec?rec.price:''), promo:[list,data.PROMO_INFORMATION].filter(Boolean).join(' — ') };
     }
     const jhead={'Content-Type':'application/json','Accept':'application/json','X-CSRF-TOKEN':csrf};
+    // BotCake salutation placeholder — MUST appear verbatim at the top of every Main Flow.
+    const MAINFLOW_PREFIX = "#GENDER{{Sir|Ma'am|Sir/Ma'am}} {{user_first_name}}";
 
     // ── Main Flow ──
     async function generateMainFlow(){
@@ -860,7 +862,7 @@ If the customer's concern has already been resolved, do not simply stop. Always 
           body:JSON.stringify({product_name:data.PRODUCT_NAME,product_description:data.PRODUCT_DESCRIPTION,features:data.PRODUCT_FEATURES,price,promo,language:($('language')||{}).value||'Taglish'})});
         const j=await res.json();
         if(!j.ok){ $('mainFlowStatus').textContent=j.message||'Failed'; return; }
-        $('mainFlowOutput').value=j.main_flow; $('mainFlowStatus').textContent='Done ✅';
+        $('mainFlowOutput').value=MAINFLOW_PREFIX+'\n'+j.main_flow; $('mainFlowStatus').textContent='Done ✅';
       }catch(e){ $('mainFlowStatus').textContent='Error: '+e.message; }
       finally{ btn.disabled=false; btn.textContent='✨ Generate Main Flow'; }
     }
