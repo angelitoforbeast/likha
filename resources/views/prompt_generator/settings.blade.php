@@ -86,8 +86,8 @@
 
     @if($sec === 'prompts')
     <div class="pgs-card">
-      <div class="pgs-sec-title">✏️ Editable AI Prompts</div>
-      <div class="pgs-help">Ang mga system prompt na ipinapadala sa AI. I-edit, i-Save (naka-log na version), o i-Restore sa naunang version. Reset = code default.</div>
+      <div class="pgs-sec-title">✏️ Editable Prompts</div>
+      <div class="pgs-help">I-edit, i-Save (naka-log na version), i-Restore sa naunang version, o Reset sa code default. <strong>Note:</strong> Ang Sales/After-Sales ay hati sa <em>Header</em> at <em>Footer</em> — ang PRICING/SHIPPING/DELIVERY sections ay awtomatikong nakasingit sa pagitan nila. Huwag burahin ang <code>@{{PLACEHOLDER}}</code> tokens (hal. <code>@{{STORE_NAME}}</code>).</div>
       <div id="editablePrompts"></div>
     </div>
     <div class="pgs-card pgs-ref">

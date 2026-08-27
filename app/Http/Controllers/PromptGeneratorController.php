@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\PromptGeneration;
 use App\Models\PromptGeneratorSetting;
 use App\Models\PromptGeneratorPromptVersion;
+use App\Support\PromptTemplateDefaults;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
@@ -126,6 +127,7 @@ SEQ;
             'defaults'  => $this->defaultSettings(),
             'promptRef' => $this->promptReference(),
             'locked'    => $this->lockedFields(),
+            'templates' => $this->activeTemplates(),
         ]);
     }
 
@@ -244,20 +246,41 @@ SEQ;
     private function promptCatalog(): array
     {
         return [
-            'mainflow' => 'Main Flow (opening auto-reply)',
-            'sequence' => 'Follow-up Sequence',
-            'vision'   => 'Image Auto-Fill (Vision)',
+            'sales_top'         => 'Sales Prompt — Header (top)',
+            'sales_bottom'      => 'Sales Prompt — Footer (bottom)',
+            'aftersales_top'    => 'After-Sales — Header (top)',
+            'aftersales_bottom' => 'After-Sales — Footer (bottom)',
+            'mainflow'          => 'Main Flow (opening auto-reply)',
+            'sequence'          => 'Follow-up Sequence',
+            'vision'            => 'Image Auto-Fill (Vision)',
         ];
+    }
+
+    /** Ang 4 na master template keys (Sales/After-Sales) na ginagamit client-side sa generator. */
+    private function templateKeys(): array
+    {
+        return ['sales_top', 'sales_bottom', 'aftersales_top', 'aftersales_bottom'];
     }
 
     private function promptDefault(string $key): string
     {
+        if (in_array($key, $this->templateKeys(), true)) {
+            return PromptTemplateDefaults::all()[$key] ?? '';
+        }
         return match ($key) {
             'mainflow' => self::MAINFLOW_PROMPT,
             'sequence' => self::SEQUENCE_PROMPT,
             'vision'   => $this->visionInstruction(),
             default    => '',
         };
+    }
+
+    /** Active Sales/After-Sales templates (override ?? default) para i-inject sa generator. */
+    private function activeTemplates(): array
+    {
+        $out = [];
+        foreach ($this->templateKeys() as $k) $out[$k] = $this->activePrompt($k);
+        return $out;
     }
 
     /** Active prompt = DB override (kung meron) o code default. */
@@ -315,7 +338,7 @@ SEQ;
     {
         return array_values(array_filter(
             $this->promptReference(),
-            fn ($r) => str_contains($r['name'], 'deterministic') || str_contains($r['name'], 'Test')
+            fn ($r) => str_contains($r['name'], 'Test')
         ));
     }
 
