@@ -30,7 +30,10 @@ class PromptGeneratorController extends Controller
 Write ONE warm, complete, high-converting OPENING message that the sales bot sends as its
 FIRST reply to any customer who messages. This is the "main flow" opening. Follow this flow:
 
-1. GREETING first — a friendly, warm rapport line (e.g. "Hi po! 😊 Salamat sa pag-message!").
+1. GREETING first — a friendly, warm rapport line that ADDRESSES the customer inline using the
+   exact marker [[SALUTATION]] woven naturally into the sentence (e.g. "Hi po [[SALUTATION]]! 😊
+   Salamat sa pag-message!"). Include [[SALUTATION]] exactly ONCE, inside the greeting — never on
+   its own separate line, and never alter, translate, or remove it.
 2. A short attention hook about the offer (e.g. "LIMITED TIME OFFER na po ito! 🔥").
 3. PRICING + OFFER (ONE line only) — first show the OLD/regular price with a REAL crossed-out line
    using unicode combining strikethrough characters so it literally looks like this: ₱̶3̶6̶0̶ (each
