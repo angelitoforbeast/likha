@@ -178,10 +178,19 @@
             <label class="pg-field"><span>Certification / Safety Info</span><textarea data-key="PRODUCT_CERTIFICATION" rows="3"></textarea></label>
           </div></section>
 
-          {{-- Policies & Delivery + Bot Flow Loops → managed sa hiwalay na ⚙️ Settings page (protected defaults). --}}
-          <div class="pg-sec" style="border-bottom:0;">
-            <div class="help">Policies &amp; Delivery at Bot Flow Loops ay naka-set na sa <a href="{{ route('prompt.generator.settings.get') }}" style="color:#4f46e5;font-weight:600;">⚙️ Settings</a> (protected defaults). Automatic na kasama sa prompt at Copy for Sheet.</div>
-          </div>
+          {{-- Policies & Delivery — nakikita + editable, PERO protected sa Analyze Image (default galing ⚙️ Settings). --}}
+          <section class="pg-sec"><h3>Policies &amp; Delivery <span style="font-size:9px;font-weight:800;color:#4338ca;background:#eef2ff;border:1px solid #c7d2fe;border-radius:999px;padding:2px 6px;vertical-align:middle;">🔒 PROTECTED</span></h3>
+            <div class="help" style="margin-bottom:8px;">Hindi hinahawakan ng Analyze Image. Default galing sa <a href="{{ route('prompt.generator.settings.get') }}" style="color:#4f46e5;font-weight:600;">⚙️ Settings</a> — editable pa rin per-product. (Bot Flow Loops ay nasa Settings.)</div>
+            <div class="pg-grid">
+              <label class="pg-field"><span>Warranty / Replacement Policy</span><textarea data-key="WARRANTY_POLICY" rows="3"></textarea></label>
+              <label class="pg-field"><span>Coverage Area</span><textarea data-key="COVERAGE_AREA" rows="3"></textarea></label>
+              <label class="pg-field"><span>Delivery Time</span><input data-key="DELIVERY_TIME" type="text"></label>
+              <label class="pg-field"><span>Payment Method</span><input data-key="PAYMENT_METHOD" type="text"></label>
+              <label class="pg-field"><span>Open Parcel Policy</span><textarea data-key="OPEN_PARCEL_POLICY" rows="3"></textarea></label>
+              <label class="pg-field"><span>Legitimacy Information</span><textarea data-key="LEGITIMACY_INFO" rows="3"></textarea></label>
+              <label class="pg-field"><span>Availability Information</span><textarea data-key="AVAILABILITY_INFORMATION" rows="3"></textarea></label>
+            </div>
+          </section>
 
           {{-- Sales & Ordering --}}
           <section class="pg-sec"><h3>Sales &amp; Ordering</h3><div class="pg-grid">
