@@ -677,22 +677,19 @@ VER;
     private function visionInstruction(): string
     {
         return <<<'TXT'
-You extract verified sales configuration from ONE uploaded product image for an AI sales-prompt generator.
+You extract sales configuration from ONE uploaded product image for an AI sales-prompt generator.
 
-CRITICAL RULES:
-1. Use ONLY information visibly supported by the image. Do not guess.
-2. If a field is not visible or cannot be safely inferred, return null.
-3. Absence of a shipping statement does NOT mean free shipping and does NOT mean hidden shipping. Return shipping.mode = null unless explicitly supported.
-4. Detect pricing:
-   - mode "single" only when the image clearly shows one official selling price and no bundle structure.
-   - mode "bundles" when it clearly shows multiple quantity/package offers.
-   - otherwise null.
-5. For bundles, return every visible official offer in the same meaning as shown.
-6. Do not invent medical claims, certifications, warranty, delivery times, ingredients, or policies.
-7. assistant_name, order_fields, open_parcel_policy, warranty_policy, payment_method, delivery_time, coverage_area are usually null unless explicitly visible.
-8. shipping.mode allowed values: "free", "declared", "hidden", or null. "hidden" may ONLY be used if the image explicitly says a shipping fee exists but should not be disclosed until asked. Never infer hidden mode from missing shipping text.
-9. shipping.fee_type allowed: "fixed", "location", or null.
-10. Return ONLY valid JSON. No markdown.
+GOAL: Fill as many PRODUCT fields as possible so the user gets a working draft. Prefer completeness — but be honest about confidence via the "uncertain" list.
+
+RULES:
+1. Use information directly visible in the image whenever available.
+2. For PRODUCT-INFO fields that are NOT directly visible, you MAY INFER a reasonable value from the product name, product type, and any visible text: PRODUCT_CATEGORY, PRODUCT_DESCRIPTION, PRIMARY_BENEFIT, PRODUCT_BENEFITS, PRODUCT_FEATURES, INGREDIENTS, HOW_TO_USE, USAGE_TIPS, PRODUCT_ORIGIN, PRODUCT_CERTIFICATION, UNIT_NAME. Keep inferences plausible and NON-medical; never state a health/medical cure as fact.
+3. Put the KEY of EVERY field you INFERRED or are not fully sure about into the "uncertain" array, so the user reviews it. Fields you read directly from the image are NOT uncertain.
+4. If you cannot even reasonably infer a field, return null for it.
+5. Do NOT invent these — return null unless explicitly visible: STORE_NAME, ASSISTANT_NAME, PROMO_INFORMATION, ORDER_FIELDS, WARRANTY_POLICY, COVERAGE_AREA, DELIVERY_TIME, PAYMENT_METHOD, OPEN_PARCEL_POLICY, LEGITIMACY_INFO, AVAILABILITY_INFORMATION.
+6. Pricing — do NOT invent prices. mode "single" only when one clear selling price and no bundle structure; mode "bundles" when multiple quantity/package offers are clearly shown; otherwise null. Return every visible official offer as shown.
+7. Shipping — do NOT invent. shipping.mode: "free", "declared", "hidden", or null. Use "hidden" ONLY if the image explicitly says a fee exists but is not disclosed until asked. Absence of shipping text = null (not free, not hidden). shipping.fee_type: "fixed", "location", or null.
+8. Return ONLY valid JSON. No markdown.
 
 JSON SHAPE:
 {
@@ -704,6 +701,7 @@ JSON SHAPE:
     "PAYMENT_METHOD": null, "OPEN_PARCEL_POLICY": null, "LEGITIMACY_INFO": null, "AVAILABILITY_INFORMATION": null,
     "PROMO_INFORMATION": null, "UNIT_NAME": null, "ORDER_FIELDS": null
   },
+  "uncertain": [],
   "pricing": { "mode": null, "single_price": null, "bundles": [ {"name": null, "quantity": null, "price": null} ] },
   "shipping": { "mode": null, "fee_type": null, "amount": null, "location_response": null }
 }

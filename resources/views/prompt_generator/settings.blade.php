@@ -231,7 +231,13 @@
       const saveB=document.createElement('button'); saveB.className='pgs-btn primary mini'; saveB.textContent='💾 Save';
       const resetB=document.createElement('button'); resetB.className='pgs-btn ghost mini'; resetB.textContent='↩︎ Reset default';
       const verB=document.createElement('button'); verB.className='pgs-btn ghost mini'; verB.textContent='🕘 Versions ('+((p.versions||[]).length)+')';
-      actions.appendChild(saveB); actions.appendChild(resetB); actions.appendChild(verB);
+      const stripB=document.createElement('button'); stripB.className='pgs-btn ghost mini'; stripB.textContent='Alisin **';
+      stripB.title='Alisin ang ** (markdown bold) — hindi naman nire-render ng Messenger, bawas characters';
+      const count=document.createElement('span'); count.style.cssText='font-size:11.5px;color:#94a3b8;margin-left:auto;align-self:center;';
+      function updCount(){ count.textContent=ta.value.length.toLocaleString()+' chars'; }
+      ta.addEventListener('input', updCount); updCount();
+      stripB.onclick=()=>{ ta.value=ta.value.replace(/\*\*/g,''); updCount(); ta.focus(); };
+      actions.appendChild(saveB); actions.appendChild(resetB); actions.appendChild(verB); actions.appendChild(stripB); actions.appendChild(count);
       const verBox=document.createElement('div'); verBox.className='pgs-verlist'; verBox.style.display='none';
       saveB.onclick=()=>savePromptFn(p.key,ta.value,status);
       resetB.onclick=()=>{ if(confirm('Reset '+p.label+' sa code default?')) resetPromptFn(p.key,status); };

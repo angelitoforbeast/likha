@@ -629,12 +629,15 @@
       if(typeof v==='string'){ const s=v.trim(); if(!s||/^(unknown|not visible|not provided|n\/a|null)$/i.test(s)) return null; return s; }
       return v;
     }
-    function applySimpleAIField(key,value){
+    function applySimpleAIField(key,value,uncertain){
       const el=document.querySelector(`[data-key="${key}"]`); if(!el) return false;
       value=normalizeKnown(value); if(value===null){ markField(el,'review'); return false; }
       if(Array.isArray(value)) value=value.filter(Boolean).map(x=>'• '+x).join('\n');
       else if(typeof value==='object') value=JSON.stringify(value);
-      el.value=String(value); markField(el,'filled'); return true;
+      el.value=String(value);
+      // Fill the value even if inferred, pero i-flag REVIEW kung hindi sigurado ang AI.
+      markField(el, uncertain ? 'review' : 'filled');
+      return uncertain ? false : true;
     }
     function applyPricingAI(p){
       const selling=$('sellingType'), single=$('singlePrice'); const mode=normalizeKnown(p?.mode);
@@ -670,7 +673,8 @@
     function applyAIResult(result){
       markAllReview(); let filled=0, review=0;
       const fields=result?.fields||{};
-      Object.keys(fields).forEach(k=>{ if(PROTECTED_KEYS.includes(k)) return; if(applySimpleAIField(k,fields[k])) filled++; });
+      const uncertain=new Set(Array.isArray(result?.uncertain)?result.uncertain:[]);
+      Object.keys(fields).forEach(k=>{ if(PROTECTED_KEYS.includes(k)) return; if(applySimpleAIField(k,fields[k],uncertain.has(k))) filled++; });
       if(applyPricingAI(result?.pricing||{})) filled++;
       if(applyShippingAI(result?.shipping||{})) filled++;
       document.querySelectorAll('.pg-field.review').forEach(()=>review++);
