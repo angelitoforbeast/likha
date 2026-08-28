@@ -861,6 +861,24 @@
     // ── Generate All + Copy for Sheet (one GSheet row) ──
     // Column order matches the sheet: Type of Selling, Bundle, Quantity, Item Name,
     // PROMO, MAIN FLOW, LOOP 1, LOOP 2, Sequence 1..N, then Sales Prompt, After-Sales.
+    // Kunin ang unang numero mula sa string (hal. "₱399" → 399, "2 bottles" → 2).
+    function pgNum(s){ const m=String(s==null?'':s).replace(/,/g,'').match(/-?[\d.]+/); return m?parseFloat(m[0]):0; }
+    // Bundle price + fixed shipping fee kung naka-declare (declared/hidden + fixed amount).
+    function bundlePriceSheet(b){
+      let p=pgNum(b.price);
+      if((b.shipMode==='declared'||b.shipMode==='hidden') && (b.shipFeeType||'')==='fixed') p+=pgNum(b.shipAmount);
+      return p;
+    }
+    function singlePriceSheet(){
+      let p=pgNum($('singlePrice').value);
+      const mode=$('shippingMode').value, ft=$('shippingFeeType').value;
+      if((mode==='declared'||mode==='hidden') && ft==='fixed') p+=pgNum($('shippingAmount').value);
+      return p;
+    }
+    // Bundle offers para sa GSheet: "QUANTITY: 1 PRICE: 498, QUANTITY: 2 PRICE: 699, ..."
+    function bundleOffersSheet(){
+      return bundles.filter(b=>b.qty||b.price).map(b=>`QUANTITY: ${pgNum(b.qty)} PRICE: ${bundlePriceSheet(b)}`).join(', ');
+    }
     function sheetColumns(){
       generate(); // refresh Sales/After-Sales output (incl. fresh verification timestamp)
       const data=fieldValues();
@@ -868,7 +886,7 @@
       const count=parseInt($('seqCount').value,10)||10;
       const cols=[
         isBundle ? 'Multiple Offers' : 'Single Selling Price',              // Type of Selling
-        isBundle ? bundles.map(b=>b.name).filter(Boolean).join('; ') : '',  // Bundle
+        isBundle ? bundleOffersSheet() : `QUANTITY: ${pgNum(data.QUANTITY_PCS||'1')} PRICE: ${singlePriceSheet()}`, // Bundle (QUANTITY: n PRICE: p)
         data.QUANTITY_PCS||'1',                                            // Quantity (pieces)
         data.PRODUCT_NAME||'',                                              // Item Name
         (derivePricePromo().price||''),                                     // PROMO (price)
