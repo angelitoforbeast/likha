@@ -1022,6 +1022,11 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get ('/prompt-generator/history',       [\App\Http\Controllers\PromptGeneratorController::class, 'history'])      ->name('prompt.generator.history');
     Route::get ('/prompt-generator/history/{id}',  [\App\Http\Controllers\PromptGeneratorController::class, 'historyDetail'])->whereNumber('id')->name('prompt.generator.history.detail');
 
+    // /image-host — mag-upload ng picture, makakuha ng PUBLIC image URL (para sa image_url, BotCake, atbp.)
+    Route::get ('/image-host',        [\App\Http\Controllers\ImageHostController::class, 'index'])  ->name('image.host.index');
+    Route::post('/image-host/upload', [\App\Http\Controllers\ImageHostController::class, 'upload']) ->middleware('throttle:60,1')->name('image.host.upload');
+    Route::post('/image-host/delete', [\App\Http\Controllers\ImageHostController::class, 'destroy'])->middleware('throttle:60,1')->name('image.host.delete');
+
     // Daily HOLD snapshots (units per item) — for /owner/private history + manual test.
     Route::get ('/jnt/hold-snapshots',     [\App\Http\Controllers\ItemHoldSnapshotController::class, 'index'])->name('jnt.hold-snapshots');
     Route::post('/jnt/hold-snapshots/run', [\App\Http\Controllers\ItemHoldSnapshotController::class, 'runNow'])->name('jnt.hold-snapshots.run');

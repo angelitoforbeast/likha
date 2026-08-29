@@ -212,6 +212,8 @@
             <button class="pg-tab" type="button" data-tab="mainflow">Main Flow</button>
             <button class="pg-tab" type="button" data-tab="sequence">Sequence</button>
             <button class="pg-tab" type="button" data-tab="test">Test</button>
+            <button class="pg-tab" type="button" data-tab="quantity">Quantity</button>
+            <button class="pg-tab" type="button" data-tab="price">Price</button>
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             <button class="btn primary" id="genAllBtn" type="button">⚡ Generate All</button>
@@ -275,6 +277,22 @@
             <textarea id="testInput" class="pg-input" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:8px 10px;font-size:12.5px;min-height:70px;" placeholder="Type a customer message… e.g. Magkano po? Legit ba kayo?"></textarea>
             <div class="pane-actions" style="margin-top:8px;"><button class="btn primary" id="testBtn" type="button">Send</button></div>
             <div id="testReply" class="reply-box flex-1" style="margin-top:4px;">— AI reply lalabas dito —</div>
+          </div>
+          {{-- QUANTITY PROMPT (BotCake) --}}
+          <div class="pg-pane pg-hidden" data-pane="quantity">
+            <div class="pane-actions">
+              <button class="btn ghost" id="copyQtyBtn" type="button">Copy</button>
+              <span class="text-[11.5px] text-slate-400">Quantity outputs auto galing bundles. Editable sa ⚙️ Settings → Prompts.</span>
+            </div>
+            <textarea id="quantityOutput" class="output" spellcheck="false" readonly></textarea>
+          </div>
+          {{-- PRICE PROMPT (BotCake) --}}
+          <div class="pg-pane pg-hidden" data-pane="price">
+            <div class="pane-actions">
+              <button class="btn ghost" id="copyPriceBtn" type="button">Copy</button>
+              <span class="text-[11.5px] text-slate-400">Prices auto galing bundles (kasama shipping sa total). Editable sa ⚙️ Settings → Prompts.</span>
+            </div>
+            <textarea id="priceOutput" class="output" spellcheck="false" readonly></textarea>
           </div>
         </div>
       </div>
@@ -510,6 +528,37 @@
                 .replace(/\{\{VERIFY_STAMP\}\}/g, verifyStamp());
     }
 
+    // ── BotCake Quantity/Price prompts — markers filled from bundle inputs ──
+    function pgNum2(s){ const m=String(s==null?'':s).replace(/,/g,'').match(/-?[\d.]+/); return m?parseFloat(m[0]):0; }
+    function botcakeOffers(){
+      const isBundle=$('sellingType').value==='bundles';
+      if(isBundle){
+        return bundles.filter(b=>b.qty||b.price).map(b=>{
+          const qty=pgNum2(b.qty), base=pgNum2(b.price);
+          const ship=((b.shipMode==='declared'||b.shipMode==='hidden') && (b.shipFeeType||'')==='fixed')?pgNum2(b.shipAmount):0;
+          return {qty, base, ship, total:base+ship, free:ship===0};
+        });
+      }
+      const base=pgNum2($('singlePrice').value);
+      const mode=$('shippingMode').value, ft=$('shippingFeeType').value;
+      const ship=((mode==='declared'||mode==='hidden') && ft==='fixed')?pgNum2($('shippingAmount').value):0;
+      return [{qty:pgNum2((fieldValues().QUANTITY_PCS)||'1'), base, ship, total:base+ship, free:ship===0}];
+    }
+    function fillBotcakeMarkers(tpl){
+      const o=botcakeOffers();
+      const official=o.map(x=> x.free
+        ? `Quantity = ${x.qty} → ₱${x.total} Free Shipping Fee`
+        : `Quantity = ${x.qty} → ₱${x.base} + ₱${x.ship} Shipping Fee = ₱${x.total} Total`).join('\n');
+      const mapping=o.map(x=>`Quantity ${x.qty} → ${x.total}`).join('\n');
+      const validPrices=o.map(x=>x.total).join('\n');
+      const validQty=o.map(x=>x.qty).join('\n');
+      return String(tpl||'')
+        .replace(/\{\{OFFICIAL_PROMO_PRICES\}\}/g, official)
+        .replace(/\{\{PRICE_MAPPING\}\}/g, mapping)
+        .replace(/\{\{VALID_PRICES\}\}/g, validPrices)
+        .replace(/\{\{VALID_QUANTITIES\}\}/g, validQty);
+    }
+
     function generate(){
       const data=fieldValues();
       const prompt=[salesPromptText(data),verificationSection(data)].filter(Boolean).join('\n\n');
@@ -517,6 +566,9 @@
       $('count').textContent=prompt.length.toLocaleString()+' characters';
       // After-Sales prompt (deterministic, reuses pricing/shipping sections)
       if($('afterOutput')) $('afterOutput').value=[afterSalesPromptText(data),verificationSection(data)].filter(Boolean).join('\n\n');
+      // BotCake Quantity/Price prompts (markers filled from bundles)
+      if($('quantityOutput')) $('quantityOutput').value=fillBotcakeMarkers((window.PG_TPL&&window.PG_TPL.quantity_prompt)||'');
+      if($('priceOutput')) $('priceOutput').value=fillBotcakeMarkers((window.PG_TPL&&window.PG_TPL.price_prompt)||'');
       const missing=(prompt.match(/\[NOT PROVIDED:[^\]]+\]/g)||[]).length;
       const st=$('status');
       if(missing){st.className='warn';st.textContent='Generated — may '+missing+' missing value(s).';}
@@ -767,6 +819,8 @@
     wireCopyPart($('copyBtn2'), ()=>$('output').value, 2);
     wireCopyPart($('copyAfterBtn1'), ()=>$('afterOutput').value, 1);
     wireCopyPart($('copyAfterBtn2'), ()=>$('afterOutput').value, 2);
+    if($('copyQtyBtn')) $('copyQtyBtn').onclick=async()=>{ generate(); const ok=await copyText($('quantityOutput').value); const b=$('copyQtyBtn'); b.textContent=ok?'Copied ✓':'Copy failed'; setTimeout(()=>b.textContent='Copy',1600); };
+    if($('copyPriceBtn')) $('copyPriceBtn').onclick=async()=>{ generate(); const ok=await copyText($('priceOutput').value); const b=$('copyPriceBtn'); b.textContent=ok?'Copied ✓':'Copy failed'; setTimeout(()=>b.textContent='Copy',1600); };
 
     document.querySelectorAll('[data-key]').forEach(el=>el.addEventListener('input',generate));
 

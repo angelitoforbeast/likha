@@ -126,6 +126,103 @@ For ANY other message — even if it is similar to, contains, mentions, or asks 
 ---
 VER;
 
+    /**
+     * BotCake Quantity Detection prompt. Markers na auto-filled mula sa bundles:
+     * {{VALID_QUANTITIES}}. Ang {{ALLCXDETAILS}} / {{last_input}} ay BotCake fields (literal).
+     */
+    public const QUANTITY_PROMPT_DEFAULT = <<<'QTY'
+Analyze these inputs carefully:
+
+CUSTOMER DETAILS: {{ALLCXDETAILS}}
+LATEST CUSTOMER MESSAGE: {{last_input}}
+
+Your only task is to identify the FINAL quantity of items the customer is ordering.
+
+OFFICIAL QUANTITY RULES:
+
+OUTPUT 1 when the customer indicates:
+1 pc / 1pcs / 1 piece / one piece / 1 item / isa / isang piraso / isang bote / solo order / tig-isa / kahit isa / isa lang / 1 lang
+
+OUTPUT 3 when the customer clearly indicates:
+BUY 2 FREE 1 / BUY2 FREE1 / BUY 2FREE 1 / BUY2FREE1 / BUY 2 FREE ONE / BUY TWO FREE ONE / BUY 2 TAKE 1 / BUY2TAKE1 / B2F1 / B2 F1 / 2+1 / 2 plus 1 / 2 bought 1 free / dalawa free isa / dalawa libre isa / dalawa dagdag isa / tatlo / tatlong piraso / 3 pcs / 3pcs / 3 pieces / 3 items / 3 bottles / isang set ng Buy 2 Free 1 / promo bundle / complete promo / avail promo
+
+OUTPUT 4 when the customer clearly indicates:
+BUY 3 FREE 1 / BUY3 FREE1 / BUY 3FREE 1 / BUY3FREE1 / BUY 3 FREE ONE / BUY THREE FREE ONE / BUY 3 TAKE 1 / BUY3TAKE1 / B3F1 / B3 F1 / 3+1 / 3 plus 1 / 3 bought 1 free / tatlo free isa / tatlo libre isa / tatlo dagdag isa / apat / apat na piraso / 4 pcs / 4pcs / 4 pieces / 4 items / 4 bottles / isang set ng Buy 3 Free 1
+
+IMPORTANT ANALYSIS RULES:
+- Prioritize the customer's LATEST and FINAL order instruction in {{last_input}}.
+- Use {{ALLCXDETAILS}} only when the latest message does not contain a clear quantity.
+- If the customer changes their order, follow the newest quantity mentioned.
+  Examples: "Tatlo sana, pero isa na lang" -> 1. "Isa lang muna—ay gawin nang Buy 2 Free 1" -> 3. "Buy 2 Free 1 sana—ay gawin nang Buy 3 Free 1" -> 4.
+- Do not add together quantities from separate statements unless the customer clearly requests a total.
+  Examples: "Isa sakin at isa kay mama" -> 2. "Una sabi ko isa pero tatlo na lang" -> 3.
+- Understand common misspellings, spacing errors, abbreviations, and Taglish variations (buy2free1, buy 2free 1, b2 f1, baywan fri wan, tatlo po -> all 3).
+- Ignore quantities that refer to: price, age, address, phone number, delivery days, dates, previous orders, product benefits, unrelated items.
+- Do not interpret "free 1" alone as quantity 1 when it clearly refers to the BUY 2 FREE 1 or BUY 3 FREE 1 promo. Determine the correct total quantity from the complete promo phrase.
+- If the customer says "promo", "bundle", "yung offer", or "yung buy 2 free 1", output 3. If "yung buy 3 free 1", output 4.
+- If no quantity or bundle is clearly stated, output the default quantity 1.
+- Never output words, labels, punctuation, spaces, explanations, or formatting.
+
+VALID OUTPUTS ONLY:
+{{VALID_QUANTITIES}}
+
+Return exactly one digit only.
+QTY;
+
+    /**
+     * BotCake Price Extraction prompt. Markers na auto-filled mula sa bundles:
+     * {{OFFICIAL_PROMO_PRICES}}, {{PRICE_MAPPING}}, {{VALID_PRICES}}, {{VALID_QUANTITIES}}.
+     * Ang {{ALLCXDETAILS}} / {{GPT_Quantity}} ay BotCake fields (literal).
+     */
+    public const PRICE_PROMPT_DEFAULT = <<<'PRC'
+Extract the correct total price from the following information:
+
+CUSTOMER DETAILS:
+{{ALLCXDETAILS}}
+
+DETECTED QUANTITY:
+{{GPT_Quantity}}
+
+Your task is to return the correct total price based on the official promo pricing.
+
+OFFICIAL PROMO PRICES
+
+{{OFFICIAL_PROMO_PRICES}}
+
+PRIORITY RULES
+
+Always use {{GPT_Quantity}} as the PRIMARY source.
+
+If {{GPT_Quantity}} is empty, missing, invalid, or not one of the valid quantities ({{VALID_QUANTITIES}}), then analyze {{ALLCXDETAILS}} to determine the correct quantity using the quantity keyword rules below.
+
+Return Quantity = 1 when the customer indicates: 1 pc / 1pcs / 1 piece / one piece / 1 item / isa / isang piraso / isang bote / solo / solo order / isa lang / 1 lang / one item
+
+Return Quantity = 3 when the customer indicates: BUY 2 FREE 1 / BUY2FREE1 / BUY2 FREE1 / BUY TWO FREE ONE / B2F1 / B2 F1 / 2+1 / 2 plus 1 / dalawa free isa / dalawa libre isa / BUY 2 TAKE 1 / B2T1 / promo bundle / 3 bottles / 3 pcs / 3pcs / 3 pieces / 3 items / tatlo / tatlong piraso / tatlong bote
+
+Return Quantity = 4 when the customer indicates: BUY 3 FREE 1 / BUY3FREE1 / BUY3 FREE1 / BUY THREE FREE ONE / B3F1 / B3 F1 / 3+1 / 3 plus 1 / tatlo free isa / tatlo libre isa / BUY 3 TAKE 1 / B3T1 / 4 bottles / 4 pcs / 4pcs / 4 pieces / 4 items / apat / apat na piraso / apat na bote
+
+IMPORTANT BUNDLE RULES
+
+BUY 2 FREE 1 always means a total of 3 items. BUY 3 FREE 1 always means a total of 4 items.
+Do not interpret the "buy" quantity alone as the final quantity. Always count the FREE item.
+If the customer mentions both a quantity and a bundle, prioritize the bundle's total quantity.
+If the customer changes their order, use the latest and final instruction.
+Do not add quantities from separate statements unless the customer clearly requests the total quantity.
+If the quantity is still unclear, default to Quantity = 1.
+
+PRICE MAPPING
+
+{{PRICE_MAPPING}}
+
+OUTPUT RULES
+
+Return ONLY the numeric total price. Do NOT include: currency symbols, PHP, commas, spaces, explanations, labels, punctuation, or markdown.
+
+VALID OUTPUTS ONLY
+
+{{VALID_PRICES}}
+PRC;
+
     private function getNormalizedRole(): string
     {
         $raw = Auth::user()?->employeeProfile?->role ?? '';
@@ -272,6 +369,8 @@ VER;
             'sales_template'      => 'Sales Prompt (full template)',
             'aftersales_template' => 'After-Sales Prompt (full template)',
             'verify'              => 'Verification Code Section (secret keyword)',
+            'quantity_prompt'     => 'BotCake — Quantity Detection',
+            'price_prompt'        => 'BotCake — Price Extraction',
             'mainflow'            => 'Main Flow (opening auto-reply)',
             'sequence'            => 'Follow-up Sequence',
             'vision'              => 'Image Auto-Fill (Vision)',
@@ -281,7 +380,7 @@ VER;
     /** Client-side template keys na ini-inject sa generator (window.PG_TPL). */
     private function templateKeys(): array
     {
-        return ['sales_template', 'aftersales_template', 'verify'];
+        return ['sales_template', 'aftersales_template', 'verify', 'quantity_prompt', 'price_prompt'];
     }
 
     /** Token sa loob ng template kung saan awtomatikong ipinapasok ang pricing/shipping/policy. */
@@ -294,6 +393,8 @@ VER;
             'sales_template'      => $t['sales_top'] . "\n\n" . self::OFFERS_MARKER . "\n\n" . $t['sales_bottom'],
             'aftersales_template' => $t['aftersales_top'] . "\n\n" . self::OFFERS_MARKER . "\n\n" . $t['aftersales_bottom'],
             'verify'              => self::VERIFY_DEFAULT,
+            'quantity_prompt'     => self::QUANTITY_PROMPT_DEFAULT,
+            'price_prompt'        => self::PRICE_PROMPT_DEFAULT,
             'mainflow'            => self::MAINFLOW_PROMPT,
             'sequence'            => self::SEQUENCE_PROMPT,
             'vision'              => $this->visionInstruction(),
