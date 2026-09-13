@@ -717,6 +717,7 @@
                 </template>
                 <a class="item-photo-btn" @click.stop
                    :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)"
+                   target="_blank" rel="noopener"
                    style="display:inline-block;text-decoration:none;"
                    x-text="itemImages[row.item_name] ? 'Change' : 'Add photo'"></a>
               </td>
