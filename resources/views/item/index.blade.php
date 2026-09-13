@@ -3,7 +3,7 @@
   <x-slot name="heading"><div class="text-xl font-bold">📦 Item Hold</div></x-slot>
 
   <style>
-    .itx-wrap { padding:16px; max-width:1100px; margin:0 auto; }
+    .itx-wrap { padding:12px 14px; max-width:none; margin:0; }
     .itx-controls { display:flex; gap:8px; align-items:end; flex-wrap:wrap; margin-bottom:14px; }
     .itx-fld { display:flex; flex-direction:column; gap:3px; }
     .itx-fld span { font-size:11px; font-weight:600; color:#475569; }
