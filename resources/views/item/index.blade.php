@@ -22,19 +22,15 @@
     .itx-imgbtns { display:flex; gap:4px; flex:0 0 auto; }
     .itx-mini { border:0; border-radius:6px; padding:4px 8px; font-size:11px; font-weight:600; cursor:pointer; background:#f1f5f9; color:#475569; text-decoration:none; }
     .itx-mini:hover { background:#e2e8f0; }
-    .itx-pages { display:none; border-top:1px solid #f1f5f9; background:#fbfcfe; padding:4px 8px 8px 34px; }
-    .itx-page { border:1px solid #eef2f7; border-radius:8px; background:#fff; margin-top:6px; overflow:hidden; }
-    .itx-prow { display:flex; align-items:center; gap:10px; padding:7px 10px; cursor:pointer; }
-    .itx-prow:hover { background:#f8fafc; }
-    .itx-pname { flex:1; min-width:0; font-size:12.5px; color:#334155; word-break:break-word; }
-    .itx-camp { display:none; border-top:1px solid #f1f5f9; }
-    .itx-camp iframe { width:100%; height:640px; border:0; display:block; background:#fff; }
+    .itx-embed { display:none; border-top:1px solid #eef2f7; background:#f8fafc; }
+    .itx-embed iframe { width:100%; height:720px; border:0; display:block; background:#fff; }
+    .itx-embed .itx-loading { font-size:12px; color:#94a3b8; padding:14px; text-align:center; }
     .itx-status { font-size:12.5px; color:#94a3b8; padding:20px; text-align:center; }
     .itx-help { font-size:11.5px; color:#94a3b8; margin-bottom:10px; }
   </style>
 
   <div class="itx-wrap">
-    <div class="itx-help">Item-first HOLD view. Total hold galing sa parehong source ng <strong>/jnt/hold</strong>. I-expand ang item → mga pages → campaigns (mula sa /owner/private). Bawat item pwedeng lagyan ng photo.</div>
+    <div class="itx-help">Item-first HOLD view. Total hold galing sa parehong source ng <strong>/jnt/hold</strong> (default: simula ng nakaraang buwan → ngayon). I-expand ang item → makikita ang buong <strong>/owner/private</strong> na naka-filter sa item na iyon (pages + campaigns, sariling default range nito). Bawat item pwedeng lagyan ng photo.</div>
     <div class="itx-controls">
       <label class="itx-fld"><span>Start</span><input type="date" id="itxStart" value="{{ $defaultStart }}"></label>
       <label class="itx-fld"><span>End</span><input type="date" id="itxEnd" value="{{ $defaultEnd }}"></label>
@@ -49,10 +45,10 @@
 
   <script>
     window.ITX = {
-      csrf:         '{{ csrf_token() }}',
-      dataUrl:      '{{ route('item.data') }}',
-      imageUrl:     '{{ route('item.image') }}',
-      breakdownUrl: '{{ route('owner.private.breakdown') }}',
+      csrf:       '{{ csrf_token() }}',
+      dataUrl:    '{{ route('item.data') }}',
+      imageUrl:   '{{ route('item.image') }}',
+      privateUrl: '{{ route('owner.private') }}',
     };
   </script>
   <script>
@@ -81,7 +77,6 @@
 
     function render(items){
       const list=$('itxList'); list.innerHTML='';
-      const start=$('itxStart').value, end=$('itxEnd').value;
       items.forEach(it=>{
         const box=document.createElement('div'); box.className='itx-item';
 
@@ -104,36 +99,26 @@
         btns.appendChild(viewB); btns.appendChild(chB);
         row.appendChild(chev); row.appendChild(sq); row.appendChild(nm); row.appendChild(hold); row.appendChild(btns);
 
-        // PAGES container
-        const pages=document.createElement('div'); pages.className='itx-pages';
-        (it.pages||[]).forEach(pg=>{
-          const pbox=document.createElement('div'); pbox.className='itx-page';
-          const prow=document.createElement('div'); prow.className='itx-prow';
-          const pchev=document.createElement('span'); pchev.className='itx-chev'; pchev.textContent='▶';
-          const pnm=document.createElement('div'); pnm.className='itx-pname'; pnm.textContent=pg.page;
-          const phold=document.createElement('div'); phold.className='itx-hold'; phold.textContent='HOLD '+Number(pg.total_hold||0).toLocaleString();
-          prow.appendChild(pchev); prow.appendChild(pnm); prow.appendChild(phold);
-          const camp=document.createElement('div'); camp.className='itx-camp';
-          let loaded=false;
-          prow.onclick=()=>{
-            const open=camp.style.display==='block';
-            camp.style.display=open?'none':'block'; pchev.classList.toggle('open',!open);
-            if(!open && !loaded){
-              loaded=true;
-              const u=new URL(window.ITX.breakdownUrl, location.origin);
-              u.searchParams.set('page_key', pg.page_key);
-              if(start) u.searchParams.set('start_date', start);
-              if(end) u.searchParams.set('end_date', end);
-              const ifr=document.createElement('iframe'); ifr.src=u.toString(); ifr.loading='lazy';
-              camp.appendChild(ifr);
-            }
-          };
-          pbox.appendChild(prow); pbox.appendChild(camp); pages.appendChild(pbox);
-        });
+        // EMBED: expand → buong /owner/private na naka-filter sa item na ito.
+        // Sariling default range ng owner/private (last 30 excl today) — hindi
+        // pasado ang item date picker (magkahiwalay na default, per requirement).
+        // Ang pages + campaigns ay nasa loob na ng owner/private mismo.
+        const embed=document.createElement('div'); embed.className='itx-embed';
+        embed.innerHTML='<div class="itx-loading">Naglo-load ng /owner/private…</div>';
+        let loaded=false;
+        row.onclick=()=>{
+          const open=embed.style.display==='block';
+          embed.style.display=open?'none':'block'; chev.classList.toggle('open',!open);
+          if(!open && !loaded){
+            loaded=true;
+            const u=new URL(window.ITX.privateUrl, location.origin);
+            u.searchParams.set('item', it.item_name);
+            const ifr=document.createElement('iframe'); ifr.src=u.toString(); ifr.loading='lazy';
+            embed.innerHTML=''; embed.appendChild(ifr);
+          }
+        };
 
-        row.onclick=()=>{ const open=pages.style.display==='block'; pages.style.display=open?'none':'block'; chev.classList.toggle('open',!open); };
-
-        box.appendChild(row); box.appendChild(pages); list.appendChild(box);
+        box.appendChild(row); box.appendChild(embed); list.appendChild(box);
       });
     }
 

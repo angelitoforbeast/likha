@@ -3351,6 +3351,14 @@
       async init(){
         this.initCols();
         await this.load();
+        // Prefilter by ?item=<name> — used by the /item embed (iframe). Matches
+        // against loaded rows case-insensitively so exact spelling/casing di kritikal.
+        const wantItem = new URLSearchParams(window.location.search).get('item');
+        if (wantItem && wantItem.trim() !== '') {
+          const target = wantItem.trim().toLowerCase();
+          const match = this.uniqueItems().find(n => String(n).trim().toLowerCase() === target);
+          this.selectedItems = [match || wantItem.trim()];
+        }
       },
     };
   }

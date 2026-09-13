@@ -47,9 +47,9 @@ class ItemController extends Controller
     public function index(Request $request)
     {
         $this->checkAccess();
-        $tz    = new \DateTimeZone('Asia/Manila');
-        $today = (new \DateTime('now', $tz))->format('Y-m-d');
-        $first = (new \DateTime('now', $tz))->modify('first day of this month')->format('Y-m-d');
+        // Item-level HOLD default = SAME as /jnt/hold: start of LAST month → today (PH).
+        $today = Carbon::now('Asia/Manila')->toDateString();
+        $first = Carbon::now('Asia/Manila')->startOfMonth()->subMonth()->toDateString();
 
         return view('item.index', [
             'defaultStart' => $first,
