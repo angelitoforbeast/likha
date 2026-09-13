@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\FeeSetting;
 use App\Models\ItemImage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -43,18 +44,55 @@ class ItemController extends Controller
         }
     }
 
-    /** GET /item — the page. */
+    /**
+     * GET /item — the page.
+     *
+     * The /item view is based on owner/private's table (item→page→campaign) with
+     * an ITEM aggregate tier on top. It needs the SAME view data as
+     * OwnerPrivateController@index (pages, role/viewAs, column configs, fees).
+     * Replicated here so owner/private stays untouched. Date defaults + per-page
+     * rows are resolved client-side (fetches owner.private.item-summary).
+     */
     public function index(Request $request)
     {
         $this->checkAccess();
-        // Item-level HOLD default = SAME as /jnt/hold: start of LAST month → today (PH).
-        $today = Carbon::now('Asia/Manila')->toDateString();
-        $first = Carbon::now('Asia/Manila')->startOfMonth()->subMonth()->toDateString();
 
-        return view('item.index', [
-            'defaultStart' => $first,
-            'defaultEnd'   => $today,
-        ]);
+        $driver = DB::getDriverName();
+        $trimFn = $driver === 'pgsql' ? 'BTRIM' : 'TRIM';
+
+        $pages = DB::table('ads_manager_reports')
+            ->whereNotNull('page_name')
+            ->selectRaw("$trimFn(page_name) AS page_name")
+            ->distinct()->orderBy('page_name')->pluck('page_name')->toArray();
+
+        $role           = $this->getNormalizedRole();
+        $isCEO          = $role === 'CEO';
+        $isMarketingOIC = $role === 'Marketing - OIC';
+
+        $viewAs = strtolower(trim((string) $request->input('view_as', 'ceo')));
+        if (!in_array($viewAs, ['ceo', 'marketing'], true)) $viewAs = 'ceo';
+        $effectiveIsCEO = $isCEO && $viewAs === 'ceo';
+
+        $viewRoleForCols = ($isCEO && $viewAs === 'marketing') ? 'Marketing' : $role;
+        $colsCtrl = new \App\Http\Controllers\OwnerColumnSettingsController();
+        $ownerPrivateColsConfig  = $colsCtrl->loadConfig('owner_private', $viewRoleForCols);
+        $campaignsColsConfig     = $colsCtrl->loadConfig('campaigns', $viewRoleForCols);
+        $breakevenTargetPct      = $colsCtrl->loadBreakevenTargetPct();
+        $colFormatRules          = $colsCtrl->loadColFormat('owner_private')['byCol'] ?? [];
+        $campaignsColFormatRules = $colsCtrl->loadColFormat('campaigns')['byCol'] ?? [];
+
+        $host  = strtolower((string) $request->getHost());
+        $today = (new \DateTime('now', new \DateTimeZone('Asia/Manila')))->format('Y-m-d');
+        $feeShipping = FeeSetting::getRate('shipping_fee_per_order', $host, $today);
+        $feeCodRate  = FeeSetting::getRate('cod_fee_rate',           $host, $today);
+        $feeVatRate  = FeeSetting::getRate('cod_fee_vat_rate',       $host, $today);
+
+        return view('item.index', compact(
+            'pages', 'isCEO', 'isMarketingOIC', 'viewAs', 'effectiveIsCEO',
+            'ownerPrivateColsConfig', 'campaignsColsConfig',
+            'breakevenTargetPct', 'colFormatRules', 'campaignsColFormatRules',
+            'feeShipping', 'feeCodRate', 'feeVatRate'
+        ));
     }
 
     /** GET /item/data — item + page HOLD totals (JSON). */
@@ -134,6 +172,22 @@ class ItemController extends Controller
             'total_items' => count($out),
             'total_hold'  => array_sum(array_column($out, 'total_hold')),
         ]);
+    }
+
+    /** GET /item/images — map ng item_name → public photo URL (para sa item tier). */
+    public function images(Request $request)
+    {
+        $this->checkAccess();
+        $map = [];
+        try {
+            if (Schema::hasTable('item_images')) {
+                foreach (ItemImage::whereNotNull('image_path')->get() as $img) {
+                    $map[$img->item_name] = url(Storage::disk('public')->url($img->image_path));
+                }
+            }
+        } catch (\Throwable $e) { /* table wala pa — walang photo */ }
+
+        return response()->json(['ok' => true, 'images' => $map]);
     }
 
     /** POST /item/image — upload/palit ng item photo. */

@@ -1870,6 +1870,10 @@
       selectedAliases: [],
       itemFilterOpen: false,
       itemFilterSearch: '',
+      // ?item= prefilter (galing sa /item embed iframe). Kinukuha DITO sa
+      // construction — BAGO tumakbo si load(), dahil binubura ng load()'s
+      // history.replaceState ang query string (kasama ang item=). Applied sa init().
+      embedItem: (new URLSearchParams(window.location.search).get('item') || '').trim(),
       uniqueItems() {
         const set = new Set();
         for (const r of this.rows) { if (r.item_name) set.add(r.item_name); }
@@ -2085,6 +2089,7 @@
         // view_as only added when 'marketing' (default 'ceo' for CEO viewers;
         // ignored server-side for non-CEO).
         const qsObj = { start_date: this.startDate, end_date: this.endDate };
+        if (this.embedItem) qsObj.item = this.embedItem; // panatilihin ang ?item= prefilter sa URL
         if (this.isCeoView && this.viewAs === 'marketing') qsObj.view_as = 'marketing';
         // partial_date — only added when explicitly set by user (opt-in 1D override)
         if (this.partialDate) qsObj.partial_date = this.partialDate;
@@ -3351,13 +3356,13 @@
       async init(){
         this.initCols();
         await this.load();
-        // Prefilter by ?item=<name> — used by the /item embed (iframe). Matches
+        // Apply ?item= prefilter (from /item embed). embedItem was captured at
+        // construction — BEFORE load()'s history.replaceState stripped it. Match
         // against loaded rows case-insensitively so exact spelling/casing di kritikal.
-        const wantItem = new URLSearchParams(window.location.search).get('item');
-        if (wantItem && wantItem.trim() !== '') {
-          const target = wantItem.trim().toLowerCase();
+        if (this.embedItem) {
+          const target = this.embedItem.toLowerCase();
           const match = this.uniqueItems().find(n => String(n).trim().toLowerCase() === target);
-          this.selectedItems = [match || wantItem.trim()];
+          this.selectedItems = [match || this.embedItem];
         }
       },
     };

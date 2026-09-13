@@ -1023,9 +1023,10 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get ('/prompt-generator/history/{id}',  [\App\Http\Controllers\PromptGeneratorController::class, 'historyDetail'])->whereNumber('id')->name('prompt.generator.history.detail');
 
     // /item — Item-first HOLD view (Item → Page → Campaign), per-item photo
-    Route::get ('/item',       [\App\Http\Controllers\ItemController::class, 'index'])      ->name('item.index');
-    Route::get ('/item/data',  [\App\Http\Controllers\ItemController::class, 'data'])       ->name('item.data');
-    Route::post('/item/image', [\App\Http\Controllers\ItemController::class, 'uploadImage'])->middleware('throttle:60,1')->name('item.image');
+    Route::get ('/item',        [\App\Http\Controllers\ItemController::class, 'index'])      ->name('item.index');
+    Route::get ('/item/data',   [\App\Http\Controllers\ItemController::class, 'data'])       ->name('item.data');
+    Route::get ('/item/images', [\App\Http\Controllers\ItemController::class, 'images'])     ->name('item.images');
+    Route::post('/item/image',  [\App\Http\Controllers\ItemController::class, 'uploadImage'])->middleware('throttle:60,1')->name('item.image');
 
     // /image-host — mag-upload ng picture, makakuha ng PUBLIC image URL (para sa image_url, BotCake, atbp.)
     Route::get ('/image-host',        [\App\Http\Controllers\ImageHostController::class, 'index'])  ->name('image.host.index');
