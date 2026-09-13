@@ -1028,7 +1028,8 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get ('/item/images', [\App\Http\Controllers\ItemController::class, 'images'])     ->name('item.images');
     Route::get ('/item/photo',  [\App\Http\Controllers\ItemController::class, 'photoForm'])  ->name('item.photo');
     Route::post('/item/photo',  [\App\Http\Controllers\ItemController::class, 'photoStore']) ->middleware('throttle:60,1')->name('item.photo.store');
-    Route::post('/item/image',  [\App\Http\Controllers\ItemController::class, 'uploadImage'])->middleware('throttle:60,1')->name('item.image');
+    Route::post('/item/image',        [\App\Http\Controllers\ItemController::class, 'uploadImage'])->middleware('throttle:60,1')->name('item.image');
+    Route::post('/item/image/delete', [\App\Http\Controllers\ItemController::class, 'deleteImage'])->middleware('throttle:60,1')->name('item.image.delete');
 
     // /image-host — mag-upload ng picture, makakuha ng PUBLIC image URL (para sa image_url, BotCake, atbp.)
     Route::get ('/image-host',        [\App\Http\Controllers\ImageHostController::class, 'index'])  ->name('image.host.index');

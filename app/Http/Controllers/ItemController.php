@@ -191,59 +191,30 @@ class ItemController extends Controller
     }
 
     /**
-     * GET /item/photo — LISTAHAN ng LAHAT ng item para pamahalaan ang photos.
-     * Mga item na WALA pang image = nasa itaas. Optional ?item=<name> → i-highlight
-     * / i-scroll ang item na iyon (galing sa "Add photo" link ng /item).
+     * GET /item/photo — LISTAHAN ng mga item para pamahalaan ang photos.
+     * SAME universe as /item (union: owner/private running items + jnt/hold>0),
+     * date-scoped — binubuo client-side (fetch item.data + owner.private.item-summary
+     * + item.images). Mga WALANG image = nasa itaas. Optional ?item=<name> → highlight.
+     * Date range = galing sa ?start_date/?end_date (default: same as /item / /jnt/hold).
      */
     public function photoForm(Request $request)
     {
         $this->checkAccess();
 
-        $driver = DB::connection()->getDriverName();
-        $qcol   = $driver === 'pgsql' ? '"' . self::MO_ITEM_COL . '"' : '`' . self::MO_ITEM_COL . '`';
+        $valid = fn ($s) => is_string($s) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $s);
+        $today = Carbon::now('Asia/Manila')->toDateString();
+        $first = Carbon::now('Asia/Manila')->startOfMonth()->subMonth()->toDateString();
 
-        // Lahat ng distinct item name mula macro_output.
-        $names = DB::table(self::MO_TABLE)
-            ->selectRaw("DISTINCT $qcol AS item_name")
-            ->whereRaw("NULLIF(TRIM($qcol), '') IS NOT NULL")
-            ->get()
-            ->pluck('item_name')
-            ->map(fn ($n) => trim((string) $n))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
-        // Existing images.
-        $imgMap = [];
-        try {
-            if (Schema::hasTable('item_images')) {
-                foreach (ItemImage::whereNotNull('image_path')->get() as $img) {
-                    $imgMap[$img->item_name] = url(Storage::disk('public')->url($img->image_path));
-                }
-            }
-        } catch (\Throwable $e) { /* table wala pa */ }
-
-        // Isama ang item na may image pero wala sa macro (edge case).
-        foreach (array_keys($imgMap) as $n) {
-            if (!in_array($n, $names, true)) $names[] = $n;
-        }
-
-        // Build + sort: WALANG image muna (0), tapos may image (1); pangalan asc.
-        $items = collect($names)
-            ->map(fn ($n) => ['item_name' => $n, 'image_url' => $imgMap[$n] ?? null])
-            ->sort(function ($a, $b) {
-                $ai = $a['image_url'] ? 1 : 0;
-                $bi = $b['image_url'] ? 1 : 0;
-                if ($ai !== $bi) return $ai <=> $bi;
-                return strcasecmp($a['item_name'], $b['item_name']);
-            })
-            ->values()
-            ->all();
+        $start = (string) $request->query('start_date', '');
+        $end   = (string) $request->query('end_date', '');
+        if (!$valid($start)) $start = $first;
+        if (!$valid($end))   $end   = $today;
+        if ($start > $end)   [$start, $end] = [$end, $start];
 
         return view('item.photo', [
-            'items' => $items,
-            'focus' => trim((string) $request->query('item', '')),
+            'focus'     => trim((string) $request->query('item', '')),
+            'startDate' => $start,
+            'endDate'   => $end,
         ]);
     }
 
@@ -273,6 +244,24 @@ class ItemController extends Controller
         return redirect()
             ->route('item.photo', ['item' => $data['item_name']])
             ->with('photo_ok', 'Na-upload ang photo para sa "' . $data['item_name'] . '".');
+    }
+
+    /** POST /item/image/delete — tanggalin ang photo ng isang item (AJAX). */
+    public function deleteImage(Request $request)
+    {
+        $this->checkAccess();
+        $data = $request->validate(['item_name' => 'required|string|max:255']);
+        if (! Schema::hasTable('item_images')) {
+            return response()->json(['ok' => false, 'message' => 'item_images table wala pa'], 200);
+        }
+        $rec = ItemImage::where('item_name', $data['item_name'])->first();
+        if ($rec) {
+            if ($rec->image_path) {
+                try { Storage::disk('public')->delete($rec->image_path); } catch (\Throwable $e) {}
+            }
+            $rec->delete();
+        }
+        return response()->json(['ok' => true]);
     }
 
     /** POST /item/image — upload/palit ng item photo (AJAX; legacy inline). */

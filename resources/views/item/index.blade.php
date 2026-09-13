@@ -732,7 +732,7 @@
                 </template>
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-top:3px;">
                   <a class="item-photo-btn" @click.stop
-                     :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)"
+                     :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)+'&start_date='+startDate+'&end_date='+endDate"
                      target="_blank" rel="noopener"
                      style="text-decoration:none;"
                      x-text="itemImages[row.item_name] ? 'Change' : 'Add photo'"></a>
