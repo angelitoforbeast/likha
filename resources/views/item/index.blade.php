@@ -78,10 +78,15 @@
     tr.item-row-nopage td { background:#fff7ed; }
     tr.item-row-nopage:hover td { background:#ffedd5; }
     .item-photo-btn {
-      margin-top:3px; border:0; border-radius:5px; padding:2px 7px;
+      border:0; border-radius:5px; padding:2px 7px;
       font-size:10px; font-weight:700; cursor:pointer; background:#c7d2fe; color:#3730a3;
     }
     .item-photo-btn:hover { background:#a5b4fc; }
+    .item-copy-btn {
+      border:0; border-radius:5px; padding:2px 7px;
+      font-size:10px; font-weight:700; cursor:pointer; background:#d1fae5; color:#065f46;
+    }
+    .item-copy-btn:hover { background:#a7f3d0; }
 
     tbody td {
       border-bottom:1px solid #f1f5f9;
@@ -503,6 +508,16 @@
       <span x-text="anyExpanded() ? '▼ Hide all' : '▶ Expand all'"></span>
     </button>
 
+    {{-- Copy ALL items (Item + HOLD + picture URL) — TSV para sa Sheets, HTML
+         table (w/ thumbnails) para sa Messenger/Docs. --}}
+    <button type="button" @click="copyAllItems()"
+            title="Kopyahin LAHAT ng item (Item + HOLD + picture) — TSV para sa Sheets, table para sa Messenger/Docs"
+            style="background:#065f46;color:#a7f3d0;border:1px solid #10b981;
+                   border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+                   cursor:pointer;margin-left:4px;">
+      <span x-text="copyState==='__all' ? '✓ Copied lahat' : '📋 Copy all'"></span>
+    </button>
+
     {{-- Refresh data — available to ALL roles. Bypasses the read cache for
          /owner/private/data + /item-summary, re-runs the heavy aggregations,
          and writes the fresh result back to cache. Use this kapag suspect
@@ -715,11 +730,15 @@
                 <template x-if="!row.hasPages">
                   <div style="font-size:11px;color:#b91c1c;font-weight:700;">⚠ walang running page</div>
                 </template>
-                <a class="item-photo-btn" @click.stop
-                   :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)"
-                   target="_blank" rel="noopener"
-                   style="display:inline-block;text-decoration:none;"
-                   x-text="itemImages[row.item_name] ? 'Change' : 'Add photo'"></a>
+                <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-top:3px;">
+                  <a class="item-photo-btn" @click.stop
+                     :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)"
+                     target="_blank" rel="noopener"
+                     style="text-decoration:none;"
+                     x-text="itemImages[row.item_name] ? 'Change' : 'Add photo'"></a>
+                  <button type="button" class="item-copy-btn" @click.stop="copyItem(row.item_name, row.hold)"
+                          x-text="copyState===row.item_name ? '✓ Copied' : '📋 Copy'"></button>
+                </div>
               </td>
               <template x-for="col in cols" :key="'ic-'+row.item_name+'-'+col.id">
                 <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(A.projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(A.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(A.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(A.projected_profit_last_7d,7):'')">
@@ -1945,6 +1964,7 @@
       _photoTarget: null,     // item_name na kasalukuyang ina-upload-an ng photo
       holdMap: {},            // item_name → HOLD count (jnt/hold logic; drives item universe)
       holdLoaded: false,      // true kapag nakuha na ang holdMap
+      copyState: '',          // '' | item_name | '__all' — para sa "✓ Copied" feedback
 
       // ── Item filter (multi-select) ───────────────────────────────────────
       selectedItems: [],
@@ -3430,28 +3450,41 @@
       // Kaya lumalabas pati ang item na may hold PERO walang running page (para
       // alam kung meron pang tumatakbong page). Sorted by HOLD desc.
       itemGroups(){
-        // Igrupo ang owner/private page rows by normalized item name.
-        const pagesByItem = {};
+        // Igrupo ang owner/private page rows by normalized item name (+ display name).
+        const pagesByItem = {}; // lowerKey → { name, pages }
         for (const row of this.sortedRows()) {
-          const k = String(row.item_name || '').trim().toLowerCase();
-          (pagesByItem[k] = pagesByItem[k] || []).push(row);
+          const disp = String(row.item_name || '').trim() || '—';
+          const k = disp.toLowerCase();
+          if (!pagesByItem[k]) pagesByItem[k] = { name: disp, pages: [] };
+          pagesByItem[k].pages.push(row);
         }
-        // Item filter (checkbox) — i-apply sa hold universe (case-insensitive).
-        const hasFilter = this.selectedItems.length > 0 || this.selectedAliases.length > 0;
-        const selLower  = new Set(this.selectedItems.map(s => String(s).trim().toLowerCase()));
-        const out = [];
+        // UNIVERSE = UNION:
+        //   (a) LAHAT ng owner/private items (may running page — kahit 0 hold), +
+        //   (b) jnt/hold items na >0 ang hold (kahit walang running page).
+        const uni = {}; // lowerKey → { name, hold, pages }
+        for (const k in pagesByItem) {
+          uni[k] = { name: pagesByItem[k].name, hold: 0, pages: pagesByItem[k].pages };
+        }
         for (const name in this.holdMap) {
           const hold = Number(this.holdMap[name] || 0);
           if (!(hold > 0)) continue;
-          const key = String(name).trim().toLowerCase();
-          if (hasFilter && !selLower.has(key)) continue;
-          const pages = pagesByItem[key] || [];
+          const k = String(name).trim().toLowerCase();
+          if (uni[k]) uni[k].hold = hold;                                  // may page + may hold
+          else uni[k] = { name: String(name).trim(), hold, pages: [] };    // hold-only, walang page
+        }
+        // Item filter (checkbox) — case-insensitive.
+        const hasFilter = this.selectedItems.length > 0 || this.selectedAliases.length > 0;
+        const selLower  = new Set(this.selectedItems.map(s => String(s).trim().toLowerCase()));
+        const out = [];
+        for (const k in uni) {
+          if (hasFilter && !selLower.has(k)) continue;
+          const u = uni[k];
           out.push({
-            item_name: name,
-            hold,
-            pages,
-            hasPages: pages.length > 0,
-            agg: this.aggOf(pages),
+            item_name: u.name,
+            hold: u.hold,
+            pages: u.pages,
+            hasPages: u.pages.length > 0,
+            agg: this.aggOf(u.pages),
           });
         }
         // Sort ITEMS: kapag may active column sort → by that column's aggregate;
@@ -3566,6 +3599,69 @@
           const j = await res.json();
           if (j && j.images) this.itemImages = j.images;
         }catch(e){ /* walang photo — ok lang */ }
+      },
+
+      // ── Copy: Item Name + HOLD + picture ──────────────────────────────────
+      _escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); },
+      _flashCopy(key){ this.copyState = key; setTimeout(() => { if (this.copyState === key) this.copyState = ''; }, 1400); },
+      // I-load ang image (same-origin) → canvas → PNG blob (para pwede sa clipboard).
+      async _imageUrlToPngBlob(url){
+        const img = new Image(); img.crossOrigin = 'anonymous';
+        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+        const cv = document.createElement('canvas');
+        cv.width = img.naturalWidth || img.width; cv.height = img.naturalHeight || img.height;
+        cv.getContext('2d').drawImage(img, 0, 0);
+        return await new Promise(res => cv.toBlob(res, 'image/png'));
+      },
+      // Per-row: actual image (image/png) + text (name + HOLD). Messenger → larawan;
+      // text field / Sheets → name + hold.
+      async copyItem(name, hold){
+        const text = name + '\tHOLD ' + Number(hold || 0).toLocaleString();
+        const url  = this.itemImages[name] || '';
+        const html = '<div><b>' + this._escHtml(name) + '</b> — HOLD ' + Number(hold || 0).toLocaleString()
+                   + (url ? ('<br><img src="' + url + '">') : '') + '</div>';
+        try {
+          if (url && window.ClipboardItem) {
+            let png = null; try { png = await this._imageUrlToPngBlob(url); } catch (e) { png = null; }
+            const parts = { 'text/plain': new Blob([text], {type:'text/plain'}), 'text/html': new Blob([html], {type:'text/html'}) };
+            if (png) parts['image/png'] = png;
+            await navigator.clipboard.write([new ClipboardItem(parts)]);
+          } else if (window.ClipboardItem) {
+            await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([text], {type:'text/plain'}), 'text/html': new Blob([html], {type:'text/html'}) })]);
+          } else {
+            await navigator.clipboard.writeText(text);
+          }
+          this._flashCopy(name);
+        } catch (e) {
+          try { await navigator.clipboard.writeText(text); this._flashCopy(name); }
+          catch (_) { alert('Copy failed: ' + (e.message || e)); }
+        }
+      },
+      // Copy-all: TSV (Item / HOLD / Image URL) + HTML table na may thumbnails.
+      // Sheets → rows/columns; Messenger/Docs → table na may larawan.
+      async copyAllItems(){
+        const groups = this.itemGroups();
+        const lines = ['Item\tHOLD\tImage URL'];
+        let rows = '<tr><th>Item</th><th>HOLD</th><th>Picture</th></tr>';
+        for (const g of groups) {
+          const url = this.itemImages[g.item_name] || '';
+          lines.push(g.item_name + '\t' + Number(g.hold || 0) + '\t' + url);
+          rows += '<tr><td>' + this._escHtml(g.item_name) + '</td><td>' + Number(g.hold || 0) + '</td><td>'
+                + (url ? ('<img src="' + url + '" width="80">') : '') + '</td></tr>';
+        }
+        const text = lines.join('\n');
+        const html = '<table border="1" cellspacing="0" cellpadding="4">' + rows + '</table>';
+        try {
+          if (window.ClipboardItem) {
+            await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([text], {type:'text/plain'}), 'text/html': new Blob([html], {type:'text/html'}) })]);
+          } else {
+            await navigator.clipboard.writeText(text);
+          }
+          this._flashCopy('__all');
+        } catch (e) {
+          try { await navigator.clipboard.writeText(text); this._flashCopy('__all'); }
+          catch (_) { alert('Copy failed: ' + (e.message || e)); }
+        }
       },
 
       async init(){
