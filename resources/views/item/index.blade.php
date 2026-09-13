@@ -72,6 +72,11 @@
     }
     .item-sq-empty { cursor:default; }
     .item-name { font-weight:800; font-size:13px; color:#1e1b4b; white-space:normal; line-height:1.3; }
+    .item-hold { flex:0 0 auto; font-weight:800; font-size:11px; color:#7c2d12;
+                 background:#ffedd5; border:1px solid #fed7aa; border-radius:999px; padding:2px 9px; margin-left:2px; }
+    .expand-chev-empty { display:inline-block; width:14px; flex:0 0 auto; }
+    tr.item-row-nopage td { background:#fff7ed; }
+    tr.item-row-nopage:hover td { background:#ffedd5; }
     .item-photo-btn {
       margin-top:3px; border:0; border-radius:5px; padding:2px 7px;
       font-size:10px; font-weight:700; cursor:pointer; background:#c7d2fe; color:#3730a3;
@@ -684,12 +689,18 @@
                  summed profit) + photo. Click → toggle pages. --}}
             <template x-if="row.__itemHeader">
             <template x-for="A in [row.agg]" :key="'agg-'+row.item_name">
-            <tr class="item-row" @click="toggleItemExpand(row.item_name)">
+            <tr class="item-row" :class="!row.hasPages ? 'item-row-nopage' : ''"
+                @click="row.hasPages && toggleItemExpand(row.item_name)">
               <td>
                 <div class="item-cell">
-                  <button class="expand-chev" :class="isItemOpen(row.item_name) ? 'active' : ''"
-                          @click.stop="toggleItemExpand(row.item_name)"
-                          :title="isItemOpen(row.item_name) ? 'Hide pages' : 'Show pages'">›</button>
+                  <template x-if="row.hasPages">
+                    <button class="expand-chev" :class="isItemOpen(row.item_name) ? 'active' : ''"
+                            @click.stop="toggleItemExpand(row.item_name)"
+                            :title="isItemOpen(row.item_name) ? 'Hide pages' : 'Show pages'">›</button>
+                  </template>
+                  <template x-if="!row.hasPages">
+                    <span class="expand-chev-empty"></span>
+                  </template>
                   <template x-if="itemImages[row.item_name]">
                     <img class="item-sq" :src="itemImages[row.item_name]" :alt="row.item_name"
                          @click.stop="viewItemPhoto(row.item_name)" title="View photo">
@@ -698,11 +709,17 @@
                     <span class="item-sq item-sq-empty">🖼</span>
                   </template>
                   <span class="item-name" x-text="row.item_name"></span>
+                  <span class="item-hold" x-text="'HOLD '+Number(row.hold||0).toLocaleString()"></span>
                 </div>
               </td>
               <td style="text-align:center;">
-                <div style="font-size:11px;color:#64748b;font-weight:600;"
-                     x-text="row.pages_count + (row.pages_count===1?' page':' pages')"></div>
+                <template x-if="row.hasPages">
+                  <div style="font-size:11px;color:#64748b;font-weight:600;"
+                       x-text="row.pages_count + (row.pages_count===1?' running page':' running pages')"></div>
+                </template>
+                <template x-if="!row.hasPages">
+                  <div style="font-size:11px;color:#b91c1c;font-weight:700;">⚠ walang running page</div>
+                </template>
                 <button class="item-photo-btn" @click.stop="pickItemPhoto(row.item_name)"
                         x-text="itemImages[row.item_name] ? 'Change' : 'Add photo'"></button>
               </td>
@@ -1837,20 +1854,17 @@
         const urlStart = qs.get('start_date');
         const urlEnd   = qs.get('end_date');
         const urlDate  = qs.get('date');
-        const ph = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Manila'}));
-        ph.setDate(ph.getDate()-1);  // yesterday
+        const phNow = new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Manila'}));
         const p = n => String(n).padStart(2,'0');
         const fmt = d => d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
-        const yesterday = fmt(ph);
-        // Default range = last 30 days ending yesterday (inclusive). 30 days = 29 day step back
-        // so [yesterday-29d, yesterday] is exactly 30 calendar days.
-        const monthAgo = new Date(ph);
-        monthAgo.setDate(monthAgo.getDate() - 29);
-        const defaultStart = fmt(monthAgo);
+        const today = fmt(phNow);
+        // Default range = SAME as /jnt/hold: unang araw ng NAKARAANG buwan → ngayon (PH).
+        const firstLastMonth = new Date(phNow.getFullYear(), phNow.getMonth() - 1, 1);
+        const defaultStart = fmt(firstLastMonth);
         let s, e;
         if (urlStart && re.test(urlStart) && urlEnd && re.test(urlEnd)) { s = urlStart; e = urlEnd; }
         else if (urlDate && re.test(urlDate)) { s = urlDate; e = urlDate; }
-        else { s = defaultStart; e = yesterday; }
+        else { s = defaultStart; e = today; }
         if (s > e) { const t = s; s = e; e = t; }
         // Partial date — optional opt-in 1D override. Empty default.
         const urlPartial = qs.get('partial_date');
@@ -1931,6 +1945,8 @@
       expandedItems: {},      // item_name → true kapag naka-expand ang pages nito
       itemImages: {},         // item_name → photo url (galing item_images table)
       _photoTarget: null,     // item_name na kasalukuyang ina-upload-an ng photo
+      holdMap: {},            // item_name → HOLD count (jnt/hold logic; drives item universe)
+      holdLoaded: false,      // true kapag nakuha na ang holdMap
 
       // ── Item filter (multi-select) ───────────────────────────────────────
       selectedItems: [],
@@ -2183,6 +2199,8 @@
           }
         }catch(e){ console.error(e); }
         finally{ this.loading=false; }
+        // Item universe = HOLD items (jnt/hold). Refresh kasabay ng metrics.
+        this.loadHold();
       },
 
       // ── Force refresh — user-triggered cache bypass + reload ──────────────
@@ -3430,24 +3448,37 @@
       },
 
       // ── ITEM tier helpers ─────────────────────────────────────────────────
-      // Group the filtered+sorted page rows BY item. Item order follows the
-      // current sort (order of first appearance in sortedRows()); pages within
-      // an item keep that sort order too. Each group carries an aggregate row
-      // (aggOf) computed with the same weighted/summed rules as the TOTAL row.
+      // Item UNIVERSE = mga item na may HOLD > 0 (jnt/hold logic, galing holdMap).
+      // LEFT JOIN sa owner/private page rows (this.rows) para sa metrics + drilldown.
+      // Kaya lumalabas pati ang item na may hold PERO walang running page (para
+      // alam kung meron pang tumatakbong page). Sorted by HOLD desc.
       itemGroups(){
-        const groups = {}; const order = [];
+        // Igrupo ang owner/private page rows by normalized item name.
+        const pagesByItem = {};
         for (const row of this.sortedRows()) {
-          const name = (row.item_name != null && String(row.item_name).trim() !== '')
-                        ? String(row.item_name).trim() : '—';
-          if (!groups[name]) { groups[name] = []; order.push(name); }
-          groups[name].push(row);
+          const k = String(row.item_name || '').trim().toLowerCase();
+          (pagesByItem[k] = pagesByItem[k] || []).push(row);
         }
-        return order.map(name => ({
-          item_name: name,
-          pages:     groups[name],
-          agg:       this.aggOf(groups[name]),
-          image_url: this.itemImages[name] || null,
-        }));
+        // Item filter (checkbox) — i-apply sa hold universe (case-insensitive).
+        const hasFilter = this.selectedItems.length > 0 || this.selectedAliases.length > 0;
+        const selLower  = new Set(this.selectedItems.map(s => String(s).trim().toLowerCase()));
+        const out = [];
+        for (const name in this.holdMap) {
+          const hold = Number(this.holdMap[name] || 0);
+          if (!(hold > 0)) continue;
+          const key = String(name).trim().toLowerCase();
+          if (hasFilter && !selLower.has(key)) continue;
+          const pages = pagesByItem[key] || [];
+          out.push({
+            item_name: name,
+            hold,
+            pages,
+            hasPages: pages.length > 0,
+            agg: this.aggOf(pages),
+          });
+        }
+        out.sort((a, b) => b.hold - a.hold);
+        return out;
       },
       toggleItemExpand(name){ this.expandedItems[name] = !this.expandedItems[name]; },
       isItemOpen(name){ return !!this.expandedItems[name]; },
@@ -3459,12 +3490,29 @@
       displayRows(){
         const out = [];
         for (const grp of this.itemGroups()) {
-          out.push({ __itemHeader:true, item_name:grp.item_name, agg:grp.agg, pages_count:grp.pages.length });
+          out.push({ __itemHeader:true, item_name:grp.item_name, agg:grp.agg,
+                     pages_count:grp.pages.length, hold:grp.hold, hasPages:grp.hasPages });
           if (this.isItemOpen(grp.item_name)) {
             for (const row of grp.pages) out.push(row);
           }
         }
         return out;
+      },
+
+      // Fetch per-item HOLD counts (jnt/hold logic) para sa item universe.
+      // Same date range as the metrics (this.startDate..endDate).
+      async loadHold(){
+        try{
+          const range = (this.startDate && this.endDate) ? (this.startDate + ' to ' + this.endDate) : '';
+          const u = new URL('{{ route('item.data') }}', location.origin);
+          if (range) u.searchParams.set('date_range', range);
+          const res = await fetch(u, {headers:{'Accept':'application/json'}});
+          const j = await res.json();
+          const map = {};
+          if (j && j.items) for (const it of j.items) map[it.item_name] = it.total_hold;
+          this.holdMap = map;
+          this.holdLoaded = true;
+        }catch(e){ /* walang hold data — magpapakita pa rin ang toolbar */ }
       },
 
       // ── Item photo (upload / view) ────────────────────────────────────────
