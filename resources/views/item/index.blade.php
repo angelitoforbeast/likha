@@ -493,12 +493,10 @@
       </svg>
     </button>
 
-    {{-- Expand-all / Hide-all toggle for the per-page campaigns expand.
-         One button — label flips based on current state:
-           - Some/all rows collapsed (or no rows expanded) → "▶ Expand all"
-           - All visible rows expanded → "▼ Hide all" --}}
+    {{-- Expand-all / Hide-all toggle — ITEM level (buksan/isara ang pages per item).
+         Label flips: walang item na bukas → "▶ Expand all"; may bukas → "▼ Hide all". --}}
     <button type="button" @click="toggleAllExpand()"
-            :title="anyExpanded() ? 'Collapse all campaigns panels' : 'Expand campaigns for every page row'"
+            :title="anyExpanded() ? 'Isara lahat ng items at campaigns' : 'Buksan ang pages ng lahat ng item'"
             style="background:#1e293b;color:#86efac;border:1px solid #475569;
                    border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
                    cursor:pointer;margin-left:4px;">
@@ -610,9 +608,6 @@
                    font-size:11px;font-weight:700;margin-left:4px;">Clear all</button>
   </div>
 
-  <!-- Hidden file input for item photo upload (item tier) -->
-  <input id="itemPhotoFile" type="file" accept="image/*" style="display:none;" @change="onItemPhotoChange($event)">
-
   <!-- Scroll area -->
   <div id="scroll">
     <div class="card">
@@ -720,8 +715,10 @@
                 <template x-if="!row.hasPages">
                   <div style="font-size:11px;color:#b91c1c;font-weight:700;">⚠ walang running page</div>
                 </template>
-                <button class="item-photo-btn" @click.stop="pickItemPhoto(row.item_name)"
-                        x-text="itemImages[row.item_name] ? 'Change' : 'Add photo'"></button>
+                <a class="item-photo-btn" @click.stop
+                   :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)"
+                   style="display:inline-block;text-decoration:none;"
+                   x-text="itemImages[row.item_name] ? 'Change' : 'Add photo'"></a>
               </td>
               <template x-for="col in cols" :key="'ic-'+row.item_name+'-'+col.id">
                 <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(A.projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(A.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(A.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(A.projected_profit_last_7d,7):'')">
@@ -3262,44 +3259,23 @@
 
       // Are any visible page rows currently expanded? Used by the
       // "Expand all / Hide all" toggle button to choose its label + action.
+      // /item override: "Expand all / Hide all" ay ITEM-level (hindi campaigns).
+      // May naka-expand na ITEM ba?
       anyExpanded(){
-        const visible = (this.sortedRows ? this.sortedRows() : (this.rows || []));
-        for (const r of visible) {
-          const st = this.expandedPages[r.page_name];
-          if (st && st.open) return true;
-        }
-        return false;
+        return Object.keys(this.expandedItems).some(k => this.expandedItems[k]);
       },
 
-      // Single-button toggle: if any row is open → collapse all visible rows;
-      // otherwise → expand all visible rows.
-      //
-      // FAST PATH: single batched HTTP call fetching ALL pages' campaigns at
-      // once via /ads_manager/campaigns/batch-data. Brings expand-all from
-      // ~minutes (40+ parallel calls) down to ~seconds (1 query).
-      //
-      // FALLBACK: if batch fails for any reason (network, server error, schema
-      // mismatch, etc.), automatically falls back to old per-page parallel
-      // method (togglePageExpand). Walang feature loss.
-      async toggleAllExpand(){
-        const visible = (this.sortedRows ? this.sortedRows() : (this.rows || []));
+      // Expand all → buksan lahat ng item na may running page (ipakita ang pages).
+      // Hide all → isara LAHAT: items at campaigns.
+      toggleAllExpand(){
         if (this.anyExpanded()) {
-          // Collapse: just flip open=false on already-loaded entries (no fetch).
-          for (const r of visible) {
-            const st = this.expandedPages[r.page_name];
-            if (st && st.open) {
-              this.expandedPages[r.page_name] = Object.assign({}, st, { open: false });
-            }
-          }
+          this.expandedItems = {};
+          this.expandedPages = {};   // isara din ang anumang bukas na campaigns
           return;
         }
-        // Try batched fast path first
-        try {
-          await this._toggleAllExpandBatch(visible);
-        } catch (e) {
-          console.warn('[expand-all] Batch path failed, falling back to per-page:', e);
-          await this._toggleAllExpandPerPage(visible);
-        }
+        const open = {};
+        for (const grp of this.itemGroups()) { if (grp.hasPages) open[grp.item_name] = true; }
+        this.expandedItems = open;
       },
 
       // FAST PATH — single POST to /ads_manager/campaigns/batch-data with all
@@ -3477,8 +3453,45 @@
             agg: this.aggOf(pages),
           });
         }
-        out.sort((a, b) => b.hold - a.hold);
+        // Sort ITEMS: kapag may active column sort → by that column's aggregate;
+        // else → by HOLD desc (default). Pages within = naka-sort na via sortedRows().
+        if (this.sortCol) {
+          const c = this.sortCol, dir = this.sortDir === 'asc' ? 1 : -1;
+          out.sort((a, b) => {
+            let va = this._itemSortValue(a, c), vb = this._itemSortValue(b, c);
+            if (va == null) va = (typeof vb === 'string') ? '' : -Infinity;
+            if (vb == null) vb = (typeof va === 'string') ? '' : -Infinity;
+            if (typeof va === 'string') return dir * va.localeCompare(vb);
+            return dir * (Number(va) - Number(vb));
+          });
+        } else {
+          out.sort((a, b) => b.hold - a.hold);
+        }
         return out;
+      },
+
+      // Sortable value for an ITEM row given a column's sort key. Mirrors
+      // sortedRows()'s computedFor() but reads the item AGGREGATE (grp.agg) + hold.
+      // Per-page-only columns (price, rts_pct, promo…) → null (sort to bottom).
+      _itemSortValue(grp, col){
+        const A = grp.agg || {};
+        switch (col) {
+          case 'item_name':             return grp.item_name;
+          case 'page_name':             return grp.hold;   // items walang page name → fall back to hold
+          case 'hold_units':            return grp.hold;   // item-level HOLD = jnt/hold value
+          case 'proj_pct_computed':     return A.proj_pct;
+          case 'tcpr_computed':         return (A.orders > 0) ? (1 - A.proceed_orders / A.orders) * 100 : null;
+          case 'breakeven_cpp_computed':return null;        // per-page only
+          case 'np_per_order_computed':    return A.np_per_order;
+          case 'np_per_order_3d_computed': return A.np_per_order_3d;
+          case 'np_per_order_7d_computed': return A.np_per_order_7d;
+          case 'np_per_order_1m_computed': return A.np_per_order_1m;
+          case 'proj_pct_last_day':     return A.proj_pct_1d;
+          case 'proj_pct_last_3d':      return A.proj_pct_3d;
+          case 'proj_pct_last_7d':      return A.proj_pct_7d;
+          default:
+            return Object.prototype.hasOwnProperty.call(A, col) ? A[col] : null;
+        }
       },
       toggleItemExpand(name){ this.expandedItems[name] = !this.expandedItems[name]; },
       isItemOpen(name){ return !!this.expandedItems[name]; },

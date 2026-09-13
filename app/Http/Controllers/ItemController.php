@@ -190,7 +190,60 @@ class ItemController extends Controller
         return response()->json(['ok' => true, 'images' => $map]);
     }
 
-    /** POST /item/image — upload/palit ng item photo. */
+    /** GET /item/photo?item=<name> — dedicated page para mag-upload ng photo per item. */
+    public function photoForm(Request $request)
+    {
+        $this->checkAccess();
+        $item = trim((string) $request->query('item', ''));
+        if ($item === '') {
+            return redirect()->route('item.index');
+        }
+
+        $currentUrl = null;
+        try {
+            if (Schema::hasTable('item_images')) {
+                $rec = ItemImage::where('item_name', $item)->first();
+                if ($rec && $rec->image_path) {
+                    $currentUrl = url(Storage::disk('public')->url($rec->image_path));
+                }
+            }
+        } catch (\Throwable $e) { /* table wala pa */ }
+
+        return view('item.photo', [
+            'itemName'   => $item,
+            'currentUrl' => $currentUrl,
+        ]);
+    }
+
+    /** POST /item/photo — i-save ang na-upload na photo, tapos balik sa form. */
+    public function photoStore(Request $request)
+    {
+        $this->checkAccess();
+        if (! Schema::hasTable('item_images')) {
+            return back()->with('photo_error', 'item_images table wala pa — patakbuhin: php artisan migrate --force');
+        }
+        $data = $request->validate([
+            'item_name' => 'required|string|max:255',
+            'image'     => 'required|image|mimes:jpg,jpeg,png,webp|max:10240',
+        ]);
+
+        $existing = ItemImage::where('item_name', $data['item_name'])->first();
+        if ($existing && $existing->image_path) {
+            try { Storage::disk('public')->delete($existing->image_path); } catch (\Throwable $e) {}
+        }
+
+        $path = $request->file('image')->store('item-images', 'public');
+        ItemImage::updateOrCreate(
+            ['item_name' => $data['item_name']],
+            ['image_path' => $path, 'updated_by' => Auth::id()]
+        );
+
+        return redirect()
+            ->route('item.photo', ['item' => $data['item_name']])
+            ->with('photo_ok', 'Na-upload ang photo para sa "' . $data['item_name'] . '".');
+    }
+
+    /** POST /item/image — upload/palit ng item photo (AJAX; legacy inline). */
     public function uploadImage(Request $request)
     {
         $this->checkAccess();

@@ -64,8 +64,10 @@
 <template x-if="col.id==='proj_prof_7d'">
   <span style="font-weight:700;" x-text="md(A.projected_profit_last_7d)"></span>
 </template>
+{{-- HOLD sa item level = jnt/hold value (row.hold), para tugma sa badge (hindi
+     yung owner/private hold_units snapshot na iba ang source). --}}
 <template x-if="col.id==='hold'">
-  <span style="color:#111;" x-text="(A.hold_units != null) ? num(A.hold_units) : '—'"></span>
+  <span style="color:#7c2d12;font-weight:700;" x-text="Number(row.hold||0).toLocaleString()"></span>
 </template>
 {{-- Per-page-only columns (Promo, Price, Set RTS%, Item Val., RTS/DEL/INT, etc.)
      — blank sa item aggregate row, tulad ng TOTAL row ng owner/private. --}}
