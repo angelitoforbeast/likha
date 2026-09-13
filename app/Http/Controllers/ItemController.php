@@ -190,28 +190,60 @@ class ItemController extends Controller
         return response()->json(['ok' => true, 'images' => $map]);
     }
 
-    /** GET /item/photo?item=<name> — dedicated page para mag-upload ng photo per item. */
+    /**
+     * GET /item/photo — LISTAHAN ng LAHAT ng item para pamahalaan ang photos.
+     * Mga item na WALA pang image = nasa itaas. Optional ?item=<name> → i-highlight
+     * / i-scroll ang item na iyon (galing sa "Add photo" link ng /item).
+     */
     public function photoForm(Request $request)
     {
         $this->checkAccess();
-        $item = trim((string) $request->query('item', ''));
-        if ($item === '') {
-            return redirect()->route('item.index');
-        }
 
-        $currentUrl = null;
+        $driver = DB::connection()->getDriverName();
+        $qcol   = $driver === 'pgsql' ? '"' . self::MO_ITEM_COL . '"' : '`' . self::MO_ITEM_COL . '`';
+
+        // Lahat ng distinct item name mula macro_output.
+        $names = DB::table(self::MO_TABLE)
+            ->selectRaw("DISTINCT $qcol AS item_name")
+            ->whereRaw("NULLIF(TRIM($qcol), '') IS NOT NULL")
+            ->get()
+            ->pluck('item_name')
+            ->map(fn ($n) => trim((string) $n))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        // Existing images.
+        $imgMap = [];
         try {
             if (Schema::hasTable('item_images')) {
-                $rec = ItemImage::where('item_name', $item)->first();
-                if ($rec && $rec->image_path) {
-                    $currentUrl = url(Storage::disk('public')->url($rec->image_path));
+                foreach (ItemImage::whereNotNull('image_path')->get() as $img) {
+                    $imgMap[$img->item_name] = url(Storage::disk('public')->url($img->image_path));
                 }
             }
         } catch (\Throwable $e) { /* table wala pa */ }
 
+        // Isama ang item na may image pero wala sa macro (edge case).
+        foreach (array_keys($imgMap) as $n) {
+            if (!in_array($n, $names, true)) $names[] = $n;
+        }
+
+        // Build + sort: WALANG image muna (0), tapos may image (1); pangalan asc.
+        $items = collect($names)
+            ->map(fn ($n) => ['item_name' => $n, 'image_url' => $imgMap[$n] ?? null])
+            ->sort(function ($a, $b) {
+                $ai = $a['image_url'] ? 1 : 0;
+                $bi = $b['image_url'] ? 1 : 0;
+                if ($ai !== $bi) return $ai <=> $bi;
+                return strcasecmp($a['item_name'], $b['item_name']);
+            })
+            ->values()
+            ->all();
+
         return view('item.photo', [
-            'itemName'   => $item,
-            'currentUrl' => $currentUrl,
+            'items' => $items,
+            'focus' => trim((string) $request->query('item', '')),
         ]);
     }
 
