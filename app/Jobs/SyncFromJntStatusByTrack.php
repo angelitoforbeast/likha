@@ -61,7 +61,7 @@ class SyncFromJntStatusByTrack implements ShouldQueue
 
         try {
             (clone $base)
-                ->select('id', 'waybill_number', 'status', 'status_logs')
+                ->select('id', 'waybill_number', 'status', 'status_logs', 'rider_name', 'rider_phone')
                 ->orderBy('id')
                 ->chunkById(200, function ($rows) use (
                     $client, &$processed, &$updated, &$unchanged, &$skipped, &$unmapped, &$failed,
@@ -87,46 +87,47 @@ class SyncFromJntStatusByTrack implements ShouldQueue
                             }
 
                             $info = JntScanStatusMapper::fromDetails($details);
+                            $upd  = [];
 
                             if ($info['unmapped']) {
                                 $unmapped++;
                                 $st = $info['scantype'] !== '' ? $info['scantype'] : '(blank)';
                                 $unmappedTypes[$st] = ($unmappedTypes[$st] ?? 0) + 1;
                                 $this->pushSample($sample, [$wb, $row->status, '(unmapped)', $info['scantype']]);
-                                continue;
+                            } else {
+                                $old = (string) $row->status;
+                                $new = (string) $info['status'];
+                                if ($new === $old) {
+                                    $unchanged++;
+                                } else {
+                                    $updated++;
+                                    $this->pushSample($sample, [$wb, $old, $new, $info['scantype']]);
+                                    $logs = json_decode((string) $row->status_logs, true);
+                                    if (!is_array($logs)) $logs = [];
+                                    $logs[] = [
+                                        'batch_at'      => now('Asia/Manila')->toDateTimeString(),
+                                        'upload_log_id' => null,
+                                        'from'          => $old ?: null,
+                                        'to'            => $new,
+                                        'src'           => 'track_sync',
+                                        'run_id'        => $this->runId,
+                                    ];
+                                    $upd['status']      = $new;
+                                    $upd['status_logs'] = json_encode($logs, JSON_UNESCAPED_UNICODE);
+                                    if (!empty($info['signingtime'])) $upd['signingtime'] = $info['signingtime'];
+                                }
                             }
 
-                            $old = (string) $row->status;
-                            $new = (string) $info['status'];
-
-                            if ($new === $old) {
-                                $unchanged++;
-                                continue;
+                            // Rider — isulat kahit unchanged/unmapped ang status (kung may laman at iba).
+                            if (!empty($info['rider_phone']) && $info['rider_phone'] !== (string) ($row->rider_phone ?? '')) {
+                                $upd['rider_phone'] = $info['rider_phone'];
+                            }
+                            if (!empty($info['rider_name']) && $info['rider_name'] !== (string) ($row->rider_name ?? '')) {
+                                $upd['rider_name'] = $info['rider_name'];
                             }
 
-                            // CHANGE
-                            $this->pushSample($sample, [$wb, $old, $new, $info['scantype']]);
-                            $updated++;
-
-                            if (!$this->dryRun) {
-                                $logs = json_decode((string) $row->status_logs, true);
-                                if (!is_array($logs)) $logs = [];
-                                $logs[] = [
-                                    'batch_at'      => now('Asia/Manila')->toDateTimeString(),
-                                    'upload_log_id' => null,
-                                    'from'          => $old ?: null,
-                                    'to'            => $new,
-                                    'src'           => 'track_sync',
-                                    'run_id'        => $this->runId,
-                                ];
-
-                                $upd = [
-                                    'status'      => $new,
-                                    'status_logs' => json_encode($logs, JSON_UNESCAPED_UNICODE),
-                                    'updated_at'  => now('Asia/Manila'),
-                                ];
-                                if (!empty($info['signingtime'])) $upd['signingtime'] = $info['signingtime'];
-
+                            if (!empty($upd) && !$this->dryRun) {
+                                $upd['updated_at'] = now('Asia/Manila');
                                 DB::table('from_jnts')->where('id', $row->id)->update($upd);
                             }
                         }

@@ -25,7 +25,7 @@ class JntScanStatusMapper
             'return register'                               => 'For Return',
             'delivered'                                     => 'Delivered',
             'on delivery'                                   => 'Delivering',
-            'picked up', 'departure', 'arrival', 'order created' => 'In Transit',
+            'picked up', 'departure', 'arrival', 'order created', 'port congested' => 'In Transit',
             default                                         => null,
         };
     }
@@ -39,15 +39,17 @@ class JntScanStatusMapper
      * For Return pa rin, hindi In Transit). Kung walang milestone → latest scan.
      *
      * @param  array<int,array<string,mixed>> $details
-     * @return array{status:?string, scantype:string, scantime:?string, signingtime:?string, unmapped:bool, empty:bool}
+     * @return array{status:?string, scantype:string, scantime:?string, signingtime:?string, rider_name:?string, rider_phone:?string, unmapped:bool, empty:bool}
      */
     public static function fromDetails(array $details): array
     {
-        if (empty($details)) {
-            return ['status' => null, 'scantype' => '', 'scantime' => null, 'signingtime' => null, 'unmapped' => false, 'empty' => true];
-        }
+        $empty = ['status'=>null,'scantype'=>'','scantime'=>null,'signingtime'=>null,'rider_name'=>null,'rider_phone'=>null,'unmapped'=>false,'empty'=>true];
+        if (empty($details)) return $empty;
 
-        // Hanapin ang PINAKA-RECENT na milestone (details ay latest-first).
+        // PINAKA-RECENT na milestone (details latest-first): Return Delivered / Delivered
+        // / Return Register. NOTE: Problematic is NOT a milestone — failed-attempt lang;
+        // per CSV ground truth, nananatiling Delivering habang nagre-retry (unless na-Return
+        // Register o na-Deliver/Return). Ito ang nananaig kaysa transit scans (return trip).
         $milestoneStatus = null;
         $milestoneScan   = null;
         foreach ($details as $d) {
@@ -57,15 +59,20 @@ class JntScanStatusMapper
             if ($st === 'return register')  { $milestoneStatus = 'For Return'; $milestoneScan = $d; break; }
         }
 
-        $latest         = $details[0];
-        $latestScantype = trim((string) ($latest['scantype'] ?? ''));
-
         if ($milestoneStatus !== null) {
             $status         = $milestoneStatus;
-            $reportScantype = trim((string) ($milestoneScan['scantype'] ?? $latestScantype));
+            $reportScantype = trim((string) ($milestoneScan['scantype'] ?? ''));
         } else {
-            $status         = self::mapScantype($latestScantype); // On Delivery→Delivering; Picked Up/Departure/Arrival→In Transit; else null
-            $reportScantype = $latestScantype;
+            // Walang milestone → latest scan na HINDI Problematic (i-ignore ang Problematic).
+            $status         = null;
+            $reportScantype = trim((string) ($details[0]['scantype'] ?? ''));
+            foreach ($details as $d) {
+                $st = trim((string) ($d['scantype'] ?? ''));
+                if (strtolower($st) === 'problematic') continue;
+                $status         = self::mapScantype($st); // On Delivery→Delivering; transit→In Transit; else null
+                $reportScantype = $st;
+                break;
+            }
         }
 
         // signingtime = scantime ng completion scan (Delivered o Return Delivered).
@@ -80,11 +87,27 @@ class JntScanStatusMapper
             }
         }
 
+        // Rider — latest "On Delivery" scan desc: "…sprinter【<code>_<name> : <phone>】…"
+        $riderName = null; $riderPhone = null;
+        foreach ($details as $d) {
+            if (strtolower(trim((string) ($d['scantype'] ?? ''))) !== 'on delivery') continue;
+            if (preg_match('/sprinter【(.+?)】/u', (string) ($d['desc'] ?? ''), $m)) {
+                $inside = trim($m[1]); // hal. "OCW_Alexander Deguzman : 639383221843"
+                if (preg_match('/(\d{10,13})/', $inside, $pm)) $riderPhone = $pm[1];
+                $namePart = trim((preg_split('/\s*:\s*/', $inside)[0] ?? ''));
+                $namePart = preg_replace('/^[A-Z0-9_]+_/', '', $namePart); // tanggalin ang code prefix (OCW_, AR_D_A_…)
+                $riderName = ($namePart !== '') ? $namePart : null;
+            }
+            break; // latest On Delivery lang
+        }
+
         return [
             'status'      => $status,
             'scantype'    => $reportScantype,
-            'scantime'    => trim((string) ($latest['scantime'] ?? '')) ?: null,
+            'scantime'    => trim((string) ($details[0]['scantime'] ?? '')) ?: null,
             'signingtime' => $signing,
+            'rider_name'  => $riderName,
+            'rider_phone' => $riderPhone,
             'unmapped'    => $status === null,
             'empty'       => false,
         ];
