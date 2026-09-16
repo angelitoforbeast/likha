@@ -29,7 +29,7 @@ class SyncFromJntStatusByTrack implements ShouldQueue
     public int $timeout = 3600; // 1 oras
     public int $tries = 1;
 
-    private const API_CHUNK   = 50;   // billcodes kada TRACKQUERY call
+    private const API_CHUNK   = 20;   // billcodes kada TRACKQUERY call (may cap ang J&T ~20)
     private const SAMPLE_MAX  = 300;  // rows na itatabi para sa preview UI
     private const FINAL       = ['Delivered', 'Returned'];
 
@@ -73,15 +73,8 @@ class SyncFromJntStatusByTrack implements ShouldQueue
                     $waybills = array_keys($map);
 
                     foreach (array_chunk($waybills, self::API_CHUNK) as $sub) {
-                        $parsed = [];
-                        try {
-                            $resp = $client->trackForJson(implode(',', $sub), 'en');
-                            $parsed = JntScanStatusMapper::parseResponse($resp);
-                        } catch (Throwable $e) {
-                            $failed += count($sub);
-                            $processed += count($sub);
-                            continue;
-                        }
+                        // Batch track + auto-retry ng mga na-drop (J&T cap ~20/call).
+                        $parsed = $this->trackSet($client, $sub);
 
                         foreach ($sub as $wb) {
                             $row = $map[$wb];
@@ -162,6 +155,34 @@ class SyncFromJntStatusByTrack implements ShouldQueue
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * Track ng isang set ng waybill: batch muna, tapos i-retry nang ISA-ISA
+     * ang mga hindi bumalik (J&T TRACKQUERY may cap ~20/call — nadi-drop ang labis).
+     * Returns [ waybill => detailsArray ] (yung may laman lang).
+     *
+     * @param  string[] $waybills
+     * @return array<string,array<int,array<string,mixed>>>
+     */
+    private function trackSet(JntClient $client, array $waybills): array
+    {
+        $found = [];
+        try {
+            $resp  = $client->trackForJson(implode(',', $waybills), 'en');
+            $found = JntScanStatusMapper::parseResponse($resp);
+        } catch (Throwable $e) { $found = []; }
+
+        // Retry ang mga na-drop (wala sa batch response) nang isa-isa.
+        $missing = array_values(array_diff($waybills, array_keys($found)));
+        foreach ($missing as $wb) {
+            try {
+                $p = JntScanStatusMapper::parseResponse($client->trackForJson($wb, 'en'));
+                if (isset($p[$wb]) && !empty($p[$wb])) $found[$wb] = $p[$wb];
+            } catch (Throwable $e) { /* stays missing → tunay na skip */ }
+        }
+
+        return $found;
     }
 
     /** @param array<int,array<int,string>> $sample */

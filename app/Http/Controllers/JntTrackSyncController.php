@@ -29,7 +29,8 @@ class JntTrackSyncController extends Controller
         $this->checkAccess();
         $tz    = 'Asia/Manila';
         $today = Carbon::now($tz)->toDateString();
-        $first = Carbon::now($tz)->startOfMonth()->toDateString();
+        // Default = simula ng NAKARAANG buwan → ngayon (gaya ng /jnt/hold).
+        $first = Carbon::now($tz)->startOfMonth()->subMonth()->toDateString();
 
         return view('jnt.track-sync.index', [
             'defaultFrom' => $first,
