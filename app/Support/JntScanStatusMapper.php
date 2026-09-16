@@ -33,6 +33,11 @@ class JntScanStatusMapper
     /**
      * Mula sa details array (latest-first) → resolved status info.
      *
+     * MILESTONE-AWARE: kapag may naganap na Return Delivered / Delivered / Return
+     * Register, yun ang totoong estado — HINDI ma-override ng mga sumunod na
+     * transit scan (hal. Return Register tapos Departure/Arrival = return trip =
+     * For Return pa rin, hindi In Transit). Kung walang milestone → latest scan.
+     *
      * @param  array<int,array<string,mixed>> $details
      * @return array{status:?string, scantype:string, scantime:?string, signingtime:?string, unmapped:bool, empty:bool}
      */
@@ -42,23 +47,42 @@ class JntScanStatusMapper
             return ['status' => null, 'scantype' => '', 'scantime' => null, 'signingtime' => null, 'unmapped' => false, 'empty' => true];
         }
 
-        $latest   = $details[0];
-        $scantype = trim((string) ($latest['scantype'] ?? ''));
-        $status   = self::mapScantype($scantype);
-
-        // signingtime = scantime ng pinakabagong Delivered / Return Delivered (kung meron).
-        $signing = null;
+        // Hanapin ang PINAKA-RECENT na milestone (details ay latest-first).
+        $milestoneStatus = null;
+        $milestoneScan   = null;
         foreach ($details as $d) {
             $st = strtolower(trim((string) ($d['scantype'] ?? '')));
-            if ($st === 'delivered' || $st === 'return delivered') {
-                $signing = trim((string) ($d['scantime'] ?? '')) ?: null;
-                break; // latest-first → unang match = pinakabago
+            if ($st === 'return delivered') { $milestoneStatus = 'Returned';   $milestoneScan = $d; break; }
+            if ($st === 'delivered')        { $milestoneStatus = 'Delivered';  $milestoneScan = $d; break; }
+            if ($st === 'return register')  { $milestoneStatus = 'For Return'; $milestoneScan = $d; break; }
+        }
+
+        $latest         = $details[0];
+        $latestScantype = trim((string) ($latest['scantype'] ?? ''));
+
+        if ($milestoneStatus !== null) {
+            $status         = $milestoneStatus;
+            $reportScantype = trim((string) ($milestoneScan['scantype'] ?? $latestScantype));
+        } else {
+            $status         = self::mapScantype($latestScantype); // On Delivery→Delivering; Picked Up/Departure/Arrival→In Transit; else null
+            $reportScantype = $latestScantype;
+        }
+
+        // signingtime = scantime ng completion scan (Delivered o Return Delivered).
+        $signing = null;
+        if ($status === 'Delivered' || $status === 'Returned') {
+            $target = $status === 'Returned' ? 'return delivered' : 'delivered';
+            foreach ($details as $d) {
+                if (strtolower(trim((string) ($d['scantype'] ?? ''))) === $target) {
+                    $signing = trim((string) ($d['scantime'] ?? '')) ?: null;
+                    break;
+                }
             }
         }
 
         return [
             'status'      => $status,
-            'scantype'    => $scantype,
+            'scantype'    => $reportScantype,
             'scantime'    => trim((string) ($latest['scantime'] ?? '')) ?: null,
             'signingtime' => $signing,
             'unmapped'    => $status === null,
