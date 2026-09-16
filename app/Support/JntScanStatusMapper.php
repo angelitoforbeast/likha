@@ -87,16 +87,25 @@ class JntScanStatusMapper
             }
         }
 
-        // Rider — latest "On Delivery" scan desc: "…sprinter【<code>_<name> : <phone>】…"
+        // Rider — latest "On Delivery" scan desc: "…sprinter【<CODE>_<name> : <phone>】…"
+        // MAY GUARD: kailangang kumpleto ang pattern (name : phone). Hiwalay na
+        // validation ang phone (PH mobile) at name (may titik, >=2 char, walang digit).
+        // Kung mali/kulang → null (hindi isusulat).
         $riderName = null; $riderPhone = null;
         foreach ($details as $d) {
             if (strtolower(trim((string) ($d['scantype'] ?? ''))) !== 'on delivery') continue;
-            if (preg_match('/sprinter【(.+?)】/u', (string) ($d['desc'] ?? ''), $m)) {
-                $inside = trim($m[1]); // hal. "OCW_Alexander Deguzman : 639383221843"
-                if (preg_match('/(\d{10,13})/', $inside, $pm)) $riderPhone = $pm[1];
-                $namePart = trim((preg_split('/\s*:\s*/', $inside)[0] ?? ''));
-                $namePart = preg_replace('/^[A-Z0-9_]+_/', '', $namePart); // tanggalin ang code prefix (OCW_, AR_D_A_…)
-                $riderName = ($namePart !== '') ? $namePart : null;
+            $desc = (string) ($d['desc'] ?? '');
+            if (preg_match('/sprinter【\s*(.+?)\s*:\s*([\d][\d\s\-]{7,})】/u', $desc, $m)) {
+                // Phone — digits lang; dapat valid PH mobile.
+                $ph = preg_replace('/\D/', '', (string) $m[2]);
+                if (preg_match('/^(639\d{9}|63\d{10}|09\d{9}|9\d{9})$/', $ph)) {
+                    $riderPhone = $ph;
+                }
+                // Name — tanggalin ang code prefix; dapat may titik, >=2 char, walang digit.
+                $nm = trim((string) preg_replace('/^[A-Z0-9_]+_/', '', trim((string) $m[1])));
+                if ($nm !== '' && mb_strlen($nm) >= 2 && preg_match('/\p{L}/u', $nm) && !preg_match('/\d/', $nm)) {
+                    $riderName = $nm;
+                }
             }
             break; // latest On Delivery lang
         }
