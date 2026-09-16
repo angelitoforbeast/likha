@@ -15,7 +15,9 @@
     .ts-btn.apply { background:#065f46; color:#fff; }
     .ts-btn:disabled { opacity:.5; cursor:not-allowed; }
     .ts-stat { display:grid; grid-template-columns:repeat(auto-fit,minmax(110px,1fr)); gap:8px; margin-top:12px; }
-    .ts-tile { border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; text-align:center; }
+    .ts-tile { border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; text-align:center; cursor:pointer; transition:box-shadow .1s, border-color .1s; }
+    .ts-tile:hover { border-color:#c7d2fe; }
+    .ts-tile.sel { border-color:#4f46e5; box-shadow:0 0 0 2px rgba(79,70,229,.25) inset; }
     .ts-tile b { display:block; font-size:19px; }
     .ts-tile span { font-size:10.5px; color:#64748b; text-transform:uppercase; letter-spacing:.04em; }
     .ts-tile.upd b{color:#065f46;} .ts-tile.skip b{color:#b45309;} .ts-tile.unmap b{color:#b91c1c;} .ts-tile.fail b{color:#dc2626;}
@@ -56,13 +58,14 @@
       <div x-show="run && run.status==='failed'" style="color:#b91c1c;font-size:12px;margin-top:6px;" x-text="'Error: '+(run?.last_error||'')"></div>
 
       <div class="ts-stat">
-        <div class="ts-tile"><b x-text="run?.total||0"></b><span>Total</span></div>
-        <div class="ts-tile upd"><b x-text="run?.updated||0"></b><span x-text="run?.dry_run ? 'Mababago' : 'Updated'"></span></div>
-        <div class="ts-tile"><b x-text="run?.unchanged||0"></b><span>Unchanged</span></div>
-        <div class="ts-tile skip"><b x-text="run?.skipped||0"></b><span>Skipped</span></div>
-        <div class="ts-tile unmap"><b x-text="run?.unmapped||0"></b><span>Unmapped</span></div>
-        <div class="ts-tile fail"><b x-text="run?.failed||0"></b><span>Failed</span></div>
+        <div class="ts-tile" :class="activeCat===null?'sel':''" @click="activeCat=null"><b x-text="run?.total||0"></b><span>Total</span></div>
+        <div class="ts-tile upd" :class="activeCat==='updated'?'sel':''" @click="activeCat='updated'"><b x-text="run?.updated||0"></b><span x-text="run?.dry_run ? 'Mababago' : 'Updated'"></span></div>
+        <div class="ts-tile" :class="activeCat==='unchanged'?'sel':''" @click="activeCat='unchanged'"><b x-text="run?.unchanged||0"></b><span>Unchanged</span></div>
+        <div class="ts-tile skip" :class="activeCat==='skipped'?'sel':''" @click="activeCat='skipped'"><b x-text="run?.skipped||0"></b><span>Skipped</span></div>
+        <div class="ts-tile unmap" :class="activeCat==='unmapped'?'sel':''" @click="activeCat='unmapped'"><b x-text="run?.unmapped||0"></b><span>Unmapped</span></div>
+        <div class="ts-tile fail" :class="activeCat==='failed'?'sel':''" @click="activeCat='failed'"><b x-text="run?.failed||0"></b><span>Failed</span></div>
       </div>
+      <div class="ts-muted" style="margin-top:6px;font-size:11px;">I-click ang tile para makita ang listahan ng waybills.</div>
 
       <!-- Unmapped scantypes -->
       <template x-if="unmappedTypes().length">
@@ -76,21 +79,28 @@
         </div>
       </template>
 
-      <!-- Sample changes -->
-      <template x-if="sampleRows().length">
+      <!-- Category list (galing sa clicked tile) -->
+      <template x-if="activeCat && activeCat!=='failed'">
         <div style="margin-top:12px;">
-          <div style="font-size:12px;font-weight:700;color:#334155;">Sample (<span x-text="sampleRows().length"></span> rows):</div>
-          <div style="max-height:320px;overflow:auto;margin-top:4px;">
+          <div style="font-size:12px;font-weight:700;color:#334155;">
+            <span style="text-transform:capitalize;" x-text="activeCat"></span>:
+            <span x-text="catRows().length"></span> ipinapakita<span x-show="catCount()>catRows().length" x-text="' (sa kabuuang '+catCount()+' — unang '+catRows().length+')'"></span>
+          </div>
+          <div style="max-height:340px;overflow:auto;margin-top:4px;">
             <table class="ts-tbl">
-              <thead><tr><th>Waybill</th><th>Status change</th><th>Latest scantype</th></tr></thead>
+              <thead><tr><th>Waybill</th><th>Detalye</th><th>Scantype</th></tr></thead>
               <tbody>
-                <template x-for="r in sampleRows()" :key="r.waybill">
+                <template x-for="r in catRows()" :key="r.waybill">
                   <tr>
                     <td x-text="r.waybill"></td>
-                    <td><span x-text="r.from||'—'"></span> <span class="ts-arrow">→</span> <b x-text="r.to"></b></td>
-                    <td x-text="r.scantype||'—'"></td>
+                    <td>
+                      <template x-if="r.from!==undefined"><span><span x-text="r.from||'—'"></span> <span class="ts-arrow">→</span> <b x-text="r.to"></b></span></template>
+                      <template x-if="r.from===undefined"><span x-text="r.status||'—'"></span></template>
+                    </td>
+                    <td x-text="r.scantype||''"></td>
                   </tr>
                 </template>
+                <template x-if="!catRows().length"><tr><td colspan="3" class="ts-muted" style="text-align:center;">Walang laman sa category na ito.</td></tr></template>
               </tbody>
             </table>
           </div>
@@ -135,10 +145,21 @@
         phase: '',
         _timer: null,
         history: [],
+        activeCat: null, // null=Total (walang list) | updated|unchanged|skipped|unmapped|failed
 
         init(){ this.loadHistory(); },
 
-        sampleRows(){ return (this.run && this.run.result_sample && this.run.result_sample.rows) ? this.run.result_sample.rows : []; },
+        // Listahan ng waybills sa napiling category (galing result_sample).
+        catRows(){
+          if (!this.activeCat || !this.run || !this.run.result_sample) return [];
+          const rs = this.run.result_sample;
+          return Array.isArray(rs[this.activeCat]) ? rs[this.activeCat] : [];
+        },
+        // Kabuuang bilang sa category (para sa "X of Y" kung na-cap ang list).
+        catCount(){
+          if (!this.activeCat || !this.run) return 0;
+          return Number(this.run[this.activeCat] || 0);
+        },
         unmappedTypes(){
           const m = (this.run && this.run.result_sample && this.run.result_sample.unmapped_scantypes) ? this.run.result_sample.unmapped_scantypes : {};
           return Object.keys(m).map(k => ({type:k, count:m[k]})).sort((a,b)=>b.count-a.count);

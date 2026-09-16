@@ -56,7 +56,7 @@ class SyncFromJntStatusByTrack implements ShouldQueue
         $client = JntClient::fromConfig();
 
         $processed = $updated = $unchanged = $skipped = $unmapped = $failed = 0;
-        $sample = [];
+        $cat = ['updated' => [], 'unchanged' => [], 'skipped' => [], 'unmapped' => []]; // per-category lists (clickable UI)
         $unmappedTypes = [];
 
         try {
@@ -65,7 +65,7 @@ class SyncFromJntStatusByTrack implements ShouldQueue
                 ->orderBy('id')
                 ->chunkById(200, function ($rows) use (
                     $client, &$processed, &$updated, &$unchanged, &$skipped, &$unmapped, &$failed,
-                    &$sample, &$unmappedTypes, $runs
+                    &$cat, &$unmappedTypes, $runs
                 ) {
                     // waybill → row
                     $map = [];
@@ -83,6 +83,7 @@ class SyncFromJntStatusByTrack implements ShouldQueue
                             $details = $parsed[$wb] ?? null;
                             if (!is_array($details) || empty($details)) {
                                 $skipped++; // walang track / success:false
+                                $this->pushCat($cat, 'skipped', ['waybill' => $wb, 'status' => $row->status]);
                                 continue;
                             }
 
@@ -93,15 +94,16 @@ class SyncFromJntStatusByTrack implements ShouldQueue
                                 $unmapped++;
                                 $st = $info['scantype'] !== '' ? $info['scantype'] : '(blank)';
                                 $unmappedTypes[$st] = ($unmappedTypes[$st] ?? 0) + 1;
-                                $this->pushSample($sample, [$wb, $row->status, '(unmapped)', $info['scantype']]);
+                                $this->pushCat($cat, 'unmapped', ['waybill' => $wb, 'status' => $row->status, 'scantype' => $info['scantype']]);
                             } else {
                                 $old = (string) $row->status;
                                 $new = (string) $info['status'];
                                 if ($new === $old) {
                                     $unchanged++;
+                                    $this->pushCat($cat, 'unchanged', ['waybill' => $wb, 'status' => $new]);
                                 } else {
                                     $updated++;
-                                    $this->pushSample($sample, [$wb, $old, $new, $info['scantype']]);
+                                    $this->pushCat($cat, 'updated', ['waybill' => $wb, 'from' => $old, 'to' => $new, 'scantype' => $info['scantype']]);
                                     $logs = json_decode((string) $row->status_logs, true);
                                     if (!is_array($logs)) $logs = [];
                                     $logs[] = [
@@ -145,7 +147,7 @@ class SyncFromJntStatusByTrack implements ShouldQueue
                 'status'        => 'done',
                 'processed'     => $processed, 'updated' => $updated, 'unchanged' => $unchanged,
                 'skipped'       => $skipped, 'unmapped' => $unmapped, 'failed' => $failed,
-                'result_sample' => json_encode(['rows' => $sample, 'unmapped_scantypes' => $unmappedTypes], JSON_UNESCAPED_UNICODE),
+                'result_sample' => json_encode($cat + ['unmapped_scantypes' => $unmappedTypes], JSON_UNESCAPED_UNICODE),
                 'finished_at'   => now('Asia/Manila'),
                 'updated_at'    => now('Asia/Manila'),
             ]);
@@ -186,11 +188,16 @@ class SyncFromJntStatusByTrack implements ShouldQueue
         return $found;
     }
 
-    /** @param array<int,array<int,string>> $sample */
-    private function pushSample(array &$sample, array $row): void
+    /**
+     * Idagdag sa per-category list (naka-cap para di lumaki masyado ang JSON).
+     * @param array<string,array<int,array<string,mixed>>> $cat
+     * @param array<string,mixed> $row
+     */
+    private function pushCat(array &$cat, string $key, array $row): void
     {
-        if (count($sample) < self::SAMPLE_MAX) {
-            $sample[] = ['waybill' => $row[0], 'from' => $row[1], 'to' => $row[2], 'scantype' => $row[3]];
+        if (!isset($cat[$key])) $cat[$key] = [];
+        if (count($cat[$key]) < self::SAMPLE_MAX) {
+            $cat[$key][] = $row;
         }
     }
 }
