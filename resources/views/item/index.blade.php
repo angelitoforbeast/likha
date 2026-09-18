@@ -2787,10 +2787,19 @@
                     projected_profit_last_day:null, gross_sales_last_day:0, proj_pct_1d:null,
                     projected_profit_last_3d:null, gross_sales_last_3d:0, proj_pct_3d:null,
                     projected_profit_last_7d:null, gross_sales_last_7d:0, proj_pct_7d:null,
-                    hold_units:null };
-        let hasP=false, hasG=false, hasP1=false, hasP3=false, hasP7=false, hasHold=false;
+                    hold_units:null,
+                    jnt_total:0, jnt_rts_cnt:0, jnt_del_cnt:0, jnt_transit_cnt:0,
+                    jnt_rts_pct:null, jnt_del_pct:null, jnt_transit_pct:null };
+        let hasP=false, hasG=false, hasP1=false, hasP3=false, hasP7=false, hasHold=false, hasJnt=false;
         for (const r of (rowsArr || [])) {
           if (r.hold_units != null) { t.hold_units = (t.hold_units||0) + Number(r.hold_units); hasHold=true; }
+          if (r.jnt_total != null) {
+            t.jnt_total       += Number(r.jnt_total       ||0);
+            t.jnt_rts_cnt     += Number(r.jnt_rts_cnt     ||0);
+            t.jnt_del_cnt     += Number(r.jnt_del_cnt     ||0);
+            t.jnt_transit_cnt += Number(r.jnt_transit_cnt ||0);
+            hasJnt=true;
+          }
           t.adspent         += Number(r.adspent         ||0);
           t.orders          += Number(r.orders          ||0);
           t.orders_last_day += Number(r.orders_last_day ||0);
@@ -2813,6 +2822,14 @@
         if(!hasP3) t.projected_profit_last_3d=null;
         if(!hasP7) t.projected_profit_last_7d=null;
         if(!hasHold) t.hold_units=null;
+        // RTS/DEL/INT sa item = ratio-of-sums: % = summed cnt ÷ summed jnt_total.
+        if (hasJnt && t.jnt_total>0) {
+          t.jnt_rts_pct     = t.jnt_rts_cnt     / t.jnt_total * 100;
+          t.jnt_del_pct     = t.jnt_del_cnt     / t.jnt_total * 100;
+          t.jnt_transit_pct = t.jnt_transit_cnt / t.jnt_total * 100;
+        } else {
+          t.jnt_total = t.jnt_rts_cnt = t.jnt_del_cnt = t.jnt_transit_cnt = null;
+        }
         t.cpp                  = t.orders>0         ? t.adspent/t.orders         : null;
         t.proceed_cpp          = t.proceed_orders>0  ? t.adspent/t.proceed_orders : null;
         t.proj_profit_per_order= (t.orders>0&&t.projected_profit!=null) ? t.projected_profit/t.orders : null;

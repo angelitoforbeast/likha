@@ -69,8 +69,57 @@
 <template x-if="col.id==='hold'">
   <span style="color:#7c2d12;font-weight:700;" x-text="Number(row.hold||0).toLocaleString()"></span>
 </template>
-{{-- Per-page-only columns (Promo, Price, Set RTS%, Item Val., RTS/DEL/INT, etc.)
+{{-- RTS / DEL / INT sa item level = aggregate ng page values (ratio-of-sums):
+     summed counts, % = cnt ÷ summed jnt_total. Kaparehong stacked layout ng page
+     cell (jnt_rdt). Sinusunod ang col.members (kung alin ang naka-check). --}}
+<template x-if="col.id==='jnt_rdt'">
+  <table style="border-collapse:collapse;font-size:11px;margin:0 auto;">
+    <tbody>
+      <template x-if="col.members && col.members.includes('jnt_rts')">
+        <tr>
+          <td style="padding:1px 6px;text-align:left;color:#94a3b8;font-size:9px;font-weight:700;letter-spacing:0.04em;">RTS</td>
+          <td style="padding:1px 6px;text-align:right;border-left:1px solid #cbd5e1;" :style="A.jnt_rts_pct==null?'color:#cbd5e1':'color:#111;font-weight:700'"
+              x-text="A.jnt_rts_pct!=null ? A.jnt_rts_pct.toFixed(1)+'%' : '—'"></td>
+          <td style="padding:1px 6px;text-align:right;border-left:1px solid #cbd5e1;color:#64748b;"
+              x-text="A.jnt_rts_pct!=null ? A.jnt_rts_cnt : ''"></td>
+        </tr>
+      </template>
+      <template x-if="col.members && col.members.includes('jnt_del')">
+        <tr>
+          <td style="padding:1px 6px;text-align:left;color:#94a3b8;font-size:9px;font-weight:700;letter-spacing:0.04em;">DEL</td>
+          <td style="padding:1px 6px;text-align:right;border-left:1px solid #cbd5e1;" :style="A.jnt_del_pct==null?'color:#cbd5e1':'color:#111;font-weight:600'"
+              x-text="A.jnt_del_pct!=null ? A.jnt_del_pct.toFixed(1)+'%' : '—'"></td>
+          <td style="padding:1px 6px;text-align:right;border-left:1px solid #cbd5e1;color:#64748b;"
+              x-text="A.jnt_del_pct!=null ? A.jnt_del_cnt : ''"></td>
+        </tr>
+      </template>
+      <template x-if="col.members && col.members.includes('jnt_transit')">
+        <tr>
+          <td style="padding:1px 6px;text-align:left;color:#94a3b8;font-size:9px;font-weight:700;letter-spacing:0.04em;">INT</td>
+          <td style="padding:1px 6px;text-align:right;border-left:1px solid #cbd5e1;" :style="A.jnt_transit_pct==null?'color:#cbd5e1':'color:#111;font-weight:600'"
+              x-text="A.jnt_transit_pct!=null ? A.jnt_transit_pct.toFixed(1)+'%' : '—'"></td>
+          <td style="padding:1px 6px;text-align:right;border-left:1px solid #cbd5e1;color:#64748b;"
+              x-text="A.jnt_transit_pct!=null ? A.jnt_transit_cnt : ''"></td>
+        </tr>
+      </template>
+    </tbody>
+  </table>
+</template>
+{{-- Individual (un-merged) jnt columns — kung hiwalay na ipinapakita sa settings. --}}
+<template x-if="col.id==='jnt_rts'">
+  <span :style="A.jnt_rts_pct==null?'color:#cbd5e1;font-size:11px':'color:#111;font-weight:700;font-size:12px'"
+        x-text="A.jnt_rts_pct!=null ? A.jnt_rts_pct.toFixed(1)+'%('+A.jnt_rts_cnt+')' : '—'"></span>
+</template>
+<template x-if="col.id==='jnt_del'">
+  <span :style="A.jnt_del_pct==null?'color:#cbd5e1;font-size:11px':'color:#111;font-size:12px'"
+        x-text="A.jnt_del_pct!=null ? A.jnt_del_pct.toFixed(1)+'%('+A.jnt_del_cnt+')' : '—'"></span>
+</template>
+<template x-if="col.id==='jnt_transit'">
+  <span :style="A.jnt_transit_pct==null?'color:#cbd5e1;font-size:11px':'color:#111;font-size:12px'"
+        x-text="A.jnt_transit_pct!=null ? A.jnt_transit_pct.toFixed(1)+'%('+A.jnt_transit_cnt+')' : '—'"></span>
+</template>
+{{-- Per-page-only columns (Promo, Price, Set RTS%, Item Val., etc.)
      — blank sa item aggregate row, tulad ng TOTAL row ng owner/private. --}}
-<template x-if="!['adspent','orders','orders_1d','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','np_per_order','np_per_order_3d','np_per_order_7d','np_per_order_1m','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_3d','proj_prof_7d','hold'].includes(col.id)">
+<template x-if="!['adspent','orders','orders_1d','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','np_per_order','np_per_order_3d','np_per_order_7d','np_per_order_1m','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_3d','proj_prof_7d','hold','jnt_rdt','jnt_rts','jnt_del','jnt_transit'].includes(col.id)">
   <span></span>
 </template>
