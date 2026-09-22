@@ -1662,6 +1662,22 @@
          2. Primary Text + Headline (backup info)
          3. Messenger preview (Page + welcome msg + quick replies mockup)
   --}}
+  {{-- Item photo lightbox — popup (imbes na bagong tab). Sarado sa backdrop / ✕ / Esc. --}}
+  <template x-if="photoModal.open">
+    <div class="ow-modal-backdrop" @click.self="photoModal.open=false" @keydown.escape.window="photoModal.open=false"
+         style="z-index:95;display:flex;align-items:center;justify-content:center;">
+      <div style="position:relative;max-width:92vw;max-height:92vh;display:flex;flex-direction:column;align-items:center;gap:10px;">
+        <button @click="photoModal.open=false"
+                style="position:absolute;top:-14px;right:-14px;background:#fff;border:1px solid #e2e8f0;border-radius:999px;width:34px;height:34px;font-size:18px;color:#334155;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2);z-index:2;"
+                title="Isara (Esc)">✕</button>
+        <img :src="photoModal.url" :alt="photoModal.name"
+             style="max-width:92vw;max-height:82vh;border-radius:10px;background:#fff;box-shadow:0 8px 40px rgba(0,0,0,.35);object-fit:contain;">
+        <div style="background:rgba(255,255,255,.95);border-radius:8px;padding:6px 14px;font-size:13px;font-weight:700;color:#0f172a;max-width:92vw;text-align:center;word-break:break-word;"
+             x-text="photoModal.name"></div>
+      </div>
+    </div>
+  </template>
+
   <template x-if="creativeModal.open">
     <div class="ow-modal-backdrop" @click.self="creativeModal.open = false" style="z-index:90;">
       <div class="ow-modal-card" style="max-width:1280px;width:96vw;max-height:90vh;overflow-y:auto;">
@@ -1965,6 +1981,7 @@
       holdMap: {},            // item_name → HOLD count (jnt/hold logic; drives item universe)
       holdLoaded: false,      // true kapag nakuha na ang holdMap
       copyState: '',          // '' | item_name | '__all' — para sa "✓ Copied" feedback
+      photoModal: { open:false, url:'', name:'' }, // lightbox popup ng item photo (imbes na bagong tab)
 
       // ── Item filter (multi-select) ───────────────────────────────────────
       selectedItems: [],
@@ -3587,7 +3604,7 @@
       },
       viewItemPhoto(name){
         const u = this.itemImages[name];
-        if (u) window.open(u, '_blank', 'noopener');
+        if (u) this.photoModal = { open:true, url:u, name:name };
       },
       async onItemPhotoChange(ev){
         const file = ev.target.files && ev.target.files[0];
