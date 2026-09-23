@@ -234,7 +234,7 @@ class JntCheckerController extends Controller
         // =========================
         // Step C: Build Macro multiset (key -> list of ids)
         // =========================
-        $macroKeyToIds = [];
+        $macroKeyToRows = [];
         foreach ($macroOutputRecords as $mo) {
             $k = $this->makeKey(
                 $mo->PAGE,
@@ -242,11 +242,12 @@ class JntCheckerController extends Controller
                 $mo->ITEM_NAME,
                 $mo->COD
             );
-            $macroKeyToIds[$k][] = (int) $mo->id;
+            $macroKeyToRows[$k][] = [
+                'id'   => (int) $mo->id,
+                'name' => strtolower($this->normText($mo->{'FULL NAME'} ?? '')), // para sa tie-breaker
+                'used' => false,
+            ];
         }
-
-        // cursor per key
-        $keyCursor = [];
 
         // =========================
         // Step D: STRICT 1-to-1 match (duplicates MUST match)
@@ -263,24 +264,42 @@ class JntCheckerController extends Controller
 
             $k = $res['key'];
 
-            if (!isset($macroKeyToIds[$k])) {
+            if (empty($macroKeyToRows[$k])) {
                 $res['matched'] = false;
                 $res['matched_id'] = null;
                 continue;
             }
 
-            $i = $keyCursor[$k] ?? 0;
+            // Duplicate = 2+ na macro rows sa parehong key (hal. dahil sa fixed phone).
+            $isDup = count($macroKeyToRows[$k]) >= 2;
+            $excelName = $res['receiver_name_norm'] ?? '';
+            $pick = -1;
 
-            if (!isset($macroKeyToIds[$k][$i])) {
+            // 1) Name match: unused macro row na TUGMANG-TUGMA ang FULL NAME ↔ Receiver.
+            if ($excelName !== '') {
+                foreach ($macroKeyToRows[$k] as $i => $g) {
+                    if (!$g['used'] && $g['name'] !== '' && $g['name'] === $excelName) { $pick = $i; break; }
+                }
+            }
+            // 2) In-order fallback — SINGLETON LANG. Kapag DUPLICATE na walang name
+            //    match, HINDI na mag-fa-fallback → mananatiling "not matched" (hindi
+            //    susulatan ng waybill) para hindi mapunta sa maling tao.
+            if ($pick === -1 && !$isDup) {
+                foreach ($macroKeyToRows[$k] as $i => $g) {
+                    if (!$g['used']) { $pick = $i; break; }
+                }
+            }
+
+            if ($pick === -1) {
                 // duplicates exhausted
                 $res['matched'] = false;
                 $res['matched_id'] = null;
                 continue;
             }
 
+            $macroKeyToRows[$k][$pick]['used'] = true;
             $res['matched'] = true;
-            $res['matched_id'] = $macroKeyToIds[$k][$i];
-            $keyCursor[$k] = $i + 1;
+            $res['matched_id'] = $macroKeyToRows[$k][$pick]['id'];
         }
         unset($res);
 
@@ -288,14 +307,9 @@ class JntCheckerController extends Controller
         // Step E: Not in Excel (EXTRA in Macro) = remaining ids after allocation
         // =========================
         $extraMacroIds = [];
-        foreach ($macroKeyToIds as $k => $ids) {
-            $used = $keyCursor[$k] ?? 0;
-            $count = count($ids);
-
-            if ($used < $count) {
-                for ($i = $used; $i < $count; $i++) {
-                    $extraMacroIds[] = $ids[$i];
-                }
+        foreach ($macroKeyToRows as $k => $rows) {
+            foreach ($rows as $g) {
+                if (!$g['used']) $extraMacroIds[] = $g['id'];
             }
         }
 
@@ -322,8 +336,8 @@ class JntCheckerController extends Controller
             return ($r['matched'] ? 3 : 2);
         })->values()->all();
 
-        // remove temp key
-        foreach ($allResults as &$r) unset($r['key']);
+        // remove temp fields
+        foreach ($allResults as &$r) { unset($r['key'], $r['receiver_name_norm']); }
         unset($r);
 
         // =========================
@@ -474,6 +488,13 @@ class JntCheckerController extends Controller
             'delivery fee', 'delivery cost',
         ]);
 
+        // optional RECEIVER NAME — para sa tie-breaker kapag may duplicate na
+        // page+phone+item+cod (hal. maraming order na iisang fixed phone).
+        $receiverNameCol = $this->resolveHeader($headerMap, [
+            'receiver name', 'consignee name', 'recipient name', 'customer name',
+            'receiver', 'consignee', 'recipient',
+        ]);
+
         $rows = array_slice($data, 1);
 
         $results = [];
@@ -521,6 +542,8 @@ class JntCheckerController extends Controller
                 'matched'      => false,
                 'matched_id'   => null,
                 'key'          => $key, // temp
+                // temp: normalized receiver name para sa duplicate tie-breaker
+                'receiver_name_norm' => $receiverNameCol ? strtolower($this->normText($row[$receiverNameCol] ?? '')) : '',
             ];
         }
 
