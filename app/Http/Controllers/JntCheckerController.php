@@ -235,6 +235,7 @@ class JntCheckerController extends Controller
         // Step C: Build Macro multiset (key -> list of ids)
         // =========================
         $macroKeyToRows = [];
+        $phoneNames     = []; // normPhone → [normName => true] — para ma-detect ang SHARED phone
         foreach ($macroOutputRecords as $mo) {
             $k = $this->makeKey(
                 $mo->PAGE,
@@ -242,12 +243,30 @@ class JntCheckerController extends Controller
                 $mo->ITEM_NAME,
                 $mo->COD
             );
+            $normName = strtolower($this->normText($mo->{'FULL NAME'} ?? ''));
             $macroKeyToRows[$k][] = [
                 'id'        => (int) $mo->id,
-                'full_name' => $this->normText($mo->{'FULL NAME'} ?? ''),             // display
-                'name'      => strtolower($this->normText($mo->{'FULL NAME'} ?? '')), // para sa tie-breaker
+                'full_name' => $this->normText($mo->{'FULL NAME'} ?? ''), // display
+                'name'      => $normName,                                  // para sa name match
                 'used'      => false,
             ];
+            if ($normName !== '') {
+                $phoneNames[$this->normPhone($mo->{'PHONE NUMBER'})][$normName] = true;
+            }
+        }
+
+        // SHARED / placeholder phone = isang phone na pag-aari ng 2+ MAGKAIBANG tao
+        // (hal. ang "fixed phone" na inilalagay kapag invalid ang totoong number).
+        // Isinasama ang Excel names para mahuli kahit iisa lang ang macro row sa range.
+        // Sa ganitong phone, HINDI maaasahan ang phone bilang identity → kailangan ng
+        // name match kahit singleton ang key.
+        foreach ($allResults as $r0) {
+            $nm = $r0['receiver_name_norm'] ?? '';
+            if ($nm !== '' && !empty($r0['receiver'])) $phoneNames[$r0['receiver']][$nm] = true;
+        }
+        $sharedPhone = [];
+        foreach ($phoneNames as $ph => $names) {
+            if (count($names) >= 2) $sharedPhone[$ph] = true;
         }
 
         // =========================
@@ -271,8 +290,9 @@ class JntCheckerController extends Controller
                 continue;
             }
 
-            // Duplicate = 2+ na macro rows sa parehong key (hal. dahil sa fixed phone).
-            $isDup = count($macroKeyToRows[$k]) >= 2;
+            // Kapag SHARED/placeholder ang phone (2+ tao ang gumagamit), hindi
+            // maaasahan ang phone → KAILANGAN ang name match kahit singleton ang key.
+            $needName = !empty($sharedPhone[$res['receiver']]);
             $excelName = $res['receiver_name_norm'] ?? '';
             $pick = -1;
 
@@ -282,10 +302,11 @@ class JntCheckerController extends Controller
                     if (!$g['used'] && $g['name'] !== '' && $g['name'] === $excelName) { $pick = $i; break; }
                 }
             }
-            // 2) In-order fallback — SINGLETON LANG. Kapag DUPLICATE na walang name
-            //    match, HINDI na mag-fa-fallback → mananatiling "not matched" (hindi
+            // 2) In-order fallback — TOTOONG phone lang (iisang tao ang may-ari, kaya
+            //    ligtas kahit duplicate). Kapag SHARED/placeholder ang phone at walang
+            //    name match → HINDI mag-fa-fallback → mananatiling "not matched" (hindi
             //    susulatan ng waybill) para hindi mapunta sa maling tao.
-            if ($pick === -1 && !$isDup) {
+            if ($pick === -1 && !$needName) {
                 foreach ($macroKeyToRows[$k] as $i => $g) {
                     if (!$g['used']) { $pick = $i; break; }
                 }
