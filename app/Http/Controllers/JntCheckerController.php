@@ -243,9 +243,10 @@ class JntCheckerController extends Controller
                 $mo->COD
             );
             $macroKeyToRows[$k][] = [
-                'id'   => (int) $mo->id,
-                'name' => strtolower($this->normText($mo->{'FULL NAME'} ?? '')), // para sa tie-breaker
-                'used' => false,
+                'id'        => (int) $mo->id,
+                'full_name' => $this->normText($mo->{'FULL NAME'} ?? ''),             // display
+                'name'      => strtolower($this->normText($mo->{'FULL NAME'} ?? '')), // para sa tie-breaker
+                'used'      => false,
             ];
         }
 
@@ -300,6 +301,7 @@ class JntCheckerController extends Controller
             $macroKeyToRows[$k][$pick]['used'] = true;
             $res['matched'] = true;
             $res['matched_id'] = $macroKeyToRows[$k][$pick]['id'];
+            $res['macro_full_name'] = $macroKeyToRows[$k][$pick]['full_name'];
         }
         unset($res);
 
@@ -542,8 +544,10 @@ class JntCheckerController extends Controller
                 'matched'      => false,
                 'matched_id'   => null,
                 'key'          => $key, // temp
-                // temp: normalized receiver name para sa duplicate tie-breaker
+                // Receiver NAME (display) + normalized temp copy para sa duplicate tie-breaker
+                'receiver_name'      => $receiverNameCol ? $this->normText($row[$receiverNameCol] ?? '') : '',
                 'receiver_name_norm' => $receiverNameCol ? strtolower($this->normText($row[$receiverNameCol] ?? '')) : '',
+                'macro_full_name'    => null, // FULL NAME ng na-match na macro row (display)
             ];
         }
 

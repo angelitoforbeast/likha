@@ -212,6 +212,8 @@
                     <th class="border px-2 py-1">Sender</th>
                     <th class="border px-2 py-1">Mapped Page</th>
                     <th class="border px-2 py-1">Receiver</th>
+                    <th class="border px-2 py-1">Receiver Name</th>
+                    <th class="border px-2 py-1">Macro Full Name</th>
                     <th class="border px-2 py-1">Item</th>
                     <th class="border px-2 py-1">COD</th>
                     <th class="border px-2 py-1">Waybill</th>
@@ -243,6 +245,8 @@
                         <td class="border px-2 py-1">{{ $row['sender'] }}</td>
                         <td class="border px-2 py-1">{{ $row['page'] }}</td>
                         <td class="border px-2 py-1">{{ $row['receiver'] }}</td>
+                        <td class="border px-2 py-1">{{ $row['receiver_name'] ?? '' }}</td>
+                        <td class="border px-2 py-1">{{ $row['macro_full_name'] ?? '' }}</td>
                         <td class="border px-2 py-1">{{ $row['item'] }}</td>
                         <td class="border px-2 py-1">{{ $row['cod'] }}</td>
                         <td class="border px-2 py-1">{{ $row['waybill'] ?? '' }}</td>
