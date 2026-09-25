@@ -200,6 +200,11 @@ class ItemController extends Controller
     public function suppliers(Request $request)
     {
         $this->checkAccess();
+        // CEO LANG ang makakakita ng supplier + presyo (data-layer: hindi lang UI hide —
+        // walang ibabalik sa hindi-CEO, same pattern ng item_value_ceo).
+        if ($this->getNormalizedRole() !== 'CEO') {
+            return response()->json(['ok' => true, 'suppliers' => []]);
+        }
         $map = [];
         try {
             if (Schema::hasTable('supply_order_items') && Schema::hasTable('supply_orders') && Schema::hasTable('suppliers')) {
@@ -252,6 +257,7 @@ class ItemController extends Controller
             'focus'     => trim((string) $request->query('item', '')),
             'startDate' => $start,
             'endDate'   => $end,
+            'isCEO'     => $this->getNormalizedRole() === 'CEO', // supplier/presyo column = CEO lang
         ]);
     }
 

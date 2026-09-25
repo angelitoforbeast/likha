@@ -730,7 +730,9 @@
                 <template x-if="!row.hasPages">
                   <div style="font-size:11px;color:#b91c1c;font-weight:700;">⚠ walang running page</div>
                 </template>
-                {{-- Supplier(s) + latest unit cost (Supply Finance). Wala = "walang supplier". --}}
+                @if($effectiveIsCEO)
+                {{-- Supplier(s) + latest unit cost (Supply Finance) — CEO LANG (viewAs=ceo).
+                     Wala sa markup ng hindi-CEO; ang endpoint ay walang ibabalik sa kanila. --}}
                 <div style="font-size:10.5px;margin-top:3px;line-height:1.35;">
                   <template x-if="suppliersFor(row.item_name).length">
                     <div style="color:#0f172a;">
@@ -745,6 +747,7 @@
                     <div style="color:#94a3b8;font-style:italic;">walang supplier</div>
                   </template>
                 </div>
+                @endif
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-top:3px;">
                   <a class="item-photo-btn" @click.stop
                      :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)+'&start_date='+startDate+'&end_date='+endDate"
@@ -3734,7 +3737,9 @@
         this.initCols();
         await this.load();
         await this.loadItemImages();
-        await this.loadItemSuppliers();
+        @if($effectiveIsCEO)
+        await this.loadItemSuppliers(); // CEO lang — walang fetch para sa iba
+        @endif
       },
     };
   }

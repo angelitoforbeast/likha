@@ -58,7 +58,7 @@
             <th style="width:64px;">Photo</th>
             <th>Item</th>
             <th style="width:90px;">HOLD</th>
-            <th style="min-width:220px;">Supplier / Presyo</th>
+            @if($isCEO)<th style="min-width:220px;">Supplier / Presyo</th>@endif
             <th style="width:230px;">Actions</th>
           </tr>
         </thead>
@@ -79,8 +79,9 @@
                 <template x-if="!it.image_url"><span class="ph-badge-no">wala pang photo</span></template>
               </td>
               <td><span class="ph-hold" x-text="'HOLD '+Number(it.hold||0).toLocaleString()"></span></td>
+              @if($isCEO)
               <td style="font-size:11px;line-height:1.4;">
-                {{-- Supplier(s) + latest unit cost (Supply Finance) — isang linya kada supplier. --}}
+                {{-- Supplier(s) + latest unit cost (Supply Finance) — CEO LANG, isang linya kada supplier. --}}
                 <template x-if="(it.suppliers||[]).length">
                   <div style="color:#0f172a;">
                     <template x-for="(s, si) in it.suppliers" :key="'sup-'+it.item_name+'-'+si">
@@ -96,6 +97,7 @@
                   <span style="color:#94a3b8;font-style:italic;">walang supplier</span>
                 </template>
               </td>
+              @endif
               <td>
                 <div class="ph-actions">
                   <input type="file" accept="image/*" :id="'file-'+slug(it.item_name)" style="display:none;"
@@ -158,7 +160,11 @@
               fetch('{{ route('item.data') }}?date_range=' + encodeURIComponent(range), {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               fetch('{{ route('owner.private.item-summary') }}?start_date=' + this.startDate + '&end_date=' + this.endDate, {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               fetch('{{ route('item.images') }}', {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
+              @if($isCEO)
               fetch('{{ route('item.suppliers') }}', {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
+              @else
+              Promise.resolve({}), // hindi CEO — walang supplier fetch
+              @endif
             ]);
             const holdMap = {}; (holdJ.items || []).forEach(it => holdMap[it.item_name] = Number(it.total_hold||0));
             const imgMap  = (imgJ && imgJ.images) ? imgJ.images : {};
