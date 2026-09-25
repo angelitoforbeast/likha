@@ -41,12 +41,6 @@ class JntUploadV2Controller extends Controller
         'barangay'       => ['barangay', 'brgy', 'barangay name'],
         'total_shipping_cost' => ['total shipping cost', 'shipping cost', 'total freight'],
         'rts_reason'     => ['rts reason', 'rts_reason', 'return reason', 'reason for rts'],
-        // TeleSMS / Opsyon A — optional columns (hindi required sa precheck).
-        'address'        => ['receiver address', 'consignee address', 'delivery address', 'address'],
-        'sender_phone'   => ['sender cellphone', 'sender phone', 'sender mobile', 'shipper phone'],
-        'item_weight'    => ['item weight', 'weight kg', 'parcel weight'],
-        'valuation_fee'  => ['valuation fee', 'valuation'],
-        'payment_method' => ['payment method', 'payment type', 'pay type'],
     ];
 
     /** Allow only Marketing - OIC and CEO. */
@@ -1070,7 +1064,6 @@ class JntUploadV2Controller extends Controller
                         if ($canon === 'receiver' && $c === 'to' && $h !== 'to') $matched = false;
                         if ($canon === 'cod' && in_array('code', $tokens, true)) $matched = false;
                         if ($canon === 'receiver_cellphone' && in_array('sender', $tokens, true)) $matched = false;
-                        if ($canon === 'address' && in_array('sender', $tokens, true)) $matched = false; // huwag mahila ang "Sender Address"
                     }
 
                     if ($matched) {

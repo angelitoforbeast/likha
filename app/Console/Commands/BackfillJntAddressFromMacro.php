@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Backfill ng from_jnts.address (at from_jnts_2.address) mula macro_output.ADDRESS,
+ * Backfill ng from_jnts.address mula macro_output.ADDRESS,
  * naka-join sa waybill (macro_output.waybill = from_jnts.waybill_number).
  *
  *  - IDEMPOTENT: pinupunan LANG ang rows na NULL/blangko ang address.
@@ -22,10 +22,10 @@ use Illuminate\Support\Facades\Schema;
 class BackfillJntAddressFromMacro extends Command
 {
     protected $signature   = 'jnt:backfill-address
-                              {--tables=from_jnts,from_jnts_2 : comma-separated tables na ba-backfill}
+                              {--tables=from_jnts : table na ba-backfill (default: from_jnts)}
                               {--chunk=20000 : id-range size kada batch}
                               {--dry-run : bilangin lang, huwag isulat}';
-    protected $description = 'Backfill address sa from_jnts / from_jnts_2 mula macro_output.ADDRESS (join sa waybill); NULL lang ang pupunan';
+    protected $description = 'Backfill from_jnts.address mula macro_output.ADDRESS (join sa waybill); NULL lang ang pupunan';
 
     public function handle(): int
     {

@@ -7,18 +7,22 @@ use Illuminate\Support\Facades\Schema;
 /**
  * TeleSMS / Opsyon A — 5 J&T Excel columns na dating NILALAKTAWAN ng importer:
  *   Address, Sender Cellphone, Item Weight, Valuation Fee, Payment Method.
- * Idinadagdag sa from_jnts (v1) at sa buong v2 pipeline (from_jnts_2 + staging
- * + winners) para tuloy-tuloy ang column list ng CSV → LOAD DATA → merge.
+ * Idinadagdag sa from_jnts LANG (ito ang table na ginagamit ng buong app).
  * Nullable lahat — bagong uploads lang ang magkakalaman; ang lumang rows ay
- * NULL (address = ba-backfill mula macro_output via `jnt:backfill-address`).
+ * NULL (address = ba-backfill mula macro_output via `jnt:backfill-address`,
+ * join sa waybill: macro_output.waybill = from_jnts.waybill_number).
  */
 return new class extends Migration
 {
-    private const TABLES = ['from_jnts', 'from_jnts_2', 'from_jnts_2_staging', 'from_jnts_2_winners'];
+    /** up(): from_jnts LANG — ito ang table na ginagamit ng app. */
+    private const TABLES_UP   = ['from_jnts'];
+    /** down(): kasama ang v2 tables — kung sakaling ang UNANG bersyon (4 tables) ang na-apply sa prod,
+     *  malinis pa rin ang rollback. Guarded ng hasTable/hasColumn kaya ligtas kahit wala ang column. */
+    private const TABLES_DOWN = ['from_jnts', 'from_jnts_2', 'from_jnts_2_staging', 'from_jnts_2_winners'];
 
     public function up(): void
     {
-        foreach (self::TABLES as $t) {
+        foreach (self::TABLES_UP as $t) {
             if (!Schema::hasTable($t)) continue;
             Schema::table($t, function (Blueprint $table) use ($t) {
                 if (!Schema::hasColumn($t, 'address'))        $table->text('address')->nullable();
@@ -32,7 +36,7 @@ return new class extends Migration
 
     public function down(): void
     {
-        foreach (self::TABLES as $t) {
+        foreach (self::TABLES_DOWN as $t) {
             if (!Schema::hasTable($t)) continue;
             Schema::table($t, function (Blueprint $table) use ($t) {
                 foreach (['address', 'sender_phone', 'item_weight', 'valuation_fee', 'payment_method'] as $c) {
