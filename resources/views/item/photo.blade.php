@@ -61,6 +61,21 @@
             <span class="ph-hold" x-text="'HOLD '+Number(it.hold||0).toLocaleString()"></span>
             <template x-if="!it.image_url"><span class="ph-badge-no">wala pang photo</span></template>
           </div>
+          {{-- Supplier(s) + latest unit cost (Supply Finance). Wala = "walang supplier". --}}
+          <div style="font-size:10.5px;line-height:1.35;">
+            <template x-if="(it.suppliers||[]).length">
+              <div style="color:#0f172a;">
+                <template x-for="(s, si) in it.suppliers" :key="'sup-'+it.item_name+'-'+si">
+                  <span :title="'PO ' + (s.order_date||'') + (s.order_no ? ' · '+s.order_no : '')">
+                    <span x-show="si>0" style="color:#cbd5e1;"> · </span>🏭 <b x-text="s.supplier"></b> <span style="color:#065f46;font-weight:700;" x-text="peso(s.unit_cost)"></span>
+                  </span>
+                </template>
+              </div>
+            </template>
+            <template x-if="!(it.suppliers||[]).length">
+              <div style="color:#94a3b8;font-style:italic;">walang supplier</div>
+            </template>
+          </div>
           <div class="ph-actions">
             <input type="file" accept="image/*" :id="'file-'+slug(it.item_name)" style="display:none;"
                    @click.stop @change="onFileChange(it.item_name, $event)">
@@ -105,6 +120,9 @@
         },
 
         slug(n){ return String(n).replace(/[^a-z0-9]+/gi, '-'); },
+        // "1 x HAND GRIP" → "hand grip" (same normalization ng supply item_key).
+        supKey(n){ return String(n||'').replace(/^\s*\d+\s*[x×]\s*/i,'').trim().toLowerCase().replace(/\s+/g,' '); },
+        peso(v){ return '₱' + Number(v||0).toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2}); },
 
         // Buuin ang SAME universe as /item: union ng owner/private running items
         // + jnt/hold>0 items, para sa range. No-image muna sa itaas.
@@ -112,13 +130,15 @@
           this.loading = true;
           try {
             const range = this.startDate + ' to ' + this.endDate;
-            const [holdJ, opJ, imgJ] = await Promise.all([
+            const [holdJ, opJ, imgJ, supJ] = await Promise.all([
               fetch('{{ route('item.data') }}?date_range=' + encodeURIComponent(range), {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               fetch('{{ route('owner.private.item-summary') }}?start_date=' + this.startDate + '&end_date=' + this.endDate, {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               fetch('{{ route('item.images') }}', {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
+              fetch('{{ route('item.suppliers') }}', {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
             ]);
             const holdMap = {}; (holdJ.items || []).forEach(it => holdMap[it.item_name] = Number(it.total_hold||0));
             const imgMap  = (imgJ && imgJ.images) ? imgJ.images : {};
+            const supMap  = (supJ && supJ.suppliers) ? supJ.suppliers : {}; // item_key → [{supplier, unit_cost, order_date}]
             // Union keyed by lowercased name → display name + hold.
             const uni = {};
             (opJ.rows || []).forEach(r => {
@@ -136,6 +156,7 @@
               item_name: u.name,
               hold: u.hold,
               image_url: imgMap[u.name] || null,
+              suppliers: supMap[this.supKey(u.name)] || supMap[String(u.name).trim().toLowerCase().replace(/\s+/g,' ')] || [],
             }));
             list.sort((a,b) => {
               const ai = a.image_url ? 1 : 0, bi = b.image_url ? 1 : 0;

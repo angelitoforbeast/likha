@@ -1033,6 +1033,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get ('/item',        [\App\Http\Controllers\ItemController::class, 'index'])      ->name('item.index');
     Route::get ('/item/data',   [\App\Http\Controllers\ItemController::class, 'data'])       ->name('item.data');
     Route::get ('/item/images', [\App\Http\Controllers\ItemController::class, 'images'])     ->name('item.images');
+    Route::get ('/item/suppliers', [\App\Http\Controllers\ItemController::class, 'suppliers']) ->name('item.suppliers');
     Route::get ('/item/photo',  [\App\Http\Controllers\ItemController::class, 'photoForm'])  ->name('item.photo');
     Route::post('/item/photo',  [\App\Http\Controllers\ItemController::class, 'photoStore']) ->middleware('throttle:60,1')->name('item.photo.store');
     Route::post('/item/image',        [\App\Http\Controllers\ItemController::class, 'uploadImage'])->middleware('throttle:60,1')->name('item.image');

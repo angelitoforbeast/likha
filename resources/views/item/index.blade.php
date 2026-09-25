@@ -730,6 +730,21 @@
                 <template x-if="!row.hasPages">
                   <div style="font-size:11px;color:#b91c1c;font-weight:700;">⚠ walang running page</div>
                 </template>
+                {{-- Supplier(s) + latest unit cost (Supply Finance). Wala = "walang supplier". --}}
+                <div style="font-size:10.5px;margin-top:3px;line-height:1.35;">
+                  <template x-if="suppliersFor(row.item_name).length">
+                    <div style="color:#0f172a;">
+                      <template x-for="(s, si) in suppliersFor(row.item_name)" :key="'sup-'+row.item_name+'-'+si">
+                        <span :title="'PO ' + (s.order_date||'') + (s.order_no ? ' · '+s.order_no : '')">
+                          <span x-show="si>0" style="color:#cbd5e1;"> · </span>🏭 <b x-text="s.supplier"></b> <span style="color:#065f46;font-weight:700;" x-text="money(s.unit_cost)"></span>
+                        </span>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="!suppliersFor(row.item_name).length">
+                    <div style="color:#94a3b8;font-style:italic;">walang supplier</div>
+                  </template>
+                </div>
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-top:3px;">
                   <a class="item-photo-btn" @click.stop
                      :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)+'&start_date='+startDate+'&end_date='+endDate"
@@ -1977,6 +1992,7 @@
       // ── ITEM tier (upper level, /item only) ───────────────────────────────
       expandedItems: {},      // item_name → true kapag naka-expand ang pages nito
       itemImages: {},         // item_name → photo url (galing item_images table)
+      itemSuppliers: {},      // item_key → [{supplier, unit_cost, order_date}] (Supply Finance)
       _photoTarget: null,     // item_name na kasalukuyang ina-upload-an ng photo
       holdMap: {},            // item_name → HOLD count (jnt/hold logic; drives item universe)
       holdLoaded: false,      // true kapag nakuha na ang holdMap
@@ -3634,6 +3650,22 @@
           if (j && j.images) this.itemImages = j.images;
         }catch(e){ /* walang photo — ok lang */ }
       },
+      // Supplier(s) + latest unit cost kada item (Supply Finance). Keyed by item_key.
+      async loadItemSuppliers(){
+        try{
+          const res = await fetch('{{ route('item.suppliers') }}', {headers:{'Accept':'application/json'}});
+          const j = await res.json();
+          if (j && j.suppliers) this.itemSuppliers = j.suppliers;
+        }catch(e){ /* walang supply data — ok lang */ }
+      },
+      // "1 x HAND GRIP" → "hand grip" (same normalization ng supply item_key).
+      supKey(n){ return String(n||'').replace(/^\s*\d+\s*[x×]\s*/i,'').trim().toLowerCase().replace(/\s+/g,' '); },
+      // Subukan ang stripped key muna ("hand grip"); fallback sa raw normalized
+      // ("1 x hand grip") kung free-typed ang PO item name na may kasamang prefix.
+      suppliersFor(name){
+        const raw = String(name||'').trim().toLowerCase().replace(/\s+/g,' ');
+        return this.itemSuppliers[this.supKey(name)] || this.itemSuppliers[raw] || [];
+      },
 
       // ── Copy: Item Name + HOLD + picture ──────────────────────────────────
       _escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); },
@@ -3702,6 +3734,7 @@
         this.initCols();
         await this.load();
         await this.loadItemImages();
+        await this.loadItemSuppliers();
       },
     };
   }

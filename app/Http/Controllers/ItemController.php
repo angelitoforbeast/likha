@@ -191,6 +191,43 @@ class ItemController extends Controller
     }
 
     /**
+     * GET /item/suppliers — supplier(s) + PINAKABAGONG unit cost kada item, galing
+     * Supply Finance (supply_order_items → supply_orders → suppliers). Keyed by
+     * item_key (base item na lowercase, walang "N x" prefix — same normalization
+     * ng SupplyFinanceController::itemKey). Discount lines (unit_cost <= 0) ay
+     * hindi kasama. Isang entry kada supplier = latest PO niya para sa item.
+     */
+    public function suppliers(Request $request)
+    {
+        $this->checkAccess();
+        $map = [];
+        try {
+            if (Schema::hasTable('supply_order_items') && Schema::hasTable('supply_orders') && Schema::hasTable('suppliers')) {
+                $rows = DB::table('supply_order_items as i')
+                    ->join('supply_orders as o', 'o.id', '=', 'i.supply_order_id')
+                    ->join('suppliers as s', 's.id', '=', 'o.supplier_id')
+                    ->where('i.unit_cost', '>', 0)
+                    ->orderByDesc('o.order_date')->orderByDesc('i.id')
+                    ->get(['i.item_key', 's.id as supplier_id', 's.name as supplier', 'i.unit_cost', 'o.order_date', 'o.order_no']);
+                $seen = [];
+                foreach ($rows as $r) {
+                    $k = (string) $r->item_key;
+                    if (isset($seen[$k][$r->supplier_id])) continue; // latest lang kada supplier
+                    $seen[$k][$r->supplier_id] = true;
+                    $map[$k][] = [
+                        'supplier'   => $r->supplier,
+                        'unit_cost'  => (float) $r->unit_cost,
+                        'order_date' => (string) $r->order_date,
+                        'order_no'   => $r->order_no,
+                    ];
+                }
+            }
+        } catch (\Throwable $e) { /* supply tables wala pa — walang supplier */ }
+
+        return response()->json(['ok' => true, 'suppliers' => $map]);
+    }
+
+    /**
      * GET /item/photo — LISTAHAN ng mga item para pamahalaan ang photos.
      * SAME universe as /item (union: owner/private running items + jnt/hold>0),
      * date-scoped — binubuo client-side (fetch item.data + owner.private.item-summary
