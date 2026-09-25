@@ -8,13 +8,16 @@
     .ph-search { flex:1; min-width:200px; border:1px solid #d1d5db; border-radius:8px; padding:8px 12px; font-size:13px; }
     .ph-count { font-size:12.5px; color:#64748b; }
     .ph-hint { font-size:11.5px; color:#94a3b8; margin-bottom:12px; }
-    .ph-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:12px; }
-    .ph-card { border:1px solid #e5e7eb; border-radius:10px; background:#fff; padding:10px; display:flex; flex-direction:column; gap:7px; cursor:pointer; transition:box-shadow .12s, border-color .12s; }
-    .ph-card:hover { border-color:#c7d2fe; }
-    .ph-card.active { border-color:#4f46e5; box-shadow:0 0 0 3px rgba(79,70,229,.18); }
-    .ph-card.noimg { background:#fff7ed; border-color:#fed7aa; }
-    .ph-card.saved { border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,.18); }
-    .ph-thumb { width:100%; aspect-ratio:1/1; border-radius:8px; border:1px solid #e2e8f0; background:#f8fafc; object-fit:cover; display:flex; align-items:center; justify-content:center; color:#cbd5e1; font-size:40px; overflow:hidden; }
+    /* ROW layout — isang row kada item (dating card grid). */
+    .ph-table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; }
+    .ph-table th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#64748b; background:#f8fafc; padding:8px 10px; border-bottom:1px solid #e5e7eb; }
+    .ph-table td { padding:8px 10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .ph-row { cursor:pointer; transition:background .12s, box-shadow .12s; }
+    .ph-row:hover { background:#f5f3ff; }
+    .ph-row.noimg { background:#fff7ed; }
+    .ph-row.active { box-shadow:inset 4px 0 0 #4f46e5; background:#eef2ff; }
+    .ph-row.saved { box-shadow:inset 4px 0 0 #10b981; background:#ecfdf5; }
+    .ph-thumb { width:56px; height:56px; border-radius:8px; border:1px solid #e2e8f0; background:#f8fafc; display:flex; align-items:center; justify-content:center; color:#cbd5e1; font-size:24px; overflow:hidden; }
     .ph-thumb img { width:100%; height:100%; object-fit:cover; }
     .ph-name { font-size:12.5px; font-weight:700; color:#0f172a; line-height:1.3; word-break:break-word; }
     .ph-hold { align-self:flex-start; font-size:10px; font-weight:800; color:#7c2d12; background:#ffedd5; border:1px solid #fed7aa; border-radius:999px; padding:2px 8px; }
@@ -41,58 +44,79 @@
       </span>
     </div>
     <div class="ph-hint">
-      Mga item na nasa <b>/item</b> (sa range na iyon). I-<b>click</b> ang card para maging aktibo, tapos <b>Ctrl+V</b> para i-paste ang larawan doon — o pindutin ang <b>Upload</b>. Walang photo = nasa itaas.
+      Mga item na nasa <b>/item</b> (sa range na iyon). I-<b>click</b> ang row para maging aktibo, tapos <b>Ctrl+V</b> para i-paste ang larawan doon — o pindutin ang <b>Upload</b>. Walang photo = nasa itaas.
     </div>
 
     <div class="ph-status" x-show="loading">Naglo-load ng items…</div>
 
-    <div class="ph-grid" x-show="!loading">
-      <template x-for="it in filtered()" :key="it.item_name">
-        <div class="ph-card"
-             :id="'card-'+slug(it.item_name)"
-             :class="{ 'active': activeItem===it.item_name, 'saved': savedItem===it.item_name, 'noimg': !it.image_url }"
-             @click="activeItem=it.item_name">
-          <div class="ph-thumb">
-            <template x-if="it.image_url"><img :src="it.image_url" :alt="it.item_name" loading="lazy"></template>
-            <template x-if="!it.image_url"><span>🖼</span></template>
-          </div>
-          <div class="ph-name" x-text="it.item_name"></div>
-          <div style="display:flex;gap:5px;flex-wrap:wrap;">
-            <span class="ph-hold" x-text="'HOLD '+Number(it.hold||0).toLocaleString()"></span>
-            <template x-if="!it.image_url"><span class="ph-badge-no">wala pang photo</span></template>
-          </div>
-          {{-- Supplier(s) + latest unit cost (Supply Finance). Wala = "walang supplier". --}}
-          <div style="font-size:10.5px;line-height:1.35;">
-            <template x-if="(it.suppliers||[]).length">
-              <div style="color:#0f172a;">
-                <template x-for="(s, si) in it.suppliers" :key="'sup-'+it.item_name+'-'+si">
-                  <span :title="'PO ' + (s.order_date||'') + (s.order_no ? ' · '+s.order_no : '')">
-                    <span x-show="si>0" style="color:#cbd5e1;"> · </span>🏭 <b x-text="s.supplier"></b> <span style="color:#065f46;font-weight:700;" x-text="peso(s.unit_cost)"></span>
-                  </span>
+    {{-- ROW layout: isang <tr> kada item. Same id ('card-<slug>') para gumana pa rin
+         ang ?item= focus/scroll; same activeItem para sa Ctrl+V paste target. --}}
+    <div x-show="!loading" style="overflow-x:auto;">
+      <table class="ph-table">
+        <thead>
+          <tr>
+            <th style="width:64px;">Photo</th>
+            <th>Item</th>
+            <th style="width:90px;">HOLD</th>
+            <th style="min-width:220px;">Supplier / Presyo</th>
+            <th style="width:230px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="it in filtered()" :key="it.item_name">
+            <tr class="ph-row"
+                :id="'card-'+slug(it.item_name)"
+                :class="{ 'active': activeItem===it.item_name, 'saved': savedItem===it.item_name, 'noimg': !it.image_url }"
+                @click="activeItem=it.item_name">
+              <td>
+                <div class="ph-thumb">
+                  <template x-if="it.image_url"><img :src="it.image_url" :alt="it.item_name" loading="lazy"></template>
+                  <template x-if="!it.image_url"><span>🖼</span></template>
+                </div>
+              </td>
+              <td>
+                <div class="ph-name" x-text="it.item_name"></div>
+                <template x-if="!it.image_url"><span class="ph-badge-no">wala pang photo</span></template>
+              </td>
+              <td><span class="ph-hold" x-text="'HOLD '+Number(it.hold||0).toLocaleString()"></span></td>
+              <td style="font-size:11px;line-height:1.4;">
+                {{-- Supplier(s) + latest unit cost (Supply Finance) — isang linya kada supplier. --}}
+                <template x-if="(it.suppliers||[]).length">
+                  <div style="color:#0f172a;">
+                    <template x-for="(s, si) in it.suppliers" :key="'sup-'+it.item_name+'-'+si">
+                      <div :title="'PO ' + (s.order_date||'') + (s.order_no ? ' · '+s.order_no : '')">
+                        🏭 <b x-text="s.supplier"></b>
+                        <span style="color:#065f46;font-weight:700;" x-text="peso(s.unit_cost)"></span>
+                        <span style="color:#94a3b8;font-size:10px;" x-text="s.order_date ? '· '+s.order_date : ''"></span>
+                      </div>
+                    </template>
+                  </div>
                 </template>
-              </div>
-            </template>
-            <template x-if="!(it.suppliers||[]).length">
-              <div style="color:#94a3b8;font-style:italic;">walang supplier</div>
-            </template>
-          </div>
-          <div class="ph-actions">
-            <input type="file" accept="image/*" :id="'file-'+slug(it.item_name)" style="display:none;"
-                   @click.stop @change="onFileChange(it.item_name, $event)">
-            <button class="ph-btn" @click.stop="pickFile(it.item_name)"
-                    x-text="savingItem===it.item_name ? '…' : (it.image_url ? 'Palitan' : 'Upload')"></button>
-            <template x-if="it.image_url">
-              <a :href="it.image_url" target="_blank" rel="noopener" @click.stop
-                 style="font-size:11px;color:#4f46e5;text-decoration:none;">View</a>
-            </template>
-            <template x-if="it.image_url">
-              <button class="ph-del" @click.stop="deleteItem(it.item_name)"
-                      x-text="deletingItem===it.item_name ? '…' : 'Delete'"></button>
-            </template>
-            <span class="ph-saved" x-show="savedItem===it.item_name">✓ Saved</span>
-          </div>
-        </div>
-      </template>
+                <template x-if="!(it.suppliers||[]).length">
+                  <span style="color:#94a3b8;font-style:italic;">walang supplier</span>
+                </template>
+              </td>
+              <td>
+                <div class="ph-actions">
+                  <input type="file" accept="image/*" :id="'file-'+slug(it.item_name)" style="display:none;"
+                         @click.stop @change="onFileChange(it.item_name, $event)">
+                  <button class="ph-btn" @click.stop="pickFile(it.item_name)"
+                          x-text="savingItem===it.item_name ? '…' : (it.image_url ? 'Palitan' : 'Upload')"></button>
+                  <template x-if="it.image_url">
+                    <a :href="it.image_url" target="_blank" rel="noopener" @click.stop
+                       style="font-size:11px;color:#4f46e5;text-decoration:none;">View</a>
+                  </template>
+                  <template x-if="it.image_url">
+                    <button class="ph-del" @click.stop="deleteItem(it.item_name)"
+                            x-text="deletingItem===it.item_name ? '…' : 'Delete'"></button>
+                  </template>
+                  <span class="ph-saved" x-show="savedItem===it.item_name">✓ Saved</span>
+                </div>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
     </div>
 
     <div class="ph-status" x-show="!loading && filtered().length===0">
