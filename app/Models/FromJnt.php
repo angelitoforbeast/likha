@@ -25,6 +25,11 @@ class FromJnt extends Model
         'barangay',
         'total_shipping_cost',
         'rts_reason',
+        'address',
+        'sender_phone',
+        'item_weight',
+        'valuation_fee',
+        'payment_method',
         'status_logs',
     ];
 

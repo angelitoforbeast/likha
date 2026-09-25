@@ -379,6 +379,13 @@ class ProcessJntUploadV2 implements ShouldQueue
             'barangay'       => ['barangay', 'brgy', 'barangay name'],
             'total_shipping_cost' => ['total shipping cost', 'shipping cost', 'total freight'],
             'rts_reason'     => ['rts reason', 'rts_reason', 'return reason', 'reason for rts'],
+            // TeleSMS / Opsyon A — dating nilalaktawan. Multi-word muna (whole-phrase match)
+            // para hindi mahila ang "Sender Address"; bare 'address' sa dulo + guard sa baba.
+            'address'        => ['receiver address', 'consignee address', 'delivery address', 'address'],
+            'sender_phone'   => ['sender cellphone', 'sender phone', 'sender mobile', 'shipper phone'],
+            'item_weight'    => ['item weight', 'weight kg', 'parcel weight'],
+            'valuation_fee'  => ['valuation fee', 'valuation'],
+            'payment_method' => ['payment method', 'payment type', 'pay type'],
         ];
 
         $map = [];
@@ -406,6 +413,7 @@ class ProcessJntUploadV2 implements ShouldQueue
                         if ($canon === 'receiver' && $c === 'to' && $h !== 'to') $matched = false;
                         if ($canon === 'cod' && in_array('code', $tokens, true)) $matched = false;
                         if ($canon === 'receiver_cellphone' && in_array('sender', $tokens, true)) $matched = false;
+                        if ($canon === 'address' && in_array('sender', $tokens, true)) $matched = false; // huwag mahila ang "Sender Address"
                     }
 
                     if ($matched) {
@@ -495,6 +503,12 @@ class ProcessJntUploadV2 implements ShouldQueue
             'barangay'           => $get('barangay'),
             'total_shipping_cost'=> $parseMoney($get('total_shipping_cost')),
             'rts_reason'         => $get('rts_reason'),
+            // TeleSMS / Opsyon A — dating nilalaktawan; kinukuha na sa bagong uploads.
+            'address'            => $get('address'),
+            'sender_phone'       => $get('sender_phone'),
+            'item_weight'        => $parseMoney($get('item_weight')),
+            'valuation_fee'      => $parseMoney($get('valuation_fee')),
+            'payment_method'     => $get('payment_method'),
             'created_at'         => $now,
             'updated_at'         => $now,
         ];
@@ -542,6 +556,11 @@ class ProcessJntUploadV2 implements ShouldQueue
                 $r['barangay'],
                 $r['total_shipping_cost'],
                 $r['rts_reason'],
+                $r['address'] ?? '',
+                $r['sender_phone'] ?? '',
+                $r['item_weight'] ?? '',
+                $r['valuation_fee'] ?? '',
+                $r['payment_method'] ?? '',
                 $now,
             ]);
         }
@@ -575,7 +594,8 @@ class ProcessJntUploadV2 implements ShouldQueue
         fwrite($this->csvHandle,
             'bulk_run_id,upload_log_id,submission_time,waybill_number,receiver,'
             . 'receiver_cellphone,sender,item_name,cod,remarks,status,signingtime,'
-            . 'province,city,barangay,total_shipping_cost,rts_reason,parsed_at'
+            . 'province,city,barangay,total_shipping_cost,rts_reason,'
+            . 'address,sender_phone,item_weight,valuation_fee,payment_method,parsed_at'
             . "\n"
         );
     }

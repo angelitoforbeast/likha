@@ -192,7 +192,8 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
                 INSERT INTO from_jnts_2_winners (
                     bulk_run_id, submission_time, waybill_number, receiver, receiver_cellphone,
                     sender, item_name, cod, remarks, status, signingtime,
-                    province, city, barangay, total_shipping_cost, rts_reason
+                    province, city, barangay, total_shipping_cost, rts_reason,
+                    address, sender_phone, item_weight, valuation_fee, payment_method
                 )
                 SELECT
                     s.bulk_run_id,
@@ -200,7 +201,8 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
                     s.waybill_number, s.receiver, s.receiver_cellphone,
                     s.sender, s.item_name, s.cod, s.remarks, s.status,
                     IF(YEAR(s.signingtime) = 0, NULL, s.signingtime) AS signingtime,
-                    s.province, s.city, s.barangay, s.total_shipping_cost, s.rts_reason
+                    s.province, s.city, s.barangay, s.total_shipping_cost, s.rts_reason,
+                    s.address, s.sender_phone, s.item_weight, s.valuation_fee, s.payment_method
                 FROM from_jnts_2_staging s
                 INNER JOIN (
                     SELECT inner_s.waybill_number, MAX(inner_s.id) AS winner_id
@@ -356,12 +358,14 @@ class ConsolidateAndMergeJntV2Run implements ShouldQueue
                 waybill_number, status, signingtime, sender, cod, item_name,
                 submission_time, receiver, receiver_cellphone, remarks,
                 province, city, barangay, total_shipping_cost, rts_reason,
+                address, sender_phone, item_weight, valuation_fee, payment_method,
                 status_logs, created_at, updated_at
             )
             SELECT
                 w.waybill_number, w.status, w.signingtime, w.sender, w.cod, w.item_name,
                 w.submission_time, w.receiver, w.receiver_cellphone, w.remarks,
                 w.province, w.city, w.barangay, w.total_shipping_cost, w.rts_reason,
+                w.address, w.sender_phone, w.item_weight, w.valuation_fee, w.payment_method,
                 JSON_ARRAY(JSON_OBJECT(
                     'batch_at', NOW(),
                     'bulk_run_id', ?,

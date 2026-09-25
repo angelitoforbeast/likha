@@ -160,7 +160,9 @@ class LoadStagingV2 implements ShouldQueue
             (@bulk_run_id, @upload_log_id, @submission_time, @waybill_number,
              @receiver, @receiver_cellphone, @sender, @item_name, @cod, @remarks,
              @status, @signingtime, @province, @city, @barangay,
-             @total_shipping_cost, @rts_reason, @parsed_at)
+             @total_shipping_cost, @rts_reason,
+             @address, @sender_phone, @item_weight, @valuation_fee, @payment_method,
+             @parsed_at)
             SET
                 bulk_run_id         = @bulk_run_id,
                 upload_log_id       = @upload_log_id,
@@ -179,6 +181,11 @@ class LoadStagingV2 implements ShouldQueue
                 barangay            = NULLIF(@barangay, ''),
                 total_shipping_cost = NULLIF(@total_shipping_cost, ''),
                 rts_reason          = NULLIF(@rts_reason, ''),
+                address             = NULLIF(@address, ''),
+                sender_phone        = NULLIF(@sender_phone, ''),
+                item_weight         = NULLIF(@item_weight, ''),
+                valuation_fee       = NULLIF(@valuation_fee, ''),
+                payment_method      = NULLIF(@payment_method, ''),
                 parsed_at           = NULLIF(@parsed_at, '')
         ";
 
