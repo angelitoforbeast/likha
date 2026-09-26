@@ -35,6 +35,11 @@ class AstraEncoder
     public const BLOCK_MARK      = '--- ASTRA';
     /** app_settings key — naka-encrypt (Crypt) na OpenAI key para sa Astra engine; sine-set sa /encoder/checker_1/settings (CEO). */
     public const SETTING_KEY     = 'astra_encoder_api_key';
+    public const SETTING_MODEL   = 'astra_encoder_model';
+    public const SETTING_EFFORT  = 'astra_encoder_effort';
+    /** Mga model na pwedeng piliin sa settings (Responses API + web_search + function tools). */
+    public const MODELS  = ['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2', 'o3', 'o4-mini'];
+    public const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
     private ?string $host = null;
     private string $model;
@@ -91,8 +96,37 @@ class AstraEncoder
 
     public function __construct(?string $model = null, ?string $effort = null)
     {
-        $this->model  = $model  ?: (string) config('services.openai.astra_encoder_model', 'gpt-6-astra');
-        $this->effort = $effort ?: (string) config('services.openai.astra_encoder_effort', 'high');
+        $eng = self::engineSettings();   // settings page (app_settings) → config/.env
+        $this->model  = $model  ?: $eng['model'];
+        $this->effort = $effort ?: $eng['effort'];
+    }
+
+    /** Model at reasoning effort: settings page muna, tapos config/.env. */
+    public static function engineSettings(): array
+    {
+        $cfgModel  = (string) config('services.openai.astra_encoder_model', 'gpt-6-astra');
+        $cfgEffort = (string) config('services.openai.astra_encoder_effort', 'high');
+        $model = null; $effort = null;
+        try {
+            $rows = DB::table('app_settings')->whereIn('key', [self::SETTING_MODEL, self::SETTING_EFFORT])->pluck('value', 'key');
+            $m = trim((string) ($rows[self::SETTING_MODEL] ?? ''));  if ($m !== '' && in_array($m, self::MODELS, true))  $model  = $m;
+            $e = trim((string) ($rows[self::SETTING_EFFORT] ?? '')); if ($e !== '' && in_array($e, self::EFFORTS, true)) $effort = $e;
+        } catch (\Throwable $x) {}
+        return [
+            'model'         => $model ?? $cfgModel,   'model_source'  => $model  !== null ? 'settings' : 'config',
+            'effort'        => $effort ?? $cfgEffort, 'effort_source' => $effort !== null ? 'settings' : 'config',
+            'config_model'  => $cfgModel,             'config_effort' => $cfgEffort,
+        ];
+    }
+
+    /** I-save (o burahin kapag blangko/'') ang model at effort mula sa settings page. */
+    public static function storeEngineSettings(?string $model, ?string $effort): void
+    {
+        foreach ([self::SETTING_MODEL => [$model, self::MODELS], self::SETTING_EFFORT => [$effort, self::EFFORTS]] as $key => [$val, $allowed]) {
+            $val = trim((string) $val);
+            if ($val === '' || !in_array($val, $allowed, true)) { DB::table('app_settings')->where('key', $key)->delete(); continue; }
+            DB::table('app_settings')->updateOrInsert(['key' => $key], ['value' => $val, 'updated_at' => now(), 'created_at' => now()]);
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -270,6 +304,7 @@ class AstraEncoder
         $trace['summary'] = [
             'engine'     => 'astra',
             'key_source' => $this->keySource,
+            'effort'     => $this->effort,
             'models'     => array_keys($models),
             'escalated'  => false,
             'searches'   => $searches,

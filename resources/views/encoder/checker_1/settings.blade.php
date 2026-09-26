@@ -143,6 +143,32 @@
           </span>
           @if(!empty($astraKey['masked'])) <span class="font-mono text-gray-600 ml-1">{{ $astraKey['masked'] }}</span> @endif
         </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label for="astra_model" class="block text-sm font-semibold mb-1">AI model</label>
+            <select id="astra_model" name="astra_model" class="border rounded px-3 py-2 w-full text-sm font-mono">
+              <option value="" @selected(($astraEngine['model_source'] ?? '') !== 'settings')>default sa config ({{ $astraEngine['config_model'] ?? 'gpt-6-astra' }})</option>
+              @foreach($astraModels as $m)
+                <option value="{{ $m }}" @selected(($astraEngine['model_source'] ?? '') === 'settings' && ($astraEngine['model'] ?? '') === $m)>{{ $m }}</option>
+              @endforeach
+            </select>
+            <p class="text-xs text-gray-500 mt-1">Ginagamit ngayon: <b>{{ $astraEngine['model'] ?? '' }}</b> ({{ ($astraEngine['model_source'] ?? '') === 'settings' ? 'settings' : 'config/.env' }})</p>
+          </div>
+          <div>
+            <label for="astra_effort" class="block text-sm font-semibold mb-1">Reasoning effort</label>
+            <select id="astra_effort" name="astra_effort" class="border rounded px-3 py-2 w-full text-sm font-mono">
+              <option value="" @selected(($astraEngine['effort_source'] ?? '') !== 'settings')>default sa config ({{ $astraEngine['config_effort'] ?? 'high' }})</option>
+              @foreach($astraEfforts as $e)
+                <option value="{{ $e }}" @selected(($astraEngine['effort_source'] ?? '') === 'settings' && ($astraEngine['effort'] ?? '') === $e)>{{ $e }}</option>
+              @endforeach
+            </select>
+            <p class="text-xs text-gray-500 mt-1">Ginagamit ngayon: <b>{{ $astraEngine['effort'] ?? '' }}</b> ({{ ($astraEngine['effort_source'] ?? '') === 'settings' ? 'settings' : 'config/.env' }})</p>
+          </div>
+        </div>
+        <p class="text-xs text-gray-500 mb-4">
+          Tantiya kada row (gpt-6-astra): <b>medium</b> ≈ ₱6–10 · <b>high</b> ≈ ₱8–12 (default, sapat sa test) · <b>xhigh</b> ≈ ₱25–45 · <b>max</b> mas mahal pa.
+          Mas mura ang gpt-5.x pero mas madalas magkamali sa mahihirap na address. Agad na gagamitin sa susunod na Astra Fix / Astra Check.
+        </p>
         <label for="astra_api_key" class="block text-sm font-semibold mb-1">Bagong key</label>
         <input type="password" id="astra_api_key" name="astra_api_key" autocomplete="new-password"
                placeholder="sk-…  (iwan blangko = walang babaguhin)"

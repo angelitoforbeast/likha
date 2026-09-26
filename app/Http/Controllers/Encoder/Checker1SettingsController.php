@@ -49,6 +49,9 @@ class Checker1SettingsController extends Controller
             // ✨ Astra engine API key (CEO lang ang makakakita/makakapagpalit; hindi ipinapakita ang buong key)
             'isCeo'         => self::isCeo(),
             'astraKey'      => self::isCeo() ? AstraEncoder::apiKeyInfo() : null,
+            'astraEngine'   => AstraEncoder::engineSettings(),
+            'astraModels'   => AstraEncoder::MODELS,
+            'astraEfforts'  => AstraEncoder::EFFORTS,
         ]);
     }
 
@@ -90,6 +93,11 @@ class Checker1SettingsController extends Controller
             'start' => $validated['shift_start'],
             'end'   => $validated['shift_end'],
         ]);
+
+        // ✨ Astra model + reasoning effort — CEO lang; '' = default mula sa config/.env
+        if (self::isCeo() && ($request->has('astra_model') || $request->has('astra_effort'))) {
+            AstraEncoder::storeEngineSettings((string) $request->input('astra_model', ''), (string) $request->input('astra_effort', ''));
+        }
 
         // ✨ Astra API key — CEO lang; blangko = walang babaguhin; 'clear' = burahin (babalik sa .env)
         if (self::isCeo()) {
