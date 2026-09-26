@@ -37,8 +37,11 @@ return [
 
     'openai' => [
     'key'   => env('OPENAI_API_KEY'),
-    // Default model ng /astra chat (user-selectable pa rin mula sa allowed list).
     'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
+    // /astra chat: default model (verified accessible sa account) + optional allowed-list
+    // override — ASTRA_MODELS="gpt-6-astra,gpt-5.5,o3" (comma-separated ids).
+    'astra_default' => env('ASTRA_DEFAULT_MODEL', 'gpt-6-astra'),
+    'astra_models'  => env('ASTRA_MODELS', ''),
     // Model is now picked per-request via the UI dropdown sa /gpt-ad-generator.
     // Allowed list + default lives sa GPTAdGeneratorController::ALLOWED_MODELS
     // and ::DEFAULT_MODEL.

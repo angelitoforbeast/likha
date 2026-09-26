@@ -26,16 +26,23 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class AstraChatController extends Controller
 {
-    /** Same list ng GPT Ad Generator — kilalang gumagana sa account; 4o family = vision. */
-    public const ALLOWED_MODELS = [
-        'gpt-4o'      => 'GPT-4o — pinakamaganda',
-        'gpt-4o-mini' => 'GPT-4o mini — mabilis, mura',
-        'gpt-4-turbo' => 'GPT-4 Turbo',
-        'gpt-4'       => 'GPT-4 (legacy)',
+    /**
+     * Allowed models — VERIFIED laban sa /v1/models ng account (2026-09-26): may access
+     * ang project sa gpt-6-astra (tinanggap ang reasoning.effort=xhigh), gpt-6-luna/sol,
+     * gpt-5.x, o3/o4-mini, at 4o. Override via ASTRA_MODELS="id1,id2,…" sa .env
+     * (config services.openai.astra_models). Label = id lang (walang inimbentong deskripsyon).
+     */
+    public const DEFAULT_ALLOWED_MODELS = [
+        'gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol',
+        'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano',
+        'o3', 'o4-mini',
+        'gpt-4o', 'gpt-4o-mini',
     ];
-    public const EFFORTS      = ['low', 'medium', 'high'];
-    public const SEARCH_MODES = ['auto', 'required', 'off'];
-    public const BUDGETS      = [2048, 4096, 8192, 16384];
+    public const EFFORTS        = ['low', 'medium', 'high', 'xhigh', 'max'];
+    public const SEARCH_MODES   = ['auto', 'required', 'off'];
+    public const BUDGETS        = [4096, 8192, 16384, 32768, 65536, 128000];
+    public const DEFAULT_EFFORT = 'xhigh';  // "Astra Extra High" — gaya ng orihinal na file
+    public const DEFAULT_BUDGET = 32768;
 
     private const MAX_ATTACH     = 4;
     private const MAX_ATTACH_KB  = 8192;
@@ -49,7 +56,7 @@ class AstraChatController extends Controller
     public function index()
     {
         return view('astra.index', [
-            'models'       => self::ALLOWED_MODELS,
+            'models'       => $this->allowedModels(),
             'defaultModel' => $this->defaultModel(),
             'efforts'      => self::EFFORTS,
             'searchModes'  => self::SEARCH_MODES,
@@ -186,10 +193,13 @@ class AstraChatController extends Controller
             abort(422, 'Walang mensahe.');
         }
 
-        $model  = isset(self::ALLOWED_MODELS[$data['model'] ?? '']) ? $data['model'] : $this->defaultModel();
-        $effort = $data['effort'] ?? 'medium';
+        $models = $this->allowedModels();
+        $model  = isset($models[$data['model'] ?? '']) ? $data['model'] : $this->defaultModel();
+        $effort = $data['effort'] ?? self::DEFAULT_EFFORT;
         $search = $data['search'] ?? 'auto';
-        $budget = in_array((int) ($data['budget'] ?? 0), self::BUDGETS, true) ? (int) $data['budget'] : 8192;
+        $budget = in_array((int) ($data['budget'] ?? 0), self::BUDGETS, true) ? (int) $data['budget'] : self::DEFAULT_BUDGET;
+        // gpt-4 family: max 16,384 output tokens — i-clamp para hindi mag-error.
+        if (preg_match('/^gpt-4/i', $model)) $budget = min($budget, 16384);
 
         // 1) Conversation — sarili lang; gumawa kung wala pa (title = unang mensahe).
         $conv = !empty($data['conversation_id'])
@@ -283,7 +293,9 @@ class AstraChatController extends Controller
                 $attempts[] = $basePayload + ['input' => array_merge($this->historyInput($conv, $userMsg->id), [$currentTurn])];
 
                 $upstream = null;
-                foreach ($attempts as $i => $payload) {
+                $strippedReasoning = false;
+                for ($i = 0; $i < count($attempts); $i++) {
+                    $payload  = $attempts[$i];
                     $upstream = Http::withToken((string) config('services.openai.key'))
                         ->connectTimeout(20)
                         ->timeout(self::OPENAI_TIMEOUT)
@@ -292,8 +304,20 @@ class AstraChatController extends Controller
 
                     if ($upstream->successful()) break;
 
-                    // Kapag invalid/expired ang previous_response_id → subukan ang history replay.
                     $err = (string) ($upstream->json('error.message') ?? $upstream->body());
+
+                    // Hindi tinatanggap ng model ang `reasoning` param → alisin sa lahat ng
+                    // attempt at ulitin ang parehong attempt (isang beses lang).
+                    if (!$strippedReasoning && isset($payload['reasoning']) && $upstream->status() === 400
+                        && (stripos($err, 'reasoning') !== false || stripos($err, 'unsupported parameter') !== false)) {
+                        $strippedReasoning = true;
+                        foreach (array_keys($attempts) as $k) unset($attempts[$k]['reasoning']);
+                        $emit(['type' => 'likha.notice', 'message' => 'Hindi supported ng model na ito ang reasoning effort — ipinadala nang wala nito.']);
+                        $i--;
+                        continue;
+                    }
+
+                    // Kapag invalid/expired ang previous_response_id → subukan ang history replay.
                     $isPrevIssue = $i === 0 && count($attempts) > 1
                         && ($upstream->status() === 404 || stripos($err, 'previous_response') !== false || stripos($err, 'not found') !== false);
                     if ($isPrevIssue) {
@@ -389,16 +413,34 @@ class AstraChatController extends Controller
         return AstraConversation::query()->where('user_id', Auth::id())->findOrFail($id);
     }
 
-    private function defaultModel(): string
+    /** @return array<string,string> id => label (config override o default list) */
+    private function allowedModels(): array
     {
-        $m = (string) config('services.openai.model', 'gpt-4o-mini');
-        return isset(self::ALLOWED_MODELS[$m]) ? $m : array_key_first(self::ALLOWED_MODELS);
+        $env = trim((string) config('services.openai.astra_models', ''));
+        $ids = $env !== ''
+            ? array_values(array_filter(array_map('trim', explode(',', $env))))
+            : self::DEFAULT_ALLOWED_MODELS;
+        $out = [];
+        foreach ($ids as $id) $out[$id] = $id;
+        return $out;
     }
 
-    /** reasoning.effort ay para lang sa reasoning models (o-series / gpt-5*); mag-e-error sa 4o. */
+    private function defaultModel(): string
+    {
+        $models = $this->allowedModels();
+        $m = (string) config('services.openai.astra_default', 'gpt-6-astra');
+        return isset($models[$m]) ? $m : (string) array_key_first($models);
+    }
+
+    /**
+     * Ipadala ang `reasoning` sa reasoning-capable families (o-series, gpt-5+ kasama
+     * gpt-6-*). Ang 4o/4-turbo ay tumatanggi. Kung mali ang hula para sa isang bagong
+     * variant, may fallback sa streamToClient(): kapag 400 tungkol sa reasoning →
+     * aalisin at ire-retry nang isang beses. Hindi na hinuhulaan — sinusubukan.
+     */
     private function supportsReasoning(string $model): bool
     {
-        return (bool) preg_match('/^(o\d|gpt-5)/i', $model);
+        return (bool) preg_match('/^(o\d|gpt-[5-9])/i', $model);
     }
 
     private function attachmentPayload(AstraAttachment $a): array

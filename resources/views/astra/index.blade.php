@@ -87,9 +87,9 @@ textarea{width:100%;resize:none;max-height:160px;min-height:52px;border:0;outlin
       <div class="settings">
         <button class="menu-btn iconbtn" id="openSide" title="Conversations">☰</button>
         <label>Model<select id="model">@foreach($models as $id => $label)<option value="{{ $id }}" @selected($id === $defaultModel)>{{ $label }}</option>@endforeach</select></label>
-        <label>Effort<select id="effort">@foreach($efforts as $e)<option value="{{ $e }}" @selected($e === 'medium')>{{ ucfirst($e) }}</option>@endforeach</select></label>
+        <label>Thinking effort<select id="effort">@foreach($efforts as $e)<option value="{{ $e }}" @selected($e === 'xhigh')>{{ ['low'=>'Low','medium'=>'Medium','high'=>'High','xhigh'=>'Extra High','max'=>'Max'][$e] ?? ucfirst($e) }}</option>@endforeach</select></label>
         <label>Web search<select id="search">@foreach($searchModes as $s)<option value="{{ $s }}" @selected($s === 'auto')>{{ $s === 'required' ? 'Always' : ucfirst($s) }}</option>@endforeach</select></label>
-        <label>Budget<select id="budget">@foreach($budgets as $b)<option value="{{ $b }}" @selected($b === 8192)>{{ number_format($b) }}</option>@endforeach</select></label>
+        <label>Budget<select id="budget">@foreach($budgets as $b)<option value="{{ $b }}" @selected($b === 32768)>{{ number_format($b) }}</option>@endforeach</select></label>
       </div>
       <div class="actions"><button id="renameChat" title="Palitan ang pangalan" disabled>Rename</button><button id="exportChat" title="I-download ang usapan" disabled>Export</button></div>
     </div></header>
@@ -162,7 +162,7 @@ const comp=$('chatForm');comp.addEventListener('dragover',e=>{e.preventDefault()
 
 // ── Send ──
 async function send(event){event?.preventDefault();if(busy)return;const prompt=$('prompt').value.trim(),model=$('model').value;if(!prompt&&!pending.length)return;$('welcome').hidden=true;$('prompt').value='';$('prompt').style.height='auto';const imgs=pending.slice();pending=[];renderPreviews();userCard(prompt,imgs);const effort=$('effort').value,card=assistantCard(model,effort),started=Date.now();let text='',summaries=new Map(),terminal=null,outputItems=new Map(),searchCount=new Set();controller=new AbortController();setBusy(true);window.scrollTo({top:document.body.scrollHeight,behavior:'instant'});
-const timer=setInterval(()=>{card.meta.textContent='Elapsed '+Math.floor((Date.now()-started)/1000)+'s';},1000);
+const timer=setInterval(()=>{card.meta.textContent='Elapsed '+Math.floor((Date.now()-started)/1000)+'s'+((effort==='xhigh'||effort==='max')?' · Extra High/Max may take several minutes.':'');},1000);
 function log(s){if(card.logs.lastChild?.textContent!==s)card.logs.append(el('div','trace',s));}
 function summaryText(){return [...summaries.values()].join('\n\n');}
 function eventHandler(e){if(e.type==='likha.start'){if(!conversationId){conversationId=e.conversation_id;conversations.unshift({id:e.conversation_id,title:e.title,last_message_at:new Date().toISOString()});renderList();$('renameChat').disabled=false;$('exportChat').disabled=false;}}
