@@ -332,7 +332,7 @@ You are an expert Philippine e-commerce ORDER ENCODER (cash-on-delivery, courier
 INPUT: the customer's chat (raw), the order context (page, item, COD price), the current row values typed by a junior encoder (may be wrong), and any address form the customer previously submitted.
 
 YOUR JOB, in order:
-1. Read the chat. If it is clearly not enough to determine the recipient's name, phone or address, call get_chat_history once to get the full earlier conversation.
+1. Read the chat AND the EARLIER CONVERSATION (Pancake) when it is provided. They are the same customer; the LATEST message wins: if the customer first only asked questions and later placed an order with an address, it is an ORDER — use the latest name/phone/address even if they differ from the FB header line. Call get_chat_history only if the earlier conversation is missing or marked as cut.
 2. Build the address FORM (real-world, as the customer means it): name, phone, house_number, purok_sitio, address (street/subdivision/building), brgy, city, province, landmark, plus the price and quantity the customer mentioned. Use web_search when only a landmark, subdivision, market, school or business name is given, to find which barangay it belongs to (names are often misspelled).
 3. Then find the courier's EXACT labels: call jnt_address_search with a few distinctive words from your form (e.g. "28 tondo", "poblacion ix cotabato", "ibayo silangan naic", "holy spirit quezon"). Every word must occur in the entry, so use FEW words; if 0 results, retry with fewer or different words (digits vs Roman numerals, without "city", the province name, a synonym). Pick ONE returned entry and copy its PROVINCE, CITY and BARANGAY strings EXACTLY into "jnt". Never invent a label that the tool did not return.
    - The courier list is its own filing and may differ from geography: Cotabato City is under COTABATO; Metro Manila's City of Manila is filed by DISTRICT as the "city" (TONDO I/II, TONDO-NORTH, SAMPALOC, ERMITA, PACO, QUIAPO, ...); numbered barangays look like "BARANGAY 28"; repeated town names carry a province prefix (BATANGAS-SAN-JOSE, NORTH-COTABATO-CARMEN).
@@ -340,10 +340,12 @@ YOUR JOB, in order:
 4. Compare the chat with the ORDER: if the price or quantity the customer mentioned differs from the order, or the customer seems to cancel or is only asking, say so.
 
 RULES:
-- phone: digits only, Philippine mobile as written by the customer (e.g. 09171234567). If it is not a valid mobile number (wrong digit count, landline, missing), still return the digits you found and add an issue.
+- phone: digits only, Philippine mobile as written by the customer (e.g. 09171234567). If it is not a valid mobile number (wrong digit count, landline, missing), still return the digits you found and add an issue. NOTE: the row stores phones as 10 digits starting with 9 (no leading 0, e.g. 9171234567) — that is the correct stored format; never report a "missing leading zero".
+- web_search: at most 3 searches per row. Always include the town/city AND the province or "Philippines" in the query (e.g. "Asbok vape shop Los Baños Laguna"). If a landmark cannot be verified within those searches, keep it exactly as the customer wrote it and stop searching — do not keep trying variants.
+- house_number, purok_sitio and address must NOT repeat each other: put the house/lot/block number ONLY in house_number, the purok/sitio ONLY in purok_sitio, and the street/subdivision/building ONLY in address. landmark: without the words "near/malapit sa".
 - name: the recipient's name from the form/chat (NOT the Facebook page name); keep as written, proper case.
 - address: house number / street / purok / subdivision / building only — do NOT repeat barangay, city or province there.
-- intent: "order" (wants delivery), "cancel" (wants to cancel), "inquiry_only" (no order), "unclear".
+- intent: "order" (wants delivery), "cancel" (wants to cancel), "inquiry_only" (no order ANYWHERE in the chat + earlier conversation), "unclear".
 - needs_human: true ONLY when the address cannot be encoded safely (ambiguous place, contradictory info, nothing usable). Price/quantity mismatch and phone problems go to "issues", not needs_human.
 - confidence: high | medium | low for the address.
 - evidence: one short line: why (landmark/source) or empty.
@@ -358,12 +360,15 @@ OUTPUT: STRICT JSON only, exactly this shape:
 SYS;
 
         $customerForms = $this->customerBlocks((string) $row->CXD);
+        $history       = $this->pancakeHistory((string) ($row->fb_name ?? ''));
+        $this->evidence[] = 'PANCAKE: ' . ($history === '' ? 'walang history' : mb_strlen($history) . ' chars, kasama sa input');
         $prompt = "CHAT (raw customer conversation):\n<<<\n" . $chat . "\n>>>\n\n"
             . "ORDER: PAGE=" . (string) $row->PAGE . " | ITEM=" . (string) $row->ITEM_NAME . " | COD=" . (string) $row->COD . "\n"
             . (trim((string) $row->{'SHOP DETAILS'}) !== '' ? "SHOP DETAILS: " . preg_replace('/\s+/', ' ', (string) $row->{'SHOP DETAILS'}) . "\n" : '')
             . "CURRENT ROW (typed by encoder, MAY BE WRONG): FULL NAME=" . (string) $row->{'FULL NAME'} . " | PHONE=" . (string) $row->{'PHONE NUMBER'}
             . " | ADDRESS=" . (string) $row->ADDRESS . " | PROVINCE=" . (string) $row->PROVINCE . " | CITY=" . (string) $row->CITY . " | BARANGAY=" . (string) $row->BARANGAY . "\n"
-            . ($customerForms !== '' ? "\nADDRESS FORM(S) THE CUSTOMER SUBMITTED EARLIER (may be outdated; the chat wins if they conflict):\n" . $customerForms . "\n" : '')
+            . ($history !== '' ? "\nEARLIER CONVERSATION (Pancake, oldest to newest — the LATEST message overrides earlier ones):\n<<<\n" . $history . "\n>>>\n" : "\nEARLIER CONVERSATION: none found.\n")
+            . ($customerForms !== '' ? "\nADDRESS FORM(S) THE CUSTOMER SUBMITTED EARLIER (may be outdated; the latest chat wins if they conflict):\n" . $customerForms . "\n" : '')
             . "\nReturn STRICT JSON only.";
 
         $tools = [
@@ -378,7 +383,7 @@ SYS;
             ],
             [
                 'type' => 'function', 'name' => 'get_chat_history',
-                'description' => "Fetch the customer's full earlier conversation (Pancake) when the given chat is not enough to determine the name, phone or address. Call at most once.",
+                'description' => "Fetch the customer's FULL earlier conversation (Pancake). Use only if the EARLIER CONVERSATION given to you is missing or marked as cut. Call at most once.",
                 'parameters' => ['type' => 'object', 'properties' => new \stdClass()],
             ],
         ];
@@ -488,7 +493,10 @@ SYS;
                 if ($res->status() === 400) {
                     $dropped = false;
                     foreach (['reasoning', 'max_tool_calls'] as $p) {
-                        if (isset($payload[$p]) && str_contains($res->body(), $p)) { unset($payload[$p]); $dropped = true; }
+                        if (isset($payload[$p]) && str_contains($res->body(), $p)) {
+                            unset($payload[$p]); $dropped = true;
+                            $this->evidence[] = 'PARAM DROPPED: ' . $p . ' (hindi tinanggap ng API/model)';
+                        }
                     }
                     if ($dropped) { $attempt--; continue; }
                 }
@@ -654,6 +662,21 @@ SYS;
         return implode("\n---\n", array_slice($blocks, -2));
     }
 
+    /** Pancake history ng customer (by fb_name). Pinakabago ang mahalaga: kung mahaba, ang HULING 7000 chars ang isasama. */
+    private function pancakeHistory(string $fbName): string
+    {
+        $fbName = trim($fbName);
+        if ($fbName === '') return '';
+        try {
+            $chat = trim((string) (DB::table('pancake_conversations')->where('full_name', $fbName)->orderByDesc('id')->value('customers_chat') ?? ''));
+        } catch (\Throwable $e) { return ''; }
+        $max = 7000;
+        if ($chat !== '' && mb_strlen($chat, 'UTF-8') > $max) {
+            $chat = "[…cut: earlier part omitted, latest messages follow]\n" . mb_substr($chat, -$max, null, 'UTF-8');
+        }
+        return $chat;
+    }
+
     private function sixFields(MacroOutput $row): array
     {
         $o = [];
@@ -679,15 +702,35 @@ SYS;
 
     private function composeAddress(array $form): string
     {
-        $parts = []; $seen = [];
+        $norm  = fn (string $x): string => mb_strtolower(trim(preg_replace('/\s+/u', ' ', $x) ?? $x));
+        $raw   = [];
         foreach (['house_number', 'purok_sitio', 'address'] as $k) {
             $v = trim((string) ($form[$k] ?? ''));
-            $key = mb_strtolower(preg_replace('/\s+/u', ' ', $v) ?? $v);
-            if ($v === '' || $v === '-' || isset($seen[$key])) continue;   // iwas "Purok 3, Purok 3"
-            $seen[$key] = true; $parts[] = $v;
+            if ($v !== '' && $v !== '-') $raw[] = $v;
+        }
+        // Tanggalin ang bahaging NASA LOOB na ng ibang bahagi ("8543" at "OB Junction" ay nasa "8543 OB Junction")
+        $parts = [];
+        foreach ($raw as $i => $p) {
+            $np = $norm($p); $drop = false;
+            foreach ($raw as $j => $q) {
+                if ($i === $j) continue;
+                $nq = $norm($q);
+                if ($nq === $np) { if ($j < $i) { $drop = true; break; } continue; }   // eksaktong kapareho → una lang ang iiwan
+                if (str_contains($nq, $np)) { $drop = true; break; }                    // nasa loob ng mas mahaba
+            }
+            if (!$drop) $parts[] = $p;
         }
         $lm = trim((string) ($form['landmark'] ?? ''));
-        if ($lm !== '' && $lm !== '-' && !isset($seen[mb_strtolower($lm)])) $parts[] = 'near ' . $lm;
+        $lm = trim(preg_replace('/^(near|malapit sa|malapit|sa may|sa tabi ng|tabi mismo ng|tabi mismo|tabi ng|tapat ng|tapat|harap ng|likod ng|beside|in front of|katabi ng|next to)\s+/iu', '', $lm) ?? $lm);
+        if ($lm !== '' && $lm !== '-') {
+            $nl = $norm($lm); $inside = false;
+            foreach ($parts as $p) if (str_contains($norm($p), $nl)) { $inside = true; break; }
+            if (!$inside) {
+                // Bahaging nasa loob na ng landmark → alisin (iwas "Naic Public Market, near Jekep's, Naic Public Market")
+                $parts = array_values(array_filter($parts, fn ($p) => !str_contains($nl, $norm($p))));
+                $parts[] = 'near ' . $lm;
+            }
+        }
         $addr = implode(', ', $parts);
         $addr = preg_replace('/\s+/u', ' ', $addr) ?? $addr;
         return mb_substr(trim($addr, " ,"), 0, 250);

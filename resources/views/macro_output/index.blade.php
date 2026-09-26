@@ -441,6 +441,10 @@
                 disabled>
           ✨ Astra Check <span id="astraCheckCount" class="ml-1 text-xs opacity-80">(…)</span>
         </button>
+        <select id="astraScope" class="border rounded px-2 py-2 text-sm {{ $aiUi === 'classic' ? 'hidden' : '' }}" title="Saklaw ng Astra Check">
+          <option value="incomplete">Incomplete lang</option>
+          <option value="blank">Lahat ng walang STATUS</option>
+        </select>
         @endif
 
         <button type="button" id="validate1-btn" class="bg-indigo-700 text-white px-4 py-2 rounded hover:bg-indigo-800">
@@ -1693,6 +1697,8 @@ function markWarn(id, field) {
       const countEl = document.getElementById('aiCheckerCount');
       const btnAstra     = document.getElementById('astraCheckBtn');   // ✨ Astra Check (batch)
       const countElAstra = document.getElementById('astraCheckCount');
+      const scopeAstra   = document.getElementById('astraScope');       // incomplete | blank
+      const astraScope   = () => (scopeAstra && scopeAstra.value === 'blank') ? 'blank' : 'incomplete';
       let   currentEngine = 'classic';                                 // aling per-row button ang ia-update ng batch
 
       // Sticky top bar elements
@@ -1734,7 +1740,16 @@ function markWarn(id, field) {
             const n = Number(j.count || 0);
             countEl.textContent = '(' + n + ')';
             btn.disabled = (n === 0) || running;
-            if (btnAstra) { countElAstra.textContent = '(' + n + ')'; btnAstra.disabled = (n === 0) || running; }
+            if (btnAstra) {
+              if (astraScope() === 'blank') {
+                const r2 = await fetch(`${URL_COUNT}?${filterQuery()}&scope=blank`, { headers: { 'Accept': 'application/json' } });
+                const j2 = await r2.json();
+                const n2 = Number((j2 && j2.count) || 0);
+                countElAstra.textContent = '(' + n2 + ')'; btnAstra.disabled = (n2 === 0) || running;
+              } else {
+                countElAstra.textContent = '(' + n + ')'; btnAstra.disabled = (n === 0) || running;
+              }
+            }
             btn.title = n > 0
               ? `Run AI Checker on ${n} pending row(s).`
               : 'No blank rows in current view. Filter to a date with pending rows.';
@@ -1804,10 +1819,11 @@ function markWarn(id, field) {
         engine = (engine === 'astra') ? 'astra' : 'classic';
         currentEngine = engine;
         const isAstra = engine === 'astra';
-        const n = parseInt((countEl.textContent.match(/\d+/) || [0])[0], 10);
-        if (n === 0) { alert('Walang blank rows na pwedeng i-process.'); return; }
+        const n = parseInt(((isAstra ? countElAstra : countEl).textContent.match(/\d+/) || [0])[0], 10);
+        if (n === 0) { alert('Walang rows na pwedeng i-process.'); return; }
         const est = isAstra ? Math.round(n * 10) : Math.round(n * 3);
-        if (!confirm(`Process ${n} row(s) sa ${isAstra ? '✨ Astra Check' : '🤖 AI Checker'}?\n\nIsa-isa lang yan — same behavior ng per-row ${isAstra ? 'Astra Fix' : 'AI Fix'} button, sequential.\nEst. cost: ~₱${est} (${isAstra ? 'gpt-6-astra + web search + J&T list, ~₱8–12/row' : 'gpt-5.2 + web search, ~₱2–3/row'}).`)) return;
+        const scopeLabel = isAstra ? (astraScope() === 'blank' ? ' · saklaw: LAHAT ng walang STATUS' : ' · saklaw: incomplete lang') : '';
+        if (!confirm(`Process ${n} row(s) sa ${isAstra ? '✨ Astra Check' : '🤖 AI Checker'}${scopeLabel}?\n\nIsa-isa lang yan — same behavior ng per-row ${isAstra ? 'Astra Fix' : 'AI Fix'} button, sequential.\nEst. cost: ~₱${est} (${isAstra ? 'gpt-6-astra + web search + J&T list, ~₱8–12/row' : 'gpt-5.2 + web search, ~₱2–3/row'}).`)) return;
 
         running = true;
         stopFlag = false;
@@ -1819,6 +1835,7 @@ function markWarn(id, field) {
         let batchId = null;   // galing sa start() — para magrupo ang per-batch logs
         try {
           const body = new URLSearchParams(filterQuery());
+          if (isAstra) body.set('scope', astraScope());
           const r = await fetch(URL_START, {
             method: 'POST',
             headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -2044,6 +2061,7 @@ function markWarn(id, field) {
       // ── Wire up ───────────────────────────────────────────────────────
       btn.addEventListener('click', () => startBatch('classic'));
       if (btnAstra) btnAstra.addEventListener('click', () => startBatch('astra'));
+      if (scopeAstra) scopeAstra.addEventListener('change', refreshCount);
       barPauseBtn.addEventListener('click', pauseBatch);
       barContinueBtn.addEventListener('click', continueBatch);
       barStopBtn.addEventListener('click', stopBatch);

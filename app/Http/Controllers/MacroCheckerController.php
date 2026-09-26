@@ -107,6 +107,9 @@ class MacroCheckerController extends Controller
             $s->whereNull('STATUS')->orWhereRaw("TRIM({$STATUS}) = ''");
         });
 
+        // scope=blank → LAHAT ng walang STATUS (kasama ang kumpleto na pero hindi pa PROCEED); default = incomplete lang
+        if ($request->input('scope') === 'blank') return $q;
+
         $q->where(function ($a) use ($wrap) {
             $cols = ['PROVINCE', 'CITY', 'BARANGAY', 'PHONE NUMBER', 'FULL NAME'];
             foreach ($cols as $c) {
