@@ -427,11 +427,19 @@
         @if(!empty($canUseAiChecker))
         {{-- AI Checker (CHECKER_11_1 PHP port) — drives MacroCheckerController.
              Role-gated: visible lang for CEO / Marketing / Marketing - OIC. --}}
+        @php $aiUi = config('services.openai.ai_checker_ui', 'both'); @endphp
         <button type="button" id="aiCheckerBtn"
-                class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700"
+                class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 {{ $aiUi === 'astra' ? 'hidden' : '' }}"
                 title="Run AI Checker on all rows na may blank na FULL NAME / PHONE / ADDRESS / PROVINCE / CITY / BARANGAY sa current view filter."
                 disabled>
           🤖 AI Checker <span id="aiCheckerCount" class="ml-1 text-xs opacity-80">(…)</span>
+        </button>
+        {{-- ✨ Astra Check — parehong rows, Astra engine (form → CXD → J&T list tool → anim na field → check) --}}
+        <button type="button" id="astraCheckBtn"
+                class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700 {{ $aiUi === 'classic' ? 'hidden' : '' }}"
+                title="Astra Check: lahat ng pending rows sa current filter gamit ang Astra engine (gpt-6-astra + web search + J&T list)."
+                disabled>
+          ✨ Astra Check <span id="astraCheckCount" class="ml-1 text-xs opacity-80">(…)</span>
         </button>
         @endif
 
@@ -1678,10 +1686,14 @@ function markWarn(id, field) {
       const URL_START   = "{{ route('macro_checker.start') }}";
       const URL_RUN_ROW = "{{ url('/encoder/checker_1/ai-checker/run-row') }}"; // + /{id}
       const CSRF        = "{{ csrf_token() }}";
+      const AI_UI       = "{{ config('services.openai.ai_checker_ui', 'both') }}"; // both | astra | classic
 
       // Toolbar button + count
       const btn     = document.getElementById('aiCheckerBtn');
       const countEl = document.getElementById('aiCheckerCount');
+      const btnAstra     = document.getElementById('astraCheckBtn');   // ✨ Astra Check (batch)
+      const countElAstra = document.getElementById('astraCheckCount');
+      let   currentEngine = 'classic';                                 // aling per-row button ang ia-update ng batch
 
       // Sticky top bar elements
       const bar           = document.getElementById('aiCheckerBar');
@@ -1722,6 +1734,7 @@ function markWarn(id, field) {
             const n = Number(j.count || 0);
             countEl.textContent = '(' + n + ')';
             btn.disabled = (n === 0) || running;
+            if (btnAstra) { countElAstra.textContent = '(' + n + ')'; btnAstra.disabled = (n === 0) || running; }
             btn.title = n > 0
               ? `Run AI Checker on ${n} pending row(s).`
               : 'No blank rows in current view. Filter to a date with pending rows.';
@@ -1729,6 +1742,7 @@ function markWarn(id, field) {
         } catch (e) {
           countEl.textContent = '(err)';
           btn.disabled = true;
+          if (btnAstra) { countElAstra.textContent = '(err)'; btnAstra.disabled = true; }
         }
       }
 
@@ -1768,7 +1782,7 @@ function markWarn(id, field) {
       function setRowButtonState(id, state, label) {
         const tr = document.querySelector(`tr[data-id="${id}"]`);
         if (!tr) return;
-        const b = tr.querySelector('.ai-fix-row-btn');
+        const b = tr.querySelector(currentEngine === 'astra' ? '.ai-fix-row-btn.astra' : '.ai-fix-row-btn:not(.astra)') || tr.querySelector('.ai-fix-row-btn');
         if (!b) return;
         b.classList.remove('queued', 'fixing', 'done', 'partial', 'fail');
         b.classList.add(state);
@@ -1786,14 +1800,19 @@ function markWarn(id, field) {
       }
 
       // ── Main batch loop (sequential, frontend-driven) ─────────────────
-      async function startBatch() {
+      async function startBatch(engine) {
+        engine = (engine === 'astra') ? 'astra' : 'classic';
+        currentEngine = engine;
+        const isAstra = engine === 'astra';
         const n = parseInt((countEl.textContent.match(/\d+/) || [0])[0], 10);
         if (n === 0) { alert('Walang blank rows na pwedeng i-process.'); return; }
-        if (!confirm(`Process ${n} row(s) sa AI Checker?\n\nIsa-isa lang yan — same behavior ng per-row AI Fix button, sequential.\nEst. cost: ~₱${(n * 0.40).toFixed(2)} (5 OpenAI calls × ~₱0.08 per row).`)) return;
+        const est = isAstra ? Math.round(n * 10) : Math.round(n * 3);
+        if (!confirm(`Process ${n} row(s) sa ${isAstra ? '✨ Astra Check' : '🤖 AI Checker'}?\n\nIsa-isa lang yan — same behavior ng per-row ${isAstra ? 'Astra Fix' : 'AI Fix'} button, sequential.\nEst. cost: ~₱${est} (${isAstra ? 'gpt-6-astra + web search + J&T list, ~₱8–12/row' : 'gpt-5.2 + web search, ~₱2–3/row'}).`)) return;
 
         running = true;
         stopFlag = false;
         btn.disabled = true;
+        if (btnAstra) btnAstra.disabled = true;
 
         // Step 1: resolve the list of IDs to process
         let ids = [];
@@ -1808,20 +1827,20 @@ function markWarn(id, field) {
           const j = await r.json();
           if (!r.ok || !j.ok) {
             alert('Failed to start: ' + (j.error || ('HTTP ' + r.status)));
-            running = false; btn.disabled = false;
+            running = false; btn.disabled = false; if (btnAstra) btnAstra.disabled = false;
             return;
           }
           ids = j.ids || [];
           batchId = j.batch_id || null;
         } catch (e) {
           alert('Failed to start: ' + e.message);
-          running = false; btn.disabled = false;
+          running = false; btn.disabled = false; if (btnAstra) btnAstra.disabled = false;
           return;
         }
 
         if (ids.length === 0) {
           alert('No rows to process.');
-          running = false; btn.disabled = false;
+          running = false; btn.disabled = false; if (btnAstra) btnAstra.disabled = false;
           return;
         }
 
@@ -1855,7 +1874,7 @@ function markWarn(id, field) {
             const r = await fetch(`${URL_RUN_ROW}/${encodeURIComponent(id)}`, {
               method: 'POST',
               headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: new URLSearchParams({ source: 'batch', batch_id: batchId || '', batch_total: String(ids.length) }).toString(),
+              body: new URLSearchParams({ source: 'batch', engine, batch_id: batchId || '', batch_total: String(ids.length) }).toString(),
             });
             const j = await r.json();
 
@@ -1900,6 +1919,7 @@ function markWarn(id, field) {
 
         running = false;
         btn.disabled = false;
+        if (btnAstra) btnAstra.disabled = false;
         refreshCount();
       }
 
@@ -1945,10 +1965,22 @@ function markWarn(id, field) {
           btn.className = 'ai-fix-row-btn block w-full mb-1 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-2 py-1 rounded shadow-sm';
           btn.title = 'AI Fix this row — runs CHECKER_11_1 logic (PROV → CITY → BRGY → NAME+ADDR → VERIFY)';
           btn.innerHTML = '🤖 AI Fix';
-          btn.addEventListener('click', () => runOneRow(id, btn));
+          btn.addEventListener('click', () => runOneRow(id, btn, 'classic'));
+          if (AI_UI === 'astra') btn.classList.add('hidden');
 
           // Prepend so the button sits at the top of the FULL NAME cell
           firstTd.insertBefore(btn, firstTd.firstChild);
+
+          // ✨ Astra Fix — parehong row, Astra engine (form → CXD → J&T list → anim na field → check)
+          if (AI_UI !== 'classic') {
+            const ab = document.createElement('button');
+            ab.type = 'button';
+            ab.className = 'ai-fix-row-btn astra block w-full mb-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-2 py-1 rounded shadow-sm';
+            ab.title = 'Astra Fix this row — gpt-6-astra + web search + J&T list (form → CXD → labels → check)';
+            ab.innerHTML = '✨ Astra Fix';
+            ab.addEventListener('click', () => runOneRow(id, ab, 'astra'));
+            btn.insertAdjacentElement('afterend', ab);
+          }
         });
       }
 
@@ -1971,10 +2003,11 @@ function markWarn(id, field) {
         });
       }
 
-      async function runOneRow(id, button) {
+      async function runOneRow(id, button, engine) {
+        engine = (engine === 'astra') ? 'astra' : 'classic';
         const orig = button.innerHTML;
         button.disabled = true;
-        button.innerHTML = '⏳ Fixing…';
+        button.innerHTML = engine === 'astra' ? '⏳ Astra…' : '⏳ Fixing…';
         try {
           const r = await fetch(`${URL_RUN_ROW}/${encodeURIComponent(id)}`, {
             method: 'POST',
@@ -1983,7 +2016,7 @@ function markWarn(id, field) {
               'Accept': 'application/json',
               'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: new URLSearchParams({ source: 'single' }).toString(),
+            body: new URLSearchParams({ source: 'single', engine }).toString(),
           });
           const j = await r.json();
           if (!r.ok || !j.ok) {
@@ -2009,7 +2042,8 @@ function markWarn(id, field) {
       }
 
       // ── Wire up ───────────────────────────────────────────────────────
-      btn.addEventListener('click', startBatch);
+      btn.addEventListener('click', () => startBatch('classic'));
+      if (btnAstra) btnAstra.addEventListener('click', () => startBatch('astra'));
       barPauseBtn.addEventListener('click', pauseBatch);
       barContinueBtn.addEventListener('click', continueBatch);
       barStopBtn.addEventListener('click', stopBatch);

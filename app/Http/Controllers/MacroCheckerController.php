@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\MacroOutput;
+use App\Services\AstraEncoder;
 use App\Services\MacroChecker;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -188,12 +189,14 @@ class MacroCheckerController extends Controller
 
         // Logging context — 'batch' (AI Checker) o 'single' (AI Fix per row).
         $source     = $request->input('source') === 'batch' ? 'batch' : 'single';
+        $engine     = $request->input('engine') === 'astra' ? 'astra' : 'classic';   // ✨ Astra Fix/Check o 🤖 AI Fix/Checker
         $batchId    = $request->input('batch_id') ?: null;
         $batchTotal = (int) $request->input('batch_total', 0);
         $t0         = microtime(true);
 
         try {
-            $result = (new MacroChecker)->processRow((int) $id, $maps, (string) $request->getHost());
+            $svc    = $engine === 'astra' ? new AstraEncoder() : new MacroChecker();
+            $result = $svc->processRow((int) $id, $maps, (string) $request->getHost());
             $durationMs = (int) round((microtime(true) - $t0) * 1000);
             // Re-read so frontend gets the actual updated values
             $row = MacroOutput::find((int) $id);
@@ -217,6 +220,7 @@ class MacroCheckerController extends Controller
 
             return response()->json([
                 'ok'     => true,
+                'engine' => $engine,
                 'result' => $result,
                 'row'    => [
                     'id'           => $row->id,

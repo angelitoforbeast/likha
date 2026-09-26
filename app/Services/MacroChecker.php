@@ -930,6 +930,12 @@ class MacroChecker
     {
         return config('services.openai.key') ?: env('OPENAI_API_KEY');
     }
+
+    /** Host ng request (per-host blacklists) — ginagamit ng AstraEncoder bago tumawag ng validateRow(). */
+    public function setHost(?string $host): void
+    {
+        $this->host = $host;
+    }
     // ═════════════════════════════════════════════════════════════════════
     //  WEB SEARCH (Responses API) · VALIDATION GATE · EVIDENCE · PHONE FORM
     // ═════════════════════════════════════════════════════════════════════
@@ -1059,7 +1065,7 @@ class MacroChecker
      *         ADDRESS (hindi blangko, walang address-keyword blacklist)
      *   soft: SHOP DETAILS item/COD mismatch
      */
-    private function validateRow($row, array $final, array $maps): array
+    public function validateRow($row, array $final, array $maps): array
     {
         $hard = []; $soft = [];
         $refs = $this->valRefs ??= $this->loadValidationRefs();

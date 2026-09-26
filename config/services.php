@@ -49,6 +49,12 @@ return [
     // kada row, sa huling pass lang. Blangko ang model = walang escalation (tao agad).
     'ai_checker_escalate_model'  => env('AI_CHECKER_ESCALATE_MODEL', 'gpt-6-astra'),
     'ai_checker_escalate_effort' => env('AI_CHECKER_ESCALATE_EFFORT', 'xhigh'),
+    // ✨ Astra engine (AstraEncoder): isang malalim na call na may tools (web_search + jnt_address_search + Pancake).
+    'astra_encoder_model'  => env('ASTRA_ENCODER_MODEL', 'gpt-6-astra'),
+    'astra_encoder_effort' => env('ASTRA_ENCODER_EFFORT', 'high'),
+    'astra_encoder_max_web' => (int) env('ASTRA_ENCODER_MAX_WEB', 4),   // cap sa web search calls kada row (0 = walang cap)
+    // Aling buttons ang nakikita sa /encoder/checker_1: both | astra | classic
+    'ai_checker_ui' => env('AI_CHECKER_UI', 'both'),
     // USD kada 1M tokens [input, output] + kada web search call — para sa cost_usd sa ai_checker_logs (estimate).
     'ai_checker_prices' => [
         'gpt-5.2'     => [1.75, 14.0],
