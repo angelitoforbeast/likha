@@ -1644,7 +1644,7 @@ function markWarn(id, field) {
   <div id="aiCheckerBar"
        class="hidden fixed bottom-0 left-0 right-0 z-[60] bg-white border-t-2 border-red-500 shadow-lg px-4 py-2">
     <div class="max-w-7xl mx-auto flex items-center gap-3 text-sm">
-      <span class="font-bold text-red-700">🤖 AI Checker</span>
+      <span id="aiBarTitle" class="font-bold text-red-700">🤖 AI Checker</span>
       <span id="aiBarCounts" class="text-slate-700 font-mono">0 / 0</span>
       <span class="text-slate-300">·</span>
       <span class="text-green-700">✅ <span id="aiBarFixed">0</span></span>
@@ -1652,6 +1652,8 @@ function markWarn(id, field) {
       <span class="text-red-700">❌ <span id="aiBarFailed">0</span></span>
       <span class="text-slate-300">·</span>
       <span id="aiBarEta" class="text-slate-500 text-xs">starting…</span>
+      <span class="text-slate-300">·</span>
+      <span id="aiBarCurrent" class="text-slate-800 text-xs font-mono truncate max-w-[380px]" title="Kasalukuyang row"></span>
 
       {{-- Inline progress bar --}}
       <div class="flex-1 mx-2 bg-slate-200 rounded-full h-2 min-w-[100px]">
@@ -1708,6 +1710,8 @@ function markWarn(id, field) {
       const barPartial    = document.getElementById('aiBarPartial');
       const barFailed     = document.getElementById('aiBarFailed');
       const barEta        = document.getElementById('aiBarEta');
+      const barTitle      = document.getElementById('aiBarTitle');
+      const barCurrent    = document.getElementById('aiBarCurrent');
       const barProgress   = document.getElementById('aiBarProgress');
       const barPauseBtn   = document.getElementById('aiBarPauseBtn');
       const barContinueBtn= document.getElementById('aiBarContinueBtn');
@@ -1762,6 +1766,14 @@ function markWarn(id, field) {
       }
 
       // ── Sticky bar helpers ────────────────────────────────────────────
+      // Ipakita kung ALING row ang pinoproseso: #id · pangalan · page, o "nasa ibang page" kung wala sa screen
+      function setBarCurrent(id, rowData, code) {
+        if (!barCurrent) return;
+        const tr = document.querySelector(`tr[data-id="${id}"]`);
+        const name = (rowData && rowData['FULL NAME']) || tr?.querySelector('[data-field="FULL NAME"]')?.value || '';
+        const page = tr?.querySelector('[data-field="PAGE"]')?.value || '';
+        barCurrent.textContent = (code ? code + ' ' : '⏳ ') + '#' + id + (name ? ' · ' + name : '') + (page ? ' · ' + page : '') + (tr ? '' : ' (nasa ibang page)');
+      }
       function showBar() { bar.classList.remove('hidden'); document.body.style.paddingBottom = '60px'; }
       function hideBar() { bar.classList.add('hidden'); document.body.style.paddingBottom = ''; }
 
@@ -1849,6 +1861,11 @@ function markWarn(id, field) {
           }
           ids = j.ids || [];
           batchId = j.batch_id || null;
+          // Unahin ang mga row na nasa screen ngayon (page na ito), tapos ang nasa ibang page
+          const inDom = new Set(Array.from(document.querySelectorAll('tr[data-id]')).map(tr => String(tr.getAttribute('data-id'))));
+          ids = ids.filter(x => inDom.has(String(x))).concat(ids.filter(x => !inDom.has(String(x))));
+          if (barTitle) barTitle.textContent = isAstra ? '✨ Astra Check' : '🤖 AI Checker';
+          if (barCurrent) barCurrent.textContent = '';
         } catch (e) {
           alert('Failed to start: ' + e.message);
           running = false; btn.disabled = false; if (btnAstra) btnAstra.disabled = false;
@@ -1886,6 +1903,7 @@ function markWarn(id, field) {
           if (stopFlag) break;
 
           setRowButtonState(id, 'fixing');
+          setBarCurrent(id, null, null);
 
           try {
             const r = await fetch(`${URL_RUN_ROW}/${encodeURIComponent(id)}`, {
@@ -1903,6 +1921,7 @@ function markWarn(id, field) {
               if (j.row) applyRowUpdate(id, j.row);
 
               const code = j.result?.final_code || '—';
+              setBarCurrent(id, j.row || null, code);
               // PROCEED gate: code = ✅ but if all_filled is false, treat as partial
               const allFilled = j.result?.all_filled !== false; // default true if missing
               if (code === '✅' && allFilled) {
