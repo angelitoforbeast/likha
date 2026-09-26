@@ -126,6 +126,35 @@
         </div>
       </section>
 
+      {{-- ✨ Astra engine API key (CEO lang) --}}
+      @if(!empty($isCeo))
+      <section class="bg-white rounded-xl shadow p-5">
+        <div class="font-semibold text-lg mb-1">✨ Astra engine — OpenAI API key</div>
+        <p class="text-sm text-gray-500 mb-3">
+          Hiwalay na key para sa <strong>✨ Astra Fix / Astra Check</strong> sa checker_1 (para hiwalay ang billing).
+          Naka-encrypt sa database. Kung walang naka-save dito, gagamitin ang <code class="bg-gray-100 px-1 rounded text-xs">ASTRA_ENCODER_API_KEY</code>
+          o <code class="bg-gray-100 px-1 rounded text-xs">OPENAI_API_KEY</code> sa .env.
+        </p>
+        <div class="text-sm mb-3">
+          Kasalukuyang gamit:
+          @php $src = $astraKey['source'] ?? 'wala'; @endphp
+          <span class="inline-block rounded px-2 py-0.5 text-xs font-semibold {{ $src === 'settings' ? 'bg-emerald-100 text-emerald-800' : ($src === 'wala' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700') }}">
+            {{ ['settings' => 'Settings (database)', 'env_astra' => '.env ASTRA_ENCODER_API_KEY', 'env_openai' => '.env OPENAI_API_KEY (shared)', 'wala' => 'WALANG KEY'][$src] ?? $src }}
+          </span>
+          @if(!empty($astraKey['masked'])) <span class="font-mono text-gray-600 ml-1">{{ $astraKey['masked'] }}</span> @endif
+        </div>
+        <label for="astra_api_key" class="block text-sm font-semibold mb-1">Bagong key</label>
+        <input type="password" id="astra_api_key" name="astra_api_key" autocomplete="new-password"
+               placeholder="sk-…  (iwan blangko = walang babaguhin)"
+               class="border rounded px-3 py-2 w-full text-sm font-mono">
+        <label class="flex items-center gap-2 mt-2 text-sm text-gray-700">
+          <input type="checkbox" name="astra_api_key_clear" value="1">
+          Burahin ang naka-save na key (babalik sa .env)
+        </label>
+        <p class="text-xs text-gray-500 mt-2">Agad na gagamitin sa susunod na Astra Fix / Astra Check — walang restart o cache clear na kailangan.</p>
+      </section>
+      @endif
+
       {{-- Save bar --}}
       <div class="flex items-center gap-2">
         <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded px-4 py-2 text-sm">

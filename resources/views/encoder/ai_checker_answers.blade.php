@@ -47,6 +47,14 @@
           @endforeach
         </select>
       </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-gray-500">Engine</span>
+        <select name="engine" class="border rounded px-2 py-1">
+          <option value="">lahat</option>
+          <option value="astra" @selected($filters['engine'] === 'astra')>✨ Astra</option>
+          <option value="classic" @selected($filters['engine'] === 'classic')>🤖 AI Checker (classic)</option>
+        </select>
+      </label>
       <label class="flex items-center gap-2 pb-1">
         <input type="checkbox" name="escalated" value="1" @checked($filters['escalated'])>
         <span>escalated lang (gpt-6-astra)</span>

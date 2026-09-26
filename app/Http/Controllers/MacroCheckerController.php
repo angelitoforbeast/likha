@@ -299,6 +299,7 @@ class MacroCheckerController extends Controller
             'mid'       => trim((string) $request->query('mid', '')),
             'outcome'   => in_array($request->query('outcome'), ['fixed', 'partial', 'failed'], true) ? (string) $request->query('outcome') : '',
             'escalated' => (bool) $request->query('escalated'),
+            'engine'    => in_array($request->query('engine'), ['astra', 'classic'], true) ? (string) $request->query('engine') : '',
         ];
         $limit = 300;
         $logs  = collect();
@@ -314,6 +315,8 @@ class MacroCheckerController extends Controller
             if ($filters['mid'] !== '')    $q->where('macro_output_id', (int) $filters['mid']);
             if ($filters['outcome'] !== '') $q->where('outcome', $filters['outcome']);
             if ($filters['escalated'] && $hasDetail) $q->where('escalated', 1);
+            if ($hasDetail && $filters['engine'] === 'astra')   $q->where('model', 'like', '%astra%');
+            if ($hasDetail && $filters['engine'] === 'classic') $q->where(function ($w) { $w->whereNull('model')->orWhere('model', 'not like', '%astra%'); });
 
             $agg = (clone $q)->selectRaw(
                 'COUNT(*) AS c, SUM(CASE WHEN outcome = ? THEN 1 ELSE 0 END) AS f, AVG(duration_ms) AS a'

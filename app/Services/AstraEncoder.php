@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\MacroOutput;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -31,6 +33,8 @@ class AstraEncoder
     public const MAX_TOOL_ROUNDS = 8;
     public const LIST_LIMIT      = 40;
     public const BLOCK_MARK      = '--- ASTRA';
+    /** app_settings key — naka-encrypt (Crypt) na OpenAI key para sa Astra engine; sine-set sa /encoder/checker_1/settings (CEO). */
+    public const SETTING_KEY     = 'astra_encoder_api_key';
 
     private ?string $host = null;
     private string $model;
@@ -39,6 +43,50 @@ class AstraEncoder
     private array $usage    = [];
     private array $searches = [];
     private ?MacroOutput $row = null;
+
+    /**
+     * Saan kukunin ang OpenAI key ng Astra engine, sa pagkakasunod:
+     *  1) app_settings[astra_encoder_api_key] — naka-encrypt, sine-set ng CEO sa /encoder/checker_1/settings
+     *  2) ASTRA_ENCODER_API_KEY sa .env
+     *  3) OPENAI_API_KEY sa .env
+     */
+    public static function resolveApiKey(): ?string
+    {
+        return self::apiKeyInfo()['key'];
+    }
+
+    /** ['key' => string|null, 'source' => 'settings'|'env_astra'|'env_openai'|'wala', 'masked' => '…1234'] — para sa settings page (hindi ipinapakita ang buong key). */
+    public static function apiKeyInfo(): array
+    {
+        try {
+            $enc = DB::table('app_settings')->where('key', self::SETTING_KEY)->value('value');
+            if ($enc) {
+                $k = trim(Crypt::decryptString((string) $enc));
+                if ($k !== '') return ['key' => $k, 'source' => 'settings', 'masked' => '…' . substr($k, -4)];
+            }
+        } catch (\Throwable $e) {
+            Log::warning('ASTRA_KEY_DECRYPT', ['error' => $e->getMessage()]);
+        }
+        $k = (string) env('ASTRA_ENCODER_API_KEY', '');
+        if (trim($k) !== '') return ['key' => trim($k), 'source' => 'env_astra', 'masked' => '…' . substr(trim($k), -4)];
+        $k = (string) (config('services.openai.key') ?: env('OPENAI_API_KEY', ''));
+        if (trim($k) !== '') return ['key' => trim($k), 'source' => 'env_openai', 'masked' => '…' . substr(trim($k), -4)];
+        return ['key' => null, 'source' => 'wala', 'masked' => ''];
+    }
+
+    /** I-save (encrypted) o burahin ang key mula sa settings page. */
+    public static function storeApiKey(?string $key): void
+    {
+        $key = trim((string) $key);
+        if ($key === '') {
+            DB::table('app_settings')->where('key', self::SETTING_KEY)->delete();
+            return;
+        }
+        DB::table('app_settings')->updateOrInsert(
+            ['key' => self::SETTING_KEY],
+            ['value' => Crypt::encryptString($key), 'updated_at' => now(), 'created_at' => now()]
+        );
+    }
 
     public function __construct(?string $model = null, ?string $effort = null)
     {
@@ -62,7 +110,8 @@ class AstraEncoder
         $chat = trim((string) $row->all_user_input);
         if ($chat === '') return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'Empty all_user_input'], $t0);
 
-        $apiKey = config('services.openai.key') ?: env('OPENAI_API_KEY');
+        // Key ng Astra engine: settings page (app_settings, encrypted) → ASTRA_ENCODER_API_KEY → OPENAI_API_KEY
+        $apiKey = self::resolveApiKey();
         if (!$apiKey) return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'No OPENAI_API_KEY'], $t0);
 
         $before = $this->sixFields($row);

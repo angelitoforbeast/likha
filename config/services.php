@@ -50,6 +50,8 @@ return [
     'ai_checker_escalate_model'  => env('AI_CHECKER_ESCALATE_MODEL', 'gpt-6-astra'),
     'ai_checker_escalate_effort' => env('AI_CHECKER_ESCALATE_EFFORT', 'xhigh'),
     // ✨ Astra engine (AstraEncoder): isang malalim na call na may tools (web_search + jnt_address_search + Pancake).
+    // Hiwalay na API key para sa Astra engine (para hiwalay ang billing/limits). Blangko = gamitin ang OPENAI_API_KEY.
+    'astra_encoder_key'    => env('ASTRA_ENCODER_API_KEY') ?: env('OPENAI_API_KEY'),
     'astra_encoder_model'  => env('ASTRA_ENCODER_MODEL', 'gpt-6-astra'),
     'astra_encoder_effort' => env('ASTRA_ENCODER_EFFORT', 'high'),
     'astra_encoder_max_web' => (int) env('ASTRA_ENCODER_MAX_WEB', 4),   // cap sa web search calls kada row (0 = walang cap)

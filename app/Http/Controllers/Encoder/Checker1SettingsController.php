@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Encoder;
 
 use App\Http\Controllers\Controller;
+use App\Services\AstraEncoder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -44,7 +46,17 @@ class Checker1SettingsController extends Controller
             'shift'         => self::loadShift(),
             'shiftDefaults' => self::SHIFT_DEFAULTS,
             'saved'         => session('settings_saved', false),
+            // ✨ Astra engine API key (CEO lang ang makakakita/makakapagpalit; hindi ipinapakita ang buong key)
+            'isCeo'         => self::isCeo(),
+            'astraKey'      => self::isCeo() ? AstraEncoder::apiKeyInfo() : null,
         ]);
+    }
+
+    /** CEO check — same pattern as MacroCheckerController::isCeo(). */
+    private static function isCeo(): bool
+    {
+        $role = preg_replace('/\s+/u', ' ', trim((string) (Auth::user()?->employeeProfile?->role ?? '')));
+        return preg_match('/^ceo$/iu', $role) === 1;
     }
 
     public function update(Request $request)
@@ -78,6 +90,21 @@ class Checker1SettingsController extends Controller
             'start' => $validated['shift_start'],
             'end'   => $validated['shift_end'],
         ]);
+
+        // ✨ Astra API key — CEO lang; blangko = walang babaguhin; 'clear' = burahin (babalik sa .env)
+        if (self::isCeo()) {
+            if ($request->boolean('astra_api_key_clear')) {
+                AstraEncoder::storeApiKey(null);
+            } else {
+                $newKey = trim((string) $request->input('astra_api_key', ''));
+                if ($newKey !== '') {
+                    if (strlen($newKey) < 20 || preg_match('/\s/', $newKey)) {
+                        return back()->withInput($request->except('astra_api_key'))->withErrors(['astra_api_key' => 'Mukhang hindi valid ang API key (masyadong maikli o may space).']);
+                    }
+                    AstraEncoder::storeApiKey($newKey);
+                }
+            }
+        }
 
         return redirect()
             ->route('encoder.checker1.settings')
