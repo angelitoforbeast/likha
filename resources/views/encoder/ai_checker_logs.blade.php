@@ -29,8 +29,12 @@
         Naka-prune sa huling <strong>90 araw</strong>. Oras = Asia/Manila.
       </p>
       @if (!empty($isCeo))
-        <a href="{{ route('macro_checker.access') }}"
-           class="shrink-0 text-sm font-semibold text-blue-600 hover:underline">⚙️ Manage access →</a>
+        <div class="shrink-0 flex items-center gap-4">
+          <a href="{{ route('macro_checker.answers') }}"
+             class="text-sm font-semibold text-blue-600 hover:underline">🧠 AI answers →</a>
+          <a href="{{ route('macro_checker.access') }}"
+             class="text-sm font-semibold text-blue-600 hover:underline">⚙️ Manage access →</a>
+        </div>
       @endif
     </div>
 

@@ -278,29 +278,61 @@ class MacroCheckerController extends Controller
     }
 
     /**
-     * GET /encoder/checker_1/ai-checker/row-log/{id} — mga huling takbo ng AI sa isang
-     * macro_output row (pinakabago muna) para sa "AI log" popup sa checker_1.
+     * GET /encoder/checker_1/ai-checker/answers — CEO-only page: ano ang aktwal na sagot ng AI
+     * kada takbo (RESOLVE/candidates, MAP, GUARD, VERIFYK, searches, before→after, gastos).
+     * Galing sa ai_checker_logs.detail (JSON). Hiwalay na page, walang popup sa checker_1.
      */
-    public function rowLog(Request $request, $id)
+    public function answers(Request $request)
     {
-        if ($r = $this->checkRole()) return $r;
-        if (!Schema::hasTable('ai_checker_logs')) return response()->json(['ok' => true, 'logs' => []]);
+        if (!$this->isCeo()) abort(403);
 
-        $cols = ['id', 'created_at', 'user_name', 'source', 'outcome', 'final_code', 'duration_ms'];
-        foreach (['model', 'escalated', 'searches', 'tokens_in', 'tokens_out', 'cost_usd', 'evidence', 'detail'] as $c) {
-            if (Schema::hasColumn('ai_checker_logs', $c)) $cols[] = $c;
-        }
-        $logs = DB::table('ai_checker_logs')
-            ->where('macro_output_id', (int) $id)
-            ->orderByDesc('id')->limit(5)
-            ->get($cols)
-            ->map(function ($l) {
-                $l->detail = isset($l->detail) && $l->detail !== null ? json_decode($l->detail, true) : null;
+        $tz   = 'Asia/Manila';
+        $date = trim((string) $request->query('date', ''));
+        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = Carbon::now($tz)->format('Y-m-d');
+        $filters = [
+            'date'      => $date,
+            'page'      => trim((string) $request->query('page', '')),
+            'mid'       => trim((string) $request->query('mid', '')),
+            'outcome'   => in_array($request->query('outcome'), ['fixed', 'partial', 'failed'], true) ? (string) $request->query('outcome') : '',
+            'escalated' => (bool) $request->query('escalated'),
+        ];
+        $limit = 300;
+        $logs  = collect();
+        $totals = ['count' => 0, 'fixed' => 0, 'escalated' => 0, 'searches' => 0, 'cost' => 0.0, 'avg_ms' => 0];
+
+        if (Schema::hasTable('ai_checker_logs')) {
+            $hasDetail = Schema::hasColumn('ai_checker_logs', 'detail');
+            // PH day → timezone ng app (created_at = now() ng app; kung UTC ang app, UTC ang window; kung PH, PH)
+            $start = Carbon::parse($date, $tz)->startOfDay()->setTimezone(config('app.timezone', 'UTC'));
+            $end   = (clone $start)->addDay();
+            $q = DB::table('ai_checker_logs')->whereBetween('created_at', [$start, $end]);
+            if ($filters['page'] !== '')   $q->where('page', 'like', '%' . $filters['page'] . '%');
+            if ($filters['mid'] !== '')    $q->where('macro_output_id', (int) $filters['mid']);
+            if ($filters['outcome'] !== '') $q->where('outcome', $filters['outcome']);
+            if ($filters['escalated'] && $hasDetail) $q->where('escalated', 1);
+
+            $agg = (clone $q)->selectRaw(
+                'COUNT(*) AS c, SUM(CASE WHEN outcome = ? THEN 1 ELSE 0 END) AS f, AVG(duration_ms) AS a'
+                . ($hasDetail ? ', SUM(escalated) AS e, SUM(searches) AS s, SUM(cost_usd) AS cost' : ''),
+                ['fixed']
+            )->first();
+            $totals = [
+                'count'     => (int) ($agg->c ?? 0),
+                'fixed'     => (int) ($agg->f ?? 0),
+                'escalated' => (int) ($agg->e ?? 0),
+                'searches'  => (int) ($agg->s ?? 0),
+                'cost'      => (float) ($agg->cost ?? 0),
+                'avg_ms'    => (float) ($agg->a ?? 0),
+            ];
+
+            $logs = $q->orderByDesc('id')->limit($limit)->get()->map(function ($l) use ($hasDetail) {
+                $l->detail = ($hasDetail && !empty($l->detail)) ? (json_decode($l->detail, true) ?: []) : [];
                 return $l;
             });
-        return response()->json(['ok' => true, 'logs' => $logs]);
-    }
+        }
 
+        return view('encoder.ai_checker_answers', compact('logs', 'filters', 'totals', 'limit'));
+    }
     /** Insert ng isang per-row AI log — best-effort (di sisirain ang run-row). */
     private function writeLog(array $data): void
     {

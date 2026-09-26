@@ -1677,7 +1677,6 @@ function markWarn(id, field) {
       const URL_COUNT   = "{{ route('macro_checker.count') }}";
       const URL_START   = "{{ route('macro_checker.start') }}";
       const URL_RUN_ROW = "{{ url('/encoder/checker_1/ai-checker/run-row') }}"; // + /{id}
-      const URL_ROW_LOG = "{{ url('/encoder/checker_1/ai-checker/row-log') }}"; // + /{id}
       const CSRF        = "{{ csrf_token() }}";
 
       // Toolbar button + count
@@ -1950,12 +1949,6 @@ function markWarn(id, field) {
 
           // Prepend so the button sits at the top of the FULL NAME cell
           firstTd.insertBefore(btn, firstTd.firstChild);
-          // 🧾 AI log — ano ang aktwal na sagot ng AI sa row na ito (ai_checker_logs)
-          const lg = document.createElement('a');
-          lg.href = '#'; lg.className = 'ai-log-row-link block text-[11px] text-blue-700 underline mb-1';
-          lg.textContent = '🧾 AI log';
-          lg.addEventListener('click', (e) => { e.preventDefault(); showAiLog(id); });
-          btn.insertAdjacentElement('afterend', lg);
         });
       }
 
@@ -2013,70 +2006,6 @@ function markWarn(id, field) {
           alert('Row #' + id + ' error: ' + e.message);
           setTimeout(() => { button.innerHTML = orig; button.disabled = false; }, 2000);
         }
-      }
-
-      // ── 🧾 AI log popup — huling takbo ng AI sa row (RESOLVE/MAP/GUARD/VERIFYK, searches, gastos) ─
-      function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-      async function showAiLog(id) {
-        let overlay = document.getElementById('aiLogOverlay');
-        if (!overlay) {
-          overlay = document.createElement('div');
-          overlay.id = 'aiLogOverlay';
-          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
-          overlay.innerHTML = '<div id="aiLogBox" style="background:#fff;max-width:960px;width:100%;max-height:90vh;overflow:auto;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.3);padding:16px 18px;font-size:12px;"></div>';
-          overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-          document.body.appendChild(overlay);
-        }
-        const box = overlay.querySelector('#aiLogBox');
-        box.innerHTML = '<div class="text-gray-500">Loading AI log ng row #' + esc(id) + '…</div>';
-        try {
-          const r = await fetch(URL_ROW_LOG + '/' + id, { headers: { 'Accept': 'application/json' } });
-          const j = await r.json();
-          if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status));
-          if (!j.logs.length) { box.innerHTML = '<div class="font-semibold mb-2">🧾 AI log — row #' + esc(id) + '</div><div class="text-gray-500">Wala pang takbo ng AI Fix / AI Checker ang row na ito.</div>' + closeBtn(); return; }
-          let html = '<div class="flex items-center justify-between mb-2"><div class="font-bold text-sm">🧾 AI log — row #' + esc(id) + ' (' + j.logs.length + ' takbo, pinakabago muna)</div>' + closeBtn() + '</div>';
-          j.logs.forEach((l, i) => {
-            const usd = Number(l.cost_usd || 0);
-            html += '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;margin-bottom:10px;' + (i === 0 ? 'background:#f8fafc;' : '') + '">'
-              + '<div class="flex flex-wrap gap-x-4 gap-y-1 mb-1">'
-              + '<span><b>' + esc(l.created_at) + '</b></span><span>👤 ' + esc(l.user_name || '') + '</span><span>' + esc(l.source || '') + '</span>'
-              + '<span>resulta: <b>' + esc(l.final_code || '') + '</b> (' + esc(l.outcome || '') + ')</span>'
-              + (l.model ? '<span>model: ' + esc(l.model) + (l.escalated ? ' <b style="color:#b45309">ESCALATED</b>' : '') + '</span>' : '')
-              + (l.searches !== undefined ? '<span>searches: ' + esc(l.searches) + '</span>' : '')
-              + (l.tokens_in !== undefined ? '<span>tokens: ' + esc(l.tokens_in) + ' in / ' + esc(l.tokens_out) + ' out</span>' : '')
-              + (l.cost_usd !== undefined ? '<span>gastos: $' + usd.toFixed(3) + ' ≈ ₱' + (usd * 58).toFixed(2) + '</span>' : '')
-              + '<span>' + esc(l.duration_ms) + ' ms</span></div>';
-            if (l.evidence) html += '<pre style="white-space:pre-wrap;word-break:break-word;background:#fff;border:1px solid #eee;border-radius:6px;padding:8px;margin:6px 0;max-height:320px;overflow:auto;">' + esc(l.evidence) + '</pre>';
-            else html += '<div class="text-gray-500 italic">Walang detalye (takbo bago ang logging ng sagot ng AI).</div>';
-            if (l.detail) {
-              const passes = (l.detail.passes || []);
-              passes.forEach((p) => {
-                (p.resolve || []).forEach((rs) => {
-                  const a = rs.answer || {};
-                  html += '<div style="margin:4px 0 2px;"><b>Pass ' + esc(p.pass) + ' · RESOLVE (' + esc(rs.model) + '):</b> '
-                    + esc([a.barangay, a.city, a.province].filter(Boolean).join(', ') || '—') + ' <i>[' + esc(a.confidence) + ']</i>'
-                    + ((a.city_candidates || []).length > 1 ? ' · city?: ' + esc(a.city_candidates.join(' / ')) : '')
-                    + ((a.barangay_candidates || []).length > 1 ? ' · brgy?: ' + esc(a.barangay_candidates.join(' / ')) : '')
-                    + (rs.map && rs.map.note ? '<br><b>MAP:</b> ' + esc(rs.map.note) : '')
-                    + (rs.assess && rs.assess.reasons && rs.assess.reasons.length ? '<br><b>GUARD:</b> ' + esc(rs.assess.reasons.join(' · ')) : '')
-                    + '</div>';
-                });
-                if (p.before && p.after) {
-                  const changed = (p.updated || []).filter(k => k !== 'APP SCRIPT CHECKER' && k !== 'STATUS');
-                  if (changed.length) html += '<div><b>Pass ' + esc(p.pass) + ' binago:</b> ' + changed.map(k => esc(k) + ': "' + esc(p.before[k] || '') + '" → "' + esc(p.after[k] || '') + '"').join(' · ') + '</div>';
-                }
-              });
-              html += '<details style="margin-top:6px;"><summary class="cursor-pointer text-blue-700">Raw JSON</summary><pre style="white-space:pre-wrap;word-break:break-word;font-size:11px;background:#111;color:#e5e7eb;padding:8px;border-radius:6px;max-height:400px;overflow:auto;">' + esc(JSON.stringify(l.detail, null, 2)) + '</pre></details>';
-            }
-            html += '</div>';
-          });
-          box.innerHTML = html;
-          box.querySelectorAll('.ai-log-close').forEach(b => b.addEventListener('click', () => overlay.remove()));
-        } catch (e) {
-          box.innerHTML = '<div class="text-red-600">Hindi ma-load ang AI log: ' + esc(e.message) + '</div>' + closeBtn();
-          box.querySelectorAll('.ai-log-close').forEach(b => b.addEventListener('click', () => overlay.remove()));
-        }
-        function closeBtn() { return '<button type="button" class="ai-log-close bg-gray-200 hover:bg-gray-300 rounded px-3 py-1 text-xs">✕ Close</button>'; }
       }
 
       // ── Wire up ───────────────────────────────────────────────────────
