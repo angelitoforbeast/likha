@@ -12,10 +12,12 @@ use Illuminate\Support\Facades\Schema;
  * Port of the CHECKER_11_1 Google Apps Script macro into Laravel.
  *
  * Replicates the macro's per-field fix sequence:
- *   1) Fuzzy-match PROVINCE/CITY/BARANGAY vs the customer chat (PHP only).
- *   2) Iteratively call OpenAI per field — PROV → CITY → BRGY — each using
- *      a filtered allowed list (cities scoped sa fixed province; brgys
- *      scoped sa fixed city+province). Same prompts as macro.
+ *   1) RESOLVE — ONE OpenAI call (web search) → real-world PSA province/city/
+ *      barangay from the customer chat (NOT list-constrained; blank if unsure).
+ *   2) MAP — PHP looks that up in the WHOLE J&T list: city first (labels are
+ *      globally unique), the PROVINCE comes FROM THE LIST (Cotabato City →
+ *      COTABATO), then barangay within that city (Roman numerals, STA./STO.,
+ *      "(POB.)"). Not found / ambiguous → left for a human, never a neighbor.
  *   3) Extract FULL NAME + ADDRESS Line 1 via OpenAI (NAMEADDR step).
  *   4) Final AI verify (VERIFYK step) → writes the status code sa
  *      `APP SCRIPT CHECKER` column, plus STATUS=PROCEED if ✅.
@@ -201,7 +203,7 @@ class MacroChecker
     }
 
     /**
-     * Runs the full PROVFIX → CITYFIX → BRGYFIX → NAMEADDR → VERIFYK sequence
+     * Runs the RESOLVE → MAP → NAMEADDR → PHONE → VERIFYK sequence
      * on a row using the given chat text. Persists updates. Returns the result.
      *
      * Called twice per hard row by processRow (pass 1 = short chat, pass 2 =
@@ -211,49 +213,72 @@ class MacroChecker
     {
         $updates = [];
 
-        // ── 1. PROVFIX ───────────────────────────────────────────────────
         $provCur = trim((string) $row->PROVINCE);
-        $newProv = $this->fixProvince($chat, $provCur, $maps['provincesList'], $apiKey);
-        if ($newProv && $this->provInList($newProv, $maps['provincesList']) && $newProv !== $provCur) {
-            $updates['PROVINCE'] = $newProv;
-        }
-        $effectiveProv = $updates['PROVINCE'] ?? $provCur;
+        $cityCur = trim((string) $row->CITY);
+        $brgyCur = trim((string) $row->BARANGAY);
+
+        // ── 1. RESOLVE — ISANG AI call (may web search) ──────────────────
+        // Alamin muna ang TOTOONG province/city/barangay (PSA names) mula sa chat.
+        // HINDI naka-kulong sa J&T list; blank ang field kapag hindi sigurado.
+        $resolved = $this->resolveAddress($chat, $provCur, $cityCur, $brgyCur, $apiKey);
         $this->sleepMs();
 
-        // Build city list for the (possibly updated) province
-        $provKey  = self::normProv($effectiveProv);
-        $cityList = isset($maps['citiesByProv'][$provKey])
-            ? implode(', ', $maps['citiesByProv'][$provKey])
-            : '';
+        // ── 2. MAP — PHP, deterministic, sa BUONG J&T list ───────────────
+        // City muna (globally unique ang labels maliban PANDAN) → province MULA SA LIST
+        // (hal. Cotabato City → COTABATO kahit "Maguindanao del Norte" ang sabi ng PSA).
+        // Hindi nakita o ambiguous → walang ilalagay → hindi ✅ → tao ang bahala.
+        $mapped = $this->mapResolvedToList($resolved, $maps);
+        if ($mapped['note'] !== '') $this->evidence[] = 'MAP: ' . $mapped['note'];
 
-        // ── 2. CITYFIX ───────────────────────────────────────────────────
-        $cityCur = trim((string) $row->CITY);
-        if ($cityList !== '') {
-            $candidate = $this->fixCity($chat, $effectiveProv, $cityCur, $cityList, $apiKey);
-            if ($candidate && $this->cityInList($candidate, $cityList) && $candidate !== $cityCur) {
-                $updates['CITY'] = $candidate;
-            }
-            $this->sleepMs();
+        if ($mapped['province'] !== null && self::normProv($mapped['province']) !== self::normProv($provCur)) {
+            $updates['PROVINCE'] = $mapped['province'];
         }
+        if ($mapped['city'] !== null && self::normPlace($mapped['city']) !== self::normPlace($cityCur)) {
+            $updates['CITY'] = $mapped['city'];
+        }
+        $effectiveProv = $updates['PROVINCE'] ?? $provCur;
         $effectiveCity = $updates['CITY'] ?? $cityCur;
 
-        // Build brgy list for the (possibly updated) city+province
-        $cityKey  = self::normPlace($effectiveCity);
-        $brgyList = isset($maps['brgysByCityProv'][$cityKey.'|'.$provKey])
-            ? implode(', ', $maps['brgysByCityProv'][$cityKey.'|'.$provKey])
-            : '';
-
-        // ── 3. BRGYFIX ───────────────────────────────────────────────────
-        $brgyCur = trim((string) $row->BARANGAY);
-        if ($brgyList !== '') {
-            $candidate = $this->fixBarangay($chat, $effectiveProv, $effectiveCity, $brgyCur, $brgyList, $apiKey);
-            if ($candidate && $this->brgyInList($candidate, $brgyList) && $candidate !== $brgyCur) {
-                $updates['BARANGAY'] = $candidate;
+        // Fallback (WALANG search): may pangalan ng city ang resolver pero hindi nakita ang
+        // spelling sa list → AI ang maghahanap sa list ng province na iyon; UNKNOWN kung wala.
+        $provKey  = self::normProv($effectiveProv);
+        $cityList = isset($maps['citiesByProv'][$provKey]) ? implode(', ', $maps['citiesByProv'][$provKey]) : '';
+        if ($mapped['city'] === null && !empty($mapped['city_unmapped']) && $cityList !== '') {
+            $cand = $this->fixCity($chat, $effectiveProv, $cityCur, $cityList, $apiKey, (string) $resolved['city']);
+            if ($cand && $this->cityInList($cand, $cityList)) {
+                $cand = $this->canonicalizeFromList($cand, $cityList);
+                if (self::normPlace($cand) !== self::normPlace($cityCur)) $updates['CITY'] = $cand;
+                $effectiveCity = $cand;
+                $this->evidence[] = 'CITYFIX (fallback, walang search): "' . $resolved['city'] . '" → ' . $cand;
+            } else {
+                $this->evidence[] = 'CITYFIX (fallback): "' . $resolved['city'] . '" wala sa list ng ' . $effectiveProv . ' → tao';
             }
             $this->sleepMs();
         }
-        $effectiveBrgy = $updates['BARANGAY'] ?? $brgyCur;
 
+        // Barangay: deterministic match sa loob ng napiling city (Roman numerals, STA./STO., "(POB.)").
+        $cityKey    = self::normPlace($effectiveCity);
+        $brgyLabels = $maps['brgysByCityProv'][$cityKey . '|' . $provKey] ?? [];
+        $brgyList   = $brgyLabels ? implode(', ', $brgyLabels) : '';
+        $aiBrgy     = trim((string) ($resolved['barangay'] ?? ''));
+        if ($brgyList !== '' && $aiBrgy !== '' && ($resolved['confidence'] ?? 'low') !== 'low') {
+            $pick = $this->matchBarangayInList($aiBrgy, $brgyLabels);
+            if ($pick !== null) {
+                $this->evidence[] = 'MAP: barangay "' . $aiBrgy . '" → ' . $pick . ' (list)';
+            } else {
+                // Fallback (WALANG search): hanapin ang spelling ng resolver barangay sa list ng city na ito.
+                $cand = $this->fixBarangay($chat, $effectiveProv, $effectiveCity, $brgyCur, $brgyList, $apiKey, $aiBrgy);
+                if ($cand && $this->brgyInList($cand, $brgyList)) {
+                    $pick = $this->canonicalizeFromList($cand, $brgyList);
+                    $this->evidence[] = 'BRGYFIX (fallback, walang search): "' . $aiBrgy . '" → ' . $pick;
+                } else {
+                    $this->evidence[] = 'MAP: barangay "' . $aiBrgy . '" wala sa list ng ' . $effectiveCity . ' → tao';
+                }
+                $this->sleepMs();
+            }
+            if ($pick !== null && self::normPlace($pick) !== self::normPlace($brgyCur)) $updates['BARANGAY'] = $pick;
+        }
+        $effectiveBrgy = $updates['BARANGAY'] ?? $brgyCur;
         // ── 4. NAMEADDR (extract FULL NAME + ADDRESS Line 1 + PHONE) ─────
         $nameCur = trim((string) $row->{'FULL NAME'});
         $addrCur = trim((string) $row->ADDRESS);
@@ -282,21 +307,21 @@ class MacroChecker
             }
         }
 
-        // ── 5. VERIFYK ───────────────────────────────────────────────────
-        $verdict = $this->verifyAddress($chat, $effectiveProv, $effectiveCity, $effectiveBrgy, $apiKey, $brgyList);
-
-        // Kung may iminungkahing MAS TAMANG barangay ang verifier (mula sa allowed list —
-        // hal. landmark → ibang kandidato), ipalit at ituring na ok ang barangay.
-        $better = trim((string) ($verdict['better_barangay'] ?? ''));
-        if ($better !== '' && $brgyList !== '' && $this->brgyInList($better, $brgyList)
-            && self::normPlace($better) !== self::normPlace($effectiveBrgy)) {
-            $updates['BARANGAY'] = $this->canonicalizeFromList($better, $brgyList);
-            $effectiveBrgy       = $updates['BARANGAY'];
-            $verdict['barangay_ok'] = true;
-            $this->evidence[] = 'VERIFYK: barangay → ' . $effectiveBrgy
-                . (!empty($verdict['evidence']) ? ' — ' . $verdict['evidence'] : '');
+        // ── 5. VERIFYK — HUKOM LANG (walang search, walang pagbabago) ────
+        $resolverNote = '';
+        if (($resolved['city'] ?? '') !== '' || ($resolved['province'] ?? '') !== '' || ($resolved['barangay'] ?? '') !== '') {
+            $resolverNote = 'A previous step (with web search) read the chat as: '
+                . implode(', ', array_filter([$resolved['barangay'] ?? '', $resolved['city'] ?? '', $resolved['province'] ?? '']))
+                . ' [confidence: ' . ($resolved['confidence'] ?? 'low') . ']'
+                . (($resolved['evidence'] ?? '') !== '' ? ' — ' . $resolved['evidence'] : '');
         }
+        $verdict = $this->verifyAddress($chat, $effectiveProv, $effectiveCity, $effectiveBrgy, $apiKey, $resolverNote);
+        if (($verdict['evidence'] ?? '') !== '') $this->evidence[] = 'VERIFYK: ' . $verdict['evidence'];
 
+        // ANG LIST ANG KATOTOHANAN: blank o wala sa list → hindi ok, kahit ano ang sabi ng AI.
+        if ($effectiveProv === '' || !$this->provInList($effectiveProv, $maps['provincesList'])) $verdict['province_ok'] = false;
+        if ($effectiveCity === '' || $cityList === '' || !$this->cityInList($effectiveCity, $cityList)) $verdict['city_ok'] = false;
+        if ($effectiveBrgy === '' || $brgyList === '' || !$this->brgyInList($effectiveBrgy, $brgyList)) $verdict['barangay_ok'] = false;
         // ✅ IMPLIED PROVINCE PATCH — same pattern as macro's implied-city patch.
         // Kung city_ok && barangay_ok pero !province_ok, AT yung current city ay
         // unique sa current province sa jnt_address.txt, then province is implied.
@@ -413,39 +438,16 @@ class MacroChecker
 
     // ── OPENAI PROMPTS — ported 1:1 from CHECKER_11_1 ─────────────────────
 
-    /** Province fix — same as macro's PROVFIX_*. */
-    public function fixProvince(string $chat, string $provOld, string $provList, string $apiKey): ?string
-    {
-        if (trim($chat) === '' || trim($provList) === '') return null;
-
-        $system = 'You validate Philippine province names. Choose ONLY from the provided province list. '
-                . 'Return STRICT JSON only: {"province":"..."}. If truly cannot determine, return UNKNOWN.';
-
-        $prompt = $chat . "\n\n"
-            . "Task: correct the PROVINCE only.\n"
-            . "Rules:\n"
-            . "- Choose ONLY from the allowed PROVINCE list below.\n"
-            . "- If the message explicitly mentions NCR/Metro Manila, pick the NCR/Metro Manila option in the list.\n"
-            . "- Do NOT keep the current province unless the message supports it.\n\n"
-            . "Current Province: " . $provOld . "\n\n"
-            . "Allowed PROVINCE list (pick ONLY from this list):\n"
-            . $provList . "\n\n"
-            . 'Return STRICT JSON only: {"province":"..."}' . "\n";
-
-        $raw = $this->callSearch($apiKey, $system, $prompt, 'PROVFIX');
-        $parsed = $this->parseJsonField($raw, 'province');
-        if (!$parsed || strtoupper($parsed) === 'UNKNOWN') return null;
-        return $this->canonicalizeProvince($parsed, $provList);
-    }
-
     /** City fix — same as macro's CITYFIX_*. */
-    public function fixCity(string $chat, string $prov, string $cityOld, string $cityList, string $apiKey): ?string
+    public function fixCity(string $chat, string $prov, string $cityOld, string $cityList, string $apiKey, string $hint = ''): ?string
     {
         if (trim($chat) === '' || trim($cityList) === '') return null;
 
         $system = 'You validate Philippine cities/municipalities. Choose ONLY from the provided city list. '
                 . 'The chat may mention landmarks, markets, terminals, or BUSINESS NAMES (often misspelled, e.g. "jekeps" = J-Keps Trading). '
-                . 'If the city is ambiguous, use web search to locate the landmark/business within the given province, then pick the matching list entry. '
+                . 'If the city is ambiguous, use the location of the landmark/business within the given province to pick the matching list entry. '
+                . 'If a RESOLVED city is given, it is the real-world name already determined — your job is only to find its spelling/label in the allowed list. '
+                . 'If the customer EXPLICITLY names a city/municipality that is NOT in the allowed list, return UNKNOWN — NEVER substitute a neighboring or similar town. '
                 . 'Return STRICT JSON only: {"city":"...","province":"...","evidence":"one short line: why (landmark/source) or empty"}. If truly cannot determine, return UNKNOWN.';
 
         $prompt = $chat . "\n\n"
@@ -456,27 +458,30 @@ class MacroChecker
             . "- Do NOT keep the current city unless the message supports it.\n"
             . "- If the message contains a 'City:' field, prioritize that value.\n\n"
             . "Province: " . $prov . "\n"
-            . "Current City: " . $cityOld . "\n\n"
+            . "Current City: " . $cityOld . "\n"
+            . ($hint !== '' ? "RESOLVED city (real-world name; find its label in the allowed list): " . $hint . "\n" : '') . "\n"
             . "Allowed CITY list (pick ONLY from this list):\n"
             . $cityList . "\n\n"
             . 'Return STRICT JSON only: {"city":"...","province":"..."}' . "\n";
 
-        $raw = $this->callSearch($apiKey, $system, $prompt, 'CITYFIX');
+        $raw = $this->callOpenAI($apiKey, $system, $prompt); // fallback lang — walang search
         $parsed = $this->parseJsonField($raw, 'city');
         if (!$parsed || strtoupper($parsed) === 'UNKNOWN') return null;
         return $parsed;
     }
 
     /** Barangay fix — same as macro's BRGYFIX_*. */
-    public function fixBarangay(string $chat, string $prov, string $city, string $brgyOld, string $brgyList, string $apiKey): ?string
+    public function fixBarangay(string $chat, string $prov, string $city, string $brgyOld, string $brgyList, string $apiKey, string $hint = ''): ?string
     {
         if (trim($chat) === '' || trim($brgyList) === '') return null;
 
         $system = 'You validate Philippine address barangays. '
                 . 'The chat may mention landmarks, markets, terminals, or BUSINESS NAMES (often misspelled, e.g. "jekeps" = J-Keps Trading). '
                 . 'When two or more list entries could match (e.g. "ibayo" → IBAYO ESTACION vs IBAYO SILANGAN) or only a landmark is given, '
-                . 'use web search to locate that landmark/business within the given city, then pick the matching list entry. '
+                . 'locate that landmark/business within the given city and pick the matching list entry. '
+                . 'If a RESOLVED barangay is given, it is the real-world name already determined — your job is only to find its spelling/label in the allowed list. '
                 . 'Return STRICT JSON only: {"barangay":"...","city":"...","province":"...","evidence":"one short line: why (landmark/source) or empty"}. '
+                . 'List entries may use ROMAN NUMERALS: "poblacion 9" = POBLACION IX, "rosary heights 12" = ROSARY HEIGHTS XII, "bagua 2" = BAGUA II. '
                 . 'If a barangay list is provided, choose ONLY from that list. '
                 . 'If truly cannot determine, return UNKNOWN.';
 
@@ -484,12 +489,13 @@ class MacroChecker
             . "We need to correct BARANGAY only.\n"
             . "Province: " . $prov . "\n"
             . "City: " . $city . "\n"
-            . "Current Barangay: " . $brgyOld . "\n\n"
+            . "Current Barangay: " . $brgyOld . "\n"
+            . ($hint !== '' ? "RESOLVED barangay (real-world name; find its label in the allowed list): " . $hint . "\n" : '') . "\n"
             . "Allowed BARANGAY list (pick ONLY from this list):\n"
             . $brgyList . "\n\n"
             . 'Return STRICT JSON only: {"barangay":"...","city":"...","province":"..."}' . "\n";
 
-        $raw = $this->callSearch($apiKey, $system, $prompt, 'BRGYFIX');
+        $raw = $this->callOpenAI($apiKey, $system, $prompt); // fallback lang — walang search
         $parsed = $this->parseJsonField($raw, 'barangay');
         if (!$parsed || strtoupper($parsed) === 'UNKNOWN') return null;
         return $parsed;
@@ -574,40 +580,44 @@ class MacroChecker
     }
 
     /** Address verification — same as macro's VERIFYK_*. */
-    public function verifyAddress(string $chat, string $prov, string $city, string $brgy, string $apiKey, string $brgyList = ''): array
+    /**
+     * VERIFYK — HUKOM LANG (walang web search, walang pagbabago). Hinuhusgahan kung ang
+     * CURRENT prov/city/brgy (filing ng courier list) ay ang lugar na sinasabi ng customer.
+     * Ang 3 booleans → computeStatusCode(); ang PHP list checks sa caller ang huling salita.
+     */
+    public function verifyAddress(string $chat, string $prov, string $city, string $brgy, string $apiKey, string $resolverNote = ''): array
     {
-        if (trim($chat) === '') {
-            return ['province_ok' => false, 'city_ok' => false, 'barangay_ok' => false, 'better_barangay' => '', 'evidence' => ''];
-        }
+        $none = ['province_ok' => false, 'city_ok' => false, 'barangay_ok' => false, 'evidence' => ''];
+        if (trim($chat) === '') return $none;
 
-        $system = "You are a strict-but-practical Philippine address verifier.\n"
-                . "You will receive RAW_CUSTOMER_CHAT and CURRENT_PROVINCE/CITY/BARANGAY (and an allowed barangay list).\n"
-                . "The chat may mention landmarks, markets, terminals, or BUSINESS NAMES (often misspelled). "
-                . "If such a landmark clearly belongs to a DIFFERENT barangay in the allowed list than CURRENT_BARANGAY, "
-                . "use web search to confirm, then return that exact list entry in better_barangay (else empty string).\n\n"
+        $system = "You are a strict-but-practical Philippine address verifier. You do NOT change anything; you only judge.\n"
+                . "You receive RAW_CUSTOMER_CHAT, an optional RESOLVER_NOTE (what a previous step concluded using web search) "
+                . "and CURRENT_PROVINCE/CITY/BARANGAY as filed in the courier's address list.\n"
+                . "IMPORTANT: the courier's filing may differ from geography or PSA naming (e.g. COTABATO-CITY is filed under COTABATO, not Maguindanao; "
+                . "MAGUINDANAO covers del Norte and del Sur; Metro Manila districts like TONDO or SAMPALOC are filed as cities). "
+                . "Judge whether each CURRENT value denotes the SAME place the customer means under that filing. "
+                . "Do NOT mark a value wrong for geographic or naming reasons.\n"
+                . "A value is ok when the chat or the resolver note supports it (directly, or through a landmark/business located there) and nothing contradicts it. "
+                . "A value is NOT ok when the chat clearly points to a different place, or when it has no basis in the chat.\n"
                 . "Output STRICT JSON only:\n"
-                . '{"province_ok":true/false,"city_ok":true/false,"barangay_ok":true/false,"better_barangay":"exact list entry or empty","evidence":"one short line or empty"}';
+                . '{"province_ok":true/false,"city_ok":true/false,"barangay_ok":true/false,"evidence":"one short line or empty"}';
 
         $prompt = "RAW_CUSTOMER_CHAT:\n<<<\n" . $chat . "\n>>>\n\n"
+            . ($resolverNote !== '' ? "RESOLVER_NOTE: " . $resolverNote . "\n\n" : '')
             . "CURRENT_PROVINCE: " . $prov . "\n"
             . "CURRENT_CITY: " . $city . "\n"
             . "CURRENT_BARANGAY: " . $brgy . "\n"
-            . ($brgyList !== '' ? "ALLOWED_BARANGAY_LIST: " . $brgyList . "\n" : '')
             . "\nReturn STRICT JSON only:\n"
-            . '{"province_ok":true/false,"city_ok":true/false,"barangay_ok":true/false,"better_barangay":"...","evidence":"..."}' . "\n";
+            . '{"province_ok":true/false,"city_ok":true/false,"barangay_ok":true/false,"evidence":"..."}' . "\n";
 
-        $raw = $this->callSearch($apiKey, $system, $prompt, 'VERIFYK');
-        $obj = $this->parseJsonObject($raw);
-
+        $obj = $this->parseJsonObject($this->callOpenAI($apiKey, $system, $prompt));
         return [
-            'province_ok'     => !empty($obj['province_ok']),
-            'city_ok'         => !empty($obj['city_ok']),
-            'barangay_ok'     => !empty($obj['barangay_ok']),
-            'better_barangay' => isset($obj['better_barangay']) ? trim((string) $obj['better_barangay']) : '',
-            'evidence'        => isset($obj['evidence']) ? trim((string) $obj['evidence']) : '',
+            'province_ok' => !empty($obj['province_ok']),
+            'city_ok'     => !empty($obj['city_ok']),
+            'barangay_ok' => !empty($obj['barangay_ok']),
+            'evidence'    => isset($obj['evidence']) ? trim((string) $obj['evidence']) : '',
         ];
     }
-
     // ── Helpers ───────────────────────────────────────────────────────────
 
     /**
@@ -804,15 +814,6 @@ class MacroChecker
             if (self::normPlace($clean) === $target) return true;
         }
         return false;
-    }
-
-    private function canonicalizeProvince(string $candidate, string $listCsv): string
-    {
-        $target = self::normProv($candidate);
-        foreach (explode(',', $listCsv) as $p) {
-            if (self::normProv($p) === $target) return trim($p);
-        }
-        return trim($candidate);
     }
 
     public static function normPlace(string $v): string
@@ -1094,5 +1095,274 @@ class MacroChecker
     {
         $digits = preg_replace('/[^\d]/', '', $s);
         return $digits === '' ? 0 : (int) $digits;
+    }
+
+    // ── RESOLVE → MAP (2026-09-26) ────────────────────────────────────────
+
+    /**
+     * RESOLVE — alamin ang TOTOONG address (PSA/PSGC names) mula sa chat gamit ang
+     * ISANG AI call na may web search (callSearch → AI_CHECKER_SEARCH mode).
+     * HINDI naka-kulong sa J&T list — ang list ay hahanapin ng mapResolvedToList().
+     * Blank ('') ang field kapag hindi sigurado: walang hulaan, walang kapit-bahay.
+     */
+    public function resolveAddress(string $chat, string $provCur, string $cityCur, string $brgyCur, string $apiKey): array
+    {
+        $empty = ['province' => '', 'province_aliases' => [], 'city' => '', 'barangay' => '', 'confidence' => 'low', 'evidence' => ''];
+        if (trim($chat) === '') return $empty;
+
+        $system = "You resolve Philippine delivery addresses from raw customer chat.\n"
+            . "Determine the REAL-WORLD official province, city/municipality and barangay (PSA/PSGC names) that the customer means. "
+            . "Use web search for landmarks, markets, terminals, subdivisions, schools and BUSINESS NAMES (often misspelled, e.g. \"jekeps\" = J-Keps Trading), "
+            . "and to confirm which barangay a landmark belongs to.\n"
+            . "Rules:\n"
+            . "- Return \"\" for any field you cannot determine with confidence. NEVER guess a neighboring or similar-sounding town/barangay.\n"
+            . "- If the customer explicitly names a city/municipality or barangay, use exactly that place.\n"
+            . "- province: the geographic province. Highly urbanized/independent cities still get the province they are geographically in "
+            . "(e.g. Cotabato City -> Maguindanao del Norte, Davao City -> Davao del Sur).\n"
+            . "- province_aliases: ALL other names that province is or was known by, including pre-split and colloquial names, "
+            . "e.g. [\"Maguindanao\",\"Cotabato\",\"North Cotabato\"] for Cotabato City; [\"Compostela Valley\"] for Davao de Oro; "
+            . "[\"Western Samar\"] for Samar; [\"NCR\",\"National Capital Region\"] for Metro Manila.\n"
+            . "- Metro Manila: province = \"Metro Manila\". For the City of Manila put the DISTRICT in city when known "
+            . "(Tondo, Sampaloc, Ermita, Paco, Quiapo, Binondo, Santa Cruz, San Miguel, San Nicolas, Santa Ana, Santa Mesa, Malate, Intramuros, Pandacan, Port Area, San Andres); otherwise city = \"Manila\".\n"
+            . "- barangay: official name without the prefix Barangay/Brgy; write numbers as digits (\"Poblacion 9\", \"Zone 5\", \"176\").\n"
+            . "- CURRENT_* values were typed by an encoder and MAY BE WRONG; treat them only as weak hints.\n"
+            . "- confidence: high | medium | low for the whole answer (low = a human should decide).\n"
+            . "Output STRICT JSON only:\n"
+            . '{"province":"...","province_aliases":["..."],"city":"...","barangay":"...","confidence":"high|medium|low","evidence":"one short line: why (landmark/source) or empty"}';
+
+        $prompt = "RAW_CUSTOMER_CHAT:\n<<<\n" . $chat . "\n>>>\n\n"
+            . "CURRENT_PROVINCE: " . $provCur . "\n"
+            . "CURRENT_CITY: " . $cityCur . "\n"
+            . "CURRENT_BARANGAY: " . $brgyCur . "\n\n"
+            . "Return STRICT JSON only:\n"
+            . '{"province":"...","province_aliases":["..."],"city":"...","barangay":"...","confidence":"high|medium|low","evidence":"..."}' . "\n";
+
+        $raw = $this->callSearch($apiKey, $system, $prompt, 'RESOLVE');
+        $obj = $this->parseJsonObject($raw);
+        if (!$obj) { $this->evidence[] = 'RESOLVE: walang sagot/JSON → tao'; return $empty; }
+
+        $clean = static function ($v): string {
+            $v = trim((string) $v);
+            return in_array(strtoupper($v), ['UNKNOWN', 'N/A', 'NA', 'NULL', 'NONE', '-'], true) ? '' : $v;
+        };
+        $aliases = [];
+        foreach ((array) ($obj['province_aliases'] ?? []) as $a) { $a = $clean($a); if ($a !== '') $aliases[] = $a; }
+        $conf = strtolower(trim((string) ($obj['confidence'] ?? 'low')));
+        if (!in_array($conf, ['high', 'medium', 'low'], true)) $conf = 'low';
+
+        $out = [
+            'province'         => $clean($obj['province'] ?? ''),
+            'province_aliases' => $aliases,
+            'city'             => $clean($obj['city'] ?? ''),
+            'barangay'         => $clean($obj['barangay'] ?? ''),
+            'confidence'       => $conf,
+            'evidence'         => trim((string) ($obj['evidence'] ?? '')),
+        ];
+        $this->evidence[] = 'RESOLVE: ' . implode(', ', array_filter([$out['barangay'], $out['city'], $out['province']]))
+            . ' [' . $conf . ']' . ($aliases ? ' aliases=' . implode('/', $aliases) : '');
+        return $out;
+    }
+
+    /**
+     * MAP — hanapin sa BUONG J&T list ang katumbas ng resolved (real-world) address.
+     * City muna: globally unique ang city labels (maliban PANDAN) dahil may province
+     * prefix ang mga paulit-ulit (BATANGAS-SAN-JOSE, NORTH-COTABATO-CARMEN). Isa lang
+     * ang tumugma → ang PROVINCE ay MULA SA LIST (Cotabato City → COTABATO). Marami →
+     * pipili gamit ang province/aliases ng resolver. Wala o ambiguous pa rin → null
+     * (tao ang bahala; walang kapit-bahay na kapalit).
+     * Returns ['province'=>?label,'city'=>?label,'note'=>string,'city_unmapped'=>bool,'city_ambiguous'=>bool]
+     */
+    public function mapResolvedToList(array $resolved, array $maps): array
+    {
+        $out = ['province' => null, 'city' => null, 'note' => '', 'city_unmapped' => false, 'city_ambiguous' => false];
+        if (($resolved['confidence'] ?? 'low') === 'low') {
+            $out['note'] = 'resolver low confidence → walang ilalagay, tao ang bahala';
+            return $out;
+        }
+
+        $aiProv    = trim((string) ($resolved['province'] ?? ''));
+        $aiCity    = trim((string) ($resolved['city'] ?? ''));
+        $provNames = array_values(array_unique(array_filter(
+            array_map(fn ($p) => trim((string) $p), array_merge([$aiProv], (array) ($resolved['province_aliases'] ?? []))),
+            fn ($p) => $p !== ''
+        )));
+
+        // Mga province label sa LIST na tumutugma sa sagot/aliases ng resolver
+        $provLabels = [];
+        foreach ($provNames as $p) { $l = $this->provinceLabelFromList($p, $maps); if ($l !== null) $provLabels[$l] = true; }
+        $provLabels = array_keys($provLabels);
+
+        if ($aiCity !== '') {
+            $idx  = self::cityIndex($maps);
+            $key  = self::normCityKey($aiCity);
+            $alt  = str_ends_with($key, ' city') ? trim(substr($key, 0, -5)) : $key . ' city';
+            $prefixes = [];
+            foreach (array_merge($provNames, $provLabels) as $p) { $pk = self::normCityKey((string) $p); if ($pk !== '') $prefixes[] = $pk; }
+            // Tier 1 = eksaktong salita ng resolver; Tier 2 = ±"city" variant (kung walang tumugma sa tier 1)
+            $cands = [];
+            foreach (array_unique([$key, $alt]) as $k) {
+                if ($k === '') continue;
+                $cands = [];
+                $take  = static function (array $hits) use (&$cands): void {
+                    foreach ($hits as $id => $c) {
+                        if (!isset($cands[$id]) || $c['rank'] < $cands[$id]['rank']) $cands[$id] = $c;
+                    }
+                };
+                $take($idx[$k] ?? []);
+                // Anyong "<province> <city>" (hal. BATANGAS-SAN-JOSE, METRO-MANILA-SAN-JUAN)
+                foreach ($prefixes as $pk) $take($idx[$pk . ' ' . $k] ?? []);
+                // 1) province ng resolver ang pumipili kapag marami
+                if (count($cands) > 1 && $provLabels) {
+                    $f = array_filter($cands, fn ($c) => in_array($c['prov'], $provLabels, true));
+                    if (count($f) >= 1) $cands = $f;
+                }
+                // 2) tunay na label (rank 0/1) ang mas matimbang sa gawa-gawang "±city" variant (rank 2)
+                if (count($cands) > 1) {
+                    $f = array_filter($cands, fn ($c) => $c['rank'] < 2);
+                    if (count($f) >= 1) $cands = $f;
+                }
+                if (count($cands) >= 1) break;   // may sagot (isa o ambiguous) sa tier na ito
+            }
+            if (count($cands) === 1) {
+                $c = array_values($cands)[0];
+                $out['city']     = $c['city'];
+                $out['province'] = $c['prov'];
+                $out['note']     = '"' . $aiCity . '" → ' . $c['city'] . ', ' . $c['prov'] . ' (list)'
+                    . (($aiProv !== '' && self::normProv($aiProv) !== self::normProv($c['prov'])) ? ' — province follows the LIST, not "' . $aiProv . '"' : '');
+                return $out;
+            }
+            if (count($cands) > 1) {
+                $out['city_ambiguous'] = true;
+                $out['note'] = 'city "' . $aiCity . '" ambiguous sa list: '
+                    . implode(' | ', array_map(fn ($c) => $c['prov'] . '/' . $c['city'], array_values($cands))) . ' → tao';
+            } else {
+                $out['city_unmapped'] = true;
+                $out['note'] = 'city "' . $aiCity . '" wala sa list' . ($aiProv !== '' ? ' (' . $aiProv . ')' : '');
+            }
+        } else {
+            $out['note'] = 'resolver walang city → tao';
+        }
+
+        // Walang city map: province lang kung malinaw
+        if (count($provLabels) === 1)                     $out['province'] = $provLabels[0];
+        elseif (count($provLabels) > 1 && $aiProv !== '') $out['province'] = $this->provinceLabelFromList($aiProv, $maps);
+        return $out;
+    }
+
+    /** Real-world province name → EKSAKTONG label sa list (alias table para sa filing ng courier). */
+    public function provinceLabelFromList(string $name, array $maps): ?string
+    {
+        $k = self::normProv(self::expandAbbr(self::normPlace($name)));
+        if ($k === '') return null;
+        static $alias = [
+            'maguindanao del norte' => 'maguindanao', 'maguindanao del sur' => 'maguindanao', 'shariff kabunsuan' => 'maguindanao',
+            'north cotabato'        => 'cotabato',    'cotabato province'   => 'cotabato',
+            'compostela valley'     => 'davao de oro', 'samar'              => 'western samar',
+            'mt province'           => 'mountain province',
+        ];
+        $k = $alias[$k] ?? $k;
+        return $maps['provincesSet'][$k] ?? null;
+    }
+
+    /** Normalized lookup key para sa city labels/sagot: normPlace + abbreviations + "municipality of". */
+    public static function normCityKey(string $v): string
+    {
+        $s = self::normPlace($v);
+        $s = preg_replace('/\b(municipality of|mun of|city of)\b/u', ' ', $s) ?? $s;
+        $s = self::expandAbbr($s);
+        $s = preg_replace('/\s+/u', ' ', $s) ?? $s;
+        return trim($s);
+    }
+
+    /** Karaniwang daglat sa address (pareho sa list at sa sagot ng AI). */
+    private static function expandAbbr(string $s): string
+    {
+        static $map = ['sta' => 'santa', 'sto' => 'santo', 'gen' => 'general', 'pob' => 'poblacion', 'bgy' => 'barangay', 'brgy' => 'barangay', 'bgry' => 'barangay'];
+        return preg_replace_callback('/\b(sta|sto|gen|pob|bgy|brgy|bgry)\b/u', fn ($m) => $map[$m[1]], $s) ?? $s;
+    }
+
+    private static ?array $cityIndex = null;
+
+    /**
+     * normKey → ['PROV|CITY' => ['prov'=>label,'city'=>label,'rank'=>0|1|2]]
+     * rank 0 = buong label, 1 = bare name (tinanggal ang province prefix), 2 = ±" city" variant.
+     */
+    private static function cityIndex(array $maps): array
+    {
+        if (self::$cityIndex !== null) return self::$cityIndex;
+
+        $prefixes = [];
+        foreach (($maps['provincesSet'] ?? []) as $label) $prefixes[] = self::normCityKey((string) $label);
+        foreach (['north cotabato', 'south cotabato', 'metro manila', 'ncr'] as $x) $prefixes[] = $x;
+        $prefixes = array_values(array_unique(array_filter($prefixes)));
+        usort($prefixes, fn ($a, $b) => strlen($b) <=> strlen($a));   // pinakamahaba muna
+
+        $idx = [];
+        $add = static function (string $key, string $prov, string $city, int $rank) use (&$idx): void {
+            $key = trim($key);
+            if ($key === '' || $key === 'city' || strlen($key) < 3) return;
+            $id = $prov . '|' . $city;
+            if (!isset($idx[$key][$id]) || $rank < $idx[$key][$id]['rank']) {
+                $idx[$key][$id] = ['prov' => $prov, 'city' => $city, 'rank' => $rank];
+            }
+        };
+        foreach (($maps['citiesByProv'] ?? []) as $provKey => $cities) {
+            $provLabel = (string) ($maps['provincesSet'][$provKey] ?? strtoupper((string) $provKey));
+            foreach ($cities as $cityLabel) {
+                $cityLabel = (string) $cityLabel;
+                $full  = self::normCityKey($cityLabel);
+                $forms = [[$full, 0]];
+                foreach ($prefixes as $pk) {
+                    if (str_starts_with($full, $pk . ' ') && strlen($full) > strlen($pk) + 1) { $forms[] = [substr($full, strlen($pk) + 1), 1]; break; }
+                }
+                foreach ($forms as [$f, $rank]) {
+                    $add($f, $provLabel, $cityLabel, $rank);
+                    if (str_ends_with($f, ' city')) $add(trim(substr($f, 0, -5)), $provLabel, $cityLabel, 2);
+                    else                            $add($f . ' city', $provLabel, $cityLabel, 2);
+                }
+            }
+        }
+        return self::$cityIndex = $idx;
+    }
+
+    /**
+     * Deterministic barangay match sa loob ng isang city: Roman numerals ("Poblacion 9" = POBLACION IX),
+     * STA./STO., "Brgy.", at "(POB.)"-style parenthetical. null kung wala o ambiguous → fallback/tao.
+     */
+    public function matchBarangayInList(string $aiBrgy, array $labels): ?string
+    {
+        $target = self::normBrgyKey($aiBrgy);
+        if ($target === '') return null;
+        $exact = []; $loose = [];
+        foreach ($labels as $label) {
+            $label = (string) $label;
+            if (self::normBrgyKey($label) === $target) { $exact[] = $label; continue; }
+            $noPar = self::normBrgyKey(preg_replace('/\([^)]*\)/u', ' ', $label) ?? $label);
+            if ($noPar !== '' && $noPar === $target) $loose[] = $label;
+        }
+        if (count($exact) === 1) return $exact[0];
+        if (count($exact) === 0 && count($loose) === 1) return $loose[0];
+        return null;
+    }
+
+    /** Normalized key para sa barangay: normPlace + tanggal "barangay/brgy" + daglat + Roman → digits. */
+    public static function normBrgyKey(string $v): string
+    {
+        $s = self::normPlace(str_replace(['(', ')'], ' ', $v));
+        $s = self::expandAbbr($s);
+        $s = preg_replace('/\bbarangay\b/u', ' ', $s) ?? $s;
+        $s = preg_replace_callback('/\b(?=[ivx])(x{0,3})(ix|iv|v?i{0,3})\b/u', static function ($m) {
+            $r = $m[1] . $m[2];
+            if ($r === '') return $m[0];
+            $val = ['i' => 1, 'v' => 5, 'x' => 10]; $n = 0; $len = strlen($r);
+            for ($i = 0; $i < $len; $i++) {
+                $cur  = $val[$r[$i]];
+                $next = $i + 1 < $len ? $val[$r[$i + 1]] : 0;
+                $n   += $cur < $next ? -$cur : $cur;
+            }
+            return (string) $n;
+        }, $s) ?? $s;
+        $s = preg_replace('/\s+/u', ' ', $s) ?? $s;
+        return trim($s);
     }
 }
