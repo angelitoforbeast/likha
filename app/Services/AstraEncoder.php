@@ -43,6 +43,7 @@ class AstraEncoder
     private array $usage    = [];
     private array $searches = [];
     private ?MacroOutput $row = null;
+    private string $keySource = 'wala';
 
     /**
      * Saan kukunin ang OpenAI key ng Astra engine, sa pagkakasunod:
@@ -111,7 +112,10 @@ class AstraEncoder
         if ($chat === '') return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'Empty all_user_input'], $t0);
 
         // Key ng Astra engine: settings page (app_settings, encrypted) → ASTRA_ENCODER_API_KEY → OPENAI_API_KEY
-        $apiKey = self::resolveApiKey();
+        $keyInfo = self::apiKeyInfo();
+        $apiKey  = $keyInfo['key'];
+        $this->keySource = $keyInfo['source'];
+        $this->evidence[] = 'KEY: ' . ['settings' => 'settings page (database)', 'env_astra' => '.env ASTRA_ENCODER_API_KEY', 'env_openai' => '.env OPENAI_API_KEY', 'wala' => 'WALA'][$keyInfo['source']];
         if (!$apiKey) return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'No OPENAI_API_KEY'], $t0);
 
         $before = $this->sixFields($row);
@@ -265,6 +269,7 @@ class AstraEncoder
         $trace = $this->trace ?: ['engine' => 'astra', 'passes' => [], 'searches' => $this->searches];
         $trace['summary'] = [
             'engine'     => 'astra',
+            'key_source' => $this->keySource,
             'models'     => array_keys($models),
             'escalated'  => false,
             'searches'   => $searches,
