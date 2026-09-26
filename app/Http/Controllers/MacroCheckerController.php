@@ -193,7 +193,7 @@ class MacroCheckerController extends Controller
         $t0         = microtime(true);
 
         try {
-            $result = (new MacroChecker)->processRow((int) $id, $maps);
+            $result = (new MacroChecker)->processRow((int) $id, $maps, (string) $request->getHost());
             $durationMs = (int) round((microtime(true) - $t0) * 1000);
             // Re-read so frontend gets the actual updated values
             $row = MacroOutput::find((int) $id);

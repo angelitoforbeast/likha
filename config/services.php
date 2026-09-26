@@ -42,6 +42,9 @@ return [
     // override — ASTRA_MODELS="gpt-6-astra,gpt-5.5,o3" (comma-separated ids).
     'astra_default' => env('ASTRA_DEFAULT_MODEL', 'gpt-6-astra'),
     'astra_models'  => env('ASTRA_MODELS', ''),
+    // /encoder/checker_1 AI checker: web_search sa address calls (PROV/CITY/BRGY/VERIFY).
+    //   required = sapilitang mag-search kada call · auto = AI ang magpapasya · off = walang search (lumang gawi)
+    'ai_checker_search' => env('AI_CHECKER_SEARCH', 'required'),
     // Model is now picked per-request via the UI dropdown sa /gpt-ad-generator.
     // Allowed list + default lives sa GPTAdGeneratorController::ALLOWED_MODELS
     // and ::DEFAULT_MODEL.

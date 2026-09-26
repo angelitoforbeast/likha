@@ -39,6 +39,15 @@ class MacroChecker
     public const MODEL          = 'gpt-5.2';
     public const SLEEP_MS       = 250;
     public const HTTP_TIMEOUT_S = 60;
+    /** Timeout ng address calls na may web_search (may search sa loob ng call). */
+    public const SEARCH_TIMEOUT_S = 120;
+
+    /** Host ng request — para sa per-host blacklists/whitelist (same as Validate). */
+    private ?string $host = null;
+    /** Ebidensya ng kasalukuyang row (search queries/sources, dahilan, gate) → `AI EVIDENCE`. */
+    private array $evidence = [];
+    /** Cached validation references (blacklists, whitelist) — isang load kada processRow. */
+    private ?array $valRefs = null;
 
     /**
      * Parse jnt_address.txt → in-memory lookup maps.
@@ -138,8 +147,11 @@ class MacroChecker
      *
      * Returns ['status' => string, 'final_code' => string|null, 'message' => string|null]
      */
-    public function processRow(int $id, array $maps): array
+    public function processRow(int $id, array $maps, ?string $host = null): array
     {
+        $this->host     = $host;
+        $this->evidence = [];
+        $this->valRefs  = null;
         $row = MacroOutput::find($id);
         if (!$row) {
             return ['status' => 'failed', 'final_code' => null, 'message' => 'Row not found'];
@@ -263,13 +275,27 @@ class MacroChecker
             if ($phone === null && !empty($nameAddr['phone_number'])) {
                 $phone = $nameAddr['phone_number']; // already normalized
             }
+            // DB/Validate form: 10 digits na nagsisimula sa 9 (hal. 9468163223) — walang 0/+63.
+            $phone = $this->normalizePhoneStrictForm($phone);
             if ($phone !== null && $phone !== '') {
                 $updates['PHONE NUMBER'] = $phone;
             }
         }
 
         // ── 5. VERIFYK ───────────────────────────────────────────────────
-        $verdict = $this->verifyAddress($chat, $effectiveProv, $effectiveCity, $effectiveBrgy, $apiKey);
+        $verdict = $this->verifyAddress($chat, $effectiveProv, $effectiveCity, $effectiveBrgy, $apiKey, $brgyList);
+
+        // Kung may iminungkahing MAS TAMANG barangay ang verifier (mula sa allowed list —
+        // hal. landmark → ibang kandidato), ipalit at ituring na ok ang barangay.
+        $better = trim((string) ($verdict['better_barangay'] ?? ''));
+        if ($better !== '' && $brgyList !== '' && $this->brgyInList($better, $brgyList)
+            && self::normPlace($better) !== self::normPlace($effectiveBrgy)) {
+            $updates['BARANGAY'] = $this->canonicalizeFromList($better, $brgyList);
+            $effectiveBrgy       = $updates['BARANGAY'];
+            $verdict['barangay_ok'] = true;
+            $this->evidence[] = 'VERIFYK: barangay → ' . $effectiveBrgy
+                . (!empty($verdict['evidence']) ? ' — ' . $verdict['evidence'] : '');
+        }
 
         // ✅ IMPLIED PROVINCE PATCH — same pattern as macro's implied-city patch.
         // Kung city_ok && barangay_ok pero !province_ok, AT yung current city ay
@@ -308,8 +334,35 @@ class MacroChecker
                   && trim((string)$finalPhone) !== ''
                   && trim((string)$finalAddr)  !== '';
 
+        // ── VALIDATION GATE — PAREHONG rules ng Validate button ─────────
+        // hard bagsak → TO FIX · soft (shop details) bagsak → TO FIX - SHOP DETAILS
+        // · pasado → PROCEED. Ang address code (✅) ay nananatili sa pasado lang.
+        $gate = ['hard' => [], 'soft' => []];
         if ($statusCode === '✅' && $allFilled) {
-            $updates['STATUS'] = 'PROCEED';
+            $gate = $this->validateRow($row, [
+                'PROVINCE'     => (string) $finalProv,  'CITY'         => (string) $finalCity,
+                'BARANGAY'     => (string) $finalBrgy,  'FULL NAME'    => (string) $finalName,
+                'PHONE NUMBER' => (string) $finalPhone, 'ADDRESS'      => (string) $finalAddr,
+            ], $maps);
+
+            if (!empty($gate['hard'])) {
+                $updates['APP SCRIPT CHECKER'] = 'TO FIX';
+                $this->evidence[] = 'GATE: TO FIX — ' . implode('; ', $gate['hard']);
+            } elseif (!empty($gate['soft'])) {
+                $updates['APP SCRIPT CHECKER'] = 'TO FIX - SHOP DETAILS';
+                $this->evidence[] = 'GATE: TO FIX - SHOP DETAILS — ' . implode('; ', $gate['soft']);
+            } else {
+                $updates['STATUS'] = 'PROCEED';
+            }
+        }
+        $proceed = ($statusCode === '✅' && $allFilled && empty($gate['hard']) && empty($gate['soft']));
+
+        // ── AI EVIDENCE (hidden column) ──────────────────────────────────
+        if (!empty($this->evidence) && self::hasEvidenceColumn()) {
+            $updates['AI EVIDENCE'] = mb_substr(
+                \Carbon\Carbon::now('Asia/Manila')->format('Y-m-d H:i') . "\n" . implode("\n", $this->evidence),
+                0, 60000
+            );
         }
 
         // ── Persist ──────────────────────────────────────────────────────
@@ -317,13 +370,15 @@ class MacroChecker
             $row->update($updates);
         }
 
+        $gateMsg = implode('; ', array_merge($gate['hard'], $gate['soft']));
         return [
-            'status'     => ($statusCode === '✅' && $allFilled) ? 'fixed' : 'partial',
-            'final_code' => $statusCode,
+            'status'     => $proceed ? 'fixed' : 'partial',
+            'final_code' => $updates['APP SCRIPT CHECKER'] ?? $statusCode,
             'all_filled' => $allFilled,
-            'message'    => $statusCode === '✅' && !$allFilled
+            'gate'       => $gate,
+            'message'    => ($statusCode === '✅' && !$allFilled)
                 ? 'Address verified but may blank na required field (di pa PROCEED)'
-                : null,
+                : (($statusCode === '✅' && !$proceed) ? 'Address ✅ pero bagsak sa validation: ' . $gateMsg : null),
         ];
     }
 
@@ -377,7 +432,7 @@ class MacroChecker
             . $provList . "\n\n"
             . 'Return STRICT JSON only: {"province":"..."}' . "\n";
 
-        $raw = $this->callOpenAI($apiKey, $system, $prompt);
+        $raw = $this->callSearch($apiKey, $system, $prompt, 'PROVFIX');
         $parsed = $this->parseJsonField($raw, 'province');
         if (!$parsed || strtoupper($parsed) === 'UNKNOWN') return null;
         return $this->canonicalizeProvince($parsed, $provList);
@@ -389,7 +444,9 @@ class MacroChecker
         if (trim($chat) === '' || trim($cityList) === '') return null;
 
         $system = 'You validate Philippine cities/municipalities. Choose ONLY from the provided city list. '
-                . 'Return STRICT JSON only: {"city":"...","province":"..."}. If truly cannot determine, return UNKNOWN.';
+                . 'The chat may mention landmarks, markets, terminals, or BUSINESS NAMES (often misspelled, e.g. "jekeps" = J-Keps Trading). '
+                . 'If the city is ambiguous, use web search to locate the landmark/business within the given province, then pick the matching list entry. '
+                . 'Return STRICT JSON only: {"city":"...","province":"...","evidence":"one short line: why (landmark/source) or empty"}. If truly cannot determine, return UNKNOWN.';
 
         $prompt = $chat . "\n\n"
             . "Task: correct the CITY only.\n"
@@ -404,7 +461,7 @@ class MacroChecker
             . $cityList . "\n\n"
             . 'Return STRICT JSON only: {"city":"...","province":"..."}' . "\n";
 
-        $raw = $this->callOpenAI($apiKey, $system, $prompt);
+        $raw = $this->callSearch($apiKey, $system, $prompt, 'CITYFIX');
         $parsed = $this->parseJsonField($raw, 'city');
         if (!$parsed || strtoupper($parsed) === 'UNKNOWN') return null;
         return $parsed;
@@ -416,7 +473,10 @@ class MacroChecker
         if (trim($chat) === '' || trim($brgyList) === '') return null;
 
         $system = 'You validate Philippine address barangays. '
-                . 'Return STRICT JSON only: {"barangay":"...","city":"...","province":"..."}. '
+                . 'The chat may mention landmarks, markets, terminals, or BUSINESS NAMES (often misspelled, e.g. "jekeps" = J-Keps Trading). '
+                . 'When two or more list entries could match (e.g. "ibayo" → IBAYO ESTACION vs IBAYO SILANGAN) or only a landmark is given, '
+                . 'use web search to locate that landmark/business within the given city, then pick the matching list entry. '
+                . 'Return STRICT JSON only: {"barangay":"...","city":"...","province":"...","evidence":"one short line: why (landmark/source) or empty"}. '
                 . 'If a barangay list is provided, choose ONLY from that list. '
                 . 'If truly cannot determine, return UNKNOWN.';
 
@@ -429,7 +489,7 @@ class MacroChecker
             . $brgyList . "\n\n"
             . 'Return STRICT JSON only: {"barangay":"...","city":"...","province":"..."}' . "\n";
 
-        $raw = $this->callOpenAI($apiKey, $system, $prompt);
+        $raw = $this->callSearch($apiKey, $system, $prompt, 'BRGYFIX');
         $parsed = $this->parseJsonField($raw, 'barangay');
         if (!$parsed || strtoupper($parsed) === 'UNKNOWN') return null;
         return $parsed;
@@ -514,31 +574,37 @@ class MacroChecker
     }
 
     /** Address verification — same as macro's VERIFYK_*. */
-    public function verifyAddress(string $chat, string $prov, string $city, string $brgy, string $apiKey): array
+    public function verifyAddress(string $chat, string $prov, string $city, string $brgy, string $apiKey, string $brgyList = ''): array
     {
         if (trim($chat) === '') {
-            return ['province_ok' => false, 'city_ok' => false, 'barangay_ok' => false];
+            return ['province_ok' => false, 'city_ok' => false, 'barangay_ok' => false, 'better_barangay' => '', 'evidence' => ''];
         }
 
         $system = "You are a strict-but-practical Philippine address verifier.\n"
-                . "You will receive RAW_CUSTOMER_CHAT and CURRENT_PROVINCE/CITY/BARANGAY.\n\n"
-                . "Output STRICT JSON only with booleans:\n"
-                . '{"province_ok":true/false,"city_ok":true/false,"barangay_ok":true/false}';
+                . "You will receive RAW_CUSTOMER_CHAT and CURRENT_PROVINCE/CITY/BARANGAY (and an allowed barangay list).\n"
+                . "The chat may mention landmarks, markets, terminals, or BUSINESS NAMES (often misspelled). "
+                . "If such a landmark clearly belongs to a DIFFERENT barangay in the allowed list than CURRENT_BARANGAY, "
+                . "use web search to confirm, then return that exact list entry in better_barangay (else empty string).\n\n"
+                . "Output STRICT JSON only:\n"
+                . '{"province_ok":true/false,"city_ok":true/false,"barangay_ok":true/false,"better_barangay":"exact list entry or empty","evidence":"one short line or empty"}';
 
         $prompt = "RAW_CUSTOMER_CHAT:\n<<<\n" . $chat . "\n>>>\n\n"
             . "CURRENT_PROVINCE: " . $prov . "\n"
             . "CURRENT_CITY: " . $city . "\n"
-            . "CURRENT_BARANGAY: " . $brgy . "\n\n"
-            . "Return STRICT JSON only:\n"
-            . '{"province_ok":true/false,"city_ok":true/false,"barangay_ok":true/false}' . "\n";
+            . "CURRENT_BARANGAY: " . $brgy . "\n"
+            . ($brgyList !== '' ? "ALLOWED_BARANGAY_LIST: " . $brgyList . "\n" : '')
+            . "\nReturn STRICT JSON only:\n"
+            . '{"province_ok":true/false,"city_ok":true/false,"barangay_ok":true/false,"better_barangay":"...","evidence":"..."}' . "\n";
 
-        $raw = $this->callOpenAI($apiKey, $system, $prompt);
+        $raw = $this->callSearch($apiKey, $system, $prompt, 'VERIFYK');
         $obj = $this->parseJsonObject($raw);
 
         return [
-            'province_ok' => !empty($obj['province_ok']),
-            'city_ok'     => !empty($obj['city_ok']),
-            'barangay_ok' => !empty($obj['barangay_ok']),
+            'province_ok'     => !empty($obj['province_ok']),
+            'city_ok'         => !empty($obj['city_ok']),
+            'barangay_ok'     => !empty($obj['barangay_ok']),
+            'better_barangay' => isset($obj['better_barangay']) ? trim((string) $obj['better_barangay']) : '',
+            'evidence'        => isset($obj['evidence']) ? trim((string) $obj['evidence']) : '',
         ];
     }
 
@@ -784,5 +850,249 @@ class MacroChecker
     private function getApiKey(): ?string
     {
         return config('services.openai.key') ?: env('OPENAI_API_KEY');
+    }
+    // ═════════════════════════════════════════════════════════════════════
+    //  WEB SEARCH (Responses API) · VALIDATION GATE · EVIDENCE · PHONE FORM
+    // ═════════════════════════════════════════════════════════════════════
+
+    /**
+     * Address call na may `web_search` — SAME model (gpt-5.2), Responses API.
+     * Ibinabalik ang output text (JSON string) para pareho ang contract ng
+     * callOpenAI(). Nire-record sa $this->evidence ang search queries, sources,
+     * at ang 'evidence' field ng JSON. tool_choice = config
+     * services.openai.ai_checker_search: required | auto | off (lumang gawi).
+     * Kapag nag-fail ang search call → fallback sa callOpenAI() (hindi mamamatay ang row).
+     */
+    private function callSearch(string $apiKey, string $system, string $prompt, string $step): string
+    {
+        $mode = strtolower(trim((string) config('services.openai.ai_checker_search', 'required')));
+        if ($mode === 'off') return $this->callOpenAI($apiKey, $system, $prompt);
+
+        $payload = [
+            'model'        => self::MODEL,
+            'instructions' => $system,
+            'input'        => $prompt . "\nReturn JSON only.",
+            'reasoning'    => ['effort' => 'low'],
+            'tools'        => [['type' => 'web_search']],
+            'tool_choice'  => $mode === 'auto' ? 'auto' : 'required',
+            'include'      => ['web_search_call.action.sources'],
+            'store'        => false,
+        ];
+
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            try {
+                $res = Http::withToken($apiKey)
+                    ->acceptJson()
+                    ->timeout(self::SEARCH_TIMEOUT_S)
+                    ->post('https://api.openai.com/v1/responses', $payload);
+
+                if ($res->successful()) {
+                    $j   = $res->json();
+                    $out = collect($j['output'] ?? []);
+                    $text = trim((string) ($j['output_text'] ?? ''));
+                    if ($text === '') {
+                        $text = trim($out->where('type', 'message')
+                            ->flatMap(fn ($m) => collect($m['content'] ?? [])->where('type', 'output_text')->pluck('text'))
+                            ->implode(''));
+                    }
+
+                    // Ebidensya: searches + queries + sources + 'evidence' ng JSON
+                    $calls = $out->where('type', 'web_search_call');
+                    $queries = []; $urls = [];
+                    foreach ($calls as $c) {
+                        $a  = (array) ($c['action'] ?? []);
+                        $qs = isset($a['queries']) ? (array) $a['queries'] : (isset($a['query']) ? [(string) $a['query']] : []);
+                        foreach ($qs as $q) if ((string) $q !== '') $queries[] = (string) $q;
+                        foreach ((array) ($a['sources'] ?? []) as $s) if (!empty($s['url'])) $urls[] = (string) $s['url'];
+                    }
+                    $urls = array_values(array_unique($urls));
+                    $obj  = $this->parseJsonObject($text);
+                    $ev   = isset($obj['evidence']) ? trim((string) $obj['evidence']) : '';
+                    if ($calls->count() > 0 || $ev !== '') {
+                        $n = $calls->count();
+                        $this->evidence[] = $step . ': ' . $n . ' search' . ($n === 1 ? '' : 'es')
+                            . ($queries ? ' [' . implode(' | ', array_slice($queries, 0, 3)) . ']' : '')
+                            . ($ev !== '' ? ' — ' . $ev : '')
+                            . ($urls ? ' — ' . implode(' ', array_slice($urls, 0, 3)) : '');
+                    }
+                    return $text;
+                }
+
+                Log::warning('MACRO_CHECKER_SEARCH_HTTP', ['step' => $step, 'attempt' => $attempt, 'status' => $res->status(), 'body' => substr($res->body(), 0, 400)]);
+            } catch (\Throwable $e) {
+                Log::warning('MACRO_CHECKER_SEARCH_EX', ['step' => $step, 'attempt' => $attempt, 'error' => $e->getMessage()]);
+            }
+            if ($attempt === 1) usleep(800 * 1000);
+        }
+
+        $this->evidence[] = $step . ': search call failed — fallback sa walang search';
+        return $this->callOpenAI($apiKey, $system, $prompt);
+    }
+
+    /** Ibalik ang EKSAKTONG label mula sa CSV list na tumutugma (normalized). */
+    private function canonicalizeFromList(string $val, string $listCsv): string
+    {
+        $key = self::normPlace($val);
+        foreach (explode(',', $listCsv) as $item) {
+            $item = trim($item);
+            if ($item !== '' && self::normPlace($item) === $key) return $item;
+        }
+        return trim($val);
+    }
+
+    /** Anyo ng DB/Validate: 10 digits na nagsisimula sa 9 (hal. 9468163223). Tinatanggal ang +63/63/0. */
+    private function normalizePhoneStrictForm(?string $raw): ?string
+    {
+        if ($raw === null) return null;
+        $d = preg_replace('/\D+/', '', $raw) ?? '';
+        if ($d === '') return null;
+        if (str_starts_with($d, '63') && strlen($d) >= 12) $d = substr($d, 2);
+        $d = ltrim($d, '0');
+        return $d === '' ? null : $d;
+    }
+
+    private static ?bool $evidenceCol = null;
+    private static function hasEvidenceColumn(): bool
+    {
+        if (self::$evidenceCol === null) {
+            try { self::$evidenceCol = Schema::hasColumn('macro_output', 'AI EVIDENCE'); }
+            catch (\Throwable $e) { self::$evidenceCol = false; }
+        }
+        return self::$evidenceCol;
+    }
+
+    /**
+     * PAREHONG rules ng Validate button (MacroOutputController::validateCheckerToFix).
+     * Returns ['hard' => [dahilan...], 'soft' => [dahilan...]].
+     *   hard: prov/city/brgy sa list (hierarchy), FULL NAME (letra/., -' lang; may titik;
+     *         Ã±→ñ normalized), PHONE (^9\d{9}$, hindi dummy, hindi duplicate sa
+     *         parehong petsa maliban kung whitelisted), ITEM (<=50, hindi blangko),
+     *         COD, fb_name blacklist, keyword blacklist (all_user_input),
+     *         ADDRESS (hindi blangko, walang address-keyword blacklist)
+     *   soft: SHOP DETAILS item/COD mismatch
+     */
+    private function validateRow($row, array $final, array $maps): array
+    {
+        $hard = []; $soft = [];
+        $refs = $this->valRefs ??= $this->loadValidationRefs();
+
+        // hierarchy vs jnt_address.txt (same maps na ginagamit ng fix steps)
+        $provKey = self::normProv($final['PROVINCE']);
+        $cityKey = self::normPlace($final['CITY']);
+        $brgyKey = self::normPlace($final['BARANGAY']);
+        $provOk  = $provKey !== '' && isset($maps['provincesSet'][$provKey]);
+        $cityOk  = $provOk && $cityKey !== ''
+            && collect($maps['citiesByProv'][$provKey] ?? [])->contains(fn ($c) => self::normPlace($c) === $cityKey);
+        $brgyOk  = $cityOk && $brgyKey !== ''
+            && collect($maps['brgysByCityProv'][$cityKey . '|' . $provKey] ?? [])->contains(fn ($b) => self::normPlace($b) === $brgyKey);
+        if (!$provOk)            $hard[] = 'PROVINCE wala sa J&T list';
+        if ($provOk && !$cityOk) $hard[] = 'CITY wala sa list ng province';
+        if ($cityOk && !$brgyOk) $hard[] = 'BARANGAY wala sa list ng city';
+
+        // FULL NAME (normalize ang sirang enye bago i-check)
+        $name = trim(str_replace(['Ã±', 'Ã‘'], ['ñ', 'Ñ'], $final['FULL NAME']));
+        if ($name === '')                                            $hard[] = 'FULL NAME blangko';
+        elseif (!preg_match("/^[\\p{L}\\.,\\-\\' ]+$/u", $name))    $hard[] = 'FULL NAME may di-pinapayagang character';
+        elseif (!preg_match('/[A-Za-zÑñ]/u', $name))                 $hard[] = 'FULL NAME walang letra';
+
+        // PHONE
+        $phone = trim($final['PHONE NUMBER']);
+        if ($phone === '')                                 $hard[] = 'PHONE blangko';
+        elseif (!preg_match('/^9\d{9}$/', $phone))         $hard[] = 'PHONE hindi 10-digit na 9XXXXXXXXX (' . $phone . ')';
+        elseif ($phone === '9123456789')                   $hard[] = 'PHONE dummy';
+        elseif (!isset($refs['whitelist'][$phone]) && $this->duplicatePhoneCount($row, $phone) > 0)
+                                                           $hard[] = 'PHONE duplicate sa parehong petsa';
+
+        // ITEM + COD
+        $item = trim((string) ($row->ITEM_NAME ?? ''));
+        $cod  = trim((string) ($row->COD ?? ''));
+        if ($item === '' || mb_strlen($item, 'UTF-8') > 50) $hard[] = 'ITEM blangko o >50 chars';
+        if ($cod === '')                                    $hard[] = 'COD blangko';
+
+        // blacklists
+        $fb = mb_strtolower(trim((string) ($row->fb_name ?? '')));
+        if ($fb !== '' && in_array($fb, $refs['fbname'], true)) $hard[] = 'FB name blacklisted';
+        $aui = mb_strtolower((string) ($row->all_user_input ?? ''));
+        foreach ($refs['keyword'] as $kw) { if ($kw !== '' && str_contains($aui, $kw)) { $hard[] = 'keyword blacklisted: ' . $kw; break; } }
+
+        // ADDRESS
+        $addr = trim($final['ADDRESS']);
+        if ($addr === '') $hard[] = 'ADDRESS blangko';
+        else { $al = mb_strtolower($addr); foreach ($refs['addrkw'] as $akw) { if ($akw !== '' && str_contains($al, $akw)) { $hard[] = 'ADDRESS keyword blacklisted: ' . $akw; break; } } }
+
+        // SOFT — SHOP DETAILS mismatch (same as Validate)
+        $shopText = trim((string) ($row->{'SHOP DETAILS'} ?? ''));
+        if ($shopText === '') $shopText = (string) ($row->all_user_input ?? '');
+        $details       = $this->extractShopDetailsV($shopText);
+        $expectedItem  = $this->normItemV(trim((string) ($details['item'] ?? '')));
+        $expectedCod   = (int) ($details['expected_cod'] ?? 0);
+        $actualItem    = $this->normItemV((string) preg_replace('/^\s*\d+\s*x\s*/iu', '', $item));
+        $actualCod     = $this->codToIntV($cod);
+        if ($expectedItem !== '' && $actualItem !== '' && $expectedItem !== $actualItem) $soft[] = 'ITEM ≠ shop details (' . $expectedItem . ' vs ' . $actualItem . ')';
+        if ($expectedCod > 0 && $actualCod > 0 && $expectedCod !== $actualCod)          $soft[] = 'COD ≠ shop details (' . $expectedCod . ' vs ' . $actualCod . ')';
+
+        return ['hard' => $hard, 'soft' => $soft];
+    }
+
+    /** Blacklists + whitelist — per host (same scope rule ng Validate: 'incepxion' o 'likha'). */
+    private function loadValidationRefs(): array
+    {
+        $host  = (string) ($this->host ?? '');
+        $scope = str_contains(strtolower($host), 'incepxion') ? 'incepxion' : 'likha';
+        $refs  = ['fbname' => [], 'keyword' => [], 'addrkw' => [], 'whitelist' => []];
+        $lower = fn ($c) => $c->map(fn ($v) => mb_strtolower(trim((string) $v)))->filter(fn ($v) => $v !== '')->values()->all();
+        try { if (class_exists(\App\Models\FbnameBlacklist::class))         $refs['fbname']  = $lower(\App\Models\FbnameBlacklist::where('host_scope', $scope)->pluck('fb_name')); } catch (\Throwable $e) {}
+        try { if (class_exists(\App\Models\KeywordBlacklist::class))        $refs['keyword'] = $lower(\App\Models\KeywordBlacklist::where('host_scope', $scope)->pluck('keyword')); } catch (\Throwable $e) {}
+        try { if (class_exists(\App\Models\AddressKeywordBlacklist::class)) $refs['addrkw']  = $lower(\App\Models\AddressKeywordBlacklist::where('host_scope', $scope)->pluck('keyword')); } catch (\Throwable $e) {}
+        try { if (class_exists(\App\Models\PhoneWhitelist::class))          $refs['whitelist'] = array_flip((array) \App\Models\PhoneWhitelist::phonesForHost($host)); } catch (\Throwable $e) {}
+        return $refs;
+    }
+
+    /** Duplicate phone sa PAREHONG petsa ng row (ts_date o TIMESTAMP), excluding CANNOT PROCEED at ang row mismo. */
+    private function duplicatePhoneCount($row, string $phone): int
+    {
+        try {
+            $q = MacroOutput::query()->where('id', '<>', (int) $row->id)->where('PHONE NUMBER', $phone)
+                ->where(function ($s) { $s->whereNull('STATUS')->orWhere('STATUS', '<>', 'CANNOT PROCEED'); });
+            $date = null;
+            if (!empty($row->ts_date)) {
+                try { $date = \Carbon\Carbon::parse((string) $row->ts_date, 'Asia/Manila')->toDateString(); } catch (\Throwable $e) {}
+            }
+            if ($date) {
+                $tsType = null; try { $tsType = Schema::getColumnType('macro_output', 'ts_date'); } catch (\Throwable $e) {}
+                if ($tsType === 'date') $q->where('ts_date', '=', $date);
+                else $q->whereBetween('ts_date', [$date . ' 00:00:00', $date . ' 23:59:59']);
+            } else {
+                $ts = (string) ($row->TIMESTAMP ?? '');
+                $dmy = strlen($ts) >= 10 ? substr($ts, -10) : '';
+                if ($dmy === '') return 0;
+                $q->where('TIMESTAMP', 'LIKE', '%' . $dmy . '%');
+            }
+            return (int) $q->count();
+        } catch (\Throwable $e) {
+            return 0;
+        }
+    }
+
+    // ── kopya ng Validate helpers (extractShopDetails / normItem / codToInt) ──
+    private function extractShopDetailsV(string $text): array
+    {
+        $item = ''; $price = 0; $qty = 1;
+        if (preg_match('/\bITEM\s*:\s*(.+?)(\r?\n|$)/iu', $text, $m)) $item = trim((string) $m[1]);
+        if (preg_match('/\bPRICE\s*:\s*₱?\s*([\d,]+(?:\.\d+)?)(\r?\n|$)/iu', $text, $m)) $price = (int) round((float) str_replace(',', '', (string) $m[1]));
+        if (preg_match('/\bQUANTITY\s*:\s*(\d+)(\r?\n|$)/iu', $text, $m)) $qty = max(1, (int) $m[1]);
+        return ['item' => $item, 'price' => $price, 'qty' => $qty, 'expected_cod' => $price];
+    }
+    private function normItemV(string $s): string
+    {
+        $s = mb_strtoupper(trim($s), 'UTF-8');
+        $s = preg_replace('/\s+/u', ' ', $s);
+        $s = preg_replace('/[^\p{L}\p{N} ]+/u', '', $s);
+        return trim((string) $s);
+    }
+    private function codToIntV(string $s): int
+    {
+        $digits = preg_replace('/[^\d]/', '', $s);
+        return $digits === '' ? 0 : (int) $digits;
     }
 }
