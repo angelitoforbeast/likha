@@ -1039,6 +1039,20 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::post('/item/image',        [\App\Http\Controllers\ItemController::class, 'uploadImage'])->middleware('throttle:60,1')->name('item.image');
     Route::post('/item/image/delete', [\App\Http\Controllers\ItemController::class, 'deleteImage'])->middleware('throttle:60,1')->name('item.image.delete');
 
+    // ── /astra — in-site AI chat (OpenAI via server-side proxy; key sa .env lang).
+    //    Lahat ng naka-login (for now). Bawat conversation ay sa may-ari lang.
+    Route::middleware('auth')->prefix('astra')->name('astra.')->group(function () {
+        Route::get   ('/',                          [\App\Http\Controllers\AstraChatController::class, 'index'])        ->name('index');
+        Route::get   ('/conversations',             [\App\Http\Controllers\AstraChatController::class, 'conversations'])->name('conversations');
+        Route::get   ('/conversations/{id}',        [\App\Http\Controllers\AstraChatController::class, 'show'])         ->whereNumber('id')->name('show');
+        Route::patch ('/conversations/{id}',        [\App\Http\Controllers\AstraChatController::class, 'rename'])       ->whereNumber('id')->name('rename');
+        Route::delete('/conversations/{id}',        [\App\Http\Controllers\AstraChatController::class, 'destroy'])      ->whereNumber('id')->name('destroy');
+        Route::get   ('/conversations/{id}/export', [\App\Http\Controllers\AstraChatController::class, 'export'])       ->whereNumber('id')->name('export');
+        Route::post  ('/send',                      [\App\Http\Controllers\AstraChatController::class, 'send'])         ->middleware('throttle:30,1')->name('send');
+        Route::post  ('/upload',                    [\App\Http\Controllers\AstraChatController::class, 'upload'])       ->middleware('throttle:60,1')->name('upload');
+        Route::get   ('/attachments/{id}',          [\App\Http\Controllers\AstraChatController::class, 'attachment'])   ->whereNumber('id')->name('attachment');
+    });
+
     // /image-host — mag-upload ng picture, makakuha ng PUBLIC image URL (para sa image_url, BotCake, atbp.)
     Route::get ('/image-host',        [\App\Http\Controllers\ImageHostController::class, 'index'])  ->name('image.host.index');
     Route::post('/image-host/upload', [\App\Http\Controllers\ImageHostController::class, 'upload']) ->middleware('throttle:60,1')->name('image.host.upload');

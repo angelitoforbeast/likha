@@ -36,7 +36,9 @@ return [
     ],
 
     'openai' => [
-    'key' => env('OPENAI_API_KEY'),
+    'key'   => env('OPENAI_API_KEY'),
+    // Default model ng /astra chat (user-selectable pa rin mula sa allowed list).
+    'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
     // Model is now picked per-request via the UI dropdown sa /gpt-ad-generator.
     // Allowed list + default lives sa GPTAdGeneratorController::ALLOWED_MODELS
     // and ::DEFAULT_MODEL.
