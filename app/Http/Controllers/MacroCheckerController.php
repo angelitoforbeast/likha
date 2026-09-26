@@ -213,7 +213,7 @@ class MacroCheckerController extends Controller
                 'all_filled'      => $allFilled,
                 'outcome'         => $outcome,
                 'duration_ms'     => $durationMs,
-            ]);
+            ] + $this->logDetail($result));
 
             return response()->json([
                 'ok'     => true,
@@ -249,6 +249,56 @@ class MacroCheckerController extends Controller
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Detalye ng takbo (mula sa MacroChecker trace) → dagdag na columns ng ai_checker_logs.
+     * Kung wala pa ang columns (hindi pa na-migrate), walang idadagdag — hindi masisira ang insert.
+     */
+    private function logDetail(array $result): array
+    {
+        static $has = null;
+        if ($has === null) {
+            try { $has = Schema::hasColumn('ai_checker_logs', 'detail'); } catch (\Throwable $e) { $has = false; }
+        }
+        if (!$has) return [];
+        $log = (array) ($result['log'] ?? []);
+        $sum = (array) ($log['summary'] ?? []);
+        unset($result['log']);
+        return [
+            'model'      => mb_substr(implode(',', (array) ($sum['models'] ?? [])), 0, 96),
+            'escalated'  => !empty($sum['escalated']),
+            'searches'   => (int) ($sum['searches'] ?? 0),
+            'tokens_in'  => (int) ($sum['tokens_in'] ?? 0),
+            'tokens_out' => (int) ($sum['tokens_out'] ?? 0),
+            'cost_usd'   => round((float) ($sum['cost_usd'] ?? 0), 4),
+            'evidence'   => mb_substr(implode("\n", (array) ($log['evidence'] ?? [])), 0, 60000),
+            'detail'     => json_encode(['result' => $result] + $log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ];
+    }
+
+    /**
+     * GET /encoder/checker_1/ai-checker/row-log/{id} — mga huling takbo ng AI sa isang
+     * macro_output row (pinakabago muna) para sa "AI log" popup sa checker_1.
+     */
+    public function rowLog(Request $request, $id)
+    {
+        if ($r = $this->checkRole()) return $r;
+        if (!Schema::hasTable('ai_checker_logs')) return response()->json(['ok' => true, 'logs' => []]);
+
+        $cols = ['id', 'created_at', 'user_name', 'source', 'outcome', 'final_code', 'duration_ms'];
+        foreach (['model', 'escalated', 'searches', 'tokens_in', 'tokens_out', 'cost_usd', 'evidence', 'detail'] as $c) {
+            if (Schema::hasColumn('ai_checker_logs', $c)) $cols[] = $c;
+        }
+        $logs = DB::table('ai_checker_logs')
+            ->where('macro_output_id', (int) $id)
+            ->orderByDesc('id')->limit(5)
+            ->get($cols)
+            ->map(function ($l) {
+                $l->detail = isset($l->detail) && $l->detail !== null ? json_decode($l->detail, true) : null;
+                return $l;
+            });
+        return response()->json(['ok' => true, 'logs' => $logs]);
     }
 
     /** Insert ng isang per-row AI log — best-effort (di sisirain ang run-row). */

@@ -50,6 +50,12 @@ class MacroChecker
     private array $evidence = [];
     /** Cached validation references (blacklists, whitelist) — isang load kada processRow. */
     private ?array $valRefs = null;
+    /** Token usage kada AI call (gastos) at structured trace → ai_checker_logs.detail. */
+    private array $usage = [];
+    private array $trace = [];
+    /** Hybrid escalation: isang beses lang kada row, sa HULING pass lang (may Pancake history na). */
+    private bool $allowEscalate = false;
+    private bool $escalated = false;
 
     /**
      * Parse jnt_address.txt → in-memory lookup maps.
@@ -151,57 +157,72 @@ class MacroChecker
      */
     public function processRow(int $id, array $maps, ?string $host = null): array
     {
-        $this->host     = $host;
-        $this->evidence = [];
-        $this->valRefs  = null;
+        $this->host      = $host;
+        $this->evidence  = [];
+        $this->valRefs   = null;
+        $this->usage     = [];
+        $this->trace     = ['passes' => [], 'searches' => []];
+        $this->escalated = false;
+        $t0 = microtime(true);
+
         $row = MacroOutput::find($id);
         if (!$row) {
-            return ['status' => 'failed', 'final_code' => null, 'message' => 'Row not found'];
+            return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'Row not found'], $t0);
         }
 
         $chat = trim((string) $row->all_user_input);
         if ($chat === '') {
-            return ['status' => 'failed', 'final_code' => null, 'message' => 'Empty all_user_input'];
+            return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'Empty all_user_input'], $t0);
         }
 
         $apiKey = $this->getApiKey();
         if (!$apiKey) {
-            return ['status' => 'failed', 'final_code' => null, 'message' => 'No OPENAI_API_KEY'];
+            return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'No OPENAI_API_KEY'], $t0);
         }
 
-        // ── PASS 1: short chat (all_user_input only) ─────────────────────
-        $result = $this->runFixSequence($row, $chat, $maps, $apiKey);
+        // Alamin agad kung may extended chat (Pancake): ang escalation sa mas malalim na model ay
+        // sa HULING pass lang (pass 2 kung meron, kung wala pass 1) at isang beses lang kada row.
+        $extendedChat = $this->fetchPancakeChat((string) ($row->fb_name ?? ''));
+        $hasPass2     = ($extendedChat !== '' && $extendedChat !== $chat);
 
-        if ($result['final_code'] === '✅') {
-            return $result;
+        // ── PASS 1: short chat (all_user_input only) ─────────────────────
+        $this->allowEscalate = !$hasPass2;
+        $result = $this->runFixSequence($row, $chat, $maps, $apiKey, 1);
+
+        if ($result['final_code'] === '✅' || !$hasPass2) {
+            return $this->finish($result, $t0);
         }
 
         // ── PASS 2: retry with extended chat from pancake_conversations ──
-        $extendedChat = $this->fetchPancakeChat((string) ($row->fb_name ?? ''));
-        if ($extendedChat === '' || $extendedChat === $chat) {
-            return $result; // no extra context available — keep pass 1 result
-        }
-
         $combinedChat = $chat . "\n\n[ADDITIONAL CHAT HISTORY FROM PANCAKE]:\n" . $extendedChat;
-
-        // Re-load row para makita yung updates ng pass 1
-        $row->refresh();
-        $result2 = $this->runFixSequence($row, $combinedChat, $maps, $apiKey);
-
-        // Use pass 2 only if it's better — never regress (e.g., pass 1 was ✅
-        // pero pass 2 became "Province" → keep pass 1). But since we already
-        // returned early on ✅, here we accept pass 2 if it's ✅, otherwise
-        // keep the pass 1 result (pass 1 already wrote partial data).
-        if ($result2['final_code'] === '✅') {
-            return $result2;
-        }
-
-        // Pass 2 didn't reach ✅ either, but its values may still be better
-        // than pass 1 (e.g., it filled in a field pass 1 left blank). The
-        // runFixSequence already persisted any improvements, so return pass 2.
-        return $result2;
+        $row->refresh();   // makita ang updates ng pass 1
+        $this->allowEscalate = true;
+        $result2 = $this->runFixSequence($row, $combinedChat, $maps, $apiKey, 2);
+        return $this->finish($result2, $t0);
     }
 
+    /** Isara ang trace (models, gastos, tokens, oras) at isama sa result → ai_checker_logs (controller). */
+    private function finish(array $result, float $t0): array
+    {
+        $in = 0; $out = 0; $searches = 0; $cost = 0.0; $models = [];
+        foreach ($this->usage as $u) {
+            $in += $u['in']; $out += $u['out']; $searches += $u['searches']; $cost += $u['cost'];
+            $models[$u['model']] = true;
+        }
+        $this->trace['summary'] = [
+            'models'     => array_keys($models),
+            'escalated'  => $this->escalated,
+            'searches'   => $searches,
+            'tokens_in'  => $in,
+            'tokens_out' => $out,
+            'cost_usd'   => round($cost, 4),
+            'elapsed_ms' => (int) round((microtime(true) - $t0) * 1000),
+        ];
+        $this->trace['usage']    = $this->usage;
+        $this->trace['evidence'] = $this->evidence;
+        $result['log'] = $this->trace;
+        return $result;
+    }
     /**
      * Runs the RESOLVE → MAP → NAMEADDR → PHONE → VERIFYK sequence
      * on a row using the given chat text. Persists updates. Returns the result.
@@ -209,9 +230,11 @@ class MacroChecker
      * Called twice per hard row by processRow (pass 1 = short chat, pass 2 =
      * combined with pancake_conversations).
      */
-    private function runFixSequence($row, string $chat, array $maps, string $apiKey): array
+    private function runFixSequence($row, string $chat, array $maps, string $apiKey, int $pass = 1): array
     {
         $updates = [];
+        $tPass   = microtime(true);
+        $passLog = ['pass' => $pass, 'chat_chars' => mb_strlen($chat), 'resolve' => [], 'fallbacks' => []];
 
         $provCur = trim((string) $row->PROVINCE);
         $cityCur = trim((string) $row->CITY);
@@ -223,32 +246,62 @@ class MacroChecker
         $resolved = $this->resolveAddress($chat, $provCur, $cityCur, $brgyCur, $apiKey);
         $this->sleepMs();
 
-        // ── 2. MAP — PHP, deterministic, sa BUONG J&T list ───────────────
-        // City muna (globally unique ang labels maliban PANDAN) → province MULA SA LIST
-        // (hal. Cotabato City → COTABATO kahit "Maguindanao del Norte" ang sabi ng PSA).
-        // Hindi nakita o ambiguous → walang ilalagay → hindi ✅ → tao ang bahala.
+        // ── 2. MAP + GUARD — PHP, deterministic ──────────────────────────
+        // MAP: hanapin sa BUONG J&T list (city muna → province MULA SA LIST).
+        // GUARD: dapat NASA CHAT ang city (o province) na sinagot ng AI. Kung hinula lang mula
+        // sa barangay/landmark, tatanggapin lang kung IISA ang city sa list na may ganoong
+        // barangay. Higit sa isang kandidato = hindi sigurado = tao ang bahala.
         $mapped = $this->mapResolvedToList($resolved, $maps);
+        $assess = $this->assessResolved($resolved, $mapped, $chat, $maps);
+        $passLog['resolve'][] = ['model' => $resolved['_model'] ?? self::MODEL, 'answer' => $resolved, 'map' => $mapped, 'assess' => $assess];
         if ($mapped['note'] !== '') $this->evidence[] = 'MAP: ' . $mapped['note'];
+        foreach ($assess['reasons'] as $r) $this->evidence[] = 'GUARD: ' . $r;
 
-        if ($mapped['province'] !== null && self::normProv($mapped['province']) !== self::normProv($provCur)) {
+        // ── 2b. ESCALATE — mahirap na row lang: mas malalim na model, isang beses kada row ─
+        $escModel = trim((string) config('services.openai.ai_checker_escalate_model', ''));
+        if ($assess['uncertain'] && $escModel !== '' && $this->allowEscalate && !$this->escalated) {
+            $this->escalated = true;
+            $escEffort = trim((string) config('services.openai.ai_checker_escalate_effort', 'xhigh')) ?: 'xhigh';
+            $this->evidence[] = 'ESCALATE: hindi sigurado → ' . $escModel . ' (' . $escEffort . ')';
+            $resolved2 = $this->resolveAddress($chat, $provCur, $cityCur, $brgyCur, $apiKey, $escModel, $escEffort, 'auto');
+            $mapped2   = $this->mapResolvedToList($resolved2, $maps);
+            $assess2   = $this->assessResolved($resolved2, $mapped2, $chat, $maps, true);
+            $passLog['resolve'][] = ['model' => $escModel, 'answer' => $resolved2, 'map' => $mapped2, 'assess' => $assess2];
+            if ($mapped2['note'] !== '') $this->evidence[] = 'MAP(' . $escModel . '): ' . $mapped2['note'];
+            foreach ($assess2['reasons'] as $r) $this->evidence[] = 'GUARD(' . $escModel . '): ' . $r;
+            $resolved = $resolved2; $mapped = $mapped2; $assess = $assess2;
+            $this->sleepMs();
+        }
+        $cityAccepted = $assess['city_ok'];
+        $brgyAccepted = $assess['brgy_ok'];
+
+        if ($cityAccepted && $mapped['province'] !== null && self::normProv($mapped['province']) !== self::normProv($provCur)) {
             $updates['PROVINCE'] = $mapped['province'];
         }
-        if ($mapped['city'] !== null && self::normPlace($mapped['city']) !== self::normPlace($cityCur)) {
+        if ($cityAccepted && $mapped['city'] !== null && self::normPlace($mapped['city']) !== self::normPlace($cityCur)) {
             $updates['CITY'] = $mapped['city'];
+        }
+        // Province lang (walang city na tinanggap) — kung EXPLICIT na nasa chat ang province
+        if (!$cityAccepted && $assess['prov_ok'] && $mapped['province'] !== null
+            && self::normProv($mapped['province']) !== self::normProv($provCur)) {
+            $updates['PROVINCE'] = $mapped['province'];
         }
         $effectiveProv = $updates['PROVINCE'] ?? $provCur;
         $effectiveCity = $updates['CITY'] ?? $cityCur;
 
-        // Fallback (WALANG search): may pangalan ng city ang resolver pero hindi nakita ang
-        // spelling sa list → AI ang maghahanap sa list ng province na iyon; UNKNOWN kung wala.
+        // Fallback (WALANG search): NASA CHAT ang city ng resolver pero hindi nakita ang spelling sa list
+        // → AI ang maghahanap sa list ng province na iyon; UNKNOWN kung wala.
         $provKey  = self::normProv($effectiveProv);
         $cityList = isset($maps['citiesByProv'][$provKey]) ? implode(', ', $maps['citiesByProv'][$provKey]) : '';
-        if ($mapped['city'] === null && !empty($mapped['city_unmapped']) && $cityList !== '') {
+        if ($mapped['city'] === null && !empty($mapped['city_unmapped']) && $assess['city_in_chat'] && $cityList !== '') {
             $cand = $this->fixCity($chat, $effectiveProv, $cityCur, $cityList, $apiKey, (string) $resolved['city']);
+            $passLog['fallbacks'][] = ['step' => 'CITYFIX', 'hint' => $resolved['city'], 'answer' => $cand];
             if ($cand && $this->cityInList($cand, $cityList)) {
                 $cand = $this->canonicalizeFromList($cand, $cityList);
                 if (self::normPlace($cand) !== self::normPlace($cityCur)) $updates['CITY'] = $cand;
                 $effectiveCity = $cand;
+                $cityAccepted  = true;
+                $brgyAccepted  = trim((string) $resolved['barangay']) !== '' && count($assess['brgy_cands']) <= 1;
                 $this->evidence[] = 'CITYFIX (fallback, walang search): "' . $resolved['city'] . '" → ' . $cand;
             } else {
                 $this->evidence[] = 'CITYFIX (fallback): "' . $resolved['city'] . '" wala sa list ng ' . $effectiveProv . ' → tao';
@@ -261,13 +314,15 @@ class MacroChecker
         $brgyLabels = $maps['brgysByCityProv'][$cityKey . '|' . $provKey] ?? [];
         $brgyList   = $brgyLabels ? implode(', ', $brgyLabels) : '';
         $aiBrgy     = trim((string) ($resolved['barangay'] ?? ''));
-        if ($brgyList !== '' && $aiBrgy !== '' && ($resolved['confidence'] ?? 'low') !== 'low') {
+        $pick       = null;
+        if ($brgyList !== '' && $aiBrgy !== '' && $cityAccepted && $brgyAccepted) {
             $pick = $this->matchBarangayInList($aiBrgy, $brgyLabels);
             if ($pick !== null) {
                 $this->evidence[] = 'MAP: barangay "' . $aiBrgy . '" → ' . $pick . ' (list)';
             } else {
                 // Fallback (WALANG search): hanapin ang spelling ng resolver barangay sa list ng city na ito.
                 $cand = $this->fixBarangay($chat, $effectiveProv, $effectiveCity, $brgyCur, $brgyList, $apiKey, $aiBrgy);
+                $passLog['fallbacks'][] = ['step' => 'BRGYFIX', 'hint' => $aiBrgy, 'answer' => $cand];
                 if ($cand && $this->brgyInList($cand, $brgyList)) {
                     $pick = $this->canonicalizeFromList($cand, $brgyList);
                     $this->evidence[] = 'BRGYFIX (fallback, walang search): "' . $aiBrgy . '" → ' . $pick;
@@ -279,6 +334,11 @@ class MacroChecker
             if ($pick !== null && self::normPlace($pick) !== self::normPlace($brgyCur)) $updates['BARANGAY'] = $pick;
         }
         $effectiveBrgy = $updates['BARANGAY'] ?? $brgyCur;
+
+        // "Pag hindi sure, tao na": may ipinanukala ang AI pero tinanggihan ng guard →
+        // hindi ✅ ang row kahit may laman na mula sa encoder; pipilitin ang review ng tao.
+        $forceCityBad = (!$cityAccepted && (trim((string) $resolved['city']) !== '' || $resolved['confidence'] === 'low'));
+        $forceBrgyBad = (!$brgyAccepted && (trim((string) $resolved['barangay']) !== '' || $resolved['confidence'] === 'low'));
         // ── 4. NAMEADDR (extract FULL NAME + ADDRESS Line 1 + PHONE) ─────
         $nameCur = trim((string) $row->{'FULL NAME'});
         $addrCur = trim((string) $row->ADDRESS);
@@ -313,15 +373,20 @@ class MacroChecker
             $resolverNote = 'A previous step (with web search) read the chat as: '
                 . implode(', ', array_filter([$resolved['barangay'] ?? '', $resolved['city'] ?? '', $resolved['province'] ?? '']))
                 . ' [confidence: ' . ($resolved['confidence'] ?? 'low') . ']'
-                . (($resolved['evidence'] ?? '') !== '' ? ' — ' . $resolved['evidence'] : '');
+                . (($resolved['evidence'] ?? '') !== '' ? ' — ' . $resolved['evidence'] : '')
+                . '. Treat this as a hypothesis, not proof.';
         }
         $verdict = $this->verifyAddress($chat, $effectiveProv, $effectiveCity, $effectiveBrgy, $apiKey, $resolverNote);
         if (($verdict['evidence'] ?? '') !== '') $this->evidence[] = 'VERIFYK: ' . $verdict['evidence'];
+        $passLog['verify'] = $verdict;
 
         // ANG LIST ANG KATOTOHANAN: blank o wala sa list → hindi ok, kahit ano ang sabi ng AI.
         if ($effectiveProv === '' || !$this->provInList($effectiveProv, $maps['provincesList'])) $verdict['province_ok'] = false;
         if ($effectiveCity === '' || $cityList === '' || !$this->cityInList($effectiveCity, $cityList)) $verdict['city_ok'] = false;
         if ($effectiveBrgy === '' || $brgyList === '' || !$this->brgyInList($effectiveBrgy, $brgyList)) $verdict['barangay_ok'] = false;
+        // GUARD ang huling salita: tinanggihan → hindi ok → tao ang bahala.
+        if ($forceCityBad) { $verdict['city_ok'] = false;     $this->evidence[] = 'GUARD: city hindi tinanggap → hindi ✅'; }
+        if ($forceBrgyBad) { $verdict['barangay_ok'] = false; $this->evidence[] = 'GUARD: barangay hindi tinanggap → hindi ✅'; }
         // ✅ IMPLIED PROVINCE PATCH — same pattern as macro's implied-city patch.
         // Kung city_ok && barangay_ok pero !province_ok, AT yung current city ay
         // unique sa current province sa jnt_address.txt, then province is implied.
@@ -382,7 +447,7 @@ class MacroChecker
         }
         $proceed = ($statusCode === '✅' && $allFilled && empty($gate['hard']) && empty($gate['soft']));
 
-        // ── AI EVIDENCE (hidden column) ──────────────────────────────────
+        // ── AI EVIDENCE (hidden column — local dev lang; prod: ai_checker_logs.evidence) ─
         if (!empty($this->evidence) && self::hasEvidenceColumn()) {
             $updates['AI EVIDENCE'] = mb_substr(
                 \Carbon\Carbon::now('Asia/Manila')->format('Y-m-d H:i') . "\n" . implode("\n", $this->evidence),
@@ -395,6 +460,17 @@ class MacroChecker
             $row->update($updates);
         }
 
+        // ── Trace ng pass na ito → ai_checker_logs.detail ────────────────
+        $passLog['before']      = ['PROVINCE' => $provCur, 'CITY' => $cityCur, 'BARANGAY' => $brgyCur, 'FULL NAME' => $nameCur, 'PHONE NUMBER' => $phoneCur, 'ADDRESS' => $addrCur];
+        $passLog['after']       = ['PROVINCE' => (string) $finalProv, 'CITY' => (string) $finalCity, 'BARANGAY' => (string) $finalBrgy, 'FULL NAME' => (string) $finalName, 'PHONE NUMBER' => (string) $finalPhone, 'ADDRESS' => (string) $finalAddr];
+        $passLog['updated']     = array_values(array_diff(array_keys($updates), ['AI EVIDENCE']));
+        $passLog['status_code'] = $statusCode;
+        $passLog['final_code']  = $updates['APP SCRIPT CHECKER'] ?? $statusCode;
+        $passLog['gate']        = $gate;
+        $passLog['proceed']     = $proceed;
+        $passLog['elapsed_ms']  = (int) round((microtime(true) - $tPass) * 1000);
+        $this->trace['passes'][] = $passLog;
+
         $gateMsg = implode('; ', array_merge($gate['hard'], $gate['soft']));
         return [
             'status'     => $proceed ? 'fixed' : 'partial',
@@ -406,7 +482,6 @@ class MacroChecker
                 : (($statusCode === '✅' && !$proceed) ? 'Address ✅ pero bagsak sa validation: ' . $gateMsg : null),
         ];
     }
-
     /**
      * Fetch the customer's full chat history from pancake_conversations
      * (same source as the "See more" link sa /encoder/checker_1). Used as
@@ -464,7 +539,7 @@ class MacroChecker
             . $cityList . "\n\n"
             . 'Return STRICT JSON only: {"city":"...","province":"..."}' . "\n";
 
-        $raw = $this->callOpenAI($apiKey, $system, $prompt); // fallback lang — walang search
+        $raw = $this->callOpenAI($apiKey, $system, $prompt, 'FALLBACK'); // fallback lang — walang search
         $parsed = $this->parseJsonField($raw, 'city');
         if (!$parsed || strtoupper($parsed) === 'UNKNOWN') return null;
         return $parsed;
@@ -495,7 +570,7 @@ class MacroChecker
             . $brgyList . "\n\n"
             . 'Return STRICT JSON only: {"barangay":"...","city":"...","province":"..."}' . "\n";
 
-        $raw = $this->callOpenAI($apiKey, $system, $prompt); // fallback lang — walang search
+        $raw = $this->callOpenAI($apiKey, $system, $prompt, 'FALLBACK'); // fallback lang — walang search
         $parsed = $this->parseJsonField($raw, 'barangay');
         if (!$parsed || strtoupper($parsed) === 'UNKNOWN') return null;
         return $parsed;
@@ -597,6 +672,8 @@ class MacroChecker
                 . "MAGUINDANAO covers del Norte and del Sur; Metro Manila districts like TONDO or SAMPALOC are filed as cities). "
                 . "Judge whether each CURRENT value denotes the SAME place the customer means under that filing. "
                 . "Do NOT mark a value wrong for geographic or naming reasons.\n"
+                . "Courier labels may use Roman numerals, hyphens and suffixes such as (POB.): 'District 1' = 'DISTRICT I (POB.)', "
+                . "'Poblacion 9' = 'POBLACION IX', 'Nabag-o' = 'NABAGO', 'Sta. Cruz' = 'SANTA CRUZ'. Treat these as the SAME place.\n"
                 . "A value is ok when the chat or the resolver note supports it (directly, or through a landmark/business located there) and nothing contradicts it. "
                 . "A value is NOT ok when the chat clearly points to a different place, or when it has no basis in the chat.\n"
                 . "Output STRICT JSON only:\n"
@@ -610,7 +687,7 @@ class MacroChecker
             . "\nReturn STRICT JSON only:\n"
             . '{"province_ok":true/false,"city_ok":true/false,"barangay_ok":true/false,"evidence":"..."}' . "\n";
 
-        $obj = $this->parseJsonObject($this->callOpenAI($apiKey, $system, $prompt));
+        $obj = $this->parseJsonObject($this->callOpenAI($apiKey, $system, $prompt, 'VERIFYK'));
         return [
             'province_ok' => !empty($obj['province_ok']),
             'city_ok'     => !empty($obj['city_ok']),
@@ -709,7 +786,7 @@ class MacroChecker
     }
 
     /** Call OpenAI with strict-JSON expectation. Retries once on failure. */
-    public function callOpenAI(string $apiKey, string $system, string $prompt): string
+    public function callOpenAI(string $apiKey, string $system, string $prompt, string $step = 'NAMEADDR'): string
     {
         for ($attempt = 1; $attempt <= 2; $attempt++) {
             try {
@@ -726,6 +803,8 @@ class MacroChecker
                     ]);
 
                 if ($res->successful()) {
+                    $u = (array) data_get($res->json(), 'usage', []);
+                    $this->recordUsage($step, self::MODEL, (int) ($u['prompt_tokens'] ?? 0), (int) ($u['completion_tokens'] ?? 0), 0, 0);
                     return trim((string) data_get($res->json(), 'choices.0.message.content', ''));
                 }
 
@@ -745,7 +824,6 @@ class MacroChecker
         }
         return '';
     }
-
     private function parseJsonField(string $raw, string $field): ?string
     {
         $obj = $this->parseJsonObject($raw);
@@ -864,18 +942,20 @@ class MacroChecker
      * services.openai.ai_checker_search: required | auto | off (lumang gawi).
      * Kapag nag-fail ang search call → fallback sa callOpenAI() (hindi mamamatay ang row).
      */
-    private function callSearch(string $apiKey, string $system, string $prompt, string $step): string
+    private function callSearch(string $apiKey, string $system, string $prompt, string $step,
+                                ?string $model = null, ?string $effort = null, ?string $toolChoice = null): string
     {
         $mode = strtolower(trim((string) config('services.openai.ai_checker_search', 'required')));
-        if ($mode === 'off') return $this->callOpenAI($apiKey, $system, $prompt);
+        if ($mode === 'off') return $this->callOpenAI($apiKey, $system, $prompt, $step);
 
+        $useModel = $model ?: self::MODEL;
         $payload = [
-            'model'        => self::MODEL,
+            'model'        => $useModel,
             'instructions' => $system,
             'input'        => $prompt . "\nReturn JSON only.",
-            'reasoning'    => ['effort' => 'low'],
+            'reasoning'    => ['effort' => $effort ?: 'low'],
             'tools'        => [['type' => 'web_search']],
-            'tool_choice'  => $mode === 'auto' ? 'auto' : 'required',
+            'tool_choice'  => $toolChoice ?: ($mode === 'auto' ? 'auto' : 'required'),
             'include'      => ['web_search_call.action.sources'],
             'store'        => false,
         ];
@@ -884,7 +964,7 @@ class MacroChecker
             try {
                 $res = Http::withToken($apiKey)
                     ->acceptJson()
-                    ->timeout(self::SEARCH_TIMEOUT_S)
+                    ->timeout($model ? 300 : self::SEARCH_TIMEOUT_S)
                     ->post('https://api.openai.com/v1/responses', $payload);
 
                 if ($res->successful()) {
@@ -916,10 +996,18 @@ class MacroChecker
                             . ($ev !== '' ? ' — ' . $ev : '')
                             . ($urls ? ' — ' . implode(' ', array_slice($urls, 0, 3)) : '');
                     }
+                    $u = (array) ($j['usage'] ?? []);
+                    $this->recordUsage($step, $useModel, (int) ($u['input_tokens'] ?? 0), (int) ($u['output_tokens'] ?? 0),
+                        (int) ($u['output_tokens_details']['reasoning_tokens'] ?? 0), $calls->count());
+                    $this->trace['searches'][] = ['step' => $step, 'model' => $useModel, 'queries' => $queries, 'sources' => $urls];
                     return $text;
                 }
 
                 Log::warning('MACRO_CHECKER_SEARCH_HTTP', ['step' => $step, 'attempt' => $attempt, 'status' => $res->status(), 'body' => substr($res->body(), 0, 400)]);
+                // Hindi tinatanggap ang reasoning param ng model → subukan nang wala
+                if ($attempt === 1 && $res->status() === 400 && isset($payload['reasoning']) && str_contains($res->body(), 'reasoning')) {
+                    unset($payload['reasoning']);
+                }
             } catch (\Throwable $e) {
                 Log::warning('MACRO_CHECKER_SEARCH_EX', ['step' => $step, 'attempt' => $attempt, 'error' => $e->getMessage()]);
             }
@@ -927,9 +1015,8 @@ class MacroChecker
         }
 
         $this->evidence[] = $step . ': search call failed — fallback sa walang search';
-        return $this->callOpenAI($apiKey, $system, $prompt);
+        return $this->callOpenAI($apiKey, $system, $prompt, $step);
     }
-
     /** Ibalik ang EKSAKTONG label mula sa CSV list na tumutugma (normalized). */
     private function canonicalizeFromList(string $val, string $listCsv): string
     {
@@ -1105,9 +1192,11 @@ class MacroChecker
      * HINDI naka-kulong sa J&T list — ang list ay hahanapin ng mapResolvedToList().
      * Blank ('') ang field kapag hindi sigurado: walang hulaan, walang kapit-bahay.
      */
-    public function resolveAddress(string $chat, string $provCur, string $cityCur, string $brgyCur, string $apiKey): array
+    public function resolveAddress(string $chat, string $provCur, string $cityCur, string $brgyCur, string $apiKey,
+                                   ?string $model = null, ?string $effort = null, ?string $toolChoice = null): array
     {
-        $empty = ['province' => '', 'province_aliases' => [], 'city' => '', 'barangay' => '', 'confidence' => 'low', 'evidence' => ''];
+        $empty = ['province' => '', 'province_aliases' => [], 'city' => '', 'city_candidates' => [], 'barangay' => '', 'barangay_candidates' => [],
+                  'confidence' => 'low', 'evidence' => '', '_model' => $model ?: self::MODEL];
         if (trim($chat) === '') return $empty;
 
         $system = "You resolve Philippine delivery addresses from raw customer chat.\n"
@@ -1117,6 +1206,10 @@ class MacroChecker
             . "Rules:\n"
             . "- Return \"\" for any field you cannot determine with confidence. NEVER guess a neighboring or similar-sounding town/barangay.\n"
             . "- If the customer explicitly names a city/municipality or barangay, use exactly that place.\n"
+            . "- city_candidates / barangay_candidates: the places that REMAIN plausible after your research, including the one you chose. "
+            . "Put exactly ONE entry when the evidence settles it (e.g. a business/landmark listing places it in a specific barangay). "
+            . "Put several ONLY when you genuinely cannot decide (the same barangay name exists in several towns and the chat names no city, "
+            . "or sources disagree about which barangay a subdivision/landmark is in) — then never silently pick one.\n"
             . "- province: the geographic province. Highly urbanized/independent cities still get the province they are geographically in "
             . "(e.g. Cotabato City -> Maguindanao del Norte, Davao City -> Davao del Sur).\n"
             . "- province_aliases: ALL other names that province is or was known by, including pre-split and colloquial names, "
@@ -1128,41 +1221,53 @@ class MacroChecker
             . "- CURRENT_* values were typed by an encoder and MAY BE WRONG; treat them only as weak hints.\n"
             . "- confidence: high | medium | low for the whole answer (low = a human should decide).\n"
             . "Output STRICT JSON only:\n"
-            . '{"province":"...","province_aliases":["..."],"city":"...","barangay":"...","confidence":"high|medium|low","evidence":"one short line: why (landmark/source) or empty"}';
+            . '{"province":"...","province_aliases":["..."],"city":"...","city_candidates":["..."],"barangay":"...","barangay_candidates":["..."],"confidence":"high|medium|low","evidence":"one short line: why (landmark/source) or empty"}';
 
         $prompt = "RAW_CUSTOMER_CHAT:\n<<<\n" . $chat . "\n>>>\n\n"
             . "CURRENT_PROVINCE: " . $provCur . "\n"
             . "CURRENT_CITY: " . $cityCur . "\n"
             . "CURRENT_BARANGAY: " . $brgyCur . "\n\n"
             . "Return STRICT JSON only:\n"
-            . '{"province":"...","province_aliases":["..."],"city":"...","barangay":"...","confidence":"high|medium|low","evidence":"..."}' . "\n";
+            . '{"province":"...","province_aliases":["..."],"city":"...","city_candidates":["..."],"barangay":"...","barangay_candidates":["..."],"confidence":"high|medium|low","evidence":"..."}' . "\n";
 
-        $raw = $this->callSearch($apiKey, $system, $prompt, 'RESOLVE');
-        $obj = $this->parseJsonObject($raw);
-        if (!$obj) { $this->evidence[] = 'RESOLVE: walang sagot/JSON → tao'; return $empty; }
+        $step = $model ? 'RESOLVE(' . $model . ')' : 'RESOLVE';
+        $raw  = $this->callSearch($apiKey, $system, $prompt, $step, $model, $effort, $toolChoice);
+        $obj  = $this->parseJsonObject($raw);
+        if (!$obj) { $this->evidence[] = $step . ': walang sagot/JSON → tao'; return $empty; }
 
         $clean = static function ($v): string {
             $v = trim((string) $v);
             return in_array(strtoupper($v), ['UNKNOWN', 'N/A', 'NA', 'NULL', 'NONE', '-'], true) ? '' : $v;
         };
-        $aliases = [];
-        foreach ((array) ($obj['province_aliases'] ?? []) as $a) { $a = $clean($a); if ($a !== '') $aliases[] = $a; }
+        $list = static function ($arr) use ($clean): array {
+            $o = [];
+            foreach ((array) $arr as $a) { $a = $clean($a); if ($a !== '' && !in_array($a, $o, true)) $o[] = $a; }
+            return $o;
+        };
         $conf = strtolower(trim((string) ($obj['confidence'] ?? 'low')));
         if (!in_array($conf, ['high', 'medium', 'low'], true)) $conf = 'low';
 
         $out = [
-            'province'         => $clean($obj['province'] ?? ''),
-            'province_aliases' => $aliases,
-            'city'             => $clean($obj['city'] ?? ''),
-            'barangay'         => $clean($obj['barangay'] ?? ''),
-            'confidence'       => $conf,
-            'evidence'         => trim((string) ($obj['evidence'] ?? '')),
+            'province'            => $clean($obj['province'] ?? ''),
+            'province_aliases'    => $list($obj['province_aliases'] ?? []),
+            'city'                => $clean($obj['city'] ?? ''),
+            'city_candidates'     => $list($obj['city_candidates'] ?? []),
+            'barangay'            => $clean($obj['barangay'] ?? ''),
+            'barangay_candidates' => $list($obj['barangay_candidates'] ?? []),
+            'confidence'          => $conf,
+            'evidence'            => trim((string) ($obj['evidence'] ?? '')),
+            '_model'              => $model ?: self::MODEL,
         ];
-        $this->evidence[] = 'RESOLVE: ' . implode(', ', array_filter([$out['barangay'], $out['city'], $out['province']]))
-            . ' [' . $conf . ']' . ($aliases ? ' aliases=' . implode('/', $aliases) : '');
+        if ($out['city'] !== '' && !in_array($out['city'], $out['city_candidates'], true)) $out['city_candidates'][] = $out['city'];
+        if ($out['barangay'] !== '' && !in_array($out['barangay'], $out['barangay_candidates'], true)) $out['barangay_candidates'][] = $out['barangay'];
+
+        $this->evidence[] = $step . ': ' . implode(', ', array_filter([$out['barangay'], $out['city'], $out['province']]))
+            . ' [' . $conf . ']'
+            . (count($out['city_candidates']) > 1 ? ' city?=' . implode('/', $out['city_candidates']) : '')
+            . (count($out['barangay_candidates']) > 1 ? ' brgy?=' . implode('/', $out['barangay_candidates']) : '')
+            . ($out['province_aliases'] ? ' aliases=' . implode('/', $out['province_aliases']) : '');
         return $out;
     }
-
     /**
      * MAP — hanapin sa BUONG J&T list ang katumbas ng resolved (real-world) address.
      * City muna: globally unique ang city labels (maliban PANDAN) dahil may province
@@ -1194,7 +1299,7 @@ class MacroChecker
 
         if ($aiCity !== '') {
             $idx  = self::cityIndex($maps);
-            $key  = self::normCityKey($aiCity);
+            $key  = self::normCityKey(str_contains($aiCity, ',') ? trim(explode(',', $aiCity)[0]) : $aiCity);   // "Sampaloc, Manila" → "Sampaloc"
             $alt  = str_ends_with($key, ' city') ? trim(substr($key, 0, -5)) : $key . ' city';
             $prefixes = [];
             foreach (array_merge($provNames, $provLabels) as $p) { $pk = self::normCityKey((string) $p); if ($pk !== '') $prefixes[] = $pk; }
@@ -1342,6 +1447,16 @@ class MacroChecker
         }
         if (count($exact) === 1) return $exact[0];
         if (count($exact) === 0 && count($loose) === 1) return $loose[0];
+        if (count($exact) === 0 && count($loose) === 0) {
+            // Compact pass: "nabag o" (mula sa Nabag-o) ↔ "nabago"; "sta ana" ↔ "santaana"
+            $tc = str_replace(' ', '', $target); $hits = [];
+            foreach ($labels as $label) {
+                $label = (string) $label;
+                $noPar = preg_replace('/\([^)]*\)/u', ' ', $label) ?? $label;
+                if (str_replace(' ', '', self::normBrgyKey($label)) === $tc || str_replace(' ', '', self::normBrgyKey($noPar)) === $tc) $hits[] = $label;
+            }
+            if (count($hits) === 1) return $hits[0];
+        }
         return null;
     }
 
@@ -1364,5 +1479,200 @@ class MacroChecker
         }, $s) ?? $s;
         $s = preg_replace('/\s+/u', ' ', $s) ?? $s;
         return trim($s);
+    }
+
+    // ── GUARD · USAGE (2026-09-26) ────────────────────────────────────────
+
+    /**
+     * GUARD — "pag hindi sure, tao na", deterministic (walang AI):
+     *  • city_in_chat: nasa chat ba ang city (label / bare name / ±"city") na sinagot ng resolver?
+     *  • prov_in_chat: nasa chat ba ang province o alinman sa aliases nito?
+     *  • Wala pareho → hinula lang mula sa barangay/landmark → tatanggapin lang kung IISA ang
+     *    city sa BUONG list na may ganoong barangay (province lang ang nasa chat → iisa sa
+     *    loob ng province na iyon).
+     *  • Higit sa isang kandidato (city_candidates / barangay_candidates) → hindi sigurado,
+     *    maliban kung EXPLICIT na nasa chat ang napili.
+     *  'uncertain' = i-escalate sa mas malalim na model — kapag higit sa isa ang kandidato (nagkakasalungat
+     *  ang sources) o kapag HINULA ang barangay mula sa landmark (wala sa chat). Kulang na impormasyon (walang city, low confidence) ay hindi malulutas ng mas malalim na
+     *  model — tao agad, walang gastos.
+     */
+    public function assessResolved(array $resolved, array $mapped, string $chat, array $maps, bool $deep = false): array
+    {
+        $out = ['city_ok' => false, 'brgy_ok' => false, 'prov_ok' => false, 'city_in_chat' => false, 'prov_in_chat' => false,
+                'brgy_in_chat' => false, 'uncertain' => false, 'city_cands' => [], 'brgy_cands' => [], 'reasons' => []];
+        $conf   = (string) ($resolved['confidence'] ?? 'low');
+        $aiCity = trim((string) ($resolved['city'] ?? ''));
+        $aiProv = trim((string) ($resolved['province'] ?? ''));
+        $aiBrgy = trim((string) ($resolved['barangay'] ?? ''));
+        $out['city_cands'] = self::distinctKeys((array) ($resolved['city_candidates'] ?? []), 'normCityKey');
+        $out['brgy_cands'] = self::distinctKeys((array) ($resolved['barangay_candidates'] ?? []), 'normBrgyKey');
+
+        if ($conf === 'low') { $out['reasons'][] = 'resolver low confidence → tao'; return $out; }
+
+        $chatKey  = ' ' . self::normCityKey($chat) . ' ';
+        $chatBrgy = ' ' . self::normBrgyKey($chat) . ' ';
+
+        // Province: nasa chat?
+        $provForms = [];
+        foreach (array_merge([$aiProv], (array) ($resolved['province_aliases'] ?? []), [(string) ($mapped['province'] ?? '')]) as $p) {
+            $p = self::normCityKey((string) $p);
+            if ($p === '') continue;
+            $provForms[] = $p;
+            if (in_array($p, ['metro manila', 'ncr', 'national capital region'], true)) array_push($provForms, 'metro manila', 'ncr', 'manila');
+        }
+        $provForms = array_values(array_unique($provForms));
+        $out['prov_in_chat'] = self::chatMentionsAny($chatKey, $provForms);
+        $out['prov_ok']      = $out['prov_in_chat'] && ($mapped['province'] ?? null) !== null;
+
+        // City: nasa chat? (salita ng resolver, buong label, bare name, ±"city")
+        $forms = [];
+        if ($aiCity !== '') { $forms[] = self::normCityKey($aiCity); if (str_contains($aiCity, ',')) $forms[] = self::normCityKey(trim(explode(',', $aiCity)[0])); }
+        if (($mapped['city'] ?? null) !== null) {
+            $full = self::normCityKey((string) $mapped['city']);
+            $forms[] = $full;
+            foreach (array_merge($provForms, self::cityPrefixes($maps)) as $pf) {
+                if ($pf !== '' && str_starts_with($full, $pf . ' ')) $forms[] = substr($full, strlen($pf) + 1);
+            }
+        }
+        $cityForms = [];
+        foreach ($forms as $f) {
+            $f = trim($f);
+            if ($f === '' || $f === 'city') continue;
+            $cityForms[] = $f;
+            $cityForms[] = str_ends_with($f, ' city') ? trim(substr($f, 0, -5)) : $f . ' city';
+        }
+        $cityForms = array_values(array_unique(array_filter($cityForms, fn ($f) => $f !== '' && $f !== 'city')));
+        $out['city_in_chat'] = self::chatMentionsAny($chatKey, $cityForms);
+        if ($aiBrgy !== '') $out['brgy_in_chat'] = self::chatMentionsAny($chatBrgy, [self::normBrgyKey($aiBrgy)]) || self::chatMentionsFuzzy($chatBrgy, self::normBrgyKey($aiBrgy));
+
+        if (($mapped['city'] ?? null) === null) {
+            if ($aiCity !== '') { $out['reasons'][] = 'city "' . $aiCity . '" hindi na-map sa list → tao'; }
+            return $out;   // walang city → walang barangay (dependent)
+        }
+
+        if ($out['city_in_chat']) {
+            $out['city_ok'] = true;
+        } elseif (count($out['city_cands']) > 1) {
+            $out['uncertain'] = true;
+            $out['reasons'][] = 'wala sa chat ang city at ' . count($out['city_cands']) . ' ang kandidato (' . implode(', ', $out['city_cands']) . ') → tao';
+        } elseif ($aiBrgy === '') {
+            $out['reasons'][] = 'wala sa chat ang city/province at walang barangay para i-verify → tao';
+        } else {
+            // Hinula mula sa barangay/landmark → dapat IISA sa list
+            $scope = $out['prov_in_chat'] ? (string) $mapped['province'] : null;
+            $n = self::barangayCityCount($aiBrgy, $maps, $scope);
+            if ($n === 1) {
+                $out['city_ok'] = true;
+                $out['reasons'][] = 'wala sa chat ang city pero IISA lang ang "' . $aiBrgy . '" sa list' . ($scope ? ' ng ' . $scope : '') . ' → tinanggap';
+            } else {
+                $out['reasons'][] = 'wala sa chat ang city; "' . $aiBrgy . '" ay nasa ' . $n . ' city sa list' . ($scope ? ' ng ' . $scope : '') . ' → tao';
+            }
+        }
+        if (!$out['city_ok']) return $out;
+
+        // Barangay
+        if ($aiBrgy === '') {
+            $out['brgy_ok'] = false;            // blank → mananatiling blank → hindi ✅ (tao), walang escalation
+        } elseif (count($out['brgy_cands']) > 1 && !$out['brgy_in_chat']) {
+            $out['brgy_ok']   = false;
+            $out['uncertain'] = true;
+            $out['reasons'][] = count($out['brgy_cands']) . ' ang kandidatong barangay (' . implode(', ', $out['brgy_cands']) . ') at wala sa chat ang napili → tao';
+        } elseif (!$out['brgy_in_chat'] && !$deep) {
+            // Hinula mula sa landmark/subdivision: ang mababaw na tawag ay nag-iiba kada takbo (District I vs San Fermin)
+            // → deeper model muna; kung walang escalation, tao ang bahala.
+            $out['brgy_ok']   = false;
+            $out['uncertain'] = true;
+            $out['reasons'][] = 'barangay "' . $aiBrgy . '" wala sa chat (hinula mula sa landmark) → mas malalim na pagsusuri muna';
+        } else {
+            $out['brgy_ok'] = true;
+            if (!$out['brgy_in_chat']) $out['reasons'][] = 'barangay "' . $aiBrgy . '" hinula mula sa landmark, kinumpirma ng mas malalim na model (isang kandidato)';
+        }
+        return $out;
+    }
+
+    /** Whole-phrase match sa normalized na chat (may leading/trailing space ang haystack). */
+    private static function chatMentionsAny(string $hayPadded, array $needles): bool
+    {
+        foreach ($needles as $n) {
+            $n = trim((string) $n);
+            if ($n !== '' && str_contains($hayPadded, ' ' . $n . ' ')) return true;
+        }
+        return false;
+    }
+
+    /** Fuzzy whole-phrase match (typo-tolerant, ≥85% similar) — "ibayo silngan" ≈ "ibayo silangan". */
+    private static function chatMentionsFuzzy(string $hayPadded, string $needle): bool
+    {
+        $needle = trim($needle);
+        if ($needle === '' || strlen($needle) < 5) return false;
+        $nw = count(explode(' ', $needle));
+        $words = array_values(array_filter(explode(' ', trim($hayPadded)), fn ($w) => $w !== ''));
+        for ($i = 0; $i + $nw <= count($words); $i++) {
+            $win = implode(' ', array_slice($words, $i, $nw));
+            similar_text($win, $needle, $pct);
+            if ($pct >= 85.0) return true;
+        }
+        return false;
+    }
+
+    private static function distinctKeys(array $vals, string $normFn): array
+    {
+        $o = [];
+        foreach ($vals as $v) { $k = self::$normFn((string) $v); if ($k !== '' && !in_array($k, $o, true)) $o[] = $k; }
+        return $o;
+    }
+
+    private static ?array $prefixCache = null;
+
+    /** Mga province prefix ng city labels (BATANGAS-SAN-JOSE, NORTH-COTABATO-CARMEN…), pinakamahaba muna. */
+    private static function cityPrefixes(array $maps): array
+    {
+        if (self::$prefixCache !== null) return self::$prefixCache;
+        $p = [];
+        foreach (($maps['provincesSet'] ?? []) as $label) $p[] = self::normCityKey((string) $label);
+        foreach (['north cotabato', 'south cotabato', 'metro manila', 'ncr'] as $x) $p[] = $x;
+        $p = array_values(array_unique(array_filter($p)));
+        usort($p, fn ($a, $b) => strlen($b) <=> strlen($a));
+        return self::$prefixCache = $p;
+    }
+
+    private static ?array $brgyIndex = null;
+
+    /** Ilang city (city|prov) sa list ang may barangay na ganito ang pangalan? Optional: sa loob lang ng isang province. */
+    public static function barangayCityCount(string $brgy, array $maps, ?string $provLabel = null): int
+    {
+        if (self::$brgyIndex === null) {
+            $idx = [];
+            foreach (($maps['brgysByCityProv'] ?? []) as $cityProv => $labels) {
+                foreach ($labels as $label) {
+                    $label = (string) $label;
+                    $k1 = self::normBrgyKey($label);
+                    $k2 = self::normBrgyKey(preg_replace('/\([^)]*\)/u', ' ', $label) ?? $label);
+                    if ($k1 !== '') $idx[$k1][$cityProv] = true;
+                    if ($k2 !== '' && $k2 !== $k1) $idx[$k2][$cityProv] = true;
+                    foreach ([$k1, $k2] as $k) { $c = '#' . str_replace(' ', '', $k); if ($c !== '#') $idx[$c][$cityProv] = true; }
+                }
+            }
+            self::$brgyIndex = $idx;
+        }
+        $key = self::normBrgyKey($brgy);
+        if ($key === '') return 0;
+        $hits = array_keys(self::$brgyIndex[$key] ?? []);
+        if (!$hits) $hits = array_keys(self::$brgyIndex['#' . str_replace(' ', '', $key)] ?? []);   // compact: "nabag o" ↔ NABAGO
+        if ($provLabel !== null && $provLabel !== '') {
+            $pk = self::normProv($provLabel);
+            $hits = array_values(array_filter($hits, fn ($cp) => substr($cp, strpos($cp, '|') + 1) === $pk));
+        }
+        return count($hits);
+    }
+
+    /** Usage kada AI call → gastos (USD) gamit ang config prices (estimate). */
+    private function recordUsage(string $step, string $model, int $in, int $out, int $reasoning, int $searches): void
+    {
+        $prices = (array) config('services.openai.ai_checker_prices', []);
+        [$pi, $po] = (array) ($prices[$model] ?? [0.0, 0.0]) + [0.0, 0.0];
+        $ps = (float) ($prices['web_search'] ?? 0.01);
+        $cost = $in / 1e6 * (float) $pi + $out / 1e6 * (float) $po + $searches * $ps;
+        $this->usage[] = ['step' => $step, 'model' => $model, 'in' => $in, 'out' => $out, 'reasoning' => $reasoning, 'searches' => $searches, 'cost' => round($cost, 5)];
     }
 }

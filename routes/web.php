@@ -589,6 +589,9 @@ Route::post('/encoder/checker_1/ai-checker/run-row/{id}', [\App\Http\Controllers
     ->name('macro_checker.run_row');
 Route::get('/encoder/checker_1/ai-checker/logs', [\App\Http\Controllers\MacroCheckerController::class, 'logs'])
     ->name('macro_checker.logs');
+Route::get('/encoder/checker_1/ai-checker/row-log/{id}', [\App\Http\Controllers\MacroCheckerController::class, 'rowLog'])
+    ->whereNumber('id')
+    ->name('macro_checker.row_log');
 Route::get ('/encoder/checker_1/ai-checker/access', [\App\Http\Controllers\MacroCheckerController::class, 'accessEdit'])
     ->name('macro_checker.access');
 Route::post('/encoder/checker_1/ai-checker/access', [\App\Http\Controllers\MacroCheckerController::class, 'accessUpdate'])

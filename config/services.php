@@ -45,6 +45,16 @@ return [
     // /encoder/checker_1 AI checker: web_search sa address calls (PROV/CITY/BRGY/VERIFY).
     //   required = sapilitang mag-search kada call · auto = AI ang magpapasya · off = walang search (lumang gawi)
     'ai_checker_search' => env('AI_CHECKER_SEARCH', 'required'),
+    // Hybrid escalation: mahirap na row lang (tinanggihan ng guard) → mas malalim na model, isang beses
+    // kada row, sa huling pass lang. Blangko ang model = walang escalation (tao agad).
+    'ai_checker_escalate_model'  => env('AI_CHECKER_ESCALATE_MODEL', 'gpt-6-astra'),
+    'ai_checker_escalate_effort' => env('AI_CHECKER_ESCALATE_EFFORT', 'xhigh'),
+    // USD kada 1M tokens [input, output] + kada web search call — para sa cost_usd sa ai_checker_logs (estimate).
+    'ai_checker_prices' => [
+        'gpt-5.2'     => [1.75, 14.0],
+        'gpt-6-astra' => [10.0, 50.0],
+        'web_search'  => 0.01,
+    ],
     // Model is now picked per-request via the UI dropdown sa /gpt-ad-generator.
     // Allowed list + default lives sa GPTAdGeneratorController::ALLOWED_MODELS
     // and ::DEFAULT_MODEL.
