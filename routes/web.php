@@ -589,6 +589,9 @@ Route::post('/encoder/checker_1/ai-checker/run-row/{id}', [\App\Http\Controllers
     ->name('macro_checker.run_row');
 Route::get('/encoder/checker_1/ai-checker/logs', [\App\Http\Controllers\MacroCheckerController::class, 'logs'])
     ->name('macro_checker.logs');
+Route::get('/encoder/checker_1/ai-checker/row-state/{id}', [\App\Http\Controllers\MacroCheckerController::class, 'rowState'])
+    ->whereNumber('id')
+    ->name('macro_checker.row_state');
 Route::get('/encoder/checker_1/ai-checker/answers', [\App\Http\Controllers\MacroCheckerController::class, 'answers'])
     ->name('macro_checker.answers');   // CEO-only: ano ang sagot ng AI kada takbo
 Route::get ('/encoder/checker_1/ai-checker/access', [\App\Http\Controllers\MacroCheckerController::class, 'accessEdit'])

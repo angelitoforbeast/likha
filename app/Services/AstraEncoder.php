@@ -49,6 +49,7 @@ class AstraEncoder
     private array $searches = [];
     private ?MacroOutput $row = null;
     private string $keySource = 'wala';
+    private string $lastHistory = '';
 
     /**
      * Saan kukunin ang OpenAI key ng Astra engine, sa pagkakasunod:
@@ -172,6 +173,22 @@ class AstraEncoder
         if ($listNote !== '') $this->evidence[] = 'LIST: ' . $listNote;
         else $this->evidence[] = 'LIST: ' . $prov . ' | ' . $city . ' | ' . $brgy;
 
+        // GUARD: barangay na HINDI binanggit ng customer (hinula mula sa landmark/web/katabing listing) →
+        // tatanggapin lang kung "high" ang confidence; kung hindi, hindi isusulat at tao ang bahala.
+        if ($brgy !== null) {
+            $hay = $chat . "\n" . $this->lastHistory . "\n" . $this->customerBlocks((string) $row->CXD);
+            $inChat = self::mentions($hay, $brgy) || ($form['brgy'] !== '' && self::mentions($hay, $form['brgy']));
+            if (!$inChat && $ai['confidence'] !== 'high') {
+                $this->evidence[] = 'GUARD: barangay "' . $brgy . '" hindi sinabi ng customer (hinula, ' . $ai['confidence'] . ') → hindi isinulat, tao';
+                $ai['issues'][]   = 'Barangay ' . $brgy . ' ay hinula lang mula sa landmark/web (' . $ai['confidence'] . ' confidence), hindi sinabi ng customer';
+                $ai['needs_human'] = true;
+                if ($ai['human_reason'] === '') $ai['human_reason'] = 'kumpirmahin ang barangay (' . $brgy . '?)';
+                $brgy = null;
+            } elseif (!$inChat) {
+                $this->evidence[] = 'GUARD: barangay "' . $brgy . '" hinula mula sa landmark/web, tinanggap dahil high confidence';
+            }
+        }
+
         // ── 4. Anim na field ─────────────────────────────────────────────
         $updates = [];
         $name = $this->cleanName((string) $form['name']);
@@ -201,12 +218,28 @@ class AstraEncoder
         }
         $issues = array_values(array_unique(array_filter(array_map('trim', $issues))));
 
-        $verdict = [
-            'province_ok' => $prov !== null && $final['PROVINCE'] !== '',
-            'city_ok'     => $city !== null && $final['CITY'] !== '',
-            'barangay_ok' => $brgy !== null && $final['BARANGAY'] !== '',
-            'evidence'    => $listNote !== '' ? $listNote : 'J&T labels mula sa list',
-        ];
+        $astraDecided = ($prov !== null && $city !== null && $brgy !== null);
+        if ($astraDecided) {
+            $verdict = [
+                'province_ok' => $final['PROVINCE'] !== '',
+                'city_ok'     => $final['CITY'] !== '',
+                'barangay_ok' => $final['BARANGAY'] !== '',
+                'evidence'    => 'J&T labels mula sa list',
+            ];
+        } else {
+            // Walang (kumpletong) J&T label si Astra. Kung may laman na ang row (hal. scope = lahat ng walang STATUS),
+            // huwag sabihing "Full Address" — i-verify ang EXISTING sa list; hindi ito PROCEED dahil hindi nakumpirma (TO FIX).
+            [$eP, $eC, $eB] = $this->validateJnt(['province' => $final['PROVINCE'], 'city' => $final['CITY'], 'barangay' => $final['BARANGAY']], $maps);
+            $verdict = [
+                'province_ok' => $eP !== null,
+                'city_ok'     => $eC !== null,
+                'barangay_ok' => $eB !== null,
+                'evidence'    => 'Astra walang J&T label; existing values na-check sa list' . ($listNote !== '' ? ' — ' . $listNote : ''),
+            ];
+            $ai['needs_human'] = true;
+            if ($ai['human_reason'] === '') $ai['human_reason'] = 'hindi matukoy ni Astra ang J&T label' . ($listNote !== '' ? ' (' . $listNote . ')' : '') . '; hindi nakumpirma ang existing na address';
+            $this->evidence[] = 'CHECK: existing prov/city/brgy vs list → ' . ($eP ? '✅' : '❌') . ' ' . ($eC ? '✅' : '❌') . ' ' . ($eB ? '✅' : '❌') . ' (hindi nakumpirma ni Astra → tao)';
+        }
         $mc = new MacroChecker();
         $mc->setHost($this->host);
         $statusCode = $mc->computeStatusCode($verdict);
@@ -231,7 +264,11 @@ class AstraEncoder
 
         // Isang linya para sa checker_1 (AI ANALYZE — existing column)
         $summary = ($statusCode === '✅' ? '✅ ' : '⚠ ' . $statusCode . ' · ')
-            . (($prov && $city && $brgy) ? $prov . ' / ' . $city . ' / ' . $brgy : 'J&T: ' . ($listNote !== '' ? $listNote : 'hindi matukoy'))
+            . ($astraDecided
+                ? $prov . ' / ' . $city . ' / ' . $brgy
+                : (($final['PROVINCE'] !== '' && $final['CITY'] !== '' && $final['BARANGAY'] !== '')
+                    ? $final['PROVINCE'] . ' / ' . $final['CITY'] . ' / ' . $final['BARANGAY'] . ' (existing, hindi nakumpirma ni Astra)'
+                    : 'J&T: ' . ($listNote !== '' ? $listNote : 'hindi matukoy')))
             . ($issues ? ' · ⚠ ' . implode(' · ', $issues) : '')
             . ($needsHuman && $ai['human_reason'] !== '' ? ' · 👤 ' . $ai['human_reason'] : '')
             . ($proceed ? ' · PROCEED' : ($code !== $statusCode ? ' · ' . $code : ''));
@@ -295,10 +332,12 @@ class AstraEncoder
 
     private function finish(array $result, float $t0): array
     {
-        $in = 0; $out = 0; $searches = 0; $cost = 0.0; $models = [];
+        $in = 0; $out = 0; $searches = 0; $cost = 0.0; $models = []; $known = true;
+        $prices = (array) config('services.openai.ai_checker_prices', []);
         foreach ($this->usage as $u) {
             $in += $u['in']; $out += $u['out']; $searches += $u['searches']; $cost += $u['cost'];
             $models[$u['model']] = true;
+            if (!isset($prices[$u['model']])) $known = false;   // walang presyo sa config → hindi tumpak ang gastos
         }
         $trace = $this->trace ?: ['engine' => 'astra', 'passes' => [], 'searches' => $this->searches];
         $trace['summary'] = [
@@ -311,6 +350,7 @@ class AstraEncoder
             'tokens_in'  => $in,
             'tokens_out' => $out,
             'cost_usd'   => round($cost, 4),
+            'cost_known' => $known,
             'elapsed_ms' => (int) round((microtime(true) - $t0) * 1000),
         ];
         $trace['usage']    = $this->usage;
@@ -336,6 +376,7 @@ YOUR JOB, in order:
 2. Build the address FORM (real-world, as the customer means it): name, phone, house_number, purok_sitio, address (street/subdivision/building), brgy, city, province, landmark, plus the price and quantity the customer mentioned. Use web_search when only a landmark, subdivision, market, school or business name is given, to find which barangay it belongs to (names are often misspelled).
 3. Then find the courier's EXACT labels: call jnt_address_search with a few distinctive words from your form (e.g. "28 tondo", "poblacion ix cotabato", "ibayo silangan naic", "holy spirit quezon"). Every word must occur in the entry, so use FEW words; if 0 results, retry with fewer or different words (digits vs Roman numerals, without "city", the province name, a synonym). Pick ONE returned entry and copy its PROVINCE, CITY and BARANGAY strings EXACTLY into "jnt". Never invent a label that the tool did not return.
    - The courier list is its own filing and may differ from geography: Cotabato City is under COTABATO; Metro Manila's City of Manila is filed by DISTRICT as the "city" (TONDO I/II, TONDO-NORTH, SAMPALOC, ERMITA, PACO, QUIAPO, ...); numbered barangays look like "BARANGAY 28"; repeated town names carry a province prefix (BATANGAS-SAN-JOSE, NORTH-COTABATO-CARMEN).
+   - The three "jnt" values must be copied from ONE row returned by jnt_address_search — never from PSA/Wikipedia/your memory (e.g. Cotabato City rows say COTABATO, not Maguindanao; use them as-is). If your first query returns nothing, search again with the barangay alone, then the city alone.
    - If several entries remain plausible and nothing in the chat decides between them (e.g. barangay NABAGO exists in 3 cities and no city was given), leave "jnt" fields EMPTY and set needs_human=true with the candidates in human_reason. Never guess a neighboring or similar town.
 4. Compare the chat with the ORDER: if the price or quantity the customer mentioned differs from the order, or the customer seems to cancel or is only asking, say so.
 
@@ -346,6 +387,7 @@ RULES:
 - name: the recipient's name from the form/chat (NOT the Facebook page name); keep as written, proper case.
 - address: house number / street / purok / subdivision / building only — do NOT repeat barangay, city or province there.
 - intent: "order" (wants delivery), "cancel" (wants to cancel), "inquiry_only" (no order ANYWHERE in the chat + earlier conversation), "unclear".
+- Price/quantity: the ORDER (COD, quantity) is authoritative. The shop's own promo/template text inside the chat (e.g. "BUY 1 ₱99 Only!", "Fill-up niyo lang po eto") and the price pre-filled in the customer form from that promo are NOT the customer's statement — do NOT report them. Report a price/quantity issue only when the CUSTOMER explicitly asks for or states a different price or quantity than the ORDER.
 - needs_human: true ONLY when the address cannot be encoded safely (ambiguous place, contradictory info, nothing usable). Price/quantity mismatch and phone problems go to "issues", not needs_human.
 - confidence: high | medium | low for the address.
 - evidence: one short line: why (landmark/source) or empty.
@@ -361,6 +403,7 @@ SYS;
 
         $customerForms = $this->customerBlocks((string) $row->CXD);
         $history       = $this->pancakeHistory((string) ($row->fb_name ?? ''));
+        $this->lastHistory = $history;
         $this->evidence[] = 'PANCAKE: ' . ($history === '' ? 'walang history' : mb_strlen($history) . ' chars, kasama sa input');
         $prompt = "CHAT (raw customer conversation):\n<<<\n" . $chat . "\n>>>\n\n"
             . "ORDER: PAGE=" . (string) $row->PAGE . " | ITEM=" . (string) $row->ITEM_NAME . " | COD=" . (string) $row->COD . "\n"
@@ -590,12 +633,33 @@ SYS;
 
         $pk = MacroChecker::normProv($p);
         $provLabel = $maps['provincesSet'][$pk] ?? null;
-        if ($provLabel === null) return [null, null, null, 'province "' . $p . '" wala sa list'];
 
         $cityLabel = null;
-        foreach (($maps['citiesByProv'][$pk] ?? []) as $cl) {
-            if (MacroChecker::normPlace((string) $cl) === MacroChecker::normPlace($c)) { $cityLabel = (string) $cl; break; }
+        if ($provLabel !== null) {
+            foreach (($maps['citiesByProv'][$pk] ?? []) as $cl) {
+                if (MacroChecker::normPlace((string) $cl) === MacroChecker::normPlace($c)) { $cityLabel = (string) $cl; break; }
+            }
         }
+        // Ang LIST ang masusunod sa province: kung wala/mali ang province pero IISA ang city na ito sa buong list
+        // (hal. COTABATO-CITY ay nasa COTABATO kahit "Maguindanao del Norte" ang sabi ng PSA/AI), kunin ang province mula sa list.
+        $note = '';
+        if ($cityLabel === null && $c !== '') {
+            $hits = $maps['provincesByCity'][MacroChecker::normPlace($c)] ?? [];
+            if (count($hits) === 1) {
+                $fixedProv = (string) $hits[0];
+                $fpk = MacroChecker::normProv($fixedProv);
+                foreach (($maps['citiesByProv'][$fpk] ?? []) as $cl) {
+                    if (MacroChecker::normPlace((string) $cl) === MacroChecker::normPlace($c)) { $cityLabel = (string) $cl; break; }
+                }
+                if ($cityLabel !== null) {
+                    $note = 'province ' . ($p !== '' ? '"' . $p . '"' : '(wala)') . ' → ' . $fixedProv . ' (filing ng list para sa ' . $cityLabel . ')';
+                    $provLabel = $maps['provincesSet'][$fpk] ?? $fixedProv;
+                    $pk = $fpk;
+                    $this->evidence[] = 'LIST: ' . $note;
+                }
+            }
+        }
+        if ($provLabel === null) return [null, null, null, 'province "' . $p . '" wala sa list'];
         if ($cityLabel === null) return [$provLabel, null, null, 'city "' . $c . '" wala sa list ng ' . $provLabel];
 
         $brgyLabel = null;
@@ -675,6 +739,17 @@ SYS;
             $chat = "[…cut: earlier part omitted, latest messages follow]\n" . mb_substr($chat, -$max, null, 'UTF-8');
         }
         return $chat;
+    }
+
+    /** Nabanggit ba sa text ang isang barangay label? (Roman↔digits, tanggal "barangay", "(POB.)"; compact match para sa "nabag o"↔NABAGO) */
+    private static function mentions(string $hay, string $label): bool
+    {
+        $needle = MacroChecker::normBrgyKey(preg_replace('/\([^)]*\)/u', ' ', $label) ?? $label);
+        if ($needle === '' || strlen($needle) < 2) return false;
+        $h = ' ' . MacroChecker::normBrgyKey($hay) . ' ';
+        if (str_contains($h, ' ' . $needle . ' ')) return true;
+        $hc = str_replace(' ', '', $h); $nc = str_replace(' ', '', $needle);
+        return strlen($nc) >= 5 && str_contains($hc, $nc);
     }
 
     private function sixFields(MacroOutput $row): array

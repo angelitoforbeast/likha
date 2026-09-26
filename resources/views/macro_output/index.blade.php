@@ -1691,6 +1691,7 @@ function markWarn(id, field) {
       const URL_COUNT   = "{{ route('macro_checker.count') }}";
       const URL_START   = "{{ route('macro_checker.start') }}";
       const URL_RUN_ROW = "{{ url('/encoder/checker_1/ai-checker/run-row') }}"; // + /{id}
+      const URL_ROW_STATE = "{{ url('/encoder/checker_1/ai-checker/row-state') }}"; // + /{id} — recovery pag nag-timeout
       const CSRF        = "{{ csrf_token() }}";
       const AI_UI       = "{{ config('services.openai.ai_checker_ui', 'both') }}"; // both | astra | classic
 
@@ -1763,6 +1764,28 @@ function markWarn(id, field) {
           btn.disabled = true;
           if (btnAstra) { countElAstra.textContent = '(err)'; btnAstra.disabled = true; }
         }
+      }
+
+      // ── Timeout-safe JSON + recovery ─────────────────────────────────
+      // Kapag HTML (hal. 504 ng nginx) ang bumalik sa halip na JSON, huwag mag-crash ng 'Unexpected token' — markahan na notJson.
+      async function safeJson(r) {
+        const txt = await r.text();
+        try { return JSON.parse(txt); }
+        catch (e) { return { ok: false, notJson: true, error: 'HTTP ' + r.status + ' — hindi JSON ang sagot (timeout ng server?)' }; }
+      }
+      // Tumatakbo pa ang server kahit nag-timeout ang browser: hintayin hanggang 2 minuto at kunin ang bagong estado ng row.
+      async function recoverRow(id, startedAt) {
+        for (let i = 0; i < 8; i++) {
+          await new Promise(res => setTimeout(res, 15000));
+          try {
+            const r = await fetch(`${URL_ROW_STATE}/${encodeURIComponent(id)}`, { headers: { 'Accept': 'application/json' } });
+            const j = await safeJson(r);
+            if (j.ok && j.row && Number(j.updated_at_ms || 0) >= startedAt - 5000) {
+              return { ok: true, row: j.row, result: { final_code: j.row['APP SCRIPT CHECKER'] || '—', all_filled: j.all_filled !== false }, recovered: true };
+            }
+          } catch (e) {}
+        }
+        return null;
       }
 
       // ── Sticky bar helpers ────────────────────────────────────────────
@@ -1906,15 +1929,22 @@ function markWarn(id, field) {
           setBarCurrent(id, null, null);
 
           try {
+            const t0 = Date.now();
             const r = await fetch(`${URL_RUN_ROW}/${encodeURIComponent(id)}`, {
               method: 'POST',
               headers: { 'X-CSRF-TOKEN': CSRF, 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
               body: new URLSearchParams({ source: 'batch', engine, batch_id: batchId || '', batch_total: String(ids.length) }).toString(),
             });
-            const j = await r.json();
+            let j = await safeJson(r);
+            if (!j.ok && j.notJson) {
+              // nag-timeout ang sagot (nginx/PHP) pero malamang tumatakbo pa ang server → hintayin ang row
+              setBarCurrent(id, null, '⏱ hinihintay');
+              const rec = await recoverRow(id, t0);
+              if (rec) j = rec;
+            }
 
-            if (!r.ok || !j.ok) {
-              setRowButtonState(id, 'fail', '❌ Failed');
+            if (!j.ok) {
+              setRowButtonState(id, 'fail', j.notJson ? '⏱ timeout' : '❌ Failed');
               state.failed++;
             } else {
               // Apply updated cell values (same as per-row click behavior)
@@ -2045,6 +2075,7 @@ function markWarn(id, field) {
         button.disabled = true;
         button.innerHTML = engine === 'astra' ? '⏳ Astra…' : '⏳ Fixing…';
         try {
+          const t0 = Date.now();
           const r = await fetch(`${URL_RUN_ROW}/${encodeURIComponent(id)}`, {
             method: 'POST',
             headers: {
@@ -2054,8 +2085,13 @@ function markWarn(id, field) {
             },
             body: new URLSearchParams({ source: 'single', engine }).toString(),
           });
-          const j = await r.json();
-          if (!r.ok || !j.ok) {
+          let j = await safeJson(r);
+          if (!j.ok && j.notJson) {
+            button.innerHTML = '⏱ hinihintay…';
+            const rec = await recoverRow(id, t0);
+            if (rec) j = rec;
+          }
+          if (!j.ok) {
             button.innerHTML = '❌';
             alert('Row #' + id + ' failed: ' + (j.error || ('HTTP ' + r.status)));
             setTimeout(() => { button.innerHTML = orig; button.disabled = false; }, 2000);

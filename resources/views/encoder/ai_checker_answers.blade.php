@@ -103,7 +103,11 @@
             <span>model: <b>{{ $l->model }}</b>@if (!empty($l->escalated)) <span class="ml-1 rounded bg-amber-100 text-amber-800 px-2 py-0.5 text-xs font-semibold">ESCALATED</span>@endif</span>
             <span>searches: {{ (int) $l->searches }}</span>
             <span>tokens: {{ number_format($tokIn) }} in / {{ number_format($tokOut) }} out</span>
-            <span>gastos: ${{ number_format($usd, 3) }} ≈ ₱{{ number_format($usd * $php, 2) }}</span>
+            @if (isset($sum['cost_known']) && !$sum['cost_known'])
+              <span class="text-amber-700">gastos: walang presyo sa config para sa {{ $l->model }}</span>
+            @else
+              <span>gastos: ${{ number_format($usd, 3) }} ≈ ₱{{ number_format($usd * $php, 2) }}</span>
+            @endif
           @endif
           <span class="text-gray-500">{{ number_format((int) $l->duration_ms / 1000, 1) }} s</span>
         </div>
@@ -159,6 +163,7 @@
               <summary class="cursor-pointer text-blue-700">Web searches at sources ({{ count($d['searches']) }} call{{ count($d['searches']) === 1 ? '' : 's' }})</summary>
               <ul class="list-disc pl-6 text-xs text-gray-700 space-y-1 mt-1">
                 @foreach ($d['searches'] as $s)
+                  @continue(empty(array_filter((array) ($s['queries'] ?? []))) && empty($s['sources'] ?? []))
                   <li><b>{{ $s['step'] ?? '' }}</b> ({{ $s['model'] ?? '' }}): {{ implode(' | ', $s['queries'] ?? []) ?: '—' }}
                     @foreach (array_slice($s['sources'] ?? [], 0, 6) as $u)
                       <br><a class="text-blue-600 hover:underline break-all" href="{{ $u }}" target="_blank" rel="noopener">{{ $u }}</a>

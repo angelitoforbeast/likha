@@ -179,6 +179,7 @@ class MacroCheckerController extends Controller
     public function runRow(Request $request, $id)
     {
         if ($r = $this->checkRole()) return $r;
+        @set_time_limit(300);   // Astra engine na may tools ay pwedeng umabot ng 1–2 minuto kada row
 
         $row = MacroOutput::find((int) $id);
         if (!$row) {
@@ -343,6 +344,25 @@ class MacroCheckerController extends Controller
 
         return view('encoder.ai_checker_answers', compact('logs', 'filters', 'totals', 'limit'));
     }
+    /**
+     * GET /encoder/checker_1/ai-checker/row-state/{id} — kasalukuyang laman ng row. Ginagamit ng browser kapag nag-timeout
+     * ang run-row (nginx/PHP) pero natapos naman ng server: hinihintay at kinukuha ang resulta sa halip na ❌.
+     */
+    public function rowState(Request $request, $id)
+    {
+        if ($r = $this->checkRole()) return $r;
+        $row = MacroOutput::find((int) $id);
+        if (!$row) return response()->json(['ok' => false, 'error' => 'Row not found'], 404);
+        $fields = ['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY'];
+        $out = [];
+        foreach (array_merge($fields, ['APP SCRIPT CHECKER', 'STATUS']) as $f) $out[$f] = $row->{$f};
+        $allFilled = count(array_filter($fields, fn ($f) => trim((string) $row->{$f}) !== '')) === count($fields);
+        return response()->json([
+            'ok' => true, 'id' => $row->id, 'row' => $out, 'all_filled' => $allFilled,
+            'updated_at_ms' => $row->updated_at ? $row->updated_at->getTimestamp() * 1000 : 0,
+        ]);
+    }
+
     /** Insert ng isang per-row AI log — best-effort (di sisirain ang run-row). */
     private function writeLog(array $data): void
     {
