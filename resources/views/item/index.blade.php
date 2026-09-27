@@ -748,24 +748,37 @@
                   </template>
                 </div>
                 {{-- ✨ Suppliers (quote) — supplier na NAKAHANAP na + sariling presyo (item_supplier_quotes), hiwalay sa PO.
-                     CEO LANG. I-edit sa /item/photo (i-click ang linya). --}}
-                <div style="font-size:10.5px;margin-top:2px;line-height:1.35;">
-                  <template x-if="quotesFor(row.item_name).length">
-                    <a @click.stop target="_blank" rel="noopener" style="color:#0f172a;text-decoration:none;display:block;"
-                       :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)+'&start_date='+startDate+'&end_date='+endDate"
-                       title="Quote ng supplier — i-click para i-edit sa /item/photo">
-                      <template x-for="(q, qi) in quotesFor(row.item_name)" :key="'q-'+row.item_name+'-'+q.id">
-                        <span :title="'Quote' + (q.moq ? ' · MOQ '+q.moq : '') + (q.updated_at ? ' · '+q.updated_at : '')">
-                          <span x-show="qi>0" style="color:#cbd5e1;"> · </span>🏷 <b x-text="q.supplier"></b> <span style="color:#1d4ed8;font-weight:700;" x-text="q.price!==null ? money(q.price) : '—'"></span>
-                        </span>
-                      </template>
-                    </a>
+                     CEO LANG. INLINE add / edit / delete dito mismo (same as /item/photo). --}}
+                <div style="font-size:10.5px;margin-top:2px;line-height:1.45;" @click.stop>
+                  <template x-for="(q, qi) in quotesFor(row.item_name)" :key="'q-'+row.item_name+'-'+q.id">
+                    <div style="display:flex;gap:4px;align-items:center;justify-content:center;flex-wrap:wrap;">
+                      <span :title="'Quote' + (q.moq ? ' · MOQ '+q.moq : '') + (q.updated_at ? ' · '+q.updated_at : '')">🏷 <b x-text="q.supplier"></b>
+                        <span style="color:#1d4ed8;font-weight:700;" x-text="q.price!==null ? money(q.price) : '—'"></span>
+                        <span x-show="q.moq" style="color:#94a3b8;" x-text="q.moq ? 'MOQ '+q.moq : ''"></span>
+                      </span>
+                      <template x-if="q.link"><a :href="q.link" target="_blank" rel="noopener" @click.stop style="color:#4f46e5;">link</a></template>
+                      <button type="button" class="item-photo-btn" style="padding:0 5px;" title="I-edit ang quote" @click.stop="openQuote(row.item_name, q)">✎</button>
+                      <button type="button" class="item-photo-btn" style="padding:0 5px;color:#b91c1c;" title="Tanggalin ang quote" @click.stop="deleteQuote(row.item_name, q)">✕</button>
+                    </div>
                   </template>
                   <template x-if="!quotesFor(row.item_name).length && !suppliersFor(row.item_name).length">
-                    <a @click.stop target="_blank" rel="noopener" style="color:#b91c1c;font-weight:700;text-decoration:none;"
-                       :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)+'&start_date='+startDate+'&end_date='+endDate"
-                       title="Wala pang supplier — i-click para magdagdag ng quote">⚠ wala pang supplier · + quote</a>
+                    <div style="color:#b91c1c;font-weight:700;">⚠ wala pang supplier</div>
                   </template>
+                  <template x-if="quoteForm.key === supKey(row.item_name)">
+                    <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;align-items:center;justify-content:center;">
+                      <select x-model="quoteForm.supplier_id" style="font-size:10.5px;padding:1px;max-width:130px;">
+                        <option value="">— supplier —</option>
+                        <template x-for="s in supplierList" :key="'s-'+s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
+                      </select>
+                      <input type="number" step="0.01" min="0" x-model="quoteForm.price" placeholder="₱ presyo" style="width:78px;font-size:10.5px;padding:1px;">
+                      <input type="number" min="0" x-model="quoteForm.moq" placeholder="MOQ" style="width:54px;font-size:10.5px;padding:1px;">
+                      <input type="text" x-model="quoteForm.link" placeholder="link (opsyonal)" style="width:120px;font-size:10.5px;padding:1px;">
+                      <button type="button" class="item-photo-btn" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
+                      <button type="button" class="item-photo-btn" @click.stop="quoteForm.key=null">Cancel</button>
+                    </div>
+                  </template>
+                  <button type="button" class="item-photo-btn" style="margin-top:2px;"
+                          x-show="quoteForm.key !== supKey(row.item_name)" @click.stop="openQuote(row.item_name, null)">+ supplier quote</button>
                 </div>
                 @endif
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-top:3px;">
@@ -2017,6 +2030,8 @@
       itemImages: {},         // item_name → photo url (galing item_images table)
       itemSuppliers: {},      // item_key → [{supplier, unit_cost, order_date}] (Supply Finance)
       itemQuotes: {},         // item_key → [{id, supplier, price, moq, link}] (item_supplier_quotes) — CEO lang
+      supplierList: [],       // existing suppliers (id, name) para sa quote dropdown — CEO lang
+      quoteForm: { key:null, item_name:'', id:null, supplier_id:'', price:'', moq:'', link:'', saving:false },   // isang bukas na form lang
       _photoTarget: null,     // item_name na kasalukuyang ina-upload-an ng photo
       holdMap: {},            // item_name → HOLD count (jnt/hold logic; drives item universe)
       holdLoaded: false,      // true kapag nakuha na ang holdMap
@@ -3696,9 +3711,44 @@
           const res = await fetch('{{ route('item.quotes') }}', {headers:{'Accept':'application/json'}});
           const j = await res.json();
           if (j && j.quotes) this.itemQuotes = j.quotes;
+          if (j && j.suppliers) this.supplierList = j.suppliers;
         }catch(e){ /* walang quote data — ok lang */ }
       },
       quotesFor(name){ return this.itemQuotes[this.supKey(name)] || []; },
+      // Inline add / edit / delete ng quote (CEO lang; 403 ang server sa iba)
+      _csrf(){ return document.querySelector('meta[name="csrf-token"]')?.content || '{{ csrf_token() }}'; },
+      openQuote(name, q){
+        this.quoteForm = q
+          ? { key:this.supKey(name), item_name:name, id:q.id, supplier_id:String(q.supplier_id), price:(q.price ?? ''), moq:(q.moq ?? ''), link:(q.link ?? ''), saving:false }
+          : { key:this.supKey(name), item_name:name, id:null, supplier_id:'', price:'', moq:'', link:'', saving:false };
+      },
+      async saveQuote(){
+        const f = this.quoteForm;
+        if (!f.key) return;
+        if (!f.supplier_id) { alert('Pumili ng supplier.'); return; }
+        f.saving = true;
+        try{
+          const res = await fetch('{{ route('item.quotes.save') }}', { method:'POST',
+            headers:{ 'X-CSRF-TOKEN': this._csrf(), 'Accept':'application/json', 'Content-Type':'application/json' },
+            body: JSON.stringify({ item_name: f.item_name, supplier_id: f.supplier_id, price: f.price === '' ? null : f.price, moq: f.moq === '' ? null : f.moq, link: f.link || null }) });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || !j.ok) { alert(j.error || j.message || ('HTTP ' + res.status)); return; }
+          this.itemQuotes = Object.assign({}, this.itemQuotes, { [f.key]: (j.quotes || []) });
+          this.quoteForm = { key:null, item_name:'', id:null, supplier_id:'', price:'', moq:'', link:'', saving:false };
+        }catch(e){ alert(e.message); }
+        finally{ f.saving = false; }
+      },
+      async deleteQuote(name, q){
+        if (!confirm('Tanggalin si ' + q.supplier + ' sa ' + name + '?')) return;
+        try{
+          const res = await fetch('{{ route('item.quotes.delete') }}', { method:'POST',
+            headers:{ 'X-CSRF-TOKEN': this._csrf(), 'Accept':'application/json', 'Content-Type':'application/json' },
+            body: JSON.stringify({ id: q.id, item_name: name }) });
+          const j = await res.json().catch(() => ({}));
+          if (j.ok) this.itemQuotes = Object.assign({}, this.itemQuotes, { [this.supKey(name)]: (j.quotes || []) });
+          else alert(j.error || ('HTTP ' + res.status));
+        }catch(e){ alert(e.message); }
+      },
 
       // ── Copy: Item Name + HOLD + picture ──────────────────────────────────
       _escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); },
