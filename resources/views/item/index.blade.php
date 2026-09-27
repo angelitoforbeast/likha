@@ -747,6 +747,26 @@
                     <div style="color:#94a3b8;font-style:italic;">walang supplier</div>
                   </template>
                 </div>
+                {{-- ✨ Suppliers (quote) — supplier na NAKAHANAP na + sariling presyo (item_supplier_quotes), hiwalay sa PO.
+                     CEO LANG. I-edit sa /item/photo (i-click ang linya). --}}
+                <div style="font-size:10.5px;margin-top:2px;line-height:1.35;">
+                  <template x-if="quotesFor(row.item_name).length">
+                    <a @click.stop target="_blank" rel="noopener" style="color:#0f172a;text-decoration:none;display:block;"
+                       :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)+'&start_date='+startDate+'&end_date='+endDate"
+                       title="Quote ng supplier — i-click para i-edit sa /item/photo">
+                      <template x-for="(q, qi) in quotesFor(row.item_name)" :key="'q-'+row.item_name+'-'+q.id">
+                        <span :title="'Quote' + (q.moq ? ' · MOQ '+q.moq : '') + (q.updated_at ? ' · '+q.updated_at : '')">
+                          <span x-show="qi>0" style="color:#cbd5e1;"> · </span>🏷 <b x-text="q.supplier"></b> <span style="color:#1d4ed8;font-weight:700;" x-text="q.price!==null ? money(q.price) : '—'"></span>
+                        </span>
+                      </template>
+                    </a>
+                  </template>
+                  <template x-if="!quotesFor(row.item_name).length && !suppliersFor(row.item_name).length">
+                    <a @click.stop target="_blank" rel="noopener" style="color:#b91c1c;font-weight:700;text-decoration:none;"
+                       :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)+'&start_date='+startDate+'&end_date='+endDate"
+                       title="Wala pang supplier — i-click para magdagdag ng quote">⚠ wala pang supplier · + quote</a>
+                  </template>
+                </div>
                 @endif
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-top:3px;">
                   <a class="item-photo-btn" @click.stop
@@ -1996,6 +2016,7 @@
       expandedItems: {},      // item_name → true kapag naka-expand ang pages nito
       itemImages: {},         // item_name → photo url (galing item_images table)
       itemSuppliers: {},      // item_key → [{supplier, unit_cost, order_date}] (Supply Finance)
+      itemQuotes: {},         // item_key → [{id, supplier, price, moq, link}] (item_supplier_quotes) — CEO lang
       _photoTarget: null,     // item_name na kasalukuyang ina-upload-an ng photo
       holdMap: {},            // item_name → HOLD count (jnt/hold logic; drives item universe)
       holdLoaded: false,      // true kapag nakuha na ang holdMap
@@ -3669,6 +3690,15 @@
         const raw = String(name||'').trim().toLowerCase().replace(/\s+/g,' ');
         return this.itemSuppliers[this.supKey(name)] || this.itemSuppliers[raw] || [];
       },
+      // Supplier QUOTES kada item (nakahanap na ng supplier kahit wala pang PO). CEO lang — blangko ang sagot sa iba.
+      async loadItemQuotes(){
+        try{
+          const res = await fetch('{{ route('item.quotes') }}', {headers:{'Accept':'application/json'}});
+          const j = await res.json();
+          if (j && j.quotes) this.itemQuotes = j.quotes;
+        }catch(e){ /* walang quote data — ok lang */ }
+      },
+      quotesFor(name){ return this.itemQuotes[this.supKey(name)] || []; },
 
       // ── Copy: Item Name + HOLD + picture ──────────────────────────────────
       _escHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); },
@@ -3739,6 +3769,7 @@
         await this.loadItemImages();
         @if($effectiveIsCEO)
         await this.loadItemSuppliers(); // CEO lang — walang fetch para sa iba
+        await this.loadItemQuotes();    // CEO lang — supplier quotes (item_supplier_quotes)
         @endif
       },
     };

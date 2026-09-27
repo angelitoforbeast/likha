@@ -29,6 +29,9 @@
     .ph-del:hover { background:#fca5a5; }
     .ph-saved { font-size:11px; color:#059669; font-weight:700; }
     .ph-status { text-align:center; color:#94a3b8; padding:40px; font-size:13px; }
+    .ph-sort { cursor:pointer; user-select:none; white-space:nowrap; }
+    .ph-sort:hover { background:#eef2ff; }
+    .ph-sort .arr { color:#4f46e5; font-size:10px; margin-left:3px; }
   </style>
 
   <div class="ph-wrap" x-data="photoList()" x-init="init()">
@@ -55,11 +58,11 @@
       <table class="ph-table">
         <thead>
           <tr>
-            <th style="width:64px;">Photo</th>
-            <th>Item</th>
-            <th style="width:90px;">HOLD</th>
-            @if($isCEO)<th style="min-width:220px;">Supplier / Presyo</th>@endif
-            @if($isCEO)<th style="min-width:300px;">Suppliers (quote)</th>@endif
+            <th style="width:64px;" class="ph-sort" @click="sortBy('photo')" title="Walang photo muna / may photo muna">Photo<span class="arr" x-text="arrow('photo')"></span></th>
+            <th class="ph-sort" @click="sortBy('item')" title="A–Z / Z–A">Item<span class="arr" x-text="arrow('item')"></span></th>
+            <th style="width:90px;" class="ph-sort" @click="sortBy('hold')" title="Pinakamaraming hold muna">HOLD<span class="arr" x-text="arrow('hold')"></span></th>
+            @if($isCEO)<th style="min-width:220px;" class="ph-sort" @click="sortBy('po')" title="Pinakamababang presyo sa PO muna; walang PO sa dulo">Supplier / Presyo<span class="arr" x-text="arrow('po')"></span></th>@endif
+            @if($isCEO)<th style="min-width:300px;" class="ph-sort" @click="sortBy('quote')" title="WALANG supplier muna; ulitin ang click = pinakamaraming supplier muna">Suppliers (quote)<span class="arr" x-text="arrow('quote')"></span></th>@endif
             <th style="width:230px;">Actions</th>
           </tr>
         </thead>
@@ -71,7 +74,8 @@
                 @click="activeItem=it.item_name">
               <td>
                 <div class="ph-thumb">
-                  <template x-if="it.image_url"><img :src="it.image_url" :alt="it.item_name" loading="lazy"></template>
+                  <template x-if="it.image_url"><img :src="it.image_url" :alt="it.item_name" loading="lazy"
+                       style="cursor:zoom-in;" title="I-click: popup + auto-copy ng image" @click.stop="openPhoto(it)"></template>
                   <template x-if="!it.image_url"><span>🖼</span></template>
                 </div>
               </td>
@@ -157,6 +161,28 @@
     <div class="ph-status" x-show="!loading && filtered().length===0">
       Walang item na tumugma / walang laman sa range na ito.
     </div>
+
+    {{-- 🖼 Photo popup (lightbox) + auto-copy ng image sa clipboard --}}
+    <template x-if="photoModal.open">
+      <div @click.self="closePhoto()" @keydown.escape.window="closePhoto()"
+           style="position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;">
+        <div style="position:relative;background:#fff;border-radius:12px;padding:12px;max-width:min(92vw,900px);max-height:92vh;display:flex;flex-direction:column;gap:8px;box-shadow:0 20px 60px rgba(0,0,0,.4);">
+          <button @click="closePhoto()" title="Isara (Esc)"
+                  style="position:absolute;top:6px;right:8px;border:0;background:#f1f5f9;border-radius:999px;width:28px;height:28px;cursor:pointer;font-size:16px;line-height:1;">×</button>
+          <img :src="photoModal.url" :alt="photoModal.name"
+               style="max-width:100%;max-height:74vh;object-fit:contain;border-radius:8px;background:#f8fafc;">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div style="font-weight:700;font-size:13px;color:#0f172a;" x-text="photoModal.name"></div>
+            <span style="font-size:12px;font-weight:700;"
+                  :style="photoModal.copied === true ? 'color:#059669' : (photoModal.copied === false ? 'color:#b91c1c' : 'color:#64748b')"
+                  x-text="photoModal.msg"></span>
+            <span style="flex:1"></span>
+            <button class="ph-btn" @click="copyPhoto()">📋 Copy ulit</button>
+            <a class="ph-btn" :href="photoModal.url" target="_blank" rel="noopener" style="text-decoration:none;">Buksan sa bagong tab</a>
+          </div>
+        </div>
+      </div>
+    </template>
   </div>
 
   <script>
@@ -173,6 +199,9 @@
         savedItem: null,
         deletingItem: null,
         supplierList: [],   // existing suppliers (id, name) para sa quote dropdown — CEO lang
+        photoModal: { open:false, url:'', name:'', copied:null, msg:'' },   // popup + auto-copy
+        sortKey: 'default',   // default | photo | item | hold | po | quote
+        sortDir: 'asc',
 
         async init(){
           document.addEventListener('paste', (e) => this.onPaste(e));
@@ -183,6 +212,43 @@
         // "1 x HAND GRIP" → "hand grip" (same normalization ng supply item_key).
         supKey(n){ return String(n||'').replace(/^\s*\d+\s*[x×]\s*/i,'').trim().toLowerCase().replace(/\s+/g,' '); },
         peso(v){ return '₱' + Number(v||0).toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2}); },
+
+        // ── Photo popup + auto-copy ───────────────────────────────────
+        openPhoto(it){
+          if (!it || !it.image_url) return;
+          this.activeItem = it.item_name;
+          this.photoModal = { open:true, url:it.image_url, name:it.item_name, copied:null, msg:'kinokopya…' };
+          this.copyPhoto();
+        },
+        closePhoto(){ this.photoModal.open = false; },
+        // Clipboard API: PNG lang ang tinatanggap ng karamihan ng browser → i-convert sa canvas kung JPG/WebP.
+        async copyPhoto(){
+          const url = this.photoModal.url;
+          try {
+            if (!navigator.clipboard || typeof ClipboardItem === 'undefined') throw new Error('hindi suportado ng browser');
+            const blob = await this.toPngBlob(url);
+            await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
+            this.photoModal.copied = true;  this.photoModal.msg = '✓ Na-copy ang image — i-paste na (Ctrl+V)';
+          } catch (e) {
+            // Fallback: kopyahin man lang ang link ng image
+            try {
+              await navigator.clipboard.writeText(url);
+              this.photoModal.copied = false; this.photoModal.msg = 'Hindi ma-copy ang image (' + e.message + ') — link ang na-copy';
+            } catch (e2) {
+              this.photoModal.copied = false; this.photoModal.msg = 'Hindi ma-copy (' + e.message + ')';
+            }
+          }
+        },
+        async toPngBlob(url){
+          const res  = await fetch(url, { cache:'no-store' });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const blob = await res.blob();
+          if (blob.type === 'image/png') return blob;
+          const bmp = await createImageBitmap(blob);
+          const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+          c.getContext('2d').drawImage(bmp, 0, 0);
+          return await new Promise((ok, no) => c.toBlob(b => b ? ok(b) : no(new Error('convert failed')), 'image/png'));
+        },
 
         // ── Supplier quotes (CEO) ─────────────────────────────────────
         hasSupplier(it){ return ((it.suppliers||[]).length + (it.quotes||[]).length) > 0; },
@@ -279,10 +345,43 @@
 
         filtered(){
           const q = (this.q || '').toLowerCase().trim();
-          if (!q) return this.items;
-          return this.items.filter(it => it.item_name.toLowerCase().includes(q));
+          const list = q ? this.items.filter(it => it.item_name.toLowerCase().includes(q)) : this.items.slice();
+          if (this.sortKey === 'default') return list;   // walang photo muna, tapos HOLD desc (gaya ng dati)
+          const dir = this.sortDir === 'desc' ? -1 : 1;
+          const val = (it) => {
+            switch (this.sortKey) {
+              case 'photo': return it.image_url ? 1 : 0;
+              case 'item':  return it.item_name.toLowerCase();
+              case 'hold':  return Number(it.hold || 0);
+              case 'po': {   // pinakamababang unit cost sa PO; walang PO = sa dulo lagi
+                const c = (it.suppliers || []).map(s => Number(s.unit_cost || 0)).filter(n => n > 0);
+                return c.length ? Math.min(...c) : null;
+              }
+              case 'quote': return (it.suppliers || []).length + (it.quotes || []).length;   // 0 = walang supplier
+              default: return 0;
+            }
+          };
+          return list.sort((a, b) => {
+            const va = val(a), vb = val(b);
+            if (va === null && vb === null) return a.item_name.localeCompare(b.item_name);
+            if (va === null) return 1;      // null laging nasa dulo
+            if (vb === null) return -1;
+            if (va < vb) return -1 * dir;
+            if (va > vb) return  1 * dir;
+            return (Number(b.hold || 0) - Number(a.hold || 0)) || a.item_name.localeCompare(b.item_name);
+          });
         },
-        noImageCount(){ return this.items.filter(it => !it.image_url).length; },
+        sortBy(k){
+          if (this.sortKey === k) {
+            // asc → desc → default (balik sa orihinal na ayos)
+            if (this.sortDir === (k === 'hold' ? 'desc' : 'asc')) this.sortDir = (k === 'hold' ? 'asc' : 'desc');
+            else { this.sortKey = 'default'; this.sortDir = 'asc'; }
+          } else {
+            this.sortKey = k;
+            this.sortDir = (k === 'hold') ? 'desc' : 'asc';   // HOLD: pinakamarami muna
+          }
+        },
+        arrow(k){ return this.sortKey === k ? (this.sortDir === 'asc' ? '▲' : '▼') : ''; },        noImageCount(){ return this.items.filter(it => !it.image_url).length; },
 
         pickFile(name){
           this.activeItem = name;
