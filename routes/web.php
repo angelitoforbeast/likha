@@ -1062,6 +1062,41 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
         Route::get   ('/attachments/{id}',          [\App\Http\Controllers\AstraChatController::class, 'attachment'])   ->whereNumber('id')->name('attachment');
     });
 
+    // ── /boardroom — AI Boardroom: mga role (CEO/CTO/COO/Reviewer) na nag-uusap gamit ang HIWALAY na API call.
+    //    CEO LANG. Bawat role ay may sariling API key (naka-encrypt; hindi bumabalik sa browser).
+    Route::middleware(['auth', \App\Http\Middleware\EnsureCeo::class])->prefix('boardroom')->name('boardroom.')->group(function () {
+        $room   = \App\Http\Controllers\Boardroom\BoardroomController::class;
+        $agents = \App\Http\Controllers\Boardroom\AgentController::class;
+
+        Route::get('/',       [$room, 'page'])  ->name('index');
+        Route::get('/agents', [$agents, 'page'])->name('agents');
+
+        Route::prefix('api')->middleware('throttle:240,1')->group(function () use ($room, $agents) {
+            Route::get   ('/bootstrap',                 [$room, 'bootstrap'])       ->name('bootstrap');
+            Route::post  ('/projects',                  [$room, 'storeProject'])    ->name('projects.store');
+            Route::post  ('/projects/{id}/archive',     [$room, 'archiveProject'])  ->whereNumber('id')->name('projects.archive');
+            Route::post  ('/meetings',                  [$room, 'storeMeeting'])    ->name('meetings.store');
+            Route::get   ('/meetings/{id}',             [$room, 'showMeeting'])     ->whereNumber('id')->name('meetings.show');
+            Route::post  ('/meetings/{id}/messages',    [$room, 'postMessage'])     ->whereNumber('id')->name('meetings.message');
+            Route::post  ('/meetings/{id}/{action}',    [$room, 'action'])          ->whereNumber('id')->whereIn('action', ['start', 'pause', 'resume', 'stop', 'retry'])->name('meetings.action');
+            Route::post  ('/decisions/{id}',            [$room, 'decide'])          ->whereNumber('id')->name('decisions.decide');
+            Route::get   ('/knowledge',                 [$room, 'knowledge'])       ->name('knowledge');
+            Route::post  ('/knowledge',                 [$room, 'storeKnowledge'])  ->name('knowledge.store');
+            Route::delete('/knowledge/{id}',            [$room, 'destroyKnowledge'])->whereNumber('id')->name('knowledge.destroy');
+
+            Route::get   ('/agents',                    [$agents, 'index'])             ->name('agents.index');
+            Route::post  ('/agents',                    [$agents, 'store'])             ->name('agents.store');
+            Route::put   ('/agents/{id}',               [$agents, 'update'])            ->whereNumber('id')->name('agents.update');
+            Route::delete('/agents/{id}/credential',    [$agents, 'destroyCredential']) ->whereNumber('id')->name('agents.credential.destroy');
+            Route::post  ('/agents/{id}/archive',       [$agents, 'archive'])           ->whereNumber('id')->name('agents.archive');
+            Route::post  ('/agents/{id}/test',          [$agents, 'test'])              ->whereNumber('id')->middleware('throttle:20,1')->name('agents.test');
+            Route::post  ('/agents/{id}/models',        [$agents, 'models'])            ->whereNumber('id')->middleware('throttle:20,1')->name('agents.models');
+            Route::put   ('/groups/{id}',               [$agents, 'updateGroup'])       ->whereNumber('id')->name('groups.update');
+            Route::post  ('/capabilities',              [$agents, 'saveCapability'])    ->name('capabilities.save');
+            Route::delete('/capabilities/{id}',         [$agents, 'destroyCapability']) ->whereNumber('id')->name('capabilities.destroy');
+        });
+    });
+
     // /image-host — mag-upload ng picture, makakuha ng PUBLIC image URL (para sa image_url, BotCake, atbp.)
     Route::get ('/image-host',        [\App\Http\Controllers\ImageHostController::class, 'index'])  ->name('image.host.index');
     Route::post('/image-host/upload', [\App\Http\Controllers\ImageHostController::class, 'upload']) ->middleware('throttle:60,1')->name('image.host.upload');

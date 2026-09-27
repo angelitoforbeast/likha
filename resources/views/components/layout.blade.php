@@ -148,7 +148,7 @@
   </nav>
 
   {{-- Page heading (hidden for checklist pages and full-viewport pages) --}}
-  @unless(request()->is('checklist') || request()->is('checklist/*') || request()->is('jnt_rts') || request()->is('jnt_rts/*') || request()->is('prompt-generator'))
+  @unless(request()->is('checklist') || request()->is('checklist/*') || request()->is('jnt_rts') || request()->is('jnt_rts/*') || request()->is('prompt-generator') || request()->is('boardroom') || request()->is('boardroom/*'))
   <header class="bg-white shadow-sm mt-16">
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <h1 class="text-3xl font-bold tracking-tight text-gray-900">
@@ -184,6 +184,8 @@
       'queue-manager',
       'queue-manager/*',
       'prompt-generator',
+      'boardroom',
+      'boardroom/*',
     ]))
       <div class="w-full px-0">
         {{ $slot }}
