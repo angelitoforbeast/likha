@@ -59,6 +59,7 @@
             <th>Item</th>
             <th style="width:90px;">HOLD</th>
             @if($isCEO)<th style="min-width:220px;">Supplier / Presyo</th>@endif
+            @if($isCEO)<th style="min-width:300px;">Suppliers (quote)</th>@endif
             <th style="width:230px;">Actions</th>
           </tr>
         </thead>
@@ -78,7 +79,7 @@
                 <div class="ph-name" x-text="it.item_name"></div>
                 <template x-if="!it.image_url"><span class="ph-badge-no">wala pang photo</span></template>
               </td>
-              <td><span class="ph-hold" x-text="'HOLD '+Number(it.hold||0).toLocaleString()"></span></td>
+              <td><span class="ph-hold" x-text="Number(it.hold||0).toLocaleString()"></span></td>
               @if($isCEO)
               <td style="font-size:11px;line-height:1.4;">
                 {{-- Supplier(s) + latest unit cost (Supply Finance) — CEO LANG, isang linya kada supplier. --}}
@@ -96,6 +97,38 @@
                 <template x-if="!(it.suppliers||[]).length">
                   <span style="color:#94a3b8;font-style:italic;">walang supplier</span>
                 </template>
+              </td>
+              <td style="font-size:11px;line-height:1.5;" @click.stop>
+                {{-- ✨ Suppliers (quote) — supplier na NAKAHANAP na (existing suppliers table) + sariling presyo/MOQ/link.
+                     Hiwalay sa PO column sa kaliwa. CEO lang (data-layer gated din). --}}
+                <template x-if="!hasSupplier(it)">
+                  <span class="ph-badge-no" style="background:#fee2e2;color:#991b1b;border-color:#fecaca;">walang supplier</span>
+                </template>
+                <template x-for="q in (it.quotes||[])" :key="'q-'+q.id">
+                  <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                    <span>🏷 <b x-text="q.supplier"></b>
+                      <span style="color:#065f46;font-weight:700;" x-text="q.price!==null ? peso(q.price) : '—'"></span>
+                      <span x-show="q.moq" style="color:#94a3b8;font-size:10px;" x-text="q.moq ? 'MOQ '+q.moq : ''"></span>
+                    </span>
+                    <template x-if="q.link"><a :href="q.link" target="_blank" rel="noopener" style="font-size:10px;color:#4f46e5;">link</a></template>
+                    <button class="ph-btn" style="padding:0 6px;font-size:10px;" title="I-edit" @click.stop="openQuote(it, q)">✎</button>
+                    <button class="ph-btn" style="padding:0 6px;font-size:10px;color:#b91c1c;" title="Tanggalin" @click.stop="deleteQuote(it, q)">✕</button>
+                  </div>
+                </template>
+                <template x-if="it.qform">
+                  <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;align-items:center;">
+                    <select x-model="it.qform.supplier_id" style="font-size:11px;padding:2px;max-width:150px;">
+                      <option value="">— supplier —</option>
+                      <template x-for="s in supplierList" :key="'s-'+s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
+                    </select>
+                    <input type="number" step="0.01" min="0" x-model="it.qform.price" placeholder="₱ presyo" style="width:90px;font-size:11px;padding:2px;">
+                    <input type="number" min="0" x-model="it.qform.moq" placeholder="MOQ" style="width:64px;font-size:11px;padding:2px;">
+                    <input type="text" x-model="it.qform.link" placeholder="link (opsyonal)" style="width:140px;font-size:11px;padding:2px;">
+                    <button class="ph-btn" @click.stop="saveQuote(it)" x-text="it.qsaving ? '…' : 'Save'"></button>
+                    <button class="ph-btn" @click.stop="it.qform=null">Cancel</button>
+                  </div>
+                </template>
+                <button class="ph-btn" style="margin-top:4px;font-size:10px;" x-show="!it.qform" @click.stop="openQuote(it, null)">+ supplier</button>
               </td>
               @endif
               <td>
@@ -139,6 +172,7 @@
         savingItem: null,
         savedItem: null,
         deletingItem: null,
+        supplierList: [],   // existing suppliers (id, name) para sa quote dropdown — CEO lang
 
         async init(){
           document.addEventListener('paste', (e) => this.onPaste(e));
@@ -150,22 +184,57 @@
         supKey(n){ return String(n||'').replace(/^\s*\d+\s*[x×]\s*/i,'').trim().toLowerCase().replace(/\s+/g,' '); },
         peso(v){ return '₱' + Number(v||0).toLocaleString('en-PH', {minimumFractionDigits:2, maximumFractionDigits:2}); },
 
+        // ── Supplier quotes (CEO) ─────────────────────────────────────
+        hasSupplier(it){ return ((it.suppliers||[]).length + (it.quotes||[]).length) > 0; },
+        openQuote(it, q){
+          it.qform = q ? { id:q.id, supplier_id:String(q.supplier_id), price:(q.price ?? ''), moq:(q.moq ?? ''), link:(q.link ?? '') }
+                       : { id:null, supplier_id:'', price:'', moq:'', link:'' };
+          this.activeItem = it.item_name;
+        },
+        async saveQuote(it){
+          const f = it.qform; if (!f || !f.supplier_id) { alert('Pumili ng supplier.'); return; }
+          it.qsaving = true;
+          try {
+            const r = await fetch('{{ route('item.quotes.save') }}', { method:'POST',
+              headers:{ 'X-CSRF-TOKEN':'{{ csrf_token() }}', 'Accept':'application/json', 'Content-Type':'application/json' },
+              body: JSON.stringify({ item_name: it.item_name, supplier_id: f.supplier_id, price: f.price === '' ? null : f.price, moq: f.moq === '' ? null : f.moq, link: f.link || null }) });
+            const j = await r.json().catch(()=>({}));
+            if (!r.ok || !j.ok) { alert(j.error || (j.message || ('HTTP ' + r.status))); return; }
+            it.quotes = j.quotes || []; it.qform = null;
+          } catch (e) { alert(e.message); }
+          finally { it.qsaving = false; }
+        },
+        async deleteQuote(it, q){
+          if (!confirm('Tanggalin si ' + q.supplier + ' sa ' + it.item_name + '?')) return;
+          try {
+            const r = await fetch('{{ route('item.quotes.delete') }}', { method:'POST',
+              headers:{ 'X-CSRF-TOKEN':'{{ csrf_token() }}', 'Accept':'application/json', 'Content-Type':'application/json' },
+              body: JSON.stringify({ id: q.id, item_name: it.item_name }) });
+            const j = await r.json().catch(()=>({}));
+            if (j.ok) it.quotes = j.quotes || []; else alert(j.error || ('HTTP ' + r.status));
+          } catch (e) { alert(e.message); }
+        },
+
         // Buuin ang SAME universe as /item: union ng owner/private running items
         // + jnt/hold>0 items, para sa range. No-image muna sa itaas.
         async loadAll(){
           this.loading = true;
           try {
             const range = this.startDate + ' to ' + this.endDate;
-            const [holdJ, opJ, imgJ, supJ] = await Promise.all([
+            const [holdJ, opJ, imgJ, supJ, qJ] = await Promise.all([
               fetch('{{ route('item.data') }}?date_range=' + encodeURIComponent(range), {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               fetch('{{ route('owner.private.item-summary') }}?start_date=' + this.startDate + '&end_date=' + this.endDate, {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               fetch('{{ route('item.images') }}', {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               @if($isCEO)
               fetch('{{ route('item.suppliers') }}', {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
+              fetch('{{ route('item.quotes') }}', {headers:{Accept:'application/json'}}).then(r=>r.json()).catch(()=>({})),
               @else
               Promise.resolve({}), // hindi CEO — walang supplier fetch
+              Promise.resolve({}),
               @endif
             ]);
+            const qMap = (qJ && qJ.quotes) ? qJ.quotes : {};   // item_key → [{id, supplier, price, moq, link}]
+            this.supplierList = (qJ && qJ.suppliers) ? qJ.suppliers : [];
             const holdMap = {}; (holdJ.items || []).forEach(it => holdMap[it.item_name] = Number(it.total_hold||0));
             const imgMap  = (imgJ && imgJ.images) ? imgJ.images : {};
             const supMap  = (supJ && supJ.suppliers) ? supJ.suppliers : {}; // item_key → [{supplier, unit_cost, order_date}]
@@ -187,6 +256,9 @@
               hold: u.hold,
               image_url: imgMap[u.name] || null,
               suppliers: supMap[this.supKey(u.name)] || supMap[String(u.name).trim().toLowerCase().replace(/\s+/g,' ')] || [],
+              quotes: qMap[this.supKey(u.name)] || [],
+              qform: null,
+              qsaving: false,
             }));
             list.sort((a,b) => {
               const ai = a.image_url ? 1 : 0, bi = b.image_url ? 1 : 0;

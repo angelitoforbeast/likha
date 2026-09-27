@@ -1094,8 +1094,8 @@ class MacroChecker
         if ($phone === '')                                 $hard[] = 'PHONE blangko';
         elseif (!preg_match('/^9\d{9}$/', $phone))         $hard[] = 'PHONE hindi 10-digit na 9XXXXXXXXX (' . $phone . ')';
         elseif ($phone === '9123456789')                   $hard[] = 'PHONE dummy';
-        elseif (!isset($refs['whitelist'][$phone]) && $this->duplicatePhoneCount($row, $phone) > 0)
-                                                           $hard[] = 'PHONE duplicate sa parehong petsa';
+        elseif (!isset($refs['whitelist'][$phone]) && ($dupes = $this->duplicatePhoneRows($row, $phone)) !== [])
+                                                           $hard[] = 'PHONE duplicate sa parehong petsa: ' . implode(', ', $dupes);
 
         // ITEM + COD
         $item = trim((string) ($row->ITEM_NAME ?? ''));
@@ -1145,6 +1145,16 @@ class MacroChecker
     /** Duplicate phone sa PAREHONG petsa ng row (ts_date o TIMESTAMP), excluding CANNOT PROCEED at ang row mismo. */
     private function duplicatePhoneCount($row, string $phone): int
     {
+        return count($this->duplicatePhoneRows($row, $phone));
+    }
+
+    /**
+     * Mga row na may PAREHONG phone sa PAREHONG petsa (lahat ng page, kasama ang PROCEED; hindi kasama ang
+     * CANNOT PROCEED at ang row mismo). Ibinabalik bilang "#id Pangalan (PAGE · STATUS)" para makita ng tao
+     * kung alin ang katapat — hindi ito lumalabas sa view na "walang STATUS" kapag PROCEED na ang isa.
+     */
+    private function duplicatePhoneRows($row, string $phone): array
+    {
         try {
             $q = MacroOutput::query()->where('id', '<>', (int) $row->id)->where('PHONE NUMBER', $phone)
                 ->where(function ($s) { $s->whereNull('STATUS')->orWhere('STATUS', '<>', 'CANNOT PROCEED'); });
@@ -1159,12 +1169,14 @@ class MacroChecker
             } else {
                 $ts = (string) ($row->TIMESTAMP ?? '');
                 $dmy = strlen($ts) >= 10 ? substr($ts, -10) : '';
-                if ($dmy === '') return 0;
+                if ($dmy === '') return [];
                 $q->where('TIMESTAMP', 'LIKE', '%' . $dmy . '%');
             }
-            return (int) $q->count();
+            return $q->orderBy('id')->limit(3)->get(['id', 'FULL NAME', 'PAGE', 'STATUS'])
+                ->map(fn ($r) => '#' . $r->id . ' ' . trim((string) $r->{'FULL NAME'}) . ' (' . trim((string) $r->PAGE) . ' · ' . (trim((string) $r->STATUS) !== '' ? trim((string) $r->STATUS) : 'walang status') . ')')
+                ->all();
         } catch (\Throwable $e) {
-            return 0;
+            return [];
         }
     }
 

@@ -232,6 +232,96 @@ class ItemController extends Controller
         return response()->json(['ok' => true, 'suppliers' => $map]);
     }
 
+    // ═════════════════════════════════════════════════════════════════════
+    //  SUPPLIER QUOTES — "may supplier na ba, magkano kada supplier" (CEO LANG)
+    //  Hiwalay sa PO: item_supplier_quotes (supplier = existing suppliers table, presyo = bago).
+    // ═════════════════════════════════════════════════════════════════════
+
+    /** GET /item/quotes — lahat ng quotes (item_key → [...]) + listahan ng suppliers para sa dropdown. CEO lang. */
+    public function quotes(Request $request)
+    {
+        $this->checkAccess();
+        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => true, 'suppliers' => [], 'quotes' => []]);
+
+        $suppliers = []; $map = [];
+        try {
+            if (Schema::hasTable('suppliers')) {
+                $suppliers = \App\Models\Supplier::query()->orderBy('name')->get(['id', 'name'])
+                    ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name])->all();
+            }
+            if (Schema::hasTable('item_supplier_quotes')) {
+                foreach ($this->quoteRows() as $key => $rows) $map[$key] = $rows;
+            }
+        } catch (\Throwable $e) { /* wala pang table */ }
+
+        return response()->json(['ok' => true, 'suppliers' => $suppliers, 'quotes' => $map]);
+    }
+
+    /** POST /item/quotes — i-save/i-update ang quote ng isang supplier para sa isang item. CEO lang. */
+    public function quoteSave(Request $request)
+    {
+        $this->checkAccess();
+        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+
+        $data = $request->validate([
+            'item_name'   => 'required|string|max:255',
+            'supplier_id' => 'required|integer|exists:suppliers,id',
+            'price'       => 'nullable|numeric|min:0|max:99999999',
+            'moq'         => 'nullable|integer|min:0|max:100000000',
+            'link'        => 'nullable|string|max:500',
+            'note'        => 'nullable|string|max:255',
+        ]);
+        $key = \App\Models\ItemSupplierQuote::keyFor($data['item_name']);
+
+        \App\Models\ItemSupplierQuote::updateOrCreate(
+            ['item_key' => $key, 'supplier_id' => (int) $data['supplier_id']],
+            [
+                'item_name'  => trim($data['item_name']),
+                'price'      => $data['price'] ?? null,
+                'moq'        => $data['moq'] ?? null,
+                'link'       => isset($data['link']) ? trim((string) $data['link']) : null,
+                'note'       => isset($data['note']) ? trim((string) $data['note']) : null,
+                'updated_by' => Auth::id(),
+            ]
+        );
+
+        return response()->json(['ok' => true, 'quotes' => $this->quoteRows($key)[$key] ?? []]);
+    }
+
+    /** POST /item/quotes/delete — tanggalin ang isang quote. CEO lang. */
+    public function quoteDelete(Request $request)
+    {
+        $this->checkAccess();
+        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+
+        $data = $request->validate(['id' => 'required|integer', 'item_name' => 'required|string|max:255']);
+        $key  = \App\Models\ItemSupplierQuote::keyFor($data['item_name']);
+        \App\Models\ItemSupplierQuote::where('id', (int) $data['id'])->where('item_key', $key)->delete();
+
+        return response()->json(['ok' => true, 'quotes' => $this->quoteRows($key)[$key] ?? []]);
+    }
+
+    /** item_key → [{id, supplier_id, supplier, price, moq, link, note, updated_at}] (isang key lang kung ibinigay). */
+    private function quoteRows(?string $onlyKey = null): array
+    {
+        $q = \App\Models\ItemSupplierQuote::query()->with('supplier')->orderBy('price');
+        if ($onlyKey !== null) $q->where('item_key', $onlyKey);
+        $map = [];
+        foreach ($q->get() as $r) {
+            $map[$r->item_key][] = [
+                'id'          => $r->id,
+                'supplier_id' => $r->supplier_id,
+                'supplier'    => $r->supplier?->name ?? ('#' . $r->supplier_id),
+                'price'       => $r->price !== null ? (float) $r->price : null,
+                'moq'         => $r->moq,
+                'link'        => $r->link,
+                'note'        => $r->note,
+                'updated_at'  => optional($r->updated_at)->format('Y-m-d'),
+            ];
+        }
+        return $map;
+    }
+
     /**
      * GET /item/photo — LISTAHAN ng mga item para pamahalaan ang photos.
      * SAME universe as /item (union: owner/private running items + jnt/hold>0),

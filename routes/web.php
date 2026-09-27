@@ -1042,6 +1042,10 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get ('/item/photo',  [\App\Http\Controllers\ItemController::class, 'photoForm'])  ->name('item.photo');
     Route::post('/item/photo',  [\App\Http\Controllers\ItemController::class, 'photoStore']) ->middleware('throttle:60,1')->name('item.photo.store');
     Route::post('/item/image',        [\App\Http\Controllers\ItemController::class, 'uploadImage'])->middleware('throttle:60,1')->name('item.image');
+    // Supplier quotes (CEO lang): may supplier na ba ang item, magkano kada supplier — hiwalay sa PO
+    Route::get ('/item/quotes',        [\App\Http\Controllers\ItemController::class, 'quotes'])     ->name('item.quotes');
+    Route::post('/item/quotes',        [\App\Http\Controllers\ItemController::class, 'quoteSave'])  ->middleware('throttle:60,1')->name('item.quotes.save');
+    Route::post('/item/quotes/delete', [\App\Http\Controllers\ItemController::class, 'quoteDelete'])->middleware('throttle:60,1')->name('item.quotes.delete');
     Route::post('/item/image/delete', [\App\Http\Controllers\ItemController::class, 'deleteImage'])->middleware('throttle:60,1')->name('item.image.delete');
 
     // ── /astra — in-site AI chat (OpenAI via server-side proxy; key sa .env lang).
