@@ -68,6 +68,35 @@ class MeetingFlowTest extends BoardroomTestCase
         $this->assertSame(0, Message::where('body', 'like', '%HIDDEN-REASONING%')->count());
     }
 
+    /**
+     * Regression: kapag hindi nababasa ang config/boardroom.php (lumang config cache, o queue worker na
+     * hindi na-restart pagkatapos ng deploy), dati ay nagiging "/responses" lang ang URL
+     * → "cURL error 6: Could not resolve host: responses".
+     */
+    public function test_meeting_runs_even_when_the_boardroom_config_is_not_loaded(): void
+    {
+        $user = $this->user();
+        $this->giveKeys();
+        $key = config('boardroom.encryption_key');
+        config(['boardroom' => null]);
+        config(['boardroom.encryption_key' => $key, 'boardroom.retry.backoff_ms' => [0, 0]]);   // parehong key na ginamit sa pag-encrypt
+        config(['boardroom.endpoints' => null, 'boardroom.limits' => null, 'boardroom.queue' => null, 'boardroom.providers' => null]);
+        $this->fakeProvider();
+
+        $m = $this->start($this->meeting($user));
+
+        $this->assertSame('completed', $m->status, (string) $m->last_error);
+        foreach ($this->calls as $call) {
+            $this->assertSame('https://api.openai.com/v1/responses', $call['url']);
+            $this->assertSame(16000, $call['body']['max_output_tokens']);
+        }
+
+        $agents = $this->actingAs($user)->getJson('/boardroom/api/agents')->assertOk();
+        $this->assertSame(['openai', 'anthropic', 'deepseek'], array_keys($agents->json('providers')));
+        $this->assertSame(16000, $agents->json('defaults.max_output_tokens'));
+        $this->assertSame(16, $this->actingAs($user)->getJson('/boardroom/api/bootstrap')->json('limits.max_calls'));
+    }
+
     /** Test 4: napupunta ang tanong sa tamang recipient; ang pagkakakilanlan ay galing sa server. */
     public function test_messages_go_to_the_correct_recipient(): void
     {

@@ -20,6 +20,11 @@
         Naka-encrypt ang mga API key bago i-save. Encryption key: <span class="font-mono font-medium" x-text="encryption"></span> (nasa .env ng server, hiwalay sa database).
         Hindi na maipapakita ulit ang key pagkatapos i-save — palitan lang o tanggalin.
       </p>
+      <p class="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900" x-show="!configLoaded">
+        Hindi nababasa ng server ang <span class="font-mono">config/boardroom.php</span> (lumang config cache). Gumagana pa rin gamit ang mga default,
+        pero hindi nababasa ang mga BOARDROOM_* sa .env. Sa server, patakbuhin ang <span class="font-mono">php artisan config:clear</span> at
+        <span class="font-mono">php artisan queue:restart</span>.
+      </p>
       <p class="mt-2 text-sm text-red-700" x-show="error" x-text="error"></p>
 
       <div class="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
@@ -368,7 +373,7 @@
 
       return {
         busy: false, error: '', saved: '', refreshed: '', formErrors: [], capError: '',
-        agents: [], providers: {}, capabilities: [], groups: [], encryption: 'APP_KEY',
+        agents: [], providers: {}, capabilities: [], groups: [], encryption: 'APP_KEY', configLoaded: true,
         defaults: { max_output_tokens: 16000, timeout_s: 240, timeout_max: 540 },
         current: null, testResult: null, fetched: null,
         form: { open: false, id: null, settings: {} },
@@ -404,6 +409,7 @@
           if (data.groups) this.groups = data.groups.map(g => ({ id: g.id, name: g.name, is_default: g.is_default, agent_ids: [...g.agent_ids] }));
           if (data.defaults) this.defaults = data.defaults;
           if (data.encryption) this.encryption = data.encryption;
+          if (typeof data.config_loaded !== 'undefined') this.configLoaded = !!data.config_loaded;
           if (this.form.id) this.current = this.agents.find(a => a.id === this.form.id) || null;
         },
         replace(agent) {

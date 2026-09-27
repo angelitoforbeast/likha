@@ -23,7 +23,7 @@ class DeepSeekAdapter extends HttpAdapter
 
     protected function baseUrl(): string
     {
-        return rtrim((string) config('boardroom.endpoints.deepseek'), '/');
+        return rtrim((string) (config('boardroom.endpoints.deepseek') ?: 'https://api.deepseek.com'), '/');
     }
 
     protected function chatPath(): string

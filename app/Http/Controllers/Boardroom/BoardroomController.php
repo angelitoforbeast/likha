@@ -53,8 +53,8 @@ class BoardroomController extends Controller
                 'id' => $g->id, 'name' => $g->name, 'is_default' => $g->is_default, 'agent_ids' => $g->agents->pluck('id')->values(),
             ])->values(),
             'limits' => [
-                'max_calls'  => (int) config('boardroom.limits.max_calls'),
-                'max_cycles' => (int) config('boardroom.limits.max_cycles'),
+                'max_calls'  => (int) config('boardroom.limits.max_calls', 16),
+                'max_cycles' => (int) config('boardroom.limits.max_cycles', 3),
             ],
         ]);
     }

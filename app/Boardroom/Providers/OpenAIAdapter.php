@@ -20,7 +20,9 @@ class OpenAIAdapter extends HttpAdapter
 
     protected function baseUrl(): string
     {
-        return rtrim((string) config('boardroom.endpoints.openai'), '/');
+        // May default dito mismo: gumagana kahit hindi pa nababasa ang config/boardroom.php
+        // (lumang config cache, o worker na hindi pa na-restart pagkatapos ng deploy).
+        return rtrim((string) (config('boardroom.endpoints.openai') ?: 'https://api.openai.com/v1'), '/');
     }
 
     protected function chatPath(): string

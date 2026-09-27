@@ -23,7 +23,7 @@ class AnthropicAdapter extends HttpAdapter
 
     protected function baseUrl(): string
     {
-        return rtrim((string) config('boardroom.endpoints.anthropic'), '/');
+        return rtrim((string) (config('boardroom.endpoints.anthropic') ?: 'https://api.anthropic.com/v1'), '/');
     }
 
     protected function chatPath(): string

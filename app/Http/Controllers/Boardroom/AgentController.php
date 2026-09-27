@@ -279,7 +279,9 @@ class AgentController extends Controller
 
         return [
             'agents'       => Agent::orderBy('sort_order')->orderBy('id')->get()->map(fn (Agent $a) => Presenter::agent($a, $this->registry))->values(),
-            'providers'    => config('boardroom.providers'),
+            'providers'    => config('boardroom.providers') ?: ['openai' => 'OpenAI', 'anthropic' => 'Anthropic', 'deepseek' => 'DeepSeek'],
+            // false = hindi nababasa ng web process ang config/boardroom.php (lumang config cache)
+            'config_loaded' => is_array(config('boardroom')),
             'role_types'   => Agent::ROLE_TYPES,
             'capabilities' => ModelCapability::orderBy('provider')->orderBy('model')->get()
                 ->map(fn (ModelCapability $c) => $this->registry->describe($c->provider, $c->model))->values(),
@@ -287,8 +289,8 @@ class AgentController extends Controller
                 'id' => $g->id, 'name' => $g->name, 'is_default' => $g->is_default, 'agent_ids' => $g->agents->pluck('id')->values(),
             ])->values(),
             'defaults'     => [
-                'max_output_tokens' => (int) config('boardroom.limits.max_output_tokens'),
-                'timeout_s'         => (int) config('boardroom.limits.timeout_s'),
+                'max_output_tokens' => (int) config('boardroom.limits.max_output_tokens', 16000),
+                'timeout_s'         => (int) config('boardroom.limits.timeout_s', 240),
                 'timeout_max'       => CapabilityRegistry::TIMEOUT_MAX,
             ],
             'encryption'   => trim((string) config('boardroom.encryption_key')) !== '' ? 'BOARDROOM_ENCRYPTION_KEY' : 'APP_KEY',
