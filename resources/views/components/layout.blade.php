@@ -49,7 +49,8 @@
 
 <div class="min-h-full">
   {{-- Top Navigation --}}
-  <nav class="bg-gray-800 fixed top-0 inset-x-0 z-50">
+  <nav class="bg-gray-800 fixed top-0 inset-x-0 z-50"
+       x-data="{ navOpen: false }" x-on:click.outside="navOpen = false" x-on:keydown.escape.window="navOpen = false">
     <div class="w-full px-4 sm:px-6 lg:px-8">
       <div class="flex h-16 items-center justify-between">
 
@@ -143,6 +144,66 @@
           </form>
         </div>
 
+        {{-- MOBILE: menu button — sa maliit na screen lang (nakatago ang desktop nav at profile doon) --}}
+        <button type="button"
+                class="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-md text-gray-300 hover:bg-gray-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+                x-on:click="navOpen = !navOpen" x-bind:aria-expanded="navOpen.toString()" aria-controls="mobile-nav" aria-label="Menu">
+          <i class="fa-solid text-lg" x-bind:class="navOpen ? 'fa-xmark' : 'fa-bars'"></i>
+        </button>
+
+      </div>
+    </div>
+
+    {{-- MOBILE NAV PANEL — parehong DB-driven na links ng desktop nav, may label na dahil walang hover sa phone --}}
+    <div id="mobile-nav" class="md:hidden border-t border-gray-700 bg-gray-800 shadow-lg" x-show="navOpen" x-cloak>
+      <div class="overflow-y-auto px-2 py-2" style="max-height: calc(100vh - 4rem); max-height: calc(100dvh - 4rem);">
+        @foreach($navLinks as $link)
+          @php $navActive = $link->active_pattern ? request()->is($link->active_pattern) : false; @endphp
+          <a href="{{ $link->route_url }}"
+             class="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium {{ $navActive ? 'bg-gray-900 text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white' }}"
+             @if($navActive) aria-current="page" @endif>
+            <span class="w-5 shrink-0 text-center"><i class="{{ $link->icon ?: 'fa-solid fa-link' }}"></i></span>
+            <span class="min-w-0 flex-1 truncate">{{ $link->label }}</span>
+            @if((int) ($navBadges[$link->key] ?? 0) > 0)
+              <span class="rounded-full bg-red-600 px-1.5 text-[10px] font-bold leading-4 text-white">{{ (int) $navBadges[$link->key] > 99 ? '99+' : (int) $navBadges[$link->key] }}</span>
+            @endif
+          </a>
+        @endforeach
+
+        <div class="mt-2 border-t border-gray-700 pt-2">
+          @if($actualRole === 'CEO')
+            <form method="POST" action="{{ route('nav.view-as') }}" class="flex items-center gap-2 px-3 py-2">
+              @csrf
+              <label for="mobile-view-as" class="text-xs text-gray-400">View as:</label>
+              <select id="mobile-view-as" name="role" onchange="this.form.submit()"
+                      class="min-w-0 flex-1 rounded border border-gray-600 bg-gray-700 px-2 py-1.5 text-sm text-gray-100">
+                <option value="" {{ empty($viewAsRole) ? 'selected' : '' }}>CEO (actual)</option>
+                @foreach(['Marketing - OIC', 'Marketing', 'Data Encoder - OIC', 'Data Encoder'] as $r)
+                  <option value="{{ $r }}" {{ $viewAsRole === $r ? 'selected' : '' }}>{{ $r }}</option>
+                @endforeach
+              </select>
+              @if(!empty($viewAsRole))
+                <span class="rounded bg-yellow-400 px-1.5 py-0.5 text-[10px] font-bold uppercase text-gray-900">Preview</span>
+              @endif
+            </form>
+          @endif
+
+          @if(Auth::check())
+            <a href="{{ url('/profile') }}" class="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">
+              <img src="{{ Auth::user()->profile_picture ?? 'https://ui-avatars.com/api/?name=' . urlencode(Auth::user()->name) }}"
+                   class="h-8 w-8 shrink-0 rounded-full border border-gray-500 object-cover" alt="">
+              <span class="min-w-0 flex-1">
+                <span class="block truncate">{{ Auth::user()->name }}</span>
+                <span class="block text-xs text-gray-400">{{ Auth::user()?->employeeProfile?->role ?? 'No Role' }}</span>
+              </span>
+            </a>
+          @endif
+
+          <form method="POST" action="{{ route('logout') }}" class="px-3 py-2">
+            @csrf
+            <button type="submit" class="w-full rounded bg-red-600 px-4 py-2 text-sm text-white transition hover:bg-red-700">Logout</button>
+          </form>
+        </div>
       </div>
     </div>
   </nav>

@@ -13,12 +13,15 @@
     @media (prefers-reduced-motion: reduce) { .br-dots span { animation: none; } }
     .br-flash { animation: br-flash 1.4s ease-out 1; }
     @keyframes br-flash { 0% { background: #fef3c7; } 100% { background: transparent; } }
+    /* Phone: 16px ang font ng mga input para hindi mag-zoom ang iOS kapag nag-focus */
+    @media (max-width: 767px) { .br-page input, .br-page select, .br-page textarea { font-size: 16px; } }
   </style>
 
-  <div class="mt-16 flex bg-gray-50 text-gray-900" style="height: calc(100vh - 4rem);" x-data="boardroom()" x-init="init()" x-cloak>
+  {{-- Mobile (< md): isang pane lang ang nakikita — listahan O usapan. Ang status panel ay drawer hanggang lg. --}}
+  <div class="br-page mt-16 flex bg-gray-50 text-gray-900" style="height: calc(100vh - 4rem); height: calc(100dvh - 4rem);" x-data="boardroom()" x-init="init()" x-cloak>
 
     {{-- ═════════════ KALIWA: projects + meetings ═════════════ --}}
-    <aside class="w-72 shrink-0 border-r border-gray-200 bg-white flex flex-col">
+    <aside class="w-full shrink-0 flex-col border-r border-gray-200 bg-white md:flex md:w-72" x-bind:class="pane === 'list' ? 'flex' : 'hidden'">
       <div class="px-4 pt-4 pb-3 border-b border-gray-100">
         <div class="flex items-center justify-between">
           <h2 class="text-base font-semibold tracking-tight">AI Boardroom</h2>
@@ -64,10 +67,11 @@
     </aside>
 
     {{-- ═════════════ GITNA: usapan ═════════════ --}}
-    <section class="flex min-w-0 flex-1 flex-col">
+    <section class="min-w-0 flex-1 flex-col md:flex" x-bind:class="pane === 'chat' ? 'flex' : 'hidden'">
       <template x-if="!state">
-        <div class="flex flex-1 items-center justify-center p-10 text-center">
+        <div class="flex flex-1 items-center justify-center p-6 text-center sm:p-10">
           <div class="max-w-md">
+            <button type="button" class="mb-4 rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 md:hidden" x-on:click="pane = 'list'">‹ Mga meeting</button>
             <p class="text-lg font-semibold">Pumili o gumawa ng meeting</p>
             <p class="mt-2 text-sm text-gray-500">Bawat role (CEO, CTO, COO, Reviewer) ay sumasagot gamit ang sarili nitong hiwalay na API call at sarili nitong API key.</p>
             <p class="mt-4 text-sm text-red-700" x-show="error" x-text="error"></p>
@@ -78,14 +82,18 @@
       <template x-if="state">
         <div class="flex min-h-0 flex-1 flex-col">
           {{-- Header ng meeting --}}
-          <header class="border-b border-gray-200 bg-white px-5 py-3">
-            <div class="flex flex-wrap items-center gap-3">
-              <div class="min-w-0 flex-1">
+          <header class="border-b border-gray-200 bg-white px-3 py-3 sm:px-5">
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <button type="button" class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-300 text-lg text-gray-700 hover:bg-gray-50 md:hidden"
+                      x-on:click="pane = 'list'" aria-label="Bumalik sa listahan ng mga meeting">‹</button>
+              <div class="min-w-[9rem] flex-1">
                 <h1 class="truncate text-base font-semibold" x-text="state.meeting.title"></h1>
                 <p class="mt-0.5 line-clamp-2 text-xs text-gray-500" x-text="state.meeting.objective"></p>
               </div>
               <span class="rounded-full px-2.5 py-1 text-xs font-medium" x-bind:class="badge(state.meeting.status)" x-text="statusLabel(state.meeting.status)"></span>
-              <div class="flex gap-2">
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 lg:hidden"
+                        x-on:click="info = true" x-text="'Status' + (openIssues().length ? ' · ' + openIssues().length + ' isyu' : '')"></button>
                 <button type="button" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                         x-show="state.meeting.status === 'draft'" x-bind:disabled="busy" x-on:click="act('start')">Start</button>
                 <button type="button" class="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
@@ -124,7 +132,7 @@
           </header>
 
           {{-- Mga message --}}
-          <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4" x-ref="scroller">
+          <div class="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5" x-ref="scroller">
             <template x-if="!state.messages.length && !state.pending.length">
               <p class="py-10 text-center text-sm text-gray-500" x-text="state.meeting.status === 'draft' ? 'Draft pa ang meeting. Pindutin ang Start para magsimula ang brief.' : 'Wala pang message.'"></p>
             </template>
@@ -190,7 +198,7 @@
           </div>
 
           {{-- Composer --}}
-          <footer class="border-t border-gray-200 bg-white px-5 py-3">
+          <footer class="border-t border-gray-200 bg-white px-3 py-3 sm:px-5">
             <template x-if="notes.length">
               <ul class="mb-2 list-disc pl-5 text-xs text-amber-800">
                 <template x-for="n in notes" x-bind:key="n"><li x-text="n"></li></template>
@@ -203,7 +211,7 @@
                           class="block w-full resize-none rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100"
                           placeholder="Mag-type ng instruction… Gamitin ang @HANDLE para direktang tanungin ang isang role."
                           x-bind:disabled="sending || state.meeting.status === 'stopped'"
-                          x-on:keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); send(); }"></textarea>
+                          x-on:keydown.enter="onEnter($event)"></textarea>
                 <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <span class="text-[11px] text-gray-400">I-address:</span>
                   <template x-for="a in state.members" x-bind:key="'mention' + a.agent_id">
@@ -223,9 +231,15 @@
     </section>
 
     {{-- ═════════════ KANAN: status, usage, issues, decisions ═════════════ --}}
-    <aside class="hidden w-80 shrink-0 overflow-y-auto border-l border-gray-200 bg-white lg:block" x-show="state">
+    {{-- lg pataas: nakapirmi sa kanan. Mas maliit: full-screen drawer na binubuksan ng "Status" button. --}}
+    <aside class="shrink-0 overflow-y-auto border-l border-gray-200 bg-white lg:static lg:block lg:w-80" x-show="state"
+           x-bind:class="info ? 'fixed inset-x-0 bottom-0 top-16 z-40 block w-full' : 'hidden'">
       <template x-if="state">
         <div class="divide-y divide-gray-100">
+          <div class="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-4 py-2.5 lg:hidden">
+            <span class="truncate text-sm font-semibold" x-text="state.meeting.title"></span>
+            <button type="button" class="rounded-md border border-gray-300 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-50" x-on:click="info = false">Isara</button>
+          </div>
           <section class="px-4 py-4">
             <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500">Run status</h3>
             <dl class="mt-2 space-y-1.5 text-sm">
@@ -341,8 +355,8 @@
     </div>
 
     {{-- ═════════════ MODAL: bagong meeting ═════════════ --}}
-    <div class="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/40 p-4" x-show="modal === 'meeting'" x-on:keydown.escape.window="modal = null">
-      <div class="my-8 w-full max-w-2xl rounded-lg bg-white p-5 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="br-meeting-title">
+    <div class="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/40 p-3 sm:items-center sm:p-4" x-show="modal === 'meeting'" x-on:keydown.escape.window="modal = null">
+      <div class="my-2 w-full max-w-2xl rounded-lg bg-white p-4 shadow-xl sm:my-8 sm:p-5" role="dialog" aria-modal="true" aria-labelledby="br-meeting-title">
         <h3 id="br-meeting-title" class="text-base font-semibold">Bagong meeting</h3>
 
         <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -420,8 +434,8 @@
     </div>
 
     {{-- ═════════════ MODAL: company knowledge ═════════════ --}}
-    <div class="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/40 p-4" x-show="modal === 'knowledge'" x-on:keydown.escape.window="modal = null">
-      <div class="my-8 w-full max-w-2xl rounded-lg bg-white p-5 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="br-know-title">
+    <div class="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/40 p-3 sm:items-center sm:p-4" x-show="modal === 'knowledge'" x-on:keydown.escape.window="modal = null">
+      <div class="my-2 w-full max-w-2xl rounded-lg bg-white p-4 shadow-xl sm:my-8 sm:p-5" role="dialog" aria-modal="true" aria-labelledby="br-know-title">
         <div class="flex items-center justify-between">
           <h3 id="br-know-title" class="text-base font-semibold">Company knowledge</h3>
           <button type="button" class="text-sm text-gray-500 hover:text-gray-900" x-on:click="modal = null">Close</button>
@@ -479,6 +493,7 @@
         loading: true, busy: false, sending: false, error: '', formError: '', formErrors: [], startErrors: [], notes: [],
         projects: [], agents: [], groups: [], limits: { max_calls: 16, max_cycles: 3 },
         selectedId: null, state: null, timer: null, flash: null, modal: null, draft: '',
+        pane: 'list', info: false,   // para sa phone: aling pane ang nakikita, at kung bukas ang status drawer
         knowledge: [],
         projectForm: { name: '', description: '' },
         meetingForm: { project_id: '', title: '', objective: '', constraints: '', agent_ids: [], max_calls: 16, max_cycles: 3, max_total_output_tokens: '', spend_limit_usd: '' },
@@ -525,6 +540,7 @@
 
         async select(id) {
           this.selectedId = id; this.state = null; this.error = ''; this.notes = []; this.startErrors = [];
+          this.pane = 'chat'; this.info = false;
           window.location.hash = 'm=' + id;
           await this.refresh(true);
         },
@@ -583,6 +599,14 @@
           if (!r.ok) { this.error = this.messagesOf(r.data)[0]; return; }
           this.draft = ''; this.notes = r.data.notes || [];
           this.apply(r.data, true);
+        },
+
+        // Desktop: Enter = send, Shift+Enter = bagong linya. Phone (touch keyboard): Enter = bagong linya; Send button ang gamit.
+        onEnter(event) {
+          const touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+          if (event.shiftKey || touch) return;
+          event.preventDefault();
+          this.send();
         },
 
         mention(handle) {

@@ -4,7 +4,12 @@
 
   {{-- /boardroom/agents — CEO lang. Ang API key ay WRITE-ONLY: tinatanggap papasok, hindi kailanman ibinabalik.
        Naka-mask na anyo lang (huling 4 na character) ang ipinapakita. Walang key na itinatago sa browser storage. --}}
-  <div class="mt-16 min-h-screen bg-gray-50 text-gray-900" x-data="boardroomAgents()" x-init="init()" x-cloak>
+  <style>
+    /* Phone: 16px ang font ng mga input para hindi mag-zoom ang iOS kapag nag-focus */
+    @media (max-width: 767px) { .br-page input, .br-page select, .br-page textarea { font-size: 16px; } }
+  </style>
+
+  <div class="br-page mt-16 min-h-screen bg-gray-50 text-gray-900" x-data="boardroomAgents()" x-init="init()" x-cloak>
     <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
 
       <div class="flex flex-wrap items-end justify-between gap-3">
@@ -33,7 +38,7 @@
         <nav class="space-y-1.5" aria-label="Mga role">
           <template x-for="a in agents" x-bind:key="'a' + a.id">
             <button type="button" class="flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left"
-                    x-bind:class="form.id === a.id ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 bg-white hover:bg-gray-50'" x-on:click="edit(a)">
+                    x-bind:class="form.id === a.id ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 bg-white hover:bg-gray-50'" x-on:click="edit(a, true)">
               <span class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" x-bind:class="avatar(a.role_type)" x-text="a.handle.slice(0, 3)"></span>
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-sm font-medium" x-text="a.display_name"></span>
@@ -51,7 +56,7 @@
         </nav>
 
         {{-- ── Editor ng napiling role ── --}}
-        <section class="rounded-lg border border-gray-200 bg-white p-5" x-show="form.open">
+        <section class="scroll-mt-20 rounded-lg border border-gray-200 bg-white p-4 sm:p-5" x-show="form.open" x-ref="editor">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <h2 class="text-base font-semibold" x-text="form.id ? 'I-edit: ' + form.display_name : 'Bagong role'"></h2>
             <span class="text-[11px] text-gray-400" x-show="form.id">Ang pag-save dito ay sa role na ito LANG — walang ibang role na nagagalaw.</span>
@@ -70,7 +75,7 @@
               <label class="block text-sm font-medium" for="ag-name">Display name</label>
               <input id="ag-name" type="text" maxlength="120" x-model="form.display_name" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm">
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-3">
               <div>
                 <label class="block text-sm font-medium" for="ag-handle">Handle (para sa @mention)</label>
                 <input id="ag-handle" type="text" maxlength="40" x-model="form.handle" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm uppercase">
@@ -277,7 +282,8 @@
         </div>
 
         <div class="mt-3 overflow-x-auto">
-          <table class="min-w-full text-left text-xs">
+          {{-- May minimum na lapad: sa phone, nag-i-scroll pahalang ang table sa halip na magsiksikan ang mga column --}}
+          <table class="min-w-[60rem] text-left text-xs">
             <thead class="text-gray-500">
               <tr class="border-b border-gray-200">
                 <th class="py-2 pr-3 font-medium">Provider</th><th class="py-2 pr-3 font-medium">Model ID</th><th class="py-2 pr-3 font-medium">Endpoint</th>
@@ -437,13 +443,19 @@
             api_key: '', key_label: '',
           };
         },
-        edit(a) { this.current = a; this.fill(a); this.reset(); },
+        edit(a, scroll) { this.current = a; this.fill(a); this.reset(); if (scroll) this.toEditor(); },
+        // Phone: nasa ilalim ng listahan ang editor, kaya dalhin doon ang view pagkapili ng role.
+        toEditor() {
+          if (window.innerWidth >= 1024) return;
+          this.$nextTick(() => this.$refs.editor && this.$refs.editor.scrollIntoView({ block: 'start' }));
+        },
         newAgent() {
           this.current = null;
           const first = this.modelsFor('openai').find(c => c.verified);
           this.fill({ provider: 'openai', model: first ? first.model : '', role_type: 'contributor', enabled: true,
             settings: { effort: first ? first.default_effort : '' } });
           this.reset();
+          this.toEditor();
         },
         reset() { this.formErrors = []; this.saved = ''; this.refreshed = ''; this.testResult = null; this.fetched = null; },
 
