@@ -107,6 +107,46 @@ listahan pero may markang "Hindi na isinasama" — i-disable o burahin ang mga l
 - Sa "Pag-usapan", sa unang sagot lang natututo; ang mga binagong sagot ay hindi na.
 - Mas maraming aral, mas mahaba ang bawat call ng role na iyon (mas mahal at mas mabagal nang kaunti).
 
+### Resources: registry na hawak ng AI
+
+Listahan ng kung saan nakalagay ang impormasyon at sino ang mga contact: channel, group chat, website, page, contact,
+link. **Nakikita ng lahat ng role.** Ang AI ang nagtatala mula sa sinabi mo sa chat; ikaw ang tumitingin at nagtatama sa
+`/boardroom/resources`.
+
+> `@CEO pag maghahanap ka ng supplier, sa Messenger. Eto ang mga names:`
+> `Juan dela Cruz`
+> `Pedro Santos`
+
+- Sa iisang call: sagot + aral (sa playbook ng role) + datos (sa registry). Ang **unang na-mention** lang ang tagatala,
+  para walang doble.
+- Kaya ng AI: **add**, **edit**, **archive**. **Walang delete** — ang tuluyang pagbura ay sa Resources page lang, ikaw lang.
+- Lalabas sa chat ang "Itinala ni CEO sa Resources: …", at bawat pagbabago ay may sariling **I-undo**.
+  Kasama rin doon ang mga **hindi** na-save at ang dahilan.
+- May tala ang bawat pagbabago (dati → bago, sino, kailan) sa "Kasaysayan" ng Resources page.
+- Mga `br_*` table lang ang nagagalaw. Hindi ginagalaw ang suppliers, PO, o orders ng website.
+
+**Mga pananggalang ng backend** (hindi umaasa sa sinabi ng AI):
+
+| Pananggalang | Ano ang ginagawa |
+|---|---|
+| Sariling record lang | Ang id na ine-edit o ina-archive ay dapat sa iyo at aktibo pa |
+| Walang doble | Parehong klase at pangalan (kahit iba ang laki ng titik o bantas) ay hindi idinadagdag ulit |
+| Eksaktong account number | Ise-save lang kung eksaktong nasa message mo (hindi binibilang ang espasyo at gitling) |
+| Naka-encrypt | Ang account number ay naka-encrypt sa database |
+| Naka-mask sa AI | Huling 4 na digit lang ang ipinapadala sa mga role. Pagka-save, pinapalitan din ng `****1234` ang numero sa message mo at sa sagot ng role |
+| Bawal ang lihim | Hindi itinatala ang password, PIN, OTP, at CVV |
+| Hanggang 20 | Pagbabago kada message |
+
+**Mga dapat malaman:**
+- Hindi kayang buksan ng AI ang mga resource. Listahan lang ito ng kung ano ang meron at para saan.
+- Pwedeng magkamali ang AI sa paghati ng pangalan o sa pagpili ng ie-edit. Tingnan ang paalala sa chat. Mas kaunti ang
+  mali kapag isang pangalan kada linya at tahasan ang utos: "idagdag", "palitan", "tanggalin".
+- Sa message kung saan mo ibinigay ang account number, nakikita ito nang buo ng mga role na na-mention doon.
+  Pagka-save, naka-mask na ito sa lahat ng susunod na call. Isang role lang ang i-mention kapag nagbibigay ng numero.
+- Kung hindi na-save ang account (hal. hindi tugma ang numero), hindi rin mama-mask ang message mo.
+- Ang buong numero ay makikita mo sa Resources page gamit ang **Ipakita**.
+- Ang pinakabagong **80** aktibong resource ang isinasama sa bawat call.
+
 ### Mga limit ng meeting (ipinapatupad ng backend)
 
 - Hanggang **3** review/revision cycle at **16** model call kada meeting (pwedeng babaan kada meeting).

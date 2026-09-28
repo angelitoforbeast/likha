@@ -38,6 +38,7 @@ class TurnRunner
         private Budget $budget,
         private QuestionRounds $rounds,
         private Playbook $playbook,
+        private Registry $resources,
     ) {
     }
 
@@ -467,6 +468,18 @@ class TurnRunner
                 // Kusang pagkatuto: kung may napansing aral ang role sa message ng user, i-save agad sa playbook nito.
                 if (! empty($data['lesson'])) {
                     $this->playbook->learn($m, $member, $data['lesson'], $turn->reply_to_message_id);
+                }
+
+                // Datos para sa resources registry: ang UNANG na-mention lang ang tagatala. Ang backend ang nagva-validate.
+                $round = $turn->round_id ? Round::find($turn->round_id) : null;
+                if (! empty($data['changes']) && ContextBuilder::records($turn, $round)) {
+                    $question = Message::where('meeting_id', $m->id)->find($turn->reply_to_message_id);
+                    $result   = $this->resources->apply($m, $member, $data['changes'], $question);
+                    $this->resources->notice($m, $member, $result, $question);
+                    if ($result['numbers']) {
+                        // Huwag iwan ang buong account number sa sagot ng role.
+                        $answer->forceFill(['body' => $this->resources->maskNumbers((string) $answer->body, $result['numbers'])])->save();
+                    }
                 }
 
                 return $answer;

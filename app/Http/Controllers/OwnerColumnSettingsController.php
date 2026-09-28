@@ -165,6 +165,8 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'item_val',     'label' => 'Item Val.'],
             ['id' => 'adspent',      'label' => 'Adspent'],
             ['id' => 'proceed',      'label' => 'Proceed'],
+            // Hold = orders ng araw na iyon na may waybill pero WALA pa sa from_jnts (aktwal na bilang, hindi snapshot)
+            ['id' => 'hold',         'label' => 'Hold'],
             ['id' => 'cpp',          'label' => 'CPP'],
             ['id' => 'proj_profit',  'label' => 'Net Profit'],
             ['id' => 'proj_pct',     'label' => 'Proj%'],
@@ -214,7 +216,7 @@ class OwnerColumnSettingsController extends Controller
         'breakdown' => [
             // Lahat visible by default — CEO/MOIC/Marketing; i-uncheck per role kung gusto.
             'date', 'primary_item', 'item_alias', 'orders', 'price', 'rts_set',
-            'promo', 'item_val', 'adspent', 'proceed', 'cpp', 'proj_profit',
+            'promo', 'item_val', 'adspent', 'proceed', 'hold', 'cpp', 'proj_profit',
             'proj_pct', 'status', 'action',
         ],
     ];

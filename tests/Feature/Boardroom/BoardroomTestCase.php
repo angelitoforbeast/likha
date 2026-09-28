@@ -73,6 +73,7 @@ abstract class BoardroomTestCase extends TestCase
                 'database/migrations/2026_09_28_100000_create_boardroom_tables.php',
                 'database/migrations/2026_09_28_200000_add_question_rounds_to_boardroom.php',
                 'database/migrations/2026_09_28_300000_create_boardroom_lessons_table.php',
+                'database/migrations/2026_09_28_400000_create_boardroom_resources_tables.php',
             ],
             '--force' => true,
         ]);

@@ -114,10 +114,31 @@ class Prompts
                     . "- If it is a lesson, write it so it stands alone WITHOUT this conversation: \"applies_when\" names the situation "
                     . "(start with \"Kapag\" or \"When\"), \"rule\" says what you must do.\n"
                     . "- Keep the user's meaning. Do not add requirements the user did not state. One lesson per message.\n"
-                    . "- If it changes a rule in YOUR PLAYBOOK, put that rule's id number in \"replaces_lesson_id\"; otherwise null.\n"
+                    . "- If it changes a rule in YOUR PLAYBOOK, put that rule's id number in \"replaces_lesson_id\"; otherwise null.\n\n"
+                    . (! empty($ctx['recorder'])
+                        ? "DATA — RESOURCES above is the company registry: where information lives and who the contacts are. "
+                            . "If the user's message gives data to record or correct (channels, group chats, websites, pages, links, contact names, "
+                            . "who supplies what, payment accounts), return it in \"changes\".\n"
+                            . "- op \"add\": a new record. op \"edit\": change an existing record (put its id from RESOURCES in \"id\"; send only the fields that change, null for the rest). "
+                            . "op \"archive\": the user says it is no longer used (put its id in \"id\"). You cannot delete.\n"
+                            . "- target \"resource\": type is one of " . json_encode(\App\Models\Boardroom\ResourceEntry::TYPES) . ". "
+                            . "target \"account\": a payment account of a contact (method, account_name, account_number, notes).\n"
+                            . "- To say what a record belongs to (a contact on a channel, an account of a contact): use \"parent_id\" for a record already in RESOURCES, "
+                            . "or \"parent_name\" for a record you are adding in this same message.\n"
+                            . "- Record ONLY what the user stated. Never invent names, links, or numbers. Copy names, links, and account numbers EXACTLY as the user wrote them.\n"
+                            . "- Do not add a record that already exists in RESOURCES: edit it instead. One record per person or place.\n"
+                            . "- Never record passwords, PINs, OTPs, or card security codes.\n"
+                            . "- In \"answer\", never repeat a full account number; refer to it by its last 4 digits.\n"
+                            . "- A rule about what to do goes in \"lesson\"; a thing, person, place, or link goes in \"changes\".\n"
+                            . "- Nothing to record: return an empty array.\n\n"
+                        : "DATA — another participant records data for this message. Return an empty \"changes\" array.\n\n")
                     . "Return ONLY a JSON object with exactly these keys:\n"
-                    . "{\"answer\": string (your reply as it will appear in the chat; if you learned something, confirm it in one sentence),\n"
-                    . " \"lesson\": null or {\"applies_when\": string, \"rule\": string, \"replaces_lesson_id\": integer or null}}",
+                    . "{\"answer\": string (your reply as it will appear in the chat; if you learned or recorded something, confirm it in one sentence),\n"
+                    . " \"lesson\": null or {\"applies_when\": string, \"rule\": string, \"replaces_lesson_id\": integer or null},\n"
+                    . " \"changes\": [{\"op\": \"add\"|\"edit\"|\"archive\", \"target\": \"resource\"|\"account\", \"id\": integer or null, \"type\": string or null, "
+                    . "\"name\": string or null, \"purpose\": string or null, \"tags\": [string], \"location\": string or null, \"parent_id\": integer or null, "
+                    . "\"parent_name\": string or null, \"details\": string or null, \"holder\": string or null, \"method\": string or null, "
+                    . "\"account_name\": string or null, \"account_number\": string or null, \"notes\": string or null}]}",
 
             'qreview' => "YOUR TASK — REVIEW the answers given to the USER QUESTION above (cycle " . ($ctx['cycle'] ?? 1) . " of " . ($ctx['max_cycles'] ?? 1) . ").\n"
                 . "Check: do they actually answer the question, do they contradict each other, what is unproven.\n"
@@ -145,6 +166,7 @@ class Prompts
     public static function schema(string $purpose): ?array
     {
         $nullableInt = ['anyOf' => [['type' => 'integer'], ['type' => 'null']]];
+        $nullableStr = ['anyOf' => [['type' => 'string'], ['type' => 'null']]];
         $str         = ['type' => 'string'];
         $obj = fn (array $props) => [
             'type'                 => 'object',
@@ -171,6 +193,25 @@ class Prompts
                     $obj(['applies_when' => $str, 'rule' => $str, 'replaces_lesson_id' => $nullableInt]),
                     ['type' => 'null'],
                 ]],
+                // Mga pagbabago sa resources registry — iminumungkahi lang; ang backend ang nagva-validate at nagse-save
+                'changes' => $list($obj([
+                    'op'             => ['type' => 'string', 'enum' => ['add', 'edit', 'archive']],
+                    'target'         => ['type' => 'string', 'enum' => ['resource', 'account']],
+                    'id'             => $nullableInt,
+                    'type'           => $nullableStr,
+                    'name'           => $nullableStr,
+                    'purpose'        => $nullableStr,
+                    'tags'           => $list($str),
+                    'location'       => $nullableStr,
+                    'parent_id'      => $nullableInt,
+                    'parent_name'    => $nullableStr,
+                    'details'        => $nullableStr,
+                    'holder'         => $nullableStr,
+                    'method'         => $nullableStr,
+                    'account_name'   => $nullableStr,
+                    'account_number' => $nullableStr,
+                    'notes'          => $nullableStr,
+                ])),
             ])],
 
             'qreview' => ['name' => 'boardroom_question_review', 'schema' => $obj([

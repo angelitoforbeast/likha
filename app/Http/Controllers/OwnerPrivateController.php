@@ -4019,6 +4019,30 @@ class OwnerPrivateController extends Controller
             $proceedByDateItem[$d2][$canonKey]['proceed'] += (int)$s->proceed;
         }
 
+        // HOLD per (date, canonical item) — AKTWAL na bilang ng ORDERS (hindi units, hindi snapshot).
+        // Parehong depinisyon ng HoldService / /jnt/hold: may waybill sa macro_output pero WALA pa
+        // sa from_jnts. Current-state ito: bumababa habang napo-proseso ng J&T ang mga order.
+        $holdByDateItem = []; // [date][canonKey] = int   (primary item ng araw ang ipinapakita)
+        $holdByDate     = []; // [date] = int             (lahat ng item ng page — nasa tooltip)
+        if (Schema::hasColumn('macro_output', 'waybill') && Schema::hasTable('from_jnts')) {
+            $moWaybill = 'mo.' . $quote('waybill');
+            $holdRows = DB::table('macro_output as mo')
+                ->leftJoin('from_jnts as fj', 'fj.waybill_number', '=', 'mo.waybill')
+                ->whereNull('fj.waybill_number')                              // wala pa sa J&T = HOLD
+                ->whereRaw("NULLIF($trimFn($moWaybill), '') IS NOT NULL")     // may waybill
+                ->whereRaw("$moPageKey = ?", [$pageNameNorm])
+                ->whereRaw("$moDateExpr BETWEEN ? AND ?", [$startDate, $endDate])
+                ->selectRaw("$moDateExpr AS d, $moItemTrim AS item_raw, COUNT(*) AS hold_orders")
+                ->groupByRaw("$moDateExpr, $moItemTrim")
+                ->get();
+            foreach ($holdRows as $h) {
+                $canonKey = $aliases->canonicalKey((string)$h->item_raw);
+                $d2 = (string)$h->d;
+                $holdByDateItem[$d2][$canonKey] = ($holdByDateItem[$d2][$canonKey] ?? 0) + (int)$h->hold_orders;
+                $holdByDate[$d2]                = ($holdByDate[$d2] ?? 0) + (int)$h->hold_orders;
+            }
+        }
+
         // Fees per-date (back-fill aware) — same as main view.
         $hostBd = strtolower((string) $request->getHost());
         $feeHistoryBd = [];
@@ -4147,6 +4171,9 @@ class OwnerPrivateController extends Controller
                     // Financials
                     'adspent'          => round($dayAdspent, 2),
                     'proceed'          => $dayProceed,
+                    // Hold: orders ng primary item ng araw na ito; hold_page = lahat ng item ng page
+                    'hold'             => (int) ($holdByDateItem[$d][$ik] ?? 0),
+                    'hold_page'        => (int) ($holdByDate[$d] ?? 0),
                     'cpp'              => $cpp !== null ? round($cpp, 2) : null,
                     'net_profit'       => $netProfit !== null ? round($netProfit, 2) : null,
                     'net_profit_partial' => $netPartial,
@@ -4189,6 +4216,10 @@ class OwnerPrivateController extends Controller
                     // Financials
                     'adspent'          => round($dayAdspent, 2),
                     'proceed'          => 0,
+                    // Walang primary item sa araw na ito → walang Hold na maipapakita sa column;
+                    // pero baka may naka-hold pa rin sa page (nasa tooltip).
+                    'hold'             => null,
+                    'hold_page'        => (int) ($holdByDate[$d] ?? 0),
                     'cpp'              => null,
                     'net_profit'       => $dayAdspent > 0 ? round(-$dayAdspent, 2) : null,
                     'net_profit_partial' => $dayAdspent > 0,

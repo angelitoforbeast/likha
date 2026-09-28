@@ -127,12 +127,26 @@ class Presenter
             ? \App\Models\Boardroom\Lesson::where('user_id', $m->user_id)->whereIn('id', $lessonIds)->pluck('status', 'id')
             : collect();
 
+        // Mga pagbabago sa resources registry na itinala sa meeting na ito (para sa I-undo sa chat)
+        $changeIds = $rows->where('kind', 'changes')->flatMap(fn (Message $x) => (array) ($x->meta['change_ids'] ?? []))->map(fn ($id) => (int) $id)->all();
+        $changes   = $changeIds
+            ? \App\Models\Boardroom\Change::where('user_id', $m->user_id)->whereIn('id', $changeIds)->get()->keyBy('id')
+            : collect();
+
         $messages = $rows
-            ->map(function (Message $msg) use ($byId, $codes, $lessons) {
+            ->map(function (Message $msg) use ($byId, $codes, $lessons, $changes) {
                 $author   = $msg->agent_id ? ($byId[$msg->agent_id] ?? null) : null;
                 $lessonId = $msg->kind === 'lesson' ? (int) ($msg->meta['lesson_id'] ?? 0) : 0;
+                $changed  = [];
+                foreach ($msg->kind === 'changes' ? (array) ($msg->meta['change_ids'] ?? []) : [] as $id) {
+                    if ($c = $changes[(int) $id] ?? null) {
+                        $changed[] = ['id' => $c->id, 'label' => $c->label, 'action' => $c->action, 'undone' => $c->undone_at !== null];
+                    }
+                }
 
                 return [
+                    'changes'             => $changed,
+                    'rejected'            => $msg->kind === 'changes' ? array_values((array) ($msg->meta['rejected'] ?? [])) : [],
                     'lesson'              => $lessonId ? ['id' => $lessonId, 'status' => $lessons[$lessonId] ?? 'deleted'] : null,
                     'id'                  => $msg->id,
                     'author_type'         => $msg->author_type,

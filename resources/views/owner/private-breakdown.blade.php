@@ -82,6 +82,8 @@
           <th style="width:5.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('item_val')">Item Val.</th>
           <th style="width:6.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('adspent')">Adspent</th>
           <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proceed')">Proceed</th>
+          <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('hold')"
+              title="Orders ng araw na ito (primary item) na may waybill pero wala pa sa J&amp;T. Aktwal na bilang ngayon — bumababa habang napo-proseso.">Hold</th>
           <th style="width:5.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('cpp')">CPP</th>
           <th style="width:6.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_profit')">Net Profit</th>
           <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_pct')">Proj%</th>
@@ -201,6 +203,12 @@
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
                 x-show="showCol('proceed')" :style="cf('proceed', r)"
                 x-text="(r.proceed !== null && r.proceed !== undefined && r.proceed > 0) ? r.proceed : '—'"></td>
+            {{-- Hold — aktwal na bilang ng ORDERS ng primary item na may waybill pero wala pa sa from_jnts.
+                 Tooltip: bilang para sa buong page (lahat ng item). --}}
+            <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
+                x-show="showCol('hold')" :style="cf('hold', r)"
+                :title="holdTitle(r)"
+                x-text="(r.hold !== null && r.hold !== undefined && r.hold > 0) ? r.hold : '—'"></td>
             {{-- CPP (adspent ÷ proceed) --}}
             <td class="px-4 py-2 border-b border-slate-100 text-right font-mono"
                 x-show="showCol('cpp')" :style="cf('cpp', r)"
@@ -259,6 +267,9 @@
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('item_val')"></td>
           <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('adspent')" x-text="money(totals().adspent)"></td>
           <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('proceed')" x-text="totals().proceed"></td>
+          <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('hold')"
+              :title="'Primary item: ' + totals().hold + ' · Buong page: ' + totals().hold_page"
+              x-text="totals().hold > 0 ? totals().hold : '—'"></td>
           <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('cpp')"
               x-text="totals().proceed > 0 ? money(totals().adspent / totals().proceed) : '—'"></td>
           <td class="px-4 py-2 bg-slate-100 text-right font-mono" x-show="showCol('proj_profit')"
@@ -478,6 +489,7 @@
         switch(catId){
           case 'adspent':      return r.adspent;
           case 'proceed':      return r.proceed;
+          case 'hold':         return r.hold;
           case 'cpp':          return r.cpp;
           case 'proj_profit':  return r.net_profit;
           case 'proj_pct':     return r.proj_pct;
@@ -569,16 +581,27 @@
       // Range totals — sum each row's adspent/proceed/net profit. Net profit
       // per row already nets that day's adspent, so the sum is the page net
       // profit for the range. Proj% = totalNetProfit ÷ totalGrossSales.
+      // Tooltip ng Hold: primary item vs buong page (lahat ng item ng page sa araw na iyon).
+      holdTitle(r){
+        const page = Number(r.hold_page || 0);
+        if (r.hold === null || r.hold === undefined) {
+          return page > 0 ? ('Walang primary item sa araw na ito · Buong page: ' + page) : 'Walang naka-hold';
+        }
+        return 'Primary item: ' + Number(r.hold || 0) + ' · Buong page: ' + page + ' (may waybill pero wala pa sa J&T)';
+      },
+
       totals(){
-        let adspent = 0, proceed = 0, net = 0, gross = 0;
+        let adspent = 0, proceed = 0, net = 0, gross = 0, hold = 0, holdPage = 0;
         for (const r of this.rows) {
           if (r.adspent)    adspent += Number(r.adspent);
           if (r.proceed)    proceed += Number(r.proceed);
+          if (r.hold)       hold     += Number(r.hold);
+          if (r.hold_page)  holdPage += Number(r.hold_page);
           if (r.net_profit !== null && r.net_profit !== undefined) net += Number(r.net_profit);
           if (r.has_data && r.mode_cod) gross += Number(r.mode_cod) * Number(r.primary_orders || 0);
         }
         return {
-          adspent, proceed, net_profit: net, gross,
+          adspent, proceed, net_profit: net, gross, hold, hold_page: holdPage,
           proj_pct: gross > 0 ? (net / gross) * 100 : 0,
         };
       },

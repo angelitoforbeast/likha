@@ -61,8 +61,9 @@
         </template>
       </div>
 
-      <div class="border-t border-gray-100 px-4 py-3">
+      <div class="flex flex-wrap gap-x-4 gap-y-1 border-t border-gray-100 px-4 py-3">
         <button type="button" class="text-xs font-medium text-gray-600 hover:text-indigo-700" x-on:click="openKnowledge()">Company knowledge</button>
+        <a href="{{ route('boardroom.resources') }}" class="text-xs font-medium text-gray-600 hover:text-indigo-700">Resources</a>
       </div>
     </aside>
 
@@ -174,6 +175,22 @@
                               x-show="msg.lesson.status === 'disabled'" x-bind:disabled="busy" x-on:click="setLesson(msg.lesson.id, 'active')">Ibalik</button>
                       <a class="text-indigo-700 hover:underline" href="{{ route('boardroom.agents') }}">I-edit sa Agents / Roles</a>
                     </div>
+                  </template>
+
+                  {{-- Mga itinala ng AI sa Resources: bawat isa ay may sariling undo --}}
+                  <template x-if="msg.changes && msg.changes.length">
+                    <ul class="mt-1.5 space-y-1">
+                      <template x-for="c in msg.changes" x-bind:key="'chg' + c.id">
+                        <li class="flex flex-wrap items-center gap-2 text-[11px]">
+                          <span class="rounded px-1.5 py-0.5 font-medium" x-bind:class="c.undone ? 'bg-gray-200 text-gray-700' : 'bg-emerald-100 text-emerald-800'"
+                                x-text="c.undone ? 'Na-undo' : 'Naka-save'"></span>
+                          <span class="min-w-0 text-gray-600" x-bind:class="c.undone ? 'line-through' : ''" x-text="c.label"></span>
+                          <button type="button" class="rounded border border-gray-300 px-2 py-0.5 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                                  x-show="!c.undone" x-bind:disabled="busy" x-on:click="undoChange(c.id)">I-undo</button>
+                        </li>
+                      </template>
+                      <li class="text-[11px]"><a class="text-indigo-700 hover:underline" href="{{ route('boardroom.resources') }}">Tingnan sa Resources</a></li>
+                    </ul>
                   </template>
                 </div>
               </article>
@@ -664,6 +681,14 @@
           return { active: 'Naka-save sa playbook', disabled: 'Na-undo — hindi na ginagamit', replaced: 'Napalitan ng mas bagong aral', deleted: 'Binura' }[s] || s;
         },
         lessonClass(s) { return s === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-200 text-gray-700'; },
+        // I-undo ang isang pagbabagong itinala ng AI sa Resources.
+        async undoChange(id) {
+          this.busy = true; this.error = '';
+          const r = await this.api('POST', '/changes/' + id + '/undo', { meeting_id: this.selectedId });
+          this.busy = false;
+          if (r.data && r.data.state) this.apply(r.data.state);
+          if (!r.ok) this.error = this.messagesOf(r.data)[0];
+        },
 
         async decide(id, status) {
           const r = await this.api('POST', '/decisions/' + id, { status });
@@ -771,7 +796,7 @@
         },
         bubble(m) {
           if (m.author_type === 'user') return 'bg-gray-800 text-white';
-          if (m.kind === 'lesson') return 'bg-emerald-50 text-emerald-950 border border-emerald-200';
+          if (m.kind === 'lesson' || m.kind === 'changes') return 'bg-emerald-50 text-emerald-950 border border-emerald-200';
           if (m.author_type === 'system') return 'bg-amber-50 text-amber-900 border border-amber-200';
           if (m.kind === 'final') return 'bg-indigo-50 border border-indigo-200';
           return 'bg-white border border-gray-200';
@@ -795,7 +820,7 @@
         kindLabel(k) {
           return { brief: 'Brief', proposal: 'Proposal', review: 'Review', question: 'Tanong', answer: 'Sagot', revision: 'Revision', final: 'Final',
             instruction: 'Instruction', notice: 'Paalala', routing: 'Susunod na hakbang', route: 'Routing', repair: 'Repair', direct: 'Sagot sa tanong mo',
-            summary: 'Buod', qreview: 'Review ng mga sagot', qsummary: 'Buod', lesson: 'Natutunan' }[k] || k;
+            summary: 'Buod', qreview: 'Review ng mga sagot', qsummary: 'Buod', lesson: 'Natutunan', changes: 'Itinala' }[k] || k;
         },
         statusLabel(s) {
           return { draft: 'Draft', running: 'Tumatakbo', paused: 'Paused', stopped: 'Stopped', completed: 'Tapos', failed: 'Nahinto',

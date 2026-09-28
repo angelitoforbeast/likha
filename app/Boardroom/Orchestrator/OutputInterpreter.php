@@ -195,7 +195,7 @@ class OutputInterpreter
      * Sagot sa tanong ng user, na may opsyonal na aral. MAPAGPATAWAD ang pagbasa: kapag hindi valid na JSON
      * ang ibinalik, ang buong text ang itinuturing na sagot at walang aral na ise-save (walang repair call).
      *
-     * @return array{answer: string, lesson: ?array, structured: bool}
+     * @return array{answer: string, lesson: ?array, changes: array<int, array>, structured: bool}
      */
     public function answer(string $text): array
     {
@@ -214,10 +214,18 @@ class OutputInterpreter
                 }
             }
 
-            return ['answer' => trim($d['answer']), 'lesson' => $lesson, 'structured' => true];
+            // Mga pagbabago sa registry: hugis lang ang tinitingnan dito; ang laman ay vina-validate ng Registry.
+            $changes = [];
+            foreach (is_array($d['changes'] ?? null) ? $d['changes'] : [] as $row) {
+                if (is_array($row) && ! array_is_list($row)) {
+                    $changes[] = $row;
+                }
+            }
+
+            return ['answer' => trim($d['answer']), 'lesson' => $lesson, 'changes' => $changes, 'structured' => true];
         }
 
-        return ['answer' => $this->salvageAnswer($text), 'lesson' => null, 'structured' => false];
+        return ['answer' => $this->salvageAnswer($text), 'lesson' => null, 'changes' => [], 'structured' => false];
     }
 
     /** Putol na JSON (hal. naubos ang token): kunin ang nababasang bahagi ng "answer" sa halip na ipakita ang hilaw na JSON. */

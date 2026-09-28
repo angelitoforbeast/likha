@@ -20,8 +20,14 @@ use App\Models\Boardroom\Turn;
  */
 class ContextBuilder
 {
-    public function __construct(private Rules $rules, private Playbook $playbook)
+    public function __construct(private Rules $rules, private Playbook $playbook, private Registry $registry)
     {
+    }
+
+    /** Ang role ba na ito ang tagatala ng datos para sa tanong na ito? (ang UNANG na-mention lang) */
+    public static function records(Turn $turn, ?Round $round): bool
+    {
+        return self::learns($turn) && $round && (int) (($round->agent_ids ?? [])[0] ?? 0) === (int) $turn->agent_id;
     }
 
     /** Natututo ba ang turn na ito mula sa message ng user? (unang sagot sa tanong ng user) */
@@ -57,7 +63,11 @@ class ContextBuilder
             $source   = $parent ?: $turn;
             $round    = $source->round_id ? Round::where('meeting_id', $m->id)->find($source->round_id) : null;
             $question = Message::where('meeting_id', $m->id)->find($round?->message_id ?? $source->reply_to_message_id);
-            $ctx      = ['cycle' => max(1, (int) $source->cycle), 'max_cycles' => (int) ($round?->max_cycles ?? 1)];
+            $ctx      = [
+                'cycle'      => max(1, (int) $source->cycle),
+                'max_cycles' => (int) ($round?->max_cycles ?? 1),
+                'recorder'   => self::records($turn, $round),   // iisang role lang ang nagtatala, para walang doble
+            ];
 
             $input = $this->knowledge($m)
                 . $this->header($m)
@@ -145,7 +155,8 @@ class ContextBuilder
             $out .= "\n";
         }
 
-        return $out;
+        // Resources registry: para sa lahat ng role. Huling 4 na digit lang ng account number ang kasama.
+        return $out . $this->registry->block((int) $m->user_id, (int) $m->project_id);
     }
 
     private function participants(Meeting $m, int $selfId): string

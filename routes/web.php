@@ -1070,6 +1070,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
 
         Route::get('/',       [$room, 'page'])  ->name('index');
         Route::get('/agents', [$agents, 'page'])->name('agents');
+        Route::get('/resources', [\App\Http\Controllers\Boardroom\ResourceController::class, 'page'])->name('resources');
 
         Route::prefix('api')->middleware('throttle:240,1')->group(function () use ($room, $agents) {
             Route::get   ('/bootstrap',                 [$room, 'bootstrap'])       ->name('bootstrap');
@@ -1098,6 +1099,19 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
             Route::post  ('/agents/{id}/lessons',       [$lessons, 'store'])            ->whereNumber('id')->name('lessons.store');
             Route::put   ('/lessons/{id}',              [$lessons, 'update'])           ->whereNumber('id')->name('lessons.update');
             Route::delete('/lessons/{id}',              [$lessons, 'destroy'])          ->whereNumber('id')->name('lessons.destroy');
+
+            // Resources registry: itinatala ng AI mula sa chat; dito nakikita, naitatama, at nabubura ng user
+            $res = \App\Http\Controllers\Boardroom\ResourceController::class;
+            Route::get   ('/resources',                 [$res, 'index'])                ->name('resources.index');
+            Route::post  ('/resources',                 [$res, 'store'])                ->name('resources.store');
+            Route::put   ('/resources/{id}',            [$res, 'update'])               ->whereNumber('id')->name('resources.update');
+            Route::post  ('/resources/{id}/archive',    [$res, 'archive'])              ->whereNumber('id')->name('resources.archive');
+            Route::delete('/resources/{id}',            [$res, 'destroy'])              ->whereNumber('id')->name('resources.destroy');
+            Route::post  ('/resources/{id}/accounts',   [$res, 'storeAccount'])         ->whereNumber('id')->name('accounts.store');
+            Route::put   ('/accounts/{id}',             [$res, 'updateAccount'])        ->whereNumber('id')->name('accounts.update');
+            Route::delete('/accounts/{id}',             [$res, 'destroyAccount'])       ->whereNumber('id')->name('accounts.destroy');
+            Route::post  ('/accounts/{id}/reveal',      [$res, 'reveal'])               ->whereNumber('id')->middleware('throttle:30,1')->name('accounts.reveal');
+            Route::post  ('/changes/{id}/undo',         [$res, 'undo'])                 ->whereNumber('id')->name('changes.undo');
 
             Route::post  ('/capabilities',              [$agents, 'saveCapability'])    ->name('capabilities.save');
             Route::delete('/capabilities/{id}',         [$agents, 'destroyCapability']) ->whereNumber('id')->name('capabilities.destroy');
