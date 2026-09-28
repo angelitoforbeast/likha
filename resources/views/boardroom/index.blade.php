@@ -625,10 +625,20 @@
           this.send();
         },
 
+        // Ang mga @mention ay nasa unahan ng message, AYON SA PAGKAKASUNOD ng pagpindot.
+        // Pagpindot ulit sa naka-mention na = tanggalin.
         mention(handle) {
-          const token = '@' + handle + ' ';
-          if (!this.draft.includes('@' + handle)) this.draft = token + this.draft;
+          this.draft = this.withMention(this.draft, handle);
           this.$nextTick(() => this.$refs.composer && this.$refs.composer.focus());
+        },
+        withMention(draft, handle) {
+          const lead = /^\s*(?:@[A-Za-z][A-Za-z0-9_-]*(?:\s+|$))*/.exec(draft)[0];
+          const rest = draft.slice(lead.length);
+          const list = lead.split(/\s+/).filter(Boolean);
+          const at   = list.findIndex(m => m.toLowerCase() === '@' + handle.toLowerCase());
+          if (at !== -1) list.splice(at, 1);
+          else if (!new RegExp('@' + handle + '(?![A-Za-z0-9_-])', 'i').test(rest)) list.push('@' + handle);
+          return (list.length ? list.join(' ') + ' ' : '') + rest;
         },
 
         async decide(id, status) {
