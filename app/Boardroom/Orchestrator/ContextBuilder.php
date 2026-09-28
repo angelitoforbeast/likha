@@ -7,6 +7,7 @@ use App\Models\Boardroom\Issue;
 use App\Models\Boardroom\Knowledge;
 use App\Models\Boardroom\Meeting;
 use App\Models\Boardroom\Message;
+use App\Models\Boardroom\Round;
 use App\Models\Boardroom\Turn;
 
 /**
@@ -45,6 +46,20 @@ class ContextBuilder
                 . $this->participants($m, (int) $turn->agent_id)
                 . $this->userInstructions($m)
                 . "\n" . Prompts::task('brief');
+        } elseif ($turn->isQuestion() || ($parent && $parent->isQuestion())) {
+            // Tanong ng user: parehong context ng room, pero malinaw kung ALING tanong ang sinasagot.
+            $source   = $parent ?: $turn;
+            $round    = $source->round_id ? Round::where('meeting_id', $m->id)->find($source->round_id) : null;
+            $question = Message::where('meeting_id', $m->id)->find($round?->message_id ?? $source->reply_to_message_id);
+            $ctx      = ['cycle' => max(1, (int) $source->cycle), 'max_cycles' => (int) ($round?->max_cycles ?? 1)];
+
+            $input = $this->knowledge($m)
+                . $this->header($m)
+                . $this->participants($m, (int) $turn->agent_id)
+                . $this->transcript($m)
+                . $this->issues($m)
+                . "## USER QUESTION\n[#" . ($question?->id ?? 0) . '] ' . $this->clip((string) ($question?->body ?? '')) . "\n\n"
+                . Prompts::task($purpose, $ctx);
         } else {
             $ctx = ['cycle' => (int) $m->cycle];
             if ($purpose === 'route') {

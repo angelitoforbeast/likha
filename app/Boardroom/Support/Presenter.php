@@ -173,7 +173,10 @@ class Presenter
             $superseded = $t->status === 'failed' && $t->error_code === 'invalid_structured_output'
                 && $turns->contains(fn ($c) => $c->parent_turn_id === $t->id && in_array($c->status, ['queued', 'generating', 'paused', 'completed'], true));
 
-            if (in_array($t->status, ['queued', 'generating', 'paused', 'failed'], true) && ! $superseded) {
+            // Ang nabigong turn ng tanong ng user ay may paalala na sa chat at hindi nire-retry — huwag nang ipakita ulit.
+            $shown = $t->isQuestion() ? ['queued', 'generating', 'paused'] : ['queued', 'generating', 'paused', 'failed'];
+
+            if (in_array($t->status, $shown, true) && ! $superseded) {
                 $pending[] = [
                     'turn_id'       => $t->id,
                     'agent_id'      => (int) $t->agent_id,
@@ -213,6 +216,12 @@ class Presenter
                 'tokens_out'              => (int) $m->tokens_out,
                 'est_cost_usd'            => (float) $m->est_cost_usd,
                 'unpriced_calls'          => (int) $m->unpriced_calls,
+                // Mga tanong ng user: hiwalay na bilang, hindi kasama sa mga limit ng meeting
+                'question_calls'          => (int) $m->question_calls,
+                'question_tokens_in'      => (int) $m->question_tokens_in,
+                'question_tokens_out'     => (int) $m->question_tokens_out,
+                'question_cost_usd'       => (float) $m->question_cost_usd,
+                'question_unpriced_calls' => (int) $m->question_unpriced_calls,
                 'stop_reason'             => $m->stop_reason,
                 'last_error'              => $m->last_error,
                 'final'                   => $m->final,

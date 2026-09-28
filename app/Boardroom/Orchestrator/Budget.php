@@ -100,7 +100,9 @@ class Budget
     private function pendingMembers(Meeting $m): array
     {
         $out = [];
-        $ids = Turn::where('meeting_id', $m->id)->whereIn('status', Turn::PENDING)->pluck('agent_id');
+        // Hindi kasama ang mga turn ng tanong ng user: hiwalay ang limit ng mga iyon.
+        $ids = Turn::where('meeting_id', $m->id)->whereNull('round_id')->where('purpose', '!=', 'direct')
+            ->whereIn('status', Turn::PENDING)->pluck('agent_id');
         foreach ($ids as $agentId) {
             $member = $m->member((int) $agentId);
             if ($member) {

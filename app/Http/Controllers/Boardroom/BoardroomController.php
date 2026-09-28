@@ -147,9 +147,13 @@ class BoardroomController extends Controller
     public function postMessage(Request $request, int $id): JsonResponse
     {
         $meeting = $this->meeting($request, $id);
-        $data    = $request->validate(['body' => ['required', 'string', 'max:8000']]);
+        $data    = $request->validate([
+            'body'   => ['required', 'string', 'max:8000'],
+            // 0 = sagot lang (tig-isang sagot); 1..3 = pag-usapan, hanggang ganito karaming cycle
+            'cycles' => ['nullable', 'integer', 'min:0', 'max:' . \App\Models\Boardroom\Round::MAX_CYCLES],
+        ]);
 
-        $result = $this->orchestrator->postUserMessage($meeting, $request->user()->id, trim($data['body']));
+        $result = $this->orchestrator->postUserMessage($meeting, $request->user()->id, trim($data['body']), (int) ($data['cycles'] ?? 0));
 
         return response()->json(['ok' => true, 'notes' => $result['notes']] + Presenter::meeting($meeting->fresh()));
     }

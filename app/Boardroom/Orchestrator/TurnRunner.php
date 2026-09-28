@@ -13,6 +13,7 @@ use App\Models\Boardroom\Decision;
 use App\Models\Boardroom\Issue;
 use App\Models\Boardroom\Meeting;
 use App\Models\Boardroom\Message;
+use App\Models\Boardroom\Round;
 use App\Models\Boardroom\Turn;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -35,6 +36,7 @@ class TurnRunner
         private AdapterFactory $adapters,
         private OutputInterpreter $interpreter,
         private Budget $budget,
+        private QuestionRounds $rounds,
     ) {
     }
 
@@ -174,15 +176,15 @@ class TurnRunner
     /** Huwag tumawag ng model kapag naka-pause o naka-stop ang meeting. @return bool true = hindi itinuloy */
     private function parkIfHalted(?Meeting $meeting, Turn $turn, int $attempt): bool
     {
-        $status = $meeting?->status ?? 'stopped';
-        $direct = $turn->purpose === 'direct';
+        $status   = $meeting?->status ?? 'draft';
+        $question = $turn->isQuestion();   // tanong ng user: tumatakbo kahit tapos, nahinto, o naka-stop na ang meeting
 
         $park = match (true) {
-            in_array($status, ['stopped', 'draft'], true)                          => 'stopped',
-            $status === 'paused'                                                  => 'paused',
-            ! $direct && in_array($status, ['completed', 'blocked'], true)        => 'stopped',
-            ! $direct && $status !== 'running'                                    => 'paused',   // failed / needs_input: hintayin ang user
-            default                                                               => null,
+            $status === 'draft'                                                        => 'stopped',
+            $status === 'paused'                                                       => 'paused',
+            ! $question && in_array($status, ['stopped', 'completed', 'blocked'], true) => 'stopped',
+            ! $question && $status !== 'running'                                        => 'paused',   // failed / needs_input: hintayin ang user
+            default                                                                    => null,
         };
         if ($park === null) {
             return false;
@@ -207,6 +209,19 @@ class TurnRunner
         return DB::transaction(function () use ($turn, $member) {
             $m = Meeting::whereKey($turn->meeting_id)->lockForUpdate()->first();
             $t = Turn::find($turn->id);
+
+            // Tanong ng user: hiwalay na bilang, walang ibinabawas sa limit ng meeting.
+            if ($t->isQuestion() && ! $t->reserved) {
+                $m->question_calls = (int) $m->question_calls + 1;
+                $t->requests       = (int) $t->requests + 1;
+                $t->save();
+                $m->save();
+                if ($t->round_id) {
+                    Round::whereKey($t->round_id)->increment('calls_used');
+                }
+
+                return null;
+            }
 
             if ($t->reserved) {
                 $t->reserved       = false;
@@ -241,12 +256,15 @@ class TurnRunner
 
         DB::transaction(function () use ($turn, $r, $cost) {
             $m = Meeting::whereKey($turn->meeting_id)->lockForUpdate()->first();
-            $m->tokens_in  = (int) $m->tokens_in + $r->tokensIn;
-            $m->tokens_out = (int) $m->tokens_out + $r->tokensOut;
+            // Hiwalay ang usage ng mga tanong ng user, para hindi nito kainin ang mga limit ng meeting.
+            $p = $turn->isQuestion() ? 'question_' : '';
+            $m->{$p . 'tokens_in'}  = (int) $m->{$p . 'tokens_in'} + $r->tokensIn;
+            $m->{$p . 'tokens_out'} = (int) $m->{$p . 'tokens_out'} + $r->tokensOut;
             if ($cost === null) {
-                $m->unpriced_calls = (int) $m->unpriced_calls + 1;
+                $m->{$p . 'unpriced_calls'} = (int) $m->{$p . 'unpriced_calls'} + 1;
             } else {
-                $m->est_cost_usd = round((float) $m->est_cost_usd + $cost, 6);
+                $costKey     = $p === '' ? 'est_cost_usd' : 'question_cost_usd';
+                $m->$costKey = round((float) $m->$costKey + $cost, 6);
             }
             $m->save();
 
@@ -292,9 +310,10 @@ class TurnRunner
         if (in_array($purpose, Prompts::STRUCTURED, true)) {
             $fresh  = Meeting::find($meeting->id);
             $parsed = match ($purpose) {
-                'route'  => $this->interpreter->route($fresh, (int) $turn->agent_id, $text),
-                'review' => $this->interpreter->review($fresh, $text),
-                'final'  => $this->interpreter->final($fresh, $text),
+                'route'   => $this->interpreter->route($fresh, (int) $turn->agent_id, $text),
+                'review'  => $this->interpreter->review($fresh, $text),
+                'final'   => $this->interpreter->final($fresh, $text),
+                'qreview' => $this->interpreter->qreview($text),
             };
             if (! $parsed['ok']) {
                 $error = $parsed['error'] . ($r->finish === ProviderResult::TRUNCATED ? ' (The output was cut off at the token limit — be more concise.)' : '');
@@ -330,9 +349,13 @@ class TurnRunner
             return true;
         });
 
-        if ($saved) {
-            $this->orchestrator->advance((int) $turn->meeting_id);
+        if (! $saved) {
+            return;
         }
+        if ($turn->round_id) {
+            $this->orchestrator->dispatch($this->rounds->advance((int) $turn->round_id));
+        }
+        $this->orchestrator->advance((int) $turn->meeting_id);
     }
 
     /** I-save ang message (isa kada turn) at ilapat ang validated na resulta. */
@@ -437,6 +460,12 @@ class TurnRunner
             case 'direct':
                 return Message::create($base + ['kind' => 'answer', 'body' => $text, 'meta' => $meta + ['to_user' => true]]);
 
+            case 'qreview':
+                return Message::create($base + ['kind' => 'review', 'body' => $data['public_message'], 'meta' => $meta + ['to_user' => true, 'verdict' => $data['verdict']]]);
+
+            case 'qsummary':
+                return Message::create($base + ['kind' => 'summary', 'body' => $text, 'meta' => $meta + ['to_user' => true]]);
+
             default:   // brief | proposal | revision
                 return Message::create($base + ['kind' => $purpose, 'body' => $text, 'meta' => $meta]);
         }
@@ -450,6 +479,7 @@ class TurnRunner
             'route'  => $out + array_diff_key((array) $data, ['public_message' => 1]),
             'review' => $out + ['verdict' => $data['verdict'], 'issues' => count($data['issues'])],
             'final'  => $out + ['status' => $data['status']],
+            'qreview' => $out + ['verdict' => $data['verdict']],
             default  => $out,
         };
     }

@@ -210,7 +210,7 @@
                 <textarea id="br-composer" rows="2" maxlength="8000" x-model="draft" x-ref="composer"
                           class="block w-full resize-none rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100"
                           placeholder="Mag-type ng instruction… Gamitin ang @HANDLE para direktang tanungin ang isang role."
-                          x-bind:disabled="sending || state.meeting.status === 'stopped'"
+                          x-bind:disabled="sending"
                           x-on:keydown.enter="onEnter($event)"></textarea>
                 <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <span class="text-[11px] text-gray-400">I-address:</span>
@@ -218,11 +218,21 @@
                     <button type="button" class="rounded-full border border-gray-200 px-2 py-0.5 text-[11px] text-gray-600 hover:border-indigo-300 hover:text-indigo-700"
                             x-on:click="mention(a.handle)" x-text="'@' + a.handle"></button>
                   </template>
-                  <span class="text-[11px] text-gray-400">· Bawat @mention ay isang model call.</span>
+                </div>
+                {{-- Paraan ng sagot sa tanong mo. Hiwalay ito sa limit ng meeting. --}}
+                <div class="mt-1.5 flex flex-wrap items-center gap-1.5" x-show="state.meeting.status !== 'draft'">
+                  <label for="br-reply-mode" class="text-[11px] text-gray-400">Sagot:</label>
+                  <select id="br-reply-mode" x-model.number="cycles" class="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700">
+                    <option value="0">Sagot lang — tig-isang sagot ang na-mention</option>
+                    <option value="1">Pag-usapan — 1 cycle</option>
+                    <option value="2">Pag-usapan — hanggang 2 cycle</option>
+                    <option value="3">Pag-usapan — hanggang 3 cycle</option>
+                  </select>
+                  <span class="text-[11px] text-gray-400" x-text="modeHint()"></span>
                 </div>
               </div>
               <button type="button" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-                      x-bind:disabled="sending || !draft.trim() || state.meeting.status === 'stopped'" x-on:click="send()">Send</button>
+                      x-bind:disabled="sending || !draft.trim()" x-on:click="send()">Send</button>
             </div>
             <p class="mt-1 text-xs text-red-700" x-show="error" x-text="error"></p>
           </footer>
@@ -245,9 +255,12 @@
             <dl class="mt-2 space-y-1.5 text-sm">
               <div class="flex justify-between"><dt class="text-gray-500">Phase</dt><dd class="font-medium" x-text="phaseLabel(state.meeting.phase)"></dd></div>
               <div class="flex justify-between"><dt class="text-gray-500">Review cycle</dt><dd class="font-medium tabular-nums" x-text="state.meeting.cycle + ' / ' + state.meeting.max_cycles"></dd></div>
-              <div class="flex justify-between"><dt class="text-gray-500">Model calls</dt>
+              <div class="flex justify-between"><dt class="text-gray-500">Model calls ng meeting</dt>
                 <dd class="font-medium tabular-nums" x-text="state.meeting.calls_used + ' / ' + state.meeting.max_calls + (state.meeting.reserved_calls ? ' (+' + state.meeting.reserved_calls + ' nakareserba)' : '')"></dd></div>
+              <div class="flex justify-between"><dt class="text-gray-500">Mga tanong mo</dt>
+                <dd class="font-medium tabular-nums" x-text="state.meeting.question_calls + ' call'"></dd></div>
             </dl>
+            <p class="mt-1 text-[11px] text-gray-400">Ang limit ay para sa kusang takbo ng meeting. Ang mga tanong mo ay hiwalay at hindi ibinabawas dito.</p>
             <div class="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100" role="img" x-bind:aria-label="'Nagamit na model calls: ' + state.meeting.calls_used + ' sa ' + state.meeting.max_calls">
               <div class="h-full rounded-full bg-indigo-500" x-bind:style="'width:' + Math.min(100, 100 * state.meeting.calls_used / state.meeting.max_calls) + '%'"></div>
             </div>
@@ -257,13 +270,15 @@
           <section class="px-4 py-4">
             <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500">Usage</h3>
             <dl class="mt-2 space-y-1.5 text-sm">
-              <div class="flex justify-between"><dt class="text-gray-500">Input tokens</dt><dd class="font-medium tabular-nums" x-text="num(state.meeting.tokens_in)"></dd></div>
-              <div class="flex justify-between"><dt class="text-gray-500">Output tokens</dt><dd class="font-medium tabular-nums" x-text="num(state.meeting.tokens_out)"></dd></div>
-              <div class="flex justify-between"><dt class="text-gray-500">Tantiyang gastos</dt><dd class="font-medium tabular-nums" x-text="cost(state.meeting.est_cost_usd, state.meeting.unpriced_calls)"></dd></div>
+              <div class="flex justify-between"><dt class="text-gray-500">Input tokens</dt><dd class="font-medium tabular-nums" x-text="num(state.meeting.tokens_in + state.meeting.question_tokens_in)"></dd></div>
+              <div class="flex justify-between"><dt class="text-gray-500">Output tokens</dt><dd class="font-medium tabular-nums" x-text="num(state.meeting.tokens_out + state.meeting.question_tokens_out)"></dd></div>
+              <div class="flex justify-between"><dt class="text-gray-500">Tantiyang gastos</dt><dd class="font-medium tabular-nums" x-text="cost(state.meeting.est_cost_usd + state.meeting.question_cost_usd, unpriced())"></dd></div>
+              <div class="flex justify-between text-xs" x-show="state.meeting.question_calls > 0"><dt class="text-gray-400">· meeting</dt><dd class="tabular-nums text-gray-500" x-text="cost(state.meeting.est_cost_usd, state.meeting.unpriced_calls)"></dd></div>
+              <div class="flex justify-between text-xs" x-show="state.meeting.question_calls > 0"><dt class="text-gray-400">· mga tanong mo</dt><dd class="tabular-nums text-gray-500" x-text="cost(state.meeting.question_cost_usd, state.meeting.question_unpriced_calls)"></dd></div>
             </dl>
             <p class="mt-1 text-[11px] text-gray-400">Tantiya lang mula sa presyo sa model registry. Ang aktwal na singil ay nasa dashboard ng provider, kada API key.</p>
-            <p class="mt-1 text-[11px] text-amber-700" x-show="state.meeting.unpriced_calls > 0"
-               x-text="state.meeting.unpriced_calls + ' call ang walang alam na presyo — hindi kasama sa tantiya.'"></p>
+            <p class="mt-1 text-[11px] text-amber-700" x-show="unpriced() > 0"
+               x-text="unpriced() + ' call ang walang alam na presyo — hindi kasama sa tantiya.'"></p>
 
             <table class="mt-3 w-full text-xs" x-show="state.usage.length">
               <thead><tr class="text-left text-gray-400"><th class="py-1 font-medium">Role</th><th class="py-1 text-right font-medium">Calls</th><th class="py-1 text-right font-medium">Out</th><th class="py-1 text-right font-medium">USD</th></tr></thead>
@@ -494,6 +509,7 @@
         projects: [], agents: [], groups: [], limits: { max_calls: 16, max_cycles: 3 },
         selectedId: null, state: null, timer: null, flash: null, modal: null, draft: '',
         pane: 'list', info: false,   // para sa phone: aling pane ang nakikita, at kung bukas ang status drawer
+        cycles: 0,                   // paraan ng sagot sa tanong: 0 = sagot lang; 1..3 = pag-usapan, hanggang ganito karaming cycle
         knowledge: [],
         projectForm: { name: '', description: '' },
         meetingForm: { project_id: '', title: '', objective: '', constraints: '', agent_ids: [], max_calls: 16, max_cycles: 3, max_total_output_tokens: '', spend_limit_usd: '' },
@@ -594,7 +610,7 @@
           const body = this.draft.trim();
           if (!body || this.sending || !this.state) return;
           this.sending = true; this.error = ''; this.notes = [];
-          const r = await this.api('POST', '/meetings/' + this.selectedId + '/messages', { body });
+          const r = await this.api('POST', '/meetings/' + this.selectedId + '/messages', { body, cycles: Number(this.cycles) || 0 });
           this.sending = false;
           if (!r.ok) { this.error = this.messagesOf(r.data)[0]; return; }
           this.draft = ''; this.notes = r.data.notes || [];
@@ -743,7 +759,8 @@
         },
         kindLabel(k) {
           return { brief: 'Brief', proposal: 'Proposal', review: 'Review', question: 'Tanong', answer: 'Sagot', revision: 'Revision', final: 'Final',
-            instruction: 'Instruction', notice: 'Paalala', routing: 'Susunod na hakbang', route: 'Routing', repair: 'Repair', direct: 'Direktang sagot' }[k] || k;
+            instruction: 'Instruction', notice: 'Paalala', routing: 'Susunod na hakbang', route: 'Routing', repair: 'Repair', direct: 'Sagot sa tanong mo',
+            summary: 'Buod', qreview: 'Review ng mga sagot', qsummary: 'Buod' }[k] || k;
         },
         statusLabel(s) {
           return { draft: 'Draft', running: 'Tumatakbo', paused: 'Paused', stopped: 'Stopped', completed: 'Tapos', failed: 'Nahinto',
@@ -780,6 +797,22 @@
         decisionLabel(s) { return { proposed: 'Naghihintay', approved: 'Approved', rejected: 'Rejected' }[s] || s; },
         decisionClass(s) { return { proposed: 'bg-amber-100 text-amber-800', approved: 'bg-emerald-100 text-emerald-800', rejected: 'bg-gray-200 text-gray-700' }[s] || 'bg-gray-100'; },
         num(n) { return Number(n || 0).toLocaleString('en-US'); },
+        unpriced() { return (this.state.meeting.unpriced_calls || 0) + (this.state.meeting.question_unpriced_calls || 0); },
+        // Ilang model call ang aabutin ng tanong, batay sa na-mention at sa napiling paraan.
+        modeHint() {
+          const members = this.state ? this.state.members : [];
+          const mentioned = members.filter(a => new RegExp('@' + a.handle + '(?![A-Za-z0-9_-])', 'i').test(this.draft));
+          if (!Number(this.cycles)) {
+            return mentioned.length ? mentioned.length + ' model call' : 'Walang @mention = walang model call (instruction lang).';
+          }
+          const contributors = members.filter(a => a.role_type === 'contributor');
+          const who = mentioned.filter(a => a.role_type === 'contributor');
+          const n = (who.length ? who : contributors).length;
+          const reviewer = members.some(a => a.role_type === 'reviewer');
+          const c = Number(this.cycles);
+          const max = reviewer ? n * c + c + 1 : n + 1;
+          return 'Hanggang ' + max + ' model call: sagot, review, tapos buod ng CEO. Titigil nang mas maaga kapag ayos na sa reviewer.';
+        },
         cost(usd, unpriced) {
           if (!usd && unpriced > 0) return 'hindi alam';
           return '≈ $' + Number(usd || 0).toFixed(4);

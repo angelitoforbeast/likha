@@ -69,8 +69,11 @@ abstract class BoardroomTestCase extends TestCase
         });
 
         Artisan::call('migrate', [
-            '--path'     => 'database/migrations/2026_09_28_100000_create_boardroom_tables.php',
-            '--force'    => true,
+            '--path'  => [
+                'database/migrations/2026_09_28_100000_create_boardroom_tables.php',
+                'database/migrations/2026_09_28_200000_add_question_rounds_to_boardroom.php',
+            ],
+            '--force' => true,
         ]);
 
         $this->calls = [];
@@ -172,6 +175,9 @@ abstract class BoardroomTestCase extends TestCase
             str_contains($input, 'write your REVISED PROPOSAL')             => 'revision',
             str_contains($input, 'write the FINAL RECOMMENDATION')          => 'final',
             str_contains($input, 'the user addressed you directly')         => 'direct',
+            str_contains($input, 'REVISE your answer to the USER QUESTION') => 'qrevise',
+            str_contains($input, 'REVIEW the answers given to the USER QUESTION') => 'qreview',
+            str_contains($input, 'write a SHORT SUMMARY for the user')      => 'qsummary',
             default                                                         => 'other',
         };
     }
@@ -236,6 +242,12 @@ abstract class BoardroomTestCase extends TestCase
                 ]);
             case 'direct':
                 return "DIRECT-BY-{$handle}: Sagot sa tanong ng user.";
+            case 'qrevise':
+                return "REVISED-ANSWER-BY-{$handle}: Binagong sagot ayon sa review.";
+            case 'qreview':
+                return json_encode(['public_message' => 'Malinaw at magkatugma ang mga sagot.', 'verdict' => 'ok']);
+            case 'qsummary':
+                return "SUMMARY-BY-{$handle}: Maikling buod ng mga sagot.";
             default:
                 return 'OK';
         }

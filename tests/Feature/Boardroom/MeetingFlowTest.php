@@ -331,6 +331,22 @@ class MeetingFlowTest extends BoardroomTestCase
         $this->assertSame(['unresolved'], Issue::where('meeting_id', $m->id)->pluck('status')->all());
     }
 
+    /** Limit na hindi kasya kahit sa unang call: humihinto ang meeting — hindi naiiwang "running". */
+    public function test_meeting_stops_cleanly_when_no_call_fits_the_limit(): void
+    {
+        $user = $this->user();
+        $this->giveKeys();
+        $this->fakeProvider();
+
+        $m = $this->start($this->meeting($user, ['spend_limit_usd' => 0.5]));
+
+        $this->assertSame('stopped', $m->status);
+        $this->assertSame('limit:spend_limit', $m->stop_reason);
+        $this->assertCount(0, $this->calls, 'Walang model call na naipadala.');
+        $this->assertSame(0, Turn::where('meeting_id', $m->id)->count());
+        $this->assertSame(1, Message::where('meeting_id', $m->id)->where('author_type', 'system')->where('body', 'like', 'Itinigil ang meeting%')->count());
+    }
+
     /** Test 7c: hindi lalampas sa 3 review/revision cycle. */
     public function test_review_revision_cycles_are_capped(): void
     {
@@ -493,7 +509,10 @@ class MeetingFlowTest extends BoardroomTestCase
         $reply = Message::where('meeting_id', $m->id)->orderByDesc('id')->firstOrFail();
         $this->assertSame($this->agent('COO')->id, (int) $reply->agent_id);
         $this->assertSame($result['message']->id, (int) $reply->reply_to_message_id);
-        $this->assertSame($before + 1, (int) $m->fresh()->calls_used);
+
+        // Ang tanong ng user ay HINDI ibinabawas sa limit ng meeting — hiwalay ang bilang nito.
+        $this->assertSame($before, (int) $m->fresh()->calls_used);
+        $this->assertSame(1, (int) $m->fresh()->question_calls);
     }
 
     /** needs_user_input: humihinto ang meeting hanggang sumagot ang user. */

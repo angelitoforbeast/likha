@@ -191,6 +191,30 @@ class OutputInterpreter
         ]];
     }
 
+    /** Review ng mga sagot sa isang tanong ng user. */
+    public function qreview(string $text): array
+    {
+        $d = $this->parseJson($text);
+        if ($d === null) {
+            return $this->fail('Output is not a valid JSON object.');
+        }
+        foreach (['public_message', 'verdict'] as $key) {
+            if (! array_key_exists($key, $d)) {
+                return $this->fail("Missing key: {$key}.");
+            }
+        }
+        $public = trim((string) (is_string($d['public_message']) ? $d['public_message'] : ''));
+        if ($public === '') {
+            return $this->fail('public_message must be a non-empty string.');
+        }
+        $verdict = (string) $d['verdict'];
+        if (! in_array($verdict, Prompts::QREVIEW_VERDICTS, true)) {
+            return $this->fail("Invalid verdict \"{$verdict}\". Allowed: " . implode(', ', Prompts::QREVIEW_VERDICTS) . '.');
+        }
+
+        return ['ok' => true, 'data' => ['public_message' => $public, 'verdict' => $verdict]];
+    }
+
     public function final(Meeting $m, string $text): array
     {
         $d = $this->parseJson($text);

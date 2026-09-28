@@ -14,8 +14,10 @@ class Prompts
     public const SEVERITIES      = ['low', 'medium', 'high'];
     public const FINAL_STATUSES  = ['recommended', 'needs_user_input', 'blocked'];
 
+    public const QREVIEW_VERDICTS = ['ok', 'revise'];
+
     /** Mga turn na JSON ang kailangang sagot. */
-    public const STRUCTURED = ['review', 'route', 'final'];
+    public const STRUCTURED = ['review', 'route', 'final', 'qreview'];
 
     public static function system(array $member, array $members): string
     {
@@ -97,7 +99,22 @@ class Prompts
                 . " \"approvals_needed\": [{\"title\": string, \"detail\": string}] (decisions that need the user's approval),\n"
                 . " \"issue_updates\": [{\"issue_id\": integer, \"status\": \"resolved\" or \"unresolved\", \"note\": string}]}",
 
-            'direct' => "YOUR TASK — the user addressed you directly (the last USER message in the transcript). Answer it.\nPlain text only.",
+            'direct' => ($ctx['cycle'] ?? 1) > 1
+                ? "YOUR TASK — REVISE your answer to the USER QUESTION above, using the reviewer's latest feedback in the transcript.\n"
+                    . "Say what you changed. You may keep your position if you disagree, but say why. Plain text only."
+                : "YOUR TASK — the user addressed you directly. Answer the USER QUESTION above.\n"
+                    . "Be direct. If the question is about something you were not told, say what you need to know. Plain text only.",
+
+            'qreview' => "YOUR TASK — REVIEW the answers given to the USER QUESTION above (cycle " . ($ctx['cycle'] ?? 1) . " of " . ($ctx['max_cycles'] ?? 1) . ").\n"
+                . "Check: do they actually answer the question, do they contradict each other, what is unproven.\n"
+                . "Use verdict \"revise\" only if another round of answers would materially improve the result.\n"
+                . "Return ONLY a JSON object with exactly these keys:\n"
+                . "{\"public_message\": string (your review as it will appear in the chat),\n"
+                . " \"verdict\": one of " . json_encode(self::QREVIEW_VERDICTS) . "}",
+
+            'qsummary' => "YOUR TASK — write a SHORT SUMMARY for the user of the answers to the USER QUESTION above.\n"
+                . "Cover: the answer in one or two sentences, where the roles agree, where they do not, and what the user should do next.\n"
+                . "Do not force consensus. Plain text only. Keep it brief.",
 
             default => 'Answer in plain text.',
         };
@@ -131,6 +148,11 @@ class Prompts
                 'issue_id'            => $nullableInt,
                 'public_message'      => $str,
                 'discussion_status'   => ['type' => 'string', 'enum' => self::ROUTE_STATUSES],
+            ])],
+
+            'qreview' => ['name' => 'boardroom_question_review', 'schema' => $obj([
+                'public_message' => $str,
+                'verdict'        => ['type' => 'string', 'enum' => self::QREVIEW_VERDICTS],
             ])],
 
             'review' => ['name' => 'boardroom_review', 'schema' => $obj([

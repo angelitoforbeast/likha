@@ -37,7 +37,7 @@ php artisan queue:restart
    Ang Test Connection ay maliit pero totoong request — maaaring kumonsumo ng kaunting credits.
 2. `/boardroom` — gumawa ng project, tapos **+ Meeting**: title, objective, constraints, mga role na kasali, at mga limit.
 3. **Create & start**. Lalabas ang usapan habang tumatakbo (nagre-refresh kada ~2.5 segundo).
-4. Mag-type ng instruction anumang oras. `@CTO` (o ibang handle) = direktang tanong sa role na iyon (isang model call).
+4. Mag-type ng instruction anumang oras. `@CTO` (o ibang handle) = direktang tanong sa role na iyon — tingnan ang "Mga tanong mo" sa ibaba.
 5. **Pause / Resume / Stop / Retry** sa itaas. Ang mga lumang meeting ay nasa kaliwa.
 
 ### Daloy ng meeting
@@ -53,7 +53,27 @@ php artisan queue:restart
 
 Hindi pinipilit ang consensus. Pwedeng magtapos sa "kailangan ng sagot mo" o "blocked".
 
-### Mga limit (ipinapatupad ng backend)
+### Mga tanong mo (hiwalay ang limit)
+
+Ang mga limit ng meeting ay para lang sa **kusang takbo** nito. Kapag ikaw ang nagtanong, makakasagot ang mga role
+kahit ubos na ang model calls ng meeting, tapos na ito, nahinto, o naka-stop. Hindi ito ibinabawas sa limit ng meeting,
+at hindi ito pinipigilan ng token limit o spending limit.
+
+| Paraan (pinipili sa tabi ng Send) | Ano ang mangyayari | Model calls |
+|---|---|---|
+| Sagot lang (default) | Tig-isang sagot ang bawat role na na-`@mention` | Bilang ng na-mention |
+| Pag-usapan, 1–3 cycle | Sagot ng mga contributor → review → (baguhin → review) → buod ng CEO | Hanggang `n × cycle + cycle + 1` |
+
+- Sa "Pag-usapan", ang mga contributor na na-mention ang sumasagot; kung walang na-mention, lahat ng contributor.
+- Tumitigil nang mas maaga kapag "ok" na ang verdict ng reviewer. Hindi lalampas sa **3 cycle**.
+- Walang `@mention` at "Sagot lang" = instruction lang, walang model call.
+- Naka-pause ang meeting: maghihintay ang sagot hanggang Resume. Draft pa: isasama ang message sa brief.
+- Kapag nabigo ang isang sagot, may paalala sa chat; hindi nagbabago ang status ng meeting. Magtanong na lang ulit.
+- Hiwalay na ipinapakita sa Run status: "Model calls ng meeting" at "Mga tanong mo".
+
+Dahil walang limit ang bilang ng tanong, walang hangganan ang kabuuang gastos ng isang meeting — ikaw ang kumokontrol.
+
+### Mga limit ng meeting (ipinapatupad ng backend)
 
 - Hanggang **3** review/revision cycle at **16** model call kada meeting (pwedeng babaan kada meeting).
 - Binibilang ang **lahat** ng call: routing, review, repair, final, at bawat retry na naipadala.

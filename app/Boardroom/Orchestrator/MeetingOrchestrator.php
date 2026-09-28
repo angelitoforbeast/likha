@@ -10,6 +10,7 @@ use App\Models\Boardroom\Issue;
 use App\Models\Boardroom\Meeting;
 use App\Models\Boardroom\Message;
 use App\Models\Boardroom\Project;
+use App\Models\Boardroom\Round;
 use App\Models\Boardroom\Turn;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -29,6 +30,7 @@ class MeetingOrchestrator
     public function __construct(
         private Budget $budget,
         private ContextBuilder $context,
+        private QuestionRounds $rounds,
     ) {
     }
 
@@ -160,6 +162,7 @@ class MeetingOrchestrator
 
             Turn::where('meeting_id', $locked->id)->whereIn('status', ['queued', 'paused'])
                 ->update(['status' => 'stopped', 'reserved' => false, 'finished_at' => now(), 'updated_at' => now()]);
+            Round::where('meeting_id', $locked->id)->where('status', 'running')->update(['status' => 'stopped', 'updated_at' => now()]);
             // Ang natitirang reserba ay para na lang sa mga turn na kasalukuyang tumatakbo.
             $locked->reserved_calls = Turn::where('meeting_id', $locked->id)->where('status', 'generating')->where('reserved', true)->count();
             $locked->save();
@@ -178,7 +181,7 @@ class MeetingOrchestrator
             }
 
             $failed = Turn::where('meeting_id', $locked->id)->where('status', 'failed')
-                ->where('purpose', '!=', 'direct')->whereNull('parent_turn_id')->get();
+                ->where('purpose', '!=', 'direct')->whereNull('round_id')->whereNull('parent_turn_id')->get();
 
             // I-refresh ang config ng mga role na nabigo (hal. pinalitan ang model pagkatapos ng error).
             $this->refreshSnapshot($locked, $failed->pluck('agent_id')->unique()->all());
@@ -206,16 +209,20 @@ class MeetingOrchestrator
     }
 
     /**
-     * Instruction ng user. `@HANDLE` = direktang tanong sa role na iyon (isang model call kada mention).
+     * Message ng user. Ang tanong ng user ay may SARILING limit at hindi ibinabawas sa limit ng meeting,
+     * kaya makakasagot ang mga role kahit ubos na ang model calls ng meeting o tapos na ito.
      *
+     * @param  int  $cycles  0 = "Sagot lang": sasagot nang tig-isang beses ang bawat na-mention.
+     *                       1..3 = "Pag-usapan": sagot → review → baguhin, hanggang ganito karaming cycle, tapos buod.
      * @return array{message: Message, notes: array<int, string>}
      */
-    public function postUserMessage(Meeting $m, int $userId, string $body): array
+    public function postUserMessage(Meeting $m, int $userId, string $body, int $cycles = 0): array
     {
-        $notes = [];
-        $new   = [];
+        $notes  = [];
+        $new    = [];
+        $cycles = max(0, min(Round::MAX_CYCLES, $cycles));
 
-        $message = DB::transaction(function () use ($m, $userId, $body, &$notes, &$new) {
+        $message = DB::transaction(function () use ($m, $userId, $body, $cycles, &$notes, &$new) {
             $locked   = Meeting::whereKey($m->id)->lockForUpdate()->first();
             $mentions = $this->mentions($locked, $body);
 
@@ -227,27 +234,17 @@ class MeetingOrchestrator
                 'kind'               => 'instruction',
                 'cycle'              => (int) $locked->cycle,
                 'body'               => $body,
+                'meta'               => $cycles > 0 ? ['discuss_cycles' => $cycles] : null,
             ]);
 
-            foreach ($mentions as $member) {
+            if ($mentions || $cycles > 0) {
                 if ($locked->status === 'draft') {
-                    $notes[] = 'Hindi pa nagsisimula ang meeting — isasama ang instruction na ito sa brief.';
-                    break;
-                }
-                if ($locked->status === 'stopped') {
-                    $notes[] = 'Naka-stop na ang meeting — walang bagong turn na ise-schedule.';
-                    break;
-                }
-                $deny = $this->budget->deny($locked, [$member], $this->budget->reservesFinal($locked));
-                if ($deny) {
-                    $notes[] = "Hindi na natanong si @{$member['handle']}: " . Budget::reasonText($deny) . '.';
-                    continue;
-                }
-                $turn = $this->createTurn($locked, $member, 'direct', "direct:{$msg->id}:{$member['agent_id']}", [
-                    'reply_to_message_id' => $msg->id,
-                ]);
-                if ($turn) {
-                    $new[] = $turn->id;
+                    $notes[] = 'Hindi pa nagsisimula ang meeting — isasama ang message na ito sa brief.';
+                } else {
+                    $new = $this->rounds->open($locked, $msg, $mentions, $cycles);
+                    if ($new && $locked->status === 'paused') {
+                        $notes[] = 'Naka-pause ang meeting — sasagot sila pagka-Resume.';
+                    }
                 }
             }
 
@@ -340,9 +337,13 @@ class MeetingOrchestrator
             $m      = Meeting::whereKey($turn->meeting_id)->lockForUpdate()->first();
             $handle = $m->member((int) $turn->agent_id)['handle'] ?? 'AGENT';
 
-            if ($turn->purpose === 'direct') {
+            if ($turn->isQuestion()) {
+                // Tanong ng user: hindi nito binabago ang status ng meeting. Tapos na lang ang round.
                 $this->release($m, $turn->fresh());
-                $this->notice($m, "Hindi nakasagot si {$handle}: {$safe}");
+                if ($turn->round_id) {
+                    Round::whereKey($turn->round_id)->where('status', 'running')->update(['status' => 'failed', 'updated_at' => now()]);
+                }
+                $this->notice($m, "Hindi nakasagot si {$handle} ({$code}): {$safe}");
             } elseif ($m->status === 'running') {
                 $m->status     = 'failed';
                 $m->last_error = mb_substr("{$handle} ({$turn->purpose}) — {$code}: {$safe}", 0, 500);
@@ -374,6 +375,29 @@ class MeetingOrchestrator
             $member = $m->member((int) $turn->agent_id);
             $handle = $member['handle'] ?? 'AGENT';
             $new    = [];
+
+            // Tanong ng user: isang repair din lang, pero hindi ito dumadaan sa budget ng meeting.
+            if ($turn->round_id) {
+                if ($turn->purpose !== 'repair') {
+                    $key    = "repair:{$turn->id}";
+                    $repair = Turn::where('meeting_id', $m->id)->where('dedupe_key', $key)->first();
+                    if (! $repair) {
+                        $repair = Turn::create([
+                            'uuid' => (string) Str::uuid(), 'meeting_id' => $m->id, 'round_id' => $turn->round_id,
+                            'agent_id' => (int) $turn->agent_id, 'purpose' => 'repair', 'phase' => $turn->phase,
+                            'cycle' => $turn->cycle, 'seq' => 0, 'dedupe_key' => $key, 'status' => 'queued', 'reserved' => false,
+                            'parent_turn_id' => $turn->id, 'reply_to_message_id' => $turn->reply_to_message_id,
+                            'provider' => $turn->provider, 'model' => $turn->model,
+                        ]);
+
+                        return [$repair->id];
+                    }
+                }
+                Round::whereKey($turn->round_id)->where('status', 'running')->update(['status' => 'failed', 'updated_at' => now()]);
+                $this->notice($m, "Hindi natapos ang sagot ni {$handle}: hindi valid ang structured output kahit matapos ang isang repair.");
+
+                return [];
+            }
 
             if ($turn->purpose !== 'repair' && $m->status === 'running') {
                 $isFinal = $turn->purpose === 'final';
@@ -454,7 +478,9 @@ class MeetingOrchestrator
         }
 
         // Hintayin munang matapos ang lahat ng phase turn (kasama ang parallel na proposals at repair).
-        $pending = Turn::where('meeting_id', $m->id)->where('purpose', '!=', 'direct')->whereIn('status', Turn::PENDING)->exists();
+        // Hindi kasama ang mga turn ng tanong ng user: hindi nila hinaharang ang takbo ng meeting.
+        $pending = Turn::where('meeting_id', $m->id)->whereNull('round_id')->where('purpose', '!=', 'direct')
+            ->whereIn('status', Turn::PENDING)->exists();
         if ($pending) {
             return false;
         }
@@ -476,7 +502,8 @@ class MeetingOrchestrator
         if (! $turn) {
             $this->plan($m, [['member' => $m->moderator(), 'purpose' => 'brief', 'key' => 'brief']], $new);
 
-            return false;
+            // Kapag tinanggihan ng limit ang brief mismo, lumipat na ang phase — suriin ulit para hindi maiwang "running".
+            return $m->phase !== 'brief';
         }
         if (! $this->done($m, $turn)) {
             return false;

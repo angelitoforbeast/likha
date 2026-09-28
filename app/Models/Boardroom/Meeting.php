@@ -18,6 +18,7 @@ class Meeting extends Model
         'cycle', 'max_cycles', 'max_calls', 'calls_used', 'reserved_calls', 'max_total_output_tokens',
         'spend_limit_usd', 'tokens_in', 'tokens_out', 'est_cost_usd', 'unpriced_calls', 'agents_snapshot',
         'brief_snapshot', 'final', 'stop_reason', 'last_error', 'started_at', 'finished_at',
+        'question_calls', 'question_tokens_in', 'question_tokens_out', 'question_cost_usd', 'question_unpriced_calls',
     ];
 
     protected $casts = [
@@ -28,6 +29,7 @@ class Meeting extends Model
         'finished_at'     => 'datetime',
         'spend_limit_usd' => 'float',
         'est_cost_usd'    => 'float',
+        'question_cost_usd' => 'float',
     ];
 
     public function project(): BelongsTo
