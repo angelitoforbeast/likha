@@ -37,6 +37,7 @@ class TurnRunner
         private OutputInterpreter $interpreter,
         private Budget $budget,
         private QuestionRounds $rounds,
+        private Playbook $playbook,
     ) {
     }
 
@@ -307,7 +308,11 @@ class TurnRunner
         }
 
         $data = null;
-        if (in_array($purpose, Prompts::STRUCTURED, true)) {
+        if (ContextBuilder::learns($turn)) {
+            // Sagot sa tanong ng user + posibleng aral. Mapagpatawad: kung hindi JSON, buong text ang sagot, walang aral.
+            $data = $this->interpreter->answer($text);
+            $text = $data['answer'];
+        } elseif (in_array($purpose, Prompts::STRUCTURED, true)) {
             $fresh  = Meeting::find($meeting->id);
             $parsed = match ($purpose) {
                 'route'   => $this->interpreter->route($fresh, (int) $turn->agent_id, $text),
@@ -458,7 +463,13 @@ class TurnRunner
                 return Message::create($base + ['kind' => 'answer', 'body' => $text, 'meta' => $meta]);
 
             case 'direct':
-                return Message::create($base + ['kind' => 'answer', 'body' => $text, 'meta' => $meta + ['to_user' => true]]);
+                $answer = Message::create($base + ['kind' => 'answer', 'body' => $text, 'meta' => $meta + ['to_user' => true]]);
+                // Kusang pagkatuto: kung may napansing aral ang role sa message ng user, i-save agad sa playbook nito.
+                if (! empty($data['lesson'])) {
+                    $this->playbook->learn($m, $member, $data['lesson'], $turn->reply_to_message_id);
+                }
+
+                return $answer;
 
             case 'qreview':
                 return Message::create($base + ['kind' => 'review', 'body' => $data['public_message'], 'meta' => $meta + ['to_user' => true, 'verdict' => $data['verdict']]]);

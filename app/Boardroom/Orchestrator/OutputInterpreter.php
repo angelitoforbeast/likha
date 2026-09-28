@@ -191,6 +191,58 @@ class OutputInterpreter
         ]];
     }
 
+    /**
+     * Sagot sa tanong ng user, na may opsyonal na aral. MAPAGPATAWAD ang pagbasa: kapag hindi valid na JSON
+     * ang ibinalik, ang buong text ang itinuturing na sagot at walang aral na ise-save (walang repair call).
+     *
+     * @return array{answer: string, lesson: ?array, structured: bool}
+     */
+    public function answer(string $text): array
+    {
+        $d = $this->parseJson($text);
+
+        if (is_array($d) && isset($d['answer']) && is_string($d['answer']) && trim($d['answer']) !== '') {
+            $lesson = null;
+            if (isset($d['lesson']) && is_array($d['lesson'])) {
+                $rule = trim((string) (is_string($d['lesson']['rule'] ?? null) ? $d['lesson']['rule'] : ''));
+                if ($rule !== '') {
+                    $lesson = [
+                        'rule'               => $rule,
+                        'applies_when'       => trim((string) (is_string($d['lesson']['applies_when'] ?? null) ? $d['lesson']['applies_when'] : '')),
+                        'replaces_lesson_id' => $this->intOrNull($d['lesson']['replaces_lesson_id'] ?? null),
+                    ];
+                }
+            }
+
+            return ['answer' => trim($d['answer']), 'lesson' => $lesson, 'structured' => true];
+        }
+
+        return ['answer' => $this->salvageAnswer($text), 'lesson' => null, 'structured' => false];
+    }
+
+    /** Putol na JSON (hal. naubos ang token): kunin ang nababasang bahagi ng "answer" sa halip na ipakita ang hilaw na JSON. */
+    private function salvageAnswer(string $text): string
+    {
+        $text = trim($text);
+        if (! preg_match('/^\s*(?:```(?:json)?\s*)?\{\s*"answer"\s*:\s*"(.*)$/s', $text, $m)) {
+            return $text;
+        }
+        $body = $m[1];
+        // Kung nakaabot sa susunod na key, putulin doon.
+        if (preg_match('/^(.*?)(?<!\\\\)"\s*,\s*"lesson"/s', $body, $cut)) {
+            $body = $cut[1];
+        }
+        for ($i = 0; $i < 8 && $body !== ''; $i++) {
+            $decoded = json_decode('"' . $body . '"');
+            if (is_string($decoded)) {
+                return trim($decoded);
+            }
+            $body = mb_substr($body, 0, -1);   // tanggalin ang putol na escape o quote sa dulo
+        }
+
+        return $text;
+    }
+
     /** Review ng mga sagot sa isang tanong ng user. */
     public function qreview(string $text): array
     {

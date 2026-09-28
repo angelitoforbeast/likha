@@ -19,7 +19,10 @@ class Prompts
     /** Mga turn na JSON ang kailangang sagot. */
     public const STRUCTURED = ['review', 'route', 'final', 'qreview'];
 
-    public static function system(array $member, array $members): string
+    /**
+     * @param  string  $playbook  mga aral na itinuro ng user sa role na ito (galing sa Playbook::block()); '' kung wala
+     */
+    public static function system(array $member, array $members, string $playbook = ''): string
     {
         $roster = [];
         foreach ($members as $m) {
@@ -27,6 +30,7 @@ class Prompts
         }
 
         return trim((string) $member['instructions']) . "\n\n"
+            . ($playbook !== '' ? trim($playbook) . "\n\n" : '')
             . "=== BOARDROOM RULES ===\n"
             . "You are {$member['display_name']} (handle: {$member['handle']}) in a boardroom meeting. Participants:\n"
             . implode("\n", $roster) . "\n\n"
@@ -103,7 +107,17 @@ class Prompts
                 ? "YOUR TASK — REVISE your answer to the USER QUESTION above, using the reviewer's latest feedback in the transcript.\n"
                     . "Say what you changed. You may keep your position if you disagree, but say why. Plain text only."
                 : "YOUR TASK — the user addressed you directly. Answer the USER QUESTION above.\n"
-                    . "Be direct. If the question is about something you were not told, say what you need to know. Plain text only.",
+                    . "Be direct. If the question is about something you were not told, say what you need to know.\n\n"
+                    . "LEARNING — decide whether the user's message teaches you how to act or assess in FUTURE situations "
+                    . "(signals: \"next time\", \"from now on\", \"always\", \"never\", \"sa susunod\", \"lagi\", \"dapat ganito\").\n"
+                    . "- A question, a request for this meeting only, or a fact about this meeting is NOT a lesson: use null.\n"
+                    . "- If it is a lesson, write it so it stands alone WITHOUT this conversation: \"applies_when\" names the situation "
+                    . "(start with \"Kapag\" or \"When\"), \"rule\" says what you must do.\n"
+                    . "- Keep the user's meaning. Do not add requirements the user did not state. One lesson per message.\n"
+                    . "- If it changes a rule in YOUR PLAYBOOK, put that rule's id number in \"replaces_lesson_id\"; otherwise null.\n"
+                    . "Return ONLY a JSON object with exactly these keys:\n"
+                    . "{\"answer\": string (your reply as it will appear in the chat; if you learned something, confirm it in one sentence),\n"
+                    . " \"lesson\": null or {\"applies_when\": string, \"rule\": string, \"replaces_lesson_id\": integer or null}}",
 
             'qreview' => "YOUR TASK — REVIEW the answers given to the USER QUESTION above (cycle " . ($ctx['cycle'] ?? 1) . " of " . ($ctx['max_cycles'] ?? 1) . ").\n"
                 . "Check: do they actually answer the question, do they contradict each other, what is unproven.\n"
@@ -148,6 +162,15 @@ class Prompts
                 'issue_id'            => $nullableInt,
                 'public_message'      => $str,
                 'discussion_status'   => ['type' => 'string', 'enum' => self::ROUTE_STATUSES],
+            ])],
+
+            // Sagot sa tanong ng user + (opsyonal) aral na napansin sa message niya
+            'direct' => ['name' => 'boardroom_answer', 'schema' => $obj([
+                'answer' => $str,
+                'lesson' => ['anyOf' => [
+                    $obj(['applies_when' => $str, 'rule' => $str, 'replaces_lesson_id' => $nullableInt]),
+                    ['type' => 'null'],
+                ]],
             ])],
 
             'qreview' => ['name' => 'boardroom_question_review', 'schema' => $obj([

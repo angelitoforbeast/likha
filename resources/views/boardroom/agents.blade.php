@@ -248,6 +248,66 @@
               <p class="mt-1 text-[11px] text-gray-500">Berde = verified sa registry. Ang iba ay magagamit bilang manual ID pero walang advanced parameter.</p>
             </div>
           </template>
+
+          {{-- ── Playbook: mga aral na natutunan ng role na ito ── --}}
+          <div class="mt-6 border-t border-gray-100 pt-4" x-show="form.id">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 class="text-sm font-semibold">Playbook <span class="font-normal text-gray-500" x-text="'(' + playbook.active + ' aktibo)'"></span></h3>
+              <button type="button" class="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium hover:bg-gray-50" x-on:click="editLesson(null)">+ Aral</button>
+            </div>
+            <p class="mt-1 text-xs text-gray-500">
+              Mga aral na itinuro mo sa role na ito. Kusa itong nase-save kapag sinabi mo sa chat, hal. "@<span x-text="form.handle"></span> next time, ganito dapat…".
+              Kasama ito sa bawat call ng role na ito, sa lahat ng meeting. Hindi nito binabago ang model.
+            </p>
+            <p class="mt-1 text-xs text-amber-800" x-show="playbook.active > playbook.max_in_context"
+               x-text="'Ang pinakabagong ' + playbook.max_in_context + ' aktibong aral lang ang isinasama sa bawat call. I-disable o burahin ang mga luma, o pagsamahin ang magkakahawig.'"></p>
+
+            <p class="mt-3 text-xs text-gray-400" x-show="!playbook.lessons.length">Wala pang aral.</p>
+            <ul class="mt-3 space-y-2">
+              <template x-for="l in playbook.lessons" x-bind:key="'l' + l.id">
+                <li class="rounded-md border p-2.5" x-bind:class="l.status === 'active' ? 'border-gray-200' : 'border-gray-200 bg-gray-50 opacity-70'">
+                  <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <span class="font-mono text-gray-400" x-text="'L' + l.id"></span>
+                    <span class="rounded px-1.5 py-0.5 font-medium" x-bind:class="l.status === 'active' ? 'bg-emerald-50 text-emerald-800' : 'bg-gray-200 text-gray-700'"
+                          x-text="{ active: 'Aktibo', disabled: 'Naka-disable', replaced: 'Napalitan' }[l.status] || l.status"></span>
+                    <span class="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600" x-text="l.project ? 'Project: ' + l.project : 'Lahat ng project'"></span>
+                    <span class="rounded bg-gray-100 px-1.5 py-0.5 text-gray-600" x-text="l.source === 'chat' ? 'Natutunan sa chat' : 'Mano-mano'"></span>
+                    <span class="rounded bg-amber-50 px-1.5 py-0.5 text-amber-800" x-show="l.status === 'active' && !l.in_context">Hindi na isinasama (lampas sa limit)</span>
+                    <span class="text-gray-400" x-text="(l.meeting ? l.meeting + ' · ' : '') + (l.created_at || '')"></span>
+                  </div>
+                  <p class="mt-1 text-xs font-medium text-gray-600" x-show="l.applies_when" x-text="l.applies_when"></p>
+                  <p class="mt-0.5 text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere;" x-text="l.rule"></p>
+                  <div class="mt-1.5 flex flex-wrap gap-3 text-xs">
+                    <button type="button" class="font-medium text-indigo-700 hover:underline" x-on:click="editLesson(l)">Edit</button>
+                    <button type="button" class="font-medium text-gray-700 hover:underline" x-show="l.status === 'active'" x-on:click="setLesson(l, 'disabled')">I-disable</button>
+                    <button type="button" class="font-medium text-gray-700 hover:underline" x-show="l.status !== 'active'" x-on:click="setLesson(l, 'active')">Gawing aktibo</button>
+                    <button type="button" class="font-medium text-red-700 hover:underline" x-on:click="deleteLesson(l)">Burahin</button>
+                  </div>
+                </li>
+              </template>
+            </ul>
+
+            <div class="mt-3 rounded-md border border-gray-200 p-3" x-show="lessonForm.open">
+              <p class="text-sm font-medium" x-text="lessonForm.id ? 'I-edit ang aral L' + lessonForm.id : 'Bagong aral'"></p>
+              <label class="mt-2 block text-[11px] text-gray-500" for="ls-when">Kailan ito gagamitin (opsyonal)</label>
+              <input id="ls-when" type="text" maxlength="300" x-model="lessonForm.applies_when" placeholder="Kapag may duplicate scan sa packing"
+                     class="mt-0.5 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm">
+              <label class="mt-2 block text-[11px] text-gray-500" for="ls-rule">Ano ang dapat gawin</label>
+              <textarea id="ls-rule" rows="3" maxlength="1000" x-model="lessonForm.rule" placeholder="Suriin muna kung parehong order at parehong station bago ituring na error."
+                        class="mt-0.5 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"></textarea>
+              <label class="mt-2 block text-[11px] text-gray-500" for="ls-project">Saklaw</label>
+              <select id="ls-project" x-model="lessonForm.project_id" class="mt-0.5 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm sm:w-72">
+                <option value="">Lahat ng project</option>
+                <template x-for="p in playbook.projects" x-bind:key="'lp' + p.id"><option x-bind:value="String(p.id)" x-text="'Sa project lang: ' + p.name"></option></template>
+              </select>
+              <p class="mt-2 text-xs text-red-700" x-show="lessonError" x-text="lessonError"></p>
+              <div class="mt-3 flex justify-end gap-2">
+                <button type="button" class="rounded-md border border-gray-300 px-3 py-1.5 text-sm" x-on:click="lessonForm.open = false">Cancel</button>
+                <button type="button" class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                        x-bind:disabled="busy || !String(lessonForm.rule || '').trim()" x-on:click="saveLesson()">Save</button>
+              </div>
+            </div>
+          </div>
         </section>
       </div>
 
@@ -382,6 +442,8 @@
         agents: [], providers: {}, capabilities: [], groups: [], encryption: 'APP_KEY', configLoaded: true,
         defaults: { max_output_tokens: 16000, timeout_s: 240, timeout_max: 540 },
         current: null, testResult: null, fetched: null,
+        playbook: { active: 0, max_in_context: 30, lessons: [], projects: [] }, lessonError: '',
+        lessonForm: { open: false, id: null, applies_when: '', rule: '', project_id: '' },
         form: { open: false, id: null, settings: {} },
         capForm: { open: false },
 
@@ -443,7 +505,44 @@
             api_key: '', key_label: '',
           };
         },
-        edit(a, scroll) { this.current = a; this.fill(a); this.reset(); if (scroll) this.toEditor(); },
+        edit(a, scroll) { this.current = a; this.fill(a); this.reset(); this.loadPlaybook(a.id); if (scroll) this.toEditor(); },
+
+        // ── Playbook ng napiling role ──
+        setPlaybook(data) {
+          if (!data || data.agent_id !== this.form.id) return;
+          this.playbook = { active: data.active, max_in_context: data.max_in_context, lessons: data.lessons, projects: data.projects };
+        },
+        async loadPlaybook(agentId) {
+          this.playbook = { active: 0, max_in_context: 30, lessons: [], projects: [] };
+          this.lessonForm.open = false;
+          if (!agentId) return;
+          const r = await this.api('GET', '/agents/' + agentId + '/lessons');
+          if (r.ok) this.setPlaybook(r.data);
+        },
+        editLesson(l) {
+          this.lessonError = '';
+          this.lessonForm = l
+            ? { open: true, id: l.id, applies_when: l.applies_when || '', rule: l.rule, project_id: l.project_id ? String(l.project_id) : '' }
+            : { open: true, id: null, applies_when: '', rule: '', project_id: '' };
+        },
+        async saveLesson() {
+          const f = this.lessonForm;
+          const body = { rule: f.rule, applies_when: f.applies_when || null, project_id: f.project_id === '' ? null : Number(f.project_id) };
+          this.busy = true; this.lessonError = '';
+          const r = f.id ? await this.api('PUT', '/lessons/' + f.id, body) : await this.api('POST', '/agents/' + this.form.id + '/lessons', body);
+          this.busy = false;
+          if (!r.ok) { this.lessonError = this.messagesOf(r.data).join(' '); return; }
+          this.setPlaybook(r.data); this.lessonForm.open = false;
+        },
+        async setLesson(l, status) {
+          const r = await this.api('PUT', '/lessons/' + l.id, { status });
+          if (r.ok) this.setPlaybook(r.data); else this.formErrors = this.messagesOf(r.data);
+        },
+        async deleteLesson(l) {
+          if (!window.confirm('Burahin ang aral na ito? Hindi na ito maibabalik. Kung gusto mo lang itong ihinto, gamitin ang I-disable.')) return;
+          const r = await this.api('DELETE', '/lessons/' + l.id);
+          if (r.ok) this.setPlaybook(r.data); else this.formErrors = this.messagesOf(r.data);
+        },
         // Phone: nasa ilalim ng listahan ang editor, kaya dalhin doon ang view pagkapili ng role.
         toEditor() {
           if (window.innerWidth >= 1024) return;
@@ -455,6 +554,7 @@
           this.fill({ provider: 'openai', model: first ? first.model : '', role_type: 'contributor', enabled: true,
             settings: { effort: first ? first.default_effort : '' } });
           this.reset();
+          this.loadPlaybook(null);
           this.toEditor();
         },
         reset() { this.formErrors = []; this.saved = ''; this.refreshed = ''; this.testResult = null; this.fetched = null; },

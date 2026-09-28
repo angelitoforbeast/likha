@@ -20,8 +20,14 @@ use App\Models\Boardroom\Turn;
  */
 class ContextBuilder
 {
-    public function __construct(private Rules $rules)
+    public function __construct(private Rules $rules, private Playbook $playbook)
     {
+    }
+
+    /** Natututo ba ang turn na ito mula sa message ng user? (unang sagot sa tanong ng user) */
+    public static function learns(Turn $turn): bool
+    {
+        return $turn->purpose === 'direct' && $turn->round_id !== null && (int) $turn->cycle <= 1;
     }
 
     /** @return array{system: string, input: string, schema: ?array, hash: string, purpose: string} */
@@ -84,9 +90,13 @@ class ContextBuilder
         }
 
         return [
-            'system'  => Prompts::system($member, $members),
+            // Ang playbook ay nasa system prompt (kasama ng instructions ng role), hindi sa shared context —
+            // kaya magkapareho pa rin ang context ng mga proposal kahit magkaiba ang natutunan ng bawat role.
+            'system'  => Prompts::system($member, $members, $this->playbook->block(
+                $this->playbook->forContext((int) $turn->agent_id, (int) $m->user_id, (int) $m->project_id)
+            )),
             'input'   => $input,
-            'schema'  => in_array($purpose, Prompts::STRUCTURED, true) ? Prompts::schema($purpose) : null,
+            'schema'  => (in_array($purpose, Prompts::STRUCTURED, true) || self::learns($turn)) ? Prompts::schema($purpose) : null,
             'hash'    => hash('sha256', $input),
             'purpose' => $purpose,
         ];

@@ -73,6 +73,40 @@ at hindi ito pinipigilan ng token limit o spending limit.
 
 Dahil walang limit ang bilang ng tanong, walang hangganan ang kabuuang gastos ng isang meeting — ikaw ang kumokontrol.
 
+### Playbook: kusang pagkatuto kada role
+
+Bawat role ay may sariling playbook — mga aral na itinuro mo. Hindi nito binabago ang model; isinasama lang ang mga
+aral sa bawat call ng role na iyon.
+
+**Paano magturo:** i-`@mention` ang role at sabihin kung ano ang dapat sa susunod. Normal na Send lang.
+
+> `@CEO next time na may ganitong problem, unahin ang epekto sa customer sa assessment.`
+
+- Sasagot ang role gaya ng dati. Kung may "dapat ganito para sa susunod" sa sinabi mo, **kusa itong mase-save** —
+  walang approval. Walang dagdag na model call: iisang call ang sagot at ang aral.
+- Isinusulat ng role ang aral bilang buong patakaran (kasama ang sitwasyon), para may saysay ito kahit sa ibang meeting.
+- Lalabas sa chat ang **"Natutunan ni CEO: …"** na may **I-undo**. Dahil walang approval, ito ang paraan mo para makita
+  at mabawi kapag mali ang pagkakaintindi.
+- Karaniwang tanong = walang aral na nase-save.
+- Kung binabago mo ang dating aral, papalitan ng bago ang luma (makikita pa rin ang luma bilang "Napalitan").
+
+**Saklaw:** sa lahat ng project at meeting bilang default. Pwedeng limitahan sa isang project sa Agents page.
+Ang mga aral ay sa iyo lang — hindi ginagamit para sa ibang user.
+
+**Pamamahala:** `/boardroom/agents` → piliin ang role → **Playbook**. Doon makikita, mae-edit, madi-disable, at
+mabubura ang mga aral, at pwede ring magdagdag nang mano-mano.
+
+**Limit:** ang pinakabagong **30** aktibong aral kada role ang isinasama sa bawat call. Ang lampas ay nananatili sa
+listahan pero may markang "Hindi na isinasama" — i-disable o burahin ang mga luma.
+
+**Mga dapat malaman:**
+- Gabay ito sa role, hindi garantiya. Kapag magkakontra ang dalawang aral, ang mas bago ang sinasabing sundin.
+- Ang role ang nagpapasya kung aral ang sinabi mo. Pwede itong magkamali: may hindi mapansin, o may mapansing hindi
+  naman aral. Tingnan ang paalala sa chat.
+- Natututo lang ang role na na-`@mention`. Ang message na walang mention ay hindi nagtuturo kahit kanino.
+- Sa "Pag-usapan", sa unang sagot lang natututo; ang mga binagong sagot ay hindi na.
+- Mas maraming aral, mas mahaba ang bawat call ng role na iyon (mas mahal at mas mabagal nang kaunti).
+
 ### Mga limit ng meeting (ipinapatupad ng backend)
 
 - Hanggang **3** review/revision cycle at **16** model call kada meeting (pwedeng babaan kada meeting).

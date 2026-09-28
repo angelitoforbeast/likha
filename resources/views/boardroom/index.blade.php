@@ -163,6 +163,18 @@
                   </div>
                   <p class="mt-1 text-[11px] text-amber-700" x-show="msg.truncated">Naputol ang sagot sa max output tokens ng role na ito.</p>
                   <p class="mt-1 text-[11px] text-gray-500" x-show="msg.repaired">Naayos matapos ang isang repair call (hindi valid ang unang structured output).</p>
+
+                  {{-- Kusang natutunan: walang approval, kaya laging may paraan para bawiin --}}
+                  <template x-if="msg.lesson">
+                    <div class="mt-1.5 flex flex-wrap items-center gap-2 text-[11px]">
+                      <span class="rounded px-1.5 py-0.5 font-medium" x-bind:class="lessonClass(msg.lesson.status)" x-text="lessonLabel(msg.lesson.status)"></span>
+                      <button type="button" class="rounded border border-gray-300 px-2 py-0.5 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                              x-show="msg.lesson.status === 'active'" x-bind:disabled="busy" x-on:click="setLesson(msg.lesson.id, 'disabled')">I-undo</button>
+                      <button type="button" class="rounded border border-gray-300 px-2 py-0.5 font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                              x-show="msg.lesson.status === 'disabled'" x-bind:disabled="busy" x-on:click="setLesson(msg.lesson.id, 'active')">Ibalik</button>
+                      <a class="text-indigo-700 hover:underline" href="{{ route('boardroom.agents') }}">I-edit sa Agents / Roles</a>
+                    </div>
+                  </template>
                 </div>
               </article>
             </template>
@@ -209,7 +221,7 @@
                 <label for="br-composer" class="sr-only">Instruction para sa meeting</label>
                 <textarea id="br-composer" rows="2" maxlength="8000" x-model="draft" x-ref="composer"
                           class="block w-full resize-none rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100"
-                          placeholder="Mag-type ng instruction… Gamitin ang @HANDLE para direktang tanungin ang isang role."
+                          placeholder="Mag-type… @HANDLE para tanungin ang isang role. Para turuan: &quot;@CEO next time, ganito dapat…&quot;"
                           x-bind:disabled="sending"
                           x-on:keydown.enter="onEnter($event)"></textarea>
                 <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -641,6 +653,18 @@
           return (list.length ? list.join(' ') + ' ' : '') + rest;
         },
 
+        // I-undo / Ibalik ang isang aral na kusang natutunan sa chat.
+        async setLesson(id, status) {
+          this.busy = true;
+          const r = await this.api('PUT', '/lessons/' + id, { status, meeting_id: this.selectedId });
+          this.busy = false;
+          if (r.ok && r.data.state) this.apply(r.data.state); else if (!r.ok) this.error = this.messagesOf(r.data)[0];
+        },
+        lessonLabel(s) {
+          return { active: 'Naka-save sa playbook', disabled: 'Na-undo — hindi na ginagamit', replaced: 'Napalitan ng mas bagong aral', deleted: 'Binura' }[s] || s;
+        },
+        lessonClass(s) { return s === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-200 text-gray-700'; },
+
         async decide(id, status) {
           const r = await this.api('POST', '/decisions/' + id, { status });
           if (r.ok) this.apply(r.data); else this.error = this.messagesOf(r.data)[0];
@@ -747,6 +771,7 @@
         },
         bubble(m) {
           if (m.author_type === 'user') return 'bg-gray-800 text-white';
+          if (m.kind === 'lesson') return 'bg-emerald-50 text-emerald-950 border border-emerald-200';
           if (m.author_type === 'system') return 'bg-amber-50 text-amber-900 border border-amber-200';
           if (m.kind === 'final') return 'bg-indigo-50 border border-indigo-200';
           return 'bg-white border border-gray-200';
@@ -770,7 +795,7 @@
         kindLabel(k) {
           return { brief: 'Brief', proposal: 'Proposal', review: 'Review', question: 'Tanong', answer: 'Sagot', revision: 'Revision', final: 'Final',
             instruction: 'Instruction', notice: 'Paalala', routing: 'Susunod na hakbang', route: 'Routing', repair: 'Repair', direct: 'Sagot sa tanong mo',
-            summary: 'Buod', qreview: 'Review ng mga sagot', qsummary: 'Buod' }[k] || k;
+            summary: 'Buod', qreview: 'Review ng mga sagot', qsummary: 'Buod', lesson: 'Natutunan' }[k] || k;
         },
         statusLabel(s) {
           return { draft: 'Draft', running: 'Tumatakbo', paused: 'Paused', stopped: 'Stopped', completed: 'Tapos', failed: 'Nahinto',

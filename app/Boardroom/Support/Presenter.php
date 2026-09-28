@@ -119,11 +119,21 @@ class Presenter
 
         $codes = Issue::where('meeting_id', $m->id)->pluck('code', 'id');
 
-        $messages = Message::where('meeting_id', $m->id)->where('id', '>', $afterMessageId)->orderBy('id')->get()
-            ->map(function (Message $msg) use ($byId, $codes) {
-                $author = $msg->agent_id ? ($byId[$msg->agent_id] ?? null) : null;
+        $rows = Message::where('meeting_id', $m->id)->where('id', '>', $afterMessageId)->orderBy('id')->get();
+
+        // Kasalukuyang estado ng mga aral na natutunan sa meeting na ito (para sa I-undo / Ibalik sa chat)
+        $lessonIds = $rows->where('kind', 'lesson')->map(fn (Message $x) => (int) ($x->meta['lesson_id'] ?? 0))->filter()->all();
+        $lessons   = $lessonIds
+            ? \App\Models\Boardroom\Lesson::where('user_id', $m->user_id)->whereIn('id', $lessonIds)->pluck('status', 'id')
+            : collect();
+
+        $messages = $rows
+            ->map(function (Message $msg) use ($byId, $codes, $lessons) {
+                $author   = $msg->agent_id ? ($byId[$msg->agent_id] ?? null) : null;
+                $lessonId = $msg->kind === 'lesson' ? (int) ($msg->meta['lesson_id'] ?? 0) : 0;
 
                 return [
+                    'lesson'              => $lessonId ? ['id' => $lessonId, 'status' => $lessons[$lessonId] ?? 'deleted'] : null,
                     'id'                  => $msg->id,
                     'author_type'         => $msg->author_type,
                     'agent_id'            => $msg->agent_id,

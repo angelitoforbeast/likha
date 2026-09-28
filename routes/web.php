@@ -1092,6 +1092,13 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
             Route::post  ('/agents/{id}/test',          [$agents, 'test'])              ->whereNumber('id')->middleware('throttle:20,1')->name('agents.test');
             Route::post  ('/agents/{id}/models',        [$agents, 'models'])            ->whereNumber('id')->middleware('throttle:20,1')->name('agents.models');
             Route::put   ('/groups/{id}',               [$agents, 'updateGroup'])       ->whereNumber('id')->name('groups.update');
+            // Playbook kada role: mga aral na kusang natutunan sa chat, o tinype nang mano-mano
+            $lessons = \App\Http\Controllers\Boardroom\LessonController::class;
+            Route::get   ('/agents/{id}/lessons',       [$lessons, 'index'])            ->whereNumber('id')->name('lessons.index');
+            Route::post  ('/agents/{id}/lessons',       [$lessons, 'store'])            ->whereNumber('id')->name('lessons.store');
+            Route::put   ('/lessons/{id}',              [$lessons, 'update'])           ->whereNumber('id')->name('lessons.update');
+            Route::delete('/lessons/{id}',              [$lessons, 'destroy'])          ->whereNumber('id')->name('lessons.destroy');
+
             Route::post  ('/capabilities',              [$agents, 'saveCapability'])    ->name('capabilities.save');
             Route::delete('/capabilities/{id}',         [$agents, 'destroyCapability']) ->whereNumber('id')->name('capabilities.destroy');
         });
