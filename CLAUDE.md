@@ -1,5 +1,17 @@
 # Likha AI Tech — project policy
 
+## Stack
+
+- Laravel 12, PHP 8.4 locally via Laravel Herd: run PHP as `"/c/Users/Forbeast/.config/herd/bin/php.bat"` in Git Bash. Production: MySQL, database queue workers under supervisor, live at likhaaitech.com.
+- Front end: Blade + Alpine.js, Vite (`npm run build`, `npm run dev`). Tailwind-style classes.
+- Install: `composer install`, `npm ci` (both already done locally; don't reinstall unless the lock files change).
+- Test: `php.bat artisan test` (PHPUnit, sqlite in memory per phpunit.xml). Only Boardroom has tests today; new work adds tests for what it touches.
+- Lint: `php.bat -l <file>` on changed PHP files. No PHP linter or formatter is configured; no prettier.
+- Build: `npm run build` when Blade/JS assets change.
+- Conventions: comments and UI text in Taglish; role checks per controller via `getNormalizedRole()`; CEO-only data gated in the data layer; guard new tables with `Schema::hasTable`; code branches for mysql and pgsql in raw SQL.
+- Deploy: by Mira only, after Busing's yes (git remote `vps` / `vps2`, migrations run by hand with `php artisan migrate --force`). Workers never push to `main` or deploy.
+- Secrets: `.env` exists locally; never read, print or edit it.
+
 <!-- dev-kit:start -->
 ## Development kit
 
