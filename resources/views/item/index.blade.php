@@ -647,121 +647,7 @@
 
   <!-- Scroll area -->
   <div id="scroll">
-    @if(!empty($effectiveIsCEO))
-    {{-- WORKLIST TABLE — lumalabas lang kapag hindi "Lahat" ang napiling chip. Lahat ng text ay x-text (escaped). --}}
-    <div class="card" x-show="worklist.list !== 'lahat'" x-cloak>
-      <table>
-        <thead>
-          <tr>
-            <th style="text-align:left;min-width:220px;">Item</th>
-            <th style="text-align:right;min-width:70px;">HOLD</th>
-            <th style="text-align:left;min-width:220px;">Suppliers</th>
-            <th style="text-align:left;min-width:200px;">Status</th>
-            <th style="text-align:center;min-width:160px;">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <template x-if="!worklistRows().length">
-            <tr><td colspan="5" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
-                    x-text="worklist.error ? worklist.error : (worklist.loading || !worklist.loaded ? 'Loading…' : 'Walang item sa listahang ito.')"></td></tr>
-          </template>
-          <template x-for="r in worklistRows()" :key="'wr-'+r.key">
-            <tr>
-              <td>
-                <div class="item-cell">
-                  <template x-if="r.image_url">
-                    <img class="item-sq" :src="r.image_url" :alt="r.name" @click="photoModal = { open:true, url:r.image_url, name:r.name }" title="View photo">
-                  </template>
-                  <template x-if="!r.image_url">
-                    <span class="item-sq item-sq-empty">🖼</span>
-                  </template>
-                  <template x-for="(q, qi) in quotesFor(r.name).filter(x => x.photo_url)" :key="'wqp-'+r.key+'-'+q.id">
-                    <img class="item-sq" style="width:26px;height:26px;border-color:#bfdbfe;" :src="q.photo_url" :alt="q.supplier"
-                         :title="'Quote photo · '+q.supplier" @click="photoModal = { open:true, url:q.photo_url, name:q.supplier+' — '+r.name }">
-                  </template>
-                  <div>
-                    <div class="item-name" x-text="r.name"></div>
-                    <div style="font-size:10.5px;color:#64748b;">
-                      <template x-for="(v, vi) in r.variants" :key="'wv-'+r.key+'-'+vi">
-                        <span><span x-show="vi>0"> · </span><span x-text="v.name+' ('+num(v.units)+')'"></span></span>
-                      </template>
-                    </div>
-                  </div>
-                </div>
-              </td>
-              <td style="text-align:right;font-weight:800;color:#7c2d12;" x-text="num(r.hold_units)"></td>
-              <td style="font-size:10.5px;line-height:1.45;">
-                <template x-for="(s, si) in r.suppliers.filter(x => x.source === 'po')" :key="'wps-'+r.key+'-'+si">
-                  <div :title="'Huling PO ' + (s.date||'')">🏭 <b x-text="s.supplier"></b> <span style="color:#065f46;font-weight:700;" x-text="money(s.price)"></span></div>
-                </template>
-                <template x-for="q in quotesFor(r.name)" :key="'wq-'+r.key+'-'+q.id">
-                  <div>
-                    🏷 <b x-text="q.supplier"></b>
-                    <span style="color:#1d4ed8;font-weight:700;" x-text="q.price!==null ? money(q.price) : '—'"></span>
-                    <span x-show="q.moq" style="color:#94a3b8;" x-text="q.moq ? 'MOQ '+q.moq : ''"></span>
-                    <span x-show="q.prev_price !== null && q.prev_price !== undefined" style="color:#94a3b8;"
-                          x-text="'dati '+money(q.prev_price)+(q.prev_date ? ' ('+q.prev_date+')' : '')"></span>
-                    <template x-if="safeLink(q.link)"><a :href="safeLink(q.link)" target="_blank" rel="noopener" style="color:#4f46e5;">link</a></template>
-                    <button type="button" class="item-photo-btn" style="padding:0 5px;" title="I-edit ang quote" @click="openQuote(r.name, q)">✎</button>
-                    <button type="button" class="item-photo-btn" style="padding:0 5px;color:#b91c1c;" title="Tanggalin ang quote" @click="deleteQuote(r.name, q)">✕</button>
-                  </div>
-                </template>
-                <template x-if="!r.suppliers.length && !quotesFor(r.name).length">
-                  <div style="color:#b91c1c;font-weight:700;">⚠ wala pang supplier</div>
-                </template>
-              </td>
-              <td style="font-size:11px;line-height:1.45;">
-                <template x-if="r.open_po">
-                  <div>
-                    🚚 <b x-text="r.open_po.supplier"></b>
-                    <span style="color:#64748b;" x-text="r.open_po.order_date + (r.open_po.orders > 1 ? ' (+'+(r.open_po.orders-1)+' pa)' : '')"></span>
-                    <div x-text="'Naka-order ' + num(r.open_po.ordered_qty) + ' · dumating ' + num(r.open_po.received_qty) + ' · hinihintay ' + num(r.open_po.open_qty)"></div>
-                    <div :style="(r.open_po.lead_time_days !== null && r.open_po.days_since > r.open_po.lead_time_days) ? 'color:#b91c1c;font-weight:700;' : 'color:#475569;'"
-                         x-text="r.open_po.days_since + ' araw na' + (r.open_po.lead_time_days !== null ? ' / lead time ' + r.open_po.lead_time_days + ' araw' : '')"></div>
-                  </div>
-                </template>
-                <template x-if="r.shortfall > 0">
-                  <div style="color:#b91c1c;font-weight:800;" x-text="'Kulang ' + num(r.shortfall) + ' — i-order na'"></div>
-                </template>
-                <template x-if="!r.open_po && r.list === 'hanapan'">
-                  <div style="color:#b91c1c;font-weight:700;">Hanapan ng supplier</div>
-                </template>
-                <template x-if="!r.open_po && r.list === 'may_quote'">
-                  <div style="color:#1d4ed8;font-weight:700;">May quote, hindi pa na-order</div>
-                </template>
-              </td>
-              <td style="text-align:center;">
-                <template x-if="quoteForm.key === supKey(r.name)">
-                  <div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:3px;align-items:center;justify-content:center;">
-                    <select x-model="quoteForm.supplier_id" style="font-size:10.5px;padding:1px;max-width:130px;">
-                      <option value="">— supplier —</option>
-                      <template x-for="s in supplierList" :key="'ws-'+s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
-                    </select>
-                    <input type="number" step="0.01" min="0" x-model="quoteForm.price" placeholder="₱ presyo" style="width:78px;font-size:10.5px;padding:1px;">
-                    <input type="number" min="0" x-model="quoteForm.moq" placeholder="MOQ" style="width:54px;font-size:10.5px;padding:1px;">
-                    <input type="text" x-model="quoteForm.link" placeholder="link (opsyonal)" style="width:120px;font-size:10.5px;padding:1px;">
-                    <input type="file" accept="image/jpeg,image/png,image/webp" @change="quoteForm.photo = $event.target.files[0] || null"
-                           title="Photo ng produkto ng supplier (jpg/png/webp, hanggang 10 MB)" style="font-size:10px;max-width:170px;">
-                    <button type="button" class="item-photo-btn" @click="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
-                    <button type="button" class="item-photo-btn" @click="quoteForm.key=null">Cancel</button>
-                  </div>
-                </template>
-                <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;">
-                  <button type="button" class="item-photo-btn" x-show="quoteForm.key !== supKey(r.name)" @click="openQuote(r.name, null)">+ supplier quote</button>
-                  <a class="item-photo-btn" style="text-decoration:none;" target="_blank" rel="noopener"
-                     :href="'{{ route('item.photo') }}?item='+encodeURIComponent(r.photo_item_name)+'&start_date='+startDate+'&end_date='+endDate"
-                     x-text="r.image_url ? 'Change' : 'Add photo'"></a>
-                  <button type="button" class="item-copy-btn" @click="copyItem(r.photo_item_name, r.hold_units)"
-                          x-text="copyState===r.photo_item_name ? '✓ Copied' : '📋 Copy'"></button>
-                </div>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-    </div>
-    @endif
-    <div class="card" x-show="!effectiveIsCeo || worklist.list === 'lahat'">
+    <div class="card">
       <table>
         <thead>
           <tr>
@@ -815,6 +701,14 @@
             </td></tr>
           </template>
 
+          @if(!empty($effectiveIsCEO))
+          {{-- Walang natira sa napiling sourcing list (CEO LANG). --}}
+          <template x-if="worklist.list !== 'lahat' && !itemGroups().length && !(rows.length === 0 && loading)">
+            <tr><td :colspan="cols.length + 2" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
+                    x-text="worklist.error ? worklist.error : (worklist.loading || !worklist.loaded || !holdLoaded ? 'Loading…' : 'Walang item sa listahang ito.')"></td></tr>
+          </template>
+          @endif
+
           <template x-if="rows.length === 0 && loading">
             <tr><td :colspan="cols.length + 2" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
               <span class="spin" style="margin-right:6px;"></span>Loading…
@@ -857,6 +751,30 @@
                   <span class="item-name" x-text="row.item_name"></span>
                   <span class="item-hold" x-text="'HOLD '+Number(row.hold||0).toLocaleString()"></span>
                 </div>
+                @if($effectiveIsCEO)
+                {{-- Extra info ng napiling sourcing list — CEO LANG, habang may napiling chip. Lahat x-text (escaped). --}}
+                <template x-if="worklistItem(row.item_name)">
+                  <template x-for="W in [worklistItem(row.item_name)]" :key="'wl-'+row.item_name">
+                    <div style="font-size:11px;line-height:1.45;margin-top:3px;">
+                      <template x-if="W.variants.length > 1">
+                        <div style="color:#7c2d12;font-weight:700;" x-text="'kabuuan: ' + num(W.hold_units)"></div>
+                      </template>
+                      <template x-if="W.list === 'i_order' && W.shortfall > 0">
+                        <div style="color:#b91c1c;font-weight:800;" x-text="'Kulang ' + num(W.shortfall) + ' — i-order na'"></div>
+                      </template>
+                      <template x-if="W.list === 'naka_order' && W.open_po">
+                        <div>
+                          🚚 <b x-text="W.open_po.supplier"></b>
+                          <span style="color:#64748b;" x-text="W.open_po.order_date + (W.open_po.orders > 1 ? ' (+'+(W.open_po.orders-1)+' pa)' : '')"></span>
+                          <div x-text="'Naka-order ' + num(W.open_po.ordered_qty) + ' · dumating ' + num(W.open_po.received_qty) + ' · hinihintay ' + num(W.open_po.open_qty)"></div>
+                          <div :style="(W.open_po.lead_time_days !== null && W.open_po.days_since > W.open_po.lead_time_days) ? 'color:#b91c1c;font-weight:700;' : 'color:#475569;'"
+                               x-text="W.open_po.days_since + ' araw na' + (W.open_po.lead_time_days !== null ? ' / lead time ' + W.open_po.lead_time_days + ' araw' : '')"></div>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </template>
+                @endif
               </td>
               <td style="text-align:center;">
                 <template x-if="row.hasPages">
@@ -2185,6 +2103,7 @@
         loaded:false, loading:false, error:'', _req:0,
         counts:{ hanapan:0, may_quote:0, i_order:0, naka_order:0 },
         items:[],
+        byKey:{},   // base key → worklist item (para sa worklistKeep, isang lookup kada row)
       },
       worklistChips: [
         { key:'lahat',      label:'Lahat' },
@@ -2435,6 +2354,10 @@
         const qs = new URLSearchParams(qsObj);
         history.replaceState(null,'','?'+qs.toString());
         if (forceRefreshFlag) qs.set('refresh', '1');
+        // Item universe = HOLD items (jnt/hold) + sourcing worklists (CEO view lang) —
+        // sabay sa mabigat na item-summary fetch (hindi na hinihintay).
+        this.loadHold();
+        if (this.effectiveIsCeo) this.loadWorklist();
         try{
           const r = await fetch('{{ route('owner.private.item-summary') }}?'+qs.toString());
           const j = await r.json();
@@ -2452,10 +2375,6 @@
           }
         }catch(e){ console.error(e); }
         finally{ this.loading=false; }
-        // Item universe = HOLD items (jnt/hold). Refresh kasabay ng metrics.
-        this.loadHold();
-        // Sourcing worklists — CEO view lang (walang ibabalik ang server sa iba).
-        if (this.effectiveIsCeo) this.loadWorklist();
       },
 
       // ── Force refresh — user-triggered cache bypass + reload ──────────────
@@ -3733,6 +3652,7 @@
         for (const k in uni) {
           if (hasFilter && !selLower.has(k)) continue;
           const u = uni[k];
+          if (!this.worklistKeep(u.name, u.hold)) continue;   // sourcing chip filter (CEO)
           out.push({
             item_name: u.name,
             hold: u.hold,
@@ -3803,12 +3723,14 @@
       // Fetch per-item HOLD counts (jnt/hold logic) para sa item universe.
       // Same date range as the metrics (this.startDate..endDate).
       async loadHold(){
+        const req = this._holdReq = (this._holdReq || 0) + 1;   // luma/naunang sagot = huwag gamitin
         try{
           const range = (this.startDate && this.endDate) ? (this.startDate + ' to ' + this.endDate) : '';
           const u = new URL('{{ route('item.data') }}', location.origin);
           if (range) u.searchParams.set('date_range', range);
           const res = await fetch(u, {headers:{'Accept':'application/json'}});
           const j = await res.json();
+          if (req !== this._holdReq) return;
           const map = {};
           if (j && j.items) for (const it of j.items) map[it.item_name] = it.total_hold;
           this.holdMap = map;
@@ -3894,6 +3816,9 @@
           if (!res.ok || !j || !j.ok) throw new Error('HTTP ' + res.status);
           this.worklist.counts = Object.assign({ hanapan:0, may_quote:0, i_order:0, naka_order:0 }, j.counts || {});
           this.worklist.items  = j.items || [];
+          const byKey = {};
+          for (const it of this.worklist.items) byKey[it.key] = it;
+          this.worklist.byKey  = byKey;
           this.worklist.loaded = true;
           this.worklist.error  = '';
         }catch(e){
@@ -3907,8 +3832,19 @@
         if (key === 'lahat') qs.delete('list'); else qs.set('list', key);
         history.replaceState(null, '', '?' + qs.toString());
       },
-      // Rows ng napiling listahan (server: sorted HOLD desc, tapos pangalan).
-      worklistRows(){ return this.worklist.items.filter(r => r.list === this.worklist.list); },
+      // Worklist item ng row — CEO lang at habang may napiling chip (hindi "Lahat"); else null.
+      worklistItem(name){
+        if (!this.effectiveIsCeo || this.worklist.list === 'lahat') return null;
+        return this.worklist.byKey[this.supKey(name)] || null;
+      },
+      // Itago ang row kung hindi kasama sa napiling listahan (base key = supKey). Lahat / hindi-CEO = ipakita lahat.
+      // Habang may napiling list: HOLD 0 na row (hal. "1 x" na may page pero walang hold) = itago din.
+      worklistKeep(name, hold){
+        if (!this.effectiveIsCeo || this.worklist.list === 'lahat') return true;
+        if (!(Number(hold) > 0)) return false;
+        const it = this.worklist.byKey[this.supKey(name)];
+        return !!it && it.list === this.worklist.list;
+      },
       // http/https lang ang link (iwas javascript: URL).
       safeLink(u){ const s = String(u || '').trim(); return /^https?:\/\//i.test(s) ? s : ''; },
       // Inline add / edit / delete ng quote (CEO lang; 403 ang server sa iba)
@@ -4024,12 +3960,15 @@
 
       async init(){
         this.initCols();
-        await this.load();
-        await this.loadItemImages();
-        @if($effectiveIsCEO)
-        await this.loadItemSuppliers(); // CEO lang — walang fetch para sa iba
-        await this.loadItemQuotes();    // CEO lang — supplier quotes (item_supplier_quotes)
-        @endif
+        // Sabay-sabay: bawat isa ay pinupuno lang ang sarili niyang map, walang dependency sa load().
+        await Promise.all([
+          this.load(),
+          this.loadItemImages(),
+          @if($effectiveIsCEO)
+          this.loadItemSuppliers(), // CEO lang — walang fetch para sa iba
+          this.loadItemQuotes(),    // CEO lang — supplier quotes (item_supplier_quotes)
+          @endif
+        ]);
       },
     };
   }

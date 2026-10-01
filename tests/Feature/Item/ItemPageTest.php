@@ -32,15 +32,40 @@ class ItemPageTest extends ItemTestCase
         ])->render();
     }
 
+    public function test_hold_and_worklist_load_in_parallel_with_the_item_summary(): void
+    {
+        $html = $this->render(true);
+        $summary = strpos($html, "await fetch('" . route('owner.private.item-summary'));
+        $this->assertNotFalse($summary);
+        // Nauuna ang hold + worklist sa summary fetch (load() lang ang tumatawag ng hold, isang beses).
+        $this->assertLessThan($summary, strpos($html, 'this.loadHold();'));
+        $this->assertLessThan($summary, strpos($html, 'this.loadWorklist();'));
+        $this->assertSame(1, substr_count($html, 'this.loadHold();'));
+        // Sabay-sabay ang images / suppliers / quotes sa init().
+        $this->assertStringContainsString('Promise.all([', $html);
+        $this->assertStringNotContainsString('await this.loadItemImages();', $html);
+    }
+
     public function test_sourcing_chips_and_worklist_show_in_the_ceo_view_only(): void
     {
         $ceo = $this->render(true);
         $this->assertStringContainsString('setWorklist(c.key)', $ceo);
-        $this->assertStringContainsString("x-show=\"worklist.list !== 'lahat'\"", $ceo);
         $this->assertStringContainsString(route('item.worklist'), $ceo);
+        // Isang table lang: ang chips ay filter ng itemGroups(), walang hiwalay na worklist table.
+        // ...at HOLD 0 na row (hal. "1 x" na may page lang) ay hindi kasama habang may napiling list.
+        $this->assertStringContainsString('worklistKeep(u.name, u.hold)', $ceo);
+        $this->assertStringNotContainsString("x-show=\"worklist.list !== 'lahat'\"", $ceo);
+        $this->assertStringNotContainsString("x-show=\"!effectiveIsCeo || worklist.list === 'lahat'\"", $ceo);
+        $this->assertStringNotContainsString('worklistRows()', $ceo);
+        $this->assertStringContainsString('Walang item sa listahang ito.', $ceo);
+        // Extra info sa item cell habang may napiling list.
+        $this->assertStringContainsString("'kabuuan: '", $ceo);
+        $this->assertStringContainsString("'Kulang '", $ceo);
 
         $mkt = $this->render(false);
         $this->assertStringNotContainsString('setWorklist(c.key)', $mkt);
-        $this->assertStringNotContainsString("x-show=\"worklist.list !== 'lahat'\"", $mkt);
+        $this->assertStringNotContainsString("'kabuuan: '", $mkt);
+        $this->assertStringNotContainsString("'Kulang '", $mkt);
+        $this->assertStringNotContainsString('Walang item sa listahang ito.', $mkt);
     }
 }
