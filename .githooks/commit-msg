@@ -1,0 +1,23 @@
+#!/bin/sh
+# dev-kit commit-msg hook: Conventional Commits, no attribution trailers.
+# Installed by /dev-kit:init through `git config core.hooksPath .githooks`. Plain sh, no deps.
+msg_file="$1"
+subject=$(sed -n '1p' "$msg_file")
+
+# Merge, revert and fixup commits are left alone.
+case "$subject" in
+  Merge*|Revert*|fixup!*|squash!*) exit 0 ;;
+esac
+
+if ! printf '%s\n' "$subject" | grep -Eq '^(feat|fix|chore|refactor|docs|test|perf|ci|build|style)(\([^)]+\))?!?: .+'; then
+  echo "commit-msg: subject must be Conventional Commits, e.g. 'feat(api): add suggestions table'" >&2
+  echo "  got: $subject" >&2
+  exit 1
+fi
+
+if grep -Eiq '^(co-authored-by|generated-by|signed-off-by: claude)' "$msg_file" || grep -Eiq 'generated with \[?claude' "$msg_file"; then
+  echo "commit-msg: no Claude attribution or Co-Authored-By trailers in commit messages" >&2
+  exit 1
+fi
+
+exit 0
