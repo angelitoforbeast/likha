@@ -623,9 +623,145 @@
                    font-size:11px;font-weight:700;margin-left:4px;">Clear all</button>
   </div>
 
+  @if(!empty($effectiveIsCEO))
+  {{-- Sourcing worklists (CEO LANG) — "Lahat" = existing view; ang apat = galing /item/worklist.
+       Naka-save sa URL (?list=) para sa reload / shared link. --}}
+  <div style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:6px 12px;
+              display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+    <span style="font-size:11px;color:#475569;font-weight:700;margin-right:2px;">Sourcing:</span>
+    <template x-for="c in worklistChips" :key="'wl-'+c.key">
+      <button type="button" @click="setWorklist(c.key)"
+              :style="worklist.list === c.key
+                ? 'background:#4f46e5;color:#fff;border:1px solid #4f46e5;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;'
+                : 'background:#fff;color:#334155;border:1px solid #cbd5e1;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;'">
+        <span x-text="c.label"></span>
+        <template x-if="c.key !== 'lahat'">
+          <span style="margin-left:4px;font-weight:800;" x-text="worklist.loaded ? (worklist.counts[c.key] || 0) : '…'"></span>
+        </template>
+      </button>
+    </template>
+    <span x-show="worklist.loading" style="font-size:11px;color:#94a3b8;"><span class="spin" style="margin-right:4px;"></span>Loading…</span>
+    <span x-show="worklist.error" style="font-size:11px;color:#b91c1c;font-weight:700;" x-text="worklist.error"></span>
+  </div>
+  @endif
+
   <!-- Scroll area -->
   <div id="scroll">
-    <div class="card">
+    @if(!empty($effectiveIsCEO))
+    {{-- WORKLIST TABLE — lumalabas lang kapag hindi "Lahat" ang napiling chip. Lahat ng text ay x-text (escaped). --}}
+    <div class="card" x-show="worklist.list !== 'lahat'" x-cloak>
+      <table>
+        <thead>
+          <tr>
+            <th style="text-align:left;min-width:220px;">Item</th>
+            <th style="text-align:right;min-width:70px;">HOLD</th>
+            <th style="text-align:left;min-width:220px;">Suppliers</th>
+            <th style="text-align:left;min-width:200px;">Status</th>
+            <th style="text-align:center;min-width:160px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-if="!worklistRows().length">
+            <tr><td colspan="5" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
+                    x-text="worklist.error ? worklist.error : (worklist.loading || !worklist.loaded ? 'Loading…' : 'Walang item sa listahang ito.')"></td></tr>
+          </template>
+          <template x-for="r in worklistRows()" :key="'wr-'+r.key">
+            <tr>
+              <td>
+                <div class="item-cell">
+                  <template x-if="r.image_url">
+                    <img class="item-sq" :src="r.image_url" :alt="r.name" @click="photoModal = { open:true, url:r.image_url, name:r.name }" title="View photo">
+                  </template>
+                  <template x-if="!r.image_url">
+                    <span class="item-sq item-sq-empty">🖼</span>
+                  </template>
+                  <template x-for="(q, qi) in quotesFor(r.name).filter(x => x.photo_url)" :key="'wqp-'+r.key+'-'+q.id">
+                    <img class="item-sq" style="width:26px;height:26px;border-color:#bfdbfe;" :src="q.photo_url" :alt="q.supplier"
+                         :title="'Quote photo · '+q.supplier" @click="photoModal = { open:true, url:q.photo_url, name:q.supplier+' — '+r.name }">
+                  </template>
+                  <div>
+                    <div class="item-name" x-text="r.name"></div>
+                    <div style="font-size:10.5px;color:#64748b;">
+                      <template x-for="(v, vi) in r.variants" :key="'wv-'+r.key+'-'+vi">
+                        <span><span x-show="vi>0"> · </span><span x-text="v.name+' ('+num(v.units)+')'"></span></span>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </td>
+              <td style="text-align:right;font-weight:800;color:#7c2d12;" x-text="num(r.hold_units)"></td>
+              <td style="font-size:10.5px;line-height:1.45;">
+                <template x-for="(s, si) in r.suppliers.filter(x => x.source === 'po')" :key="'wps-'+r.key+'-'+si">
+                  <div :title="'Huling PO ' + (s.date||'')">🏭 <b x-text="s.supplier"></b> <span style="color:#065f46;font-weight:700;" x-text="money(s.price)"></span></div>
+                </template>
+                <template x-for="q in quotesFor(r.name)" :key="'wq-'+r.key+'-'+q.id">
+                  <div>
+                    🏷 <b x-text="q.supplier"></b>
+                    <span style="color:#1d4ed8;font-weight:700;" x-text="q.price!==null ? money(q.price) : '—'"></span>
+                    <span x-show="q.moq" style="color:#94a3b8;" x-text="q.moq ? 'MOQ '+q.moq : ''"></span>
+                    <span x-show="q.prev_price !== null && q.prev_price !== undefined" style="color:#94a3b8;"
+                          x-text="'dati '+money(q.prev_price)+(q.prev_date ? ' ('+q.prev_date+')' : '')"></span>
+                    <template x-if="safeLink(q.link)"><a :href="safeLink(q.link)" target="_blank" rel="noopener" style="color:#4f46e5;">link</a></template>
+                    <button type="button" class="item-photo-btn" style="padding:0 5px;" title="I-edit ang quote" @click="openQuote(r.name, q)">✎</button>
+                    <button type="button" class="item-photo-btn" style="padding:0 5px;color:#b91c1c;" title="Tanggalin ang quote" @click="deleteQuote(r.name, q)">✕</button>
+                  </div>
+                </template>
+                <template x-if="!r.suppliers.length && !quotesFor(r.name).length">
+                  <div style="color:#b91c1c;font-weight:700;">⚠ wala pang supplier</div>
+                </template>
+              </td>
+              <td style="font-size:11px;line-height:1.45;">
+                <template x-if="r.open_po">
+                  <div>
+                    🚚 <b x-text="r.open_po.supplier"></b>
+                    <span style="color:#64748b;" x-text="r.open_po.order_date + (r.open_po.orders > 1 ? ' (+'+(r.open_po.orders-1)+' pa)' : '')"></span>
+                    <div x-text="'Naka-order ' + num(r.open_po.ordered_qty) + ' · dumating ' + num(r.open_po.received_qty) + ' · hinihintay ' + num(r.open_po.open_qty)"></div>
+                    <div :style="(r.open_po.lead_time_days !== null && r.open_po.days_since > r.open_po.lead_time_days) ? 'color:#b91c1c;font-weight:700;' : 'color:#475569;'"
+                         x-text="r.open_po.days_since + ' araw na' + (r.open_po.lead_time_days !== null ? ' / lead time ' + r.open_po.lead_time_days + ' araw' : '')"></div>
+                  </div>
+                </template>
+                <template x-if="r.shortfall > 0">
+                  <div style="color:#b91c1c;font-weight:800;" x-text="'Kulang ' + num(r.shortfall) + ' — i-order na'"></div>
+                </template>
+                <template x-if="!r.open_po && r.list === 'hanapan'">
+                  <div style="color:#b91c1c;font-weight:700;">Hanapan ng supplier</div>
+                </template>
+                <template x-if="!r.open_po && r.list === 'may_quote'">
+                  <div style="color:#1d4ed8;font-weight:700;">May quote, hindi pa na-order</div>
+                </template>
+              </td>
+              <td style="text-align:center;">
+                <template x-if="quoteForm.key === supKey(r.name)">
+                  <div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:3px;align-items:center;justify-content:center;">
+                    <select x-model="quoteForm.supplier_id" style="font-size:10.5px;padding:1px;max-width:130px;">
+                      <option value="">— supplier —</option>
+                      <template x-for="s in supplierList" :key="'ws-'+s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
+                    </select>
+                    <input type="number" step="0.01" min="0" x-model="quoteForm.price" placeholder="₱ presyo" style="width:78px;font-size:10.5px;padding:1px;">
+                    <input type="number" min="0" x-model="quoteForm.moq" placeholder="MOQ" style="width:54px;font-size:10.5px;padding:1px;">
+                    <input type="text" x-model="quoteForm.link" placeholder="link (opsyonal)" style="width:120px;font-size:10.5px;padding:1px;">
+                    <input type="file" accept="image/jpeg,image/png,image/webp" @change="quoteForm.photo = $event.target.files[0] || null"
+                           title="Photo ng produkto ng supplier (jpg/png/webp, hanggang 10 MB)" style="font-size:10px;max-width:170px;">
+                    <button type="button" class="item-photo-btn" @click="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
+                    <button type="button" class="item-photo-btn" @click="quoteForm.key=null">Cancel</button>
+                  </div>
+                </template>
+                <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;">
+                  <button type="button" class="item-photo-btn" x-show="quoteForm.key !== supKey(r.name)" @click="openQuote(r.name, null)">+ supplier quote</button>
+                  <a class="item-photo-btn" style="text-decoration:none;" target="_blank" rel="noopener"
+                     :href="'{{ route('item.photo') }}?item='+encodeURIComponent(r.photo_item_name)+'&start_date='+startDate+'&end_date='+endDate"
+                     x-text="r.image_url ? 'Change' : 'Add photo'"></a>
+                  <button type="button" class="item-copy-btn" @click="copyItem(r.photo_item_name, r.hold_units)"
+                          x-text="copyState===r.photo_item_name ? '✓ Copied' : '📋 Copy'"></button>
+                </div>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    @endif
+    <div class="card" x-show="!effectiveIsCeo || worklist.list === 'lahat'">
       <table>
         <thead>
           <tr>
@@ -755,8 +891,14 @@
                       <span :title="'Quote' + (q.moq ? ' · MOQ '+q.moq : '') + (q.updated_at ? ' · '+q.updated_at : '')">🏷 <b x-text="q.supplier"></b>
                         <span style="color:#1d4ed8;font-weight:700;" x-text="q.price!==null ? money(q.price) : '—'"></span>
                         <span x-show="q.moq" style="color:#94a3b8;" x-text="q.moq ? 'MOQ '+q.moq : ''"></span>
+                        <span x-show="q.prev_price !== null && q.prev_price !== undefined" style="color:#94a3b8;"
+                              x-text="'dati '+money(q.prev_price)+(q.prev_date ? ' ('+q.prev_date+')' : '')"></span>
                       </span>
-                      <template x-if="q.link"><a :href="q.link" target="_blank" rel="noopener" @click.stop style="color:#4f46e5;">link</a></template>
+                      <template x-if="q.photo_url">
+                        <img class="item-sq" style="width:22px;height:22px;border-color:#bfdbfe;" :src="q.photo_url" :alt="q.supplier"
+                             :title="'Quote photo · '+q.supplier" @click.stop="photoModal = { open:true, url:q.photo_url, name:q.supplier+' — '+row.item_name }">
+                      </template>
+                      <template x-if="safeLink(q.link)"><a :href="safeLink(q.link)" target="_blank" rel="noopener" @click.stop style="color:#4f46e5;">link</a></template>
                       <button type="button" class="item-photo-btn" style="padding:0 5px;" title="I-edit ang quote" @click.stop="openQuote(row.item_name, q)">✎</button>
                       <button type="button" class="item-photo-btn" style="padding:0 5px;color:#b91c1c;" title="Tanggalin ang quote" @click.stop="deleteQuote(row.item_name, q)">✕</button>
                     </div>
@@ -773,6 +915,8 @@
                       <input type="number" step="0.01" min="0" x-model="quoteForm.price" placeholder="₱ presyo" style="width:78px;font-size:10.5px;padding:1px;">
                       <input type="number" min="0" x-model="quoteForm.moq" placeholder="MOQ" style="width:54px;font-size:10.5px;padding:1px;">
                       <input type="text" x-model="quoteForm.link" placeholder="link (opsyonal)" style="width:120px;font-size:10.5px;padding:1px;">
+                      <input type="file" accept="image/jpeg,image/png,image/webp" @change="quoteForm.photo = $event.target.files[0] || null"
+                             title="Photo ng produkto ng supplier (jpg/png/webp, hanggang 10 MB)" style="font-size:10px;max-width:170px;">
                       <button type="button" class="item-photo-btn" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
                       <button type="button" class="item-photo-btn" @click.stop="quoteForm.key=null">Cancel</button>
                     </div>
@@ -2031,7 +2175,24 @@
       itemSuppliers: {},      // item_key → [{supplier, unit_cost, order_date}] (Supply Finance)
       itemQuotes: {},         // item_key → [{id, supplier, price, moq, link}] (item_supplier_quotes) — CEO lang
       supplierList: [],       // existing suppliers (id, name) para sa quote dropdown — CEO lang
-      quoteForm: { key:null, item_name:'', id:null, supplier_id:'', price:'', moq:'', link:'', saving:false },   // isang bukas na form lang
+      quoteForm: { key:null, item_name:'', id:null, supplier_id:'', price:'', moq:'', link:'', photo:null, saving:false },   // isang bukas na form lang
+      // Sourcing worklists (CEO lang) — /item/worklist. list = napiling chip (galing ?list=).
+      worklist: {
+        list: (function(){
+          const v = (new URLSearchParams(window.location.search).get('list') || '').toLowerCase();
+          return ['hanapan','may_quote','i_order','naka_order'].includes(v) ? v : 'lahat';
+        })(),
+        loaded:false, loading:false, error:'', _req:0,
+        counts:{ hanapan:0, may_quote:0, i_order:0, naka_order:0 },
+        items:[],
+      },
+      worklistChips: [
+        { key:'lahat',      label:'Lahat' },
+        { key:'hanapan',    label:'Hanapan ng supplier' },
+        { key:'may_quote',  label:'May quote, hindi pa na-order' },
+        { key:'i_order',    label:'I-order na' },
+        { key:'naka_order', label:'Naka-order, hinihintay' },
+      ],
       _photoTarget: null,     // item_name na kasalukuyang ina-upload-an ng photo
       holdMap: {},            // item_name → HOLD count (jnt/hold logic; drives item universe)
       holdLoaded: false,      // true kapag nakuha na ang holdMap
@@ -2266,6 +2427,8 @@
         if (this.isCeoView && this.viewAs === 'marketing') qsObj.view_as = 'marketing';
         // partial_date — only added when explicitly set by user (opt-in 1D override)
         if (this.partialDate) qsObj.partial_date = this.partialDate;
+        // Sourcing worklist chip (CEO view lang) — panatilihin sa URL.
+        if (this.effectiveIsCeo && this.worklist.list !== 'lahat') qsObj.list = this.worklist.list;
         // refresh=1 bypasses the server-side cache for this single request.
         // History-replaced URL does NOT include refresh — kasi nagdadagdag lang
         // siya ng noise sa visible address bar.
@@ -2291,6 +2454,8 @@
         finally{ this.loading=false; }
         // Item universe = HOLD items (jnt/hold). Refresh kasabay ng metrics.
         this.loadHold();
+        // Sourcing worklists — CEO view lang (walang ibabalik ang server sa iba).
+        if (this.effectiveIsCeo) this.loadWorklist();
       },
 
       // ── Force refresh — user-triggered cache bypass + reload ──────────────
@@ -3715,12 +3880,43 @@
         }catch(e){ /* walang quote data — ok lang */ }
       },
       quotesFor(name){ return this.itemQuotes[this.supKey(name)] || []; },
+      // ── Sourcing worklists (CEO lang) ─────────────────────────────────────
+      async loadWorklist(){
+        const req = ++this.worklist._req;   // luma/naunang sagot = huwag gamitin
+        this.worklist.loading = true;
+        try{
+          const u = new URL('{{ route('item.worklist') }}', location.origin);
+          u.searchParams.set('start_date', this.startDate);
+          u.searchParams.set('end_date', this.endDate);
+          const res = await fetch(u, {headers:{'Accept':'application/json'}});
+          const j = await res.json();
+          if (req !== this.worklist._req) return;
+          if (!res.ok || !j || !j.ok) throw new Error('HTTP ' + res.status);
+          this.worklist.counts = Object.assign({ hanapan:0, may_quote:0, i_order:0, naka_order:0 }, j.counts || {});
+          this.worklist.items  = j.items || [];
+          this.worklist.loaded = true;
+          this.worklist.error  = '';
+        }catch(e){
+          if (req === this.worklist._req) this.worklist.error = 'Hindi ma-load ang worklist (' + (e.message || e) + '). I-refresh.';
+        }
+        finally{ if (req === this.worklist._req) this.worklist.loading = false; }
+      },
+      setWorklist(key){
+        this.worklist.list = key;
+        const qs = new URLSearchParams(window.location.search);
+        if (key === 'lahat') qs.delete('list'); else qs.set('list', key);
+        history.replaceState(null, '', '?' + qs.toString());
+      },
+      // Rows ng napiling listahan (server: sorted HOLD desc, tapos pangalan).
+      worklistRows(){ return this.worklist.items.filter(r => r.list === this.worklist.list); },
+      // http/https lang ang link (iwas javascript: URL).
+      safeLink(u){ const s = String(u || '').trim(); return /^https?:\/\//i.test(s) ? s : ''; },
       // Inline add / edit / delete ng quote (CEO lang; 403 ang server sa iba)
       _csrf(){ return document.querySelector('meta[name="csrf-token"]')?.content || '{{ csrf_token() }}'; },
       openQuote(name, q){
         this.quoteForm = q
-          ? { key:this.supKey(name), item_name:name, id:q.id, supplier_id:String(q.supplier_id), price:(q.price ?? ''), moq:(q.moq ?? ''), link:(q.link ?? ''), saving:false }
-          : { key:this.supKey(name), item_name:name, id:null, supplier_id:'', price:'', moq:'', link:'', saving:false };
+          ? { key:this.supKey(name), item_name:name, id:q.id, supplier_id:String(q.supplier_id), price:(q.price ?? ''), moq:(q.moq ?? ''), link:(q.link ?? ''), photo:null, saving:false }
+          : { key:this.supKey(name), item_name:name, id:null, supplier_id:'', price:'', moq:'', link:'', photo:null, saving:false };
       },
       async saveQuote(){
         const f = this.quoteForm;
@@ -3728,13 +3924,23 @@
         if (!f.supplier_id) { alert('Pumili ng supplier.'); return; }
         f.saving = true;
         try{
+          // Multipart (FormData) para kasama ang photo. Blangkong field = hindi isinasama
+          // (walang "null" string); walang photo = hindi ginagalaw ng server ang dating photo.
+          const fd = new FormData();
+          fd.append('item_name', f.item_name);
+          fd.append('supplier_id', f.supplier_id);
+          if (f.price !== '' && f.price !== null) fd.append('price', f.price);
+          if (f.moq !== '' && f.moq !== null) fd.append('moq', f.moq);
+          if (f.link) fd.append('link', f.link);
+          if (f.photo) fd.append('photo', f.photo);
           const res = await fetch('{{ route('item.quotes.save') }}', { method:'POST',
-            headers:{ 'X-CSRF-TOKEN': this._csrf(), 'Accept':'application/json', 'Content-Type':'application/json' },
-            body: JSON.stringify({ item_name: f.item_name, supplier_id: f.supplier_id, price: f.price === '' ? null : f.price, moq: f.moq === '' ? null : f.moq, link: f.link || null }) });
+            headers:{ 'X-CSRF-TOKEN': this._csrf(), 'Accept':'application/json' },
+            body: fd });
           const j = await res.json().catch(() => ({}));
           if (!res.ok || !j.ok) { alert(j.error || j.message || ('HTTP ' + res.status)); return; }
           this.itemQuotes = Object.assign({}, this.itemQuotes, { [f.key]: (j.quotes || []) });
-          this.quoteForm = { key:null, item_name:'', id:null, supplier_id:'', price:'', moq:'', link:'', saving:false };
+          this.quoteForm = { key:null, item_name:'', id:null, supplier_id:'', price:'', moq:'', link:'', photo:null, saving:false };
+          if (this.effectiveIsCeo) this.loadWorklist(); // baka lumipat ng listahan
         }catch(e){ alert(e.message); }
         finally{ f.saving = false; }
       },
@@ -3745,7 +3951,10 @@
             headers:{ 'X-CSRF-TOKEN': this._csrf(), 'Accept':'application/json', 'Content-Type':'application/json' },
             body: JSON.stringify({ id: q.id, item_name: name }) });
           const j = await res.json().catch(() => ({}));
-          if (j.ok) this.itemQuotes = Object.assign({}, this.itemQuotes, { [this.supKey(name)]: (j.quotes || []) });
+          if (j.ok) {
+            this.itemQuotes = Object.assign({}, this.itemQuotes, { [this.supKey(name)]: (j.quotes || []) });
+            if (this.effectiveIsCeo) this.loadWorklist(); // baka lumipat ng listahan
+          }
           else alert(j.error || ('HTTP ' + res.status));
         }catch(e){ alert(e.message); }
       },

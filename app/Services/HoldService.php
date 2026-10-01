@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Carbon\Carbon;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use App\Models\ItemHoldSnapshot;
 
@@ -45,7 +46,50 @@ class HoldService
             ->groupByRaw($moItemRef)
             ->get();
 
-        $map = []; // item_key => ['name'=>baseName, 'units'=>int]
+        return $this->groupUnitsByBaseItem($rows);
+    }
+
+    /**
+     * macro_output STATUS na "hindi na itutuloy" (normalized: lower, walang space/underscore).
+     * Galing sa macro_output dropdown: CANNOT PROCEED at ODZ. Inaprubahan ni Mira (handoff 001).
+     */
+    public const CANCELLED_STATUSES = ['cannotproceed', 'odz'];
+
+    /**
+     * LIVE HOLD base query (para sa /item/data at /item/worklist): macro_output rows na
+     * may waybill, WALA pa sa from_jnts, HINDI cancelled (CANCELLED_STATUSES), at — kung
+     * may range — ts_date (indexed, sine-set ng DB trigger) nasa [$startDate, $endDate] ('Y-m-d').
+     * Portable SQL lang (TRIM/LOWER/REPLACE) → mysql, pgsql at sqlite.
+     * Hindi ito ginagamit ng snapshot (unitsByBaseItem) — hiwalay ang history na yon.
+     */
+    public function liveHoldQuery(?string $startDate, ?string $endDate): Builder
+    {
+        $driver    = DB::getDriverName();
+        $statusCol = $driver === 'pgsql' ? 'mo."STATUS"' : 'mo.`STATUS`';
+        $marks     = implode(',', array_fill(0, count(self::CANCELLED_STATUSES), '?'));
+
+        $q = DB::table('macro_output as mo')
+            ->leftJoin('from_jnts as fj', 'fj.' . self::FJ_WAYBILL_COL, '=', 'mo.' . self::MO_WAYBILL_COL)
+            ->whereNull('fj.' . self::FJ_WAYBILL_COL)                              // not yet in J&T = HELD
+            ->whereRaw("NULLIF(TRIM(mo." . self::MO_WAYBILL_COL . "), '') IS NOT NULL") // has waybill
+            ->whereRaw(
+                "($statusCol IS NULL OR LOWER(REPLACE(REPLACE(TRIM($statusCol), ' ', ''), '_', '')) NOT IN ($marks))",
+                self::CANCELLED_STATUSES
+            );
+
+        if ($startDate && $endDate) {
+            $q->whereBetween('mo.ts_date', [$startDate, $endDate]);
+        }
+        return $q;
+    }
+
+    /**
+     * Rows na {item_name, hold_count} → [ item_key => ['name'=>, 'units'=>, 'variants'=>[raw name => units]] ].
+     * Strip ng "N x" prefix → base item; units = count × N.
+     */
+    public function groupUnitsByBaseItem(iterable $rows): array
+    {
+        $map = []; // item_key => ['name'=>baseName, 'units'=>int, 'variants'=>[]]
         foreach ($rows as $r) {
             $name  = trim((string) ($r->item_name ?? ''));
             $count = (int) $r->hold_count;
@@ -62,8 +106,9 @@ class HoldService
             if ($baseName === '') continue;
 
             $key = $this->itemKey($baseName);
-            if (!isset($map[$key])) $map[$key] = ['name' => $baseName, 'units' => 0];
+            if (!isset($map[$key])) $map[$key] = ['name' => $baseName, 'units' => 0, 'variants' => []];
             $map[$key]['units'] += $count * $qty;
+            $map[$key]['variants'][$name] = ($map[$key]['variants'][$name] ?? 0) + $count * $qty;
         }
         return $map;
     }

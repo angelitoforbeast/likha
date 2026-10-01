@@ -13,7 +13,7 @@ class ItemSupplierQuote extends Model
 {
     protected $table = 'item_supplier_quotes';
 
-    protected $fillable = ['item_key', 'item_name', 'supplier_id', 'price', 'moq', 'link', 'note', 'updated_by'];
+    protected $fillable = ['item_key', 'item_name', 'supplier_id', 'price', 'moq', 'link', 'note', 'photo_path', 'updated_by'];
 
     protected $casts = [
         'price' => 'decimal:2',

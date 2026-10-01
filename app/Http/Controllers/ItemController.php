@@ -24,11 +24,7 @@ use Carbon\Carbon;
  */
 class ItemController extends Controller
 {
-    private const MO_TABLE       = 'macro_output';
-    private const FJ_TABLE       = 'from_jnts';
     private const MO_ITEM_COL    = 'ITEM_NAME';
-    private const MO_WAYBILL_COL = 'waybill';
-    private const FJ_WAYBILL_COL = 'waybill_number';
 
     private function getNormalizedRole(): string
     {
@@ -100,28 +96,19 @@ class ItemController extends Controller
     {
         $this->checkAccess();
 
-        [$startAt, $endAt] = $this->parseRange((string) $request->input('date_range', ''));
+        [$startDate, $endDate] = $this->parseRange((string) $request->input('date_range', ''));
         $q = trim((string) $request->input('q', ''));
 
         $driver  = DB::connection()->getDriverName();
         $qcol    = fn ($c) => $driver === 'pgsql' ? "mo.\"$c\"" : "mo.`$c`";
         $moItem  = $qcol(self::MO_ITEM_COL);
         $moPage  = $qcol('PAGE');
-        $moTs    = $qcol('TIMESTAMP');
-        $tsExpr  = $driver === 'pgsql'
-            ? "to_timestamp($moTs, 'HH24:MI DD-MM-YYYY')"
-            : "STR_TO_DATE($moTs, '%H:%i %d-%m-%Y')";
         $likeOp  = $driver === 'pgsql' ? 'ILIKE' : 'LIKE';
 
-        // HOLD base: macro_output waybills NOT in from_jnts (not yet shipped) within range.
-        $base = DB::table(self::MO_TABLE . ' as mo')
-            ->leftJoin(self::FJ_TABLE . ' as fj', 'fj.' . self::FJ_WAYBILL_COL, '=', 'mo.' . self::MO_WAYBILL_COL)
-            ->whereNull('fj.' . self::FJ_WAYBILL_COL)
-            ->whereRaw('NULLIF(TRIM(mo.' . self::MO_WAYBILL_COL . "), '') IS NOT NULL");
+        // HOLD base: macro_output waybills NOT in from_jnts (not yet shipped), hindi cancelled,
+        // within range (ts_date) — isang depinisyon sa HoldService (shared ng /item/worklist).
+        $base = app(\App\Services\HoldService::class)->liveHoldQuery($startDate, $endDate);
 
-        if ($startAt && $endAt) {
-            $base->whereBetween(DB::raw($tsExpr), [$startAt, $endAt]);
-        }
         if ($q !== '') {
             $base->where(function ($w) use ($q, $likeOp, $moItem, $moPage) {
                 $w->whereRaw("$moItem $likeOp ?", ["%{$q}%"])
@@ -232,6 +219,174 @@ class ItemController extends Controller
         return response()->json(['ok' => true, 'suppliers' => $map]);
     }
 
+    /** supply_orders.status na "hindi pa dumarating / hindi pa nabibilang" = open (Mira, handoff 001). */
+    private const OPEN_PO_STATUSES = ['ordered', 'delivered'];
+
+    /**
+     * GET /item/worklist?start_date&end_date — SOURCING WORKLISTS (CEO LANG).
+     * Isang row kada base item na may live HOLD sa range, naka-classify sa isa sa apat na
+     * listahan (SourcingClassifier): hanapan / may_quote / i_order / naka_order.
+     * PO line = supply_order_items na ordered_qty > 0 at unit_cost >= 0 (hindi discount line);
+     * open qty = Σ (ordered − received) sa POs na status ordered|delivered.
+     * Lahat ng key = ItemSupplierQuote::keyFor / HoldService grouping (parehong resulta).
+     */
+    public function worklist(Request $request)
+    {
+        $this->checkAccess();
+        // CEO LANG (data-layer, same pattern ng suppliers()/quotes()).
+        if ($this->getNormalizedRole() !== 'CEO') {
+            return response()->json(['ok' => true, 'counts' => new \stdClass(), 'items' => []]);
+        }
+
+        // Totoong petsa lang (hindi 2026-09-99) — kung hindi, default range.
+        $valid = fn ($s) => is_string($s) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $s)
+            && checkdate((int) substr($s, 5, 2), (int) substr($s, 8, 2), (int) substr($s, 0, 4));
+        $start = (string) $request->query('start_date', '');
+        $end   = (string) $request->query('end_date', '');
+        if (!$valid($start)) $start = Carbon::now('Asia/Manila')->startOfMonth()->subMonth()->toDateString();
+        if (!$valid($end))   $end   = Carbon::now('Asia/Manila')->toDateString();
+        if ($start > $end)   [$start, $end] = [$end, $start];
+
+        $svc    = app(\App\Services\HoldService::class);
+        $moItem = DB::getDriverName() === 'pgsql' ? 'mo."' . self::MO_ITEM_COL . '"' : 'mo.`' . self::MO_ITEM_COL . '`';
+        $rows   = $svc->liveHoldQuery($start, $end)
+            ->selectRaw("$moItem as item_name, COUNT(*) as hold_count")
+            ->groupByRaw($moItem)
+            ->get();
+        $hold = array_filter($svc->groupUnitsByBaseItem($rows), fn ($i) => $i['units'] > 0);
+
+        $counts = array_fill_keys(\App\Services\SourcingClassifier::LISTS, 0);
+        if (!$hold) return response()->json(['ok' => true, 'counts' => $counts, 'items' => []]);
+
+        $keyFor = fn ($n) => \App\Models\ItemSupplierQuote::keyFor((string) $n);
+        $today  = Carbon::now('Asia/Manila')->startOfDay();
+
+        // ── PO lines (Supply Finance) ──
+        $po = []; // key => ['has_line'=>true, 'suppliers'=>[sid=>row], 'open'=>[...]]
+        try {
+            if (Schema::hasTable('supply_order_items') && Schema::hasTable('supply_orders') && Schema::hasTable('suppliers')) {
+                $lines = DB::table('supply_order_items as i')
+                    ->join('supply_orders as o', 'o.id', '=', 'i.supply_order_id')
+                    ->join('suppliers as s', 's.id', '=', 'o.supplier_id')
+                    ->where('i.ordered_qty', '>', 0)
+                    ->where('i.unit_cost', '>=', 0)
+                    ->orderByDesc('o.order_date')->orderByDesc('i.id')
+                    ->get(['i.item_name', 'i.ordered_qty', 'i.received_qty', 'i.unit_cost',
+                           'o.id as order_id', 'o.order_date', 'o.status', 's.id as supplier_id', 's.name as supplier']);
+                foreach ($lines as $l) {
+                    $k = $keyFor($l->item_name);
+                    if (!isset($hold[$k])) continue;
+                    $po[$k] ??= ['suppliers' => [], 'open' => null];
+                    $date = substr((string) $l->order_date, 0, 10);
+                    if ((float) $l->unit_cost > 0 && !isset($po[$k]['suppliers'][$l->supplier_id])) {
+                        $po[$k]['suppliers'][$l->supplier_id] = [
+                            'source' => 'po', 'supplier' => $l->supplier, 'price' => (float) $l->unit_cost,
+                            'date' => $date, 'photo_url' => null,
+                        ];
+                    }
+                    if (in_array((string) $l->status, self::OPEN_PO_STATUSES, true)) {
+                        $ordered  = (int) $l->ordered_qty;
+                        $received = (int) ($l->received_qty ?? 0);
+                        $o = $po[$k]['open'] ?? ['order_ids' => [], 'supplier' => null, 'order_date' => null,
+                                                  'ordered_qty' => 0, 'received_qty' => 0, 'open_qty' => 0];
+                        $o['order_ids'][$l->order_id] = true;
+                        $o['ordered_qty']  += $ordered;
+                        $o['received_qty'] += $received;
+                        $o['open_qty']     += max(0, $ordered - $received);
+                        // Pinakamatagal nang naghihintay (lines ay date desc → huling makita = pinakaluma).
+                        $o['supplier']   = $l->supplier;
+                        $o['order_date'] = $date;
+                        $po[$k]['open'] = $o;
+                    }
+                }
+            }
+        } catch (\Throwable $e) { /* supply tables wala pa — walang PO */ }
+
+        // ── Quotes ──
+        $quotes = []; // key => [row...]
+        try {
+            if (Schema::hasTable('item_supplier_quotes')) {
+                $qrows = \App\Models\ItemSupplierQuote::query()->with('supplier')
+                    ->whereIn('item_key', array_keys($hold))->orderBy('price')->get();
+                foreach ($qrows as $q) {
+                    $quotes[$q->item_key][] = [
+                        'source'    => 'quote',
+                        'supplier'  => $q->supplier?->name ?? ('#' . $q->supplier_id),
+                        'price'     => $q->price !== null ? (float) $q->price : null,
+                        'date'      => optional($q->updated_at)->format('Y-m-d'),
+                        'photo_url' => $q->photo_path ? url(Storage::disk('public')->url($q->photo_path)) : null,
+                    ];
+                }
+            }
+        } catch (\Throwable $e) { /* wala pang table */ }
+
+        // ── Lead time (supply_item_settings, keyed by item_name) ──
+        $lead = [];
+        try {
+            if (Schema::hasTable('supply_item_settings')) {
+                foreach (DB::table('supply_item_settings')->get(['item_name', 'lead_time_days']) as $s) {
+                    $k = $keyFor($s->item_name);
+                    if (isset($hold[$k]) && $s->lead_time_days !== null) $lead[$k] = (int) $s->lead_time_days;
+                }
+            }
+        } catch (\Throwable $e) { /* wala pang table */ }
+
+        // ── Item photos (item_images, keyed by raw variant name) ──
+        $imgMap = [];
+        try {
+            if (Schema::hasTable('item_images')) {
+                $names = [];
+                foreach ($hold as $h) foreach (array_keys($h['variants']) as $n) $names[] = $n;
+                foreach (ItemImage::whereIn('item_name', $names)->whereNotNull('image_path')->get() as $img) {
+                    $imgMap[$img->item_name] = url(Storage::disk('public')->url($img->image_path));
+                }
+            }
+        } catch (\Throwable $e) { /* wala pang table */ }
+
+        $items = [];
+        foreach ($hold as $k => $h) {
+            $variants = [];
+            foreach ($h['variants'] as $n => $u) $variants[] = ['name' => (string) $n, 'units' => (int) $u];
+            usort($variants, fn ($a, $b) => [$b['units'], $a['name']] <=> [$a['units'], $b['name']]);
+
+            $photoName = $variants[0]['name'];
+            foreach ($variants as $v) { if (isset($imgMap[$v['name']])) { $photoName = $v['name']; break; } }
+
+            $open    = $po[$k]['open'] ?? null;
+            $openPo  = $open ? [
+                'orders'         => count($open['order_ids']),
+                'supplier'       => $open['supplier'],
+                'order_date'     => $open['order_date'],
+                'days_since'     => (int) Carbon::parse($open['order_date'], 'Asia/Manila')->startOfDay()->diffInDays($today),
+                'ordered_qty'    => $open['ordered_qty'],
+                'received_qty'   => $open['received_qty'],
+                'open_qty'       => $open['open_qty'],
+                'lead_time_days' => $lead[$k] ?? null,
+            ] : null;
+
+            $cls = \App\Services\SourcingClassifier::classify(
+                isset($po[$k]), count($quotes[$k] ?? []), $openPo['open_qty'] ?? 0, (int) $h['units']
+            );
+            $counts[$cls['list']]++;
+
+            $items[] = [
+                'key'             => $k,
+                'name'            => $h['name'],
+                'variants'        => $variants,
+                'hold_units'      => (int) $h['units'],
+                'image_url'       => $imgMap[$photoName] ?? null,
+                'photo_item_name' => $photoName,
+                'list'            => $cls['list'],
+                'shortfall'       => $cls['shortfall'],
+                'suppliers'       => array_merge(array_values($po[$k]['suppliers'] ?? []), $quotes[$k] ?? []),
+                'open_po'         => $openPo,
+            ];
+        }
+        usort($items, fn ($a, $b) => [$b['hold_units'], $a['name']] <=> [$a['hold_units'], $b['name']]);
+
+        return response()->json(['ok' => true, 'counts' => $counts, 'items' => $items]);
+    }
+
     // ═════════════════════════════════════════════════════════════════════
     //  SUPPLIER QUOTES — "may supplier na ba, magkano kada supplier" (CEO LANG)
     //  Hiwalay sa PO: item_supplier_quotes (supplier = existing suppliers table, presyo = bago).
@@ -270,22 +425,86 @@ class ItemController extends Controller
             'moq'         => 'nullable|integer|min:0|max:100000000',
             'link'        => 'nullable|string|max:500',
             'note'        => 'nullable|string|max:255',
+            // Photo ng produkto ng supplier — parehong rules ng item photo upload.
+            'photo'       => 'nullable|image|mimes:jpg,jpeg,png,webp|max:10240',
         ]);
         $key = \App\Models\ItemSupplierQuote::keyFor($data['item_name']);
 
-        \App\Models\ItemSupplierQuote::updateOrCreate(
-            ['item_key' => $key, 'supplier_id' => (int) $data['supplier_id']],
-            [
-                'item_name'  => trim($data['item_name']),
-                'price'      => $data['price'] ?? null,
-                'moq'        => $data['moq'] ?? null,
-                'link'       => isset($data['link']) ? trim((string) $data['link']) : null,
-                'note'       => isset($data['note']) ? trim((string) $data['note']) : null,
-                'updated_by' => Auth::id(),
-            ]
-        );
+        // Bagong photo: i-store muna (generated name). WALANG photo = hindi ginagalaw ang dati.
+        $newPath = null;
+        if ($request->hasFile('photo') && Schema::hasColumn('item_supplier_quotes', 'photo_path')) {
+            $newPath = $request->file('photo')->store('supplier-quote-images', 'public');
+        }
+        $oldPath = null;
+
+        try {
+            DB::transaction(function () use ($key, $data, $newPath, &$oldPath) {
+                // History: kung nagbago ang presyo / MOQ / link → itala muna ang LUMANG values.
+                $existing = \App\Models\ItemSupplierQuote::where('item_key', $key)
+                    ->where('supplier_id', (int) $data['supplier_id'])->lockForUpdate()->first();
+                if ($existing && $this->quoteChanged($existing, $data)) {
+                    $this->writeQuoteHistory($existing, 'update');
+                }
+
+                $attrs = [
+                    'item_name'  => trim($data['item_name']),
+                    'price'      => $data['price'] ?? null,
+                    'moq'        => $data['moq'] ?? null,
+                    'link'       => isset($data['link']) ? trim((string) $data['link']) : null,
+                    'note'       => isset($data['note']) ? trim((string) $data['note']) : null,
+                    'updated_by' => Auth::id(),
+                ];
+                if ($newPath !== null) {
+                    $oldPath = $existing?->photo_path;
+                    $attrs['photo_path'] = $newPath;
+                }
+                \App\Models\ItemSupplierQuote::updateOrCreate(
+                    ['item_key' => $key, 'supplier_id' => (int) $data['supplier_id']],
+                    $attrs
+                );
+            });
+        } catch (\Throwable $e) {
+            if ($newPath) { try { Storage::disk('public')->delete($newPath); } catch (\Throwable $ex) {} }
+            throw $e;
+        }
+        // Pagkatapos ng commit lang tanggalin ang napalitang photo.
+        if ($oldPath && $oldPath !== $newPath) {
+            try { Storage::disk('public')->delete($oldPath); } catch (\Throwable $e) {}
+        }
 
         return response()->json(['ok' => true, 'quotes' => $this->quoteRows($key)[$key] ?? []]);
+    }
+
+    /** Nagbago ba ang presyo (2dp), MOQ o link? null ≠ 0; "100" = "100.00". */
+    private function quoteChanged(\App\Models\ItemSupplierQuote $q, array $data): bool
+    {
+        $price = fn ($v) => ($v === null || $v === '') ? null : number_format((float) $v, 2, '.', '');
+        $moq   = fn ($v) => ($v === null || $v === '') ? null : (int) $v;
+        $link  = fn ($v) => ($v === null || trim((string) $v) === '') ? null : trim((string) $v);
+
+        return $price($q->price) !== $price($data['price'] ?? null)
+            || $moq($q->moq)     !== $moq($data['moq'] ?? null)
+            || $link($q->link)   !== $link($data['link'] ?? null);
+    }
+
+    /** Isang history row ng LUMANG values ng quote (best-effort kung wala pang table). */
+    private function writeQuoteHistory(\App\Models\ItemSupplierQuote $q, string $action): void
+    {
+        if (! Schema::hasTable('item_supplier_quote_history')) return;
+        DB::table('item_supplier_quote_history')->insert([
+            'quote_id'    => $q->id,
+            'item_key'    => $q->item_key,
+            'item_name'   => $q->item_name,
+            'supplier_id' => $q->supplier_id,
+            'price'       => $q->price,
+            'moq'         => $q->moq,
+            'link'        => $q->link,
+            'action'      => $action,
+            'quoted_at'   => $q->updated_at,
+            'updated_by'  => Auth::id(),
+            'created_at'  => now(),
+            'updated_at'  => now(),
+        ]);
     }
 
     /** POST /item/quotes/delete — tanggalin ang isang quote. CEO lang. */
@@ -296,18 +515,50 @@ class ItemController extends Controller
 
         $data = $request->validate(['id' => 'required|integer', 'item_name' => 'required|string|max:255']);
         $key  = \App\Models\ItemSupplierQuote::keyFor($data['item_name']);
-        \App\Models\ItemSupplierQuote::where('id', (int) $data['id'])->where('item_key', $key)->delete();
+        $photo = null;
+        DB::transaction(function () use ($data, $key, &$photo) {
+            $q = \App\Models\ItemSupplierQuote::where('id', (int) $data['id'])->where('item_key', $key)->lockForUpdate()->first();
+            if ($q) {
+                $photo = $q->photo_path;
+                $this->writeQuoteHistory($q, 'delete');
+                $q->delete();
+            }
+        });
+        if ($photo) {
+            try { Storage::disk('public')->delete($photo); } catch (\Throwable $e) {}
+        }
 
         return response()->json(['ok' => true, 'quotes' => $this->quoteRows($key)[$key] ?? []]);
     }
 
-    /** item_key → [{id, supplier_id, supplier, price, moq, link, note, updated_at}] (isang key lang kung ibinigay). */
+    /**
+     * item_key → [{id, supplier_id, supplier, price, moq, link, note, updated_at, prev_price, prev_date}]
+     * (isang key lang kung ibinigay). prev_* = "dati ₱X (date)": pinakahuling history row ng
+     * parehong item + supplier na may presyo at IBA sa kasalukuyang presyo.
+     */
     private function quoteRows(?string $onlyKey = null): array
     {
         $q = \App\Models\ItemSupplierQuote::query()->with('supplier')->orderBy('price');
         if ($onlyKey !== null) $q->where('item_key', $onlyKey);
+        $quotes = $q->get();
+
+        $hist = []; // "item_key|supplier_id" → [rows, pinakabago muna]
+        try {
+            if ($quotes->isNotEmpty() && Schema::hasTable('item_supplier_quote_history')) {
+                $h = DB::table('item_supplier_quote_history')->whereNotNull('price')
+                    ->whereIn('item_key', $quotes->pluck('item_key')->unique()->all())
+                    ->orderByDesc('id')->get(['item_key', 'supplier_id', 'price', 'quoted_at']);
+                foreach ($h as $r) $hist[$r->item_key . '|' . $r->supplier_id][] = $r;
+            }
+        } catch (\Throwable $e) { /* walang history — ok lang */ }
+
         $map = [];
-        foreach ($q->get() as $r) {
+        foreach ($quotes as $r) {
+            $cur  = $r->price !== null ? number_format((float) $r->price, 2, '.', '') : null;
+            $prev = null;
+            foreach ($hist[$r->item_key . '|' . $r->supplier_id] ?? [] as $h) {
+                if (number_format((float) $h->price, 2, '.', '') !== $cur) { $prev = $h; break; }
+            }
             $map[$r->item_key][] = [
                 'id'          => $r->id,
                 'supplier_id' => $r->supplier_id,
@@ -317,6 +568,9 @@ class ItemController extends Controller
                 'link'        => $r->link,
                 'note'        => $r->note,
                 'updated_at'  => optional($r->updated_at)->format('Y-m-d'),
+                'prev_price'  => $prev ? (float) $prev->price : null,
+                'prev_date'   => $prev && $prev->quoted_at ? substr((string) $prev->quoted_at, 0, 10) : null,
+                'photo_url'   => $r->photo_path ? url(Storage::disk('public')->url($r->photo_path)) : null,
             ];
         }
         return $map;
@@ -424,7 +678,7 @@ class ItemController extends Controller
         return response()->json(['ok' => true, 'url' => url(Storage::disk('public')->url($path))]);
     }
 
-    /** date_range "YYYY-MM-DD to YYYY-MM-DD" → [startAt, endAt] datetime strings. */
+    /** date_range "YYYY-MM-DD to YYYY-MM-DD" → [startDate, endDate] 'Y-m-d' (para sa ts_date). */
     private function parseRange(string $range): array
     {
         if ($range === '') return [null, null];
@@ -432,9 +686,9 @@ class ItemController extends Controller
         $s = $parts[0] ?? null;
         $e = $parts[1] ?? $parts[0] ?? null;
         try {
-            $startAt = $s ? Carbon::createFromFormat('Y-m-d', $s)->startOfDay()->format('Y-m-d H:i:s') : null;
-            $endAt   = $e ? Carbon::createFromFormat('Y-m-d', $e)->endOfDay()->format('Y-m-d H:i:s') : null;
-            return [$startAt, $endAt];
+            $startDate = $s ? Carbon::createFromFormat('Y-m-d', $s)->format('Y-m-d') : null;
+            $endDate   = $e ? Carbon::createFromFormat('Y-m-d', $e)->format('Y-m-d') : null;
+            return [$startDate, $endDate];
         } catch (\Throwable $ex) {
             return [null, null];
         }
