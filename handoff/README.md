@@ -6,4 +6,4 @@ Protocol: Mira writes `handoff/NNN-name/HANDOFF.md` (never edited by the worker)
 |---|---|---|---|
 | 001 | sourcing-worklist | `feat/sourcing-worklist` | Done — live 2026-10-01 |
 | 002 | worklist-filters-table | `fix/worklist-filters-table` | done — RESULT.md filled, waiting for Mira's branch review |
-| 003 | stock-doi-category | `feat/stock-doi-category` | planning — plan sent to Mira, waiting for her "go" |
+| 003 | stock-doi-category | `feat/stock-doi-category` | done — RESULT.md filled, waiting for Mira's branch review |
