@@ -1,6 +1,6 @@
 # Result 005: /item layout that fits the screen, restock decision first
 
-Status: **in progress — plan sent to Mira, waiting for her "go"** (branch `feat/item-layout`, cut from `feat/lifecycle-restock` at `762d4ae`). Nothing pushed, merged or deployed.
+Status: **in progress — plan sent to Mira, waiting for her "go"** (branch `feat/item-layout`, cut from `feat/lifecycle-restock` at `762d4ae`). Spec `docs/specs/005-item-layout.md`, plan `docs/plans/005-item-layout.md`. Nothing pushed, merged or deployed.
 
 ## Summary
 
