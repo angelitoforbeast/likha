@@ -532,6 +532,21 @@
       <span x-show="loading">Refreshing…</span>
     </button>
 
+    {{-- Palit ng layout: bagong view (walang horizontal scroll) <-> lumang table. --}}
+    @if(!empty($layoutOld))
+    <a :href="viewSwitchUrl()"
+       title="Bumalik sa bagong layout (walang horizontal scroll)"
+       style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
+              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+              cursor:pointer;margin-left:4px;">✨ Bagong view</a>
+    @else
+    <a :href="viewSwitchUrl()"
+       title="Buksan ang dating table (lahat ng column, may horizontal scroll)"
+       style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
+              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+              cursor:pointer;margin-left:4px;">🗂 Lumang view</a>
+    @endif
+
     {{-- CEO-only chrome — hidden when CEO toggles to Marketing view so the UI
          truly mirrors what Marketing sees. Actual CEO role still has access via
          direct URL; this is a view-toggle gate, not an auth gate. --}}
@@ -660,7 +675,11 @@
     </select>
   </div>
 
-  @include('item._table_old')
+  @if(!empty($layoutOld))
+    @include('item._table_old')
+  @else
+    @include('item._table_new')
+  @endif
 
   {{-- Edit modal — 3 independent sections (RTS, Promo, COGS) — each has its
        own editable effective_date and Save button. Modal stays open after each
@@ -1183,6 +1202,9 @@
       // button visibility and for ANY genuinely-CEO-only behavior (writes, etc.).
       isCeoView: @json(!empty($isCEO ?? false)),
 
+      // Layout: false = bagong layout (default), true = lumang table (?layout=old, galing sa server).
+      layoutOld: @json(!empty($layoutOld)),
+
       // CEO "view as" toggle: 'ceo' = full CEO mode (default), 'marketing' = simulate
       // Marketing's UI. Drives cogs source for profit + visibility of CEO column
       // + modal CEO field. Initialized from URL ?view_as= so refresh preserves it.
@@ -1518,6 +1540,8 @@
         if (this.partialDate) qsObj.partial_date = this.partialDate;
         // Sourcing worklist chip (CEO view lang) — panatilihin sa URL.
         if (this.effectiveIsCeo && this.worklist.list !== 'lahat') qsObj.list = this.worklist.list;
+        // Lumang table view — panatilihin ang ?layout=old sa URL.
+        if (this.layoutOld) qsObj.layout = 'old';
         // refresh=1 bypasses the server-side cache for this single request.
         // History-replaced URL does NOT include refresh — kasi nagdadagdag lang
         // siya ng noise sa visible address bar.
@@ -3148,6 +3172,14 @@
       stockTip(text, S){
         const vt = this.variantTip(S);
         return text + (vt ? ' — ' + vt : '') + (this.stock.error ? ' — ' + this.stock.error : '');
+      },
+      // Link papunta sa kabilang layout — kopya ng kasalukuyang query string (range, list, view_as...),
+      // ?layout=old lang ang binabago.
+      viewSwitchUrl(){
+        const qs = new URLSearchParams(window.location.search);
+        if (this.layoutOld) qs.delete('layout'); else qs.set('layout', 'old');
+        const s = qs.toString();
+        return window.location.pathname + (s ? '?' + s : '');
       },
       setWorklist(key){
         this.worklist.list = key;

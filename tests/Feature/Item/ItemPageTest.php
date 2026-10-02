@@ -44,6 +44,27 @@ class ItemPageTest extends ItemTestCase
         }
     }
 
+    public function test_default_render_has_the_new_layout_and_the_old_one_has_the_old_table(): void
+    {
+        $new = $this->render(true);
+        $old = $this->render(true, true);
+        foreach (['Drag headers to reorder', 'colDragStart($event', '<td>TOTAL</td>'] as $oldMarker) {
+            $this->assertStringNotContainsString($oldMarker, $new);
+            $this->assertStringContainsString($oldMarker, $old);
+        }
+        $this->assertStringContainsString('id="item-layout-new"', $new);
+        $this->assertStringNotContainsString('id="item-layout-new"', $old);
+        // Link papunta sa kabilang view.
+        $this->assertStringContainsString('Lumang view', $new);
+        $this->assertStringNotContainsString('Bagong view', $new);
+        $this->assertStringContainsString('Bagong view', $old);
+        $this->assertStringNotContainsString('Lumang view', $old);
+        // Pinapanatili ng load() ang ?layout=old sa URL.
+        $this->assertStringContainsString("qsObj.layout = 'old'", $new);
+        $this->assertStringContainsString('layoutOld: false,', $new);
+        $this->assertStringContainsString('layoutOld: true,', $old);
+    }
+
     public function test_hold_and_worklist_load_in_parallel_with_the_item_summary(): void
     {
         $html = $this->render(true);
@@ -60,7 +81,7 @@ class ItemPageTest extends ItemTestCase
 
     public function test_stock_columns_are_registered_and_rendered_on_item_rows(): void
     {
-        $ceo = $this->render(true);
+        $ceo = $this->render(true, true);
         $ids = ['category', 'stock', 'incoming', 'units_per_day', 'doi', 'order_qty'];
         $catalogIds = array_column(\App\Http\Controllers\OwnerColumnSettingsController::CATALOG['owner_private'], 'id');
         $defaultIds = \App\Http\Controllers\OwnerColumnSettingsController::DEFAULT_VISIBLE['owner_private'];
@@ -85,7 +106,7 @@ class ItemPageTest extends ItemTestCase
         $ctl = \App\Http\Controllers\OwnerColumnSettingsController::class;
         $this->assertContains('lifecycle', array_column($ctl::CATALOG['owner_private'], 'id'));
         $this->assertContains('lifecycle', $ctl::DEFAULT_VISIBLE['owner_private']);
-        foreach ([$this->render(true), $this->render(false)] as $html) {
+        foreach ([$this->render(true, true), $this->render(false, true)] as $html) {
             $this->assertStringContainsString("id:'lifecycle'", $html);              // defaultCols()
             $this->assertStringContainsString("col.id==='lifecycle'", $html);        // item-row cell
             $this->assertStringContainsString("'order_qty','lifecycle']", $html);    // labas sa catch-all na blank cell
@@ -101,7 +122,7 @@ class ItemPageTest extends ItemTestCase
 
     public function test_rows_pick_the_normal_or_lugi_set_from_the_combined_base_profit(): void
     {
-        foreach ([$this->render(true), $this->render(false)] as $html) {
+        foreach ([$this->render(true, true), $this->render(false, true)] as $html) {
             // Isang profit figure kada base item: Σ projected_profit_last_7d ÷ Σ gross_sales_last_7d.
             $this->assertStringContainsString('baseProfitPct7(name)', $html);
             $this->assertStringContainsString('S.gated && pct != null && pct <= 0', $html);
@@ -115,15 +136,15 @@ class ItemPageTest extends ItemTestCase
             $this->assertStringContainsString('huling 7 araw', $html);
         }
         // Ang palugit editor ay CEO lang.
-        $this->assertStringContainsString('blank = default ng lifecycle', $this->render(true));
-        $this->assertStringNotContainsString('blank = default ng lifecycle', $this->render(false));
+        $this->assertStringContainsString('blank = default ng lifecycle', $this->render(true, true));
+        $this->assertStringNotContainsString('blank = default ng lifecycle', $this->render(false, true));
     }
 
     public function test_category_selector_shows_only_while_the_category_column_is_visible(): void
     {
         $ctl = \App\Http\Controllers\OwnerColumnSettingsController::class;
         $this->assertNotContains('category', $ctl::DEFAULT_VISIBLE['owner_private']);
-        foreach ([$this->render(true), $this->render(false)] as $html) {
+        foreach ([$this->render(true, true), $this->render(false, true)] as $html) {
             $this->assertStringContainsString('x-show="categoryColVisible()"', $html);
             $this->assertStringContainsString("cols.some(c => c.id === 'category')", $html);
             $this->assertStringContainsString("categoryFilter !== '' && categoryColVisible()", $html);
@@ -134,7 +155,7 @@ class ItemPageTest extends ItemTestCase
 
     public function test_order_tooltip_is_hold_only_for_phasing_out_and_dormant_without_palugit(): void
     {
-        foreach ([$this->render(true), $this->render(false)] as $html) {
+        foreach ([$this->render(true, true), $this->render(false, true)] as $html) {
             $this->assertStringContainsString('ilang piraso ang dapat i-order (HOLD lang − stock − paparating; walang benta kaya walang dagdag)', $html);
             $this->assertStringContainsString('ilang piraso ang dapat i-order (HOLD + benta habang hinihintay − stock − paparating)', $html);
             $this->assertStringContainsString('orderTip(row.item_name)', $html);
@@ -152,15 +173,15 @@ class ItemPageTest extends ItemTestCase
 
     public function test_ceo_item_value_binding_is_not_in_the_marketing_render(): void
     {
-        $this->assertStringContainsString('itemValueCeo(row.item_name)', $this->render(true));
-        $this->assertStringNotContainsString('itemValueCeo(row.item_name)', $this->render(false));
+        $this->assertStringContainsString('itemValueCeo(row.item_name)', $this->render(true, true));
+        $this->assertStringNotContainsString('itemValueCeo(row.item_name)', $this->render(false, true));
     }
 
     public function test_doi_lead_and_order_by_lines_have_plain_tooltips(): void
     {
         $lead = 'Lead = ilang araw bago dumating ang order; palugit = dagdag na araw na reserba';
-        $ceo  = $this->render(true);
-        $mkt  = $this->render(false);
+        $ceo  = $this->render(true, true);
+        $mkt  = $this->render(false, true);
         foreach ([$ceo, $mkt] as $html) {
             $this->assertStringContainsString($lead, $html);
             $this->assertStringContainsString('Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa.', $html);
@@ -173,8 +194,8 @@ class ItemPageTest extends ItemTestCase
 
     public function test_category_filter_is_for_every_role_and_inline_edits_are_ceo_only(): void
     {
-        $ceo = $this->render(true);
-        $mkt = $this->render(false);
+        $ceo = $this->render(true, true);
+        $mkt = $this->render(false, true);
         foreach ([$ceo, $mkt] as $html) {
             $this->assertStringContainsString('x-model="categoryFilter"', $html);
             $this->assertStringContainsString('Walang category', $html);
@@ -202,7 +223,7 @@ class ItemPageTest extends ItemTestCase
 
     public function test_sourcing_chips_and_worklist_show_in_the_ceo_view_only(): void
     {
-        $ceo = $this->render(true);
+        $ceo = $this->render(true, true);
         $this->assertStringContainsString('setWorklist(c.key)', $ceo);
         $this->assertStringContainsString(route('item.worklist'), $ceo);
         // Isang table lang: ang chips ay filter ng itemGroups(), walang hiwalay na worklist table.
@@ -216,7 +237,7 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringContainsString("'kabuuan: '", $ceo);
         $this->assertStringContainsString("'Kulang '", $ceo);
 
-        $mkt = $this->render(false);
+        $mkt = $this->render(false, true);
         $this->assertStringNotContainsString('setWorklist(c.key)', $mkt);
         $this->assertStringNotContainsString("'kabuuan: '", $mkt);
         $this->assertStringNotContainsString("'Kulang '", $mkt);
