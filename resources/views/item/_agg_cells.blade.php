@@ -245,7 +245,7 @@
   </span>
 </template>
 <template x-if="col.id==='order_qty'">
-  <span :title="stockTip('ilang piraso ang dapat i-order (HOLD + benta habang hinihintay − stock − paparating)', stockFor(row.item_name))">
+  <span :title="stockTip(orderTip(row.item_name), stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
     <span x-show="!stockPending()">
       <span style="font-weight:800;" x-text="stockSet(row.item_name) && stockSet(row.item_name).order_qty != null ? num(stockSet(row.item_name).order_qty) : '—'"></span>

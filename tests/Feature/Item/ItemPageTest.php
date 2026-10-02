@@ -115,6 +115,16 @@ class ItemPageTest extends ItemTestCase
             $this->assertStringContainsString("cols.some(c => c.id === 'category')", $html);
             $this->assertStringContainsString("categoryFilter !== '' && categoryColVisible()", $html);
             $this->assertStringContainsString("if (f === '' || !this.categoryColVisible()", $html);
+            $this->assertStringContainsString("if (!this.categoryColVisible()) this.categoryFilter = '';", $html);
+        }
+    }
+
+    public function test_order_tooltip_is_hold_only_for_phasing_out_and_dormant_without_palugit(): void
+    {
+        foreach ([$this->render(true), $this->render(false)] as $html) {
+            $this->assertStringContainsString('ilang piraso ang dapat i-order (HOLD lang − stock − paparating; walang benta kaya walang dagdag)', $html);
+            $this->assertStringContainsString('ilang piraso ang dapat i-order (HOLD + benta habang hinihintay − stock − paparating)', $html);
+            $this->assertStringContainsString('orderTip(row.item_name)', $html);
         }
     }
 

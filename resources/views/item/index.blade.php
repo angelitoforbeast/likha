@@ -2310,6 +2310,7 @@
           if (!hiddenSet.has(c.id) && !seen.has(c.id)) ordered.push(c);
         }
         this.cols = this.mergeRtsTrio(ordered);
+        if (!this.categoryColVisible()) this.categoryFilter = '';   // nakatago ang CATEGORY column = balik sa Lahat
       },
 
       // Pagsamahin ang RTS% / Del% / Transit% sa ISANG stacked column (jnt_rdt).
@@ -3978,6 +3979,14 @@
           case 'dormant':     return 'Matagal nang walang benta — HOLD lang ang i-order';
           default:            return '';
         }
+      },
+      // Tooltip ng I-ORDER: HOLD lang ang quantity ng Phasing Out / Dormant (walang palugit), kaya iba ang paliwanag.
+      orderTip(name){
+        const S = this.stockFor(name), P = this.stockSet(name);
+        if (S && P && P.palugit == null && (S.lifecycle === 'phasing_out' || S.lifecycle === 'dormant')) {
+          return 'ilang piraso ang dapat i-order (HOLD lang − stock − paparating; walang benta kaya walang dagdag)';
+        }
+        return 'ilang piraso ang dapat i-order (HOLD + benta habang hinihintay − stock − paparating)';
       },
       // Ang Category selector at filter ay para lang kapag naka-show ang CATEGORY column.
       categoryColVisible(){ return this.cols.some(c => c.id === 'category'); },
