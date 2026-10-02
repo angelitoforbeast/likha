@@ -109,6 +109,28 @@ How they behave:
 - T6: `ItemPageTest > category filter…`: no `x-model="categoryFilter"`.
 - T6 fix: an `ItemPageTest` markup assertion. The first line was truncated in the runner output.
 
+## Fix list 1 (Mira, verifier findings)
+
+Commit `cde134d`: "fix: plain tooltips for lead/palugit, order-by date and DOI colours (003 fix list 1)". Only `resources/views/item/_agg_cells.blade.php` and `tests/Feature/Item/ItemPageTest.php` changed.
+
+1. **DOI cell, "lead N · palugit M" line**
+   - Every role gets `title="Lead = ilang araw bago dumating ang order; palugit = dagdag na araw na reserba"`.
+   - The CEO's edit button reads "Lead = … reserba — i-click para palitan (para sa lahat ng variant ng item na ito)".
+2. **I-ORDER cell, "bago mag <date>" / "ngayon na" line:** `title="Huling araw na pwedeng umorder para hindi maubusan, base sa lead time"`.
+3. **DOI tooltip:** now ends with "Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa."
+4. **`ItemPageTest::test_doi_lead_and_order_by_lines_have_plain_tooltips`:**
+   - All three texts are in the CEO and Marketing renders.
+   - "… — i-click para palitan" is in the CEO render only.
+   - Red first: it failed with `assertStringContainsString` on the missing lead text before the Blade change.
+
+Outputs:
+- `php.bat artisan test --filter=ItemPageTest` → `Tests: 7 passed (82 assertions)`.
+- Full suite `php.bat artisan test` → `Tests: 1 failed, 3 skipped, 142 passed (1409 assertions)`.
+  - The only failure is the known baseline `Tests\Feature\ExampleTest > the application returns a successful response`: "Expected response status code [200] but received 302."
+  - The 3 skipped are the Boardroom live tests (off by design).
+- `php.bat -l tests/Feature/Item/ItemPageTest.php` → `No syntax errors detected in tests/Feature/Item/ItemPageTest.php`. This is the only changed PHP file; the Blade partial isn't plain PHP.
+- `npm run build` → `vite v6.3.5 … ✓ built in 2.38s` (bundle unchanged: `app-DNxiirP_.js 35.32 kB`).
+
 ## Endpoint SQL (for EXPLAIN on production)
 
 The example uses `/item/stock?start_date=2026-09-01&end_date=2026-10-02`, with START `2026-09-25`.
