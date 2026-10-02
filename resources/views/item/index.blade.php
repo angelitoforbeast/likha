@@ -15,9 +15,10 @@
     body { display:flex; flex-direction:column; overflow:hidden; }
 
     #nav {
-      flex-shrink:0; height:52px; background:#1e293b;
+      flex-shrink:0; background:#1e293b;
       border-bottom:1px solid #334155;
-      display:flex; align-items:center; padding:0 18px; gap:10px;
+      display:flex; flex-wrap:wrap; align-items:center; padding:6px 18px; gap:10px;
+      min-height:52px; row-gap:6px;
       position:relative; z-index:100;
     }
 
@@ -318,7 +319,7 @@
     .il-table { table-layout:fixed; width:100%; }
     .il-table thead th {
       white-space:normal; overflow-wrap:anywhere; line-height:1.2;
-      font-size:10px; letter-spacing:.01em; padding:8px 3px; text-align:center;
+      font-size:11px; letter-spacing:.01em; padding:8px 3px; text-align:center;
     }
     .il-table thead th.il-th-item { text-align:left; padding-left:10px; }
     .il-table thead th:focus-visible { outline:2px solid #60a5fa; outline-offset:-2px; }
@@ -416,9 +417,47 @@
     .il-camp .fb-table .sub, .il-camp .fb-table div[style*="font-size:10px"], .il-camp .fb-table div[style*="font-size:9px"]{font-size:11px !important;}
     .il-camp td.nest-host{padding:6px 4px !important; min-width:0;}
     .il-camp .expand-nest-1 .expand-wrap, .il-camp .expand-nest-2 .expand-wrap{max-height:none; overflow-y:visible;}
+    .il-m-label { display:none; }
+    /* TOTAL (nakikita) — sticky sa baba gaya ng lumang TOTAL row. Walang fills. */
+    .il-table > tbody > tr.il-total > td {
+      position:sticky; bottom:0; z-index:20; font-weight:700; color:#0f172a;
+      background:#f1f5f9; border-top:2px solid #cbd5e1;
+    }
     @media (max-width: 1439px) {
       .il-col-lc { display:none !important; }
       .il-lc-under { display:block; }
+    }
+    /* 1,100–1,365: tanggal ang ACTION column (nasa expanded block na), mas makikitid ang ilang column. */
+    @media (max-width: 1365px) {
+      .il-col-action { display:none !important; }
+      .il-table col.il-col-doi { width:170px !important; }
+      .il-table col.il-col-order { width:136px !important; }
+      .il-table col.il-col-pct { width:96px !important; }
+      .il-table col.il-col-ads { width:110px !important; }
+      .il-pct-grid { grid-template-columns:1fr; }
+      .il-only-lt1366{display:block;}
+    }
+    /* Mas makitid sa 1,100: bawat item ay card; walang lumalampas sa lapad ng screen. */
+    @media (max-width: 1099px) {
+      .il-only-lt1100{display:block;}
+      .il-table, .il-table > tbody { display:block; width:100%; min-width:0; }
+      .il-table thead { display:block; position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden; }
+      .il-table colgroup { display:none; }
+      .il-table tbody tr.il-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); position:relative;
+        border:1px solid #cbd5e1; border-radius:8px; margin:8px 0; background:#fff; min-width:0; }
+      .il-table > tbody > tr.il-row > td { display:block; min-width:0; border-top:0; text-align:left; padding:6px 10px; overflow-wrap:anywhere; }
+      .il-table > tbody > tr.il-row > td.il-item { position:static; grid-column:1 / -1; padding-right:48px; }
+      .il-table > tbody > tr.il-row > td.il-c-pct { grid-column:1 / -1; }
+      .il-table > tbody > tr.il-row > td.il-c-hide { display:none !important; }
+      .il-table > tbody > tr.il-row > td.il-chev-td { position:absolute; top:6px; right:6px; padding:0; background:transparent; }
+      .il-table > tbody > tr.il-expand-row { display:block; min-width:0; }
+      .il-table > tbody > tr.il-expand-row > td { display:block; min-width:0; }
+      .il-table > tbody > tr.il-empty-row, .il-table > tbody > tr.il-total { display:block; }
+      .il-table > tbody > tr.il-empty-row > td, .il-table > tbody > tr.il-total > td { display:block; min-width:0; text-align:left; }
+      .il-table > tbody > tr.il-total > td { position:static; }
+      .il-table > tbody > tr.il-total > td.il-t-empty { display:none !important; }
+      .il-m-label { display:block; font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.02em; }
+      .il-pct-grid { grid-template-columns:1fr 1fr; }
     }
   </style>
 </head>
@@ -439,7 +478,7 @@
                placeholder="Search item or alias…"
                style="background:#0f172a;color:#e2e8f0;border:1px solid #475569;
                       border-radius:6px;padding:5px 28px 5px 28px;font-size:12px;
-                      outline:none;width:240px;transition:border-color .15s;"
+                      outline:none;width:240px;max-width:100%;transition:border-color .15s;"
                onfocus="this.style.borderColor='#2563eb';"
                onblur="this.style.borderColor='#475569';">
         <button x-show="itemFilterSearch" type="button"
@@ -613,7 +652,7 @@
             :title="anyExpanded() ? 'Isara lahat ng items at campaigns' : 'Buksan ang pages ng lahat ng item'"
             style="background:#1e293b;color:#86efac;border:1px solid #475569;
                    border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
-                   cursor:pointer;margin-left:4px;">
+                   cursor:pointer;margin-left:4px;width:118px;text-align:center;white-space:nowrap;">
       <span x-text="anyExpanded() ? '▼ Hide all' : '▶ Expand all'"></span>
     </button>
 
@@ -755,6 +794,7 @@
     <span style="font-size:11px;color:#475569;font-weight:700;margin-right:2px;">Sourcing:</span>
     <template x-for="c in worklistChips" :key="'wl-'+c.key">
       <button type="button" @click="setWorklist(c.key)"
+              :title="c.key === 'i_order' ? 'Mga item na may supplier na at kailangan nang i-order' : ''"
               :style="worklist.list === c.key
                 ? 'background:#4f46e5;color:#fff;border:1px solid #4f46e5;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;'
                 : 'background:#fff;color:#334155;border:1px solid #cbd5e1;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;'">
@@ -1403,7 +1443,7 @@
         { key:'lahat',      label:'Lahat' },
         { key:'hanapan',    label:'Hanapan ng supplier' },
         { key:'may_quote',  label:'May quote, hindi pa na-order' },
-        { key:'i_order',    label:'I-order na' },
+        { key:'i_order',    label:'Handa nang i-order (may supplier)' },
         { key:'naka_order', label:'Naka-order, hinihintay' },
       ],
       // Stock / DOI / order qty / category / item value kada base item — /item/stock (lahat ng role).
@@ -3528,6 +3568,9 @@
         if (this.ilIdOn('breakeven_cpp')) { const be = this.ilBeRange(G); if (be) parts.push('BE ' + be); }
         return parts.join(' · ');
       },
+      // TOTAL (nakikita): sinusunod ang itemGroups() (item checkbox, sourcing chip, category filter).
+      ilTotVisible() { return this.aggOf(this.itemGroups().flatMap(G => G.pages)); },
+      ilHoldVisible() { return this.itemGroups().reduce((s, G) => s + (Number(G.hold) || 0), 0); },
       // Pinakabagong action note sa mga page ng item (by action_at).
       ilLatestAction(G){
         let best = null;

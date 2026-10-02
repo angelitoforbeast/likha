@@ -8,12 +8,12 @@
           <col class="il-col-lc" style="width:112px" x-show="ilColOn('lifecycle')">
           <col style="width:104px" x-show="ilColOn('stock')">
           <col style="width:72px" x-show="ilColOn('upd')">
-          <col style="width:188px" x-show="ilColOn('doi')">
-          <col style="width:150px" x-show="ilColOn('order')">
+          <col class="il-col-doi" style="width:188px" x-show="ilColOn('doi')">
+          <col class="il-col-order" style="width:150px" x-show="ilColOn('order')">
           <col style="width:96px" x-show="ilColOn('kita')">
-          <col style="width:150px" x-show="ilColOn('pct')">
-          <col style="width:128px" x-show="ilColOn('ads')">
-          <col style="width:116px" x-show="ilColOn('action')">
+          <col class="il-col-pct" style="width:150px" x-show="ilColOn('pct')">
+          <col class="il-col-ads" style="width:128px" x-show="ilColOn('ads')">
+          <col class="il-col-action" style="width:116px" x-show="ilColOn('action')">
           <col style="width:36px">
         </colgroup>
         <thead>
@@ -54,7 +54,7 @@
                 title="Gastos sa ads, kasama ang CPP at breakeven CPP">
               <span>ADS</span><span x-text="arr('adspent')"></span>
             </th>
-            <th class="sortable" :class="ac('il_action_at')" x-show="ilColOn('action')" tabindex="0" @click="sb('il_action_at')" @keydown.enter="sb('il_action_at')"
+            <th class="sortable il-col-action" :class="ac('il_action_at')" x-show="ilColOn('action')" tabindex="0" @click="sb('il_action_at')" @keydown.enter="sb('il_action_at')"
                 title="Pinakabagong action note sa mga page ng item">
               <span>ACTION</span><span x-text="arr('il_action_at')"></span>
             </th>
@@ -197,7 +197,7 @@
               <td class="il-col-lc" x-show="ilColOn('lifecycle')">@include('item._il_lifecycle')</td>
 
               {{-- STOCK / PAPARATING --}}
-              <td x-show="ilColOn('stock')" :title="stockTip('Stock = ilang piraso ang natitira; Paparating = naka-order sa supplier na hindi pa dumarating', stockFor(G.item_name))">
+              <td class="il-c-hide" x-show="ilColOn('stock')" :title="stockTip('Stock = ilang piraso ang natitira; Paparating = naka-order sa supplier na hindi pa dumarating', stockFor(G.item_name))">
                 <span x-show="stockPending()" class="il-grey">…</span>
                 <div x-show="!stockPending()" style="display:flex;flex-wrap:wrap;gap:0 4px;justify-content:center;">
                   <template x-if="ilIdOn('stock')">
@@ -218,7 +218,7 @@
               </td>
 
               {{-- BENTA/ARAW --}}
-              <td x-show="ilColOn('upd')"
+              <td class="il-c-hide" x-show="ilColOn('upd')"
                   :title="stockTip(stockSet(G.item_name) ? 'average ng huling ' + stockSet(G.item_name).velocity_days + ' araw' : 'average na benta kada araw', stockFor(G.item_name))">
                 <span x-show="stockPending()" class="il-grey">…</span>
                 <span x-show="!stockPending()" x-text="stockSet(G.item_name) ? Number(stockSet(G.item_name).units_per_day).toFixed(1) : '—'"></span>
@@ -226,6 +226,7 @@
 
               {{-- AABOT PA? --}}
               <td x-show="ilColOn('doi')" style="text-align:left;">
+                <span class="il-m-label">AABOT PA?</span>
                 <span x-show="stockPending()" class="il-grey">…</span>
                 <template x-if="!stockPending()">
                   <div>
@@ -269,6 +270,7 @@
 
               {{-- I-ORDER --}}
               <td x-show="ilColOn('order')" :title="stockTip(ilOrderReason(G.item_name), stockFor(G.item_name))">
+                <span class="il-m-label">I-ORDER</span>
                 <span x-show="stockPending()" class="il-grey">…</span>
                 <template x-if="!stockPending()">
                   <div>
@@ -286,7 +288,7 @@
               </td>
 
               {{-- KITA NGAYON --}}
-              <td x-show="ilColOn('kita')">
+              <td class="il-c-hide" x-show="ilColOn('kita')">
                 <template x-if="ilIdOn('proj_prof_1d')">
                   <div class="il-num" :style="'color:' + ilTone(G.agg.projected_profit_last_day)"
                        x-text="ilArrow(G.agg.projected_profit_last_day) + ilMoney(G.agg.projected_profit_last_day)"></div>
@@ -297,7 +299,8 @@
               </td>
 
               {{-- KITA % (2×2) --}}
-              <td x-show="ilColOn('pct')" title="Kita bilang % ng benta: 1 araw, 3 araw, 7 araw, buong range">
+              <td class="il-c-pct" x-show="ilColOn('pct')" title="Kita bilang % ng benta: 1 araw, 3 araw, 7 araw, buong range">
+                <span class="il-m-label">KITA %</span>
                 <div class="il-pct-grid">
                   <template x-if="ilIdOn('proj_pct_1d')"><span :style="'color:' + ilTone(G.agg.proj_pct_1d)" x-text="'1D ' + ilPct(G.agg.proj_pct_1d)"></span></template>
                   <template x-if="ilIdOn('proj_pct_3d')"><span :style="'color:' + ilTone(G.agg.proj_pct_3d)" x-text="'3D ' + ilPct(G.agg.proj_pct_3d)"></span></template>
@@ -307,7 +310,7 @@
               </td>
 
               {{-- ADS --}}
-              <td x-show="ilColOn('ads')">
+              <td class="il-c-hide" x-show="ilColOn('ads')">
                 <template x-if="ilIdOn('adspent')">
                   <div class="il-num" x-text="ilMoney(G.agg.adspent)"></div>
                 </template>
@@ -315,7 +318,7 @@
               </td>
 
               {{-- ACTION — pinakabagong note; ang pag-edit ay per page (nasa expanded block) --}}
-              <td x-show="ilColOn('action')">
+              <td class="il-col-action il-c-hide" x-show="ilColOn('action')">
                 <template x-if="ilLatestAction(G)">
                   <div class="il-ellipsis" :title="ilLatestAction(G).page + ': ' + ilLatestAction(G).text" x-text="ilLatestAction(G).text"></div>
                 </template>
@@ -323,7 +326,7 @@
               </td>
 
               {{-- › --}}
-              <td>
+              <td class="il-chev-td">
                 <button type="button" class="il-chev" :class="isItemOpen(G.item_name) ? 'active' : ''"
                         :aria-expanded="isItemOpen(G.item_name) ? 'true' : 'false'"
                         title="Ipakita/itago ang detalye ng item" aria-label="Ipakita/itago ang detalye ng item"
@@ -342,6 +345,45 @@
                   </template>
                 </div>
               </td>
+            </tr>
+          </tbody>
+        </template>
+
+        {{-- TOTAL (nakikita) — sumusunod sa itemGroups() (item filter, sourcing chip, category). Walang fills. --}}
+        <template x-if="itemGroups().length > 0">
+          <tbody>
+            <tr class="il-total">
+              <td class="il-item" title="Kabuuan ng mga item na nakikita ngayon (kasama ang filter)">
+                <div class="il-name">TOTAL (nakikita)</div>
+                <div class="il-sub" x-text="'Naka-hold: ' + num(ilHoldVisible())"></div>
+              </td>
+              <td class="il-col-lc il-t-empty" x-show="ilColOn('lifecycle')"></td>
+              <td class="il-t-empty" x-show="ilColOn('stock')"></td>
+              <td class="il-t-empty" x-show="ilColOn('upd')"></td>
+              <td class="il-t-empty" x-show="ilColOn('doi')"></td>
+              <td class="il-t-empty" x-show="ilColOn('order')"></td>
+              <td x-show="ilColOn('kita')">
+                <span class="il-m-label">KITA NGAYON</span>
+                <div class="il-num" :style="'color:' + ilTone(ilTotVisible().projected_profit_last_day)"
+                     x-text="ilArrow(ilTotVisible().projected_profit_last_day) + ilMoney(ilTotVisible().projected_profit_last_day)"></div>
+                <div class="il-sub" x-text="num(ilTotVisible().orders_last_day) + ' orders'"></div>
+              </td>
+              <td x-show="ilColOn('pct')">
+                <span class="il-m-label">KITA %</span>
+                <div class="il-pct-grid">
+                  <span :style="'color:' + ilTone(ilTotVisible().proj_pct_1d)" x-text="'1D ' + ilPct(ilTotVisible().proj_pct_1d)"></span>
+                  <span :style="'color:' + ilTone(ilTotVisible().proj_pct_3d)" x-text="'3D ' + ilPct(ilTotVisible().proj_pct_3d)"></span>
+                  <span :style="'color:' + ilTone(ilTotVisible().proj_pct_7d)" x-text="'7D ' + ilPct(ilTotVisible().proj_pct_7d)"></span>
+                  <span :style="'color:' + ilTone(ilTotVisible().proj_pct)" x-text="'1M ' + ilPct(ilTotVisible().proj_pct)"></span>
+                </div>
+              </td>
+              <td x-show="ilColOn('ads')">
+                <span class="il-m-label">ADS</span>
+                <div class="il-num" x-text="ilMoney(ilTotVisible().adspent)"></div>
+                <div class="il-sub" x-text="'CPP ' + md(ilTotVisible().cpp)"></div>
+              </td>
+              <td class="il-col-action il-t-empty" x-show="ilColOn('action')"></td>
+              <td class="il-t-empty"></td>
             </tr>
           </tbody>
         </template>

@@ -370,4 +370,79 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringNotContainsString("'Kulang '", $mkt);
         $this->assertStringNotContainsString('Walang item sa listahang ito.', $mkt);
     }
+
+    // ── Bagong layout (005 T5): TOTAL, toolbar, breakpoints ───────────────────
+
+    public function test_new_table_total_follows_the_visible_items_and_the_old_total_is_unchanged(): void
+    {
+        foreach ([true, false] as $ceo) {
+            $new = $this->render($ceo);
+            $this->assertStringContainsString('class="il-total"', $new);
+            $this->assertStringContainsString('TOTAL (nakikita)', $new);
+            $this->assertStringContainsString('Kabuuan ng mga item na nakikita ngayon (kasama ang filter)', $new);
+            $this->assertStringContainsString('ilTotVisible() { return this.aggOf(this.itemGroups().flatMap(G => G.pages)); }', $new);
+            $this->assertStringContainsString('ilHoldVisible() {', $new);
+            $this->assertStringNotContainsString('<td>TOTAL</td>', $new);
+
+            $old = $this->render($ceo, true);
+            $this->assertStringContainsString('<td>TOTAL</td>', $old);
+            $this->assertStringContainsString('tot() { return this.aggOf(this.filteredRows()); }', $old);
+            $this->assertStringNotContainsString('class="il-total"', $old);
+        }
+    }
+
+    public function test_i_order_chip_is_renamed_with_a_tooltip(): void
+    {
+        $ceo = $this->render(true);
+        $this->assertStringContainsString("label:'Handa nang i-order (may supplier)'", $ceo);
+        $this->assertStringNotContainsString("label:'I-order na'", $ceo);
+        $this->assertStringContainsString('Mga item na may supplier na at kailangan nang i-order', $ceo);
+    }
+
+    public function test_toolbar_wraps_and_expand_all_has_a_fixed_width(): void
+    {
+        foreach ([true, false] as $ceo) {
+            $html = $this->render($ceo);
+            $this->assertMatchesRegularExpression('/#nav\s*\{[^}]*flex-wrap:wrap;[^}]*min-height:52px/', $html);
+            $this->assertDoesNotMatchRegularExpression('/#nav\s*\{[^}]*[^-]height:52px/', $html);
+            $this->assertStringContainsString('width:118px;text-align:center;white-space:nowrap', $html);
+        }
+    }
+
+    public function test_new_table_has_the_narrow_screen_breakpoints(): void
+    {
+        $html = $this->render(true);
+        $this->assertStringContainsString('@media (max-width: 1365px)', $html);
+        $this->assertStringContainsString('@media (max-width: 1099px)', $html);
+        foreach (['<col class="il-col-action"', '<th class="sortable il-col-action"', '<td class="il-col-action il-c-hide"'] as $m) {
+            $this->assertStringContainsString($m, $html);
+        }
+        $this->assertMatchesRegularExpression('/\.il-col-action\s*\{\s*display:none\s*!important/', $html);
+        $this->assertStringContainsString('.il-only-lt1366{display:block;}', $html);
+        $this->assertStringContainsString('.il-only-lt1100{display:block;}', $html);
+        $this->assertStringContainsString('.il-table tbody tr.il-row{display:grid', $html);
+        $this->assertStringContainsString('class="il-m-label"', $html);
+        $this->assertStringContainsString('tr.il-total', $html);
+    }
+
+    public function test_new_layout_font_sizes_are_never_below_11px(): void
+    {
+        $dir = base_path('resources/views/item/');
+        $index = file_get_contents($dir . 'index.blade.php');
+        $start = strpos($index, '/* ── Bagong layout (005)');
+        $this->assertNotFalse($start);
+        $css = substr($index, $start, strpos($index, '</style>', $start) - $start);
+        $css = preg_replace('/\[style\*="[^"]*"\]/', '', $css); // attribute selectors lang, hindi totoong size
+        $sources = ['il css' => $css];
+        foreach (['_table_new', '_il_expand', '_il_lifecycle'] as $p) {
+            $sources[$p] = file_get_contents($dir . $p . '.blade.php');
+        }
+        foreach ($sources as $name => $src) {
+            preg_match_all('/font-size:\s*(\d+(?:\.\d+)?)px/', $src, $m);
+            foreach ($m[1] as $px) {
+                $this->assertGreaterThanOrEqual(11, (float) $px, "$name has font-size {$px}px");
+            }
+        }
+        $this->assertDoesNotMatchRegularExpression('/\sx-html\s*=/', implode('', $sources));
+    }
 }
