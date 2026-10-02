@@ -81,6 +81,7 @@ class LifecycleStockTest extends ItemTestCase
             'CONSX'  => ['consistent',  0,   null, 220, 150, true],
             'SCALX'  => ['scaling',     105, null, 365, 150, true],   // 7-day v = 15
             'SCALZ'  => ['scaling',     0,   null, 260, 150, true],   // 7-day v = 0, 14-day v = 10 wins (amendment 004-1)
+            'EQUX'   => ['scaling',     70,  null, 260, 150, true],   // 7-day v = 14-day v = 10: strict >, kaya 14-day ang gamit
             'DECLX'  => ['declining',   0,   null, 120, 120, false],
             'PHASEX' => ['phasing_out', 0,   null, 50,  50,  false],
             'DORMX'  => ['dormant',     0,   null, 50,  50,  false],
@@ -96,7 +97,7 @@ class LifecycleStockTest extends ItemTestCase
         $items = $this->stock();
 
         // velocity_days = bilang ng araw sa likod ng units_per_day: [normal, lugi]
-        $days = ['newx' => [14, 14], 'actx' => [14, 14], 'consx' => [14, 14], 'scalx' => [7, 14], 'scalz' => [14, 14],
+        $days = ['newx' => [14, 14], 'actx' => [14, 14], 'consx' => [14, 14], 'scalx' => [7, 14], 'scalz' => [14, 14], 'equx' => [14, 14],
                  'declx' => [14, 14], 'phasex' => [14, 14], 'dormx' => [14, 14], 'overx' => [14, 14],
                  'fivex' => [5, 5], 'fivep' => [5, 5]];
         foreach ($days as $k => [$normalDays, $lugiDays]) {
@@ -136,6 +137,18 @@ class LifecycleStockTest extends ItemTestCase
             }
         }
         $this->assertSame('Scaling', trim(preg_replace('/[^A-Za-z ]/u', '', $items['scalx']['lifecycle_label'])));
+    }
+
+    public function test_velocity_days_is_still_given_when_stock_is_not_ready(): void
+    {
+        DB::table('app_settings')->where('key', 'item_stock_start')->delete();
+        $this->formulaItem('NORDY', 'active');
+
+        $s = $this->stock()['nordy']['normal'];
+
+        $this->assertSame(14, $s['velocity_days']);
+        $this->assertEquals(10, $s['units_per_day']);
+        $this->assertNull($s['order_qty']);
     }
 
     public function test_scaling_doi_example_is_16_point_7_amber(): void
