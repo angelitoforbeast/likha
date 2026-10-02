@@ -68,6 +68,56 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringContainsString('kulang ', $ceo);
     }
 
+    public function test_lifecycle_column_is_registered_and_rendered_on_item_rows(): void
+    {
+        $ctl = \App\Http\Controllers\OwnerColumnSettingsController::class;
+        $this->assertContains('lifecycle', array_column($ctl::CATALOG['owner_private'], 'id'));
+        $this->assertContains('lifecycle', $ctl::DEFAULT_VISIBLE['owner_private']);
+        foreach ([$this->render(true), $this->render(false)] as $html) {
+            $this->assertStringContainsString("id:'lifecycle'", $html);              // defaultCols()
+            $this->assertStringContainsString("col.id==='lifecycle'", $html);        // item-row cell
+            $this->assertStringContainsString("'order_qty','lifecycle']", $html);    // labas sa catch-all na blank cell
+            $this->assertStringContainsString("case 'lifecycle':", $html);           // sort by label
+            $this->assertStringContainsString('lifecycle_label', $html);
+            $this->assertStringContainsString("' · lugi'", $html);
+            $this->assertStringContainsString('(manual)', $html);
+            $this->assertStringContainsString('HOLD lang ang i-order', $html);
+            $this->assertSame(0, substr_count($html, 'x-html'));
+        }
+    }
+
+    public function test_rows_pick_the_normal_or_lugi_set_from_the_combined_base_profit(): void
+    {
+        foreach ([$this->render(true), $this->render(false)] as $html) {
+            // Isang profit figure kada base item: Σ projected_profit_last_7d ÷ Σ gross_sales_last_7d.
+            $this->assertStringContainsString('baseProfitPct7(name)', $html);
+            $this->assertStringContainsString('S.gated && pct != null && pct <= 0', $html);
+            $this->assertStringContainsString('this.stockIsLugi(name) ? S.lugi : S.normal', $html);
+            // Benta/araw, DOI, I-order at order-by ay galing sa napiling set.
+            $this->assertGreaterThanOrEqual(4, substr_count($html, 'stockSet(row.item_name)'));
+            $this->assertStringContainsString("case 'units_per_day': case 'doi': case 'order_qty':", $html);
+            $this->assertStringContainsString('walang benta', $html);
+            $this->assertStringContainsString('halos walang benta', $html);
+            $this->assertStringContainsString('HOLD lang', $html);
+            $this->assertStringContainsString('huling 7 araw', $html);
+        }
+        // Ang palugit editor ay CEO lang.
+        $this->assertStringContainsString('blank = default ng lifecycle', $this->render(true));
+        $this->assertStringNotContainsString('blank = default ng lifecycle', $this->render(false));
+    }
+
+    public function test_category_selector_shows_only_while_the_category_column_is_visible(): void
+    {
+        $ctl = \App\Http\Controllers\OwnerColumnSettingsController::class;
+        $this->assertNotContains('category', $ctl::DEFAULT_VISIBLE['owner_private']);
+        foreach ([$this->render(true), $this->render(false)] as $html) {
+            $this->assertStringContainsString('x-show="categoryColVisible()"', $html);
+            $this->assertStringContainsString("cols.some(c => c.id === 'category')", $html);
+            $this->assertStringContainsString("categoryFilter !== '' && categoryColVisible()", $html);
+            $this->assertStringContainsString("if (f === '' || !this.categoryColVisible()", $html);
+        }
+    }
+
     public function test_stock_loads_in_parallel_before_the_item_summary(): void
     {
         $html = $this->render(true);

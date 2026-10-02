@@ -104,6 +104,7 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'units_per_day', 'label' => 'Benta/araw (/item)'],
             ['id' => 'doi',           'label' => 'DOI (/item)'],
             ['id' => 'order_qty',     'label' => 'I-order (/item)'],
+            ['id' => 'lifecycle',     'label' => 'Lifecycle (/item)'],
         ],
         'campaigns' => [
             ['id' => 'on',             'label' => 'Off / On'],
@@ -199,7 +200,7 @@ class OwnerColumnSettingsController extends Controller
             'proj_prof_1d', 'proj_prof_3d', 'proj_prof_7d',
             'jnt_rts', 'jnt_del', 'jnt_transit',
             'rts_set', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee', 'hold', 'action',
-            'stock', 'incoming', 'units_per_day', 'doi', 'order_qty',
+            'stock', 'incoming', 'units_per_day', 'doi', 'order_qty', 'lifecycle',
         ],
         'campaigns' => [
             // Reduced default to keep the inline expand panel within the

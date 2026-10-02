@@ -646,7 +646,8 @@
   @endif
 
   {{-- Category filter (lahat ng role). Naka-AND sa sourcing chips sa itemGroups(). --}}
-  <div style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:6px 12px;
+  {{-- Handoff 004: lalabas lang habang naka-show ang CATEGORY column. --}}
+  <div x-show="categoryColVisible()" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:6px 12px;
               display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
     <label for="category-filter" style="font-size:11px;color:#475569;font-weight:700;margin-right:2px;">Category:</label>
     <select id="category-filter" aria-label="Category" x-model="categoryFilter"
@@ -723,7 +724,7 @@
           </template>
           @endif
           {{-- Walang natira sa napiling category (lahat ng role; kung walang sourcing list na sumasagot na). --}}
-          <template x-if="categoryFilter !== '' && (!effectiveIsCeo || worklist.list === 'lahat') && !itemGroups().length && !(rows.length === 0 && loading)">
+          <template x-if="categoryFilter !== '' && categoryColVisible() && (!effectiveIsCeo || worklist.list === 'lahat') && !itemGroups().length && !(rows.length === 0 && loading)">
             <tr><td :colspan="cols.length + 2" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
                     x-text="!stock.loaded ? 'Loading…' : 'Walang item sa category na ito.'"></td></tr>
           </template>
@@ -2011,6 +2012,8 @@
   };
 
   function privateUI() {
+    // Cache ng baseProfitPct7() — labas ng Alpine state para hindi mag-trigger ng re-render pag sinulatan.
+    const bp7Cache = { rows: null, byKey: null };
     return {
       ...(function(){
         // URL precedence: ?start_date + ?end_date > legacy ?date= > default 30-day range ending yesterday PH
@@ -2261,6 +2264,7 @@
           { id:'units_per_day', label:'Benta/araw', sort:'units_per_day', align:'center', minw:90  },
           { id:'doi',           label:'DOI',        sort:'doi',           align:'center', minw:110 },
           { id:'order_qty',     label:'I-order',    sort:'order_qty',     align:'center', minw:100 },
+          { id:'lifecycle',     label:'Lifecycle',  sort:'lifecycle',     align:'center', minw:120 },
         ];
       },
 
@@ -3733,8 +3737,12 @@
           case 'item_value':            return this.itemValue(grp.item_name);
           case 'item_value_ceo':        return this.itemValueCeo(grp.item_name);
           case 'category':              return this.stockFor(grp.item_name)?.category ?? null;
-          case 'stock': case 'incoming': case 'units_per_day': case 'doi': case 'order_qty':
+          case 'stock': case 'incoming':
             return this.stockFor(grp.item_name)?.[col] ?? null;
+          // Benta/araw, DOI, I-order = galing sa set na napili ng profit (normal o lugi).
+          case 'units_per_day': case 'doi': case 'order_qty':
+            return this.stockSet(grp.item_name)?.[col] ?? null;
+          case 'lifecycle':             return this.stockFor(grp.item_name)?.lifecycle_label ?? null;
           default:
             return Object.prototype.hasOwnProperty.call(A, col) ? A[col] : null;
         }
@@ -3895,8 +3903,89 @@
       itemValue(name){ const v = this.stock.values[String(name||'').trim().toLowerCase()]?.item_value; return v == null ? null : v; },
       itemValueCeo(name){ const v = this.stock.values[String(name||'').trim().toLowerCase()]?.item_value_ceo; return v == null ? null : v; },
       stockPending(){ return !this.stock.loaded && !this.stock.error; },
+      // Isang profit figure kada BASE item para pareho ang set sa lahat ng variant row nito:
+      //   basePct = Σ projected_profit_last_7d ÷ Σ gross_sales_last_7d × 100
+      // (aggregate ng bawat item row ng page, parehong numerator/denominator ng Prof.%(7D)).
+      // Hindi isinasama ang item row na walang profit data (projected_profit_last_7d == null o gross_sales_last_7d <= 0);
+      // kung wala nang natira = null = walang gate. Naka-cache kada base key; nare-reset kapag napalitan ang this.rows.
+      baseProfitPct7(name){
+        if (!bp7Cache.byKey || bp7Cache.rows !== this.rows) {
+          const byItem = {};   // lowercased trimmed item_name → page rows (gaya ng itemGroups)
+          for (const r of this.rows) {
+            const k = String(r.item_name || '').trim().toLowerCase();
+            (byItem[k] = byItem[k] || []).push(r);
+          }
+          const sums = {};     // base key → { p, g }
+          for (const k in byItem) {
+            const A = this.aggOf(byItem[k]);
+            if (A.projected_profit_last_7d == null || !(A.gross_sales_last_7d > 0)) continue;
+            const b = this.supKey(k);
+            const s = (sums[b] = sums[b] || { p: 0, g: 0 });
+            s.p += A.projected_profit_last_7d;
+            s.g += A.gross_sales_last_7d;
+          }
+          bp7Cache.rows = this.rows;
+          bp7Cache.byKey = sums;
+        }
+        const s = bp7Cache.byKey[this.supKey(name)];
+        return s ? s.p / s.g * 100 : null;
+      },
+      // Scaling/Consistent na hindi kumikita (basePct <= 0) = lugi set; kung hindi, normal set.
+      stockIsLugi(name){
+        const S = this.stockFor(name);
+        const pct = this.baseProfitPct7(name);
+        return !!S && S.gated && pct != null && pct <= 0;
+      },
+      // Ang set (normal/lugi) na ipinapakita ng row: dito galing ang Benta/araw, DOI, palugit, I-order at order-by.
+      stockSet(name){
+        const S = this.stockFor(name);
+        if (!S) return null;
+        return this.stockIsLugi(name) ? S.lugi : S.normal;
+      },
+      leadLine(name){
+        const S = this.stockFor(name), P = this.stockSet(name);
+        if (!S || !P) return '';
+        return 'lead ' + S.lead + ' · ' + (P.palugit == null ? 'HOLD lang' : 'palugit ' + P.palugit);
+      },
+      lifecycleBadgeText(name){
+        const S = this.stockFor(name);
+        if (!S) return '—';
+        return S.lifecycle_label + (this.stockIsLugi(name) ? ' · lugi' : '');
+      },
+      lifecycleStyle(lc){
+        const m = { new:['#dbeafe','#1e40af'], scaling:['#dcfce7','#166534'], consistent:['#ccfbf1','#115e59'],
+                    active:['#f1f5f9','#334155'], declining:['#ffedd5','#9a3412'], phasing_out:['#fee2e2','#991b1b'],
+                    dormant:['#f3f4f6','#6b7280'] };
+        const c = m[lc] || ['#f3f4f6','#9ca3af'];
+        return 'display:inline-block;padding:1px 7px;border-radius:9999px;font-size:11px;font-weight:700;white-space:nowrap;background:' + c[0] + ';color:' + c[1];
+      },
+      // Isang linya ng Taglish: ano ang ibig sabihin ng lifecycle at ilang araw na palugit ang gamit (galing sa napiling set).
+      lifecycleTip(name){
+        const S = this.stockFor(name);
+        if (!S) return '';
+        const P = this.stockSet(name);
+        const n = (P && P.palugit != null) ? P.palugit : 0;
+        const lugi = this.stockIsLugi(name);
+        switch (S.lifecycle) {
+          case 'new':         return 'Bagong item (≤30 araw) — palugit ' + n + ' araw';
+          case 'scaling':     return lugi ? 'Tumataas pero lugi (Prof.%(7D) ≤ 0) — palugit ' + n + ' araw lang'
+                                          : 'Tumataas ang benta — palugit ' + n + ' araw, benta = huling 7 araw';
+          case 'consistent':  return lugi ? 'Matagal nang mabenta pero lugi (Prof.%(7D) ≤ 0) — palugit ' + n + ' araw lang'
+                                          : 'Matagal nang mabenta (≥90 araw) — palugit ' + n + ' araw';
+          case 'active':      return 'Tuloy-tuloy ang benta — palugit ' + n + ' araw';
+          case 'declining':   return n > 0 ? 'Bumababa ang benta — palugit ' + n + ' araw' : 'Bumababa ang benta — walang palugit';
+          case 'phasing_out': return 'Walang benta sa huling 14 araw — HOLD lang ang i-order';
+          case 'dormant':     return 'Matagal nang walang benta — HOLD lang ang i-order';
+          default:            return '';
+        }
+      },
+      // Ang Category selector at filter ay para lang kapag naka-show ang CATEGORY column.
+      categoryColVisible(){ return this.cols.some(c => c.id === 'category'); },
       doiText(S){
-        if (!S || S.doi == null) return '—';
+        if (!S) return '—';
+        if (S.doi_note === 'walang_benta') return 'walang benta';
+        if (S.doi_note === 'halos_walang_benta') return 'halos walang benta';
+        if (S.doi == null) return '—';
         const n = Number(S.doi);
         if (n < 0) return 'kulang ' + Math.abs(n).toFixed(1).replace(/\.0$/, '') + ' araw';
         return n.toFixed(1) + ' araw';
@@ -3908,7 +3997,7 @@
       },
       doiColour(S){
         const c = S && S.colour;
-        return c === 'red' ? '#b91c1c' : c === 'amber' ? '#b45309' : c === 'green' ? '#15803d' : '#94a3b8';
+        return c === 'red' ? '#b91c1c' : c === 'amber' ? '#b45309' : c === 'green' ? '#15803d' : '#94a3b8';   // 'grey' / wala = abo
       },
       variantTip(S){ return (S && S.variants && S.variants.length > 1) ? 'para sa lahat ng variant: ' + S.variants.join(', ') : ''; },
       // Tooltip ng stock cell: ang paliwanag + variant note (kung may) + error (kung may).
@@ -3938,14 +4027,14 @@
       // Category filter: hangga't wala pa ang stock data, huwag munang itago ang rows.
       categoryKeep(name){
         const f = this.categoryFilter;
-        if (f === '' || !this.stock.loaded) return true;
+        if (f === '' || !this.categoryColVisible() || !this.stock.loaded) return true;   // nakatago ang CATEGORY column = Lahat
         const cid = this.stockFor(name)?.category_id;
         if (f === '__none') return !cid;
         return String(cid) === f;
       },
       // ── CEO inline edits: category + lead/safety (per base item; server ang nagre-recompute) ──
       openStockEdit(name, S){
-        this.stockEdit = { key:this.supKey(name), mode:'sup', lead:(S ? S.lead : ''), safety:(S ? S.safety : ''), newCat:'', saving:false, error:'' };
+        this.stockEdit = { key:this.supKey(name), mode:'sup', lead:(S ? S.lead : ''), safety:(S && S.palugit_override != null ? S.palugit_override : ''), newCat:'', saving:false, error:'' };
       },
       closeStockEdit(){ this.stockEdit = { key:null, mode:null, lead:'', safety:'', newCat:'', saving:false, error:'' }; },
       async _stockPost(url, payload){
@@ -3993,9 +4082,12 @@
       async saveSupplySettings(name, lead, safety){
         if (this.stockEdit.saving) return;
         const ok = v => /^\d+$/.test(String(v).trim()) && Number(v) <= 255;
-        if (!ok(lead) || !ok(safety)) { this.stockEdit.error = 'Lagyan ng numero (0–255) ang lead at palugit.'; return; }
-        const j = await this._stockPost('{{ route('item.supply-settings.save') }}',
-          { item_name: name, lead_time_days: Number(lead), safety_days: Number(safety) });
+        // Blangko ang palugit = balik sa default ng lifecycle → hindi ipinapadala ang safety_days.
+        const blankSafety = String(safety ?? '').trim() === '';
+        if (!ok(lead) || (!blankSafety && !ok(safety))) { this.stockEdit.error = 'Lagyan ng numero (0–255) ang lead at palugit.'; return; }
+        const payload = { item_name: name, lead_time_days: Number(lead) };
+        if (!blankSafety) payload.safety_days = Number(safety);
+        const j = await this._stockPost('{{ route('item.supply-settings.save') }}', payload);
         this._stockSaved(j);
       },
       // Matagumpay na save: isara ang editor, kunin ang bagong category list, i-recompute ng server ang stock/DOI.

@@ -201,16 +201,16 @@
   </span>
 </template>
 <template x-if="col.id==='units_per_day'">
-  <span :title="stockTip('average na nabentang piraso kada araw (huling 14 araw)', stockFor(row.item_name))">
+  <span :title="stockTip('average na nabentang piraso kada araw (huling 14 araw; huling 7 araw kung Scaling na kumikita)', stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
-    <span x-show="!stockPending()" x-text="stockFor(row.item_name) ? Number(stockFor(row.item_name).units_per_day).toFixed(1) : '—'"></span>
+    <span x-show="!stockPending()" x-text="stockSet(row.item_name) ? Number(stockSet(row.item_name).units_per_day).toFixed(1) : '—'"></span>
   </span>
 </template>
 <template x-if="col.id==='doi'">
-  <span :title="stockTip('ilang araw pa tatagal ang stock + paparating, bawas ang HOLD. Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa.', stockFor(row.item_name))">
+  <span :title="stockTip('ilang araw pa tatagal ang stock + paparating, bawas ang HOLD. Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa. Abo: walang benta o halos walang benta.', stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
     <span x-show="!stockPending()">
-      <span :style="'font-weight:700;color:' + doiColour(stockFor(row.item_name))" x-text="doiText(stockFor(row.item_name))"></span>
+      <span :style="'font-weight:700;color:' + doiColour(stockSet(row.item_name))" x-text="doiText(stockSet(row.item_name))"></span>
       <template x-if="stockFor(row.item_name)">
         @if($effectiveIsCEO)
         <div @click.stop>
@@ -218,13 +218,15 @@
                   x-show="!(stockEdit.key === supKey(row.item_name) && stockEdit.mode === 'sup')"
                   @click.stop="openStockEdit(row.item_name, stockFor(row.item_name))"
                   style="background:none;border:0;padding:0;cursor:pointer;font-size:9px;color:#6366f1;font-weight:400;text-decoration:underline;"
-                  x-text="'lead ' + stockFor(row.item_name).lead + ' · palugit ' + stockFor(row.item_name).safety"></button>
+                  x-text="leadLine(row.item_name)"></button>
           <template x-if="stockEdit.key === supKey(row.item_name) && stockEdit.mode === 'sup'">
             <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:10px;font-weight:400;" title="para sa lahat ng variant ng item na ito">
               <label>lead <input type="number" min="0" max="255" step="1" x-model="stockEdit.lead"
                                  style="width:52px;border:1px solid #cbd5e1;border-radius:5px;padding:2px 4px;font-size:11px;"></label>
               <label>palugit <input type="number" min="0" max="255" step="1" x-model="stockEdit.safety"
+                                    placeholder="blank = default ng lifecycle" title="blank = default ng lifecycle"
                                     style="width:52px;border:1px solid #cbd5e1;border-radius:5px;padding:2px 4px;font-size:11px;"></label>
+              <span style="font-size:9px;color:#94a3b8;">blank = default ng lifecycle</span>
               <button type="button" :disabled="stockEdit.saving" @click.stop="saveSupplySettings(row.item_name, stockEdit.lead, stockEdit.safety)"
                       style="border:0;border-radius:5px;padding:3px 8px;font-size:10px;font-weight:700;cursor:pointer;background:#4f46e5;color:#fff;">Save</button>
               <button type="button" :disabled="stockEdit.saving" @click.stop="closeStockEdit()"
@@ -236,7 +238,7 @@
         </div>
         @else
         <div style="font-size:9px;color:#94a3b8;font-weight:400;" title="Lead = ilang araw bago dumating ang order; palugit = dagdag na araw na reserba"
-             x-text="'lead ' + stockFor(row.item_name).lead + ' · palugit ' + stockFor(row.item_name).safety"></div>
+             x-text="leadLine(row.item_name)"></div>
         @endif
       </template>
     </span>
@@ -246,15 +248,32 @@
   <span :title="stockTip('ilang piraso ang dapat i-order (HOLD + benta habang hinihintay − stock − paparating)', stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
     <span x-show="!stockPending()">
-      <span style="font-weight:800;" x-text="stockFor(row.item_name) && stockFor(row.item_name).order_qty != null ? num(stockFor(row.item_name).order_qty) : '—'"></span>
-      <template x-if="stockFor(row.item_name)">
-        <div style="font-size:9px;color:#64748b;font-weight:400;" title="Huling araw na pwedeng umorder para hindi maubusan, base sa lead time" x-text="orderByText(stockFor(row.item_name))"></div>
+      <span style="font-weight:800;" x-text="stockSet(row.item_name) && stockSet(row.item_name).order_qty != null ? num(stockSet(row.item_name).order_qty) : '—'"></span>
+      <template x-if="stockSet(row.item_name)">
+        <div style="font-size:9px;color:#64748b;font-weight:400;" title="Huling araw na pwedeng umorder para hindi maubusan, base sa lead time" x-text="orderByText(stockSet(row.item_name))"></div>
       </template>
+    </span>
+  </span>
+</template>
+{{-- LIFECYCLE (item rows lang): badge = lifecycle_label (+ " · lugi" kung lugi set ang napili, + "(manual)" kung override). --}}
+<template x-if="col.id==='lifecycle'">
+  <span :title="stockTip(lifecycleTip(row.item_name), stockFor(row.item_name))">
+    <span x-show="stockPending()" style="color:#94a3b8;">…</span>
+    <span x-show="!stockPending()">
+      <template x-if="stockFor(row.item_name)">
+        <span>
+          <span :style="lifecycleStyle(stockFor(row.item_name).lifecycle)" x-text="lifecycleBadgeText(row.item_name)"></span>
+          <template x-if="stockFor(row.item_name).lifecycle_auto === false">
+            <span style="font-size:9px;color:#64748b;font-weight:400;">(manual)</span>
+          </template>
+        </span>
+      </template>
+      <template x-if="!stockFor(row.item_name)"><span style="color:#94a3b8;">—</span></template>
     </span>
   </span>
 </template>
 {{-- Per-page-only columns (Promo, Price, Set RTS%, Item Val., etc.)
      — blank sa item aggregate row, tulad ng TOTAL row ng owner/private. --}}
-<template x-if="!['adspent','orders','orders_1d','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','np_per_order','np_per_order_3d','np_per_order_7d','np_per_order_1m','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_3d','proj_prof_7d','hold','jnt_rdt','jnt_rts','jnt_del','jnt_transit','item_val','item_val_ceo','category','stock','incoming','units_per_day','doi','order_qty'].includes(col.id)">
+<template x-if="!['adspent','orders','orders_1d','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','np_per_order','np_per_order_3d','np_per_order_7d','np_per_order_1m','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_3d','proj_prof_7d','hold','jnt_rdt','jnt_rts','jnt_del','jnt_transit','item_val','item_val_ceo','category','stock','incoming','units_per_day','doi','order_qty','lifecycle'].includes(col.id)">
   <span></span>
 </template>
