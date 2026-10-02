@@ -3073,8 +3073,8 @@
         } else if (this.layoutOld) {
           out.sort((a, b) => b.hold - a.hold);
         } else {
-          // Bagong layout: pinakamadalian muna (Kulang/Mauubos), tapos HOLD desc.
-          const rank = new Map(out.map(g => [g, this.ilUrgency(g)]));
+          // Bagong layout: ayon sa Next step (pula, kahel, dilaw, berde, abo, walang data), tapos HOLD desc.
+          const rank = new Map(out.map(g => [g, this.ilNext(g.item_name).rank]));
           out.sort((a, b) => (rank.get(a) - rank.get(b)) || (b.hold - a.hold));
         }
         return out;
@@ -3109,6 +3109,9 @@
           case 'units_per_day': case 'doi': case 'order_qty':
             return this.stockSet(grp.item_name)?.[col] ?? null;
           case 'lifecycle':             return this.stockFor(grp.item_name)?.lifecycle_label ?? null;
+          // To order (006): Next step rank at pinagsamang 7-day profit % ng base item.
+          case 'il_next':               return this.ilNext(grp.item_name).rank;
+          case 'il_profit7':            return this.baseProfitPct7(grp.item_name);
           // Bagong layout lang (ACTION header): pinakabagong action_at sa mga page ng item.
           case 'il_action_at': {
             let best = null;
@@ -3458,37 +3461,6 @@
         // "▲ 15.8%" / "▼ −3.2%" (U+2212 para sa negatibo).
         return (Number(v) >= 0 ? '▲ ' : '▼ −') + Math.abs(Number(v)).toFixed(1) + '%';
       },
-      // AABOT PA? — isang state kada item, sinusunod ang serye ng spec §6 (walang bagong formula).
-      ilAabot(name){
-        const S = this.stockFor(name), P = this.stockSet(name);
-        const st = (key, text, tone, icon, tip) => ({ key, text, tone, icon, tip });
-        if (!this.stock.loaded || !this.stock.ready || !S || !P) {
-          return st('nodata', '—', 'grey', '', 'Wala pang datos ng stock');
-        }
-        if (S.stock_needs_count) {
-          return st('uncounted', 'Hindi pa alam — bilangin muna ang stock', 'grey', '',
-                    'May stock na hindi nabilang bago ang ' + (this.stock.start || 'START') + '; bilangin muna');
-        }
-        if (P.doi_note === 'walang_benta') return st('walang_benta', '💤 Walang benta', 'grey', '💤', 'Walang benta, kaya walang bilang ng araw');
-        if (P.doi_note === 'halos_walang_benta') return st('halos', '🐢 Halos walang benta', 'grey', '🐢', 'Mas mababa sa 0.5 piraso kada araw ang benta');
-        if (P.doi == null) {
-          return Number(P.units_per_day) === 0
-            ? st('walang_benta', '💤 Walang benta', 'grey', '💤', 'Walang benta, kaya walang bilang ng araw')
-            : st('nodata', '—', 'grey', '', 'Wala pang datos ng stock');
-        }
-        const doi = Number(P.doi);
-        if (doi < 0) {
-          return st('kulang', '⚠ Kulang: ' + this.ilDays(-doi) + ' araw na benta ang naka-hold', 'red', '⚠',
-                    'Kulang na ang stock + paparating para sa mga naka-hold; ilang araw na benta ang kulang');
-        }
-        if (P.colour === 'red')   return st('mauubos', '⚠ Mauubos bago dumating', 'red', '⚠', 'Mauubos ang stock bago dumating ang bagong order (lead time)');
-        if (P.colour === 'amber') return st('malapit', 'Malapit na: ' + this.ilDays(doi) + ' araw', 'amber', '', 'Tatagal pa ang stock, pero malapit na ang huling araw para umorder');
-        if (P.colour === 'green') {
-          return st('sapat', doi > 365 ? '✓ Sapat: mahigit 1 taon' : '✓ Sapat: ' + this.ilDays(doi) + ' araw', 'teal', '✓',
-                    'Sapat pa ang stock + paparating (bawas ang naka-hold) para sa ilang araw');
-        }
-        return st('nodata', '—', 'grey', '', 'Wala pang datos ng stock');
-      },
       // "Dating sa 7 araw + 3 araw reserba (Lumalaki)" / "Dating sa 7 araw · HOLD lang".
       ilLeadLine(name){
         const S = this.stockFor(name), P = this.stockSet(name);
@@ -3588,15 +3560,34 @@
       // CEO lang: "≈ ₱38,335" = qty × presyo (pinakamurang quote, else ITEM VAL. ÷ N) + " (min 3,000)" kapag kulang sa MOQ.
       ilQtyCost(name){
         if (!this.effectiveIsCeo) return '';
+        const a = this.ilQtyCostAmount(name);
+        if (!a) return '';
+        return '≈ ₱' + this.num(Math.round(a.amount)) + (a.min ? ' (min ' + this.num(a.min) + ')' : '');
+      },
+      // CEO lang: { amount, min } — amount = qty × presyo (hindi pa naka-round), min = MOQ kapag kulang ang qty; null kung walang presyo.
+      ilQtyCostAmount(name){
+        if (!this.effectiveIsCeo) return null;
         const P = this.stockSet(name);
-        if (!P || !(P.order_qty > 0)) return '';
+        if (!P || !(P.order_qty > 0)) return null;
         const q = this.ilCheapQuote(name);
         const price = q ? Number(q.price)
                         : ((this.ilIdOn('item_val') || this.ilIdOn('item_val_ceo')) ? this.ilPieceCost(name) : null);
-        if (price == null || isNaN(price)) return '';
-        let s = '≈ ₱' + this.num(Math.round(P.order_qty * price));
-        if (q && Number(q.moq) > 0 && P.order_qty < Number(q.moq)) s += ' (min ' + this.num(q.moq) + ')';
-        return s;
+        if (price == null || isNaN(price)) return null;
+        const min = (q && Number(q.moq) > 0 && P.order_qty < Number(q.moq)) ? Number(q.moq) : null;
+        return { amount: P.order_qty * price, min };
+      },
+      // TOTAL ng To order: mga nakikitang item na pula ang Next step. peso = null kung walang may cost (o hindi CEO view).
+      ilOrderTotal(){
+        let items = 0, pcs = 0, peso = null;
+        for (const G of this.itemGroups()) {
+          if (this.ilNext(G.item_name).tone !== 'red') continue;
+          items++;
+          const P = this.stockSet(G.item_name);
+          pcs += (P && Number(P.order_qty) > 0) ? Number(P.order_qty) : 0;
+          const a = this.ilQtyCostAmount(G.item_name);
+          if (a) peso = (peso || 0) + a.amount;
+        }
+        return { items, pcs, peso };
       },
       // Days left (spec §4.4): buong araw; abo "—" kapag walang data / bilangin muna / halos walang benta.
       ilDaysLeft(name){
@@ -3792,19 +3783,11 @@
         }
         return best ? { text: String(best.action_comment).trim(), page: String(best.page_name || '') } : null;
       },
-      // Default sort ng bagong layout: 0 Kulang/Mauubos (may supplier/quote), 1 Kulang/Mauubos (wala), 2 hindi pa nabibilang,
-      // 3 Malapit na, 4 Sapat, 5 ang iba. Marketing: walang supplier data kaya pareho ang 0 at 1.
-      ilUrgency(G){
-        const k = this.ilAabot(G.item_name).key;
-        if (k === 'kulang' || k === 'mauubos') {
-          if (!this.effectiveIsCeo) return 0;
-          return (this.suppliersFor(G.item_name).length || this.quotesFor(G.item_name).length) ? 0 : 1;
-        }
-        return k === 'uncounted' ? 2 : k === 'malapit' ? 3 : k === 'sapat' ? 4 : 5;
-      },
       // Palit ng tab (gaya ng setWorklist): ?tab=sales, o tanggal ang param para sa To order.
       setTab(tab){
         this.ilTab = tab === 'sales' ? 'sales' : 'order';
+        // Balik sa default sort para walang naiiwang sort ng column na wala sa kabilang tab.
+        this.sortCol = ''; this.sortDir = 'desc';
         const qs = new URLSearchParams(window.location.search);
         if (this.ilTab === 'sales') qs.set('tab', 'sales'); else qs.delete('tab');
         history.replaceState(null, '', '?' + qs.toString());

@@ -354,13 +354,51 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringContainsString('units_per_day != null) ? Number(', $expand);
     }
 
-    public function test_default_item_order_is_by_urgency_in_the_new_layout_and_by_hold_in_the_old(): void
+    public function test_default_item_order_is_by_next_step_rank_in_the_new_layout_and_by_hold_in_the_old(): void
     {
         $html = $this->render(true);
-        $this->assertStringContainsString('if (this.layoutOld) {', $html);
-        $this->assertStringContainsString('ilUrgency(', $html);
+        $this->assertStringContainsString('} else if (this.layoutOld) {', $html);
         $this->assertStringContainsString('out.sort((a, b) => b.hold - a.hold);', $html);
-        $this->assertLessThan(strpos($html, 'this.ilUrgency(g)'), strpos($html, 'if (this.layoutOld) {'));
+        $rank = strpos($html, 'const rank = new Map(out.map(g => [g, this.ilNext(g.item_name).rank]));');
+        $this->assertNotFalse($rank);
+        $this->assertLessThan($rank, strpos($html, '} else if (this.layoutOld) {'));
+        $this->assertStringContainsString('out.sort((a, b) => (rank.get(a) - rank.get(b)) || (b.hold - a.hold));', $html);
+        // Wala nang 005 urgency helpers.
+        foreach (['ilUrgency(', 'ilAabot('] as $gone) {
+            $this->assertStringNotContainsString($gone, $html);
+        }
+    }
+
+    public function test_every_to_order_header_sorts_and_switching_tab_resets_the_sort(): void
+    {
+        $html = $this->render(true);
+        $start = strpos($html, 'id="il-table-order"');
+        $head = substr($html, $start, strpos($html, '</thead>', $start) - $start);
+        foreach (['item_name', 'il_next', 'order_qty', 'doi', 'il_profit7', 'lifecycle'] as $key) {
+            $this->assertStringContainsString("tabindex=\"0\" @click=\"sb('{$key}')\" @keydown.enter=\"sb('{$key}')\"", $head);
+            $this->assertStringContainsString("x-text=\"arr('{$key}')\"", $head);
+        }
+        $this->assertStringContainsString("case 'il_next':               return this.ilNext(grp.item_name).rank;", $html);
+        $this->assertStringContainsString("case 'il_profit7':            return this.baseProfitPct7(grp.item_name);", $html);
+        // setTab: bumalik sa default sort (walang nakatagong sort na naiiwan).
+        $this->assertMatchesRegularExpression("/setTab\(tab\)\{[^}]*this\.sortCol = ''; this\.sortDir = 'desc';/s", $html);
+    }
+
+    public function test_to_order_total_counts_the_red_rows_and_shows_pesos_to_the_ceo_only(): void
+    {
+        $ceo = $this->render(true);
+        $mkt = $this->render(false);
+        foreach ([$ceo, $mkt] as $html) {
+            foreach (['x-for="T in [ilOrderTotal()]"', "'To order now: '", "' items · '", "' item · '", "' pcs'",
+                      "'To order now: nothing urgent'", "if (this.ilNext(G.item_name).tone !== 'red') continue;",
+                      'class="il-total"'] as $s) {
+                $this->assertStringContainsString($s, $html);
+            }
+            $this->assertSame(1, substr_count($html, 'ilOrderTotal()]'));
+            $this->assertMatchesRegularExpression('/ilQtyCostAmount\(name\)\s*\{\s*if \(!this\.effectiveIsCeo\) return null;/', $html);
+        }
+        $this->assertStringContainsString("' · ≈ ₱' + num(Math.round(T.peso))", $ceo);
+        $this->assertStringNotContainsString("' · ≈ ₱' + num(Math.round(T.peso))", $mkt);
     }
 
     public function test_hold_and_worklist_load_in_parallel_with_the_item_summary(): void

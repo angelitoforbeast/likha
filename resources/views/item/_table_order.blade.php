@@ -15,12 +15,14 @@
     <tr>
       <th class="sortable il-th-item" :class="ac('item_name')" tabindex="0" @click="sb('item_name')" @keydown.enter="sb('item_name')"
           title="The item, and how many pieces are on hold (ordered by customers, not shipped yet)"><span>Item</span><span x-text="arr('item_name')"></span></th>
-      <th x-show="ilIdOn('order_qty')" title="The one thing to do next for this item"><span>Next step</span></th>
+      <th class="sortable" x-show="ilIdOn('order_qty')" :class="ac('il_next')" tabindex="0" @click="sb('il_next')" @keydown.enter="sb('il_next')"
+          title="The one thing to do next for this item"><span>Next step</span><span x-text="arr('il_next')"></span></th>
       <th class="sortable" x-show="ilIdOn('order_qty')" :class="ac('order_qty')" tabindex="0" @click="sb('order_qty')" @keydown.enter="sb('order_qty')"
           title="How many pieces to order now"><span>Qty to order</span><span x-text="arr('order_qty')"></span></th>
       <th class="sortable" x-show="ilIdOn('doi')" :class="ac('doi')" tabindex="0" @click="sb('doi')" @keydown.enter="sb('doi')"
           title="How many days the stock and incoming pieces last after the orders on hold"><span>Days left</span><span x-text="arr('doi')"></span></th>
-      <th x-show="ilIdOn('proj_pct_7d')" title="Profit as a % of sales over the last 7 days (all variants together), and the profit in pesos"><span>Profit (7 days)</span></th>
+      <th class="sortable" x-show="ilIdOn('proj_pct_7d')" :class="ac('il_profit7')" tabindex="0" @click="sb('il_profit7')" @keydown.enter="sb('il_profit7')"
+          title="Profit as a % of sales over the last 7 days (all variants together), and the profit in pesos"><span>Profit (7 days)</span><span x-text="arr('il_profit7')"></span></th>
       <th class="sortable" x-show="ilIdOn('lifecycle')" :class="ac('lifecycle')" tabindex="0" @click="sb('lifecycle')" @keydown.enter="sb('lifecycle')"
           title="Where the item's sales are going: new, growing, steady, slowing..."><span>Trend</span><span x-text="arr('lifecycle')"></span></th>
       <th class="il-chev-th" title="Show or hide the item details"><span class="sr-only" style="position:absolute;left:-9999px;">Details</span></th>
@@ -143,6 +145,23 @@
           </div>
         </td>
       </tr>
+    </tbody>
+  </template>
+
+  {{-- TOTAL: mga row na pula ang Next step sa mga nakikita (filter + chip + category). Isang compute lang kada render. --}}
+  <template x-if="itemGroups().length > 0">
+    <tbody>
+      <template x-for="T in [ilOrderTotal()]" :key="'il-ot'">
+        <tr class="il-total">
+          <td :colspan="ilOrderColspan()" style="text-align:left;padding-left:10px;"
+              title="Shown items whose next step is red (Find a supplier, Order now): how many, how many pieces to order, and the estimated cost">
+            <span x-text="T.items ? 'To order now: ' + num(T.items) + (T.items === 1 ? ' item · ' : ' items · ') + num(T.pcs) + ' pcs' : 'To order now: nothing urgent'"></span>
+            @if($effectiveIsCEO)
+            <span x-show="T.items && T.peso !== null" x-text="' · ≈ ₱' + num(Math.round(T.peso))"></span>
+            @endif
+          </td>
+        </tr>
+      </template>
     </tbody>
   </template>
 </table>
