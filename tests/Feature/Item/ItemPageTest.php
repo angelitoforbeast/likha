@@ -21,15 +21,27 @@ class ItemPageTest extends ItemTestCase
         $this->actingAs($this->user());
     }
 
-    private function render(bool $effectiveIsCEO): string
+    private function render(bool $effectiveIsCEO, bool $layoutOld = false): string
     {
         return view('item.index', [
+            'layoutOld' => $layoutOld,
             'pages' => [], 'isCEO' => true, 'isMarketingOIC' => false,
             'viewAs' => $effectiveIsCEO ? 'ceo' : 'marketing', 'effectiveIsCEO' => $effectiveIsCEO,
             'ownerPrivateColsConfig' => null, 'campaignsColsConfig' => null, 'breakevenTargetPct' => 5,
             'colFormatRules' => [], 'campaignsColFormatRules' => [],
             'feeShipping' => null, 'feeCodRate' => null, 'feeVatRate' => null,
         ])->render();
+    }
+
+    public function test_old_render_has_the_full_scrolling_table(): void
+    {
+        $html = $this->render(true, true);
+        foreach ([
+            "col.id==='doi'", 'Drag headers to reorder', '<td>TOTAL</td>',
+            'colDragStart(', 'page-col-header', 'expand-panel',
+        ] as $marker) {
+            $this->assertStringContainsString($marker, $html);
+        }
     }
 
     public function test_hold_and_worklist_load_in_parallel_with_the_item_summary(): void
