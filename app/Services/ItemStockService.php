@@ -338,7 +338,7 @@ class ItemStockService
         $map = [];
         foreach (DB::table($table)->where('date', '<=', $end)->orderByDesc('date')->get(['item_name', 'unit_cost']) as $r) {
             $rawNames[mb_strtolower(trim((string) ($r->item_name ?? '')))] ??= (string) $r->item_name;
-            $k =$aliases->canonicalKey((string) ($r->item_name ?? ''));
+            $k = $aliases->canonicalKey((string) ($r->item_name ?? ''));
             if ($k === '' || array_key_exists($k, $map)) continue;
             $map[$k] = $r->unit_cost !== null ? (float) $r->unit_cost : ($keepNull ? null : 0.0);
         }
