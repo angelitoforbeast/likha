@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Http\Controllers\JntSupplyController;
+use App\Support\ItemLifecycle;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
@@ -62,6 +63,32 @@ class JntSupplyLifecycleTest extends TestCase
     public function test_jnt_supply_lifecycle_badge(string $key, string $label, string $classes): void
     {
         $this->assertSame([$label, $classes], $this->controllerBadge($key));
+    }
+
+    #[DataProvider('classifyCases')]
+    public function test_item_lifecycle_classifies_the_same(float $recent, float $prev, int $days, string $expected): void
+    {
+        $this->assertSame($expected, ItemLifecycle::classify($recent, $prev, $days, true, 30, 90, 1.5, 0.5));
+    }
+
+    #[DataProvider('badgeCases')]
+    public function test_item_lifecycle_badge_is_the_same(string $key, string $label, string $classes): void
+    {
+        $this->assertSame([$label, $classes], ItemLifecycle::badge($key));
+    }
+
+    public function test_item_lifecycle_defaults_are_the_jnt_supply_defaults(): void
+    {
+        $this->assertSame(
+            [14, 30, 90, 1.5, 0.5],
+            [
+                ItemLifecycle::RECENT_DAYS,
+                ItemLifecycle::NEW_ITEM_DAYS,
+                ItemLifecycle::LONG_RUNNING_DAYS,
+                ItemLifecycle::SCALE_THRESHOLD,
+                ItemLifecycle::DECLINE_THRESHOLD,
+            ]
+        );
     }
 
     private function controllerClassify(float $recent, float $prev, int $days): string

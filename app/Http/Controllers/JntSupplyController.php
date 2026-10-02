@@ -59,28 +59,10 @@ class JntSupplyController extends Controller
         float  $scaleThreshold,
         float  $declineThreshold
     ): string {
-        if ($daysRunning <= $newItemDays && $recentVel > 0) {
-            return 'new';
-        }
-        if ($recentVel == 0 && $prevVel > 0) {
-            return 'phasing_out';
-        }
-        if ($recentVel == 0 && $prevVel == 0) {
-            return 'dormant';
-        }
-        if ($prevVel == 0 && $recentVel > 0) {
-            return 'scaling';
-        }
-        if ($recentVel >= $prevVel * $scaleThreshold) {
-            return 'scaling';
-        }
-        if ($recentVel <= $prevVel * $declineThreshold) {
-            return 'declining';
-        }
-        if ($daysRunning >= $longRunningDays) {
-            return 'consistent';
-        }
-        return 'active';
+        return \App\Support\ItemLifecycle::classify(
+            $recentVel, $prevVel, $daysRunning, $hasOldOrders,
+            $newItemDays, $longRunningDays, $scaleThreshold, $declineThreshold
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -88,16 +70,7 @@ class JntSupplyController extends Controller
     // -----------------------------------------------------------------------
     private function lifecycleBadge(string $class): array
     {
-        return match ($class) {
-            'new'         => ['🆕 New',          'bg-blue-100 text-blue-800'],
-            'scaling'     => ['📈 Scaling',       'bg-green-100 text-green-800'],
-            'consistent'  => ['✅ Consistent',    'bg-teal-100 text-teal-800'],
-            'active'      => ['🔄 Active',        'bg-slate-100 text-slate-700'],
-            'declining'   => ['📉 Declining',     'bg-orange-100 text-orange-800'],
-            'phasing_out' => ['🚫 Phasing Out',   'bg-red-100 text-red-800'],
-            'dormant'     => ['💤 Dormant',       'bg-gray-100 text-gray-500'],
-            default       => ['— Unknown',        'bg-gray-100 text-gray-400'],
-        };
+        return \App\Support\ItemLifecycle::badge($class);
     }
 
     // -----------------------------------------------------------------------
