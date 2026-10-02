@@ -63,8 +63,10 @@ class ItemEditTest extends ItemTestCase
         $category = [
             'unknown category' => [['category_id' => 99999], 'category_id'],
             'name too long'    => [['new_category' => str_repeat('a', 61)], 'new_category'],
-            'blank name'       => [['new_category' => '   '], 'new_category'],
+            'both id and name' => [['category_id' => $this->categoryId('Iba pa'), 'new_category' => 'X'], 'new_category'],
             'item too long'    => [['item_name' => str_repeat('a', 191), 'new_category' => 'X'], 'item_name'],
+            // "İ" lowercases to 2 code points → key lampas 190 kahit 190 chars ang name.
+            'key too long'     => [['item_name' => str_repeat('İ', 190), 'new_category' => 'X'], 'item_name'],
             'empty key'        => [['item_name' => '3 x', 'new_category' => 'X'], 'item_name'],
         ];
         foreach ($category as $label => [$override, $field]) {
@@ -122,6 +124,41 @@ class ItemEditTest extends ItemTestCase
             ->assertOk()->assertJson(['ok' => true, 'category_id' => null]);
 
         $this->assertSame(0, DB::table('item_category_assignments')->count());
+    }
+
+    public function test_blank_new_category_counts_as_absent_and_clears_the_assignment(): void
+    {
+        $this->send('/item/category', ['item_name' => 'Glow Tape', 'category_id' => $this->categoryId('Iba pa')])->assertOk();
+
+        $this->send('/item/category', ['item_name' => 'Glow Tape', 'new_category' => '   '])
+            ->assertOk()->assertJson(['ok' => true, 'category_id' => null]);
+
+        $this->assertSame(0, DB::table('item_category_assignments')->count());
+        $this->assertSame(8, DB::table('item_categories')->count());
+    }
+
+    public function test_new_category_that_already_exists_twice_yields_one_row(): void
+    {
+        DB::table('item_categories')->insert(['name' => 'Bagong Cat', 'sort_order' => 9, 'created_at' => now(), 'updated_at' => now()]);
+
+        foreach ([1, 2] as $i) {
+            $this->send('/item/category', ['item_name' => 'Glow Tape', 'new_category' => 'Bagong Cat'])->assertOk();
+        }
+
+        $this->assertSame(1, DB::table('item_categories')->where('name', 'Bagong Cat')->count());
+    }
+
+    public function test_supply_settings_update_all_rows_sharing_a_key_and_keep_their_names(): void
+    {
+        $this->settingsRow('Glow Tape', 7, 3);
+        $this->settingsRow('glow  tape', 8, 2);
+
+        $this->send('/item/supply-settings', ['item_name' => 'GLOW TAPE', 'lead_time_days' => 12, 'safety_days' => 5])->assertOk();
+
+        $rows = DB::table('supply_item_settings')->orderBy('id')->get();
+        $this->assertSame(['Glow Tape', 'glow  tape'], $rows->pluck('item_name')->all());
+        $this->assertSame([12, 12], $rows->pluck('lead_time_days')->map(fn ($v) => (int) $v)->all());
+        $this->assertSame([5, 5], $rows->pluck('safety_days')->map(fn ($v) => (int) $v)->all());
     }
 
     public function test_supply_settings_update_every_row_with_the_same_key(): void

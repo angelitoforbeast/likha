@@ -521,22 +521,38 @@ class ItemController extends Controller
         if ($key === '') {
             throw \Illuminate\Validation\ValidationException::withMessages(['item_name' => 'Walang laman ang pangalan ng item.']);
         }
+        // Ang lowercase ay pwedeng pahabain ang key (hal. "İ") — dapat kasya sa item_key(190).
+        if (mb_strlen($key) > 190) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['item_name' => 'Masyadong mahaba ang pangalan ng item.']);
+        }
+        // Blank new_category (TrimStrings → null) = walang ipinadala. Parehong ipinadala = malabo.
         $newName = trim((string) ($data['new_category'] ?? ''));
-        if ($request->has('new_category') && $newName === '') {
-            throw \Illuminate\Validation\ValidationException::withMessages(['new_category' => 'Walang laman ang bagong category.']);
+        if ($newName !== '' && isset($data['category_id'])) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['new_category' => 'Pumili ng category O maglagay ng bago, hindi pareho.']);
         }
 
         $categoryId = DB::transaction(function () use ($data, $key, $newName) {
             $categoryId = isset($data['category_id']) ? (int) $data['category_id'] : null;
 
             if ($newName !== '') {
-                $existing = \App\Models\ItemCategory::whereRaw('LOWER(name) = ?', [mb_strtolower($newName, 'UTF-8')])->first();
-                $categoryId = $existing
-                    ? $existing->id
-                    : \App\Models\ItemCategory::create([
-                        'name'       => $newName,
-                        'sort_order' => ((int) \App\Models\ItemCategory::max('sort_order')) + 1,
-                    ])->id;
+                $byName = fn () => \App\Models\ItemCategory::whereRaw('LOWER(name) = ?', [mb_strtolower($newName, 'UTF-8')])->first();
+                $existing = $byName();
+                if (! $existing) {
+                    try {
+                        // Savepoint — para hindi masira ang outer transaction (pgsql) kapag unique violation.
+                        $existing = DB::transaction(fn () => \App\Models\ItemCategory::create([
+                            'name'       => $newName,
+                            'sort_order' => ((int) \App\Models\ItemCategory::max('sort_order')) + 1,
+                        ]));
+                    } catch (\Illuminate\Database\QueryException $e) {
+                        // Double submit, o case/accent-insensitive collation (MySQL) na nakatugma sa existing.
+                        $existing = $byName() ?? \App\Models\ItemCategory::where('name', $newName)->first();
+                        if (! $existing) {
+                            throw \Illuminate\Validation\ValidationException::withMessages(['new_category' => 'Hindi ma-save ang bagong category — subukan ulit.']);
+                        }
+                    }
+                }
+                $categoryId = $existing->id;
             }
 
             if ($categoryId === null) {
@@ -588,14 +604,25 @@ class ItemController extends Controller
                 ->filter(fn ($r) => \App\Support\ItemBaseKey::key((string) $r->item_name) === $parsed['key'])
                 ->pluck('id')->all();
 
-            if ($ids) {
-                DB::table('supply_item_settings')->whereIn('id', $ids)->update($values);
-            } else {
-                DB::table('supply_item_settings')->insert($values + [
-                    'item_name'  => $parsed['base'],
-                    'created_at' => now(),
-                ]);
+            if (! $ids) {
+                try {
+                    // Savepoint — double submit / collation match = unique violation → update path na lang.
+                    DB::transaction(fn () => DB::table('supply_item_settings')->insert($values + [
+                        'item_name'  => $parsed['base'],
+                        'created_at' => now(),
+                    ]));
+                    return;
+                } catch (\Illuminate\Database\QueryException $e) {
+                    $ids = DB::table('supply_item_settings')->get(['id', 'item_name'])
+                        ->filter(fn ($r) => mb_strtolower(trim((string) $r->item_name), 'UTF-8') === mb_strtolower($parsed['base'], 'UTF-8')
+                            || \App\Support\ItemBaseKey::key((string) $r->item_name) === $parsed['key'])
+                        ->pluck('id')->all();
+                    if (! $ids) {
+                        throw \Illuminate\Validation\ValidationException::withMessages(['item_name' => 'Hindi ma-save ang settings — subukan ulit.']);
+                    }
+                }
             }
+            DB::table('supply_item_settings')->whereIn('id', $ids)->update($values);
         });
 
         return response()->json(['ok' => true]);
