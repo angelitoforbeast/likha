@@ -235,6 +235,19 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringContainsString('baseProfit7(name){', $html);
     }
 
+    public function test_t2_review_minors_are_fixed(): void
+    {
+        $html = $this->render(true);
+        preg_match('/ilCfTint\(colId, v\)\s*\{.*?\n      \},/s', $html, $m);
+        // (a) tumama ang rule pero hindi tinanggap ang kulay = walang fill (hindi default band).
+        $this->assertStringContainsString("if (!(/^#[0-9a-f]{3,8}$/i.test(c) || /^[a-z]+$/i.test(c))) return '';", $m[0]);
+        // (b) ₱ sub-line ng Profit (7 days) ay may sariling grant.
+        $this->assertMatchesRegularExpression("/<template x-if=\"ilIdOn\('proj_prof_7d'\)\">\s*<div class=\"il-cf-sub\" x-text=\"ilPesoWhole\(baseProfit7\(G\.item_name\)\)\"/",
+            file_get_contents(resource_path('views/item/_table_order.blade.php')));
+        // (c) quote na ≤ 0 ang presyo = walang presyo.
+        $this->assertStringContainsString('if (!(Number(q.price) > 0)) continue;', $html);
+    }
+
     public function test_marketing_to_order_has_no_cost_line_supplier_names_or_find_a_supplier(): void
     {
         $ceo = $this->render(true);

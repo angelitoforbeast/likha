@@ -118,7 +118,9 @@
           <template x-if="baseProfitPct7(G.item_name) !== null">
             <div class="il-cf" :style="ilCfTint('proj_pct_7d', baseProfitPct7(G.item_name))">
               <div class="il-num" x-text="ilPct(baseProfitPct7(G.item_name))"></div>
-              <div class="il-cf-sub" x-text="ilPesoWhole(baseProfit7(G.item_name))"></div>
+              <template x-if="ilIdOn('proj_prof_7d')">
+                <div class="il-cf-sub" x-text="ilPesoWhole(baseProfit7(G.item_name))"></div>
+              </template>
             </div>
           </template>
         </td>

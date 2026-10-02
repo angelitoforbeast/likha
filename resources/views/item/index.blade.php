@@ -3500,7 +3500,7 @@
       ilCheapQuote(name){
         let best = null;
         for (const q of this.quotesFor(name)) {
-          if (q.price == null || isNaN(Number(q.price))) continue;
+          if (!(Number(q.price) > 0)) continue;   // walang presyo, 0 o negatibo = hindi presyo
           if (best === null || Number(q.price) < Number(best.price)) best = q;
         }
         return best;
@@ -3616,14 +3616,14 @@
       ilCfTint(colId, v){
         if (v == null || isNaN(Number(v))) return '';
         const rules = (window.__COL_FORMAT__ || {})[colId];
-        let colour = null;
+        let colour;
         if (Array.isArray(rules) && rules.length) {
           const m = /background:([^;]+);/.exec(this._evalRules(rules, v, null, null));
           if (!m) return '';
           const c = m[1].trim();
-          if (/^#[0-9a-f]{3,8}$/i.test(c) || /^[a-z]+$/i.test(c)) colour = c;
-        }
-        if (!colour) {
+          if (!(/^#[0-9a-f]{3,8}$/i.test(c) || /^[a-z]+$/i.test(c))) return '';   // hindi tinanggap na kulay = walang fill
+          colour = c;
+        } else {
           const n = Number(v);
           colour = n >= 15 ? '#16a34a' : n >= 0 ? '#eab308' : '#dc2626';
         }
