@@ -291,7 +291,7 @@
               <td class="il-c-hide" x-show="ilColOn('kita')">
                 <template x-if="ilIdOn('proj_prof_1d')">
                   <div class="il-num" :style="'color:' + ilTone(G.agg.projected_profit_last_day)"
-                       x-text="ilArrow(G.agg.projected_profit_last_day) + ilMoney(G.agg.projected_profit_last_day)"></div>
+                       x-text="ilArrow(G.agg.projected_profit_last_day) + ilMoneyKita(G.agg.projected_profit_last_day)"></div>
                 </template>
                 <template x-if="ilIdOn('orders_1d')">
                   <div class="il-sub" x-text="num(G.agg.orders_last_day) + ' orders'"></div>
@@ -367,7 +367,7 @@
               <td x-show="ilColOn('kita')">
                 <span class="il-m-label">KITA NGAYON</span>
                 <div class="il-num" :style="'color:' + ilTone(T.projected_profit_last_day)"
-                     x-text="ilArrow(T.projected_profit_last_day) + ilMoney(T.projected_profit_last_day)"></div>
+                     x-text="ilArrow(T.projected_profit_last_day) + ilMoneyKita(T.projected_profit_last_day)"></div>
                 <div class="il-sub" x-text="num(T.orders_last_day) + ' orders'"></div>
               </td>
               <td x-show="ilColOn('pct')">

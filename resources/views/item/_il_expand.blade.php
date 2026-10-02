@@ -144,7 +144,7 @@
     <div class="il-dl-i il-only-narrow il-only-lt1100">
       <div class="il-dl-l">Kita ngayon</div>
       <div class="il-dl-v il-num" :style="'color:' + ilTone(G.agg.projected_profit_last_day)"
-           x-text="ilArrow(G.agg.projected_profit_last_day) + ilMoney(G.agg.projected_profit_last_day) + ' · ' + num(G.agg.orders_last_day) + ' orders'"></div>
+           x-text="ilArrow(G.agg.projected_profit_last_day) + ilMoneyKita(G.agg.projected_profit_last_day) + ' · ' + num(G.agg.orders_last_day) + ' orders'"></div>
     </div>
   </template>
   <template x-if="ilColOn('ads')">

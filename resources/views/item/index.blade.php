@@ -3406,6 +3406,13 @@
         const r = Math.round(Number(v) * 100) / 100;
         return (r < 0 ? '−₱' : '₱') + Math.abs(r).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
       },
+      // KITA NGAYON lang: ≥ ₱1,000 buo (walang ".00"), mas mababa = dalawang decimal gaya ng ilMoney.
+      ilMoneyKita(v){
+        if (v == null || isNaN(Number(v))) return '—';
+        const r = Math.round(Number(v) * 100) / 100;
+        if (Math.abs(r) >= 1000) return (r < 0 ? '−₱' : '₱') + Math.round(Math.abs(r)).toLocaleString('en-PH', { minimumFractionDigits:0, maximumFractionDigits:0 });
+        return this.ilMoney(v);
+      },
       ilArrow(v){ return (v == null || isNaN(Number(v))) ? '' : (Number(v) >= 0 ? '▲ ' : '▼ '); },
       // Asul (kita) / kahel (lugi) / abo (walang data).
       ilTone(v){ return (v == null || isNaN(Number(v))) ? '#64748b' : (Number(v) >= 0 ? '#1d4ed8' : '#c2410c'); },

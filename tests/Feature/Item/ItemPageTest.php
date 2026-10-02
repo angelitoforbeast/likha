@@ -491,6 +491,22 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringContainsString("(Number(v) >= 0 ? '▲ ' : '▼ −')", $html);
     }
 
+    public function test_kita_ngayon_uses_whole_pesos_from_1000_and_only_there(): void
+    {
+        $html = $this->render(true);
+        // Helper: ≥1,000 buo (walang .00), mas mababa = dalawang decimal; "−₱" style ng ilMoney.
+        $this->assertMatchesRegularExpression('/ilMoneyKita\(v\)\s*\{[^}]*>=\s*1000[^}]*maximumFractionDigits:0/s', $html);
+        $dir = resource_path('views/item/');
+        $table = file_get_contents($dir . '_table_new.blade.php');
+        $expand = file_get_contents($dir . '_il_expand.blade.php');
+        $this->assertSame(2, substr_count($table, 'ilMoneyKita('), 'main row + TOTAL');
+        $this->assertStringContainsString('ilMoneyKita(G.agg.projected_profit_last_day)', $table);
+        $this->assertStringContainsString('ilMoneyKita(T.projected_profit_last_day)', $table);
+        $this->assertStringContainsString('ilMoneyKita(G.agg.projected_profit_last_day)', $expand);
+        $this->assertStringNotContainsString('ilMoney(G.agg.projected_profit_last_day)', $table . $expand);
+        $this->assertStringNotContainsString('ilMoney(T.projected_profit_last_day)', $table);
+    }
+
     public function test_new_layout_font_sizes_are_never_below_11px(): void
     {
         $dir = base_path('resources/views/item/');
