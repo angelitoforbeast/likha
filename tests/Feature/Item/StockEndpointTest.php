@@ -63,7 +63,7 @@ class StockEndpointTest extends ItemTestCase
         $this->shipAll(array_merge($leftOnes, $leftTwos));             // 40 + 10×2 = 60 units left
     }
 
-    private function po(string $status, string $itemKey, int $ordered, ?int $received = null, ?string $countedAt = null): void
+    private function po(string $status, string $itemKey, int $ordered, ?int $received = null, ?string $countedAt = null, float $unitCost = 10): void
     {
         $supplier = DB::table('suppliers')->insertGetId(['name' => 'Acme ' . $itemKey . $status, 'created_at' => now(), 'updated_at' => now()]);
         $orderId  = DB::table('supply_orders')->insertGetId([
@@ -72,8 +72,8 @@ class StockEndpointTest extends ItemTestCase
         ]);
         DB::table('supply_order_items')->insert([
             'supply_order_id' => $orderId, 'item_key' => $itemKey, 'item_name' => $itemKey,
-            'ordered_qty' => $ordered, 'unit_cost' => 10, 'received_qty' => $received,
-            'line_total' => $ordered * 10, 'created_at' => now(), 'updated_at' => now(),
+            'ordered_qty' => $ordered, 'unit_cost' => $unitCost, 'received_qty' => $received,
+            'line_total' => $ordered * $unitCost, 'created_at' => now(), 'updated_at' => now(),
         ]);
     }
 
@@ -211,6 +211,136 @@ class StockEndpointTest extends ItemTestCase
 
         $this->assertSame(40, $item['stock']);
         $this->assertSame(50, $item['hold_units']);
+    }
+
+    public function test_doi_is_exact_then_rounded_and_the_rounded_value_decides_colour_and_date(): void
+    {
+        // 10 units sa 3 araw (upd 3.333…); (0 + 100 − 0) × 3 / 10 = 30 eksakto
+        $this->rows('1 x NOISE', 10, '2026-09-30', null);
+        $this->po('ordered', 'Noise', 100);
+
+        $noise = $this->stock()->assertOk()->json('items.noise');
+        $this->assertEquals(30.0, $noise['doi']);
+        $this->assertSame('2026-10-25', $noise['order_by']);   // 10-02 + 23 araw
+        $this->assertSame('green', $noise['colour']);
+
+        // [item, incoming, doi, order_by, colour] — upd 10/araw (10 orders sa end date), lead 7, safety 3
+        foreach ([
+            ['EDGEA', 70,  7.0,  '2026-10-02', 'amber'],   // DOI = lead → hindi "now"
+            ['EDGEB', 100, 10.0, '2026-10-05', 'green'],   // DOI = lead + safety
+            ['EDGEC', 69,  6.9,  'now',        'red'],
+        ] as [$name, $incoming, $doi, $orderBy, $colour]) {
+            $this->rows("1 x $name", 10, '2026-10-02', null);
+            $this->po('ordered', $name, $incoming);
+            $item = $this->stock()->assertOk()->json('items.' . strtolower($name));
+            $this->assertEquals($doi, $item['doi'], $name);
+            $this->assertSame($orderBy, $item['order_by'], $name);
+            $this->assertSame($colour, $item['colour'], $name);
+        }
+
+        // 6.99 ay nagro-round sa 7.0 → ang 7.0 ang nagpapasya (amber), hindi ang 6.99
+        $this->rows('1 x ROUNDUP', 100, '2026-10-02', null);
+        $this->po('ordered', 'Roundup', 699);
+        $up = $this->stock()->assertOk()->json('items.roundup');
+        $this->assertEquals(7.0, $up['doi']);
+        $this->assertSame('amber', $up['colour']);
+        $this->assertSame('2026-10-02', $up['order_by']);
+    }
+
+    public function test_order_qty_uses_stock_after_the_zero_floor(): void
+    {
+        $this->shipAll($this->rows('1 x ROPE', 25, '2026-09-10', 'RP'));
+        $this->rows('1 x ROPE', 5, '2026-09-10', 'RH');   // hold, walang recent demand
+
+        $item = $this->stock()->assertOk()->json('items.rope');
+
+        $this->assertSame(-25, $item['stock_raw']);
+        $this->assertSame(5, $item['order_qty']);          // hindi 30
+    }
+
+    public function test_discount_lines_are_not_received_or_incoming(): void
+    {
+        $this->rows('1 x TAPE', 1, '2026-09-10', 'TH');
+        $this->po('counted', 'Tape', 100, 100, '2026-09-26 09:00:00');
+        $this->po('counted', 'Tape', 1, 20, '2026-09-26 09:00:00', -5);
+        $this->po('ordered', 'Tape', 10);
+        $this->po('ordered', 'Tape', 30, null, null, -5);
+
+        $item = $this->stock()->assertOk()->json('items.tape');
+
+        $this->assertSame(100, $item['stock']);
+        $this->assertSame(10, $item['incoming']);
+    }
+
+    public function test_po_counted_before_start_does_not_add_to_received(): void
+    {
+        $this->rows('1 x TAPE', 1, '2026-09-10', 'TH');
+        $this->po('counted', 'Tape', 100, 100, '2026-09-20 09:00:00');
+        $this->po('counted', 'Tape', 7, 7, '2026-09-25 00:00:00');
+
+        $this->assertSame(7, $this->stock()->assertOk()->json('items.tape.stock_raw'));
+    }
+
+    public function test_delivered_po_counts_as_incoming_but_counted_po_does_not(): void
+    {
+        $this->rows('1 x POT', 1, '2026-09-10', 'PH');
+        $this->po('delivered', 'Pot', 30, 10);
+        $this->po('counted', 'Pot', 50, 10, '2026-09-26 09:00:00');
+
+        $item = $this->stock()->assertOk()->json('items.pot');
+
+        $this->assertSame(20, $item['incoming']);
+        $this->assertSame(10, $item['stock']);
+    }
+
+    public function test_cancelled_orders_and_null_submission_time_are_not_left(): void
+    {
+        $this->shipAll($this->rows('1 x PEN', 1, '2026-09-10', 'PN'));
+        $this->shipAll($this->rows('1 x PEN', 1, '2026-09-10', 'PC', 'CANNOT PROCEED'));
+        $this->shipAll($this->rows('1 x PEN', 1, '2026-09-10', 'PO', 'ODZ'));
+        $this->rows('1 x PEN', 1, '2026-09-10', 'PX');
+        $this->shipped('PX', null);
+
+        $this->assertSame(-1, $this->stock()->assertOk()->json('items.pen.stock_raw'));
+    }
+
+    public function test_lead_and_safety_come_from_settings_lowest_id_wins(): void
+    {
+        $this->rows('1 x GLOW TAPE', 1, '2026-09-10', 'GH');
+        $now = ['created_at' => now(), 'updated_at' => now()];
+        DB::table('supply_item_settings')->insert([
+            ['item_name' => 'Glow Tape', 'lead_time_days' => 5, 'safety_days' => 2] + $now,
+            ['item_name' => 'GLOW TAPE', 'lead_time_days' => 9, 'safety_days' => 8] + $now,
+        ]);
+
+        $item = $this->stock()->assertOk()->json('items.glow tape');
+
+        $this->assertSame([5, 2], [$item['lead'], $item['safety']]);
+    }
+
+    public function test_category_assignment_and_category_list(): void
+    {
+        $this->rows('1 x GLOW TAPE', 1, '2026-09-10', 'GH');
+        DB::table('item_category_assignments')->insert([
+            'item_key' => 'glow tape', 'category_id' => 2, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $json = $this->stock()->assertOk()->json();
+
+        $this->assertSame(2, $json['items']['glow tape']['category_id']);
+        $this->assertSame('Ilaw at Kuryente', $json['items']['glow tape']['category']);
+        $this->assertSame(
+            ['Bahay at Paglilinis', 'Ilaw at Kuryente', 'Sasakyan at Motor', 'Repair at DIY',
+             'Health at Beauty', 'Fashion at Accessories', 'Office at School', 'Iba pa'],
+            array_column($json['categories'], 'name')
+        );
+    }
+
+    public function test_item_value_is_null_without_a_cogs_row(): void
+    {
+        $this->rows('1 x LAMP', 1, '2026-09-10', 'LH');
+
+        $this->assertNull($this->stock()->assertOk()->json('values.1 x lamp.item_value'));
     }
 
     public function test_unknown_role_gets_404(): void

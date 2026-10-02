@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Schema;
  *
  *   stock_raw = natanggap mula START − umalis mula START;  stock = max(0, stock_raw)
  *   order_qty = max(0, ceil(hold + upd × (lead + safety) − incoming − stock))
- *   doi       = (stock + incoming − hold) / upd
+ *   doi       = round((stock + incoming − hold) × days / units, 1)  — ito ang ginagamit sa kulay at order_by
  */
 class ItemStockService
 {
@@ -53,7 +53,8 @@ class ItemStockService
             $lead      = $settings[$k]['lead'] ?? self::DEFAULT_LEAD;
             $safety    = $settings[$k]['safety'] ?? self::DEFAULT_SAFETY;
 
-            $upd = 0.0;
+            $upd  = 0.0;
+            $days = 1;
             if (isset($demand[$k]) && $demand[$k]['units'] > 0) {
                 $first = Carbon::parse($demand[$k]['first'], 'Asia/Manila')->startOfDay();
                 $days  = max(1, min(self::DEMAND_DAYS, (int) $first->diffInDays($endDay) + 1));
@@ -86,8 +87,9 @@ class ItemStockService
                 $row['order_qty'] = (int) max(0, ceil(round($holdUnits + $upd * ($lead + $safety) - $inc - $stock, 6)));
 
                 if ($upd > 0) {
-                    $doi = ($stock + $inc - $holdUnits) / $upd;
-                    $row['doi']      = round($doi, 1);
+                    // Walang paghahati sa umuulit na float; ang naka-round na doi ang nagpapasya ng kulay at petsa.
+                    $doi = round(($stock + $inc - $holdUnits) * $days / $demand[$k]['units'], 1);
+                    $row['doi']      = $doi;
                     $row['order_by'] = $doi < $lead ? 'now' : $endDay->copy()->addDays((int) floor($doi - $lead))->toDateString();
                     $row['colour']   = $doi < $lead ? 'red' : ($doi < $lead + $safety ? 'amber' : 'green');
                 }
