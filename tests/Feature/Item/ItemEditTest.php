@@ -1,0 +1,149 @@
+<?php
+
+namespace Tests\Feature\Item;
+
+use Illuminate\Support\Facades\DB;
+
+/**
+ * POST /item/category at /item/supply-settings — CEO lang.
+ */
+class ItemEditTest extends ItemTestCase
+{
+    private function categoryId(string $name): int
+    {
+        return (int) DB::table('item_categories')->where('name', $name)->value('id');
+    }
+
+    private function send(string $url, array $body, string $role = 'CEO')
+    {
+        $email = strtolower(preg_replace('/\W+/', '', $role)) . '@example.test';
+        $user  = \App\Models\User::where('email', $email)->first() ?? $this->user($role, $email);
+
+        return $this->actingAs($user)->postJson($url, $body);
+    }
+
+    private function settingsRow(string $name, int $lead = 7, int $safety = 3): void
+    {
+        DB::table('supply_item_settings')->insert([
+            'item_name' => $name, 'lead_time_days' => $lead, 'safety_days' => $safety,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
+    public function test_non_ceo_gets_403_and_nothing_is_written(): void
+    {
+        foreach (['Marketing', 'Marketing - OIC'] as $role) {
+            $this->send('/item/category', ['item_name' => 'Glow Tape', 'new_category' => 'Bago'], $role)
+                ->assertStatus(403)->assertJson(['ok' => false, 'error' => 'CEO lang']);
+            $this->send('/item/supply-settings', ['item_name' => 'Glow Tape', 'lead_time_days' => 5, 'safety_days' => 2], $role)
+                ->assertStatus(403);
+        }
+
+        $this->assertSame(0, DB::table('item_category_assignments')->count());
+        $this->assertSame(0, DB::table('supply_item_settings')->count());
+        $this->assertSame(0, DB::table('item_categories')->where('name', 'Bago')->count());
+    }
+
+    public function test_invalid_input_gets_422_and_writes_nothing(): void
+    {
+        $ok = ['item_name' => 'Glow Tape', 'lead_time_days' => 7, 'safety_days' => 3];
+        $settings = [
+            'lead 256'     => [['lead_time_days' => 256], 'lead_time_days'],
+            'lead -1'      => [['lead_time_days' => -1], 'lead_time_days'],
+            'lead x'       => [['lead_time_days' => 'x'], 'lead_time_days'],
+            'safety 256'   => [['safety_days' => 256], 'safety_days'],
+            'missing lead' => [['lead_time_days' => null], 'lead_time_days'],
+            'empty key'    => [['item_name' => '3 x'], 'item_name'],
+        ];
+        foreach ($settings as $label => [$override, $field]) {
+            $this->send('/item/supply-settings', array_merge($ok, $override))
+                ->assertStatus(422)->assertJsonValidationErrors($field);
+        }
+
+        $category = [
+            'unknown category' => [['category_id' => 99999], 'category_id'],
+            'name too long'    => [['new_category' => str_repeat('a', 61)], 'new_category'],
+            'blank name'       => [['new_category' => '   '], 'new_category'],
+            'item too long'    => [['item_name' => str_repeat('a', 191), 'new_category' => 'X'], 'item_name'],
+            'empty key'        => [['item_name' => '3 x', 'new_category' => 'X'], 'item_name'],
+        ];
+        foreach ($category as $label => [$override, $field]) {
+            $this->send('/item/category', array_merge(['item_name' => 'Glow Tape'], $override))
+                ->assertStatus(422)->assertJsonValidationErrors($field);
+        }
+
+        $this->assertSame(0, DB::table('item_category_assignments')->count());
+        $this->assertSame(0, DB::table('supply_item_settings')->count());
+        $this->assertSame(8, DB::table('item_categories')->count());
+    }
+
+    public function test_new_category_name_reuses_existing_one_case_insensitively(): void
+    {
+        $id = $this->categoryId('Repair at DIY');
+
+        $this->send('/item/category', ['item_name' => 'Glow Tape', 'new_category' => ' repair at diy '])
+            ->assertOk()->assertJson(['ok' => true, 'category_id' => $id]);
+
+        $this->assertSame(8, DB::table('item_categories')->count());
+        $this->assertSame($id, (int) DB::table('item_category_assignments')->value('category_id'));
+    }
+
+    public function test_genuinely_new_category_is_created_with_next_sort_order(): void
+    {
+        $res = $this->send('/item/category', ['item_name' => 'Glow Tape', 'new_category' => 'Pet Supplies'])
+            ->assertOk()->json();
+
+        $row = DB::table('item_categories')->where('name', 'Pet Supplies')->first();
+        $this->assertSame(9, (int) $row->sort_order);
+        $this->assertSame((int) $row->id, $res['category_id']);
+        $this->assertSame('Pet Supplies', end($res['categories'])['name']);
+        $this->assertCount(9, $res['categories']);
+    }
+
+    public function test_assignment_is_stored_by_base_key_and_updated_in_place(): void
+    {
+        $a = $this->categoryId('Ilaw at Kuryente');
+        $b = $this->categoryId('Iba pa');
+
+        $this->send('/item/category', ['item_name' => '1 x GLOW TAPE', 'category_id' => $a])->assertOk();
+        $this->assertSame('glow tape', DB::table('item_category_assignments')->value('item_key'));
+
+        $this->send('/item/category', ['item_name' => '2 x Glow Tape', 'category_id' => $b])->assertOk();
+        $this->assertSame(1, DB::table('item_category_assignments')->count());
+        $this->assertSame($b, (int) DB::table('item_category_assignments')->value('category_id'));
+        $this->assertNotNull(DB::table('item_category_assignments')->value('updated_by'));
+    }
+
+    public function test_sending_no_category_clears_the_assignment(): void
+    {
+        $this->send('/item/category', ['item_name' => 'Glow Tape', 'category_id' => $this->categoryId('Iba pa')])->assertOk();
+
+        $this->send('/item/category', ['item_name' => '1 x GLOW TAPE'])
+            ->assertOk()->assertJson(['ok' => true, 'category_id' => null]);
+
+        $this->assertSame(0, DB::table('item_category_assignments')->count());
+    }
+
+    public function test_supply_settings_update_every_row_with_the_same_key(): void
+    {
+        $this->settingsRow('Glow Tape', 7, 3);
+
+        $this->send('/item/supply-settings', ['item_name' => '1 x GLOW TAPE', 'lead_time_days' => 10, 'safety_days' => 4])
+            ->assertOk()->assertJson(['ok' => true]);
+
+        $this->assertSame(1, DB::table('supply_item_settings')->count());
+        $row = DB::table('supply_item_settings')->first();
+        $this->assertSame('Glow Tape', $row->item_name);
+        $this->assertSame([10, 4], [(int) $row->lead_time_days, (int) $row->safety_days]);
+    }
+
+    public function test_supply_settings_insert_a_row_named_by_the_base_when_none_exists(): void
+    {
+        $this->send('/item/supply-settings', ['item_name' => '1 x GLOW TAPE', 'lead_time_days' => 10, 'safety_days' => 4])
+            ->assertOk();
+
+        $row = DB::table('supply_item_settings')->first();
+        $this->assertSame('GLOW TAPE', $row->item_name);
+        $this->assertSame([10, 4], [(int) $row->lead_time_days, (int) $row->safety_days]);
+    }
+}

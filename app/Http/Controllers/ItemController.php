@@ -499,6 +499,108 @@ class ItemController extends Controller
         return response()->json(['ok' => true, 'quotes' => $this->quoteRows($key)[$key] ?? []]);
     }
 
+    /**
+     * POST /item/category — itakda (o tanggalin) ang category ng isang item. CEO lang.
+     * Walang category_id at walang new_category = "Walang category" (buburahin ang assignment).
+     */
+    public function categorySave(Request $request)
+    {
+        $this->checkAccess();
+        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+        if (! Schema::hasTable('item_categories') || ! Schema::hasTable('item_category_assignments')) {
+            return response()->json(['ok' => false, 'message' => 'item_categories table wala pa — patakbuhin: php artisan migrate --force'], 200);
+        }
+
+        $data = $request->validate([
+            'item_name'    => 'required|string|max:190',
+            'category_id'  => 'nullable|integer|exists:item_categories,id',
+            'new_category' => 'nullable|string|max:60',
+        ]);
+
+        $key = \App\Support\ItemBaseKey::key($data['item_name']);
+        if ($key === '') {
+            throw \Illuminate\Validation\ValidationException::withMessages(['item_name' => 'Walang laman ang pangalan ng item.']);
+        }
+        $newName = trim((string) ($data['new_category'] ?? ''));
+        if ($request->has('new_category') && $newName === '') {
+            throw \Illuminate\Validation\ValidationException::withMessages(['new_category' => 'Walang laman ang bagong category.']);
+        }
+
+        $categoryId = DB::transaction(function () use ($data, $key, $newName) {
+            $categoryId = isset($data['category_id']) ? (int) $data['category_id'] : null;
+
+            if ($newName !== '') {
+                $existing = \App\Models\ItemCategory::whereRaw('LOWER(name) = ?', [mb_strtolower($newName, 'UTF-8')])->first();
+                $categoryId = $existing
+                    ? $existing->id
+                    : \App\Models\ItemCategory::create([
+                        'name'       => $newName,
+                        'sort_order' => ((int) \App\Models\ItemCategory::max('sort_order')) + 1,
+                    ])->id;
+            }
+
+            if ($categoryId === null) {
+                \App\Models\ItemCategoryAssignment::where('item_key', $key)->delete();
+            } else {
+                \App\Models\ItemCategoryAssignment::updateOrCreate(
+                    ['item_key' => $key],
+                    ['category_id' => $categoryId, 'updated_by' => Auth::id()]
+                );
+            }
+
+            return $categoryId;
+        });
+
+        $categories = \App\Models\ItemCategory::orderBy('sort_order')->orderBy('id')->get(['id', 'name'])
+            ->map(fn ($c) => ['id' => $c->id, 'name' => $c->name])->all();
+
+        return response()->json(['ok' => true, 'category_id' => $categoryId, 'categories' => $categories]);
+    }
+
+    /** POST /item/supply-settings — lead time at safety days ng isang item (by base key). CEO lang. */
+    public function supplySettingsSave(Request $request)
+    {
+        $this->checkAccess();
+        if ($this->getNormalizedRole() !== 'CEO') return response()->json(['ok' => false, 'error' => 'CEO lang'], 403);
+        if (! Schema::hasTable('supply_item_settings')) {
+            return response()->json(['ok' => false, 'message' => 'supply_item_settings table wala pa — patakbuhin: php artisan migrate --force'], 200);
+        }
+
+        $data = $request->validate([
+            'item_name'      => 'required|string|max:255',
+            'lead_time_days' => 'required|integer|min:0|max:255',
+            'safety_days'    => 'required|integer|min:0|max:255',
+        ]);
+
+        $parsed = \App\Support\ItemBaseKey::parse($data['item_name']);
+        if ($parsed['key'] === '') {
+            throw \Illuminate\Validation\ValidationException::withMessages(['item_name' => 'Walang laman ang pangalan ng item.']);
+        }
+
+        DB::transaction(function () use ($data, $parsed) {
+            $values = [
+                'lead_time_days' => (int) $data['lead_time_days'],
+                'safety_days'    => (int) $data['safety_days'],
+                'updated_at'     => now(),
+            ];
+            // Maliit ang table — i-filter sa PHP para parehong key ang gamit (kahit magkaiba ang case/spacing).
+            $ids = DB::table('supply_item_settings')->get(['id', 'item_name'])
+                ->filter(fn ($r) => \App\Support\ItemBaseKey::key((string) $r->item_name) === $parsed['key'])
+                ->pluck('id')->all();
+
+            if ($ids) {
+                DB::table('supply_item_settings')->whereIn('id', $ids)->update($values);
+            } else {
+                DB::table('supply_item_settings')->insert($values + [
+                    'item_name'  => $parsed['base'],
+                    'created_at' => now(),
+                ]);
+            }
+        });
+
+        return response()->json(['ok' => true]);
+    }
+
     /** Nagbago ba ang presyo (2dp), MOQ o link? null ≠ 0; "100" = "100.00". */
     private function quoteChanged(\App\Models\ItemSupplierQuote $q, array $data): bool
     {

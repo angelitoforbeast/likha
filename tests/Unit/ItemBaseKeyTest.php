@@ -15,6 +15,11 @@ class ItemBaseKeyTest extends TestCase
         'GLOW TAPE',
         '  10 X Hand Grip ',
         'x factor',
+        '2 x',
+        '5x',
+        "2 x\nfoo",
+        "2 x foo\nbar",
+        '3×fan',
     ];
 
     public function test_key_matches_quote_key_for_every_name(): void
