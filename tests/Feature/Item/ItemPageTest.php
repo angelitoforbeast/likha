@@ -82,6 +82,29 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringNotContainsString('itemValueCeo(row.item_name)', $this->render(false));
     }
 
+    public function test_category_filter_is_for_every_role_and_inline_edits_are_ceo_only(): void
+    {
+        $ceo = $this->render(true);
+        $mkt = $this->render(false);
+        foreach ([$ceo, $mkt] as $html) {
+            $this->assertStringContainsString('x-model="categoryFilter"', $html);
+            $this->assertStringContainsString('Walang category', $html);
+            $this->assertStringContainsString('Walang item sa category na ito.', $html);
+            $this->assertSame(0, substr_count($html, 'x-html'));
+            // AND-ed pagkatapos ng worklistKeep sa itemGroups().
+            $this->assertGreaterThan(
+                strpos($html, 'worklistKeep(u.name, u.hold)'),
+                strpos($html, 'categoryKeep(u.name)')
+            );
+        }
+        $this->assertStringContainsString('saveCategory(row.item_name', $ceo);
+        $this->assertStringContainsString('saveSupplySettings(row.item_name', $ceo);
+        $this->assertStringContainsString('+ bagong category', $ceo);
+        foreach (['saveCategory(row.item_name', 'saveSupplySettings(row.item_name', '+ bagong category'] as $s) {
+            $this->assertStringNotContainsString($s, $mkt);
+        }
+    }
+
     public function test_sourcing_chips_and_worklist_show_in_the_ceo_view_only(): void
     {
         $ceo = $this->render(true);

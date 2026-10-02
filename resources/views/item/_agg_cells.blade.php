@@ -153,7 +153,35 @@
 <template x-if="col.id==='category'">
   <span :title="stockTip('Category ng item na ito', stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
+    @if($effectiveIsCEO)
+    {{-- CEO: palitan ang category (para sa lahat ng variant ng base item). --}}
+    <span x-show="!stockPending()" @click.stop title="para sa lahat ng variant ng item na ito">
+      <select aria-label="Category ng item" :disabled="stockEdit.saving"
+              @change="saveCategory(row.item_name, $event.target.value)"
+              style="border:1px solid #cbd5e1;border-radius:5px;padding:2px 4px;font-size:11px;max-width:140px;">
+        <option value="" :selected="!stockFor(row.item_name)?.category_id">— wala —</option>
+        <template x-for="c in stock.categories" :key="'cc-'+c.id">
+          <option :value="String(c.id)" :selected="String(c.id) === String(stockFor(row.item_name)?.category_id)" x-text="c.name"></option>
+        </template>
+        <option value="__new">+ bagong category</option>
+      </select>
+      <template x-if="stockEdit.key === supKey(row.item_name) && stockEdit.mode === 'cat'">
+        <div style="margin-top:3px;display:flex;gap:4px;align-items:center;">
+          <input type="text" maxlength="60" aria-label="Bagong category" x-model="stockEdit.newCat"
+                 @keydown.enter.stop.prevent="saveNewCategory(row.item_name, stockEdit.newCat)"
+                 style="border:1px solid #cbd5e1;border-radius:5px;padding:2px 5px;font-size:11px;width:110px;">
+          <button type="button" :disabled="stockEdit.saving" @click.stop="saveNewCategory(row.item_name, stockEdit.newCat)"
+                  style="border:0;border-radius:5px;padding:3px 8px;font-size:10px;font-weight:700;cursor:pointer;background:#4f46e5;color:#fff;">Save</button>
+          <button type="button" :disabled="stockEdit.saving" @click.stop="closeStockEdit()"
+                  style="border:0;border-radius:5px;padding:3px 8px;font-size:10px;font-weight:700;cursor:pointer;background:#e2e8f0;color:#334155;">Cancel</button>
+        </div>
+      </template>
+      <div x-show="stockEdit.key === supKey(row.item_name) && stockEdit.mode === 'cat' && stockEdit.error"
+           style="font-size:10px;color:#b91c1c;font-weight:600;" x-text="stockEdit.error"></div>
+    </span>
+    @else
     <span x-show="!stockPending()" style="font-weight:600;" x-text="stockFor(row.item_name)?.category || '—'"></span>
+    @endif
   </span>
 </template>
 <template x-if="col.id==='stock'">
@@ -184,8 +212,32 @@
     <span x-show="!stockPending()">
       <span :style="'font-weight:700;color:' + doiColour(stockFor(row.item_name))" x-text="doiText(stockFor(row.item_name))"></span>
       <template x-if="stockFor(row.item_name)">
+        @if($effectiveIsCEO)
+        <div @click.stop>
+          <button type="button" title="para sa lahat ng variant ng item na ito — i-click para palitan"
+                  x-show="!(stockEdit.key === supKey(row.item_name) && stockEdit.mode === 'sup')"
+                  @click.stop="openStockEdit(row.item_name, stockFor(row.item_name))"
+                  style="background:none;border:0;padding:0;cursor:pointer;font-size:9px;color:#6366f1;font-weight:400;text-decoration:underline;"
+                  x-text="'lead ' + stockFor(row.item_name).lead + ' · palugit ' + stockFor(row.item_name).safety"></button>
+          <template x-if="stockEdit.key === supKey(row.item_name) && stockEdit.mode === 'sup'">
+            <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:10px;font-weight:400;" title="para sa lahat ng variant ng item na ito">
+              <label>lead <input type="number" min="0" max="255" step="1" x-model="stockEdit.lead"
+                                 style="width:52px;border:1px solid #cbd5e1;border-radius:5px;padding:2px 4px;font-size:11px;"></label>
+              <label>palugit <input type="number" min="0" max="255" step="1" x-model="stockEdit.safety"
+                                    style="width:52px;border:1px solid #cbd5e1;border-radius:5px;padding:2px 4px;font-size:11px;"></label>
+              <button type="button" :disabled="stockEdit.saving" @click.stop="saveSupplySettings(row.item_name, stockEdit.lead, stockEdit.safety)"
+                      style="border:0;border-radius:5px;padding:3px 8px;font-size:10px;font-weight:700;cursor:pointer;background:#4f46e5;color:#fff;">Save</button>
+              <button type="button" :disabled="stockEdit.saving" @click.stop="closeStockEdit()"
+                      style="border:0;border-radius:5px;padding:3px 8px;font-size:10px;font-weight:700;cursor:pointer;background:#e2e8f0;color:#334155;">Cancel</button>
+            </div>
+          </template>
+          <div x-show="stockEdit.key === supKey(row.item_name) && stockEdit.mode === 'sup' && stockEdit.error"
+               style="font-size:10px;color:#b91c1c;font-weight:600;" x-text="stockEdit.error"></div>
+        </div>
+        @else
         <div style="font-size:9px;color:#94a3b8;font-weight:400;"
              x-text="'lead ' + stockFor(row.item_name).lead + ' · palugit ' + stockFor(row.item_name).safety"></div>
+        @endif
       </template>
     </span>
   </span>

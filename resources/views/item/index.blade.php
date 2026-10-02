@@ -645,6 +645,20 @@
   </div>
   @endif
 
+  {{-- Category filter (lahat ng role). Naka-AND sa sourcing chips sa itemGroups(). --}}
+  <div style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:6px 12px;
+              display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+    <label for="category-filter" style="font-size:11px;color:#475569;font-weight:700;margin-right:2px;">Category:</label>
+    <select id="category-filter" aria-label="Category" x-model="categoryFilter"
+            style="border:1px solid #cbd5e1;border-radius:6px;padding:3px 8px;font-size:11px;background:#fff;color:#334155;">
+      <option value="">Lahat</option>
+      <template x-for="c in stock.categories" :key="'cf-'+c.id">
+        <option :value="String(c.id)" x-text="c.name"></option>
+      </template>
+      <option value="__none">Walang category</option>
+    </select>
+  </div>
+
   <!-- Scroll area -->
   <div id="scroll">
     <div class="card">
@@ -708,6 +722,11 @@
                     x-text="worklist.error ? worklist.error : (worklist.loading || !worklist.loaded || !holdLoaded ? 'Loading…' : 'Walang item sa listahang ito.')"></td></tr>
           </template>
           @endif
+          {{-- Walang natira sa napiling category (lahat ng role; kung walang sourcing list na sumasagot na). --}}
+          <template x-if="categoryFilter !== '' && worklist.list === 'lahat' && !itemGroups().length && !(rows.length === 0 && loading)">
+            <tr><td :colspan="cols.length + 2" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
+                    x-text="!stock.loaded ? 'Loading…' : 'Walang item sa category na ito.'"></td></tr>
+          </template>
 
           <template x-if="rows.length === 0 && loading">
             <tr><td :colspan="cols.length + 2" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
@@ -2114,6 +2133,8 @@
       ],
       // Stock / DOI / order qty / category / item value kada base item — /item/stock (lahat ng role).
       stock: { items:{}, values:{}, categories:[], start:null, ready:false, loaded:false, loading:false, error:'', _req:0 },
+      categoryFilter: '',   // '' = Lahat, '__none' = Walang category, else category id
+      stockEdit: { key:null, mode:null, lead:'', safety:'', newCat:'', saving:false, error:'' },   // isang editor lang kada bukas (supKey)
       _photoTarget: null,     // item_name na kasalukuyang ina-upload-an ng photo
       holdMap: {},            // item_name → HOLD count (jnt/hold logic; drives item universe)
       holdLoaded: false,      // true kapag nakuha na ang holdMap
@@ -3663,6 +3684,7 @@
           if (hasFilter && !selLower.has(k)) continue;
           const u = uni[k];
           if (!this.worklistKeep(u.name, u.hold)) continue;   // sourcing chip filter (CEO)
+          if (!this.categoryKeep(u.name)) continue;           // category filter (lahat ng role)
           out.push({
             item_name: u.name,
             hold: u.hold,
@@ -3912,6 +3934,61 @@
         if (!(Number(hold) > 0)) return false;
         const it = this.worklist.byKey[this.supKey(name)];
         return !!it && it.list === this.worklist.list;
+      },
+      // Category filter: hangga't wala pa ang stock data, huwag munang itago ang rows.
+      categoryKeep(name){
+        const f = this.categoryFilter;
+        if (f === '' || !this.stock.loaded) return true;
+        const cid = this.stockFor(name)?.category_id;
+        if (f === '__none') return !cid;
+        return String(cid) === f;
+      },
+      // ── CEO inline edits: category + lead/safety (per base item; server ang nagre-recompute) ──
+      openStockEdit(name, S){
+        this.stockEdit = { key:this.supKey(name), mode:'sup', lead:(S ? S.lead : ''), safety:(S ? S.safety : ''), newCat:'', saving:false, error:'' };
+      },
+      closeStockEdit(){ this.stockEdit = { key:null, mode:null, lead:'', safety:'', newCat:'', saving:false, error:'' }; },
+      async _stockPost(url, payload){
+        const e = this.stockEdit;
+        e.saving = true; e.error = '';
+        try{
+          const res = await fetch(url, { method:'POST',
+            headers:{ 'X-CSRF-TOKEN': this._csrf(), 'Accept':'application/json', 'Content-Type':'application/json' },
+            body: JSON.stringify(payload) });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || !j.ok) { e.error = j.message || j.error || ('HTTP ' + res.status); return null; }
+          return j;
+        }catch(err){ e.error = err.message || String(err); return null; }
+        finally{ e.saving = false; }
+      },
+      async saveCategory(name, value){
+        const key = this.supKey(name);
+        if (value === '__new') {   // ilabas lang ang input
+          this.stockEdit = { key, mode:'cat', lead:'', safety:'', newCat:'', saving:false, error:'' };
+          return;
+        }
+        if (this.stockEdit.key !== key || this.stockEdit.mode !== 'cat') this.stockEdit = { key, mode:'cat', lead:'', safety:'', newCat:'', saving:false, error:'' };
+        const j = await this._stockPost('{{ route('item.category.save') }}',
+          value === '' ? { item_name: name } : { item_name: name, category_id: Number(value) });
+        this._stockSaved(j);
+      },
+      async saveNewCategory(name, text){
+        const t = String(text || '').trim();
+        if (!t) { this.stockEdit.error = 'Maglagay ng pangalan ng category.'; return; }
+        const j = await this._stockPost('{{ route('item.category.save') }}', { item_name: name, new_category: t });
+        this._stockSaved(j);
+      },
+      async saveSupplySettings(name, lead, safety){
+        const j = await this._stockPost('{{ route('item.supply-settings.save') }}',
+          { item_name: name, lead_time_days: Number(lead), safety_days: Number(safety) });
+        this._stockSaved(j);
+      },
+      // Matagumpay na save: isara ang editor, kunin ang bagong category list, i-recompute ng server ang stock/DOI.
+      _stockSaved(j){
+        if (!j) return;
+        if (j.categories) this.stock.categories = j.categories;
+        this.closeStockEdit();
+        this.loadStock()
       },
       // http/https lang ang link (iwas javascript: URL).
       safeLink(u){ const s = String(u || '').trim(); return /^https?:\/\//i.test(s) ? s : ''; },
