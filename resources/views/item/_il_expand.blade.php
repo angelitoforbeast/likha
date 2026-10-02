@@ -1,6 +1,124 @@
 {{-- Expanded block ng bagong /item layout (005 T4). Expects Alpine `G` (item group) sa scope.
      Walang x-html, walang fills (pbStyle / cellFormatStyle) — text + ▲/▼ lang. Ang CSS ay .il-* sa index. --}}
 
+{{-- ── Inilipat mula sa 005 _table_new (006 T1), as-is: sourcing-list info, supplier at quote lines + inline editor
+     (CEO LANG), at lead/palugit line + ✎ editor. T5 ang magsasalin at mag-aayos. ── --}}
+<div style="margin-bottom:10px;" @click.stop>
+  @if($effectiveIsCEO)
+  {{-- Extra info ng napiling sourcing list — CEO LANG. Lahat x-text (escaped). --}}
+  <template x-if="worklistItem(G.item_name)">
+    <template x-for="W in [worklistItem(G.item_name)]" :key="'wl-'+G.item_name">
+      <div style="font-size:11px;line-height:1.45;margin-top:3px;">
+        <template x-if="W.variants.length > 1">
+          <div style="color:#7c2d12;font-weight:700;" x-text="'kabuuan: ' + num(W.hold_units)"></div>
+        </template>
+        <template x-if="W.list === 'i_order' && W.shortfall > 0">
+          <div style="color:#b91c1c;font-weight:800;" x-text="'Kulang ' + num(W.shortfall) + ' — i-order na'"></div>
+        </template>
+        <template x-if="W.list === 'naka_order' && W.open_po">
+          <div>
+            🚚 <b x-text="W.open_po.supplier"></b>
+            <span style="color:#64748b;" x-text="W.open_po.order_date + (W.open_po.orders > 1 ? ' (+'+(W.open_po.orders-1)+' pa)' : '')"></span>
+            <div x-text="'Naka-order ' + num(W.open_po.ordered_qty) + ' · dumating ' + num(W.open_po.received_qty) + ' · hinihintay ' + num(W.open_po.open_qty)"></div>
+            <div :style="(W.open_po.lead_time_days !== null && W.open_po.days_since > W.open_po.lead_time_days) ? 'color:#b91c1c;font-weight:700;' : 'color:#475569;'"
+                 x-text="W.open_po.days_since + ' araw na' + (W.open_po.lead_time_days !== null ? ' / lead time ' + W.open_po.lead_time_days + ' araw' : '')"></div>
+          </div>
+        </template>
+      </div>
+    </template>
+  </template>
+  {{-- Supplier(s) + huling unit cost (Supply Finance) — CEO LANG; wala sa markup ng hindi-CEO. --}}
+  <div style="font-size:11px;margin-top:3px;line-height:1.4;font-weight:400;">
+    <template x-if="suppliersFor(G.item_name).length">
+      <div style="color:#0f172a;">
+        <template x-for="(s, si) in suppliersFor(G.item_name)" :key="'sup-'+G.item_name+'-'+si">
+          <span :title="'PO ' + (s.order_date||'') + (s.order_no ? ' · '+s.order_no : '')">
+            <span x-show="si>0" style="color:#94a3b8;"> · </span>🏭 <b x-text="s.supplier"></b> <span style="color:#065f46;font-weight:700;" x-text="money(s.unit_cost)"></span>
+          </span>
+        </template>
+      </div>
+    </template>
+    <template x-if="!suppliersFor(G.item_name).length">
+      <div class="il-sub" style="font-style:italic;">walang supplier</div>
+    </template>
+  </div>
+  {{-- Supplier quotes — INLINE add / edit / delete (CEO LANG). --}}
+  <div style="font-size:11px;margin-top:2px;line-height:1.45;font-weight:400;">
+    <template x-for="(q, qi) in quotesFor(G.item_name)" :key="'q-'+G.item_name+'-'+q.id">
+      <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+        <span :title="'Quote' + (q.moq ? ' · MOQ '+q.moq : '') + (q.updated_at ? ' · '+q.updated_at : '')">🏷 <b x-text="q.supplier"></b>
+          <span style="color:#1d4ed8;font-weight:700;" x-text="q.price!==null ? money(q.price) : '—'"></span>
+          <span x-show="q.moq" class="il-sub" x-text="q.moq ? 'MOQ '+q.moq : ''"></span>
+          <span x-show="q.prev_price !== null && q.prev_price !== undefined" class="il-sub"
+                x-text="'dati '+money(q.prev_price)+(q.prev_date ? ' ('+q.prev_date+')' : '')"></span>
+        </span>
+        <template x-if="q.photo_url">
+          <img class="item-sq" style="width:22px;height:22px;border-color:#bfdbfe;" :src="q.photo_url" :alt="q.supplier"
+               :title="'Quote photo · '+q.supplier" @click.stop="photoModal = { open:true, url:q.photo_url, name:q.supplier+' — '+G.item_name }">
+        </template>
+        <template x-if="safeLink(q.link)"><a :href="safeLink(q.link)" target="_blank" rel="noopener" @click.stop style="color:#4f46e5;">link</a></template>
+        <button type="button" class="il-edit" title="I-edit ang quote" aria-label="I-edit ang quote" @click.stop="openQuote(G.item_name, q)">✎</button>
+        <button type="button" class="il-edit" style="color:#b91c1c;" title="Tanggalin ang quote" aria-label="Tanggalin ang quote" @click.stop="deleteQuote(G.item_name, q)">✕</button>
+      </div>
+    </template>
+    <template x-if="!quotesFor(G.item_name).length && !suppliersFor(G.item_name).length">
+      <div style="color:#b91c1c;font-weight:700;">⚠ wala pang supplier</div>
+    </template>
+    <template x-if="quoteForm.key === supKey(G.item_name)">
+      <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;align-items:center;">
+        <select x-model="quoteForm.supplier_id" aria-label="Supplier" style="font-size:11px;padding:1px;max-width:130px;">
+          <option value="">— supplier —</option>
+          <template x-for="s in supplierList" :key="'s-'+s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
+        </select>
+        <input type="number" step="0.01" min="0" x-model="quoteForm.price" placeholder="₱ presyo" aria-label="Presyo" style="width:78px;font-size:11px;padding:1px;">
+        <input type="number" min="0" x-model="quoteForm.moq" placeholder="MOQ" aria-label="MOQ" style="width:54px;font-size:11px;padding:1px;">
+        <input type="text" x-model="quoteForm.link" placeholder="link (opsyonal)" aria-label="Link" style="width:120px;font-size:11px;padding:1px;">
+        <input type="file" accept="image/jpeg,image/png,image/webp" @change="quoteForm.photo = $event.target.files[0] || null"
+               title="Photo ng produkto ng supplier (jpg/png/webp, hanggang 10 MB)" style="font-size:11px;max-width:170px;">
+        <button type="button" class="il-edit" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
+        <button type="button" class="il-edit" @click.stop="quoteForm.key=null">Cancel</button>
+      </div>
+    </template>
+    <button type="button" class="il-edit" style="margin-top:2px;"
+            x-show="quoteForm.key !== supKey(G.item_name)" @click.stop="openQuote(G.item_name, null)">+ supplier quote</button>
+  </div>
+  @endif
+
+  {{-- Lead/palugit line (lahat ng role) + ✎ editor (CEO LANG). --}}
+  <template x-if="!stockPending() && stockFor(G.item_name)">
+    @if($effectiveIsCEO)
+    <div style="margin-top:4px;">
+      <div class="il-sub" style="display:flex;gap:4px;align-items:flex-start;"
+           x-show="!(stockEdit.key === supKey(G.item_name) && stockEdit.mode === 'sup')">
+        <span x-text="ilLeadLine(G.item_name)"></span>
+        <button type="button" class="il-edit" title="Palitan ang lead at palugit ng item na ito (para sa lahat ng variant)"
+                aria-label="Palitan ang lead at palugit ng item na ito (para sa lahat ng variant)"
+                @click.stop="openStockEdit(G.item_name, stockFor(G.item_name))">✎</button>
+      </div>
+      <template x-if="stockEdit.key === supKey(G.item_name) && stockEdit.mode === 'sup'">
+        <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:11px;font-weight:400;" title="para sa lahat ng variant ng item na ito">
+          <label>lead <input type="number" min="0" max="255" step="1" x-model="stockEdit.lead"
+                             style="width:52px;border:1px solid #cbd5e1;border-radius:5px;padding:2px 4px;font-size:12px;"></label>
+          <label>palugit <input type="number" min="0" max="255" step="1" x-model="stockEdit.safety"
+                                placeholder="blank = default ng lifecycle" title="blank = default ng lifecycle"
+                                style="width:52px;border:1px solid #cbd5e1;border-radius:5px;padding:2px 4px;font-size:12px;"></label>
+          <span class="il-sub">blank = default ng lifecycle</span>
+          <button type="button" :disabled="stockEdit.saving" @click.stop="saveSupplySettings(G.item_name, stockEdit.lead, stockEdit.safety)"
+                  style="border:0;border-radius:5px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;background:#4f46e5;color:#fff;">Save</button>
+          <button type="button" :disabled="stockEdit.saving" @click.stop="closeStockEdit()"
+                  style="border:0;border-radius:5px;padding:4px 9px;font-size:11px;font-weight:700;cursor:pointer;background:#e2e8f0;color:#334155;">Cancel</button>
+        </div>
+      </template>
+      <div x-show="stockEdit.key === supKey(G.item_name) && stockEdit.mode === 'sup' && stockEdit.error"
+           style="font-size:11px;color:#b91c1c;font-weight:600;" x-text="stockEdit.error"></div>
+    </div>
+    @else
+    <div class="il-sub" style="margin-top:4px;" title="Lead = ilang araw bago dumating ang order; palugit = dagdag na araw na reserba"
+         x-text="ilLeadLine(G.item_name)"></div>
+    @endif
+  </template>
+</div>
+
 {{-- ── ITEM: definition-list grid. Bawat entry ay lalabas lang kung visible ang id niya. ── --}}
 <div class="il-dl">
 

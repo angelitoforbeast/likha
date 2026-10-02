@@ -54,74 +54,137 @@ class ItemPageTest extends ItemTestCase
         }
         $this->assertStringContainsString('id="item-layout-new"', $new);
         $this->assertStringNotContainsString('id="item-layout-new"', $old);
-        // Link papunta sa kabilang view.
-        $this->assertStringContainsString('Lumang view', $new);
-        $this->assertStringNotContainsString('Bagong view', $new);
-        $this->assertStringContainsString('Bagong view', $old);
-        $this->assertStringNotContainsString('Lumang view', $old);
+        // Link papunta sa kabilang view (English, 006).
+        $this->assertStringContainsString('🗂 Old view', $new);
+        $this->assertStringNotContainsString('✨ New view', $new);
+        $this->assertStringContainsString('✨ New view', $old);
+        $this->assertStringNotContainsString('🗂 Old view', $old);
+        $this->assertStringContainsString('title="Open the original table (all columns, scrolls sideways)"', $new);
+        $this->assertStringContainsString('title="Back to the simple view"', $old);
         // Pinapanatili ng load() ang ?layout=old sa URL.
         $this->assertStringContainsString("qsObj.layout = 'old'", $new);
         $this->assertStringContainsString('layoutOld: false,', $new);
         $this->assertStringContainsString('layoutOld: true,', $old);
     }
 
-    // ── Bagong layout (005 T3): main row ──────────────────────────────────────
+    // ── 006 T1: tabs, English chrome ──────────────────────────────────────────
 
-    public function test_new_table_has_the_eleven_headers_in_order_with_sort_keys(): void
+    /** Mga label ng <th><span>…</span> sa loob ng isang table (hanggang </thead>), sa pagkakasunod, kasama ang title. */
+    private function headers(string $html, string $tableId): array
+    {
+        $start = strpos($html, 'id="' . $tableId . '"');
+        $this->assertNotFalse($start, "table {$tableId} missing");
+        $head = substr($html, $start, strpos($html, '</thead>', $start) - $start);
+        preg_match_all('/<th\b([^>]*)>\s*<span>([^<]+)<\/span>/', $head, $m, PREG_SET_ORDER);
+        $out = [];
+        foreach ($m as $h) {
+            $this->assertMatchesRegularExpression('/\stitle="[^"]+"/', $h[1], "header {$h[2]} has no title");
+            $out[] = html_entity_decode($h[2]);
+        }
+        return $out;
+    }
+
+    public function test_default_render_has_both_tabs_to_order_first_and_both_header_sets_with_titles(): void
     {
         foreach ([$this->render(true), $this->render(false)] as $html) {
-            $last = 0;
-            foreach (['ITEM', 'LIFECYCLE', 'STOCK / PAPARATING', 'BENTA/ARAW', 'AABOT PA?', 'I-ORDER',
-                      'KITA NGAYON', 'KITA %', 'ADS', 'ACTION'] as $label) {
-                // BENTA/ARAW: puwedeng mag-break pagkatapos ng slash (hindi sa gitna ng salita).
-                $shown = $label === 'BENTA/ARAW' ? 'BENTA/<wbr>ARAW' : $label;
-                $pos = strpos($html, '<span>' . $shown . '</span>', $last);
-                $this->assertNotFalse($pos, "header {$label} missing or out of order");
-                $last = $pos;
-            }
-            $this->assertGreaterThan($last, strpos($html, 'il-chev-th', $last));
-            foreach (['item_name', 'lifecycle', 'stock', 'units_per_day', 'doi', 'order_qty',
-                      'projected_profit_last_day', 'proj_pct_last_7d', 'adspent', 'il_action_at'] as $key) {
-                $this->assertStringContainsString("sb('{$key}')", $html);
-            }
-            // Composite columns: lalabas lang kapag may member id na visible.
-            $this->assertStringContainsString('ilColOn(', $html);
-            $this->assertStringContainsString('table-layout:fixed', $html);
-            $this->assertStringContainsString('<colgroup>', $html);
+            // Tabs: totoong button, role=tab, aria-selected, isang tooltip bawat isa.
+            $this->assertSame(2, substr_count($html, 'role="tab"'));
+            $this->assertMatchesRegularExpression('/<button type="button" role="tab"[^>]*:aria-selected="ilTab === \'order\'[^>]*title="[^"]+"[^>]*>To order<\/button>/', $html);
+            $this->assertMatchesRegularExpression('/<button type="button" role="tab"[^>]*:aria-selected="ilTab === \'sales\'[^>]*title="[^"]+"[^>]*>Sales &amp; Profit<\/button>/', $html);
+            $this->assertLessThan(strpos($html, '>Sales &amp; Profit</button>'), strpos($html, '>To order</button>'));
+            // Default = To order; ?tab=sales lang (eksakto) ang pumipili ng Sales.
+            $this->assertStringContainsString("ilTab: (new URLSearchParams(window.location.search).get('tab') === 'sales') ? 'sales' : 'order',", $html);
+            // Click: replaceState gaya ng setWorklist; load() pinapanatili ang tab.
+            $this->assertStringContainsString("if (this.ilTab === 'sales') qs.set('tab', 'sales'); else qs.delete('tab');", $html);
+            $this->assertStringContainsString("if (this.ilTab === 'sales') qsObj.tab = 'sales';", $html);
+            // Isang table lang ang nasa DOM: ang napiling tab.
+            $this->assertStringContainsString('<template x-if="ilTab === \'order\'">', $html);
+            $this->assertStringContainsString('<template x-if="ilTab === \'sales\'">', $html);
+
+            $this->assertSame(['Item', 'Next step', 'Qty to order', 'Days left', 'Profit (7 days)', 'Trend'],
+                $this->headers($html, 'il-table-order'));
+            $this->assertSame(['Item', 'Orders today', 'Profit today', 'Profit %', 'Ad spend', 'Cost per order'],
+                $this->headers($html, 'il-table-sales'));
         }
     }
 
-    public function test_new_row_texts_are_plain_taglish_sentences_without_x_html(): void
+    public function test_chips_are_in_english(): void
     {
-        $texts = [
-            '🆕 Bago', '📈 Lumalaki', '✅ Stable', '🔄 Aktibo', '📉 Bumababa', '🚫 Itinitigil', '💤 Tulog',
-            'Hindi pa nabibilang', 'Naka-hold: ', 'average ng huling ', 'Umorder ', 'Dating sa ', 'araw reserba',
-            'Hindi pa alam — bilangin muna ang stock', 'Kulang: ', 'araw na benta ang naka-hold',
-            'Mauubos bago dumating', 'Malapit na: ', 'Sapat: ', 'mahigit 1 taon', 'Halos walang benta', 'Walang benta',
-            'Bilangin muna ang stock', 'Hindi pa kailangan', 'Hanap muna ng supplier', 'ngayon na', "'bago '",
-            "['Ene','Peb','Mar','Abr','May','Hun','Hul','Ago','Set','Okt','Nob','Dis']", '−₱', 'HOLD lang',
-            'naka-hold − ', 'No data for selected date.', 'Walang item sa category na ito.',
+        $ceo = $this->render(true);
+        foreach (["{ key:'lahat',      label:'All' }", "{ key:'hanapan',    label:'Need a supplier' }",
+                  "{ key:'may_quote',  label:'Has a quote, not ordered' }", "{ key:'i_order',    label:'Ready to order' }",
+                  "{ key:'naka_order', label:'Ordered, waiting' }",
+                  "'Items that have a supplier and need to be ordered now'"] as $s) {
+            $this->assertStringContainsString($s, $ceo);
+        }
+        foreach (["label:'Lahat'", 'Hanapan ng supplier', 'May quote, hindi pa na-order',
+                  'Handa nang i-order (may supplier)', 'Naka-order, hinihintay'] as $s) {
+            $this->assertStringNotContainsString($s, $ceo);
+        }
+    }
+
+    public function test_default_render_chrome_is_english(): void
+    {
+        $english = [
+            '<option value="">All</option>', '<option value="__none">No category</option>',
+            'No data for the selected dates.', 'Loading…',
+            "'Close all items and campaigns'", '✓ Copied all', 'Close (Esc)', 'No edit history yet.',
+            'Could not load the worklist (', 'Could not load the stock (',
+        ];
+        $taglish = [
+            'Lumang view', 'Bagong view', 'Hanapan ng supplier', 'Naka-order, hinihintay',
+            'Walang item sa listahang ito', 'Walang category', 'Kopyahin LAHAT', 'Copied lahat',
+            'Walang edit history pa', 'Isara (Esc)', 'Hindi ma-load', 'Isara lahat', 'Buksan ang pages',
+            'anong aksyon ginawa', "placeholder=\"hal. ", 'blanko = panatilihin', 'Iwang <b>blanko',
+            'Pwede ka mag-set', 'start ng period', "Iba't ibang", 'if walang promo', 'Set sa /ads_manager',
+            'Walang item sa category na ito', 'Pumili ng supplier', 'Tanggalin si ', 'Maglagay ng pangalan',
+            'Walang rows na visible', 'view ng /owner/private', 'o iwang blanko',
         ];
         foreach ([$this->render(true), $this->render(false)] as $html) {
-            foreach ($texts as $text) {
-                $this->assertStringContainsString($text, $html);
+            foreach ($english as $s) {
+                $this->assertStringContainsString($s, $html);
             }
-            $this->assertSame(0, substr_count($html, 'x-html'));
+            foreach ($taglish as $s) {
+                $this->assertStringNotContainsString($s, $html);
+            }
+        }
+        $ceo = $this->render(true);
+        $this->assertStringContainsString("'No items in this list.'", $ceo);
+        $this->assertStringContainsString("'No items in this category.'", $ceo);
+    }
+
+    public function test_old_table_partial_is_byte_identical_to_the_base_commit(): void
+    {
+        // sha1 ng resources/views/item/_table_old.blade.php sa d9606c8 (hindi ginagalaw ng 006).
+        // LF muna ang line endings para pareho ang hash kahit CRLF ang checkout (Windows).
+        $src = str_replace("\r\n", "\n", file_get_contents(resource_path('views/item/_table_old.blade.php')));
+        $this->assertSame('d3b53d274bb451ee6173df0606d951563c84b299', sha1($src));
+    }
+
+    public function test_item_views_have_no_x_html(): void
+    {
+        foreach (glob(resource_path('views/item/*.blade.php')) as $f) {
+            $this->assertDoesNotMatchRegularExpression('/\sx-html\s*=/', file_get_contents($f), basename($f));
         }
     }
 
-    public function test_new_row_ceo_only_parts_are_absent_for_marketing(): void
+    public function test_ceo_only_editors_moved_to_the_details_are_absent_for_marketing(): void
     {
-        $ceoOnly = ['ilPieceCost(G.item_name', '≈ ', 'openStockEdit(G.item_name', 'openQuote(G.item_name',
-                    'wala pang supplier', 'blank = default ng lifecycle', 'saveSupplySettings(G.item_name'];
+        $ceoOnly = ['openStockEdit(G.item_name', 'openQuote(G.item_name', 'deleteQuote(G.item_name', '@click.stop="saveQuote()"',
+                    'wala pang supplier', 'blank = default ng lifecycle', 'saveSupplySettings(G.item_name',
+                    'x-for="(s, si) in suppliersFor(G.item_name)"', "'kabuuan: '"];
         $ceo = $this->render(true);
         $mkt = $this->render(false);
+        $expand = file_get_contents(resource_path('views/item/_il_expand.blade.php'));
         foreach ($ceoOnly as $s) {
+            $this->assertStringContainsString($s, $expand, "{$s} is not in the details");
             $this->assertStringContainsString($s, $ceo);
             $this->assertStringNotContainsString($s, $mkt);
         }
         // Marketing: lead line plain text lang (walang ✎ button).
         $this->assertStringContainsString('ilLeadLine(G.item_name)', $mkt);
+        // Wala nang nag-iinclude ng 005 table.
+        $this->assertStringNotContainsString("item._table_new", file_get_contents(resource_path('views/item/index.blade.php')));
     }
 
     // ── Bagong layout (005 T4): expanded block ────────────────────────────────
@@ -179,26 +242,20 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringNotContainsString('il-camp', file_get_contents(resource_path('views/owner/_private_expand_inline.blade.php')));
     }
 
-    public function test_expanded_block_has_no_cell_fills_and_new_action_header_sorts_by_latest_note(): void
+    public function test_expanded_block_and_new_tables_have_no_cell_fills(): void
     {
-        foreach (['item/_il_expand.blade.php', 'item/_table_new.blade.php'] as $f) {
+        foreach (['item/_il_expand.blade.php', 'item/_table_order.blade.php', 'item/_table_sales.blade.php'] as $f) {
             $src = file_get_contents(resource_path('views/' . $f));
             foreach (['pbStyle(', 'pbStyleN(', 'cellFormatStyle(', 'background:#fef2f2'] as $fill) {
                 $this->assertStringNotContainsString($fill, $src, "{$f} has {$fill}");
             }
         }
-        $html = $this->render(true);
-        $this->assertStringContainsString("sb('il_action_at')", $html);
-        $this->assertStringContainsString("case 'il_action_at':", $html);
-        // Tulad ng ilLatestAction: pages na may action_comment lang ang binibilang.
-        $this->assertStringContainsString('if (r.action_comment && r.action_at && (best', $html);
     }
 
     public function test_new_layout_review_minors_are_in_the_markup(): void
     {
         $html = $this->render(true);
         $expand = file_get_contents(resource_path('views/item/_il_expand.blade.php'));
-        $table = file_get_contents(resource_path('views/item/_table_new.blade.php'));
         foreach ([
             // 1: link ay binubuo sa click time, hindi lang sa render
             '@click.prevent="window.location.href = viewSwitchUrl()"',
@@ -213,11 +270,8 @@ class ItemPageTest extends ItemTestCase
         ] as $needle) {
             $this->assertStringContainsString($needle, $html);
         }
-        // 5: walang "0.0" kapag null ang units_per_day (main row at narrow duplicate)
-        foreach ([$table, $expand] as $src) {
-            $this->assertStringContainsString('units_per_day != null) ? Number(', $src);
-        }
-        $this->assertStringNotContainsString('il-nb" x-text="\'Paparating', $table);
+        // 5: walang "0.0" kapag null ang units_per_day (narrow duplicate sa expanded block)
+        $this->assertStringContainsString('units_per_day != null) ? Number(', $expand);
     }
 
     public function test_default_item_order_is_by_urgency_in_the_new_layout_and_by_hold_in_the_old(): void
@@ -410,33 +464,16 @@ class ItemPageTest extends ItemTestCase
 
     // ── Bagong layout (005 T5): TOTAL, toolbar, breakpoints ───────────────────
 
-    public function test_new_table_total_follows_the_visible_items_and_the_old_total_is_unchanged(): void
+    public function test_old_total_is_unchanged_and_only_in_the_old_view(): void
     {
         foreach ([true, false] as $ceo) {
-            $new = $this->render($ceo);
-            $this->assertStringContainsString('class="il-total"', $new);
-            $this->assertStringContainsString('TOTAL (nakikita)', $new);
-            $this->assertStringContainsString('Kabuuan ng mga item na nakikita ngayon (kasama ang filter)', $new);
-            $this->assertStringContainsString('ilTotVisible() { return this.aggOf(this.itemGroups().flatMap(G => G.pages)); }', $new);
-            $this->assertStringContainsString('ilHoldVisible() {', $new);
-            // Isang compute lang ng total kada render (T), hindi bawat cell.
-            $this->assertStringContainsString('x-for="T in [ilTotVisible()]"', $new);
-            $this->assertSame(1, substr_count($new, 'ilTotVisible()]'));
-            $this->assertStringNotContainsString('<td>TOTAL</td>', $new);
+            $this->assertStringNotContainsString('<td>TOTAL</td>', $this->render($ceo));
 
             $old = $this->render($ceo, true);
             $this->assertStringContainsString('<td>TOTAL</td>', $old);
             $this->assertStringContainsString('tot() { return this.aggOf(this.filteredRows()); }', $old);
             $this->assertStringNotContainsString('class="il-total"', $old);
         }
-    }
-
-    public function test_i_order_chip_is_renamed_with_a_tooltip(): void
-    {
-        $ceo = $this->render(true);
-        $this->assertStringContainsString("label:'Handa nang i-order (may supplier)'", $ceo);
-        $this->assertStringNotContainsString("label:'I-order na'", $ceo);
-        $this->assertStringContainsString('Mga item na may supplier na at kailangan nang i-order', $ceo);
     }
 
     public function test_toolbar_wraps_and_expand_all_has_a_fixed_width(): void
@@ -454,28 +491,9 @@ class ItemPageTest extends ItemTestCase
         $html = $this->render(true);
         $this->assertStringContainsString('@media (max-width: 1365px)', $html);
         $this->assertStringContainsString('@media (max-width: 1099px)', $html);
-        foreach (['<col class="il-col-action"', '<th class="sortable il-col-action"', '<td class="il-col-action il-c-hide"'] as $m) {
-            $this->assertStringContainsString($m, $html);
-        }
-        $this->assertMatchesRegularExpression('/\.il-col-action\s*\{\s*display:none\s*!important/', $html);
         $this->assertStringContainsString('.il-only-lt1366{display:block;}', $html);
         $this->assertStringContainsString('.il-only-lt1100{display:block;}', $html);
         $this->assertStringContainsString('.il-table tbody tr.il-row{display:grid', $html);
-        $this->assertStringContainsString('class="il-m-label"', $html);
-        $this->assertStringContainsString('tr.il-total', $html);
-    }
-
-    public function test_colspan_follows_the_columns_the_media_queries_leave_visible(): void
-    {
-        $html = $this->render(true);
-        // Parehong query ng CSS (@media max-width 1439 / 1365).
-        $this->assertStringContainsString("window.matchMedia('(max-width: 1439px)')", $html);
-        $this->assertStringContainsString("window.matchMedia('(max-width: 1365px)')", $html);
-        $this->assertStringContainsString("addEventListener('change'", $html);
-        $this->assertMatchesRegularExpression('/ilColspan\(\)\s*\{[^}]*ilVw\.lt1440[^}]*ilVw\.lt1366/s', $html);
-        $table = file_get_contents(resource_path('views/item/_table_new.blade.php'));
-        $this->assertDoesNotMatchRegularExpression('/(?<!:)colspan="\d+"/', $table);
-        $this->assertStringContainsString(':colspan="ilColspan()"', $table);
     }
 
     public function test_chevron_button_fits_its_column(): void
@@ -496,15 +514,9 @@ class ItemPageTest extends ItemTestCase
         $html = $this->render(true);
         // Helper: ≥1,000 buo (walang .00), mas mababa = dalawang decimal; "−₱" style ng ilMoney.
         $this->assertMatchesRegularExpression('/ilMoneyKita\(v\)\s*\{[^}]*>=\s*1000[^}]*maximumFractionDigits:0/s', $html);
-        $dir = resource_path('views/item/');
-        $table = file_get_contents($dir . '_table_new.blade.php');
-        $expand = file_get_contents($dir . '_il_expand.blade.php');
-        $this->assertSame(2, substr_count($table, 'ilMoneyKita('), 'main row + TOTAL');
-        $this->assertStringContainsString('ilMoneyKita(G.agg.projected_profit_last_day)', $table);
-        $this->assertStringContainsString('ilMoneyKita(T.projected_profit_last_day)', $table);
+        $expand = file_get_contents(resource_path('views/item/_il_expand.blade.php'));
         $this->assertStringContainsString('ilMoneyKita(G.agg.projected_profit_last_day)', $expand);
-        $this->assertStringNotContainsString('ilMoney(G.agg.projected_profit_last_day)', $table . $expand);
-        $this->assertStringNotContainsString('ilMoney(T.projected_profit_last_day)', $table);
+        $this->assertStringNotContainsString('ilMoney(G.agg.projected_profit_last_day)', $expand);
     }
 
     public function test_new_layout_font_sizes_are_never_below_11px(): void
@@ -516,7 +528,7 @@ class ItemPageTest extends ItemTestCase
         $css = substr($index, $start, strpos($index, '</style>', $start) - $start);
         $css = preg_replace('/\[style\*="[^"]*"\]/', '', $css); // attribute selectors lang, hindi totoong size
         $sources = ['il css' => $css];
-        foreach (['_table_new', '_il_expand', '_il_lifecycle'] as $p) {
+        foreach (['_table_order', '_table_sales', '_il_expand', '_il_lifecycle'] as $p) {
             $sources[$p] = file_get_contents($dir . $p . '.blade.php');
         }
         foreach ($sources as $name => $src) {

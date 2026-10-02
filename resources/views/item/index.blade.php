@@ -316,6 +316,16 @@
     /* ── Bagong layout (005): lahat naka-scope sa .il-* — hindi ginagalaw ang lumang table ── */
     #scroll.il-scroll { padding:0 8px; }
     .card.il-card { min-width:0; }
+    /* Tabs (006): To order / Sales & Profit, nakadikit sa ibabaw ng table. */
+    .il-tabs { display:flex; flex-wrap:wrap; gap:4px; margin:12px 0 0; }
+    .il-tabs + .card.il-card { margin-top:0; border-top-left-radius:0; }
+    .il-tab {
+      border:1px solid #cbd5e1; border-bottom:0; border-radius:8px 8px 0 0; background:#fff; color:#334155;
+      font-size:13px; font-weight:700; padding:7px 16px; min-height:34px; cursor:pointer;
+    }
+    .il-tab:hover { background:#f1f5f9; }
+    .il-tab.active { background:#1e293b; border-color:#1e293b; color:#fff; }
+    .il-tab:focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
     .il-table { table-layout:fixed; width:100%; }
     .il-table thead th {
       white-space:normal; overflow-wrap:normal; line-height:1.2;
@@ -651,7 +661,7 @@
     {{-- Expand-all / Hide-all toggle — ITEM level (buksan/isara ang pages per item).
          Label flips: walang item na bukas → "▶ Expand all"; may bukas → "▼ Hide all". --}}
     <button type="button" @click="toggleAllExpand()"
-            :title="anyExpanded() ? 'Isara lahat ng items at campaigns' : 'Buksan ang pages ng lahat ng item'"
+            :title="anyExpanded() ? 'Close all items and campaigns' : 'Open the details of every item'"
             style="background:#1e293b;color:#86efac;border:1px solid #475569;
                    border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
                    cursor:pointer;margin-left:4px;width:118px;text-align:center;white-space:nowrap;">
@@ -661,11 +671,11 @@
     {{-- Copy ALL items (Item + HOLD + picture URL) — TSV para sa Sheets, HTML
          table (w/ thumbnails) para sa Messenger/Docs. --}}
     <button type="button" @click="copyAllItems()"
-            title="Kopyahin LAHAT ng item (Item + HOLD + picture) — TSV para sa Sheets, table para sa Messenger/Docs"
+            title="Copy ALL items (Item + HOLD + picture): TSV for Sheets, a table for Messenger/Docs"
             style="background:#065f46;color:#a7f3d0;border:1px solid #10b981;
                    border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
                    cursor:pointer;margin-left:4px;">
-      <span x-text="copyState==='__all' ? '✓ Copied lahat' : '📋 Copy all'"></span>
+      <span x-text="copyState==='__all' ? '✓ Copied all' : '📋 Copy all'"></span>
     </button>
 
     {{-- Refresh data — available to ALL roles. Bypasses the read cache for
@@ -685,16 +695,16 @@
     {{-- Palit ng layout: bagong view (walang horizontal scroll) <-> lumang table. --}}
     @if(!empty($layoutOld))
     <a :href="viewSwitchUrl()" @click.prevent="window.location.href = viewSwitchUrl()"
-       title="Bumalik sa bagong layout (walang horizontal scroll)"
+       title="Back to the simple view"
        style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
-              cursor:pointer;margin-left:4px;">✨ Bagong view</a>
+              cursor:pointer;margin-left:4px;">✨ New view</a>
     @else
     <a :href="viewSwitchUrl()" @click.prevent="window.location.href = viewSwitchUrl()"
-       title="Buksan ang dating table (lahat ng column, may horizontal scroll)"
+       title="Open the original table (all columns, scrolls sideways)"
        style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
-              cursor:pointer;margin-left:4px;">🗂 Lumang view</a>
+              cursor:pointer;margin-left:4px;">🗂 Old view</a>
     @endif
 
     {{-- CEO-only chrome — hidden when CEO toggles to Marketing view so the UI
@@ -796,7 +806,7 @@
     <span style="font-size:11px;color:#475569;font-weight:700;margin-right:2px;">Sourcing:</span>
     <template x-for="c in worklistChips" :key="'wl-'+c.key">
       <button type="button" @click="setWorklist(c.key)"
-              :title="c.key === 'i_order' ? 'Mga item na may supplier na at kailangan nang i-order' : ''"
+              :title="c.key === 'i_order' ? 'Items that have a supplier and need to be ordered now' : ''"
               :style="worklist.list === c.key
                 ? 'background:#4f46e5;color:#fff;border:1px solid #4f46e5;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;'
                 : 'background:#fff;color:#334155;border:1px solid #cbd5e1;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;'">
@@ -818,18 +828,42 @@
     <label for="category-filter" style="font-size:11px;color:#475569;font-weight:700;margin-right:2px;">Category:</label>
     <select id="category-filter" aria-label="Category" x-model="categoryFilter"
             style="border:1px solid #cbd5e1;border-radius:6px;padding:3px 8px;font-size:11px;background:#fff;color:#334155;">
-      <option value="">Lahat</option>
+      <option value="">All</option>
       <template x-for="c in stock.categories" :key="'cf-'+c.id">
         <option :value="String(c.id)" x-text="c.name"></option>
       </template>
+      {{-- Old view: hindi binabago (nakapin sa 004 test); bagong view: English. --}}
+      @if(!empty($layoutOld))
       <option value="__none">Walang category</option>
+      @else
+      <option value="__none">No category</option>
+      @endif
     </select>
   </div>
 
   @if(!empty($layoutOld))
     @include('item._table_old')
   @else
-    @include('item._table_new')
+    {{-- Bagong layout (006): dalawang tab — To order (default) at Sales & Profit (?tab=sales). --}}
+    <div id="scroll" class="il-scroll">
+      <div class="il-tabs" role="tablist" aria-label="Table view">
+        <button type="button" role="tab" class="il-tab" :class="ilTab === 'order' ? 'active' : ''"
+                :aria-selected="ilTab === 'order' ? 'true' : 'false'" @click="setTab('order')"
+                title="What to order and when: one next step per item">To order</button>
+        <button type="button" role="tab" class="il-tab" :class="ilTab === 'sales' ? 'active' : ''"
+                :aria-selected="ilTab === 'sales' ? 'true' : 'false'" @click="setTab('sales')"
+                title="Orders, profit, profit % and ad spend per item">Sales &amp; Profit</button>
+      </div>
+      <div class="card il-card" id="item-layout-new">
+        {{-- Isang table lang ang nasa DOM (x-if): ang napiling tab. --}}
+        <template x-if="ilTab === 'order'">
+          @include('item._table_order')
+        </template>
+        <template x-if="ilTab === 'sales'">
+          @include('item._table_sales')
+        </template>
+      </div>
+    </div>
   @endif
 
   {{-- Edit modal — 3 independent sections (RTS, Promo, COGS) — each has its
@@ -857,7 +891,7 @@
           <div style="font-size:16px;font-weight:700;color:#0f172a;margin-top:4px;word-break:break-word;" x-text="actionModal.page_name"></div>
           <div style="font-size:12px;color:#475569;margin-top:2px;word-break:break-word;">
             <span style="font-family:ui-monospace,monospace;" x-text="actionModal.ts_date"></span>
-            <span style="color:#94a3b8;"> · anong aksyon ginawa sa page na ito sa araw na ito</span>
+            <span style="color:#94a3b8;"> · what was done on this page on this day</span>
           </div>
         </div>
 
@@ -866,7 +900,7 @@
           <textarea x-model="actionModal.comment" maxlength="1000"
                     x-init="$nextTick(() => { $el.style.height='auto'; $el.style.height=Math.min($el.scrollHeight,220)+'px'; })"
                     @input="$el.style.height='auto'; $el.style.height=Math.min($el.scrollHeight,220)+'px'"
-                    placeholder="hal. 'Tinaasan ang budget', 'Pinause ang adset', 'Bagong creative'…"
+                    placeholder="e.g. 'Raised the budget', 'Paused the ad set', 'New creative'…"
                     style="width:100%;box-sizing:border-box;border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:13px;resize:none;outline:none;min-height:58px;white-space:pre-wrap;overflow-wrap:break-word;overflow-y:auto;"></textarea>
 
           <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px;flex-wrap:wrap;">
@@ -886,7 +920,7 @@
                 <div style="font-size:11px;color:#94a3b8;">Loading…</div>
               </template>
               <template x-if="!actionModal.logsLoading && actionModal.logs.length===0">
-                <div style="font-size:11px;color:#94a3b8;">Walang edit history pa.</div>
+                <div style="font-size:11px;color:#94a3b8;">No edit history yet.</div>
               </template>
               <template x-for="(lg, i) in actionModal.logs" :key="i">
                 <div style="font-size:11px;color:#334155;padding:4px 0;border-bottom:1px solid #f8fafc;word-break:break-word;">
@@ -945,22 +979,22 @@
           <div style="font-size:10.5px;color:#92400e;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">📊 RTS%</div>
           <label>RTS% <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(per page, item & price · effective for chosen period)</span></label>
           <div style="display:flex;align-items:center;gap:8px;">
-            <input type="number" step="0.01" min="0" max="100" x-model="edit.rts_pct" placeholder="e.g. 50 — blanko = panatilihin">
+            <input type="number" step="0.01" min="0" max="100" x-model="edit.rts_pct" placeholder="e.g. 50 — leave blank to keep">
             <span style="color:#64748b;">%</span>
           </div>
           <div style="font-size:11px;color:#64748b;margin-top:3px;">
-            💡 Iwang <b>blanko</b> kung gusto mo lang mag-dagdag ng remark — ipagpapatuloy ang dating RTS (base sa item alias kung meron, kung wala ay sa item name).
+            💡 Leave it <b>blank</b> if you only want to add a remark — the previous RTS carries on (by item alias if there is one, otherwise by item name).
           </div>
           <template x-if="edit.rts_inherited && edit.rts_eff_date">
             <div style="font-size:11px;color:#b45309;margin-top:4px;">
-              ⚠ Current value inherited from <span style="font-family:ui-monospace,monospace;" x-text="edit.rts_eff_date"></span>. Pwede ka mag-set ng bagong period sa baba.
+              ⚠ Current value inherited from <span style="font-family:ui-monospace,monospace;" x-text="edit.rts_eff_date"></span>. You can set a new period below.
             </div>
           </template>
 
           <label style="margin-top:10px;">RTS Comment <span style="color:#dc2626;">*</span></label>
           <input type="text" x-model="edit.comment" maxlength="500" placeholder="why is this value different?">
 
-          <label style="margin-top:10px;">Effective from <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(start ng period kung saan applicable)</span></label>
+          <label style="margin-top:10px;">Effective from <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(start of the period it applies to)</span></label>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <input type="date" x-model="edit.rts_effective_date">
             <button type="button" class="ow-btn"
@@ -972,7 +1006,7 @@
                     @click="edit.rts_effective_date = edit.date">↶ this date</button>
           </div>
           <div style="font-size:11px;color:#64748b;margin-top:3px;">
-            Iba't ibang season = iba't ibang period. Pumili ng date kung saan magstart ang bagong RTS value.
+            Different seasons = different periods. Pick the date the new RTS value starts.
             <template x-if="edit.anchor_first_date">
               <span style="color:#7c3aed;font-weight:600;"> · price anchor: <span x-text="edit.anchor_first_date"></span></span>
             </template>
@@ -995,15 +1029,15 @@
         <div class="ow-modal-section" style="border-top:1px solid #e2e8f0;background:#fdf4ff;"
              x-show="!edit.focusScope || edit.focusScope === 'promo'">
           <div style="font-size:10.5px;color:#86198f;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;">🏷 Promo</div>
-          <label>Promo <span style="color:#dc2626;">*</span> <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(type NONE if walang promo)</span></label>
+          <label>Promo <span style="color:#dc2626;">*</span> <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(type NONE if there is no promo)</span></label>
           <input type="text" x-model="edit.promo" maxlength="255" placeholder='e.g. "9.9 Sale", "PAYDAY", or "NONE"'>
           <template x-if="edit.promo_inherited && edit.rts_eff_date">
             <div style="font-size:11px;color:#b45309;margin-top:4px;">
-              ⚠ Current value inherited from <span style="font-family:ui-monospace,monospace;" x-text="edit.rts_eff_date"></span>. Pwede ka mag-set ng bagong period sa baba.
+              ⚠ Current value inherited from <span style="font-family:ui-monospace,monospace;" x-text="edit.rts_eff_date"></span>. You can set a new period below.
             </div>
           </template>
 
-          <label style="margin-top:10px;">Effective from <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(start ng promo period)</span></label>
+          <label style="margin-top:10px;">Effective from <span style="color:#94a3b8;font-weight:500;text-transform:none;letter-spacing:0;">(start of the promo period)</span></label>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <input type="date" x-model="edit.promo_effective_date">
             <button type="button" class="ow-btn"
@@ -1015,7 +1049,7 @@
                     @click="edit.promo_effective_date = edit.date">↶ this date</button>
           </div>
           <div style="font-size:11px;color:#64748b;margin-top:3px;">
-            Iba't ibang promo period = pumili ng start date. Promo applies until next change or end of price scope.
+            Different promo periods = pick a start date. Promo applies until next change or end of price scope.
           </div>
 
           <template x-if="edit.promoError">
@@ -1107,7 +1141,7 @@
       <div style="position:relative;max-width:92vw;max-height:92vh;display:flex;flex-direction:column;align-items:center;gap:10px;">
         <button @click="photoModal.open=false"
                 style="position:absolute;top:-14px;right:-14px;background:#fff;border:1px solid #e2e8f0;border-radius:999px;width:34px;height:34px;font-size:18px;color:#334155;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.2);z-index:2;"
-                title="Isara (Esc)">✕</button>
+                title="Close (Esc)" aria-label="Close (Esc)">✕</button>
         <img :src="photoModal.url" :alt="photoModal.name"
              style="max-width:92vw;max-height:82vh;border-radius:10px;background:#fff;box-shadow:0 8px 40px rgba(0,0,0,.35);object-fit:contain;">
         <div style="background:rgba(255,255,255,.95);border-radius:8px;padding:6px 14px;font-size:13px;font-weight:700;color:#0f172a;max-width:92vw;text-align:center;word-break:break-word;"
@@ -1189,7 +1223,7 @@
               <template x-if="!creativeModal.data.creative?.ad_link">
                 <div style="background:white;border:1px dashed #cbd5e1;border-radius:8px;padding:24px;text-align:center;color:#94a3b8;font-size:12px;">
                   No ad link saved yet.<br>
-                  <span style="font-size:10.5px;">Set sa /ads_manager/campaigns/history para mag-preview.</span>
+                  <span style="font-size:10.5px;">Set it in /ads_manager/campaigns/history to preview.</span>
                 </div>
               </template>
             </div>
@@ -1355,6 +1389,8 @@
 
       // Layout: false = bagong layout (default), true = lumang table (?layout=old, galing sa server).
       layoutOld: @json(!empty($layoutOld)),
+      // Tab ng bagong layout: 'order' (default) o 'sales'. Allow-list: eksaktong 'sales' lang; hindi ine-echo ang param.
+      ilTab: (new URLSearchParams(window.location.search).get('tab') === 'sales') ? 'sales' : 'order',
       // Bagong layout: aling composite column ang binubuo ng aling owner_private ids (lalabas kapag may kahit isang visible).
       ilCols: {
         lifecycle:['lifecycle'], stock:['stock','incoming'], upd:['units_per_day'], doi:['doi'], order:['order_qty'],
@@ -1442,15 +1478,15 @@
         byKey:{},   // base key → worklist item (para sa worklistKeep, isang lookup kada row)
       },
       worklistChips: [
-        { key:'lahat',      label:'Lahat' },
-        { key:'hanapan',    label:'Hanapan ng supplier' },
-        { key:'may_quote',  label:'May quote, hindi pa na-order' },
-        { key:'i_order',    label:'Handa nang i-order (may supplier)' },
-        { key:'naka_order', label:'Naka-order, hinihintay' },
+        { key:'lahat',      label:'All' },
+        { key:'hanapan',    label:'Need a supplier' },
+        { key:'may_quote',  label:'Has a quote, not ordered' },
+        { key:'i_order',    label:'Ready to order' },
+        { key:'naka_order', label:'Ordered, waiting' },
       ],
       // Stock / DOI / order qty / category / item value kada base item — /item/stock (lahat ng role).
       stock: { items:{}, values:{}, categories:[], start:null, ready:false, loaded:false, loading:false, error:'', _req:0 },
-      categoryFilter: '',   // '' = Lahat, '__none' = Walang category, else category id
+      categoryFilter: '',   // '' = lahat, '__none' = walang category, else category id
       stockEdit: { key:null, mode:null, lead:'', safety:'', newCat:'', saving:false, error:'' },   // isang editor lang kada bukas (supKey)
       _photoTarget: null,     // item_name na kasalukuyang ina-upload-an ng photo
       holdMap: {},            // item_name → HOLD count (jnt/hold logic; drives item universe)
@@ -1699,6 +1735,8 @@
         if (this.effectiveIsCeo && this.worklist.list !== 'lahat') qsObj.list = this.worklist.list;
         // Lumang table view — panatilihin ang ?layout=old sa URL.
         if (this.layoutOld) qsObj.layout = 'old';
+        // Tab ng bagong layout — panatilihin ang ?tab=sales (kahit nasa lumang view, para bumalik sa parehong tab).
+        if (this.ilTab === 'sales') qsObj.tab = 'sales';
         // refresh=1 bypasses the server-side cache for this single request.
         // History-replaced URL does NOT include refresh — kasi nagdadagdag lang
         // siya ng noise sa visible address bar.
@@ -1858,9 +1896,9 @@
       async saveSnapshot(){
         if (this.savingSnapshot) return;
         if (!this.rows || this.rows.length === 0) {
-          if (!confirm('Walang rows na visible ngayon — save anyway as an empty snapshot?')) return;
+          if (!confirm('No rows are visible right now — save anyway as an empty snapshot?')) return;
         }
-        if (!confirm('Save snapshot for ' + this.startDate + ' → ' + this.endDate + '?\n\nFreezes the current view ng /owner/private. Viewable later sa /owner/private/snapshots.')) return;
+        if (!confirm('Save snapshot for ' + this.startDate + ' → ' + this.endDate + '?\n\nFreezes the current view of /owner/private. You can open it later in /owner/private/snapshots.')) return;
 
         this.savingSnapshot = true; this.saveMsg = '';
         try {
@@ -2153,7 +2191,7 @@
           let rts = null;
           if (!rtsBlank) {
             rts = parseFloat(rtsRaw);
-            if (isNaN(rts) || rts < 0 || rts > 100) { e.rtsError = 'RTS% must be 0–100 (o iwang blanko para ipagpatuloy ang dating RTS).'; return; }
+            if (isNaN(rts) || rts < 0 || rts > 100) { e.rtsError = 'RTS% must be 0–100 (or leave it blank to keep the previous RTS).'; return; }
           }
           const cmt = (e.comment || '').trim();
           if (!cmt) { e.rtsError = 'RTS Comment is required.'; return; }
@@ -2167,7 +2205,7 @@
           e.savingRts = true;
         } else if (scope === 'promo') {
           const promo = (e.promo || '').trim();
-          if (!promo) { e.promoError = 'Promo required — type "NONE" if walang promo.'; return; }
+          if (!promo) { e.promoError = 'Promo required — type "NONE" if there is no promo.'; return; }
           if (cellPriceInt === null) { e.promoError = 'No price detected for this cell. Cannot save.'; return; }
           fd.append('promo',          promo);
           fd.append('mode_cod_int',   cellPriceInt);
@@ -2241,7 +2279,7 @@
         // Inline save lacks a promo input — server requires it. Prompt for it,
         // pre-filling with current row promo (or NONE) so user can Enter-through.
         const promoDefault = (row && row.promo) ? row.promo : 'NONE';
-        const promo = (prompt('Promo (required — type NONE if walang promo):', promoDefault) || '').trim();
+        const promo = (prompt('Promo (required — type NONE if there is no promo):', promoDefault) || '').trim();
         if (!promo) { alert('Promo is required.'); return; }
 
         // Comment is required by server too — fallback to short reason if blank.
@@ -3197,7 +3235,7 @@
           this.worklist.loaded = true;
           this.worklist.error  = '';
         }catch(e){
-          if (req === this.worklist._req) this.worklist.error = 'Hindi ma-load ang worklist (' + (e.message || e) + '). I-refresh.';
+          if (req === this.worklist._req) this.worklist.error = 'Could not load the worklist (' + (e.message || e) + '). Refresh the page.';
         }
         finally{ if (req === this.worklist._req) this.worklist.loading = false; }
       },
@@ -3222,7 +3260,7 @@
           this.stock.loaded     = true;
           this.stock.error      = '';
         }catch(e){
-          if (req === this.stock._req) this.stock.error = 'Hindi ma-load ang stock (' + (e.message || e) + '). I-refresh.';
+          if (req === this.stock._req) this.stock.error = 'Could not load the stock (' + (e.message || e) + '). Refresh the page.';
         }
         finally{ if (req === this.stock._req) this.stock.loading = false; }
       },
@@ -3623,6 +3661,13 @@
         }
         return k === 'uncounted' ? 2 : k === 'malapit' ? 3 : k === 'sapat' ? 4 : 5;
       },
+      // Palit ng tab (gaya ng setWorklist): ?tab=sales, o tanggal ang param para sa To order.
+      setTab(tab){
+        this.ilTab = tab === 'sales' ? 'sales' : 'order';
+        const qs = new URLSearchParams(window.location.search);
+        if (this.ilTab === 'sales') qs.set('tab', 'sales'); else qs.delete('tab');
+        history.replaceState(null, '', '?' + qs.toString());
+      },
       setWorklist(key){
         this.worklist.list = key;
         const qs = new URLSearchParams(window.location.search);
@@ -3693,7 +3738,7 @@
       async saveNewCategory(name, text){
         if (this.stockEdit.saving) return;
         const t = String(text || '').trim();
-        if (!t) { this.stockEdit.error = 'Maglagay ng pangalan ng category.'; return; }
+        if (!t) { this.stockEdit.error = 'Enter a category name.'; return; }
         const j = await this._stockPost('{{ route('item.category.save') }}', { item_name: name, new_category: t });
         this._stockSaved(j);
       },
@@ -3702,7 +3747,11 @@
         const ok = v => /^\d+$/.test(String(v).trim()) && Number(v) <= 255;
         // Blangko ang palugit = balik sa default ng lifecycle → hindi ipinapadala ang safety_days.
         const blankSafety = String(safety ?? '').trim() === '';
-        if (!ok(lead) || (!blankSafety && !ok(safety))) { this.stockEdit.error = 'Lagyan ng numero (0–255) ang lead at palugit.'; return; }
+        // Old view: dating text (nakapin sa 004 test); bagong view: English.
+        if (!ok(lead) || (!blankSafety && !ok(safety))) {
+          this.stockEdit.error = this.layoutOld ? 'Lagyan ng numero (0–255) ang lead at palugit.' : 'Enter a number (0–255) for the lead time and the buffer.';
+          return;
+        }
         const payload = { item_name: name, lead_time_days: Number(lead) };
         if (!blankSafety) payload.safety_days = Number(safety);
         const j = await this._stockPost('{{ route('item.supply-settings.save') }}', payload);
@@ -3727,7 +3776,7 @@
       async saveQuote(){
         const f = this.quoteForm;
         if (!f.key) return;
-        if (!f.supplier_id) { alert('Pumili ng supplier.'); return; }
+        if (!f.supplier_id) { alert('Pick a supplier.'); return; }
         f.saving = true;
         try{
           // Multipart (FormData) para kasama ang photo. Blangkong field = hindi isinasama
@@ -3751,7 +3800,7 @@
         finally{ f.saving = false; }
       },
       async deleteQuote(name, q){
-        if (!confirm('Tanggalin si ' + q.supplier + ' sa ' + name + '?')) return;
+        if (!confirm('Delete the quote from ' + q.supplier + ' for ' + name + '?')) return;
         try{
           const res = await fetch('{{ route('item.quotes.delete') }}', { method:'POST',
             headers:{ 'X-CSRF-TOKEN': this._csrf(), 'Accept':'application/json', 'Content-Type':'application/json' },
