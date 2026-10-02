@@ -73,3 +73,16 @@ Accepted review findings, each with the reason it isn't fixed now (CLAUDE.md wor
 - **The page cards' Prof.Profit(1D) value keeps two decimals**; fix list 1's whole-peso rule is applied only to the KITA NGAYON cells (main row, TOTAL, narrow duplicate), as written. Reason: "nothing else changes"; Mira can extend it.
 - **The colspan test matches `ilVw.lt1440` / `ilVw.lt1366` by text order only**; deleting the `ilColOn` guard would still pass. Reason: no JS runner; string-grep seam.
 - **Missing edge tests the reviewers listed:** `?layout[]=old` and an empty `?layout=` (both give the new layout by the strict `=== 'old'`), a non-CEO `GET /item`, an item with no demand (`velocity_days` 1), TOTAL cells in the Marketing render, `ilPageVal` for `jnt_rdt` with partial members / `rts_pct` 0 / null price range / manual vs cogs item value. Reason: keep the suite small; trusted or display-only paths.
+
+## Handoff 006: /item simple view in English (2026-10-02)
+
+- **No runtime test of the 006 helpers** (`ilNext`, `ilReason`, `ilSupplier`, `ilCheapQuote`, `ilQtyCost`/`ilQtyCostAmount`, `ilDaysLeft`, `baseProfit7`, `ilCfTint`, `ilOrderTotal`, `ilSalesColspan`, `ilLeadLine`, `ilOrderReason`, `ilSalesADay`, the rank sort, the first-click-ascending `il_next` sort, the tab switch). `ItemPageTest` proves the code and texts are in the markup, not that they pick the right state. Reason: no JS runner, and adding one is a new dependency (same as 005). Suggestion: allow `node --test` on a small pure helper file.
+- **"To order now" ₱ sums only red rows that have a cost line**; "Find a supplier" rows with no item value add to items and pcs but not to ₱. Reason: spec §6 allows it; no price, no honest number.
+- **A ₱0 quote counts as "no price"** for Next step and the cost line, but still counts as a quote for the server's "Has a quote" chip and shows "₱0.00" in the details. Reason: display mismatch only; the chip logic is unchanged by design.
+- **The Lead time line in the details shows the trend word and "losing money" to every role**, even one without the `lifecycle` grant. Reason: same as 005 (`ilLeadLine` was ungated there); Mira decides whether lifecycle is hidden from any role.
+- **The Trend entry in the details shows the trend word plus its tip text**, which is also its tooltip. Reason: the visible tip is the "lifecycle detail" the handoff asks for in the details.
+- **Below 1,100 px the header row is hidden, so header sorts aren't reachable in card view.** Reason: inherited from 005; the default urgency sort still applies.
+- **The Sales total row tints its four % values** with the same owner rule per window. Reason: one colour meaning per column; the 005 total had no fills because 005 had none anywhere.
+- **`il-w-item` is a marker class with no CSS rule** (a test pins the flexible Item column by it). Reason: harmless.
+- **At 72 px (1,100–1,365 px) a value like "▼ −100.0%" may wrap.** Reason: width approved in spec §8; Mira's browser check decides.
+- **`ilCfTint` evaluates the owner's rules with no reference row**, so a rule that compares against another column or a formula is skipped. Reason: the To order value is a combined base-item figure, not a page row.

@@ -49,5 +49,17 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 
 - 005 fix list 1: format-helper changes (ilMoneyKita, ilPct) apply to the named cells only; the page-card path `ilPageVal` case 'proj_prof_1d' (peso()) still uses 2-dp ilMoney, and ilPct on tiny negatives (-0.04) prints "▼ −0.0%". Tests remain string-grep of the Blade.
 
+- 006 T1 tabs: tests are still string-grep of the Blade (ilTab/setTab never executed); header sort keys `cpp`/`orders_last_day` work only via _itemSortValue's default branch (agg field); a sortCol from one tab stays active, invisible, after switching to the other tab; ilColspan/ilWatchViewport/ilTotVisible may be dead after _table_new removal (check in T6); _table_old pinned by sha1 in a test, so any later legit edit must update the hash.
+
+- 006 T2 To order cells: ItemPageTest still string-grep (ilNext/ilDaysLeft/ilCfTint never executed); profit pesos shown under the proj_pct_7d grant only (proj_prof_7d is a separate column id); ilCfTint falls to the 15/0 default when a matched rule colour is rgb()/hsl() (regex hex|name only), against "owner rule wins"; working tree can hold the next task's tests (T3) that fail while reviewing the previous commit.
+
+- 006 T3 sort/TOTAL: tests string-grep only (ilOrderTotal, rank sort never executed); developer claims like "an old test asserts ilDays" must be grepped (it did not; ilDays is dead); first click on rank header sorts desc = grey first, red last; TOTAL pesos silently skip red rows with no cost line (spec-accepted).
+
+- 006 T4 Sales rows + T2 fix: tests string-grep only (ilCfTint, ilCheapQuote, ilSalesColspan never executed); TOTAL row carries tints though 005 TOTAL had "no fills" and spec §5 is silent; a quote with price<=0 now skipped by ilCheapQuote but server chip counts/old views (`q.price!==null`) still treat it as a quote; sales cells have no il-m-label, card mode is T6.
+
+- 006 T5 details panel: tests string-grep only (ilLeadLine/ilOrderReason/ilSalesADay never executed); ilLeadLine shows trend word + "losing money" to Marketing with no lifecycle grant (same as 005), prints "(—)" when lifecycle unknown; .il-only-* CSS and the lt1366 ilColspan decrement are now dead (check T6); removed helpers were not referenced outside _il_expand/tests (grepped OK).
+
+- 006 T6 widths/cards: tests string-grep only (CSS needles, media blocks via mediaBlock helper); widths/min-widths verified by hand (796+300, 822+300, -48 at 72px pct); `il-w-item` is a marker class with no CSS rule; card mode hides thead so sorting is unreachable below 1,100 px (inherited from 005); removed helpers/classes grepped clean in views and tests; dynamic `il-tone-`+tone has no teal producer.
+
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.
