@@ -173,8 +173,10 @@ class ItemPageTest extends ItemTestCase
     public function test_ceo_only_editors_moved_to_the_details_are_absent_for_marketing(): void
     {
         $ceoOnly = ['openStockEdit(G.item_name', 'openQuote(G.item_name', 'deleteQuote(G.item_name', '@click.stop="saveQuote()"',
-                    'wala pang supplier', 'blank = default ng lifecycle', 'saveSupplySettings(G.item_name',
-                    'x-for="(s, si) in suppliersFor(G.item_name)"', "'kabuuan: '"];
+                    '⚠ No supplier yet', 'blank = lifecycle default', 'saveSupplySettings(G.item_name',
+                    'x-for="(s, si) in suppliersFor(G.item_name)"', "'total on hold: '", "'Short ' + num(W.shortfall) + ' — order now'",
+                    "'Ordered ' + num(W.open_po.ordered_qty)", 'title="Edit quote"', 'title="Delete quote"', 'placeholder="₱ price"',
+                    'placeholder="link (optional)"', '+ supplier quote', "'was ' + money(q.prev_price)"];
         $ceo = $this->render(true);
         $mkt = $this->render(false);
         $expand = file_get_contents(resource_path('views/item/_il_expand.blade.php'));
@@ -187,6 +189,29 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringContainsString('ilLeadLine(G.item_name)', $mkt);
         // Wala nang nag-iinclude ng 005 table.
         $this->assertStringNotContainsString("item._table_new", file_get_contents(resource_path('views/item/index.blade.php')));
+    }
+
+    public function test_details_panel_taglish_is_gone_from_the_new_view(): void
+    {
+        foreach ([$this->render(true), $this->render(false)] as $html) {
+            // Wala kahit saan (markup at JS ng bagong view).
+            foreach (['Puhunan bawat piraso', 'Paano nakuha', 'Dating sa ', 'araw reserba', 'naka-hold −',
+                      'wala pang supplier', 'Palitan ang lead', 'I-edit ang quote', 'Tanggalin ang quote', "'dati '",
+                      'Mga page (', 'HOLD (piraso) hanggang', 'wala pang hold snapshot', 'back-filled earliest',
+                      'Ipakita/itago', '+ bagong category', '— wala —', 'ilLifecycleLabels', 'ilLatestAction', 'ilAdsLine',
+                      "'kabuuan: '", 'i-order na', "' araw na'", 'Kita ngayon'] as $s) {
+                $this->assertFalse(str_contains($html, $s), "found: {$s}");
+            }
+            // Wala sa markup (nasa JS pa ng lumang view: field names, column label 'Benta/araw', orderTip, comments).
+            $markup = substr($html, 0, strrpos($html, '<script>'));
+            foreach (['palugit', 'walang running page', 'walang supplier', 'para sa lahat ng variant', 'Lead = ilang araw',
+                      'Benta/araw', 'hinihintay'] as $s) {
+                $this->assertFalse(str_contains($markup, $s), "found in markup: {$s}");
+            }
+        }
+        $expand = file_get_contents(resource_path('views/item/_il_expand.blade.php'));
+        $this->assertStringNotContainsString('stockTip(', $expand);
+        $this->assertStringNotContainsString('il-only-', $expand);
     }
 
     // ── 006 T2: To order rows ─────────────────────────────────────────────────
@@ -343,15 +368,19 @@ class ItemPageTest extends ItemTestCase
     {
         foreach ([$this->render(true), $this->render(false)] as $html) {
             foreach ([
-                'Puhunan bawat piraso', 'Halaga ng isang piraso (cogs) hanggang sa huling petsa ng range',
-                'Paano nakuha: ', 'Mga page (', 'Walang running page — walang page na maipapakita.',
-                'Campaigns', 'Ipakita/itago ang campaigns ng page na ito',
+                // Item section (006 T5, English)
+                '>Sales a day</div>', "'Average of the last ' + ", '>Stock / Incoming</div>', "'Count the stock first'",
+                '>Lead time</div>', 'ilLeadLine(G.item_name)', '>How the qty is worked out</div>', 'ilOrderReason(G.item_name)',
+                '>Trend</div>', 'ilTrendTip(G.item_name)', '>Running pages</div>', "' running page'", "'No running ad'",
+                '>Cost per piece</div>', 'Cost of one piece (COGS) as of the last day of the range',
+                // Page cards + campaigns
+                "'Pages (' + G.pages.length + ')'", 'No running ad — no pages to show.',
+                'Campaigns', "title=\"Show or hide this page's campaigns\"",
                 'togglePageExpand(row.page_name)', 'class="il-camp"', 'expand-panel',
                 'x-for="row in G.pages"',
                 "openEditModal(row, 'rts')", "openEditModal(row, 'promo')", "openEditModal(row, 'cogs')",
                 'openActionModal(row)', 'openBreakdown(row)',
-                'copyItem(G.item_name', "itemImages[G.item_name] ? 'Change' : 'Add photo'",
-                'il-only-lt1366', 'il-only-lt1100',
+                'copyItem(G.item_name', "itemImages[G.item_name] ? 'Change photo' : 'Add photo'",
             ] as $s) {
                 $this->assertStringContainsString($s, $html);
             }
@@ -361,7 +390,7 @@ class ItemPageTest extends ItemTestCase
 
     public function test_ceo_piece_cost_category_editor_and_ceo_cogs_edit_are_absent_for_marketing(): void
     {
-        $ceoOnly = ["'CEO: ' + ilMoney(", "openEditModal(row, 'cogs_ceo')", 'saveCategory(G.item_name', '+ bagong category'];
+        $ceoOnly = ["'CEO value: ' + ilMoney(", "openEditModal(row, 'cogs_ceo')", 'saveCategory(G.item_name', '+ new category'];
         $ceo = $this->render(true);
         $mkt = $this->render(false);
         foreach ($ceoOnly as $s) {
@@ -413,15 +442,16 @@ class ItemPageTest extends ItemTestCase
             'const n = Number(x), r1 = Math.round(n * 10) / 10;',
             // 3: cover galing sa numero ng server
             'Number(P.order_qty) - hold + inc + st',
-            // 6: HOLD tooltip ng page card
-            "'wala pang hold snapshot'",
+            // 6: HOLD tooltip ng page card (English, 006 T5)
+            "'No hold snapshot yet'",
             // 7: STOCK cell puwedeng mag-wrap
             '.il-table .il-wrap { white-space:normal; overflow-wrap:normal; }',
         ] as $needle) {
             $this->assertStringContainsString($needle, $html);
         }
-        // 5: walang "0.0" kapag null ang units_per_day (narrow duplicate sa expanded block)
-        $this->assertStringContainsString('units_per_day != null) ? Number(', $expand);
+        // 5: walang "0.0" kapag null ang units_per_day (Sales a day sa details)
+        $this->assertStringContainsString('units_per_day != null) ? Number(', $html);
+        $this->assertStringContainsString('ilSalesADay(G.item_name)', $expand);
     }
 
     public function test_default_item_order_is_by_next_step_rank_in_the_new_layout_and_by_hold_in_the_old(): void
@@ -702,9 +732,10 @@ class ItemPageTest extends ItemTestCase
         $html = $this->render(true);
         // Helper: ≥1,000 buo (walang .00), mas mababa = dalawang decimal; "−₱" style ng ilMoney.
         $this->assertMatchesRegularExpression('/ilMoneyKita\(v\)\s*\{[^}]*>=\s*1000[^}]*maximumFractionDigits:0/s', $html);
-        $expand = file_get_contents(resource_path('views/item/_il_expand.blade.php'));
-        $this->assertStringContainsString('ilMoneyKita(G.agg.projected_profit_last_day)', $expand);
-        $this->assertStringNotContainsString('ilMoney(G.agg.projected_profit_last_day)', $expand);
+        // 006: Profit today sa Sales & Profit (wala na ang narrow duplicate sa details).
+        $sales = file_get_contents(resource_path('views/item/_table_sales.blade.php'));
+        $this->assertStringContainsString('ilMoneyKita(G.agg.projected_profit_last_day)', $sales);
+        $this->assertStringNotContainsString('ilMoney(G.agg.projected_profit_last_day)', $sales);
     }
 
     public function test_new_layout_font_sizes_are_never_below_11px(): void

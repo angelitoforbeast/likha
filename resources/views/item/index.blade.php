@@ -3432,14 +3432,6 @@
         if (this.ilVw.lt1366 && this.ilColOn('action')) n--;
         return n;
       },
-      ilLifecycleLabels: { new:'🆕 Bago', scaling:'📈 Lumalaki', consistent:'✅ Stable', active:'🔄 Aktibo',
-                           declining:'📉 Bumababa', phasing_out:'🚫 Itinitigil', dormant:'💤 Tulog' },
-      // Pangalan lang (walang emoji), para sa lead line.
-      ilLifecycleName(name){
-        const S = this.stockFor(name);
-        const l = S && this.ilLifecycleLabels[S.lifecycle];
-        return l ? l.replace(/^\S+\s/, '') : '';
-      },
       // Araw: ≥10 buo (may separator), mas mababa sa 10 = isang decimal.
       ilDays(x){
         // I-round muna sa isang decimal bago magdesisyon (9.96 → 10, hindi "10.0").
@@ -3467,27 +3459,33 @@
         // "▲ 15.8%" / "▼ −3.2%" (U+2212 para sa negatibo).
         return (Number(v) >= 0 ? '▲ ' : '▼ −') + Math.abs(Number(v)).toFixed(1) + '%';
       },
-      // "Dating sa 7 araw + 3 araw reserba (Lumalaki)" / "Dating sa 7 araw · HOLD lang".
+      // Lead line ng details: "Arrives in 7 days + 3 days buffer (Growing)" / "Arrives in 7 days · only the orders waiting".
       ilLeadLine(name){
         const S = this.stockFor(name), P = this.stockSet(name);
         if (!S || !P) return '';
-        if (P.palugit == null) return 'Dating sa ' + S.lead + ' araw · HOLD lang';
-        return 'Dating sa ' + S.lead + ' araw + ' + P.palugit + ' araw reserba (' + this.ilLifecycleName(name) + (this.stockIsLugi(name) ? ' · lugi' : '') + ')';
+        if (P.palugit == null) return 'Arrives in ' + S.lead + ' days · only the orders waiting';
+        const trend = this.ilTrendText(name).replace(/^\S+\s/, '');   // salita lang, walang emoji
+        return 'Arrives in ' + S.lead + ' days + ' + P.palugit + ' days buffer (' + trend + (this.stockIsLugi(name) ? ' · losing money' : '') + ')';
       },
       // Paliwanag ng order_qty (hindi ito ang nagko-compute; ipinapaliwanag lang ang galing sa server).
       ilOrderReason(name){
         const S = this.stockFor(name), P = this.stockSet(name);
-        if (!S || !P || P.order_qty == null) return 'Wala pang bilang ng stock para sa order';
+        if (!S || !P || P.order_qty == null) return 'No stock count to work out an order yet';
         const hold = Number(S.hold_units || 0), inc = Number(S.incoming || 0), st = Number(S.stock || 0);
-        const tail = this.num(hold) + ' naka-hold − ' + this.num(inc) + ' paparating − ' + this.num(st) + ' stock';
-        if (P.palugit == null) return tail + ' (HOLD lang)';
+        const tail = this.num(hold) + ' on hold − ' + this.num(inc) + ' incoming − ' + this.num(st) + ' in stock';
+        if (P.palugit == null) return tail + ' (only the orders waiting)';
         const days = Number(S.lead) + Number(P.palugit);
         // Sa numero ng server galing ang cover: order_qty = ceil(HOLD + v×(lead+palugit) − incoming − stock),
         // kaya cover = order_qty − hold + incoming + stock (walang 2-decimal rounding error).
         const cover = Number(P.order_qty) > 0
           ? Number(P.order_qty) - hold + inc + st
           : Math.ceil(Number(P.units_per_day || 0) * days);
-        return this.num(cover) + ' para sa ' + days + ' araw + ' + tail;
+        return this.num(cover) + ' for ' + days + ' days + ' + tail;
+      },
+      // Sales a day: isang decimal; "—" kapag walang data (hindi "0.0").
+      ilSalesADay(name){
+        const P = this.stockSet(name);
+        return (P && P.units_per_day != null) ? Number(P.units_per_day).toFixed(1) : '—';
       },
       // ── To order (006 T2) — English; ipinapaliwanag lang ang numero ng server (walang bagong formula). ──
       // Tooltip na English (kapalit ng stockTip sa bagong view): text + lahat ng variant + error ng stock.
@@ -3673,7 +3671,7 @@
         return 2 + (this.ilIdOn('order_qty') ? 2 : 0) + (this.ilIdOn('doi') ? 1 : 0)
                  + (this.ilIdOn('proj_pct_7d') ? 1 : 0) + (this.ilIdOn('lifecycle') ? 1 : 0);
       },
-      // Puhunan bawat piraso = ITEM VAL. (CEO kung CEO view at meron) ÷ N ng "N x" sa pangalan. null kung walang value.
+      // Halaga kada piraso = ITEM VAL. (CEO kung CEO view at meron) ÷ N ng "N x" sa pangalan. null kung walang value.
       ilPieceCost(name){
         const ceo = this.effectiveIsCeo ? this.itemValueCeo(name) : null;
         const v = ceo != null ? ceo : this.itemValue(name);
@@ -3682,7 +3680,7 @@
         const n = m ? Math.max(1, parseInt(m[1], 10)) : 1;
         return Number(v) / n;
       },
-      // Halaga ÷ N ng "N x" sa pangalan; null kung walang value. (Para sa "Puhunan bawat piraso" sa expanded block.)
+      // Halaga ÷ N ng "N x" sa pangalan; null kung walang value. (Para sa "Cost per piece" sa details.)
       ilPiece(v, name){
         if (v == null || isNaN(Number(v))) return null;
         const m = /^\s*(\d+)\s*[x×]\s*/i.exec(String(name || ''));
@@ -3756,7 +3754,7 @@
           case 'item_val_ceo': return money(r.item_value_ceo);
           case 'ship': return money(r.shipping_fee);
           case 'cod_fee': return money(r.cod_fee);
-          case 'hold': return has(r.hold_units) ? ok(this.num(r.hold_units), { tip: r.hold_snap_date ? 'HOLD (piraso) hanggang ' + r.hold_snap_date : 'wala pang hold snapshot' }) : miss;
+          case 'hold': return has(r.hold_units) ? ok(this.num(r.hold_units), { tip: r.hold_snap_date ? 'Pieces on hold as of ' + r.hold_snap_date : 'No hold snapshot yet' }) : miss;
           case 'action':
             return r.action_comment ? ok(String(r.action_comment), { tip: String(r.action_comment),
                      sub: r.action_by ? '✎ ' + r.action_by + (r.action_at ? ' · ' + r.action_at : '') : '' }) : miss;
@@ -3770,13 +3768,6 @@
         const lo = this.ilMoney(Math.min(...vals)), hi = this.ilMoney(Math.max(...vals));
         return lo === hi ? lo : lo + '–' + hi;
       },
-      // Line 2 ng ADS: "CPP ₱17.91 · BE ₱52.48" — bawat bahagi ay sumusunod sa sarili nitong id.
-      ilAdsLine(G){
-        const parts = [];
-        if (this.ilIdOn('cpp')) parts.push('CPP ' + this.md(G.agg.cpp));
-        if (this.ilIdOn('breakeven_cpp')) { const be = this.ilBeRange(G); if (be) parts.push('BE ' + be); }
-        return parts.join(' · ');
-      },
       // TOTAL (nakikita): sinusunod ang itemGroups() (item checkbox, sourcing chip, category filter).
       ilTotVisible() { return this.aggOf(this.itemGroups().flatMap(G => G.pages)); },
       // Sales & Profit: ilang Profit % sub-column ang naka-grant, at ang colspan ng buong table (Item + › lagi).
@@ -3784,15 +3775,6 @@
       ilSalesColspan(){
         return 2 + (this.ilIdOn('orders_1d') ? 1 : 0) + (this.ilIdOn('proj_prof_1d') ? 1 : 0) + this.ilSalesPctCount()
                  + (this.ilIdOn('adspent') ? 1 : 0) + (this.ilIdOn('cpp') ? 1 : 0);
-      },
-      // Pinakabagong action note sa mga page ng item (by action_at).
-      ilLatestAction(G){
-        let best = null;
-        for (const r of (G.pages || [])) {
-          if (!String(r.action_comment || '').trim()) continue;
-          if (!best || String(r.action_at || '') > String(best.action_at || '')) best = r;
-        }
-        return best ? { text: String(best.action_comment).trim(), page: String(best.page_name || '') } : null;
       },
       // Palit ng tab (gaya ng setWorklist): ?tab=sales, o tanggal ang param para sa To order.
       setTab(tab){
