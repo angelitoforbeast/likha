@@ -20,6 +20,7 @@ Same definitions as `/jnt/supply`, per base key (`ItemBaseKey::key`), counting e
 
 - `recent` = units with `ts_date` in [end − 13, end]; `prev` = units in [end − 27, end − 14]. One grouped query on the `ts_date` range with two `SUM(CASE …)`.
 - `first` = `MIN(ts_date)` per `ITEM_NAME`, `ts_date <= end`. **Same full-table grouped scan as `/jnt/supply`'s step 5** (no `ITEM_NAME` index exists); the `<= end` bound can't change any result (an item whose first order is after the as-of date has no recent/prev units and is Dormant either way).
+- The first-date map (base key → earliest date) is cached with `Cache::remember` for 12 hours, key `item_stock:first_dates:v1:<host>:<end>` (Mira's answer 1).
 - `recentVel = round(recent / 14, 4)`, `prevVel = round(prev / 14, 4)`, `daysRunning = first ? diffInDays(first, end) : 9999`, then `ItemLifecycle::classify`.
 - `lifecycle_override` (the lowest-id `supply_item_settings` row for the base key, 003's rule) wins when set; `lifecycle_auto = false` then.
 
@@ -44,7 +45,7 @@ Defaults in `supply_settings`, group `item_palugit`, `int`, seeded by a migratio
 - Edited through the existing generic editor on `/jnt/supply/config` ("Other settings" lists every group that isn't a class group) and its route `POST /jnt/supply/setting-kv` (CEO-only already). That route gains one check: for keys in group `item_palugit`, the value must be an integer 0–255 (422 otherwise). Other keys behave exactly as before.
 - Missing rows or table → the defaults above in code.
 - **Per-item override:** new nullable `supply_item_settings.palugit_override` (unsignedTinyInteger, additive). `POST /item/supply-settings` writes it together with `safety_days` (003 behaviour for `safety_days` and `lead_time_days` unchanged, so `/jnt/supply` sees the same values as before); `safety_days` blank/absent → `palugit_override = NULL` ("balik sa lifecycle"), `safety_days` untouched. `/item` ignores `safety_days` from now on; existing rows have `palugit_override = NULL`, so they use the lifecycle default until the CEO sets one on `/item`.
-- Precedence for the palugit of a set: `palugit_override` → lifecycle default (normal set) or `palugit_lugi` (lugi set).
+- Precedence for the palugit of a set: `palugit_override` → lifecycle default (normal set) or `palugit_lugi` (lugi set). The override applies to both sets (Mira's answer 3); Phasing Out / Dormant stay HOLD-based even with an override.
 
 ## 5. Result sets per base key
 
@@ -70,7 +71,7 @@ Per set, with v = its velocity, P = its palugit, L = lead:
 
 ## 6. Page (/item)
 
-- Set choice per item row: `S.gated && A.proj_pct_7d != null && A.proj_pct_7d <= 0 ? S.lugi : S.normal` (`A` = that item row's aggregate, as the PROF.%(7D) cell shows it). Hold-only rows have no PROF.%(7D) → normal.
+- Set choice per base item (Mira's answer 2): one combined profit figure per base key, so every variant row of a base shows the same set. `basePct = Σ projected_profit_last_7d ÷ Σ gross_sales_last_7d × 100` over the base's item rows on the page (each row's aggregate `A`, the same numerator and denominator PROF.%(7D) uses); a row with no profit data (`projected_profit_last_7d == null` or `gross_sales_last_7d <= 0`) is left out; none left → no gate. `S.gated && basePct != null && basePct <= 0 ? S.lugi : S.normal`.
 - LIFECYCLE column (`lifecycle`): catalog + `DEFAULT_VISIBLE` (CEO), `defaultCols()`, item-row cell (badge = `lifecycle_label`, plus " · lugi" when the lugi set is chosen, "(manual)" marker when `lifecycle_auto` is false), blank page-row cell, sort by label. One-line Taglish tooltip per lifecycle saying what it means and the palugit it uses.
 - BENTA/ARAW, DOI, the "lead N · palugit M" line, I-ORDER and the order-by line read the chosen set; DOI shows "walang benta" / "halos walang benta" in grey for the notes. Sorting on these columns reads the chosen set.
 - CEO palugit editor: the palugit field may be left blank = "balik sa default ng lifecycle" (sends no `safety_days`).
