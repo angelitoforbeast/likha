@@ -58,6 +58,7 @@ abstract class ItemTestCase extends TestCase
         Schema::create('from_jnts', function (Blueprint $t) {
             $t->id();
             $t->string('waybill_number')->nullable();
+            $t->string('submission_time')->nullable();
         });
 
         Artisan::call('migrate', [
@@ -76,6 +77,10 @@ abstract class ItemTestCase extends TestCase
             'database/migrations/2026_09_27_100000_create_item_supplier_quotes_table.php',
             'database/migrations/2026_10_01_100000_create_item_supplier_quote_history_table.php',
             'database/migrations/2026_10_01_100100_add_photo_path_to_item_supplier_quotes.php',
+            'database/migrations/2026_04_10_000003_create_app_settings_table.php',
+            'database/migrations/2026_10_02_100000_create_item_categories_table.php',
+            'database/migrations/2026_10_02_100100_create_item_category_assignments_table.php',
+            'database/migrations/2026_10_02_100200_seed_item_stock_start_setting.php',
         ];
     }
 
@@ -102,8 +107,8 @@ abstract class ItemTestCase extends TestCase
     }
 
     /** Waybill na nasa J&T na (shipped → hindi HOLD). */
-    protected function shipped(string $waybill): void
+    protected function shipped(string $waybill, ?string $submittedAt = null): void
     {
-        DB::table('from_jnts')->insert(['waybill_number' => $waybill]);
+        DB::table('from_jnts')->insert(['waybill_number' => $waybill, 'submission_time' => $submittedAt]);
     }
 }
