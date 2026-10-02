@@ -478,6 +478,12 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringContainsString(':colspan="ilColspan()"', $table);
     }
 
+    public function test_chevron_button_fits_its_column(): void
+    {
+        $html = $this->render(true);
+        $this->assertMatchesRegularExpression('/\.il-chev\s*\{[^}]*width:24px;\s*height:24px/', $html);
+    }
+
     public function test_new_layout_font_sizes_are_never_below_11px(): void
     {
         $dir = base_path('resources/views/item/');

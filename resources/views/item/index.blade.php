@@ -372,8 +372,8 @@
     }
     .il-edit:focus-visible, .il-chev:focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
     .il-chev {
-      width:32px; height:32px; border:0; border-radius:6px; background:transparent; color:#475569;
-      font-size:20px; line-height:1; cursor:pointer; transition:transform .12s;
+      width:24px; height:24px; padding:0; border:0; border-radius:6px; background:transparent; color:#475569;
+      font-size:18px; line-height:1; cursor:pointer; transition:transform .12s;
     }
     .il-chev:hover { background:#e2e8f0; }
     .il-chev.active { transform:rotate(90deg); }
