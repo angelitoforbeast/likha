@@ -246,7 +246,7 @@
   <span :title="stockTip('ilang piraso ang dapat i-order (HOLD + benta habang hinihintay − stock − paparating)', stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
     <span x-show="!stockPending()">
-      <span style="font-weight:800;" x-text="stockFor(row.item_name) ? num(stockFor(row.item_name).order_qty) : '—'"></span>
+      <span style="font-weight:800;" x-text="stockFor(row.item_name) && stockFor(row.item_name).order_qty != null ? num(stockFor(row.item_name).order_qty) : '—'"></span>
       <template x-if="stockFor(row.item_name)">
         <div style="font-size:9px;color:#64748b;font-weight:400;" x-text="orderByText(stockFor(row.item_name))"></div>
       </template>

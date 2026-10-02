@@ -110,6 +110,21 @@ class SuggestCategoriesTest extends ItemTestCase
         $this->assertNull(DB::table('item_category_assignments')->where('item_key', 'toy car')->value('updated_by'));
     }
 
+    public function test_apply_skips_keys_longer_than_190_chars_with_a_warning(): void
+    {
+        $long = 'LED BULB ' . str_repeat('X', 182);   // 191 chars
+        DB::table('supply_order_items')->insert([
+            'supply_order_id' => DB::table('supply_orders')->value('id'), 'item_key' => 'long', 'item_name' => $long,
+            'ordered_qty' => 1, 'unit_cost' => 1, 'line_total' => 1, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $out = $this->run_(['--apply' => true]);
+
+        $this->assertStringContainsString('Na-save: 6', $out);
+        $this->assertStringContainsString('Masyadong mahaba', $out);
+        $this->assertSame(0, DB::table('item_category_assignments')->whereRaw('LENGTH(item_key) > 190')->count());
+    }
+
     public function test_apply_skips_items_whose_rule_category_is_missing_and_warns(): void
     {
         DB::table('item_categories')->where('name', 'Bahay at Paglilinis')->delete();

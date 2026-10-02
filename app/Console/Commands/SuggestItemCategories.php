@@ -57,6 +57,10 @@ class SuggestItemCategories extends Command
         $saved = 0;
         foreach ($matched as $key => [$base, $category]) {
             if (isset($existing[$key])) continue;
+            if (mb_strlen($key, 'UTF-8') > 190) {
+                $this->warn('Masyadong mahaba ang item key (>190) — nilaktawan: ' . mb_substr($base, 0, 60, 'UTF-8') . '…');
+                continue;
+            }
             if (! isset($ids[$category])) {
                 $this->warn("Walang category na \"$category\" sa item_categories — nilaktawan: $base");
                 continue;

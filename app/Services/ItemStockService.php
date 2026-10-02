@@ -41,7 +41,7 @@ class ItemStockService
 
         $keys = array_unique(array_merge(
             array_keys($hold), array_keys($demand), array_keys($left['units'] ?? []),
-            array_keys($received), array_keys($incoming)
+            array_keys($received), array_keys($incoming), array_map('strval', array_keys($category))
         ));
         sort($keys);
 
@@ -297,7 +297,8 @@ class ItemStockService
     }
 
     /**
-     * lower(trim(raw ITEM_NAME)) => ['item_value', 'item_value_ceo'?] para sa mga raw name na may order sa range.
+     * lower(trim(raw ITEM_NAME)) => ['item_value', 'item_value_ceo'?] para sa mga raw name na may order sa range
+     * at sa mga pangalan sa cogs (/cogs_ceo, CEO lang) na date <= $end.
      * Rule ng OwnerPrivateController (latest cogs row <= $end, by ItemAliasResolver::canonicalKey);
      * item_value_ceo (cogs_ceo, parehong rule, walang fallback) ay kasama LANG kung $withCeoValue.
      */
@@ -310,16 +311,19 @@ class ItemStockService
             ->distinct()
             ->selectRaw("$item as item_name")
             ->pluck('item_name');
-        if ($names->isEmpty()) return [];
 
-        $aliases = new ItemAliasResolver();
-        $cogs    = $this->latestCost('cogs', $end, $aliases, false);
-        $ceo     = $withCeoValue ? $this->latestCost('cogs_ceo', $end, $aliases, true) : [];
+        // Isama rin ang mga pangalan sa cogs (page-only na item, walang order sa range) — parehong rows na binabasa.
+        $aliases  = new ItemAliasResolver();
+        $cogsSeen = [];
+        $ceoSeen  = [];
+        $cogs     = $this->latestCost('cogs', $end, $aliases, false, $cogsSeen);
+        $ceo      = $withCeoValue ? $this->latestCost('cogs_ceo', $end, $aliases, true, $ceoSeen) : [];
 
         $out = [];
-        foreach ($names as $raw) {
+        foreach (array_merge($names->all(), $cogsSeen, $ceoSeen) as $raw) {
             $raw = (string) $raw;
             $key = mb_strtolower(trim($raw));
+            if ($key === '') continue;
             $ck  = $aliases->canonicalKey($raw);
             $out[$key] = ['item_value' => $cogs[$ck] ?? null];
             if ($withCeoValue) $out[$key]['item_value_ceo'] = $ceo[$ck] ?? null;
@@ -328,12 +332,13 @@ class ItemStockService
     }
 
     /** canonical key => unit_cost ng pinakabagong row na date <= $end (first-seen sa date DESC). */
-    private function latestCost(string $table, string $end, ItemAliasResolver $aliases, bool $keepNull): array
+    private function latestCost(string $table, string $end, ItemAliasResolver $aliases, bool $keepNull, array &$rawNames): array
     {
         if (!Schema::hasTable($table)) return [];
         $map = [];
         foreach (DB::table($table)->where('date', '<=', $end)->orderByDesc('date')->get(['item_name', 'unit_cost']) as $r) {
-            $k = $aliases->canonicalKey((string) ($r->item_name ?? ''));
+            $rawNames[mb_strtolower(trim((string) ($r->item_name ?? '')))] ??= (string) $r->item_name;
+            $k =$aliases->canonicalKey((string) ($r->item_name ?? ''));
             if ($k === '' || array_key_exists($k, $map)) continue;
             $map[$k] = $r->unit_cost !== null ? (float) $r->unit_cost : ($keepNull ? null : 0.0);
         }

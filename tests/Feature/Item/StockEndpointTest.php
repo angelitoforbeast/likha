@@ -343,6 +343,31 @@ class StockEndpointTest extends ItemTestCase
         $this->assertNull($this->stock()->assertOk()->json('values.1 x lamp.item_value'));
     }
 
+    public function test_item_value_exists_for_an_item_with_a_cogs_row_but_no_orders_in_range(): void
+    {
+        DB::table('cogs')->insert(['date' => '2026-09-01', 'item_name' => 'PAGE ONLY FAN', 'unit_cost' => 42, 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('cogs_ceo')->insert(['date' => '2026-09-01', 'item_name' => 'PAGE ONLY FAN', 'unit_cost' => 30, 'created_at' => now(), 'updated_at' => now()]);
+
+        $json = $this->stock()->assertOk()->json();
+
+        $this->assertEquals(42, $json['values']['page only fan']['item_value']);
+        $this->assertEquals(30, $json['values']['page only fan']['item_value_ceo']);
+    }
+
+    public function test_category_only_item_still_appears_with_its_category(): void
+    {
+        DB::table('item_category_assignments')->insert([
+            'item_key' => 'slow item', 'category_id' => 2, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $item = $this->stock()->assertOk()->json('items.slow item');
+
+        $this->assertSame('Ilaw at Kuryente', $item['category']);
+        $this->assertSame('slow item', $item['name']);
+        $this->assertSame(0, $item['order_qty']);
+        $this->assertNull($item['doi']);
+    }
+
     public function test_unknown_role_gets_404(): void
     {
         $this->stock('Warehouse')->assertNotFound();
