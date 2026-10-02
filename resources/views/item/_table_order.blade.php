@@ -3,7 +3,7 @@
      Lahat ng text ay x-text / :title (walang x-html). CSS = .il-* sa index. --}}
 <table class="il-table" id="il-table-order">
   <colgroup>
-    <col>
+    <col class="il-w-item">
     <col style="width:250px" x-show="ilIdOn('order_qty')">
     <col style="width:130px" x-show="ilIdOn('order_qty')">
     <col style="width:120px" x-show="ilIdOn('doi')">
@@ -71,7 +71,8 @@
           </div>
         </td>
         {{-- Next step: icon + salita + kulay, at isang maikling dahilan. --}}
-        <td x-show="ilIdOn('order_qty')" style="text-align:left;">
+        <td x-show="ilIdOn('order_qty')" class="il-c-wide" style="text-align:left;">
+          <span class="il-m-label">Next step</span>
           <span x-show="stockPending()" class="il-grey">…</span>
           <template x-if="!stockPending()">
             <template x-for="N in [ilNext(G.item_name)]" :key="'nx-'+G.item_name">
@@ -87,6 +88,7 @@
 
         {{-- Qty to order (+ "≈ ₱" CEO lang) --}}
         <td x-show="ilIdOn('order_qty')" :title="ilTip('How many pieces to order now', stockFor(G.item_name))">
+          <span class="il-m-label">Qty to order</span>
           <span x-show="stockPending()" class="il-grey">…</span>
           <template x-if="!stockPending()">
             <div>
@@ -102,6 +104,7 @@
 
         {{-- Days left --}}
         <td x-show="ilIdOn('doi')">
+          <span class="il-m-label">Days left</span>
           <span x-show="stockPending()" class="il-grey">…</span>
           <template x-if="!stockPending()">
             <template x-for="D in [ilDaysLeft(G.item_name)]" :key="'dl-'+G.item_name">
@@ -112,6 +115,7 @@
 
         {{-- Profit (7 days): pinagsamang base item; mapusyaw na kulay ng rule ng owner --}}
         <td x-show="ilIdOn('proj_pct_7d')" :title="ilProfit7Tip(G.item_name)">
+          <span class="il-m-label">Profit (7 days)</span>
           <template x-if="baseProfitPct7(G.item_name) === null">
             <span class="il-grey" title="No profit data for the last 7 days">—</span>
           </template>
@@ -126,7 +130,7 @@
         </td>
 
         {{-- Trend --}}
-        <td x-show="ilIdOn('lifecycle')">@include('item._il_lifecycle')</td>
+        <td x-show="ilIdOn('lifecycle')"><span class="il-m-label">Trend</span>@include('item._il_lifecycle')</td>
         <td class="il-chev-td">
           <button type="button" class="il-chev" :class="isItemOpen(G.item_name) ? 'active' : ''"
                   :aria-expanded="isItemOpen(G.item_name) ? 'true' : 'false'"
@@ -155,7 +159,7 @@
     <tbody>
       <template x-for="T in [ilOrderTotal()]" :key="'il-ot'">
         <tr class="il-total">
-          <td :colspan="ilOrderColspan()" style="text-align:left;padding-left:10px;"
+          <td :colspan="ilOrderColspan()" class="il-c-wide" style="text-align:left;padding-left:10px;"
               title="Shown items whose next step is red (Find a supplier, Order now): how many, how many pieces to order, and the estimated cost">
             <span x-text="T.items ? 'To order now: ' + num(T.items) + (T.items === 1 ? ' item · ' : ' items · ') + num(T.pcs) + ' pcs' : 'To order now: nothing urgent'"></span>
             @if($effectiveIsCEO)

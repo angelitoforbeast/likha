@@ -438,14 +438,10 @@ class ItemPageTest extends ItemTestCase
         foreach ([
             // 1: link ay binubuo sa click time, hindi lang sa render
             '@click.prevent="window.location.href = viewSwitchUrl()"',
-            // 2: round muna sa isang decimal bago magdesisyon
-            'const n = Number(x), r1 = Math.round(n * 10) / 10;',
             // 3: cover galing sa numero ng server
             'Number(P.order_qty) - hold + inc + st',
             // 6: HOLD tooltip ng page card (English, 006 T5)
             "'No hold snapshot yet'",
-            // 7: STOCK cell puwedeng mag-wrap
-            '.il-table .il-wrap { white-space:normal; overflow-wrap:normal; }',
         ] as $needle) {
             $this->assertStringContainsString($needle, $html);
         }
@@ -704,14 +700,81 @@ class ItemPageTest extends ItemTestCase
         }
     }
 
-    public function test_new_table_has_the_narrow_screen_breakpoints(): void
+    // ── 006 T6: widths, cards, cleanup ────────────────────────────────────────
+
+    public function test_each_view_has_the_spec_column_widths_and_a_minimum_that_fits_1366(): void
+    {
+        foreach (['_table_order' => [250, 130, 120, 130, 130, 36], '_table_sales' => [90, 120, 84, 84, 84, 84, 110, 130, 36]] as $p => $widths) {
+            $src = file_get_contents(resource_path("views/item/{$p}.blade.php"));
+            $cg = substr($src, strpos($src, '<colgroup>'), strpos($src, '</colgroup>') - strpos($src, '<colgroup>'));
+            $this->assertMatchesRegularExpression('/<colgroup>\s*<col class="il-w-item">/', $cg, "{$p}: Item col is flexible");
+            preg_match_all('/width:(\d+)px/', $cg, $m);
+            $this->assertSame($widths, array_map('intval', $m[1]), $p);
+        }
+        $html = $this->render(true);
+        // Item min 300 + fixed widths (spec §8): 300 + 796 = 1096; 300 + 822 = 1122 — kasya sa ≈1,333 px ng 1,366.
+        $this->assertStringContainsString('#il-table-order { min-width:1096px; }', $html);
+        $this->assertStringContainsString('#il-table-sales { min-width:1122px; }', $html);
+        $this->assertStringContainsString('.il-name { font-weight:800; font-size:13px; color:#1e1b4b; line-height:1.3; overflow-wrap:anywhere; }', $html);
+    }
+
+    /** Laman ng isang @media block sa .il- CSS (hanggang sa sarili nitong closing brace sa 4-space indent). */
+    private function mediaBlock(string $html, string $query): string
+    {
+        $start = strpos($html, '@media (' . $query . ') {');
+        $this->assertNotFalse($start, "@media {$query} missing");
+        return substr($html, $start, strpos($html, "\n    }\n", $start) - $start);
+    }
+
+    public function test_narrow_screens_shrink_columns_and_phones_get_one_card_per_item(): void
     {
         $html = $this->render(true);
-        $this->assertStringContainsString('@media (max-width: 1365px)', $html);
-        $this->assertStringContainsString('@media (max-width: 1099px)', $html);
-        $this->assertStringContainsString('.il-only-lt1366{display:block;}', $html);
-        $this->assertStringContainsString('.il-only-lt1100{display:block;}', $html);
-        $this->assertStringContainsString('.il-table tbody tr.il-row{display:grid', $html);
+        $mid = $this->mediaBlock($html, 'max-width: 1365px');
+        foreach (['#il-table-order { min-width:1056px; }', '#il-table-sales { min-width:1034px; }',
+                  '#il-table-sales col.il-w-pct { width:72px !important; }'] as $css) {
+            $this->assertStringContainsString($css, $mid);
+        }
+        $card = $this->mediaBlock($html, 'max-width: 1099px');
+        foreach (['#il-table-order, #il-table-sales { min-width:0; }',
+                  '.il-table thead { display:block; position:absolute; left:-9999px;', '.il-table colgroup { display:none; }',
+                  '.il-table tbody tr.il-row, .il-table tbody tr.il-total { display:grid; grid-template-columns:1fr 1fr;',
+                  'td.il-c-wide { grid-column:1 / -1; }', '.il-m-label { display:block;'] as $css) {
+            $this->assertStringContainsString($css, $card);
+        }
+        // Isang maliit na label kada cell sa card mode.
+        $order = file_get_contents(resource_path('views/item/_table_order.blade.php'));
+        foreach (['Next step', 'Qty to order', 'Days left', 'Profit (7 days)', 'Trend'] as $l) {
+            $this->assertStringContainsString('<span class="il-m-label">' . $l . '</span>', $order);
+        }
+        $sales = file_get_contents(resource_path('views/item/_table_sales.blade.php'));
+        foreach (['Orders today', 'Profit today', 'Profit % today', 'Profit % 3 days', 'Profit % 7 days',
+                  'Profit % 1 month', 'Ad spend', 'Cost per order'] as $l) {
+            $this->assertStringContainsString('<span class="il-m-label">' . $l . '</span>', $sales);
+        }
+        $this->assertStringContainsString('class="il-c-wide"', $order);
+    }
+
+    public function test_005_leftovers_are_removed(): void
+    {
+        foreach ([$this->render(true), $this->render(false)] as $html) {
+            foreach (['ilCols:', 'ilColOn(', 'ilColspan(', 'ilVw', 'ilWatchViewport', "'il_action_at'", 'ilDays(',
+                      '.il-only-', '.il-col-', '.il-pill', '.il-lc-under', '.il-ellipsis', '.il-pct-grid', '.il-hold-chip',
+                      '.il-badge', '.il-wrap', '.il-c-pct', '.il-c-hide'] as $s) {
+                $this->assertFalse(str_contains($html, $s), "found: {$s}");
+            }
+        }
+    }
+
+    public function test_final_wave_minors(): void
+    {
+        $html = $this->render(true);
+        // (1) unang click sa Next step = pula muna (ascending); ang ibang header ay desc pa rin.
+        $this->assertStringContainsString("else{ this.sortCol=col; this.sortDir = col === 'il_next' ? 'asc' : 'desc'; }", $html);
+        // (2) % sa TOTAL ng Sales ay il-num din gaya ng rows.
+        $sales = file_get_contents(resource_path('views/item/_table_sales.blade.php'));
+        foreach (['proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d', 'proj_pct'] as $f) {
+            $this->assertStringContainsString(":class=\"T.{$f} == null ? 'il-grey' : 'il-cf il-num'\"", $sales);
+        }
     }
 
     public function test_chevron_button_fits_its_column(): void

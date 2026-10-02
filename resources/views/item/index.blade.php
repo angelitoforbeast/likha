@@ -327,6 +327,9 @@
     .il-tab.active { background:#1e293b; border-color:#1e293b; color:#fff; }
     .il-tab:focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
     .il-table { table-layout:fixed; width:100%; }
+    /* Lapad (spec §8): Item = natitira (min 300) + fixed na columns. Kasya sa ≈1,333 px ng 1,366 na window. */
+    #il-table-order { min-width:1096px; }
+    #il-table-sales { min-width:1122px; }
     .il-table thead th {
       white-space:normal; overflow-wrap:normal; line-height:1.2;
       font-size:11px; letter-spacing:.01em; padding:8px 3px; text-align:center;
@@ -348,23 +351,12 @@
     .il-table > tbody > tr.il-empty-row > td { text-align:center; padding:36px; color:#64748b; font-size:13px; }
     .il-item-top { display:flex; gap:8px; align-items:flex-start; }
     .il-item-main { min-width:0; flex:1 1 auto; }
-    .il-name { font-weight:800; font-size:13px; color:#1e1b4b; line-height:1.3; }
+    .il-name { font-weight:800; font-size:13px; color:#1e1b4b; line-height:1.3; overflow-wrap:anywhere; }
     .il-sub { font-size:11px; color:#64748b; line-height:1.4; font-weight:400; }
     .il-grey { color:#64748b; }
-    .il-warn { font-size:11px; font-weight:700; color:#b91c1c; }
-    .il-hold-chip {
-      display:inline-block; font-size:11px; font-weight:700; color:#334155; background:#f1f5f9;
-      border:1px solid #cbd5e1; border-radius:999px; padding:1px 8px; margin-right:4px;
-    }
-    .il-badge { display:inline-block; padding:1px 7px; border-radius:9999px; font-size:11px; font-weight:700; white-space:nowrap; }
-    .il-lc-under { display:none; margin-top:3px; }
-    .il-nb { white-space:nowrap; }
-    /* STOCK cell: puwedeng mag-wrap sa pagitan ng salita para hindi lumampas sa katabing cell. */
-    .il-table .il-wrap { white-space:normal; overflow-wrap:normal; }
     .il-state { font-weight:700; }
     .il-tone-red { color:#b91c1c; }
     .il-tone-amber { color:#b45309; }
-    .il-tone-teal { color:#0f766e; }
     .il-tone-grey { color:#64748b; font-weight:600; font-style:italic; }
     /* To order (006 T2): isang kahulugan kada kulay — pula = kumilos ngayon, kahel = bilangin, dilaw = malapit, berde = ok. */
     .il-tone-orange { color:#c2410c; }
@@ -380,15 +372,7 @@
     }
     .il-tag-loss { display:inline-block; font-size:11px; font-weight:700; color:#9a3412; margin-left:4px; }
     .il-qty { font-weight:800; }
-    .il-pill { display:inline-block; font-size:11px; font-weight:700; border-radius:9999px; padding:1px 7px; margin-top:2px; }
-    .il-pill-red { background:#fef2f2; color:#b91c1c; }
-    .il-pill-amber { background:#fffbeb; color:#b45309; }
-    .il-pill-teal { background:#f0fdfa; color:#0f766e; }
-    .il-pill-grey { background:#f1f5f9; color:#64748b; }
-    .il-pill-neutral { background:#f1f5f9; color:#334155; }
     .il-num { font-weight:700; }
-    .il-pct-grid { display:grid; grid-template-columns:1fr 1fr; gap:2px 6px; font-weight:700; font-size:12px; text-align:left; }
-    .il-ellipsis { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:12px; text-align:left; }
     .il-edit {
       background:#fff; border:1px solid #cbd5e1; border-radius:5px; color:#334155; cursor:pointer;
       font-size:12px; line-height:1; padding:4px 7px; min-height:24px;
@@ -410,7 +394,6 @@
     .il-dl-l{font-size:11px; color:#64748b; line-height:1.3;}
     .il-dl-v{font-size:12.5px; color:#0f172a; line-height:1.4; overflow-wrap:anywhere;}
     .il-dl-btns{display:flex; gap:6px; flex-wrap:wrap;}
-    .il-only-narrow{display:none;}
     .il-pages-h{font-size:12.5px; font-weight:800; color:#1e1b4b; margin:4px 0 6px;}
     .il-page-card{min-width:0; max-width:100%; background:#fff; border:1px solid #cbd5e1; border-radius:8px; padding:10px 12px; margin-bottom:8px; overflow-wrap:anywhere;}
     .il-pc-head{display:flex; flex-wrap:wrap; gap:6px 16px; align-items:flex-start; justify-content:space-between; margin-bottom:8px;}
@@ -448,41 +431,31 @@
       position:sticky; bottom:0; z-index:20; font-weight:700; color:#0f172a;
       background:#f1f5f9; border-top:2px solid #cbd5e1;
     }
-    @media (max-width: 1439px) {
-      .il-col-lc { display:none !important; }
-      .il-lc-under { display:block; }
-    }
-    /* 1,100–1,365: tanggal ang ACTION column (nasa expanded block na), mas makikitid ang ilang column. */
+    /* 1,100–1,365: Item min 260, Profit % sub-columns 72 (spec §8). */
     @media (max-width: 1365px) {
-      .il-col-action { display:none !important; }
-      .il-table col.il-col-doi { width:170px !important; }
-      .il-table col.il-col-order { width:136px !important; }
-      .il-table col.il-col-pct { width:96px !important; }
-      .il-table col.il-col-ads { width:110px !important; }
-      .il-pct-grid { grid-template-columns:1fr; }
-      .il-only-lt1366{display:block;}
+      #il-table-order { min-width:1056px; }
+      #il-table-sales { min-width:1034px; }
+      #il-table-sales col.il-w-pct { width:72px !important; }
     }
-    /* Mas makitid sa 1,100: bawat item ay card; walang lumalampas sa lapad ng screen. */
+    /* Mas makitid sa 1,100: isang card kada item (dalawang column); walang lumalampas sa lapad ng screen. */
     @media (max-width: 1099px) {
-      .il-only-lt1100{display:block;}
+      #il-table-order, #il-table-sales { min-width:0; }
       .il-table, .il-table > tbody { display:block; width:100%; min-width:0; }
       .il-table thead { display:block; position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden; }
       .il-table colgroup { display:none; }
-      .il-table tbody tr.il-row{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); position:relative;
+      .il-table tbody tr.il-row, .il-table tbody tr.il-total { display:grid; grid-template-columns:1fr 1fr; position:relative;
         border:1px solid #cbd5e1; border-radius:8px; margin:8px 0; background:#fff; min-width:0; }
-      .il-table > tbody > tr.il-row > td { display:block; min-width:0; border-top:0; text-align:left; padding:6px 10px; overflow-wrap:anywhere; }
-      .il-table > tbody > tr.il-row > td.il-item { position:static; grid-column:1 / -1; padding-right:48px; }
-      .il-table > tbody > tr.il-row > td.il-c-pct { grid-column:1 / -1; }
-      .il-table > tbody > tr.il-row > td.il-c-hide { display:none !important; }
+      .il-table > tbody > tr.il-row > td, .il-table > tbody > tr.il-total > td { display:block; min-width:0; border-top:0; text-align:left; padding:6px 10px; overflow-wrap:anywhere; }
+      .il-table > tbody > tr.il-row > td.il-item, .il-table > tbody > tr.il-total > td.il-item { position:static; grid-column:1 / -1; padding-right:48px; }
+      .il-table > tbody > tr > td.il-c-wide { grid-column:1 / -1; }
       .il-table > tbody > tr.il-row > td.il-chev-td { position:absolute; top:6px; right:6px; padding:0; background:transparent; }
       .il-table > tbody > tr.il-expand-row { display:block; min-width:0; }
       .il-table > tbody > tr.il-expand-row > td { display:block; min-width:0; }
-      .il-table > tbody > tr.il-empty-row, .il-table > tbody > tr.il-total { display:block; }
-      .il-table > tbody > tr.il-empty-row > td, .il-table > tbody > tr.il-total > td { display:block; min-width:0; text-align:left; }
+      .il-table > tbody > tr.il-empty-row { display:block; }
+      .il-table > tbody > tr.il-empty-row > td { display:block; min-width:0; text-align:left; }
       .il-table > tbody > tr.il-total > td { position:static; }
       .il-table > tbody > tr.il-total > td.il-t-empty { display:none !important; }
       .il-m-label { display:block; font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.02em; }
-      .il-pct-grid { grid-template-columns:1fr 1fr; }
     }
   </style>
 </head>
@@ -1404,13 +1377,6 @@
       layoutOld: @json(!empty($layoutOld)),
       // Tab ng bagong layout: 'order' (default) o 'sales'. Allow-list: eksaktong 'sales' lang; hindi ine-echo ang param.
       ilTab: (new URLSearchParams(window.location.search).get('tab') === 'sales') ? 'sales' : 'order',
-      // Bagong layout: aling composite column ang binubuo ng aling owner_private ids (lalabas kapag may kahit isang visible).
-      ilCols: {
-        lifecycle:['lifecycle'], stock:['stock','incoming'], upd:['units_per_day'], doi:['doi'], order:['order_qty'],
-        kita:['proj_prof_1d','orders_1d'], pct:['proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_pct'],
-        ads:['adspent','cpp','breakeven_cpp'], action:['action'],
-      },
-
       // CEO "view as" toggle: 'ceo' = full CEO mode (default), 'marketing' = simulate
       // Marketing's UI. Drives cogs source for profit + visibility of CEO column
       // + modal CEO field. Initialized from URL ?view_as= so refresh preserves it.
@@ -1974,7 +1940,8 @@
       // ── Sort ─────────────────────────────────────────────────────────────
       sb(col){
         if(this.sortCol===col){ this.sortDir = this.sortDir==='asc'?'desc':'asc'; }
-        else{ this.sortCol=col; this.sortDir='desc'; }
+        // Next step: unang click = pula muna (ascending na rank); ang iba = desc gaya ng dati.
+        else{ this.sortCol=col; this.sortDir = col === 'il_next' ? 'asc' : 'desc'; }
       },
       arr(col){ return this.sortCol!==col?'':(this.sortDir==='asc'?' ↑':' ↓'); },
       ac(col) { return this.sortCol===col?'col-active':''; },
@@ -3118,14 +3085,6 @@
           // To order (006): Next step rank at pinagsamang 7-day profit % ng base item.
           case 'il_next':               return this.ilNext(grp.item_name).rank;
           case 'il_profit7':            return this.baseProfitPct7(grp.item_name);
-          // Bagong layout lang (ACTION header): pinakabagong action_at sa mga page ng item.
-          case 'il_action_at': {
-            let best = null;
-            for (const r of (grp.pages || [])) {
-              if (r.action_comment && r.action_at && (best === null || String(r.action_at) > best)) best = String(r.action_at);
-            }
-            return best;
-          }
           default:
             return Object.prototype.hasOwnProperty.call(A, col) ? A[col] : null;
         }
@@ -3409,35 +3368,9 @@
         const s = qs.toString();
         return window.location.pathname + (s ? '?' + s : '');
       },
-      // ── Bagong layout (005) ──────────────────────────────────────────────
-      // Visibility: may member id ba na naka-check (kasama ang members ng merged jnt_rdt)?
+      // ── Bagong layout (005/006) ──────────────────────────────────────────
+      // Visibility (data gate): may member id ba na naka-check (kasama ang members ng merged jnt_rdt)?
       ilIdOn(id){ return this.cols.some(c => c.id === id || (c.members && c.members.includes(id))); },
-      ilColOn(key){ return (this.ilCols[key] || []).some(id => this.ilIdOn(id)); },
-      // Reactive na kopya ng media queries ng CSS (parehong breakpoints) — para sumunod ang colspan.
-      ilVw: { lt1440:false, lt1366:false },
-      ilWatchViewport(){
-        if (!window.matchMedia) return;
-        const watch = (mq, key) => {
-          const set = () => { this.ilVw[key] = mq.matches; };
-          set();
-          if (mq.addEventListener) mq.addEventListener('change', set); else if (mq.addListener) mq.addListener(set);
-        };
-        watch(window.matchMedia('(max-width: 1439px)'), 'lt1440');
-        watch(window.matchMedia('(max-width: 1365px)'), 'lt1366');
-      },
-      // ITEM + › lagi; ang iba kapag visible AT hindi itinatago ng media query (LIFECYCLE <1440, ACTION <1366).
-      ilColspan(){
-        let n = 2 + Object.keys(this.ilCols).filter(k => this.ilColOn(k)).length;
-        if (this.ilVw.lt1440 && this.ilColOn('lifecycle')) n--;
-        if (this.ilVw.lt1366 && this.ilColOn('action')) n--;
-        return n;
-      },
-      // Araw: ≥10 buo (may separator), mas mababa sa 10 = isang decimal.
-      ilDays(x){
-        // I-round muna sa isang decimal bago magdesisyon (9.96 → 10, hindi "10.0").
-        const n = Number(x), r1 = Math.round(n * 10) / 10;
-        return Math.abs(r1) >= 10 ? Math.round(n).toLocaleString('en-PH') : r1.toFixed(1);
-      },
       // "−₱534.71" (U+2212 bago ang ₱); null = "—".
       ilMoney(v){
         if (v == null || isNaN(Number(v))) return '—';
@@ -3996,7 +3929,6 @@
 
       async init(){
         this.initCols();
-        this.ilWatchViewport();
         // Sabay-sabay: bawat isa ay pinupuno lang ang sarili niyang map, walang dependency sa load().
         await Promise.all([
           this.load(),

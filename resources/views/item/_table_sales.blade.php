@@ -3,13 +3,13 @@
      bawat isa may mapusyaw na kulay ng rule ng owner (ilCfTint). Lahat ng text ay x-text / :title (walang x-html). --}}
 <table class="il-table" id="il-table-sales">
   <colgroup>
-    <col>
+    <col class="il-w-item">
     <col style="width:90px" x-show="ilIdOn('orders_1d')">
     <col style="width:120px" x-show="ilIdOn('proj_prof_1d')">
-    <col style="width:84px" x-show="ilIdOn('proj_pct_1d')">
-    <col style="width:84px" x-show="ilIdOn('proj_pct_3d')">
-    <col style="width:84px" x-show="ilIdOn('proj_pct_7d')">
-    <col style="width:84px" x-show="ilIdOn('proj_pct')">
+    <col class="il-w-pct" style="width:84px" x-show="ilIdOn('proj_pct_1d')">
+    <col class="il-w-pct" style="width:84px" x-show="ilIdOn('proj_pct_3d')">
+    <col class="il-w-pct" style="width:84px" x-show="ilIdOn('proj_pct_7d')">
+    <col class="il-w-pct" style="width:84px" x-show="ilIdOn('proj_pct')">
     <col style="width:110px" x-show="ilIdOn('adspent')">
     <col style="width:130px" x-show="ilIdOn('cpp')">
     <col style="width:36px">
@@ -83,17 +83,19 @@
             </div>
           </div>
         </td>
-        <td x-show="ilIdOn('orders_1d')" class="il-num" x-text="num(G.agg.orders_last_day)"></td>
+        <td x-show="ilIdOn('orders_1d')"><span class="il-m-label">Orders today</span><span class="il-num" x-text="num(G.agg.orders_last_day)"></span></td>
         <td x-show="ilIdOn('proj_prof_1d')">
+          <span class="il-m-label">Profit today</span>
           <div class="il-num" :style="'color:' + ilTone(G.agg.projected_profit_last_day)"
                x-text="ilArrow(G.agg.projected_profit_last_day) + ilMoneyKita(G.agg.projected_profit_last_day)"></div>
         </td>
-        <td x-show="ilIdOn('proj_pct_1d')"><span :class="G.agg.proj_pct_1d == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct_1d', G.agg.proj_pct_1d)" x-text="ilPct(G.agg.proj_pct_1d)"></span></td>
-        <td x-show="ilIdOn('proj_pct_3d')"><span :class="G.agg.proj_pct_3d == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct_3d', G.agg.proj_pct_3d)" x-text="ilPct(G.agg.proj_pct_3d)"></span></td>
-        <td x-show="ilIdOn('proj_pct_7d')"><span :class="G.agg.proj_pct_7d == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct_7d', G.agg.proj_pct_7d)" x-text="ilPct(G.agg.proj_pct_7d)"></span></td>
-        <td x-show="ilIdOn('proj_pct')"><span :class="G.agg.proj_pct == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct', G.agg.proj_pct)" x-text="ilPct(G.agg.proj_pct)"></span></td>
-        <td x-show="ilIdOn('adspent')" class="il-num" x-text="ilMoney(G.agg.adspent)"></td>
+        <td x-show="ilIdOn('proj_pct_1d')"><span class="il-m-label">Profit % today</span><span :class="G.agg.proj_pct_1d == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct_1d', G.agg.proj_pct_1d)" x-text="ilPct(G.agg.proj_pct_1d)"></span></td>
+        <td x-show="ilIdOn('proj_pct_3d')"><span class="il-m-label">Profit % 3 days</span><span :class="G.agg.proj_pct_3d == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct_3d', G.agg.proj_pct_3d)" x-text="ilPct(G.agg.proj_pct_3d)"></span></td>
+        <td x-show="ilIdOn('proj_pct_7d')"><span class="il-m-label">Profit % 7 days</span><span :class="G.agg.proj_pct_7d == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct_7d', G.agg.proj_pct_7d)" x-text="ilPct(G.agg.proj_pct_7d)"></span></td>
+        <td x-show="ilIdOn('proj_pct')"><span class="il-m-label">Profit % 1 month</span><span :class="G.agg.proj_pct == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct', G.agg.proj_pct)" x-text="ilPct(G.agg.proj_pct)"></span></td>
+        <td x-show="ilIdOn('adspent')"><span class="il-m-label">Ad spend</span><span class="il-num" x-text="ilMoney(G.agg.adspent)"></span></td>
         <td x-show="ilIdOn('cpp')">
+          <span class="il-m-label">Cost per order</span>
           <div class="il-num" x-text="md(G.agg.cpp)"></div>
           <template x-if="ilIdOn('breakeven_cpp') && ilBeRange(G)">
             <div class="il-sub" title="The cost per order where the item stops making money (one value per page)" x-text="'break-even ' + ilBeRange(G)"></div>
@@ -128,18 +130,19 @@
       <template x-for="T in [ilTotVisible()]" :key="'il-st'">
         <tr class="il-total">
           <td class="il-item" title="Totals over the items shown now (with the filters)"><div class="il-name">Total (shown)</div></td>
-          <td x-show="ilIdOn('orders_1d')" x-text="num(T.orders_last_day)"></td>
+          <td x-show="ilIdOn('orders_1d')"><span class="il-m-label">Orders today</span><span x-text="num(T.orders_last_day)"></span></td>
           <td x-show="ilIdOn('proj_prof_1d')">
+            <span class="il-m-label">Profit today</span>
             <div :style="'color:' + ilTone(T.projected_profit_last_day)"
                  x-text="ilArrow(T.projected_profit_last_day) + ilMoneyKita(T.projected_profit_last_day)"></div>
           </td>
-          <td x-show="ilIdOn('proj_pct_1d')"><span :class="T.proj_pct_1d == null ? 'il-grey' : 'il-cf'" :style="ilCfTint('proj_pct_1d', T.proj_pct_1d)" x-text="ilPct(T.proj_pct_1d)"></span></td>
-          <td x-show="ilIdOn('proj_pct_3d')"><span :class="T.proj_pct_3d == null ? 'il-grey' : 'il-cf'" :style="ilCfTint('proj_pct_3d', T.proj_pct_3d)" x-text="ilPct(T.proj_pct_3d)"></span></td>
-          <td x-show="ilIdOn('proj_pct_7d')"><span :class="T.proj_pct_7d == null ? 'il-grey' : 'il-cf'" :style="ilCfTint('proj_pct_7d', T.proj_pct_7d)" x-text="ilPct(T.proj_pct_7d)"></span></td>
-          <td x-show="ilIdOn('proj_pct')"><span :class="T.proj_pct == null ? 'il-grey' : 'il-cf'" :style="ilCfTint('proj_pct', T.proj_pct)" x-text="ilPct(T.proj_pct)"></span></td>
-          <td x-show="ilIdOn('adspent')" x-text="ilMoney(T.adspent)"></td>
-          <td x-show="ilIdOn('cpp')" x-text="md(T.cpp)"></td>
-          <td></td>
+          <td x-show="ilIdOn('proj_pct_1d')"><span class="il-m-label">Profit % today</span><span :class="T.proj_pct_1d == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct_1d', T.proj_pct_1d)" x-text="ilPct(T.proj_pct_1d)"></span></td>
+          <td x-show="ilIdOn('proj_pct_3d')"><span class="il-m-label">Profit % 3 days</span><span :class="T.proj_pct_3d == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct_3d', T.proj_pct_3d)" x-text="ilPct(T.proj_pct_3d)"></span></td>
+          <td x-show="ilIdOn('proj_pct_7d')"><span class="il-m-label">Profit % 7 days</span><span :class="T.proj_pct_7d == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct_7d', T.proj_pct_7d)" x-text="ilPct(T.proj_pct_7d)"></span></td>
+          <td x-show="ilIdOn('proj_pct')"><span class="il-m-label">Profit % 1 month</span><span :class="T.proj_pct == null ? 'il-grey' : 'il-cf il-num'" :style="ilCfTint('proj_pct', T.proj_pct)" x-text="ilPct(T.proj_pct)"></span></td>
+          <td x-show="ilIdOn('adspent')"><span class="il-m-label">Ad spend</span><span x-text="ilMoney(T.adspent)"></span></td>
+          <td x-show="ilIdOn('cpp')"><span class="il-m-label">Cost per order</span><span x-text="md(T.cpp)"></span></td>
+          <td class="il-t-empty"></td>
         </tr>
       </template>
     </tbody>
