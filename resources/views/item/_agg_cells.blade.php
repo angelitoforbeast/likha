@@ -207,7 +207,7 @@
   </span>
 </template>
 <template x-if="col.id==='doi'">
-  <span :title="stockTip('ilang araw pa tatagal ang stock + paparating, bawas ang HOLD. Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa. Abo: walang benta o halos walang benta.', stockFor(row.item_name))">
+  <span :title="stockTip('ilang araw pa tatagal ang stock + paparating, bawas ang HOLD. Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa. Abo: walang benta, o mas mababa sa 0.5 kada araw.', stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
     <span x-show="!stockPending()">
       <span :style="'font-weight:700;color:' + doiColour(stockSet(row.item_name))" x-text="doiText(stockSet(row.item_name))"></span>
@@ -264,7 +264,7 @@
         <span>
           <span :style="lifecycleStyle(stockFor(row.item_name).lifecycle)" x-text="lifecycleBadgeText(row.item_name)"></span>
           <template x-if="stockFor(row.item_name).lifecycle_auto === false">
-            <span style="font-size:9px;color:#64748b;font-weight:400;">(manual)</span>
+            <span title="Ikaw ang nagtakda ng lifecycle na ito sa Supply page; hindi awtomatiko" style="font-size:9px;color:#64748b;font-weight:400;">(manual)</span>
           </template>
         </span>
       </template>

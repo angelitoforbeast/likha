@@ -81,6 +81,7 @@ class ItemPageTest extends ItemTestCase
             $this->assertStringContainsString('lifecycle_label', $html);
             $this->assertStringContainsString("' · lugi'", $html);
             $this->assertStringContainsString('(manual)', $html);
+            $this->assertStringContainsString('title="Ikaw ang nagtakda ng lifecycle na ito sa Supply page; hindi awtomatiko"', $html);
             $this->assertStringContainsString('HOLD lang ang i-order', $html);
             $this->assertSame(0, substr_count($html, 'x-html'));
         }
@@ -151,6 +152,7 @@ class ItemPageTest extends ItemTestCase
         foreach ([$ceo, $mkt] as $html) {
             $this->assertStringContainsString($lead, $html);
             $this->assertStringContainsString('Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa.', $html);
+            $this->assertStringContainsString('Abo: walang benta, o mas mababa sa 0.5 kada araw', $html);
             $this->assertStringContainsString('Huling araw na pwedeng umorder para hindi maubusan, base sa lead time', $html);
         }
         $this->assertStringContainsString($lead . ' — i-click para palitan', $ceo);
