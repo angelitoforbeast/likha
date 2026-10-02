@@ -137,7 +137,7 @@
   <template x-if="ilColOn('upd')">
     <div class="il-dl-i il-only-narrow il-only-lt1100">
       <div class="il-dl-l">Benta/araw</div>
-      <div class="il-dl-v" x-text="stockSet(G.item_name) ? Number(stockSet(G.item_name).units_per_day).toFixed(1) : '—'"></div>
+      <div class="il-dl-v" x-text="(stockSet(G.item_name) && stockSet(G.item_name).units_per_day != null) ? Number(stockSet(G.item_name).units_per_day).toFixed(1) : '—'"></div>
     </div>
   </template>
   <template x-if="ilColOn('kita')">

@@ -318,7 +318,7 @@
     .card.il-card { min-width:0; }
     .il-table { table-layout:fixed; width:100%; }
     .il-table thead th {
-      white-space:normal; overflow-wrap:anywhere; line-height:1.2;
+      white-space:normal; overflow-wrap:normal; line-height:1.2;
       font-size:11px; letter-spacing:.01em; padding:8px 3px; text-align:center;
     }
     .il-table thead th.il-th-item { text-align:left; padding-left:10px; }
@@ -349,6 +349,8 @@
     .il-badge { display:inline-block; padding:1px 7px; border-radius:9999px; font-size:11px; font-weight:700; white-space:nowrap; }
     .il-lc-under { display:none; margin-top:3px; }
     .il-nb { white-space:nowrap; }
+    /* STOCK cell: puwedeng mag-wrap sa pagitan ng salita para hindi lumampas sa katabing cell. */
+    .il-table .il-wrap { white-space:normal; overflow-wrap:normal; }
     .il-state { font-weight:700; }
     .il-tone-red { color:#b91c1c; }
     .il-tone-amber { color:#b45309; }
@@ -682,13 +684,13 @@
 
     {{-- Palit ng layout: bagong view (walang horizontal scroll) <-> lumang table. --}}
     @if(!empty($layoutOld))
-    <a :href="viewSwitchUrl()"
+    <a :href="viewSwitchUrl()" @click.prevent="window.location.href = viewSwitchUrl()"
        title="Bumalik sa bagong layout (walang horizontal scroll)"
        style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
               cursor:pointer;margin-left:4px;">✨ Bagong view</a>
     @else
-    <a :href="viewSwitchUrl()"
+    <a :href="viewSwitchUrl()" @click.prevent="window.location.href = viewSwitchUrl()"
        title="Buksan ang dating table (lahat ng column, may horizontal scroll)"
        style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
@@ -3066,7 +3068,7 @@
           case 'il_action_at': {
             let best = null;
             for (const r of (grp.pages || [])) {
-              if (r.action_at && (best === null || String(r.action_at) > best)) best = String(r.action_at);
+              if (r.action_comment && r.action_at && (best === null || String(r.action_at) > best)) best = String(r.action_at);
             }
             return best;
           }
@@ -3377,8 +3379,9 @@
       },
       // Araw: ≥10 buo (may separator), mas mababa sa 10 = isang decimal.
       ilDays(x){
-        const n = Number(x);
-        return Math.abs(n) >= 10 ? Math.round(n).toLocaleString('en-PH') : n.toFixed(1);
+        // I-round muna sa isang decimal bago magdesisyon (9.96 → 10, hindi "10.0").
+        const n = Number(x), r1 = Math.round(n * 10) / 10;
+        return Math.abs(r1) >= 10 ? Math.round(n).toLocaleString('en-PH') : r1.toFixed(1);
       },
       // "−₱534.71" (U+2212 bago ang ₱); null = "—".
       ilMoney(v){
@@ -3446,7 +3449,12 @@
         const tail = this.num(hold) + ' naka-hold − ' + this.num(inc) + ' paparating − ' + this.num(st) + ' stock';
         if (P.palugit == null) return tail + ' (HOLD lang)';
         const days = Number(S.lead) + Number(P.palugit);
-        return this.num(Math.ceil(Number(P.units_per_day || 0) * days)) + ' para sa ' + days + ' araw + ' + tail;
+        // Sa numero ng server galing ang cover: order_qty = ceil(HOLD + v×(lead+palugit) − incoming − stock),
+        // kaya cover = order_qty − hold + incoming + stock (walang 2-decimal rounding error).
+        const cover = Number(P.order_qty) > 0
+          ? Number(P.order_qty) - hold + inc + st
+          : Math.ceil(Number(P.units_per_day || 0) * days);
+        return this.num(cover) + ' para sa ' + days + ' araw + ' + tail;
       },
       ilQtyText(name){
         const P = this.stockSet(name);
@@ -3547,7 +3555,7 @@
           case 'item_val_ceo': return money(r.item_value_ceo);
           case 'ship': return money(r.shipping_fee);
           case 'cod_fee': return money(r.cod_fee);
-          case 'hold': return has(r.hold_units) ? ok(this.num(r.hold_units), { tip: r.hold_snap_date ? 'HOLD units as-of ' + r.hold_snap_date : '' }) : miss;
+          case 'hold': return has(r.hold_units) ? ok(this.num(r.hold_units), { tip: r.hold_snap_date ? 'HOLD (piraso) hanggang ' + r.hold_snap_date : 'wala pang hold snapshot' }) : miss;
           case 'action':
             return r.action_comment ? ok(String(r.action_comment), { tip: String(r.action_comment),
                      sub: r.action_by ? '✎ ' + r.action_by + (r.action_at ? ' · ' + r.action_at : '') : '' }) : miss;

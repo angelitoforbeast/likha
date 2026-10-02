@@ -73,7 +73,9 @@ class ItemPageTest extends ItemTestCase
             $last = 0;
             foreach (['ITEM', 'LIFECYCLE', 'STOCK / PAPARATING', 'BENTA/ARAW', 'AABOT PA?', 'I-ORDER',
                       'KITA NGAYON', 'KITA %', 'ADS', 'ACTION'] as $label) {
-                $pos = strpos($html, '<span>' . $label . '</span>', $last);
+                // BENTA/ARAW: puwedeng mag-break pagkatapos ng slash (hindi sa gitna ng salita).
+                $shown = $label === 'BENTA/ARAW' ? 'BENTA/<wbr>ARAW' : $label;
+                $pos = strpos($html, '<span>' . $shown . '</span>', $last);
                 $this->assertNotFalse($pos, "header {$label} missing or out of order");
                 $last = $pos;
             }
@@ -181,6 +183,34 @@ class ItemPageTest extends ItemTestCase
         $html = $this->render(true);
         $this->assertStringContainsString("sb('il_action_at')", $html);
         $this->assertStringContainsString("case 'il_action_at':", $html);
+        // Tulad ng ilLatestAction: pages na may action_comment lang ang binibilang.
+        $this->assertStringContainsString('if (r.action_comment && r.action_at && (best', $html);
+    }
+
+    public function test_new_layout_review_minors_are_in_the_markup(): void
+    {
+        $html = $this->render(true);
+        $expand = file_get_contents(resource_path('views/item/_il_expand.blade.php'));
+        $table = file_get_contents(resource_path('views/item/_table_new.blade.php'));
+        foreach ([
+            // 1: link ay binubuo sa click time, hindi lang sa render
+            '@click.prevent="window.location.href = viewSwitchUrl()"',
+            // 2: round muna sa isang decimal bago magdesisyon
+            'const n = Number(x), r1 = Math.round(n * 10) / 10;',
+            // 3: cover galing sa numero ng server
+            'Number(P.order_qty) - hold + inc + st',
+            // 6: HOLD tooltip ng page card
+            "'wala pang hold snapshot'",
+            // 7: STOCK cell puwedeng mag-wrap
+            '.il-table .il-wrap { white-space:normal; overflow-wrap:normal; }',
+        ] as $needle) {
+            $this->assertStringContainsString($needle, $html);
+        }
+        // 5: walang "0.0" kapag null ang units_per_day (main row at narrow duplicate)
+        foreach ([$table, $expand] as $src) {
+            $this->assertStringContainsString('units_per_day != null) ? Number(', $src);
+        }
+        $this->assertStringNotContainsString('il-nb" x-text="\'Paparating', $table);
     }
 
     public function test_default_item_order_is_by_urgency_in_the_new_layout_and_by_hold_in_the_old(): void
@@ -382,6 +412,9 @@ class ItemPageTest extends ItemTestCase
             $this->assertStringContainsString('Kabuuan ng mga item na nakikita ngayon (kasama ang filter)', $new);
             $this->assertStringContainsString('ilTotVisible() { return this.aggOf(this.itemGroups().flatMap(G => G.pages)); }', $new);
             $this->assertStringContainsString('ilHoldVisible() {', $new);
+            // Isang compute lang ng total kada render (T), hindi bawat cell.
+            $this->assertStringContainsString('x-for="T in [ilTotVisible()]"', $new);
+            $this->assertSame(1, substr_count($new, 'ilTotVisible()]'));
             $this->assertStringNotContainsString('<td>TOTAL</td>', $new);
 
             $old = $this->render($ceo, true);

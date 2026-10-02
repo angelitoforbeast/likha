@@ -32,7 +32,7 @@
             </th>
             <th class="sortable" :class="ac('units_per_day')" x-show="ilColOn('upd')" tabindex="0" @click="sb('units_per_day')" @keydown.enter="sb('units_per_day')"
                 title="Average na piraso na nabebenta kada araw">
-              <span>BENTA/ARAW</span><span x-text="arr('units_per_day')"></span>
+              <span>BENTA/<wbr>ARAW</span><span x-text="arr('units_per_day')"></span>
             </th>
             <th class="sortable" :class="ac('doi')" x-show="ilColOn('doi')" tabindex="0" @click="sb('doi')" @keydown.enter="sb('doi')"
                 title="Aabot pa ba ang stock hanggang sa dumating ang bagong order?">
@@ -203,16 +203,16 @@
                   <template x-if="ilIdOn('stock')">
                     <span>
                       <template x-if="stock.ready && stockFor(G.item_name) && stockFor(G.item_name).stock_needs_count">
-                        <span class="il-grey il-nb" :title="'May stock na hindi nabilang bago ang ' + stock.start + '; bilangin muna'"
+                        <span class="il-grey il-wrap" :title="'May stock na hindi nabilang bago ang ' + stock.start + '; bilangin muna'"
                               x-text="'Hindi pa nabibilang' + (ilIdOn('incoming') ? ' ·' : '')"></span>
                       </template>
                       <template x-if="!(stock.ready && stockFor(G.item_name) && stockFor(G.item_name).stock_needs_count)">
-                        <span class="il-nb" x-text="'Stock ' + ((stock.ready && stockFor(G.item_name)) ? num(stockFor(G.item_name).stock) : '—') + (ilIdOn('incoming') ? ' ·' : '')"></span>
+                        <span class="il-wrap" x-text="'Stock ' + ((stock.ready && stockFor(G.item_name)) ? num(stockFor(G.item_name).stock) : '—') + (ilIdOn('incoming') ? ' ·' : '')"></span>
                       </template>
                     </span>
                   </template>
                   <template x-if="ilIdOn('incoming')">
-                    <span class="il-nb" x-text="'Paparating ' + (stockFor(G.item_name) ? num(stockFor(G.item_name).incoming) : '—')"></span>
+                    <span class="il-wrap" x-text="'Paparating ' + (stockFor(G.item_name) ? num(stockFor(G.item_name).incoming) : '—')"></span>
                   </template>
                 </div>
               </td>
@@ -221,7 +221,7 @@
               <td class="il-c-hide" x-show="ilColOn('upd')"
                   :title="stockTip(stockSet(G.item_name) ? 'average ng huling ' + stockSet(G.item_name).velocity_days + ' araw' : 'average na benta kada araw', stockFor(G.item_name))">
                 <span x-show="stockPending()" class="il-grey">…</span>
-                <span x-show="!stockPending()" x-text="stockSet(G.item_name) ? Number(stockSet(G.item_name).units_per_day).toFixed(1) : '—'"></span>
+                <span x-show="!stockPending()" x-text="(stockSet(G.item_name) && stockSet(G.item_name).units_per_day != null) ? Number(stockSet(G.item_name).units_per_day).toFixed(1) : '—'"></span>
               </td>
 
               {{-- AABOT PA? --}}
@@ -352,6 +352,8 @@
         {{-- TOTAL (nakikita) — sumusunod sa itemGroups() (item filter, sourcing chip, category). Walang fills. --}}
         <template x-if="itemGroups().length > 0">
           <tbody>
+            {{-- Isang beses lang kino-compute ang total kada render (T), hindi bawat cell. --}}
+            <template x-for="T in [ilTotVisible()]" :key="'il-tot'">
             <tr class="il-total">
               <td class="il-item" title="Kabuuan ng mga item na nakikita ngayon (kasama ang filter)">
                 <div class="il-name">TOTAL (nakikita)</div>
@@ -364,27 +366,28 @@
               <td class="il-t-empty" x-show="ilColOn('order')"></td>
               <td x-show="ilColOn('kita')">
                 <span class="il-m-label">KITA NGAYON</span>
-                <div class="il-num" :style="'color:' + ilTone(ilTotVisible().projected_profit_last_day)"
-                     x-text="ilArrow(ilTotVisible().projected_profit_last_day) + ilMoney(ilTotVisible().projected_profit_last_day)"></div>
-                <div class="il-sub" x-text="num(ilTotVisible().orders_last_day) + ' orders'"></div>
+                <div class="il-num" :style="'color:' + ilTone(T.projected_profit_last_day)"
+                     x-text="ilArrow(T.projected_profit_last_day) + ilMoney(T.projected_profit_last_day)"></div>
+                <div class="il-sub" x-text="num(T.orders_last_day) + ' orders'"></div>
               </td>
               <td x-show="ilColOn('pct')">
                 <span class="il-m-label">KITA %</span>
                 <div class="il-pct-grid">
-                  <span :style="'color:' + ilTone(ilTotVisible().proj_pct_1d)" x-text="'1D ' + ilPct(ilTotVisible().proj_pct_1d)"></span>
-                  <span :style="'color:' + ilTone(ilTotVisible().proj_pct_3d)" x-text="'3D ' + ilPct(ilTotVisible().proj_pct_3d)"></span>
-                  <span :style="'color:' + ilTone(ilTotVisible().proj_pct_7d)" x-text="'7D ' + ilPct(ilTotVisible().proj_pct_7d)"></span>
-                  <span :style="'color:' + ilTone(ilTotVisible().proj_pct)" x-text="'1M ' + ilPct(ilTotVisible().proj_pct)"></span>
+                  <span :style="'color:' + ilTone(T.proj_pct_1d)" x-text="'1D ' + ilPct(T.proj_pct_1d)"></span>
+                  <span :style="'color:' + ilTone(T.proj_pct_3d)" x-text="'3D ' + ilPct(T.proj_pct_3d)"></span>
+                  <span :style="'color:' + ilTone(T.proj_pct_7d)" x-text="'7D ' + ilPct(T.proj_pct_7d)"></span>
+                  <span :style="'color:' + ilTone(T.proj_pct)" x-text="'1M ' + ilPct(T.proj_pct)"></span>
                 </div>
               </td>
               <td x-show="ilColOn('ads')">
                 <span class="il-m-label">ADS</span>
-                <div class="il-num" x-text="ilMoney(ilTotVisible().adspent)"></div>
-                <div class="il-sub" x-text="'CPP ' + md(ilTotVisible().cpp)"></div>
+                <div class="il-num" x-text="ilMoney(T.adspent)"></div>
+                <div class="il-sub" x-text="'CPP ' + md(T.cpp)"></div>
               </td>
               <td class="il-col-action il-t-empty" x-show="ilColOn('action')"></td>
               <td class="il-t-empty"></td>
             </tr>
+            </template>
           </tbody>
         </template>
       </table>
