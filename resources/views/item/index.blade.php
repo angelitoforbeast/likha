@@ -322,7 +322,8 @@
     }
     .il-table thead th.il-th-item { text-align:left; padding-left:10px; }
     .il-table thead th:focus-visible { outline:2px solid #60a5fa; outline-offset:-2px; }
-    .il-table tbody td {
+    /* Direct child lang (> tbody > tr > td) para hindi tamaan ang mga nested table (campaigns) sa expanded block. */
+    .il-table > tbody > tr > td {
       white-space:normal; vertical-align:top; padding:8px 6px;
       font-size:12.5px; line-height:1.35; color:#1e293b; text-align:center;
       background:#fff; border-top:1px solid #e2e8f0; overflow-wrap:anywhere;
@@ -332,8 +333,8 @@
     .il-table tbody tr.il-row:hover td { background:#f8fafc; }
     .il-table tbody tr.il-row.il-nopage td { background:#fff7ed; }
     .il-table tbody tr.il-row.il-nopage:hover td { background:#ffedd5; }
-    .il-table tbody tr.il-expand-row td { padding:0; background:#f8fafc; text-align:left; }
-    .il-table tbody tr.il-empty-row td { text-align:center; padding:36px; color:#64748b; font-size:13px; }
+    .il-table > tbody > tr.il-expand-row > td { padding:0; background:#f8fafc; text-align:left; }
+    .il-table > tbody > tr.il-empty-row > td { text-align:center; padding:36px; color:#64748b; font-size:13px; }
     .il-item-top { display:flex; gap:8px; align-items:flex-start; }
     .il-item-main { min-width:0; flex:1 1 auto; }
     .il-name { font-weight:800; font-size:13px; color:#1e1b4b; line-height:1.3; }
@@ -373,6 +374,48 @@
     }
     .il-chev:hover { background:#e2e8f0; }
     .il-chev.active { transform:rotate(90deg); }
+
+    /* Expanded block (T4): item section + page cards + campaigns. Walang horizontal scroll, walang fills. */
+    .il-expand{min-width:0; max-width:100%; background:#f8fafc; padding:10px 12px; font-size:12.5px; overflow-wrap:anywhere; text-align:left; color:#1e293b;}
+    .il-expand > div{min-width:0; max-width:100%;}
+    .il-dl{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px 14px; margin-bottom:10px;}
+    .il-dl-i{min-width:0; max-width:100%;}
+    .il-dl-wide{grid-column:1 / -1;}
+    .il-dl-l{font-size:11px; color:#64748b; line-height:1.3;}
+    .il-dl-v{font-size:12.5px; color:#0f172a; line-height:1.4; overflow-wrap:anywhere;}
+    .il-dl-btns{display:flex; gap:6px; flex-wrap:wrap;}
+    .il-only-narrow{display:none;}
+    .il-pages-h{font-size:12.5px; font-weight:800; color:#1e1b4b; margin:4px 0 6px;}
+    .il-page-card{min-width:0; max-width:100%; background:#fff; border:1px solid #cbd5e1; border-radius:8px; padding:10px 12px; margin-bottom:8px; overflow-wrap:anywhere;}
+    .il-pc-head{display:flex; flex-wrap:wrap; gap:6px 16px; align-items:flex-start; justify-content:space-between; margin-bottom:8px;}
+    .il-pc-page, .il-pc-item{min-width:0; flex:1 1 180px;}
+    .il-pc-name{font-weight:700; color:#0f172a; line-height:1.35;}
+    .il-pc-link{text-decoration:underline; text-decoration-color:#cbd5e1; text-underline-offset:2px; cursor:pointer;}
+    .il-pc-link:hover{color:#2563eb; text-decoration-color:#2563eb;}
+    .il-pc-warn{font-size:11px; font-weight:600; line-height:1.3; margin-top:2px;}
+    .il-camp-btn{white-space:nowrap; font-weight:700;}
+    .il-camp-chev{display:inline-block; transition:transform .12s;}
+    .il-camp-chev.active{transform:rotate(90deg);}
+    .il-pf-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px 12px;}
+    .il-pf{min-width:0; max-width:100%;}
+    .il-pf-wide{grid-column:1 / -1;}
+    .il-pf-v{display:flex; gap:4px; align-items:flex-start; font-size:12.5px; line-height:1.4;}
+    .il-clamp{display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
+    .il-linkbtn{background:none; border:0; padding:0; color:#2563eb; font-size:11px; font-weight:600; cursor:pointer;}
+    .il-edit, .il-camp-btn, .il-linkbtn{min-height:24px;}
+
+    /* Campaigns panel (shared include galing /owner/private) — pinipilit na magkasya sa lapad; naka-scope sa .il-camp lang. */
+    .il-camp{min-width:0; max-width:100%; margin:0 0 10px;}
+    .il-camp .expand-panel{padding:8px; min-width:0; max-width:100%;}
+    .il-camp .expand-header{flex-wrap:wrap; gap:6px;}
+    .il-camp .expand-wrap{overflow-x:visible !important; overflow-y:auto; max-height:70vh; max-width:100%;}
+    .il-camp .fb-table{table-layout:fixed;width:100%;}
+    .il-camp .fb-table th, .il-camp .fb-table td{min-width:0 !important; white-space:normal !important; overflow-wrap:anywhere; word-break:break-word; padding:5px 4px !important; font-size:11px !important;}
+    .il-camp .fb-table *{white-space:normal !important;}
+    .il-camp .fb-table th[style*="width:32px"]{width:28px !important; padding:5px 2px !important;}
+    .il-camp .fb-table .sub, .il-camp .fb-table div[style*="font-size:10px"], .il-camp .fb-table div[style*="font-size:9px"]{font-size:11px !important;}
+    .il-camp td.nest-host{padding:6px 4px !important; min-width:0;}
+    .il-camp .expand-nest-1 .expand-wrap, .il-camp .expand-nest-2 .expand-wrap{max-height:none; overflow-y:visible;}
     @media (max-width: 1439px) {
       .il-col-lc { display:none !important; }
       .il-lc-under { display:block; }
@@ -2979,6 +3022,14 @@
           case 'units_per_day': case 'doi': case 'order_qty':
             return this.stockSet(grp.item_name)?.[col] ?? null;
           case 'lifecycle':             return this.stockFor(grp.item_name)?.lifecycle_label ?? null;
+          // Bagong layout lang (ACTION header): pinakabagong action_at sa mga page ng item.
+          case 'il_action_at': {
+            let best = null;
+            for (const r of (grp.pages || [])) {
+              if (r.action_at && (best === null || String(r.action_at) > best)) best = String(r.action_at);
+            }
+            return best;
+          }
           default:
             return Object.prototype.hasOwnProperty.call(A, col) ? A[col] : null;
         }
@@ -3381,6 +3432,87 @@
         const m = /^\s*(\d+)\s*[x×]\s*/i.exec(String(name || ''));
         const n = m ? Math.max(1, parseInt(m[1], 10)) : 1;
         return Number(v) / n;
+      },
+      // Halaga ÷ N ng "N x" sa pangalan; null kung walang value. (Para sa "Puhunan bawat piraso" sa expanded block.)
+      ilPiece(v, name){
+        if (v == null || isNaN(Number(v))) return null;
+        const m = /^\s*(\d+)\s*[x×]\s*/i.exec(String(name || ''));
+        return Number(v) / (m ? Math.max(1, parseInt(m[1], 10)) : 1);
+      },
+      // Piraso ng CEO value — ibabalik lang kung meron at iba sa Marketing value; else null.
+      ilCeoPieceDiff(name){
+        const c = this.ilPiece(this.itemValueCeo(name), name);
+        if (c === null) return null;
+        const m = this.ilPiece(this.itemValue(name), name);
+        return (m !== null && Math.abs(c - m) < 0.005) ? null : c;
+      },
+      // Mga id na item-level (nasa main row / item section) — hindi na uulitin sa page card.
+      ilPageFieldOn(id){
+        return !['lifecycle','stock','incoming','units_per_day','doi','order_qty','category'].includes(id);
+      },
+      // Halaga ng isang page field para sa page card: { text, tone, tip, sub, miss }. Walang fill — kulay ng text lang.
+      ilPageVal(id, r){
+        const miss = { text:'—', tone:null, tip:'', sub:'', miss:true };
+        const ok = (text, extra) => Object.assign({ text, tone:null, tip:'', sub:'', miss:false }, extra || {});
+        const has = v => v !== null && v !== undefined && v !== '' && !isNaN(Number(v));
+        const peso = v => has(v) ? ok(this.ilArrow(v) + this.ilMoney(v), { tone:this.ilTone(v) }) : miss;
+        const pct = v => has(v) ? ok(this.ilPct(v), { tone:this.ilTone(v) }) : miss;
+        const money = v => has(v) ? ok(this.money(v)) : miss;
+        const count = v => has(v) ? ok(this.num(v)) : miss;
+        const jnt = (p, c) => has(p) ? ok(Number(p).toFixed(1) + '% (' + c + ')') : miss;
+        const per = (p, o) => (has(p) && Number(o) > 0) ? peso(Number(p) / Number(o)) : miss;
+        const subs = a => a.filter(Boolean).join(' · ');
+        switch (id) {
+          case 'adspent': return money(r.adspent);
+          case 'orders': return count(r.orders);
+          case 'orders_1d': return count(r.orders_last_day);
+          case 'cpp': return money(r.cpp);
+          case 'proceed': return count(r.proceed_orders);
+          case 'pcpp': return money(r.proceed_cpp);
+          case 'tcpr': { const t = this.tcprFor(r); return t === null ? miss : ok(t.toFixed(1) + '%'); }
+          case 'breakeven_cpp': return money(this.breakevenCppFor(r));
+          case 'proj_profit': return peso(r.projected_profit);
+          case 'per_order': return peso(r.proj_profit_per_order);
+          case 'np_per_order': return per(r.projected_profit_last_day, r.orders_last_day);
+          case 'np_per_order_3d': return per(r.projected_profit_last_3d, r.orders_last_3d);
+          case 'np_per_order_7d': return per(r.projected_profit_last_7d, r.orders_last_7d);
+          case 'np_per_order_1m': return per(r.projected_profit, r.orders);
+          case 'proj_pct': return (has(r.projected_profit) && Number(r.gross_sales) > 0) ? pct(Number(r.projected_profit) / Number(r.gross_sales) * 100) : miss;
+          case 'proj_pct_1d': return pct(r.proj_pct_last_day);
+          case 'proj_pct_3d': return pct(r.proj_pct_last_3d);
+          case 'proj_pct_7d': return pct(r.proj_pct_last_7d);
+          case 'proj_prof_1d': return peso(r.projected_profit_last_day);
+          case 'proj_prof_3d': return peso(r.projected_profit_last_3d);
+          case 'proj_prof_7d': return peso(r.projected_profit_last_7d);
+          case 'jnt_rts': return jnt(r.jnt_rts_pct, r.jnt_rts_cnt);
+          case 'jnt_del': return jnt(r.jnt_del_pct, r.jnt_del_cnt);
+          case 'jnt_transit': return jnt(r.jnt_transit_pct, r.jnt_transit_cnt);
+          case 'jnt_rdt': {
+            const col = this.cols.find(c => c.id === 'jnt_rdt') || { members: [] };
+            const parts = [];
+            if (col.members.includes('jnt_rts')) parts.push('RTS ' + this.ilPageVal('jnt_rts', r).text);
+            if (col.members.includes('jnt_del')) parts.push('DEL ' + this.ilPageVal('jnt_del', r).text);
+            if (col.members.includes('jnt_transit')) parts.push('INT ' + this.ilPageVal('jnt_transit', r).text);
+            return parts.length ? ok(parts.join(' · ')) : miss;
+          }
+          case 'rts_set':
+            return has(r.rts_pct) ? ok(Number(r.rts_pct).toFixed(1) + '%', { sub: subs([r.settings_date ? 'from ' + r.settings_date : '', r.rts_comment ? '💬 ' + r.rts_comment : '']) }) : miss;
+          case 'promo':
+            return (r.promo && String(r.promo).toUpperCase() !== 'NONE' && r.promo !== '-') ? ok(String(r.promo)) : miss;
+          case 'price':
+            return has(r.price) ? ok(this.money(r.price), { sub: subs([has(r.price_min) ? '↓ ' + this.money(r.price_min) : '', has(r.price_max) ? '↑ ' + this.money(r.price_max) : '']) }) : miss;
+          case 'item_val':
+            return has(r.item_value) ? ok(this.money(r.item_value), { sub: r.item_value_source === 'cogs' ? 'cogs'
+                     : (r.item_value_source === 'manual' ? subs([r.settings_date ? 'from ' + r.settings_date : '', r.item_value_comment ? '💬 ' + r.item_value_comment : '']) : '') }) : miss;
+          case 'item_val_ceo': return money(r.item_value_ceo);
+          case 'ship': return money(r.shipping_fee);
+          case 'cod_fee': return money(r.cod_fee);
+          case 'hold': return has(r.hold_units) ? ok(this.num(r.hold_units), { tip: r.hold_snap_date ? 'HOLD units as-of ' + r.hold_snap_date : '' }) : miss;
+          case 'action':
+            return r.action_comment ? ok(String(r.action_comment), { tip: String(r.action_comment),
+                     sub: r.action_by ? '✎ ' + r.action_by + (r.action_at ? ' · ' + r.action_at : '') : '' }) : miss;
+          default: return miss;
+        }
       },
       // BE ng item = pinakamababa–pinakamataas ng breakeven CPP ng mga page nito (isa lang = isa; wala = '').
       ilBeRange(G){

@@ -54,9 +54,9 @@
                 title="Gastos sa ads, kasama ang CPP at breakeven CPP">
               <span>ADS</span><span x-text="arr('adspent')"></span>
             </th>
-            <th class="sortable" :class="ac('action_at')" x-show="ilColOn('action')" tabindex="0" @click="sb('action_at')" @keydown.enter="sb('action_at')"
+            <th class="sortable" :class="ac('il_action_at')" x-show="ilColOn('action')" tabindex="0" @click="sb('il_action_at')" @keydown.enter="sb('il_action_at')"
                 title="Pinakabagong action note sa mga page ng item">
-              <span>ACTION</span><span x-text="arr('action_at')"></span>
+              <span>ACTION</span><span x-text="arr('il_action_at')"></span>
             </th>
             <th class="il-chev-th" title="Ipakita/itago ang detalye ng item"><span class="sr-only" style="position:absolute;left:-9999px;">Detalye</span></th>
           </tr>
@@ -331,9 +331,17 @@
               </td>
             </tr>
 
-            {{-- Expanded block — lalagyan ng laman sa T4. --}}
+            {{-- Expanded block — nire-render lang kapag bukas (x-if) para hindi mabigat ang daan-daang item. --}}
             <tr x-show="isItemOpen(G.item_name)" class="il-expand-row">
-              <td :colspan="ilColspan()"><div class="il-expand" data-expand-hook></div></td>
+              <td :colspan="ilColspan()">
+                <div class="il-expand">
+                  <template x-if="isItemOpen(G.item_name)">
+                    <div>
+                      @include('item._il_expand')
+                    </div>
+                  </template>
+                </div>
+              </td>
             </tr>
           </tbody>
         </template>

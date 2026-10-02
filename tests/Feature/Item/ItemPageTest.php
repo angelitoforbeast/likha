@@ -79,7 +79,7 @@ class ItemPageTest extends ItemTestCase
             }
             $this->assertGreaterThan($last, strpos($html, 'il-chev-th', $last));
             foreach (['item_name', 'lifecycle', 'stock', 'units_per_day', 'doi', 'order_qty',
-                      'projected_profit_last_day', 'proj_pct_last_7d', 'adspent', 'action_at'] as $key) {
+                      'projected_profit_last_day', 'proj_pct_last_7d', 'adspent', 'il_action_at'] as $key) {
                 $this->assertStringContainsString("sb('{$key}')", $html);
             }
             // Composite columns: lalabas lang kapag may member id na visible.
@@ -120,6 +120,67 @@ class ItemPageTest extends ItemTestCase
         }
         // Marketing: lead line plain text lang (walang ✎ button).
         $this->assertStringContainsString('ilLeadLine(G.item_name)', $mkt);
+    }
+
+    // ── Bagong layout (005 T4): expanded block ────────────────────────────────
+
+    public function test_expanded_block_has_item_section_page_cards_and_actions(): void
+    {
+        foreach ([$this->render(true), $this->render(false)] as $html) {
+            foreach ([
+                'Puhunan bawat piraso', 'Halaga ng isang piraso (cogs) hanggang sa huling petsa ng range',
+                'Paano nakuha: ', 'Mga page (', 'Walang running page — walang page na maipapakita.',
+                'Campaigns', 'Ipakita/itago ang campaigns ng page na ito',
+                'togglePageExpand(row.page_name)', 'class="il-camp"', 'expand-panel',
+                'x-for="row in G.pages"',
+                "openEditModal(row, 'rts')", "openEditModal(row, 'promo')", "openEditModal(row, 'cogs')",
+                'openActionModal(row)', 'openBreakdown(row)',
+                'copyItem(G.item_name', "itemImages[G.item_name] ? 'Change' : 'Add photo'",
+                'il-only-lt1366', 'il-only-lt1100',
+            ] as $s) {
+                $this->assertStringContainsString($s, $html);
+            }
+            $this->assertSame(0, substr_count($html, 'x-html'));
+        }
+    }
+
+    public function test_ceo_piece_cost_category_editor_and_ceo_cogs_edit_are_absent_for_marketing(): void
+    {
+        $ceoOnly = ["'CEO: ' + ilMoney(", "openEditModal(row, 'cogs_ceo')", 'saveCategory(G.item_name', '+ bagong category'];
+        $ceo = $this->render(true);
+        $mkt = $this->render(false);
+        foreach ($ceoOnly as $s) {
+            $this->assertStringContainsString($s, $ceo);
+            $this->assertStringNotContainsString($s, $mkt);
+        }
+    }
+
+    public function test_campaigns_panel_is_scoped_to_fit_without_horizontal_scroll(): void
+    {
+        $html = $this->render(true);
+        foreach ([
+            '.il-camp .expand-wrap{overflow-x:visible !important;', '.il-camp .fb-table{table-layout:fixed;width:100%;',
+            'overflow-wrap:anywhere', '.il-camp .fb-table *{white-space:normal !important;}',
+            '.il-expand{min-width:0;', '.il-page-card{min-width:0;',
+        ] as $css) {
+            $this->assertStringContainsString($css, $html);
+        }
+        // Ang /owner/private ay hindi ginalaw: walang .il-camp doon.
+        $this->assertStringNotContainsString('il-camp', file_get_contents(resource_path('views/owner/private.blade.php')));
+        $this->assertStringNotContainsString('il-camp', file_get_contents(resource_path('views/owner/_private_expand_inline.blade.php')));
+    }
+
+    public function test_expanded_block_has_no_cell_fills_and_new_action_header_sorts_by_latest_note(): void
+    {
+        foreach (['item/_il_expand.blade.php', 'item/_table_new.blade.php'] as $f) {
+            $src = file_get_contents(resource_path('views/' . $f));
+            foreach (['pbStyle(', 'pbStyleN(', 'cellFormatStyle(', 'background:#fef2f2'] as $fill) {
+                $this->assertStringNotContainsString($fill, $src, "{$f} has {$fill}");
+            }
+        }
+        $html = $this->render(true);
+        $this->assertStringContainsString("sb('il_action_at')", $html);
+        $this->assertStringContainsString("case 'il_action_at':", $html);
     }
 
     public function test_default_item_order_is_by_urgency_in_the_new_layout_and_by_hold_in_the_old(): void
