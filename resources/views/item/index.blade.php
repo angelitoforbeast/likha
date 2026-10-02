@@ -372,6 +372,12 @@
     .il-tone-green { color:#15803d; }
     .il-cf { display:inline-block; border-radius:6px; padding:2px 8px; line-height:1.3; }
     .il-cf-sub { font-size:11px; font-weight:600; }
+    /* Sales & Profit: dalawang header row — sticky ang buong thead para hindi magpatong ang dalawang row. */
+    /* (≥1,100 lang — sa card mode nakatago ang thead.) */
+    @media (min-width: 1100px) {
+      #il-table-sales thead { position:sticky; top:0; z-index:30; }
+      #il-table-sales thead th { position:static; }
+    }
     .il-tag-loss { display:inline-block; font-size:11px; font-weight:700; color:#9a3412; margin-left:4px; }
     .il-qty { font-weight:800; }
     .il-pill { display:inline-block; font-size:11px; font-weight:700; border-radius:9999px; padding:1px 7px; margin-top:2px; }
@@ -3773,7 +3779,12 @@
       },
       // TOTAL (nakikita): sinusunod ang itemGroups() (item checkbox, sourcing chip, category filter).
       ilTotVisible() { return this.aggOf(this.itemGroups().flatMap(G => G.pages)); },
-      ilHoldVisible() { return this.itemGroups().reduce((s, G) => s + (Number(G.hold) || 0), 0); },
+      // Sales & Profit: ilang Profit % sub-column ang naka-grant, at ang colspan ng buong table (Item + › lagi).
+      ilSalesPctCount(){ return ['proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_pct'].filter(id => this.ilIdOn(id)).length; },
+      ilSalesColspan(){
+        return 2 + (this.ilIdOn('orders_1d') ? 1 : 0) + (this.ilIdOn('proj_prof_1d') ? 1 : 0) + this.ilSalesPctCount()
+                 + (this.ilIdOn('adspent') ? 1 : 0) + (this.ilIdOn('cpp') ? 1 : 0);
+      },
       // Pinakabagong action note sa mga page ng item (by action_at).
       ilLatestAction(G){
         let best = null;

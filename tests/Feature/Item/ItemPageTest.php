@@ -103,7 +103,9 @@ class ItemPageTest extends ItemTestCase
 
             $this->assertSame(['Item', 'Next step', 'Qty to order', 'Days left', 'Profit (7 days)', 'Trend'],
                 $this->headers($html, 'il-table-order'));
-            $this->assertSame(['Item', 'Orders today', 'Profit today', 'Profit %', 'Ad spend', 'Cost per order'],
+            // Dalawang header row: "Profit %" sa itaas ng apat na sub-column.
+            $this->assertSame(['Item', 'Orders today', 'Profit today', 'Profit %', 'Ad spend', 'Cost per order',
+                               'Today', '3 days', '7 days', '1 month'],
                 $this->headers($html, 'il-table-sales'));
         }
     }
@@ -233,6 +235,61 @@ class ItemPageTest extends ItemTestCase
         }
         // Sibling ng baseProfitPct7 sa parehong cache.
         $this->assertStringContainsString('baseProfit7(name){', $html);
+    }
+
+    // ── 006 T4: Sales & Profit rows ───────────────────────────────────────────
+
+    public function test_sales_headers_sort_by_keys_the_item_sort_resolves(): void
+    {
+        $html = $this->render(true);
+        $start = strpos($html, 'id="il-table-sales"');
+        $head = substr($html, $start, strpos($html, '</thead>', $start) - $start);
+        // [sort key, paano nire-resolve ng _itemSortValue]
+        $keys = [
+            'orders_last_day'           => 'default',
+            'projected_profit_last_day' => 'default',
+            'adspent'                   => 'default',
+            'cpp'                       => 'default',
+            'proj_pct_last_day'         => "case 'proj_pct_last_day':     return A.proj_pct_1d;",
+            'proj_pct_last_3d'          => "case 'proj_pct_last_3d':      return A.proj_pct_3d;",
+            'proj_pct_last_7d'          => "case 'proj_pct_last_7d':      return A.proj_pct_7d;",
+            'proj_pct_computed'         => "case 'proj_pct_computed':     return A.proj_pct;",
+        ];
+        foreach ($keys as $key => $how) {
+            $this->assertStringContainsString("tabindex=\"0\" @click=\"sb('{$key}')\" @keydown.enter=\"sb('{$key}')\"", $head);
+            $this->assertStringContainsString($how === 'default' ? 'return Object.prototype.hasOwnProperty.call(A, col) ? A[col] : null;' : $how, $html);
+            if ($how === 'default') {
+                // Field ng aggOf na may parehong pangalan.
+                $this->assertMatchesRegularExpression('/const t = \{[^}]*\b' . $key . ':/', $html);
+            }
+        }
+    }
+
+    public function test_sales_cells_use_their_grants_tints_and_one_total_row(): void
+    {
+        $sales = file_get_contents(resource_path('views/item/_table_sales.blade.php'));
+        foreach ([
+            "x-show=\"ilIdOn('orders_1d')\"", 'num(G.agg.orders_last_day)',
+            "x-show=\"ilIdOn('proj_prof_1d')\"", 'ilArrow(G.agg.projected_profit_last_day) + ilMoneyKita(G.agg.projected_profit_last_day)',
+            "ilCfTint('proj_pct_1d', G.agg.proj_pct_1d)", "ilCfTint('proj_pct_3d', G.agg.proj_pct_3d)",
+            "ilCfTint('proj_pct_7d', G.agg.proj_pct_7d)", "ilCfTint('proj_pct', G.agg.proj_pct)",
+            "x-show=\"ilIdOn('adspent')\"", 'ilMoney(G.agg.adspent)',
+            "x-show=\"ilIdOn('cpp')\"", 'md(G.agg.cpp)', "ilIdOn('breakeven_cpp') && ilBeRange(G)", "'break-even ' + ilBeRange(G)",
+            ':colspan="ilSalesColspan()"', ':colspan="ilSalesPctCount()"',
+            // Total (shown)
+            'x-for="T in [ilTotVisible()]"', 'Total (shown)', 'num(T.orders_last_day)',
+            'ilArrow(T.projected_profit_last_day) + ilMoneyKita(T.projected_profit_last_day)',
+            "ilCfTint('proj_pct_1d', T.proj_pct_1d)", "ilCfTint('proj_pct', T.proj_pct)", 'ilMoney(T.adspent)', 'md(T.cpp)',
+        ] as $s) {
+            $this->assertStringContainsString($s, $sales);
+        }
+        $this->assertSame(1, substr_count($sales, 'ilTotVisible()]'));
+        $this->assertDoesNotMatchRegularExpression('/(?<!:)colspan="\d+"/', $sales);
+        $html = $this->render(true);
+        $this->assertMatchesRegularExpression("/ilSalesColspan\(\)\s*\{[^}]*'orders_1d'[^}]*'proj_prof_1d'[^}]*ilSalesPctCount\(\)[^}]*'adspent'[^}]*'cpp'/", $html);
+        $this->assertStringNotContainsString('ilHoldVisible', $html);
+        // Dalawang header row: sticky ang buong thead, hindi bawat th.
+        $this->assertStringContainsString('#il-table-sales thead { position:sticky;', $html);
     }
 
     public function test_t2_review_minors_are_fixed(): void
