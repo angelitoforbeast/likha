@@ -31,6 +31,13 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 - 003 /item/stock map keys come only from hold/demand/received/incoming/left, and `values` only from raw names with orders in [start,end]: items outside those sets show "—" for category/stock/ITEM VAL on the page even if they have a category or cogs row.
 - 003 T6 inline edits: JS payload builders use Number(x) so a cleared number input sends 0 (Number('')=0); worklist.list comes from ?list= even for non-CEO, so "list === 'lahat'" guards on new empty-rows silently skip marketing; select keeps the unsaved choice after a failed POST; Enter handlers skip the `saving` guard.
 - 003 /item/stock values: after fix loop 1 keys = order names + raw cogs/cogs_ceo names; a page item whose name is only an item_type_mappings alias of the cogs name (no orders in range) still has no values key. CEO-gate test never uses a cogs_ceo-only name for a non-CEO viewer.
+- 004 ItemLifecycle: classify's hasOldOrders param is unused (both copies); test table always passes true. Without Bash, "verbatim move" can't be verified from git: ask the main session for the diff.
+
+- 004 T2: owner_private_cols_default (Save-as-default snapshot) is not rewritten by column-config migrations, so Reset-to-default can bring a hidden column back; any new supply_settings group shows up automatically in /jnt/supply "Other Settings" table (filter is a group blacklist).
+
+- 004 T3 ItemStockService: unknown lifecycle_override string, doi_note kept when stock_ready=false, near-zero note on non-active lifecycles, and the 12 h first-date cache hit path (cached value wins over window_first) have no test; Scaling with 0 units in last 7 days (natural scaling is possible) gets v=0 → no doi, no note, no colour. Per-request Schema::hasColumn x2 + hasTable add uncached metadata queries beyond the "+2" claim. Cache key embeds request Host (any authed user can mint entries; minor).
+
+- 004 T4 /item page: set choice, baseProfitPct7 memo (bp7Cache keyed on this.rows identity; rows only replaced at loadItems, so OK), sort and DOI texts are verified only by string-grep of the Blade; spec lines the dev quietly softens ("filter resets to Lahat" became "ignored while hidden") need checking word by word. Tooltip lifecycle rules are hard-coded (30/90/14 days) while the thresholds are settings.
 
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.
