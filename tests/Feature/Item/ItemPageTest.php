@@ -187,6 +187,86 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringNotContainsString("item._table_new", file_get_contents(resource_path('views/item/index.blade.php')));
     }
 
+    // ── 006 T2: To order rows ─────────────────────────────────────────────────
+
+    public function test_to_order_cells_show_one_english_state_each_behind_their_column_grant(): void
+    {
+        $cells = [
+            // Next step + reason (spec §4.1, §4.2)
+            "x-for=\"N in [ilNext(G.item_name)]\"", "'il-tone-' + N.tone", 'ilReason(G.item_name)',
+            "'🟠 Count the stock first'", "'⚪ Barely selling'", "'🟢 OK'", "'🔴 Find a supplier'",
+            "'🔴 Order from ' + sup + ' now'", "'🔴 Order now'", "'🟡 Order from ' + sup + ' by '", "'🟡 Order by '",
+            "'count is below zero'", "'only the orders waiting'", "' waiting + '", "' days of sales'", "' arriving'", "'enough stock'",
+            "['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']",
+            // Qty (§4.3), Days left (§4.4)
+            'ilQty(G.item_name)', "' pcs'", 'ilDaysLeft(G.item_name)', "'Short '", "'1 year+'", "'<1 day'",
+            // Profit (7 days) (§4.5): pinagsamang base item, may tint
+            "ilCfTint('proj_pct_7d', baseProfitPct7(G.item_name))", 'ilPesoWhole(baseProfit7(G.item_name))', 'ilProfit7Tip(G.item_name)',
+            "'All variants: '",
+            // Trend
+            "new:'🆕 New'", "scaling:'📈 Growing'", "consistent:'✅ Steady'", "active:'🔄 Active'",
+            "declining:'📉 Slowing'", "phasing_out:'🚫 Stopping'", "dormant:'💤 Stopped'", 'losing money',
+            'ilTrendText(G.item_name)', 'ilTrendTip(G.item_name)',
+            // Column grants = data gate (005 mapping)
+            "x-show=\"ilIdOn('order_qty')\"", "x-show=\"ilIdOn('doi')\"", "x-show=\"ilIdOn('proj_pct_7d')\"",
+            "x-show=\"ilIdOn('lifecycle')\"", ':colspan="ilOrderColspan()"',
+        ];
+        foreach ([$this->render(true), $this->render(false)] as $html) {
+            foreach ($cells as $s) {
+                $this->assertStringContainsString($s, $html);
+            }
+        }
+        $table = file_get_contents(resource_path('views/item/_table_order.blade.php'));
+        $this->assertDoesNotMatchRegularExpression('/(?<!:)colspan="\d+"/', $table);
+        $this->assertStringContainsString("@include('item._il_lifecycle')", $table);
+    }
+
+    public function test_profit_tint_uses_the_owner_rule_colour_lightly_or_the_15_and_0_default(): void
+    {
+        $html = $this->render(true);
+        $this->assertMatchesRegularExpression('/ilCfTint\(colId, v\)\s*\{.*?\n      \},/s', $html);
+        preg_match('/ilCfTint\(colId, v\)\s*\{.*?\n      \},/s', $html, $m);
+        foreach (['(window.__COL_FORMAT__ || {})[colId]', 'this._evalRules(rules, v, null, null)',
+                  '/^#[0-9a-f]{3,8}$/i', '/^[a-z]+$/i', 'n >= 15', 'n >= 0',
+                  "'background:color-mix(in srgb, ' + colour + ' 22%, white);color:#111827;'"] as $s) {
+            $this->assertStringContainsString($s, $m[0]);
+        }
+        // Sibling ng baseProfitPct7 sa parehong cache.
+        $this->assertStringContainsString('baseProfit7(name){', $html);
+    }
+
+    public function test_marketing_to_order_has_no_cost_line_supplier_names_or_find_a_supplier(): void
+    {
+        $ceo = $this->render(true);
+        $mkt = $this->render(false);
+        $this->assertStringContainsString('ilQtyCost(G.item_name)', $ceo);
+        $this->assertStringNotContainsString('ilQtyCost(G.item_name)', $mkt);
+        foreach ([$ceo, $mkt] as $html) {
+            // JS gate din: walang pangalan / cost / Find a supplier kapag hindi CEO view.
+            $this->assertMatchesRegularExpression('/ilSupplier\(name\)\s*\{\s*if \(!this\.effectiveIsCeo\) return \'\';/', $html);
+            $this->assertMatchesRegularExpression('/ilQtyCost\(name\)\s*\{\s*if \(!this\.effectiveIsCeo\) return \'\';/', $html);
+            $this->assertStringContainsString("if (this.effectiveIsCeo && !this.suppliersFor(name).length && !this.quotesFor(name).length) return st('find'", $html);
+            // Supplier = pinakamurang quote na may presyo.
+            $this->assertStringContainsString('Number(q.price) < Number(best.price)', $html);
+            $this->assertStringContainsString("' (min '", $html);
+        }
+    }
+
+    public function test_replaced_005_row_texts_are_gone_from_the_new_view(): void
+    {
+        foreach ([$this->render(true), $this->render(false)] as $html) {
+            // Wala na kahit saan (tinanggal ang ilPill / ilQtyText / ilLifecycleText / ilLcStyle).
+            foreach (['Hanap muna ng supplier', 'Umorder ', 'Bilangin muna ang stock', 'ilPill(', 'ilQtyText(', 'ilLcStyle('] as $s) {
+                $this->assertStringNotContainsString($s, $html);
+            }
+            // Wala sa markup (puwedeng nasa JS pa ng lumang view / T3 / T5 helpers).
+            $markup = substr($html, 0, strrpos($html, '<script>'));
+            foreach (['Kulang: ', 'Sapat: ', '🆕 Bago', 'Lumalaki', 'Bumababa', 'Itinitigil', 'Tulog', 'Ikaw ang nagtakda'] as $s) {
+                $this->assertStringNotContainsString($s, $markup);
+            }
+        }
+    }
+
     // ── Bagong layout (005 T4): expanded block ────────────────────────────────
 
     public function test_expanded_block_has_item_section_page_cards_and_actions(): void
