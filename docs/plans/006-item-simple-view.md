@@ -1,0 +1,20 @@
+# Plan 006: /item simple "To order" view, in English
+
+Spec: `docs/specs/006-item-simple-view.md`. Branch `feat/item-simple-view` from `develop` at `d9606c8`.
+All tasks are **frontend**, **medium** tier (developer sonnet → `skeptic-reviewer` standard depth, sonnet).
+None is parallel-safe: every task edits `resources/views/item/index.blade.php`, so they run one after another
+on this branch (no worktrees; `git worktree` isn't in the allowlist). Each task: red markup test in
+`tests/Feature/Item/ItemPageTest.php` first, then the code, one `feat:` commit per slice.
+
+| # | Task | Files | Tests (red first) |
+|---|---|---|---|
+| T1 | **Shell, tabs, English chrome.** Tabs To order / Sales & Profit (`?tab=sales`, kept by `load()` and the view link); "Old view" / "New view" links; delete `_table_new.blade.php` and include `_table_order` / `_table_sales` (T1 adds them as minimal skeletons with headers only); English for toolbar, chips, category filter, empty / loading / error rows and messages, alerts, modals and their tooltips outside `_table_old`. | `index.blade.php`, new `_table_order.blade.php`, `_table_sales.blade.php`, delete `_table_new.blade.php`; `ItemPageTest.php` | tabs present and To order default; five English chip labels; Taglish chrome strings absent from the default render; `_table_old.blade.php` byte-identical to `d9606c8` (git-free: a stored hash) and still the `?layout=old` render; 005 new-layout tests replaced |
+| T2 | **To order rows.** Item / Next step / Qty to order / Days left / Profit (7 days) / Trend / ›; helpers `ilNext`, `ilReason`, `ilQtyCost`, `ilDaysLeft`, `ilProfit7`, `ilCfTint`, `ilTrend…`; header tooltips; `_il_lifecycle` → English Trend cell. | `_table_order.blade.php`, `_il_lifecycle.blade.php`, `index.blade.php` | headers in order with sort keys and tooltips; the six Next step texts and the reason texts; "pcs", "≈ ₱", "(min "; "Short ", " days", "1 year+", "<1 day"; seven Trend labels and "losing money"; `ilCfTint` reads `proj_pct_7d` rules with the 15 / 0 default; Marketing render has no "Find a supplier", "Order from ", "≈ ₱" |
+| T3 | **Sort and TOTAL.** Default urgency sort (red, orange, yellow, green, grey, then hold desc) for the new views; `_itemSortValue` keys `il_next`, `il_profit7`; "To order now: … items · … pcs · ≈ ₱…" (₱ CEO only). | `index.blade.php`, `_table_order.blade.php` | urgency branch in `itemGroups()` and Old view's hold sort kept; the two sort keys; TOTAL text, red-only filter, ₱ part absent for Marketing |
+| T4 | **Sales & Profit rows.** Orders today / Profit today / Profit % (Today, 3 days, 7 days, 1 month sub-columns, owner's rule per window) / Ad spend / Cost per order + "break-even ₱…" / ›; "Total (shown)" row. | `_table_sales.blade.php`, `index.blade.php` | headers and sub-headers with sort keys and tooltips; four `ilCfTint` ids; "break-even "; total row texts |
+| T5 | **Details panel (›) in English.** Rewrite `_il_expand` texts and move in: supplier + quote lines with inline add / edit / delete (CEO), lead + buffer with ✎ (CEO), full order reason, sales a day, stock / incoming, lifecycle detail, sourcing-list info (CEO), running pages / no running ad, cost per piece, category, Change photo, Copy; page cards and campaigns panel unchanged in behaviour. | `_il_expand.blade.php`, `index.blade.php` | English labels present, Taglish absent; quote editor, ✎ lead/buffer, "CEO value" absent for Marketing; campaigns panel still inside `.il-camp`; no `x-html` |
+| T6 | **Widths and cards.** `<colgroup>` widths per spec §8, 1,100–1,365 px narrowing, cards below 1,100 px for both views, `ilColspan` per view; no font under 11 px. | `index.blade.php` (CSS), both table partials | the media queries and widths; no `font-size` under 11 px in the new partials; colspan helper per view |
+
+After T6: full suite once, `php -l` on changed PHP (tests), `npm run build`, RESULT.md with the browser
+checklist. Browser check (`browser-checker`) is skipped: running the app reads the local `.env` database
+(handoff §7).

@@ -1,8 +1,8 @@
 # Result 006: /item simple "To order" view, in English
 
 Status: **in progress — plan sent to Mira, waiting for her "go"**. Branch `feat/item-simple-view`, cut from `develop` at `d9606c8`.
-- Spec: _to fill_
-- Plan: _to fill_
+- Spec: `docs/specs/006-item-simple-view.md`.
+- Plan: `docs/plans/006-item-simple-view.md`.
 - There's no PR, so this file stands in for the PR body. Nothing was pushed, merged or deployed.
 
 ## Summary
