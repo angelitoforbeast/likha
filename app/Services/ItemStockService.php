@@ -81,7 +81,7 @@ class ItemStockService
             $gated = in_array($lifecycle, ['scaling', 'consistent'], true);
             $ctx   = [
                 'ready' => $ready, 'hold' => $holdUnits, 'inc' => $inc, 'lead' => $lead, 'endDay' => $endDay,
-                'lifecycle' => $lifecycle, 'upd14' => $v14['units'] / $v14['days'],
+                'lifecycle' => $lifecycle, 'upd14' => $v14['units'] / $v14['days'], 'upd14_days' => $v14['days'],
                 'stock' => null,
             ];
             $stock = null;
@@ -147,6 +147,8 @@ class ItemStockService
         $v        = $vel['units'] > 0 ? $vel['units'] / $vel['days'] : 0.0;
         $set = [
             'units_per_day' => round($holdOnly ? $c['upd14'] : $v, 2),
+            // araw sa likod ng units_per_day (7 kapag 7-day ang nanalo sa Scaling; HOLD-only = 14-day window)
+            'velocity_days' => $holdOnly ? $c['upd14_days'] : $vel['days'],
             'palugit'       => $holdOnly ? null : $palugit,
             'doi'           => null,
             'doi_note'      => $holdOnly ? 'walang_benta' : ($v > 0 && $v < self::NEAR_ZERO ? 'halos_walang_benta' : null),

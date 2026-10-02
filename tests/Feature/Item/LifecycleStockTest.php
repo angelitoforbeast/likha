@@ -87,8 +87,22 @@ class LifecycleStockTest extends ItemTestCase
             'OVERX'  => ['consistent',  0,   5,    170, 170, true],
         ];
         foreach ($cases as $name => [$lc, $u7, $po]) $this->formulaItem($name, $lc, $u7, $po);
+        // Unang order 09-28 = 5 araw sa window (09-28..10-02, kasama ang dulo): active at phasing_out
+        foreach (['FIVEX' => 'active', 'FIVEP' => 'phasing_out'] as $name => $lc) {
+            $this->rows("1 x $name", 10, '2026-09-28');
+            $this->setting("1 x $name", ['lifecycle_override' => $lc]);
+        }
 
         $items = $this->stock();
+
+        // velocity_days = bilang ng araw sa likod ng units_per_day: [normal, lugi]
+        $days = ['newx' => [14, 14], 'actx' => [14, 14], 'consx' => [14, 14], 'scalx' => [7, 14], 'scalz' => [14, 14],
+                 'declx' => [14, 14], 'phasex' => [14, 14], 'dormx' => [14, 14], 'overx' => [14, 14],
+                 'fivex' => [5, 5], 'fivep' => [5, 5]];
+        foreach ($days as $k => [$normalDays, $lugiDays]) {
+            $this->assertSame($normalDays, $items[$k]['normal']['velocity_days'], "$k normal days");
+            $this->assertSame($lugiDays, $items[$k]['lugi']['velocity_days'], "$k lugi days");
+        }
 
         foreach ($cases as $name => [$lc, , $po, $normal, $lugi, $gated]) {
             $it = $items[strtolower($name)];

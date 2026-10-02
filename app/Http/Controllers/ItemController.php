@@ -83,8 +83,11 @@ class ItemController extends Controller
         $feeCodRate  = FeeSetting::getRate('cod_fee_rate',           $host, $today);
         $feeVatRate  = FeeSetting::getRate('cod_fee_vat_rate',       $host, $today);
 
+        // ?layout=old lang (eksaktong string) ang lumang table; lahat ng iba = bagong layout
+        $layoutOld = $request->query('layout') === 'old';
+
         return view('item.index', compact(
-            'pages', 'isCEO', 'isMarketingOIC', 'viewAs', 'effectiveIsCEO',
+            'pages', 'isCEO', 'isMarketingOIC', 'viewAs', 'effectiveIsCEO', 'layoutOld',
             'ownerPrivateColsConfig', 'campaignsColsConfig',
             'breakevenTargetPct', 'colFormatRules', 'campaignsColFormatRules',
             'feeShipping', 'feeCodRate', 'feeVatRate'
