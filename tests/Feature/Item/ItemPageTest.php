@@ -82,6 +82,20 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringNotContainsString('itemValueCeo(row.item_name)', $this->render(false));
     }
 
+    public function test_doi_lead_and_order_by_lines_have_plain_tooltips(): void
+    {
+        $lead = 'Lead = ilang araw bago dumating ang order; palugit = dagdag na araw na reserba';
+        $ceo  = $this->render(true);
+        $mkt  = $this->render(false);
+        foreach ([$ceo, $mkt] as $html) {
+            $this->assertStringContainsString($lead, $html);
+            $this->assertStringContainsString('Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa.', $html);
+            $this->assertStringContainsString('Huling araw na pwedeng umorder para hindi maubusan, base sa lead time', $html);
+        }
+        $this->assertStringContainsString($lead . ' — i-click para palitan', $ceo);
+        $this->assertStringNotContainsString('i-click para palitan', $mkt);
+    }
+
     public function test_category_filter_is_for_every_role_and_inline_edits_are_ceo_only(): void
     {
         $ceo = $this->render(true);

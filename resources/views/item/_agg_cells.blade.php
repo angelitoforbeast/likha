@@ -207,14 +207,14 @@
   </span>
 </template>
 <template x-if="col.id==='doi'">
-  <span :title="stockTip('ilang araw pa tatagal ang stock + paparating, bawas ang HOLD', stockFor(row.item_name))">
+  <span :title="stockTip('ilang araw pa tatagal ang stock + paparating, bawas ang HOLD. Pula: mauubos bago dumating ang order. Dilaw: malapit na. Berde: ok pa.', stockFor(row.item_name))">
     <span x-show="stockPending()" style="color:#94a3b8;">…</span>
     <span x-show="!stockPending()">
       <span :style="'font-weight:700;color:' + doiColour(stockFor(row.item_name))" x-text="doiText(stockFor(row.item_name))"></span>
       <template x-if="stockFor(row.item_name)">
         @if($effectiveIsCEO)
         <div @click.stop>
-          <button type="button" title="para sa lahat ng variant ng item na ito — i-click para palitan"
+          <button type="button" title="Lead = ilang araw bago dumating ang order; palugit = dagdag na araw na reserba — i-click para palitan (para sa lahat ng variant ng item na ito)"
                   x-show="!(stockEdit.key === supKey(row.item_name) && stockEdit.mode === 'sup')"
                   @click.stop="openStockEdit(row.item_name, stockFor(row.item_name))"
                   style="background:none;border:0;padding:0;cursor:pointer;font-size:9px;color:#6366f1;font-weight:400;text-decoration:underline;"
@@ -235,7 +235,7 @@
                style="font-size:10px;color:#b91c1c;font-weight:600;" x-text="stockEdit.error"></div>
         </div>
         @else
-        <div style="font-size:9px;color:#94a3b8;font-weight:400;"
+        <div style="font-size:9px;color:#94a3b8;font-weight:400;" title="Lead = ilang araw bago dumating ang order; palugit = dagdag na araw na reserba"
              x-text="'lead ' + stockFor(row.item_name).lead + ' · palugit ' + stockFor(row.item_name).safety"></div>
         @endif
       </template>
@@ -248,7 +248,7 @@
     <span x-show="!stockPending()">
       <span style="font-weight:800;" x-text="stockFor(row.item_name) && stockFor(row.item_name).order_qty != null ? num(stockFor(row.item_name).order_qty) : '—'"></span>
       <template x-if="stockFor(row.item_name)">
-        <div style="font-size:9px;color:#64748b;font-weight:400;" x-text="orderByText(stockFor(row.item_name))"></div>
+        <div style="font-size:9px;color:#64748b;font-weight:400;" title="Huling araw na pwedeng umorder para hindi maubusan, base sa lead time" x-text="orderByText(stockFor(row.item_name))"></div>
       </template>
     </span>
   </span>
