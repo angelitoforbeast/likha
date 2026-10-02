@@ -458,6 +458,19 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringContainsString('tr.il-total', $html);
     }
 
+    public function test_colspan_follows_the_columns_the_media_queries_leave_visible(): void
+    {
+        $html = $this->render(true);
+        // Parehong query ng CSS (@media max-width 1439 / 1365).
+        $this->assertStringContainsString("window.matchMedia('(max-width: 1439px)')", $html);
+        $this->assertStringContainsString("window.matchMedia('(max-width: 1365px)')", $html);
+        $this->assertStringContainsString("addEventListener('change'", $html);
+        $this->assertMatchesRegularExpression('/ilColspan\(\)\s*\{[^}]*ilVw\.lt1440[^}]*ilVw\.lt1366/s', $html);
+        $table = file_get_contents(resource_path('views/item/_table_new.blade.php'));
+        $this->assertDoesNotMatchRegularExpression('/(?<!:)colspan="\d+"/', $table);
+        $this->assertStringContainsString(':colspan="ilColspan()"', $table);
+    }
+
     public function test_new_layout_font_sizes_are_never_below_11px(): void
     {
         $dir = base_path('resources/views/item/');

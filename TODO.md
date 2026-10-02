@@ -65,7 +65,6 @@ Accepted review findings, each with the reason it isn't fixed now (CLAUDE.md wor
 - **The campaigns panel inside /item's expanded block uses 11 px text**, and the shared markup's light greys (`#94a3b8`, `#bcc0c4`) are below AA. Reason: the panel must fit without horizontal scroll (Mira's answer 6), and its colours are in the shared include that `/owner/private` uses, which must not change.
 - **On a phone the campaigns table wraps mid-word** (fixed layout, ~12 columns in ~340 px). Reason: the price of "no horizontal scroll" without changing the shared include; Mira's browser check decides if it's usable.
 - **`.expand-wrap{overflow-x:visible}` computes to `auto`** (the other axis scrolls), so content that can't wrap would bring back an inner scrollbar. None was found in the include. Reason: CSS rule, harmless today.
-- **`ilColspan()` counts LIFECYCLE / ACTION even when a media query hides them.** The empty-state and expanded rows span one or two extra columns. Reason: browsers clamp the colspan; no visible effect.
 - **Below 1,100 px the header row is hidden, so header sorts aren't reachable in card view.** Reason: per spec (cards); the default urgency sort still applies.
 - **ctrl/cmd-click on "Lumang view" / "Bagong view" opens in the same tab** (the link builds its URL on click). Reason: cosmetic; a plain click is the common case.
 - **`.il-table th { overflow-wrap:normal }`** could let a long header word poke past its column at 1,100–1,365 px. Reason: unverified without a browser; part of Mira's checklist.

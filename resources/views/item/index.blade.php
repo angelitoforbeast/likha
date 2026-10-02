@@ -3354,8 +3354,25 @@
       // Visibility: may member id ba na naka-check (kasama ang members ng merged jnt_rdt)?
       ilIdOn(id){ return this.cols.some(c => c.id === id || (c.members && c.members.includes(id))); },
       ilColOn(key){ return (this.ilCols[key] || []).some(id => this.ilIdOn(id)); },
-      // ITEM + › lagi; ang iba kapag visible.
-      ilColspan(){ return 2 + Object.keys(this.ilCols).filter(k => this.ilColOn(k)).length; },
+      // Reactive na kopya ng media queries ng CSS (parehong breakpoints) — para sumunod ang colspan.
+      ilVw: { lt1440:false, lt1366:false },
+      ilWatchViewport(){
+        if (!window.matchMedia) return;
+        const watch = (mq, key) => {
+          const set = () => { this.ilVw[key] = mq.matches; };
+          set();
+          if (mq.addEventListener) mq.addEventListener('change', set); else if (mq.addListener) mq.addListener(set);
+        };
+        watch(window.matchMedia('(max-width: 1439px)'), 'lt1440');
+        watch(window.matchMedia('(max-width: 1365px)'), 'lt1366');
+      },
+      // ITEM + › lagi; ang iba kapag visible AT hindi itinatago ng media query (LIFECYCLE <1440, ACTION <1366).
+      ilColspan(){
+        let n = 2 + Object.keys(this.ilCols).filter(k => this.ilColOn(k)).length;
+        if (this.ilVw.lt1440 && this.ilColOn('lifecycle')) n--;
+        if (this.ilVw.lt1366 && this.ilColOn('action')) n--;
+        return n;
+      },
       ilLifecycleLabels: { new:'🆕 Bago', scaling:'📈 Lumalaki', consistent:'✅ Stable', active:'🔄 Aktibo',
                            declining:'📉 Bumababa', phasing_out:'🚫 Itinitigil', dormant:'💤 Tulog' },
       // Pangalan lang (walang emoji), para sa lead line.
@@ -3805,6 +3822,7 @@
 
       async init(){
         this.initCols();
+        this.ilWatchViewport();
         // Sabay-sabay: bawat isa ay pinupuno lang ang sarili niyang map, walang dependency sa load().
         await Promise.all([
           this.load(),
