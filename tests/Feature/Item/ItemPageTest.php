@@ -46,6 +46,42 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringNotContainsString('await this.loadItemImages();', $html);
     }
 
+    public function test_stock_columns_are_registered_and_rendered_on_item_rows(): void
+    {
+        $ceo = $this->render(true);
+        $ids = ['category', 'stock', 'incoming', 'units_per_day', 'doi', 'order_qty'];
+        $catalogIds = array_column(\App\Http\Controllers\OwnerColumnSettingsController::CATALOG['owner_private'], 'id');
+        $defaultIds = \App\Http\Controllers\OwnerColumnSettingsController::DEFAULT_VISIBLE['owner_private'];
+        foreach ($ids as $id) {
+            $this->assertStringContainsString("id:'{$id}'", $ceo);                 // defaultCols()
+            $this->assertStringContainsString("col.id==='{$id}'", $ceo);           // item-row cell
+            $this->assertContains($id, $catalogIds);
+            $this->assertContains($id, $defaultIds);
+        }
+        $this->assertStringContainsString("col.id==='item_val'", $ceo);
+        $this->assertStringContainsString('itemValue(row.item_name)', $ceo);
+        // Walang x-html sa bagong cells (x-text lang).
+        $this->assertSame(0, substr_count($ceo, 'x-html'));
+        // Tooltip + marker texts.
+        $this->assertStringContainsString('bilangin', $ceo);
+        $this->assertStringContainsString('kulang ', $ceo);
+    }
+
+    public function test_stock_loads_in_parallel_before_the_item_summary(): void
+    {
+        $html = $this->render(true);
+        $summary = strpos($html, "await fetch('" . route('owner.private.item-summary'));
+        $this->assertLessThan($summary, strpos($html, 'this.loadStock();'));
+        $this->assertSame(1, substr_count($html, 'this.loadStock();'));
+        $this->assertStringContainsString(route('item.stock'), $html);
+    }
+
+    public function test_ceo_item_value_binding_is_not_in_the_marketing_render(): void
+    {
+        $this->assertStringContainsString('itemValueCeo(row.item_name)', $this->render(true));
+        $this->assertStringNotContainsString('itemValueCeo(row.item_name)', $this->render(false));
+    }
+
     public function test_sourcing_chips_and_worklist_show_in_the_ceo_view_only(): void
     {
         $ceo = $this->render(true);

@@ -97,6 +97,13 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'cod_fee',       'label' => 'COD Fee'],
             ['id' => 'hold',          'label' => 'Hold'],
             ['id' => 'action',        'label' => 'Action'],
+            // /item lang (item rows) — hindi ginagamit ng /owner/private.
+            ['id' => 'category',      'label' => 'Category (/item)'],
+            ['id' => 'stock',         'label' => 'Stock (/item)'],
+            ['id' => 'incoming',      'label' => 'Paparating (/item)'],
+            ['id' => 'units_per_day', 'label' => 'Benta/araw (/item)'],
+            ['id' => 'doi',           'label' => 'DOI (/item)'],
+            ['id' => 'order_qty',     'label' => 'I-order (/item)'],
         ],
         'campaigns' => [
             ['id' => 'on',             'label' => 'Off / On'],
@@ -192,6 +199,7 @@ class OwnerColumnSettingsController extends Controller
             'proj_prof_1d', 'proj_prof_3d', 'proj_prof_7d',
             'jnt_rts', 'jnt_del', 'jnt_transit',
             'rts_set', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee', 'hold', 'action',
+            'category', 'stock', 'incoming', 'units_per_day', 'doi', 'order_qty',
         ],
         'campaigns' => [
             // Reduced default to keep the inline expand panel within the

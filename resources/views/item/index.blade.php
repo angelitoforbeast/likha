@@ -2112,6 +2112,8 @@
         { key:'i_order',    label:'I-order na' },
         { key:'naka_order', label:'Naka-order, hinihintay' },
       ],
+      // Stock / DOI / order qty / category / item value kada base item — /item/stock (lahat ng role).
+      stock: { items:{}, values:{}, categories:[], start:null, ready:false, loaded:false, loading:false, error:'', _req:0 },
       _photoTarget: null,     // item_name na kasalukuyang ina-upload-an ng photo
       holdMap: {},            // item_name → HOLD count (jnt/hold logic; drives item universe)
       holdLoaded: false,      // true kapag nakuha na ang holdMap
@@ -2231,6 +2233,13 @@
           { id:'cod_fee',    label:'COD Fee',    sort:'cod_fee',              align:'center', minw:72  },
           { id:'hold',       label:'Hold',       sort:'hold_units',           align:'center', minw:60  },
           { id:'action',     label:'Action',     sort:'action_at',            align:'left',   minw:160 },
+          // Stock / DOI (item rows lang) — galing sa /item/stock.
+          { id:'category',      label:'Category',   sort:'category',      align:'center', minw:110 },
+          { id:'stock',         label:'Stock',      sort:'stock',         align:'center', minw:75  },
+          { id:'incoming',      label:'Paparating', sort:'incoming',      align:'center', minw:90  },
+          { id:'units_per_day', label:'Benta/araw', sort:'units_per_day', align:'center', minw:90  },
+          { id:'doi',           label:'DOI',        sort:'doi',           align:'center', minw:110 },
+          { id:'order_qty',     label:'I-order',    sort:'order_qty',     align:'center', minw:100 },
         ];
       },
 
@@ -2357,6 +2366,7 @@
         // Item universe = HOLD items (jnt/hold) + sourcing worklists (CEO view lang) —
         // sabay sa mabigat na item-summary fetch (hindi na hinihintay).
         this.loadHold();
+        this.loadStock();   // stock / DOI / item value — hindi hinihintay, hindi nagpapabagal sa table
         if (this.effectiveIsCeo) this.loadWorklist();
         try{
           const r = await fetch('{{ route('owner.private.item-summary') }}?'+qs.toString());
@@ -3697,6 +3707,12 @@
           case 'proj_pct_last_day':     return A.proj_pct_1d;
           case 'proj_pct_last_3d':      return A.proj_pct_3d;
           case 'proj_pct_last_7d':      return A.proj_pct_7d;
+          // Galing sa /item/stock (per base item) — null = sa ibaba ng sort.
+          case 'item_value':            return this.itemValue(grp.item_name);
+          case 'item_value_ceo':        return this.itemValueCeo(grp.item_name);
+          case 'category':              return this.stockFor(grp.item_name)?.category ?? null;
+          case 'stock': case 'incoming': case 'units_per_day': case 'doi': case 'order_qty':
+            return this.stockFor(grp.item_name)?.[col] ?? null;
           default:
             return Object.prototype.hasOwnProperty.call(A, col) ? A[col] : null;
         }
@@ -3825,6 +3841,58 @@
           if (req === this.worklist._req) this.worklist.error = 'Hindi ma-load ang worklist (' + (e.message || e) + '). I-refresh.';
         }
         finally{ if (req === this.worklist._req) this.worklist.loading = false; }
+      },
+      // ── Stock / DOI / order qty / category / item value (/item/stock, lahat ng role) ──
+      async loadStock(){
+        const req = ++this.stock._req;   // luma/naunang sagot = huwag gamitin
+        this.stock.loading = true;
+        try{
+          const u = new URL('{{ route('item.stock') }}', location.origin);
+          u.searchParams.set('start_date', this.startDate);
+          u.searchParams.set('end_date', this.endDate);
+          if (this.isCeoView && this.viewAs === 'marketing') u.searchParams.set('view_as', 'marketing');
+          const res = await fetch(u, {headers:{'Accept':'application/json'}});
+          const j = await res.json();
+          if (req !== this.stock._req) return;
+          if (!res.ok || !j || !j.ok) throw new Error('HTTP ' + res.status);
+          this.stock.items      = j.items || {};
+          this.stock.values     = j.values || {};
+          this.stock.categories = j.categories || [];
+          this.stock.start      = j.start || null;
+          this.stock.ready      = !!j.stock_ready;
+          this.stock.loaded     = true;
+          this.stock.error      = '';
+        }catch(e){
+          if (req === this.stock._req) this.stock.error = 'Hindi ma-load ang stock (' + (e.message || e) + '). I-refresh.';
+        }
+        finally{ if (req === this.stock._req) this.stock.loading = false; }
+      },
+      // Base-item numbers (stock, DOI…) — pareho sa lahat ng variant ng base; null kung wala.
+      stockFor(name){ return this.stock.items[this.supKey(name)] || null; },
+      // ITEM VAL. galing sa cogs table (raw name, lowercase) — null kung wala.
+      itemValue(name){ const v = this.stock.values[String(name||'').trim().toLowerCase()]?.item_value; return v == null ? null : v; },
+      itemValueCeo(name){ const v = this.stock.values[String(name||'').trim().toLowerCase()]?.item_value_ceo; return v == null ? null : v; },
+      stockPending(){ return !this.stock.loaded && !this.stock.error; },
+      doiText(S){
+        if (!S || S.doi == null) return '—';
+        const n = Number(S.doi);
+        if (n < 0) return 'kulang ' + Math.abs(n).toFixed(1).replace(/\.0$/, '') + ' araw';
+        return n.toFixed(1) + ' araw';
+      },
+      orderByText(S){
+        if (!S || S.order_by == null) return '—';
+        if (S.order_by === 'now') return 'ngayon na';
+        return 'bago mag ' + this.fmtDate(S.order_by);
+      },
+      doiColour(S){
+        const c = S && S.colour;
+        return c === 'red' ? '#b91c1c' : c === 'amber' ? '#b45309' : c === 'green' ? '#15803d' : '#94a3b8';
+      },
+      variantTip(S){ return (S && S.variants && S.variants.length > 1) ? 'para sa lahat ng variant: ' + S.variants.join(', ') : ''; },
+      // Tooltip ng stock cell: ang paliwanag + variant note (kung may) + error (kung may).
+      stockTip(text, S){
+        const vt = this.variantTip(S);
+        return text + (vt ? ' — ' + vt : '') + (this.stock.error ? ' — ' + this.stock.error : '');
       },
       setWorklist(key){
         this.worklist.list = key;
