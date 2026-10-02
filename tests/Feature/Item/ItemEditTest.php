@@ -148,6 +148,34 @@ class ItemEditTest extends ItemTestCase
         $this->assertSame(1, DB::table('item_categories')->where('name', 'Bagong Cat')->count());
     }
 
+    public function test_setting_kv_is_ceo_only_and_item_palugit_keys_accept_only_0_to_255(): void
+    {
+        DB::table('supply_settings')->insert([
+            'key' => 'running_threshold', 'value' => '1', 'label' => 'Running threshold', 'group' => 'velocity',
+            'data_type' => 'float', 'sort_order' => 41, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $value = fn (string $key) => DB::table('supply_settings')->where('key', $key)->value('value');
+
+        foreach (['Marketing', 'Marketing - OIC'] as $role) {
+            $this->send('/jnt/supply/setting-kv', ['key' => 'palugit_new', 'value' => '9'], $role)->assertStatus(403);
+        }
+        $this->assertSame('3', $value('palugit_new'));
+
+        foreach (['256', '-1', 'x', '2.5'] as $bad) {
+            $this->send('/jnt/supply/setting-kv', ['key' => 'palugit_new', 'value' => $bad])->assertStatus(422);
+        }
+        $this->assertSame('3', $value('palugit_new'));
+
+        foreach (['0', '255'] as $good) {
+            $this->send('/jnt/supply/setting-kv', ['key' => 'palugit_new', 'value' => $good])
+                ->assertOk()->assertJson(['success' => true, 'value' => $good]);
+        }
+
+        // Hindi item_palugit: dating range pa rin.
+        $this->send('/jnt/supply/setting-kv', ['key' => 'running_threshold', 'value' => '300'])->assertOk();
+        $this->assertSame('300', $value('running_threshold'));
+    }
+
     public function test_supply_settings_update_all_rows_sharing_a_key_and_keep_their_names(): void
     {
         $this->settingsRow('Glow Tape', 7, 3);
@@ -172,6 +200,29 @@ class ItemEditTest extends ItemTestCase
         $row = DB::table('supply_item_settings')->first();
         $this->assertSame('Glow Tape', $row->item_name);
         $this->assertSame([10, 4], [(int) $row->lead_time_days, (int) $row->safety_days]);
+    }
+
+    public function test_supply_settings_write_palugit_override_with_safety_and_blank_clears_only_the_override(): void
+    {
+        $this->settingsRow('Glow Tape', 7, 3);
+
+        $this->send('/item/supply-settings', ['item_name' => 'Glow Tape', 'lead_time_days' => 7, 'safety_days' => 5])->assertOk();
+        $row = DB::table('supply_item_settings')->first();
+        $this->assertSame([5, 5], [(int) $row->safety_days, (int) $row->palugit_override]);
+
+        foreach ([null, ''] as $blank) {
+            DB::table('supply_item_settings')->update(['palugit_override' => 5]);
+            $this->send('/item/supply-settings', ['item_name' => 'Glow Tape', 'lead_time_days' => 9, 'safety_days' => $blank])->assertOk();
+            $row = DB::table('supply_item_settings')->first();
+            $this->assertNull($row->palugit_override);
+            $this->assertSame([9, 5], [(int) $row->lead_time_days, (int) $row->safety_days]);
+        }
+
+        // Bagong row na walang safety_days: DB default (3) ang safety, walang override.
+        $this->send('/item/supply-settings', ['item_name' => 'Bagong Item', 'lead_time_days' => 4])->assertOk();
+        $row = DB::table('supply_item_settings')->where('item_name', 'BAGONG ITEM')->orWhere('item_name', 'Bagong Item')->first();
+        $this->assertSame([4, 3], [(int) $row->lead_time_days, (int) $row->safety_days]);
+        $this->assertNull($row->palugit_override);
     }
 
     public function test_supply_settings_insert_a_row_named_by_the_base_when_none_exists(): void

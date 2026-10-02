@@ -585,7 +585,7 @@ class ItemController extends Controller
         $data = $request->validate([
             'item_name'      => 'required|string|max:255',
             'lead_time_days' => 'required|integer|min:0|max:255',
-            'safety_days'    => 'required|integer|min:0|max:255',
+            'safety_days'    => 'nullable|integer|min:0|max:255',
         ]);
 
         $parsed = \App\Support\ItemBaseKey::parse($data['item_name']);
@@ -596,9 +596,14 @@ class ItemController extends Controller
         DB::transaction(function () use ($data, $parsed) {
             $values = [
                 'lead_time_days' => (int) $data['lead_time_days'],
-                'safety_days'    => (int) $data['safety_days'],
                 'updated_at'     => now(),
             ];
+            // Palugit: may value = safety_days at palugit_override; blangko = balik sa lifecycle (override NULL, safety_days hindi ginagalaw).
+            $palugit = $data['safety_days'] ?? null;
+            if ($palugit !== null) $values['safety_days'] = (int) $palugit;
+            if (Schema::hasColumn('supply_item_settings', 'palugit_override')) {
+                $values['palugit_override'] = $palugit === null ? null : (int) $palugit;
+            }
             // Maliit ang table — i-filter sa PHP para parehong key ang gamit (kahit magkaiba ang case/spacing).
             $ids = DB::table('supply_item_settings')->get(['id', 'item_name'])
                 ->filter(fn ($r) => \App\Support\ItemBaseKey::key((string) $r->item_name) === $parsed['key'])

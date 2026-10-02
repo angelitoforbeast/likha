@@ -61,6 +61,18 @@ abstract class ItemTestCase extends TestCase
             $t->string('submission_time')->nullable();
         });
 
+        // supply_settings: kapareho ng 2026_04_24_000003 (hindi mapatakbo mag-isa — may item_class_thresholds ito).
+        Schema::create('supply_settings', function (Blueprint $t) {
+            $t->id();
+            $t->string('key', 100)->unique();
+            $t->string('value', 50);
+            $t->string('label', 150);
+            $t->string('group', 30)->default('general');
+            $t->string('data_type', 10)->default('float');
+            $t->unsignedSmallInteger('sort_order')->default(0);
+            $t->timestamps();
+        });
+
         Artisan::call('migrate', [
             '--path'  => $this->migrationPaths(),
             '--force' => true,
@@ -81,6 +93,9 @@ abstract class ItemTestCase extends TestCase
             'database/migrations/2026_10_02_100000_create_item_categories_table.php',
             'database/migrations/2026_10_02_100100_create_item_category_assignments_table.php',
             'database/migrations/2026_10_02_100200_seed_item_stock_start_setting.php',
+            'database/migrations/2026_10_02_100300_add_palugit_override_to_supply_item_settings.php',
+            'database/migrations/2026_10_02_100400_seed_item_palugit_settings.php',
+            'database/migrations/2026_10_02_100500_hide_category_column_owner_private.php',
         ];
     }
 

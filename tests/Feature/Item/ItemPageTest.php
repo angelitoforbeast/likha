@@ -56,7 +56,8 @@ class ItemPageTest extends ItemTestCase
             $this->assertStringContainsString("id:'{$id}'", $ceo);                 // defaultCols()
             $this->assertStringContainsString("col.id==='{$id}'", $ceo);           // item-row cell
             $this->assertContains($id, $catalogIds);
-            $this->assertContains($id, $defaultIds);
+            // Handoff 004: nakatago na by default ang CATEGORY (nasa catalog pa rin).
+            $id === 'category' ? $this->assertNotContains($id, $defaultIds) : $this->assertContains($id, $defaultIds);
         }
         $this->assertStringContainsString("col.id==='item_val'", $ceo);
         $this->assertStringContainsString('itemValue(row.item_name)', $ceo);

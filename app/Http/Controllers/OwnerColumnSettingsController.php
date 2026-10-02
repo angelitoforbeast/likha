@@ -199,7 +199,7 @@ class OwnerColumnSettingsController extends Controller
             'proj_prof_1d', 'proj_prof_3d', 'proj_prof_7d',
             'jnt_rts', 'jnt_del', 'jnt_transit',
             'rts_set', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee', 'hold', 'action',
-            'category', 'stock', 'incoming', 'units_per_day', 'doi', 'order_qty',
+            'stock', 'incoming', 'units_per_day', 'doi', 'order_qty',
         ],
         'campaigns' => [
             // Reduced default to keep the inline expand panel within the

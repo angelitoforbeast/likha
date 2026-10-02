@@ -1192,6 +1192,10 @@ class JntSupplyController extends Controller
                     return response()->json(['error' => 'Expected integer'], 422);
                 }
                 $val = (string)(int)$val;
+                // Palugit ng /item: 0–255 lang (tinyint sa per-item override).
+                if ($setting->group === 'item_palugit' && ((int)$val < 0 || (int)$val > 255)) {
+                    return response()->json(['error' => 'Palugit dapat 0 hanggang 255 araw'], 422);
+                }
                 break;
             case 'float':
                 if (!is_numeric($val)) {
