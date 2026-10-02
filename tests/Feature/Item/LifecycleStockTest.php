@@ -80,6 +80,7 @@ class LifecycleStockTest extends ItemTestCase
             'ACTX'   => ['active',      0,   null, 190, 190, false],
             'CONSX'  => ['consistent',  0,   null, 220, 150, true],
             'SCALX'  => ['scaling',     105, null, 365, 150, true],   // 7-day v = 15
+            'SCALZ'  => ['scaling',     0,   null, 260, 150, true],   // 7-day v = 0, 14-day v = 10 wins (amendment 004-1)
             'DECLX'  => ['declining',   0,   null, 120, 120, false],
             'PHASEX' => ['phasing_out', 0,   null, 50,  50,  false],
             'DORMX'  => ['dormant',     0,   null, 50,  50,  false],
@@ -105,6 +106,9 @@ class LifecycleStockTest extends ItemTestCase
         $this->assertSame(5, $items['overx']['lugi']['palugit']);
         $this->assertEquals(15, $items['scalx']['normal']['units_per_day']);
         $this->assertSame(3, $items['scalx']['lugi']['palugit']);
+        $this->assertEquals(10, $items['scalz']['normal']['units_per_day']);
+        $this->assertSame(14, $items['scalz']['normal']['palugit']);
+        $this->assertEquals(-5.0, $items['scalz']['normal']['doi']);   // (0 − 50) × 14 ÷ 140, 14-day units/days
 
         foreach (['phasex', 'dormx'] as $k) {
             foreach (['normal', 'lugi'] as $set) {
@@ -134,19 +138,27 @@ class LifecycleStockTest extends ItemTestCase
 
     public function test_velocity_under_half_a_unit_a_day_is_halos_walang_benta_but_keeps_the_formula(): void
     {
-        // 3 units mula 09-23 (10 araw) = 0.3/araw; HOLD 12 (3 dito + 9 mas luma)
-        $this->rows('1 x SLOW', 3, '2026-09-23', 3);
-        $this->rows('1 x SLOW', 9, '2026-09-10', 9);
-        $this->setting('1 x SLOW', ['lifecycle_override' => 'active']);
+        // 3 units mula 09-23 (10 araw) = 0.3/araw (7-day = 0, kaya 14-day ang nananalo sa Scaling); HOLD 12 (3 dito + 9 mas luma)
+        // [lifecycle, normal qty]: active 12 + 0.3 × 14 = 16.2 → 17; scaling 12 + 0.3 × 21 = 18.3 → 19
+        $cases = ['SLOW' => ['active', 17], 'SLOWS' => ['scaling', 19]];
+        foreach ($cases as $name => [$lc]) {
+            $this->rows("1 x $name", 3, '2026-09-23', 3);
+            $this->rows("1 x $name", 9, '2026-09-10', 9);
+            $this->setting("1 x $name", ['lifecycle_override' => $lc]);
+        }
 
-        $s = $this->stock()['slow']['normal'];
+        $items = $this->stock();
 
-        $this->assertEquals(0.3, $s['units_per_day']);
-        $this->assertSame('halos_walang_benta', $s['doi_note']);
-        $this->assertSame('grey', $s['colour']);
-        $this->assertSame(17, $s['order_qty']);        // 12 + 0.3 × 14 = 16.2 → 17
-        $this->assertEquals(-40.0, $s['doi']);          // (0 − 12) × 10 ÷ 3
-        $this->assertSame('now', $s['order_by']);
+        foreach ($cases as $name => [, $qty]) {
+            $s = $items[strtolower($name)]['normal'];
+
+            $this->assertEquals(0.3, $s['units_per_day'], $name);
+            $this->assertSame('halos_walang_benta', $s['doi_note'], $name);
+            $this->assertSame('grey', $s['colour'], $name);
+            $this->assertSame($qty, $s['order_qty'], $name);
+            $this->assertEquals(-40.0, $s['doi'], $name);   // (0 − 12) × 10 ÷ 3
+            $this->assertSame('now', $s['order_by'], $name);
+        }
     }
 
     public function test_natural_lifecycle_matches_the_jnt_supply_definitions(): void

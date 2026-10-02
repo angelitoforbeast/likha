@@ -65,7 +65,7 @@ class ItemStockService
             $inc       = (int) ($incoming[$k] ?? 0);
             $lead      = $settings[$k]['lead'] ?? self::DEFAULT_LEAD;
 
-            // 14-day: 003's rule. 7-day: units ng huling 7 araw ÷ 7 (Scaling lang ang gumagamit).
+            // 14-day: 003's rule. 7-day: units ng huling 7 araw ÷ 7 (Scaling lang; ang mas malaki sa dalawa ang gamit).
             $v14 = ['units' => 0, 'days' => 1];
             if (isset($demand[$k]) && $demand[$k]['units'] > 0) {
                 $first = Carbon::parse($demand[$k]['first'], 'Asia/Manila')->startOfDay();
@@ -91,7 +91,9 @@ class ItemStockService
                 $ctx['stock'] = $stock;
             }
 
-            $normal = $this->restockSet($ctx, $lifecycle === 'scaling' ? $v7 : $v14, $pal($lifecycle));
+            // Scaling: ang mas malaki sa 7-day at 14-day (amendment 004-1); tie = parehong numero.
+            $vNormal = $lifecycle === 'scaling' && $v7['units'] / $v7['days'] > $v14['units'] / $v14['days'] ? $v7 : $v14;
+            $normal = $this->restockSet($ctx, $vNormal, $pal($lifecycle));
             $lugi   = $gated ? $this->restockSet($ctx, $v14, $pal('lugi')) : $normal;
 
             $variants = array_keys(($hold[$k]['variants'] ?? []) + ($demand[$k]['variants'] ?? []));

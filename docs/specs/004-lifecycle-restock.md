@@ -28,6 +28,7 @@ Same definitions as `/jnt/supply`, per base key (`ItemBaseKey::key`), counting e
 
 - 14-day velocity: 003's rule, unchanged (cancelled excluded, divisor = days since first order in the window, 1–14).
 - 7-day velocity (Scaling only): units in [end − 6, end], cancelled excluded, **÷ 7**. Folded into 003's demand query as a `SUM(CASE WHEN ts_date >= end − 6 …)`, no new query.
+- Scaling `normal` velocity = **max(7-day, 14-day)** (Amendment 004-1): a Scaling item with no sales in its last 7 days must not fall to a HOLD-only order. The DOI uses the winning velocity's own units and days (14-day units/days, or 7-day units × 7); a tie gives the same number either way. The `lugi` set keeps the 14-day velocity.
 
 ## 4. Palugit
 
@@ -56,7 +57,7 @@ Each set: `units_per_day`, `palugit`, `doi`, `doi_note`, `order_qty`, `order_by`
 | lifecycle | `normal` velocity / palugit | `lugi` | `gated` |
 |---|---|---|---|
 | new | 14-day / `palugit_new` | = normal | false |
-| scaling | 7-day / `palugit_scaling` | 14-day / `palugit_lugi` | true |
+| scaling | max(7-day, 14-day) / `palugit_scaling` | 14-day / `palugit_lugi` | true |
 | consistent | 14-day / `palugit_consistent` | 14-day / `palugit_lugi` | true |
 | active | 14-day / `palugit_active` | = normal | false |
 | declining | 14-day / `palugit_declining` | = normal | false |
