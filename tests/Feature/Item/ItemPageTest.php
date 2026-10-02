@@ -484,6 +484,13 @@ class ItemPageTest extends ItemTestCase
         $this->assertMatchesRegularExpression('/\.il-chev\s*\{[^}]*width:24px;\s*height:24px/', $html);
     }
 
+    public function test_pct_helper_shows_the_unicode_minus_with_the_down_arrow(): void
+    {
+        $html = $this->render(true);
+        // "▼ −3.2%" / "▲ 15.8%": may space pagkatapos ng arrow, U+2212 para sa negatibo.
+        $this->assertStringContainsString("(Number(v) >= 0 ? '▲ ' : '▼ −')", $html);
+    }
+
     public function test_new_layout_font_sizes_are_never_below_11px(): void
     {
         $dir = base_path('resources/views/item/');

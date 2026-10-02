@@ -3411,7 +3411,8 @@
       ilTone(v){ return (v == null || isNaN(Number(v))) ? '#64748b' : (Number(v) >= 0 ? '#1d4ed8' : '#c2410c'); },
       ilPct(v){
         if (v == null || isNaN(Number(v))) return '—';
-        return (Number(v) >= 0 ? '▲' : '▼') + Math.abs(Number(v)).toFixed(1) + '%';
+        // "▲ 15.8%" / "▼ −3.2%" (U+2212 para sa negatibo).
+        return (Number(v) >= 0 ? '▲ ' : '▼ −') + Math.abs(Number(v)).toFixed(1) + '%';
       },
       // 'YYYY-MM-DD' → "Okt 24".
       ilDate(d){
