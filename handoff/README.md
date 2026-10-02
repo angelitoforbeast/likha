@@ -8,4 +8,4 @@ Protocol: Mira writes `handoff/NNN-name/HANDOFF.md` (never edited by the worker)
 | 002 | worklist-filters-table | `fix/worklist-filters-table` | done — RESULT.md filled, waiting for Mira's branch review |
 | 003 | stock-doi-category | `feat/stock-doi-category` | done — RESULT.md filled, waiting for Mira's branch review |
 | 004 | lifecycle-restock | `feat/lifecycle-restock` | done — RESULT.md filled, waiting for Mira's branch review |
-| 005 | item-layout | `feat/item-layout` | in progress — plan sent to Mira, waiting for her "go" |
+| 005 | item-layout | `feat/item-layout` | done — RESULT.md filled, waiting for Mira's branch review |

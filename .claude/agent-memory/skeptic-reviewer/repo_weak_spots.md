@@ -39,5 +39,13 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 
 - 004 T4 /item page: set choice, baseProfitPct7 memo (bp7Cache keyed on this.rows identity; rows only replaced at loadItems, so OK), sort and DOI texts are verified only by string-grep of the Blade; spec lines the dev quietly softens ("filter resets to Lahat" became "ignored while hidden") need checking word by word. Tooltip lifecycle rules are hard-coded (30/90/14 days) while the thresholds are settings.
 
+- 005 T2: Alpine :href/:attr built from window.location (viewSwitchUrl) is not reactive to history.replaceState done by load()/setWorklist, so links go stale; ItemPageTest renders the view directly, so controller query mapping (?layout=old) has no test. Reviewer Bash may be denied: verbatim-move check falls back to diff hunk counts.
+
+- 005 T3 new /item row: ItemPageTest is string-grep only, so ilAabot/ilPill/ilDays/ilUrgency are never executed; header sort keys must exist in `_itemSortValue` (action_at falls to default and returns null = no-op sort); server rounds units_per_day to 2 dp so JS reason text ceil(upd*days) can differ from order_qty; ilDays(9.96) prints "10.0".
+
+- 005 T4 expanded block: ItemPageTest still string-grep only (ilPageVal never executed); shared campaigns include keeps 9-11px/#94a3b8 text under .il-camp !important 11px, below the handoff's ">=12 px body / AA" rule; overflow-x:visible with overflow-y:auto computes to auto (scroll can reappear only if content overflows; fixed layout prevents it); Number(null)=0 pattern again in the "Benta/araw" duplicate (units_per_day null prints 0.0); il_action_at sort ignores the non-empty-comment rule that ilLatestAction uses.
+
+- 005 T5 widths/TOTAL: col-width budget in spec §12 matches CSS (sums 1,152/1,040/820 verified); remaining overflow risk is `white-space:nowrap` (.il-nb) text in fixed narrow cells (STOCK 104px "Hindi pa nabibilang ·" overlaps next cell, no scrollbar) and 11px bold th text in 72px col breaking mid-word; ilTotVisible()/itemGroups() re-run (sort + aggOf per item) ~15x per Alpine pass. Breakpoint/stack/card behaviour has only string-grep tests.
+
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.
