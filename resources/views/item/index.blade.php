@@ -411,14 +411,14 @@
     .il-camp{min-width:0; max-width:100%; margin:0 0 10px;}
     .il-camp .expand-panel{padding:8px; min-width:0; max-width:100%;}
     .il-camp .expand-header{flex-wrap:wrap; gap:6px;}
-    .il-camp .expand-wrap{overflow-x:visible !important; overflow-y:auto; max-height:70vh; max-width:100%;}
+    .il-camp .expand-wrap{overflow:visible !important; max-height:none !important; max-width:100%;}
     .il-camp .fb-table{table-layout:fixed;width:100%;}
     .il-camp .fb-table th, .il-camp .fb-table td{min-width:0 !important; white-space:normal !important; overflow-wrap:anywhere; word-break:break-word; padding:5px 4px !important; font-size:11px !important;}
     .il-camp .fb-table *{white-space:normal !important;}
     .il-camp .fb-table th[style*="width:32px"]{width:28px !important; padding:5px 2px !important;}
     .il-camp .fb-table .sub, .il-camp .fb-table div[style*="font-size:10px"], .il-camp .fb-table div[style*="font-size:9px"]{font-size:11px !important;}
     .il-camp td.nest-host{padding:6px 4px !important; min-width:0;}
-    .il-camp .expand-nest-1 .expand-wrap, .il-camp .expand-nest-2 .expand-wrap{max-height:none; overflow-y:visible;}
+    .il-camp .expand-nest-1 .expand-wrap, .il-camp .expand-nest-2 .expand-wrap{max-height:none !important; overflow:visible !important;}
     .il-m-label { display:none; }
     /* TOTAL (nakikita) — sticky sa baba gaya ng lumang TOTAL row. Walang fills. */
     .il-table > tbody > tr.il-total > td {

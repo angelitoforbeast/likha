@@ -161,11 +161,18 @@ class ItemPageTest extends ItemTestCase
     {
         $html = $this->render(true);
         foreach ([
-            '.il-camp .expand-wrap{overflow-x:visible !important;', '.il-camp .fb-table{table-layout:fixed;width:100%;',
+            '.il-camp .expand-wrap{overflow:visible !important; max-height:none !important;', '.il-camp .fb-table{table-layout:fixed;width:100%;',
             'overflow-wrap:anywhere', '.il-camp .fb-table *{white-space:normal !important;}',
             '.il-expand{min-width:0;', '.il-page-card{min-width:0;',
         ] as $css) {
             $this->assertStringContainsString($css, $html);
+        }
+        // Walang inner scroll: walang overflow-y:auto / max-height:70vh / overflow-x:hidden sa .il-camp rules.
+        preg_match_all('/\.il-camp[^{]*\{[^}]*\}/', $html, $rules);
+        $campCss = implode("\n", $rules[0]);
+        $this->assertNotSame('', $campCss);
+        foreach (['overflow-y:auto', 'max-height:70vh', 'overflow-x:hidden', 'overflow:auto', 'overflow:hidden'] as $bad) {
+            $this->assertStringNotContainsString($bad, $campCss);
         }
         // Ang /owner/private ay hindi ginalaw: walang .il-camp doon.
         $this->assertStringNotContainsString('il-camp', file_get_contents(resource_path('views/owner/private.blade.php')));
