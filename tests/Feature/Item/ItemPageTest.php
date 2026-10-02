@@ -100,8 +100,14 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringContainsString('saveCategory(row.item_name', $ceo);
         $this->assertStringContainsString('saveSupplySettings(row.item_name', $ceo);
         $this->assertStringContainsString('+ bagong category', $ceo);
-        foreach (['saveCategory(row.item_name', 'saveSupplySettings(row.item_name', '+ bagong category'] as $s) {
+        foreach (['saveCategory(row.item_name', 'saveSupplySettings(row.item_name', '+ bagong category', 'openStockEdit(row.item_name'] as $s) {
             $this->assertStringNotContainsString($s, $mkt);
+        }
+        $this->assertStringContainsString('openStockEdit(row.item_name', $ceo);
+        // Guards: lead/palugit validation, category-empty row ignores ?list= for non-CEO view.
+        $this->assertStringContainsString('Lagyan ng numero (0–255) ang lead at palugit.', $ceo);
+        foreach ([$ceo, $mkt] as $html) {
+            $this->assertStringContainsString("(!effectiveIsCeo || worklist.list === 'lahat')", $html);
         }
     }
 

@@ -723,7 +723,7 @@
           </template>
           @endif
           {{-- Walang natira sa napiling category (lahat ng role; kung walang sourcing list na sumasagot na). --}}
-          <template x-if="categoryFilter !== '' && worklist.list === 'lahat' && !itemGroups().length && !(rows.length === 0 && loading)">
+          <template x-if="categoryFilter !== '' && (!effectiveIsCeo || worklist.list === 'lahat') && !itemGroups().length && !(rows.length === 0 && loading)">
             <tr><td :colspan="cols.length + 2" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
                     x-text="!stock.loaded ? 'Loading…' : 'Walang item sa category na ito.'"></td></tr>
           </template>
@@ -3961,7 +3961,17 @@
         }catch(err){ e.error = err.message || String(err); return null; }
         finally{ e.saving = false; }
       },
-      async saveCategory(name, value){
+      // Ibalik ang select sa naka-save na category (pagkabigo / Cancel).
+      _resetCategorySelect(name, sel){
+        if (sel) sel.value = String(this.stockFor(name)?.category_id ?? '');
+      },
+      cancelNewCategory(name, sel){
+        if (this.stockEdit.saving) return;
+        this.closeStockEdit();
+        this._resetCategorySelect(name, sel);
+      },
+      async saveCategory(name, value, sel){
+        if (this.stockEdit.saving) return;
         const key = this.supKey(name);
         if (value === '__new') {   // ilabas lang ang input
           this.stockEdit = { key, mode:'cat', lead:'', safety:'', newCat:'', saving:false, error:'' };
@@ -3970,15 +3980,20 @@
         if (this.stockEdit.key !== key || this.stockEdit.mode !== 'cat') this.stockEdit = { key, mode:'cat', lead:'', safety:'', newCat:'', saving:false, error:'' };
         const j = await this._stockPost('{{ route('item.category.save') }}',
           value === '' ? { item_name: name } : { item_name: name, category_id: Number(value) });
+        if (!j) this._resetCategorySelect(name, sel);
         this._stockSaved(j);
       },
       async saveNewCategory(name, text){
+        if (this.stockEdit.saving) return;
         const t = String(text || '').trim();
         if (!t) { this.stockEdit.error = 'Maglagay ng pangalan ng category.'; return; }
         const j = await this._stockPost('{{ route('item.category.save') }}', { item_name: name, new_category: t });
         this._stockSaved(j);
       },
       async saveSupplySettings(name, lead, safety){
+        if (this.stockEdit.saving) return;
+        const ok = v => /^\d+$/.test(String(v).trim()) && Number(v) <= 255;
+        if (!ok(lead) || !ok(safety)) { this.stockEdit.error = 'Lagyan ng numero (0–255) ang lead at palugit.'; return; }
         const j = await this._stockPost('{{ route('item.supply-settings.save') }}',
           { item_name: name, lead_time_days: Number(lead), safety_days: Number(safety) });
         this._stockSaved(j);

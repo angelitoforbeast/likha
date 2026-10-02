@@ -157,7 +157,7 @@
     {{-- CEO: palitan ang category (para sa lahat ng variant ng base item). --}}
     <span x-show="!stockPending()" @click.stop title="para sa lahat ng variant ng item na ito">
       <select aria-label="Category ng item" :disabled="stockEdit.saving"
-              @change="saveCategory(row.item_name, $event.target.value)"
+              @change="saveCategory(row.item_name, $event.target.value, $event.target)"
               style="border:1px solid #cbd5e1;border-radius:5px;padding:2px 4px;font-size:11px;max-width:140px;">
         <option value="" :selected="!stockFor(row.item_name)?.category_id">— wala —</option>
         <template x-for="c in stock.categories" :key="'cc-'+c.id">
@@ -172,7 +172,7 @@
                  style="border:1px solid #cbd5e1;border-radius:5px;padding:2px 5px;font-size:11px;width:110px;">
           <button type="button" :disabled="stockEdit.saving" @click.stop="saveNewCategory(row.item_name, stockEdit.newCat)"
                   style="border:0;border-radius:5px;padding:3px 8px;font-size:10px;font-weight:700;cursor:pointer;background:#4f46e5;color:#fff;">Save</button>
-          <button type="button" :disabled="stockEdit.saving" @click.stop="closeStockEdit()"
+          <button type="button" :disabled="stockEdit.saving" @click.stop="cancelNewCategory(row.item_name, $el.closest('span[title]').querySelector('select'))"
                   style="border:0;border-radius:5px;padding:3px 8px;font-size:10px;font-weight:700;cursor:pointer;background:#e2e8f0;color:#334155;">Cancel</button>
         </div>
       </template>
