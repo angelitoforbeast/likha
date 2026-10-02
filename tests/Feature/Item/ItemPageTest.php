@@ -65,6 +65,72 @@ class ItemPageTest extends ItemTestCase
         $this->assertStringContainsString('layoutOld: true,', $old);
     }
 
+    // ── Bagong layout (005 T3): main row ──────────────────────────────────────
+
+    public function test_new_table_has_the_eleven_headers_in_order_with_sort_keys(): void
+    {
+        foreach ([$this->render(true), $this->render(false)] as $html) {
+            $last = 0;
+            foreach (['ITEM', 'LIFECYCLE', 'STOCK / PAPARATING', 'BENTA/ARAW', 'AABOT PA?', 'I-ORDER',
+                      'KITA NGAYON', 'KITA %', 'ADS', 'ACTION'] as $label) {
+                $pos = strpos($html, '<span>' . $label . '</span>', $last);
+                $this->assertNotFalse($pos, "header {$label} missing or out of order");
+                $last = $pos;
+            }
+            $this->assertGreaterThan($last, strpos($html, 'il-chev-th', $last));
+            foreach (['item_name', 'lifecycle', 'stock', 'units_per_day', 'doi', 'order_qty',
+                      'projected_profit_last_day', 'proj_pct_last_7d', 'adspent', 'action_at'] as $key) {
+                $this->assertStringContainsString("sb('{$key}')", $html);
+            }
+            // Composite columns: lalabas lang kapag may member id na visible.
+            $this->assertStringContainsString('ilColOn(', $html);
+            $this->assertStringContainsString('table-layout:fixed', $html);
+            $this->assertStringContainsString('<colgroup>', $html);
+        }
+    }
+
+    public function test_new_row_texts_are_plain_taglish_sentences_without_x_html(): void
+    {
+        $texts = [
+            '🆕 Bago', '📈 Lumalaki', '✅ Stable', '🔄 Aktibo', '📉 Bumababa', '🚫 Itinitigil', '💤 Tulog',
+            'Hindi pa nabibilang', 'Naka-hold: ', 'average ng huling ', 'Umorder ', 'Dating sa ', 'araw reserba',
+            'Hindi pa alam — bilangin muna ang stock', 'Kulang: ', 'araw na benta ang naka-hold',
+            'Mauubos bago dumating', 'Malapit na: ', 'Sapat: ', 'mahigit 1 taon', 'Halos walang benta', 'Walang benta',
+            'Bilangin muna ang stock', 'Hindi pa kailangan', 'Hanap muna ng supplier', 'ngayon na', "'bago '",
+            "['Ene','Peb','Mar','Abr','May','Hun','Hul','Ago','Set','Okt','Nob','Dis']", '−₱', 'HOLD lang',
+            'naka-hold − ', 'No data for selected date.', 'Walang item sa category na ito.',
+        ];
+        foreach ([$this->render(true), $this->render(false)] as $html) {
+            foreach ($texts as $text) {
+                $this->assertStringContainsString($text, $html);
+            }
+            $this->assertSame(0, substr_count($html, 'x-html'));
+        }
+    }
+
+    public function test_new_row_ceo_only_parts_are_absent_for_marketing(): void
+    {
+        $ceoOnly = ['ilPieceCost(G.item_name', '≈ ', 'openStockEdit(G.item_name', 'openQuote(G.item_name',
+                    'wala pang supplier', 'blank = default ng lifecycle', 'saveSupplySettings(G.item_name'];
+        $ceo = $this->render(true);
+        $mkt = $this->render(false);
+        foreach ($ceoOnly as $s) {
+            $this->assertStringContainsString($s, $ceo);
+            $this->assertStringNotContainsString($s, $mkt);
+        }
+        // Marketing: lead line plain text lang (walang ✎ button).
+        $this->assertStringContainsString('ilLeadLine(G.item_name)', $mkt);
+    }
+
+    public function test_default_item_order_is_by_urgency_in_the_new_layout_and_by_hold_in_the_old(): void
+    {
+        $html = $this->render(true);
+        $this->assertStringContainsString('if (this.layoutOld) {', $html);
+        $this->assertStringContainsString('ilUrgency(', $html);
+        $this->assertStringContainsString('out.sort((a, b) => b.hold - a.hold);', $html);
+        $this->assertLessThan(strpos($html, 'this.ilUrgency(g)'), strpos($html, 'if (this.layoutOld) {'));
+    }
+
     public function test_hold_and_worklist_load_in_parallel_with_the_item_summary(): void
     {
         $html = $this->render(true);

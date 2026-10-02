@@ -311,6 +311,72 @@
       .creative-modal-grid{grid-template-columns:1fr;}
       .creative-modal-grid > .ow-modal-section{border-right:0;border-bottom:1px solid #e2e8f0;}
     }
+
+    /* ── Bagong layout (005): lahat naka-scope sa .il-* — hindi ginagalaw ang lumang table ── */
+    #scroll.il-scroll { padding:0 8px; }
+    .card.il-card { min-width:0; }
+    .il-table { table-layout:fixed; width:100%; }
+    .il-table thead th {
+      white-space:normal; overflow-wrap:anywhere; line-height:1.2;
+      font-size:10px; letter-spacing:.01em; padding:8px 3px; text-align:center;
+    }
+    .il-table thead th.il-th-item { text-align:left; padding-left:10px; }
+    .il-table thead th:focus-visible { outline:2px solid #60a5fa; outline-offset:-2px; }
+    .il-table tbody td {
+      white-space:normal; vertical-align:top; padding:8px 6px;
+      font-size:12.5px; line-height:1.35; color:#1e293b; text-align:center;
+      background:#fff; border-top:1px solid #e2e8f0; overflow-wrap:anywhere;
+    }
+    .il-table tbody td.il-item { position:sticky; left:0; z-index:5; text-align:left; padding-left:10px; }
+    .il-table tbody tr.il-row { cursor:pointer; }
+    .il-table tbody tr.il-row:hover td { background:#f8fafc; }
+    .il-table tbody tr.il-row.il-nopage td { background:#fff7ed; }
+    .il-table tbody tr.il-row.il-nopage:hover td { background:#ffedd5; }
+    .il-table tbody tr.il-expand-row td { padding:0; background:#f8fafc; text-align:left; }
+    .il-table tbody tr.il-empty-row td { text-align:center; padding:36px; color:#64748b; font-size:13px; }
+    .il-item-top { display:flex; gap:8px; align-items:flex-start; }
+    .il-item-main { min-width:0; flex:1 1 auto; }
+    .il-name { font-weight:800; font-size:13px; color:#1e1b4b; line-height:1.3; }
+    .il-sub { font-size:11px; color:#64748b; line-height:1.4; font-weight:400; }
+    .il-grey { color:#64748b; }
+    .il-warn { font-size:11px; font-weight:700; color:#b91c1c; }
+    .il-hold-chip {
+      display:inline-block; font-size:11px; font-weight:700; color:#334155; background:#f1f5f9;
+      border:1px solid #cbd5e1; border-radius:999px; padding:1px 8px; margin-right:4px;
+    }
+    .il-badge { display:inline-block; padding:1px 7px; border-radius:9999px; font-size:11px; font-weight:700; white-space:nowrap; }
+    .il-lc-under { display:none; margin-top:3px; }
+    .il-nb { white-space:nowrap; }
+    .il-state { font-weight:700; }
+    .il-tone-red { color:#b91c1c; }
+    .il-tone-amber { color:#b45309; }
+    .il-tone-teal { color:#0f766e; }
+    .il-tone-grey { color:#64748b; font-weight:600; font-style:italic; }
+    .il-qty { font-weight:800; }
+    .il-pill { display:inline-block; font-size:11px; font-weight:700; border-radius:9999px; padding:1px 7px; margin-top:2px; }
+    .il-pill-red { background:#fef2f2; color:#b91c1c; }
+    .il-pill-amber { background:#fffbeb; color:#b45309; }
+    .il-pill-teal { background:#f0fdfa; color:#0f766e; }
+    .il-pill-grey { background:#f1f5f9; color:#64748b; }
+    .il-pill-neutral { background:#f1f5f9; color:#334155; }
+    .il-num { font-weight:700; }
+    .il-pct-grid { display:grid; grid-template-columns:1fr 1fr; gap:2px 6px; font-weight:700; font-size:12px; text-align:left; }
+    .il-ellipsis { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:12px; text-align:left; }
+    .il-edit {
+      background:#fff; border:1px solid #cbd5e1; border-radius:5px; color:#334155; cursor:pointer;
+      font-size:12px; line-height:1; padding:4px 7px; min-height:24px;
+    }
+    .il-edit:focus-visible, .il-chev:focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
+    .il-chev {
+      width:32px; height:32px; border:0; border-radius:6px; background:transparent; color:#475569;
+      font-size:20px; line-height:1; cursor:pointer; transition:transform .12s;
+    }
+    .il-chev:hover { background:#e2e8f0; }
+    .il-chev.active { transform:rotate(90deg); }
+    @media (max-width: 1439px) {
+      .il-col-lc { display:none !important; }
+      .il-lc-under { display:block; }
+    }
   </style>
 </head>
 <body>
@@ -1204,6 +1270,12 @@
 
       // Layout: false = bagong layout (default), true = lumang table (?layout=old, galing sa server).
       layoutOld: @json(!empty($layoutOld)),
+      // Bagong layout: aling composite column ang binubuo ng aling owner_private ids (lalabas kapag may kahit isang visible).
+      ilCols: {
+        lifecycle:['lifecycle'], stock:['stock','incoming'], upd:['units_per_day'], doi:['doi'], order:['order_qty'],
+        kita:['proj_prof_1d','orders_1d'], pct:['proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_pct'],
+        ads:['adspent','cpp','breakeven_cpp'], action:['action'],
+      },
 
       // CEO "view as" toggle: 'ceo' = full CEO mode (default), 'marketing' = simulate
       // Marketing's UI. Drives cogs source for profit + visibility of CEO column
@@ -2868,8 +2940,12 @@
             if (typeof va === 'string') return dir * va.localeCompare(vb);
             return dir * (Number(va) - Number(vb));
           });
-        } else {
+        } else if (this.layoutOld) {
           out.sort((a, b) => b.hold - a.hold);
+        } else {
+          // Bagong layout: pinakamadalian muna (Kulang/Mauubos), tapos HOLD desc.
+          const rank = new Map(out.map(g => [g, this.ilUrgency(g)]));
+          out.sort((a, b) => (rank.get(a) - rank.get(b)) || (b.hold - a.hold));
         }
         return out;
       },
@@ -3180,6 +3256,164 @@
         if (this.layoutOld) qs.delete('layout'); else qs.set('layout', 'old');
         const s = qs.toString();
         return window.location.pathname + (s ? '?' + s : '');
+      },
+      // ── Bagong layout (005) ──────────────────────────────────────────────
+      // Visibility: may member id ba na naka-check (kasama ang members ng merged jnt_rdt)?
+      ilIdOn(id){ return this.cols.some(c => c.id === id || (c.members && c.members.includes(id))); },
+      ilColOn(key){ return (this.ilCols[key] || []).some(id => this.ilIdOn(id)); },
+      // ITEM + › lagi; ang iba kapag visible.
+      ilColspan(){ return 2 + Object.keys(this.ilCols).filter(k => this.ilColOn(k)).length; },
+      ilLifecycleLabels: { new:'🆕 Bago', scaling:'📈 Lumalaki', consistent:'✅ Stable', active:'🔄 Aktibo',
+                           declining:'📉 Bumababa', phasing_out:'🚫 Itinitigil', dormant:'💤 Tulog' },
+      // Pangalan lang (walang emoji), para sa lead line.
+      ilLifecycleName(name){
+        const S = this.stockFor(name);
+        const l = S && this.ilLifecycleLabels[S.lifecycle];
+        return l ? l.replace(/^\S+\s/, '') : '';
+      },
+      ilLifecycleText(name){
+        const S = this.stockFor(name);
+        if (!S) return '—';
+        return (this.ilLifecycleLabels[S.lifecycle] || '—') + (this.stockIsLugi(name) ? ' · lugi' : '');
+      },
+      // Neutral pastel; hindi pula ang Bumababa / Itinitigil.
+      ilLcStyle(lc){
+        const m = { new:['#dbeafe','#1e40af'], scaling:['#dcfce7','#166534'], consistent:['#ccfbf1','#115e59'],
+                    active:['#f1f5f9','#334155'], declining:['#fef3c7','#92400e'], phasing_out:['#e2e8f0','#475569'],
+                    dormant:['#f3f4f6','#64748b'] };
+        const c = m[lc] || ['#f3f4f6','#64748b'];
+        return 'background:' + c[0] + ';color:' + c[1];
+      },
+      // Araw: ≥10 buo (may separator), mas mababa sa 10 = isang decimal.
+      ilDays(x){
+        const n = Number(x);
+        return Math.abs(n) >= 10 ? Math.round(n).toLocaleString('en-PH') : n.toFixed(1);
+      },
+      // "−₱534.71" (U+2212 bago ang ₱); null = "—".
+      ilMoney(v){
+        if (v == null || isNaN(Number(v))) return '—';
+        const r = Math.round(Number(v) * 100) / 100;
+        return (r < 0 ? '−₱' : '₱') + Math.abs(r).toLocaleString('en-PH', { minimumFractionDigits:2, maximumFractionDigits:2 });
+      },
+      ilArrow(v){ return (v == null || isNaN(Number(v))) ? '' : (Number(v) >= 0 ? '▲ ' : '▼ '); },
+      // Asul (kita) / kahel (lugi) / abo (walang data).
+      ilTone(v){ return (v == null || isNaN(Number(v))) ? '#64748b' : (Number(v) >= 0 ? '#1d4ed8' : '#c2410c'); },
+      ilPct(v){
+        if (v == null || isNaN(Number(v))) return '—';
+        return (Number(v) >= 0 ? '▲' : '▼') + Math.abs(Number(v)).toFixed(1) + '%';
+      },
+      // 'YYYY-MM-DD' → "Okt 24".
+      ilDate(d){
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || ''));
+        if (!m) return '';
+        const months = ['Ene','Peb','Mar','Abr','May','Hun','Hul','Ago','Set','Okt','Nob','Dis'];
+        return months[parseInt(m[2], 10) - 1] + ' ' + parseInt(m[3], 10);
+      },
+      // AABOT PA? — isang state kada item, sinusunod ang serye ng spec §6 (walang bagong formula).
+      ilAabot(name){
+        const S = this.stockFor(name), P = this.stockSet(name);
+        const st = (key, text, tone, icon, tip) => ({ key, text, tone, icon, tip });
+        if (!this.stock.loaded || !this.stock.ready || !S || !P) {
+          return st('nodata', '—', 'grey', '', 'Wala pang datos ng stock');
+        }
+        if (S.stock_needs_count) {
+          return st('uncounted', 'Hindi pa alam — bilangin muna ang stock', 'grey', '',
+                    'May stock na hindi nabilang bago ang ' + (this.stock.start || 'START') + '; bilangin muna');
+        }
+        if (P.doi_note === 'walang_benta') return st('walang_benta', '💤 Walang benta', 'grey', '💤', 'Walang benta, kaya walang bilang ng araw');
+        if (P.doi_note === 'halos_walang_benta') return st('halos', '🐢 Halos walang benta', 'grey', '🐢', 'Mas mababa sa 0.5 piraso kada araw ang benta');
+        if (P.doi == null) {
+          return Number(P.units_per_day) === 0
+            ? st('walang_benta', '💤 Walang benta', 'grey', '💤', 'Walang benta, kaya walang bilang ng araw')
+            : st('nodata', '—', 'grey', '', 'Wala pang datos ng stock');
+        }
+        const doi = Number(P.doi);
+        if (doi < 0) {
+          return st('kulang', '⚠ Kulang: ' + this.ilDays(-doi) + ' araw na benta ang naka-hold', 'red', '⚠',
+                    'Kulang na ang stock + paparating para sa mga naka-hold; ilang araw na benta ang kulang');
+        }
+        if (P.colour === 'red')   return st('mauubos', '⚠ Mauubos bago dumating', 'red', '⚠', 'Mauubos ang stock bago dumating ang bagong order (lead time)');
+        if (P.colour === 'amber') return st('malapit', 'Malapit na: ' + this.ilDays(doi) + ' araw', 'amber', '', 'Tatagal pa ang stock, pero malapit na ang huling araw para umorder');
+        if (P.colour === 'green') {
+          return st('sapat', doi > 365 ? '✓ Sapat: mahigit 1 taon' : '✓ Sapat: ' + this.ilDays(doi) + ' araw', 'teal', '✓',
+                    'Sapat pa ang stock + paparating (bawas ang naka-hold) para sa ilang araw');
+        }
+        return st('nodata', '—', 'grey', '', 'Wala pang datos ng stock');
+      },
+      // "Dating sa 7 araw + 3 araw reserba (Lumalaki)" / "Dating sa 7 araw · HOLD lang".
+      ilLeadLine(name){
+        const S = this.stockFor(name), P = this.stockSet(name);
+        if (!S || !P) return '';
+        if (P.palugit == null) return 'Dating sa ' + S.lead + ' araw · HOLD lang';
+        return 'Dating sa ' + S.lead + ' araw + ' + P.palugit + ' araw reserba (' + this.ilLifecycleName(name) + (this.stockIsLugi(name) ? ' · lugi' : '') + ')';
+      },
+      // Paliwanag ng order_qty (hindi ito ang nagko-compute; ipinapaliwanag lang ang galing sa server).
+      ilOrderReason(name){
+        const S = this.stockFor(name), P = this.stockSet(name);
+        if (!S || !P || P.order_qty == null) return 'Wala pang bilang ng stock para sa order';
+        const hold = Number(S.hold_units || 0), inc = Number(S.incoming || 0), st = Number(S.stock || 0);
+        const tail = this.num(hold) + ' naka-hold − ' + this.num(inc) + ' paparating − ' + this.num(st) + ' stock';
+        if (P.palugit == null) return tail + ' (HOLD lang)';
+        const days = Number(S.lead) + Number(P.palugit);
+        return this.num(Math.ceil(Number(P.units_per_day || 0) * days)) + ' para sa ' + days + ' araw + ' + tail;
+      },
+      ilQtyText(name){
+        const P = this.stockSet(name);
+        return (P && P.order_qty != null) ? 'Umorder ' + this.num(P.order_qty) + ' pcs' : '—';
+      },
+      // Pill sa ilalim ng I-ORDER (unang tumama ang nananalo).
+      ilPill(name){
+        const S = this.stockFor(name), P = this.stockSet(name);
+        if (!this.stock.ready || !S || !P) return null;
+        if (S.stock_needs_count) return { text:'Bilangin muna ang stock', tone:'grey' };
+        if (P.order_qty == null) return null;
+        if (P.order_qty === 0) return { text:'Hindi pa kailangan', tone:'teal' };
+        if (this.effectiveIsCeo && !this.suppliersFor(name).length && !this.quotesFor(name).length) return { text:'Hanap muna ng supplier', tone:'amber' };
+        if (P.order_by === 'now') return { text:'⚠ ngayon na', tone:'red' };
+        if (P.order_by) return { text:'bago ' + this.ilDate(P.order_by), tone:'neutral' };
+        return null;
+      },
+      // Puhunan bawat piraso = ITEM VAL. (CEO kung CEO view at meron) ÷ N ng "N x" sa pangalan. null kung walang value.
+      ilPieceCost(name){
+        const ceo = this.effectiveIsCeo ? this.itemValueCeo(name) : null;
+        const v = ceo != null ? ceo : this.itemValue(name);
+        if (v == null) return null;
+        const m = /^\s*(\d+)\s*[x×]\s*/i.exec(String(name || ''));
+        const n = m ? Math.max(1, parseInt(m[1], 10)) : 1;
+        return Number(v) / n;
+      },
+      // BE ng item = pinakamababa–pinakamataas ng breakeven CPP ng mga page nito (isa lang = isa; wala = '').
+      ilBeRange(G){
+        const vals = (G.pages || []).map(r => this.breakevenCppFor(r)).filter(v => v != null && isFinite(v));
+        if (!vals.length) return '';
+        const lo = this.ilMoney(Math.min(...vals)), hi = this.ilMoney(Math.max(...vals));
+        return lo === hi ? lo : lo + '–' + hi;
+      },
+      // Line 2 ng ADS: "CPP ₱17.91 · BE ₱52.48" — bawat bahagi ay sumusunod sa sarili nitong id.
+      ilAdsLine(G){
+        const parts = [];
+        if (this.ilIdOn('cpp')) parts.push('CPP ' + this.md(G.agg.cpp));
+        if (this.ilIdOn('breakeven_cpp')) { const be = this.ilBeRange(G); if (be) parts.push('BE ' + be); }
+        return parts.join(' · ');
+      },
+      // Pinakabagong action note sa mga page ng item (by action_at).
+      ilLatestAction(G){
+        let best = null;
+        for (const r of (G.pages || [])) {
+          if (!String(r.action_comment || '').trim()) continue;
+          if (!best || String(r.action_at || '') > String(best.action_at || '')) best = r;
+        }
+        return best ? { text: String(best.action_comment).trim(), page: String(best.page_name || '') } : null;
+      },
+      // Default sort ng bagong layout: 0 Kulang/Mauubos (may supplier/quote), 1 Kulang/Mauubos (wala), 2 hindi pa nabibilang,
+      // 3 Malapit na, 4 Sapat, 5 ang iba. Marketing: walang supplier data kaya pareho ang 0 at 1.
+      ilUrgency(G){
+        const k = this.ilAabot(G.item_name).key;
+        if (k === 'kulang' || k === 'mauubos') {
+          if (!this.effectiveIsCeo) return 0;
+          return (this.suppliersFor(G.item_name).length || this.quotesFor(G.item_name).length) ? 0 : 1;
+        }
+        return k === 'uncounted' ? 2 : k === 'malapit' ? 3 : k === 'sapat' ? 4 : 5;
       },
       setWorklist(key){
         this.worklist.list = key;
