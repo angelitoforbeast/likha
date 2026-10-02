@@ -94,15 +94,16 @@ class StockEndpointTest extends ItemTestCase
 
         $this->assertSame('GLOW TAPE', $item['name']);
         $this->assertSame(50, $item['hold_units']);
-        $this->assertEquals(10, $item['units_per_day']);
+        $n = $item['normal'];
+        $this->assertEquals(10, $n['units_per_day']);
         $this->assertSame(200, $item['incoming']);
         $this->assertSame(40, $item['stock']);
         $this->assertFalse($item['stock_needs_count']);
-        $this->assertSame(0, $item['order_qty']);
-        $this->assertEquals(19.0, $item['doi']);
-        $this->assertSame('2026-10-14', $item['order_by']);
-        $this->assertSame('green', $item['colour']);
-        $this->assertSame([7, 3], [$item['lead'], $item['safety']]);
+        $this->assertSame(0, $n['order_qty']);
+        $this->assertEquals(19.0, $n['doi']);
+        $this->assertSame('2026-10-14', $n['order_by']);
+        $this->assertSame('green', $n['colour']);
+        $this->assertSame([7, 3], [$item['lead'], $n['palugit']]);   // New item → palugit_new 3
         $this->assertSame(['1 x GLOW TAPE', '2 x GLOW TAPE'], $item['variants']);
     }
 
@@ -114,10 +115,10 @@ class StockEndpointTest extends ItemTestCase
 
         $this->assertSame(0, $item['stock']);
         $this->assertSame(0, $item['incoming']);
-        $this->assertSame(150, $item['order_qty']);
-        $this->assertEquals(-5.0, $item['doi']);
-        $this->assertSame('now', $item['order_by']);
-        $this->assertSame('red', $item['colour']);
+        $this->assertSame(150, $item['normal']['order_qty']);
+        $this->assertEquals(-5.0, $item['normal']['doi']);
+        $this->assertSame('now', $item['normal']['order_by']);
+        $this->assertSame('red', $item['normal']['colour']);
     }
 
     public function test_example_c_hold_without_recent_demand_has_no_doi(): void
@@ -126,11 +127,15 @@ class StockEndpointTest extends ItemTestCase
 
         $item = $this->stock()->assertOk()->json('items.lamp');
 
-        $this->assertEquals(0, $item['units_per_day']);
-        $this->assertNull($item['doi']);
-        $this->assertNull($item['order_by']);
-        $this->assertNull($item['colour']);
-        $this->assertSame(12, $item['order_qty']);
+        // 003: walang doi/kulay. 004: ang item ay Phasing Out (may order sa nakaraang 14 araw, wala ngayon)
+        // kaya HOLD lang ang order_qty, "walang benta" sa grey.
+        $n = $item['normal'];
+        $this->assertEquals(0, $n['units_per_day']);
+        $this->assertNull($n['doi']);
+        $this->assertNull($n['order_by']);
+        $this->assertSame('grey', $n['colour']);
+        $this->assertSame('walang_benta', $n['doi_note']);
+        $this->assertSame(12, $n['order_qty']);
     }
 
     public function test_example_d_negative_raw_stock_shows_zero_and_needs_count(): void
@@ -164,8 +169,13 @@ class StockEndpointTest extends ItemTestCase
         $item = $json['items']['glow tape'];
 
         $this->assertFalse($json['stock_ready']);
-        foreach (['stock', 'stock_raw', 'stock_needs_count', 'doi', 'order_qty', 'order_by', 'colour'] as $f) {
+        foreach (['stock', 'stock_raw', 'stock_needs_count'] as $f) {
             $this->assertNull($item[$f], $f);
+        }
+        foreach (['normal', 'lugi'] as $set) {
+            foreach (['doi', 'order_qty', 'order_by', 'colour'] as $f) {
+                $this->assertNull($item[$set][$f], "$set.$f");
+            }
         }
         $this->assertSame(50, $item['hold_units']);
         $this->assertSame(200, $item['incoming']);
@@ -219,7 +229,7 @@ class StockEndpointTest extends ItemTestCase
         $this->rows('1 x NOISE', 10, '2026-09-30', null);
         $this->po('ordered', 'Noise', 100);
 
-        $noise = $this->stock()->assertOk()->json('items.noise');
+        $noise = $this->stock()->assertOk()->json('items.noise.normal');
         $this->assertEquals(30.0, $noise['doi']);
         $this->assertSame('2026-10-25', $noise['order_by']);   // 10-02 + 23 araw
         $this->assertSame('green', $noise['colour']);
@@ -232,7 +242,7 @@ class StockEndpointTest extends ItemTestCase
         ] as [$name, $incoming, $doi, $orderBy, $colour]) {
             $this->rows("1 x $name", 10, '2026-10-02', null);
             $this->po('ordered', $name, $incoming);
-            $item = $this->stock()->assertOk()->json('items.' . strtolower($name));
+            $item = $this->stock()->assertOk()->json('items.' . strtolower($name) . '.normal');
             $this->assertEquals($doi, $item['doi'], $name);
             $this->assertSame($orderBy, $item['order_by'], $name);
             $this->assertSame($colour, $item['colour'], $name);
@@ -241,7 +251,7 @@ class StockEndpointTest extends ItemTestCase
         // 6.99 ay nagro-round sa 7.0 → ang 7.0 ang nagpapasya (amber), hindi ang 6.99
         $this->rows('1 x ROUNDUP', 100, '2026-10-02', null);
         $this->po('ordered', 'Roundup', 699);
-        $up = $this->stock()->assertOk()->json('items.roundup');
+        $up = $this->stock()->assertOk()->json('items.roundup.normal');
         $this->assertEquals(7.0, $up['doi']);
         $this->assertSame('amber', $up['colour']);
         $this->assertSame('2026-10-02', $up['order_by']);
@@ -255,7 +265,7 @@ class StockEndpointTest extends ItemTestCase
         $item = $this->stock()->assertOk()->json('items.rope');
 
         $this->assertSame(-25, $item['stock_raw']);
-        $this->assertSame(5, $item['order_qty']);          // hindi 30
+        $this->assertSame(5, $item['normal']['order_qty']);   // hindi 30
     }
 
     public function test_discount_lines_are_not_received_or_incoming(): void
@@ -304,7 +314,7 @@ class StockEndpointTest extends ItemTestCase
         $this->assertSame(-1, $this->stock()->assertOk()->json('items.pen.stock_raw'));
     }
 
-    public function test_lead_and_safety_come_from_settings_lowest_id_wins(): void
+    public function test_lead_comes_from_settings_lowest_id_wins_and_safety_days_is_ignored(): void
     {
         $this->rows('1 x GLOW TAPE', 1, '2026-09-10', 'GH');
         $now = ['created_at' => now(), 'updated_at' => now()];
@@ -315,7 +325,8 @@ class StockEndpointTest extends ItemTestCase
 
         $item = $this->stock()->assertOk()->json('items.glow tape');
 
-        $this->assertSame([5, 2], [$item['lead'], $item['safety']]);
+        // safety_days (2) ay hindi na ginagamit ng /item; palugit_override ay wala pa → NULL
+        $this->assertSame([5, null], [$item['lead'], $item['palugit_override']]);
     }
 
     public function test_category_assignment_and_category_list(): void
@@ -364,8 +375,8 @@ class StockEndpointTest extends ItemTestCase
 
         $this->assertSame('Ilaw at Kuryente', $item['category']);
         $this->assertSame('slow item', $item['name']);
-        $this->assertSame(0, $item['order_qty']);
-        $this->assertNull($item['doi']);
+        $this->assertSame(0, $item['normal']['order_qty']);
+        $this->assertNull($item['normal']['doi']);
     }
 
     public function test_unknown_role_gets_404(): void

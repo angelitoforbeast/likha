@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Support\ItemBaseKey;
+use App\Support\ItemLifecycle;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -14,14 +16,22 @@ use Illuminate\Support\Facades\Schema;
  * grouped rows lang. Spec: docs/specs/003-stock-doi-category.md.
  *
  *   stock_raw = natanggap mula START − umalis mula START;  stock = max(0, stock_raw)
- *   order_qty = max(0, ceil(hold + upd × (lead + safety) − incoming − stock))
+ *   order_qty = max(0, ceil(hold + upd × (lead + palugit) − incoming − stock))
  *   doi       = round((stock + incoming − hold) × days / units, 1)  — ito ang ginagamit sa kulay at order_by
+ *
+ * Handoff 004: bawat base item ay may lifecycle (ItemLifecycle, as-of = end date) at dalawang result set,
+ * `normal` (palugit at velocity ng lifecycle) at `lugi` (palugit_lugi, 14-day) — ang page ang pumipili
+ * gamit ang kita. Spec: docs/specs/004-lifecycle-restock.md.
  */
 class ItemStockService
 {
     private const DEFAULT_LEAD   = 7;
-    private const DEFAULT_SAFETY = 3;
     private const DEMAND_DAYS    = 14;
+    private const SCALING_DAYS   = 7;
+    private const NEAR_ZERO      = 0.5;
+    private const FIRST_DATES_TTL = 43200;
+    /** Default palugit (araw) bawat lifecycle; ang supply_settings (palugit_*) ang nananalo. */
+    private const PALUGIT_DEFAULTS = ['new' => 3, 'scaling' => 14, 'consistent' => 10, 'active' => 7, 'declining' => 0, 'lugi' => 3];
     private const START_SETTING  = 'item_stock_start';
     private const OPEN_PO_STATUSES = ['ordered', 'delivered'];
 
@@ -45,56 +55,67 @@ class ItemStockService
         ));
         sort($keys);
 
-        $endDay = Carbon::parse($end, 'Asia/Manila')->startOfDay();
-        $items  = [];
+        $endDay    = Carbon::parse($end, 'Asia/Manila')->startOfDay();
+        $life      = $this->lifecycleInputs($end);
+        $firstDate = $this->firstDates($end);
+        $palugit   = $this->palugitDefaults();
+        $items     = [];
         foreach ($keys as $k) {
             $holdUnits = (int) ($hold[$k]['units'] ?? 0);
             $inc       = (int) ($incoming[$k] ?? 0);
             $lead      = $settings[$k]['lead'] ?? self::DEFAULT_LEAD;
-            $safety    = $settings[$k]['safety'] ?? self::DEFAULT_SAFETY;
 
-            $upd  = 0.0;
-            $days = 1;
+            // 14-day: 003's rule. 7-day: units ng huling 7 araw ÷ 7 (Scaling lang ang gumagamit).
+            $v14 = ['units' => 0, 'days' => 1];
             if (isset($demand[$k]) && $demand[$k]['units'] > 0) {
                 $first = Carbon::parse($demand[$k]['first'], 'Asia/Manila')->startOfDay();
-                $days  = max(1, min(self::DEMAND_DAYS, (int) $first->diffInDays($endDay) + 1));
-                $upd   = $demand[$k]['units'] / $days;
+                $v14   = ['units' => $demand[$k]['units'],
+                          'days'  => max(1, min(self::DEMAND_DAYS, (int) $first->diffInDays($endDay) + 1))];
             }
+            $v7 = ['units' => $demand[$k]['units7'] ?? 0, 'days' => 7];
+
+            [$lifecycle, $auto] = $this->lifecycleOf($k, $life, $firstDate, $end, $settings[$k]['lifecycle_override'] ?? null);
+            $override = $settings[$k]['palugit_override'] ?? null;
+            $pal = fn (string $lc) => $override ?? $palugit[$lc] ?? $palugit['active'];
+
+            $gated = in_array($lifecycle, ['scaling', 'consistent'], true);
+            $ctx   = [
+                'ready' => $ready, 'hold' => $holdUnits, 'inc' => $inc, 'lead' => $lead, 'endDay' => $endDay,
+                'lifecycle' => $lifecycle, 'upd14' => $v14['units'] / $v14['days'],
+                'stock' => null,
+            ];
+            $stock = null;
+            if ($ready) {
+                $raw   = (int) ($received[$k] ?? 0) - (int) ($left['units'][$k] ?? 0);
+                $stock = max(0, $raw);
+                $ctx['stock'] = $stock;
+            }
+
+            $normal = $this->restockSet($ctx, $lifecycle === 'scaling' ? $v7 : $v14, $pal($lifecycle));
+            $lugi   = $gated ? $this->restockSet($ctx, $v14, $pal('lugi')) : $normal;
 
             $variants = array_keys(($hold[$k]['variants'] ?? []) + ($demand[$k]['variants'] ?? []));
             sort($variants);
 
-            $row = [
-                'name'          => $hold[$k]['name'] ?? $demand[$k]['name'] ?? $left['names'][$k] ?? $k,
-                'variants'      => $variants,
-                'hold_units'    => $holdUnits,
-                'units_per_day' => round($upd, 2),
-                'incoming'      => $inc,
-                'stock_raw'     => null, 'stock' => null, 'stock_needs_count' => null,
-                'lead'          => $lead,
-                'safety'        => $safety,
-                'doi'           => null, 'order_qty' => null, 'order_by' => null, 'colour' => null,
-                'category_id'   => $category[$k]['id'] ?? null,
-                'category'      => $category[$k]['name'] ?? null,
+            $items[$k] = [
+                'name'             => $hold[$k]['name'] ?? $demand[$k]['name'] ?? $left['names'][$k] ?? $k,
+                'variants'         => $variants,
+                'hold_units'       => $holdUnits,
+                'incoming'         => $inc,
+                'stock_raw'        => $ready ? $raw : null,
+                'stock'            => $stock,
+                'stock_needs_count' => $ready ? $raw < 0 : null,
+                'lead'             => $lead,
+                'palugit_override' => $override,
+                'category_id'      => $category[$k]['id'] ?? null,
+                'category'         => $category[$k]['name'] ?? null,
+                'lifecycle'        => $lifecycle,
+                'lifecycle_label'  => ItemLifecycle::badge($lifecycle)[0],
+                'lifecycle_auto'   => $auto,
+                'gated'            => $gated,
+                'normal'           => $normal,
+                'lugi'             => $lugi,
             ];
-
-            if ($ready) {
-                $raw   = (int) ($received[$k] ?? 0) - (int) ($left['units'][$k] ?? 0);
-                $stock = max(0, $raw);
-                $row['stock_raw']         = $raw;
-                $row['stock']             = $stock;
-                $row['stock_needs_count'] = $raw < 0;
-                $row['order_qty'] = (int) max(0, ceil(round($holdUnits + $upd * ($lead + $safety) - $inc - $stock, 6)));
-
-                if ($upd > 0) {
-                    // Walang paghahati sa umuulit na float; ang naka-round na doi ang nagpapasya ng kulay at petsa.
-                    $doi = round(($stock + $inc - $holdUnits) * $days / $demand[$k]['units'], 1);
-                    $row['doi']      = $doi;
-                    $row['order_by'] = $doi < $lead ? 'now' : $endDay->copy()->addDays((int) floor($doi - $lead))->toDateString();
-                    $row['colour']   = $doi < $lead ? 'red' : ($doi < $lead + $safety ? 'amber' : 'green');
-                }
-            }
-            $items[$k] = $row;
         }
 
         return [
@@ -106,6 +127,139 @@ class ItemStockService
             'items'       => $items ?: new \stdClass(),
             'values'      => $this->values($start, $end, $withCeoValue) ?: new \stdClass(),
         ];
+    }
+
+    /**
+     * Isang result set (normal o lugi) ng isang base item.
+     * $vel = ['units','days'] ng velocity na gagamitin (14-day o 7-day); $palugit = araw ng palugit.
+     * Phasing Out / Dormant = HOLD lang (walang lead, walang palugit). stock_ready = false → walang
+     * order_qty/doi/order_by/colour, pero ang doi_note (galing sa lifecycle at velocity lang) ay nananatili.
+     *
+     * @param array<string,mixed> $c
+     * @param array{units:int,days:int} $vel
+     * @return array<string,mixed>
+     */
+    private function restockSet(array $c, array $vel, int $palugit): array
+    {
+        $holdOnly = in_array($c['lifecycle'], ['phasing_out', 'dormant'], true);
+        $v        = $vel['units'] > 0 ? $vel['units'] / $vel['days'] : 0.0;
+        $set = [
+            'units_per_day' => round($holdOnly ? $c['upd14'] : $v, 2),
+            'palugit'       => $holdOnly ? null : $palugit,
+            'doi'           => null,
+            'doi_note'      => $holdOnly ? 'walang_benta' : ($v > 0 && $v < self::NEAR_ZERO ? 'halos_walang_benta' : null),
+            'order_qty'     => null, 'order_by' => null, 'colour' => null,
+        ];
+        if (!$c['ready']) return $set;
+
+        $lead  = $c['lead'];
+        $stock = $c['stock'];
+        if ($holdOnly) {
+            $set['order_qty'] = (int) max(0, ceil($c['hold'] - $c['inc'] - $stock));
+            $set['colour']    = 'grey';
+            return $set;
+        }
+
+        $set['order_qty'] = (int) max(0, ceil(round($c['hold'] + $v * ($lead + $palugit) - $c['inc'] - $stock, 6)));
+        if ($v > 0) {
+            // Walang paghahati sa umuulit na float; ang naka-round na doi ang nagpapasya ng kulay at petsa.
+            $doi = round(($stock + $c['inc'] - $c['hold']) * $vel['days'] / $vel['units'], 1);
+            $set['doi']      = $doi;
+            $set['order_by'] = $doi < $lead ? 'now' : $c['endDay']->copy()->addDays((int) floor($doi - $lead))->toDateString();
+            $set['colour']   = $set['doi_note'] !== null ? 'grey' : ($doi < $lead ? 'red' : ($doi < $lead + $palugit ? 'amber' : 'green'));
+        }
+        return $set;
+    }
+
+    /**
+     * Lifecycle ng base item as-of $end — parehong kahulugan ng /jnt/supply (bilang ang LAHAT ng macro_output
+     * rows). Kapag walang first date sa (naka-cache na) mapa pero may order sa window, window_first ang gamit.
+     * @return array{0:string,1:bool} [lifecycle, auto]
+     */
+    private function lifecycleOf(string $k, array $life, array $firstDate, string $end, ?string $override): array
+    {
+        if ($override !== null && $override !== '') return [$override, false];
+
+        $first = $firstDate[$k] ?? ($life[$k]['window_first'] ?? null);
+        $days  = $first
+            ? (int) Carbon::parse($first, 'Asia/Manila')->diffInDays(Carbon::parse($end, 'Asia/Manila'))
+            : 9999;
+        $recent = round(($life[$k]['recent'] ?? 0) / self::DEMAND_DAYS, 4);
+        $prev   = round(($life[$k]['prev'] ?? 0) / self::DEMAND_DAYS, 4);
+
+        return [ItemLifecycle::classify(
+            $recent, $prev, $days, $first !== null,
+            ItemLifecycle::NEW_ITEM_DAYS, ItemLifecycle::LONG_RUNNING_DAYS,
+            ItemLifecycle::SCALE_THRESHOLD, ItemLifecycle::DECLINE_THRESHOLD
+        ), true];
+    }
+
+    /** base key => ['recent','prev','window_first'] — recent = end−13..end, prev = end−27..end−14 (units). */
+    private function lifecycleInputs(string $end): array
+    {
+        $endC  = Carbon::parse($end, 'Asia/Manila');
+        $item  = $this->col('ITEM_NAME');
+        $rows  = DB::table('macro_output as mo')
+            ->whereBetween('mo.ts_date', [$endC->copy()->subDays(2 * self::DEMAND_DAYS - 1)->toDateString(), $end])
+            ->selectRaw(
+                "$item as item_name,
+                 SUM(CASE WHEN mo.ts_date >= ? THEN 1 ELSE 0 END) as recent,
+                 SUM(CASE WHEN mo.ts_date <= ? THEN 1 ELSE 0 END) as prev,
+                 MIN(mo.ts_date) as window_first",
+                [$endC->copy()->subDays(self::DEMAND_DAYS - 1)->toDateString(), $endC->copy()->subDays(self::DEMAND_DAYS)->toDateString()]
+            )
+            ->groupByRaw($item)
+            ->get();
+
+        $out = [];
+        foreach ($rows as $r) {
+            $p = ItemBaseKey::parse(trim((string) ($r->item_name ?? '')));
+            if ($p['key'] === '') continue;
+            $first = substr((string) $r->window_first, 0, 10);
+            $d = $out[$p['key']] ??= ['recent' => 0, 'prev' => 0, 'window_first' => $first];
+            $d['recent'] += (int) $r->recent * $p['qty'];
+            $d['prev']   += (int) $r->prev * $p['qty'];
+            if ($first < $d['window_first']) $d['window_first'] = $first;
+            $out[$p['key']] = $d;
+        }
+        return $out;
+    }
+
+    /** base key => pinakamaagang order date <= $end. Buong scan ng macro_output kaya naka-cache (12 oras). */
+    private function firstDates(string $end): array
+    {
+        $key = 'item_stock:first_dates:v1:' . strtolower(request()->getHost()) . ':' . $end;
+
+        return Cache::remember($key, self::FIRST_DATES_TTL, function () use ($end) {
+            $item = $this->col('ITEM_NAME');
+            $rows = DB::table('macro_output as mo')
+                ->where('mo.ts_date', '<=', $end)
+                ->selectRaw("$item as item_name, MIN(mo.ts_date) as first_date")
+                ->groupByRaw($item)
+                ->get();
+
+            $out = [];
+            foreach ($rows as $r) {
+                $k = ItemBaseKey::key(trim((string) ($r->item_name ?? '')));
+                if ($k === '' || $r->first_date === null) continue;
+                $d = substr((string) $r->first_date, 0, 10);
+                if (!isset($out[$k]) || $d < $out[$k]) $out[$k] = $d;
+            }
+            return $out;
+        });
+    }
+
+    /** lifecycle => araw ng palugit galing supply_settings (palugit_*); wala = default sa code. */
+    private function palugitDefaults(): array
+    {
+        $out = self::PALUGIT_DEFAULTS;
+        if (!Schema::hasTable('supply_settings')) return $out;
+
+        $keys = array_map(fn ($n) => 'palugit_' . $n, array_keys($out));
+        foreach (DB::table('supply_settings')->whereIn('key', $keys)->pluck('value', 'key') as $key => $value) {
+            if (is_numeric($value)) $out[substr($key, 8)] = (int) $value;
+        }
+        return $out;
     }
 
     private function col(string $name): string
@@ -144,12 +298,17 @@ class ItemStockService
     /** base key => ['name','units','first','variants'=>[raw=>true]] — huling 14 araw hanggang $end. */
     private function demandByBase(string $end): array
     {
-        $from = Carbon::parse($end, 'Asia/Manila')->subDays(self::DEMAND_DAYS - 1)->toDateString();
-        $item = $this->col('ITEM_NAME');
+        $from  = Carbon::parse($end, 'Asia/Manila')->subDays(self::DEMAND_DAYS - 1)->toDateString();
+        $from7 = Carbon::parse($end, 'Asia/Manila')->subDays(self::SCALING_DAYS - 1)->toDateString();
+        $item  = $this->col('ITEM_NAME');
         $rows = DB::table('macro_output as mo')
             ->whereBetween('mo.ts_date', [$from, $end])
             ->whereRaw($this->notCancelledSql(), HoldService::CANCELLED_STATUSES)
-            ->selectRaw("$item as item_name, COUNT(*) as cnt, MIN(mo.ts_date) as first_date")
+            ->selectRaw(
+                "$item as item_name, COUNT(*) as cnt, MIN(mo.ts_date) as first_date,
+                 SUM(CASE WHEN mo.ts_date >= ? THEN 1 ELSE 0 END) as cnt7",
+                [$from7]
+            )
             ->groupByRaw($item)
             ->get();
 
@@ -160,8 +319,9 @@ class ItemStockService
             $p = ItemBaseKey::parse($raw);
             if ($p['key'] === '') continue;
             $first = substr((string) $r->first_date, 0, 10);
-            $d = $out[$p['key']] ??= ['name' => $p['base'], 'units' => 0, 'first' => $first, 'variants' => []];
-            $d['units'] += (int) $r->cnt * $p['qty'];
+            $d = $out[$p['key']] ??= ['name' => $p['base'], 'units' => 0, 'units7' => 0, 'first' => $first, 'variants' => []];
+            $d['units']  += (int) $r->cnt * $p['qty'];
+            $d['units7'] += (int) $r->cnt7 * $p['qty'];
             if ($first < $d['first']) $d['first'] = $first;
             $d['variants'][$raw] = true;
             $out[$p['key']] = $d;
@@ -251,17 +411,22 @@ class ItemStockService
         return $out;
     }
 
-    /** base key => ['lead','safety']; pinakamababang id ang nananalo kapag doble. */
+    /** base key => ['lead','palugit_override','lifecycle_override']; pinakamababang id ang nananalo kapag doble. */
     private function settingsByKey(): array
     {
         if (!Schema::hasTable('supply_item_settings')) return [];
+        $cols = ['item_name', 'lead_time_days'];
+        foreach (['lifecycle_override', 'palugit_override'] as $c) {
+            if (Schema::hasColumn('supply_item_settings', $c)) $cols[] = $c;
+        }
         $out = [];
-        foreach (DB::table('supply_item_settings')->orderBy('id')->get(['item_name', 'lead_time_days', 'safety_days']) as $s) {
+        foreach (DB::table('supply_item_settings')->orderBy('id')->get($cols) as $s) {
             $k = ItemBaseKey::key((string) $s->item_name);
             if ($k === '' || isset($out[$k])) continue;
             $out[$k] = [
-                'lead'   => $s->lead_time_days !== null ? (int) $s->lead_time_days : self::DEFAULT_LEAD,
-                'safety' => $s->safety_days !== null ? (int) $s->safety_days : self::DEFAULT_SAFETY,
+                'lead'               => $s->lead_time_days !== null ? (int) $s->lead_time_days : self::DEFAULT_LEAD,
+                'palugit_override'   => ($s->palugit_override ?? null) !== null ? (int) $s->palugit_override : null,
+                'lifecycle_override' => $s->lifecycle_override ?? null,
             ];
         }
         return $out;

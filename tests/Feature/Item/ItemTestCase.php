@@ -84,6 +84,7 @@ abstract class ItemTestCase extends TestCase
     {
         return [
             'database/migrations/2026_04_23_000002_create_supply_item_settings_table.php',
+            'database/migrations/2026_04_23_000003_add_lifecycle_override_to_supply_item_settings.php',
             'database/migrations/2026_06_04_020000_create_supply_finance_tables.php',
             'database/migrations/2026_09_13_100000_create_item_images_table.php',
             'database/migrations/2026_09_27_100000_create_item_supplier_quotes_table.php',
