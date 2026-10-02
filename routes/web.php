@@ -1040,6 +1040,7 @@ Route::post('/jnt/status/export-to-gsheet', [JntStatusController::class, 'export
     Route::get ('/item/images', [\App\Http\Controllers\ItemController::class, 'images'])     ->name('item.images');
     Route::get ('/item/suppliers', [\App\Http\Controllers\ItemController::class, 'suppliers']) ->name('item.suppliers');
     Route::get ('/item/worklist',  [\App\Http\Controllers\ItemController::class, 'worklist'])  ->name('item.worklist'); // CEO lang: sourcing worklists
+    Route::get ('/item/stock',     [\App\Http\Controllers\ItemController::class, 'stock'])     ->name('item.stock');    // stock gauge, DOI, order qty, item values
     Route::get ('/item/photo',  [\App\Http\Controllers\ItemController::class, 'photoForm'])  ->name('item.photo');
     Route::post('/item/photo',  [\App\Http\Controllers\ItemController::class, 'photoStore']) ->middleware('throttle:60,1')->name('item.photo.store');
     Route::post('/item/image',        [\App\Http\Controllers\ItemController::class, 'uploadImage'])->middleware('throttle:60,1')->name('item.image');

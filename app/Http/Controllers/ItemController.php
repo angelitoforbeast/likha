@@ -387,6 +387,30 @@ class ItemController extends Controller
         return response()->json(['ok' => true, 'counts' => $counts, 'items' => $items]);
     }
 
+    /**
+     * GET /item/stock?start_date&end_date&view_as — stock, BENTA/ARAW, DOI, i-order, category at item value
+     * kada base item (logic sa ItemStockService). Marketing ay may parehong numero (walang presyo);
+     * item_value_ceo ay ibinabalik LANG sa CEO na view_as=ceo.
+     */
+    public function stock(Request $request)
+    {
+        $this->checkAccess();
+
+        $valid = fn ($s) => is_string($s) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $s)
+            && checkdate((int) substr($s, 5, 2), (int) substr($s, 8, 2), (int) substr($s, 0, 4));
+        $start = (string) $request->query('start_date', '');
+        $end   = (string) $request->query('end_date', '');
+        if (!$valid($start)) $start = Carbon::now('Asia/Manila')->startOfMonth()->subMonth()->toDateString();
+        if (!$valid($end))   $end   = Carbon::now('Asia/Manila')->toDateString();
+        if ($start > $end)   [$start, $end] = [$end, $start];
+
+        $viewAs = strtolower(trim((string) $request->query('view_as', 'ceo')));
+        if (!in_array($viewAs, ['ceo', 'marketing'], true)) $viewAs = 'ceo';
+        $withCeoValue = $this->getNormalizedRole() === 'CEO' && $viewAs === 'ceo';
+
+        return response()->json(app(\App\Services\ItemStockService::class)->build($start, $end, $withCeoValue));
+    }
+
     // ═════════════════════════════════════════════════════════════════════
     //  SUPPLIER QUOTES — "may supplier na ba, magkano kada supplier" (CEO LANG)
     //  Hiwalay sa PO: item_supplier_quotes (supplier = existing suppliers table, presyo = bago).
