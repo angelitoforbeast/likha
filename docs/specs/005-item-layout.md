@@ -67,7 +67,7 @@ Checked in this order:
 6. `lead ≤ P.doi < lead + palugit`: amber "Malapit na: X araw".
 7. otherwise: teal "✓ Sapat: X araw"; X > 365 → "✓ Sapat: mahigit 1 taon".
 
-Steps 4–7 follow the server's `colour` (red / amber / green), split by the sign of `doi`; the page doesn't recompute thresholds. Day format: whole days when |X| ≥ 10, one decimal below 10 (see open question 1).
+Steps 4–7 follow the server's `colour` (red / amber / green), split by the sign of `doi`; the page doesn't recompute thresholds. Day format: whole days when |X| ≥ 10 (rounded), one decimal below 10 (Mira's answer 1).
 
 ## 7. I-ORDER
 
@@ -85,7 +85,7 @@ Breakeven CPP exists per page only today (`breakevenCppFor(row)`). At item level
 One full-width cell under the item row, wrapping content, no horizontal scroll:
 
 - **Item section** (definition-list grid, `repeat(auto-fill, minmax(150px, 1fr))`): Puhunan bawat piraso: ₱30 (+ "CEO: ₱34" only when it differs, CEO view only); RTS/DEL/INT (aggregate); TCPR; PROF.PROFIT (period total); NP/O(1M); CATEGORY when visible (CEO select as today); the I-ORDER reason line; Change / Add photo; Copy. Below 1,366 px, ACTION; below 1,100 px, also STOCK / PAPARATING, BENTA/ARAW, KITA NGAYON and ADS (they leave the card).
-- **Pages** (one card per page row, in the current page sort): page name (breakdown link when `is_range`), item names in the page, mixed-primary and back-filled warnings; a wrapping grid of every visible page field with its current formatting minus fills (signed text, ▲/▼ for profit fields); the ✎ buttons for Set RTS%, Promo, Item Val., Item Val. (CEO, CEO view) and Action open the same modals as today; a "Campaigns ›" toggle that renders `owner._private_expand_inline` unchanged under the card. That shared panel keeps its own bordered box with its own inner scroll (it's shared with `/owner/private`, which must not change); the page itself doesn't scroll sideways.
+- **Pages** (one card per page row, in the current page sort): page name (breakdown link when `is_range`), item names in the page, mixed-primary and back-filled warnings; a wrapping grid of every visible page field with its current formatting minus fills (signed text, ▲/▼ for profit fields); the ✎ buttons for Set RTS%, Promo, Item Val., Item Val. (CEO, CEO view) and Action open the same modals as today; a "Campaigns ›" toggle that renders `owner._private_expand_inline` under the card. The panel's markup is shared with `/owner/private` and stays unchanged; inside /item's new layout it sits in a wrapper class only the new layout uses (e.g. `.il-camp`), and CSS scoped to that class makes the campaigns / ad sets / ads table fit with **no horizontal scroll** (fixed table layout at 100% width, `min-width` overrides, wrapping cells; a vertical inner scroll is allowed). Mira's answer 6. If it truly can't fit without changing the shared markup, the build stops at that step and reports what it would take.
 
 ## 10. Colour and type
 
@@ -124,6 +124,17 @@ Below 1,100 px: cards (CSS on the same markup): header row hidden; each item is 
 ## 13. Data
 
 Reuse `/item/stock`, `item-summary`, `/item/data`, the worklist and supplier/quote loads. One additive field: each restock set (`normal`, `lugi`) in `GET /item/stock` gains `velocity_days` (the day count behind `units_per_day`: 7 when Scaling's 7-day figure wins, else the 14-day window's day count, 1–14). No number changes; no new query.
+
+## 13a. Mira's answers (go, 2026-10-02)
+
+1. Day rounding: follow the rule — whole days when ≥ 10 ("Kulang: 12 araw…", "Sapat: 30 araw"), one decimal below 10.
+2. Cost line uses qty × (item value ÷ N of the row's "N x" prefix); "Puhunan bawat piraso" is per piece.
+3. Item-row BE: one page → its value; several → lowest–highest; none → omitted.
+4. 1,100–1,365 px: ACTION moves into the expanded block, KITA % stacks.
+5. No conditional-formatting or `pbStyle` fills in the new layout; the old view keeps them.
+6. Campaigns panel: no horizontal scroll inside it either; wrap/stack with CSS scoped to /item's new layout; shared markup unchanged (§9).
+7. Uncounted stock: grey "Hindi pa alam — bilangin muna ang stock"; for Marketing the two Kulang/Mauubos sort groups merge.
+8. Pill order: Bilangin muna → Hindi pa kailangan → Hanap muna ng supplier → ngayon na → bago <date>.
 
 ## 14. Tests
 
