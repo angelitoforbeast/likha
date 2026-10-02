@@ -69,4 +69,7 @@ Accepted review findings, each with the reason it isn't fixed now (CLAUDE.md wor
 - **`.il-table th { overflow-wrap:normal }`** could let a long header word poke past its column at 1,100–1,365 px. Reason: unverified without a browser; part of Mira's checklist.
 - **When `order_qty` is 0, the reason line's cover figure uses the 2-decimal `units_per_day`** and can differ by 1 from the server's. Reason: nothing is ordered in that case.
 - **`ilPageVal` runs a few times per page-card cell** (x-show still evaluates x-text). Reason: only for open items; fine at current counts.
+- **`ilPct` on a tiny negative (e.g. −0.04) prints "▼ −0.0%"** (sign is taken before rounding). Reason: cosmetic; fix list 1 asked only for the minus with ▼.
+- **The page cards' Prof.Profit(1D) value keeps two decimals**; fix list 1's whole-peso rule is applied only to the KITA NGAYON cells (main row, TOTAL, narrow duplicate), as written. Reason: "nothing else changes"; Mira can extend it.
+- **The colspan test matches `ilVw.lt1440` / `ilVw.lt1366` by text order only**; deleting the `ilColOn` guard would still pass. Reason: no JS runner; string-grep seam.
 - **Missing edge tests the reviewers listed:** `?layout[]=old` and an empty `?layout=` (both give the new layout by the strict `=== 'old'`), a non-CEO `GET /item`, an item with no demand (`velocity_days` 1), TOTAL cells in the Marketing render, `ilPageVal` for `jnt_rdt` with partial members / `rts_pct` 0 / null price range / manual vs cogs item value. Reason: keep the suite small; trusted or display-only paths.

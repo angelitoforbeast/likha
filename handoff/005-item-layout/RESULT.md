@@ -332,6 +332,40 @@ Deploy together with 004, from this branch; it contains 004's commits.
     There's no database step.
 - **One-way part:** none.
 
+## Fix list 1
+
+These are Mira's verifier findings. There's one `fix:` commit per item; each has a red markup test first, then the code.
+
+| # | Fix | Commit | Red run |
+|---|---|---|---|
+| 1 | `ilColspan()` equals the columns actually rendered: 11 at ≥1,440 px, 10 at 1,366–1,439, 9 below 1,366 when every column is on. The reactive `ilVw.lt1440` / `ilVw.lt1366` come from `window.matchMedia('(max-width: 1439px)')` / `('(max-width: 1365px)')`, the same queries as the CSS. `change` listeners (falling back to `addListener`) start in `init()`. LIFECYCLE or ACTION is subtracted only when it is both on and hidden by width. Every `:colspan` in `_table_new` uses `ilColspan()`, and the test also forbids a numeric constant. The TODO note is removed. | `f8f2fbf` | `colspan follows the columns the media queries leave visible`: the `window.matchMedia('(max-width: 1439px)')` call was missing |
+| 2 | The campaigns panel has no inner scroll. `.il-camp .expand-wrap` and the nested ad set / ad wraps are `overflow:visible !important; max-height:none !important`, so the panel grows taller instead. There's no `overflow-x:hidden`, and the wrapping rules are kept. The test now asserts that rule and the absence of `overflow-y:auto`, `max-height:70vh`, `overflow:auto` and `overflow:hidden` in the `.il-camp` rules. The TODO note about `overflow-x` computing to `auto` is removed. | `fd5c97e` | `campaigns panel is scoped to fit without horizontal scroll`: the new rule was missing |
+| 3 | `.il-chev` is `width:24px; height:24px; padding:0; font-size:18px`, inside the 36 px cell. The card-mode placement is unchanged. | `d37dd85` | `chevron button fits its column`: `width:24px; height:24px` was missing |
+| 4 | `ilPct` gives "▲ 15.8%", "▼ −3.2%" (U+2212) and "—" for null. Page cards use the same helper, so they show the minus too. | `3a84d46` | `pct helper shows the unicode minus with the down arrow`: the `'▼ −'` expression was missing |
+| 5 | KITA NGAYON uses a new `ilMoneyKita()`: whole pesos when the amount rounded to 2 decimals is ₱1,000 or more either way (e.g. "▲ ₱2,638", "▼ −₱1,500"), otherwise `ilMoney` with two decimals. It's used only in the KITA NGAYON cells: the main row, TOTAL, and the narrow-screen duplicate in `_il_expand`. `ilMoney` and every other cell are unchanged. | `164300d` | `kita ngayon uses whole pesos from 1000 and only there`: no `ilMoneyKita` helper |
+
+**Outputs on the final tree:**
+- `php.bat artisan test --compact` → `Tests: 1 failed, 3 skipped, 232 passed (2130 assertions)`. The only failure is the known baseline `Tests\Feature\ExampleTest > the application returns a successful response` ("Expected response status code [200] but received 302."). The 3 skipped are the Boardroom live tests. `ItemPageTest` alone gives 31 passed (523 assertions).
+- `php.bat -l tests/Feature/Item/ItemPageTest.php` → "No syntax errors detected in tests/Feature/Item/ItemPageTest.php". It's the only changed PHP file; the rest are Blade views, `TODO.md` and this file.
+- `npm run build` → `vite v6.3.5 … ✓ built in 2.21s`. The bundle is unchanged (`app-DNxiirP_.js 35.32 kB`).
+- `git diff --stat 5879e63 164300d` touches only `index.blade.php`, `_table_new.blade.php`, `_il_expand.blade.php`, `ItemPageTest.php` and `TODO.md`. `_table_old`, `_agg_cells` and `owner/*` are untouched.
+
+**Review:** `skeptic-reviewer` ran a scoped review at standard depth (sonnet) and found no blocker or major.
+- **Confirmed:**
+  - the queries equal the CSS breakpoints
+  - there's no double subtract when LIFECYCLE or ACTION is switched off in the column settings
+  - `ilVw` is reactive
+  - `!important` overrides the base `.expand-wrap{overflow-x:auto}`
+  - there's no scope creep and no `x-html`
+- **Minors, accepted in `TODO.md`:**
+  - **Page cards keep two decimals.** Their Prof.Profit(1D) still shows two decimals, because the fix list named only the KITA NGAYON cells. Say if you want the whole-peso rule there too; it's one line.
+  - **Tiny negatives.** `ilPct(-0.04)` shows "▼ −0.0%".
+  - **Loose colspan test.** It matches the code by text order only.
+- **Not tested at runtime:** the colspan on resize, the 24 px chevron and the panel growing taller are covered by markup assertions only. For the live check:
+  - Open › at 1,920 px, then shrink the window to 1,400 and 1,300 px. The expanded block should stay as wide as the table, with no phantom column and ITEM not narrowing.
+  - An open Campaigns panel should have no scrollbar of its own and just grow taller.
+  - The › button should sit inside its cell.
+
 ## Suggestions for Busing
 
 - **Allow `node --test` for one small pure JS file** with the `/item` helpers (states, pills, formats, sort ranks), so they can be tested without a new package.

@@ -47,5 +47,7 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 
 - 005 T5 widths/TOTAL: col-width budget in spec §12 matches CSS (sums 1,152/1,040/820 verified); remaining overflow risk is `white-space:nowrap` (.il-nb) text in fixed narrow cells (STOCK 104px "Hindi pa nabibilang ·" overlaps next cell, no scrollbar) and 11px bold th text in 72px col breaking mid-word; ilTotVisible()/itemGroups() re-run (sort + aggOf per item) ~15x per Alpine pass. Breakpoint/stack/card behaviour has only string-grep tests.
 
+- 005 fix list 1: format-helper changes (ilMoneyKita, ilPct) apply to the named cells only; the page-card path `ilPageVal` case 'proj_prof_1d' (peso()) still uses 2-dp ilMoney, and ilPct on tiny negatives (-0.04) prints "▼ −0.0%". Tests remain string-grep of the Blade.
+
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.
