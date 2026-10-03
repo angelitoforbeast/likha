@@ -343,17 +343,18 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
         $failedCount = MacroImportRunItem::where('run_id', $run->id)->where('status', 'failed')->count();
         if ($failedCount > 0) $finalStatus = 'failed';
 
-        // May cancel request (force-stop o stale close) habang nasa huling sheet → iwan ang run kung ano ito;
-        // huwag gawing done ang run na isinara na.
-        if (!MacroImportRun::where('id', $run->id)->value('cancel_requested')) {
-            $run->update([
+        // Conditional update: habang queued/running pa lang ang run, anuman ang cancel_requested
+        // (Cancel na na-click sa huling sheet → tapos pa rin sa totoong resulta). Ang run na isinara na
+        // (force-stop o stale close) ay iniiwan kung ano ito; hindi ginagawang done.
+        MacroImportRun::where('id', $run->id)
+            ->whereIn('status', ['queued', 'running'])
+            ->update([
                 'status'      => $finalStatus,
                 'finished_at' => now(),
                 'message'     => $finalStatus === 'failed'
                     ? "May {$failedCount} sheet(s) na failed."
                     : 'Import completed.',
             ]);
-        }
 
         // === Recompute daily_page_primary_item for touched dates ===
         // Wrapped in try/catch so any failure here never marks the import as failed.

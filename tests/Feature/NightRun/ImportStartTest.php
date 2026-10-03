@@ -209,6 +209,54 @@ class ImportStartTest extends NightRunTestCase
         $this->assertSame($before, $run->fresh()->getAttributes());
     }
 
+    public function test_macro_job_final_write_applies_only_while_the_run_is_still_active(): void
+    {
+        // Cancel na na-click sa huling sheet ng malusog na run: dapat matapos pa rin sa totoong resulta.
+        $healthy = $this->macroRun('running', ['cancel_requested' => true]);
+
+        (new ImportMacroFromGoogleSheet($healthy->id))->handle();
+
+        $healthy->refresh();
+        $this->assertSame('done', $healthy->status);
+        $this->assertSame('Import completed.', $healthy->message);
+        $this->assertNotNull($healthy->finished_at);
+
+        // Isinara ng iba (stale close / Force-stop) habang nasa huling sheet: hindi na binabago ng final write.
+        // Ang item na walang setting ay hindi umaabot sa Google fetch; doon ginagaya ang pagsasara.
+        $closed = $this->macroRun('running');
+        MacroImportRunItem::create(['run_id' => $closed->id, 'setting_id' => null, 'status' => 'queued']);
+        MacroImportRunItem::updated(function (MacroImportRunItem $item) use ($closed) {
+            if ((int) $item->run_id === $closed->id) {
+                MacroImportRun::where('id', $closed->id)->update(['status' => 'failed', 'message' => 'Stale: closed by the night run']);
+            }
+        });
+
+        (new ImportMacroFromGoogleSheet($closed->id))->handle();
+
+        $closed->refresh();
+        $this->assertSame('failed', $closed->status);
+        $this->assertSame('Stale: closed by the night run', $closed->message);
+        $this->assertNull($closed->finished_at);
+    }
+
+    public function test_likha_stale_close_falls_back_to_created_at_when_started_at_is_null(): void
+    {
+        $this->likhaSetting('a');
+        $this->travelTo('2026-10-04 02:00:00');
+
+        // [minuto mula created_at, isinara ba]
+        foreach ([[121, true], [119, false]] as [$minutes, $closed]) {
+            LikhaImportRun::query()->delete();
+            $old = LikhaImportRun::create(['status' => 'running', 'started_at' => null]);
+            LikhaImportRun::where('id', $old->id)->update(['created_at' => now()->subMinutes($minutes)]);
+
+            $result = app(LikhaImportStarter::class)->start();
+
+            $this->assertSame($closed, $result['started'], "{$minutes} min");
+            $this->assertSame($closed ? 'failed' : 'running', $old->fresh()->status, "{$minutes} min");
+        }
+    }
+
     // ───────────────────────────── Likha ─────────────────────────────
 
     private function likhaSetting(string $name, bool $archived = false): LikhaOrderSetting

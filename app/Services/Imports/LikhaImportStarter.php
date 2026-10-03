@@ -91,8 +91,16 @@ class LikhaImportStarter
      */
     private function closeStaleRuns(string $message): void
     {
+        $cutoff = now()->subMinutes(self::STALE_MINUTES);
+
+        // Walang started_at (lumang run) → created_at ang batayan, para hindi ito manatiling running habambuhay.
         $staleIds = LikhaImportRun::where('status', 'running')
-            ->where('started_at', '<', now()->subMinutes(self::STALE_MINUTES))
+            ->where(function ($q) use ($cutoff) {
+                $q->where('started_at', '<', $cutoff)
+                    ->orWhere(function ($q) use ($cutoff) {
+                        $q->whereNull('started_at')->where('created_at', '<', $cutoff);
+                    });
+            })
             ->pluck('id');
 
         if ($staleIds->isEmpty()) {

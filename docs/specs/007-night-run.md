@@ -137,8 +137,10 @@ exists). Likha closes them on every path (§4.1).
 ### 4.3 Job changes (the smallest that make the stale rule safe)
 
 - `ImportMacroFromGoogleSheet::handle`: (a) at the start, return without doing anything when the run's status is
-  not `queued` or `running`; (b) before the final status write, when `cancel_requested` is set, leave the run as
-  it is; (c) in the existing cancel branch, when the run is already `failed`, stop without rewriting its status
+  not `queued` or `running`; (b) the final status write applies only while the run is still `queued` or
+  `running` (a conditional update, as Likha (c)): a run already closed stays as it is, an active one ends with
+  its true result as today, whatever `cancel_requested` says (T1 review: skipping the write on the flag left a
+  healthy run `running` for good); (c) in the existing cancel branch, when the run is already `failed`, stop without rewriting its status
   and message (so "Stale: closed by the night run" isn't replaced by "Cancelled by user.").
 - `ImportLikhaFromGoogleSheet::handle`: (a) at the start, return when the run's status is not `running`;
   (b) before each sheet, re-read the status and stop when it is not `running`; (c) write the final `done` only
