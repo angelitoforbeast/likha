@@ -1,6 +1,6 @@
 ---
 name: testing-gotchas
-description: Non-obvious facts about testing this repo's import/queue/cache code in sqlite (learned in handoff 007 T1)
+description: Non-obvious facts about testing this repo's import, queue, cache and AI-engine code in sqlite (handoff 007 T1 to T3)
 metadata:
   type: project
 ---
@@ -16,6 +16,16 @@ Gotchas when testing server code here (PHPUnit, sqlite in memory, no RefreshData
 - A `date` column with Eloquent's `date` cast is stored as `Y-m-d 00:00:00` on sqlite and as `Y-m-d` on MySQL, so equality lookups and unique keys differ. Keep such columns uncast and pass `Y-m-d` strings (as `NightRunStep::night_date`).
 - The app timezone is already Asia/Manila; a test that must prove "Manila, not server time" switches `date_default_timezone_set('UTC')` and restores it in `finally`.
 - No tinker and no local-database edits are allowed in handoffs: evidence that needs settings turned on comes from a test that prints to STDERR only when it is named in `--filter=`.
+
+AI engines (AstraEncoder, MacroChecker, AiCheckerRowRunner; learned in 007 T3):
+
+- The only seam is `Http::fake()` + `Http::preventStrayRequests()`. Astra calls `api.openai.com/v1/responses`; the classic engine calls `/v1/responses` (RESOLVE) and `/v1/chat/completions` (NAMEADDR, VERIFYK: tell them apart by the system prompt). The first registered stub wins, so never put a default fake in `setUp` if a test needs its own. A fake callback's second argument is the Guzzle options (`$options['timeout']`).
+- `AstraEncoder::apiKeyInfo()` reads the Astra key variable from the environment directly, before config. For a key source that doesn't depend on the machine, call `AstraEncoder::storeApiKey('test-key-not-real')` (source `settings`) and set every `services.openai.*` value the engine reads with `config([...])`.
+- `AstraEncoder::post` sleeps 1.2 s before its own retry on 429, 5xx and exceptions: each such test case costs 1.2 s; 401/403 return at once.
+- Process-wide static caches survive between tests: the runner's `logDetail` caches "has the detail column", MacroChecker caches its city and barangay indexes. Never drop `ai_checker_logs` in a test; to make its insert fail use a sqlite `BEFORE INSERT ... RAISE(ABORT)` trigger.
+- To make `MacroChecker::loadAddressMaps()` return empty without touching the repo file: `$this->app->setBasePath(<a folder that doesn't exist>)` around the request, restored in `finally`.
+- Two fixture orders with the same phone and the same `ts_date` trip the gate "PHONE duplicate sa parehong petsa" (TO FIX instead of PROCEED): give each order its own date.
+- `RunRowCharacterizationTest` pins the browser run-row JSON and log row with `assertSame` (types and key order). It must stay byte-unchanged; a change in engine output shows there first.
 
 **Why:** each of these cost a wrong first guess or would silently run a real job.
 **How to apply:** start new backend test cases from `tests/Feature/NightRun/NightRunTestCase.php` and extend its migration list.
