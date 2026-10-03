@@ -70,6 +70,12 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 - 007 T1 import starters: a "skip the final write when a flag is set" rule strands the run in an active state when the job was healthy (macro Cancel on the last sheet); the safe rule is a final write conditional on the status still being active. Check every "leave it as it is" branch for who ends the run afterwards.
 - Import job loop branches (cancel branch, between-sheet re-read, final write) have no test because the Google client is built inside handle(); only the "already closed at start" early return is tested. `MacroImportController::import` is an unrouted, unguarded second macro start (dead code; check it stays unrouted).
 - Run row committed, then dispatch outside the transaction: a failed dispatch leaves an active run with no job, and with a guard that run now blocks starts (Likha: 120 min, no Force-stop).
+- 007 T2 night imports: macro job touches its run/items only at sheet start and sheet end (nothing during the row loop, max 5,000 rows, indexed lookup), so any no-progress rule is "one whole sheet + two Google calls"; Force-stop uses run `updated_at` 10 min, night rule 15 min on run+items. A `queued` run behind a busy single `default` worker has no progress either and gets closed while healthy (harmless: old job returns at start).
+- Job start is still read-then-unconditional `status = running`: a close landing between the read and the write revives the run (ms window). Check any new closer against it.
+- try/catch "DB unreachable → defaults" branches (routes/console.php, NightRunSettings::read) are only tested with a dropped table (hasTable false), never with a throwing connection: removing the catch keeps tests green.
+- Scheduler `withoutOverlapping()` default is 1440 min = exactly the daily period; a killed `schedule:run` leaves a mutex that expires the same second the next night's run checks it. Ask for a short expiry on daily entries.
+- night_date = Manila date at the call; an import time set before midnight (23:30) lands on the previous night's date. Check every later task (Astra condition, banner) for that assumption.
+- Red runs that are errors (file not found, command does not exist) keep showing up as TDD evidence; they are not behaviour failures.
 
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.
