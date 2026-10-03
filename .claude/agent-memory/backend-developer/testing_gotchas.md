@@ -12,6 +12,10 @@ Gotchas when testing server code here (PHPUnit, sqlite in memory, no RefreshData
 - Creating a `User` auto-creates its `EmployeeProfile`; set the role with `$user->employeeProfile()->update(['role' => 'CEO'])`. Web routes sit behind `web, auth, allowed_ip`; tests disable `AllowedIpMiddleware`.
 - `back()` needs `$this->from('/the/page')` in a test, otherwise the redirect target is the site root.
 - `url()` in a test depends on the local app URL, so build the expected value with `url()` rather than a literal host.
+- `routes/console.php` is loaded by the first `Artisan::call` in `setUp` (the migrate), before any setting exists. To test schedule entries: set the settings, `$this->app->forgetInstance(Schedule::class)`, `ScheduleFacade::clearResolvedInstance(Schedule::class)`, `require base_path('routes/console.php')`, then read `events()` or `Artisan::call('schedule:list')` + `Artisan::output()`.
+- A `date` column with Eloquent's `date` cast is stored as `Y-m-d 00:00:00` on sqlite and as `Y-m-d` on MySQL, so equality lookups and unique keys differ. Keep such columns uncast and pass `Y-m-d` strings (as `NightRunStep::night_date`).
+- The app timezone is already Asia/Manila; a test that must prove "Manila, not server time" switches `date_default_timezone_set('UTC')` and restores it in `finally`.
+- No tinker and no local-database edits are allowed in handoffs: evidence that needs settings turned on comes from a test that prints to STDERR only when it is named in `--filter=`.
 
 **Why:** each of these cost a wrong first guess or would silently run a real job.
 **How to apply:** start new backend test cases from `tests/Feature/NightRun/NightRunTestCase.php` and extend its migration list.
