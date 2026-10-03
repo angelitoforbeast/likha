@@ -32,6 +32,9 @@ class NightAstraRun
     /** Ilang sunod-sunod na `failed` na row bago ihinto ang run. */
     public const BREAKER_LIMIT = 10;
 
+    /** Ilang minutong `running` ang isang row bago ito ituring na naiwan ng worker. */
+    public const STALE_ROW_MINUTES = 10;
+
     private const INSERT_CHUNK = 500;
 
     /**
@@ -228,8 +231,51 @@ class NightAstraRun
         NightRunStep::where('id', $stepId)->where('consecutive_failures', '>', 0)->update(['consecutive_failures' => 0]);
     }
 
-    /** Ang tick kada minuto (spec §6.2): simulan, maghintay, o itala ang "Did not run" para sa gabing ito. */
+    /**
+     * Ang tick kada minuto (spec §6.2, §6.5): ang gabing ito (simulan, maghintay o "Did not run"), tapos ang
+     * pagbabantay sa BAWAT tumatakbong run — anumang gabi, anumang trigger, naka-on man o hindi ang switch.
+     */
     public function tick(): void
+    {
+        $this->tickTonight();
+
+        foreach (NightRunStep::where('kind', self::KIND)->where('state', 'running')->orderBy('id')->get() as $step) {
+            $this->sweep($step);
+        }
+    }
+
+    /**
+     * Pagbabantay sa isang tumatakbong run. Ang mga state na isinusulat dito sa row ay `failed` at `not_run`
+     * lang — HINDI kailanman `queued`.
+     */
+    private function sweep(NightRunStep $step): void
+    {
+        // Mga row na `running` nang higit 10 minuto (namatay ang worker; ang job timeout na 540 s ay mas maikli).
+        $cutoff = now()->subMinutes(self::STALE_ROW_MINUTES);
+        $stale  = NightAstraRow::where('step_id', $step->id)->where('state', 'running')->where('started_at', '<', $cutoff)->orderBy('id')->pluck('id');
+        foreach ($stale as $rowId) {
+            $failed = NightAstraRow::where('id', $rowId)->where('state', 'running')->where('started_at', '<', $cutoff)
+                ->update(['state' => 'failed', 'reason' => 'Worker stopped', 'finished_at' => now()]);
+            if ($failed === 1) {
+                $this->countFailure((int) $step->id, 'Worker stopped'); // maaaring ihinto nito ang run (breaker)
+            }
+        }
+
+        // Lampas na ang stop time: ang mga hindi pa nasimulan ay hindi na sisimulan.
+        if ($step->stop_at && now()->gte($step->stop_at)) {
+            NightAstraRow::where('step_id', $step->id)->where('state', 'queued')
+                ->update(['state' => 'not_run', 'reason' => 'Not run: out of time', 'finished_at' => now()]);
+        }
+
+        if (NightRunStep::where('id', $step->id)->value('state') !== 'running') {
+            return; // inihinto ng breaker
+        }
+
+        $this->dispatchPending($step);
+        $this->settle($step);
+    }
+
+    private function tickTonight(): void
     {
         $settings = NightRunSettings::read();
         $now      = now(self::TZ);

@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Schema;
 use App\Models\AppSetting;
+use App\Models\NightRunStep;
 use App\Support\NightRunSettings;
 
 Artisan::command('inspire', function () {
@@ -37,7 +38,7 @@ Schedule::command('holds:snapshot')
 // Night run (handoff 007) — macro at Likha import sa oras 1 at oras 2 (default 01:00 at 02:00, Asia/Manila).
 // Ang mga switch at oras ay nasa app_settings (CEO lang), binabasa kada `schedule:run` sa pamamagitan ng
 // NightRunSettings: mali ang oras → default; DB di available o walang app_settings → lahat OFF.
-// Naka-OFF ang switch → WALANG entry para sa import na iyon (hindi lalabas sa `schedule:list`).
+// Naka-OFF ang switch → WALANG entry para sa hakbang na iyon (hindi lalabas sa `schedule:list`).
 $nightSettings = NightRunSettings::read();
 
 foreach ([1 => $nightSettings['night_import_time_1'], 2 => $nightSettings['night_import_time_2']] as $nightSlot => $nightTime) {
@@ -49,6 +50,24 @@ foreach ([1 => $nightSettings['night_import_time_1'], 2 => $nightSettings['night
         Schedule::command("night:import {$nightKind} {$nightSlot}")
             ->timezone('Asia/Manila')
             ->dailyAt($nightTime)
-            ->withoutOverlapping();
+            ->withoutOverlapping(30); // 30 min lang ang mutex: ang nag-crash na start ay hindi haharang sa susunod na gabi
     }
+}
+
+// Astra night run — tick kada minuto. Naka-schedule kapag naka-ON ang Astra switch, O may Astra step na
+// `waiting` o `running` (para ang manual na run na naka-off ang switch ay nababantayan pa rin at natatapos).
+$nightAstraActive = false;
+try {
+    if (!$nightSettings['night_astra_enabled'] && Schema::hasTable('night_run_steps')) {
+        $nightAstraActive = NightRunStep::where('kind', 'astra')->whereIn('state', ['waiting', 'running'])->exists();
+    }
+} catch (\Throwable $e) {
+    // DB di available — walang tick.
+}
+
+if ($nightSettings['night_astra_enabled'] || $nightAstraActive) {
+    Schedule::command('night:astra-tick')
+        ->timezone('Asia/Manila')
+        ->everyMinute()
+        ->withoutOverlapping(5); // 5 min: ang tick na nag-crash ay hindi haharang sa mga susunod nang isang araw
 }
