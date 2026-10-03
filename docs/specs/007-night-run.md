@@ -301,7 +301,12 @@ on the browser path:
    - a final `failed` **and a transient first attempt that is sent back for its retry** each add 1 to the
      step's `consecutive_failures` (one atomic increment); any `done` row sets it to 0. (T4 review: the retry
      job lands behind the whole queue, so counting only final failures let an all-night outage burn the window
-     with the breaker never tripping.) At 10 the run stops:
+     with the breaker never tripping.) The step also keeps when the current streak began
+     (`failure_streak_started_at`, cleared with the counter). The run stops when the counter is 10 or more
+     **and** either the failure just counted is a final one, or the streak is at least 120 seconds old (longer
+     than the 65 s retry delay). So a 30-second blip of 5xx answers doesn't stop the night before any retry has
+     had its chance, and a real outage stops it within minutes instead of at 07:00 (T5 review). At that point
+     the run stops:
      "Stopped: 10 rows failed in a row (last: <reason>)".
 7. The row's final write is `WHERE id=? AND state='running'`, nothing else. If the sweep already marked the row
    "Worker stopped", the late result is not written to the night table (the order and its log row are as the

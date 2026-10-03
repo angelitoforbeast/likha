@@ -22,7 +22,7 @@ class NightRunSummary
     /** Mensahe ng pumalyang sheet: hanggang ilang character ang ipinapakita (sa CEO lang). */
     private const SHEET_MESSAGE_MAX = 200;
 
-    /** "Waiting for the worker": walang row na nagsimula o natapos sa loob ng ganito karaming minuto. */
+    /** "Waiting for the worker": walang row na nagsimula o natapos, at walang galaw ang step, sa loob ng ganito karaming minuto. */
     private const WORKER_QUIET_MINUTES = 3;
 
     /** Ilang minuto pagkalipas ng oras ng isang step bago sabihing "has no record". */
@@ -189,8 +189,11 @@ class NightRunSummary
 
             $queued   = $count(fn ($g) => $g->state === 'queued');
             $running  = $count(fn ($g) => $g->state === 'running');
-            $lastSeen = max((string) $rows->max('last_started'), (string) $rows->max('last_finished'));
-            $quiet    = $lastSeen === '' || Carbon::parse($lastSeen)->lt(now()->subMinutes(self::WORKER_QUIET_MINUTES));
+            // Aktibidad din ang simula ng run at ang huling galaw ng step (hal. binuksan ulit): walang "Waiting for
+            // the worker" sa mga unang minuto pagkatapos ng start o ng Run now / Retry failed.
+            $lastSeen = collect([$rows->max('last_started'), $rows->max('last_finished'), $step->started_at, $step->updated_at])
+                ->filter()->map(fn ($time) => Carbon::parse($time))->max();
+            $quiet    = $lastSeen === null || $lastSeen->lt(now()->subMinutes(self::WORKER_QUIET_MINUTES));
             $status   = $step->state === 'running' && $queued > 0 && $running === 0 && $quiet ? 'waiting_for_worker' : (string) $step->state;
             $failed   = $count(fn ($g) => $g->state === 'failed');
             $notRun   = $count(fn ($g) => $g->state === 'not_run');

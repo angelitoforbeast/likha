@@ -34,6 +34,12 @@ class NightAstraRun
     /** Ilang sunod-sunod na `failed` na row bago ihinto ang run. */
     public const BREAKER_LIMIT = 10;
 
+    /**
+     * Ilang segundo dapat ang tanda ng streak bago ito maihinto ng unang subok na transient (mas mahaba sa
+     * 65 s na delay ng retry).
+     */
+    public const BREAKER_STREAK_SECONDS = 120;
+
     /** Ilang minutong `running` ang isang row bago ito ituring na naiwan ng worker. */
     public const STALE_ROW_MINUTES = 10;
 
@@ -265,6 +271,7 @@ class NightAstraRun
                 'state'                => 'running',
                 'reason'               => null,
                 'consecutive_failures' => 0,
+                'failure_streak_started_at' => null,
                 'finished_at'          => null,
                 'stop_at'              => $this->stopAt(substr((string) $step->night_date, 0, 10), 'manual', $settings['night_astra_stop_time']),
             ]);
@@ -380,24 +387,38 @@ class NightAstraRun
     }
 
     /**
-     * Breaker: bawat huling `failed` ng isang row, at bawat unang subok na ibinalik para sa retry, ay +1
-     * (atomic increment); sa ika-10 sunod-sunod, hinto ang run.
+     * Breaker: bawat huling `failed` ng isang row ($final = true), at bawat unang subok na ibinalik para sa retry
+     * ($final = false), ay +1 (atomic increment). Hinto ang run kapag 10 o higit pa ang sunod-sunod AT (huling
+     * `failed` ang kabibilang lang, O 120 segundo na ang streak): ang maikling blip ng 5xx ay hindi humihinto sa
+     * gabi bago pa tumakbo ang kahit isang retry (65 s), pero ang totoong outage ay humihinto sa loob ng ilang minuto.
      * Ang $reason ay fixed string ng row, hindi kailanman text mula sa OpenAI.
      */
-    public function countFailure(int $stepId, string $reason): void
+    public function countFailure(int $stepId, string $reason, bool $final): void
     {
+        // Simula ng streak: isinusulat lang kapag wala pa (conditional update), kaya hindi ito magagalaw ng
+        // pangalawang worker. Nauuna sa increment: kapag may `done` na sumingit sa pagitan, ang maiiwan ay bilang
+        // na walang simula (itatakda ng susunod na palya), hindi simulang luma na magpapahinto nang maaga.
+        NightRunStep::where('id', $stepId)->whereNull('failure_streak_started_at')->update(['failure_streak_started_at' => now()]);
         NightRunStep::where('id', $stepId)->increment('consecutive_failures');
 
         $step = NightRunStep::find($stepId);
-        if ($step && (int) $step->consecutive_failures >= self::BREAKER_LIMIT) {
+        if (!$step || (int) $step->consecutive_failures < self::BREAKER_LIMIT) {
+            return;
+        }
+
+        $streakIsOld = $step->failure_streak_started_at !== null
+            && $step->failure_streak_started_at->lte(now()->subSeconds(self::BREAKER_STREAK_SECONDS));
+        if ($final || $streakIsOld) {
             $this->stop($step, 'Stopped: ' . self::BREAKER_LIMIT . " rows failed in a row (last: {$reason})");
         }
     }
 
-    /** Isang row na natapos nang maayos → balik sa 0 ang bilang ng breaker. */
+    /** Isang row na natapos nang maayos → balik sa 0 ang bilang ng breaker, at wala nang streak. */
     public function resetFailures(int $stepId): void
     {
-        NightRunStep::where('id', $stepId)->where('consecutive_failures', '>', 0)->update(['consecutive_failures' => 0]);
+        NightRunStep::where('id', $stepId)
+            ->where(fn ($streak) => $streak->where('consecutive_failures', '>', 0)->orWhereNotNull('failure_streak_started_at'))
+            ->update(['consecutive_failures' => 0, 'failure_streak_started_at' => null]);
     }
 
     /**
@@ -451,7 +472,7 @@ class NightAstraRun
             $failed = NightAstraRow::where('id', $rowId)->where('state', 'running')->where('started_at', '<', $cutoff)
                 ->update(['state' => 'failed', 'reason' => 'Worker stopped', 'finished_at' => now()]);
             if ($failed === 1) {
-                $this->countFailure((int) $step->id, 'Worker stopped'); // maaaring ihinto nito ang run (breaker)
+                $this->countFailure((int) $step->id, 'Worker stopped', true); // huling `failed`: maaaring ihinto nito ang run (breaker)
             }
         }
 

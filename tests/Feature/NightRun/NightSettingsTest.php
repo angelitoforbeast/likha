@@ -184,7 +184,7 @@ class NightSettingsTest extends NightRunTestCase
     {
         $this->assertTrue(Schema::hasColumns('night_run_steps', [
             'id', 'night_date', 'kind', 'state', 'reason', 'ref_id', 'trigger', 'started_at', 'finished_at', 'stop_at',
-            'rows_found', 'rows_over_max', 'consecutive_failures', 'created_at', 'updated_at',
+            'rows_found', 'rows_over_max', 'consecutive_failures', 'failure_streak_started_at', 'created_at', 'updated_at',
         ]));
         $this->assertTrue(Schema::hasColumns('night_astra_rows', [
             'id', 'step_id', 'macro_output_id', 'state', 'attempts', 'code', 'proceed', 'reason', 'log_id', 'cost_usd',

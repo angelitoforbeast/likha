@@ -76,7 +76,7 @@ class RunNightAstraRow implements ShouldQueue
             try {
                 $row = NightAstraRow::find($this->rowId);
                 if ($row && $this->finish('failed', ['reason' => 'Error while running the row'])) {
-                    $night->countFailure((int) $row->step_id, 'Error while running the row');
+                    $night->countFailure((int) $row->step_id, 'Error while running the row', true);
                     $this->settle($night, (int) $row->step_id);
                 }
             } catch (\Throwable $again) {
@@ -179,9 +179,11 @@ class RunNightAstraRow implements ShouldQueue
             if ($requeued) {
                 // Bilang din sa breaker ang unang subok na pumalya: ang retry job ay nasa dulo ng buong pila, kaya
                 // kung huling `failed` lang ang bibilangin, uubusin ng outage ang buong gabi nang walang hinto.
+                // Hindi ito huling `failed` (final = false): humihinto lang ito kapag 120 segundo na ang streak,
+                // para hindi mapatay ng maikling blip ang gabi bago pa tumakbo ang kahit isang retry.
                 // `queued` muna ang row BAGO ang bilang: kapag inihinto nito ang run, kasama ang row na ito sa mga
                 // ginagawang `not_run` ng stop(), at wala nang retry job na ipapadala.
-                $night->countFailure((int) $step->id, $reason);
+                $night->countFailure((int) $step->id, $reason, false);
                 if (DB::table('night_astra_rows')->where('id', $this->rowId)->value('state') === 'queued') {
                     self::dispatch($this->rowId)->delay(self::RETRY_DELAY_S);
                 }
@@ -195,7 +197,7 @@ class RunNightAstraRow implements ShouldQueue
             if ($class === 'fatal') {
                 $night->stop($step, $stopReason);
             }
-            $night->countFailure((int) $step->id, $reason);
+            $night->countFailure((int) $step->id, $reason, true);
         }
         $night->settle($step);
     }

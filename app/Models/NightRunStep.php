@@ -25,9 +25,11 @@ class NightRunStep extends Model
         'rows_found',
         'rows_over_max',
         'consecutive_failures',
+        'failure_streak_started_at',
     ];
 
     protected $casts = [
+        'failure_streak_started_at' => 'datetime',
         'started_at'  => 'datetime',
         'finished_at' => 'datetime',
         'stop_at'     => 'datetime',

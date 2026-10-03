@@ -30,6 +30,7 @@ return new class extends Migration
             $table->unsignedInteger('rows_found')->default(0);
             $table->unsignedInteger('rows_over_max')->default(0);
             $table->unsignedInteger('consecutive_failures')->default(0);
+            $table->timestamp('failure_streak_started_at')->nullable(); // kailan nagsimula ang kasalukuyang sunod-sunod na palya
             $table->timestamps();
 
             $table->unique(['night_date', 'kind']);

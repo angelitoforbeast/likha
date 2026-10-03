@@ -117,19 +117,24 @@ class NightRunSummaryTest extends NightAstraTestCase
         $this->at('03:30:00');
         $ago = fn (int $minutes) => now()->subMinutes($minutes)->toDateTimeString();
 
-        // [mga row, inaasahang status, inaasahang state]
+        // [mga row, inaasahang status, inaasahang state, ilang minuto na mula nagsimula ang run, mula sa huling
+        //  galaw ng step (hal. binuksan ulit)]. Ang simula at ang pagbukas ulit ay bilang ding aktibidad.
         $cases = [
-            'queued, last row ended 4 minutes ago' => [[['queued'], ['done', true, '✅', null, null, null, $ago(5), $ago(4)]], 'waiting_for_worker', 'Waiting for the worker'],
-            'queued, nothing ever started'         => [[['queued']], 'waiting_for_worker', 'Waiting for the worker'],
-            'queued, a row ended 2 minutes ago'    => [[['queued'], ['done', true, '✅', null, null, null, $ago(5), $ago(2)]], 'running', 'Running'],
-            'queued, a row started 1 minute ago'   => [[['queued'], ['failed', false, null, 'x', null, null, $ago(1), null]], 'running', 'Running'],
-            'queued, a row is running'             => [[['queued'], ['running', false, null, null, null, null, $ago(9)]], 'running', 'Running'],
+            'queued, last row ended 4 minutes ago' => [[['queued'], ['done', true, '✅', null, null, null, $ago(5), $ago(4)]], 'waiting_for_worker', 'Waiting for the worker', 30, 30],
+            'queued, nothing ever started'         => [[['queued']], 'waiting_for_worker', 'Waiting for the worker', 4, 4],
+            'queued, the run started 2 minutes ago' => [[['queued']], 'running', 'Running', 2, 2],
+            'queued, re-opened 2 minutes ago'      => [[['queued'], ['done', true, '✅', null, null, null, $ago(25), $ago(24)]], 'running', 'Running', 30, 2],
+            'queued, a row ended 2 minutes ago'    => [[['queued'], ['done', true, '✅', null, null, null, $ago(5), $ago(2)]], 'running', 'Running', 30, 30],
+            'queued, a row started 1 minute ago'   => [[['queued'], ['failed', false, null, 'x', null, null, $ago(1), null]], 'running', 'Running', 30, 30],
+            'queued, a row is running'             => [[['queued'], ['running', false, null, null, null, null, $ago(9)]], 'running', 'Running', 30, 30],
         ];
 
-        foreach ($cases as $name => [$rows, $status, $state]) {
+        foreach ($cases as $name => [$rows, $status, $state, $startedAgo, $touchedAgo]) {
             NightAstraRow::query()->delete();
             NightRunStep::query()->delete();
-            $this->rows($this->runningStep([]), $rows);
+            $step = $this->runningStep([], ['started_at' => $ago($startedAgo)]);
+            DB::table('night_run_steps')->where('id', $step->id)->update(['updated_at' => $ago($touchedAgo)]);
+            $this->rows($step, $rows);
 
             $astra = NightRunSummary::build(false)['nights'][0]['astra'];
 

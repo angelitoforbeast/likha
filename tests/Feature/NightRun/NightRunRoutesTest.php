@@ -232,7 +232,7 @@ class NightRunRoutesTest extends NightAstraTestCase
             ['failed', 'PROCEED'],     // may STATUS na mula sa tao → hindi ginagalaw
             ['done', null],            // tapos na ni Astra (hal. TO FIX, blangko pa rin) → hindi na uulitin
             ['skipped', null],
-        ], ['reason' => 'Stopped: 10 rows failed in a row (last: OpenAI server error (5xx))', 'consecutive_failures' => 10, 'rows_found' => 5]);
+        ], ['reason' => 'Stopped: 10 rows failed in a row (last: OpenAI server error (5xx))', 'consecutive_failures' => 10, 'failure_streak_started_at' => self::NIGHT . ' 02:50:00', 'rows_found' => 5]);
         // Tatlong bagong blangkong order ng petsa na wala pa sa run; dalawa lang ang kasya sa maximum na 7.
         $new = [
             $this->order(['TIMESTAMP' => '21:17 04-10-2026']),
@@ -256,8 +256,8 @@ class NightRunRoutesTest extends NightAstraTestCase
         $this->assertSame([2, 'OpenAI server error (5xx)'], [(int) $rows[2]->attempts, $rows[2]->reason]);
         $step->refresh();
         $this->assertSame(
-            ['running', null, 0, null, self::NIGHT . ' 07:00:00', 8, 1],
-            [$step->state, $step->reason, (int) $step->consecutive_failures, $step->finished_at, $step->stop_at->toDateTimeString(), (int) $step->rows_found, (int) $step->rows_over_max]
+            ['running', null, 0, null, null, self::NIGHT . ' 07:00:00', 8, 1],
+            [$step->state, $step->reason, (int) $step->consecutive_failures, $step->failure_streak_started_at, $step->finished_at, $step->stop_at->toDateTimeString(), (int) $step->rows_found, (int) $step->rows_over_max]
         );
         Queue::assertPushed(RunNightAstraRow::class, 4);
 
