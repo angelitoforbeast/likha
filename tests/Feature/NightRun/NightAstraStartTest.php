@@ -208,7 +208,8 @@ class NightAstraStartTest extends NightAstraTestCase
 
         $this->at('04:00:00');
         $this->night()->tick();
-        $this->assertSame(['did_not_run', 'Did not run: an import was still running (macro)'], [$this->step()->state, $this->step()->reason]);
+        // Ang dahilan ay ang switch, hindi ang lumang dahilan ng paghihintay (tapos na ang import).
+        $this->assertSame(['did_not_run', 'Did not run: switched off while waiting'], [$this->step()->state, $this->step()->reason]);
 
         // Naka-off at walang step: walang sinisimulan at walang itinatala.
         NightRunStep::query()->delete();

@@ -225,8 +225,10 @@ update sets `dispatched_at` and one `RunNightAstraRow` job is dispatched to queu
 `dispatchPending` too, so a crash between insert and dispatch heals; a row is dispatched once per time it is
 queued.
 
-A `waiting` step whose 60 minutes have passed is closed as `did_not_run` by the tick whatever the switch says,
-so a switch turned off mid-wait can't leave a step waiting (and the tick scheduled) for good.
+A `waiting` step whose 60 minutes have passed never stays waiting: with the switch on, the condition met and
+the stop time not reached it starts (the late-start rule, question 5); otherwise the tick closes it as
+`did_not_run`, whatever the switch says, so the tick can't stay scheduled for good. Closed because the switch
+was turned off: "Did not run: switched off while waiting".
 
 No API key at start (`AstraEncoder::resolveApiKey()` null) → `stopped`, "Stopped: no API key set", no rows run.
 Zero rows found → `finished` at once with 0 rows.
@@ -295,8 +297,11 @@ on the browser path:
      | other | any other status, or no transport error (the AI gave no usable answer) | `failed`, no retry |
 
      Reasons: "OpenAI timeout or connection error", "OpenAI rate limit (429)", "OpenAI server error (5xx)",
-     "OpenAI error (4xx)", "No usable answer from the AI", "Error: <exception class name>".
-   - a final `failed` adds 1 to the step's `consecutive_failures` (one atomic increment). At 10 the run stops:
+     "OpenAI error (4xx)", "No usable answer from the AI", "Error while running the row".
+   - a final `failed` **and a transient first attempt that is sent back for its retry** each add 1 to the
+     step's `consecutive_failures` (one atomic increment); any `done` row sets it to 0. (T4 review: the retry
+     job lands behind the whole queue, so counting only final failures let an all-night outage burn the window
+     with the breaker never tripping.) At 10 the run stops:
      "Stopped: 10 rows failed in a row (last: <reason>)".
 7. The row's final write is `WHERE id=? AND state='running'`, nothing else. If the sweep already marked the row
    "Worker stopped", the late result is not written to the night table (the order and its log row are as the

@@ -8,6 +8,7 @@ use App\Models\NightAstraRow;
 use App\Models\NightRunStep;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schedule as ScheduleFacade;
@@ -138,6 +139,50 @@ class NightAstraTickTest extends NightAstraTestCase
         $step->refresh();
         $this->assertSame(['finished', self::NIGHT . ' 07:01:00'], [$step->state, $step->finished_at->toDateTimeString()]);
         Queue::assertNothingPushed();
+    }
+
+    public function test_the_sweep_also_closes_rows_left_in_a_stopped_run(): void
+    {
+        $this->at('03:30:00');
+        $step = $this->stepWithRows([
+            ['running', self::NIGHT . ' 03:00:00', self::NIGHT . ' 03:19:00'], // naiwan ng worker
+            ['running', self::NIGHT . ' 03:00:00', self::NIGHT . ' 03:25:00'], // tumatakbo pa: tatapusin ng worker
+            ['queued', self::NIGHT . ' 03:29:30', null],                       // ibinalik para sa retry kasabay ng hinto
+            ['done', self::NIGHT . ' 03:00:00', self::NIGHT . ' 03:01:00'],
+        ], ['state' => 'stopped', 'reason' => 'Stopped: OpenAI credit or spend limit reached', 'consecutive_failures' => 4]);
+
+        $this->tick();
+
+        $this->assertSame(
+            [['failed', 'Worker stopped'], ['running', null], ['not_run', 'Not run: run stopped'], ['done', null]],
+            NightAstraRow::orderBy('id')->get()->map(fn ($row) => [$row->state, $row->reason])->all()
+        );
+        $step->refresh();
+        $this->assertSame(
+            ['stopped', 'Stopped: OpenAI credit or spend limit reached', 4],
+            [$step->state, $step->reason, (int) $step->consecutive_failures]
+        );
+        Queue::assertNothingPushed();
+    }
+
+    public function test_a_throw_in_the_start_of_tonight_does_not_skip_the_sweeps(): void
+    {
+        $this->at('03:30:00');
+        // Ibang gabi na tumatakbo pa, may row na naiwan ng worker.
+        $this->stepWithRows([['running', self::NIGHT . ' 03:00:00', self::NIGHT . ' 03:10:00']], ['night_date' => '2026-10-02', 'trigger' => 'manual']);
+        // Ngayong gabi: pwede nang magsimula, pero pumapalya ang pagpasok ng mga row (may marker ang exception message).
+        $this->macroImport();
+        $this->order();
+        DB::statement("CREATE TRIGGER night_rows_fail BEFORE INSERT ON night_astra_rows BEGIN SELECT RAISE(ABORT, 'MARKER-lihim'); END");
+
+        $this->tick();
+        DB::statement('DROP TRIGGER night_rows_fail');
+
+        $this->assertSame([['failed', 'Worker stopped']], NightAstraRow::get()->map(fn ($row) => [$row->state, $row->reason])->all());
+        $this->assertSame(0, NightRunStep::where('night_date', self::NIGHT)->count()); // na-rollback ang start
+        $line = collect($this->logLines)->firstWhere('message', 'NIGHT_ASTRA_TICK');
+        $this->assertSame(['exception' => \Illuminate\Database\QueryException::class], $line['context'] ?? null);
+        $this->assertStringNotContainsString('MARKER', json_encode($this->logLines->getArrayCopy()));
     }
 
     /** Binabasa ulit ang routes/console.php sa bagong Schedule, gaya ng ginagawa ng bawat `schedule:run`. */

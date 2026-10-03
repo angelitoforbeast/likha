@@ -128,14 +128,15 @@ class NightAstraRowJobTest extends NightAstraTestCase
         // Unang takbo: balik sa queued, may dispatched_at (para hindi maputol ng tick ang delay), isang delayed job.
         $row = $this->work($order->id);
         $this->assertSame(['queued', 1, self::NIGHT . ' 03:00:00'], [$row->state, (int) $row->attempts, $row->dispatched_at->toDateTimeString()]);
-        $this->assertSame(['running', 0], [$step->fresh()->state, (int) $step->fresh()->consecutive_failures]);
+        // Bilang na sa breaker ang unang subok na ibinalik para sa retry (T4 review).
+        $this->assertSame(['running', 1], [$step->fresh()->state, (int) $step->fresh()->consecutive_failures]);
         Queue::assertPushedOn('astra', RunNightAstraRow::class, fn ($job) => $job->rowId === $row->id && $job->delay === 65);
         Queue::assertPushed(RunNightAstraRow::class, 1);
 
-        // Pangalawang takbo: failed na, at bilang sa breaker.
+        // Pangalawang takbo: failed na, at bilang ulit sa breaker.
         $row = $this->work($order->id);
         $this->assertSame(['failed', 'OpenAI server error (5xx)', 2], [$row->state, $row->reason, (int) $row->attempts]);
-        $this->assertSame(['finished', 1], [$step->fresh()->state, (int) $step->fresh()->consecutive_failures]);
+        $this->assertSame(['finished', 2], [$step->fresh()->state, (int) $step->fresh()->consecutive_failures]);
 
         // Walang ikatlo: ang isa pang delivery ay walang engine run at walang bagong job.
         $this->work($order->id);
@@ -224,6 +225,69 @@ class NightAstraRowJobTest extends NightAstraTestCase
         // Ang mga job ng mga natitirang row ay walang ginagawa.
         $this->work($orders[12]->id);
         Http::assertSentCount(12);
+        Queue::assertNothingPushed();
+    }
+
+    /**
+     * PERA: ang retry job ay napupunta sa dulo ng buong pila, kaya sa isang outage na buong gabi, bawat row ay
+     * magkakaroon muna ng unang subok bago may mabilang kung huling `failed` lang ang binibilang.
+     */
+    public function test_transient_first_attempts_count_for_the_breaker_and_stop_the_run_before_any_retry(): void
+    {
+        $orders = [];
+        for ($i = 0; $i < 12; $i++) {
+            $orders[] = $this->order();
+        }
+        $step = $this->runningStep(array_map(fn ($order) => $order->id, $orders));
+        $fail = true;
+        Http::fake(['api.openai.com/v1/responses' => function () use (&$fail) {
+            return $fail ? $this->openAiError(500, 'server_error', null) : Http::response($this->goodAnswer());
+        }]);
+
+        // Siyam na unang subok na pumalya (500), tapos isang tagumpay: hindi humihinto, balik sa 0 ang bilang.
+        for ($i = 0; $i < 9; $i++) {
+            $this->assertSame('queued', $this->work($orders[$i]->id)->state);
+        }
+        $this->assertSame(['running', 9], [$step->fresh()->state, (int) $step->fresh()->consecutive_failures]);
+        $fail = false;
+        $this->assertSame('done', $this->work($orders[9]->id)->state);
+        $this->assertSame(['running', 0], [$step->fresh()->state, (int) $step->fresh()->consecutive_failures]);
+
+        // Ang ika-10 sunod-sunod (ibinabalik sa 9 ang bilang sa halip na siyam pang tawag na tig-1.2 s).
+        NightRunStep::where('id', $step->id)->update(['consecutive_failures' => 9]);
+        $fail = true;
+        $tenth = $this->work($orders[10]->id);
+
+        $step->refresh();
+        $this->assertSame(['stopped', 'Stopped: 10 rows failed in a row (last: OpenAI server error (5xx))'], [$step->state, $step->reason]);
+        // Ang row na kababalik lang sa pila ay `not_run` din, gaya ng ibang nakapila; walang pangalawang subok.
+        $this->assertSame(['not_run', 'Not run: run stopped', 1], [$tenth->state, $tenth->reason, (int) $tenth->attempts]);
+        $this->assertSame(
+            array_merge(array_fill(0, 9, 'not_run'), ['done', 'not_run', 'not_run']),
+            $this->rowStates()
+        );
+        Queue::assertPushed(RunNightAstraRow::class, 9); // ang siyam na retry lang; wala para sa ika-10
+
+        // Dumating ang mga retry job pagkatapos ng hinto: walang engine call.
+        $this->work($orders[0]->id);
+        $this->work($orders[10]->id);
+        Http::assertSentCount(21); // 10 pumalyang subok × 2 (sariling mabilis na retry ng engine) + 1 tagumpay
+    }
+
+    public function test_no_api_key_right_before_the_call_fails_the_row_and_stops_the_run(): void
+    {
+        Http::fake();
+        $first = $this->order();
+        $next  = $this->order();
+        $step  = $this->runningStep([$first->id, $next->id]);
+
+        $this->withoutApiKey(fn () => $this->work($first->id));
+
+        $row = $this->rowFor($first->id);
+        $this->assertSame(['failed', 'No API key set', 1], [$row->state, $row->reason, (int) $row->attempts]);
+        $this->assertSame(['stopped', 'Stopped: no API key set'], [$step->fresh()->state, $step->fresh()->reason]);
+        $this->assertSame(['not_run', 'Not run: run stopped'], [$this->rowFor($next->id)->state, $this->rowFor($next->id)->reason]);
+        Http::assertNothingSent();
         Queue::assertNothingPushed();
     }
 

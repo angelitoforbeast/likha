@@ -143,6 +143,31 @@ abstract class NightAstraTestCase extends NightRunTestCase
         return $step;
     }
 
+    /**
+     * Patakbuhin ang $run nang walang API key. Ang engine ay bumabasa rin ng key mula sa environment ng
+     * makina: pinapawalang-laman lang sa process na ito, at ibinabalik pagkatapos.
+     */
+    protected function withoutApiKey(callable $run): void
+    {
+        AstraEncoder::storeApiKey(null);
+        config(['services.openai.key' => null]);
+        $saved = [];
+        foreach (['ASTRA_ENCODER_API_KEY', 'OPENAI_API_KEY'] as $name) {
+            $saved[$name] = [$_SERVER[$name] ?? null, $_ENV[$name] ?? null];
+            $_SERVER[$name] = '';
+            $_ENV[$name]    = '';
+        }
+
+        try {
+            $run();
+        } finally {
+            foreach ($saved as $name => [$server, $env]) {
+                if ($server === null) { unset($_SERVER[$name]); } else { $_SERVER[$name] = $server; }
+                if ($env === null) { unset($_ENV[$name]); } else { $_ENV[$name] = $env; }
+            }
+        }
+    }
+
     protected function rowFor(int $orderId): NightAstraRow
     {
         return NightAstraRow::where('macro_output_id', $orderId)->sole();

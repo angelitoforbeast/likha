@@ -12,6 +12,7 @@ use App\Support\NightRunSettings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Ang Astra night run (spec 007 §6): aling mga order, kailan magsisimula, at ang pagbabantay kada minuto.
@@ -212,7 +213,8 @@ class NightAstraRun
     }
 
     /**
-     * Breaker: bawat huling `failed` ng isang row ay +1 (atomic increment); sa ika-10 sunod-sunod, hinto ang run.
+     * Breaker: bawat huling `failed` ng isang row, at bawat unang subok na ibinalik para sa retry, ay +1
+     * (atomic increment); sa ika-10 sunod-sunod, hinto ang run.
      * Ang $reason ay fixed string ng row, hindi kailanman text mula sa OpenAI.
      */
     public function countFailure(int $stepId, string $reason): void
@@ -237,11 +239,36 @@ class NightAstraRun
      */
     public function tick(): void
     {
-        $this->tickTonight();
+        try {
+            $this->tickTonight();
+        } catch (\Throwable $e) {
+            // Ang palya sa pagsisimula ng gabing ito ay hindi dapat pumigil sa pagbabantay ng mga tumatakbong run.
+            // Class lang ng exception ang nilo-log, hindi ang message.
+            Log::warning('NIGHT_ASTRA_TICK', ['exception' => get_class($e)]);
+        }
 
         foreach (NightRunStep::where('kind', self::KIND)->where('state', 'running')->orderBy('id')->get() as $step) {
             $this->sweep($step);
         }
+
+        $this->sweepStopped();
+    }
+
+    /**
+     * Mga run na `stopped`: ang row na naiwang `running` ng worker ay isinasara ("Worker stopped", walang bilang
+     * sa breaker — hinto na ang run), at ang row na `queued` pa (hal. ibinalik para sa retry kasabay ng hinto)
+     * ay `not_run`. Hindi kailanman `queued` ang isinusulat dito.
+     */
+    private function sweepStopped(): void
+    {
+        $stopped = NightRunStep::where('kind', self::KIND)->where('state', 'stopped')->select('id');
+
+        NightAstraRow::whereIn('step_id', $stopped)->where('state', 'running')
+            ->where('started_at', '<', now()->subMinutes(self::STALE_ROW_MINUTES))
+            ->update(['state' => 'failed', 'reason' => 'Worker stopped', 'finished_at' => now()]);
+
+        NightAstraRow::whereIn('step_id', clone $stopped)->where('state', 'queued')
+            ->update(['state' => 'not_run', 'reason' => 'Not run: run stopped', 'finished_at' => now()]);
     }
 
     /**
@@ -296,7 +323,10 @@ class NightAstraRun
                 $this->start($tonight, 'schedule');
             } elseif (!$isTonight || $waitOver) {
                 // Kapag OK na ang kondisyon pero hindi na pwedeng simulan: ang huling dahilan ng paghihintay.
-                $reason = $condition['reason'] ?? preg_replace('/^Waiting: /', '', (string) $waiting->reason);
+                // Pinatay ang switch habang naghihintay: iyon ang dahilan, hindi ang lumang dahilan ng paghihintay.
+                $reason = !$settings['night_astra_enabled']
+                    ? 'switched off while waiting'
+                    : ($condition['reason'] ?? preg_replace('/^Waiting: /', '', (string) $waiting->reason));
                 NightRunStep::where('id', $waiting->id)->where('state', 'waiting')
                     ->update(['state' => 'did_not_run', 'reason' => 'Did not run: ' . $reason, 'finished_at' => now()]);
             } elseif (!$condition['ok']) {

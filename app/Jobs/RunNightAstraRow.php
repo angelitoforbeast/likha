@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\NightAstraRow;
 use App\Models\NightRunStep;
 use App\Services\AiCheckerRowRunner;
+use App\Services\AstraEncoder;
 use App\Services\NightAstraRun;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -117,6 +118,16 @@ class RunNightAstraRow implements ShouldQueue
             return;
         }
 
+        // Nawala ang API key pagkatapos magsimula ang run: walang engine call, hinto agad ang run.
+        if (AstraEncoder::resolveApiKey() === null) {
+            if ($this->finish('failed', ['reason' => 'No API key set'])) {
+                $night->stop($step, 'Stopped: no API key set');
+            }
+            $night->settle($step);
+
+            return;
+        }
+
         // 5. Ang parehong run-one-row function ng browser. Ang buong app.url ang host (str_contains ang scope rule).
         $out = app(AiCheckerRowRunner::class)->run((int) $row->macro_output_id, 'astra', (string) config('app.url'), [
             'source'                 => 'night',
@@ -166,7 +177,14 @@ class RunNightAstraRow implements ShouldQueue
         if ($class === 'transient' && (int) $row->attempts === 1 && NightRunStep::where('id', $step->id)->value('state') === 'running') {
             $requeued = $this->write(['state' => 'queued', 'dispatched_at' => now()] + $base);
             if ($requeued) {
-                self::dispatch($this->rowId)->delay(self::RETRY_DELAY_S);
+                // Bilang din sa breaker ang unang subok na pumalya: ang retry job ay nasa dulo ng buong pila, kaya
+                // kung huling `failed` lang ang bibilangin, uubusin ng outage ang buong gabi nang walang hinto.
+                // `queued` muna ang row BAGO ang bilang: kapag inihinto nito ang run, kasama ang row na ito sa mga
+                // ginagawang `not_run` ng stop(), at wala nang retry job na ipapadala.
+                $night->countFailure((int) $step->id, $reason);
+                if (DB::table('night_astra_rows')->where('id', $this->rowId)->value('state') === 'queued') {
+                    self::dispatch($this->rowId)->delay(self::RETRY_DELAY_S);
+                }
             }
 
             return;

@@ -64,7 +64,7 @@ class NightSettingsTest extends NightRunTestCase
 
     public function test_invalid_time_falls_back_to_the_default(): void
     {
-        foreach (['', '25:00', '1:00', 'abc', '03:60'] as $bad) {
+        foreach (['', '25:00', '1:00', 'abc', '03:60', "04:00\n"] as $bad) {
             $this->set([
                 'night_import_time_1'   => $bad,
                 'night_import_time_2'   => $bad,

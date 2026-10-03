@@ -25,7 +25,8 @@ class NightRunSettings
     public const MAX_ROWS_DEFAULT = 1500;
     public const MAX_ROWS_LIMIT   = 20000;
 
-    private const TIME_PATTERN = '/^([01]\d|2[0-3]):[0-5]\d$/';
+    // \z, hindi $: ang $ ay tumatanggap ng newline sa dulo.
+    private const TIME_PATTERN = '/^([01]\d|2[0-3]):[0-5]\d\z/';
 
     /**
      * @return array{night_macro_import_enabled: bool, night_likha_import_enabled: bool, night_astra_enabled: bool,
