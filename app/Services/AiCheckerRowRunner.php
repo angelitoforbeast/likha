@@ -41,10 +41,16 @@ class AiCheckerRowRunner
             'batch_total'     => $batchTotal > 0 ? $batchTotal : null,
             'macro_output_id' => $id,
         ];
-        $t0 = microtime(true);
+        $t0  = microtime(true);
+        $svc = null;
 
         try {
-            $svc    = $engine === 'astra' ? new AstraEncoder() : new MacroChecker();
+            $svc = $engine === 'astra' ? new AstraEncoder() : new MacroChecker();
+            // Engine options ng night run (Astra lang); hindi ito sine-set ng browser kaya walang nagbabago roon.
+            if ($svc instanceof AstraEncoder) {
+                if (isset($ctx['http_timeout']))            $svc->httpTimeout((int) $ctx['http_timeout']);
+                if (!empty($ctx['only_when_status_blank'])) $svc->onlyWhenStatusBlank();
+            }
             $result = $svc->processRow($id, $maps, (string) $host);
             $durationMs = (int) round((microtime(true) - $t0) * 1000);
             // Re-read so frontend gets the actual updated values
@@ -78,7 +84,7 @@ class AiCheckerRowRunner
                     'APP SCRIPT CHECKER' => $row->{'APP SCRIPT CHECKER'},
                     'STATUS'       => $row->STATUS,
                 ],
-            ], $result, $logId);
+            ], $result, $logId, $this->lastError($svc));
         } catch (\Throwable $e) {
             $durationMs = (int) round((microtime(true) - $t0) * 1000);
             $logId = $this->writeLog($logBase + [
@@ -90,13 +96,19 @@ class AiCheckerRowRunner
                 'duration_ms' => $durationMs,
             ], $ctx);
 
-            return $this->out(500, ['ok' => false, 'error' => $e->getMessage()], null, $logId);
+            return $this->out(500, ['ok' => false, 'error' => $e->getMessage()], null, $logId, $this->lastError($svc));
         }
     }
 
-    private function out(int $status, array $payload, ?array $result = null, ?int $logId = null): array
+    private function out(int $status, array $payload, ?array $result = null, ?int $logId = null, ?array $lastError = null): array
     {
-        return ['status' => $status, 'payload' => $payload, 'result' => $result, 'log_id' => $logId, 'last_error' => null];
+        return ['status' => $status, 'payload' => $payload, 'result' => $result, 'log_id' => $logId, 'last_error' => $lastError];
+    }
+
+    /** Huling transport error ng Astra (kind/status/code); null para sa classic engine o kapag wala. */
+    private function lastError($svc): ?array
+    {
+        return $svc instanceof AstraEncoder ? $svc->lastError() : null;
     }
 
     /**
