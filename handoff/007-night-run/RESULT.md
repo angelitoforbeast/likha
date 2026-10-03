@@ -1,9 +1,9 @@
 # Result 007: Night run: automatic imports at 1am and 2am, Astra at 3am
 
-Status: **spec and plan committed, waiting for Mira's "go"**, branch `feat/007-night-run` cut from `develop` at `91c470a`. No code yet.
+Status: **in progress (T1 to T7)**, branch `feat/007-night-run` cut from `develop` at `91c470a`.
 - Spec: `docs/specs/007-night-run.md` (spec review in its §16: needs revision, 3 majors, all folded in).
 - Plan: `docs/plans/007-night-run.md` (T1–T7).
-- Mira's "go": **not given yet.** 18 questions, each with the default that will be built, are in spec §15.
+- Mira's "go": **given 2026-10-04**, after she read the spec, the 18 questions and the plan at `a906389`: "Go on the plan, T1 to T7 in order, one handoff." Her answers are amendment 007-1 (`AMENDMENT-1.md`), summarised in spec §15a.
 
 ## Summary
 

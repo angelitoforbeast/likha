@@ -114,9 +114,14 @@ block on the settings page. The existing settings form and route aren't touched.
 `php artisan night:import {kind : macro|likha} {slot : 1|2}`:
 
 1. Reads the switch for that kind again; off → exits, records nothing.
-2. Stale rule: an active run of that kind whose `started_at` (or `created_at` when null) is older than 60 minutes
-   (macro) or 120 minutes (Likha) is closed: `status = failed`, `finished_at = now`, message "Stale: closed by
-   the night run"; its unfinished items/sheets are set to `failed`; for macro `cancel_requested = true`.
+2. Stale rule (amendment 007-1, 17). **Macro:** an active run with no progress for 15 minutes, where progress
+   is the later of the run's `updated_at` and its items' `updated_at` (the job touches them per sheet). A run
+   that is progressing is never closed, whatever its age. **Likha:** 2 hours from `started_at` (in the
+   starter, on every path, §4.1). A no-progress rule isn't reliable for Likha: on a fresh sheet the job reads
+   the whole sheet and processes every row before its first `saveProgress`, so a healthy run can go a long time
+   without touching its run or run-sheet rows. A stale run is closed: `status = failed`, `finished_at = now`,
+   message "Stale: closed by the night run"; its unfinished items/sheets are set to `failed`; for macro
+   `cancel_requested = true`.
 3. Calls the start service. Started → step `started` with `ref_id` = run id. Refused → step `skipped`, reason
    "Skipped: run #N was still running". An exception → step `failed`, reason "Failed to start" plus the exception
    class name only.
@@ -198,13 +203,16 @@ A tick, `php artisan night:astra-tick`, runs every minute (§7). For tonight (`n
 
 - Before the Astra time, or when the switch is off: nothing to start.
 - From the Astra time to the stop time, when no `astra` step exists for tonight: check the condition
-  **no macro import is `queued` or `running`, and a macro import with `status = done` has `finished_at` ≥ 00:00
-  Manila today**.
+  (amendment 007-1, 12 and 16) **no import of either kind is active (macro `queued`/`running`, Likha
+  `running`), and a macro import that started at or after 00:00 Manila today has ended (`done` or `failed`)
+  with at least one sheet (`macro_import_run_items`) `done`**.
   - Met → start.
   - Not met and it is still within 60 minutes of the Astra time → step `waiting` with the reason ("Waiting: an
-    import is still running" / "Waiting: no finished macro import since midnight"); the next ticks check again.
-  - Not met after 60 minutes → `did_not_run`, reason "Did not run: an import was still running" or "Did not run:
-    no finished macro import since midnight".
+    import is still running (macro)" / "(Likha)" / "Waiting: no finished macro import since midnight"); the next
+    ticks check again.
+  - Not met after 60 minutes → `did_not_run`, reason "Did not run: an import was still running (macro)" /
+    "(Likha)" or "Did not run: no finished macro import since midnight". A macro run in which no sheet finished
+    doesn't count as finished.
 - A step that exists and isn't `waiting` is never started again by the schedule: one run per date.
 
 Start is **one database transaction**: a conditional update (`waiting`/new → `running`), and only the caller
@@ -403,10 +411,10 @@ inline), and the held-lock test sets the starter's wait to 0.
 |---|---|
 | `RunRowCharacterizationTest` | browser `runRow` JSON and log row, written before the refactor, unchanged after: Astra engine, classic engine, row not found (404), address maps missing (500), exception path (500 and a `failed` log row) |
 | `ImportStartTest` | second macro start while queued and while running is refused; API 409 with the same JSON; button message unchanged; a start while the lock is held creates no run, and two starts create one run; archived settings excluded on button, API and scheduler; Likha guard (start and single sheet) |
-| `NightImportCommandTest` | stale macro run (61 min) and Likha run (121 min) closed with the message, then a new run starts; a fresh active run → "Skipped: run #N was still running"; switch off → nothing starts and nothing is recorded; second call same night and kind does nothing; a job whose run was closed does not import (macro and Likha) |
+| `NightImportCommandTest` | macro run with no progress for 16 minutes and Likha run started 121 minutes ago closed with the message, then a new run starts; a macro run 3 hours old that progressed a minute ago is not closed; a fresh active run → "Skipped: run #N was still running"; switch off → nothing starts and nothing is recorded; second call same night and kind does nothing; a job whose run was closed does not import (macro and Likha) |
 | `NightSettingsTest` | invalid time falls back to the default (table of bad values); max rows out of range falls back; schedule has the entries with switches on and none with them off |
 | `NightAstraSelectionTest` | yesterday by Manila date at 00:30 Manila (16:30 UTC the day before); STATUS NULL, '' and spaces in; other dates and statused rows out; oldest first; safety maximum |
-| `NightAstraStartTest` | waits while an import runs, starts after it; "Did not run" after 60 minutes (both reasons); one run per date; no API key → stopped; Astra switch off → the tick starts nothing; a waiting step past its window is closed with the switch off |
+| `NightAstraStartTest` | waits while a macro import runs and while a Likha import runs, starts after it; starts after a macro run that ended `failed` with one sheet done, not after one with no sheet done; "Did not run" after 60 minutes (the three reasons); one run per date; no API key → stopped; Astra switch off → the tick starts nothing; a waiting step past its window is closed with the switch off |
 | `NightAstraRowJobTest` | STATUS set meanwhile → skipped, order untouched, no HTTP call; STATUS set during the call → nothing written; retry once then failed; breaker at 10 with rows left `not_run`; 401 and `insufficient_quota` stop at once; a second delivery of the same job makes no second call; log row has source `night`, null user; host scope from `app.url` (likha and incepxion lists); stop time → "Not run: out of time"; reasons contain no response body |
 | `NightAstraTickTest` | a row running 10 minutes is failed by the tick; the tick never re-queues; finishes the run |
 | `NightRunRoutesTest` | each of the four routes: CEO passes, another allowed role gets 403 (one table); Run now rejects today and bad dates; Retry failed takes only failed and not-run rows still blank; the logs page shows the section, and the cost only to the CEO |
@@ -484,6 +492,25 @@ outside the page; changing `AstraEncoder::post`'s own retry; cleaning the three 
     (`updated_at`) for 10 minutes.
 18. **Timeout of one OpenAI call at night:** 120 s instead of the browser's 300 s (§6.3), so a hung call is
     retried rather than ending as "Worker stopped". Default: as written.
+
+## 15a. Mira's answers (amendment 007-1, 2026-10-04; `handoff/007-night-run/AMENDMENT-1.md`)
+
+"Go" on T1 to T7. Defaults accepted for questions 1 to 11, 13, 15 and 18. Changed:
+
+- **12:** Astra waits while any import, macro or Likha, is active (§6.2, already edited above).
+- **14:** `AstraEncoder::post` logs the HTTP status and OpenAI's error type and code only, never the body, on
+  both paths (`ASTRA_ENCODER_HTTP`). The exception line (`ASTRA_ENCODER_EX`) logs the exception class, not its
+  message. Test: a 401 whose body contains a key-like string leaves no such string in the log line. This
+  replaces the "left as it is" sentence in §1.
+- **16:** the finished-import condition is "a macro run started since 00:00 Manila has ended with at least one
+  sheet done" (§6.2). On the page such a run with failed sheets reads "Done with N failed sheets", its expand
+  lists the failed sheets' names and reasons, and the red banner shows. The sheet reasons are the jobs' raw
+  exception text, so they are cut to 200 characters and shown to the CEO only; other viewers see the names.
+- **17:** macro stale = no progress for 15 minutes; Likha stays at 2 hours from the start, with the reason
+  (§4.2).
+- **8:** rows skipped as "No chat text" are counted on the night's line: found = PROCEED + for a person +
+  failed + skipped + not run (+ over the safety maximum).
+- **1:** config price line and the "gpt-6-luna cost is computed" test; no migration.
 
 ## 16. Spec review (skeptic-reviewer, spec-review mode, opus, 2026-10-04)
 
