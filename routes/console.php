@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Schema;
 use App\Models\AppSetting;
+use App\Support\NightRunSettings;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -32,3 +33,22 @@ Schedule::command('holds:snapshot')
     ->dailyAt($holdSnapshotTime)
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/holds-snapshot.log')); // file log ng cron output
+
+// Night run (handoff 007) — macro at Likha import sa oras 1 at oras 2 (default 01:00 at 02:00, Asia/Manila).
+// Ang mga switch at oras ay nasa app_settings (CEO lang), binabasa kada `schedule:run` sa pamamagitan ng
+// NightRunSettings: mali ang oras → default; DB di available o walang app_settings → lahat OFF.
+// Naka-OFF ang switch → WALANG entry para sa import na iyon (hindi lalabas sa `schedule:list`).
+$nightSettings = NightRunSettings::read();
+
+foreach ([1 => $nightSettings['night_import_time_1'], 2 => $nightSettings['night_import_time_2']] as $nightSlot => $nightTime) {
+    foreach (['macro', 'likha'] as $nightKind) {
+        if (!$nightSettings["night_{$nightKind}_import_enabled"]) {
+            continue;
+        }
+
+        Schedule::command("night:import {$nightKind} {$nightSlot}")
+            ->timezone('Asia/Manila')
+            ->dailyAt($nightTime)
+            ->withoutOverlapping();
+    }
+}

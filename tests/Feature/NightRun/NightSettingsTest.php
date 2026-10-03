@@ -4,6 +4,9 @@ namespace Tests\Feature\NightRun;
 
 use App\Models\AppSetting;
 use App\Support\NightRunSettings;
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule as ScheduleFacade;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -123,6 +126,58 @@ class NightSettingsTest extends NightRunTestCase
         $this->assertSame('1', AppSetting::get('night_macro_import_enabled'));
         $this->assertSame('0', AppSetting::get('night_likha_import_enabled'));
         $this->assertNull(AppSetting::get('hold_snapshot_time'), 'hindi night key → hindi sinusulat');
+    }
+
+    /**
+     * Binabasa ulit ang routes/console.php sa bagong Schedule (gaya ng ginagawa ng bawat `schedule:run`),
+     * tapos ang totoong `schedule:list`. Para makita ang listing bilang ebidensya:
+     * `php artisan test --filter=test_schedule_list_has_the_night_imports_only_when_their_switch_is_on`.
+     */
+    public function test_schedule_list_has_the_night_imports_only_when_their_switch_is_on(): void
+    {
+        $this->set(['night_import_time_1' => '01:15', 'night_import_time_2' => '02:45']);
+
+        // [macro switch, likha switch, inaasahang entries: command => cron]
+        $cases = [
+            'switches on' => ['1', '1', [
+                'night:import macro 1' => '15 1 * * *',
+                'night:import likha 1' => '15 1 * * *',
+                'night:import macro 2' => '45 2 * * *',
+                'night:import likha 2' => '45 2 * * *',
+            ]],
+            'macro only' => ['1', '0', [
+                'night:import macro 1' => '15 1 * * *',
+                'night:import macro 2' => '45 2 * * *',
+            ]],
+            'switches off' => ['0', '0', []],
+        ];
+
+        foreach ($cases as $name => [$macro, $likha, $expected]) {
+            $this->set(['night_macro_import_enabled' => $macro, 'night_likha_import_enabled' => $likha]);
+
+            $this->app->forgetInstance(Schedule::class);
+            ScheduleFacade::clearResolvedInstance(Schedule::class);
+            require base_path('routes/console.php');
+
+            $night = [];
+            foreach ($this->app->make(Schedule::class)->events() as $event) {
+                if (preg_match('/night:\S+.*$/', (string) $event->command, $m)) {
+                    $night[$m[0]] = $event->expression;
+                    $this->assertSame('Asia/Manila', (string) $event->timezone, $name);
+                    $this->assertTrue($event->withoutOverlapping, $name);
+                }
+            }
+            $this->assertSame($expected, $night, $name);
+
+            Artisan::call('schedule:list');
+            $listing = Artisan::output();
+            $this->assertStringContainsString('holds:snapshot', $listing, $name);
+            $this->assertSame(count($expected), substr_count($listing, 'night:import'), $name);
+
+            if (in_array('--filter=' . __FUNCTION__, $_SERVER['argv'] ?? [], true)) {
+                fwrite(STDERR, "\n--- schedule:list, {$name} ---\n{$listing}");
+            }
+        }
     }
 
     public function test_night_tables_are_created_by_their_migrations(): void

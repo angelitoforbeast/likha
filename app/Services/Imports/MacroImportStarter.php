@@ -7,6 +7,7 @@ use App\Models\MacroGsheetSetting;
 use App\Models\MacroImportRun;
 use App\Models\MacroImportRunItem;
 use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -17,6 +18,9 @@ use Illuminate\Support\Facades\DB;
  */
 class MacroImportStarter
 {
+    /** Walang progress nang ganito katagal (minuto) = stale, para sa scheduled start. */
+    public const STALE_MINUTES = 15;
+
     /** Ilang segundo maghihintay sa lock (0 sa tests para hindi matulog). */
     public int $lockWait = 5;
 
@@ -33,6 +37,44 @@ class MacroImportStarter
             );
         } catch (LockTimeoutException $e) {
             return ['started' => false, 'run' => $this->activeRun()];
+        }
+    }
+
+    /**
+     * Stale rule ng night run (amendment 007-1, 17): ang queued/running na run na walang progress nang
+     * STALE_MINUTES ay isinasara. Progress = ang mas huli sa updated_at ng run at ng items nito (ginagalaw ng job
+     * kada sheet). Ang run na umuusad ay hindi isinasara, gaano man katagal. Tinatawag LANG ng scheduled
+     * start bago ang start(); ang button at API ay hindi (may Force-stop button sila).
+     */
+    public function closeStaleRuns(string $message): void
+    {
+        $cutoff = now()->subMinutes(self::STALE_MINUTES);
+
+        foreach (MacroImportRun::whereIn('status', ['queued', 'running'])->get() as $run) {
+            $itemProgress = MacroImportRunItem::where('run_id', $run->id)->max('updated_at');
+            $progress = collect([$run->updated_at, $itemProgress ? Carbon::parse($itemProgress) : null])->filter()->max();
+
+            if ($progress && $progress->gte($cutoff)) {
+                continue;
+            }
+
+            // Run + items sa iisang transaction; conditional ang update para hindi masagasaan ang run na katatapos lang.
+            DB::transaction(function () use ($run, $message) {
+                $closed = MacroImportRun::where('id', $run->id)
+                    ->whereIn('status', ['queued', 'running'])
+                    ->update([
+                        'status'           => 'failed',
+                        'finished_at'      => now(),
+                        'message'          => $message,
+                        'cancel_requested' => true,
+                    ]);
+
+                if ($closed) {
+                    MacroImportRunItem::where('run_id', $run->id)
+                        ->whereIn('status', ['queued', 'running', 'processing'])
+                        ->update(['status' => 'failed']);
+                }
+            });
         }
     }
 
