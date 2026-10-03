@@ -86,3 +86,33 @@ Accepted review findings, each with the reason it isn't fixed now (CLAUDE.md wor
 - **`il-w-item` is a marker class with no CSS rule** (a test pins the flexible Item column by it). Reason: harmless.
 - **At 72 px (1,100–1,365 px) a value like "▼ −100.0%" may wrap.** Reason: width approved in spec §8; Mira's browser check decides.
 - **`ilCfTint` evaluates the owner's rules with no reference row**, so a rule that compares against another column or a formula is skipped. Reason: the To order value is a combined base-item figure, not a page row.
+
+## Handoff 007: night run (2026-10-04)
+
+Accepted review findings. None is a blocker or a major; the majors were fixed (see `handoff/007-night-run/RESULT.md`).
+
+- **A `queued` macro run waiting 15+ minutes behind a long job on the one `default` worker is closed as stale while healthy.** Reason: harmless (its job returns at start, the new run imports the same rows); the earlier run only reads "Failed / Stale". Trusted path.
+- **A night import time set before midnight (e.g. 23:30) is recorded under that day's date, not the next morning's.** Reason: CEO input, trusted; the defaults are 01:00 and 02:00.
+- **If the step update fails after a real import start, the step stays "Failed to start: interrupted" though the import runs.** Reason: needs a database failure between two writes; the import page still shows the run.
+- **Job dispatch happens after the commit in both import starters**, so a failed dispatch leaves an active run with no job. Reason: database-failure path; macro has Force-stop and the no-progress rule, Likha the 2-hour rule.
+- **A stale-closed Likha run's job finishes the sheet it is on** (and marks that sheet done on the closed run) before stopping. Reason: the job is only changed between sheets; same limit as the macro Force-stop.
+- **A macro job closed mid-run skips the primary-item recompute and the cache bump** for rows it already imported. Reason: same as today's Cancel branch; the next import recomputes.
+- **`app/Http/Controllers/MacroImportController.php` holds a second, unrouted macro start with no guard.** Reason: dead code, not touched by the handoff. Suggestion for the owner: delete the file.
+- **`AI_CHECKER_LOG_FAIL` logs a query exception message** (it can contain order text), and the classic engine's `MACRO_CHECKER_*_HTTP` lines still log the response body. Reason: moved as it was / classic engine is out of scope; amendment 007-1 item 14 covered Astra's `post` only. Suggestion: class and status only, as Astra now does.
+- **The runner's 500 payload carries the raw exception message**, as the browser gets today. Reason: the browser path must not change; the night job never copies it (fixed reasons only, tested).
+- **A row deleted during a night call reads "Status set by a person".** Reason: rows aren't deleted in normal use; nothing is written either way.
+- **The blank-STATUS rule exists in four places** (`blankRowsQuery`, `AstraEncoder`'s conditional write, `NightAstraRun::whereStatusBlank` and `isStatusBlank`). Reason: the first two are existing or opt-in code the handoff said not to refactor; they agree (reviewer checked NBSP, tab, '0').
+- **A billed call whose runner ends in the exception path adds no cost to the night's estimate.** Reason: the result is null there; the cost is labelled "estimated".
+- **A dead Likha run blocks Astra ("Did not run: an import was still running (Likha)") until something starts a Likha import**, which closes runs older than 2 hours. Reason: visible in the banner; with the Likha night switch on it heals itself at 01:00.
+- **The tick is scheduled only while the Astra switch is on or a step is waiting/running**, so rows left in a *stopped* run are swept only then. Reason: Retry failed re-opens the step and the tick then runs; nothing is spent meanwhile.
+- **After a short blip leaves the breaker's counter at 10 or more, one unrelated final failure before any success stops the run.** Reason: rare; Retry failed recovers it.
+- **"10 rows failed in a row" can be fewer than 10 distinct rows** (a row counts on its first attempt and again on its final failure). Reason: it is a count of consecutive failures; stricter is the safe side for money.
+- **Run now for yesterday's orders before tonight's Astra time takes that date's one run.** Reason: Mira's decision (amendment 007-1, question 4); the confirm text says so.
+- **Banner: a false "has no record" on the day a switch is first turned on after its time** (or a time is moved earlier than now). Reason: the page doesn't know when a switch was turned on; it clears the next night.
+- **"N of M done" counts only imports that have a record**, and counts "Done with failed sheets" as done. Reason: the badge shows the worst state and the banner names a missing step.
+- **Duration of a re-opened run spans from its first start.** Reason: one record per date.
+- **`cost_complete` is derived from the log's model names against the config prices**, not from the engine's `cost_known` flag. Reason: they agree; the flag isn't stored per row.
+- **`isCeo()` ignores the CEO's "view as" preview** and now exists in three controllers. Reason: existing pattern, copied as the spec says; a preview is still the CEO.
+- **Untested, by design or because sqlite can't run it:** real concurrency of the cache lock, of the claim and of the double-click re-open on MySQL; `INSERT IGNORE` and the `TRIM(STATUS)` clause on MySQL/pgsql; the jobs' between-sheet branches behind the Google client; the catch branches in `routes/console.php` and the job's own catch; the Alpine helpers of the Night run section; CSRF on the three forms (tests run without the middleware). Reason: the test DB is sqlite in memory, the Google fetch is out of test scope (handoff), and the project has no JS test harness.
+- **Red runs that were "class or method not found"** for several first slices. Reason: `.claude/rules/tests.md` allows it for a module about to be created; the later slices have behaviour failures.
+- **`node --test 'test/hooks/*.test.mjs'` was not run.** Reason: not in the handoff's allowed commands; no kit file was touched.

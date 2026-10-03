@@ -397,7 +397,8 @@ At the top of `/encoder/checker_1/ai-checker/logs`, above "Batches":
   ("≈ $0.41 estimated") and **Retry failed**. For the CEO, "Show rows" loads the row list: order id, page, result
   (PROCEED / code / Failed / Skipped / Not run), reason, and a link to its log entry
   (`/encoder/checker_1/ai-checker/answers?date=…&mid=…`).
-- "Waiting for the worker": the run is `running`, rows are `queued`, none is `running`, and no row started or
+- "Waiting for the worker" (the step's own start or re-open in the last 3 minutes also counts as activity):
+  the run is `running`, rows are `queued`, none is `running`, and no row started or
   finished in the last 3 minutes.
 - CEO: a date field and **Run now** with a confirm.
 - English labels, the page's existing classes, no horizontal scroll (the expand stacks on a phone), every value
