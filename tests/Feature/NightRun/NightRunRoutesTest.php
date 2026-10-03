@@ -105,7 +105,7 @@ class NightRunRoutesTest extends NightAstraTestCase
     {
         $response = $this->actingAs($this->user())->post(self::SETTINGS_URL, self::VALID_SETTINGS);
 
-        $response->assertRedirect(route('encoder.checker1.settings'))->assertSessionHas('settings_saved', true);
+        $response->assertRedirect(route('encoder.checker1.settings'))->assertSessionHas('night_settings_saved', true)->assertSessionMissing('settings_saved');
         $this->assertSame([
             'night_macro_import_enabled' => true,
             'night_likha_import_enabled' => false,
@@ -147,7 +147,8 @@ class NightRunRoutesTest extends NightAstraTestCase
         foreach ($cases as $name => [$change, $errorField]) {
             $response = $this->from('/encoder/checker_1/settings')->post(self::SETTINGS_URL, array_merge(self::VALID_SETTINGS, $change));
 
-            $response->assertRedirect('/encoder/checker_1/settings')->assertSessionHasErrors($errorField);
+            $response->assertRedirect('/encoder/checker_1/settings')->assertSessionHasErrors($errorField, null, 'night');
+            $this->assertTrue(session('errors')->getBag('default')->isEmpty(), "{$name}: the default bag must stay empty");
             $this->assertSame($before, NightRunSettings::read(), $name);
         }
     }

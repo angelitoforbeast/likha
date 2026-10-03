@@ -213,6 +213,7 @@ class NightRunSummary
                 'no_chat_text'       => (int) ($noChat[$step->id] ?? 0),
                 'not_run'            => $notRun,
                 'over_max'           => (int) $step->rows_over_max,
+                'max_rows'           => (int) NightRunSettings::read()['night_astra_max_rows'],
                 'queued'             => $queued,
                 'running'            => $running,
                 'started_at'         => self::manila($step->started_at, 'Y-m-d H:i'),

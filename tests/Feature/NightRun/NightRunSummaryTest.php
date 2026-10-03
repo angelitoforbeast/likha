@@ -87,6 +87,7 @@ class NightRunSummaryTest extends NightAstraTestCase
                 'no_chat_text'       => 1,
                 'not_run'            => 2,
                 'over_max'           => 2,
+                'max_rows'           => 1500,
                 'queued'             => 0,
                 'running'            => 0,
                 'started_at'         => '2026-10-05 03:00',

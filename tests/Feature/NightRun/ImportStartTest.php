@@ -207,6 +207,20 @@ class ImportStartTest extends NightRunTestCase
         (new ImportMacroFromGoogleSheet($run->id))->handle();
 
         $this->assertSame($before, $run->fresh()->getAttributes());
+
+        // Isinara ng iba sa pagitan ng pagbasa ng job at ng pagsulat ng "running": hindi dapat mabuhay ulit.
+        $racy      = $this->macroRun('queued');
+        $startedAt = $racy->fresh()->started_at;
+        MacroImportRun::retrieved(function (MacroImportRun $found) use ($racy) {
+            if ((int) $found->id === $racy->id) {
+                MacroImportRun::where('id', $racy->id)->update(['status' => 'failed', 'message' => 'Stale: closed by the night run']);
+            }
+        });
+
+        (new ImportMacroFromGoogleSheet($racy->id))->handle();
+
+        $racy->refresh();
+        $this->assertSame(['failed', 'Stale: closed by the night run', $startedAt?->toDateTimeString()], [$racy->status, $racy->message, $racy->started_at?->toDateTimeString()]);
     }
 
     public function test_macro_job_final_write_applies_only_while_the_run_is_still_active(): void

@@ -32,8 +32,8 @@ class NightRunController extends Controller
     {
         if (!$this->isCeo()) abort(403);
 
-        // Checkbox ang mga switch: walang field = off.
-        $validated = $request->validate([
+        // Checkbox ang mga switch: walang field = off. Sariling error bag (`night`) para hindi madoble ang listahan sa page.
+        $validated = $request->validateWithBag('night', [
             'night_macro_import_enabled' => 'nullable|boolean',
             'night_likha_import_enabled' => 'nullable|boolean',
             'night_astra_enabled'        => 'nullable|boolean',
@@ -45,10 +45,10 @@ class NightRunController extends Controller
         ]);
 
         if ($validated['night_import_time_1'] >= $validated['night_import_time_2']) {
-            return back()->withInput()->withErrors(['night_import_time_1' => 'The first import time must be earlier than the second import time.']);
+            return back()->withInput()->withErrors(['night_import_time_1' => 'The first import time must be earlier than the second import time.'], 'night');
         }
         if ($validated['night_astra_time'] >= $validated['night_astra_stop_time']) {
-            return back()->withInput()->withErrors(['night_astra_time' => 'The Astra time must be earlier than the stop time.']);
+            return back()->withInput()->withErrors(['night_astra_time' => 'The Astra time must be earlier than the stop time.'], 'night');
         }
 
         foreach (NightRunSettings::SWITCHES as $switch) {
@@ -57,7 +57,7 @@ class NightRunController extends Controller
         $validated['night_astra_max_rows'] = (int) $validated['night_astra_max_rows'];
         NightRunSettings::save($validated);
 
-        return redirect()->route('encoder.checker1.settings')->with('settings_saved', true);
+        return redirect()->route('encoder.checker1.settings')->with('night_settings_saved', true);
     }
 
     /** POST /encoder/checker_1/ai-checker/night/run-now — `date` = petsa ng mga order (kahapon sa Manila o mas maaga). */

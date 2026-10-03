@@ -46,11 +46,16 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
             return;
         }
 
-        $run->update([
+        // Conditional: kung may nagsara ng run sa pagitan ng pagbasa at ng sulat na ito, walang row na magbabago → hinto.
+        $started = MacroImportRun::where('id', $run->id)->whereIn('status', ['queued', 'running'])->update([
             'status'     => 'running',
             'started_at' => $run->started_at ?: now(),
             'message'    => null,
         ]);
+        if ($started === 0) {
+            return;
+        }
+        $run->refresh();
 
         $settings = MacroGsheetSetting::all()->keyBy('id');
 
