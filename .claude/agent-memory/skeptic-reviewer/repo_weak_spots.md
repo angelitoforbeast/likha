@@ -67,6 +67,9 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 - Specs name methods that don't exist (007: `MacroChecker::lists()` is really `loadValidationRefs()`); grep every method name, not only files.
 - Queue state machines: check what happens to the dispatch marker when a row is re-queued, and whether "step flipped to running" and "rows inserted" share a transaction.
 - phpunit.xml uses QUEUE_CONNECTION=sync and CACHE_STORE=array: delayed dispatches run inline, and a lock test with block(n) sleeps n seconds.
+- 007 T1 import starters: a "skip the final write when a flag is set" rule strands the run in an active state when the job was healthy (macro Cancel on the last sheet); the safe rule is a final write conditional on the status still being active. Check every "leave it as it is" branch for who ends the run afterwards.
+- Import job loop branches (cancel branch, between-sheet re-read, final write) have no test because the Google client is built inside handle(); only the "already closed at start" early return is tested. `MacroImportController::import` is an unrouted, unguarded second macro start (dead code; check it stays unrouted).
+- Run row committed, then dispatch outside the transaction: a failed dispatch leaves an active run with no job, and with a guard that run now blocks starts (Likha: 120 min, no Force-stop).
 
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.
