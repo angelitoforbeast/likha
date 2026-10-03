@@ -598,6 +598,18 @@ Route::get ('/encoder/checker_1/ai-checker/access', [\App\Http\Controllers\Macro
     ->name('macro_checker.access');
 Route::post('/encoder/checker_1/ai-checker/access', [\App\Http\Controllers\MacroCheckerController::class, 'accessUpdate'])
     ->name('macro_checker.access.update');
+
+// 🌙 Night run (handoff 007) — CEO lang ang bawat isa (tinitingnan sa controller).
+Route::post('/encoder/checker_1/settings/night', [\App\Http\Controllers\NightRunController::class, 'settings'])
+    ->name('night_run.settings');
+Route::post('/encoder/checker_1/ai-checker/night/run-now', [\App\Http\Controllers\NightRunController::class, 'runNow'])
+    ->name('night_run.run_now');
+Route::post('/encoder/checker_1/ai-checker/night/{step}/retry-failed', [\App\Http\Controllers\NightRunController::class, 'retryFailed'])
+    ->whereNumber('step')
+    ->name('night_run.retry_failed');
+Route::get('/encoder/checker_1/ai-checker/night/{step}/rows', [\App\Http\Controllers\NightRunController::class, 'rows'])
+    ->whereNumber('step')
+    ->name('night_run.rows');
 Route::get('/macro_output/download', [MacroOutputController::class, 'download'])->name('macro_output.download');
 Route::post('/macro_output/validate-items', [MacroOutputController::class, 'validateItems']);
 Route::post('/macro_output/validate1', [MacroOutputController::class, 'validateCheckerToFix'])

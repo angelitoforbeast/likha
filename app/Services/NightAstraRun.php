@@ -19,8 +19,9 @@ use Illuminate\Support\Facades\Log;
  * Ang isang row mismo ay pinapatakbo ng job na RunNightAstraRow.
  *
  * PERA (invariant): ang engine ay tinatawag lang ng job pagkatapos ng claim na `queued → running`.
- * WALA sa class na ito ang nagbabalik ng row sa `queued` — hindi ang tick, hindi ang dispatchPending,
- * hindi ang settle, hindi ang stop. Ang mga row ay nagiging `queued` lang kapag ipinasok sa start().
+ * WALANG naka-schedule sa class na ito ang nagbabalik ng row sa `queued` — hindi ang tick, hindi ang
+ * dispatchPending, hindi ang settle, hindi ang stop. Ang mga row ay nagiging `queued` lang kapag ipinasok sa
+ * start(), o sa click ng CEO (runNow / retryFailed → reopen()).
  */
 class NightAstraRun
 {
@@ -156,6 +157,172 @@ class NightAstraRun
         }
 
         return $step;
+    }
+
+    /**
+     * "Run now" ng CEO para sa petsa ng mga order (spec §6.6). Walang paghihintay: kapag hindi pa pwede,
+     * tinatanggihan kasama ang dahilan. Walang step ang petsa → normal na start (trigger `manual`);
+     * may step na tapos na (finished / stopped / did_not_run) → ang parehong run ang binubuksan ulit.
+     *
+     * @return array{ok: bool, message: string}
+     */
+    public function runNow(string $ordersDate): array
+    {
+        $nightDate = Carbon::parse($ordersDate, self::TZ)->addDay()->toDateString();
+        $step      = NightRunStep::where('night_date', $nightDate)->where('kind', self::KIND)->first();
+
+        // Bago ang start(): kukunin sana nito ang step na `waiting`.
+        if ($step && in_array($step->state, ['waiting', 'running'], true)) {
+            return ['ok' => false, 'message' => 'Already running'];
+        }
+
+        $condition = $this->importCondition();
+        if (!$condition['ok']) {
+            return ['ok' => false, 'message' => 'Not started: ' . $condition['reason']];
+        }
+        if (AstraEncoder::resolveApiKey() === null) {
+            return ['ok' => false, 'message' => 'Not started: no API key set'];
+        }
+
+        if ($step === null) {
+            $started = $this->start($nightDate, 'manual');
+            if ($started === null) {
+                return ['ok' => false, 'message' => 'Already running']; // may nauna nang nagbukas
+            }
+            $queued = $started->state === 'running' ? NightAstraRow::where('step_id', $started->id)->count() : 0;
+
+            return ['ok' => true, 'message' => $queued > 0
+                ? 'Started: ' . self::rowsLabel($queued) . " queued for {$ordersDate}"
+                : "Finished: nothing to run for {$ordersDate}"];
+        }
+
+        $queued = $this->reopen($step, ['finished', 'stopped', 'did_not_run'], $ordersDate);
+        if ($queued === null) {
+            return ['ok' => false, 'message' => 'Already running'];
+        }
+
+        return ['ok' => true, 'message' => $queued > 0
+            ? 'Re-opened: ' . self::rowsLabel($queued) . " queued for {$ordersDate}"
+            : "Finished: nothing to run for {$ordersDate}"];
+    }
+
+    /**
+     * "Retry failed" ng CEO: para lang sa run na `finished` o `stopped`, at ang mga row lang nitong `failed` /
+     * `not_run` na blangko pa ang STATUS ng order. Walang bagong row, walang import condition.
+     *
+     * @return array{ok: bool, message: string}
+     */
+    public function retryFailed(NightRunStep $step): array
+    {
+        $refusal = fn (?string $state) => match (true) {
+            in_array($state, ['waiting', 'running'], true) => 'Nothing to retry: the run is still active',
+            $state === 'did_not_run'                       => 'Nothing to retry: the run did not run',
+            default                                        => 'Nothing to retry: no failed or not-run row is still blank',
+        };
+
+        if (!in_array($step->state, ['finished', 'stopped'], true)) {
+            return ['ok' => false, 'message' => $refusal($step->state)];
+        }
+
+        $queued = $this->reopen($step, ['finished', 'stopped'], null);
+        if ($queued === null) {
+            // Hindi nabuksan: may nauna nang click (tumatakbo na), o walang row na pwedeng ulitin.
+            return ['ok' => false, 'message' => $refusal(NightRunStep::where('id', $step->id)->value('state'))];
+        }
+
+        return ['ok' => true, 'message' => 'Retrying ' . self::rowsLabel($queued)];
+    }
+
+    /**
+     * Buksan ulit ang isang run na tapos na. ISANG transaction (step + mga row), at ang conditional update ng
+     * state ng step ang guard: sa double click, isa lang ang nagbubukas. PERA: ito lang, kasama ng start(), ang
+     * naglalagay ng row sa `queued` sa class na ito — at click lang ng CEO ang tumatawag dito. Ang `done` at
+     * `skipped` ay hindi kailanman ginagalaw.
+     *
+     * $ordersDate null = Retry failed: walang idinadagdag na row, at hindi binubuksan kung walang row na mauulit
+     * (nananatili ang "Stopped" at ang dahilan nito). May petsa = Run now: idinadagdag ang mga blangkong order
+     * na wala pa sa run, hanggang sa safety maximum; kapag walang na-queue, `finished` agad.
+     *
+     * @return int|null ilang row ang `queued`; null = hindi ITONG tawag ang nagbukas
+     */
+    private function reopen(NightRunStep $step, array $fromStates, ?string $ordersDate): ?int
+    {
+        $settings   = NightRunSettings::read();
+        $blankOrder = fn () => self::whereStatusBlank(DB::table('macro_output'))->select('id');
+
+        $queued = DB::transaction(function () use ($step, $fromStates, $ordersDate, $settings, $blankOrder) {
+            $now  = now();
+            $open = NightRunStep::where('id', $step->id)->whereIn('state', $fromStates);
+            if ($ordersDate === null) {
+                $open->whereExists(function ($rows) use ($blankOrder) {
+                    $rows->from('night_astra_rows')
+                        ->whereColumn('night_astra_rows.step_id', 'night_run_steps.id')
+                        ->whereIn('night_astra_rows.state', ['failed', 'not_run'])
+                        ->whereIn('night_astra_rows.macro_output_id', $blankOrder());
+                });
+            }
+            $won = $open->update([
+                'state'                => 'running',
+                'reason'               => null,
+                'consecutive_failures' => 0,
+                'finished_at'          => null,
+                'stop_at'              => $this->stopAt(substr((string) $step->night_date, 0, 10), 'manual', $settings['night_astra_stop_time']),
+            ]);
+            if ($won !== 1) {
+                return null;
+            }
+            // Run na hindi kailanman nagsimula (did_not_run): ngayon ang simula nito.
+            NightRunStep::where('id', $step->id)->whereNull('started_at')->update(['started_at' => $now]);
+
+            NightAstraRow::where('step_id', $step->id)->whereIn('state', ['failed', 'not_run'])
+                ->whereIn('macro_output_id', $blankOrder())
+                ->update(['state' => 'queued', 'attempts' => 0, 'dispatched_at' => null, 'reason' => null, 'started_at' => null, 'finished_at' => null]);
+
+            if ($ordersDate !== null) {
+                // Mga blangkong order ng petsa na wala pa sa run, pinakaluma muna; ang kabuuang row record ng
+                // run ay hindi lalampas sa safety maximum. rows_found = mga row record + ang sobra sa maximum.
+                $have    = NightAstraRow::where('step_id', $step->id)->count();
+                $missing = $this->selection($ordersDate)
+                    ->whereNotIn('id', NightAstraRow::where('step_id', $step->id)->select('macro_output_id'));
+                $found   = (clone $missing)->reorder()->count();
+                $add     = min($found, max(0, $settings['night_astra_max_rows'] - $have));
+
+                if ($add > 0) {
+                    foreach ($missing->limit($add)->pluck('id')->chunk(self::INSERT_CHUNK) as $chunk) {
+                        NightAstraRow::insert($chunk->map(fn ($orderId) => [
+                            'step_id'         => $step->id,
+                            'macro_output_id' => $orderId,
+                            'state'           => 'queued',
+                            'created_at'      => $now,
+                            'updated_at'      => $now,
+                        ])->all());
+                    }
+                }
+
+                NightRunStep::where('id', $step->id)->update([
+                    'rows_found'    => $have + $found,
+                    'rows_over_max' => $found - $add,
+                ]);
+            }
+
+            $queued = NightAstraRow::where('step_id', $step->id)->where('state', 'queued')->count();
+            if ($queued === 0) {
+                NightRunStep::where('id', $step->id)->update(['state' => 'finished', 'finished_at' => $now]);
+            }
+
+            return $queued;
+        });
+
+        if ($queued) {
+            $this->dispatchPending($step);
+        }
+
+        return $queued;
+    }
+
+    private static function rowsLabel(int $count): string
+    {
+        return $count . ($count === 1 ? ' row' : ' rows');
     }
 
     /**
