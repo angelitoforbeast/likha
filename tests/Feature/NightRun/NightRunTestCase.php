@@ -68,6 +68,8 @@ abstract class NightRunTestCase extends TestCase
             'database/migrations/2026_05_17_120000_add_is_archived_to_likha_order_settings.php',
             'database/migrations/2026_05_18_120000_add_is_archived_to_macro_gsheet_settings.php',
             'database/migrations/2026_06_30_000200_add_cancel_requested_to_macro_import_runs.php',
+            'database/migrations/2026_10_04_100000_create_night_run_steps_table.php',
+            'database/migrations/2026_10_04_100100_create_night_astra_rows_table.php',
         ];
     }
 
