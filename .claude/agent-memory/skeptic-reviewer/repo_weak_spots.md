@@ -87,6 +87,11 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 - A dead Likha run (`running`, no Force-stop) blocks the Astra condition every night when the Likha night switch is off (nothing else closes it).
 - 007 T4 untested branches: the job's own catch, start()'s transaction rollback, routes/console.php catch, late start of a waiting step, blank variants ('' / spaces) at job level, transient on a stopped step. Runner 500 path drops the cost of a billed call.
 - Blank-STATUS rule is now 3 SQL copies (blankRowsQuery, AstraEncoder, NightAstraRun::whereStatusBlank) plus one PHP copy (isStatusBlank); all agree today (spaces only), check on any change.
+- 007 T4 fix / T5: a breaker that counts transient first attempts trips on a short fast-failing blip (10 quick 5xx/429 in ~20 s with 2 workers) before any 65 s retry can run; the same row can count twice (first attempt + retry). Checklist proposal: for any consecutive-failure breaker, ask how many seconds 10 fast failures take, not only how many rows.
+- 007 T5 manual actions: Run now for yesterday between the first import and the Astra time takes tonight's one step (scheduled start then does nothing; rows of the later import wait for a second click); manual runs never wait for imports that start after them. "Waiting for the worker" shows for the first seconds of every start/re-open and during a 65 s retry wait after a long timeout (rule ignores step started_at).
+- Night summary values that come from outside and reach all logs-page viewers: `for_person_by_code` keys (AI final_code), sheet names, run messages, step reasons. Any Blade built on them: `{{ }}` / x-text only, checkbox value "1" (the save rule is `boolean`, "on" fails).
+- CEO rule is now copied in MacroCheckerController, Checker1SettingsController, NightRunController plus the EnsureCeo middleware; all use the real role, so a CEO in "view as" still gets CEO data.
+- Concurrency of reopen/start (double click) is only tested as two sequential requests; sqlite cannot prove the conditional-update race.
 
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.
