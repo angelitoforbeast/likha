@@ -27,5 +27,14 @@ AI engines (AstraEncoder, MacroChecker, AiCheckerRowRunner; learned in 007 T3):
 - Two fixture orders with the same phone and the same `ts_date` trip the gate "PHONE duplicate sa parehong petsa" (TO FIX instead of PROCEED): give each order its own date.
 - `RunRowCharacterizationTest` pins the browser run-row JSON and log row with `assertSame` (types and key order). It must stay byte-unchanged; a change in engine output shows there first.
 
+Astra night run (learned in 007 T4):
+
+- Start Astra night tests from `tests/Feature/NightRun/NightAstraTestCase.php`: it fakes the queue, captures every log line in `$this->logLines` (so nothing reaches the real log and leaks can be asserted), fixes the time, and has `runningStep()` / `work()` to run one row job by calling `handle()`.
+- In a table loop, register `Http::fake` once with a closure that calls a variable (`$answer`), and swap the variable per case: a second `Http::fake` for the same URL never wins.
+- "No API key" can't be reached by clearing the stored key alone, because the engine also reads the machine's environment. Blank `ASTRA_ENCODER_API_KEY` and `OPENAI_API_KEY` in `$_SERVER` and `$_ENV` for the test process and restore them in `finally` (see `NightAstraStartTest`).
+- To make the engine's write to an order throw (runner 500 path): a sqlite `BEFORE UPDATE ON macro_output ... RAISE(ABORT)` trigger, dropped after the case.
+- Timestamps are stored as wall time in PHP's default timezone and the query builder doesn't convert a Carbon's timezone: convert a Manila time with `->setTimezone(date_default_timezone_get())` before binding or storing it.
+- `count()` on a query that has `orderBy` fails on pgsql: `reorder()` first.
+
 **Why:** each of these cost a wrong first guess or would silently run a real job.
 **How to apply:** start new backend test cases from `tests/Feature/NightRun/NightRunTestCase.php` and extend its migration list.
