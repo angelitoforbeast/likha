@@ -44,6 +44,9 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
         $run = LikhaImportRun::find($this->runId);
         if (!$run) return;
 
+        // Sarado na ang run (hal. stale na isinara) bago pa ito nakuha ng worker → huwag mag-import.
+        if ($run->status !== 'running') return;
+
         $client = new Google_Client();
         $client->setAuthConfig(storage_path('app/credentials.json'));
         $client->addScope(Google_Service_Sheets::SPREADSHEETS);
@@ -57,6 +60,9 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
                 ->first();
 
             if (!$runSheet) continue;
+
+            // Bago ang bawat sheet: basahin ulit ang status — kapag isinara na ang run, hinto na.
+            if (LikhaImportRun::where('id', $run->id)->value('status') !== 'running') return;
 
             if (!$setting->sheet_id || !$setting->range) {
                 $runSheet->update([
@@ -161,7 +167,8 @@ class ImportLikhaFromGoogleSheet implements ShouldQueue
             }
         }
 
-        $run->update([
+        // `done` lang kapag running pa rin — huwag buhayin ang run na isinara habang tumatakbo ang huling sheet.
+        LikhaImportRun::where('id', $run->id)->where('status', 'running')->update([
             'status' => 'done',
             'finished_at' => now(),
         ]);

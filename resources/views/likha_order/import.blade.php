@@ -300,7 +300,7 @@
             if (!data.ok) {
                 setImportButtonsDisabled(false);
                 btn.textContent = '🔄 Run Import Now';
-                alert('Failed to start import');
+                alert(data.message || 'Failed to start import');
                 return;
             }
 
@@ -342,7 +342,7 @@
                 if (!data.ok) {
                     setImportButtonsDisabled(false);
                     if (btn) btn.textContent = '🔄 Import';
-                    alert('Failed to start import');
+                    alert(data.message || 'Failed to start import');
                     return;
                 }
                 currentRunId = data.run_id;

@@ -2,10 +2,15 @@
 
 namespace Tests\Feature\NightRun;
 
+use App\Jobs\ImportLikhaFromGoogleSheet;
 use App\Jobs\ImportMacroFromGoogleSheet;
+use App\Models\LikhaImportRun;
+use App\Models\LikhaImportRunSheet;
+use App\Models\LikhaOrderSetting;
 use App\Models\MacroGsheetSetting;
 use App\Models\MacroImportRun;
 use App\Models\MacroImportRunItem;
+use App\Services\Imports\LikhaImportStarter;
 use App\Services\Imports\MacroImportStarter;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
@@ -200,6 +205,136 @@ class ImportStartTest extends NightRunTestCase
         $before = $run->fresh()->getAttributes();
 
         (new ImportMacroFromGoogleSheet($run->id))->handle();
+
+        $this->assertSame($before, $run->fresh()->getAttributes());
+    }
+
+    // ───────────────────────────── Likha ─────────────────────────────
+
+    private function likhaSetting(string $name, bool $archived = false): LikhaOrderSetting
+    {
+        return LikhaOrderSetting::create([
+            'sheet_id'    => 'sheet-' . $name,
+            'range'       => 'Sheet1!A2:I',
+            'is_archived' => $archived,
+        ]);
+    }
+
+    private function likhaRefusal(?int $runId): array
+    {
+        return [
+            'ok'      => false,
+            'message' => $runId ? "May running import pa (Run #{$runId}). Hintayin muna matapos." : 'May running import pa. Hintayin muna matapos.',
+            'run_id'  => $runId,
+        ];
+    }
+
+    public function test_likha_start_and_single_sheet_start_are_refused_while_a_run_is_running(): void
+    {
+        $this->actingAs($this->user());
+        $first = $this->likhaSetting('a');
+        $this->likhaSetting('old', true);
+        $second = $this->likhaSetting('b');
+
+        // Unang start: gaya ng dati ang sagot; archived hindi kasama.
+        $this->postJson('/likha_order_import/start')->assertStatus(200)->assertExactJson(['ok' => true, 'run_id' => 1]);
+        $run = LikhaImportRun::sole();
+        $this->assertSame('running', $run->status);
+        $this->assertSame(2, (int) $run->total_settings);
+        $this->assertSame(
+            [[$first->id, 'queued'], [$second->id, 'queued']],
+            LikhaImportRunSheet::where('run_id', 1)->orderBy('id')->get()->map(fn ($s) => [(int) $s->setting_id, $s->status])->all()
+        );
+
+        // Habang running: parehong start ay 409, walang bagong run.
+        $this->postJson('/likha_order_import/start')->assertStatus(409)->assertExactJson($this->likhaRefusal(1));
+        $this->postJson("/likha_order_import/{$second->id}/start")->assertStatus(409)->assertExactJson($this->likhaRefusal(1));
+        $this->assertSame(1, LikhaImportRun::count());
+
+        // Tapos na ang run → single-sheet start, gaya ng dati ang sagot.
+        $run->update(['status' => 'done']);
+        $this->postJson("/likha_order_import/{$second->id}/start")->assertStatus(200)->assertExactJson(['ok' => true, 'run_id' => 2]);
+        $this->assertSame(1, (int) LikhaImportRun::find(2)->total_settings);
+        $this->assertSame([$second->id], LikhaImportRunSheet::where('run_id', 2)->pluck('setting_id')->map(fn ($id) => (int) $id)->all());
+
+        Queue::assertPushed(ImportLikhaFromGoogleSheet::class, 2);
+    }
+
+    public function test_likha_start_while_the_lock_is_held_creates_no_run(): void
+    {
+        $this->actingAs($this->user());
+        $this->likhaSetting('a');
+        $starter = new LikhaImportStarter();
+        $starter->lockWait = 0;
+        $this->app->instance(LikhaImportStarter::class, $starter);
+
+        $held = Cache::lock('import-start:likha', 30);
+        $this->assertTrue($held->get());
+
+        $this->postJson('/likha_order_import/start')->assertStatus(409)->assertExactJson($this->likhaRefusal(null));
+        $this->assertSame(0, LikhaImportRun::count());
+        Queue::assertNothingPushed();
+
+        $held->release();
+    }
+
+    public function test_likha_run_older_than_two_hours_is_closed_at_the_next_start(): void
+    {
+        $this->actingAs($this->user());
+        $setting = $this->likhaSetting('a');
+        $done    = $this->likhaSetting('b');
+        $this->travelTo('2026-10-04 02:00:00');
+
+        $viaButton = fn () => $this->postJson('/likha_order_import/start')->assertStatus(200);
+        $viaNight  = fn () => $this->assertTrue(app(LikhaImportStarter::class)->start(null, 'Stale: closed by the night run')['started']);
+
+        // [minuto mula nang magsimula, paano sinimulan, inaasahang message ng lumang run (null = hindi isinara)]
+        $cases = [
+            '121 min, button'    => [121, $viaButton, 'Stale: closed at the next start'],
+            '121 min, scheduler' => [121, $viaNight, 'Stale: closed by the night run'],
+            '119 min'            => [119, fn () => $this->postJson('/likha_order_import/start')->assertStatus(409), null],
+        ];
+
+        foreach ($cases as $name => [$minutes, $start, $closedMessage]) {
+            LikhaImportRunSheet::query()->delete();
+            LikhaImportRun::query()->delete();
+
+            $old = LikhaImportRun::create(['status' => 'running', 'total_settings' => 2, 'started_at' => now()->subMinutes($minutes)]);
+            LikhaImportRunSheet::create(['run_id' => $old->id, 'setting_id' => $done->id, 'status' => 'done']);
+            LikhaImportRunSheet::create(['run_id' => $old->id, 'setting_id' => $setting->id, 'status' => 'processing']);
+
+            $start();
+
+            $old->refresh();
+            $sheets = LikhaImportRunSheet::where('run_id', $old->id)->orderBy('id')->pluck('status')->all();
+
+            if ($closedMessage === null) {
+                $this->assertSame('running', $old->status, $name);
+                $this->assertNull($old->message, $name);
+                $this->assertSame(['done', 'processing'], $sheets, $name);
+                $this->assertSame(1, LikhaImportRun::count(), $name);
+                continue;
+            }
+
+            $this->assertSame('failed', $old->status, $name);
+            $this->assertSame($closedMessage, $old->message, $name);
+            $this->assertSame('2026-10-04 02:00:00', $old->finished_at->toDateTimeString(), $name);
+            $this->assertSame(['done', 'failed'], $sheets, $name);
+            $this->assertSame(1, LikhaImportRun::where('status', 'running')->where('id', '!=', $old->id)->count(), $name);
+        }
+    }
+
+    public function test_likha_job_leaves_a_run_that_is_already_failed_untouched(): void
+    {
+        $run = LikhaImportRun::create([
+            'status'      => 'failed',
+            'message'     => 'Stale: closed at the next start',
+            'started_at'  => now()->subHours(3),
+            'finished_at' => now()->subMinutes(5),
+        ]);
+        $before = $run->fresh()->getAttributes();
+
+        (new ImportLikhaFromGoogleSheet($run->id))->handle();
 
         $this->assertSame($before, $run->fresh()->getAttributes());
     }

@@ -9,6 +9,7 @@ use App\Models\LikhaOrder;
 use App\Models\LikhaOrderSetting;
 use App\Models\LikhaImportRun;
 use App\Models\LikhaImportRunSheet;
+use App\Services\Imports\LikhaImportStarter;
 
 class LikhaOrderImportController extends Controller
 {
@@ -53,23 +54,24 @@ class LikhaOrderImportController extends Controller
         // Skip archived settings — they're kept around for reference but no
         // longer need to be imported. Unarchive sa /likha_order_import/settings
         // to bring them back into the import job.
-        $settings = LikhaOrderSetting::where('is_archived', false)->orderBy('id')->get();
+        // Run + sheets + dispatch ay nasa LikhaImportStarter (isang run lang sa bawat pagkakataon).
+        return $this->startResponse(app(LikhaImportStarter::class)->start());
+    }
 
-        $run = LikhaImportRun::create([
-            'status' => 'running',
-            'total_settings' => $settings->count(),
-            'started_at' => now(),
-        ]);
+    // Sagot ng start/startOne: gaya ng dati kapag nagsimula; 409 kapag may running pa.
+    private function startResponse(array $result)
+    {
+        $run = $result['run'];
 
-        foreach ($settings as $s) {
-            LikhaImportRunSheet::create([
-                'run_id' => $run->id,
-                'setting_id' => $s->id,
-                'status' => 'queued',
-            ]);
+        if (!$result['started']) {
+            return response()->json([
+                'ok' => false,
+                'message' => $run
+                    ? "May running import pa (Run #{$run->id}). Hintayin muna matapos."
+                    : 'May running import pa. Hintayin muna matapos.',
+                'run_id' => $run?->id,
+            ], 409);
         }
-
-        ImportLikhaFromGoogleSheet::dispatch($run->id);
 
         return response()->json([
             'ok' => true,
@@ -83,24 +85,7 @@ class LikhaOrderImportController extends Controller
     // resume logic. Pollable via /status?run_id= (gaya ng bulk).
     public function startOne(LikhaOrderSetting $setting)
     {
-        $run = LikhaImportRun::create([
-            'status' => 'running',
-            'total_settings' => 1,
-            'started_at' => now(),
-        ]);
-
-        LikhaImportRunSheet::create([
-            'run_id' => $run->id,
-            'setting_id' => $setting->id,
-            'status' => 'queued',
-        ]);
-
-        ImportLikhaFromGoogleSheet::dispatch($run->id);
-
-        return response()->json([
-            'ok' => true,
-            'run_id' => $run->id,
-        ]);
+        return $this->startResponse(app(LikhaImportStarter::class)->start($setting));
     }
 
     // AJAX polling
