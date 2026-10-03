@@ -3,13 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\MacroOutput;
-use App\Services\AstraEncoder;
-use App\Services\MacroChecker;
+use App\Services\AiCheckerRowRunner;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
@@ -181,108 +179,22 @@ class MacroCheckerController extends Controller
         if ($r = $this->checkRole()) return $r;
         @set_time_limit(300);   // Astra engine na may tools ay pwedeng umabot ng 1–2 minuto kada row
 
-        $row = MacroOutput::find((int) $id);
-        if (!$row) {
-            return response()->json(['ok' => false, 'error' => 'Row not found'], 404);
-        }
-
-        $maps = MacroChecker::loadAddressMaps();
-        if (empty($maps['provincesSet'])) {
-            return response()->json(['ok' => false, 'error' => 'jnt_address.txt missing or empty'], 500);
-        }
-
+        // Ang mismong takbo ng row ay nasa AiCheckerRowRunner (iisa para sa browser at sa night run).
         // Logging context — 'batch' (AI Checker) o 'single' (AI Fix per row).
-        $source     = $request->input('source') === 'batch' ? 'batch' : 'single';
-        $engine     = $request->input('engine') === 'astra' ? 'astra' : 'classic';   // ✨ Astra Fix/Check o 🤖 AI Fix/Checker
-        $batchId    = $request->input('batch_id') ?: null;
-        $batchTotal = (int) $request->input('batch_total', 0);
-        $t0         = microtime(true);
+        $out = (new AiCheckerRowRunner())->run(
+            (int) $id,
+            $request->input('engine') === 'astra' ? 'astra' : 'classic',   // ✨ Astra Fix/Check o 🤖 AI Fix/Checker
+            (string) $request->getHost(),
+            [
+                'source'      => $request->input('source') === 'batch' ? 'batch' : 'single',
+                'batch_id'    => $request->input('batch_id') ?: null,
+                'batch_total' => (int) $request->input('batch_total', 0),
+                'user_id'     => Auth::id(),
+                'user_name'   => Auth::user()?->name ?? Auth::user()?->email ?? 'unknown',
+            ]
+        );
 
-        try {
-            $svc    = $engine === 'astra' ? new AstraEncoder() : new MacroChecker();
-            $result = $svc->processRow((int) $id, $maps, (string) $request->getHost());
-            $durationMs = (int) round((microtime(true) - $t0) * 1000);
-            // Re-read so frontend gets the actual updated values
-            $row = MacroOutput::find((int) $id);
-
-            $code      = (string) ($result['final_code'] ?? '');
-            $allFilled = ($result['all_filled'] ?? true) ? true : false;
-            $outcome   = ($code === '✅' && $allFilled) ? 'fixed' : 'partial';
-
-            $this->writeLog([
-                'source'          => $source,
-                'batch_id'        => $batchId,
-                'batch_total'     => $batchTotal > 0 ? $batchTotal : null,
-                'macro_output_id' => (int) $id,
-                'page'            => $row->PAGE ?? null,
-                'item'            => $row->{'ITEM_NAME'} ?? null,
-                'final_code'      => $code !== '' ? $code : null,
-                'all_filled'      => $allFilled,
-                'outcome'         => $outcome,
-                'duration_ms'     => $durationMs,
-            ] + $this->logDetail($result));
-
-            return response()->json([
-                'ok'     => true,
-                'engine' => $engine,
-                'result' => $result,
-                'row'    => [
-                    'id'           => $row->id,
-                    'FULL NAME'    => $row->{'FULL NAME'},
-                    'PHONE NUMBER' => $row->{'PHONE NUMBER'},
-                    'ADDRESS'      => $row->ADDRESS,
-                    'PROVINCE'     => $row->PROVINCE,
-                    'CITY'         => $row->CITY,
-                    'BARANGAY'     => $row->BARANGAY,
-                    'APP SCRIPT CHECKER' => $row->{'APP SCRIPT CHECKER'},
-                    'STATUS'       => $row->STATUS,
-                ],
-            ]);
-        } catch (\Throwable $e) {
-            $durationMs = (int) round((microtime(true) - $t0) * 1000);
-            $this->writeLog([
-                'source'          => $source,
-                'batch_id'        => $batchId,
-                'batch_total'     => $batchTotal > 0 ? $batchTotal : null,
-                'macro_output_id' => (int) $id,
-                'page'            => $row->PAGE ?? null,
-                'item'            => $row->{'ITEM_NAME'} ?? null,
-                'final_code'      => '❌',
-                'all_filled'      => false,
-                'outcome'         => 'failed',
-                'duration_ms'     => $durationMs,
-            ]);
-            return response()->json([
-                'ok'    => false,
-                'error' => $e->getMessage(),
-            ], 500);
-        }
-    }
-
-    /**
-     * Detalye ng takbo (mula sa MacroChecker trace) → dagdag na columns ng ai_checker_logs.
-     * Kung wala pa ang columns (hindi pa na-migrate), walang idadagdag — hindi masisira ang insert.
-     */
-    private function logDetail(array $result): array
-    {
-        static $has = null;
-        if ($has === null) {
-            try { $has = Schema::hasColumn('ai_checker_logs', 'detail'); } catch (\Throwable $e) { $has = false; }
-        }
-        if (!$has) return [];
-        $log = (array) ($result['log'] ?? []);
-        $sum = (array) ($log['summary'] ?? []);
-        unset($result['log']);
-        return [
-            'model'      => mb_substr(implode(',', (array) ($sum['models'] ?? [])), 0, 96),
-            'escalated'  => !empty($sum['escalated']),
-            'searches'   => (int) ($sum['searches'] ?? 0),
-            'tokens_in'  => (int) ($sum['tokens_in'] ?? 0),
-            'tokens_out' => (int) ($sum['tokens_out'] ?? 0),
-            'cost_usd'   => round((float) ($sum['cost_usd'] ?? 0), 4),
-            'evidence'   => mb_substr(implode("\n", (array) ($log['evidence'] ?? [])), 0, 60000),
-            'detail'     => json_encode(['result' => $result] + $log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-        ];
+        return response()->json($out['payload'], $out['status']);
     }
 
     /**
@@ -361,28 +273,6 @@ class MacroCheckerController extends Controller
             'ok' => true, 'id' => $row->id, 'row' => $out, 'all_filled' => $allFilled,
             'updated_at_ms' => $row->updated_at ? $row->updated_at->getTimestamp() * 1000 : 0,
         ]);
-    }
-
-    /** Insert ng isang per-row AI log — best-effort (di sisirain ang run-row). */
-    private function writeLog(array $data): void
-    {
-        try {
-            // Defensive caps — para hindi mag-fail ang insert dahil sa haba ng value.
-            foreach (['final_code' => 64, 'page' => 255, 'item' => 255] as $k => $max) {
-                if (isset($data[$k]) && is_string($data[$k])) {
-                    $data[$k] = mb_substr($data[$k], 0, $max);
-                }
-            }
-            DB::table('ai_checker_logs')->insert(array_merge($data, [
-                'user_id'    => Auth::id(),
-                'user_name'  => mb_substr((string) (Auth::user()?->name ?? Auth::user()?->email ?? 'unknown'), 0, 255),
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]));
-        } catch (\Throwable $e) {
-            // Huwag ipa-fail ang run-row, pero i-log na (hindi na tahimik) para ma-debug.
-            Log::warning('AI_CHECKER_LOG_FAIL', ['error' => $e->getMessage()]);
-        }
     }
 
     /**
