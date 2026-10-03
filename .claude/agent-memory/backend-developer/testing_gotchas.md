@@ -36,5 +36,13 @@ Astra night run (learned in 007 T4):
 - Timestamps are stored as wall time in PHP's default timezone and the query builder doesn't convert a Carbon's timezone: convert a Manila time with `->setTimezone(date_default_timezone_get())` before binding or storing it.
 - `count()` on a query that has `orderBy` fails on pgsql: `reorder()` first.
 
+Routes and pages (learned in 007 T5):
+
+- Every Blade view rendered for a logged-in user, the 403 and 404 pages included, runs the `View::composer('*')` in `AppServiceProvider`, which counts the user's rows in `tasks`. A test that asserts 403/404 on a web route or renders a page must create a small `tasks` table (`id`, `user_id`, `status`, timestamps), or the response is a 500. Page tests also need `$this->withoutVite()`.
+- `php.bat` is a Windows batch file: a `|` inside `--filter=` is taken as a pipe by cmd even when quoted. Run one filter name per command.
+- To go back to a guest after `actingAs` inside one test, call `auth()->forgetGuards()`.
+- `isCeo()` in the controllers reads the stored role only; it does not follow the CEO's "view as" role (`AiCheckerAccess::allows()` does). A CEO previewing another role still passes CEO-only routes.
+- Columns not in a model's `$fillable` (`created_at`) are silently dropped by `create()`: set them with a query-builder update in the fixture.
+
 **Why:** each of these cost a wrong first guess or would silently run a real job.
 **How to apply:** start new backend test cases from `tests/Feature/NightRun/NightRunTestCase.php` and extend its migration list.
