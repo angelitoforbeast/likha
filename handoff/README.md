@@ -10,4 +10,4 @@ Protocol: Mira writes `handoff/NNN-name/HANDOFF.md` (never edited by the worker)
 | 004 | lifecycle-restock | `feat/lifecycle-restock` | done — RESULT.md filled, waiting for Mira's branch review |
 | 005 | item-layout | `feat/item-layout` | done — RESULT.md filled, waiting for Mira's branch review |
 | 006 | item-simple-view | `feat/item-simple-view` | done — RESULT.md filled, waiting for Mira's branch review |
-| 007 | night-run | `feat/007-night-run` | in progress — Mira's "go" 2026-10-04 |
+| 007 | night-run | `feat/007-night-run` | done — RESULT.md filled, waiting for Mira's branch review |
