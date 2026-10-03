@@ -144,16 +144,17 @@ class NightSettingsTest extends NightRunTestCase
                 'night:import likha 1' => '15 1 * * *',
                 'night:import macro 2' => '45 2 * * *',
                 'night:import likha 2' => '45 2 * * *',
-            ]],
+                'night:astra-tick'     => '* * * * *',
+            ], '1'],
             'macro only' => ['1', '0', [
                 'night:import macro 1' => '15 1 * * *',
                 'night:import macro 2' => '45 2 * * *',
-            ]],
-            'switches off' => ['0', '0', []],
+            ], '0'],
+            'switches off' => ['0', '0', [], '0'],
         ];
 
-        foreach ($cases as $name => [$macro, $likha, $expected]) {
-            $this->set(['night_macro_import_enabled' => $macro, 'night_likha_import_enabled' => $likha]);
+        foreach ($cases as $name => [$macro, $likha, $expected, $astra]) {
+            $this->set(['night_macro_import_enabled' => $macro, 'night_likha_import_enabled' => $likha, 'night_astra_enabled' => $astra]);
 
             $this->app->forgetInstance(Schedule::class);
             ScheduleFacade::clearResolvedInstance(Schedule::class);
@@ -172,7 +173,7 @@ class NightSettingsTest extends NightRunTestCase
             Artisan::call('schedule:list');
             $listing = Artisan::output();
             $this->assertStringContainsString('holds:snapshot', $listing, $name);
-            $this->assertSame(count($expected), substr_count($listing, 'night:import'), $name);
+            $this->assertSame(count($expected), substr_count($listing, 'night:import') + substr_count($listing, 'night:astra-tick'), $name);
 
             if (in_array('--filter=' . __FUNCTION__, $_SERVER['argv'] ?? [], true)) {
                 fwrite(STDERR, "\n--- schedule:list, {$name} ---\n{$listing}");
