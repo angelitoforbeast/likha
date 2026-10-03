@@ -81,6 +81,12 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 - Blank-STATUS rule (NULL or TRIM = '') is now written twice (MacroCheckerController::blankRowsQuery, AstraEncoder); a third copy (night selection) is the DRY trigger.
 - NightRun tests do not pin LOG_CHANNEL: Log::warning in tests lands in the machine's real laravel.log; retry tests really sleep 1.2 s each (usleep in post()).
 - "Moved verbatim" checks: also grep the old file for every `use` the diff removes (here AstraEncoder, MacroChecker, Log were only used by the moved code: OK).
+- 007 T4 night Astra: the database queue takes jobs by id, so a delayed re-dispatch lands behind the whole backlog; a breaker that counts only final failures stays at 0 until every row had a first attempt. Checklist proposal: for any retry + consecutive-failure breaker, ask where the retry job lands in the queue.
+- Sweeps scoped to steps in state `running` never touch a stopped step: a row left `running` (worker killed) or `queued` (lost delayed job) in a stopped run stays that way until a later Retry re-opens it.
+- tick(): tonight's start/condition runs before the sweeps with no try/catch, so one throw (missing table, DB error) skips the sweep of every running run that minute.
+- A dead Likha run (`running`, no Force-stop) blocks the Astra condition every night when the Likha night switch is off (nothing else closes it).
+- 007 T4 untested branches: the job's own catch, start()'s transaction rollback, routes/console.php catch, late start of a waiting step, blank variants ('' / spaces) at job level, transient on a stopped step. Runner 500 path drops the cost of a billed call.
+- Blank-STATUS rule is now 3 SQL copies (blankRowsQuery, AstraEncoder, NightAstraRun::whereStatusBlank) plus one PHP copy (isStatusBlank); all agree today (spaces only), check on any change.
 
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.
