@@ -208,14 +208,18 @@
         <p class="text-sm text-gray-500">Times are Philippine time. Rows not started by the stop time are left for a person.</p>
       </div>
 
-      @if($errors->has('night_macro_import_enabled') || $errors->has('night_likha_import_enabled') || $errors->has('night_astra_enabled')
-          || $errors->has('night_import_time_1') || $errors->has('night_import_time_2') || $errors->has('night_astra_time')
-          || $errors->has('night_astra_stop_time') || $errors->has('night_astra_max_rows'))
+      {{-- May old input ang form na ito kapag isa sa mga oras niya ay nasa old(): ang wala sa old = naka-uncheck. --}}
+      @php $nightSubmitted = old('night_import_time_1') !== null; @endphp
+
+      @if(session('night_settings_saved'))
+        <div class="bg-green-50 border border-green-200 text-green-800 rounded-lg p-3 text-sm" role="status">Night run settings saved.</div>
+      @endif
+
+      {{-- Sariling error bag (`night`): hindi lalabas sa listahan sa taas ng page. --}}
+      @if($errors->night->any())
         <div class="bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm" role="alert">
-          @foreach(['night_macro_import_enabled', 'night_likha_import_enabled', 'night_astra_enabled', 'night_import_time_1', 'night_import_time_2', 'night_astra_time', 'night_astra_stop_time', 'night_astra_max_rows'] as $field)
-            @foreach($errors->get($field) as $err)
-              <div>• {{ $err }}</div>
-            @endforeach
+          @foreach($errors->night->all() as $err)
+            <div>• {{ $err }}</div>
           @endforeach
         </div>
       @endif
@@ -228,7 +232,7 @@
         ] as $field => [$label, $help])
           <div>
             <label class="flex items-center gap-2 text-sm font-semibold">
-              <input type="checkbox" name="{{ $field }}" value="1" @checked(old($field, $night[$field]))>
+              <input type="checkbox" name="{{ $field }}" value="1" @checked($nightSubmitted ? (bool) old($field) : $night[$field])>
               {{ $label }}
             </label>
             <p class="text-xs text-gray-500 mt-1 ml-6">{{ $help }}</p>

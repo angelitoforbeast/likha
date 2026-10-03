@@ -61,7 +61,7 @@
       <div class="p-3 text-sm"
            x-data="{ open: false, rows: null, loading: false, failed: false,
                      load() {
-                       if (this.rows !== null || this.loading) return;
+                       if (this.loading) return; // isang request lang at a time; bawat click ay kumukuha ulit
                        this.loading = true; this.failed = false;
                        fetch(this.$root.dataset.rowsUrl, { headers: { 'Accept': 'application/json' } })
                          .then(r => r.ok ? r.json() : Promise.reject())
@@ -97,7 +97,7 @@
             <span class="text-xs text-gray-500 mr-1">Astra</span>
             @if ($a)
               <span class="{{ $badge }} {{ $astraColor[$a['status']] ?? 'bg-gray-100 text-gray-700' }}">{{ $a['state'] }}</span>
-              <span class="text-gray-700">{{ $nightPlural($a['rows_found'], 'row') }} · {{ $a['proceed'] }} PROCEED · {{ $a['for_person'] }} for a person · {{ $a['failed'] }} failed</span>
+              <span class="text-gray-700 break-words">{{ $nightPlural($a['rows_found'], 'row') }} · {{ $a['proceed'] }} PROCEED · {{ $a['for_person'] }} for a person · {{ $a['failed'] }} failed{{ $a['skipped'] > 0 ? ' · ' . $a['skipped'] . ' skipped' : '' }}{{-- Kasama sa "not run" ang sobra sa maximum (hiwalay sa not_run, kaya hindi nadodoble) --}}{{ ($a['not_run'] + $a['over_max']) > 0 ? ' · ' . ($a['not_run'] + $a['over_max']) . ' not run' : '' }}{{ ($a['queued'] + $a['running']) > 0 ? ' · ' . ($a['queued'] + $a['running']) . ' queued/running' : '' }}</span>
             @else
               —
             @endif
@@ -114,7 +114,7 @@
           <div>
             <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Imports</div>
             @forelse ($imports as $i)
-              <div class="py-1">
+              <div class="py-1 break-words min-w-0">
                 <span class="font-semibold">{{ $i['label'] }}</span>
                 <span class="text-gray-500">{{ $i['time'] }}</span>
                 <span class="{{ $badge }} {{ $importColor[$i['status']] ?? 'bg-gray-100 text-gray-700' }}">{{ $i['state'] }}</span>
@@ -122,10 +122,10 @@
                   <span class="text-gray-600">{{ $i['processed'] }} processed / {{ $i['inserted'] }} inserted / {{ $i['updated'] }} updated</span>
                 @endif
                 @if ($i['message'])
-                  <div class="text-xs text-gray-600">{{ $i['message'] }}</div>
+                  <div class="text-xs text-gray-600 break-words">{{ $i['message'] }}</div>
                 @endif
                 @foreach ($i['failed_sheets'] as $sheet)
-                  <div class="text-xs text-red-700">Failed sheet: {{ $sheet['name'] }}@if (!empty($sheet['message'])) — {{ $sheet['message'] }}@endif</div>
+                  <div class="text-xs text-red-700 break-words">Failed sheet: {{ $sheet['name'] }}@if (!empty($sheet['message'])) — {{ $sheet['message'] }}@endif</div>
                 @endforeach
               </div>
             @empty
@@ -136,7 +136,7 @@
           @if ($a)
             <div>
               <div class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Astra</div>
-              <ul class="space-y-0.5 text-gray-700">
+              <ul class="space-y-0.5 text-gray-700 break-words">
                 <li>{{ $nightPlural($a['rows_found'], 'row') }} found</li>
                 <li>{{ $a['proceed'] }} PROCEED</li>
                 <li>
@@ -148,7 +148,7 @@
                 <li>{{ $a['failed'] }} failed</li>
                 <li>{{ $a['skipped'] }} skipped {{ $a['no_chat_text'] > 0 ? '(' . $a['no_chat_text'] . ' with no chat text)' : '' }}</li>
                 <li>{{ $a['not_run'] }} not run</li>
-                @if ($a['over_max'] > 0)<li>{{ $a['over_max'] }} not run: over the safety maximum</li>@endif
+                @if ($a['over_max'] > 0)<li>{{ $a['over_max'] }} not run: over the safety maximum of {{ number_format($a['max_rows']) }}</li>@endif
                 @if ($a['queued'] > 0)<li>{{ $a['queued'] }} still queued</li>@endif
                 @if ($a['running'] > 0)<li>{{ $a['running'] }} running now</li>@endif
                 @if ($nightLength($a['duration_seconds']) !== null)<li>Took {{ $nightLength($a['duration_seconds']) }}</li>@endif
@@ -177,11 +177,11 @@
                 <div x-show="rows !== null && rows.length === 0" x-cloak class="mt-2 text-xs text-gray-500">No rows for this night.</div>
                 <ul x-show="rows !== null && rows.length > 0" x-cloak class="mt-2 divide-y rounded border text-xs">
                   <template x-for="r in (rows || [])" :key="r.id">
-                    <li class="flex flex-wrap items-center gap-x-4 gap-y-1 p-2">
+                    <li class="flex flex-wrap items-center gap-x-4 gap-y-1 p-2 min-w-0">
                       <span class="font-mono" x-text="'#' + r.macro_output_id"></span>
-                      <span class="text-gray-600" x-text="r.page"></span>
-                      <span class="font-semibold" x-text="result(r)"></span>
-                      <span class="text-gray-600" x-text="r.reason"></span>
+                      <span class="text-gray-600 break-words min-w-0" x-text="r.page"></span>
+                      <span class="font-semibold break-words min-w-0" x-text="result(r)"></span>
+                      <span class="text-gray-600 break-words min-w-0" x-text="r.reason"></span>
                       <a x-show="href(r.log_url)" :href="href(r.log_url)" class="text-blue-600 hover:underline">log</a>
                     </li>
                   </template>
