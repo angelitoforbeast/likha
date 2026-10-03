@@ -1,6 +1,9 @@
 # Result 007: Night run: automatic imports at 1am and 2am, Astra at 3am
 
-Status: **not started — spec and plan stage**, branch `feat/007-night-run` cut from `develop` at `91c470a`.
+Status: **spec and plan committed, waiting for Mira's "go"**, branch `feat/007-night-run` cut from `develop` at `91c470a`. No code yet.
+- Spec: `docs/specs/007-night-run.md` (spec review in its §16: needs revision, 3 majors, all folded in).
+- Plan: `docs/plans/007-night-run.md` (T1–T7).
+- Mira's "go": **not given yet.** 18 questions, each with the default that will be built, are in spec §15.
 
 ## Summary
 

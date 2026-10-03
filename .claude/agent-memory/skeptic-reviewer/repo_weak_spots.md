@@ -61,5 +61,12 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 
 - 006 T6 widths/cards: tests string-grep only (CSS needles, media blocks via mediaBlock helper); widths/min-widths verified by hand (796+300, 822+300, -48 at 72px pct); `il-w-item` is a marker class with no CSS rule; card mode hides thead so sorting is unreachable below 1,100 px (inherited from 005); removed helpers/classes grepped clean in views and tests; dynamic `il-tone-`+tone has no teal producer.
 
+- 007 night run (spec review): import jobs have tries 1, timeout 3600 and no failed() hook, so a killed job leaves its run `running`/`queued` forever; any new "one at a time" guard must say who clears a dead run on every path (Likha has no Force-stop).
+- AstraEncoder: HTTP timeout 300 s x 2 attempts per post, up to 8 tool rounds per row; any job timeout or sweep threshold below ~600 s kills the worker before post() returns, so "timeout is retried" paths are unreachable. post() logs 500 chars of the OpenAI error body (a 401 body carries a key fragment).
+- Macro import run ends `failed` when any one sheet fails; a rule that needs a `done` run is blocked by one bad sheet.
+- Specs name methods that don't exist (007: `MacroChecker::lists()` is really `loadValidationRefs()`); grep every method name, not only files.
+- Queue state machines: check what happens to the dispatch marker when a row is re-queued, and whether "step flipped to running" and "rows inserted" share a transaction.
+- phpunit.xml uses QUEUE_CONNECTION=sync and CACHE_STORE=array: delayed dispatches run inline, and a lock test with block(n) sleeps n seconds.
+
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.

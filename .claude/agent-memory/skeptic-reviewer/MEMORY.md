@@ -1,1 +1,1 @@
-- [Repo weak spots](repo_weak_spots.md) — quoteSave wipes fields a caller leaves out, shared quote endpoints, STR_TO_DATE untestable on sqlite, PO open-status gap, dangling spec refs
+- [Repo weak spots](repo_weak_spots.md) — quoteSave wipes fields a caller leaves out, shared quote endpoints, STR_TO_DATE untestable on sqlite, PO open-status gap, dangling spec refs, import runs left running by dead jobs, Astra HTTP timeout vs job timeout
