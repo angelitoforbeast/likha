@@ -92,6 +92,11 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 - Night summary values that come from outside and reach all logs-page viewers: `for_person_by_code` keys (AI final_code), sheet names, run messages, step reasons. Any Blade built on them: `{{ }}` / x-text only, checkbox value "1" (the save rule is `boolean`, "on" fails).
 - CEO rule is now copied in MacroCheckerController, Checker1SettingsController, NightRunController plus the EnsureCeo middleware; all use the real role, so a CEO in "view as" still gets CEO data.
 - Concurrency of reopen/start (double click) is only tested as two sequential requests; sqlite cannot prove the conditional-update race.
+- Blade checkboxes with `@checked(old($field, $saved))`: after a validation error an unchecked box has no old value, so it falls back to the saved value and comes back checked (a switch the CEO turned off stays on). Check every checkbox that uses old() with a default.
+- Pages with a second form on a view that already prints `$errors->all()` and one shared "saved" flash: the new form's errors show twice and the old banner text (Idle Summary) shows for the new save.
+- Blade page tests run without the CSRF middleware and never execute Alpine: a removed `@csrf`, `:href` guards and x-text helpers are unproven. Long outside text (sheet names, exception text) needs `break-words` or it brings back horizontal scroll on a phone.
+- Night run "N of M done" counts only steps that have a record: a night where an import never started reads "2 of 2 done"; only the latest night's banner says "no record".
+- Time-gated breaker (007 fix loop 2, closed): check the gate with three timings: fast failures (stops at the gate age or at the first final retry), slow timeouts (count x duration / workers), and a success racing the streak-start write. Spec text for a rule changed in a fix loop (§9 "Waiting for the worker") tends to stay on the old wording.
 
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.
