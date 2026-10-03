@@ -251,7 +251,7 @@ All times Asia/Manila, defaults shown. `night_date` is the date of the morning; 
 **Minors:** the ones on untrusted or money paths were fixed in the final wave (`e96d4bb`, `a1769ae`): the
 unticked switch coming back ticked after a refused save, the night line not adding up, long text causing
 horizontal scroll, stale row list, doubled errors, the macro job's read-then-write start. The rest are in
-`TODO.md` under "Handoff 007", each with its reason (23 entries).
+`TODO.md` under "Handoff 007", each with its reason (25 entries).
 
 **Declined to judge by the reviewer** (environment facts): the production cache store; `pcntl` on the server;
 `DB_QUEUE_RETRY_AFTER` and `APP_URL`; OpenAI's real error codes for the fatal class and whether timed-out calls
