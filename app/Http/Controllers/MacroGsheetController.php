@@ -9,6 +9,7 @@ use App\Models\MacroOutput;
 use App\Models\MacroImportRun;
 use App\Models\MacroImportRunItem;
 use App\Jobs\ImportMacroFromGoogleSheet;
+use App\Services\Imports\MacroImportStarter;
 
 class MacroGsheetController extends Controller
 {
@@ -58,50 +59,18 @@ class MacroGsheetController extends Controller
     public function import(Request $request)
     {
         try {
-            // ✅ one run at a time (recommended)
-            $running = MacroImportRun::whereIn('status', ['queued', 'running'])->latest('id')->first();
-            if ($running) {
-                return back()->with('error', "May running import pa (Run #{$running->id}). Hintayin muna matapos.");
+            // ✅ one run at a time — atomic guard (lock), run + items at dispatch ay nasa
+            // MacroImportStarter (iisa para sa button, API at scheduler). Archived settings
+            // ay hindi kasama — manage at /macro/gsheet/settings to archive/unarchive.
+            $result = app(MacroImportStarter::class)->start(auth()->id(), null);
+            if (!$result['started']) {
+                $running = $result['run'];
+                return back()->with('error', $running
+                    ? "May running import pa (Run #{$running->id}). Hintayin muna matapos."
+                    : 'May running import pa. Hintayin muna matapos.');
             }
 
-            // Skip archived settings — they stay configured but won't be imported.
-            // Manage at /macro/gsheet/settings to archive/unarchive.
-            $settings = MacroGsheetSetting::where('is_archived', false)->get();
-
-            $run = MacroImportRun::create([
-                'started_by'        => auth()->id(),
-                'status'            => 'queued',
-                'started_at'        => now(),
-                'total_settings'    => $settings->count(),
-                'processed_settings'=> 0,
-                'total_processed'   => 0,
-                'total_inserted'    => 0,
-                'total_updated'     => 0,
-                'total_skipped'     => 0,
-                'message'           => null,
-            ]);
-
-            // Create per-setting items snapshot
-            foreach ($settings as $s) {
-                MacroImportRunItem::create([
-                    'run_id'      => $run->id,
-                    'setting_id'  => $s->id,
-                    'gsheet_name' => $s->gsheet_name,
-                    'sheet_url'   => $s->sheet_url,
-                    'sheet_range' => $s->sheet_range,
-                    'status'      => 'queued',
-                    'processed'   => 0,
-                    'inserted'    => 0,
-                    'updated'     => 0,
-                    'skipped'     => 0,
-                    'message'     => null,
-                    'started_at'  => null,
-                    'finished_at' => null,
-                ]);
-            }
-
-            // Dispatch job with run id
-            ImportMacroFromGoogleSheet::dispatch($run->id, auth()->id());
+            $run = $result['run'];
 
             // Redirect back w/ run id so UI can poll
             return redirect()

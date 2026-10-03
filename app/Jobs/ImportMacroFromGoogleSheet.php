@@ -40,6 +40,12 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
             return;
         }
 
+        // Sarado na ang run (hal. stale na isinara, o force-stopped) bago pa ito nakuha ng worker
+        // → huwag nang buhayin o mag-import.
+        if (!in_array($run->status, ['queued', 'running'], true)) {
+            return;
+        }
+
         $run->update([
             'status'     => 'running',
             'started_at' => $run->started_at ?: now(),
@@ -71,6 +77,11 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
             // ✅ Graceful cancel — bago ang bawat sheet, tingnan kung nag-request ang website.
             // Basahin LANG ang cancel_requested (di ini-o-overwrite ng job, kaya persistent).
             if (MacroImportRun::where('id', $run->id)->value('cancel_requested')) {
+                // Naka-failed na (isinara ng iba, hal. "Stale: ...") → hinto lang, huwag palitan ang status/message.
+                if (MacroImportRun::where('id', $run->id)->value('status') === 'failed') {
+                    return;
+                }
+
                 $run->update([
                     'status'      => 'failed',
                     'message'     => '🛑 Cancelled by user.',
@@ -332,13 +343,17 @@ class ImportMacroFromGoogleSheet implements ShouldQueue
         $failedCount = MacroImportRunItem::where('run_id', $run->id)->where('status', 'failed')->count();
         if ($failedCount > 0) $finalStatus = 'failed';
 
-        $run->update([
-            'status'      => $finalStatus,
-            'finished_at' => now(),
-            'message'     => $finalStatus === 'failed'
-                ? "May {$failedCount} sheet(s) na failed."
-                : 'Import completed.',
-        ]);
+        // May cancel request (force-stop o stale close) habang nasa huling sheet → iwan ang run kung ano ito;
+        // huwag gawing done ang run na isinara na.
+        if (!MacroImportRun::where('id', $run->id)->value('cancel_requested')) {
+            $run->update([
+                'status'      => $finalStatus,
+                'finished_at' => now(),
+                'message'     => $finalStatus === 'failed'
+                    ? "May {$failedCount} sheet(s) na failed."
+                    : 'Import completed.',
+            ]);
+        }
 
         // === Recompute daily_page_primary_item for touched dates ===
         // Wrapped in try/catch so any failure here never marks the import as failed.

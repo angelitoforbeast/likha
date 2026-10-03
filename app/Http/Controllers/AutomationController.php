@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use App\Models\MacroImportRun;
 use App\Jobs\ImportMacroFromGoogleSheet;
+use App\Services\Imports\MacroImportStarter;
 
 class AutomationController extends Controller
 {
@@ -24,53 +25,19 @@ class AutomationController extends Controller
     {
         $this->authorizeAutomation($request);
 
-        // ✅ one run at a time (same logic you already use)
-        $running = MacroImportRun::whereIn('status', ['queued', 'running'])->latest('id')->first();
-        if ($running) {
+        // ✅ one run at a time — parehong starter ng button (atomic guard, archived settings hindi kasama).
+        // started_by = null (walang system user).
+        $result = app(MacroImportStarter::class)->start(null, 'Triggered via n8n');
+        if (!$result['started']) {
+            $running = $result['run'];
             return response()->json([
                 'ok' => false,
-                'message' => "May running import pa (Run #{$running->id}).",
-                'run_id' => $running->id,
+                'message' => $running ? "May running import pa (Run #{$running->id})." : 'May running import pa.',
+                'run_id' => $running?->id,
             ], 409);
         }
 
-        // If you want, you can use a fixed "system user id"
-        $startedBy = null;
-
-        $run = MacroImportRun::create([
-            'started_by'         => $startedBy,
-            'status'             => 'queued',
-            'started_at'         => now(),
-            'total_settings'     => \App\Models\MacroGsheetSetting::count(),
-            'processed_settings' => 0,
-            'total_processed'    => 0,
-            'total_inserted'     => 0,
-            'total_updated'      => 0,
-            'total_skipped'      => 0,
-            'message'            => 'Triggered via n8n',
-        ]);
-
-        // create run items same as MacroGsheetController does
-        $settings = \App\Models\MacroGsheetSetting::all();
-        foreach ($settings as $s) {
-            \App\Models\MacroImportRunItem::create([
-                'run_id'      => $run->id,
-                'setting_id'  => $s->id,
-                'gsheet_name' => $s->gsheet_name,
-                'sheet_url'   => $s->sheet_url,
-                'sheet_range' => $s->sheet_range,
-                'status'      => 'queued',
-                'processed'   => 0,
-                'inserted'    => 0,
-                'updated'     => 0,
-                'skipped'     => 0,
-                'message'     => null,
-                'started_at'  => null,
-                'finished_at' => null,
-            ]);
-        }
-
-        ImportMacroFromGoogleSheet::dispatch($run->id, $startedBy);
+        $run = $result['run'];
 
         return response()->json([
             'ok' => true,
