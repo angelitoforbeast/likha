@@ -61,6 +61,7 @@ return [
     'ai_checker_prices' => [
         'gpt-5.2'     => [1.75, 14.0],
         'gpt-6-astra' => [10.0, 50.0],
+        'gpt-6-luna'  => [0.10, 0.50],
         'web_search'  => 0.01,
     ],
     // Model is now picked per-request via the UI dropdown sa /gpt-ad-generator.

@@ -50,6 +50,35 @@ class AstraEncoder
     private ?MacroOutput $row = null;
     private string $keySource = 'wala';
     private string $lastHistory = '';
+    /** Huling transport failure ng post() (para sa night run) — kind/status/code lang, HINDI ang body o message. */
+    private ?array $lastError = null;
+    /** Opt-in ng night run; ang browser ay nananatili sa TIMEOUT_S. */
+    private int $httpTimeout = self::TIMEOUT_S;
+    /** Opt-in ng night run: isulat lang ang row habang blangko pa ang STATUS (hindi kailanman papatungan ang inilagay ng tao). */
+    private bool $onlyWhenStatusBlank = false;
+
+    /**
+     * Huling transport failure ng OpenAI call sa huling processRow(), o null kapag wala / nakabawi:
+     * ['kind' => 'http'|'exception', 'status' => int|null, 'code' => string|null].
+     */
+    public function lastError(): ?array
+    {
+        return $this->lastError;
+    }
+
+    /** Timeout (segundo) ng bawat OpenAI call. Default = TIMEOUT_S. */
+    public function httpTimeout(int $seconds): static
+    {
+        $this->httpTimeout = $seconds;
+        return $this;
+    }
+
+    /** Kapag naka-on: ang huling sulat sa row ay mangyayari lang kung blangko pa rin ang STATUS. */
+    public function onlyWhenStatusBlank(bool $on = true): static
+    {
+        $this->onlyWhenStatusBlank = $on;
+        return $this;
+    }
 
     /**
      * Saan kukunin ang OpenAI key ng Astra engine, sa pagkakasunod:
@@ -137,6 +166,7 @@ class AstraEncoder
     public function processRow(int $id, array $maps, ?string $host = null): array
     {
         $this->host = $host; $this->evidence = []; $this->usage = []; $this->searches = [];
+        $this->lastError = null;
         $t0 = microtime(true);
 
         $row = MacroOutput::find($id);
@@ -278,7 +308,20 @@ class AstraEncoder
         $block = $this->formatBlock($form, ($prov && $city && $brgy) ? [$prov, $city, $brgy] : null, $listNote, $summary);
         $updates['CXD'] = $this->appendBlock((string) $row->CXD, $block);
 
-        $row->update($updates);
+        if ($this->onlyWhenStatusBlank) {
+            // Night run: ISANG conditional UPDATE — kung may STATUS na (inilagay ng tao habang tumatakbo ang call), walang isusulat.
+            $STATUS  = DB::getQueryGrammar()->wrap('STATUS');
+            $written = MacroOutput::query()->whereKey($row->id)
+                ->where(function ($s) use ($STATUS) {
+                    $s->whereNull('STATUS')->orWhereRaw("TRIM({$STATUS}) = ''");
+                })
+                ->update($updates);
+            if ($written === 0) {
+                return $this->finish(['status' => 'skipped', 'final_code' => null, 'all_filled' => false, 'message' => 'Status set by a person'], $t0);
+            }
+        } else {
+            $row->update($updates);
+        }
 
         // ── Trace → ai_checker_logs.detail (hugis na kapareho ng MacroChecker para sa AI answers page) ──
         $this->trace = [
@@ -528,10 +571,14 @@ SYS;
     {
         for ($attempt = 1; $attempt <= 2; $attempt++) {
             try {
-                $res = Http::withToken($apiKey)->acceptJson()->timeout(self::TIMEOUT_S)
+                $res = Http::withToken($apiKey)->acceptJson()->timeout($this->httpTimeout)
                     ->post('https://api.openai.com/v1/responses', $payload);
-                if ($res->successful()) return $res->json();
-                Log::warning('ASTRA_ENCODER_HTTP', ['attempt' => $attempt, 'status' => $res->status(), 'body' => substr($res->body(), 0, 500)]);
+                if ($res->successful()) { $this->lastError = null; return $res->json(); }
+                // HINDI nilo-log ang body: ang 401 ng OpenAI ay may bahagi ng API key. Status + error type/code lang.
+                $errType = self::errorIdent(data_get($res->json(), 'error.type'));
+                $errCode = self::errorIdent(data_get($res->json(), 'error.code'));
+                $this->lastError = ['kind' => 'http', 'status' => $res->status(), 'code' => $errCode ?? $errType];
+                Log::warning('ASTRA_ENCODER_HTTP', ['attempt' => $attempt, 'status' => $res->status(), 'type' => $errType, 'code' => $errCode]);
                 // Param na hindi tinatanggap ng model/API (reasoning, max_tool_calls) → tanggalin at subukan ulit
                 if ($res->status() === 400) {
                     $dropped = false;
@@ -545,11 +592,21 @@ SYS;
                 }
                 if ($res->status() < 500 && $res->status() !== 429) return null;
             } catch (\Throwable $e) {
-                Log::warning('ASTRA_ENCODER_EX', ['attempt' => $attempt, 'error' => $e->getMessage()]);
+                // Class lang ng exception, hindi ang message (maaaring may laman ng request/response).
+                $this->lastError = ['kind' => 'exception', 'status' => null, 'code' => null];
+                Log::warning('ASTRA_ENCODER_EX', ['attempt' => $attempt, 'exception' => get_class($e)]);
             }
             if ($attempt === 1) usleep(1200 * 1000);
         }
         return null;
+    }
+
+    /** Maikling identifier mula sa error ng OpenAI (type/code): [A-Za-z0-9_.-] lang, hanggang 64 chars; null kung wala. */
+    private static function errorIdent($value): ?string
+    {
+        if (!is_string($value) && !is_int($value)) return null;
+        $s = substr(preg_replace('/[^A-Za-z0-9_.\-]/', '', (string) $value) ?? '', 0, 64);
+        return $s === '' ? null : $s;
     }
 
     private function runTool(string $name, array $args): array
