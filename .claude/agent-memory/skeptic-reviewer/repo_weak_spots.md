@@ -75,7 +75,12 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 - try/catch "DB unreachable → defaults" branches (routes/console.php, NightRunSettings::read) are only tested with a dropped table (hasTable false), never with a throwing connection: removing the catch keeps tests green.
 - Scheduler `withoutOverlapping()` default is 1440 min = exactly the daily period; a killed `schedule:run` leaves a mutex that expires the same second the next night's run checks it. Ask for a short expiry on daily entries.
 - night_date = Manila date at the call; an import time set before midnight (23:30) lands on the previous night's date. Check every later task (Astra condition, banner) for that assumption.
-- Red runs that are errors (file not found, command does not exist) keep showing up as TDD evidence; they are not behaviour failures.
+- Red runs that are errors (file not found, command does not exist, class/method undefined) keep showing up as TDD evidence; they are not behaviour failures.
+- 007 T3 runner/AstraEncoder: `AI_CHECKER_LOG_FAIL` logs a QueryException message (SQL + bindings = customer chat/evidence) and the runner's 500 payload carries the raw exception message; later tasks must not copy either into night tables or pages. A failed row with `last_error` null (no key, unparsable answer, deleted row, DB error) is not a transport failure: check how the caller classifies it.
+- Conditional `UPDATE ... WHERE STATUS blank` returning 0 is reported as "Status set by a person" even when the row was deleted; then the runner's re-read is null and it ends as a 500 "read property on null". No test for a row deleted mid-call.
+- Blank-STATUS rule (NULL or TRIM = '') is now written twice (MacroCheckerController::blankRowsQuery, AstraEncoder); a third copy (night selection) is the DRY trigger.
+- NightRun tests do not pin LOG_CHANNEL: Log::warning in tests lands in the machine's real laravel.log; retry tests really sleep 1.2 s each (usleep in post()).
+- "Moved verbatim" checks: also grep the old file for every `use` the diff removes (here AstraEncoder, MacroChecker, Log were only used by the moved code: OK).
 
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.
