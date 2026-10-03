@@ -29,6 +29,9 @@ class NightAstraRun
     /** Ilang minuto mula sa Astra time maghihintay sa import bago itala ang "Did not run". */
     public const WAIT_MINUTES = 60;
 
+    /** Ilang sunod-sunod na `failed` na row bago ihinto ang run. */
+    public const BREAKER_LIMIT = 10;
+
     private const INSERT_CHUNK = 500;
 
     /**
@@ -48,6 +51,12 @@ class NightAstraRun
     public static function isStatusBlank($status): bool
     {
         return trim((string) $status, ' ') === '';
+    }
+
+    /** Ang petsa ng mga order ng isang gabi: night_date − 1 araw. */
+    public static function ordersDate(string $nightDate): string
+    {
+        return Carbon::parse($nightDate, self::TZ)->subDay()->toDateString();
     }
 
     /**
@@ -102,7 +111,7 @@ class NightAstraRun
         }
 
         $settings   = NightRunSettings::read();
-        $ordersDate = Carbon::parse($nightDate, self::TZ)->subDay()->toDateString();
+        $ordersDate = self::ordersDate($nightDate);
 
         // ISANG transaction (step + mga row): kapag pumalya sa gitna, walang maiiwang "Finished, 0 rows".
         $step = DB::transaction(function () use ($nightDate, $trigger, $settings, $ordersDate) {
@@ -164,6 +173,59 @@ class NightAstraRun
         }
 
         return $dispatched;
+    }
+
+    /**
+     * Ihinto ang run: step → `stopped` (kung `running` pa) at lahat ng `queued` na row nito → `not_run`.
+     * Ang mga row na tumatakbo sa ibang worker ay natatapos nang normal. False = hindi na `running` ang step.
+     */
+    public function stop(NightRunStep $step, string $reason): bool
+    {
+        // Dalawang table → isang transaction.
+        return DB::transaction(function () use ($step, $reason) {
+            $stopped = NightRunStep::where('id', $step->id)->where('state', 'running')
+                ->update(['state' => 'stopped', 'reason' => $reason, 'finished_at' => now()]);
+            if ($stopped !== 1) {
+                return false;
+            }
+
+            NightAstraRow::where('step_id', $step->id)->where('state', 'queued')
+                ->update(['state' => 'not_run', 'reason' => 'Not run: run stopped', 'finished_at' => now()]);
+
+            return true;
+        });
+    }
+
+    /** Tapos na ang run kapag `running` pa ito at wala nang row na `queued` o `running`. */
+    public function settle(NightRunStep $step): bool
+    {
+        return NightRunStep::where('id', $step->id)->where('state', 'running')
+            ->whereNotExists(function ($rows) {
+                $rows->from('night_astra_rows')
+                    ->whereColumn('night_astra_rows.step_id', 'night_run_steps.id')
+                    ->whereIn('night_astra_rows.state', ['queued', 'running']);
+            })
+            ->update(['state' => 'finished', 'finished_at' => now()]) === 1;
+    }
+
+    /**
+     * Breaker: bawat huling `failed` ng isang row ay +1 (atomic increment); sa ika-10 sunod-sunod, hinto ang run.
+     * Ang $reason ay fixed string ng row, hindi kailanman text mula sa OpenAI.
+     */
+    public function countFailure(int $stepId, string $reason): void
+    {
+        NightRunStep::where('id', $stepId)->increment('consecutive_failures');
+
+        $step = NightRunStep::find($stepId);
+        if ($step && (int) $step->consecutive_failures >= self::BREAKER_LIMIT) {
+            $this->stop($step, 'Stopped: ' . self::BREAKER_LIMIT . " rows failed in a row (last: {$reason})");
+        }
+    }
+
+    /** Isang row na natapos nang maayos → balik sa 0 ang bilang ng breaker. */
+    public function resetFailures(int $stepId): void
+    {
+        NightRunStep::where('id', $stepId)->where('consecutive_failures', '>', 0)->update(['consecutive_failures' => 0]);
     }
 
     /** Ang tick kada minuto (spec §6.2): simulan, maghintay, o itala ang "Did not run" para sa gabing ito. */

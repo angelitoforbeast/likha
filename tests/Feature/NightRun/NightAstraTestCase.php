@@ -27,13 +27,22 @@ abstract class NightAstraTestCase extends NightRunTestCase
     protected const NIGHT  = '2026-10-05';
     protected const ORDERS = '2026-10-04';
 
+    protected \ArrayObject $logLines;
+
     protected function setUp(): void
     {
         parent::setUp();
 
         Queue::fake();
         Http::preventStrayRequests();
+        // Walang napupunta sa totoong log; ang bawat linya ay naiipon para mahanap kung may tumagas.
+        $this->logLines = $lines = new \ArrayObject();
         Log::spy();
+        foreach (['debug', 'info', 'notice', 'warning', 'error', 'critical'] as $level) {
+            Log::shouldReceive($level)->zeroOrMoreTimes()->andReturnUsing(function ($message, array $context = []) use ($lines, $level) {
+                $lines[] = ['level' => $level, 'message' => $message, 'context' => $context];
+            });
+        }
         Carbon::setTestNow(self::NIGHT . ' 03:00:00'); // app timezone = Asia/Manila
         AppSetting::set('night_astra_enabled', '1');
         AstraEncoder::storeApiKey('test-key-not-real');
