@@ -199,6 +199,72 @@
       </div>
     </form>
 
+    {{-- 🌙 Night run (handoff 007) — CEO lang; hiwalay na form, hindi nested sa taas --}}
+    @if(!empty($night))
+    <form method="POST" action="{{ route('night_run.settings') }}" class="bg-white rounded-xl shadow p-5 space-y-4">
+      @csrf
+      <div>
+        <div class="font-semibold text-lg mb-1">🌙 Night run</div>
+        <p class="text-sm text-gray-500">Times are Philippine time. Rows not started by the stop time are left for a person.</p>
+      </div>
+
+      @if($errors->has('night_macro_import_enabled') || $errors->has('night_likha_import_enabled') || $errors->has('night_astra_enabled')
+          || $errors->has('night_import_time_1') || $errors->has('night_import_time_2') || $errors->has('night_astra_time')
+          || $errors->has('night_astra_stop_time') || $errors->has('night_astra_max_rows'))
+        <div class="bg-red-50 border border-red-200 text-red-800 rounded-lg p-3 text-sm" role="alert">
+          @foreach(['night_macro_import_enabled', 'night_likha_import_enabled', 'night_astra_enabled', 'night_import_time_1', 'night_import_time_2', 'night_astra_time', 'night_astra_stop_time', 'night_astra_max_rows'] as $field)
+            @foreach($errors->get($field) as $err)
+              <div>• {{ $err }}</div>
+            @endforeach
+          @endforeach
+        </div>
+      @endif
+
+      <div class="space-y-3">
+        @foreach([
+          'night_macro_import_enabled' => ['Night macro import', 'Imports the macro sheets every night.'],
+          'night_likha_import_enabled' => ['Night Likha import', 'Imports the Likha order sheets every night.'],
+          'night_astra_enabled'        => ['Night Astra', 'Astra checks the blank orders of the day before.'],
+        ] as $field => [$label, $help])
+          <div>
+            <label class="flex items-center gap-2 text-sm font-semibold">
+              <input type="checkbox" name="{{ $field }}" value="1" @checked(old($field, $night[$field]))>
+              {{ $label }}
+            </label>
+            <p class="text-xs text-gray-500 mt-1 ml-6">{{ $help }}</p>
+          </div>
+        @endforeach
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        @foreach([
+          'night_import_time_1'   => ['Import time 1', 'The first import of the night.'],
+          'night_import_time_2'   => ['Import time 2', 'The second import; must be later than time 1.'],
+          'night_astra_time'      => ['Astra time', 'When Astra starts; must be earlier than the stop time.'],
+          'night_astra_stop_time' => ['Astra stop time', 'Rows not started by the stop time are left for a person.'],
+        ] as $field => [$label, $help])
+          <div>
+            <label for="{{ $field }}" class="block text-sm font-semibold mb-1">{{ $label }}</label>
+            <input type="time" id="{{ $field }}" name="{{ $field }}" required value="{{ old($field, $night[$field]) }}"
+                   class="border rounded px-3 py-2 w-full text-sm font-mono">
+            <p class="text-xs text-gray-500 mt-1">{{ $help }}</p>
+          </div>
+        @endforeach
+        <div>
+          <label for="night_astra_max_rows" class="block text-sm font-semibold mb-1">Max rows per night</label>
+          <input type="number" id="night_astra_max_rows" name="night_astra_max_rows" required min="1" max="20000" step="1"
+                 value="{{ old('night_astra_max_rows', $night['night_astra_max_rows']) }}"
+                 class="border rounded px-3 py-2 w-full text-sm font-mono">
+          <p class="text-xs text-gray-500 mt-1">A safety limit, 1 to 20000. Orders past it are left for a person.</p>
+        </div>
+      </div>
+
+      <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded px-4 py-2 text-sm">
+        Save night run settings
+      </button>
+    </form>
+    @endif
+
     <section class="bg-white rounded-xl shadow p-5">
       <div class="font-semibold mb-2">📊 Quick reference: seconds → human</div>
       <table class="text-sm">

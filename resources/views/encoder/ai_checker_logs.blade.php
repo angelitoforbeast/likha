@@ -38,6 +38,9 @@
       @endif
     </div>
 
+    {{-- ════════ 🌙 Night run (handoff 007) ════════ --}}
+    @include('encoder._night_run')
+
     {{-- ════════ AI Checker batches (grouped by batch_id) ════════ --}}
     <div>
       <h2 class="text-base font-bold text-gray-800 mb-2">🤖 AI Checker — Batches</h2>

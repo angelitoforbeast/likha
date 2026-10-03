@@ -162,7 +162,7 @@ Nothing else in the jobs changes; the Google fetch isn't touched or tested.
 | `trigger` string(10) | `schedule` or `manual` |
 | `started_at`, `finished_at`, `stop_at` | `stop_at` = when rows stop being started |
 | `rows_found`, `rows_over_max` | Astra: selected count, and how many were left out by the safety maximum |
-| `consecutive_failures` | the breaker's counter |
+| `consecutive_failures`, `failure_streak_started_at` | the breaker's counter and when the current streak began |
 | timestamps | |
 
 Unique `(night_date, kind)`.
