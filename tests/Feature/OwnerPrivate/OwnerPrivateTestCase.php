@@ -56,6 +56,8 @@ abstract class OwnerPrivateTestCase extends TestCase
             'database/migrations/2026_06_03_010001_create_page_day_action_logs_table.php',
             'database/migrations/2026_10_04_110000_create_page_day_claude_actions_table.php',
             'database/migrations/2026_10_04_110001_create_page_day_claude_action_logs_table.php',
+            'database/migrations/2026_10_04_120000_create_page_day_ceo_actions_table.php',
+            'database/migrations/2026_10_04_120001_create_page_day_ceo_action_logs_table.php',
         ];
     }
 

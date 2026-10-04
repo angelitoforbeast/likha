@@ -125,17 +125,22 @@ class ClaudeActionCommandTest extends OwnerPrivateTestCase
         $this->assertSame('old', Cache::get('owner_private:cache_version'));
     }
 
-    public function test_the_team_action_tables_are_left_untouched(): void
+    /** Ang team pair at ang CEO pair (may row ang CEO note para sa parehong page + date) ay hindi hinahawakan ng command. */
+    public function test_the_team_and_ceo_action_tables_are_left_untouched(): void
     {
         DB::table('page_day_actions')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'comment' => 'team note', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
         DB::table('page_day_action_logs')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'new_comment' => 'team note', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
-        $before = [DB::table('page_day_actions')->get()->all(), DB::table('page_day_action_logs')->get()->all()];
+        DB::table('page_day_ceo_actions')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'action' => 'ceo A', 'reason' => 'ceo R', 'source' => 'ceo:Busing', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
+        DB::table('page_day_ceo_action_logs')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'new_action' => 'ceo A', 'new_reason' => 'ceo R', 'source' => 'ceo:Busing', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
+        $tables = ['page_day_actions', 'page_day_action_logs', 'page_day_ceo_actions', 'page_day_ceo_action_logs'];
+        $snapshot = fn () => array_map(fn ($t) => DB::table($t)->get()->all(), $tables);
+        $before = $snapshot();
 
         $this->run_(['--action' => 'A1', '--reason' => 'R1'])->assertExitCode(0);
         $this->run_(['--action' => 'A2'])->assertExitCode(0);
         $this->run_(['--clear' => true])->assertExitCode(0);
 
-        $this->assertEquals($before, [DB::table('page_day_actions')->get()->all(), DB::table('page_day_action_logs')->get()->all()]);
+        $this->assertEquals($before, $snapshot());
     }
 
     public function test_a_page_key_no_page_has_is_saved_with_a_note_on_the_same_line(): void

@@ -2194,6 +2194,8 @@ class OwnerPrivateController extends Controller
         }
         // Claude Action/Reason (page_day_claude_actions) — CEO lang; walang laman ang map sa iba kaya hindi lumalabas ang text.
         $pageClaudeMap = $isCEO ? (new \App\Services\PageDayClaudeActionService())->forDate($endDate) : [];
+        // CEO Action/Reason (page_day_ceo_actions) — sariling note ng CEO; CEO lang din.
+        $pageCeoMap = $isCEO ? (new \App\Services\PageDayCeoActionService())->forDate($endDate) : [];
 
         // ── HOLD snapshot (units per base item) — as-of end_date ───────────────
         // Per-item HOLD na naka-snapshot daily. Gamitin ang snapshot ng end_date;
@@ -2535,6 +2537,10 @@ class OwnerPrivateController extends Controller
                 'claude_reason'         => $pageClaudeMap[$pk]['reason'] ?? null,
                 'claude_at'             => $pageClaudeMap[$pk]['at'] ?? null,
                 'claude_source'         => $pageClaudeMap[$pk]['source'] ?? null,
+                'ceo_action'            => $pageCeoMap[$pk]['action'] ?? null,
+                'ceo_reason'            => $pageCeoMap[$pk]['reason'] ?? null,
+                'ceo_at'                => $pageCeoMap[$pk]['at'] ?? null,
+                'ceo_source'            => $pageCeoMap[$pk]['source'] ?? null,
                 'action_date'           => $endDate,
                 // HOLD units (daily snapshot, as-of end_date) for this page's item.
                 'hold_units'            => $holdMap[$holdKeyOf((string)$dominant['item_name'])] ?? null,
@@ -4093,6 +4099,10 @@ class OwnerPrivateController extends Controller
         $claudeByDate = $this->isCEO()
             ? (new \App\Services\PageDayClaudeActionService())->forPage($pageKey, $startDate, $endDate)
             : [];
+        // CEO Action/Reason per date (sariling note ng CEO) — CEO lang din.
+        $ceoByDate = $this->isCEO()
+            ? (new \App\Services\PageDayCeoActionService())->forPage($pageKey, $startDate, $endDate)
+            : [];
 
         $out = [];
         $cursor = strtotime($startDate);
@@ -4201,6 +4211,10 @@ class OwnerPrivateController extends Controller
                     'claude_reason'    => $claudeByDate[$d]['reason'] ?? null,
                     'claude_at'        => $claudeByDate[$d]['at'] ?? null,
                     'claude_source'    => $claudeByDate[$d]['source'] ?? null,
+                    'ceo_action'       => $ceoByDate[$d]['action'] ?? null,
+                    'ceo_reason'       => $ceoByDate[$d]['reason'] ?? null,
+                    'ceo_at'           => $ceoByDate[$d]['at'] ?? null,
+                    'ceo_source'       => $ceoByDate[$d]['source'] ?? null,
                     'is_anchor'        => $itemMatches && $priceMatches,
                     'is_anchor_date'   => ($d === $endDate),  // end-date row = anchor source
                     'has_data'         => true,
@@ -4246,6 +4260,10 @@ class OwnerPrivateController extends Controller
                     'claude_reason'    => $claudeByDate[$d]['reason'] ?? null,
                     'claude_at'        => $claudeByDate[$d]['at'] ?? null,
                     'claude_source'    => $claudeByDate[$d]['source'] ?? null,
+                    'ceo_action'       => $ceoByDate[$d]['action'] ?? null,
+                    'ceo_reason'       => $ceoByDate[$d]['reason'] ?? null,
+                    'ceo_at'           => $ceoByDate[$d]['at'] ?? null,
+                    'ceo_source'       => $ceoByDate[$d]['source'] ?? null,
                     'is_anchor_date'   => ($d === $endDate),
                     'is_anchor'        => false,
                     'has_data'         => false,
@@ -4388,6 +4406,18 @@ class OwnerPrivateController extends Controller
      */
     public function saveClaudeAction(Request $request, \App\Services\PageDayClaudeActionService $claude)
     {
+        return $this->saveCeoOnlyNote($request, $claude, 'claude');
+    }
+
+    /** POST /owner/private/ceo-action — pareho ng nasa itaas, pero sa sariling note ng CEO (page_day_ceo_actions). */
+    public function saveCeoAction(Request $request, \App\Services\PageDayCeoActionService $ceo)
+    {
+        return $this->saveCeoOnlyNote($request, $ceo, 'ceo');
+    }
+
+    /** Iisang katawan para sa dalawang route; ang $prefix ang bumubuo ng {prefix}_action, _reason, _source, _at sa sagot. */
+    private function saveCeoOnlyNote(Request $request, \App\Services\PageDayClaudeActionService $claude, string $prefix)
+    {
         $this->checkCEOAccess();
 
         $v = $request->validate([
@@ -4420,14 +4450,14 @@ class OwnerPrivateController extends Controller
         $now = $claude->forPage($pageKey, $tsDate, $tsDate)[$tsDate] ?? null;
 
         return response()->json([
-            'ok'            => true,
-            'status'        => $status,
-            'page_key'      => $pageKey,
-            'ts_date'       => $tsDate,
-            'claude_action' => $now['action'] ?? null,
-            'claude_reason' => $now['reason'] ?? null,
-            'claude_source' => $now['source'] ?? null,
-            'claude_at'     => $now['at'] ?? null,
+            'ok'                => true,
+            'status'            => $status,
+            'page_key'          => $pageKey,
+            'ts_date'           => $tsDate,
+            "{$prefix}_action"  => $now['action'] ?? null,
+            "{$prefix}_reason"  => $now['reason'] ?? null,
+            "{$prefix}_source"  => $now['source'] ?? null,
+            "{$prefix}_at"      => $now['at'] ?? null,
         ]);
     }
 

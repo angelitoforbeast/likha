@@ -11,7 +11,8 @@ use PHPUnit\Framework\Attributes\DataProvider;
 
 class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
 {
-    private const CLAUDE = ['claude_action', 'claude_reason'];
+    /** Ang apat na CEO-only note column, sa ayos nila: kasunod agad ng 'action'. */
+    private const NOTES = ['claude_action', 'claude_reason', 'ceo_action', 'ceo_reason'];
 
     private function save(string $key, array $config): void
     {
@@ -28,40 +29,53 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
     }
 
     #[DataProvider('tablesAndRoles')]
-    public function test_non_ceo_always_hides_the_claude_columns(string $table, string $role, string $key): void
+    public function test_non_ceo_always_hides_the_note_columns(string $table, string $role, string $key): void
     {
         $ctl = new OwnerColumnSettingsController();
 
         // walang saved config (breakdown = all visible by default)
-        $this->assertEqualsCanonicalizing(self::CLAUDE, array_intersect(self::CLAUDE, $ctl->loadConfig($table, $role)['hidden']));
+        $this->assertEqualsCanonicalizing(self::NOTES, array_intersect(self::NOTES, $ctl->loadConfig($table, $role)['hidden']));
 
         // kahit ibigay ng saved visible_by_role
-        $this->save($key, ['visible_by_role' => [$role => ['action', 'claude_action', 'claude_reason']]]);
+        $this->save($key, ['visible_by_role' => [$role => array_merge(['action'], self::NOTES)]]);
         $hidden = $ctl->loadConfig($table, $role)['hidden'];
-        $this->assertContains('claude_action', $hidden);
-        $this->assertContains('claude_reason', $hidden);
+        foreach (self::NOTES as $id) {
+            $this->assertContains($id, $hidden);
+        }
         $this->assertNotContains('action', $hidden);
     }
 
     #[DataProvider('tablesAndRoles')]
-    public function test_ceo_sees_the_claude_columns_by_default_right_after_action(string $table): void
+    public function test_ceo_sees_the_note_columns_by_default_right_after_action(string $table): void
     {
         $config = (new OwnerColumnSettingsController())->loadConfig($table, 'CEO');
 
-        $this->assertNotContains('claude_action', $config['hidden']);
-        $this->assertNotContains('claude_reason', $config['hidden']);
+        foreach (self::NOTES as $id) {
+            $this->assertNotContains($id, $config['hidden']);
+        }
         $i = array_search('action', $config['order'], true);
-        $this->assertSame(['claude_action', 'claude_reason'], array_slice($config['order'], $i + 1, 2));
+        $this->assertSame(self::NOTES, array_slice($config['order'], $i + 1, 4));
     }
 
-    #[DataProvider('tablesAndRoles')]
-    public function test_an_older_saved_order_gets_the_claude_columns_right_after_action(string $table, string $role, string $key): void
+    /** @return array<string, array{0: array, 1: array}> saved order, order na inaasahan sa simula */
+    public static function olderOrders(): array
     {
-        $this->save($key, ['order' => ['hold', 'action', 'adspent', 'orders']]);
+        return [
+            'knows neither note type'   => [['hold', 'action', 'adspent', 'orders'], ['hold', 'action', 'claude_action', 'claude_reason', 'ceo_action', 'ceo_reason', 'adspent', 'orders']],
+            'knows only the claude ids' => [['hold', 'action', 'claude_action', 'claude_reason', 'adspent', 'orders'], ['hold', 'action', 'claude_action', 'claude_reason', 'ceo_action', 'ceo_reason', 'adspent', 'orders']],
+        ];
+    }
+
+    #[DataProvider('olderOrders')]
+    public function test_an_older_saved_order_gets_the_note_columns_right_after_action(array $saved, array $expected): void
+    {
         $ctl = new OwnerColumnSettingsController();
 
-        foreach ([$ctl->loadConfig($table, 'CEO')['order'], $ctl->loadConfigMatrix($table)['order']] as $order) {
-            $this->assertSame(['hold', 'action', 'claude_action', 'claude_reason', 'adspent', 'orders'], array_slice($order, 0, 6));
+        foreach (['owner_private' => 'owner_private_cols', 'breakdown' => 'breakdown_cols'] as $table => $key) {
+            $this->save($key, ['order' => $saved]);
+            foreach ([$ctl->loadConfig($table, 'CEO')['order'], $ctl->loadConfigMatrix($table)['order']] as $order) {
+                $this->assertSame($expected, array_slice($order, 0, 8), $table);
+            }
         }
     }
 
@@ -144,10 +158,10 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
     }
 
     #[DataProvider('sections')]
-    public function test_ceo_hide_and_show_of_the_claude_columns_works_like_action(string $table): void
+    public function test_ceo_hide_and_show_of_the_note_columns_works_like_action(string $table): void
     {
         $ctl = new OwnerColumnSettingsController();
-        $three = array_merge(['action'], self::CLAUDE);
+        $three = array_merge(['action'], self::NOTES);
 
         $this->postSave($table, ['order' => $this->catalogOrder($table), 'hidden' => $three]);
         [$pageHidden, $html] = $this->pageState($table);
@@ -172,12 +186,12 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
         }
     }
 
-    /** Ang dalawang id ay kasunod agad ng 'action' sa order. */
+    /** Ang apat na id ay kasunod agad ng 'action' sa order. */
     private function assertClaudeAfterAction(array $order, string $msg): void
     {
         $i = array_search('action', $order, true);
         $this->assertNotFalse($i, $msg);
-        $this->assertSame(self::CLAUDE, array_slice($order, $i + 1, 2), $msg);
+        $this->assertSame(self::NOTES, array_slice($order, $i + 1, 4), $msg);
     }
 
     private function assertCeoSeesClaudeAfterAction(string $table): void
@@ -186,7 +200,7 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
         $config = $ctl->loadConfig($table, 'CEO');
         $this->assertClaudeAfterAction($config['order'], 'loadConfig');
         $this->assertClaudeAfterAction($ctl->loadConfigMatrix($table)['order'], 'matrix');
-        foreach (self::CLAUDE as $id) {
+        foreach (self::NOTES as $id) {
             $this->assertNotContains($id, $config['hidden'], $id);
         }
     }
@@ -212,7 +226,7 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
             ->assertRedirect()->assertSessionHasNoErrors();
         $snapshot = $this->raw($key);
 
-        $this->postSave($table, ['hidden' => array_merge(['hold'], self::CLAUDE)]);
+        $this->postSave($table, ['hidden' => array_merge(['hold'], self::NOTES)]);
         $this->assertNotSame($snapshot, $this->raw($key));
 
         $this->resetFrom($table);
@@ -237,7 +251,7 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
     #[DataProvider('sections')]
     public function test_reset_without_a_snapshot_uses_the_code_default_with_the_claude_columns(string $table, string $key): void
     {
-        $this->postSave($table, ['hidden' => self::CLAUDE]);
+        $this->postSave($table, ['hidden' => self::NOTES]);
         $this->assertNull($this->raw($key . '_default'));
 
         $this->resetFrom($table);
@@ -260,6 +274,8 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
         $labels = array_column(json_decode($c[1], true)[$table], 'label', 'id');
         $this->assertSame('Claude Action (CEO)', $labels['claude_action']);
         $this->assertSame('Claude Reason (CEO)', $labels['claude_reason']);
+        $this->assertSame('CEO Action', $labels['ceo_action']);
+        $this->assertSame('CEO Reason', $labels['ceo_reason']);
     }
 
     // Client-rendered ang mga row, kaya ang tsine-check dito ay ang ipinapadala ng server:
@@ -270,7 +286,7 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
         $html = $this->get($this->settingsUrl($table))->assertOk()->getContent();
 
         $this->assertSame(1, preg_match('/const COL_CEO_ONLY\s*=\s*(\[[^\]]*\]);/', $html, $m), 'missing: COL_CEO_ONLY constant');
-        $this->assertSame(self::CLAUDE, json_decode($m[1], true));
+        $this->assertSame(self::NOTES, json_decode($m[1], true));
 
         $has = fn (string $needle) => str_contains($html, $needle);
         $this->assertTrue($has(':disabled="isCeoOnly(id)"'), 'missing: :disabled="isCeoOnly(id)" on the role checkbox');
@@ -297,9 +313,9 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
         $ctl = new OwnerColumnSettingsController();
         $matrix = $ctl->loadConfigMatrix($table);
         foreach (self::TEAM as $role) {
-            $this->assertEmpty(array_intersect(self::CLAUDE, $matrix['visible_by_role'][$role]), "{$msg}: matrix {$role}");
+            $this->assertEmpty(array_intersect(self::NOTES, $matrix['visible_by_role'][$role]), "{$msg}: matrix {$role}");
             $hidden = $ctl->loadConfig($table, $role)['hidden'];
-            foreach (self::CLAUDE as $id) {
+            foreach (self::NOTES as $id) {
                 $this->assertContains($id, $hidden, "{$msg}: {$role} {$id}");
             }
         }
@@ -310,7 +326,7 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
     {
         $this->assertClaudeLockedForTeam($table, 'no saved row'); // breakdown "all ids by default" case too
 
-        $grant = array_merge(['action'], self::CLAUDE);
+        $grant = array_merge(['action'], self::NOTES);
         $response = $this->postSave($table, ['visible_by_role' => ['Marketing - OIC' => $grant, 'Marketing' => $grant]]);
 
         $stored = json_decode($this->raw($key), true)['visible_by_role'];
@@ -325,7 +341,7 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
     #[DataProvider('sections')]
     public function test_a_stored_team_grant_on_the_claude_columns_stays_hidden_through_save_as_default_and_reset(string $table, string $key): void
     {
-        $grant = array_merge(['action'], self::CLAUDE);
+        $grant = array_merge(['action'], self::NOTES);
         $row = ['order' => $this->catalogOrder($table), 'hidden' => [], 'visible_by_role' => ['Marketing - OIC' => $grant, 'Marketing' => $grant]];
 
         $this->save($key, $row);
@@ -342,22 +358,22 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
         $this->assertClaudeLockedForTeam($table, 'after reset');
     }
 
-    /** D6 (handoff 010): iisang write route ang may 'claude'; POST lang, nasa web (CSRF) + auth. Ang refusal per role: ClaudeActionSaveRouteTest. */
-    public function test_the_only_claude_write_route_is_the_ceo_save_route(): void
+    /** A8 (amendment 010-1): ang dalawang save route lang ang write route na may 'claude' o 'ceo-action'; POST lang, nasa web (CSRF) + auth. Ang refusal per role: ClaudeActionSaveRouteTest. */
+    public function test_the_only_claude_and_ceo_action_write_routes_are_the_two_ceo_save_routes(): void
     {
         $writes = [];
         foreach (Route::getRoutes() as $route) {
             $isWrite = array_intersect($route->methods(), ['POST', 'PUT', 'PATCH', 'DELETE']);
-            $mentionsClaude = stripos((string) $route->getName() . ' ' . $route->uri(), 'claude') !== false;
-            if ($isWrite && $mentionsClaude) {
-                $writes[] = $route;
+            $text = strtolower((string) $route->getName() . ' ' . $route->uri());
+            if ($isWrite && (str_contains($text, 'claude') || str_contains($text, 'ceo-action'))) {
+                $writes[$route->getName()] = $route;
             }
         }
 
-        $this->assertCount(1, $writes);
-        $this->assertSame('owner.private.claude-action.save', $writes[0]->getName());
-        $this->assertSame(['POST'], array_values(array_diff($writes[0]->methods(), ['OPTIONS'])));
-        $this->assertContains('web', $writes[0]->gatherMiddleware());
-        $this->assertContains('auth', $writes[0]->gatherMiddleware());
+        $this->assertEqualsCanonicalizing(['owner.private.claude-action.save', 'owner.private.ceo-action.save'], array_keys($writes));
+        foreach ($writes as $route) {
+            $this->assertSame(['POST'], array_values(array_diff($route->methods(), ['OPTIONS'])));
+            $this->assertEqualsCanonicalizing(['web', 'auth'], array_values(array_intersect($route->gatherMiddleware(), ['web', 'auth'])));
+        }
     }
 }

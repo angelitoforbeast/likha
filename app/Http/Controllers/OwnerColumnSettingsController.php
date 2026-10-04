@@ -99,6 +99,8 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'action',        'label' => 'Action'],
             ['id' => 'claude_action', 'label' => 'Claude Action (CEO)'],
             ['id' => 'claude_reason', 'label' => 'Claude Reason (CEO)'],
+            ['id' => 'ceo_action',    'label' => 'CEO Action'],
+            ['id' => 'ceo_reason',    'label' => 'CEO Reason'],
             // /item lang (item rows) — hindi ginagamit ng /owner/private.
             ['id' => 'category',      'label' => 'Category (/item)'],
             ['id' => 'stock',         'label' => 'Stock (/item)'],
@@ -184,11 +186,13 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'action',       'label' => 'Action'],
             ['id' => 'claude_action', 'label' => 'Claude Action (CEO)'],
             ['id' => 'claude_reason', 'label' => 'Claude Reason (CEO)'],
+            ['id' => 'ceo_action',    'label' => 'CEO Action'],
+            ['id' => 'ceo_reason',    'label' => 'CEO Reason'],
         ],
     ];
 
     /** Mga column na CEO lang ang puwedeng makakita — laging hidden sa ibang role. */
-    public const CEO_ONLY = ['claude_action', 'claude_reason'];
+    public const CEO_ONLY = ['claude_action', 'claude_reason', 'ceo_action', 'ceo_reason'];
 
     /**
      * Default visibility per column when nothing has been saved yet.
@@ -206,7 +210,7 @@ class OwnerColumnSettingsController extends Controller
             'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d',
             'proj_prof_1d', 'proj_prof_3d', 'proj_prof_7d',
             'jnt_rts', 'jnt_del', 'jnt_transit',
-            'rts_set', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee', 'hold', 'action', 'claude_action', 'claude_reason',
+            'rts_set', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee', 'hold', 'action', 'claude_action', 'claude_reason', 'ceo_action', 'ceo_reason',
             'stock', 'incoming', 'units_per_day', 'doi', 'order_qty', 'lifecycle',
         ],
         'campaigns' => [
@@ -233,7 +237,7 @@ class OwnerColumnSettingsController extends Controller
             // Lahat visible by default — CEO/MOIC/Marketing; i-uncheck per role kung gusto.
             'date', 'primary_item', 'item_alias', 'orders', 'price', 'rts_set',
             'promo', 'item_val', 'adspent', 'proceed', 'hold', 'cpp', 'proj_profit',
-            'proj_pct', 'status', 'action', 'claude_action', 'claude_reason',
+            'proj_pct', 'status', 'action', 'claude_action', 'claude_reason', 'ceo_action', 'ceo_reason',
         ],
     ];
 

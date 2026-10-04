@@ -9,14 +9,22 @@ use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
- * POST /owner/private/claude-action: CEO lang ang puwedeng mag-edit ng Claude Action + Reason.
+ * POST /owner/private/claude-action at /owner/private/ceo-action: CEO lang ang puwedeng mag-edit ng Action + Reason.
+ * Pareho ang rules ng dalawang note type, kaya ang mga test dito ay tumatakbo para sa 'claude' at 'ceo'
+ * (route /owner/private/{n}-action, tables page_day_{n}_actions + page_day_{n}_action_logs, keys {n}_action...).
  */
 class ClaudeActionSaveRouteTest extends OwnerPrivateTestCase
 {
-    private const URL    = '/owner/private/claude-action';
-    private const PAGE   = 'page a';
-    private const DATE   = '2026-10-03';
+    private const PAGE = 'page a';
+    private const DATE = '2026-10-03';
     private const SOURCE = 'ceo:CEO User';
+
+    /** Anim na note table: team, Claude, CEO. */
+    private const NOTE_TABLES = [
+        'page_day_actions', 'page_day_action_logs',
+        'page_day_claude_actions', 'page_day_claude_action_logs',
+        'page_day_ceo_actions', 'page_day_ceo_action_logs',
+    ];
 
     protected function setUp(): void
     {
@@ -67,139 +75,178 @@ class ClaudeActionSaveRouteTest extends OwnerPrivateTestCase
         ]);
     }
 
-    private function save(array $over = [])
+    /** @return array<string, array{0: string}> */
+    public static function notes(): array
     {
-        return $this->postJson(self::URL, array_merge(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'action' => 'A1', 'reason' => 'R1'], $over));
+        return ['claude' => ['claude'], 'ceo' => ['ceo']];
     }
 
-    private function seedClaude(): void
+    /** Lahat ng note type na may ibang input (role, body...): [label => [note, ...args]]. */
+    private static function eachNote(array $cases): array
     {
-        DB::table('page_day_claude_actions')->insert([
-            'page_key' => self::PAGE, 'ts_date' => self::DATE, 'action' => 'seed A', 'reason' => 'seed R',
-            'source' => 'run-0', 'created_at' => '2026-10-04 08:00:00', 'updated_at' => '2026-10-04 09:30:00',
-        ]);
-        DB::table('page_day_claude_action_logs')->insert([
-            'page_key' => self::PAGE, 'ts_date' => self::DATE, 'new_action' => 'seed A', 'new_reason' => 'seed R',
-            'source' => 'run-0', 'edited_at' => '2026-10-04 08:00:00', 'created_at' => '2026-10-04 08:00:00', 'updated_at' => '2026-10-04 08:00:00',
-        ]);
+        $out = [];
+        foreach (self::notes() as $n => [$note]) {
+            foreach ($cases as $label => $args) {
+                $out["$n / $label"] = array_merge([$note], $args);
+            }
+        }
+
+        return $out;
     }
 
-    /** @return array<int, array> */
-    private function snapshot(): array
+    private function table(string $n): string
     {
-        return array_map(fn ($t) => DB::table($t)->get()->all(), ['page_day_claude_actions', 'page_day_claude_action_logs', 'page_day_actions', 'page_day_action_logs']);
+        return "page_day_{$n}_actions";
     }
 
-    public function test_ceo_inserts_updates_and_clears_with_the_ceo_source_in_the_audit_log(): void
+    private function logTable(string $n): string
+    {
+        return "page_day_{$n}_action_logs";
+    }
+
+    private function save(string $n, array $over = [])
+    {
+        return $this->postJson("/owner/private/{$n}-action", array_merge(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'action' => 'A1', 'reason' => 'R1'], $over));
+    }
+
+    /** May row ang lahat ng anim na table (team, Claude, CEO) para sa (page, date). */
+    private function seedAllNotes(): void
+    {
+        DB::table('page_day_actions')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'comment' => 'team note', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
+        DB::table('page_day_action_logs')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'new_comment' => 'team note', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
+        foreach (['claude', 'ceo'] as $n) {
+            DB::table($this->table($n))->insert([
+                'page_key' => self::PAGE, 'ts_date' => self::DATE, 'action' => "seed A $n", 'reason' => "seed R $n",
+                'source' => 'run-0', 'created_at' => '2026-10-04 08:00:00', 'updated_at' => '2026-10-04 09:30:00',
+            ]);
+            DB::table($this->logTable($n))->insert([
+                'page_key' => self::PAGE, 'ts_date' => self::DATE, 'new_action' => "seed A $n", 'new_reason' => "seed R $n",
+                'source' => 'run-0', 'edited_at' => '2026-10-04 08:00:00', 'created_at' => '2026-10-04 08:00:00', 'updated_at' => '2026-10-04 08:00:00',
+            ]);
+        }
+    }
+
+    /** @return array<int, array> ang laman ng mga table maliban sa $except */
+    private function snapshot(array $except = []): array
+    {
+        return array_map(fn ($t) => DB::table($t)->get()->all(), array_values(array_diff(self::NOTE_TABLES, $except)));
+    }
+
+    #[DataProvider('notes')]
+    public function test_ceo_inserts_updates_and_clears_with_the_ceo_source_in_the_audit_log(string $n): void
     {
         $this->actingAs($this->user('CEO'));
 
-        $res = $this->save()->assertOk();
+        $res = $this->save($n)->assertOk();
         $this->assertSame(['ok' => true, 'status' => 'inserted', 'page_key' => self::PAGE, 'ts_date' => self::DATE,
-            'claude_action' => 'A1', 'claude_reason' => 'R1', 'claude_source' => self::SOURCE], array_diff_key($res->json(), ['claude_at' => 1]));
-        $this->assertSame(now()->format('Y-m-d H:i'), $res->json('claude_at'));
+            "{$n}_action" => 'A1', "{$n}_reason" => 'R1', "{$n}_source" => self::SOURCE], array_diff_key($res->json(), ["{$n}_at" => 1]));
+        $this->assertSame(now()->format('Y-m-d H:i'), $res->json("{$n}_at"));
 
-        $this->save(['action' => ' A2 '])->assertOk()->assertJsonPath('status', 'updated')->assertJsonPath('claude_action', 'A2');
-        $row = DB::table('page_day_claude_actions')->first();
+        $this->save($n, ['action' => ' A2 '])->assertOk()->assertJsonPath('status', 'updated')->assertJsonPath("{$n}_action", 'A2');
+        $row = DB::table($this->table($n))->first();
         $this->assertSame(['A2', 'R1', self::SOURCE], [$row->action, $row->reason, $row->source]);
 
-        $this->save(['action' => '', 'reason' => null])->assertOk()->assertJsonPath('status', 'cleared')
-            ->assertJson(['claude_action' => null, 'claude_reason' => null, 'claude_source' => null, 'claude_at' => null]);
-        $this->assertSame(0, DB::table('page_day_claude_actions')->count());
+        $this->save($n, ['action' => '', 'reason' => null])->assertOk()->assertJsonPath('status', 'cleared')
+            ->assertJson(["{$n}_action" => null, "{$n}_reason" => null, "{$n}_source" => null, "{$n}_at" => null]);
+        $this->assertSame(0, DB::table($this->table($n))->count());
 
-        $log = DB::table('page_day_claude_action_logs')->orderBy('id')->get();
+        $log = DB::table($this->logTable($n))->orderBy('id')->get();
         $this->assertSame([self::SOURCE, self::SOURCE, self::SOURCE], $log->pluck('source')->all());
         $this->assertSame([null, 'A1', 'A2'], $log->pluck('old_action')->all());
         $this->assertSame(['A1', 'A2', null], $log->pluck('new_action')->all());
     }
 
-    public function test_an_unchanged_save_writes_no_audit_row(): void
+    #[DataProvider('notes')]
+    public function test_an_unchanged_save_writes_no_audit_row(string $n): void
     {
         $this->actingAs($this->user('CEO'));
-        $this->save()->assertOk();
-        $this->save()->assertOk()->assertJsonPath('status', 'unchanged')->assertJsonPath('claude_action', 'A1');
+        $this->save($n)->assertOk();
+        $this->save($n)->assertOk()->assertJsonPath('status', 'unchanged')->assertJsonPath("{$n}_action", 'A1');
 
-        $this->assertSame(1, DB::table('page_day_claude_action_logs')->count());
+        $this->assertSame(1, DB::table($this->logTable($n))->count());
     }
 
-    public function test_one_blank_field_is_cleared_and_two_blank_fields_delete_the_note(): void
+    #[DataProvider('notes')]
+    public function test_one_blank_field_is_cleared_and_two_blank_fields_delete_the_note(string $n): void
     {
         $this->actingAs($this->user('CEO'));
-        $this->save()->assertOk();
+        $this->save($n)->assertOk();
 
         // Blangko ang action, may reason pa: action lang ang nabubura.
-        $this->save(['action' => '   '])->assertOk()->assertJsonPath('status', 'updated')
-            ->assertJsonPath('claude_action', null)->assertJsonPath('claude_reason', 'R1');
-        $this->assertNull(DB::table('page_day_claude_actions')->value('action'));
-        $this->save(['action' => ''])->assertOk()->assertJsonPath('status', 'unchanged');
-        $this->assertSame(2, DB::table('page_day_claude_action_logs')->count());
+        $this->save($n, ['action' => '   '])->assertOk()->assertJsonPath('status', 'updated')
+            ->assertJsonPath("{$n}_action", null)->assertJsonPath("{$n}_reason", 'R1');
+        $this->assertNull(DB::table($this->table($n))->value('action'));
+        $this->save($n, ['action' => ''])->assertOk()->assertJsonPath('status', 'unchanged');
+        $this->assertSame(2, DB::table($this->logTable($n))->count());
 
         // Puro space ang dalawa = burahin ang note.
-        $this->save(['action' => ' ', 'reason' => "  \n "])->assertOk()->assertJsonPath('status', 'cleared');
-        $this->assertSame(0, DB::table('page_day_claude_actions')->count());
-        $this->assertSame(3, DB::table('page_day_claude_action_logs')->count());
+        $this->save($n, ['action' => ' ', 'reason' => "  \n "])->assertOk()->assertJsonPath('status', 'cleared');
+        $this->assertSame(0, DB::table($this->table($n))->count());
+        $this->assertSame(3, DB::table($this->logTable($n))->count());
     }
 
     #[DataProvider('refusedRoles')]
-    public function test_other_roles_get_404_and_nothing_is_written(string $role): void
+    public function test_other_roles_get_404_and_nothing_is_written(string $n, string $role): void
     {
-        $this->seedClaude();
+        $this->seedAllNotes();
         $before = $this->snapshot();
 
         $this->actingAs($this->user($role, 'other@example.test'));
-        $this->save()->assertNotFound();
-        $this->save(['action' => '', 'reason' => ''])->assertNotFound();
+        $this->save($n)->assertNotFound();
+        $this->save($n, ['action' => '', 'reason' => ''])->assertNotFound();
 
         $this->assertEquals($before, $this->snapshot());
     }
 
-    /** @return array<string, array{0: string}> */
+    /** @return array<string, array{0: string, 1: string}> */
     public static function refusedRoles(): array
     {
-        return ['Marketing' => ['Marketing'], 'Marketing - OIC' => ['Marketing - OIC'], 'Data Encoder' => ['Data Encoder']];
+        return self::eachNote(['Marketing' => ['Marketing'], 'Marketing - OIC' => ['Marketing - OIC'], 'Data Encoder' => ['Data Encoder']]);
     }
 
-    public function test_a_guest_gets_what_a_guest_gets_on_another_ceo_only_endpoint_and_nothing_is_written(): void
+    #[DataProvider('notes')]
+    public function test_a_guest_gets_what_a_guest_gets_on_another_ceo_only_endpoint_and_nothing_is_written(string $n): void
     {
-        $this->seedClaude();
+        $this->seedAllNotes();
         $before = $this->snapshot();
 
         $expected = $this->getJson('/owner/private/daily')->getStatusCode();
         $this->assertNotSame(200, $expected);
-        $this->save()->assertStatus($expected);
+        $this->save($n)->assertStatus($expected);
 
         $this->assertEquals($before, $this->snapshot());
     }
 
-    /** @return array<string, array{0: array}> */
+    /** @return array<string, array{0: string, 1: array}> */
     public static function invalidBodies(): array
     {
-        return [
+        return self::eachNote([
             'impossible date'   => [['ts_date' => '2026-02-30']],
             'wrong date format' => [['ts_date' => '03/10/2026']],
             'empty page key'    => [['page_key' => '']],
             'page key too long' => [['page_key' => str_repeat('p', 256)]],
             'action too long'   => [['action' => str_repeat('a', 2001)]],
             'reason too long'   => [['reason' => str_repeat('r', 4001)]],
-        ];
+        ]);
     }
 
     #[DataProvider('invalidBodies')]
-    public function test_invalid_input_answers_422_and_writes_nothing(array $over): void
+    public function test_invalid_input_answers_422_and_writes_nothing(string $n, array $over): void
     {
         $this->actingAs($this->user('CEO'));
-        $this->save($over)->assertStatus(422);
+        $this->save($n, $over)->assertStatus(422);
 
-        $this->assertSame(0, DB::table('page_day_claude_actions')->count());
-        $this->assertSame(0, DB::table('page_day_claude_action_logs')->count());
+        $this->assertSame(0, DB::table($this->table($n))->count());
+        $this->assertSame(0, DB::table($this->logTable($n))->count());
     }
 
-    public function test_text_at_the_exact_limit_is_accepted(): void
+    #[DataProvider('notes')]
+    public function test_text_at_the_exact_limit_is_accepted(string $n): void
     {
         $this->actingAs($this->user('CEO'));
-        $this->save(['action' => str_repeat('a', 2000), 'reason' => str_repeat('r', 4000)])->assertOk();
+        $this->save($n, ['action' => str_repeat('a', 2000), 'reason' => str_repeat('r', 4000)])->assertOk();
 
-        $this->assertSame([2000, 4000], [mb_strlen(DB::table('page_day_claude_actions')->value('action')), mb_strlen(DB::table('page_day_claude_actions')->value('reason'))]);
+        $this->assertSame([2000, 4000], [mb_strlen(DB::table($this->table($n))->value('action')), mb_strlen(DB::table($this->table($n))->value('reason'))]);
     }
 
     public function test_command_text_edited_by_the_ceo_keeps_run_source_until_the_text_changes(): void
@@ -207,11 +254,11 @@ class ClaudeActionSaveRouteTest extends OwnerPrivateTestCase
         $this->artisan('owner-private:claude-action', ['page_key' => self::PAGE, 'ts_date' => self::DATE, '--action' => 'A1', '--reason' => 'R1', '--source' => 'run-1'])->assertExitCode(0);
 
         $this->actingAs($this->user('CEO'));
-        $this->save()->assertOk()->assertJsonPath('status', 'unchanged')->assertJsonPath('claude_source', 'run-1');
+        $this->save('claude')->assertOk()->assertJsonPath('status', 'unchanged')->assertJsonPath('claude_source', 'run-1');
         $this->assertSame('run-1', DB::table('page_day_claude_actions')->value('source'));
         $this->assertSame(1, DB::table('page_day_claude_action_logs')->count());
 
-        $this->save(['action' => 'A2'])->assertOk();
+        $this->save('claude', ['action' => 'A2'])->assertOk();
         $row = DB::table('page_day_claude_actions')->first();
         $this->assertSame(['A2', 'R1', self::SOURCE], [$row->action, $row->reason, $row->source]);
 
@@ -220,7 +267,8 @@ class ClaudeActionSaveRouteTest extends OwnerPrivateTestCase
         $this->assertSame(['A1', 'A2'], $log->pluck('new_action')->all());
     }
 
-    public function test_a_save_shows_in_the_ceo_summary_and_breakdown_after_a_warm_cache_but_never_to_marketing(): void
+    #[DataProvider('notes')]
+    public function test_a_save_shows_in_the_ceo_summary_and_breakdown_after_a_warm_cache_but_never_to_marketing(string $n): void
     {
         $marker = 'ZX-SAVE-MARKER-4410';
         $summaryUrl = '/owner/private/item-summary?start_date=2026-10-03&end_date=2026-10-03';
@@ -230,43 +278,46 @@ class ClaudeActionSaveRouteTest extends OwnerPrivateTestCase
         // Ang version ay time() (1s resolution): ilagay ang luma para hindi mag-banggaan ang lazy-init at ang bump sa iisang segundo.
         Cache::forever('owner_private:cache_version', 'old');
         $this->actingAs($this->user('CEO'));
-        $this->assertNull($pageA($this->getJson($summaryUrl)->assertOk())['claude_action']); // warm the cache
+        $this->assertNull($pageA($this->getJson($summaryUrl)->assertOk())["{$n}_action"]); // warm the cache
 
-        $this->save(['action' => $marker])->assertOk();
+        $this->save($n, ['action' => $marker])->assertOk();
 
         $summary = $this->getJson($summaryUrl)->assertOk();
-        $this->assertSame($marker, $pageA($summary)['claude_action']);
-        $this->assertSame($marker, collect($this->getJson($breakdownUrl)->assertOk()->json('rows'))->firstWhere('date', self::DATE)['claude_action']);
+        $this->assertSame($marker, $pageA($summary)["{$n}_action"]);
+        $this->assertSame($marker, collect($this->getJson($breakdownUrl)->assertOk()->json('rows'))->firstWhere('date', self::DATE)["{$n}_action"]);
 
         auth()->forgetGuards();
         $this->actingAs($this->user('Marketing', 'marketing@example.test'));
         $summary = $this->getJson($summaryUrl)->assertOk();
         $breakdown = $this->getJson($breakdownUrl)->assertOk();
-        $this->assertNull($pageA($summary)['claude_action']);
-        $this->assertNull(collect($breakdown->json('rows'))->firstWhere('date', self::DATE)['claude_action']);
+        $this->assertNull($pageA($summary)["{$n}_action"]);
+        $this->assertNull(collect($breakdown->json('rows'))->firstWhere('date', self::DATE)["{$n}_action"]);
         $this->assertStringNotContainsString($marker, $summary->getContent() . $breakdown->getContent());
     }
 
-    public function test_the_team_action_tables_are_left_untouched(): void
+    /** Independence: ang save at clear ng isang note type ay hindi humahawak sa ibang apat na table (team + kabilang note). */
+    #[DataProvider('notes')]
+    public function test_a_save_or_clear_leaves_the_other_note_tables_untouched(string $n): void
     {
-        DB::table('page_day_actions')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'comment' => 'team note', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
-        DB::table('page_day_action_logs')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'new_comment' => 'team note', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
-        $before = [DB::table('page_day_actions')->get()->all(), DB::table('page_day_action_logs')->get()->all()];
+        $this->seedAllNotes();
+        $before = $this->snapshot([$this->table($n), $this->logTable($n)]);
 
         $this->actingAs($this->user('CEO'));
-        $this->save()->assertOk();
-        $this->save(['action' => '', 'reason' => ''])->assertOk();
+        $this->save($n)->assertOk();
+        $this->save($n, ['action' => 'A2'])->assertOk();
+        $this->save($n, ['action' => '', 'reason' => ''])->assertOk();
 
-        $this->assertEquals($before, [DB::table('page_day_actions')->get()->all(), DB::table('page_day_action_logs')->get()->all()]);
+        $this->assertEquals($before, $this->snapshot([$this->table($n), $this->logTable($n)]));
     }
 
-    public function test_script_text_comes_back_as_plain_json_data(): void
+    #[DataProvider('notes')]
+    public function test_script_text_comes_back_as_plain_json_data(string $n): void
     {
         $evil = '<script>alert(1)</script>';
         $this->actingAs($this->user('CEO'));
 
-        $res = $this->save(['action' => $evil])->assertOk();
+        $res = $this->save($n, ['action' => $evil])->assertOk();
         $this->assertStringContainsString('application/json', $res->headers->get('Content-Type'));
-        $this->assertSame($evil, $res->json('claude_action'));
+        $this->assertSame($evil, $res->json("{$n}_action"));
     }
 }

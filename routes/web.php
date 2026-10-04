@@ -544,6 +544,8 @@ Route::get('/owner/private/action/logs', [OwnerPrivateController::class, 'action
 
 // Claude Action + Reason ng (page, date) — CEO lang ang puwedeng mag-edit.
 Route::post('/owner/private/claude-action', [OwnerPrivateController::class, 'saveClaudeAction'])->name('owner.private.claude-action.save');
+// Sariling Action + Reason ng CEO (hiwalay na table) — CEO lang din.
+Route::post('/owner/private/ceo-action', [OwnerPrivateController::class, 'saveCeoAction'])->name('owner.private.ceo-action.save');
 
 // /owner/private snapshots — CEO-only frozen captures of the rendered state.
 Route::get('/owner/private/snapshots',         [\App\Http\Controllers\OwnerPrivateSnapshotsController::class, 'index'])

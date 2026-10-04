@@ -9,11 +9,15 @@ use InvalidArgumentException;
 
 /**
  * Note ni Claude per (page, araw) — hiwalay na tables (page_day_claude_actions + logs).
- * Artisan command lang ang sumusulat; ang /owner/private (CEO lang) ang bumabasa.
+ * Artisan command lang ang sumusulat; ang /owner/private (CEO lang) ang bumabasa. Ang table names ay
+ * properties para magamit ng PageDayCeoActionService (sariling note ng CEO) ang parehong logic.
  * Query builder lang (gaya ng controller); 'Y-m-d' strings ang petsa, walang date cast.
  */
 class PageDayClaudeActionService
 {
+    protected string $table    = 'page_day_claude_actions';
+    protected string $logTable = 'page_day_claude_action_logs';
+
     private const MAX_PAGE_KEY = 255;
     private const MAX_ACTION   = 2000;
     private const MAX_REASON   = 4000;
@@ -51,12 +55,12 @@ class PageDayClaudeActionService
             }
 
             if ($existing) {
-                DB::table('page_day_claude_actions')
+                DB::table($this->table)
                     ->where('page_key', $pageKey)
                     ->where('ts_date', $tsDate)
                     ->update(['action' => $newAction, 'reason' => $newReason, 'source' => $newSource, 'updated_at' => now()]);
             } else {
-                DB::table('page_day_claude_actions')->insert([
+                DB::table($this->table)->insert([
                     'page_key'   => $pageKey,
                     'ts_date'    => $tsDate,
                     'action'     => $newAction,
@@ -95,7 +99,7 @@ class PageDayClaudeActionService
                 return 'nothing';
             }
 
-            DB::table('page_day_claude_actions')
+            DB::table($this->table)
                 ->where('page_key', $pageKey)
                 ->where('ts_date', $tsDate)
                 ->delete();
@@ -120,12 +124,12 @@ class PageDayClaudeActionService
      */
     public function forDate(string $tsDate): array
     {
-        if (!Schema::hasTable('page_day_claude_actions')) {
+        if (!Schema::hasTable($this->table)) {
             return [];
         }
 
         $map = [];
-        $rows = DB::table('page_day_claude_actions')
+        $rows = DB::table($this->table)
             ->where('ts_date', $tsDate)
             ->get(['page_key', 'action', 'reason', 'source', 'updated_at']);
         foreach ($rows as $r) {
@@ -145,12 +149,12 @@ class PageDayClaudeActionService
      */
     public function forPage(string $pageKey, string $startDate, string $endDate): array
     {
-        if (!Schema::hasTable('page_day_claude_actions')) {
+        if (!Schema::hasTable($this->table)) {
             return [];
         }
 
         $map = [];
-        $rows = DB::table('page_day_claude_actions')
+        $rows = DB::table($this->table)
             ->where('page_key', $pageKey)
             ->whereBetween('ts_date', [$startDate, $endDate])
             ->get(['ts_date', 'action', 'reason', 'source', 'updated_at']);
@@ -200,7 +204,7 @@ class PageDayClaudeActionService
 
     private function find(string $pageKey, string $tsDate): ?object
     {
-        return DB::table('page_day_claude_actions')
+        return DB::table($this->table)
             ->where('page_key', $pageKey)
             ->where('ts_date', $tsDate)
             ->first(['action', 'reason', 'source']);
@@ -208,7 +212,7 @@ class PageDayClaudeActionService
 
     private function audit(string $pageKey, string $tsDate, ?string $oldAction, ?string $newAction, ?string $oldReason, ?string $newReason, ?string $source): void
     {
-        DB::table('page_day_claude_action_logs')->insert([
+        DB::table($this->logTable)->insert([
             'page_key'   => $pageKey,
             'ts_date'    => $tsDate,
             'old_action' => $oldAction,

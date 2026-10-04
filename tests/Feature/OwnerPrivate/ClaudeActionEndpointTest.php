@@ -12,7 +12,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
  */
 class ClaudeActionEndpointTest extends OwnerPrivateTestCase
 {
-    private const MARKER = 'ZX-CLAUDE-MARKER-7731';
+    private const MARKER = 'ZX-NOTE-MARKER-7731';
 
     protected function setUp(): void
     {
@@ -70,9 +70,10 @@ class ClaudeActionEndpointTest extends OwnerPrivateTestCase
         ]);
     }
 
-    private function claudeNote(string $date, string $action, string $reason, string $source): void
+    /** Note ng Claude ($n = 'claude') o ng CEO ($n = 'ceo'): magkahiwalay na table, pareho ang hugis. */
+    private function note(string $n, string $date, string $action, string $reason, string $source): void
     {
-        DB::table('page_day_claude_actions')->insert([
+        DB::table("page_day_{$n}_actions")->insert([
             'page_key' => 'page a', 'ts_date' => $date, 'action' => $action, 'reason' => $reason,
             'source' => $source, 'created_at' => '2026-10-04 08:00:00', 'updated_at' => '2026-10-04 09:30:00',
         ]);
@@ -97,15 +98,25 @@ class ClaudeActionEndpointTest extends OwnerPrivateTestCase
 
     private string $lastBodies = '';
 
-    public function test_ceo_gets_the_claude_values_and_empty_page_days_get_nulls(): void
+    /** @return array<string, array{0: string}> */
+    public static function noteTypes(): array
     {
-        $this->claudeNote('2026-10-03', 'taasan ang budget', "ROAS 4.1\nCPP 80", 'run-1');
-        $this->claudeNote('2026-10-02', 'ibaba', 'walang orders', 'run-1');
+        return ['claude' => ['claude'], 'ceo' => ['ceo']];
+    }
+
+    #[DataProvider('noteTypes')]
+    public function test_ceo_gets_the_note_values_and_empty_page_days_get_nulls(string $n): void
+    {
+        // Ang kabilang note type ay may ibang text: hindi sila naghahalo.
+        $other = $n === 'claude' ? 'ceo' : 'claude';
+        $this->note($other, '2026-10-03', 'ibang action', 'ibang reason', 'other-run');
+        $this->note($n, '2026-10-03', 'taasan ang budget', "ROAS 4.1\nCPP 80", 'run-1');
+        $this->note($n, '2026-10-02', 'ibaba', 'walang orders', 'run-1');
 
         [$a, $b, $days] = $this->fetch('CEO');
 
-        $expected = ['claude_action' => 'taasan ang budget', 'claude_reason' => "ROAS 4.1\nCPP 80", 'claude_at' => '2026-10-04 09:30', 'claude_source' => 'run-1'];
-        $nulls    = ['claude_action' => null, 'claude_reason' => null, 'claude_at' => null, 'claude_source' => null];
+        $expected = ["{$n}_action" => 'taasan ang budget', "{$n}_reason" => "ROAS 4.1\nCPP 80", "{$n}_at" => '2026-10-04 09:30', "{$n}_source" => 'run-1'];
+        $nulls    = ["{$n}_action" => null, "{$n}_reason" => null, "{$n}_at" => null, "{$n}_source" => null];
 
         $this->assertSame($expected, array_intersect_key($a, $expected));
         $this->assertSame($nulls, array_intersect_key($b, $nulls));
@@ -113,20 +124,25 @@ class ClaudeActionEndpointTest extends OwnerPrivateTestCase
         $this->assertSame($expected, array_intersect_key($days['2026-10-03'], $expected));
         // walang data na araw (ibang payload site) may note pa rin
         $this->assertFalse($days['2026-10-02']['has_data']);
-        $this->assertSame('ibaba', $days['2026-10-02']['claude_action']);
+        $this->assertSame('ibaba', $days['2026-10-02']["{$n}_action"]);
+        $this->assertSame('ibang action', $a["{$other}_action"]);
     }
 
     #[DataProvider('nonCeoRoles')]
-    public function test_non_ceo_never_receives_the_claude_text(string $role): void
+    public function test_non_ceo_never_receives_the_claude_or_ceo_text(string $role): void
     {
-        $this->claudeNote('2026-10-03', self::MARKER . '-action', self::MARKER . '-reason', self::MARKER . '-source');
-        $this->claudeNote('2026-10-02', self::MARKER . '-action2', self::MARKER . '-reason2', self::MARKER . '-source2');
+        foreach (['claude', 'ceo'] as $n) {
+            $this->note($n, '2026-10-03', self::MARKER . "-$n-action", self::MARKER . "-$n-reason", self::MARKER . "-$n-source");
+            $this->note($n, '2026-10-02', self::MARKER . "-$n-action2", self::MARKER . "-$n-reason2", self::MARKER . "-$n-source2");
+        }
 
         [$a, , $days] = $this->fetch($role);
 
         foreach ([$a, $days['2026-10-03'], $days['2026-10-02']] as $row) {
-            foreach (['claude_action', 'claude_reason', 'claude_at', 'claude_source'] as $key) {
-                $this->assertNull($row[$key] ?? null, "$key leaked to $role");
+            foreach (['claude', 'ceo'] as $n) {
+                foreach (['action', 'reason', 'at', 'source'] as $field) {
+                    $this->assertNull($row["{$n}_{$field}"] ?? null, "{$n}_{$field} leaked to $role");
+                }
             }
         }
         $this->assertStringNotContainsString(self::MARKER, $this->lastBodies);
@@ -135,14 +151,15 @@ class ClaudeActionEndpointTest extends OwnerPrivateTestCase
     /** Ang item-summary ay naka-cache per role: ang naka-cache na sagot ng CEO ay hindi dapat maihain sa iba. */
     public function test_a_cached_ceo_summary_is_not_served_to_marketing(): void
     {
-        $this->claudeNote('2026-10-03', self::MARKER . '-action', self::MARKER . '-reason', self::MARKER . '-source');
+        $this->note('claude', '2026-10-03', self::MARKER . '-action', self::MARKER . '-reason', self::MARKER . '-source');
+        $this->note('ceo', '2026-10-03', self::MARKER . '-ceo-action', self::MARKER . '-ceo-reason', self::MARKER . '-ceo-source');
         $url = '/owner/private/item-summary?start_date=2026-10-03&end_date=2026-10-03';
 
         $this->actingAs($this->user('CEO'));
         $this->getJson($url)->assertOk();
         $hit = $this->getJson($url)->assertOk();
         $this->assertSame('hit', $hit->json('_cache'));
-        $this->assertStringContainsString(self::MARKER, $hit->getContent());
+        $this->assertStringContainsString(self::MARKER . '-ceo-action', $hit->getContent());
 
         auth()->forgetGuards();
         $this->actingAs($this->user('Marketing', 'marketing@example.test'));
@@ -159,10 +176,11 @@ class ClaudeActionEndpointTest extends OwnerPrivateTestCase
      * Ang JSON ng Laravel ay hindi nag-hex-escape ng '<' (slash lang ang escaped), kaya ang proteksyon ay:
      * JSON content-type (hindi HTML) + data lang ang text, at textContent/escape sa pag-render ng page.
      */
-    public function test_script_text_is_returned_as_plain_json_data(): void
+    #[DataProvider('noteTypes')]
+    public function test_script_text_is_returned_as_plain_json_data(string $n): void
     {
         $evil = '<script>alert(1)</script>';
-        $this->claudeNote('2026-10-03', $evil, $evil, $evil);
+        $this->note($n, '2026-10-03', $evil, $evil, $evil);
         $this->actingAs($this->user('CEO'));
 
         foreach ([
@@ -172,8 +190,8 @@ class ClaudeActionEndpointTest extends OwnerPrivateTestCase
             $res = $this->getJson($url)->assertOk();
             $this->assertStringContainsString('application/json', $res->headers->get('Content-Type'));
             $row = collect($res->json('rows'))->first(fn ($r) => ($r['page_key'] ?? null) === 'page a' || ($r['date'] ?? null) === '2026-10-03');
-            $this->assertSame($evil, $row['claude_action']);
-            $this->assertSame($evil, $row['claude_reason']);
+            $this->assertSame($evil, $row["{$n}_action"]);
+            $this->assertSame($evil, $row["{$n}_reason"]);
         }
     }
 }
