@@ -155,7 +155,10 @@ class AiCheckerRowRunner
             ]));
         } catch (\Throwable $e) {
             // Huwag ipa-fail ang row, pero i-log na (hindi na tahimik) para ma-debug.
-            Log::warning('AI_CHECKER_LOG_FAIL', ['error' => $e->getMessage()]);
+            // HINDI nilo-log ang message: kasama sa QueryException ang SQL at bindings (text ng customer). Class at SQLSTATE lang.
+            $fail = ['exception' => get_class($e)];
+            if ($e instanceof \Illuminate\Database\QueryException) $fail['sqlstate'] = (string) $e->getCode();
+            Log::warning('AI_CHECKER_LOG_FAIL', $fail);
             return null;
         }
     }

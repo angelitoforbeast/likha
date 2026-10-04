@@ -808,21 +808,30 @@ class MacroChecker
                     return trim((string) data_get($res->json(), 'choices.0.message.content', ''));
                 }
 
+                // HINDI nilo-log ang body: maaaring may key o text ng customer. Status, type at code lang.
                 Log::warning('MACRO_CHECKER_OPENAI_HTTP', [
                     'attempt' => $attempt,
                     'status'  => $res->status(),
-                    'body'    => substr($res->body(), 0, 400),
+                    'type'    => self::errorIdent(data_get($res->json(), 'error.type')),
+                    'code'    => self::errorIdent(data_get($res->json(), 'error.code')),
                 ]);
             } catch (\Throwable $e) {
+                // Class lang ng exception, hindi ang message (maaaring may laman ng request/response).
                 Log::warning('MACRO_CHECKER_OPENAI_EX', [
-                    'attempt' => $attempt,
-                    'error'   => $e->getMessage(),
+                    'attempt'   => $attempt,
+                    'exception' => get_class($e),
                 ]);
             }
 
             if ($attempt === 1) usleep(800 * 1000); // 800ms before retry
         }
         return '';
+    }
+    /** Maikling identifier mula sa error ng OpenAI (type/code): [A-Za-z0-9_.-] lang, hanggang 64 chars; '' kung wala. */
+    private static function errorIdent($value): string
+    {
+        if (!is_string($value) && !is_int($value)) return '';
+        return substr(preg_replace('/[^A-Za-z0-9_.\-]/', '', (string) $value) ?? '', 0, 64);
     }
     private function parseJsonField(string $raw, string $field): ?string
     {
@@ -1009,13 +1018,16 @@ class MacroChecker
                     return $text;
                 }
 
-                Log::warning('MACRO_CHECKER_SEARCH_HTTP', ['step' => $step, 'attempt' => $attempt, 'status' => $res->status(), 'body' => substr($res->body(), 0, 400)]);
+                // HINDI nilo-log ang body: maaaring may key o text ng customer. Status, type at code lang.
+                Log::warning('MACRO_CHECKER_SEARCH_HTTP', ['step' => $step, 'attempt' => $attempt, 'status' => $res->status(),
+                    'type' => self::errorIdent(data_get($res->json(), 'error.type')), 'code' => self::errorIdent(data_get($res->json(), 'error.code'))]);
                 // Hindi tinatanggap ang reasoning param ng model → subukan nang wala
                 if ($attempt === 1 && $res->status() === 400 && isset($payload['reasoning']) && str_contains($res->body(), 'reasoning')) {
                     unset($payload['reasoning']);
                 }
             } catch (\Throwable $e) {
-                Log::warning('MACRO_CHECKER_SEARCH_EX', ['step' => $step, 'attempt' => $attempt, 'error' => $e->getMessage()]);
+                // Class lang ng exception, hindi ang message (maaaring may laman ng request/response).
+                Log::warning('MACRO_CHECKER_SEARCH_EX', ['step' => $step, 'attempt' => $attempt, 'exception' => get_class($e)]);
             }
             if ($attempt === 1) usleep(800 * 1000);
         }
