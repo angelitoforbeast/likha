@@ -123,7 +123,7 @@ class ClaudeActionViewTest extends OwnerPrivateTestCase
             $html = $this->page($url, $role);
 
             // Ang column id sa server config (hidden/order JSON) ay okay; ang label at ang cell/field code ay hindi.
-            foreach (['Claude Action', 'Claude Reason', 'row.claude_', 'r.claude_', '.claude_source', "case 'claude_", "id:'claude_"] as $s) {
+            foreach (['Claude Action', 'Claude Reason', 'row.claude_', 'r.claude_', '.claude_source', "case 'claude_", "id:'claude_", 'claude-cells'] as $s) {
                 $this->assertFalse(str_contains($html, $s), "{$role} {$url}: found {$s}");
             }
             auth()->forgetGuards();

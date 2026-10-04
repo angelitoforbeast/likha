@@ -258,8 +258,8 @@
               </div>
             </td>
             {{-- Claude cells — VIEW ONLY, plain text (x-text lang), walang edit/click --}}
-            <!-- claude-cells-start -->
             @if(!in_array('claude_action', $colsConfig['hidden'] ?? [], true))
+            <!-- claude-cells-start -->
             <td class="px-4 py-2 border-b border-slate-100 bd-wrap" x-show="showCol('claude_action')">
               <div class="text-left text-xs text-slate-700" style="max-width:240px;white-space:normal;line-height:1.3;">
                 <template x-if="r.claude_action">
@@ -281,8 +281,8 @@
                 <template x-if="!r.claude_reason"><span class="text-slate-300">—</span></template>
               </div>
             </td>
-            @endif
             <!-- claude-cells-end -->
+            @endif
           </tr>
         </template>
       </tbody>
