@@ -122,6 +122,24 @@ class ClaudeActionSaveRouteTest extends OwnerPrivateTestCase
         $this->assertSame(1, DB::table('page_day_claude_action_logs')->count());
     }
 
+    public function test_one_blank_field_is_cleared_and_two_blank_fields_delete_the_note(): void
+    {
+        $this->actingAs($this->user('CEO'));
+        $this->save()->assertOk();
+
+        // Blangko ang action, may reason pa: action lang ang nabubura.
+        $this->save(['action' => '   '])->assertOk()->assertJsonPath('status', 'updated')
+            ->assertJsonPath('claude_action', null)->assertJsonPath('claude_reason', 'R1');
+        $this->assertNull(DB::table('page_day_claude_actions')->value('action'));
+        $this->save(['action' => ''])->assertOk()->assertJsonPath('status', 'unchanged');
+        $this->assertSame(2, DB::table('page_day_claude_action_logs')->count());
+
+        // Puro space ang dalawa = burahin ang note.
+        $this->save(['action' => ' ', 'reason' => "  \n "])->assertOk()->assertJsonPath('status', 'cleared');
+        $this->assertSame(0, DB::table('page_day_claude_actions')->count());
+        $this->assertSame(3, DB::table('page_day_claude_action_logs')->count());
+    }
+
     #[DataProvider('refusedRoles')]
     public function test_other_roles_get_404_and_nothing_is_written(string $role): void
     {
