@@ -14,5 +14,8 @@ metadata:
 - Card mode (<1,100 px) hides `.il-table thead` with a class rule. Any `#il-table-…` id rule that sets thead `position` wins on specificity; wrap it in `@media (min-width: 1100px)`.
 - `_table_old.blade.php` is pinned by the sha1 of its LF-normalised content in ItemPageTest (value from d9606c8). Any edit there fails the test by design.
 
+- Blade `{{-- --}}` markers don't reach the render; to slice a block out of a page in a test use an HTML comment (`<!-- claude-cells-start -->`) or a JS needle. The server-injected column config (`hidden`/`order` JSON) puts column ids like `claude_action` in the source even for non-CEO, so "absent" checks must target the label and `row.claude_` / `case 'claude_` code, not the bare id.
+- `/owner/private`, its breakdown and `/item` all render in one test class on the OwnerPrivate base plus hand-made `tasks`, `ads_manager_reports`, `fee_settings` and the real `daily_page_primary_item` migration (see ClaudeActionViewTest).
+
 **Why:** each of these cost a red/green cycle on 006 T1 (2026-10-02).
 **How to apply:** check these before writing new /item markup assertions or moving shared chrome.

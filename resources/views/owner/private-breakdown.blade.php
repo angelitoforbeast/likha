@@ -89,6 +89,13 @@
           <th style="width:4.5%" class="text-right px-4 py-2 border-b border-slate-200" x-show="showCol('proj_pct')">Proj%</th>
           <th style="width:6%"   class="text-center px-4 py-2 border-b border-slate-200" x-show="showCol('status')">Status</th>
           <th style="width:11%"  class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('action')">Action</th>
+          {{-- Claude columns — wala sa HTML kapag nasa server-side hidden list (non-CEO) --}}
+          @if(!in_array('claude_action', $colsConfig['hidden'] ?? [], true))
+          <th style="width:11%"  class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('claude_action')">Claude Action</th>
+          @endif
+          @if(!in_array('claude_reason', $colsConfig['hidden'] ?? [], true))
+          <th style="width:14%"  class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('claude_reason')">Claude Reason</th>
+          @endif
         </tr>
       </thead>
       <tbody>
@@ -250,6 +257,32 @@
                 <template x-if="!r.action_comment"><span class="text-slate-300">—</span></template>
               </div>
             </td>
+            {{-- Claude cells — VIEW ONLY, plain text (x-text lang), walang edit/click --}}
+            <!-- claude-cells-start -->
+            @if(!in_array('claude_action', $colsConfig['hidden'] ?? [], true))
+            <td class="px-4 py-2 border-b border-slate-100 bd-wrap" x-show="showCol('claude_action')">
+              <div class="text-left text-xs text-slate-700" style="max-width:240px;white-space:normal;line-height:1.3;">
+                <template x-if="r.claude_action">
+                  <span>
+                    <span x-text="r.claude_action"></span>
+                    <template x-if="r.claude_source || r.claude_at">
+                      <span class="block text-[10px] text-slate-400" x-text="[r.claude_source, r.claude_at].filter(Boolean).join(' · ')"></span>
+                    </template>
+                  </span>
+                </template>
+                <template x-if="!r.claude_action"><span class="text-slate-300">—</span></template>
+              </div>
+            </td>
+            @endif
+            @if(!in_array('claude_reason', $colsConfig['hidden'] ?? [], true))
+            <td class="px-4 py-2 border-b border-slate-100 bd-wrap" x-show="showCol('claude_reason')">
+              <div class="text-left text-xs text-slate-700" style="max-width:300px;white-space:normal;line-height:1.3;">
+                <template x-if="r.claude_reason"><span x-text="r.claude_reason"></span></template>
+                <template x-if="!r.claude_reason"><span class="text-slate-300">—</span></template>
+              </div>
+            </td>
+            @endif
+            <!-- claude-cells-end -->
           </tr>
         </template>
       </tbody>
@@ -280,6 +313,12 @@
               x-text="totals().gross > 0 ? (totals().proj_pct.toFixed(1) + '%') : '—'"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('status')"></td>
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('action')"></td>
+          @if(!in_array('claude_action', $colsConfig['hidden'] ?? [], true))
+          <td class="px-4 py-2 bg-slate-100" x-show="showCol('claude_action')"></td>
+          @endif
+          @if(!in_array('claude_reason', $colsConfig['hidden'] ?? [], true))
+          <td class="px-4 py-2 bg-slate-100" x-show="showCol('claude_reason')"></td>
+          @endif
         </tr>
       </tfoot>
     </table>

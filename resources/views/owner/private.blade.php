@@ -1170,6 +1170,62 @@
                     </span>
                   </template>
 
+                  @if(!empty($isCEO))
+                  {{-- Claude columns — read-only (CEO lang). Plain text via x-text,
+                       walang edit button/modal; more/less toggle lang ang click. --}}
+                  <!-- claude-cells-start -->
+                  <template x-if="col.id==='claude_action'">
+                    <div style="text-align:left;min-width:0;width:100%;">
+                      <template x-if="row.claude_action">
+                        <div :title="row.claude_action">
+                          <div :style="row._claudeActionOpen
+                                        ? 'white-space:normal;max-width:200px;'
+                                        : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;'"
+                               style="font-size:11px;color:#0f172a;line-height:1.3;">
+                            <span x-text="row.claude_action"></span>
+                          </div>
+                          <template x-if="row.claude_source || row.claude_at">
+                            <div style="font-size:9px;color:#94a3b8;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;"
+                                 x-text="[row.claude_source, row.claude_at].filter(Boolean).join(' · ')"></div>
+                          </template>
+                          <template x-if="(row.claude_action||'').length > 24">
+                            <button type="button" @click="row._claudeActionOpen = !row._claudeActionOpen"
+                                    style="background:none;border:none;color:#2563eb;font-size:9px;cursor:pointer;padding:0;font-weight:600;"
+                                    x-text="row._claudeActionOpen ? '▾ less' : '▸ more'"></button>
+                          </template>
+                        </div>
+                      </template>
+                      <template x-if="!row.claude_action">
+                        <span style="color:#cbd5e1;" title="no Claude action yet">—</span>
+                      </template>
+                    </div>
+                  </template>
+
+                  <template x-if="col.id==='claude_reason'">
+                    <div style="text-align:left;min-width:0;width:100%;">
+                      <template x-if="row.claude_reason">
+                        <div :title="row.claude_reason">
+                          <div :style="row._claudeReasonOpen
+                                        ? 'white-space:normal;max-width:260px;'
+                                        : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px;'"
+                               style="font-size:11px;color:#0f172a;line-height:1.3;">
+                            <span x-text="row.claude_reason"></span>
+                          </div>
+                          <template x-if="(row.claude_reason||'').length > 24">
+                            <button type="button" @click="row._claudeReasonOpen = !row._claudeReasonOpen"
+                                    style="background:none;border:none;color:#2563eb;font-size:9px;cursor:pointer;padding:0;font-weight:600;"
+                                    x-text="row._claudeReasonOpen ? '▾ less' : '▸ more'"></button>
+                          </template>
+                        </div>
+                      </template>
+                      <template x-if="!row.claude_reason">
+                        <span style="color:#cbd5e1;" title="no Claude reason yet">—</span>
+                      </template>
+                    </div>
+                  </template>
+                  <!-- claude-cells-end -->
+                  @endif
+
                 </td>
               </template>
 
@@ -1978,6 +2034,10 @@
           { id:'cod_fee',    label:'COD Fee',    sort:'cod_fee',              align:'center', minw:72  },
           { id:'hold',       label:'Hold',       sort:'hold_units',           align:'center', minw:60  },
           { id:'action',     label:'Action',     sort:'action_at',            align:'left',   minw:160 },
+@if(!empty($isCEO))
+          { id:'claude_action', label:'Claude Action', sort:'claude_action', align:'left', minw:160 },
+          { id:'claude_reason', label:'Claude Reason', sort:'claude_reason', align:'left', minw:200 },
+@endif
         ];
       },
 
@@ -1996,6 +2056,10 @@
         // issues during initCols which runs before any user interaction.
         const isEffectivelyCeo = this.isCeoView && this.viewAs === 'ceo';
         if (!isEffectivelyCeo) hiddenSet.add('item_val_ceo');
+@if(!empty($isCEO))
+        // Claude columns — CEO lang din (defence in depth, kahit may nagbago sa server config)
+        if (!isEffectivelyCeo) { hiddenSet.add('claude_action'); hiddenSet.add('claude_reason'); }
+@endif
 
         let orderedIds;
         if (Array.isArray(serverCfg.order) && serverCfg.order.length) {

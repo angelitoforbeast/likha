@@ -349,11 +349,11 @@
       {{-- Lahat ng page field na nakikita ng role, sa lumang column order. Walang fill; text lang. --}}
       <div class="il-pf-grid">
         <template x-for="col in cols" :key="'pf-'+row.page_key+'-'+col.id">
-          <div class="il-pf" :class="col.id === 'action' ? 'il-pf-wide' : ''" x-show="ilPageFieldOn(col.id)">
+          <div class="il-pf" :class="{!! !empty($isCEO) ? "['action','claude_action','claude_reason']" : "['action']" !!}.includes(col.id) ? 'il-pf-wide' : ''" x-show="ilPageFieldOn(col.id)">
             <div class="il-dl-l" x-text="col.label"></div>
             <div class="il-pf-v">
               <div style="flex:1;min-width:0;">
-                <div :class="(ilPageVal(col.id, row).miss ? 'il-grey ' : '') + (col.id === 'action' && !row._actionOpen ? 'il-clamp' : '')"
+                <div :class="(ilPageVal(col.id, row).miss ? 'il-grey ' : '') + ((col.id === 'action' && !row._actionOpen){!! !empty($isCEO) ? " || (col.id === 'claude_action' && !row._claudeActionOpen) || (col.id === 'claude_reason' && !row._claudeReasonOpen)" : '' !!} ? 'il-clamp' : '')"
                      :style="ilPageVal(col.id, row).tone ? 'color:' + ilPageVal(col.id, row).tone + ';font-weight:700;' : ''"
                      :title="ilPageVal(col.id, row).tip"
                      x-text="ilPageVal(col.id, row).text"></div>
@@ -364,6 +364,17 @@
                   <button type="button" class="il-linkbtn" @click="row._actionOpen = !row._actionOpen"
                           x-text="row._actionOpen ? '▾ less' : '▸ more'"></button>
                 </template>
+                @if(!empty($isCEO))
+                {{-- Claude columns: more/less lang, walang ✎ --}}
+                <template x-if="col.id === 'claude_action' && (row.claude_action||'').length > 60">
+                  <button type="button" class="il-linkbtn" @click="row._claudeActionOpen = !row._claudeActionOpen"
+                          x-text="row._claudeActionOpen ? '▾ less' : '▸ more'"></button>
+                </template>
+                <template x-if="col.id === 'claude_reason' && (row.claude_reason||'').length > 60">
+                  <button type="button" class="il-linkbtn" @click="row._claudeReasonOpen = !row._claudeReasonOpen"
+                          x-text="row._claudeReasonOpen ? '▾ less' : '▸ more'"></button>
+                </template>
+                @endif
               </div>
               <template x-if="col.id === 'rts_set'">
                 <button type="button" class="il-edit" @click="openEditModal(row, 'rts')" title="Edit RTS%" aria-label="Edit RTS%">✎</button>

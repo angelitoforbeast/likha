@@ -1586,6 +1586,10 @@
           { id:'cod_fee',    label:'COD Fee',    sort:'cod_fee',              align:'center', minw:72  },
           { id:'hold',       label:'Hold',       sort:'hold_units',           align:'center', minw:60  },
           { id:'action',     label:'Action',     sort:'action_at',            align:'left',   minw:160 },
+@if(!empty($isCEO))
+          { id:'claude_action', label:'Claude Action', sort:'claude_action', align:'left', minw:160 },
+          { id:'claude_reason', label:'Claude Reason', sort:'claude_reason', align:'left', minw:200 },
+@endif
           // Stock / DOI (item rows lang) — galing sa /item/stock.
           { id:'category',      label:'Category',   sort:'category',      align:'center', minw:110 },
           { id:'stock',         label:'Stock',      sort:'stock',         align:'center', minw:75  },
@@ -1612,6 +1616,10 @@
         // issues during initCols which runs before any user interaction.
         const isEffectivelyCeo = this.isCeoView && this.viewAs === 'ceo';
         if (!isEffectivelyCeo) hiddenSet.add('item_val_ceo');
+@if(!empty($isCEO))
+        // Claude columns: CEO lang; at itago sa lumang layout — walang cell template para sa kanila ang pinned na _table_old (headers lang na walang laman).
+        if (!isEffectivelyCeo || this.layoutOld) { hiddenSet.add('claude_action'); hiddenSet.add('claude_reason'); }
+@endif
 
         let orderedIds;
         if (Array.isArray(serverCfg.order) && serverCfg.order.length) {
@@ -3691,6 +3699,14 @@
           case 'action':
             return r.action_comment ? ok(String(r.action_comment), { tip: String(r.action_comment),
                      sub: r.action_by ? '✎ ' + r.action_by + (r.action_at ? ' · ' + r.action_at : '') : '' }) : miss;
+@if(!empty($isCEO))
+          // Claude columns — read-only, plain text lang (x-text sa _il_expand)
+          case 'claude_action':
+            return r.claude_action ? ok(String(r.claude_action), { tip: String(r.claude_action),
+                     sub: subs([r.claude_source, r.claude_at]) }) : miss;
+          case 'claude_reason':
+            return r.claude_reason ? ok(String(r.claude_reason), { tip: String(r.claude_reason) }) : miss;
+@endif
           default: return miss;
         }
       },
