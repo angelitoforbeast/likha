@@ -2192,6 +2192,8 @@ class OwnerPrivateController extends Controller
                 ];
             }
         }
+        // Claude Action/Reason (page_day_claude_actions) — CEO lang; walang laman ang map sa iba kaya hindi lumalabas ang text.
+        $pageClaudeMap = $isCEO ? (new \App\Services\PageDayClaudeActionService())->forDate($endDate) : [];
 
         // ── HOLD snapshot (units per base item) — as-of end_date ───────────────
         // Per-item HOLD na naka-snapshot daily. Gamitin ang snapshot ng end_date;
@@ -2529,6 +2531,10 @@ class OwnerPrivateController extends Controller
                 'action_comment'        => $pageActionMap[$pk]['comment'] ?? null,
                 'action_by'             => $pageActionMap[$pk]['by'] ?? null,
                 'action_at'             => $pageActionMap[$pk]['at'] ?? null,
+                'claude_action'         => $pageClaudeMap[$pk]['action'] ?? null,
+                'claude_reason'         => $pageClaudeMap[$pk]['reason'] ?? null,
+                'claude_at'             => $pageClaudeMap[$pk]['at'] ?? null,
+                'claude_source'         => $pageClaudeMap[$pk]['source'] ?? null,
                 'action_date'           => $endDate,
                 // HOLD units (daily snapshot, as-of end_date) for this page's item.
                 'hold_units'            => $holdMap[$holdKeyOf((string)$dominant['item_name'])] ?? null,
@@ -4083,6 +4089,10 @@ class OwnerPrivateController extends Controller
                 ];
             }
         }
+        // Claude Action/Reason per date — CEO lang; walang laman ang map sa iba.
+        $claudeByDate = $this->isCEO()
+            ? (new \App\Services\PageDayClaudeActionService())->forPage($pageKey, $startDate, $endDate)
+            : [];
 
         $out = [];
         $cursor = strtotime($startDate);
@@ -4187,6 +4197,10 @@ class OwnerPrivateController extends Controller
                     'action_comment'   => $actionByDate[$d]['comment'] ?? null,
                     'action_by'        => $actionByDate[$d]['by'] ?? null,
                     'action_at'        => $actionByDate[$d]['at'] ?? null,
+                    'claude_action'    => $claudeByDate[$d]['action'] ?? null,
+                    'claude_reason'    => $claudeByDate[$d]['reason'] ?? null,
+                    'claude_at'        => $claudeByDate[$d]['at'] ?? null,
+                    'claude_source'    => $claudeByDate[$d]['source'] ?? null,
                     'is_anchor'        => $itemMatches && $priceMatches,
                     'is_anchor_date'   => ($d === $endDate),  // end-date row = anchor source
                     'has_data'         => true,
@@ -4228,6 +4242,10 @@ class OwnerPrivateController extends Controller
                     'action_comment'   => $actionByDate[$d]['comment'] ?? null,
                     'action_by'        => $actionByDate[$d]['by'] ?? null,
                     'action_at'        => $actionByDate[$d]['at'] ?? null,
+                    'claude_action'    => $claudeByDate[$d]['action'] ?? null,
+                    'claude_reason'    => $claudeByDate[$d]['reason'] ?? null,
+                    'claude_at'        => $claudeByDate[$d]['at'] ?? null,
+                    'claude_source'    => $claudeByDate[$d]['source'] ?? null,
                     'is_anchor_date'   => ($d === $endDate),
                     'is_anchor'        => false,
                     'has_data'         => false,

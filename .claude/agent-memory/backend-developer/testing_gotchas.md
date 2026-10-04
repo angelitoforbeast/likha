@@ -44,5 +44,13 @@ Routes and pages (learned in 007 T5):
 - `isCeo()` in the controllers reads the stored role only; it does not follow the CEO's "view as" role (`AiCheckerAccess::allows()` does). A CEO previewing another role still passes CEO-only routes.
 - Columns not in a model's `$fillable` (`created_at`) are silently dropped by `create()`: set them with a query-builder update in the fixture.
 
+/owner/private endpoints (learned in 009 T1):
+
+- Start from `tests/Feature/OwnerPrivate/OwnerPrivateTestCase.php`. `itemSummary()` and `pageRangeBreakdown()` both run on sqlite with: hand-made `macro_output` (ITEM_NAME, PAGE, TIMESTAMP, STATUS, waybill, COD, ts_date) + `from_jnts` + `supply_excluded_pages`, and real migrations for ads_manager_reports, cogs, fee_settings, page_item_settings, daily_page_primary_item. Do NOT run the cogs_ceo migration (MySQL-only `INSERT IGNORE`), nor 2026_04_24_000008 (needs item_class_rules).
+- `fee_settings` migration seeds only cod_fee_rate and cod_fee_vat_rate for scope `likha`; insert `shipping_fee_per_order` (scope `likha`, the test host maps to it) or itemSummary aborts 422.
+- itemSummary's page roster comes from `daily_page_primary_item` rows on end_date (page_key is the lowercase label); a row there is enough to get a payload row. Add `refresh=1` to bypass the per-role cache.
+- Laravel's JSON response does NOT hex-escape `<` (only `/` becomes `\/`), so a raw-body "no literal <script>" assertion fails; assert JSON content-type + round-trip instead.
+- `php.bat -l` and git commands: a Bash call with a `for` loop variable (`$f`) is refused by the sandbox; run one command per call.
+
 **Why:** each of these cost a wrong first guess or would silently run a real job.
 **How to apply:** start new backend test cases from `tests/Feature/NightRun/NightRunTestCase.php` and extend its migration list.

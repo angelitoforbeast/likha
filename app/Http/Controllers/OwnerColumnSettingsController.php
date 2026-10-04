@@ -97,6 +97,8 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'cod_fee',       'label' => 'COD Fee'],
             ['id' => 'hold',          'label' => 'Hold'],
             ['id' => 'action',        'label' => 'Action'],
+            ['id' => 'claude_action', 'label' => 'Claude Action (CEO)'],
+            ['id' => 'claude_reason', 'label' => 'Claude Reason (CEO)'],
             // /item lang (item rows) — hindi ginagamit ng /owner/private.
             ['id' => 'category',      'label' => 'Category (/item)'],
             ['id' => 'stock',         'label' => 'Stock (/item)'],
@@ -180,8 +182,13 @@ class OwnerColumnSettingsController extends Controller
             ['id' => 'proj_pct',     'label' => 'Proj%'],
             ['id' => 'status',       'label' => 'Status'],
             ['id' => 'action',       'label' => 'Action'],
+            ['id' => 'claude_action', 'label' => 'Claude Action (CEO)'],
+            ['id' => 'claude_reason', 'label' => 'Claude Reason (CEO)'],
         ],
     ];
+
+    /** Mga column na CEO lang ang puwedeng makakita — laging hidden sa ibang role. */
+    public const CEO_ONLY = ['claude_action', 'claude_reason'];
 
     /**
      * Default visibility per column when nothing has been saved yet.
@@ -199,7 +206,7 @@ class OwnerColumnSettingsController extends Controller
             'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d',
             'proj_prof_1d', 'proj_prof_3d', 'proj_prof_7d',
             'jnt_rts', 'jnt_del', 'jnt_transit',
-            'rts_set', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee', 'hold', 'action',
+            'rts_set', 'promo', 'price', 'item_val', 'item_val_ceo', 'ship', 'cod_fee', 'hold', 'action', 'claude_action', 'claude_reason',
             'stock', 'incoming', 'units_per_day', 'doi', 'order_qty', 'lifecycle',
         ],
         'campaigns' => [
@@ -226,7 +233,7 @@ class OwnerColumnSettingsController extends Controller
             // Lahat visible by default — CEO/MOIC/Marketing; i-uncheck per role kung gusto.
             'date', 'primary_item', 'item_alias', 'orders', 'price', 'rts_set',
             'promo', 'item_val', 'adspent', 'proceed', 'hold', 'cpp', 'proj_profit',
-            'proj_pct', 'status', 'action',
+            'proj_pct', 'status', 'action', 'claude_action', 'claude_reason',
         ],
     ];
 
@@ -741,10 +748,7 @@ class OwnerColumnSettingsController extends Controller
                     }
                     // Append any catalog ids not in the saved order so new
                     // columns added to the catalog after the save still appear.
-                    foreach ($allowedIds as $id) {
-                        if (!in_array($id, $valid, true)) $valid[] = $id;
-                    }
-                    $order = $valid;
+                    $order = $this->appendMissingIds($valid, $allowedIds);
                 }
                 if (!empty($decoded['hidden']) && is_array($decoded['hidden'])) {
                     foreach ($decoded['hidden'] as $id) {
@@ -782,9 +786,26 @@ class OwnerColumnSettingsController extends Controller
                 ?? (($table === 'breakdown') ? $allowedIds : []);
             $vSet = array_flip($visible);
             $hidden = array_values(array_filter($allowedIds, fn($id) => !isset($vSet[$id])));
+            // CEO-only columns: laging hidden sa ibang role, kahit ibigay ng visible_by_role.
+            $hidden = array_merge($hidden, array_intersect(self::CEO_ONLY, $allowedIds));
         }
 
         return ['order' => $order, 'hidden' => array_values(array_unique($hidden))];
+    }
+
+    /**
+     * Idagdag sa dulo ang catalog ids na wala sa saved order; ang CEO_ONLY ay isiningit
+     * sa kasunod ng naunang catalog column nila (claude_* = kasunod ng Action).
+     */
+    private function appendMissingIds(array $valid, array $allowedIds): array
+    {
+        foreach ($allowedIds as $i => $id) {
+            if (in_array($id, $valid, true)) continue;
+            $pos = ($i > 0 && in_array($id, self::CEO_ONLY, true)) ? array_search($allowedIds[$i - 1], $valid, true) : false;
+            if ($pos === false) $valid[] = $id;
+            else array_splice($valid, $pos + 1, 0, [$id]);
+        }
+        return $valid;
     }
 
     /**
@@ -812,10 +833,7 @@ class OwnerColumnSettingsController extends Controller
                     foreach ($decoded['order'] as $id) {
                         if (is_string($id) && isset($allowedSet[$id])) $valid[] = $id;
                     }
-                    foreach ($allowedIds as $id) {
-                        if (!in_array($id, $valid, true)) $valid[] = $id;
-                    }
-                    $order = $valid;
+                    $order = $this->appendMissingIds($valid, $allowedIds);
                 }
                 if (!empty($decoded['hidden']) && is_array($decoded['hidden'])) {
                     foreach ($decoded['hidden'] as $id) {
