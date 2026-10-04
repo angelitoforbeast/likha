@@ -935,6 +935,9 @@
       </div>
     </div>
   </template>
+  @if(!empty($isCEO))
+  @include('owner._claude_action_modal')
+  @endif
 
   <template x-if="edit.open">
     <div class="ow-modal-backdrop" @click.self="edit.open = false">
@@ -2097,6 +2100,9 @@
         } catch(e) { /* non-fatal */ }
         finally { m.logsLoading = false; }
       },
+      @if(!empty($isCEO))
+      @include('owner._claude_action_modal_js')
+      @endif
 
       // ── Modal-based edit — 3-section design (RTS / Promo / COGS) ─────────
       // Each section has its own editable effective_date + Save button. User
@@ -3700,7 +3706,7 @@
             return r.action_comment ? ok(String(r.action_comment), { tip: String(r.action_comment),
                      sub: r.action_by ? '✎ ' + r.action_by + (r.action_at ? ' · ' + r.action_at : '') : '' }) : miss;
 @if(!empty($isCEO))
-          // Claude columns — read-only, plain text lang (x-text sa _il_expand)
+          // Claude columns — plain text lang (x-text sa _il_expand); ✎ edit nasa _il_expand (Claude modal)
           case 'claude_action':
             return r.claude_action ? ok(String(r.claude_action), { tip: String(r.claude_action),
                      sub: subs([r.claude_source, r.claude_at]) }) : miss;

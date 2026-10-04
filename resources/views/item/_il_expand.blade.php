@@ -365,7 +365,7 @@
                           x-text="row._actionOpen ? '▾ less' : '▸ more'"></button>
                 </template>
                 @if(!empty($isCEO))
-                {{-- Claude columns: more/less lang, walang ✎ --}}
+                {{-- Claude columns: more/less dito; ✎ (Claude modal) nasa baba, katabi ng ibang il-edit --}}
                 <template x-if="col.id === 'claude_action' && (row.claude_action||'').length > 60">
                   <button type="button" class="il-linkbtn" @click="row._claudeActionOpen = !row._claudeActionOpen"
                           x-text="row._claudeActionOpen ? '▾ less' : '▸ more'"></button>
@@ -393,6 +393,14 @@
               <template x-if="col.id === 'action'">
                 <button type="button" class="il-edit" @click="openActionModal(row)" title="Edit Action note" aria-label="Edit Action note">✎</button>
               </template>
+              @if(!empty($isCEO))
+              <template x-if="col.id === 'claude_action'">
+                <button type="button" class="il-edit" @click="openClaudeModal(row, 'action')" title="Edit Claude Action" aria-label="Edit Claude Action">✎</button>
+              </template>
+              <template x-if="col.id === 'claude_reason'">
+                <button type="button" class="il-edit" @click="openClaudeModal(row, 'reason')" title="Edit Claude Reason" aria-label="Edit Claude Reason">✎</button>
+              </template>
+              @endif
             </div>
           </div>
         </template>

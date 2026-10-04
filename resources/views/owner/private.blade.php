@@ -50,6 +50,10 @@
     thead th[draggable="true"]:active { cursor:grabbing; }
     thead th.drag-over { box-shadow:inset 2px 0 0 #60a5fa; }
 
+    @if(!empty($isCEO))
+    /* Claude columns: puting cell bg para di mawala ang borders kapag lampas sa card (grey page bg). */
+    tbody td.claude-col { background:#fff; }
+    @endif
     tr.total-row td {
       position:sticky; bottom:0; z-index:20;
       font-weight:700; color:#0f172a;
@@ -744,7 +748,8 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
+                <td @if(!empty($isCEO)) :class="(col.id==='claude_action'||col.id==='claude_reason') ? 'claude-col' : ''" @endif
+                    :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
@@ -1171,11 +1176,12 @@
                   </template>
 
                   @if(!empty($isCEO))
-                  {{-- Claude columns — read-only (CEO lang). Plain text via x-text,
-                       walang edit button/modal; more/less toggle lang ang click. --}}
+                  {{-- Claude columns (CEO lang). Plain text via x-text; ✎ chip → Claude modal
+                       (hiwalay sa Action note modal ng team). --}}
                   <!-- claude-cells-start -->
                   <template x-if="col.id==='claude_action'">
-                    <div style="text-align:left;min-width:0;width:100%;">
+                    <span style="display:flex;width:100%;align-items:flex-start;justify-content:space-between;gap:6px;">
+                    <div style="flex:1;text-align:left;min-width:0;">
                       <template x-if="row.claude_action">
                         <div :title="row.claude_action">
                           <div :style="row._claudeActionOpen
@@ -1199,10 +1205,16 @@
                         <span style="color:#cbd5e1;" title="no Claude action yet">—</span>
                       </template>
                     </div>
+                    <button type="button" @click="openClaudeModal(row, 'action')" title="Edit Claude Action" aria-label="Edit Claude Action"
+                            style="flex-shrink:0;align-self:flex-start;background:#fff;border:1px solid #cbd5e1;
+                                   border-radius:5px;color:#334155;font-size:12px;line-height:1;padding:3px 6px;
+                                   cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.2);">✎</button>
+                    </span>
                   </template>
 
                   <template x-if="col.id==='claude_reason'">
-                    <div style="text-align:left;min-width:0;width:100%;">
+                    <span style="display:flex;width:100%;align-items:flex-start;justify-content:space-between;gap:6px;">
+                    <div style="flex:1;text-align:left;min-width:0;">
                       <template x-if="row.claude_reason">
                         <div :title="row.claude_reason">
                           <div :style="row._claudeReasonOpen
@@ -1222,6 +1234,11 @@
                         <span style="color:#cbd5e1;" title="no Claude reason yet">—</span>
                       </template>
                     </div>
+                    <button type="button" @click="openClaudeModal(row, 'reason')" title="Edit Claude Reason" aria-label="Edit Claude Reason"
+                            style="flex-shrink:0;align-self:flex-start;background:#fff;border:1px solid #cbd5e1;
+                                   border-radius:5px;color:#334155;font-size:12px;line-height:1;padding:3px 6px;
+                                   cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.2);">✎</button>
+                    </span>
                   </template>
                   <!-- claude-cells-end -->
                   @endif
@@ -1256,7 +1273,8 @@
               <td>TOTAL</td>
               <td></td>
               <template x-for="col in cols" :key="col.id">
-                <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(tot().projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(tot().projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(tot().projected_profit_last_7d,7):'')">
+                <td @if(!empty($isCEO)) :class="(col.id==='claude_action'||col.id==='claude_reason') ? 'claude-col' : ''" @endif
+                    :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(tot().projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(tot().projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(tot().projected_profit_last_7d,7):'')">
                   <template x-if="col.id==='adspent'">
                     <span x-text="money(tot().adspent)"></span>
                   </template>
@@ -1437,6 +1455,9 @@
       </div>
     </div>
   </template>
+  @if(!empty($isCEO))
+  @include('owner._claude_action_modal')
+  @endif
 
   <template x-if="edit.open">
     <div class="ow-modal-backdrop" @click.self="edit.open = false">
@@ -2524,6 +2545,9 @@
         } catch(e) { /* non-fatal */ }
         finally { m.logsLoading = false; }
       },
+      @if(!empty($isCEO))
+      @include('owner._claude_action_modal_js')
+      @endif
 
       // ── Modal-based edit — 3-section design (RTS / Promo / COGS) ─────────
       // Each section has its own editable effective_date + Save button. User
