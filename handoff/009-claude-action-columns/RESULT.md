@@ -3,6 +3,8 @@
 Status: **done, waiting for Mira's review of branch `feat/009-claude-action-columns`**, cut from `develop` at `28de664`.
 Nothing was pushed, merged or deployed, no migration or command was run outside tests, and there is no PR, so this file stands in for the PR body.
 
+**Round 1 (fix list + Amendment 009-1) is applied**; see the "Round 1" section at the end. Amendments applied: `AMENDMENT-1.md` (009-1: A1, A2).
+
 ## Plan
 
 1. First commit: this handoff saved verbatim, this file, and the row in `handoff/README.md`.
@@ -268,8 +270,124 @@ have no red run; `/item` has one. Recorded in `TODO.md`.
    if the owner still uses that layout.
 2. **Snapshot detail:** render Action, Claude Action and Claude Reason cells in `private-snapshot-show.blade.php`
    (today all three would be a header with an empty cell in a new snapshot).
-3. **Settings page:** disable the MOIC / Marketing checkboxes for `CEO_ONLY` columns.
+3. ~~**Settings page:** disable the MOIC / Marketing checkboxes for `CEO_ONLY` columns.~~ Done in round 1
+   (amendment 009-1).
 4. **Browser check** of the three pages as CEO at desktop and phone width (more/less, clamp, sorting by the two
-   columns, breakdown table width with two more columns), once a session has browser tools.
+   columns, breakdown table width with two more columns), and of the settings page (the two disabled team
+   checkboxes with their "CEO only" hint), once a session has browser tools.
 5. **A reader for the audit trail** (`page_day_claude_action_logs`) if the owner wants to see how a
    recommendation changed; today it is written but shown nowhere.
+6. **Delete the dead view `resources/views/owner/column_settings.blade.php`** (no route renders it; it carries an
+   older copy of the settings script).
+
+## Round 1
+
+Mira's fix list (verifier item D-a) and Amendment 009-1, on the same branch. Base of the round: `ef54948`.
+Amendment saved verbatim as `AMENDMENT-1.md` in the round's first commit (`a3e3ece`).
+
+Commits (`git log --oneline ef54948..HEAD`, before this file's commit):
+
+```
+96d22ca docs: accepted round 1 review findings and reviewer memory for handoff 009
+b3de79b chore: leave the settings page save-url constant line as it was
+866cf4d fix: team checkboxes for the claude columns are disabled and never sent on the settings page
+05b5d32 fix: claude columns can never be stored or listed as visible for Marketing roles on the settings flow
+06685c0 test: claude columns hide, show, save-as-default and reset like any other column on the settings flow
+a3e3ece docs: amendment 009-1 for handoff 009
+```
+
+All tests are in `tests/Feature/OwnerPrivate/ClaudeActionColumnSettingsTest.php`, each run for both sections
+(`owner_private` and `breakdown`), through the real routes as CEO.
+
+### Part A: fix list (tests only)
+
+Commit `06685c0` holds only tests; they passed with no production change, so the two columns already behaved
+like any other column in the settings.
+
+| # | Item | Test | What it does |
+|---|---|---|---|
+| 1 | Hide and show through the real `save` endpoint, like `action` | `ceo hide and show of the claude columns works like action` | `POST /owner/column-settings/save` with `claude_action`, `claude_reason` and `action` in `hidden[]`: all three are in `loadConfig(<table>, 'CEO')['hidden']`. Breakdown page: no `Claude Action</th>` / `Claude Reason</th>` in the source and the three ids in the injected hidden list. `/owner/private`: the three ids in the `hidden` of the injected `window.__OWNER_PRIVATE_COLS__` (parsed, not grepped). Posted again without them: all three visible again, breakdown headers back. `action` is asserted beside the two ids at every step. |
+| 2a | `saveAsDefault` then `resetToDefault` | `save as default then reset restores the snapshot with the claude columns` | Save, snapshot (redirect, no error), hide the two ids in the live config, reset: the live config is the snapshot again and both ids sit right after `action` in `loadConfig` and `loadConfigMatrix`. |
+| 2b | Older saved default that does not know the two ids | `reset to an older snapshot without the claude ids still places them after action` | A `_default` row with order `hold, action, adspent, orders`: reset succeeds, loaded order has `action, claude_action, claude_reason` adjacent, visible for the CEO. |
+| 2c | Reset with no snapshot | `reset without a snapshot uses the code default with the claude columns` | Code default: both ids right after `action`, visible for the CEO. |
+| 3 | Settings page has a row for each id in both sections | `settings page sends a row and label for each claude column` | The matrix the page injects into `sectionState(...)` is decoded: its `order` has both ids right after `action`; the injected `COL_CATALOG` has the labels "Claude Action (CEO)" and "Claude Reason (CEO)". |
+
+Two things that are not literally as the fix list words them, both because of how the pages are built:
+
+- **Main table, "page source carries no Claude column".** On `/owner/private` every column, `action` included, is
+  hidden by the injected hidden list: the Alpine column loop drops hidden ids, while the cell templates stay in
+  the CEO's page source. So for the main table the test asserts the hidden list (the thing that hides `action`
+  too), not the absence of the words. On the breakdown page the two headers really are absent from the source
+  when hidden. Making the main table's source drop the Claude templates when the CEO hides them would be a
+  production change (Part A was tests only); it is two `@if` conditions if Mira wants it.
+- **Settings page, "renders a checkbox row".** The rows are built in the browser by Alpine from the injected
+  matrix (`x-for` over `order`), so the server HTML has one row template, not one row per column. The test
+  asserts the data the rows are built from.
+
+### Part B: Amendment 009-1
+
+| # | Change | Where | Tests |
+|---|---|---|---|
+| A1 (server) | A posted tick for Marketing or Marketing - OIC on a `CEO_ONLY` id is dropped on save; the settings matrix never lists those ids for a team role, whatever is stored. `loadConfig` already hid them for non-CEO roles. | `OwnerColumnSettingsController.php`: `save()` (one line changed), `loadConfigMatrix()` (one line added). 4 added lines, 1 changed. | `a posted team tick on the claude columns is not stored` (raw stored JSON has `action` and not the two ids; the JSON response's `config.visible_by_role` does not have them; `loadConfig` hides both for the role and not `action`; the matrix does not list them; both roles), `a stored team grant on the claude columns stays hidden through save as default and reset` (a grant written directly into the live and `_default` rows stays hidden after both actions). Red before the change: "stored Marketing - OIC … Failed asserting that two arrays are identical" (`claude_action`, `claude_reason` stored beside `action`). |
+| A1 (page) | The team checkbox for a `CEO_ONLY` id is disabled and unchecked, with the title "CEO only" and a not-allowed cursor; the page script never sends those ids for a team role. The CEO's checkbox is untouched. | `owner/column_settings_section.blade.php` (the checkbox template, one injected constant `COL_CEO_ONLY`), `owner/_col_settings_alpine_helpers.blade.php` (`sectionState` only). | `settings page locks the claude columns for the team checkboxes` (the injected `COL_CEO_ONLY` decodes to exactly the two ids; the team checkbox template has `:disabled="isCeoOnly(id)"` and the "CEO only" title; the CEO checkbox has no `:disabled`; the guards are in `isVisibleForRole`, `toggleRoleVisible` and `save`). Red before the change: `missing: COL_CEO_ONLY constant`. |
+| A2 | Done-when: tests for A1. | | The three tests above. **Not literally met:** "the two disabled inputs per section are in the page HTML". The rows are client-rendered, so the HTML holds one checkbox template with the disabled binding plus the list of locked ids, and that is what the test asserts. The disabled checkboxes were not seen in a browser. |
+
+On "save-as-default and reset": those two take no column input; they copy the stored rows as they are. So an old
+stored grant stays in the JSON, but it can never take effect (`loadConfig` hides the ids, the page never lists
+them), which is what the stored-grant test proves.
+
+`OwnerPrivateController.php` is untouched in this round: `git diff ef54948..HEAD --stat -- app/Http/Controllers/OwnerPrivateController.php` prints nothing.
+
+### Evidence
+
+`php.bat artisan test --filter=ClaudeActionColumnSettingsTest` → `Tests: 23 passed (868 assertions)` (run again
+after `b3de79b`).
+
+Whole suite, `php.bat artisan test --compact`, on `866cf4d`:
+
+```
+   FAILED  Tests\Feature\ExampleTest > the application returns a successful response
+  Expected response status code [200] but received 302.
+
+  Tests:    1 failed, 3 skipped, 413 passed (4882 assertions)
+  Duration: 44.31s
+```
+
+No new failure: the one red test is the old `ExampleTest` (red on the base, see done-when item 3), the 3 skipped
+are the Boardroom live tests. Before the round it was 397 passed; the 16 more are the round's tests. After that
+run only `b3de79b` touched code: it puts back one space on a line of the settings page script that the round had
+changed without need; the settings tests were run again after it, the whole suite was not.
+
+Round diff, `git diff a3e3ece..HEAD --stat` (before this file's commit):
+
+```
+ .../skeptic-reviewer/repo_weak_spots.md            |   1 +
+ TODO.md                                            |  10 +-
+ .../Controllers/OwnerColumnSettingsController.php  |   5 +-
+ .../owner/_col_settings_alpine_helpers.blade.php   |   6 +-
+ .../views/owner/column_settings_section.blade.php  |   6 +-
+ .../ClaudeActionColumnSettingsTest.php             | 279 +++++++++++++++++++++
+```
+
+### Review (round 1)
+
+`skeptic-reviewer`, standard depth, on `a3e3ece..866cf4d`: no blocker, no major. It found no way for anything
+posted or stored to make the two columns visible to a team role, the CEO's checkbox on the same path as `action`,
+other columns, roles and sections unchanged, and `OwnerPrivateController.php` not in the range. Minors, all
+accepted in `TODO.md` with reasons: a stale stored grant stays in the JSON without effect; the page tests assert
+the server's output, not rendered inputs; no test for the order-only save or for a snapshot taken with the two
+columns hidden; the dead older settings view has no lock. One of its minors was mistaken (it took the existing
+`no write route mentions claude` test for a new one).
+
+### Rulings (round 1)
+
+- Ruling: Part A stayed tests only, so the main table's page source still holds the Claude cell templates when the CEO hides the columns - the fix list says tests only, and `action` is hidden the same way - if wrong, two `@if` conditions in `owner/private.blade.php`.
+- Ruling: save-as-default and reset were not changed - they take no column input, and the lock is enforced where the config is read (`loadConfig`, `loadConfigMatrix`) and where it is posted (`save`) - if wrong, an old grant sits unused in a stored row until the next Save rewrites it.
+- Ruling: the disabled state is one Alpine binding on the existing checkbox, not new markup per column - the page builds its rows in the browser and A1 says to follow the page's existing style - if wrong, the server rules still hold; only the look of the two checkboxes is affected.
+
+### Deploy notes (round 1)
+
+Nothing new to run: no migration, no new setting. `php artisan view:clear` as before. To check: as CEO on
+`/owner/column-settings/owner-private` and `/breakdown`, the MOIC and Marketing checkboxes of "Claude Action (CEO)"
+and "Claude Reason (CEO)" are greyed out and unchecked with the hover text "CEO only"; unticking the CEO checkbox
+and saving hides the column on the page, ticking it brings it back.
