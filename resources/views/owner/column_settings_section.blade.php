@@ -147,7 +147,11 @@
             @if($showRoleColumns)
               <template x-for="role in roles" :key="role">
                 <span class="role-cell">
+                  {{-- CEO-only ang claude_* columns: disabled at unchecked para sa team --}}
                   <input type="checkbox" :checked="isVisibleForRole(id, role)"
+                         :disabled="isCeoOnly(id)"
+                         :title="isCeoOnly(id) ? 'CEO only' : null"
+                         :style="isCeoOnly(id) ? 'cursor:not-allowed' : null"
                          @change="toggleRoleVisible(id, role, $event.target.checked)"
                          class="h-4 w-4">
                 </span>
@@ -223,7 +227,8 @@
   <script>
     const COL_CATALOG       = @json($catalog);
     const COL_DEFAULT_VIS   = @json($defaultVisible);
-    const COL_SAVE_URL      = '{{ route('owner.column-settings.save') }}';
+    const COL_CEO_ONLY      = @json(\App\Http\Controllers\OwnerColumnSettingsController::CEO_ONLY);
+    const COL_SAVE_URL     = '{{ route('owner.column-settings.save') }}';
     const COL_CSRF          = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
     function colsSettings() {

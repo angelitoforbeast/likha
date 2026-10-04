@@ -314,10 +314,14 @@
         visibleCountForCEO() {
           return this.order.filter((id) => !this.hidden.has(id)).length;
         },
+        // CEO-only ang claude_* — hindi pwedeng i-grant sa team.
+        isCeoOnly(id) { return COL_CEO_ONLY.includes(id); },
         isVisibleForRole(id, role) {
+          if (this.isCeoOnly(id)) return false;
           return this.visibleByRole[role]?.has(id) === true;
         },
         toggleRoleVisible(id, role, visible) {
+          if (this.isCeoOnly(id)) return;
           const set = this.visibleByRole[role] || new Set();
           if (visible) set.add(id); else set.delete(id);
           // Force reactivity by reassigning.
@@ -377,7 +381,7 @@
             // Per-role visible lists.
             this.roles.forEach((role) => {
               const set = this.visibleByRole[role] || new Set();
-              [...set].forEach((id) => fd.append(`visible_by_role[${role}][]`, id));
+              [...set].filter((id) => !this.isCeoOnly(id)).forEach((id) => fd.append(`visible_by_role[${role}][]`, id));
             });
             const r = await fetch(COL_SAVE_URL, { method: 'POST', body: fd });
             const j = await r.json();

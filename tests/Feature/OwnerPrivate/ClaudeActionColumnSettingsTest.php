@@ -262,6 +262,32 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
         $this->assertSame('Claude Reason (CEO)', $labels['claude_reason']);
     }
 
+    // Client-rendered ang mga row, kaya ang tsine-check dito ay ang ipinapadala ng server:
+    // ang CEO-only list, ang disabled binding ng team checkbox, at ang guards sa sectionState.
+    #[DataProvider('sections')]
+    public function test_settings_page_locks_the_claude_columns_for_the_team_checkboxes(string $table): void
+    {
+        $html = $this->get($this->settingsUrl($table))->assertOk()->getContent();
+
+        $this->assertSame(1, preg_match('/const COL_CEO_ONLY\s*=\s*(\[[^\]]*\]);/', $html, $m), 'missing: COL_CEO_ONLY constant');
+        $this->assertSame(self::CLAUDE, json_decode($m[1], true));
+
+        $has = fn (string $needle) => str_contains($html, $needle);
+        $this->assertTrue($has(':disabled="isCeoOnly(id)"'), 'missing: :disabled="isCeoOnly(id)" on the role checkbox');
+        $this->assertTrue($has(":title=\"isCeoOnly(id) ? 'CEO only' : null\""), 'missing: CEO only title binding');
+
+        // Ang CEO checkbox ay walang :disabled.
+        $this->assertSame(1, preg_match('/<span class="role-cell ceo".*?<\/span>/s', $html, $ceo), 'missing: CEO checkbox cell');
+        $this->assertStringNotContainsString(':disabled', $ceo[0]);
+
+        // Sa sectionState lang tumingin (may ibang async save() sa naunang function).
+        $state = substr($html, (int) strpos($html, 'function sectionState('));
+        foreach (['isVisibleForRole(id, role)', 'toggleRoleVisible(id, role, visible)', 'async save()'] as $fn) {
+            $this->assertSame(1, preg_match('/' . preg_quote($fn, '/') . ' \{(.*?)\n        \},/s', $state, $body), "missing: {$fn} in sectionState");
+            $this->assertTrue(str_contains($body[1], 'isCeoOnly('), "missing: isCeoOnly( guard in {$fn}");
+        }
+    }
+
     // ── Part B (amendment A1/A2): walang paraan para maging visible ang claude_* sa non-CEO ──
 
     private const TEAM = ['Marketing - OIC', 'Marketing'];
