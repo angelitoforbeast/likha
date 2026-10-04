@@ -76,19 +76,32 @@ class ClaudeActionViewTest extends OwnerPrivateTestCase
     /** Ang modal at ang JS block: plain text lang (x-model/x-text), walang HTML sink. */
     private function assertModalEscaped(string $html): void
     {
-        $blocks = [
-            $this->between($html, '<!-- claude-modal-start -->', '<!-- claude-modal-end -->'),
-            $this->between($html, '// claude-modal-js-start', '// claude-modal-js-end'),
-        ];
-        foreach ($blocks as $block) {
-            foreach (['x-html', 'innerHTML', 'insertAdjacentHTML', 'outerHTML'] as $s) {
-                $this->assertFalse(str_contains($block, $s), "html sink in claude modal: {$s}");
+        foreach (['claude', 'ceo'] as $n) {
+            $blocks = [
+                $this->between($html, "<!-- {$n}-modal-start -->", "<!-- {$n}-modal-end -->"),
+                $this->between($html, "// {$n}-modal-js-start", "// {$n}-modal-js-end"),
+            ];
+            foreach ($blocks as $block) {
+                foreach (['x-html', 'innerHTML', 'insertAdjacentHTML', 'outerHTML'] as $s) {
+                    $this->assertFalse(str_contains($block, $s), "html sink in {$n} modal: {$s}");
+                }
+            }
+            foreach (["x-model=\"{$n}Modal.action\"", "x-model=\"{$n}Modal.reason\""] as $s) {
+                $this->assertTrue(str_contains($blocks[0], $s), "missing: {$s}");
             }
         }
-        foreach (['x-model="claudeModal.action"', 'x-model="claudeModal.reason"'] as $s) {
-            $this->assertTrue(str_contains($blocks[0], $s), "missing: {$s}");
-        }
         $this->assertSame(0, preg_match('/\sx-html\s*=/', $html));
+    }
+
+    /** Ang CEO twin ng Claude cells: parehong markup, ibang pangalan. */
+    private function assertCeoCells(string $html): void
+    {
+        $cells = $this->between($html, '<!-- ceo-cells-start -->', '<!-- ceo-cells-end -->');
+        $this->assertStringContainsString("openCeoModal(row, 'action')", $cells);
+        $this->assertStringContainsString("openCeoModal(row, 'reason')", $cells);
+        foreach (['openActionModal', 'saveActionNote', 'openClaudeModal'] as $s) {
+            $this->assertStringNotContainsString($s, $cells);
+        }
     }
 
     public function test_main_table_has_editable_claude_columns_for_ceo(): void
@@ -98,9 +111,13 @@ class ClaudeActionViewTest extends OwnerPrivateTestCase
         foreach ([
             'Claude Action', 'Claude Reason', 'x-text="row.claude_action"', 'x-text="row.claude_reason"',
             route('owner.private.claude-action.save'), 'saveClaudeNote', 'td.claude-col', "'claude-col'",
+            'CEO Action', 'CEO Reason', 'x-text="row.ceo_action"', 'x-text="row.ceo_reason"',
+            route('owner.private.ceo-action.save'), 'saveCeoNote',
+            "['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id)",
         ] as $s) {
             $this->assertTrue(str_contains($html, $s), "missing: {$s}");
         }
+        $this->assertCeoCells($html);
         $cells = $this->between($html, '<!-- claude-cells-start -->', '<!-- claude-cells-end -->');
         $this->assertStringContainsString("openClaudeModal(row, 'action')", $cells);
         $this->assertStringContainsString("openClaudeModal(row, 'reason')", $cells);
@@ -113,13 +130,15 @@ class ClaudeActionViewTest extends OwnerPrivateTestCase
     {
         $html = $this->page('/owner/private/breakdown?page_key=page+a&start_date=2026-10-01&end_date=2026-10-03', 'CEO');
 
-        foreach (['Claude Action</th>', 'Claude Reason</th>', 'x-text="r.claude_action"', 'x-text="r.claude_reason"'] as $s) {
+        foreach (['Claude Action</th>', 'Claude Reason</th>', 'x-text="r.claude_action"', 'x-text="r.claude_reason"',
+            'CEO Action</th>', 'CEO Reason</th>', 'x-text="r.ceo_action"', 'x-text="r.ceo_reason"'] as $s) {
             $this->assertTrue(str_contains($html, $s), "missing: {$s}");
         }
         $this->assertNoWriteSurface($this->between($html, '<!-- claude-cells-start -->', '<!-- claude-cells-end -->'));
+        $this->assertNoWriteSurface($this->between($html, '<!-- ceo-cells-start -->', '<!-- ceo-cells-end -->'));
         $this->assertSame(0, preg_match('/\sx-html\s*=/', $html));
         // D3: wala pang edit dito (sa /owner/private lang).
-        foreach (['claude-action', 'openClaudeModal'] as $s) {
+        foreach (['claude-action', 'openClaudeModal', 'ceo-action', 'openCeoModal'] as $s) {
             $this->assertFalse(str_contains($html, $s), "edit surface in breakdown: {$s}");
         }
     }
@@ -133,6 +152,10 @@ class ClaudeActionViewTest extends OwnerPrivateTestCase
             route('owner.private.claude-action.save'), 'saveClaudeNote',
             '@click="openClaudeModal(row, \'action\')" title="Edit Claude Action"',
             '@click="openClaudeModal(row, \'reason\')" title="Edit Claude Reason"',
+            "case 'ceo_action':", "case 'ceo_reason':", "id:'ceo_action'", "id:'ceo_reason'",
+            route('owner.private.ceo-action.save'), 'saveCeoNote',
+            '@click="openCeoModal(row, \'action\')" title="Edit CEO Action"',
+            '@click="openCeoModal(row, \'reason\')" title="Edit CEO Reason"',
         ] as $s) {
             $this->assertTrue(str_contains($html, $s), "missing: {$s}");
         }
@@ -157,7 +180,9 @@ class ClaudeActionViewTest extends OwnerPrivateTestCase
 
             // Ang column id sa server config (hidden/order JSON) ay okay; ang label at ang cell/field code ay hindi.
             foreach (['Claude Action', 'Claude Reason', 'row.claude_', 'r.claude_', '.claude_source', "case 'claude_", "id:'claude_", 'claude-cells',
-                'claude-action', 'openClaudeModal', 'saveClaudeNote', 'claudeModal', 'claude-modal', 'claude-col'] as $s) {
+                'claude-action', 'openClaudeModal', 'saveClaudeNote', 'claudeModal', 'claude-modal', 'claude-col',
+                'CEO Action', 'CEO Reason', 'row.ceo_', 'r.ceo_', '.ceo_source', "case 'ceo_", "id:'ceo_", 'ceo-cells', 'ceo-action',
+                'openCeoModal', 'saveCeoNote', 'ceoModal', 'ceo-modal'] as $s) {
                 $this->assertFalse(str_contains($html, $s), "{$role} {$url}: found {$s}");
             }
             auth()->forgetGuards();

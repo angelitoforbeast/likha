@@ -96,6 +96,12 @@
           @if(!in_array('claude_reason', $colsConfig['hidden'] ?? [], true))
           <th style="width:14%"  class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('claude_reason')">Claude Reason</th>
           @endif
+          @if(!in_array('ceo_action', $colsConfig['hidden'] ?? [], true))
+          <th style="width:11%"  class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('ceo_action')">CEO Action</th>
+          @endif
+          @if(!in_array('ceo_reason', $colsConfig['hidden'] ?? [], true))
+          <th style="width:14%"  class="text-left px-4 py-2 border-b border-slate-200" x-show="showCol('ceo_reason')">CEO Reason</th>
+          @endif
         </tr>
       </thead>
       <tbody>
@@ -283,6 +289,32 @@
             </td>
             <!-- claude-cells-end -->
             @endif
+            {{-- CEO cells — VIEW ONLY din, kambal ng Claude cells --}}
+            @if(!in_array('ceo_action', $colsConfig['hidden'] ?? [], true))
+            <!-- ceo-cells-start -->
+            <td class="px-4 py-2 border-b border-slate-100 bd-wrap" x-show="showCol('ceo_action')">
+              <div class="text-left text-xs text-slate-700" style="max-width:240px;white-space:normal;line-height:1.3;">
+                <template x-if="r.ceo_action">
+                  <span>
+                    <span x-text="r.ceo_action"></span>
+                    <template x-if="r.ceo_source || r.ceo_at">
+                      <span class="block text-[10px] text-slate-400" x-text="[r.ceo_source, r.ceo_at].filter(Boolean).join(' · ')"></span>
+                    </template>
+                  </span>
+                </template>
+                <template x-if="!r.ceo_action"><span class="text-slate-300">—</span></template>
+              </div>
+            </td>
+            @endif
+            @if(!in_array('ceo_reason', $colsConfig['hidden'] ?? [], true))
+            <td class="px-4 py-2 border-b border-slate-100 bd-wrap" x-show="showCol('ceo_reason')">
+              <div class="text-left text-xs text-slate-700" style="max-width:300px;white-space:normal;line-height:1.3;">
+                <template x-if="r.ceo_reason"><span x-text="r.ceo_reason"></span></template>
+                <template x-if="!r.ceo_reason"><span class="text-slate-300">—</span></template>
+              </div>
+            </td>
+            <!-- ceo-cells-end -->
+            @endif
           </tr>
         </template>
       </tbody>
@@ -318,6 +350,12 @@
           @endif
           @if(!in_array('claude_reason', $colsConfig['hidden'] ?? [], true))
           <td class="px-4 py-2 bg-slate-100" x-show="showCol('claude_reason')"></td>
+          @endif
+          @if(!in_array('ceo_action', $colsConfig['hidden'] ?? [], true))
+          <td class="px-4 py-2 bg-slate-100" x-show="showCol('ceo_action')"></td>
+          @endif
+          @if(!in_array('ceo_reason', $colsConfig['hidden'] ?? [], true))
+          <td class="px-4 py-2 bg-slate-100" x-show="showCol('ceo_reason')"></td>
           @endif
         </tr>
       </tfoot>

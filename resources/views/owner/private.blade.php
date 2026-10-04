@@ -748,7 +748,7 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td @if(!empty($isCEO)) :class="(col.id==='claude_action'||col.id==='claude_reason') ? 'claude-col' : ''" @endif
+                <td @if(!empty($isCEO)) :class="['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id) ? 'claude-col' : ''" @endif
                     :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
 
                   <!-- adspent -->
@@ -1241,6 +1241,71 @@
                     </span>
                   </template>
                   <!-- claude-cells-end -->
+
+                  {{-- CEO columns (CEO lang): kambal ng Claude cells, sariling CEO modal. --}}
+                  <!-- ceo-cells-start -->
+                  <template x-if="col.id==='ceo_action'">
+                    <span style="display:flex;width:100%;align-items:flex-start;justify-content:space-between;gap:6px;">
+                    <div style="flex:1;text-align:left;min-width:0;">
+                      <template x-if="row.ceo_action">
+                        <div :title="row.ceo_action">
+                          <div :style="row._ceoActionOpen
+                                        ? 'white-space:normal;max-width:200px;'
+                                        : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px;'"
+                               style="font-size:11px;color:#0f172a;line-height:1.3;">
+                            <span x-text="row.ceo_action"></span>
+                          </div>
+                          <template x-if="row.ceo_source || row.ceo_at">
+                            <div style="font-size:9px;color:#94a3b8;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;"
+                                 x-text="[row.ceo_source, row.ceo_at].filter(Boolean).join(' · ')"></div>
+                          </template>
+                          <template x-if="(row.ceo_action||'').length > 24">
+                            <button type="button" @click="row._ceoActionOpen = !row._ceoActionOpen"
+                                    style="background:none;border:none;color:#2563eb;font-size:9px;cursor:pointer;padding:0;font-weight:600;"
+                                    x-text="row._ceoActionOpen ? '▾ less' : '▸ more'"></button>
+                          </template>
+                        </div>
+                      </template>
+                      <template x-if="!row.ceo_action">
+                        <span style="color:#cbd5e1;" title="no CEO action yet">—</span>
+                      </template>
+                    </div>
+                    <button type="button" @click="openCeoModal(row, 'action')" title="Edit CEO Action" aria-label="Edit CEO Action"
+                            style="flex-shrink:0;align-self:flex-start;background:#fff;border:1px solid #cbd5e1;
+                                   border-radius:5px;color:#334155;font-size:12px;line-height:1;padding:3px 6px;
+                                   cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.2);">✎</button>
+                    </span>
+                  </template>
+
+                  <template x-if="col.id==='ceo_reason'">
+                    <span style="display:flex;width:100%;align-items:flex-start;justify-content:space-between;gap:6px;">
+                    <div style="flex:1;text-align:left;min-width:0;">
+                      <template x-if="row.ceo_reason">
+                        <div :title="row.ceo_reason">
+                          <div :style="row._ceoReasonOpen
+                                        ? 'white-space:normal;max-width:260px;'
+                                        : 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px;'"
+                               style="font-size:11px;color:#0f172a;line-height:1.3;">
+                            <span x-text="row.ceo_reason"></span>
+                          </div>
+                          <template x-if="(row.ceo_reason||'').length > 24">
+                            <button type="button" @click="row._ceoReasonOpen = !row._ceoReasonOpen"
+                                    style="background:none;border:none;color:#2563eb;font-size:9px;cursor:pointer;padding:0;font-weight:600;"
+                                    x-text="row._ceoReasonOpen ? '▾ less' : '▸ more'"></button>
+                          </template>
+                        </div>
+                      </template>
+                      <template x-if="!row.ceo_reason">
+                        <span style="color:#cbd5e1;" title="no CEO reason yet">—</span>
+                      </template>
+                    </div>
+                    <button type="button" @click="openCeoModal(row, 'reason')" title="Edit CEO Reason" aria-label="Edit CEO Reason"
+                            style="flex-shrink:0;align-self:flex-start;background:#fff;border:1px solid #cbd5e1;
+                                   border-radius:5px;color:#334155;font-size:12px;line-height:1;padding:3px 6px;
+                                   cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.2);">✎</button>
+                    </span>
+                  </template>
+                  <!-- ceo-cells-end -->
                   @endif
 
                 </td>
@@ -1273,7 +1338,7 @@
               <td>TOTAL</td>
               <td></td>
               <template x-for="col in cols" :key="col.id">
-                <td @if(!empty($isCEO)) :class="(col.id==='claude_action'||col.id==='claude_reason') ? 'claude-col' : ''" @endif
+                <td @if(!empty($isCEO)) :class="['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id) ? 'claude-col' : ''" @endif
                     :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(tot().projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(tot().projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(tot().projected_profit_last_7d,7):'')">
                   <template x-if="col.id==='adspent'">
                     <span x-text="money(tot().adspent)"></span>
@@ -1456,7 +1521,8 @@
     </div>
   </template>
   @if(!empty($isCEO))
-  @include('owner._claude_action_modal')
+  @include('owner._claude_action_modal', ['note' => 'claude', 'noteLabel' => 'Claude'])
+  @include('owner._claude_action_modal', ['note' => 'ceo', 'noteLabel' => 'CEO'])
   @endif
 
   <template x-if="edit.open">
@@ -2058,6 +2124,8 @@
 @if(!empty($isCEO))
           { id:'claude_action', label:'Claude Action', sort:'claude_action', align:'left', minw:160 },
           { id:'claude_reason', label:'Claude Reason', sort:'claude_reason', align:'left', minw:200 },
+          { id:'ceo_action', label:'CEO Action', sort:'ceo_action', align:'left', minw:160 },
+          { id:'ceo_reason', label:'CEO Reason', sort:'ceo_reason', align:'left', minw:200 },
 @endif
         ];
       },
@@ -2079,7 +2147,7 @@
         if (!isEffectivelyCeo) hiddenSet.add('item_val_ceo');
 @if(!empty($isCEO))
         // Claude columns — CEO lang din (defence in depth, kahit may nagbago sa server config)
-        if (!isEffectivelyCeo) { hiddenSet.add('claude_action'); hiddenSet.add('claude_reason'); }
+        if (!isEffectivelyCeo) { hiddenSet.add('claude_action'); hiddenSet.add('claude_reason'); hiddenSet.add('ceo_action'); hiddenSet.add('ceo_reason'); }
 @endif
 
         let orderedIds;
@@ -2546,7 +2614,8 @@
         finally { m.logsLoading = false; }
       },
       @if(!empty($isCEO))
-      @include('owner._claude_action_modal_js')
+      @include('owner._claude_action_modal_js', ['note' => 'claude', 'noteLabel' => 'Claude'])
+      @include('owner._claude_action_modal_js', ['note' => 'ceo', 'noteLabel' => 'CEO'])
       @endif
 
       // ── Modal-based edit — 3-section design (RTS / Promo / COGS) ─────────

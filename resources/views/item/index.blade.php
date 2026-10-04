@@ -936,7 +936,8 @@
     </div>
   </template>
   @if(!empty($isCEO))
-  @include('owner._claude_action_modal')
+  @include('owner._claude_action_modal', ['note' => 'claude', 'noteLabel' => 'Claude'])
+  @include('owner._claude_action_modal', ['note' => 'ceo', 'noteLabel' => 'CEO'])
   @endif
 
   <template x-if="edit.open">
@@ -1592,6 +1593,8 @@
 @if(!empty($isCEO))
           { id:'claude_action', label:'Claude Action', sort:'claude_action', align:'left', minw:160 },
           { id:'claude_reason', label:'Claude Reason', sort:'claude_reason', align:'left', minw:200 },
+          { id:'ceo_action', label:'CEO Action', sort:'ceo_action', align:'left', minw:160 },
+          { id:'ceo_reason', label:'CEO Reason', sort:'ceo_reason', align:'left', minw:200 },
 @endif
           // Stock / DOI (item rows lang) — galing sa /item/stock.
           { id:'category',      label:'Category',   sort:'category',      align:'center', minw:110 },
@@ -1621,7 +1624,7 @@
         if (!isEffectivelyCeo) hiddenSet.add('item_val_ceo');
 @if(!empty($isCEO))
         // Claude columns: CEO lang; at itago sa lumang layout — walang cell template para sa kanila ang pinned na _table_old (headers lang na walang laman).
-        if (!isEffectivelyCeo || this.layoutOld) { hiddenSet.add('claude_action'); hiddenSet.add('claude_reason'); }
+        if (!isEffectivelyCeo || this.layoutOld) { hiddenSet.add('claude_action'); hiddenSet.add('claude_reason'); hiddenSet.add('ceo_action'); hiddenSet.add('ceo_reason'); }
 @endif
 
         let orderedIds;
@@ -2101,7 +2104,8 @@
         finally { m.logsLoading = false; }
       },
       @if(!empty($isCEO))
-      @include('owner._claude_action_modal_js')
+      @include('owner._claude_action_modal_js', ['note' => 'claude', 'noteLabel' => 'Claude'])
+      @include('owner._claude_action_modal_js', ['note' => 'ceo', 'noteLabel' => 'CEO'])
       @endif
 
       // ── Modal-based edit — 3-section design (RTS / Promo / COGS) ─────────
@@ -3712,6 +3716,12 @@
                      sub: subs([r.claude_source, r.claude_at]) }) : miss;
           case 'claude_reason':
             return r.claude_reason ? ok(String(r.claude_reason), { tip: String(r.claude_reason) }) : miss;
+          // CEO columns — kambal ng Claude (plain text; ✎ edit nasa _il_expand, CEO modal)
+          case 'ceo_action':
+            return r.ceo_action ? ok(String(r.ceo_action), { tip: String(r.ceo_action),
+                     sub: subs([r.ceo_source, r.ceo_at]) }) : miss;
+          case 'ceo_reason':
+            return r.ceo_reason ? ok(String(r.ceo_reason), { tip: String(r.ceo_reason) }) : miss;
 @endif
           default: return miss;
         }

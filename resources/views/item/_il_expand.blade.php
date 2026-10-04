@@ -349,11 +349,11 @@
       {{-- Lahat ng page field na nakikita ng role, sa lumang column order. Walang fill; text lang. --}}
       <div class="il-pf-grid">
         <template x-for="col in cols" :key="'pf-'+row.page_key+'-'+col.id">
-          <div class="il-pf" :class="{!! !empty($isCEO) ? "['action','claude_action','claude_reason']" : "['action']" !!}.includes(col.id) ? 'il-pf-wide' : ''" x-show="ilPageFieldOn(col.id)">
+          <div class="il-pf" :class="{!! !empty($isCEO) ? "['action','claude_action','claude_reason','ceo_action','ceo_reason']" : "['action']" !!}.includes(col.id) ? 'il-pf-wide' : ''" x-show="ilPageFieldOn(col.id)">
             <div class="il-dl-l" x-text="col.label"></div>
             <div class="il-pf-v">
               <div style="flex:1;min-width:0;">
-                <div :class="(ilPageVal(col.id, row).miss ? 'il-grey ' : '') + ((col.id === 'action' && !row._actionOpen){!! !empty($isCEO) ? " || (col.id === 'claude_action' && !row._claudeActionOpen) || (col.id === 'claude_reason' && !row._claudeReasonOpen)" : '' !!} ? 'il-clamp' : '')"
+                <div :class="(ilPageVal(col.id, row).miss ? 'il-grey ' : '') + ((col.id === 'action' && !row._actionOpen){!! !empty($isCEO) ? " || (col.id === 'claude_action' && !row._claudeActionOpen) || (col.id === 'claude_reason' && !row._claudeReasonOpen) || (col.id === 'ceo_action' && !row._ceoActionOpen) || (col.id === 'ceo_reason' && !row._ceoReasonOpen)" : '' !!} ? 'il-clamp' : '')"
                      :style="ilPageVal(col.id, row).tone ? 'color:' + ilPageVal(col.id, row).tone + ';font-weight:700;' : ''"
                      :title="ilPageVal(col.id, row).tip"
                      x-text="ilPageVal(col.id, row).text"></div>
@@ -373,6 +373,14 @@
                 <template x-if="col.id === 'claude_reason' && (row.claude_reason||'').length > 60">
                   <button type="button" class="il-linkbtn" @click="row._claudeReasonOpen = !row._claudeReasonOpen"
                           x-text="row._claudeReasonOpen ? '▾ less' : '▸ more'"></button>
+                </template>
+                <template x-if="col.id === 'ceo_action' && (row.ceo_action||'').length > 60">
+                  <button type="button" class="il-linkbtn" @click="row._ceoActionOpen = !row._ceoActionOpen"
+                          x-text="row._ceoActionOpen ? '▾ less' : '▸ more'"></button>
+                </template>
+                <template x-if="col.id === 'ceo_reason' && (row.ceo_reason||'').length > 60">
+                  <button type="button" class="il-linkbtn" @click="row._ceoReasonOpen = !row._ceoReasonOpen"
+                          x-text="row._ceoReasonOpen ? '▾ less' : '▸ more'"></button>
                 </template>
                 @endif
               </div>
@@ -399,6 +407,12 @@
               </template>
               <template x-if="col.id === 'claude_reason'">
                 <button type="button" class="il-edit" @click="openClaudeModal(row, 'reason')" title="Edit Claude Reason" aria-label="Edit Claude Reason">✎</button>
+              </template>
+              <template x-if="col.id === 'ceo_action'">
+                <button type="button" class="il-edit" @click="openCeoModal(row, 'action')" title="Edit CEO Action" aria-label="Edit CEO Action">✎</button>
+              </template>
+              <template x-if="col.id === 'ceo_reason'">
+                <button type="button" class="il-edit" @click="openCeoModal(row, 'reason')" title="Edit CEO Reason" aria-label="Edit CEO Reason">✎</button>
               </template>
               @endif
             </div>
