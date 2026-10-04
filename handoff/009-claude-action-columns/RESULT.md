@@ -362,11 +362,12 @@ Round diff, `git diff a3e3ece..HEAD --stat` (before this file's commit):
 
 ```
  .../skeptic-reviewer/repo_weak_spots.md            |   1 +
- TODO.md                                            |  10 +-
+ TODO.md                                            |   9 +-
  .../Controllers/OwnerColumnSettingsController.php  |   5 +-
  .../owner/_col_settings_alpine_helpers.blade.php   |   6 +-
- .../views/owner/column_settings_section.blade.php  |   6 +-
+ .../views/owner/column_settings_section.blade.php  |   5 +
  .../ClaudeActionColumnSettingsTest.php             | 279 +++++++++++++++++++++
+ 6 files changed, 302 insertions(+), 3 deletions(-)
 ```
 
 ### Review (round 1)
