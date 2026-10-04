@@ -97,6 +97,7 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 - Blade page tests run without the CSRF middleware and never execute Alpine: a removed `@csrf`, `:href` guards and x-text helpers are unproven. Long outside text (sheet names, exception text) needs `break-words` or it brings back horizontal scroll on a phone.
 - Night run "N of M done" counts only steps that have a record: a night where an import never started reads "2 of 2 done"; only the latest night's banner says "no record".
 - Time-gated breaker (007 fix loop 2, closed): check the gate with three timings: fast failures (stops at the gate age or at the first final retry), slow timeouts (count x duration / workers), and a success racing the streak-start write. Spec text for a rule changed in a fix loop (§9 "Waiting for the worker") tends to stay on the old wording.
+- 008 log cleanup (clean review): MacroChecker has exactly 4 Log:: calls, AiCheckerRowRunner 1; errorIdent now copied in MacroChecker (''-returning) and AstraEncoder (null-returning); AiCheckerRowRunner:99 still returns getMessage() in the 500 payload (out of scope, not a log).
 
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.

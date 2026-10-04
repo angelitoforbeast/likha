@@ -116,3 +116,14 @@ Accepted review findings. None is a blocker or a major; the majors were fixed (s
 - **Untested, by design or because sqlite can't run it:** real concurrency of the cache lock, of the claim and of the double-click re-open on MySQL; `INSERT IGNORE` and the `TRIM(STATUS)` clause on MySQL/pgsql; the jobs' between-sheet branches behind the Google client; the catch branches in `routes/console.php` and the job's own catch; the Alpine helpers of the Night run section; CSRF on the three forms (tests run without the middleware). Reason: the test DB is sqlite in memory, the Google fetch is out of test scope (handoff), and the project has no JS test harness.
 - **Red runs that were "class or method not found"** for several first slices. Reason: `.claude/rules/tests.md` allows it for a module about to be created; the later slices have behaviour failures.
 - **`node --test 'test/hooks/*.test.mjs'` was not run.** Reason: not in the handoff's allowed commands; no kit file was touched.
+
+## Handoff 008: checker log cleanup (2026-10-04)
+
+Closes the 007 item above about `AI_CHECKER_LOG_FAIL` and the `MACRO_CHECKER_*_HTTP` lines. Accepted minors from the review:
+
+- **The runner's 500 payload still carries the raw exception message** (`AiCheckerRowRunner.php:99`). Reason: it is a return value, not a log; handoff 008 forbids any behaviour change. Same item as in 007; proposed as its own task.
+- **`errorIdent` now exists twice** (`MacroChecker`, returning `''`; `AstraEncoder`, returning null). Reason: the handoff forbids touching `AstraEncoder` and allows one small private helper; second copy, not the third. Suggestion: one shared helper when either is next touched.
+- **No non-JSON test on the search line.** Reason: it reads `type`/`code` through the same helper the OpenAI line's "not json" case proves; `.claude/rules/tests.md` says no second test for a proven behaviour.
+- **A hostile provider could put up to 64 characters of `[A-Za-z0-9_.-]` into `error.type` / `error.code`**, and that would be logged. Reason: same rule as `ASTRA_ENCODER_HTTP` (Mira's decision on the shape); OpenAI's values are fixed identifiers, and the 401 key fragment sits in `error.message`, which is never read.
+- **`CheckerLogCleanupTest` takes about 6 s.** Reason: the two 800 ms retry sleeps are real and may not change (no behaviour change).
+- **`node --test 'test/hooks/*.test.mjs'` was not run.** Reason: the handoff says it is not needed; no hook was touched.
