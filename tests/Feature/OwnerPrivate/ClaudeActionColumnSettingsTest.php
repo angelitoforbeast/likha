@@ -262,6 +262,60 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
         $this->assertSame('Claude Reason (CEO)', $labels['claude_reason']);
     }
 
+    // ── Part B (amendment A1/A2): walang paraan para maging visible ang claude_* sa non-CEO ──
+
+    private const TEAM = ['Marketing - OIC', 'Marketing'];
+
+    private function assertClaudeLockedForTeam(string $table, string $msg): void
+    {
+        $ctl = new OwnerColumnSettingsController();
+        $matrix = $ctl->loadConfigMatrix($table);
+        foreach (self::TEAM as $role) {
+            $this->assertEmpty(array_intersect(self::CLAUDE, $matrix['visible_by_role'][$role]), "{$msg}: matrix {$role}");
+            $hidden = $ctl->loadConfig($table, $role)['hidden'];
+            foreach (self::CLAUDE as $id) {
+                $this->assertContains($id, $hidden, "{$msg}: {$role} {$id}");
+            }
+        }
+    }
+
+    #[DataProvider('sections')]
+    public function test_a_posted_team_tick_on_the_claude_columns_is_not_stored(string $table, string $key): void
+    {
+        $this->assertClaudeLockedForTeam($table, 'no saved row'); // breakdown "all ids by default" case too
+
+        $grant = array_merge(['action'], self::CLAUDE);
+        $response = $this->postSave($table, ['visible_by_role' => ['Marketing - OIC' => $grant, 'Marketing' => $grant]]);
+
+        $stored = json_decode($this->raw($key), true)['visible_by_role'];
+        foreach (self::TEAM as $role) {
+            $this->assertSame(['action'], $stored[$role], "stored {$role}");
+            $this->assertSame(['action'], $response->json("config.visible_by_role.{$role}"), "response {$role}");
+            $this->assertNotContains('action', (new OwnerColumnSettingsController())->loadConfig($table, $role)['hidden']);
+        }
+        $this->assertClaudeLockedForTeam($table, 'after save');
+    }
+
+    #[DataProvider('sections')]
+    public function test_a_stored_team_grant_on_the_claude_columns_stays_hidden_through_save_as_default_and_reset(string $table, string $key): void
+    {
+        $grant = array_merge(['action'], self::CLAUDE);
+        $row = ['order' => $this->catalogOrder($table), 'hidden' => [], 'visible_by_role' => ['Marketing - OIC' => $grant, 'Marketing' => $grant]];
+
+        $this->save($key, $row);
+        $this->assertClaudeLockedForTeam($table, 'older live row');
+
+        $this->from($this->settingsUrl($table))
+            ->post(route('owner.column-settings.save-as-default', $table))
+            ->assertRedirect()->assertSessionHasNoErrors();
+        $this->assertClaudeLockedForTeam($table, 'after save-as-default');
+
+        $this->save($key, ['order' => $this->catalogOrder($table)]);
+        $this->save($key . '_default', $row);
+        $this->resetFrom($table);
+        $this->assertClaudeLockedForTeam($table, 'after reset');
+    }
+
     public function test_no_write_route_mentions_claude(): void
     {
         foreach (Route::getRoutes() as $route) {

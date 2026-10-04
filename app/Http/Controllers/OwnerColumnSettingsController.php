@@ -693,7 +693,8 @@ class OwnerColumnSettingsController extends Controller
             foreach (self::NON_CEO_ROLES as $r) {
                 $list = $visibleByRoleInput[$r] ?? [];
                 if (!is_array($list)) $list = [];
-                $visibleByRole[$r] = $clean($list);
+                // CEO_ONLY: hindi kailanman nase-save bilang visible sa non-CEO role.
+                $visibleByRole[$r] = array_values(array_diff($clean($list), self::CEO_ONLY));
             }
         } else {
             $visibleByRole = $existing['visible_by_role'] ?? [];
@@ -864,6 +865,8 @@ class OwnerColumnSettingsController extends Controller
             if (!array_key_exists($r, $visibleByRole)) {
                 $visibleByRole[$r] = ($table === 'breakdown') ? $allowedIds : [];
             }
+            // CEO_ONLY: laging unchecked sa settings page, kahit ano ang naka-store.
+            $visibleByRole[$r] = array_values(array_diff($visibleByRole[$r], self::CEO_ONLY));
         }
 
         return [
