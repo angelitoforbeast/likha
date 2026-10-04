@@ -132,6 +132,23 @@ class ClaudeActionEndpointTest extends OwnerPrivateTestCase
         $this->assertStringNotContainsString(self::MARKER, $this->lastBodies);
     }
 
+    /** Ang item-summary ay naka-cache per role: ang naka-cache na sagot ng CEO ay hindi dapat maihain sa iba. */
+    public function test_a_cached_ceo_summary_is_not_served_to_marketing(): void
+    {
+        $this->claudeNote('2026-10-03', self::MARKER . '-action', self::MARKER . '-reason', self::MARKER . '-source');
+        $url = '/owner/private/item-summary?start_date=2026-10-03&end_date=2026-10-03';
+
+        $this->actingAs($this->user('CEO'));
+        $this->getJson($url)->assertOk();
+        $hit = $this->getJson($url)->assertOk();
+        $this->assertSame('hit', $hit->json('_cache'));
+        $this->assertStringContainsString(self::MARKER, $hit->getContent());
+
+        auth()->forgetGuards();
+        $this->actingAs($this->user('Marketing', 'marketing@example.test'));
+        $this->assertStringNotContainsString(self::MARKER, $this->getJson($url)->assertOk()->getContent());
+    }
+
     /** @return array<string, array{0: string}> */
     public static function nonCeoRoles(): array
     {

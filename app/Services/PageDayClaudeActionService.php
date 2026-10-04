@@ -164,6 +164,23 @@ class PageDayClaudeActionService
         return $map;
     }
 
+    /**
+     * May page ba na EKSAKTONG ganito ang page_key (roster: daily_page_primary_item)? Case-sensitive
+     * sa PHP, dahil ganoon ang lookup ng /owner/private kahit case-insensitive ang MySQL collation.
+     * Walang roster table = true (walang masasabi).
+     */
+    public function pageKeyKnown(string $pageKey): bool
+    {
+        if (!Schema::hasTable('daily_page_primary_item')) {
+            return true;
+        }
+
+        return DB::table('daily_page_primary_item')
+            ->where('page_key', $pageKey)
+            ->pluck('page_key')
+            ->contains(fn ($k) => (string) $k === $pageKey);
+    }
+
     /** Isang row → payload shape; null kung walang laman ang action at reason. */
     private function entry(object $r): ?array
     {

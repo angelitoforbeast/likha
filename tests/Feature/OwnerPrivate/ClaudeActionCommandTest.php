@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\OwnerPrivate;
 
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -135,5 +136,22 @@ class ClaudeActionCommandTest extends OwnerPrivateTestCase
         $this->run_(['--clear' => true])->assertExitCode(0);
 
         $this->assertEquals($before, [DB::table('page_day_actions')->get()->all(), DB::table('page_day_action_logs')->get()->all()]);
+    }
+
+    public function test_a_page_key_no_page_has_is_saved_with_a_note_on_the_same_line(): void
+    {
+        // Ang roster (daily_page_primary_item) ang may alam ng tunay na page_key: lowercase + trimmed.
+        Artisan::call('migrate', ['--path' => ['database/migrations/2026_04_24_000009_create_daily_page_primary_item_table.php'], '--force' => true]);
+        DB::table('daily_page_primary_item')->insert([
+            'ts_date' => '2026-10-01', 'page_label' => 'PAGE A', 'page_key' => 'page a',
+            'primary_item' => 'Widget', 'primary_item_key' => 'widget', 'primary_orders' => 5, 'total_orders_all' => 5,
+        ]);
+
+        $this->artisan('owner-private:claude-action', ['page_key' => 'page a', 'ts_date' => self::DATE, '--action' => 'A1'])
+            ->expectsOutput('inserted Claude action for page a 2026-10-03')
+            ->assertExitCode(0);
+        $this->artisan('owner-private:claude-action', ['page_key' => 'Page A', 'ts_date' => '2026-10-02', '--action' => 'A1'])
+            ->expectsOutput('inserted Claude action for Page A 2026-10-02 (note: no page has exactly this page_key, so it will not show on the page)')
+            ->assertExitCode(0);
     }
 }

@@ -42,9 +42,14 @@ class OwnerPrivateClaudeAction extends Command
             return self::FAILURE;
         }
 
+        // Nai-save pa rin, pero sabihin sa parehong linya kung walang page na eksaktong ganito ang key.
+        $note = (in_array($result['status'], ['inserted', 'updated', 'unchanged'], true) && !$service->pageKeyKnown($result['page_key']))
+            ? ' (note: no page has exactly this page_key, so it will not show on the page)'
+            : '';
+
         $this->line($result['status'] === 'nothing'
             ? "nothing to clear for {$result['page_key']} {$result['ts_date']}"
-            : "{$result['status']} Claude action for {$result['page_key']} {$result['ts_date']}");
+            : "{$result['status']} Claude action for {$result['page_key']} {$result['ts_date']}{$note}");
 
         return self::SUCCESS;
     }
