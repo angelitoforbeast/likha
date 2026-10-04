@@ -148,6 +148,5 @@ class CheckerLogCleanupTest extends NightRunTestCase
         $this->assertSame(['exception', 'sqlstate'], array_keys($contexts[0]));
         $this->assertSame('Illuminate\\Database\\QueryException', $contexts[0]['exception']);
         $this->assertSame('23000', $contexts[0]['sqlstate']); // ang ABORT ng sqlite trigger = constraint violation
-        $this->assertMatchesRegularExpression('/^[A-Z0-9]{1,5}$/', $contexts[0]['sqlstate']);
     }
 }
