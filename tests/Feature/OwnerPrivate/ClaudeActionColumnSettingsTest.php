@@ -342,13 +342,22 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
         $this->assertClaudeLockedForTeam($table, 'after reset');
     }
 
-    public function test_no_write_route_mentions_claude(): void
+    /** D6 (handoff 010): iisang write route ang may 'claude'; POST lang, nasa web (CSRF) + auth. Ang refusal per role: ClaudeActionSaveRouteTest. */
+    public function test_the_only_claude_write_route_is_the_ceo_save_route(): void
     {
+        $writes = [];
         foreach (Route::getRoutes() as $route) {
-            if (array_intersect($route->methods(), ['POST', 'PUT', 'PATCH', 'DELETE'])) {
-                $this->assertStringNotContainsStringIgnoringCase('claude', (string) $route->getName(), $route->uri());
-                $this->assertStringNotContainsStringIgnoringCase('claude', $route->uri());
+            $isWrite = array_intersect($route->methods(), ['POST', 'PUT', 'PATCH', 'DELETE']);
+            $mentionsClaude = stripos((string) $route->getName() . ' ' . $route->uri(), 'claude') !== false;
+            if ($isWrite && $mentionsClaude) {
+                $writes[] = $route;
             }
         }
+
+        $this->assertCount(1, $writes);
+        $this->assertSame('owner.private.claude-action.save', $writes[0]->getName());
+        $this->assertSame(['POST'], array_values(array_diff($writes[0]->methods(), ['OPTIONS'])));
+        $this->assertContains('web', $writes[0]->gatherMiddleware());
+        $this->assertContains('auth', $writes[0]->gatherMiddleware());
     }
 }

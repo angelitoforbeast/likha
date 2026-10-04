@@ -4381,6 +4381,56 @@ class OwnerPrivateController extends Controller
         return response()->json(['ok' => true, 'logs' => $logs]);
     }
 
+    /**
+     * POST /owner/private/claude-action — CEO lang: edit ng Claude Action + Reason ng (page, date).
+     * Body: { page_key, ts_date (Y-m-d), action, reason }. Walang laman ang dalawa = burahin ang note.
+     * Source = 'ceo:<pangalan>'; kapag walang binago sa text, walang sinusulat (hindi nagbabago ang source).
+     */
+    public function saveClaudeAction(Request $request, \App\Services\PageDayClaudeActionService $claude)
+    {
+        $this->checkCEOAccess();
+
+        $v = $request->validate([
+            'page_key' => 'required|string|max:255',
+            'ts_date'  => 'required|date_format:Y-m-d',
+            'action'   => 'nullable|string|max:2000',
+            'reason'   => 'nullable|string|max:4000',
+        ]);
+
+        $pageKey = trim($v['page_key']);
+        $tsDate  = $v['ts_date'];
+        $action  = trim((string) ($v['action'] ?? ''));
+        $reason  = trim((string) ($v['reason'] ?? ''));
+        $source  = mb_substr('ceo:' . (string) optional(auth()->user())->name, 0, 255);
+
+        try {
+            $stored = $claude->forPage($pageKey, $tsDate, $tsDate)[$tsDate] ?? null;
+            if ($action === '' && $reason === '') {
+                $status = $claude->clear($pageKey, $tsDate, $source)['status'];
+            } elseif ($stored && $stored['action'] === ($action !== '' ? $action : null) && $stored['reason'] === ($reason !== '' ? $reason : null)) {
+                $status = 'unchanged';
+            } else {
+                $status = $claude->save($pageKey, $tsDate, $action, $reason, $source)['status'];
+            }
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['ok' => false, 'message' => $e->getMessage()], 422);
+        }
+
+        // Fresh read para ang cell ay kapareho ng makikita pagkatapos mag-reload.
+        $now = $claude->forPage($pageKey, $tsDate, $tsDate)[$tsDate] ?? null;
+
+        return response()->json([
+            'ok'            => true,
+            'status'        => $status,
+            'page_key'      => $pageKey,
+            'ts_date'       => $tsDate,
+            'claude_action' => $now['action'] ?? null,
+            'claude_reason' => $now['reason'] ?? null,
+            'claude_source' => $now['source'] ?? null,
+            'claude_at'     => $now['at'] ?? null,
+        ]);
+    }
+
     /** CEO-only gate (Daily Summary view). */
     private function checkCEOAccess(): void
     {
