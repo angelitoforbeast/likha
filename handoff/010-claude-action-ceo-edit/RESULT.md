@@ -1,7 +1,9 @@
 # Result 010: Claude Action and Claude Reason on the owner private page become editable by the CEO
 
 Status: **done, waiting for Mira's review of branch `feat/010-claude-action-ceo-edit`**, cut from `develop` at `1b04668`.
-Nothing was pushed, merged or deployed, no migration or command was run outside tests, and there is no PR, so this file stands in for the PR body. No amendment was received.
+Nothing was pushed, merged or deployed, no migration or command was run outside tests, and there is no PR, so this file stands in for the PR body.
+
+**Amendments applied:** `AMENDMENT-1.md` (010-1: A1 to A9, CEO Action and CEO Reason); see the "Amendment 010-1" section at the end. The sections before it describe the first run (head `e4fbc06`) and are left as they were; where the amendment changes a statement (for example "no migration"), the amendment section says so.
 
 ## Plan
 
@@ -258,3 +260,232 @@ shared with the team's Action save); in `TODO.md`.
 4. **Edit history for the Claude note in the editor** (the audit log is written but shown nowhere; out of scope
    here and in 009).
 5. **Cache version with finer resolution than one second** (`bumpCacheVersion()`), for both notes.
+
+## Amendment 010-1
+
+Mira's amendment (CEO Action and CEO Reason), on the same branch. Base of the round: `e4fbc06`. Saved verbatim as
+`AMENDMENT-1.md` in the round's first commit (`0b79678`). It changes requirements only; nothing in it touches
+permissions, commands or policy files.
+
+Commits (`git log --oneline e4fbc06..HEAD`, before this file's commit):
+
+```
+91142f7 docs: accepted amendment 010-1 review findings and reviewer memory for handoff 010
+e53c7db feat: ceo action and reason columns with the ceo editor on the owner private table, breakdown and item page card
+36e1461 feat: ceo action and reason data layer, ceo-only save route and column settings (own tables)
+0b79678 docs: amendment 010-1 for handoff 010
+```
+
+### Summary of the round
+
+The CEO now has two more columns, **CEO Action** and **CEO Reason**, right after Claude Reason on the main
+table, the per-date breakdown and the page card of the new `/item` layout: his own note beside the team's Action
+and the assistant's recommendation. They are edited exactly like the Claude cells (✎, the same floating editor
+with both texts; view-only on the breakdown), stored in their own table pair, written through their own
+CEO-only route, and invisible to every other role. The assistant's artisan command cannot reach them.
+
+Four things for Mira to know:
+
+1. **Run the two migrations before anyone opens the page.** Without the tables the pages and data endpoints
+   still work (the columns show "—"), but a save into CEO Action answers a server error.
+2. **Shared code, by subclass.** `PageDayCeoActionService` extends the Claude service and overrides only the two
+   table names; the Claude service's table names became two protected properties (14 added, 10 removed lines,
+   no logic change). The controller's save body became one private helper used by both routes. No rewrite of
+   what 009 and the first run shipped.
+3. **The existing test files were extended, not copied.** The route, payload, migration, settings and view tests
+   now run for both note types through data providers, so several first-run test names now carry a note-type
+   case, and three were renamed or replaced (listed below).
+4. **One command outside the allowed shape.** In one evidence command I piped `git log` into `grep -ci` in the
+   shell and used `echo` separators, although the amendment says to use the Grep tool instead. It read git
+   output only. Otherwise the round used only the allowed commands.
+
+### Items
+
+| # | What was done | Where |
+|---|---|---|
+| A1 | Two columns `ceo_action` ("CEO Action") and `ceo_reason` ("CEO Reason") right after `claude_reason` in the three places. Main table and item page card: the same cell as the Claude one (clamp, more/less, "—", `source · time` line under CEO Action) with a ✎ that opens the CEO editor (`openCeoModal`), which posts to the CEO route and updates the cells in place. Breakdown: header, view-only cell and footer cell, no edit. All inside the CEO-only gates. | `owner/private.blade.php`, `owner/private-breakdown.blade.php`, `item/index.blade.php`, `item/_il_expand.blade.php`; the two editor partials `owner/_claude_action_modal.blade.php` and `_claude_action_modal_js.blade.php` now take `note` (`claude` or `ceo`) and are included once per note type in both pages. With `note = claude` their output is what it was at `e4fbc06` (reviewer compared; only a leading blank line differs). |
+| A2 | Tables `page_day_ceo_actions` (unique page_key + ts_date; action, reason text nullable; source; timestamps) and `page_day_ceo_action_logs`, same shape as the Claude pair, guarded with `Schema::hasTable`, with `down()`. Limits (2000 / 4000 / 255) and "audit row only on a change" come from the shared service; source is `ceo:<user name>`. | `database/migrations/2026_10_04_120000_create_page_day_ceo_actions_table.php`, `2026_10_04_120001_create_page_day_ceo_action_logs_table.php`, `app/Services/PageDayCeoActionService.php` |
+| A3 | `POST owner/private/ceo-action` (`owner.private.ceo-action.save`), same helper as the Claude route: `checkCEOAccess()` first (404), validation (422), clear when both texts are empty, no write on an unchanged save, cache bumped by the service on a real change, JSON `{ok, status, page_key, ts_date, ceo_action, ceo_reason, ceo_source, ceo_at}`. | `routes/web.php`, `OwnerPrivateController::saveCeoAction` + private `saveCeoOnlyNote` |
+| A4 | The command type-hints `PageDayClaudeActionService`, whose tables are the Claude pair; nothing under `app/Console` names the CEO tables or the CEO service; the CEO service's docblock forbids its use in any artisan command. | see evidence below |
+| A5 | Both ids after `claude_reason` in both catalogs and both default-visible lists, and in `CEO_ONLY` (so the team checkboxes are locked, a posted team tick is dropped, and they are always hidden for team roles). `appendMissingIds` needed no change: an older saved order gets them right after `claude_reason`, whether it knows the Claude ids or not. | `OwnerColumnSettingsController.php` (10 lines) |
+| A6 | `ceo_action`, `ceo_reason`, `ceo_at`, `ceo_source` in the `item-summary` rows and at both row sites of `page-range-breakdown`, loaded only for the real CEO role, null otherwise; the `Schema::hasTable` guard is in the service's `forDate` / `forPage`. Non-CEO page source: no column, no ✎, no editor, no script, no `ceo-action` URL. | `OwnerPrivateController.php` (loaders and keys, additions only) |
+| A7 | The `:class` on the body and TOTAL `<td>` of the column loop now gives `claude-col` (white cell background) to the four ids. Not seen in a browser. | `owner/private.blade.php` |
+| A8 | Tests below. | `tests/Feature/OwnerPrivate/` |
+| A9 | Evidence below; the table of the three places and the deploy notes follow. | this section |
+
+### Tests (A8), all under `tests/Feature/OwnerPrivate/`
+
+`php.bat artisan test --compact --filter=OwnerPrivate` → `Tests: 97 passed (1016 assertions)`.
+
+| A8 item | File | Test (each "both notes" test runs once for `claude` and once for `ceo`) |
+|---|---|---|
+| Migrations | `ClaudeActionMigrationTest` | `migrations create both tables`, `same page and date violates the unique key` (both pairs) |
+| Route for the CEO: insert, update, clear, audit rows | `ClaudeActionSaveRouteTest` | `ceo inserts updates and clears with the ceo source in the audit log` (both notes) |
+| Unchanged save | same | `an unchanged save writes no audit row` (both notes); `one blank field is cleared and two blank fields delete the note` (both notes) |
+| Every other role and a guest | same | `other roles get 404 and nothing is written` (Marketing, Marketing - OIC, Data Encoder × both notes; all six note tables compared before and after), `a guest gets what a guest gets on another ceo only endpoint and nothing is written` (both notes) |
+| Validation | same | `invalid input answers 422 and writes nothing` (six cases × both notes), `text at the exact limit is accepted` (both notes) |
+| Independence through the routes | same | `a save or clear leaves the other note tables untouched` (both notes; replaces the first run's `the team action tables are left untouched`, which is covered by it) |
+| Payload for CEO and non-CEO, with a marker | `ClaudeActionEndpointTest`, `ClaudeActionSaveRouteTest` | `ceo gets the note values and empty page days get nulls` (both notes), `non ceo never receives the claude or ceo text` (Marketing, Marketing - OIC; a marker in each note, nowhere in either body), `a cached ceo summary is not served to marketing`, `a save shows in the ceo summary and breakdown after a warm cache but never to marketing` (both notes) |
+| Page source for CEO, three pages | `ClaudeActionViewTest` | `main table has editable claude columns for ceo`, `breakdown has read only claude columns for ceo`, `item page new layout has editable claude page fields for ceo` (each now also asserts the CEO columns, the `ceo-cells` block, `openCeoModal`, the CEO save URL and editor on the two editable pages, and none of them on the breakdown) |
+| Page source for non-CEO, three pages | same | `non ceo roles get no claude columns in the page source` (forbidden list extended with `CEO Action`, `CEO Reason`, `row.ceo_`, `r.ceo_`, `.ceo_source`, `case 'ceo_`, `id:'ceo_`, `ceo-cells`, `ceo-action`, `openCeoModal`, `saveCeoNote`, `ceoModal`, `ceo-modal`) |
+| Escaping | `ClaudeActionSaveRouteTest`, `ClaudeActionEndpointTest`, `ClaudeActionViewTest` | `script text comes back as plain json data` (both notes), `script text is returned as plain json data` (both notes); the editor and script blocks of both notes have no `x-html`, `innerHTML`, `insertAdjacentHTML`, `outerHTML` |
+| Settings flow | `ClaudeActionColumnSettingsTest` | `ceo hide and show of the note columns works like action`, `save as default then reset restores the snapshot with the claude columns`, `reset to an older snapshot without the claude ids still places them after action`, `reset without a snapshot uses the code default with the claude columns`, `an older saved order gets the note columns right after action` (an order with no note ids, and one with only the Claude ids), `ceo sees the note columns by default right after action`, `non ceo always hides the note columns`, `settings page sends a row and label for each claude column`, `settings page locks the claude columns for the team checkboxes`, `a posted team tick on the claude columns is not stored`, `a stored team grant on the claude columns stays hidden through save as default and reset` (all over the four ids; some names still say "claude") |
+| The Claude command leaves the CEO tables untouched | `ClaudeActionCommandTest` | `the team and ceo action tables are left untouched` (insert, update and `--clear` with a seeded CEO row) |
+| Route test of D6, widened | `ClaudeActionColumnSettingsTest` | `the only claude and ceo action write routes are the two ceo save routes` (replaces the first run's route test; exactly the two names, POST only, `web` and `auth`); refusal per role is the route test above |
+
+Red runs (from the developers). Backend, before any production change: `non ceo always hides the note columns`
+(expected `ceo_action`, `ceo_reason` in the hidden list, had only the Claude ids), `ceo sees the note columns by
+default right after action` (expected the two ids after `claude_reason`, got `category, stock`), `settings page
+locks the claude columns for the team checkboxes` (`COL_CEO_ONLY` had only the Claude ids), the posted-tick and
+stored-grant tests (no `ceo_action` in the team's hidden list); the migration, route, payload and command tests
+failed on the missing tables, the missing route and the missing keys, without a copied first line (in `TODO.md`).
+Frontend, before any Blade change: main table `missing: CEO Action`, breakdown `missing: CEO Action</th>`, item
+page `missing: case 'ceo_action':`; the non-CEO test was green before and after (it asserts absence).
+
+### Evidence (A9)
+
+**Whole suite**, `php.bat artisan test --compact`, run once on `91142f7` (the only later commit is this file):
+
+```
+   FAILED  Tests\Feature\ExampleTest > the application returns a successful response
+  Expected response status code [200] but received 302.
+
+  Tests:    1 failed, 3 skipped, 452 passed (4786 assertions)
+  Duration: 45.02s
+```
+
+No new failure: the one red test is the old `ExampleTest`, the 3 skipped are the Boardroom live tests. First run
+431 passed; the 21 more are the CEO-note cases of the parameterised tests.
+
+**`php.bat artisan route:list --path=owner/private`** (19 routes; the write routes among them):
+
+```
+  POST       owner/private/action ...................... owner.private.action.save › OwnerPrivateController@saveAction
+  POST       owner/private/ceo-action ........... owner.private.ceo-action.save › OwnerPrivateController@saveCeoAction
+  POST       owner/private/claude-action .. owner.private.claude-action.save › OwnerPrivateController@saveClaudeAction
+  POST       owner/private/item-setting ..... owner.private.item-setting.save › OwnerPrivateController@saveItemSetting
+  POST       owner/private/item-setting/delete owner.private.item-setting.delete › OwnerPrivateController@deleteItemS…
+  POST       owner/private/refresh-primary-items owner.private.refresh-primary-items › OwnerPrivateController@refresh…
+  POST       owner/private/snapshots ............. owner.private.snapshots.save › OwnerPrivateSnapshotsController@save
+  DELETE     owner/private/snapshots/{id} .. owner.private.snapshots.destroy › OwnerPrivateSnapshotsController@destroy
+```
+
+The other 11 lines are GET routes that were there on the base. The two save routes are the second and third line.
+
+**`git grep -n "page_day_ceo" -- app/Console`** prints nothing. In all of `app`, the CEO tables and the CEO
+service are named only in `app/Services/PageDayCeoActionService.php` and `OwnerPrivateController.php` (two
+loaders, `saveCeoAction`), plus one docblock line in the Claude service.
+
+**Controller.** `git diff 1b04668..HEAD --numstat -- app/Http/Controllers/OwnerPrivateController.php` → `80	0`
+(additions only against the base; nothing inside `saveAction` or `actionLogs`). Within the round
+(`0b79678..HEAD`): `38	8`, the 8 removed lines being the first run's own response array, re-keyed with the prefix.
+**Migrations.** `git diff 1b04668..HEAD --stat -- database`: exactly the two new CEO migrations (68 lines).
+**Pinned file.** `git diff 1b04668..HEAD --stat -- resources/views/item/_table_old.blade.php` prints nothing.
+
+Round diff, `git diff 0b79678..HEAD --stat` (before this file's commit):
+
+```
+ .../skeptic-reviewer/repo_weak_spots.md            |   1 +
+ TODO.md                                            |   9 +
+ .../Controllers/OwnerColumnSettingsController.php  |  10 +-
+ app/Http/Controllers/OwnerPrivateController.php    |  46 ++++-
+ app/Services/PageDayCeoActionService.php           |  14 ++
+ app/Services/PageDayClaudeActionService.php        |  24 ++-
+ ...04_120000_create_page_day_ceo_actions_table.php |  33 ++++
+ ...20001_create_page_day_ceo_action_logs_table.php |  35 ++++
+ resources/views/item/_il_expand.blade.php          |  18 +-
+ resources/views/item/index.blade.php               |  16 +-
+ .../views/owner/_claude_action_modal.blade.php     |  62 +++---
+ .../views/owner/_claude_action_modal_js.blade.php  |  46 +++--
+ resources/views/owner/private-breakdown.blade.php  |  38 ++++
+ resources/views/owner/private.blade.php            |  79 +++++++-
+ routes/web.php                                     |   2 +
+ .../ClaudeActionColumnSettingsTest.php             |  90 +++++----
+ .../OwnerPrivate/ClaudeActionCommandTest.php       |  11 +-
+ .../OwnerPrivate/ClaudeActionEndpointTest.php      |  58 ++++--
+ .../OwnerPrivate/ClaudeActionMigrationTest.php     |  25 ++-
+ .../OwnerPrivate/ClaudeActionSaveRouteTest.php     | 211 +++++++++++++--------
+ .../Feature/OwnerPrivate/ClaudeActionViewTest.php  |  51 +++--
+ .../Feature/OwnerPrivate/OwnerPrivateTestCase.php  |   2 +
+ 22 files changed, 645 insertions(+), 236 deletions(-)
+```
+
+Commits: Conventional Commits; `git log --format=%B 1b04668..HEAD` has 0 lines matching `co-authored`,
+`generated with` or `claude-session`; `git status --short` prints nothing after the final commit.
+
+### Where and how the cells are edited, with the CEO cells
+
+| # | Place | Team's Action | Claude Action / Reason | CEO Action / Reason (new) |
+|---|---|---|---|---|
+| 1 | `/owner/private` main table (END date's note) | ✎ chip → floating Action editor | ✎ chip on each cell → Claude editor with both texts | Same: ✎ chip on each cell → CEO editor with both texts ("CEO Action / Reason"), saved through `owner/private/ceo-action`, cells and the `source · time` line updated in place. |
+| 2 | Per-date breakdown | View-only | View-only | View-only: header, cell (with `source · time` under CEO Action), footer cell. A note saved on the main table shows on that date's row. |
+| 3 | `/item`, new layout, page card | ✎ (`il-edit`) → Action editor | ✎ beside each field → Claude editor | Same: two fields after Claude Reason, wide, clamped with more/less, ✎ beside each → CEO editor. Hidden in the old layout, like the Claude fields. |
+
+### Review (amendment)
+
+`skeptic-reviewer`, standard depth, on `0b79678..e53c7db`, three-part report: no blocker, no major.
+
+- **Spec:** A1 to A8 met (A1 and A7 with the browser-only parts unverified); A9's grep confirmed.
+- **Check 1 (only the CEO writes or learns either text): pass.** Both routes go through the helper that calls
+  `checkCEOAccess()` first; both payload maps load only for the CEO; the cache key holds the role; refusals are
+  proven with all six note tables unchanged; the non-CEO page source test covers the three pages for both notes.
+- **Check 2 (each route writes only its own pair; Action note unchanged): pass.** The helper writes only
+  through the injected service; the cross-table test holds; the round's diff touches nothing of the Action note.
+- **Check 3 (never rendered as HTML): pass.** Only `x-text`, `x-model`, `:title`; the Blade variables printed
+  into the partials are hardcoded names and `route()`, never note text.
+- **Check 4 (A4 independence): pass.** Nothing under `app/Console` names the CEO tables; the command's type-hint
+  resolves to the Claude class; no provider binds the CEO class; the base class cannot reach the CEO tables.
+- **Also confirmed:** the Claude route's behaviour and JSON are unchanged by the helper; the Claude editor's
+  rendered output is unchanged apart from whitespace.
+- **Declined to judge:** Alpine behaviour, sort, focus, drag, the look, the breakdown's width with four extra
+  columns.
+
+Minors, all on trusted paths, all accepted in `TODO.md` with reasons: a save before the migrations have run is a
+server error (deploy order); no test drops a table to prove the `hasTable` guard; A4 rests on the type-hint and
+one test, not a hard barrier; the view tests only search the page source; the helper's parameter is still named
+`$claude`; the backend red run lacks first-failure lines for some tests.
+
+### Rulings (amendment)
+
+- Ruling: the CEO service is a subclass of the Claude service with only the two table names overridden - A4 allows a common base, and it is the smallest change to shipped code (table literals became two properties) - if wrong, a later split into a neutral base class is a rename with no behaviour change.
+- Ruling: one private controller helper for both routes, keyed by a prefix - a second copy of a 45-line method in a file whose diff must stay small - if wrong, the Claude tests would show any drift; they pass unchanged.
+- Ruling: the editor partials take a `note` parameter and are included twice, instead of a second pair of partials - one script and one markup for both note types - if wrong, the file names still say "claude"; renaming them is cosmetic.
+- Ruling: labels are "CEO Action" and "CEO Reason", also on the settings page (the Claude ones there read "Claude Action (CEO)") - "CEO Action (CEO)" would read as a mistake - if wrong, two strings in the catalog.
+- Ruling: the white-background class keeps its name `claude-col` for all four columns - A7 says "the same white cell background you gave the Claude columns" - if wrong, a rename in one CSS rule and two bindings.
+- Ruling: existing tests were parameterised over the two note types rather than copied - `.claude/rules/tests.md` (variants go into the table) - if wrong, nothing is lost; every first-run behaviour is still asserted, now twice.
+- Ruling: the snapshot detail and the old `/item` layout get nothing, as for the Claude columns - both are out of scope in the handoff - if wrong, the same proposed tasks as in 009.
+
+### Deploy notes for Mira (amendment)
+
+1. **Migrations to run first** (`php artisan migrate --force`), both new, both guarded with `Schema::hasTable`:
+   - `2026_10_04_120000_create_page_day_ceo_actions_table`
+   - `2026_10_04_120001_create_page_day_ceo_action_logs_table`
+
+   Until they run, the pages work and the CEO columns show "—", but saving a CEO note answers a server error.
+2. **Caches:** `php artisan view:clear`; `route:clear` or re-cache routes (two new routes in total). No asset build
+   was run and none should be needed.
+3. **Check as CEO:** on `/owner/private`, CEO Action and CEO Reason sit right after Claude Reason, each with a ✎;
+   the editor's title reads "CEO Action / Reason"; save, see the text and `ceo:<your name> · time` under CEO
+   Action, reload, same. Saving a CEO note must leave the Claude cells as they were, and the other way round.
+   Breakdown: the two columns after Claude Reason, no ✎. `/item` new layout, page card: the two fields with ✎.
+   Column settings (owner-private and breakdown): "CEO Action" and "CEO Reason" after "Claude Reason (CEO)",
+   team checkboxes greyed out. Audit: `select page_key, ts_date, old_action, new_action, source, edited_at from
+   page_day_ceo_action_logs order by id desc limit 5;`.
+4. **Check as Marketing and Marketing - OIC:** no CEO column on the three pages; view source has no `CEO Action`
+   and no `ceo-action`; `item-summary` and `page-range-breakdown` have the four `ceo_*` keys `null`; a POST to
+   `/owner/private/ceo-action` answers 404.
+5. **Not verifiable without a browser** (none of it was seen): everything in deploy note 6 of the first run, now
+   for both editors; that the two editors do not interfere on one page; sorting by the two new columns; the
+   white background on four columns; the breakdown table's width with four extra columns (its header widths are
+   percentages that now add up to more than before).
+6. **Merge danger:** low to medium. The shipped Claude service changed (table names as properties) and the Claude
+   route now runs through the shared helper; the Claude command, route and editor tests pass unchanged. No change
+   to the team's Action note. `_table_old.blade.php` unchanged.
+
+### Proposed tasks (amendment)
+
+1. The first run's task 1 (make the white card as wide as the table) matters more now: four columns sit past
+   Action.
+2. Give the breakdown table column widths that fit four extra columns, after a look in a browser.
+3. If the assistant should one day compare its recommendation with the owner's note, that reader must be a
+   separate, deliberate change; today nothing under `app/Console` can load the CEO note (A4).
