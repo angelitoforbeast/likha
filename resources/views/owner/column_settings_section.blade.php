@@ -228,7 +228,7 @@
     const COL_CATALOG       = @json($catalog);
     const COL_DEFAULT_VIS   = @json($defaultVisible);
     const COL_CEO_ONLY      = @json(\App\Http\Controllers\OwnerColumnSettingsController::CEO_ONLY);
-    const COL_SAVE_URL     = '{{ route('owner.column-settings.save') }}';
+    const COL_SAVE_URL      = '{{ route('owner.column-settings.save') }}';
     const COL_CSRF          = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
     function colsSettings() {
