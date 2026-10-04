@@ -99,5 +99,8 @@ Weak spots found in reviews (first seen in handoff 001 spec review, 2026-10-01).
 - Time-gated breaker (007 fix loop 2, closed): check the gate with three timings: fast failures (stops at the gate age or at the first final retry), slow timeouts (count x duration / workers), and a success racing the streak-start write. Spec text for a rule changed in a fix loop (§9 "Waiting for the worker") tends to stay on the old wording.
 - 008 log cleanup (clean review): MacroChecker has exactly 4 Log:: calls, AiCheckerRowRunner 1; errorIdent now copied in MacroChecker (''-returning) and AstraEncoder (null-returning); AiCheckerRowRunner:99 still returns getMessage() in the 500 payload (out of scope, not a log).
 
+- 009 Claude action columns (clean standard review): itemSummary/data cache keys embed the real normalized role, so a CEO-only payload key cannot reach a non-CEO via cache; item-summary tests always use ?refresh=1, so the cache-hit path is untested. CEO with view_as=marketing still receives CEO-only keys (isCEO is the real role; the page JS hides them). Page keys are case-sensitive in the PHP map lookup (MySQL ci collation matches rows, PHP array key does not), so any artisan writer must be given the roster page_key exactly (lowercase), and nothing validates that the page exists.
+- Column catalog CEO_ONLY ids are still grantable in the settings matrix UI for Marketing (forced hidden in loadConfig only); saved order insertion is via appendMissingIds (shared by loadConfig and loadConfigMatrix).
+
 **Why:** these produced findings in the 001 spec review and are likely to recur in follow-up handoffs on /item.
 **How to apply:** in any /item, quote, HOLD or supply review, check these before reading the rest of the diff.

@@ -127,3 +127,15 @@ Closes the 007 item above about `AI_CHECKER_LOG_FAIL` and the `MACRO_CHECKER_*_H
 - **A hostile provider could put up to 64 characters of `[A-Za-z0-9_.-]` into `error.type` / `error.code`**, and that would be logged. Reason: same rule as `ASTRA_ENCODER_HTTP` (Mira's decision on the shape); OpenAI's values are fixed identifiers, and the 401 key fragment sits in `error.message`, which is never read.
 - **`CheckerLogCleanupTest` takes about 6 s.** Reason: the two 800 ms retry sleeps are real and may not change (no behaviour change).
 - **`node --test 'test/hooks/*.test.mjs'` was not run.** Reason: the handoff says it is not needed; no hook was touched.
+
+## Handoff 009: Claude Action columns (2026-10-04)
+
+The review found no blocker and no major. Two minors on untrusted paths were fixed (unknown page key note in the command; cache-hit test). Accepted minors:
+
+- **The column settings page still offers MOIC / Marketing checkboxes for "Claude Action (CEO)" and "Claude Reason (CEO)"; ticking them does nothing** (`loadConfig` always hides `CEO_ONLY` ids for other roles). Reason: the settings view is outside the handoff; the label says "(CEO)". Suggestion: disable those two checkboxes when the settings page is next touched.
+- **Two `owner-private:claude-action` runs at the same moment for the same new page-day: the second fails on the unique key with a raw query error.** Reason: trusted operator path, nothing is lost or corrupted; the first write stands.
+- **A CEO previewing with `view_as=marketing` still receives the `claude_*` keys in the JSON** (the columns are hidden on the page). Reason: D5 gates on the real role and the viewer is the CEO; same pattern as the 007 `isCeo()` item above. No test pins it.
+- **Untested:** the rollback when the audit insert fails, the `forDate` / `forPage` path before the migration has run (`Schema::hasTable` guard, read by eye), the Alpine behaviour of the new cells (more/less, clamp, sort by the two columns) and the layout at phone width. Reason: no JS test harness in the project and no browser tools in the session; the view tests check the rendered markup only.
+- **Line breaks in the Claude text show as spaces**, as in the Action note (`x-text` in a normal-wrapping cell). Reason: D8 says "the way the Action note does it".
+- **The red run for the main table and breakdown markup is missing** (the developer wrote that markup before its tests; `/item` has a real red run). Reason: found after the fact; the tests were checked against the finished markup and the non-CEO test was later proven red by the marker-comment leak.
+- **`node --test 'test/hooks/*.test.mjs'` was not run.** Reason: not in the handoff's allowed commands; no kit file was touched.
