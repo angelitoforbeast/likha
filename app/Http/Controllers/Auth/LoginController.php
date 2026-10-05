@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Listeners\RefuseRememberedLoginUnlessCeo;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cookie;
 
 class LoginController extends Controller
 {
@@ -23,8 +24,16 @@ class LoginController extends Controller
             // PAGKATAPOS tanggapin ang password (kaya pareho ang bigong login may account man o wala), at
             // galing sa account sa database, hindi sa form: walang binabasang `remember` na request parameter.
             if (RefuseRememberedLoginUnlessCeo::isCeo(Auth::user())) {
-                Auth::guard()->setRememberDuration(60 * 24 * 30); // minuto = 30 araw mula sa login
+                Auth::guard()->setRememberDuration(RefuseRememberedLoginUnlessCeo::REMEMBER_MINUTES); // 30 araw mula sa login
                 Auth::login(Auth::user(), true); // ito ang naglalabas ng remember cookie
+
+                // Amendment 012-1 (A1): pangalawang cookie na may user id at oras ng login na ito, naka-encrypt
+                // ng framework. Ito ang binabasa ng server para sa 30 araw; hindi umaasa sa expiry ng browser.
+                Cookie::queue(
+                    RefuseRememberedLoginUnlessCeo::SINCE_COOKIE,
+                    Auth::id() . '|' . now()->timestamp,
+                    RefuseRememberedLoginUnlessCeo::REMEMBER_MINUTES
+                );
             }
 
             $request->session()->regenerate();

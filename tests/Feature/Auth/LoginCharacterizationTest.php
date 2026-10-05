@@ -36,6 +36,7 @@ class LoginCharacterizationTest extends AuthTestCase
         $this->assertAuthenticatedAs($user);
         $this->assertNotSame($sessionIdBefore, session()->getId());
         $response->assertCookieMissing($this->recallerName());
+        $response->assertCookieMissing(self::SINCE_COOKIE);
         $this->assertNull($user->fresh()->remember_token);
     }
 
@@ -70,6 +71,7 @@ class LoginCharacterizationTest extends AuthTestCase
         $this->assertGuest();
         $this->assertSame($sessionIdBefore, session()->getId());
         $response->assertCookieMissing($this->recallerName());
+        $response->assertCookieMissing(self::SINCE_COOKIE);
         // Walang dagdag na query para sa kilalang e-mail: ang tagal ng bigong login ay hindi dapat magsabi
         // kung may account. Ang role ay binabasa lang pagkatapos tanggapin ang password.
         $this->assertSame(0, $profileQueries, 'Binasa ang employee_profiles sa bigong login.');
@@ -82,6 +84,7 @@ class LoginCharacterizationTest extends AuthTestCase
         $response = $this->actingAs($user)->post('/logout');
 
         $response->assertRedirect('/login');
+        $response->assertCookieMissing(self::SINCE_COOKIE);
         $this->assertGuest();
     }
 
@@ -121,7 +124,9 @@ class LoginCharacterizationTest extends AuthTestCase
         $this->assertNotNull($encrypted, 'Walang remember cookie sa login ng CEO.');
 
         // Kontrol: ang hindi ginalaw na cookie ay nagsa-sign-in, kaya ang pagbabago lang ang dahilan ng pagtanggi.
+        // Kasama ang wastong pangalawang cookie (Amendment 012-1), na nananatili rin sa request sa ibaba.
         $this->freshBrowser();
+        $this->withUnencryptedCookie(self::SINCE_COOKIE, $this->rawCookie($login, self::SINCE_COOKIE));
         $this->withUnencryptedCookie($this->recallerName(), $encrypted)->get(self::PROTECTED_URL)->assertOk();
 
         // Binabago ang isang character sa gitna ng ciphertext (base64 ng JSON na may iv, value, mac).

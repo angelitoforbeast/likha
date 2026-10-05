@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Auth;
 
+use App\Listeners\RefuseRememberedLoginUnlessCeo;
 use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Auth;
@@ -22,6 +23,9 @@ abstract class AuthTestCase extends TestCase
 
     /** Page na nasa likod ng ['web','auth'] lang: JSON, walang view, walang role check. */
     protected const PROTECTED_URL = '/debug/ip';
+
+    /** Pangalawang cookie ng CEO (Amendment 012-1, A1): user id at oras ng password login. */
+    protected const SINCE_COOKIE = RefuseRememberedLoginUnlessCeo::SINCE_COOKIE;
 
     protected function setUp(): void
     {
@@ -103,12 +107,49 @@ abstract class AuthTestCase extends TestCase
         Cookie::flushQueuedCookies();
     }
 
-    /** Request sa protektadong page gamit lang ang ibinigay na remember cookie (bagong browser). */
-    protected function getWithRememberCookie(string $value): TestResponse
+    /**
+     * Request sa protektadong page gamit lang ang ibinigay na remember cookie (bagong browser), at ang
+     * pangalawang cookie ng Amendment 012-1 kung may ibinigay. Walang $since = hindi ito ipinapadala.
+     */
+    protected function getWithRememberCookie(string $value, ?string $since = null): TestResponse
     {
         $this->freshBrowser();
 
+        // Ang withCookie ay nananatili sa mga susunod na request ng parehong test, kaya tinatanggal muna.
+        unset($this->defaultCookies[self::SINCE_COOKIE], $this->unencryptedCookies[self::SINCE_COOKIE]);
+        if ($since !== null) {
+            $this->withCookie(self::SINCE_COOKIE, $since);
+        }
+
         return $this->withCookie($this->recallerName(), $value)->get(self::PROTECTED_URL);
+    }
+
+    /**
+     * Password login ng CEO; ibinabalik ang [remember cookie, pangalawang cookie] na ibinigay ng server
+     * (mga halagang na-decrypt na, gaya ng nababasa ng server).
+     */
+    protected function loginAndTakeCookies(User $user): array
+    {
+        [$response] = $this->postLogin(['email' => $user->email, 'password' => self::PASSWORD]);
+
+        $remember = $response->getCookie($this->recallerName());
+        $this->assertNotNull($remember, 'Walang remember cookie sa login ng CEO.');
+        $since = $response->getCookie(self::SINCE_COOKIE);
+        $this->assertNotNull($since, 'Walang pangalawang cookie sa login ng CEO.');
+
+        return [$remember->getValue(), $since->getValue()];
+    }
+
+    /** Ang cookie na naka-encrypt pa, gaya ng hawak ng browser. */
+    protected function rawCookie(TestResponse $response, string $name): string
+    {
+        foreach ($response->headers->getCookies() as $cookie) {
+            if ($cookie->getName() === $name) {
+                return $cookie->getValue();
+            }
+        }
+
+        $this->fail("Walang cookie na {$name} sa response.");
     }
 
     protected function assertSentToLogin(TestResponse $response): void
