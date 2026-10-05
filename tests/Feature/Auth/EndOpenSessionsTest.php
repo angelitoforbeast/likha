@@ -43,14 +43,33 @@ class EndOpenSessionsTest extends AuthTestCase
         });
     }
 
-    public function test_non_ceo_logout_leaves_the_other_session_of_that_user_signed_in(): void
+    /** Sino ang hindi CEO sa oras ng Logout: [role sa login, ano ang nangyari sa account pagkatapos mag-login]. */
+    public static function whoIsNotCeoAtLogout(): array
     {
-        $staff = $this->user('Marketing', 'staff@example.test');
+        return [
+            'Marketing'                                      => ['Marketing', null],
+            'CEO na ginawang Marketing pagkatapos mag-login' => ['CEO', 'pinalitan ang role'],
+            'CEO na binura ang employee profile pagkatapos'  => ['CEO', 'binura ang profile'],
+        ];
+    }
+
+    #[DataProvider('whoIsNotCeoAtLogout')]
+    public function test_non_ceo_logout_leaves_the_other_session_of_that_user_signed_in(string $roleAtLogin, ?string $change): void
+    {
+        $staff = $this->user($roleAtLogin, 'staff@example.test');
         $pressed = $this->loginInNewBrowser($staff);
         $other = $this->loginInNewBrowser($staff);
 
         // Patunay na database driver talaga: may row ang bawat login, na may user id.
         $this->assertSame(2, $this->sessionRowsOf($staff));
+
+        // Ang role sa oras ng Logout ang binabasa, hindi ang role noong nag-login.
+        $profile = DB::table('employee_profiles')->where('user_id', $staff->id);
+        match ($change) {
+            'pinalitan ang role' => $profile->update(['role' => 'Marketing']),
+            'binura ang profile' => $profile->delete(),
+            null                 => null,
+        };
 
         $this->freshBrowser();
         $this->withCookie(session()->getName(), $pressed)->post('/logout')->assertRedirect('/login');
@@ -97,17 +116,21 @@ class EndOpenSessionsTest extends AuthTestCase
         $this->getWithSessionOnly($other)->assertOk();
     }
 
-    /** B1: kaninong password ang pinapalitan ng CEO, at aling session lang ang dapat matapos. */
+    /**
+     * B1: [kaninong session ang nagpapalit, kaninong password, sagot, aling session lang ang dapat matapos].
+     * Ang huling row: tinatanggihan ang hindi CEO (404 gaya ng dati) BAGO may mabura na kahit anong session.
+     */
     public static function whosePasswordIsChanged(): array
     {
         return [
-            'password ng ibang user' => ['staff', 'staff'],
-            'sariling password'      => ['ceo', 'ceo sa ibang browser'],
+            'password ng ibang user'                => ['ceo na nagpapalit', 'staff', 200, 'staff'],
+            'sariling password'                     => ['ceo na nagpapalit', 'ceo', 200, 'ceo sa ibang browser'],
+            'Marketing ang nagpapalit: tinanggihan' => ['bystander', 'staff', 404, null],
         ];
     }
 
     #[DataProvider('whosePasswordIsChanged')]
-    public function test_password_change_ends_the_open_sessions_of_that_user_and_no_others(string $target, string $ended): void
+    public function test_password_change_ends_the_open_sessions_of_that_user_and_no_others(string $actor, string $target, int $status, ?string $ended): void
     {
         $users = [
             'ceo'       => $this->user('CEO', 'ceo@example.test'),
@@ -123,11 +146,14 @@ class EndOpenSessionsTest extends AuthTestCase
 
         // withCredentials: ang JSON request ng test ay hindi nagdadala ng cookie kung wala ito.
         $this->freshBrowser();
-        $this->withCredentials()
-            ->withCookie(session()->getName(), $sessions['ceo na nagpapalit'])
-            ->postJson(route('owner.users.password', $users[$target]->id), ['password' => 'bagong-password'])
-            ->assertOk()
-            ->assertExactJson(['ok' => true, 'id' => $users[$target]->id, 'password' => 'bagong-password']);
+        $response = $this->withCredentials()
+            ->withCookie(session()->getName(), $sessions[$actor])
+            ->postJson(route('owner.users.password', $users[$target]->id), ['password' => 'bagong-password']);
+
+        $response->assertStatus($status);
+        if ($status === 200) {
+            $response->assertExactJson(['ok' => true, 'id' => $users[$target]->id, 'password' => 'bagong-password']);
+        }
 
         foreach ($sessions as $name => $sessionId) {
             $response = $this->getWithSessionOnly($sessionId);
