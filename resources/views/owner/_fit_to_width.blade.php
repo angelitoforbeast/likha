@@ -54,6 +54,8 @@
   .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(1) .page-cell-body div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   /* Item cell: siksik ang mga linya (pangalan at secondary items); ellipsis sa nowrap na secondary. */
   .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(2) > div { line-height:1.2 !important; max-width:110px; overflow:hidden; text-overflow:ellipsis; overflow-wrap:anywhere; }
+  /* Pangalan ng item: hanggang 2 linya, buo sa title. */
+  .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(2) > div:first-child { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; }
   /* Text columns: sila ang kumukuha ng natitirang lapad; hanggang 3 linya */
   .ow-compact > table > thead > tr > th:is([data-col="action"],[data-col="claude_action"],[data-col="ceo_action"]),
   .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="action"],[data-col="claude_action"],[data-col="ceo_action"]) { width:auto !important; min-width:135px !important; }

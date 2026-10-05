@@ -134,13 +134,14 @@ class FitToWidthTest extends OwnerPrivateTestCase
             'th:nth-child(2) { width:115px;',
             'td[data-col="rts_set"] > span > div > template + div { display:block; max-width:64px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;',
             'td[data-col="rts_set"] > span > div > template + div > div { display:inline !important;',
+            'td:nth-child(2) > div:first-child { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2;',
         ] as $s) {
             $this->assertTrue(str_contains($style, $s), "missing css: {$s}");
         }
 
         $this->assertTrue(str_contains($html, ':title="owCompact ? [row.settings_date'));
-        // Compact-only titles: 6 na nagsisimula sa "owCompact ? " at 1 na "(owCompact ? " (back-fill).
-        $this->assertSame(6, substr_count($html, ':title="owCompact ? '));
+        // Compact-only titles: 7 na nagsisimula sa "owCompact ? " at 1 na "(owCompact ? " (back-fill).
+        $this->assertSame(7,substr_count($html, ':title="owCompact ? '));
         $this->assertSame(1, substr_count($html, ':title="(owCompact ? '));
     }
 

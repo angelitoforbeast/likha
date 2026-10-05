@@ -742,6 +742,7 @@
               <!-- Fixed: Item -->
               <td style="text-align:center;">
                 <div style="font-weight:600;color:#1e293b;white-space:normal;line-height:1.35;"
+                     :title="owCompact ? sq(row.item_name) : null"
                      x-text="sq(row.item_name)"></div>
                 <template x-for="s in (row.secondary_items||[])" :key="s.item_name">
                   <div style="font-size:10px;color:#94a3b8;line-height:1.4;"
