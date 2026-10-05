@@ -7,8 +7,10 @@ use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Testing\TestResponse;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Amendment 012-2 (B1, B2): ang mga session na bukas na sa ibang browser. Dito lang sa file na ito
@@ -56,6 +58,68 @@ class EndOpenSessionsTest extends AuthTestCase
         $this->assertSentToLogin($this->getWithSessionOnly($pressed));
         $this->getWithSessionOnly($other)->assertOk();
         $this->assertSame(1, $this->sessionRowsOf($staff));
+    }
+
+    /** B1: kaninong password ang pinapalitan ng CEO, at aling session lang ang dapat matapos. */
+    public static function whosePasswordIsChanged(): array
+    {
+        return [
+            'password ng ibang user' => ['staff', 'staff'],
+            'sariling password'      => ['ceo', 'ceo sa ibang browser'],
+        ];
+    }
+
+    #[DataProvider('whosePasswordIsChanged')]
+    public function test_password_change_ends_the_open_sessions_of_that_user_and_no_others(string $target, string $ended): void
+    {
+        $users = [
+            'ceo'       => $this->user('CEO', 'ceo@example.test'),
+            'staff'     => $this->user('Marketing', 'staff@example.test'),
+            'bystander' => $this->user('Marketing', 'bystander@example.test'),
+        ];
+        $sessions = [
+            'ceo na nagpapalit'    => $this->loginInNewBrowser($users['ceo']),
+            'ceo sa ibang browser' => $this->loginInNewBrowser($users['ceo']),
+            'staff'                => $this->loginInNewBrowser($users['staff']),
+            'bystander'            => $this->loginInNewBrowser($users['bystander']),
+        ];
+
+        // withCredentials: ang JSON request ng test ay hindi nagdadala ng cookie kung wala ito.
+        $this->freshBrowser();
+        $this->withCredentials()
+            ->withCookie(session()->getName(), $sessions['ceo na nagpapalit'])
+            ->postJson(route('owner.users.password', $users[$target]->id), ['password' => 'bagong-password'])
+            ->assertOk()
+            ->assertExactJson(['ok' => true, 'id' => $users[$target]->id, 'password' => 'bagong-password']);
+
+        foreach ($sessions as $name => $sessionId) {
+            $response = $this->getWithSessionOnly($sessionId);
+
+            if ($name === $ended) {
+                $this->assertSentToLogin($response);
+            } else {
+                $this->assertSame(200, $response->status(), "Natapos ang session na hindi dapat: {$name}");
+            }
+        }
+    }
+
+    public function test_password_stays_when_the_sessions_of_that_user_cannot_be_ended(): void
+    {
+        $ceo = $this->user('CEO', 'ceo@example.test');
+        $staff = $this->user('Marketing', 'staff@example.test');
+        $ceoSession = $this->loginInNewBrowser($ceo);
+        $this->loginInNewBrowser($staff);
+
+        // Pumapalya ang pagbura sa sessions (sqlite trigger), gaya ng DB error sa gitna ng request.
+        DB::statement("CREATE TRIGGER sessions_no_delete BEFORE DELETE ON sessions BEGIN SELECT RAISE(ABORT, 'no delete'); END");
+
+        $this->freshBrowser();
+        $response = $this->withCredentials()
+            ->withCookie(session()->getName(), $ceoSession)
+            ->postJson(route('owner.users.password', $staff->id), ['password' => 'bagong-password']);
+
+        $response->assertStatus(500);
+        $this->assertTrue(Hash::check(self::PASSWORD, $staff->fresh()->password), 'Napalitan ang password kahit hindi natapos ang mga session.');
     }
 
     /**

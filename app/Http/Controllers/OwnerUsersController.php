@@ -84,7 +84,16 @@ class OwnerUsersController extends Controller
         $updates['remember_token'] = \Illuminate\Support\Str::random(60);
         $updates['updated_at'] = now();
 
-        DB::table('users')->where('id', $id)->update($updates);
+        // Amendment 012-2 (B1): tapos na rin ang mga session na bukas na ng user na ito sa ibang browser.
+        // Naiiwan ang session ng gumagawa ng request: kapag ibang user ang pinalitan, hindi naman kanya ang
+        // mga row na iyon; kapag sarili niyang password, ito lang ang natitira sa kanya.
+        // Iisang transaction: kapag pumalya ang pagbura ng sessions, hindi rin napapalitan ang password.
+        $keepSessionId = $request->session()->getId();
+        DB::transaction(function () use ($id, $updates, $keepSessionId) {
+            DB::table('users')->where('id', $id)->update($updates);
+
+            \App\Listeners\RefuseRememberedLoginUnlessCeo::endSessionsOf($id, $keepSessionId);
+        });
 
         return response()->json([
             'ok'       => true,

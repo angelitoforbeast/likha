@@ -6,6 +6,7 @@ use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Handoff 012 (D3): ang sign-in na galing sa remember cookie (hindi sa password) ay para lang sa account
@@ -71,6 +72,30 @@ class RefuseRememberedLoginUnlessCeo
         if (request()->cookies->has(self::SINCE_COOKIE)) {
             Cookie::queue(Cookie::forget(self::SINCE_COOKIE));
         }
+    }
+
+    /**
+     * Amendment 012-2 (B1, B2): tinatapos ang mga session na bukas na ng isang user, sa pagbura ng mga row niya
+     * sa session table; sa susunod na request ng mga browser na iyon, guest na sila. Kapag may
+     * $exceptSessionId, naiiwan ang session na iyon (ang session ng mismong gumagawa).
+     * Sa `database` na session driver lang may mabubura; sa ibang driver, walang ginagawa at walang error.
+     * Laging may kondisyon na user_id: kapag walang user id, walang binubura.
+     */
+    public static function endSessionsOf($userId, ?string $exceptSessionId = null): void
+    {
+        if (empty($userId) || config('session.driver') !== 'database') {
+            return;
+        }
+
+        $query = DB::connection(config('session.connection'))
+            ->table(config('session.table'))
+            ->where('user_id', $userId);
+
+        if ($exceptSessionId !== null && $exceptSessionId !== '') {
+            $query->where('id', '!=', $exceptSessionId);
+        }
+
+        $query->delete();
     }
 
     /**
