@@ -120,8 +120,11 @@ class OwnerPrivateController extends Controller
     }
 
     /**
-     * Sino ang huling nag-log ng RTS% (display lang, walang computation na bumabasa nito).
+     * Sino ang nag-set ng RTS% (display lang, walang computation na bumabasa nito).
      * Key: page||canonical item||effective_date||rts (2 decimals) → pangalan ng user.
+     * Ang pangalan ay sa NAGSIMULA ng value sa effective-date timeline, hindi sa nag-carry
+     * (promo/cost/remark save na nag-carry lang ng RTS). Kapag ang nagsimula ay scope na
+     * promo/cogs, hindi niya tinype ang RTS → walang pangalan.
      * Best effort: kapag pumalya, [] — hindi dapat masira ang page.
      */
     protected function rtsSetByMap(string $date, \App\Services\ItemAliasResolver $aliases): array
@@ -129,34 +132,48 @@ class OwnerPrivateController extends Controller
         if (!Schema::hasTable('page_item_settings_log')) return [];
 
         try {
+            $select = [
+                'l.id', 'l.page_name', 'l.item_name', 'l.effective_date',
+                'l.old_rts_pct', 'l.new_rts_pct', 'l.user_email',
+                DB::raw('COALESCE(ep.name, u.name) AS user_name'),
+            ];
+            $hasScope = Schema::hasColumn('page_item_settings_log', 'scope');
+            if ($hasScope) $select[] = 'l.scope';
+
             $rows = DB::table('page_item_settings_log as l')
                 ->leftJoin('users as u', 'u.email', '=', 'l.user_email')
                 ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
                 ->where('l.effective_date', '<=', $date)
                 ->whereNotNull('l.new_rts_pct')
-                ->orderByDesc('l.id')
-                ->select([
-                    'l.page_name', 'l.item_name', 'l.effective_date',
-                    'l.old_rts_pct', 'l.new_rts_pct', 'l.user_email',
-                    DB::raw('COALESCE(ep.name, u.name) AS user_name'),
-                ])
+                ->orderBy('l.effective_date')
+                ->orderBy('l.id')
+                ->select($select)
                 ->get();
 
-            $map = [];
+            $map  = [];
+            $runs = []; // pair => ['val' => ..., 'name' => ...] — kasalukuyang run ng value
             foreach ($rows as $r) {
-                $new = number_format((float)$r->new_rts_pct, 2, '.', '');
-                // Hindi nagbago ang RTS (promo/cost-only save) → hindi ito ang nag-set
-                if ($r->old_rts_pct !== null && number_format((float)$r->old_rts_pct, 2, '.', '') === $new) continue;
+                $pair = strtolower(trim((string)$r->page_name)).'||'.$aliases->canonicalKey((string)$r->item_name);
+                $val  = number_format((float)$r->new_rts_pct, 2, '.', '');
 
-                $name = trim((string)($r->user_name ?? ''));
-                if ($name === '') {
-                    $name = trim(explode('@', (string)($r->user_email ?? ''))[0]);
+                if (!isset($runs[$pair]) || $runs[$pair]['val'] !== $val) {
+                    // Bagong run: ang row na ito ang nagsimula ng value
+                    $name = '';
+                    if (!($hasScope && in_array((string)($r->scope ?? ''), ['promo', 'cogs'], true))) {
+                        $name = trim((string)($r->user_name ?? ''));
+                        if ($name === '') {
+                            $name = trim(explode('@', (string)($r->user_email ?? ''))[0]);
+                        }
+                    }
+                    $runs[$pair] = ['val' => $val, 'name' => $name];
                 }
-                if ($name === '') continue;
 
-                $key = strtolower(trim((string)$r->page_name)).'||'.$aliases->canonicalKey((string)$r->item_name)
-                    .'||'.substr((string)$r->effective_date, 0, 10).'||'.$new;
-                if (!isset($map[$key])) $map[$key] = $name;
+                $key = $pair.'||'.substr((string)$r->effective_date, 0, 10).'||'.$val;
+                if ($runs[$pair]['name'] !== '') {
+                    $map[$key] = $runs[$pair]['name'];
+                } else {
+                    unset($map[$key]);
+                }
             }
 
             return $map;
