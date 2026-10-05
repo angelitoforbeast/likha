@@ -48,6 +48,9 @@ class LoginController extends Controller
     public function logout(Request $request)
     {
         $user = Auth::user(); // kinukuha bago mag-logout, para sa B2 sa ibaba
+        // Binabasa ang role BAGO ang logout (query ito sa profile): kapag pumalya, walang nagagalaw, sa halip
+        // na matapos ang session na ito habang buhay pa ang iba pang session ng CEO.
+        $isCeo = RefuseRememberedLoginUnlessCeo::isCeo($user);
 
         Auth::logout();
         $request->session()->invalidate();
@@ -56,7 +59,7 @@ class LoginController extends Controller
         // Amendment 012-2 (B2): ang Logout ng CEO ay sign-out sa lahat ng device: tinatapos din ang iba pang
         // session ng account na iyon. Sadyang nandito at hindi sa Logout event, dahil ang event na iyon ay
         // tumatakbo rin kapag tinanggihan ang isang cookie sign-in. Sa ibang role, walang binubura.
-        if (RefuseRememberedLoginUnlessCeo::isCeo($user)) {
+        if ($isCeo) {
             RefuseRememberedLoginUnlessCeo::endSessionsOf($user->getAuthIdentifier());
         }
 

@@ -77,6 +77,26 @@ class EndOpenSessionsTest extends AuthTestCase
         $this->assertSame(0, $this->sessionRowsOf($ceo));
     }
 
+    public function test_logout_that_cannot_read_the_role_signs_nobody_out(): void
+    {
+        $ceo = $this->user('CEO', 'ceo@example.test');
+        $pressed = $this->loginInNewBrowser($ceo);
+        $other = $this->loginInNewBrowser($ceo);
+
+        // Pumapalya ang pagbasa ng role (wala ang table), gaya ng DB error sa gitna ng request.
+        $this->freshBrowser();
+        Schema::rename('employee_profiles', 'employee_profiles_wala');
+        try {
+            $this->withCookie(session()->getName(), $pressed)->post('/logout')->assertStatus(500);
+        } finally {
+            Schema::rename('employee_profiles_wala', 'employee_profiles');
+        }
+
+        // Walang kalahating logout: hindi natapos ang pinindutang session habang buhay pa ang iba.
+        $this->getWithSessionOnly($pressed)->assertOk();
+        $this->getWithSessionOnly($other)->assertOk();
+    }
+
     /** B1: kaninong password ang pinapalitan ng CEO, at aling session lang ang dapat matapos. */
     public static function whosePasswordIsChanged(): array
     {

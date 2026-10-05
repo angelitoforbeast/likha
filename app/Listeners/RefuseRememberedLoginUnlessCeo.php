@@ -81,7 +81,7 @@ class RefuseRememberedLoginUnlessCeo
      * Sa `database` na session driver lang may mabubura; sa ibang driver, walang ginagawa at walang error.
      * Laging may kondisyon na user_id: kapag walang user id, walang binubura.
      */
-    public static function endSessionsOf($userId, ?string $exceptSessionId = null): void
+    public static function endSessionsOf(int $userId, ?string $exceptSessionId = null): void
     {
         if (empty($userId) || config('session.driver') !== 'database') {
             return;
