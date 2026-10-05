@@ -74,6 +74,15 @@ class RefuseRememberedLoginUnlessCeo
     }
 
     /**
+     * Halaga ng pangalawang cookie para sa password login na nangyayari ngayon: "user id|unix timestamp".
+     * Dito lang binubuo ang format, katabi ng bumabasa nito (isFreshFor), para iisa ang pinanggagalingan.
+     */
+    public static function sinceCookieValue($userId): string
+    {
+        return $userId . '|' . now()->timestamp;
+    }
+
+    /**
      * Wasto ba ang pangalawang cookie para sa user na ito? Mahigpit ang basa: eksaktong "digits|digits",
      * parehong user id (bilang string), at edad na 0 hanggang 30 araw. Ang cookie na hindi na-decrypt ay null.
      */

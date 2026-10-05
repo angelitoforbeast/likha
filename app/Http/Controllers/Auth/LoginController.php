@@ -31,7 +31,7 @@ class LoginController extends Controller
                 // ng framework. Ito ang binabasa ng server para sa 30 araw; hindi umaasa sa expiry ng browser.
                 Cookie::queue(
                     RefuseRememberedLoginUnlessCeo::SINCE_COOKIE,
-                    Auth::id() . '|' . now()->timestamp,
+                    RefuseRememberedLoginUnlessCeo::sinceCookieValue(Auth::id()),
                     RefuseRememberedLoginUnlessCeo::REMEMBER_MINUTES
                 );
             }
