@@ -384,3 +384,18 @@ As before: merge, pull, `php artisan view:clear`. No migration, no build, no res
 
 - Measure once more with the one-liner before the owner looks; the two numbers that decide it are `tableWidth` (1730 or less) and the height of the tallest row.
 - The font trade in Ruling 1 is the one thing here the owner might notice that you did not ask for by name; it is the only way I found to reach the per-column targets.
+
+---
+
+# Amendment 013-2 (same branch `feat/013b-compact-tighten`)
+
+Status: **in progress.**
+
+## Plan (written before code)
+
+Tier medium. Two tasks, in order: `backend-developer` (one read-only field), then `frontend-developer`; `skeptic-reviewer` at standard depth on both.
+
+1. **Who set the RTS (backend).** It is stored: every save writes `page_item_settings_log` with `user_email`, page, item, effective date and the new RTS. The page's row data does not carry it. One query for the whole load (not per row) builds a map "page, item family, effective date, RTS value → name of the last person who logged that value"; each row gets `rts_set_by` (name, or null when no log row matches). No calculation reads it. File: `app/Http/Controllers/OwnerPrivateController.php`.
+2. **One hover box (frontend).** The fit script owns one fixed-position element on `<body>` (outside the zoomed card and the scroll box, filled with `textContent`). The body cell gets `:data-ow-tip` and `:title`, both `owCompact ? owTip(col.id, row) : null`; `owTip()` builds the text from the row for `rts_set`, `item_val`, `action`, `claude_action`, `ceo_action`. Shown on mouse-over at the pointer, hidden on mouse-out, scroll, or a click elsewhere (which is also what a tap does).
+3. **Cells in compact:** CSS hides the notes in `rts_set` (replacing 013-1's two-line rules) and `item_val`, and the author line in the three action cells. The page-cell notes go back to full text and may wrap; 013-1's titles on them and on the hidden notes are removed again.
+4. **Expanded row shows full texts:** the three-line clamp applies only to `tbody:not(.page-section-expanded)`; that class is already set by the existing expand state. Collapsing removes the class, so the clamp returns unless he opened the text himself (`_actionOpen` is untouched). CSS only, so the old layout is not affected.
