@@ -70,13 +70,42 @@ class CeoRememberedLoginTest extends AuthTestCase
         $this->assertAuthenticatedAs($user);
     }
 
-    public function test_remembered_sign_in_is_accepted_29_days_after_the_login(): void
+    /**
+     * A1: mga pangalawang cookie na tinatanggap.
+     * Bawat case: [paano ginagawa ang pangalawang cookie, ilang minuto ang lumipas bago ang remembered sign-in].
+     */
+    public static function validSinceCookies(): array
     {
-        $user = $this->user('CEO');
-        [$cookie, $since] = $this->loginAndTakeCookies($user);
+        return [
+            '29 araw na'                                => ['as issued', 29 * 24 * 60],
+            'eksaktong 30 araw (hangganan)'             => ['as issued', 30 * 24 * 60],
+            '60 segundo sa hinaharap, loob ng palugit'  => [fn (int $id, int $at) => $id . '|' . ($at + 60), 0],
+            // Sadyang disenyo: hindi napapalitan ang remember token sa bawat login, kaya ang remember cookie ng
+            // naunang login (40 araw na) ay tinatanggap kasama ang pangalawang cookie ng mas huling login (20 araw).
+            'galing sa mas huling password login'       => ['later login', 20 * 24 * 60],
+        ];
+    }
 
-        $this->travel(29)->days();
-        $response = $this->getWithRememberCookie($cookie, $since);
+    #[DataProvider('validSinceCookies')]
+    public function test_remembered_sign_in_is_accepted_with_a_valid_second_cookie($since, int $minutesLater): void
+    {
+        $this->freezeSecond();
+        $user = $this->user('CEO');
+        [$cookie, $issued] = $this->loginAndTakeCookies($user);
+        $loginAt = now()->timestamp;
+
+        if ($since === 'later login') {
+            // Pangalawang password login makalipas ang 20 araw, sa ibang browser; ang pangalawang cookie nito ang gagamitin.
+            $this->travel(20)->days();
+            $this->freshBrowser();
+            [, $issued] = $this->loginAndTakeCookies($user);
+        }
+
+        $this->travel($minutesLater)->minutes();
+        $response = $this->getWithRememberCookie(
+            $cookie,
+            $since instanceof \Closure ? $since($user->id, $loginAt) : $issued
+        );
 
         $response->assertOk();
         $this->assertAuthenticatedAs($user);
@@ -97,6 +126,7 @@ class CeoRememberedLoginTest extends AuthTestCase
             'hindi digits ang oras'        => [fn (int $id, int $at) => $id . '|' . $at . 'x', 0],
             'user id na may zero sa unahan' => [fn (int $id, int $at) => '0' . $id . '|' . $at, 0],
             'walang oras'                  => [fn (int $id, int $at) => (string) $id, 0],
+            'array ang hugis (name[]=...)' => ['as array', 0],
         ];
     }
 
@@ -122,6 +152,10 @@ class CeoRememberedLoginTest extends AuthTestCase
             );
         } elseif ($since === 'as issued') {
             $this->withUnencryptedCookie(self::SINCE_COOKIE, $rawSince);
+        } elseif ($since === 'as array') {
+            // Ang tunay na cookie ng server, pero ipinadala bilang ceo_remember_since[]=...: nade-decrypt ang
+            // laman, array ang dumarating sa listener. String lang ang tinatanggap ng withUnencryptedCookie.
+            $this->unencryptedCookies[self::SINCE_COOKIE] = [$rawSince];
         } elseif ($since !== null) {
             $this->withCookie(self::SINCE_COOKIE, $since($user->id, $loginAt));
         }

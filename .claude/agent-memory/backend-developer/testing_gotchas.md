@@ -65,6 +65,8 @@ Login, session and remember cookie (learned in 012):
 - Since Amendment 012-1 a remembered sign-in needs two cookies: the recaller and `RefuseRememberedLoginUnlessCeo::SINCE_COOKIE` (`id|unix time`). Use `loginAndTakeCookies()` and `getWithRememberCookie($remember, $since)` from `AuthTestCase`; a test that replays only the recaller is refused. `rawCookie()` gives the still-encrypted value for tamper cases.
 - Cookie expiry (`Cookie::queue`, `Cookie::forget`) and `assertCookieExpired` both follow Carbon's test clock, so `$this->travel()` works for cookie age; `freezeSecond()` before asserting a cookie value that holds a timestamp.
 - Event discovery returns listeners as `'Class@method'` strings (only `handle*` / `__invoke`), an explicit `Event::listen` with `[Class, 'method']` stays an array in `Event::getRawListeners()`: that is how a test tells the two apart. Listeners registered in `AppServiceProvider::register()` come before every discovered one (those are attached while the app boots).
+- An array-shaped cookie (`name[]=...`) can't go through `withCookie` / `withUnencryptedCookie` (string only): set `$this->unencryptedCookies[$name] = [$rawEncryptedValue]`. `EncryptCookies` decrypts each element, so with a real raw value the code under test receives an array, not null.
+- With `freezeSecond()` first, `travel()` keeps the clock frozen, so an exact age boundary (30 days to the second) can be tested.
 - A `postJson` to a route that answers `abort(404)` gets JSON back, so no Blade view (and no `withoutVite`) is needed for a refused-role test.
 
 **Why:** each of these cost a wrong first guess or would silently run a real job.
