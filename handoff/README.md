@@ -14,4 +14,4 @@ Protocol: Mira writes `handoff/NNN-name/HANDOFF.md` (never edited by the worker)
 | 008 | checker-log-cleanup | `feat/008-checker-log-cleanup` | done — RESULT.md filled, waiting for Mira's branch review |
 | 009 | claude-action-columns | `feat/009-claude-action-columns` | done — RESULT.md filled, waiting for Mira's branch review |
 | 010 | claude-action-ceo-edit | `feat/010-claude-action-ceo-edit` | done — RESULT.md filled, waiting for Mira's branch review |
-| 011 | fit-to-width | `feat/011-fit-to-width` | in progress |
+| 011 | fit-to-width | `feat/011-fit-to-width` | done — RESULT.md filled, waiting for Mira's branch review |
