@@ -619,6 +619,7 @@
             <template x-for="col in cols" :key="col.id">
               <th
                 draggable="true"
+                :data-col="owCompact ? col.id : null"
                 :class="[col.sort ? 'sortable' : '', col.sort && ac(col.sort) ? 'col-active' : '', dragOver===col.id ? 'drag-over' : '']"
                 :style="'text-align:'+col.align+';min-width:'+col.minw+'px'"
                 @click="col.sort && sb(col.sort)"
@@ -628,7 +629,7 @@
                 @dragleave="dragOver=null"
                 @drop.prevent="colDrop($event, col.id)"
               >
-                <span x-text="col.label"></span>
+                <span x-text="hdr(col.label)"></span>
                 <template x-if="col.sort">
                   <span x-text="arr(col.sort)" style="font-size:10px;"></span>
                 </template>
@@ -671,8 +672,9 @@
               <th style="text-align:left;min-width:110px;">Page</th>
               <th style="text-align:left;min-width:160px;">Item</th>
               <template x-for="col in cols" :key="'ph-'+row.page_key+'-'+col.id">
-                <th :style="'text-align:'+col.align+';min-width:'+col.minw+'px'">
-                  <span x-text="col.label"></span>
+                <th :data-col="owCompact ? col.id : null"
+                    :style="'text-align:'+col.align+';min-width:'+col.minw+'px'">
+                  <span x-text="hdr(col.label)"></span>
                 </th>
               </template>
             </tr>
@@ -751,7 +753,8 @@
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
-                <td @if(!empty($isCEO)) :class="['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id) ? 'claude-col' : ''" @endif
+                <td :data-col="owCompact ? col.id : null"
+                    @if(!empty($isCEO)) :class="['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id) ? 'claude-col' : ''" @endif
                     :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
 
                   <!-- adspent -->
@@ -1341,7 +1344,8 @@
               <td>TOTAL</td>
               <td></td>
               <template x-for="col in cols" :key="col.id">
-                <td @if(!empty($isCEO)) :class="['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id) ? 'claude-col' : ''" @endif
+                <td :data-col="owCompact ? col.id : null"
+                    @if(!empty($isCEO)) :class="['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id) ? 'claude-col' : ''" @endif
                     :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(tot().projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(tot().projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(tot().projected_profit_last_7d,7):'')">
                   <template x-if="col.id==='adspent'">
                     <span x-text="money(tot().adspent)"></span>
@@ -1949,6 +1953,7 @@
       // Actual CEO role from server — used as the auth gate for the View toggle
       // button visibility and for ANY genuinely-CEO-only behavior (writes, etc.).
       isCeoView: @json(!empty($isCEO ?? false)),
+      owCompact: !!window.__owCompact,   // compact layout ba (galing sa fit script)
 
       // CEO "view as" toggle: 'ceo' = full CEO mode (default), 'marketing' = simulate
       // Marketing's UI. Drives cogs source for profit + visibility of CEO column
@@ -2472,6 +2477,8 @@
       },
       arr(col){ return this.sortCol!==col?'':(this.sortDir==='asc'?' ↑':' ↓'); },
       ac(col) { return this.sortCol===col?'col-active':''; },
+      // Compact lang: zero-width space bago ang "(" na walang espasyo para puwedeng mag-wrap ang label.
+      hdr(label){ return this.owCompact ? String(label).replace(/(\S)\(/g, '$1' + String.fromCharCode(8203) + '(') : label; },
       sortedRows(){
         const base = this.filteredRows();
         if(!this.sortCol) return base;
@@ -3514,6 +3521,7 @@
       },
 
       async init(){
+        window.addEventListener('ow-fit-mode', e => { this.owCompact = !!e.detail; });
         this.initCols();
         await this.load();
         // Apply ?item= prefilter (from /item embed). embedItem was captured at

@@ -2,16 +2,72 @@
      Isang beses lang i-include, sa toolbar. Plain script (walang Alpine); kapag pumalya, gaya pa rin ng dati ang page. --}}
 <!-- fit-to-width-start -->
 <button type="button" id="owFitSwitch" aria-pressed="true"
-        title="Fit: laging kasya ang buong table sa lapad ng screen (walang sideways scroll). 100%: normal na laki, may scroll."
+        title="Compact: siksik na layout, laging kasya sa lapad (walang sideways scroll); zoom lang kapag kulang pa. 100%: dating layout, normal na laki, may scroll."
         style="background:#1e293b;color:#fcd34d;border:1px solid #475569;
                border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
-               cursor:pointer;margin-left:4px;">↔ Fit</button>
+               cursor:pointer;margin-left:4px;">↔ Compact</button>
+@if(!empty($effectiveIsCEO))
+{{-- Actions view (CEO lang): PAGE, ITEM, CPP, Prof.%, HOLD at ang mga text column lang. Sa browser lang naka-save; hindi ginagalaw ang column settings. --}}
+<button type="button" id="owActionsBtn" aria-pressed="false"
+        title="Actions view: ipakita lang ang PAGE, ITEM, CPP, Prof.%, HOLD, Action, Claude at CEO columns. Pindutin ulit para ibalik ang dating columns."
+        style="background:#1e293b;color:#f9a8d4;border:1px solid #475569;
+               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+               cursor:pointer;margin-left:4px;">☰ Actions</button>
+@endif
 <style>
   /* Fit mode: walang sideways scroll; laging may vertical scrollbar para hindi mag-loop ang sukat. */
   .ow-fit-on { overflow-x:hidden !important; overflow-y:scroll !important; }
+
+  /* Compact layout (013): lahat nasa ilalim ng .ow-compact; ang data-col ay nilalagay lang ng Alpine kapag compact. */
+  .ow-compact > table > tbody > tr > td { padding:2px 5px; font-size:12px; }
+  .ow-compact > table > thead > tr > th,
+  .ow-compact > table > tbody > tr.page-col-header > th { padding:4px 4px; font-size:10px; letter-spacing:0; line-height:1.15; white-space:normal; }
+  .ow-compact > table > thead > tr > th[data-col],
+  .ow-compact > table > tbody > tr.page-col-header > th[data-col] { min-width:0 !important; }
+  /* Page / Item: sahig na lapad (inline min-width 110/160 ang dati) */
+  .ow-compact > table > thead > tr > th:nth-child(1),
+  .ow-compact > table > tbody > tr.page-col-header > th:nth-child(1) { min-width:120px !important; }
+  .ow-compact > table > thead > tr > th:nth-child(2),
+  .ow-compact > table > tbody > tr.page-col-header > th:nth-child(2) { min-width:130px !important; }
+  /* Promo: puwedeng mag-wrap */
+  .ow-compact > table > thead > tr > th[data-col="promo"],
+  .ow-compact > table > tbody > tr.page-col-header > th[data-col="promo"] { min-width:80px !important; }
+  .ow-compact > table > tbody > tr > td[data-col="promo"] { white-space:normal; }
+  /* RTS block: dikit ang tatlong linya */
+  .ow-compact > table > tbody > tr > td[data-col="jnt_rdt"] > table td { padding:0 4px !important; line-height:1.2; }
+  /* Text columns: sila ang kumukuha ng natitirang lapad; hanggang 3 linya */
+  .ow-compact > table > thead > tr > th:is([data-col="action"],[data-col="claude_action"],[data-col="ceo_action"]),
+  .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="action"],[data-col="claude_action"],[data-col="ceo_action"]) { min-width:150px !important; }
+  .ow-compact > table > thead > tr > th:is([data-col="claude_reason"],[data-col="ceo_reason"]),
+  .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="claude_reason"],[data-col="ceo_reason"]) { min-width:170px !important; }
+  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) { white-space:normal; }
+  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > div:first-child { max-width:none !important; white-space:normal !important; overflow-wrap:anywhere; }
+  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > div:first-child[style*="ellipsis"] { display:-webkit-box !important; -webkit-box-orient:vertical; -webkit-line-clamp:3; line-clamp:3; overflow:hidden; }
+  /* author/time line: isang linya pa rin, katabi ang "more" */
+  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > template + div { display:inline-block; max-width:calc(100% - 46px) !important; vertical-align:bottom; }
+
+  /* Actions view (CEO lang): itago ang lahat ng column maliban sa PAGE, ITEM, CPP, Prof.%, HOLD at text columns. */
+  .ow-actions > table > thead > tr > th[data-col]:not([data-col="cpp"]):not([data-col="proj_pct"]):not([data-col="proj_pct_1d"]):not([data-col="proj_pct_3d"]):not([data-col="proj_pct_7d"]):not([data-col="hold"]):not([data-col="action"]):not([data-col="claude_action"]):not([data-col="claude_reason"]):not([data-col="ceo_action"]):not([data-col="ceo_reason"]),
+  .ow-actions > table > tbody > tr > th[data-col]:not([data-col="cpp"]):not([data-col="proj_pct"]):not([data-col="proj_pct_1d"]):not([data-col="proj_pct_3d"]):not([data-col="proj_pct_7d"]):not([data-col="hold"]):not([data-col="action"]):not([data-col="claude_action"]):not([data-col="claude_reason"]):not([data-col="ceo_action"]):not([data-col="ceo_reason"]),
+  .ow-actions > table > tbody > tr > td[data-col]:not([data-col="cpp"]):not([data-col="proj_pct"]):not([data-col="proj_pct_1d"]):not([data-col="proj_pct_3d"]):not([data-col="proj_pct_7d"]):not([data-col="hold"]):not([data-col="action"]):not([data-col="claude_action"]):not([data-col="claude_reason"]):not([data-col="ceo_action"]):not([data-col="ceo_reason"]) { display:none; }
 </style>
 <script>
 (function(){
+  // Una sa lahat, habang nagpa-parse pa ang page (bago mag-start ang Alpine): compact ba? Blocked ang storage = compact.
+  try {
+    var stored = null;
+    try { stored = window.localStorage.getItem('owFitMode'); } catch (e) {}
+    window.__owCompact = (stored !== 'full');
+  } catch (e) {}
+
+  // Sabihan ang Alpine (privateUI) kung compact o hindi.
+  function announce(on){
+    try {
+      window.__owCompact = !!on;
+      window.dispatchEvent(new CustomEvent('ow-fit-mode', {detail: !!on}));
+    } catch (e) {}
+  }
+
   // Dito lang kino-compute ang factor. Pure: lapad ng container at natural na lapad ng table lang ang input.
   // fit-factor-start
   function owFitFactor(containerWidth, naturalWidth){
@@ -32,6 +88,21 @@
     b.style.opacity = '.5';
   }
 
+  // Dating layout: naka-disable din ang Actions button (kung meron).
+  function disableAll(b){
+    announce(false);
+    disableSwitch(b);
+    try {
+      var a = document.getElementById('owActionsBtn');
+      if (a) {
+        a.setAttribute('aria-pressed', 'false');
+        a.disabled = true;
+        a.style.cursor = 'default';
+        a.style.opacity = '.5';
+      }
+    } catch (e) {}
+  }
+
   function init(){
     try {
       var btn = document.getElementById('owFitSwitch');
@@ -42,13 +113,30 @@
       var ok = !!(window.CSS && CSS.supports && CSS.supports('zoom', '0.5'));
       if (!card || !box || !table || !ok) {
         // Walang table o walang zoom support: 100% lang, naka-disable ang switch.
-        disableSwitch(btn);
+        disableAll(btn);
         return;
       }
 
       // Kahit anong naka-store na hindi eksaktong 'full' (o blocked ang storage) = Fit.
       var mode = 'fit';
       try { if (window.localStorage.getItem('owFitMode') === 'full') mode = 'full'; } catch (e) {}
+
+      // Actions view (CEO lang, kung may button): '1' lang ang on. Walang ibang key na sinusulat.
+      var actionsBtn = document.getElementById('owActionsBtn');
+      var actionsOn = false;
+      try { actionsOn = (window.localStorage.getItem('owActionsView') === '1'); } catch (e) {}
+
+      function paintActions(){
+        if (!actionsBtn) return;
+        var fit = (mode === 'fit');
+        var pressed = actionsOn && fit;
+        actionsBtn.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+        actionsBtn.disabled = !fit;
+        actionsBtn.style.opacity = fit ? '1' : '.5';
+        actionsBtn.style.cursor = fit ? 'pointer' : 'default';
+        actionsBtn.style.background = pressed ? '#f9a8d4' : '#1e293b';
+        actionsBtn.style.color = pressed ? '#1e293b' : '#f9a8d4';
+      }
 
       var queued = false, lastLabel = null;
 
@@ -65,11 +153,15 @@
         try {
           if (mode !== 'fit') {
             box.classList.remove('ow-fit-on');
+            card.classList.remove('ow-compact', 'ow-actions');
             card.style.zoom = '';
             label('↔ 100%');
             return;
           }
           box.classList.add('ow-fit-on');
+          // Compact muna bago sukatin: masikip na layout muna, zoom lang para sa kulang pa.
+          card.classList.add('ow-compact');
+          card.classList.toggle('ow-actions', actionsOn && !!actionsBtn);
           // Laging sinusukat sa zoom 1, kaya hindi nakadepende sa dating factor (walang loop).
           card.style.zoom = '1';
           var cs = window.getComputedStyle(box);
@@ -87,14 +179,17 @@
             card.style.zoom = String(f);
           }
           // fit-verify-end
-          label('↔ Fit ' + Math.round(f * 100) + '%');
+          label('↔ Compact ' + Math.round(f * 100) + '%');
         } catch (e) {
           // Pumalya ang sukat: 100% na talaga ang switch (sa memory lang, hindi sinusulat sa storage).
           // Sa susunod na click, babalik sa Fit at susubok ulit.
           box.classList.remove('ow-fit-on');
+          card.classList.remove('ow-compact', 'ow-actions');
           card.style.zoom = '';
           mode = 'full';
+          announce(false);
           label('↔ 100%');
+          paintActions();
         }
       }
 
@@ -108,8 +203,19 @@
       btn.addEventListener('click', function(){
         mode = (mode === 'fit' ? 'full' : 'fit');
         try { window.localStorage.setItem('owFitMode', mode); } catch (e) {}
+        announce(mode === 'fit');
+        paintActions();
         schedule();
       });
+
+      if (actionsBtn) {
+        actionsBtn.addEventListener('click', function(){
+          actionsOn = !actionsOn;
+          try { window.localStorage.setItem('owActionsView', actionsOn ? '1' : '0'); } catch (e) {}
+          paintActions();
+          schedule();
+        });
+      }
 
       // resize: kasama na ang page zoom ng browser.
       window.addEventListener('resize', schedule);
@@ -127,12 +233,14 @@
         });
       }
 
+      announce(mode === 'fit');
+      paintActions();
       schedule();
     } catch (e) {
       // Pumalya ang init: hanapin ulit ang button dito para hindi na ito mag-throw.
       try {
         var b = document.getElementById('owFitSwitch');
-        if (b) disableSwitch(b);
+        if (b) disableAll(b);
       } catch (e2) {}
     }
   }

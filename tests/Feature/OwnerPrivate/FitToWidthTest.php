@@ -70,6 +70,46 @@ class FitToWidthTest extends OwnerPrivateTestCase
         }
     }
 
+    public function test_ceo_gets_compact_css_and_one_actions_button(): void
+    {
+        $html = $this->page('/owner/private', 'CEO');
+
+        foreach (['id="owFitSwitch"', 'id="owActionsBtn"'] as $s) {
+            $this->assertSame(1, substr_count($html, $s), "expected exactly one: {$s}");
+        }
+        foreach (['.ow-compact > table', '-webkit-line-clamp:3', '.ow-actions > table', 'owActionsView', 'ow-fit-mode'] as $s) {
+            $this->assertTrue(str_contains($html, $s), "missing: {$s}");
+        }
+    }
+
+    public function test_actions_button_is_ceo_view_only(): void
+    {
+        $this->assertFalse(str_contains($this->page('/owner/private', 'Marketing'), 'id="owActionsBtn"'));
+        $this->assertFalse(str_contains($this->page('/owner/private?view_as=marketing', 'CEO'), 'id="owActionsBtn"'));
+    }
+
+    public function test_data_col_is_only_the_alpine_binding_so_old_layout_is_unchanged(): void
+    {
+        $html = $this->page('/owner/private', 'CEO');
+
+        $this->assertSame(4, substr_count($html, ':data-col="'));
+        $this->assertSame(4, substr_count($html, ':data-col="owCompact ? col.id : null"'));
+        // Walang static data-col sa markup (ang nasa CSS ay [data-col=...], hindi ' data-col=').
+        $this->assertSame(0, preg_match('/<(th|td)\b[^>]*\sdata-col="/', $html));
+    }
+
+    public function test_fit_script_never_writes_html(): void
+    {
+        $html = $this->page('/owner/private', 'CEO');
+        $a = strpos($html, '<!-- fit-to-width-start -->');
+        $b = strpos($html, '<!-- fit-to-width-end -->');
+        $block = substr($html, $a, $b - $a);
+
+        foreach (['x-html', 'innerHTML', 'insertAdjacentHTML'] as $s) {
+            $this->assertFalse(str_contains($block, $s), "found {$s}");
+        }
+    }
+
     public function test_pages_out_of_scope_do_not_carry_the_fit_helper(): void
     {
         $this->actingAs($this->user('CEO', 'ceo@example.test'));
