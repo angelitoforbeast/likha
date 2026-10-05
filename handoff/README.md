@@ -16,3 +16,4 @@ Protocol: Mira writes `handoff/NNN-name/HANDOFF.md` (never edited by the worker)
 | 010 | claude-action-ceo-edit | `feat/010-claude-action-ceo-edit` | done — RESULT.md filled, waiting for Mira's branch review |
 | 011 | fit-to-width | `feat/011-fit-to-width` | done — RESULT.md filled, waiting for Mira's branch review |
 | 012 | ceo-stay-logged-in | `feat/012-ceo-stay-logged-in` | done with amendments 012-1 and 012-2 — RESULT.md filled, waiting for Mira's branch review |
+| 013 | compact-table | `feat/013-compact-table` | in progress |
