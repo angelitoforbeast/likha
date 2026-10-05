@@ -52,5 +52,13 @@ Routes and pages (learned in 007 T5):
 - Laravel's JSON response does NOT hex-escape `<` (only `/` becomes `\/`), so a raw-body "no literal <script>" assertion fails; assert JSON content-type + round-trip instead.
 - `php.bat -l` and git commands: a Bash call with a `for` loop variable (`$f`) is refused by the sandbox; run one command per call.
 
+Login, session and remember cookie (learned in 012):
+
+- Start from `tests/Feature/Auth/AuthTestCase.php`. Any test that signs in through the guard (POST `/login` or a remember cookie, not `actingAs`) fires the `Login` event, and the listeners in `app/Listeners` are auto-discovered (no provider registers them): `CopyEverydayTasksOnLogin` needs `everyday_tasks` and `tasks` tables or the request is a 500.
+- One test = one app instance, so state leaks between requests the way it never does between browsers: the session store keeps old attributes (`start()` merges, it doesn't replace), the guard keeps its cached user and its `loggedOut` / `recallAttempted` flags, the cookie jar keeps queued cookies, and `withCookie` values stay for every later request. Before a "new browser" request call `freshBrowser()` (session flush, `Auth::forgetGuards()`, `Cookie::flushQueuedCookies()`); without `forgetGuards` a "still a guest" assertion passes for the wrong reason. `refreshApplication()` is not an option: it drops the in-memory sqlite database.
+- The session id changes on every test request unless the session cookie is sent. To assert `regenerate()`, send a known 40-character id as the session cookie and compare with `session()->getId()` afterwards (same id after a failed login is the control).
+- `withCookie` encrypts and `$response->getCookie($name)` decrypts, so a remember cookie can be read from a login response and replayed as plain `id|token|hash`. The guard never checks the third segment. Never print the value.
+- `/debug/ip` is the cheapest page behind `web, auth` only (JSON, no view, no role check).
+
 **Why:** each of these cost a wrong first guess or would silently run a real job.
 **How to apply:** start new backend test cases from `tests/Feature/NightRun/NightRunTestCase.php` and extend its migration list.

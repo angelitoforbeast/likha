@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Listeners\RefuseRememberedLoginUnlessCeo;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -17,7 +18,14 @@ class LoginController extends Controller
     {
         $credentials = $request->only('email', 'password');
 
-        if (Auth::attempt($credentials)) {
+        // CEO lang ang may "remembered" login na 30 araw (handoff 012). Ang role ay galing sa account sa
+        // database, hindi sa form: walang binabasang `remember` na request parameter.
+        $remember = RefuseRememberedLoginUnlessCeo::isCeo(Auth::getProvider()->retrieveByCredentials($credentials));
+        if ($remember) {
+            Auth::guard()->setRememberDuration(60 * 24 * 30); // minuto = 30 araw mula sa login
+        }
+
+        if (Auth::attempt($credentials, $remember)) {
             $request->session()->regenerate();
             return redirect()->intended('/');
         }
