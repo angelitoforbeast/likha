@@ -121,7 +121,7 @@ class FitToWidthTest extends OwnerPrivateTestCase
         $this->assertGreaterThan(10, $count);
     }
 
-    public function test_compact_css_holds_explicit_widths_and_the_two_line_rts_cell(): void
+    public function test_compact_css_holds_explicit_widths(): void
     {
         $html = $this->page('/owner/private', 'CEO');
         $a = strpos($html, '<!-- fit-to-width-start -->');
@@ -132,17 +132,54 @@ class FitToWidthTest extends OwnerPrivateTestCase
             'th[data-col="promo"] { width:100px !important;',
             'th:nth-child(1) { width:115px;',
             'th:nth-child(2) { width:115px;',
-            'td[data-col="rts_set"] > span > div > template + div { display:block; max-width:64px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;',
-            'td[data-col="rts_set"] > span > div > template + div > div { display:inline !important;',
             'td:nth-child(2) > div:first-child { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2;',
         ] as $s) {
             $this->assertTrue(str_contains($style, $s), "missing css: {$s}");
         }
+    }
 
-        $this->assertTrue(str_contains($html, ':title="owCompact ? [row.settings_date'));
-        // Compact-only titles: 7 na nagsisimula sa "owCompact ? " at 1 na "(owCompact ? " (back-fill).
-        $this->assertSame(7,substr_count($html, ':title="owCompact ? '));
-        $this->assertSame(1, substr_count($html, ':title="(owCompact ? '));
+    public function test_compact_cells_show_notes_on_hover_only(): void
+    {
+        $html = $this->page('/owner/private', 'CEO');
+        $a = strpos($html, '<!-- fit-to-width-start -->');
+        $style = substr($html, strpos($html, '<style>', $a), strpos($html, '</style>', $a) - strpos($html, '<style>', $a));
+
+        foreach ([
+            'td[data-col="rts_set"] > span > div > template + div > div { display:none !important; }',
+            'td[data-col="item_val"] > span > div > template + div > div { display:none !important; }',
+            '> div[title] > template + div { display:none !important; }',
+            '.page-cell-body div { white-space:normal; overflow-wrap:anywhere; }',
+            '.ow-compact > table > tbody:not(.page-section-expanded) > tr > td:is(',
+            '.ow-compact > table > tbody.page-section-expanded > tr > td:is(',
+        ] as $s) {
+            $this->assertTrue(str_contains($style, $s), "missing css: {$s}");
+        }
+        foreach (['max-width:64px', 'display:inline !important', '.page-cell-body div { white-space:nowrap'] as $s) {
+            $this->assertFalse(str_contains($style, $s), "css must be gone: {$s}");
+        }
+
+        foreach ([
+            'owTip(colId, row){',
+            "'Set by ' + row.rts_set_by",
+        ] as $s) {
+            $this->assertTrue(str_contains($html, $s), "missing: {$s}");
+        }
+        $this->assertSame(1, substr_count($html, ':data-ow-tip="owCompact ? owTip(col.id, row) : null"'));
+        // Natira lang ang item name, secondary item at ang owTip na title.
+        $this->assertSame(3, substr_count($html, ':title="owCompact ? '));
+        $this->assertSame(0, substr_count($html, ':title="(owCompact ? '));
+
+        $a = strpos($html, '// ow-tip-start');
+        $b = strpos($html, '// ow-tip-end');
+        $this->assertNotFalse($a, 'missing marker: // ow-tip-start');
+        $this->assertNotFalse($b, 'missing marker: // ow-tip-end');
+        $tip = substr($html, $a, $b - $a);
+        foreach (['tip.textContent = text', 'document.body.appendChild(tip)', 'e.clientX'] as $s) {
+            $this->assertTrue(str_contains($tip, $s), "tip script missing: {$s}");
+        }
+        foreach (['getBoundingClientRect', 'preventDefault', 'stopPropagation'] as $s) {
+            $this->assertFalse(str_contains($tip, $s), "tip script must not use: {$s}");
+        }
     }
 
     public function test_actions_whitelist_ids_are_real_columns(): void

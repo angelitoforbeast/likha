@@ -39,19 +39,17 @@
   /* RTS block: dikit ang tatlong linya (ang 9px na label cells ay hindi ginagalaw; sa table lang ang font-size) */
   .ow-compact > table > tbody > tr > td[data-col="jnt_rdt"] > table td { padding:0 2px !important; line-height:1.2; }
   .ow-compact > table > tbody > tr > td[data-col="jnt_rdt"] > table { font-size:10px !important; }
-  /* Set RTS%: dalawang linya lang -- porsyento sa una; "from <date>" at ang note magkatabi sa pangalawa, putol na may "..." (buo sa title). */
-  .ow-compact > table > tbody > tr > td[data-col="rts_set"] > span > div > template + div { display:block; max-width:64px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; }
-  .ow-compact > table > tbody > tr > td[data-col="rts_set"] > span > div > template + div > span { display:block; }
-  .ow-compact > table > tbody > tr > td[data-col="rts_set"] > span > div > template + div > div { display:inline !important; white-space:nowrap !important; max-width:none !important; margin:0 3px 0 0 !important; }
-  /* Item value: isang linya ang bawat note, putol; ang halaga mismo ay hindi pinuputol. */
-  .ow-compact > table > tbody > tr > td[data-col="item_val"] > span > div > template + div > div { max-width:44px !important; white-space:nowrap !important; overflow:hidden; text-overflow:ellipsis; line-height:1.15; margin-top:0 !important; }
+  /* Set RTS%: porsyento lang sa cell; ang "from <date>", ang note at kung sino ang nag-set ay nasa hover. */
+  .ow-compact > table > tbody > tr > td[data-col="rts_set"] > span > div > template + div > div { display:none !important; }
+  /* Item value: halaga lang sa cell; ang cogs / from / note ay nasa hover na. */
+  .ow-compact > table > tbody > tr > td[data-col="item_val"] > span > div > template + div > div { display:none !important; }
   /* Pencil icons: maliit na gap at padding sa number cells. */
   .ow-compact > table > tbody > tr > td:is([data-col="rts_set"],[data-col="promo"],[data-col="item_val"],[data-col="item_val_ceo"]) > span { gap:2px !important; }
   .ow-compact > table > tbody > tr > td:is([data-col="rts_set"],[data-col="promo"],[data-col="item_val"],[data-col="item_val_ceo"]) > span > button.cell-edit-icon { padding:1px 2px; }
-  /* Page cell: makitid ang lapad; ang mga note ay isang linya na may "...". */
-  .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(1) .page-cell-body { max-width:82px; overflow:hidden; }
+  /* Page cell: makitid ang lapad; buo ang mga note, puwedeng mag-wrap, hindi pinuputol. */
+  .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(1) .page-cell-body { max-width:82px; }
   .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(1) .page-cell-body > :is(a,span) { line-height:1.2 !important; overflow-wrap:anywhere; }
-  .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(1) .page-cell-body div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(1) .page-cell-body div { white-space:normal; overflow-wrap:anywhere; }
   /* Item cell: siksik ang mga linya (pangalan at secondary items); ellipsis sa nowrap na secondary. */
   .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(2) > div { line-height:1.2 !important; max-width:110px; overflow:hidden; text-overflow:ellipsis; overflow-wrap:anywhere; }
   /* Pangalan ng item: hanggang 2 linya, buo sa title. */
@@ -63,10 +61,11 @@
   .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="claude_reason"],[data-col="ceo_reason"]) { width:auto !important; min-width:155px !important; }
   .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) { white-space:normal; }
   .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > div:first-child { max-width:none !important; white-space:normal !important; overflow-wrap:anywhere; line-height:1.2 !important; }
-  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > div:first-child[style*="ellipsis"] { display:-webkit-box !important; -webkit-box-orient:vertical; -webkit-line-clamp:3; line-clamp:3; overflow:hidden; }
-  /* author/time line: isang linya pa rin, katabi ang "more" */
-  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > template + div { display:inline-block; width:0; min-width:calc(100% - 46px); max-width:none !important; line-height:1.1; vertical-align:bottom; }
-  /* width:0 + min-width na % para hindi palaparin ng mahabang pangalan/oras ang column (ang % max-width ay walang bisa sa sukat ng table cell). Nowrap + ellipsis pa rin galing sa inline style. */
+  .ow-compact > table > tbody:not(.page-section-expanded) > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > div:first-child[style*="ellipsis"] { display:-webkit-box !important; -webkit-box-orient:vertical; -webkit-line-clamp:3; line-clamp:3; overflow:hidden; }
+  /* Naka-expand ang page row: buo ang text (gaya ng "more"); walang "more" button habang naka-expand. */
+  .ow-compact > table > tbody.page-section-expanded > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > button { display:none; }
+  /* author/time line: nasa hover na (walang linya sa cell). */
+  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > template + div { display:none !important; }
   /* Pencil chip: mas maliit ang padding. */
   .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > button { padding:2px 3px !important; }
 
@@ -176,6 +175,7 @@
         queued = false;
         try {
           if (mode !== 'fit') {
+            if (typeof hideTip === 'function') hideTip();   // dating layout: walang hover box
             box.classList.remove('ow-fit-on');
             card.classList.remove('ow-compact', 'ow-actions');
             card.style.zoom = '';
@@ -256,6 +256,49 @@
           attributes: true, attributeFilter: ['style', 'class', 'data-col']
         });
       }
+
+      try {
+        // Hover box (013-2): iisang elemento sa <body> (labas ng zoom at ng scroll box); textContent lang ang laman.
+        // ow-tip-start
+        var tip = null, tipCell = null;
+        function hideTip(){ tipCell = null; if (tip) tip.style.display = 'none'; }
+        function showTip(cell, x, y){
+          var text = cell.getAttribute('data-ow-tip');
+          if (!text) { hideTip(); return; }
+          if (!tip) {
+            tip = document.createElement('div');
+            tip.id = 'owTip';
+            tip.setAttribute('role', 'tooltip');
+            tip.style.cssText = 'position:fixed;z-index:70;display:none;max-width:min(360px,90vw);padding:6px 9px;border-radius:6px;' +
+              'background:#0f172a;color:#f8fafc;font-size:12px;line-height:1.35;white-space:pre-line;overflow-wrap:anywhere;' +
+              'box-shadow:0 4px 12px rgba(0,0,0,.3);pointer-events:none;';
+            document.body.appendChild(tip);
+          }
+          tipCell = cell;
+          tip.textContent = text;
+          tip.style.left = '0px'; tip.style.top = '0px'; tip.style.display = 'block';
+          var w = tip.offsetWidth, h = tip.offsetHeight;
+          var left = Math.max(8, Math.min(x + 12, window.innerWidth - w - 8));
+          var top = y + 16;
+          if (top + h > window.innerHeight - 8) top = Math.max(8, y - h - 12);
+          tip.style.left = left + 'px'; tip.style.top = top + 'px';
+        }
+        function tipCellOf(t){ var c = (t && t.closest) ? t.closest('[data-ow-tip]') : null; return (c && table.contains(c)) ? c : null; }
+        table.addEventListener('mouseover', function(e){
+          var c = tipCellOf(e.target);
+          if (!c) { hideTip(); return; }
+          if (c !== tipCell) showTip(c, e.clientX, e.clientY);
+        });
+        table.addEventListener('mouseleave', hideTip);
+        // Tap (touch) o click: sa cell = ipakita; sa button/link o sa labas = itago. Hindi nito ginagalaw ang ibang click handler.
+        document.addEventListener('click', function(e){
+          var c = tipCellOf(e.target);
+          if (!c || (e.target.closest && e.target.closest('button,a,input,textarea,select'))) { hideTip(); return; }
+          showTip(c, e.clientX, e.clientY);
+        });
+        window.addEventListener('scroll', hideTip, true);
+        // ow-tip-end
+      } catch (e) {}
 
       announce(mode === 'fit');
       paintActions();

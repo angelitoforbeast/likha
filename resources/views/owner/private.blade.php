@@ -712,13 +712,11 @@
                     <template x-if="row.mixed_primary">
                       <div style="cursor:pointer;" @click="openBreakdown(row)"
                            :title="row.distinct_items_in_range + ' distinct primary items across ' + row.range_days + '-day range. Click to see breakdown.'">
-                        <div style="font-size:10px;color:#b45309;font-weight:600;line-height:1.3;margin-top:2px;"
-                             :title="owCompact ? ('⚠ mixed primary · ' + row.included_days + '/' + row.range_days + ' d · ' + row.distinct_items_in_range + ' distinct primary items across ' + row.range_days + '-day range. Click to see breakdown.') : null">
+                        <div style="font-size:10px;color:#b45309;font-weight:600;line-height:1.3;margin-top:2px;">
                           ⚠ mixed primary · <span x-text="row.included_days + '/' + row.range_days + ' d'"></span>
                         </div>
                         <template x-if="row.anchor_first_date">
-                          <div style="font-size:9px;color:#64748b;line-height:1.2;"
-                               :title="owCompact ? 'computed since ' + fmtMD(row.anchor_first_date) : null">
+                          <div style="font-size:9px;color:#64748b;line-height:1.2;">
                             computed since <span x-text="fmtMD(row.anchor_first_date)"></span>
                           </div>
                         </template>
@@ -731,7 +729,7 @@
                     <template x-if="row.has_backfill">
                       <div style="cursor:pointer;font-size:10px;color:#dc2626;font-weight:600;line-height:1.3;margin-top:2px;"
                            @click="openBreakdown(row)"
-                           :title="(owCompact ? ('⚠ back-filled ' + (row.backfill_fields && row.backfill_fields.length ? row.backfill_fields.map(f => ({rts:'RTS', cost:'cost', fee:'fee'}[f] || f)).join(' + ') : '')) + ' — ' : '') + '⚠ ' + (row.backfill_dates ? row.backfill_dates.length : 0) + ' date(s) walang proper setting — back-filled earliest. Click para makita sa breakdown (red cells).'"
+                           :title="'⚠ ' + (row.backfill_dates ? row.backfill_dates.length : 0) + ' date(s) walang proper setting — back-filled earliest. Click para makita sa breakdown (red cells).'"
                            x-text="'⚠ back-filled ' + (row.backfill_fields && row.backfill_fields.length ? row.backfill_fields.map(f => ({rts:'RTS', cost:'cost', fee:'fee'}[f] || f)).join(' + ') : '')">
                       </div>
                     </template>
@@ -758,6 +756,8 @@
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
                 <td :data-col="owCompact ? col.id : null"
+                    :data-ow-tip="owCompact ? owTip(col.id, row) : null"
+                    :title="owCompact ? owTip(col.id, row) : null"
                     @if(!empty($isCEO)) :class="['claude_action','claude_reason','ceo_action','ceo_reason'].includes(col.id) ? 'claude-col' : ''" @endif
                     :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
 
@@ -1021,7 +1021,7 @@
                     <span style="display:inline-flex;align-items:flex-start;gap:4px;">
                       <div style="flex:1;">
                         <template x-if="row.rts_pct !== null">
-                          <div :title="owCompact ? [row.settings_date ? 'from ' + row.settings_date : '', row.rts_comment ? '💬 ' + row.rts_comment : ''].filter(Boolean).join(' · ') || null : null">
+                          <div>
                             <span style="font-weight:700;color:#000;"
                                   x-text="row.rts_pct.toFixed(1)+'%'"></span>
                             <template x-if="row.settings_date">
@@ -1093,12 +1093,10 @@
                             </template>
                             <template x-if="row.item_value_source === 'manual' && row.settings_date">
                               <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
-                                   :title="owCompact ? 'from ' + row.settings_date : null"
                                    x-text="'from ' + row.settings_date"></div>
                             </template>
                             <template x-if="row.item_value_comment && row.item_value_source === 'manual'">
                               <div style="font-size:9px;color:#64748b;margin-top:1px;font-style:italic;white-space:normal;max-width:110px;"
-                                   :title="owCompact ? '💬 ' + row.item_value_comment : null"
                                    x-text="'💬 '+row.item_value_comment"></div>
                             </template>
                           </div>
@@ -2487,6 +2485,34 @@
       ac(col) { return this.sortCol===col?'col-active':''; },
       // Compact lang: zero-width space bago ang "(" na walang espasyo para puwedeng mag-wrap ang label.
       hdr(label){ if (!this.owCompact) return label; const z = String.fromCharCode(8203); return String(label).replace(/\.(?=[^\s.])/g, '.' + z).replace(/(\S)\(/g, '$1' + z + '('); },
+      // Hover text ng cell sa compact: plain text lang, galing sa row.
+      owTip(colId, row){
+        const L = [];
+        if (colId === 'rts_set') {
+          if (row.rts_pct === null || row.rts_pct === undefined) return null;
+          if (row.settings_date) L.push('from ' + row.settings_date);
+          if (row.rts_comment)   L.push('💬 ' + row.rts_comment);
+          if (row.rts_set_by)    L.push('Set by ' + row.rts_set_by);
+        } else if (colId === 'item_val') {
+          if (row.item_value === null || row.item_value === undefined) return null;
+          if (row.item_value_source === 'cogs') L.push('cogs');
+          if (row.item_value_source === 'manual' && row.settings_date) L.push('from ' + row.settings_date);
+          if (row.item_value_source === 'manual' && row.item_value_comment) L.push('💬 ' + row.item_value_comment);
+        } else if (colId === 'action') {
+          if (!row.action_comment) return null;
+          L.push(row.action_comment);
+          if (row.action_by) L.push('✎ ' + row.action_by + (row.action_at ? (' · ' + row.action_at) : ''));
+        } else if (colId === 'claude_action' || colId === 'ceo_action') {
+          const p = colId === 'claude_action' ? 'claude' : 'ceo';
+          if (!row[p + '_action']) return null;
+          L.push(row[p + '_action']);
+          const meta = [row[p + '_source'], row[p + '_at']].filter(Boolean).join(' · ');
+          if (meta) L.push(meta);
+        } else {
+          return null;
+        }
+        return L.length ? L.join('\n') : null;
+      },
       sortedRows(){
         const base = this.filteredRows();
         if(!this.sortCol) return base;
