@@ -238,3 +238,20 @@ Log in as the CEO at 1707 px wide, `/owner/private`, with the usual date.
 - If rows per screen matter more to Busing than three lines of text, ask for two lines; it is a one-word change and brings text rows down to the RTS block's height.
 - The pattern worth keeping in agent memory after merge (not written in this run): a hard-coded list of column ids in CSS or script has no link to the `cols` catalog, so pin it with a test; any view-only feature on this page must say what column drag does, because drag posts to the shared column settings; substring checks cannot prove CSS is scoped to a state, test the selector prefixes.
 - The Google Drive connector asked for authorisation during this run; nothing here needed it.
+
+---
+
+# Amendment 013-1 (branch `feat/013b-compact-tighten`, from `5f9de2e`)
+
+Status: **in progress.**
+
+## Plan (written before code)
+
+Mira's measurement shows every column sat at its minimum content width (the table was wider than the card), so the numbers can only come down by making the content itself smaller or cappable. Tier medium, one frontend task, then `skeptic-reviewer` at standard depth.
+
+1. **Smaller cell chrome and type, compact only:** body cells `padding:2px 2px`, 11px (was `2px 4px`, 12px); header cells `padding:3px 2px`, 9.5px; the RTS block's inner cells 10px with `padding:0 2px`; pencil icons and their gap tightened. At a zoom of 0.96 or better an 11px figure is drawn larger than today's 12px at 0.86.
+2. **`rts_set` in two lines:** the wrapper around the percentage and its notes gets a pixel `max-width`, `white-space:nowrap`, `overflow:hidden`, `text-overflow:ellipsis`; the percentage is a block (line 1), the "from date" note and the comment note become inline (line 2). A compact-only `:title` on the wrapper carries both notes in full.
+3. **Notes that must not widen or heighten a cell:** `item_val` notes, the page cell's "mixed primary", "computed since" and "back-filled" lines, and the secondary-item lines under an item name each stay on one line with an ellipsis and a pixel `max-width` (a pixel cap is what table layout honours), each with a compact-only `:title`. Page and item names wrap; Promo wraps anywhere.
+4. **Explicit widths:** every non-text header cell gets `width:1px` in compact, which makes it a fixed-width column that sits at its content width and takes no share of spare width; Page 115, Item 115 and Promo 100 get their own pixel widths; the text columns stay `width:auto` with their 135 / 155 floors, so all spare width is theirs.
+5. **Header break:** `hdr()` also allows a break after a full stop inside a label (`PROF.` / `PROFIT` / `(1D)`), so `Prof.Profit(1D)` and `Prof.%(1M)` no longer set their column's width.
+6. Old layout: every new rule under `.ow-compact`, every new attribute bound to `null` unless `owCompact`; the scoping test already pins the first.
