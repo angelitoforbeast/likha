@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Auth;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 
@@ -55,6 +56,13 @@ class LoginCharacterizationTest extends AuthTestCase
         // CEO ang account: kahit CEO, walang cookie kapag bigo ang login.
         $this->user('CEO');
 
+        $profileQueries = 0;
+        DB::listen(function ($query) use (&$profileQueries) {
+            if (str_contains($query->sql, 'employee_profiles')) {
+                $profileQueries++;
+            }
+        });
+
         [$response, $sessionIdBefore] = $this->postLogin($form);
 
         $response->assertRedirect('/login');
@@ -62,6 +70,9 @@ class LoginCharacterizationTest extends AuthTestCase
         $this->assertGuest();
         $this->assertSame($sessionIdBefore, session()->getId());
         $response->assertCookieMissing($this->recallerName());
+        // Walang dagdag na query para sa kilalang e-mail: ang tagal ng bigong login ay hindi dapat magsabi
+        // kung may account. Ang role ay binabasa lang pagkatapos tanggapin ang password.
+        $this->assertSame(0, $profileQueries, 'Binasa ang employee_profiles sa bigong login.');
     }
 
     public function test_logout_signs_out_and_redirects_to_login(): void

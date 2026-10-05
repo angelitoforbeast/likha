@@ -18,14 +18,15 @@ class LoginController extends Controller
     {
         $credentials = $request->only('email', 'password');
 
-        // CEO lang ang may "remembered" login na 30 araw (handoff 012). Ang role ay galing sa account sa
-        // database, hindi sa form: walang binabasang `remember` na request parameter.
-        $remember = RefuseRememberedLoginUnlessCeo::isCeo(Auth::getProvider()->retrieveByCredentials($credentials));
-        if ($remember) {
-            Auth::guard()->setRememberDuration(60 * 24 * 30); // minuto = 30 araw mula sa login
-        }
+        if (Auth::attempt($credentials)) {
+            // CEO lang ang may "remembered" login na 30 araw (handoff 012). Ang role ay binabasa lang
+            // PAGKATAPOS tanggapin ang password (kaya pareho ang bigong login may account man o wala), at
+            // galing sa account sa database, hindi sa form: walang binabasang `remember` na request parameter.
+            if (RefuseRememberedLoginUnlessCeo::isCeo(Auth::user())) {
+                Auth::guard()->setRememberDuration(60 * 24 * 30); // minuto = 30 araw mula sa login
+                Auth::login(Auth::user(), true); // ito ang naglalabas ng remember cookie
+            }
 
-        if (Auth::attempt($credentials, $remember)) {
             $request->session()->regenerate();
             return redirect()->intended('/');
         }
