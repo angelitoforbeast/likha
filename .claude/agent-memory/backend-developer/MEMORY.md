@@ -1,1 +1,1 @@
-- [Testing gotchas](testing_gotchas.md) — sync queue, array cache locks, real migrations on sqlite, `from()` for `back()`
+- [Testing gotchas](testing_gotchas.md) — sync queue, array cache locks, real migrations on sqlite, `from()` for `back()`, login/cookie/database-session tests
