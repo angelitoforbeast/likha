@@ -19,29 +19,46 @@
   .ow-fit-on { overflow-x:hidden !important; overflow-y:scroll !important; }
 
   /* Compact layout (013): lahat nasa ilalim ng .ow-compact; ang data-col ay nilalagay lang ng Alpine kapag compact. */
-  .ow-compact > table > tbody > tr:not(.page-expand-row) > td { padding:2px 4px; font-size:12px; }
+  .ow-compact > table > tbody > tr:not(.page-expand-row) > td { padding:2px 2px; font-size:11px; }
   .ow-compact > table > thead > tr > th,
-  .ow-compact > table > tbody > tr.page-col-header > th { padding:4px 3px; font-size:10px; letter-spacing:0; line-height:1.15; white-space:normal; }
+  .ow-compact > table > tbody > tr.page-col-header > th { padding:3px 2px; font-size:9.5px; letter-spacing:0; line-height:1.15; white-space:normal; }
   .ow-compact > table > thead > tr > th[data-col],
   .ow-compact > table > tbody > tr.page-col-header > th[data-col] { min-width:0 !important; }
-  /* Item: sahig na lapad (inline min-width 160 ang dati); Page: naiiwan ang inline 110 */
+  /* Fixed-width column = sukat ng laman, hindi kumukuha ng sobrang lapad; ang sobra ay sa text columns lang. */
+  .ow-compact > table > thead > tr > th[data-col],
+  .ow-compact > table > tbody > tr.page-col-header > th[data-col] { width:1px; }
+  /* Page at Item: tiyak na lapad (naiiwan ang inline min-width ng Page; ino-override ang 160 ng Item) */
+  .ow-compact > table > thead > tr > th:nth-child(1),
+  .ow-compact > table > tbody > tr.page-col-header > th:nth-child(1) { width:115px; }
   .ow-compact > table > thead > tr > th:nth-child(2),
-  .ow-compact > table > tbody > tr.page-col-header > th:nth-child(2) { min-width:120px !important; }
+  .ow-compact > table > tbody > tr.page-col-header > th:nth-child(2) { width:115px; min-width:0 !important; }
   /* Promo: puwedeng mag-wrap */
   .ow-compact > table > thead > tr > th[data-col="promo"],
-  .ow-compact > table > tbody > tr.page-col-header > th[data-col="promo"] { min-width:70px !important; }
-  .ow-compact > table > tbody > tr > td[data-col="promo"] { white-space:normal; }
-  /* RTS block: dikit ang tatlong linya */
-  .ow-compact > table > tbody > tr > td[data-col="jnt_rdt"] > table td { padding:0 3px !important; line-height:1.2; }
-  /* Ang "from <date>" na linya puwedeng mag-wrap kaysa palaparin ang column. */
-  .ow-compact > table > tbody > tr > td:is([data-col="item_val"],[data-col="rts_set"]) { white-space:normal; }
-  /* Item cell: siksik ang mga linya (pangalan at secondary items). */
-  .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(2) > div { line-height:1.2 !important; }
+  .ow-compact > table > tbody > tr.page-col-header > th[data-col="promo"] { width:100px !important; min-width:0 !important; }
+  .ow-compact > table > tbody > tr > td[data-col="promo"] { white-space:normal; overflow-wrap:anywhere; }
+  /* RTS block: dikit ang tatlong linya (ang 9px na label cells ay hindi ginagalaw; sa table lang ang font-size) */
+  .ow-compact > table > tbody > tr > td[data-col="jnt_rdt"] > table td { padding:0 2px !important; line-height:1.2; }
+  .ow-compact > table > tbody > tr > td[data-col="jnt_rdt"] > table { font-size:10px !important; }
+  /* Set RTS%: dalawang linya lang -- porsyento sa una; "from <date>" at ang note magkatabi sa pangalawa, putol na may "..." (buo sa title). */
+  .ow-compact > table > tbody > tr > td[data-col="rts_set"] > span > div > template + div { display:block; max-width:64px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; }
+  .ow-compact > table > tbody > tr > td[data-col="rts_set"] > span > div > template + div > span { display:block; }
+  .ow-compact > table > tbody > tr > td[data-col="rts_set"] > span > div > template + div > div { display:inline !important; white-space:nowrap !important; max-width:none !important; margin:0 3px 0 0 !important; }
+  /* Item value: isang linya ang bawat note, putol; ang halaga mismo ay hindi pinuputol. */
+  .ow-compact > table > tbody > tr > td[data-col="item_val"] > span > div > template + div > div { max-width:44px !important; white-space:nowrap !important; overflow:hidden; text-overflow:ellipsis; line-height:1.15; margin-top:0 !important; }
+  /* Pencil icons: maliit na gap at padding sa number cells. */
+  .ow-compact > table > tbody > tr > td:is([data-col="rts_set"],[data-col="promo"],[data-col="item_val"],[data-col="item_val_ceo"]) > span { gap:2px !important; }
+  .ow-compact > table > tbody > tr > td:is([data-col="rts_set"],[data-col="promo"],[data-col="item_val"],[data-col="item_val_ceo"]) > span > button.cell-edit-icon { padding:1px 2px; }
+  /* Page cell: makitid ang lapad; ang mga note ay isang linya na may "...". */
+  .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(1) .page-cell-body { max-width:82px; overflow:hidden; }
+  .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(1) .page-cell-body > :is(a,span) { line-height:1.2 !important; overflow-wrap:anywhere; }
+  .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(1) .page-cell-body div { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* Item cell: siksik ang mga linya (pangalan at secondary items); ellipsis sa nowrap na secondary. */
+  .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(2) > div { line-height:1.2 !important; max-width:110px; overflow:hidden; text-overflow:ellipsis; overflow-wrap:anywhere; }
   /* Text columns: sila ang kumukuha ng natitirang lapad; hanggang 3 linya */
   .ow-compact > table > thead > tr > th:is([data-col="action"],[data-col="claude_action"],[data-col="ceo_action"]),
-  .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="action"],[data-col="claude_action"],[data-col="ceo_action"]) { min-width:135px !important; }
+  .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="action"],[data-col="claude_action"],[data-col="ceo_action"]) { width:auto !important; min-width:135px !important; }
   .ow-compact > table > thead > tr > th:is([data-col="claude_reason"],[data-col="ceo_reason"]),
-  .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="claude_reason"],[data-col="ceo_reason"]) { min-width:155px !important; }
+  .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="claude_reason"],[data-col="ceo_reason"]) { width:auto !important; min-width:155px !important; }
   .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) { white-space:normal; }
   .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > div:first-child { max-width:none !important; white-space:normal !important; overflow-wrap:anywhere; line-height:1.2 !important; }
   .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > div:first-child[style*="ellipsis"] { display:-webkit-box !important; -webkit-box-orient:vertical; -webkit-line-clamp:3; line-clamp:3; overflow:hidden; }

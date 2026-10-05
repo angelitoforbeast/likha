@@ -712,11 +712,13 @@
                     <template x-if="row.mixed_primary">
                       <div style="cursor:pointer;" @click="openBreakdown(row)"
                            :title="row.distinct_items_in_range + ' distinct primary items across ' + row.range_days + '-day range. Click to see breakdown.'">
-                        <div style="font-size:10px;color:#b45309;font-weight:600;line-height:1.3;margin-top:2px;">
+                        <div style="font-size:10px;color:#b45309;font-weight:600;line-height:1.3;margin-top:2px;"
+                             :title="owCompact ? ('⚠ mixed primary · ' + row.included_days + '/' + row.range_days + ' d · ' + row.distinct_items_in_range + ' distinct primary items across ' + row.range_days + '-day range. Click to see breakdown.') : null">
                           ⚠ mixed primary · <span x-text="row.included_days + '/' + row.range_days + ' d'"></span>
                         </div>
                         <template x-if="row.anchor_first_date">
-                          <div style="font-size:9px;color:#64748b;line-height:1.2;">
+                          <div style="font-size:9px;color:#64748b;line-height:1.2;"
+                               :title="owCompact ? 'computed since ' + fmtMD(row.anchor_first_date) : null">
                             computed since <span x-text="fmtMD(row.anchor_first_date)"></span>
                           </div>
                         </template>
@@ -729,7 +731,7 @@
                     <template x-if="row.has_backfill">
                       <div style="cursor:pointer;font-size:10px;color:#dc2626;font-weight:600;line-height:1.3;margin-top:2px;"
                            @click="openBreakdown(row)"
-                           :title="'⚠ ' + (row.backfill_dates ? row.backfill_dates.length : 0) + ' date(s) walang proper setting — back-filled earliest. Click para makita sa breakdown (red cells).'"
+                           :title="(owCompact ? ('⚠ back-filled ' + (row.backfill_fields && row.backfill_fields.length ? row.backfill_fields.map(f => ({rts:'RTS', cost:'cost', fee:'fee'}[f] || f)).join(' + ') : '')) + ' — ' : '') + '⚠ ' + (row.backfill_dates ? row.backfill_dates.length : 0) + ' date(s) walang proper setting — back-filled earliest. Click para makita sa breakdown (red cells).'"
                            x-text="'⚠ back-filled ' + (row.backfill_fields && row.backfill_fields.length ? row.backfill_fields.map(f => ({rts:'RTS', cost:'cost', fee:'fee'}[f] || f)).join(' + ') : '')">
                       </div>
                     </template>
@@ -742,7 +744,8 @@
                 <div style="font-weight:600;color:#1e293b;white-space:normal;line-height:1.35;"
                      x-text="sq(row.item_name)"></div>
                 <template x-for="s in (row.secondary_items||[])" :key="s.item_name">
-                  <div style="font-size:10px;color:#94a3b8;line-height:1.4;">
+                  <div style="font-size:10px;color:#94a3b8;line-height:1.4;"
+                       :title="owCompact ? sq(s.item_name) + ' (' + s.total_orders + ')' + ((s.price && s.price !== row.price) ? ' · ' + money(s.price) : '') : null">
                     <span x-text="sq(s.item_name)+' ('+s.total_orders+')'"></span>
                     <template x-if="s.price && s.price !== row.price">
                       <span style="color:#cbd5e1;" x-text="' · '+money(s.price)"></span>
@@ -1017,7 +1020,7 @@
                     <span style="display:inline-flex;align-items:flex-start;gap:4px;">
                       <div style="flex:1;">
                         <template x-if="row.rts_pct !== null">
-                          <div>
+                          <div :title="owCompact ? [row.settings_date ? 'from ' + row.settings_date : '', row.rts_comment ? '💬 ' + row.rts_comment : ''].filter(Boolean).join(' · ') || null : null">
                             <span style="font-weight:700;color:#000;"
                                   x-text="row.rts_pct.toFixed(1)+'%'"></span>
                             <template x-if="row.settings_date">
@@ -1089,10 +1092,12 @@
                             </template>
                             <template x-if="row.item_value_source === 'manual' && row.settings_date">
                               <div style="font-size:9px;color:#94a3b8;margin-top:2px;"
+                                   :title="owCompact ? 'from ' + row.settings_date : null"
                                    x-text="'from ' + row.settings_date"></div>
                             </template>
                             <template x-if="row.item_value_comment && row.item_value_source === 'manual'">
                               <div style="font-size:9px;color:#64748b;margin-top:1px;font-style:italic;white-space:normal;max-width:110px;"
+                                   :title="owCompact ? '💬 ' + row.item_value_comment : null"
                                    x-text="'💬 '+row.item_value_comment"></div>
                             </template>
                           </div>
@@ -2480,7 +2485,7 @@
       arr(col){ return this.sortCol!==col?'':(this.sortDir==='asc'?' ↑':' ↓'); },
       ac(col) { return this.sortCol===col?'col-active':''; },
       // Compact lang: zero-width space bago ang "(" na walang espasyo para puwedeng mag-wrap ang label.
-      hdr(label){ return this.owCompact ? String(label).replace(/(\S)\(/g, '$1' + String.fromCharCode(8203) + '(') : label; },
+      hdr(label){ if (!this.owCompact) return label; const z = String.fromCharCode(8203); return String(label).replace(/\.(?=[^\s.])/g, '.' + z).replace(/(\S)\(/g, '$1' + z + '('); },
       sortedRows(){
         const base = this.filteredRows();
         if(!this.sortCol) return base;

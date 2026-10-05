@@ -121,6 +121,29 @@ class FitToWidthTest extends OwnerPrivateTestCase
         $this->assertGreaterThan(10, $count);
     }
 
+    public function test_compact_css_holds_explicit_widths_and_the_two_line_rts_cell(): void
+    {
+        $html = $this->page('/owner/private', 'CEO');
+        $a = strpos($html, '<!-- fit-to-width-start -->');
+        $style = substr($html, strpos($html, '<style>', $a), strpos($html, '</style>', $a) - strpos($html, '<style>', $a));
+
+        foreach ([
+            'th[data-col] { width:1px; }',
+            'th[data-col="promo"] { width:100px !important;',
+            'th:nth-child(1) { width:115px;',
+            'th:nth-child(2) { width:115px;',
+            'td[data-col="rts_set"] > span > div > template + div { display:block; max-width:64px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;',
+            'td[data-col="rts_set"] > span > div > template + div > div { display:inline !important;',
+        ] as $s) {
+            $this->assertTrue(str_contains($style, $s), "missing css: {$s}");
+        }
+
+        $this->assertTrue(str_contains($html, ':title="owCompact ? [row.settings_date'));
+        // Compact-only titles: 6 na nagsisimula sa "owCompact ? " at 1 na "(owCompact ? " (back-fill).
+        $this->assertSame(6, substr_count($html, ':title="owCompact ? '));
+        $this->assertSame(1, substr_count($html, ':title="(owCompact ? '));
+    }
+
     public function test_actions_whitelist_ids_are_real_columns(): void
     {
         $html = $this->page('/owner/private', 'CEO');
