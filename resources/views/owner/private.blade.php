@@ -496,6 +496,9 @@
       <span x-show="loading">Refreshing…</span>
     </button>
 
+    {{-- Fit / 100% switch ng main table — para sa LAHAT ng role (display lang, walang data). --}}
+    @include('owner._fit_to_width')
+
     {{-- CEO-only chrome — hidden when CEO toggles to Marketing view so the UI
          truly mirrors what Marketing sees. Actual CEO role still has access via
          direct URL; this is a view-toggle gate, not an auth gate. --}}
@@ -589,7 +592,7 @@
 
   <!-- Scroll area -->
   <div id="scroll">
-    <div class="card">
+    <div class="card" data-ow-fit>
       <table>
         <thead>
           <tr>

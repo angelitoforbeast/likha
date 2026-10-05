@@ -16,6 +16,8 @@ metadata:
 
 - Blade `{{-- --}}` markers don't reach the render; to slice a block out of a page in a test use an HTML comment (`<!-- claude-cells-start -->`) or a JS needle. The server-injected column config (`hidden`/`order` JSON) puts column ids like `claude_action` in the source even for non-CEO, so "absent" checks must target the label and `row.claude_` / `case 'claude_` code, not the bare id.
 - `/owner/private`, its breakdown and `/item` all render in one test class on the OwnerPrivate base plus hand-made `tasks`, `ads_manager_reports`, `fee_settings` and the real `daily_page_primary_item` migration (see ClaudeActionViewTest).
+- The `page($url, $role)` helper copied from ClaudeActionViewTest creates the user on every call: two calls with the same role in one test die on `users.email` UNIQUE (an error, not a red). Call `actingAs` once and `$this->get()` per URL, or `auth()->forgetGuards()` between different roles.
+- `owner/_fit_to_width.blade.php` (011) is pinned by FitToWidthTest: its include name may appear in exactly one view file once (a source scan of all `*.blade.php`, comments included), and `id="owFitSwitch"` / `function owFitFactor(` exactly once in the render. Don't name the partial in a Blade comment elsewhere.
 
 **Why:** each of these cost a red/green cycle on 006 T1 (2026-10-02).
 **How to apply:** check these before writing new /item markup assertions or moving shared chrome.
