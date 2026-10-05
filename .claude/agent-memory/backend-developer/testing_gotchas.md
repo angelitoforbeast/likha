@@ -76,6 +76,8 @@ Database session driver in a test (learned in 012-2, see `tests/Feature/Auth/End
 - `postJson` / `getJson` send no cookies at all unless `$this->withCredentials()` was called; a session cookie given with `withCookie` is silently dropped and the answer is 401.
 - A POST `/logout` answers a redirect to `/login` whether or not the session was signed in, so it proves nothing about the session it was sent with.
 - The handler object is shared by all requests of a test and keeps its `exists` flag, so a deleted session id is not inserted again as a guest row the way a real request (new handler) does. Assert on "authenticated or not", not on the row count of guest rows.
+- A failing test whose request answered 500 prints the whole exception trace, and the tool output is cut before the assertion line: to read a red run's first line, keep the 500 request out of the failing path or accept "which test failed" as the evidence.
+- A session keeps working after its user's role changes or the employee profile is deleted (only the cookie sign-in re-checks the role), so "still authenticated" is a valid assertion for a demoted account.
 - To make a delete on a table fail: sqlite `CREATE TRIGGER ... BEFORE DELETE ON <table> BEGIN SELECT RAISE(ABORT, '...'); END`.
 
 **Why:** each of these cost a wrong first guess or would silently run a real job.
