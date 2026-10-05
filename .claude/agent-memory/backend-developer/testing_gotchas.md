@@ -62,6 +62,10 @@ Login, session and remember cookie (learned in 012):
 - A transient DB error on the role lookup is simulated with `Schema::rename('employee_profiles', ...)` and back; the request answers 500 (takes about 2 s, the error page renders).
 - The raw (still encrypted) cookie is in `$response->headers->getCookies()`; replay it with `withUnencryptedCookie`.
 - `/debug/ip` is the cheapest page behind `web, auth` only (JSON, no view, no role check).
+- Since Amendment 012-1 a remembered sign-in needs two cookies: the recaller and `RefuseRememberedLoginUnlessCeo::SINCE_COOKIE` (`id|unix time`). Use `loginAndTakeCookies()` and `getWithRememberCookie($remember, $since)` from `AuthTestCase`; a test that replays only the recaller is refused. `rawCookie()` gives the still-encrypted value for tamper cases.
+- Cookie expiry (`Cookie::queue`, `Cookie::forget`) and `assertCookieExpired` both follow Carbon's test clock, so `$this->travel()` works for cookie age; `freezeSecond()` before asserting a cookie value that holds a timestamp.
+- Event discovery returns listeners as `'Class@method'` strings (only `handle*` / `__invoke`), an explicit `Event::listen` with `[Class, 'method']` stays an array in `Event::getRawListeners()`: that is how a test tells the two apart. Listeners registered in `AppServiceProvider::register()` come before every discovered one (those are attached while the app boots).
+- A `postJson` to a route that answers `abort(404)` gets JSON back, so no Blade view (and no `withoutVite`) is needed for a refused-role test.
 
 **Why:** each of these cost a wrong first guess or would silently run a real job.
 **How to apply:** start new backend test cases from `tests/Feature/NightRun/NightRunTestCase.php` and extend its migration list.

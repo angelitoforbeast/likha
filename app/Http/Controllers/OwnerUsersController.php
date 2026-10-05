@@ -79,6 +79,9 @@ class OwnerUsersController extends Controller
         if (Schema::hasColumn('users', 'password_plain')) {
             $updates['password_plain'] = $newPlain;
         }
+        // Handoff 012, Amendment 012-1 (A2): bagong remember token sa parehong update, para patay na ang
+        // lahat ng remember cookie na inilabas bago ang palit ng password (60 chars, gaya ng framework).
+        $updates['remember_token'] = \Illuminate\Support\Str::random(60);
         $updates['updated_at'] = now();
 
         DB::table('users')->where('id', $id)->update($updates);
