@@ -1,6 +1,6 @@
 # Result 012: The CEO account stays logged in for 30 days
 
-Status: **first run and Amendment 012-1 built and reviewed; one new security major open for Mira's ruling** (a session already started from the cookies outlives day 30, Logout and a password change; see "Amendment 012-1" at the end of this file, which is the current state and wins wherever the sections before it disagree). The first run's open major (the 30 days enforced only by the browser) is closed by A1. Branch `feat/012-ceo-stay-logged-in`, cut from `develop` at `9332e43`. Nothing was pushed, merged or deployed, and there is no PR, so this file stands in for the PR body. Nothing was seen in a browser (no browser tools, no dev server in the allowed commands).
+Status: **done: first run, Amendment 012-1 and Amendment 012-2 built and reviewed; no blocker or major open; waiting for Mira's review of the branch.** The file is in three parts, oldest first; **"Amendment 012-2" at the end is the current state** and wins wherever an earlier section disagrees (its sign-in table and its deploy checklist replace the earlier ones). The first run's open major (30 days enforced only by the browser) was closed by A1; the second (open sessions outliving Logout and a password change) by B1 and B2. Branch `feat/012-ceo-stay-logged-in`, cut from `develop` at `9332e43`. Nothing was pushed, merged or deployed, and there is no PR, so this file stands in for the PR body. Nothing was seen in a browser (no browser tools, no dev server in the allowed commands).
 
 ## Plan
 
@@ -441,3 +441,219 @@ No conflict between CLAUDE.md and the amendment. All file writes in this run use
 3. **Clear leftover CEO cookies when a non-CEO logs in** on the same browser, so a shared computer cannot fall back to the CEO when the other account's session lapses.
 4. **`CopyEverydayTasksOnLogin` in its own try/catch** (log and continue), so a task-copy error cannot block a login. No longer a security matter; the re-check runs first.
 5. Suggestions for the owner, not done: remove the `/debug/ip` route; the plain-text `password_plain` column and the password echoed in the response of `updatePassword` deserve their own decision; public registration at `/registerlogin`; delete the dead `app/Http/Kernel.php` and `app/Providers/EventServiceProvider.php`; `AppServiceProvider` has a stray `deleteAll()` method and reads `env()` in `boot()` (breaks under `config:cache`: the production HTTPS forcing would be skipped); `ExampleTest` still fails.
+
+---
+
+# Amendment 012-2
+
+Saved verbatim as `AMENDMENT-2.md` (`67ef3c1`). It changes requirements, a decision (D4) and done-when; nothing in it touches permissions, commands or policy files. This section is the current and final state of the handoff. In the 012-1 section above, "Question for Mira (open major)", "Every way to become signed in (current)", "Deploy notes (current)" and "Proposed tasks (current)" are replaced by the sections below.
+
+## Plan (amendment 2)
+
+1. Save the amendment; pin, under the database session driver, that a non-CEO Logout leaves that user's other session signed in.
+2. One helper, `RefuseRememberedLoginUnlessCeo::endSessionsOf(int $userId, ?string $exceptSessionId)`: with the `database` session driver it deletes that user's rows in the session table (always with the `user_id` condition), optionally keeping one session id; with any other driver it does nothing.
+3. B1: `OwnerUsersController::updatePassword` calls it for the changed user, keeping the caller's current session id.
+4. B2: `LoginController::logout()` calls it for a CEO after the three existing lines; other roles get no delete. Not on the `Logout` event, which also fires when a cookie sign-in is refused.
+5. Reviewer at adversarial depth with checks 6 and 7, minors wave, the full suite, this section.
+
+## Summary (amendment 2)
+
+- **B1, done.** A password change on `/owner/users` now also deletes that user's rows in the `sessions` table, in the same request and the same database transaction as the password and the remember token. Every browser already signed in as that user is a guest at its next request, and its remember cookie is dead because the token changed. The person who makes the change keeps the session he is in: when he changes someone else's password his own rows are not that user's, and when he changes his own, only his other sessions end. This applies to whatever account's password is changed, CEO or not.
+- **B2, done.** When a CEO presses Logout, every session of that account ends, on every device, besides the token cycle that already killed the remember cookies. For every other role Logout ends only the session it was pressed in, as before (pinned under the database driver, also for a demoted CEO and for an account without a profile).
+- **B3, not built**, as ruled. It is proposed task 1 with its cost.
+- **Driver.** Both paths act only when the running session driver is `database` (the config default). With any other driver they do nothing extra and do not fail. The checklist has the command to see the running value.
+- **Review:** no blocker, no major. One accepted minor is worth Mira's eye because its real fix is a design decision (below).
+
+## For Mira's attention: a sign-in in flight during the cut (accepted minor, not started)
+
+The reviewer traced this from the framework source; it was not run (sqlite cannot show it). If someone already holds working credentials for the account (a still-valid CEO cookie pair, or the current password) and sends sign-in requests in a loop, then at the moment the CEO presses Logout or the password is changed, one of those requests may have passed its check just before the cut and write its new session row just after the delete. That session lives on like any session.
+
+It is a minor, not a major: it needs a prepared loop by someone who already has the credentials; a lost device or a copied session cookie alone is cut cleanly; and a second Logout or password change ends the survivor, because by then its credentials are dead and its row carries the user id.
+
+| | Option | Cost |
+|---|---|---|
+| a | Accept, and tell the owner the order for a suspected theft: change the password, wait a few seconds, press Logout | None. **This is what the branch does** (checklist step 13) |
+| b | A per-request validity check (the framework's `AuthenticateSession`, or a "sessions valid after" time per user that every request compares with its own login time) | The same design class as B3: a middleware in the web group and a stored value; its own task |
+| c | A second, delayed delete a few seconds later | Narrows the window, does not close it; needs a queued job |
+
+Per the amendment's last-amendment rule, nothing was started on b or c.
+
+## Done-when evidence (amendment 2)
+
+**B5.1 The B4 tests exist and pass.** All in `tests/Feature/Auth/EndOpenSessionsTest.php`, which switches the session driver to `database` by config, creates the `sessions` table with the migration's columns, and proves the driver is really in use (two rows with the user's id after two logins). Every "still signed in?" check sends only the session cookie, so neither a pass nor a failure can come from the remember cookies.
+
+| B4 line | Test | Rows and what is asserted |
+|---|---|---|
+| Password change of someone else: that user's old session is no longer authenticated | `test_password_change_ends_the_open_sessions_of_that_user_and_no_others` | "password ng ibang user": the staff user's session is sent to login; both CEO sessions and a bystander's session still answer 200 |
+| Password change of one's own: current session kept, other session ended | same test | "sariling password": the session he acted from answers 200, his other browser is sent to login; staff and bystander untouched |
+| (review) access is checked before anything is deleted | same test | "Marketing ang nagpapalit: tinanggihan": 404, all four open sessions still answer 200 |
+| (developer) all or nothing | `test_password_stays_when_the_sessions_of_that_user_cannot_be_ended` | when the session delete fails, the password is unchanged |
+| After a CEO Logout, a second session of the same CEO is no longer authenticated | `test_ceo_logout_ends_every_session_of_that_account_and_no_others` | the second session is sent to login, the CEO has no session rows left, a bystander's session still answers 200 |
+| A non-CEO Logout leaves that user's other session as today (pinned first, `5ea183c`) | `test_non_ceo_logout_leaves_the_other_session_of_that_user_signed_in` | Marketing; a CEO made Marketing after login; a CEO whose employee profile was deleted. The pressed session is sent to login, the other answers 200 |
+| (review) a failed role read leaves nothing half-done | `test_logout_that_cannot_read_the_role_signs_nobody_out` | server error; both sessions still signed in |
+| With a non-database driver the two paths run without error | existing tests, no new one: `OwnerPasswordChangeTest::test_ceo_sets_a_new_password_for_a_user`, `CeoRememberedLoginTest::test_logout_clears_the_remember_cookie_and_the_old_cookie_no_longer_signs_in`, `LoginCharacterizationTest::test_logout_signs_out_and_redirects_to_login` | they run the password change and the CEO and Marketing logout under the `array` driver with no `sessions` table in the database; a delete attempt would fail them with "no such table" |
+| The 42 earlier Auth tests stay green | all files | 51 tests now |
+
+`php.bat artisan test --filter Feature.Auth` at `65fc6c5`:
+
+```
+   PASS  Tests\Feature\Auth\CeoRememberedLoginTest      (23)
+   PASS  Tests\Feature\Auth\EndOpenSessionsTest         (9)
+   PASS  Tests\Feature\Auth\LoginCharacterizationTest   (15)
+   PASS  Tests\Feature\Auth\OwnerPasswordChangeTest     (4)
+  Tests:    51 passed (465 assertions)
+```
+
+Red runs (from the developer's reports):
+
+- Pin (`5ea183c`): no red run by design; green on the code before B1 and B2.
+- B1: `test_password_change_ends_the_open_sessions_of_that_user_and_no_others`, both rows then present, `Expected response status code [201, 301, 302, 303, 307, 308] but received 200.`
+- B1 transaction: `test_password_stays_when_the_sessions_of_that_user_cannot_be_ended`, `Napalitan ang password kahit hindi natapos ang mga session. Failed asserting that false is true.`
+- B2: `test_ceo_logout_ends_every_session_of_that_account_and_no_others`, `Expected response status code [201, 301, 302, 303, 307, 308] but received 200.`
+- Logout order (`cd65bc3`): `test_logout_that_cannot_read_the_role_signs_nobody_out` failed before the fix; its first failure line was not readable (the error page's trace filled the output); the cause seen was the role query failing after the sign-out.
+- The rows of `5bf439d` are pins (no red run).
+
+**B5.2 Whole suite.** `php.bat artisan test`, once for this amendment, on the tree of `65fc6c5` (the last commit that touches code or tests is `5bf439d`; the commits after it change only agent memory, `TODO.md` and handoff files):
+
+```
+   FAILED  Tests\Feature\ExampleTest > the application returns a successful response
+  Expected response status code [200] but received 302.
+
+  Tests:    1 failed, 3 skipped, 507 passed (5289 assertions)
+  Duration: 62.79s
+```
+
+Base: 456 passed, 3 skipped, 1 failed. Now 507 passed (the 51 new), the same 3 skipped, the same 1 failed (`ExampleTest`). No new failure.
+
+**B5.3** `git diff 9332e43..HEAD --stat -- app`:
+
+```
+ app/Http/Controllers/Auth/LoginController.php    |  31 +++++
+ app/Http/Controllers/OwnerUsersController.php    |  14 ++-
+ app/Listeners/RefuseRememberedLoginUnlessCeo.php | 141 +++++++++++++++++++++++
+ app/Providers/AppServiceProvider.php             |  12 +-
+ 4 files changed, 196 insertions(+), 2 deletions(-)
+```
+
+The whole branch is 18 files (these four, four test files, three handoff files plus the index, `TODO.md`, agent memory). `git diff 9332e43..HEAD --stat -- config database resources/views routes bootstrap` prints nothing.
+
+`git log --oneline 964572b..HEAD` (before this section's own commit):
+
+```
+3217fc0 docs: review findings and reviewer memory for amendment 012-2
+65fc6c5 docs: developer memory for the 012-2 minors wave
+5bf439d test: pin refused password change and demoted-account logout under the database session driver (012-2 minors)
+cd65bc3 fix: logout reads the role before signing out, and endSessionsOf takes an int user id (012-2 minors)
+8994e71 docs: developer memory for database session driver tests (012-2)
+07e1ad5 feat: a CEO logout ends every other session of that account (012-2 B2)
+8d13eca feat: a password change on the owner users page ends the open sessions of that user (012-2 B1)
+5ea183c test: pin that a non-CEO logout leaves that user's other session signed in (database session driver)
+67ef3c1 docs: amendment 012-2 saved verbatim
+```
+
+**B5.4 Commits and tree:** Conventional Commits; `git log 9332e43..HEAD -i -E --grep="co-authored|claude-session|generated with" --oneline` prints nothing; `git status --short` is empty after this section's commit.
+
+## Every way to become and to stop being signed in (final)
+
+**Becoming signed in**
+
+| # | Way in | CEO | Other roles |
+|---|---|---|---|
+| 1 | Login form, `POST /login` | Session, plus two cookies for 30 days from this login: the remember cookie and `ceo_remember_since` (user id and login time, encrypted) | Session only, exactly as on the base. A posted `remember` field is never read |
+| 2 | The two cookies, on any request where the `web` guard finds no session | A new session, only when the account is CEO now and the second cookie is present, decrypts, names the same user id and is at most 30 days old. The cookies are not renewed | Always refused, also with a valid-looking pair |
+| 3 | An existing session cookie | Stays signed in while used at least every 120 minutes | Same, as on the base |
+| 4 | Registration (`/registerlogin`), `GET /api/user` (`auth:sanctum`, not installed locally) | Neither signs anyone in | Same |
+| 5 | Not found | No second login controller, API or token login, impersonation, `loginUsingId`, password reset or basic auth route | Same |
+
+**Stopping being signed in**
+
+| Event | CEO | Other roles |
+|---|---|---|
+| 120 minutes without a request | The session ends; the next page load signs him in again from the cookies (within the 30 days) | The session ends; login page, as on the base |
+| Logout | **Every session of the account ends, on every device**; both cookies cleared in this browser; token cycled, so the cookies in his other browsers are dead | Only the session it was pressed in, exactly as on the base |
+| The account's password is changed on `/owner/users` | Every session of that account ends except, when he changes his own, the one he is in; token cycled, so every remember cookie of the account is dead | **Same for any account** (new with B1: before, a password change left a user's open sessions alone) |
+| 30 days after the password login | A sign-in from the cookies is refused (server-side count): login page, both cookies cleared, token cycled. A session that is open at that moment continues until it has been idle for 120 minutes (B3 not built) | Not applicable |
+| Role changed away from CEO, or employee profile removed | The next sign-in from the cookies is refused. An open session continues (the pages check the role on every request) | Not applicable |
+| A sign-in from the cookies is refused in one browser (too old, second cookie missing or damaged, role, a database error at that moment) | That browser goes to the login page; the token is cycled, so the cookies in his other browsers are dead too. Open sessions elsewhere are **not** ended by a refusal | Not applicable |
+| Session driver is not `database` | Logout and the password change still cycle the token; open sessions elsewhere are not ended | Logout as on the base; a password change ends no sessions |
+
+## Review findings (amendment 2)
+
+`skeptic-reviewer`, adversarial depth (opus), on `964572b..8994e71`. No fix loop was needed; the minors went into one wave.
+
+- **Check 6** (a password change and a CEO Logout really end sessions that were already open, and cannot end sessions of any other user): **pass**, with the in-flight caveat above. Every save of a signed-in session writes `user_id` with the payload, so no signed-in row lacks it; the delete uses the same connection and table as the session driver; a request in flight in a deleted session updates zero rows and cannot write itself back; the condition is always `user_id = <int>`, guest rows (null) never match; the password route checks access first and answers 404 for a missing id before any delete; Logout uses the authenticated user's own id; a refused cookie sign-in cannot trigger the delete (the only callers are the two controllers); `POST /logout` stays behind CSRF.
+- **Check 7** (nothing changes for non-CEO logins and logouts): **pass.** `login()` is untouched in this amendment. A non-CEO Logout gives the same redirect, session invalidation and cookies as `9332e43`; the one difference is one read of the employee profile before it (accepted minor 3).
+- **Earlier five checks:** not weakened. The login path, the `Login` listener and its registration are unchanged; the token cycle on a password change is still there, now inside the transaction.
+- **Spec:** B1, B2, B3 and every B4 line met; the deploy notes B1 and B2 ask for are in the checklist below.
+
+| # | Severity | Finding | Outcome |
+|---|---|---|---|
+| 1 | minor, scope | The transaction around the password update and the session delete was not asked for | Kept (reviewer: keep on its merits), ruling below; `TODO.md` |
+| 2 | minor, security, design | A sign-in in flight during the cut survives it | Accepted, `TODO.md`; described above with options; not started |
+| 3 | minor | Logout read the role after the sign-out: a failed read left the pressing browser signed out and the other sessions alive | Fixed (`cd65bc3`): role read first; red test. Cost: every role's Logout now depends on one profile read (`TODO.md`) |
+| 4 | minor | `endSessionsOf` took an untyped user id | Fixed (`cd65bc3`): `int` |
+| 5 | minor, missing test | No named test for the non-database driver | Accepted, `TODO.md`: three existing tests prove it (table above) |
+| 6 | minor, missing test | A non-CEO caller of the password route under the database driver | Fixed (`5bf439d`) |
+| 7 | minor, missing test | Logout by a demoted CEO and by an account without a profile | Fixed (`5bf439d`) |
+| 8 | minor | The empty-id guard has no reachable caller and no test | Accepted, `TODO.md` |
+| 9 | minor, architecture | A static session helper in a listener class, called from two controllers | Accepted, `TODO.md` |
+
+Not re-reviewed: the minors wave (`cd65bc3`, `5bf439d`): one moved line, one type, and test rows; the main session read its diff and ran the tests. Declined to judge by the reviewer: the full suite (run by the main session), the server's real session driver, connection and table, MySQL locking, the race of finding 2 (not executed), and the red runs (listed above from the developer's reports).
+
+## Rulings (amendment 2)
+
+- Ruling: B2 lives in `LoginController::logout()`, not on the framework's `Logout` event - that event also fires when a cookie sign-in is refused, and an expired cookie in one old browser must not end the CEO's live sessions everywhere; B2 says "presses Logout" - none.
+- Ruling: one delete with `user_id = ?` and `id != <caller's session>` serves both B1 cases - for someone else's password the caller's row is not among that user's, for his own it is the one kept - none.
+- Ruling: the password update and the session delete share one transaction - a failed delete then changes nothing and says so, where otherwise the password would be changed, the sessions alive and the error would read as "nothing happened" - a database error on the `sessions` table blocks a password change until it is fixed.
+- Ruling: Logout reads the role before signing out - a failed read then leaves everything as it was and he presses Logout again, where otherwise the CEO would be half signed out - a Logout by any role now fails with a server error if the profile cannot be read at that instant.
+- Ruling: the helper is a static method on `RefuseRememberedLoginUnlessCeo` - no new class was allowed, and it keeps the 012 rules in one file - a listener class that two controllers call; a suggestion for the owner if the auth code grows.
+- Ruling: finding 2 (in flight) was accepted and described, not built - its fix is the per-request design B3 rules out, and this is the last amendment - a prepared attacker who already holds working credentials can keep one session through a single cut; a second cut ends it.
+- Ruling: the full suite ran on the last code commit, not on the final docs commit - the commits after it touch only agent memory, `TODO.md` and handoff files - none.
+
+No conflict between CLAUDE.md and the amendment. All file writes used the Write and Edit tools.
+
+## Deploy checklist for Mira (complete; replaces every earlier list)
+
+**Before deploying**
+
+1. On the server, see which session driver is running, from the running config and without opening any env file: `php artisan config:show session.driver` (or `php artisan about`, section "Drivers", line "Session"). It must say `database` for B1 and B2 to end open sessions. With anything else the deploy is still safe, but Logout and a password change only kill the cookies; tell me and it becomes a task.
+2. `php artisan config:show session.connection` and `session.table`: expect `null` (the default connection) and `sessions`. The delete uses exactly these.
+3. `SHOW COLUMNS FROM users LIKE 'remember_token';` and `SHOW COLUMNS FROM sessions LIKE 'user_id';` both return a row (standard columns; no migration in this branch).
+
+**Deploy**
+
+4. Pull the merged code. No migration, no config change, no asset build, no queue restart.
+5. `php artisan optimize:clear`, then the caching the server normally runs (`php artisan optimize`, or `config:cache` and `route:cache`). The role re-check does not depend on the events cache; this only removes caches from before this code.
+
+**Check on the server**
+
+6. `php artisan event:list --event=Login`: under `Illuminate\Auth\Events\Login` the first listener is `App\Listeners\RefuseRememberedLoginUnlessCeo@recheckRememberedLogin`, once. `php artisan event:list --event=Logout`: `…@forgetSinceCookie`, once.
+
+**Check in a browser** (nothing in this handoff was seen in a browser)
+
+7. Log in as the CEO with the password (an old session gets no cookies). Devtools shows `remember_web_…` and `ceo_remember_since`, both Secure, HttpOnly, SameSite Lax, expiring 30 days out. If Secure is missing, set `SESSION_SECURE_COOKIE=true` on the server and repeat.
+8. Delete only the session cookie and reload: still signed in (cookie sign-in works).
+9. Delete the session cookie and `ceo_remember_since` and reload: the login page, and `remember_web_…` is gone too (the server-side rule works). Log in again.
+10. Open a second browser (or a private window) and log in as the CEO there too. In the first, press Logout. Reload the second: the login page (B2). Its cookies are still shown but no longer work.
+11. Log in as the CEO in two browsers and as a staff user in a third. As the CEO, change the staff user's password on `/owner/users`: the staff browser goes to the login page on its next click, both CEO browsers stay in. Then change the CEO's own password: the browser he did it in stays in, the other goes to the login page (B1).
+12. Log in as a Marketing user in two browsers and press Logout in one: the other stays signed in, and neither ever had the two cookies (unchanged for other roles).
+
+**Tell Busing**
+
+13. **Logout signs him out on every device at once.** For a lost or shared device, or if he suspects someone else is in: change the password on `/owner/users`, wait a few seconds, then press Logout. After that nothing that was signed in or remembered before works any more.
+14. He stays signed in for 30 days from each password login, per browser; on day 31 that browser asks for the password. If one browser is refused (too old, a damaged cookie), his other browsers ask for the password once their own session has been idle for two hours.
+15. Changing any user's password on `/owner/users` now signs that user out everywhere at once.
+16. A page left open for hours can answer "CSRF token mismatch." on a save: copy the text, reload, save again.
+
+**Server facts**
+
+17. Both cookies are encrypted with the app key: rotating it ends every remembered login. If `vps` and `vps2` serve the same site they need the same key and clocks within 5 minutes.
+18. Rollback: revert the merge, then have the CEO press Logout once or set his `users.remember_token` to null. The framework accepts a remember cookie with or without this code; after a revert neither the role re-check nor the 30-day check would run.
+
+## Proposed tasks (final)
+
+1. **B3, a hard 30-day age for a remembered session, checked on every request.** What it would cost: the login controller and the listener write the login time into the session; one small middleware in the web group compares it on each request and ends the session past 30 days (one new class, one registration line in `bootstrap/app.php`, about 40 lines with tests; no query per request, the session is already loaded). Decisions needed: CEO only or every role, and whether it should also carry a "sessions valid after" time per user, which would close the in-flight case above but needs a stored value (a column or the cache). High tier.
+2. **Friendly message on 419** in the three save handlers of `/owner/private`. Views only.
+3. **Clear leftover CEO cookies when a non-CEO logs in** on the same browser, so a shared computer cannot fall back to the CEO when the other account's session lapses.
+4. **`CopyEverydayTasksOnLogin` in its own try/catch** (log and continue), so a task-copy error cannot block a login.
+5. Suggestions for the owner, not done: remove the `/debug/ip` route; the plain-text `password_plain` column and the password echoed in the response of `updatePassword` deserve their own decision; public registration at `/registerlogin`; delete the dead `app/Http/Kernel.php` and `app/Providers/EventServiceProvider.php`; `AppServiceProvider` has a stray `deleteAll()` method and reads `env()` in `boot()`; `ExampleTest` still fails.
