@@ -2220,6 +2220,8 @@
 
       // ── Column drag-and-drop ──────────────────────────────────────────────
       colDragStart(e, colId) {
+        // Actions view: walang drag, para hindi masulat ang column order mula sa bahagyang view.
+        if (document.querySelector('[data-ow-fit].ow-actions')) { e.preventDefault(); return; }
         this.dragSrc = colId;
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', colId);

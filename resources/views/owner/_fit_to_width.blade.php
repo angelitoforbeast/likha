@@ -19,32 +19,37 @@
   .ow-fit-on { overflow-x:hidden !important; overflow-y:scroll !important; }
 
   /* Compact layout (013): lahat nasa ilalim ng .ow-compact; ang data-col ay nilalagay lang ng Alpine kapag compact. */
-  .ow-compact > table > tbody > tr > td { padding:2px 5px; font-size:12px; }
+  .ow-compact > table > tbody > tr:not(.page-expand-row) > td { padding:2px 4px; font-size:12px; }
   .ow-compact > table > thead > tr > th,
-  .ow-compact > table > tbody > tr.page-col-header > th { padding:4px 4px; font-size:10px; letter-spacing:0; line-height:1.15; white-space:normal; }
+  .ow-compact > table > tbody > tr.page-col-header > th { padding:4px 3px; font-size:10px; letter-spacing:0; line-height:1.15; white-space:normal; }
   .ow-compact > table > thead > tr > th[data-col],
   .ow-compact > table > tbody > tr.page-col-header > th[data-col] { min-width:0 !important; }
-  /* Page / Item: sahig na lapad (inline min-width 110/160 ang dati) */
-  .ow-compact > table > thead > tr > th:nth-child(1),
-  .ow-compact > table > tbody > tr.page-col-header > th:nth-child(1) { min-width:120px !important; }
+  /* Item: sahig na lapad (inline min-width 160 ang dati); Page: naiiwan ang inline 110 */
   .ow-compact > table > thead > tr > th:nth-child(2),
-  .ow-compact > table > tbody > tr.page-col-header > th:nth-child(2) { min-width:130px !important; }
+  .ow-compact > table > tbody > tr.page-col-header > th:nth-child(2) { min-width:120px !important; }
   /* Promo: puwedeng mag-wrap */
   .ow-compact > table > thead > tr > th[data-col="promo"],
-  .ow-compact > table > tbody > tr.page-col-header > th[data-col="promo"] { min-width:80px !important; }
+  .ow-compact > table > tbody > tr.page-col-header > th[data-col="promo"] { min-width:70px !important; }
   .ow-compact > table > tbody > tr > td[data-col="promo"] { white-space:normal; }
   /* RTS block: dikit ang tatlong linya */
-  .ow-compact > table > tbody > tr > td[data-col="jnt_rdt"] > table td { padding:0 4px !important; line-height:1.2; }
+  .ow-compact > table > tbody > tr > td[data-col="jnt_rdt"] > table td { padding:0 3px !important; line-height:1.2; }
+  /* Ang "from <date>" na linya puwedeng mag-wrap kaysa palaparin ang column. */
+  .ow-compact > table > tbody > tr > td:is([data-col="item_val"],[data-col="rts_set"]) { white-space:normal; }
+  /* Item cell: siksik ang mga linya (pangalan at secondary items). */
+  .ow-compact > table > tbody.page-row-tbody > tr:not(.page-expand-row) > td:nth-child(2) > div { line-height:1.2 !important; }
   /* Text columns: sila ang kumukuha ng natitirang lapad; hanggang 3 linya */
   .ow-compact > table > thead > tr > th:is([data-col="action"],[data-col="claude_action"],[data-col="ceo_action"]),
-  .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="action"],[data-col="claude_action"],[data-col="ceo_action"]) { min-width:150px !important; }
+  .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="action"],[data-col="claude_action"],[data-col="ceo_action"]) { min-width:135px !important; }
   .ow-compact > table > thead > tr > th:is([data-col="claude_reason"],[data-col="ceo_reason"]),
-  .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="claude_reason"],[data-col="ceo_reason"]) { min-width:170px !important; }
+  .ow-compact > table > tbody > tr.page-col-header > th:is([data-col="claude_reason"],[data-col="ceo_reason"]) { min-width:155px !important; }
   .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) { white-space:normal; }
-  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > div:first-child { max-width:none !important; white-space:normal !important; overflow-wrap:anywhere; }
+  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > div:first-child { max-width:none !important; white-space:normal !important; overflow-wrap:anywhere; line-height:1.2 !important; }
   .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > div:first-child[style*="ellipsis"] { display:-webkit-box !important; -webkit-box-orient:vertical; -webkit-line-clamp:3; line-clamp:3; overflow:hidden; }
   /* author/time line: isang linya pa rin, katabi ang "more" */
-  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > template + div { display:inline-block; max-width:calc(100% - 46px) !important; vertical-align:bottom; }
+  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > div > div[title] > template + div { display:inline-block; width:0; min-width:calc(100% - 46px); max-width:none !important; line-height:1.1; vertical-align:bottom; }
+  /* width:0 + min-width na % para hindi palaparin ng mahabang pangalan/oras ang column (ang % max-width ay walang bisa sa sukat ng table cell). Nowrap + ellipsis pa rin galing sa inline style. */
+  /* Pencil chip: mas maliit ang padding. */
+  .ow-compact > table > tbody > tr > td:is([data-col="action"],[data-col="claude_action"],[data-col="claude_reason"],[data-col="ceo_action"],[data-col="ceo_reason"]) > span > button { padding:2px 3px !important; }
 
   /* Actions view (CEO lang): itago ang lahat ng column maliban sa PAGE, ITEM, CPP, Prof.%, HOLD at text columns. */
   .ow-actions > table > thead > tr > th[data-col]:not([data-col="cpp"]):not([data-col="proj_pct"]):not([data-col="proj_pct_1d"]):not([data-col="proj_pct_3d"]):not([data-col="proj_pct_7d"]):not([data-col="hold"]):not([data-col="action"]):not([data-col="claude_action"]):not([data-col="claude_reason"]):not([data-col="ceo_action"]):not([data-col="ceo_reason"]),
@@ -229,7 +234,7 @@
       if (window.MutationObserver) {
         new MutationObserver(schedule).observe(table, {
           childList: true, subtree: true, characterData: true,
-          attributes: true, attributeFilter: ['style', 'class']
+          attributes: true, attributeFilter: ['style', 'class', 'data-col']
         });
       }
 

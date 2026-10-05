@@ -98,6 +98,49 @@ class FitToWidthTest extends OwnerPrivateTestCase
         $this->assertSame(0, preg_match('/<(th|td)\b[^>]*\sdata-col="/', $html));
     }
 
+    public function test_every_new_css_rule_is_scoped_so_old_layout_cannot_match(): void
+    {
+        $html = $this->page('/owner/private', 'CEO');
+        $a = strpos($html, '<!-- fit-to-width-start -->');
+        $style = substr($html, strpos($html, '<style>', $a), strpos($html, '</style>', $a) - strpos($html, '<style>', $a));
+        $style = preg_replace('#/\*.*?\*/#s', '', $style);
+
+        $count = 0;
+        foreach (explode('}', $style) as $rule) {
+            $sel = trim(substr($rule, 0, (int) strpos($rule . '{', '{')), " \t\r\n");
+            $sel = trim(str_replace('<style>', '', $sel));
+            if ($sel === '') {
+                continue;
+            }
+            // Hiwa-hiwalay lang sa kuwit na sinusundan ng (espasyo/newline at) ".": hindi ang nasa loob ng :is() / :not().
+            foreach (preg_split('/,\s*(?=\.)/', $sel) as $one) {
+                $count++;
+                $this->assertMatchesRegularExpression('/^\.(ow-compact|ow-actions|ow-fit-on)\b/', trim($one), "unscoped selector: {$one}");
+            }
+        }
+        $this->assertGreaterThan(10, $count);
+    }
+
+    public function test_actions_whitelist_ids_are_real_columns(): void
+    {
+        $html = $this->page('/owner/private', 'CEO');
+        $a = strpos($html, '.ow-actions > table');
+        preg_match_all('/:not\(\[data-col="([a-z0-9_]+)"\]\)/', substr($html, $a, strpos($html, '{', $a) - $a), $m);
+        $expected = ['cpp', 'proj_pct', 'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d', 'hold', 'action', 'claude_action', 'claude_reason', 'ceo_action', 'ceo_reason'];
+        $this->assertSame($expected, array_slice($m[1], 0, 11));
+
+        foreach ($expected as $id) {
+            $this->assertTrue(str_contains($html, "{ id:'{$id}',"), "no column with id {$id}");
+        }
+    }
+
+    public function test_column_drag_is_refused_while_actions_view_is_on(): void
+    {
+        $html = $this->page('/owner/private', 'CEO');
+
+        $this->assertTrue(str_contains($html, "if (document.querySelector('[data-ow-fit].ow-actions')) { e.preventDefault(); return; }"));
+    }
+
     public function test_fit_script_never_writes_html(): void
     {
         $html = $this->page('/owner/private', 'CEO');
