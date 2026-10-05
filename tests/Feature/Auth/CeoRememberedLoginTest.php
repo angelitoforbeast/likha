@@ -3,6 +3,9 @@
 namespace Tests\Feature\Auth;
 
 use App\Models\User;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cookie;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 
@@ -107,6 +110,34 @@ class CeoRememberedLoginTest extends AuthTestCase
 
         // Ang lumang cookie ay patay na rin sa susunod na request.
         $this->assertSentToLogin($this->getWithRememberCookie($cookie));
+        $this->assertGuest();
+    }
+
+    /**
+     * Fail closed: isinusulat ng guard ang login id sa session BAGO ang Login event. Kapag pumalya ang
+     * pagbasa ng role (hal. DB error), hindi dapat maiwang naka-sign-in ang session na iyon.
+     */
+    public function test_remembered_sign_in_leaves_no_signed_in_session_when_the_role_check_fails(): void
+    {
+        $user = $this->user('CEO');
+        $cookie = $this->loginAndTakeRememberCookie($user);
+
+        // Panandaliang DB error sa pagbasa ng employee profile.
+        Schema::rename('employee_profiles', 'employee_profiles_off');
+        $this->getWithRememberCookie($cookie)->assertStatus(500);
+        Schema::rename('employee_profiles_off', 'employee_profiles');
+
+        // Susunod na request ng parehong browser: session cookie lang, walang remember cookie.
+        // Nililinis ang nasa memory para ang mabasa ay ang session na na-save ng pumalyang request.
+        $sessionId = session()->getId();
+        session()->flush();
+        Auth::forgetGuards();
+        Cookie::flushQueuedCookies();
+        unset($this->defaultCookies[$this->recallerName()]);
+
+        $response = $this->withCookie(session()->getName(), $sessionId)->get(self::PROTECTED_URL);
+
+        $this->assertSentToLogin($response);
         $this->assertGuest();
     }
 

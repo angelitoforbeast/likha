@@ -94,4 +94,33 @@ class LoginCharacterizationTest extends AuthTestCase
         $this->assertSentToLogin($response);
         $this->assertGuest();
     }
+
+    /** Totoong naka-encrypt na cookie ng CEO na may isang character na binago: tinatanggihan ng framework. */
+    public function test_tampered_real_remember_cookie_signs_nobody_in(): void
+    {
+        $user = $this->user('CEO');
+        [$login] = $this->postLogin(['email' => $user->email, 'password' => self::PASSWORD]);
+
+        $encrypted = null;
+        foreach ($login->headers->getCookies() as $cookie) {
+            if ($cookie->getName() === $this->recallerName()) {
+                $encrypted = $cookie->getValue();
+            }
+        }
+        $this->assertNotNull($encrypted, 'Walang remember cookie sa login ng CEO.');
+
+        // Kontrol: ang hindi ginalaw na cookie ay nagsa-sign-in, kaya ang pagbabago lang ang dahilan ng pagtanggi.
+        $this->freshBrowser();
+        $this->withUnencryptedCookie($this->recallerName(), $encrypted)->get(self::PROTECTED_URL)->assertOk();
+
+        // Binabago ang isang character sa gitna ng ciphertext (base64 ng JSON na may iv, value, mac).
+        $middle = intdiv(strlen($encrypted), 2);
+        $tampered = substr_replace($encrypted, $encrypted[$middle] === 'A' ? 'B' : 'A', $middle, 1);
+
+        $this->freshBrowser();
+        $response = $this->withUnencryptedCookie($this->recallerName(), $tampered)->get(self::PROTECTED_URL);
+
+        $this->assertSentToLogin($response);
+        $this->assertGuest();
+    }
 }

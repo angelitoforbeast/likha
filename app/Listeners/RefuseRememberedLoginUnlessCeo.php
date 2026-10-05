@@ -19,7 +19,22 @@ class RefuseRememberedLoginUnlessCeo
         $guard = Auth::guard($event->guard);
 
         // Ang password login ng CEO ay may remember=true rin sa event; viaRemember() lang ang nagsasabing cookie ang pinanggalingan.
-        if ($guard->viaRemember() && ! self::isCeo($event->user)) {
+        if (! $guard->viaRemember()) {
+            return;
+        }
+
+        try {
+            $isCeo = self::isCeo($event->user);
+        } catch (\Throwable $e) {
+            // Fail closed: naisulat na ng guard ang login id sa session bago ang event na ito. Kapag pumalya
+            // ang pagbasa ng role (hal. DB error), logout muna bago ibalik ang error, para hindi maiwang
+            // naka-sign-in ang session nang walang re-check.
+            $guard->logout();
+
+            throw $e;
+        }
+
+        if (! $isCeo) {
             $guard->logout();
         }
     }
