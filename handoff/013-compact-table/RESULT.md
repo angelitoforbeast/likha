@@ -243,7 +243,7 @@ Log in as the CEO at 1707 px wide, `/owner/private`, with the usual date.
 
 # Amendment 013-1 (branch `feat/013b-compact-tighten`, from `5f9de2e`)
 
-Status: **in progress.**
+Status: **built, reviewed and tested; still not seen in a browser.** I have no browser, so every figure below is derived from Mira's measurements and the CSS, not measured. Nothing was pushed and there is no PR. Where this section and the first part of this file disagree (widths, fonts, padding, the `rts_set` and `item_val` cells), this section is the current state.
 
 ## Plan (written before code)
 
@@ -255,3 +255,132 @@ Mira's measurement shows every column sat at its minimum content width (the tabl
 4. **Explicit widths:** every non-text header cell gets `width:1px` in compact, which makes it a fixed-width column that sits at its content width and takes no share of spare width; Page 115, Item 115 and Promo 100 get their own pixel widths; the text columns stay `width:auto` with their 135 / 155 floors, so all spare width is theirs.
 5. **Header break:** `hdr()` also allows a break after a full stop inside a label (`PROF.` / `PROFIT` / `(1D)`), so `Prof.Profit(1D)` and `Prof.%(1M)` no longer set their column's width.
 6. Old layout: every new rule under `.ow-compact`, every new attribute bound to `null` unless `owCompact`; the scoping test already pins the first.
+
+## Summary
+
+1. The `rts_set` cell is now two lines (percentage; then "from date" and the note on one line, cut with an ellipsis, full text in the title), and the other notes that could wrap (Item Val., the page cell's notes, secondary items, a long item name) are held to one or two lines with titles.
+2. Every non-text header cell has an explicit width in compact, so number columns sit at their content width and all spare width goes to the text columns; body cells went from 12px with 4px side padding to 11px with 2px, headers from 10px to 9.5px, the RTS block to 10px.
+3. Expected at 1707 px with Mira's column set: natural width about **1714** (zoom about 0.97), rows about **45 to 50 px** without a three-line text and about **57 to 66 px** with one. These are derived, not measured.
+
+## Evidence per done-when item
+
+**8a. Per-column widths.** Method: Mira found every column at its minimum content width (the table was wider than the card), so each measured width is content plus 9 px of padding and border. New width = (measured − 9) × 11/12 + 5 for a column set by its body content (11px instead of 12px; 2 + 2 px padding + 1 px rule), and (measured − 7) × 0.95 + 5 where a header word sets it. Columns with a rule of their own are derived from the rule.
+
+| Column | Measured (013) | Rule in compact now | Expected | Mira's target |
+|---|---|---|---|---|
+| page + item (the expander is inside the page cell) | 282 | `th` width 115 each; page body capped at 82 px after the 22 px chevron and 6 px gap; item lines capped at 110 px | 230 | 230 |
+| `promo` | 148 | `th` width 100; text wraps anywhere | 100 | 100 |
+| `price` | 51 | width 1px → content | 44 | 46 |
+| `np_per_order_1m` | 55 | content | 47 | 48 |
+| `adspent` | 88 | content | 77 | 72 |
+| `orders_1d` | 44 | header word "ORDERS" | 40 | 40 |
+| `proj_prof_1d` | 71 | content (the header now breaks after "PROF.") | 62 | 62 |
+| `item_val` | 69 | content: value + 2 px gap + pencil; notes capped at 44 px | 58 | 58 |
+| `item_val_ceo` | 69 | content: value + 2 px gap + pencil | 58 | 58 |
+| `cpp` | 51 | content | 44 | 46 |
+| `rts_set` | 71 | notes block capped at 64 px + 2 px gap + pencil (about 14) + 5 | 85 | up to 95 |
+| `jnt_rdt` | 109 | inner table 10px, inner cells `padding:0 2px` | 92 | 95 |
+| `tcpr` | 48 | content | 41 | 44 |
+| `breakeven_cpp` | 61 | header word "BREAKEVEN" (content alone would be 53) | 56 | 52 |
+| `proj_profit` | 78 | content | 68 | 68 |
+| `proj_pct`, `_1d`, `_3d`, `_7d` | 48 each | content (41) or header "PROF." / "%(1M)"; counted at 44 | 44 each | 44 each |
+| `hold` | 37 | content | 31 | 34 |
+| `action`, `claude_action`, `ceo_action` | 135 each | `width:auto`, floor 135, all spare width | 135+ each | 135 or wider |
+
+Columns outside Mira's set follow the same rule (`width:1px` → content): `orders`, `proceed`, `pcpp`, `per_order`, the other `np_per_order*`, `proj_prof_3d` / `_7d`, `ship`, `cod_fee`. `claude_reason` and `ceo_reason` are `width:auto` with a floor of 155.
+
+**8b. Arithmetic.** 230 + 100 + 44 + 47 + 77 + 40 + 62 + 58 + 58 + 44 + 85 + 92 + 41 + 56 + 68 + (4 × 44 = 176) + 31 + (3 × 135 = 405) = **1714 px ≤ 1730**. Zoom = 1660 / 1714 = **0.968**. Two columns miss their suggested target because their content cannot be narrower without changing what it says: `adspent` (77 against 72: a figure such as ₱123,456.78 in the bold total row) and `breakeven_cpp` (56 against 52: the word BREAKEVEN). `rts_set` is 10 under its allowance, which pays for both. If the real total comes out over 1730, the cheapest levers are the `rts_set` cap (64 → 56) and Promo (100 → 90).
+
+**8c. The `rts_set` rule.** `resources/views/owner/_fit_to_width.blade.php` lines 43 to 45:
+
+```css
+.ow-compact > table > tbody > tr > td[data-col="rts_set"] > span > div > template + div { display:block; max-width:64px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; }
+.ow-compact > table > tbody > tr > td[data-col="rts_set"] > span > div > template + div > span { display:block; }
+.ow-compact > table > tbody > tr > td[data-col="rts_set"] > span > div > template + div > div { display:inline !important; white-space:nowrap !important; max-width:none !important; margin:0 3px 0 0 !important; }
+```
+
+The first rule is the block around the percentage and its notes; the second puts the percentage on its own line; the third puts the "from date" note and the comment note side by side on the next line. The full text of both notes is in a compact-only `:title` on that block (`private.blade.php`, the `<div>` under `x-if="row.rts_pct !== null"`). I took "the estimated / updated note" to be the comment line (`rts_comment`, shown with 💬); it is the only other note in that cell. With "from 2026-10-01" taking about 62 of the 64 px, the comment is mostly cut and is read from the title.
+
+**8d. Expected heights** (cell content; the row adds 4 px padding and a 1 px rule):
+
+| Cell | Measured (013) | Expected now |
+|---|---|---|
+| `rts_set` | 89 to 102 | 2 × 13.2 = **about 27** (limit 34). The 💬 emoji may lift line two by a pixel or two. |
+| `jnt_rdt` | 47 | 3 × (10 × 1.2 + 1) = **about 39** |
+| `item_val` | 32 | value 13 + up to two notes of 10.4 = **24 to 34** |
+| `price` | 16 to 18 | rule unchanged: up to three short lines, about 35 |
+| item cell | 16 to 18 | name at most two lines (26), plus 11.5 per secondary-item line |
+| page cell | 23 to 59 | name wraps freely, each note one line; exempt from the limit |
+| text cells | 32 to 61 | rule unchanged: three lines and the author line, about 51 to 61 |
+
+Rows: **about 45 to 50 px** when no text cell shows three lines, **about 57 to 66 px** when one does (target 70 or less). One case can break the 47 limit and I could not rule it out: an item with two or more secondary-item lines (26 + 2 × 11.5 = 49, more with three). Mira's measurement shows item cells at 16 to 18 px, so no row had secondary lines that day.
+
+**9. Tests.** `php.bat artisan test --filter=FitToWidth` on `59f7ca7`: `Tests:    12 passed (126 assertions)`. Full suite on `59f7ca7`: `Tests:    1 failed, 3 skipped, 515 passed (5377 assertions)` (the failure is the old `ExampleTest`; base 514 / 3 / 1, plus the one new test). New test: `compact css holds explicit widths and the two line rts cell`. It pins the `width:1px` rule, the Promo and Page / Item widths, the two `rts_set` rules, the two-line item-name clamp, and that all eight new or changed `:title` bindings are gated on `owCompact`. Red runs as the developer reported them: first `missing css: th[data-col] { width:1px; }`, then, for the fix, `missing css: td:nth-child(2) > div:first-child { display:-webkit-box; …`.
+
+**10. Paths and the old layout.** `git diff --stat 5f9de2e..HEAD` (before this file's own commit):
+
+```
+ handoff/013-compact-table/AMENDMENT-1.md      | 23 +++++++++++++
+ handoff/013-compact-table/RESULT.md           | 17 ++++++++++
+ resources/views/owner/_fit_to_width.blade.php | 47 +++++++++++++++++++--------
+ resources/views/owner/private.blade.php       | 18 ++++++----
+ tests/Feature/OwnerPrivate/FitToWidthTest.php | 24 ++++++++++++++
+ 5 files changed, 109 insertions(+), 20 deletions(-)
+```
+
+(`handoff/README.md` joins with this commit.) `git diff 5f9de2e..HEAD -- resources/views/item/_table_old.blade.php` is empty. Old layout, checked by reading and by test, not in a browser:
+
+- The existing test `every new css rule is scoped so old layout cannot match` still passes: every selector starts with `.ow-compact`, `.ow-actions` or `.ow-fit-on`, and the script removes those classes in the old state.
+- `private.blade.php` changed in nine places. Seven add one `:title` that is `null` unless `owCompact`, so Alpine removes the attribute in the old layout. The eighth is the back-fill line's existing `:title`, now `(owCompact ? <its visible text> + ' — ' : '') + <the old expression>`; with `owCompact` false that is the old string exactly. The ninth is `hdr()`, which still returns the label itself when not compact. No existing `style`, `class` or `x-text` was edited.
+- The same caveat as done-when 6: the Alpine directive attributes themselves are new in the template.
+
+**11.** `git log --format='%B' 5f9de2e..HEAD | grep -ciE 'co-authored|claude-session|generated with'` prints `0`. Commits: `2580223 docs: amendment 013-1 and its plan`, `70d016c feat: tighten compact widths, two-line RTS cell and compact-only titles`, `59f7ca7 fix: clamp compact item name to two lines with full name in title`, then this file's `docs:` commit. No push, no PR.
+
+## Review
+
+`skeptic-reviewer`, standard depth, on `2580223..70d016c`: **no blocker, no major**, five minors.
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 | The Item Val. "from date" note is cut at 44 px ("from 202…") | Accepted: the 58 px target leaves no room; the full note is in the title. Raising the cap to 66 costs about 20 px of table width. |
+| 2 | Nothing held page and item names to two lines | Item name fixed (`59f7ca7`: two-line clamp, full name in a compact-only title). Page name left to wrap: it is a link with its own title, and the page cell is exempt from the height limit. |
+| 3 | Body font 12 → 11px and header 10 → 9.5px were not asked for | Deliberate, see Rulings. |
+| 4 | The new test pins strings, not rendering | Accepted: there is no browser harness; the page-cell, Item Val. and RTS-block rules are not pinned. |
+| 5 | The page cell has no slack (22 + 6 + 82 = 110 = 115 − 4 − 1) | Accepted; on the browser list. |
+
+## Rulings
+
+| # | Ruling | Reason | Cost |
+|---|---|---|---|
+| 1 | Smaller type in compact: body 11px, header 9.5px, RTS block 10px | Every column was already at its content width, so the targets (for example `cpp` 51 → 46) can only be met by smaller content or smaller padding; I used both. At the expected zoom of 0.97 an 11px figure is drawn at about 10.6 px, against 12 × 0.86 = 10.3 px on the live page. | If the zoom lands well under 0.95 the figures are smaller than today; then put the font back to 12px and accept a lower zoom. |
+| 2 | `width:1px` on every non-text header instead of a pixel width per column | It is an explicit width on each `data-col` header that makes the column fixed-width at its content, so it takes no spare width and cannot clip a large figure; a pixel number per column would clip or be ignored whenever the data is wider than I guessed. Promo, Page and Item, which wrap, have real pixel widths. | The widths in the table are expectations, not guarantees. |
+| 3 | Promo breaks anywhere | It measured 148 px at its minimum, so its text has no break point that fits 100 px. | A promo code may break in the middle of a word. |
+| 4 | Titles are added only in compact | The old layout must not gain an attribute. | No hover text on those notes in the old layout, as before. |
+| 5 | Built without Mira's "go" on the plan | Headless run; the plan was committed first (`2580223`). | Mira sees the plan only now. |
+
+## What a browser check must look at (amendment)
+
+Same setup as Mira's measurement (1707 px, CEO view, full daily column set). The one-liner from done-when 5 still works.
+
+1. `tableWidth` at zoom 1 against 1714 (limit 1730), the label against `↔ Compact 97%`, and `allCols` against the table in 8a; the three text columns at 135 or more.
+2. Row heights against 45 to 50 and 57 to 66. For the tallest row, which cell sets it.
+3. `rts_set`: two lines, the second cut with "…", hover shows both notes in full, the percentage never cut, the pencil still opens the modal. Whether the ellipsis actually draws on line two.
+4. Number columns: no figure cut or wrapped; headers break as `PROF.` / `PROFIT` / `(1D)` and `PROF.%` / `(1M)` or similar; the header row's height.
+5. Spare width: widen the window or switch on the Actions view; only the text columns should grow.
+6. Page cell: chevron and breakdown link still clickable, notes on one line with "…" and a hover text, no clipped pixel at the right edge. Item cell: a long name stops at two lines with the full name on hover; secondary lines cut with "…".
+7. Promo at 100 px: where it breaks. Item Val.: "from 202…" with the full note on hover.
+8. Old layout (`↔ 100%`): unchanged, and `document.querySelectorAll('[data-col]').length` is `0`.
+
+## Deploy steps for Mira
+
+As before: merge, pull, `php artisan view:clear`. No migration, no build, no restart.
+
+## Proposed tasks
+
+1. Tune from the measurement (low): the `rts_set` cap (64), Promo (100), the Item Val. note cap (44) and the fonts are one value each in the partial.
+2. Decide what a row with several secondary-item lines should do (low): each is a line today, and they are the one thing that can still push a non-text cell past the RTS block.
+
+## Suggestions for Mira
+
+- Measure once more with the one-liner before the owner looks; the two numbers that decide it are `tableWidth` (1730 or less) and the height of the tallest row.
+- The font trade in Ruling 1 is the one thing here the owner might notice that you did not ask for by name; it is the only way I found to reach the per-column targets.
