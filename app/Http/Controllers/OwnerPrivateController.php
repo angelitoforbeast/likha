@@ -119,6 +119,53 @@ class OwnerPrivateController extends Controller
         Cache::forever(self::CACHE_VERSION_KEY, (string) time());
     }
 
+    /**
+     * Sino ang huling nag-log ng RTS% (display lang, walang computation na bumabasa nito).
+     * Key: page||canonical item||effective_date||rts (2 decimals) → pangalan ng user.
+     * Best effort: kapag pumalya, [] — hindi dapat masira ang page.
+     */
+    protected function rtsSetByMap(string $date, \App\Services\ItemAliasResolver $aliases): array
+    {
+        if (!Schema::hasTable('page_item_settings_log')) return [];
+
+        try {
+            $rows = DB::table('page_item_settings_log as l')
+                ->leftJoin('users as u', 'u.email', '=', 'l.user_email')
+                ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+                ->where('l.effective_date', '<=', $date)
+                ->whereNotNull('l.new_rts_pct')
+                ->orderByDesc('l.id')
+                ->select([
+                    'l.page_name', 'l.item_name', 'l.effective_date',
+                    'l.old_rts_pct', 'l.new_rts_pct', 'l.user_email',
+                    DB::raw('COALESCE(ep.name, u.name) AS user_name'),
+                ])
+                ->get();
+
+            $map = [];
+            foreach ($rows as $r) {
+                $new = number_format((float)$r->new_rts_pct, 2, '.', '');
+                // Hindi nagbago ang RTS (promo/cost-only save) → hindi ito ang nag-set
+                if ($r->old_rts_pct !== null && number_format((float)$r->old_rts_pct, 2, '.', '') === $new) continue;
+
+                $name = trim((string)($r->user_name ?? ''));
+                if ($name === '') {
+                    $name = trim(explode('@', (string)($r->user_email ?? ''))[0]);
+                }
+                if ($name === '') continue;
+
+                $key = strtolower(trim((string)$r->page_name)).'||'.$aliases->canonicalKey((string)$r->item_name)
+                    .'||'.substr((string)$r->effective_date, 0, 10).'||'.$new;
+                if (!isset($map[$key])) $map[$key] = $name;
+            }
+
+            return $map;
+        } catch (\Throwable $e) {
+            \Log::warning('rtsSetByMap failed: '.$e->getMessage());
+            return [];
+        }
+    }
+
     /** Current version sentinel (lazy-init kung blank pa). */
     private function cacheVersion(): string
     {
@@ -1727,6 +1774,7 @@ class OwnerPrivateController extends Controller
         // Canonical key collapses aliased variants (e.g. "II" + "VII" → same family);
         // on hosts with zero mappings, canonical == raw normalized key → unchanged.
         $aliases = new \App\Services\ItemAliasResolver();
+        $rtsSetByMap = $this->rtsSetByMap($date, $aliases);
         $statByKeyDate = [];
         foreach ($statRows as $s) {
             $canonKey = $aliases->canonicalKey((string)$s->item_raw);
@@ -2606,6 +2654,7 @@ class OwnerPrivateController extends Controller
                 'settings_date'         => $settings ? $settings['effective_date'] : null,
                 'has_settings'          => $settings !== null,
                 'rts_comment'           => $rtsComment,
+                'rts_set_by'            => ($settings && $rtsPct !== null) ? ($rtsSetByMap[$pk.'||'.$dominantKey.'||'.substr((string)$settings['effective_date'], 0, 10).'||'.number_format($rtsPct, 2, '.', '')] ?? null) : null,
                 'item_value_comment'    => $settings ? ($settings['item_value_comment'] ?: null) : null,
                 'promo'                 => $settings ? ($settings['promo'] ?: null) : null,
                 'jnt_rts_pct'           => $jntRtsPct,
