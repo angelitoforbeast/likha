@@ -60,6 +60,23 @@ class EndOpenSessionsTest extends AuthTestCase
         $this->assertSame(1, $this->sessionRowsOf($staff));
     }
 
+    public function test_ceo_logout_ends_every_session_of_that_account_and_no_others(): void
+    {
+        $ceo = $this->user('CEO', 'ceo@example.test');
+        $bystander = $this->user('Marketing', 'bystander@example.test');
+        $pressed = $this->loginInNewBrowser($ceo);
+        $other = $this->loginInNewBrowser($ceo);
+        $bystanderSession = $this->loginInNewBrowser($bystander);
+
+        $this->freshBrowser();
+        $this->withCookie(session()->getName(), $pressed)->post('/logout')->assertRedirect('/login');
+
+        $this->assertSentToLogin($this->getWithSessionOnly($pressed));
+        $this->assertSentToLogin($this->getWithSessionOnly($other));
+        $this->getWithSessionOnly($bystanderSession)->assertOk();
+        $this->assertSame(0, $this->sessionRowsOf($ceo));
+    }
+
     /** B1: kaninong password ang pinapalitan ng CEO, at aling session lang ang dapat matapos. */
     public static function whosePasswordIsChanged(): array
     {
