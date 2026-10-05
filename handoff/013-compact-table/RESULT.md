@@ -389,7 +389,7 @@ As before: merge, pull, `php artisan view:clear`. No migration, no build, no res
 
 # Amendment 013-2 (same branch `feat/013b-compact-tighten`)
 
-Status: **in progress.**
+Status: **built, reviewed and tested; not seen in a browser.** I still have no browser: the hover box, the one-line cells and the expanded-row texts were checked by reading the template, the CSS and the script, and by tests that look for the markup, never by running the page. Nothing was pushed and there is no PR. This section is the current state for the `rts_set`, Item Val., text and page cells; the width table of Amendment 013-1 still holds except `rts_set` (now about 56 px, total about 1685).
 
 ## Plan (written before code)
 
@@ -399,3 +399,226 @@ Tier medium. Two tasks, in order: `backend-developer` (one read-only field), the
 2. **One hover box (frontend).** The fit script owns one fixed-position element on `<body>` (outside the zoomed card and the scroll box, filled with `textContent`). The body cell gets `:data-ow-tip` and `:title`, both `owCompact ? owTip(col.id, row) : null`; `owTip()` builds the text from the row for `rts_set`, `item_val`, `action`, `claude_action`, `ceo_action`. Shown on mouse-over at the pointer, hidden on mouse-out, scroll, or a click elsewhere (which is also what a tap does).
 3. **Cells in compact:** CSS hides the notes in `rts_set` (replacing 013-1's two-line rules) and `item_val`, and the author line in the three action cells. The page-cell notes go back to full text and may wrap; 013-1's titles on them and on the hidden notes are removed again.
 4. **Expanded row shows full texts:** the three-line clamp applies only to `tbody:not(.page-section-expanded)`; that class is already set by the existing expand state. Collapsing removes the class, so the clamp returns unless he opened the text himself (`_actionOpen` is untouched). CSS only, so the old layout is not affected.
+
+## What changed
+
+| Change asked | What was built | Where |
+|---|---|---|
+| `rts_set`: percentage only; notes and who set it on hover | The notes are hidden in compact; the hover lists "from date", the 💬 note and "Set by name". 013-1's two-line rules are gone. | CSS `_fit_to_width.blade.php:43`; hover text `private.blade.php:2489` |
+| Who set the RTS | Stored but not sent: `page_item_settings_log.user_email`. New read-only row field `rts_set_by` (a display name or null), from one query per load. | `OwnerPrivateController.php`, `rtsSetByMap()` and one line in the row array |
+| Author line of Action, Claude Action, CEO Action on hover | The line is hidden in compact; the hover shows the full text, then the author line. | CSS `:68`; hover text `:2489` |
+| Item Val.: "cogs" and "from date" on hover | All notes under the value are hidden in compact (also the 💬 note, see Rulings); the hover lists them. | CSS `:45` |
+| Page notes in full, wrapping | 013-1's one-line cut and its titles are undone; notes wrap, nothing is clipped. | CSS `:50` to `:52` |
+| Expanded row shows the texts in full | The three-line cut applies only to a row that is not expanded; the "more" button is hidden while it is. | CSS `:64`, `:66` |
+| A prompt hover that is not clipped | One box on `<body>`, placed at the pointer, filled with `textContent`; the native `title` is kept. A click or tap on a cell shows it, a click elsewhere or on a button hides it. | script `_fit_to_width.blade.php:262` |
+
+## Evidence per done-when item
+
+**12. Compact cells, by reading** (`resources/views/owner/_fit_to_width.blade.php` unless named):
+
+- `rts_set` is one line: line 43, `…td[data-col="rts_set"] > span > div > template + div > div { display:none !important; }`. The cell's block holds the percentage `span` and the two note `div`s (`private.blade.php`, under `x-if="row.rts_pct !== null"`); only the `div`s match, so the percentage and the pencil remain.
+- No author line in the three text cells: line 68, `…> span > div > div[title] > template + div { display:none !important; }`. In each cell the author line is the only `div` that directly follows a `<template>` inside the titled block; the text is the first child and "more" is a `button`.
+- No "cogs" or date note in Item Val.: line 45, `…td[data-col="item_val"] > span > div > template + div > div { display:none !important; }`. `item_val_ceo` has no note in the template at all (value and pencil only), so there was nothing to hide there.
+- Page notes in full: line 50 `.page-cell-body { max-width:82px; }` (no `overflow:hidden` any more) and line 52 `.page-cell-body div { white-space:normal; overflow-wrap:anywhere; }`. No ellipsis rule touches the page cell.
+
+**13. Hover content, escaped.** The body cell (`private.blade.php:759`) carries `:data-ow-tip="owCompact ? owTip(col.id, row) : null"` and the same expression as `:title`. Alpine sets both as attribute values, which cannot hold markup. `owTip()` (`private.blade.php:2489`):
+
+```js
+owTip(colId, row){
+  const L = [];
+  if (colId === 'rts_set') {
+    if (row.rts_pct === null || row.rts_pct === undefined) return null;
+    if (row.settings_date) L.push('from ' + row.settings_date);
+    if (row.rts_comment)   L.push('💬 ' + row.rts_comment);
+    if (row.rts_set_by)    L.push('Set by ' + row.rts_set_by);
+  } else if (colId === 'item_val') {
+    if (row.item_value === null || row.item_value === undefined) return null;
+    if (row.item_value_source === 'cogs') L.push('cogs');
+    if (row.item_value_source === 'manual' && row.settings_date) L.push('from ' + row.settings_date);
+    if (row.item_value_source === 'manual' && row.item_value_comment) L.push('💬 ' + row.item_value_comment);
+  } else if (colId === 'action') {
+    if (!row.action_comment) return null;
+    L.push(row.action_comment);
+    if (row.action_by) L.push('✎ ' + row.action_by + (row.action_at ? (' · ' + row.action_at) : ''));
+  } else if (colId === 'claude_action' || colId === 'ceo_action') {
+    const p = colId === 'claude_action' ? 'claude' : 'ceo';
+    if (!row[p + '_action']) return null;
+    L.push(row[p + '_action']);
+    const meta = [row[p + '_source'], row[p + '_at']].filter(Boolean).join(' · ');
+    if (meta) L.push(meta);
+  } else {
+    return null;
+  }
+  return L.length ? L.join('\n') : null;
+},
+```
+
+The box itself (`_fit_to_width.blade.php`, between `// ow-tip-start` at line 262 and `// ow-tip-end`): `var text = cell.getAttribute('data-ow-tip'); … tip.textContent = text;` on a `div` appended to `document.body` with `position:fixed`, placed from the pointer's `clientX` / `clientY`. No HTML sink: the tests `fit script never writes html` and `compact cells show notes on hover only` pin `textContent` and the absence of `innerHTML`, `x-html`, `preventDefault` and `stopPropagation`.
+
+**14. Expanded row.** Code path: the chevron calls `togglePageExpand()`, "Expand all" calls `toggleAllExpand()`; both set `expandedPages[page].open`, and the row's `<tbody>` already binds `page-section-expanded` to that flag (`private.blade.php:663`). The three-line cut is now `_fit_to_width.blade.php:64`, `.ow-compact > table > tbody:not(.page-section-expanded) > tr > td:is(…) … div:first-child[style*="ellipsis"] { -webkit-line-clamp:3 … }`, so it does not apply while the class is on, and the general rule above it (wrap, no max-width) shows the whole text. Line 66 hides "more" in an expanded section. Collapse: the class goes, the cut applies again to any text whose own state is closed; a text he opened with "more" has `_actionOpen` true, its bound style then has no `ellipsis`, and the cut never matched it, so it stays open. Nothing writes `_actionOpen`. Covered by reasoning and by the test pinning both selectors, not by running it.
+
+**15. Tests.** `artisan test --filter=FitToWidth` on `d27dd1c`: `Tests:    13 passed (143 assertions)`. Full suite on `d27dd1c`: `Tests:    1 failed, 3 skipped, 520 passed (5402 assertions)` (the failure is the old `ExampleTest`; base 515 / 3 / 1; five new tests). New: `compact cells show notes on hover only` (the markers of this amendment) and `RtsSetByMapTest` (4 tests). Red runs as the developers reported them: `missing css: td[data-col="rts_set"] > span > div > template + div > div { display:none !important; }`; `Method …OwnerPrivateController::rtsSetByMap() does not exist`; and for the fix, `-'Person A' +'Person B'`.
+
+**16. Paths.** `git diff --stat 5f9de2e..HEAD` (before this file's own commit):
+
+```
+ app/Http/Controllers/OwnerPrivateController.php |  66 ++++++++++
+ handoff/013-compact-table/AMENDMENT-1.md        |  23 ++++
+ handoff/013-compact-table/AMENDMENT-2.md        |  21 ++++
+ handoff/013-compact-table/RESULT.md             | 161 ++++++++++++++++++++++++
+ handoff/README.md                               |   2 +-
+ resources/views/owner/_fit_to_width.blade.php   |  98 ++++++++++++---
+ resources/views/owner/private.blade.php         |  36 +++++-
+ tests/Feature/OwnerPrivate/FitToWidthTest.php   |  61 +++++++++
+ tests/Feature/OwnerPrivate/RtsSetByMapTest.php  |  96 ++++++++++++++
+ 9 files changed, 543 insertions(+), 21 deletions(-)
+```
+
+The controller is `app/Http/Controllers/OwnerPrivateController.php`; **a second test file** came with it (`RtsSetByMapTest.php`), which the list in done-when 16 does not name. Its diff (`git diff 2f23cde..d27dd1c -- app/Http/Controllers/OwnerPrivateController.php`) is three additions and no removal:
+
+```php
+// 1. new helper, above cacheVersion()
+protected function rtsSetByMap(string $date, \App\Services\ItemAliasResolver $aliases): array
+{
+    if (!Schema::hasTable('page_item_settings_log')) return [];
+    try {
+        $select = [
+            'l.id', 'l.page_name', 'l.item_name', 'l.effective_date',
+            'l.old_rts_pct', 'l.new_rts_pct', 'l.user_email',
+            DB::raw('COALESCE(ep.name, u.name) AS user_name'),
+        ];
+        $hasScope = Schema::hasColumn('page_item_settings_log', 'scope');
+        if ($hasScope) $select[] = 'l.scope';
+
+        $rows = DB::table('page_item_settings_log as l')
+            ->leftJoin('users as u', 'u.email', '=', 'l.user_email')
+            ->leftJoin('employee_profiles as ep', 'ep.user_id', '=', 'u.id')
+            ->where('l.effective_date', '<=', $date)
+            ->whereNotNull('l.new_rts_pct')
+            ->orderBy('l.effective_date')
+            ->orderBy('l.id')
+            ->select($select)
+            ->get();
+
+        $map  = [];
+        $runs = [];
+        foreach ($rows as $r) {
+            $pair = strtolower(trim((string)$r->page_name)).'||'.$aliases->canonicalKey((string)$r->item_name);
+            $val  = number_format((float)$r->new_rts_pct, 2, '.', '');
+            if (!isset($runs[$pair]) || $runs[$pair]['val'] !== $val) {
+                $name = '';
+                if (!($hasScope && in_array((string)($r->scope ?? ''), ['promo', 'cogs'], true))) {
+                    $name = trim((string)($r->user_name ?? ''));
+                    if ($name === '') $name = trim(explode('@', (string)($r->user_email ?? ''))[0]);
+                }
+                $runs[$pair] = ['val' => $val, 'name' => $name];
+            }
+            $key = $pair.'||'.substr((string)$r->effective_date, 0, 10).'||'.$val;
+            if ($runs[$pair]['name'] !== '') $map[$key] = $runs[$pair]['name'];
+            else unset($map[$key]);
+        }
+        return $map;
+    } catch (\Throwable $e) {
+        \Log::warning('rtsSetByMap failed: '.$e->getMessage());
+        return [];
+    }
+}
+
+// 2. in itemSummary(), right after  $aliases = new \App\Services\ItemAliasResolver();
+$rtsSetByMap = $this->rtsSetByMap($date, $aliases);
+
+// 3. in the row array, right after  'rts_comment' => $rtsComment,
+'rts_set_by' => ($settings && $rtsPct !== null) ? ($rtsSetByMap[$pk.'||'.$dominantKey.'||'.substr((string)$settings['effective_date'], 0, 10).'||'.number_format($rtsPct, 2, '.', '')] ?? null) : null,
+```
+
+(Comments and the docblock are left out here; the code lines are as committed.) No existing query, calculation, cache key or payload value changed; `git diff 5f9de2e..HEAD -- resources/views/item/_table_old.blade.php` is empty.
+
+Old layout: every selector still starts with `.ow-compact`, `.ow-actions` or `.ow-fit-on` (test); `data-ow-tip` and the cell `title` are `null` unless `owCompact`; the box is only created when a cell with `data-ow-tip` is hovered or clicked, and such cells exist only in compact. The five 013-1 title bindings on the page notes, the back-fill line, the `rts_set` block and the Item Val. notes are back to `617fb34`: `git diff 617fb34..HEAD -- resources/views/owner/private.blade.php` removes six lines in all (the two header labels, the repeated header cell, the two `x-for` cells, and the secondary-item `div` that gained a compact-only title), none of them in those elements.
+
+**17.** `git log --format='%B' 5f9de2e..HEAD | grep -ciE 'co-authored|claude-session|generated with'` prints `0`. Commits of this amendment: `2f23cde docs: amendment 013-2 and its plan`, `2bbe3c9 feat: add read-only rts_set_by to owner private rows`, `f5f9a69 feat: compact cells show notes in one hover box, full texts when expanded`, `d27dd1c fix: credit rts_set_by to who started the value run, not who carried it`, then this file's `docs:` commit. No push, no PR.
+
+## Expected row heights now
+
+Cell content, then the row adds 4 px padding and a 1 px rule. Derived, not measured.
+
+| Cell | 013 measured | After 013-2 (expected) |
+|---|---|---|
+| `rts_set` | 89 to 102 | one line, about 13 to 15 (the pencil) |
+| text cells | 32 to 61 | at most three lines of 13.2 = about 40, no author line |
+| `jnt_rdt` | 47 | about 39 |
+| Item Val. | 32 | one line, about 13 to 15 |
+| page cell | 23 to 59 | name plus every note in full; a note that wraps adds a line. Roughly 13 to 26 for the name, 12 to 24 for "mixed primary", 11 to 22 for "computed since", 12 to 24 for "back-filled" |
+| everything else | 16 to 18 | about 13 to 15 |
+
+So a row without page notes is **about 44 to 46 px** (the RTS block or a three-line text sets it), against 104 measured after 013. A row with page notes is as tall as its notes need, by the owner's choice: up to about 80 to 100 px when all three notes show and wrap. An expanded row is as tall as its longest text.
+
+Width: `rts_set` drops from the 85 px of 013-1 to about 56 (percentage, gap, pencil), so the expected total goes from 1714 to **about 1685** (zoom about 0.985).
+
+## Review
+
+`skeptic-reviewer`, standard depth, on `2f23cde..f5f9a69`: no blocker, **one major**, minors. One fix loop; its re-check on `d27dd1c`: **closed**.
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 | **Major:** `rts_set_by` named the person who only carried the RTS forward. A promo-only or remark-only save on a new date is logged with the carried RTS as the new value, so "latest log row" named the wrong person. | Fixed (`d27dd1c`): the log is walked in effective-date order and each value is credited to whoever started its run. Re-check: closed. |
+| 2 | The query reads the whole log on each uncached load | Accepted: one query, linear walk, cached with the rest of the payload. Worth a date floor if the log grows large. |
+| 3 | The fallback shows the part of an email before `@` to every role | Accepted: never a full address; `action_by` already shows names to everyone. |
+| 4 | No end-to-end test of the `rts_set_by` row field | Accepted: the data endpoint has no test harness (it needs dozens of tables). The key is built the same way on both sides, checked by reading. If the two ever differ the field is silently null. |
+| 5 | Tests look for strings; `owTip()` and the box are never executed | Accepted: no JS harness in this repo. |
+| 6 | The box is not refreshed while the pointer rests on one cell and the data changes | Accepted: it updates on the next move. |
+| 7 | (re-check) The "started by a promo or cost save → no name" rule needs a `scope` column, and no migration in the repo adds it | Open question for Mira, see "What was left out". |
+| 8 | (re-check) Someone who retypes the same value is not credited; the starter of the run is | Accepted: that is the rule. |
+
+Policy note: the reviewer wrote one line into its memory file although told not to; I removed that line again so the diff stays within done-when 16. Its content is under Suggestions.
+
+## Rulings
+
+| # | Ruling | Reason | Cost |
+|---|---|---|---|
+| 1 | "Who set" = who started the current run of that value, read from the save log | The log is the only place a person is stored, and it also records saves that merely carry the RTS; the latest row would often name the wrong person. | The name can be missing; in the cases under "What was left out" it can still be wrong. |
+| 2 | The Item Val. 💬 note also goes to the hover | The amendment names "cogs" and the date; leaving only the comment visible, cut at 44 px, would be the one note still wrapping or cut in that cell. | One more thing behind a hover; say so if he wants it back. |
+| 3 | The hover box is placed at the pointer, not against the cell | The card can be zoomed, and element rectangles under CSS zoom differ between browser versions; pointer coordinates are always in screen pixels. | The box does not follow the pointer inside a cell. |
+| 4 | Expanded rows show all five text columns in full, Reasons included | One rule for the text columns; he expands to read. | None seen. |
+| 5 | Claude Reason and CEO Reason get no hover box | The amendment names the three action columns; the Reasons have no author line and keep their native title and "more". | Their full text needs "more", an expanded row, or the slow native title. |
+| 6 | Touch: a tap shows the box through the same click handler; taps on buttons and links hide it | It adds a listener on `document` and never stops or prevents an event, so the pencil, "more" and the links act as before. | Not tried on a touch screen. |
+| 7 | Built without Mira's "go" on the plan | Headless run; plan committed first (`2f23cde`). | Mira sees the plan only now. |
+
+## What was left out, and why
+
+- **`item_val_ceo` has no hover:** its cell has no note in the template (value and pencil only), so there is nothing to move.
+- **Who set the RTS can be empty or, rarely, wrong.** Empty: no log row matches the page, item family, effective date and value (for example a value saved before the log existed in May 2026). Possibly wrong, both rare and both only for a value that has no earlier log row of its own: (a) a remark-only save with the RTS field left blank is logged like a typed RTS and cannot be told apart; (b) a promo-only or cost-only save is left unnamed only if the log table has a `scope` column, and **no migration in the repo adds that column** (the code writes it only when it exists). I could not check production. If the column is missing there, case (b) names the person who made that first save.
+- **No stored "set by" field:** not added, as instructed. See Proposed tasks.
+- **Nothing was run in a browser or on a touch screen.**
+
+## Deploy steps for Mira
+
+1. Merge, pull, `php artisan view:clear`. No migration, no build, no restart.
+2. `rts_set_by` comes with freshly built row data. Rows served from the page's read cache do not have it until the cache is rebuilt; the page's own "🔄 Refresh" button does that. Until then the hover simply has no "Set by" line.
+
+## What a browser check must look at (amendment 013-2)
+
+CEO view, compact, 1707 px.
+
+1. **Row heights** with the one-liner from done-when 5: rows without page notes near 45; `tableWidth` near 1685.
+2. **`rts_set`:** only the percentage and the pencil. Hover: a dark box at the pointer, at once, with "from date", the 💬 note and "Set by name". Check one row whose RTS you know who set, and one where a promo was changed later by someone else: the name must be the person who set the RTS.
+3. **Action, Claude Action, CEO Action:** at most three lines, no author line. Hover: the full text, then the author line. Pencil and "more" still work, and the box disappears when you click them.
+4. **Item Val.:** value and pencil only; hover shows "cogs" or "from date" and the note. Item Val. (CEO): no hover.
+5. **Page notes:** "mixed primary", "computed since", "back-filled" in full, wrapping, nothing cut; clicking them still opens the breakdown.
+6. **Expand a row:** its texts show in full, "more" is gone; collapse: three lines again. Open one text with "more", expand and collapse the row: that text stays open. Then "Expand all" and "Hide all".
+7. **The box:** near the right and bottom edges of the window it stays inside; it is not clipped by the table or shrunk by the zoom; it goes away on scroll and when the pointer leaves the table; it sits under the edit modals, not over them. Note whether the native tooltip appearing a second later on top of it is acceptable.
+8. **Touch** (phone or device emulation): tap a cell → box; tap elsewhere → gone; tap the pencil → editor opens, no box left behind.
+9. **Old layout (`↔ 100%`):** notes and author lines visible as before, no box, `document.querySelectorAll('[data-ow-tip]').length` is `0`.
+10. **Marketing user:** `rts_set` hover works; "Set by" shows a name, never an email address.
+
+## Proposed tasks
+
+1. **Store who set the RTS** (medium, needs Busing's yes and a migration): a `rts_set_by` column on `page_item_settings`, written only when the RTS field itself is typed. It removes the guessing from the log.
+2. **Confirm or add the `scope` column on `page_item_settings_log`** (low): the code writes it when present; the repo has no migration for it.
+3. **A date floor for the log query** (low) when the log grows.
+4. **Hover for the Reason columns** (low), if he wants the same there.
+5. **A test harness for the data endpoint** (medium): it would let the row wiring of fields like this one be proven.
+
+## Suggestions for Mira
+
+- Check step 2 of the browser list with a real case before telling Busing the name is reliable; until task 1 exists, "Set by" is a best reading of the log.
+- For the reviewer's memory after merge (not written in this run): `saveItemSetting` logs the carried RTS as the new value on promo-only and remark-only saves, so any reading of that log for "who" must follow runs of a value; tests on this page look for strings and never execute the script.
