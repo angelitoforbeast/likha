@@ -121,7 +121,8 @@ class FitToWidthTest extends OwnerPrivateTestCase
         $this->assertNotFalse($a, 'missing marker: // fit-verify-start');
         $this->assertNotFalse($b, 'missing marker: // fit-verify-end');
         $verify = substr($html, $a, $b - $a);
-        foreach (['i < 3', 'owFitFactor(', 'break'] as $s) {
+        // Mula sa lapad na talagang in-apply (container / f) ang pagwawasto, hindi sa unang tantiya.
+        foreach (['i < 3', 'owFitFactor(', 'break', 'tw <= cw', '(container / f) * tw / cw'] as $s) {
             $this->assertTrue(str_contains($verify, $s), "verify pass missing: {$s}");
         }
         $this->assertFalse(str_contains($verify, 'while'), 'verify pass must be bounded: found while');

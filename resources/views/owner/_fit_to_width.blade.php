@@ -82,20 +82,19 @@
           for (var i = 0; i < 3 && f < 1; i++) {
             var cw = card.offsetWidth, tw = table.offsetWidth;   // parehong nasa zoom ng card, kaya ratio lang ang mahalaga
             if (!(cw > 0) || tw <= cw) break;
-            natural = natural * tw / cw;
+            natural = (container / f) * tw / cw;   // mula sa lapad na talagang in-apply, hindi sa unang tantiya
             f = owFitFactor(container, natural);
             card.style.zoom = String(f);
           }
           // fit-verify-end
           label('↔ Fit ' + Math.round(f * 100) + '%');
         } catch (e) {
-          // Pumalya ang sukat: ibalik sa dati, at 100% ang ipakita ng switch (hindi sinusulat sa storage).
+          // Pumalya ang sukat: 100% na talaga ang switch (sa memory lang, hindi sinusulat sa storage).
+          // Sa susunod na click, babalik sa Fit at susubok ulit.
           box.classList.remove('ow-fit-on');
           card.style.zoom = '';
-          var kept = mode;
           mode = 'full';
           label('↔ 100%');
-          mode = kept;
         }
       }
 
