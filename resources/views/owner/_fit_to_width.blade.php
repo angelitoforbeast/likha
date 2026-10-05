@@ -23,6 +23,15 @@
   }
   // fit-factor-end
 
+  // Hindi magagamit ang Fit: 100% ang label, naka-disable at mukhang naka-disable.
+  function disableSwitch(b){
+    b.textContent = '↔ 100%';
+    b.setAttribute('aria-pressed', 'false');
+    b.disabled = true;
+    b.style.cursor = 'default';
+    b.style.opacity = '.5';
+  }
+
   function init(){
     try {
       var btn = document.getElementById('owFitSwitch');
@@ -33,9 +42,7 @@
       var ok = !!(window.CSS && CSS.supports && CSS.supports('zoom', '0.5'));
       if (!card || !box || !table || !ok) {
         // Walang table o walang zoom support: 100% lang, naka-disable ang switch.
-        btn.textContent = '↔ 100%';
-        btn.setAttribute('aria-pressed', 'false');
-        btn.disabled = true;
+        disableSwitch(btn);
         return;
       }
 
@@ -70,11 +77,25 @@
           var natural = Math.max(card.offsetWidth, table.offsetWidth);
           var f = owFitFactor(container, natural);
           card.style.zoom = (f < 1 ? String(f) : '');
+          // fit-verify-start
+          // Hindi eksaktong linear ang pagliit (1px borders, maliit na text): hanggang 3 beses na pagwawasto, tapos tigil.
+          for (var i = 0; i < 3 && f < 1; i++) {
+            var cw = card.offsetWidth, tw = table.offsetWidth;   // parehong nasa zoom ng card, kaya ratio lang ang mahalaga
+            if (!(cw > 0) || tw <= cw) break;
+            natural = natural * tw / cw;
+            f = owFitFactor(container, natural);
+            card.style.zoom = String(f);
+          }
+          // fit-verify-end
           label('↔ Fit ' + Math.round(f * 100) + '%');
         } catch (e) {
-          // Pumalya ang sukat: ibalik sa dati.
+          // Pumalya ang sukat: ibalik sa dati, at 100% ang ipakita ng switch (hindi sinusulat sa storage).
           box.classList.remove('ow-fit-on');
           card.style.zoom = '';
+          var kept = mode;
+          mode = 'full';
+          label('↔ 100%');
+          mode = kept;
         }
       }
 
@@ -108,7 +129,13 @@
       }
 
       schedule();
-    } catch (e) {}
+    } catch (e) {
+      // Pumalya ang init: hanapin ulit ang button dito para hindi na ito mag-throw.
+      try {
+        var b = document.getElementById('owFitSwitch');
+        if (b) disableSwitch(b);
+      } catch (e2) {}
+    }
   }
 
   // Nasa toolbar ang script, bago pa ang table: hintayin ang DOM.

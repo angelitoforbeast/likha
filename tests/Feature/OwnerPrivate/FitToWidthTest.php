@@ -114,5 +114,16 @@ class FitToWidthTest extends OwnerPrivateTestCase
         foreach (['document', 'window', 'localStorage'] as $s) {
             $this->assertFalse(str_contains($fn, $s), "not pure: {$s}");
         }
+
+        // Verify pass pagkatapos i-apply ang factor: may hangganan (3 beses), iisang factor function pa rin.
+        $a = strpos($html, '// fit-verify-start');
+        $b = strpos($html, '// fit-verify-end');
+        $this->assertNotFalse($a, 'missing marker: // fit-verify-start');
+        $this->assertNotFalse($b, 'missing marker: // fit-verify-end');
+        $verify = substr($html, $a, $b - $a);
+        foreach (['i < 3', 'owFitFactor(', 'break'] as $s) {
+            $this->assertTrue(str_contains($verify, $s), "verify pass missing: {$s}");
+        }
+        $this->assertFalse(str_contains($verify, 'while'), 'verify pass must be bounded: found while');
     }
 }
