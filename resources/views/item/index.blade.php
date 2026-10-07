@@ -327,7 +327,7 @@
     .il-tab.active { background:#1e293b; border-color:#1e293b; color:#fff; }
     .il-tab:focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
     .il-table { table-layout:fixed; width:100%; }
-    /* Lapad (spec §8): Item = natitira (min 300) + fixed na columns. Kasya sa ≈1,333 px ng 1,366 na window. */
+    /* Lapad: Item = natitira (min 300) + fixed na columns. Kasya sa ≈1,333 px ng 1,366 na window. */
     #il-table-order { min-width:1096px; }
     #il-table-sales { min-width:1122px; }
     .il-table thead th {
@@ -431,7 +431,7 @@
       position:sticky; bottom:0; z-index:20; font-weight:700; color:#0f172a;
       background:#f1f5f9; border-top:2px solid #cbd5e1;
     }
-    /* 1,100–1,365: Item min 260, Profit % sub-columns 72 (spec §8). */
+    /* 1,100–1,365: Item min 260, Profit % sub-columns 72. */
     @media (max-width: 1365px) {
       #il-table-order { min-width:1056px; }
       #il-table-sales { min-width:1034px; }
@@ -808,7 +808,7 @@
   @endif
 
   {{-- Category filter (lahat ng role). Naka-AND sa sourcing chips sa itemGroups(). --}}
-  {{-- Handoff 004: lalabas lang habang naka-show ang CATEGORY column. --}}
+  {{-- Lalabas lang habang naka-show ang CATEGORY column. --}}
   <div x-show="categoryColVisible()" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:6px 12px;
               display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
     <label for="category-filter" style="font-size:11px;color:#475569;font-weight:700;margin-right:2px;">Category:</label>
@@ -3468,7 +3468,7 @@
         const s = this.suppliersFor(name)[0];
         return s ? String(s.supplier || '') : '';
       },
-      // Next step — isang state kada item, unang tumama ang nananalo (spec §4.1). rank: pula 0 … abo 4, walang data 5.
+      // Next step — isang state kada item, unang tumama ang nananalo. rank: pula 0 … abo 4, walang data 5.
       ilNext(name){
         const S = this.stockFor(name), P = this.stockSet(name);
         const st = (key, rank, text, tone, tip) => ({ key, rank, text, tone, tip });
@@ -3494,7 +3494,7 @@
         return st('by', 2, sup ? '🟡 Order from ' + sup + ' by ' + by : '🟡 Order by ' + by, 'yellow',
                   'The last day to order without running out, based on the lead time');
       },
-      // Isang maikling dahilan sa ilalim ng Next step (spec §4.2); ang buong paliwanag ay nasa details.
+      // Isang maikling dahilan sa ilalim ng Next step; ang buong paliwanag ay nasa details.
       ilReason(name){
         const S = this.stockFor(name), P = this.stockSet(name);
         if (!this.stock.ready || !S || !P) return '';
@@ -3544,7 +3544,7 @@
         }
         return { items, pcs, peso };
       },
-      // Days left (spec §4.4): buong araw; abo "—" kapag walang data / bilangin muna / halos walang benta.
+      // Days left: buong araw; abo "—" kapag walang data / bilangin muna / halos walang benta.
       ilDaysLeft(name){
         const S = this.stockFor(name), P = this.stockSet(name);
         const d = (text, tone, tip) => ({ text, tone, tip });

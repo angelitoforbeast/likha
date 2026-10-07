@@ -1,5 +1,5 @@
 {{--
-  🌙 Night run (handoff 007, spec §9, §10): huling 14 na gabi + pulang banner.
+  🌙 Night run: huling 14 na gabi + pulang banner.
   Lahat ng text (sheet name, mensahe, reason, code, page, item) ay galing sa labas: {{ }} o x-text lang (walang raw output).
   Inaasahan: $night = ['nights' => [...], 'banner' => [...]], $isCeo, $nightSettings (CEO lang, kung hindi ay null).
 --}}

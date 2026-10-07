@@ -222,7 +222,7 @@ class ItemController extends Controller
         return response()->json(['ok' => true, 'suppliers' => $map]);
     }
 
-    /** supply_orders.status na "hindi pa dumarating / hindi pa nabibilang" = open (Mira, handoff 001). */
+    /** supply_orders.status na "hindi pa dumarating / hindi pa nabibilang" = open (inaprubahan ng reviewer). */
     private const OPEN_PO_STATUSES = ['ordered', 'delivered'];
 
     /**

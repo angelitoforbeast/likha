@@ -9,17 +9,17 @@ use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Handoff 012 (D3): ang sign-in na galing sa remember cookie (hindi sa password) ay para lang sa account
+ * Ang sign-in na galing sa remember cookie (hindi sa password) ay para lang sa account
  * na CEO pa rin sa oras na iyon. Kung hindi na CEO (pinalitan ang role, binura ang employee profile),
  * tinatanggihan: logout agad, kaya nabubura ang cookie at napapalitan ang remember token.
  *
- * Amendment 012-1 (A1): kailangan din ng pangalawang cookie na inilabas sa password login ng CEO (user id at
+ * Kailangan din ng pangalawang cookie na inilabas sa password login ng CEO (user id at
  * oras ng login). Tinatanggap lang ang remembered sign-in kung nandoon ito, na-decrypt ng framework, para sa
  * parehong user id, at hindi lalampas sa 30 araw. Server ang nagbibilang ng 30 araw, hindi ang browser.
  *
  * Tumatakbo ito sa loob mismo ng guard (Login event), kaya walang route o middleware na makakalaktaw.
  *
- * Amendment 012-1 (A3): tahasang nakarehistro ang dalawang method sa AppServiceProvider::register(). Sadyang
+ * Tahasang nakarehistro ang dalawang method sa AppServiceProvider::register(). Sadyang
  * HINDI `handle*` o `__invoke` ang mga pangalan, para hindi rin sila makuha ng event discovery (dobleng takbo)
  * at para hindi umasa ang re-check sa naka-cache na events file.
  */
@@ -75,7 +75,7 @@ class RefuseRememberedLoginUnlessCeo
     }
 
     /**
-     * Amendment 012-2 (B1, B2): tinatapos ang mga session na bukas na ng isang user, sa pagbura ng mga row niya
+     * Tinatapos ang mga session na bukas na ng isang user, sa pagbura ng mga row niya
      * sa session table; sa susunod na request ng mga browser na iyon, guest na sila. Kapag may
      * $exceptSessionId, naiiwan ang session na iyon (ang session ng mismong gumagawa).
      * Sa `database` na session driver lang may mabubura; sa ibang driver, walang ginagawa at walang error.

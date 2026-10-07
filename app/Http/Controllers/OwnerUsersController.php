@@ -79,12 +79,12 @@ class OwnerUsersController extends Controller
         if (Schema::hasColumn('users', 'password_plain')) {
             $updates['password_plain'] = $newPlain;
         }
-        // Handoff 012, Amendment 012-1 (A2): bagong remember token sa parehong update, para patay na ang
+        // Bagong remember token sa parehong update, para patay na ang
         // lahat ng remember cookie na inilabas bago ang palit ng password (60 chars, gaya ng framework).
         $updates['remember_token'] = \Illuminate\Support\Str::random(60);
         $updates['updated_at'] = now();
 
-        // Amendment 012-2 (B1): tapos na rin ang mga session na bukas na ng user na ito sa ibang browser.
+        // Tapos na rin ang mga session na bukas na ng user na ito sa ibang browser.
         // Naiiwan ang session ng gumagawa ng request: kapag ibang user ang pinalitan, hindi naman kanya ang
         // mga row na iyon; kapag sarili niyang password, ito lang ang natitira sa kanya.
         // Iisang transaction: kapag pumalya ang pagbura ng sessions, hindi rin napapalitan ang password.

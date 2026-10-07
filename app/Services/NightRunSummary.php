@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Ang data ng "Night run" section sa AI Checker logs page (spec 007 §9, §10): huling 14 na gabi at ang banner.
+ * Ang data ng "Night run" section sa AI Checker logs page: huling 14 na gabi at ang banner.
  *
  * CEO-only data ay dito hinaharang, hindi sa view: kapag hindi CEO, WALA sa array ang gastos (`cost_usd`,
  * `cost_complete`) at ang mga mensahe ng pumalyang sheet (raw exception text ng import job).
@@ -119,7 +119,7 @@ class NightRunSummary
                 $step->state === 'failed'                                 => ['failed', $step->reason],
                 $run === null                                             => ['failed', 'Import run not found'],
                 in_array($run->status, ['queued', 'running'], true)       => ['running', $run->message],
-                // May pumalyang sheet pero may natapos din: tumuloy ang Astra sa kung ano ang naroon (amendment 007-1, 16).
+                // May pumalyang sheet pero may natapos din: tumuloy ang Astra sa kung ano ang naroon.
                 $failed !== [] && $done > 0                               => ['done_with_failures', $run->message],
                 $run->status === 'done'                                   => ['done', $run->message],
                 default                                                   => ['failed', $run->message],

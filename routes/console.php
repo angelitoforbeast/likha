@@ -35,7 +35,7 @@ Schedule::command('holds:snapshot')
     ->withoutOverlapping()
     ->appendOutputTo(storage_path('logs/holds-snapshot.log')); // file log ng cron output
 
-// Night run (handoff 007) — macro at Likha import sa oras 1 at oras 2 (default 01:00 at 02:00, Asia/Manila).
+// Night run — macro at Likha import sa oras 1 at oras 2 (default 01:00 at 02:00, Asia/Manila).
 // Ang mga switch at oras ay nasa app_settings (CEO lang), binabasa kada `schedule:run` sa pamamagitan ng
 // NightRunSettings: mali ang oras → default; DB di available o walang app_settings → lahat OFF.
 // Naka-OFF ang switch → WALANG entry para sa hakbang na iyon (hindi lalabas sa `schedule:list`).

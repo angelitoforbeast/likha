@@ -343,7 +343,7 @@ class MacroCheckerController extends Controller
             'batches' => $batches,
             'singles' => $singles,
             'isCeo'   => $this->isCeo(),   // para sa "Manage access" link (CEO lang)
-            // 🌙 Night run (handoff 007): ang gastos ay nasa data ng CEO lang; settings para sa "Run now" form niya.
+            // 🌙 Night run: ang gastos ay nasa data ng CEO lang; settings para sa "Run now" form niya.
             'night'         => \App\Services\NightRunSummary::build($this->isCeo()),
             'nightSettings' => $this->isCeo() ? \App\Support\NightRunSettings::read() : null,
         ]);

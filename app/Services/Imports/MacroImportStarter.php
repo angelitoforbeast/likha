@@ -41,7 +41,7 @@ class MacroImportStarter
     }
 
     /**
-     * Stale rule ng night run (amendment 007-1, 17): ang queued/running na run na walang progress nang
+     * Stale rule ng night run: ang queued/running na run na walang progress nang
      * STALE_MINUTES ay isinasara. Progress = ang mas huli sa updated_at ng run at ng items nito (ginagalaw ng job
      * kada sheet). Ang run na umuusad ay hindi isinasara, gaano man katagal. Tinatawag LANG ng scheduled
      * start bago ang start(); ang button at API ay hindi (may Force-stop button sila).

@@ -604,7 +604,7 @@ Route::get ('/encoder/checker_1/ai-checker/access', [\App\Http\Controllers\Macro
 Route::post('/encoder/checker_1/ai-checker/access', [\App\Http\Controllers\MacroCheckerController::class, 'accessUpdate'])
     ->name('macro_checker.access.update');
 
-// 🌙 Night run (handoff 007) — CEO lang ang bawat isa (tinitingnan sa controller).
+// 🌙 Night run — CEO lang ang bawat isa (tinitingnan sa controller).
 Route::post('/encoder/checker_1/settings/night', [\App\Http\Controllers\NightRunController::class, 'settings'])
     ->name('night_run.settings');
 Route::post('/encoder/checker_1/ai-checker/night/run-now', [\App\Http\Controllers\NightRunController::class, 'runNow'])

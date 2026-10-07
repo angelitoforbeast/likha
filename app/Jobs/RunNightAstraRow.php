@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Isang order ng Astra night run (spec 007 §6.4), sa sariling queue na `astra` para manatiling libre
+ * Isang order ng Astra night run, sa sariling queue na `astra` para manatiling libre
  * ang `default` worker sa imports at J&T.
  *
  * PERA: ang engine ay tinatawag lang pagkatapos ng claim (`queued → running`, isang conditional UPDATE),

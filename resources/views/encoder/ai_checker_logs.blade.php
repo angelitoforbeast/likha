@@ -38,7 +38,7 @@
       @endif
     </div>
 
-    {{-- ════════ 🌙 Night run (handoff 007) ════════ --}}
+    {{-- ════════ 🌙 Night run ════════ --}}
     @include('encoder._night_run')
 
     {{-- ════════ AI Checker batches (grouped by batch_id) ════════ --}}

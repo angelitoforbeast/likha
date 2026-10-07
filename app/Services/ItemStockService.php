@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Schema;
  *   order_qty = max(0, ceil(hold + upd × (lead + palugit) − incoming − stock))
  *   doi       = round((stock + incoming − hold) × days / units, 1)  — ito ang ginagamit sa kulay at order_by
  *
- * Handoff 004: bawat base item ay may lifecycle (ItemLifecycle, as-of = end date) at dalawang result set,
+ * Bawat base item ay may lifecycle (ItemLifecycle, as-of = end date) at dalawang result set,
  * `normal` (palugit at velocity ng lifecycle) at `lugi` (palugit_lugi, 14-day) — ang page ang pumipili
  * gamit ang kita. Spec: docs/specs/004-lifecycle-restock.md.
  */
@@ -91,7 +91,7 @@ class ItemStockService
                 $ctx['stock'] = $stock;
             }
 
-            // Scaling: ang mas malaki sa 7-day at 14-day (amendment 004-1); tie = parehong numero.
+            // Scaling: ang mas malaki sa 7-day at 14-day; tie = parehong numero.
             $vNormal = $lifecycle === 'scaling' && $v7['units'] / $v7['days'] > $v14['units'] / $v14['days'] ? $v7 : $v14;
             $normal = $this->restockSet($ctx, $vNormal, $pal($lifecycle));
             $lugi   = $gated ? $this->restockSet($ctx, $v14, $pal('lugi')) : $normal;

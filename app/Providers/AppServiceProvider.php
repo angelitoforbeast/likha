@@ -19,7 +19,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        // Handoff 012, Amendment 012-1 (A3): tahasang rehistro ng re-check ng remembered login, para hindi ito
+        // Tahasang rehistro ng re-check ng remembered login, para hindi ito
         // umasa sa event discovery o sa naka-cache na events file. Dito sa register() (hindi sa boot()) para
         // mauna ito sa mga listener na galing sa discovery, na ikinakabit lang kapag nagbu-boot na ang app.
         \Illuminate\Support\Facades\Event::listen(

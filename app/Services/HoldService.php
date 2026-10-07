@@ -51,7 +51,7 @@ class HoldService
 
     /**
      * macro_output STATUS na "hindi na itutuloy" (normalized: lower, walang space/underscore).
-     * Galing sa macro_output dropdown: CANNOT PROCEED at ODZ. Inaprubahan ni Mira (handoff 001).
+     * Galing sa macro_output dropdown: CANNOT PROCEED at ODZ. Inaprubahan ng reviewer.
      */
     public const CANCELLED_STATUSES = ['cannotproceed', 'odz'];
 

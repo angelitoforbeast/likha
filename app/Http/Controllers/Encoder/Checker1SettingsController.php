@@ -52,7 +52,7 @@ class Checker1SettingsController extends Controller
             'astraEngine'   => AstraEncoder::engineSettings(),
             'astraModels'   => AstraEncoder::MODELS,
             'astraEfforts'  => AstraEncoder::EFFORTS,
-            // 🌙 Night run settings (handoff 007) — CEO lang
+            // 🌙 Night run settings — CEO lang
             'night'         => self::isCeo() ? \App\Support\NightRunSettings::read() : null,
         ]);
     }

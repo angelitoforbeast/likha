@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Night run (handoff 007, spec §6.6 at §8): settings ng gabi, "Run now", "Retry failed" at ang listahan ng
+ * Night run: settings ng gabi, "Run now", "Retry failed" at ang listahan ng
  * mga row ng isang gabi. LAHAT ay CEO lang (403 sa iba), at bawat input ay validated bago gamitin.
  * Ang mismong patakaran ng run ay nasa App\Services\NightAstraRun.
  */

@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Iisang lugar para sa "patakbuhin ang ISANG row" ng AI Checker (spec 007 §6.3) — ginagamit ng browser
+ * Iisang lugar para sa "patakbuhin ang ISANG row" ng AI Checker — ginagamit ng browser
  * (MacroCheckerController::runRow) at ng night job. Ito ang dating laman ng runRow: kunin ang row,
  * address maps, piliin ang engine, processRow, outcome, isang ai_checker_logs row, at ang payload.
  *

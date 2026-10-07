@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Ang Astra night run (spec 007 §6): aling mga order, kailan magsisimula, at ang pagbabantay kada minuto.
+ * Ang Astra night run: aling mga order, kailan magsisimula, at ang pagbabantay kada minuto.
  * Ang isang row mismo ay pinapatakbo ng job na RunNightAstraRow.
  *
  * PERA (invariant): ang engine ay tinatawag lang ng job pagkatapos ng claim na `queued → running`.
@@ -166,7 +166,7 @@ class NightAstraRun
     }
 
     /**
-     * "Run now" ng CEO para sa petsa ng mga order (spec §6.6). Walang paghihintay: kapag hindi pa pwede,
+     * "Run now" ng CEO para sa petsa ng mga order. Walang paghihintay: kapag hindi pa pwede,
      * tinatanggihan kasama ang dahilan. Walang step ang petsa → normal na start (trigger `manual`);
      * may step na tapos na (finished / stopped / did_not_run) → ang parehong run ang binubuksan ulit.
      *
@@ -422,7 +422,7 @@ class NightAstraRun
     }
 
     /**
-     * Ang tick kada minuto (spec §6.2, §6.5): ang gabing ito (simulan, maghintay o "Did not run"), tapos ang
+     * Ang tick kada minuto: ang gabing ito (simulan, maghintay o "Did not run"), tapos ang
      * pagbabantay sa BAWAT tumatakbong run — anumang gabi, anumang trigger, naka-on man o hindi ang switch.
      */
     public function tick(): void

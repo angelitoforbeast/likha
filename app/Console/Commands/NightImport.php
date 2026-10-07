@@ -9,7 +9,7 @@ use App\Support\NightRunSettings;
 use Illuminate\Console\Command;
 
 /**
- * Night import (handoff 007): tinatawag ng scheduler sa oras 1 at oras 2 —
+ * Night import: tinatawag ng scheduler sa oras 1 at oras 2 —
  * `php artisan night:import macro 1`, `night:import likha 2`, atbp.
  * Isang step lang kada (gabi, kind): ang pangalawang tawag sa parehong gabi ay walang ginagawa.
  * Ang resulta ng import mismo ay binabasa ng page mula sa run (ref_id); dito, kung nasimulan lang o hindi.

@@ -6,7 +6,7 @@ use App\Services\NightAstraRun;
 use Illuminate\Console\Command;
 
 /**
- * Tick ng Astra night run (handoff 007), tinatawag ng scheduler kada minuto: sinisimulan ang run ng gabi
+ * Tick ng Astra night run, tinatawag ng scheduler kada minuto: sinisimulan ang run ng gabi
  * kapag oras na at tapos na ang import, at binabantayan ang bawat tumatakbong run (mga row na naiwan ng
  * worker, stop time, mga row na hindi pa na-dispatch, pagtatapos). Hindi nito ibinabalik ang row sa `queued`.
  */
