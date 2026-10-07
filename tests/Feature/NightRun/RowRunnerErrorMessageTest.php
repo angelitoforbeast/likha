@@ -248,6 +248,8 @@ class RowRunnerErrorMessageTest extends NightAstraTestCase
         foreach ([self::CUSTOMER, self::MARKER, 'UPDATE', 'macro_output', 'SQLSTATE', 'bindings'] as $needle) {
             $this->assertStringNotContainsStringIgnoringCase($needle, $response->getContent());
         }
+        // Ang database nga ang pumalya (ang trigger), hindi ang engine bago pa ito makasulat.
+        $this->assertSame(['Illuminate\Database\QueryException'], array_column(array_column($this->lines('AI_CHECKER_ROW_FAIL'), 'context'), 'exception'));
     }
 
     public function test_S_02_2_a_database_failure_logs_class_sqlstate_and_row_id_only(): void
