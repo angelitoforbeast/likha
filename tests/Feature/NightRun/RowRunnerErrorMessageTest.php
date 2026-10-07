@@ -11,7 +11,6 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Testing\TestResponse;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
@@ -50,9 +49,11 @@ class RowRunnerErrorMessageTest extends NightAstraTestCase
     public static function messages(): array
     {
         return [
-            'empty'         => [''],
-            '10,001 chars'  => [str_repeat('J', 10001)],
-            'non-ASCII'     => ['Ñandú, Bgy. Sta. Cruz, ₱599'],
+            'empty'         => [new \RuntimeException('')],
+            '10,001 chars'  => [new \RuntimeException(str_repeat('J', 10001))],
+            'non-ASCII'     => [new \RuntimeException('Ñandú, Bgy. Sta. Cruz, ₱599')],
+            // Hindi lahat ng pumapalya ay Exception: pareho dapat ang trato sa Error ng PHP.
+            'TypeError'     => [new \TypeError(self::LINE)],
         ];
     }
 
@@ -207,6 +208,8 @@ class RowRunnerErrorMessageTest extends NightAstraTestCase
         $response->assertStatus(500);
         $this->assertSame('AI check failed. Ref: log #' . $this->failedLogId($orderId), $response->json('error'));
         $this->assertNowhere(self::LINE, $response->getContent());
+        // Ang database nga ang pumalya (ang trigger), hindi ang engine bago pa ito makasulat.
+        $this->assertSame(['Illuminate\Database\QueryException'], array_column(array_column($this->lines('AI_CHECKER_ROW_FAIL'), 'context'), 'exception'));
 
         // Sa runner: piniling message sa karaniwang exception.
         $out = $this->thrown(new \RuntimeException(self::LINE), $engine);
@@ -215,11 +218,11 @@ class RowRunnerErrorMessageTest extends NightAstraTestCase
     }
 
     #[DataProvider('messages')]
-    public function test_S_01_3_the_message_does_not_depend_on_the_exception(string $message): void
+    public function test_S_01_3_the_message_does_not_depend_on_the_exception(\Throwable $thrown): void
     {
         $order = $this->order();
 
-        $out = $this->thrown(new \RuntimeException($message), 'astra', $order->id);
+        $out = $this->thrown($thrown, 'astra', $order->id);
 
         // Ang buong sagot ay eksaktong ito, kaya hindi nakadepende ang haba nito sa exception.
         $this->assertSame('{"ok":false,"error":"AI check failed. Ref: log #' . $this->failedLogId($order->id) . '"}', $this->body($out));
