@@ -436,7 +436,7 @@ class RunRowCharacterizationTest extends NightRunTestCase
         $response = $this->runRow($order->id, ['engine' => 'astra', 'source' => 'batch', 'batch_id' => 'batch-abc', 'batch_total' => 7]);
 
         $response->assertStatus(500);
-        $this->assertSame(['ok' => false, 'error' => 'Array to string conversion'], $response->json());
+        $this->assertSame(['ok' => false, 'error' => 'AI check failed. Ref: log #' . DB::table('ai_checker_logs')->value('id')], $response->json());
         $this->assertSame([
             'user_id'         => $this->userId,
             'user_name'       => 'CEO User',

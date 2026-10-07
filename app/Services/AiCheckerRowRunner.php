@@ -96,7 +96,21 @@ class AiCheckerRowRunner
                 'duration_ms' => $durationMs,
             ], $ctx);
 
-            return $this->out(500, ['ok' => false, 'error' => $e->getMessage()], null, $logId, $this->lastError($svc));
+            // HINDI ibinabalik o nilo-log ang message ng exception: kasama sa message ng database exception ang SQL at
+            // bound values (text ng customer), at ang sagot na ito ay ipinapakita sa browser. Class at SQLSTATE lang
+            // ang nasa log; ang numero ng log row ang ibinibigay sa staff para mahanap ang pumalyang row.
+            $fail = ['exception' => get_class($e)];
+            if ($e instanceof \Illuminate\Database\QueryException) $fail['sqlstate'] = (string) $e->getCode();
+            $fail['macro_output_id'] = $id;
+            // Kapag ang log mismo ang hindi maisulat, tuloy pa rin: dapat may sagot at numero pa rin ang pumalyang row.
+            try {
+                Log::warning('AI_CHECKER_ROW_FAIL', $fail);
+            } catch (\Throwable $logFail) {
+            }
+
+            $error = $logId !== null ? 'AI check failed. Ref: log #' . $logId : 'AI check failed. No log reference.';
+
+            return $this->out(500, ['ok' => false, 'error' => $error], null, $logId, $this->lastError($svc));
         }
     }
 
