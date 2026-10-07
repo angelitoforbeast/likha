@@ -1,5 +1,0 @@
-Amendment 009-1
-| # | Change | Who and why |
-|---|---|---|
-| A1 | On the column settings page, for the ids in `CEO_ONLY`, the Marketing - OIC and Marketing checkboxes are rendered disabled and unchecked, with a short "CEO only" hint (title or small label, following the page's existing style). The server ignores any submitted value for those roles and ids on save, save-as-default and reset (they stay hidden for non-CEO whatever is posted). The CEO's own checkbox for the two ids keeps working like any other column. | Mira's decision: today those checkboxes can be ticked and do nothing, which reads as a broken setting. Visibility for the team stays locked (handoff decision D5) until the owner decides to open it; that will be its own change. |
-| A2 | Done-when gets one more item: tests for A1 (the two disabled inputs per section are in the page HTML; a posted tick for Marketing or Marketing - OIC on a CEO_ONLY id is not stored as visible and the columns stay hidden for that role). | Mira's decision: same reason. |
