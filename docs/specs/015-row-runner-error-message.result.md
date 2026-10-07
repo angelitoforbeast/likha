@@ -22,7 +22,7 @@ suite runs in any checkout.
 ## Case table
 
 Command: `php.bat vendor/phpunit/phpunit/phpunit --no-progress --testdox tests/Feature/NightRun/RowRunnerErrorMessageTest.php`
-→ `OK (20 tests, 201 assertions)`. New tests are in that file unless another class is named.
+→ `OK (20 tests, 202 assertions)`. New tests are in that file unless another class is named.
 
 | Case | Test | Result |
 |---|---|---|
@@ -30,7 +30,7 @@ Command: `php.bat vendor/phpunit/phpunit/phpunit --no-progress --testdox tests/F
 | S-01.2 | `test_S_01_2_the_customer_line_appears_nowhere` (astra, classic; route and runner) | pass: `✔ … "astra"`, `✔ … "classic"` |
 | S-01.3 | `test_S_01_3_the_message_does_not_depend_on_the_exception` (empty, 10,001 chars, non-ASCII, TypeError) | pass: four `✔` |
 | S-01.4 | `test_S_01_4_a_previous_exception_is_not_shown_or_logged` | pass: `✔` |
-| S-02.1 | `test_S_02_1_a_database_failure_shows_no_sql_and_no_bound_value` | pass: `✔` |
+| S-02.1 | `test_S_02_1_a_database_failure_shows_no_sql_and_no_bound_value` | pass: `✔ S 02 1 a database failure shows no sql and no bound value`. It now also asserts that the one `AI_CHECKER_ROW_FAIL` line names `IlluminateDatabaseQueryException`; that assertion turns red if the row fails for any other reason than the database write (the trigger not firing, or the engine throwing before its write), or if the log line is no longer written |
 | S-02.2 | `test_S_02_2_a_database_failure_logs_class_sqlstate_and_row_id_only` | pass: `✔` |
 | S-02.3 | `test_S_02_3_both_writes_failing_gives_the_message_without_a_reference` | pass: `✔` |
 | S-02.4 | `test_S_02_4_a_plain_exception_logs_no_sqlstate` | pass: `✔` |
@@ -95,7 +95,7 @@ the review wave (S-01.3 "TypeError") is among the 18.
 ## Done-when checklist
 
 - [x] Cases S-01.1 to S-05.3 plus S-02.5 pass, each with a test named after it, except S-03.4 and
-      S-03.5 (owner checks). Evidence: the case table above; `OK (20 tests, 201 assertions)` and
+      S-03.5 (owner checks). Evidence: the case table above; `OK (20 tests, 202 assertions)` (run again after fix list 1) and
       the four single runs of the existing tests.
 - [x] Red line for every fix slice, watched before the code: the red-run table above. Test and
       code of the fix are in one commit (`96748ed`), tests written and run first. One exception,
@@ -157,6 +157,7 @@ Ruling: accepted minors are recorded in this file, not in `TODO.md` — the done
 Ruling: log-line and body searches in the new tests ignore case and use `print_r` for log lines — the framework writes `update` in lower case, and an exception object in a log context would serialise to `{}` under `json_encode` and hide its message — none.
 Ruling: the searches for the exception message in log lines look for `SQLSTATE[` and not `SQLSTATE` — the wanted context key `sqlstate` would match a case-insensitive search for the plain word — none.
 Ruling: the suite summaries are given from plain `phpunit` as well as `artisan test` — in this worktree `artisan test` reports most passing tests as "warnings" (a `file_get_contents` notice per test that plain `phpunit` does not show; its cause was not chased, no environment file was read) — the two runners agree on which two tests fail.
+Ruling (fix list 1): S-02.1 gained one assertion that the logged exception class is `IlluminateDatabaseQueryException`, as the route half of S-01.2 has; `qa/stories.md` was reformatted only (owner checks as a checkbox list near the top, Last run cells as "Passed · 2026-10-08 · auto" and "Not run · manual", a summary line under the slice heading: 19 passed, 0 failed, 0 blocked, 0 skipped, 2 not run, which matches the table), with no story or case text changed; the test-only commit after the fix commit was accepted as it stands — the reviewer's check asked for exactly these — none; test and document edits only, no plan or review round.
 Ruling: no browser check was run — the page is not changed and S-03.4 and S-03.5 are owner checks — the alert text is unverified until the owner check.
 
 ## Deferred minors
