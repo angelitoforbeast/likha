@@ -45,7 +45,7 @@ class AiCheckerRowRunner
         $svc = null;
 
         try {
-            $svc = $engine === 'astra' ? new AstraEncoder() : new MacroChecker();
+            $svc = $this->engine($engine);
             // Engine options ng night run (Astra lang); hindi ito sine-set ng browser kaya walang nagbabago roon.
             if ($svc instanceof AstraEncoder) {
                 if (isset($ctx['http_timeout']))            $svc->httpTimeout((int) $ctx['http_timeout']);
@@ -98,6 +98,12 @@ class AiCheckerRowRunner
 
             return $this->out(500, ['ok' => false, 'error' => $e->getMessage()], null, $logId, $this->lastError($svc));
         }
+    }
+
+    /** Ang pagpili ng engine — hiwalay na method para mapalitan ng test ng engine na pumapalya. */
+    protected function engine(string $engine)
+    {
+        return $engine === 'astra' ? new AstraEncoder() : new MacroChecker();
     }
 
     private function out(int $status, array $payload, ?array $result = null, ?int $logId = null, ?array $lastError = null): array
