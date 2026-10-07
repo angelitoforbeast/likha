@@ -1,6 +1,6 @@
 # Spec 004: Restock target by item lifecycle on /item
 
-Handoff: `handoff/004-lifecycle-restock/HANDOFF.md`. Builds on spec 003 (`docs/specs/003-stock-doi-category.md`).
+Source: the task brief for this work (not kept in the repository). Builds on spec 003 (`docs/specs/003-stock-doi-category.md`).
 
 ## Threat model
 
@@ -20,7 +20,7 @@ Same definitions as `/jnt/supply`, per base key (`ItemBaseKey::key`), counting e
 
 - `recent` = units with `ts_date` in [end − 13, end]; `prev` = units in [end − 27, end − 14]. One grouped query on the `ts_date` range with two `SUM(CASE …)`.
 - `first` = `MIN(ts_date)` per `ITEM_NAME`, `ts_date <= end`. **Same full-table grouped scan as `/jnt/supply`'s step 5** (no `ITEM_NAME` index exists); the `<= end` bound can't change any result (an item whose first order is after the as-of date has no recent/prev units and is Dormant either way).
-- The first-date map (base key → earliest date) is cached with `Cache::remember` for 12 hours, key `item_stock:first_dates:v1:<host>:<end>` (Mira's answer 1).
+- The first-date map (base key → earliest date) is cached with `Cache::remember` for 12 hours, key `item_stock:first_dates:v1:<host>:<end>` (the reviewer's answer 1).
 - `recentVel = round(recent / 14, 4)`, `prevVel = round(prev / 14, 4)`, `daysRunning = first ? diffInDays(first, end) : 9999`, then `ItemLifecycle::classify`.
 - `lifecycle_override` (the lowest-id `supply_item_settings` row for the base key, 003's rule) wins when set; `lifecycle_auto = false` then.
 
@@ -28,7 +28,7 @@ Same definitions as `/jnt/supply`, per base key (`ItemBaseKey::key`), counting e
 
 - 14-day velocity: 003's rule, unchanged (cancelled excluded, divisor = days since first order in the window, 1–14).
 - 7-day velocity (Scaling only): units in [end − 6, end], cancelled excluded, **÷ 7**. Folded into 003's demand query as a `SUM(CASE WHEN ts_date >= end − 6 …)`, no new query.
-- Scaling `normal` velocity = **max(7-day, 14-day)** (Amendment 004-1): a Scaling item with no sales in its last 7 days must not fall to a HOLD-only order. The DOI uses the winning velocity's own units and days (14-day units/days, or 7-day units × 7); a tie gives the same number either way. The `lugi` set keeps the 14-day velocity.
+- Scaling `normal` velocity = **max(7-day, 14-day)** (follow-up 004-1): a Scaling item with no sales in its last 7 days must not fall to a HOLD-only order. The DOI uses the winning velocity's own units and days (14-day units/days, or 7-day units × 7); a tie gives the same number either way. The `lugi` set keeps the 14-day velocity.
 
 ## 4. Palugit
 
@@ -46,7 +46,7 @@ Defaults in `supply_settings`, group `item_palugit`, `int`, seeded by a migratio
 - Edited through the existing generic editor on `/jnt/supply/config` ("Other settings" lists every group that isn't a class group) and its route `POST /jnt/supply/setting-kv` (CEO-only already). That route gains one check: for keys in group `item_palugit`, the value must be an integer 0–255 (422 otherwise). Other keys behave exactly as before.
 - Missing rows or table → the defaults above in code.
 - **Per-item override:** new nullable `supply_item_settings.palugit_override` (unsignedTinyInteger, additive). `POST /item/supply-settings` writes it together with `safety_days` (003 behaviour for `safety_days` and `lead_time_days` unchanged, so `/jnt/supply` sees the same values as before); `safety_days` blank/absent → `palugit_override = NULL` ("balik sa lifecycle"), `safety_days` untouched. `/item` ignores `safety_days` from now on; existing rows have `palugit_override = NULL`, so they use the lifecycle default until the CEO sets one on `/item`.
-- Precedence for the palugit of a set: `palugit_override` → lifecycle default (normal set) or `palugit_lugi` (lugi set). The override applies to both sets (Mira's answer 3); Phasing Out / Dormant stay HOLD-based even with an override.
+- Precedence for the palugit of a set: `palugit_override` → lifecycle default (normal set) or `palugit_lugi` (lugi set). The override applies to both sets (the reviewer's answer 3); Phasing Out / Dormant stay HOLD-based even with an override.
 
 ## 5. Result sets per base key
 
@@ -72,14 +72,14 @@ Per set, with v = its velocity, P = its palugit, L = lead:
 
 ## 6. Page (/item)
 
-- Set choice per base item (Mira's answer 2): one combined profit figure per base key, so every variant row of a base shows the same set. `basePct = Σ projected_profit_last_7d ÷ Σ gross_sales_last_7d × 100` over the base's item rows on the page (each row's aggregate `A`, the same numerator and denominator PROF.%(7D) uses); a row with no profit data (`projected_profit_last_7d == null` or `gross_sales_last_7d <= 0`) is left out; none left → no gate. `S.gated && basePct != null && basePct <= 0 ? S.lugi : S.normal`.
+- Set choice per base item (the reviewer's answer 2): one combined profit figure per base key, so every variant row of a base shows the same set. `basePct = Σ projected_profit_last_7d ÷ Σ gross_sales_last_7d × 100` over the base's item rows on the page (each row's aggregate `A`, the same numerator and denominator PROF.%(7D) uses); a row with no profit data (`projected_profit_last_7d == null` or `gross_sales_last_7d <= 0`) is left out; none left → no gate. `S.gated && basePct != null && basePct <= 0 ? S.lugi : S.normal`.
 - LIFECYCLE column (`lifecycle`): catalog + `DEFAULT_VISIBLE` (CEO), `defaultCols()`, item-row cell (badge = `lifecycle_label`, plus " · lugi" when the lugi set is chosen, "(manual)" marker when `lifecycle_auto` is false), blank page-row cell, sort by label. One-line Taglish tooltip per lifecycle saying what it means and the palugit it uses.
 - BENTA/ARAW, DOI, the "lead N · palugit M" line, I-ORDER and the order-by line read the chosen set; DOI shows "walang benta" / "halos walang benta" in grey for the notes. Sorting on these columns reads the chosen set.
 - CEO palugit editor: the palugit field may be left blank = "balik sa default ng lifecycle" (sends no `safety_days`).
 - Category: `category` leaves `DEFAULT_VISIBLE`; a data migration adds `category` to the saved `owner_private` column config's `hidden` list and removes it from every `visible_by_role` list (no-op when nothing is saved). The Category selector shows only while the CATEGORY column is visible; when hidden the filter resets to Lahat.
 - New values use `x-text` only.
 
-## 7. Tests (expected values typed from the handoff §5)
+## 7. Tests (expected values typed from the task brief, §5)
 
 - `StockEndpointTest` (or a new `LifecycleStockTest`): each §5 row at `GET /item/stock`, the DOI example (16.7 amber), the `lugi` set for Scaling and Consistent, `gated`, `lifecycle_override` precedence, `palugit_override` precedence (170), the near-zero note, Phasing Out / Dormant note and qty, and lifecycle inputs counting cancelled orders.
 - `JntSupplyLifecycleTest`: the characterisation table.

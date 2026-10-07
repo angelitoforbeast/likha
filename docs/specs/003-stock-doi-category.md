@@ -1,19 +1,19 @@
 # Spec 003: Item value on item rows, stock gauge, DOI, order quantity, category
 
-Handoff: `handoff/003-stock-doi-category/HANDOFF.md`. Branch `feat/stock-doi-category` from `f20b200`. Risk tier: medium.
+Source: the task brief for this work (not kept in the repository). Branch `feat/stock-doi-category` from `f20b200`. Risk tier: medium.
 
 ## Verified facts (2026-10-02, code read only)
 
 - **Indexes the new queries use:** `macro_output.ts_date` (`macro_output_ts_date_index`), `macro_output.waybill` (`2025_08_04_000129`, `->index()`), `macro_output.STATUS` (`idx_macro_output_status`), `from_jnts.waybill_number` (`idx_from_jnts_waybill` and `from_jnts_waybill_number_index`), `from_jnts.submission_time` (`idx_from_jnts_submission_time`, DATETIME since `2026_01_23_221803`), `supply_order_items.item_key`. So "units that left" can be computed from indexed columns, and no schema change on existing tables is needed.
-- **`supply_item_settings.lead_time_days` and `safety_days` are `unsignedTinyInteger`** (`2026_04_23_000002`), so MySQL stores at most **255**. The handoff's 0–365 would make a save of 256–365 fail with a 500 error in strict mode. That's a real conflict; see question Q1.
+- **`supply_item_settings.lead_time_days` and `safety_days` are `unsignedTinyInteger`** (`2026_04_23_000002`), so MySQL stores at most **255**. The task's 0–365 would make a save of 256–365 fail with a 500 error in strict mode. That's a real conflict; see question Q1.
 - `app_settings` is `key` (unique) / `value` (text) / timestamps, so the START row is a plain `updateOrInsert`.
 - The column catalog `owner_private` is shared with `/owner/private`. Its view drops ids it doesn't define (`private.blade.php:2017`), so new catalog ids only show on `/item` and in the Columns settings list (and the conditional-format editor).
 - `cogs` lookup on page rows: `OwnerPrivateController:1894-1929` (latest `date <= end_date`, keyed by `ItemAliasResolver::canonicalKey(raw name)`; `cogs_ceo` the same, no fallback).
 
-## Questions for Mira (need answers with the go)
+## Questions for the reviewer (need answers with the go)
 
-- **Q1. Lead/safety range.** The columns hold 0–255, not 0–365. Proposal: validate **0–255**, no schema change (the handoff says additive only). The alternative is a new migration that widens two existing columns, which changes an existing table.
-- **Q2. `from_jnts` rows with `submission_time` NULL.** Proposal: they don't count as "left" (they can't be dated). Mira can check how many there are on production: `SELECT COUNT(*) FROM from_jnts WHERE submission_time IS NULL;`.
+- **Q1. Lead/safety range.** The columns hold 0–255, not 0–365. Proposal: validate **0–255**, no schema change (the task says additive only). The alternative is a new migration that widens two existing columns, which changes an existing table.
+- **Q2. `from_jnts` rows with `submission_time` NULL.** Proposal: they don't count as "left" (they can't be dated). The reviewer can check how many there are on production: `SELECT COUNT(*) FROM from_jnts WHERE submission_time IS NULL;`.
 
 ## Design
 
@@ -120,7 +120,7 @@ Response:
 
 ### Migrations (additive)
 
-1. `create_item_categories_table`: id, name (unique, 60), sort_order (unsigned int), timestamps; seeds the 8 categories in handoff order (1..8). It's idempotent: insert only names that aren't there yet.
+1. `create_item_categories_table`: id, name (unique, 60), sort_order (unsigned int), timestamps; seeds the 8 categories in the brief's order (1..8). It's idempotent: insert only names that aren't there yet.
 2. `create_item_category_assignments_table`: id, item_key (unique), category_id (FK → item_categories, restrict on delete), updated_by (nullable unsigned bigint), timestamps.
 3. `seed_item_stock_start_setting`: `app_settings` `item_stock_start` = today (Asia/Manila) when the key is missing; `down()` deletes that key only.
 
@@ -128,7 +128,7 @@ Reads are guarded with `Schema::hasTable` and fall back to empty values.
 
 ### `items:suggest-categories [--apply]` (`app/Console/Commands/SuggestItemCategories.php`, `config/item_categories.php`)
 
-- **Config:** `['rules' => [category name => [keywords…]]]` in the handoff's order.
+- **Config:** `['rules' => [category name => [keywords…]]]` in the task's order.
 - **Matching:** a case-insensitive `str_contains` on `' ' . lower(base name) . ' '`, so `"car "` matches "TOY CAR". First match wins.
 - **Items considered:**
   - distinct `ITEM_NAME` from `macro_output` with `ts_date >= today − 90`
@@ -187,7 +187,7 @@ Sorting is through new `_itemSortValue` cases that read the stock map by `supKey
 
 - **`ItemTestCase`:** `from_jnts` gets a nullable `submission_time` column (string; the sqlite comparison of `Y-m-d H:i:s` is lexicographic). `migrationPaths()` adds the `app_settings` migration and the three new ones.
 - **`StockEndpointTest`:**
-  - examples A, B, C, D (expected values typed from the handoff)
+  - examples A, B, C, D (expected values typed from the task brief)
   - the `values` map: item value for a hold-only item; `item_value_ceo` absent for Marketing and for CEO `view_as=marketing`
   - a waybill whose first J&T record is before START is not "left"
   - `stock_ready: false` without the START row

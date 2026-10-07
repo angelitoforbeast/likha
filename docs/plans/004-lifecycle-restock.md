@@ -2,7 +2,7 @@
 
 Spec: `docs/specs/004-lifecycle-restock.md`. Branch `feat/lifecycle-restock`.
 
-All tasks run one after another on this branch (no worktrees: `git worktree` isn't in the handoff's allowlist, and T3/T4 share `ItemStockService` and the tests harness).
+All tasks run one after another on this branch (no worktrees: `git worktree` isn't in the task's allowlist, and T3/T4 share `ItemStockService` and the tests harness).
 
 | # | Task | Tier | Side | Parallel | Depends |
 |---|---|---|---|---|---|
@@ -13,10 +13,10 @@ All tasks run one after another on this branch (no worktrees: `git worktree` isn
 
 Per task: Red → Green → Blue, one-line red run reported, one `feat:`/`refactor:` commit per task (T1 is a `test:` commit then a `refactor:` commit). Developers on sonnet; after each task `skeptic-reviewer` at standard depth (sonnet) on that task's diff. Blocker/major → fix loop, max 2. Minors on untrusted paths fixed in one final wave; the rest to `TODO.md` with a reason.
 
-After T4: full `php.bat artisan test`, `php.bat -l` on every changed PHP file, `npm run build`, RESULT.md (evidence, rulings, SQL for EXPLAIN, deploy notes, merge danger). The browser check is skipped: running the app reads the local `.env` database (handoff §7).
+After T4: full `php.bat artisan test`, `php.bat -l` on every changed PHP file, `npm run build`, the result notes (evidence, rulings, SQL for EXPLAIN, deploy notes, merge danger). The browser check is skipped: running the app reads the local `.env` database (the task brief, §7).
 
 Files touched:
 - **New:** `app/Support/ItemLifecycle.php`, 3 migrations, `tests/Feature/Item/JntSupplyLifecycleTest.php` (or `tests/Unit/`), `tests/Feature/Item/LifecycleStockTest.php`.
-- **Changed:** `app/Http/Controllers/JntSupplyController.php` (two private method bodies delegate; `saveSupplySetting` one range check for `item_palugit`), `app/Services/ItemStockService.php`, `app/Http/Controllers/ItemController.php` (`supplySettingsSave`), `app/Http/Controllers/OwnerColumnSettingsController.php` (`CATALOG`, `DEFAULT_VISIBLE`), `resources/views/item/index.blade.php`, `resources/views/item/_agg_cells.blade.php`, `tests/Feature/Item/ItemTestCase.php`, `StockEndpointTest.php`, `ItemEditTest.php`, `ItemPageTest.php`, `TODO.md`, handoff RESULT/README.
+- **Changed:** `app/Http/Controllers/JntSupplyController.php` (two private method bodies delegate; `saveSupplySetting` one range check for `item_palugit`), `app/Services/ItemStockService.php`, `app/Http/Controllers/ItemController.php` (`supplySettingsSave`), `app/Http/Controllers/OwnerColumnSettingsController.php` (`CATALOG`, `DEFAULT_VISIBLE`), `resources/views/item/index.blade.php`, `resources/views/item/_agg_cells.blade.php`, `tests/Feature/Item/ItemTestCase.php`, `StockEndpointTest.php`, `ItemEditTest.php`, `ItemPageTest.php`, `TODO.md`, the task's result notes.
 
 Untouched: `/jnt/supply` output, Supply Finance, PO data, `HoldService`, `item-summary`.

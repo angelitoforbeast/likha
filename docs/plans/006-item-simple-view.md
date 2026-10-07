@@ -15,6 +15,6 @@ on this branch (no worktrees; `git worktree` isn't in the allowlist). Each task:
 | T5 | **Details panel (›) in English.** Rewrite `_il_expand` texts and move in: supplier + quote lines with inline add / edit / delete (CEO), lead + buffer with ✎ (CEO), full order reason, sales a day, stock / incoming, lifecycle detail, sourcing-list info (CEO), running pages / no running ad, cost per piece, category, Change photo, Copy; page cards and campaigns panel unchanged in behaviour. | `_il_expand.blade.php`, `index.blade.php` | English labels present, Taglish absent; quote editor, ✎ lead/buffer, "CEO value" absent for Marketing; campaigns panel still inside `.il-camp`; no `x-html` |
 | T6 | **Widths and cards.** `<colgroup>` widths per spec §8, 1,100–1,365 px narrowing, cards below 1,100 px for both views, `ilColspan` per view; no font under 11 px. | `index.blade.php` (CSS), both table partials | the media queries and widths; no `font-size` under 11 px in the new partials; colspan helper per view |
 
-After T6: full suite once, `php -l` on changed PHP (tests), `npm run build`, RESULT.md with the browser
+After T6: full suite once, `php -l` on changed PHP (tests), `npm run build`, the result notes with the browser
 checklist. Browser check (`browser-checker`) is skipped: running the app reads the local `.env` database
-(handoff §7).
+(the task brief, §7).

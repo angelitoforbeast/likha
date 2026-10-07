@@ -2,7 +2,7 @@
 
 Spec: `docs/specs/003-stock-doi-category.md`. Branch `feat/stock-doi-category`.
 
-All tasks run one after another on this branch. There are no worktrees, because `git worktree` isn't in the handoff's allowlist and the tasks share `ItemController`, `routes/web.php` and the Blade file.
+All tasks run one after another on this branch. There are no worktrees, because `git worktree` isn't in the task's allowlist and the tasks share `ItemController`, `routes/web.php` and the Blade file.
 
 | # | Task | Tier | Side | Parallel | Depends |
 |---|---|---|---|---|---|
@@ -19,12 +19,12 @@ After T6:
 - full `php.bat artisan test`
 - `php.bat -l` on every changed PHP file
 - `npm run build`
-- RESULT.md (evidence, rulings, SQL for EXPLAIN, deploy notes, merge danger)
+- The result notes (evidence, rulings, SQL for EXPLAIN, deploy notes, merge danger)
 
-The browser check is skipped, because running the app reads the local `.env` database (handoff §7).
+The browser check is skipped, because running the app reads the local `.env` database (the task brief, §7).
 
 Files touched:
 - **New:** `app/Support/ItemBaseKey.php`, `app/Services/ItemStockService.php`, `app/Models/ItemCategory.php`, `app/Models/ItemCategoryAssignment.php`, `app/Console/Commands/SuggestItemCategories.php`, `config/item_categories.php`, the 3 migrations, and the tests under `tests/Feature/Item/` and `tests/Unit/`.
-- **Changed:** `app/Http/Controllers/ItemController.php` (3 methods), `routes/web.php` (3 lines), `app/Http/Controllers/OwnerColumnSettingsController.php` (`CATALOG`, `DEFAULT_VISIBLE`), `resources/views/item/index.blade.php`, `resources/views/item/_agg_cells.blade.php`, `tests/Feature/Item/ItemTestCase.php`, `tests/Feature/Item/ItemPageTest.php`, `TODO.md`, and handoff RESULT/README.
+- **Changed:** `app/Http/Controllers/ItemController.php` (3 methods), `routes/web.php` (3 lines), `app/Http/Controllers/OwnerColumnSettingsController.php` (`CATALOG`, `DEFAULT_VISIBLE`), `resources/views/item/index.blade.php`, `resources/views/item/_agg_cells.blade.php`, `tests/Feature/Item/ItemTestCase.php`, `tests/Feature/Item/ItemPageTest.php`, `TODO.md`, and the task's result notes.
 
 Untouched: `/jnt/supply`, Supply Finance, `HoldService`, `OwnerPrivateController`, the `item-summary` output (no cache bump).

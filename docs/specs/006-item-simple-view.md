@@ -1,6 +1,6 @@
 # Spec 006: /item simple "To order" view, in English
 
-Handoff: `handoff/006-item-simple-view/HANDOFF.md`. Base `develop` at `d9606c8`. Risk tier: **medium** (internal
+Source: the task brief for this work (not kept in the repository). Base `develop` at `d9606c8`. Risk tier: **medium** (internal
 page, view-only, Old view is the fallback). Side: frontend only; no PHP, route, query or formula change is planned.
 
 ## 1. Threat model
@@ -164,7 +164,7 @@ chip labels, header tooltips, English strings present and the replaced Taglish s
 render, CEO-only content absent for Marketing, no `x-html`, `_table_old` byte-identical to `d9606c8` and still
 rendered for `?layout=old`. 005's new-layout assertions are replaced by these; every Old-view assertion stays.
 No JS runner and no browser: runtime choices (state picked, numbers, colours, sort order, widths) are covered by
-markup only, and RESULT.md says so.
+markup only, and the result notes say so.
 
 ## 10. Out of scope
 

@@ -1,6 +1,6 @@
 # Spec 007: Night run (imports at 01:00 and 02:00, Astra at 03:00 on yesterday's blank orders)
 
-Handoff: `handoff/007-night-run/HANDOFF.md`. Base `develop` at `91c470a`, branch `feat/007-night-run`.
+Source: the task brief for this work (not kept in the repository). Base `develop` at `91c470a`, branch `feat/007-night-run`.
 Risk tier: **high** (spends money on OpenAI and sets order statuses with nobody watching).
 Sides: backend (most of it) and frontend (settings block, "Night run" section).
 
@@ -8,7 +8,7 @@ Sides: backend (most of it) and frontend (settings block, "Night run" section).
 
 - **Untrusted:** everything in `macro_output` (names, addresses, chat text), Google Sheets contents, OpenAI
   responses and error bodies, and anything a non-CEO user sends to the new routes (dates, step ids, form fields).
-- **Trusted:** the repo, `app_settings` written by the CEO, environment and config, Mira's and Busing's inputs.
+- **Trusted:** the repo, `app_settings` written by the CEO, environment and config, the reviewer's and the owner's inputs.
 - **Secrets:** the OpenAI key (settings page, encrypted, or environment) and `AUTOMATION_KEY`. Nothing new logs
   or shows them. Reasons shown on the page are built from **fixed strings plus an HTTP status or an OpenAI error
   code**; no OpenAI response body and no exception message reaches the page or the night tables (an OpenAI
@@ -45,7 +45,7 @@ Sides: backend (most of it) and frontend (settings block, "Night run" section).
 | Settings page | `Checker1SettingsController` | `POST /encoder/checker_1/settings` has **no role gate** and requires the idle-threshold fields; CEO parts are checked inside |
 | Tests | `tests/Feature/Item/ItemTestCase.php` | sqlite in memory, tables created by hand per test case, no macro/Astra tests |
 
-**Stale-run finding (asked for in the handoff).** Neither job writes into another run: both use only their own
+**Stale-run finding (asked for in the task).** Neither job writes into another run: both use only their own
 run id. The real danger is different: a job that is still alive, or still waiting in the queue, **imports at the
 same time as the new run**.
 - Macro: a job picked up after its run was closed sets the run back to `running` and imports. A job that is
@@ -114,7 +114,7 @@ block on the settings page. The existing settings form and route aren't touched.
 `php artisan night:import {kind : macro|likha} {slot : 1|2}`:
 
 1. Reads the switch for that kind again; off → exits, records nothing.
-2. Stale rule (amendment 007-1, 17). **Macro:** an active run with no progress for 15 minutes, where progress
+2. Stale rule (follow-up 007-1, 17). **Macro:** an active run with no progress for 15 minutes, where progress
    is the later of the run's `updated_at` and its items' `updated_at` (the job touches them per sheet). A run
    that is progressing is never closed, whatever its age. **Likha:** 2 hours from `started_at` (in the
    starter, on every path, §4.1). A no-progress rule isn't reliable for Likha: on a fresh sheet the job reads
@@ -205,7 +205,7 @@ A tick, `php artisan night:astra-tick`, runs every minute (§7). For tonight (`n
 
 - Before the Astra time, or when the switch is off: nothing to start.
 - From the Astra time to the stop time, when no `astra` step exists for tonight: check the condition
-  (amendment 007-1, 12 and 16) **no import of either kind is active (macro `queued`/`running`, Likha
+  (follow-up 007-1, 12 and 16) **no import of either kind is active (macro `queued`/`running`, Likha
   `running`), and a macro import that started at or after 00:00 Manila today has ended (`done` or `failed`)
   with at least one sheet (`macro_import_run_items`) `done`**.
   - Met → start.
@@ -439,21 +439,21 @@ inline), and the held-lock test sets the starter's wait to 0.
 processes and a `stopwaitsecs` above the job timeout, re-running `config:cache` for the new price, the
 cache-store note: the lock is per cache store, so it only guards starts that share one store), one paragraph
 on turning it on and what the page shows.
-`RESULT.md` repeats the deploy notes for Mira.
+The result notes repeat the deploy notes for the reviewer.
 
 ## 13. Out of scope
 
-As the handoff §9. Also not done here: making the classic checker or the escalation callable at night; alerts
+As the task brief, §9. Also not done here: making the classic checker or the escalation callable at night; alerts
 outside the page; changing `AstraEncoder::post`'s own retry; cleaning the three copies of the validation rules.
 
-## 14. Conflicts with CLAUDE.md, noted for RESULT.md
+## 14. Conflicts with CLAUDE.md, noted for the result notes
 
-- CLAUDE.md asks for a git worktree per work branch; `git worktree` isn't in the handoff's allowed commands, so
+- CLAUDE.md asks for a git worktree per work branch; `git worktree` isn't in the task's allowed commands, so
   the branch is worked in place, as in 006.
-- CLAUDE.md's `/ship` pushes and opens a PR; the handoff says no push and no PR. RESULT.md stands in for the PR.
-- The handoff says PHP 8.2, CLAUDE.md 8.4 locally: code stays 8.2-compatible (`composer.json` `^8.2`).
+- CLAUDE.md's `/ship` pushes and opens a PR; the task says no push and no PR. The result notes stand in for the PR.
+- The task says PHP 8.2, CLAUDE.md 8.4 locally: code stays 8.2-compatible (`composer.json` `^8.2`).
 
-## 15. Questions for Mira (each with the default that will be built)
+## 15. Questions for the reviewer (each with the default that will be built)
 
 1. **The price isn't in a table.** `ai_checker_prices` is a config array (`config/services.php:61`), read by
    both engines. Default: add `'gpt-6-luna' => [0.10, 0.50]` there, no migration, and replace the "price
@@ -488,7 +488,7 @@ outside the page; changing `AstraEncoder::post`'s own retry; cleaning the three 
 14. **Existing log of OpenAI error bodies.** `AstraEncoder::post` writes up to 500 characters of an error body
     to `storage/logs` (`ASTRA_ENCODER_HTTP`), and a 401 body carries a fragment of the key. It exists today on
     the browser path; at night it would be written for every failing row until the run stops (one row for a
-    401). Default: left as it is, because the handoff says not to change Astra; say the word and the body is
+    401). Default: left as it is, because the task says not to change Astra; say the word and the body is
     replaced by status and error code in that log line.
 15. **Dead Likha runs.** The decision says the *scheduled* start closes stale runs. For Likha the default is to
     close a run older than 2 hours on every path (§4.1), because Likha has no Force-stop and a killed job
@@ -506,7 +506,7 @@ outside the page; changing `AstraEncoder::post`'s own retry; cleaning the three 
 18. **Timeout of one OpenAI call at night:** 120 s instead of the browser's 300 s (§6.3), so a hung call is
     retried rather than ending as "Worker stopped". Default: as written.
 
-## 15a. Mira's answers (amendment 007-1, 2026-10-04; `handoff/007-night-run/AMENDMENT-1.md`)
+## 15a. The reviewer's answers (follow-up 007-1, 2026-10-04)
 
 "Go" on T1 to T7. Defaults accepted for questions 1 to 11, 13, 15 and 18. Changed:
 

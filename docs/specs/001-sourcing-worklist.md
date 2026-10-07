@@ -1,6 +1,6 @@
 # Spec 001: Sourcing worklists on `/item`
 
-Handoff: `handoff/001-sourcing-worklist/HANDOFF.md`. Status: approved by Mira 2026-10-01. Answers:
+Source: the task brief for this work (not kept in the repository). Status: approved by the reviewer 2026-10-01. Answers:
 - `ts_date` gap count on production = 0, so the build uses `ts_date`.
 - Q1: exclude normalised `cannotproceed` and `odz`.
 - Q2: open = `ordered` + `delivered`.
@@ -10,10 +10,10 @@ Handoff: `handoff/001-sourcing-worklist/HANDOFF.md`. Status: approved by Mira 20
 
 ## Verified facts (2026-10-01)
 
-| Handoff claim | Code says |
+| Brief's claim | Code says |
 |---|---|
 | `/item/data` HOLD rule, `STR_TO_DATE`, ignores `STATUS` | Confirmed, `ItemController.php:99-175`. Without `date_range` it has no date filter at all. |
-| `HoldService::unitsByBaseItem` | Confirmed (`HoldService.php:27-69`), but its only callers are the daily snapshot (`SnapshotItemHolds`, `ItemHoldSnapshotController::runNow`). Changing it changes `item_hold_snapshots` history, a ripple outside this handoff. |
+| `HoldService::unitsByBaseItem` | Confirmed (`HoldService.php:27-69`), but its only callers are the daily snapshot (`SnapshotItemHolds`, `ItemHoldSnapshotController::runNow`). Changing it changes `item_hold_snapshots` history, a ripple outside this task. |
 | Four copies of the key rule | Three agree: `ItemSupplierQuote::keyFor`, `HoldService::itemKey` (applied after the prefix strip), JS `supKey`. **`SupplyFinanceController::itemKey` does not strip `N x`**, so `supply_order_items.item_key` can hold "2 x foo". |
 | CEO gate at 205/244/264/295 | Confirmed. |
 | `supply_orders.status` | Only `ordered` (on create), `delivered` (arrived, `markDelivered`), `counted` (`saveCount` sets `received_qty`). No cancelled status: a cancel is a hard delete. `received_qty` is NULL until counted. Nothing in the code computes an open quantity today. |
@@ -21,7 +21,7 @@ Handoff: `handoff/001-sourcing-worklist/HANDOFF.md`. Status: approved by Mira 20
 | Item photos | Confirmed: `store('item-images','public')` (a generated hash name), `image|mimes:jpg,jpeg,png,webp|max:10240`. |
 | `latest.dump` tracked | Confirmed (`git ls-files`). Not in `.gitignore`. |
 
-### `macro_output.STATUS` values (for requirement 4, needs Mira's go)
+### `macro_output.STATUS` values (for requirement 4, needs the reviewer's go)
 
 - Written: `PROCEED` (auto checker, AstraEncoder), and by hand from the dropdown (`macro_output/index.blade.php:599-601`): blank, `PROCEED`, `CANNOT PROCEED`, `ODZ`. Free text is accepted (`nullable|string|max:255`), and the sheet import keeps any value.
 - No `CANCELLED` value exists. **`CANNOT PROCEED`** is the "won't ship" status (excluded from validation, duplicate checks, red row). **`ODZ`** is a third terminal status, never sent to J&T (my reading: out of delivery zone).
@@ -32,14 +32,14 @@ Handoff: `handoff/001-sourcing-worklist/HANDOFF.md`. Status: approved by Mira 20
 
 - Filled by DB triggers on insert and on update of `TIMESTAMP` (mysql and pgsql, migration `2025_12_19_235532`), plus a backfill. No later migration drops them. Every insert goes through `MacroOutput::create` (two importers), so nothing bypasses the trigger.
 - `ts_date` is NULL only when the last 10 characters aren't `dd-mm-yyyy`. Both importers normalise TIMESTAMP to `H:i d-m-Y`, so that covers almost every row. A whole-day `ts_date BETWEEN start AND end` gives the same days as today's datetime filter from 00:00:00 to 23:59:59.
-- **Gap:** `ImportMacroFromGoogleSheet` keeps the raw sheet value when no format parses. A value such as `00:03 1-10-2026` or one with a trailing space can still parse with `STR_TO_DATE` while the trigger leaves `ts_date` NULL. Those rows would drop out of HOLD. Deploy note for Mira: before deploy, run `SELECT COUNT(*) FROM macro_output WHERE ts_date IS NULL AND STR_TO_DATE(`TIMESTAMP`,'%H:%i %d-%m-%Y') IS NOT NULL` on production; if it's not ~0, hold back the `ts_date` part.
+- **Gap:** `ImportMacroFromGoogleSheet` keeps the raw sheet value when no format parses. A value such as `00:03 1-10-2026` or one with a trailing space can still parse with `STR_TO_DATE` while the trigger leaves `ts_date` NULL. Those rows would drop out of HOLD. Deploy note for the reviewer: before deploy, run `SELECT COUNT(*) FROM macro_output WHERE ts_date IS NULL AND STR_TO_DATE(`TIMESTAMP`,'%H:%i %d-%m-%Y') IS NOT NULL` on production; if it's not ~0, hold back the `ts_date` part.
 - `OwnerPrivateController`'s HOLD and `JntHoldDownloadController` already filter on `ts_date`, which suggests the triggers exist on production.
 - **Verdict: reliable, subject to that one count.** `/item/data` and the worklist filter `mo.ts_date BETWEEN start_date AND end_date`.
 
-## Questions for Mira (need answers with the go)
+## Questions for the reviewer (need answers with the go)
 
 1. **Cancelled STATUS values.** Proposal: exclude normalised `cannotproceed` and `odz` (see above). Keep NULL, blank and `PROCEED`. Not checked: whether a J&T cancel (`jnt_shipments` `CANCEL_OK`) leaves `macro_output.waybill` set, which would keep that order in HOLD; that needs production data.
-2. **Which `supply_orders.status` values are "open".** Your reading is `ordered`. **I recommend `ordered` + `delivered`.** A `delivered` order has arrived but hasn't been counted (`received_qty` NULL). With `ordered` only, Busing marks a PO delivered, the item jumps to "I-order na" with the full HOLD as shortfall, and he reorders stock already on his shelf. `counted` stays closed. Stock on hand after counting is never compared with HOLD; that's out of scope here and goes to the report as a suggestion.
+2. **Which `supply_orders.status` values are "open".** Your reading is `ordered`. **I recommend `ordered` + `delivered`.** A `delivered` order has arrived but hasn't been counted (`received_qty` NULL). With `ordered` only, the owner marks a PO delivered, the item jumps to "I-order na" with the full HOLD as shortfall, and he reorders stock already on his shelf. `counted` stays closed. Stock on hand after counting is never compared with HOLD; that's out of scope here and goes to the report as a suggestion.
 3. **PO lines typed as "2 x foo".** `keyFor` matches them to "foo", but `ordered_qty` is used as is (not ×2). I recommend this, because a PO quantity is what was ordered from the supplier.
 4. **"dati ₱X (date)" in the Lahat table too.** I recommend yes: it's the existing quote line (`index.blade.php:753-763`). One added span; the table layout is unchanged.
 
@@ -134,7 +134,7 @@ Constants hold the four list keys. Labels live in the Blade only.
 ## Threat model
 
 - **Untrusted:** uploaded images; quote fields (price, moq, link, note) and `start_date`/`end_date`/`list` from requests (CEO only, validated); stored `ITEM_NAME`/`PAGE`/supplier names (from sheets and users). Rendered only via Alpine text bindings.
-- **Trusted:** repo, config, schema, Busing's and Mira's inputs.
+- **Trusted:** repo, config, schema, the owner's and the reviewer's inputs.
 - **Exposure:** every new endpoint and field sits behind `auth` + `checkAccess()` + the exact role `CEO` in the controller (the data layer), not only in the UI.
 
 ## Tests (sqlite in memory)
@@ -160,5 +160,5 @@ Constants hold the four list keys. Labels live in the Blade only.
     - a `photo_path` in the request is ignored
     - rejects with 422 and stores nothing: a non-image, a fake `.jpg`, a file over 10240 KB
     - non-CEO gets 403
-- **Seam 3:** `tests/Feature/Item/HoldDataTest.php`: characterisation first, then a STATUS table (NULL, blank, `PROCEED` kept; `CANNOT PROCEED`, `cannot proceed`, `CANNOT_PROCEED`, ` odz ` excluded, per Mira's answer) and the `ts_date` range. Plus `tests/Unit/HoldServiceGroupingTest.php` for the extracted loop and the key-equality table.
+- **Seam 3:** `tests/Feature/Item/HoldDataTest.php`: characterisation first, then a STATUS table (NULL, blank, `PROCEED` kept; `CANNOT PROCEED`, `cannot proceed`, `CANNOT_PROCEED`, ` odz ` excluded, per the reviewer's answer) and the `ts_date` range. Plus `tests/Unit/HoldServiceGroupingTest.php` for the extracted loop and the key-equality table.
 - Expected numbers are written by hand from the fixtures.
