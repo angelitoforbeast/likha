@@ -304,7 +304,7 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
         }
     }
 
-    // ── Part B (amendment A1/A2): walang paraan para maging visible ang claude_* sa non-CEO ──
+    // ── Part B: walang paraan para maging visible ang claude_* sa non-CEO ──
 
     private const TEAM = ['Marketing - OIC', 'Marketing'];
 
@@ -358,7 +358,7 @@ class ClaudeActionColumnSettingsTest extends OwnerPrivateTestCase
         $this->assertClaudeLockedForTeam($table, 'after reset');
     }
 
-    /** A8 (amendment 010-1): ang dalawang save route lang ang write route na may 'claude' o 'ceo-action'; POST lang, nasa web (CSRF) + auth. Ang refusal per role: ClaudeActionSaveRouteTest. */
+    /** Ang dalawang save route lang ang write route na may 'claude' o 'ceo-action'; POST lang, nasa web (CSRF) + auth. Ang refusal per role: ClaudeActionSaveRouteTest. */
     public function test_the_only_claude_and_ceo_action_write_routes_are_the_two_ceo_save_routes(): void
     {
         $writes = [];

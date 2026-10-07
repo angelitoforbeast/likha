@@ -7,7 +7,7 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
- * Pin ng kasalukuyang login / logout bago ang handoff 012 (CEO stays logged in):
+ * Pin ng kasalukuyang login / logout bago ang "CEO stays logged in":
  * walang remember cookie ang ibang role, pareho ang redirect, pareho ang failure.
  */
 class LoginCharacterizationTest extends AuthTestCase
@@ -124,7 +124,7 @@ class LoginCharacterizationTest extends AuthTestCase
         $this->assertNotNull($encrypted, 'Walang remember cookie sa login ng CEO.');
 
         // Kontrol: ang hindi ginalaw na cookie ay nagsa-sign-in, kaya ang pagbabago lang ang dahilan ng pagtanggi.
-        // Kasama ang wastong pangalawang cookie (Amendment 012-1), na nananatili rin sa request sa ibaba.
+        // Kasama ang wastong pangalawang cookie, na nananatili rin sa request sa ibaba.
         $this->freshBrowser();
         $this->withUnencryptedCookie(self::SINCE_COOKIE, $this->rawCookie($login, self::SINCE_COOKIE));
         $this->withUnencryptedCookie($this->recallerName(), $encrypted)->get(self::PROTECTED_URL)->assertOk();

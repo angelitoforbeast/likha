@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 /**
- * Ang shared run-one-row function (spec 007 §6.3) kapag tinawag nang walang request — gaya ng night job.
+ * Ang shared run-one-row function kapag tinawag nang walang request — gaya ng night job.
  * Ang browser path mismo ay naka-pin sa RunRowCharacterizationTest.
  */
 class AiCheckerRowRunnerTest extends NightRunTestCase

@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Ang data ng "Night run" section (spec 007 §9, §10; amendment 007-1 items 8 at 16).
+ * Ang data ng "Night run" section.
  * Ang gastos at ang mga mensahe ng pumalyang sheet (raw exception text) ay para sa CEO lang — wala sa array ng iba.
  */
 class NightRunSummaryTest extends NightAstraTestCase

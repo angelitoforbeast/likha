@@ -13,8 +13,8 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
- * Handoff 012: ang CEO lang ang may "remembered" login na 30 araw (D1, D2), at natatapos iyon sa Logout (D4).
- * Amendment 012-1 (A1): ang 30 araw ay binabantayan ng server sa pamamagitan ng pangalawang cookie.
+ * Ang CEO lang ang may "remembered" login na 30 araw, at natatapos iyon sa Logout.
+ * Ang 30 araw ay binabantayan ng server sa pamamagitan ng pangalawang cookie.
  */
 class CeoRememberedLoginTest extends AuthTestCase
 {
@@ -45,7 +45,7 @@ class CeoRememberedLoginTest extends AuthTestCase
         $this->assertNotNull($cookie, 'Walang remember cookie sa login ng CEO.');
         $this->assertEqualsWithDelta(time() + self::THIRTY_DAYS, $cookie->getExpiresTime(), 120);
 
-        // A1: pangalawang cookie na may user id at oras ng login, parehong tagal at parehong attributes.
+        // Pangalawang cookie na may user id at oras ng login, parehong tagal at parehong attributes.
         $since = $response->getCookie(self::SINCE_COOKIE);
         $this->assertNotNull($since, 'Walang pangalawang cookie sa login ng CEO.');
         $this->assertSame($user->id . '|' . now()->timestamp, $since->getValue());
@@ -71,7 +71,7 @@ class CeoRememberedLoginTest extends AuthTestCase
     }
 
     /**
-     * A1: mga pangalawang cookie na tinatanggap.
+     * Mga pangalawang cookie na tinatanggap.
      * Bawat case: [paano ginagawa ang pangalawang cookie, ilang minuto ang lumipas bago ang remembered sign-in].
      */
     public static function validSinceCookies(): array
@@ -112,7 +112,7 @@ class CeoRememberedLoginTest extends AuthTestCase
     }
 
     /**
-     * A1: walang remembered sign-in kung walang wastong pangalawang cookie na hindi lalampas sa 30 araw.
+     * Walang remembered sign-in kung walang wastong pangalawang cookie na hindi lalampas sa 30 araw.
      * Bawat case: [paano ginagawa ang pangalawang cookie mula sa (user id, oras ng login), ilang minuto ang lumipas].
      */
     public static function badSinceCookies(): array
@@ -191,7 +191,7 @@ class CeoRememberedLoginTest extends AuthTestCase
         $this->assertGuest();
     }
 
-    /** D3: ang sign-in na galing sa cookie ay para lang sa account na CEO pa rin sa oras na iyon. */
+    /** Ang sign-in na galing sa cookie ay para lang sa account na CEO pa rin sa oras na iyon. */
     public static function accountsThatAreNotCeoAnymore(): array
     {
         return [
@@ -262,7 +262,7 @@ class CeoRememberedLoginTest extends AuthTestCase
     }
 
     /**
-     * A3: ang re-check ay nakakabit sa Login event nang tahasan (AppServiceProvider), hindi sa discovery o sa
+     * Ang re-check ay nakakabit sa Login event nang tahasan (AppServiceProvider), hindi sa discovery o sa
      * naka-cache na events file: array na [class, method] ang tahasang rehistro, string na "Class@method" ang
      * galing sa discovery. Nauuna rin ito sa ibang Login listener, at isang beses lang nakakabit.
      */

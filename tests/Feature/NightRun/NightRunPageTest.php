@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Ang markup ng "Night run" sa logs page at ng night block sa settings page (spec 007 §9, §10), sa pamamagitan ng
+ * Ang markup ng "Night run" sa logs page at ng night block sa settings page, sa pamamagitan ng
  * totoong routes. Ang bilang at CEO-only na data ay sinubok na sa NightRunSummaryTest: dito ang ipinapakita.
  */
 class NightRunPageTest extends NightAstraTestCase

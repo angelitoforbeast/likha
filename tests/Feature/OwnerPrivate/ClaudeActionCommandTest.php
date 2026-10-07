@@ -130,8 +130,8 @@ class ClaudeActionCommandTest extends OwnerPrivateTestCase
     {
         DB::table('page_day_actions')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'comment' => 'team note', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
         DB::table('page_day_action_logs')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'new_comment' => 'team note', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
-        DB::table('page_day_ceo_actions')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'action' => 'ceo A', 'reason' => 'ceo R', 'source' => 'ceo:Busing', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
-        DB::table('page_day_ceo_action_logs')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'new_action' => 'ceo A', 'new_reason' => 'ceo R', 'source' => 'ceo:Busing', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
+        DB::table('page_day_ceo_actions')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'action' => 'ceo A', 'reason' => 'ceo R', 'source' => 'ceo:CEO User', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
+        DB::table('page_day_ceo_action_logs')->insert(['page_key' => self::PAGE, 'ts_date' => self::DATE, 'new_action' => 'ceo A', 'new_reason' => 'ceo R', 'source' => 'ceo:CEO User', 'created_at' => '2026-10-01 10:00:00', 'updated_at' => '2026-10-01 10:00:00']);
         $tables = ['page_day_actions', 'page_day_action_logs', 'page_day_ceo_actions', 'page_day_ceo_action_logs'];
         $snapshot = fn () => array_map(fn ($t) => DB::table($t)->get()->all(), $tables);
         $before = $snapshot();

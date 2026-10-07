@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 /**
- * Characterization ng browser path: POST /encoder/checker_1/ai-checker/run-row/{id} (spec 007 §6.3).
+ * Characterization ng browser path: POST /encoder/checker_1/ai-checker/run-row/{id}.
  * Isinulat BAGO ilipat ang laman ng runRow sa AiCheckerRowRunner — dapat pareho ang JSON at ang
  * ai_checker_logs row bago at pagkatapos ng paglipat. Ang tanging seam ay Http::fake sa OpenAI;
  * walang totoong network, walang totoong key. Ang address list ay ang totoong jnt_address.txt ng repo.

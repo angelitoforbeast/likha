@@ -18,7 +18,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 
 /**
- * Base ng mga test ng Astra night run (spec 007 §6): walang job na tumatakbo nang kusa (Queue::fake —
+ * Base ng mga test ng Astra night run: walang job na tumatakbo nang kusa (Queue::fake —
  * tinatawag ng test ang handle()), walang totoong OpenAI (Http::preventStrayRequests), walang
  * napupunta sa totoong log, at nakapirmi ang oras. Gabi = 2026-10-05, mga order = 2026-10-04.
  */

@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * POST /owner/users/{id}/password (OwnerUsersController::updatePassword): ang nag-iisang lugar sa app na
- * nagpapalit ng password. Pin ng kasalukuyang ugali, tapos ang A2 ng Amendment 012-1.
+ * nagpapalit ng password. Pin ng kasalukuyang ugali, tapos ang bagong remember token sa bawat palit.
  */
 class OwnerPasswordChangeTest extends AuthTestCase
 {
@@ -35,7 +35,7 @@ class OwnerPasswordChangeTest extends AuthTestCase
         $this->assertTrue(Hash::check(self::NEW_PASSWORD, $target->fresh()->password));
     }
 
-    /** A2: sino ang nagpapalit ng password ng CEO na may remembered login. */
+    /** Sino ang nagpapalit ng password ng CEO na may remembered login. */
     public static function whoChangesThePassword(): array
     {
         return [

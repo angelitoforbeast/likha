@@ -13,7 +13,7 @@ use Illuminate\Testing\TestResponse;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
- * Amendment 012-2 (B1, B2): ang mga session na bukas na sa ibang browser. Dito lang sa file na ito
+ * Ang mga session na bukas na sa ibang browser. Dito lang sa file na ito
  * naka-`database` ang session driver (gaya ng live), dahil ang mga row sa `sessions` ang binubura.
  * Ang ibang Auth test ay nasa default na `array` driver: sila ang patunay na walang nasisira doon.
  */
@@ -117,7 +117,7 @@ class EndOpenSessionsTest extends AuthTestCase
     }
 
     /**
-     * B1: [kaninong session ang nagpapalit, kaninong password, sagot, aling session lang ang dapat matapos].
+     * Pagpapalit ng password: [kaninong session ang nagpapalit, kaninong password, sagot, aling session lang ang dapat matapos].
      * Ang huling row: tinatanggihan ang hindi CEO (404 gaya ng dati) BAGO may mabura na kahit anong session.
      */
     public static function whosePasswordIsChanged(): array

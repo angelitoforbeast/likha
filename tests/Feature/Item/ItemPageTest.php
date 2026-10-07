@@ -219,7 +219,7 @@ class ItemPageTest extends ItemTestCase
     public function test_to_order_cells_show_one_english_state_each_behind_their_column_grant(): void
     {
         $cells = [
-            // Next step + reason (spec §4.1, §4.2)
+            // Next step + reason
             "x-for=\"N in [ilNext(G.item_name)]\"", "'il-tone-' + N.tone", 'ilReason(G.item_name)',
             "'🟠 Count the stock first'", "'⚪ Barely selling'", "'🟢 OK'", "'🔴 Find a supplier'",
             "'🔴 Order from ' + sup + ' now'", "'🔴 Order now'", "'🟡 Order from ' + sup + ' by '", "'🟡 Order by '",
@@ -521,7 +521,7 @@ class ItemPageTest extends ItemTestCase
             $this->assertStringContainsString("id:'{$id}'", $ceo);                 // defaultCols()
             $this->assertStringContainsString("col.id==='{$id}'", $ceo);           // item-row cell
             $this->assertContains($id, $catalogIds);
-            // Handoff 004: nakatago na by default ang CATEGORY (nasa catalog pa rin).
+            // Nakatago na by default ang CATEGORY (nasa catalog pa rin).
             $id === 'category' ? $this->assertNotContains($id, $defaultIds) : $this->assertContains($id, $defaultIds);
         }
         $this->assertStringContainsString("col.id==='item_val'", $ceo);
@@ -712,7 +712,7 @@ class ItemPageTest extends ItemTestCase
             $this->assertSame($widths, array_map('intval', $m[1]), $p);
         }
         $html = $this->render(true);
-        // Item min 300 + fixed widths (spec §8): 300 + 796 = 1096; 300 + 822 = 1122 — kasya sa ≈1,333 px ng 1,366.
+        // Item min 300 + fixed widths: 300 + 796 = 1096; 300 + 822 = 1122 — kasya sa ≈1,333 px ng 1,366.
         $this->assertStringContainsString('#il-table-order { min-width:1096px; }', $html);
         $this->assertStringContainsString('#il-table-sales { min-width:1122px; }', $html);
         $this->assertStringContainsString('.il-name { font-weight:800; font-size:13px; color:#1e1b4b; line-height:1.3; overflow-wrap:anywhere; }', $html);

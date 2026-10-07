@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Schedule as ScheduleFacade;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Night run settings (spec 007 §3): iisang reader na may validation at defaults.
+ * Night run settings: iisang reader na may validation at defaults.
  */
 class NightSettingsTest extends NightRunTestCase
 {

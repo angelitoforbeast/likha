@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Ang apat na route ng night run (spec 007 §6.6, §8): CEO lang, validated ang bawat input.
+ * Ang apat na route ng night run: CEO lang, validated ang bawat input.
  * PERA: dito lang (click ng CEO) bumabalik sa `queued` ang row na natapos na; ang `done` at `skipped` ay hindi kailanman.
  */
 class NightRunRoutesTest extends NightAstraTestCase

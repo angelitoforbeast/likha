@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 
 /**
- * Isang import lang sa bawat pagkakataon (spec 007 §4.1, §4.3): button, API at Likha starts.
+ * Isang import lang sa bawat pagkakataon: button, API at Likha starts.
  * Hindi sinusubok ang Google fetch — Queue::fake() kaya walang job na tumatakbo.
  */
 class ImportStartTest extends NightRunTestCase

@@ -6,7 +6,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * GET /item — ?layout=old ang tanging paraan para sa lumang view (handoff 005): eksaktong 'old' lang.
+ * GET /item — ?layout=old ang tanging paraan para sa lumang view: eksaktong 'old' lang.
  */
 class ItemLayoutTest extends ItemTestCase
 {

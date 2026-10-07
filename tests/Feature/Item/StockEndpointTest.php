@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Schema;
 
 /**
  * GET /item/stock — stock gauge, DOI, order qty, item values.
- * Inaasahang values = worked examples A–D ng handoff 003 (section 5), hindi kinompute ulit.
+ * Inaasahang values = worked examples A–D na kinuwenta nang kamay, hindi kinompute ulit.
  */
 class StockEndpointTest extends ItemTestCase
 {

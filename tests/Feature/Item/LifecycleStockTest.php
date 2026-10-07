@@ -5,8 +5,8 @@ namespace Tests\Feature\Item;
 use Illuminate\Support\Facades\DB;
 
 /**
- * GET /item/stock — lifecycle at ang normal / lugi na result sets (handoff 004).
- * Inaasahang values = section 5 ng handoff 004, nakasulat nang kamay (hindi kinompute ulit).
+ * GET /item/stock — lifecycle at ang normal / lugi na result sets.
+ * Inaasahang values = mga halimbawang kinuwenta at isinulat nang kamay (hindi kinompute ulit).
  * Lead 7, stock 0, incoming 0, HOLD 50, 14-day velocity 10/araw maliban kung sinabi.
  */
 class LifecycleStockTest extends ItemTestCase
@@ -80,7 +80,7 @@ class LifecycleStockTest extends ItemTestCase
             'ACTX'   => ['active',      0,   null, 190, 190, false],
             'CONSX'  => ['consistent',  0,   null, 220, 150, true],
             'SCALX'  => ['scaling',     105, null, 365, 150, true],   // 7-day v = 15
-            'SCALZ'  => ['scaling',     0,   null, 260, 150, true],   // 7-day v = 0, 14-day v = 10 wins (amendment 004-1)
+            'SCALZ'  => ['scaling',     0,   null, 260, 150, true],   // 7-day v = 0, 14-day v = 10 wins
             'EQUX'   => ['scaling',     70,  null, 260, 150, true],   // 7-day v = 14-day v = 10: strict >, kaya 14-day ang gamit
             'DECLX'  => ['declining',   0,   null, 120, 120, false],
             'PHASEX' => ['phasing_out', 0,   null, 50,  50,  false],

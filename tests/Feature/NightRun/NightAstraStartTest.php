@@ -13,7 +13,7 @@ use App\Services\AstraEncoder;
 use Illuminate\Support\Facades\Queue;
 
 /**
- * Kailan nagsisimula ang Astra night run (spec 007 §6.2, amendment 007-1 items 12 at 16):
+ * Kailan nagsisimula ang Astra night run:
  * naghihintay sa import, "Did not run" pagkalipas ng 60 minuto, isang run kada petsa.
  */
 class NightAstraStartTest extends NightAstraTestCase

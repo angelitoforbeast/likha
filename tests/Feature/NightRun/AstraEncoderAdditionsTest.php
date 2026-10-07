@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Log;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
- * Mga dagdag sa AstraEncoder para sa night run (spec 007 §6.3, amendment 007-1 item 14):
+ * Mga dagdag sa AstraEncoder para sa night run:
  * lastError(), httpTimeout(), onlyWhenStatusBlank(), ang log na walang body, at ang presyo ng gpt-6-luna.
  * Lahat ay opt-in o logging lang — ang browser path ay naka-pin sa RunRowCharacterizationTest.
  */

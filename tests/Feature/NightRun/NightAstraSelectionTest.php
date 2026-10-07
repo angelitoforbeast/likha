@@ -9,7 +9,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Queue;
 
 /**
- * Aling mga order ang kinukuha ng Astra night run (spec 007 §6.1): "lahat ng blangko" ng kahapon (Manila),
+ * Aling mga order ang kinukuha ng Astra night run: "lahat ng blangko" ng kahapon (Manila),
  * pinakaluma muna, hanggang sa safety maximum.
  */
 class NightAstraSelectionTest extends NightAstraTestCase

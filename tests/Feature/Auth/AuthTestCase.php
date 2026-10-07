@@ -24,7 +24,7 @@ abstract class AuthTestCase extends TestCase
     /** Page na nasa likod ng ['web','auth'] lang: JSON, walang view, walang role check. */
     protected const PROTECTED_URL = '/debug/ip';
 
-    /** Pangalawang cookie ng CEO (Amendment 012-1, A1): user id at oras ng password login. */
+    /** Pangalawang cookie ng CEO: user id at oras ng password login. */
     protected const SINCE_COOKIE = RefuseRememberedLoginUnlessCeo::SINCE_COOKIE;
 
     protected function setUp(): void
@@ -109,7 +109,7 @@ abstract class AuthTestCase extends TestCase
 
     /**
      * Request sa protektadong page gamit lang ang ibinigay na remember cookie (bagong browser), at ang
-     * pangalawang cookie ng Amendment 012-1 kung may ibinigay. Walang $since = hindi ito ipinapadala.
+     * pangalawang cookie ng CEO kung may ibinigay. Walang $since = hindi ito ipinapadala.
      */
     protected function getWithRememberCookie(string $value, ?string $since = null): TestResponse
     {

@@ -8,7 +8,7 @@ use PHPUnit\Framework\TestCase;
 class SourcingClassifierTest extends TestCase
 {
     /**
-     * Mga patakaran mula sa handoff 001 (unang tumama, panalo):
+     * Mga patakaran ng sourcing worklist (unang tumama, panalo):
      *  1. hanapan    — walang PO line kailanman, walang quote
      *  2. may_quote  — may quote, walang PO line kailanman
      *  3. i_order    — may supplier, at open qty < HOLD (shortfall = HOLD − open)

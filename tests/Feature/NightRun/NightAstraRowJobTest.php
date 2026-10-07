@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
 /**
- * Ang job ng isang row (spec 007 §6.4). Mga invariant na binabantayan dito:
+ * Ang job ng isang row. Mga invariant na binabantayan dito:
  *  - PERA: engine call lang pagkatapos ng claim; hanggang 2 engine run kada row; walang ikatlo.
  *  - DATA: walang sinusulat sa order na may STATUS na inilagay ng tao (bago o habang tumatakbo ang call).
  *  - Ang `reason` ay fixed strings lang — walang laman ng sagot ng OpenAI o ng exception.

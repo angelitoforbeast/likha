@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 
 /**
- * `night:import {kind} {slot}` (spec 007 §4.2, amendment 17): stale rule, isang step kada gabi at kind.
+ * `night:import {kind} {slot}`: stale rule, isang step kada gabi at kind.
  * Hindi sinusubok ang Google fetch — Queue::fake() kaya walang job na tumatakbo.
  */
 class NightImportCommandTest extends NightRunTestCase

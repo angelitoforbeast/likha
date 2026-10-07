@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schedule as ScheduleFacade;
 
 /**
- * Ang tick kada minuto (spec 007 §6.5, §7): sweep ng mga row na naiwang `running`, stop time,
+ * Ang tick kada minuto: sweep ng mga row na naiwang `running`, stop time,
  * dispatchPending, settle. PERA: ang tick ay HINDI kailanman nagbabalik ng row sa `queued`.
  */
 class NightAstraTickTest extends NightAstraTestCase
