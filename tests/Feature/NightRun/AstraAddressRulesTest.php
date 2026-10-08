@@ -2449,6 +2449,45 @@ class AstraAddressRulesTest extends NightAstraTestCase
         ]);
     }
 
+    public function test_S_26_26_poblacion_beside_the_name_confirms_a_namesake_only_where_the_town_has_no_other_poblacion_barangay(): void
+    {
+        $princesa = ['PALAWAN', 'PUERTO-PRINCESA-CITY', 'PRINCESA (POB.)'];
+        $burgos   = ['QUEZON', 'QUEZON-PADRE-BURGOS', 'BURGOS (POB.)'];
+        $samar    = ['WESTERN-SAMAR', 'MOTIONG', 'WESTERN SAMAR'];
+        $rizal    = ['RIZAL', 'RIZAL-BARAS', 'RIZAL (POB.)'];
+        $this->assertLinesInList(
+            $princesa, ['PALAWAN', 'PUERTO-PRINCESA-CITY', 'BAGONG SIKAT (POB.)'], $burgos, ['QUEZON', 'QUEZON-PADRE-BURGOS', 'BASIAO (POB.)'],
+            $samar, ['WESTERN-SAMAR', 'MOTIONG', 'POBLACION I'], $rizal
+        );
+        // Baras: RIZAL (POB.) lang ang label na poblacion ang uri.
+        $this->assertSame(['RIZAL (POB.)'], array_values(array_filter($this->cityLabels($rizal), static fn ($label): bool => stripos((string) $label, 'POB') !== false)));
+
+        $this->assertSame([
+            'the town\'s full name, then Poblacion'        => self::NONE,
+            'Poblacion, then the town\'s full name'        => self::NONE,
+            'the name, then Poblacion'                     => self::NONE,
+            'Pob. before the name'                         => self::NONE,
+            'the town\'s name, Poblacion, the province'    => self::NONE,
+            'town, province named like the label, Poblacion' => self::NONE,
+            // Kumpirmado pa rin.
+            'a barangay word, other poblacion barangays'   => self::PHRASE,
+            'a barangay word, BURGOS (POB.)'               => self::PHRASE,
+            'the only poblacion barangay, Poblacion after' => self::PHRASE,
+            'the only poblacion barangay, Pob. before'     => self::PHRASE,
+        ], [
+            'the town\'s full name, then Poblacion'        => $this->textCheck($princesa, 'Puerto Princesa Poblacion'),
+            'Poblacion, then the town\'s full name'        => $this->textCheck($princesa, 'Poblacion Puerto Princesa'),
+            'the name, then Poblacion'                     => $this->textCheck($princesa, 'Princesa Poblacion, Palawan'),
+            'Pob. before the name'                         => $this->textCheck($princesa, 'Pob. Princesa, Palawan'),
+            'the town\'s name, Poblacion, the province'    => $this->textCheck($burgos, 'Padre Burgos Poblacion Quezon'),
+            'town, province named like the label, Poblacion' => $this->textCheck($samar, 'Motiong Western Samar Poblacion'),
+            'a barangay word, other poblacion barangays'   => $this->textCheck($princesa, 'Brgy Princesa, Puerto Princesa City'),
+            'a barangay word, BURGOS (POB.)'               => $this->textCheck($burgos, 'Brgy. Burgos, Padre Burgos, Quezon'),
+            'the only poblacion barangay, Poblacion after' => $this->textCheck($rizal, 'Rizal Poblacion, Baras'),
+            'the only poblacion barangay, Pob. before'     => $this->textCheck($rizal, 'Pob. Rizal, Baras'),
+        ]);
+    }
+
     public function test_S_26_9_the_mapper_picks_the_exact_number_and_never_a_neighbour(): void
     {
         $this->assertLinesInList(self::COTABATO_POB, ['COTABATO', 'COTABATO-CITY', 'POBLACION I'], self::COTABATO_POB_2);

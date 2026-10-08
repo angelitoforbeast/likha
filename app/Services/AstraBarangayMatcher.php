@@ -66,7 +66,7 @@ class AstraBarangayMatcher
      *
      * $sharesCityName: ang barangay ay kapangalan ng sarili nitong city o bayan (MALIBCONG sa bayan ng MALIBCONG).
      * Ang "Malibcong, Abra" ay pangalan ng BAYAN, ilang beses man isulat: kumpirmado lang kapag may barangay word
-     * (o "pob"/"poblacion") na katabi mismo ng isang hit.
+     * na katabi mismo ng isang hit, o "pob"/"poblacion" kapag walang ibang barangay ng bayan na poblacion ang uri.
      * Pagtanggi lang ang naidaragdag nito.
      */
     public static function confirmWithWording(string $text, string $label, string $formWording, array $cityLabels, bool $sharesCityName = false): array
@@ -476,8 +476,9 @@ class AstraBarangayMatcher
         $sibWords  = 1; // pinakamahabang pangalan ng ibang label, sa bilang ng salita
         foreach ($siblings as $sib) $sibWords = max($sibWords, substr_count($sib, ' ') + 1);
 
-        // Ang "poblacion" sa tabi ng hit ay tanda ng barangay, maliban kung POBLACION mismo ay ibang barangay ng city.
-        $pobIsSibling = isset($sibSet['poblacion']);
+        // Ang "poblacion" sa tabi ng hit ay tanda ng barangay, maliban kung may IBANG barangay ng city na poblacion din ang uri
+        // (POBLACION, POBLACION I, "BAGONG SIKAT (POB.)"): doon, ang "Puerto Princesa Poblacion" ay hindi pa PRINCESA (POB.).
+        $pobIsSibling = self::inAny('poblacion', $siblings);
         $hitCount     = 0;     // ilang malinis na hit sa buong text
         $marked       = false; // may hit bang katabi mismo ng barangay word o ng "poblacion"
 
