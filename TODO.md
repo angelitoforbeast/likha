@@ -249,3 +249,15 @@ Accepted minors:
 - **Rows of a cut-off browser come back as guest rows** (a later request with the old session id inserts an empty row with no user id), and the tests share one session handler object, so they do not show that insert. Reason: a guest row signs nobody in; no assertion depends on it.
 - **The red run of the Logout ordering test has no readable first failure line** (the 500 page's trace filled the output); the cause seen was the role query failing after the sign-out. Reason: found in the developer's report.
 - **`node --test 'test/hooks/*.test.mjs'` was not run.** Reason: outside the allowed commands; no kit file was touched.
+
+## 016: night run rows on Checker 1 (2026-10-08)
+
+Minor review findings accepted, not fixed. None is on a path where untrusted input can widen the result, error the page or show other data.
+
+- **`NightStepFilter::nightRowCount()` has no guard for a "not valid" filter.** The only caller (`MacroOutputController::index`) calls it for a valid filter. Reason: a guard that cannot be reached is dead code; on a wrong call the count would be 0 rows of step "null", nothing leaks.
+- **The rule "the rows of the night" (state done, not PROCEED) and the rule "an Astra step" are now written twice** (`NightStepFilter`, and `NightRunSummary` / `NightRunController::astraStep()`). Reason: sharing them means changing two files this work was not allowed to touch. `test_S_06_4` pins that both give the same count. Proposed as a follow-up task.
+- **The date formats `D, M j` and `M j` are written in two views** (`_night_run.blade.php`, `macro_output/index.blade.php`). Reason: two uses; a shared helper comes with the third.
+- **The branch "the night tables do not exist" of `NightStepFilter` has no test.** Reason: trusted path (deploy state); the test database always has the tables. It fails closed ("not valid", no rows).
+- **Untested here because the test database is sqlite:** the sub-select and the boolean `proceed` on MySQL and pgsql. Reason: built with the query builder only (bindings, no raw SQL except `1 = 0`), no MySQL or pgsql available in this worktree.
+- **`test_S_07_5` and `test_S_07_8` read markup and script text; they do not run JavaScript.** Reason: the project has no JavaScript test runner and adding one is a new dependency. S-07.5 is also an owner check in `qa/stories.md`.
+- **`test_S_09_4` has no variant "an Astra step with for_person 0 and an empty by-code list".** Reason: `test_S_09_3` covers the count of 0; the by-code list is unchanged code.
