@@ -2118,9 +2118,10 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $babagan   = ['TAWI-TAWI', 'SOUTH-UBIAN', 'BABAGAN'];
         $isidroSur = ['CAMARINES-SUR', 'LAGONOY', 'SAN ISIDRO SUR (POB.)'];
         $camagong  = ['AGUSAN-DEL-NORTE', 'NASIPIT', 'CAMAGONG'];
+        $cavite10a = ['CAVITE', 'CAVITE-CITY', 'BARANGAY 10-A (KINGFISHER-A)'];
         $this->assertLinesInList(
             $holy, $pagasa, $bayabas, ['ABRA', 'MALIBCONG', 'MALIBCONG'], $pitogoPag, ['QUEZON', 'QUEZON-PITOGO', 'QUEZON'], $babagan, ['TAWI-TAWI', 'SOUTH-UBIAN', 'NUSA'],
-            $isidroSur, ['CAMARINES-SUR', 'LAGONOY', 'SAN ISIDRO'], $camagong, self::NASIPIT_BRGY_5
+            $isidroSur, ['CAMARINES-SUR', 'LAGONOY', 'SAN ISIDRO'], $camagong, self::NASIPIT_BRGY_5, $cavite10a, ['CAVITE', 'CAVITE-CITY', 'BARANGAY 10 (KINGFISHER)']
         );
         $moved     = 'dati sa Brgy Holy Spirit, ngayon sa Brgy Bagong Pag-asa po';
         $corrected = 'hindi Brgy Holy Spirit, Brgy Bagong Pag-asa po';
@@ -2143,6 +2144,7 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'the other name is under 5 characters'  => self::PHRASE,
             'the other name is part of this one'    => self::PHRASE,
             'a number without a barangay word'      => self::PHRASE,
+            'a numbered name that is part of this one' => self::PHRASE,
             'one barangay only'                     => self::PHRASE,
         ], [
             'moved, the first one named'            => $this->textCheck($holy, $moved),
@@ -2160,6 +2162,7 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'the other name is under 5 characters'  => $this->textCheck($babagan, 'Brgy Babagan, malapit sa Nusa Store, South Ubian'),
             'the other name is part of this one'    => $this->textCheck($isidroSur, 'Brgy San Isidro Sur, Lagonoy'),
             'a number without a barangay word'      => $this->textCheck($camagong, 'Brgy Camagong, 5 pcs po'),
+            'a numbered name that is part of this one' => $this->textCheck($cavite10a, 'Brgy 10-A, Cavite City'),
             'one barangay only'                     => $this->textCheck($holy, 'Brgy Holy Spirit, Quezon City', 'Holy Spirit po', 'Holy Spirit, Quezon City'),
         ]);
 

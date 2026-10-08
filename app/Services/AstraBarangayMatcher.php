@@ -90,10 +90,12 @@ class AstraBarangayMatcher
                 foreach ([$keys[0], $keys[1]] as $key) {
                     if ($key === '' || isset($seen[$key])) continue;
                     $seen[$key] = true;
+                    // Bahagi ng pangalan ng kinukumpirma ("10" sa loob ng "10 a", "san isidro" sa loob ng "san isidro sur"): hindi iba.
+                    if (self::inAny($key, $own)) continue;
                     $words = explode(' ', $key);
                     $kind  = 'name';
                     if (count(self::specials($words)) === count($words)) $kind = 'number';
-                    elseif (strlen($key) < self::MIN_LEN || self::inAny($key, $own)) continue;
+                    elseif (strlen($key) < self::MIN_LEN) continue;
                     elseif (self::inAny($key, $placeNames)) $kind = 'place';
                     $index[$words[0]][] = [$words, $kind, $key];
                 }
