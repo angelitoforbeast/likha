@@ -1458,6 +1458,79 @@ class AstraAddressRulesTest extends NightAstraTestCase
         ]);
     }
 
+    public function test_S_26_17_the_exact_name_of_a_sibling_beside_a_filler_word_does_not_confirm_the_longer_name(): void
+    {
+        // Bawat row: [province, city, ang mas maikling label, ang mas mahabang label, text na ang maikli ang sinabi, sariling sulat ng mahaba na may filler].
+        $pairs = [
+            // Ang mahaba ay ang maikli at isang salita sa dulo.
+            ['CAMARINES-SUR', 'LAGONOY', 'SAN ISIDRO', 'SAN ISIDRO SUR (POB.)', 'Brgy San Isidro sa Lagonoy', 'Brgy San Isidro Sur sa Lagonoy'],
+            ['DAVAO-DEL-SUR', 'BANSALAN', 'POBLACION', 'POBLACION DOS', 'Brgy Poblacion sa Bansalan', 'Brgy Poblacion Dos sa Bansalan'],
+            ['TAWI-TAWI', 'SOUTH-UBIAN', 'NUSA', 'NUSA-NUSA', 'ship po sa Nusa', 'Brgy Nusa-Nusa sa South Ubian'],
+            ['DAVAO-DEL-SUR', 'DAVAO-CITY', 'LEON GARCIA', 'LEON GARCIA SR.', 'Brgy Leon Garcia sa Davao City', 'Brgy Leon Garcia Sr sa Davao City'],
+            ['AKLAN', 'LEZO', 'SANTA CRUZ', 'SANTA CRUZ BIGAA', 'Brgy Santa Cruz ba', 'Brgy Santa Cruz Bigaa ba'],
+            ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'MUZON', 'MUZON EAST', 'Muzon at SJDM', 'Muzon East at SJDM'],
+            ['CEBU', 'BORBON', 'BONGDO', 'BONGDO GUA', 'Bongdo nga po', 'Bongdo Gua nga po'],
+            ['BENGUET', 'BAGUIO-CITY', 'MODERN SITE', 'MODERN SITE EAST', 'Modern Site at Baguio', 'Modern Site East at Baguio'],
+            // Ang mahaba ay isang salita sa unahan at ang maikli.
+            ['BOHOL', 'BOHOL-CORTES', 'LOURDES', 'NEW LOURDES', 'na Lourdes', 'Brgy New Lourdes na po'],
+            ['BATAAN', 'ORION', 'BILOLO', 'DAANG BILOLO (POB.)', 'ng Bilolo', 'sa Daang Bilolo ng Orion'],
+            ['ALBAY', 'ALBAY-SANTO-DOMINGO', 'SAN ROQUE', 'BAGONG SAN ROQUE', 'ang San Roque', 'ang Bagong San Roque po'],
+            ['BASILAN', 'LAMITAN-CITY', 'BATO', 'KULAY BATO', 'kay Bato', 'sa Kulay Bato kay Ana'],
+            ['CATANDUANES', 'VIRAC', 'SALVACION', 'PALTA SALVACION', 'at Salvacion', 'at Palta Salvacion po'],
+            ['CAVITE', 'TANZA', 'AMAYA I', 'DAANG AMAYA I', 'lang Amaya I', 'sa Daang Amaya I lang po'],
+        ];
+        $seen = [];
+        $want = [];
+        foreach ($pairs as [$prov, $city, $short, $long, $siblingText, $ownText]) {
+            $this->assertLinesInList([$prov, $city, $short], [$prov, $city, $long]);
+            $want[$siblingText] = self::NONE;
+            $want[$ownText]     = self::PHRASE;
+            $seen[$siblingText] = $this->confirmed($siblingText, [$prov, $city, $long]);
+            $seen[$ownText]     = $this->confirmed($ownText, [$prov, $city, $long]);
+        }
+
+        $this->assertSame($want, $seen);
+    }
+
+    /**
+     * Lahat ng pares ng label sa iisang city na ang isa ay ang isa pa at isang salita sa unahan o sa dulo, sa sampung filler.
+     * Ang mas mahabang label na hindi nakukumpirma ng sarili nitong sulat sa anyong ito ay ang mga may numero sa unahan
+     * ("BGY. NO. 31 TALINGAAN"), may initial ("R. ECLEO SR.") o may kuwit sa loob ng pangalan: ang bilang nila ay nakatakda.
+     */
+    public function test_S_26_18_over_every_pair_of_a_name_and_its_one_word_longer_sibling_a_filler_word_never_confirms_the_longer_name(): void
+    {
+        $bare    = static fn (string $label): string => trim(preg_replace('/\s+/', ' ', preg_replace('/\([^)]*\)/u', ' ', $label)));
+        $fillers = ['sa', 'ng', 'po', 'na', 'ba', 'at', 'dito', 'lang', 'daw', 'nga'];
+        $pairs   = 0;
+        $wrong   = [];
+        $unconfirmed = [];
+        $start   = hrtime(true);
+        foreach ($this->maps()['brgysByCityProv'] as $place => $labels) {
+            $city  = explode('|', (string) $place)[0];
+            $words = [];
+            foreach ($labels as $label) {
+                $key = MacroChecker::normBrgyKey($bare((string) $label));
+                if ($key !== '') $words[(string) $label] = explode(' ', $key);
+            }
+            foreach ($words as $long => $lw) {
+                foreach ($words as $short => $sw) {
+                    if (count($lw) !== count($sw) + 1 || (array_slice($lw, 0, -1) !== $sw && array_slice($lw, 1) !== $sw)) continue;
+                    $pairs++;
+                    foreach ($fillers as $filler) {
+                        if (AstraBarangayMatcher::confirm('Brgy ' . $bare((string) $short) . " $filler $city", (string) $long, $labels)['result'] !== 'none') $wrong[] = "$place: $short $filler → $long";
+                        if (AstraBarangayMatcher::confirm('Brgy ' . $bare((string) $long) . " $filler $city", (string) $long, $labels)['result'] === 'none') $unconfirmed["$place: $long"] = true;
+                    }
+                }
+            }
+        }
+        $seconds = (hrtime(true) - $start) / 1e9;
+
+        $this->assertSame(593, $pairs);
+        $this->assertSame([], $wrong);
+        $this->assertCount(35, $unconfirmed, implode("\n", array_keys($unconfirmed)));
+        $this->assertLessThan(15.0, $seconds);
+    }
+
     public function test_S_33_5_one_numbered_barangay_repeated_over_200000_characters_gives_the_result_of_the_short_text(): void
     {
         $this->assertLinesInList(self::CABADBARAN_POB_1, self::CABADBARAN_POB_2);

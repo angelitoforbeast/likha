@@ -335,6 +335,8 @@ class AstraBarangayMatcher
         $sibSet = array_fill_keys($siblings, true);
         $ownSet = array_fill_keys($own, true);
         $ownNumber = self::plain($nw[$n - 1]);
+        $sibWords  = 1; // pinakamahabang pangalan ng ibang label, sa bilang ng salita
+        foreach ($siblings as $sib) $sibWords = max($sibWords, substr_count($sib, ' ') + 1);
 
         // Ang "poblacion" sa tabi ng hit ay tanda ng barangay, maliban kung POBLACION mismo ay ibang barangay ng city.
         $pobIsSibling = isset($sibSet['poblacion']);
@@ -382,11 +384,15 @@ class AstraBarangayMatcher
                     [$pct, $siblingWins] = $nearMemo[$win];
                     if ($pct === null) continue;
                     if ($siblingWins) return ['result' => 'none', 'score' => 0, 'rejected' => true];
-                    $hits[] = [$i, $i + $n, 'near', (int) floor($pct)];
+                    // Ang halos-tugmang window na may hawak na buong pangalan ng IBANG barangay ng city ("San Isidro sa" para sa
+                    // SAN ISIDRO SUR): ang kapatid ang sinabi ng customer, kaya hindi ito binibilang na hit. Dumadaan pa rin ito sa mga
+                    // pagtanggi sa ibaba, para pagtanggi lang ang naidaragdag.
+                    $hits[] = [$i, $i + $n, 'near', (int) floor($pct), self::siblingInside($seg, $i, $i + $n, $sibSet, $sibWords, $nw)];
                 }
             }
 
-            foreach ($hits as [$from, $to, $kind, $score]) {
+            foreach ($hits as $hit) {
+                [$from, $to, $kind, $score] = $hit;
                 if (self::continues($seg, $to, $allowed)) return ['result' => 'none', 'score' => 0, 'rejected' => true];
                 if ($longer !== []) {
                     // Tumatawid ng hangganan ang tinging ito, pasulong at pabalik: "Fatima - 2", "Fatima (2)", "Fatima, 2" ay
@@ -410,6 +416,7 @@ class AstraBarangayMatcher
                     // Pati ang sariling numero pagkatapos ng pang-ugnay ("Fatima 2 or Dos"): dalawang numero pa rin ang sinabi.
                     if (isset($otherNumbers[$second]) || ($at > 0 && $second === $ownNumber)) return ['result' => 'none', 'score' => 0, 'rejected' => true];
                 }
+                if ($hit[4] ?? false) continue;
                 $hitCount++;
                 if (isset($seg['brgy'][$from]) || (!$pobIsSibling && (($w[$from - 1] ?? '') === 'poblacion' || ($w[$to] ?? '') === 'poblacion'))) $marked = true;
                 $rank = ['none' => 0, 'near' => 1, 'compact' => 2, 'phrase' => 3];
@@ -453,6 +460,36 @@ class AstraBarangayMatcher
         }
 
         return [$pct, false];
+    }
+
+    /**
+     * May buong pangalan ba ng IBANG label ng city na sumasapaw sa mga salitang $from hanggang $to (hindi kasama ang $to)?
+     * Ang pangalang puro numero o iisang letra ay binibilang lang kapag kasunod-agad ng barangay word: saanman ay may ganoong salita.
+     * Hindi binibilang ang kapatid na bahagi mismo ng pangalan kapag ang natitirang salita ng customer ay isang letra lang ang layo
+     * sa natitirang salita ng label ("Anilao Labak" para sa ANILAO-LABAC): typo iyon ng mahabang pangalan, hindi filler.
+     */
+    private static function siblingInside(array $seg, int $from, int $to, array $sibSet, int $sibWords, array $nw): bool
+    {
+        $w = $seg['w'];
+        $m = count($w);
+        for ($s = max(0, $from - $sibWords + 1); $s < $to; $s++) {
+            $run = '';
+            for ($e = $s; $e < $m && $e - $s < $sibWords; $e++) {
+                $run .= ($e > $s ? ' ' : '') . $w[$e];
+                if ($e < $from || !isset($sibSet[$run])) continue;
+                if (!isset($seg['brgy'][$s]) && count(self::specials(array_slice($w, $s, $e - $s + 1))) > $e - $s) continue;
+                if ($s >= $from && $e < $to && ($s === $from || $e === $to - 1) && array_slice($w, $s, $e - $s + 1) === array_slice($nw, $s - $from, $e - $s + 1)) {
+                    $said  = $s === $from ? array_slice($w, $e + 1, $to - $e - 1) : array_slice($w, $from, $s - $from);
+                    $extra = $s === $from ? array_slice($nw, $e + 1 - $from) : array_slice($nw, 0, $s - $from);
+                    $label = implode(' ', $extra);
+                    if (strlen($label) >= self::MIN_LEN && self::specials($said) === self::specials($extra) && levenshtein(implode(' ', $said), $label) <= 1) continue;
+                }
+
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** May malambot na hangganan ba SA LOOB ng mga salitang $from hanggang $to (hindi kasama ang $to)? */
