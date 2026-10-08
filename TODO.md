@@ -261,3 +261,31 @@ Minor review findings accepted, not fixed. None is on a path where untrusted inp
 - **Untested here because the test database is sqlite:** the sub-select and the boolean `proceed` on MySQL and pgsql. Reason: built with the query builder only (bindings, no raw SQL except `1 = 0`), no MySQL or pgsql available in this worktree.
 - **`test_S_07_5` and `test_S_07_8` read markup and script text; they do not run JavaScript.** Reason: the project has no JavaScript test runner and adding one is a new dependency. S-07.5 is also an owner check in `qa/stories.md`.
 - **`test_S_09_4` has no variant "an Astra step with for_person 0 and an empty by-code list".** Reason: `test_S_09_3` covers the count of 0; the by-code list is unchanged code.
+
+## 018: Astra identifies the J&T address like the classic checker (2026-10-08)
+
+Review findings accepted, not fixed. Each fix loop was closed after two rounds. None of these can change a result while the switch is off.
+
+**The text check (new rules only)**
+- **A one-word near match on a different name is confirmed unless the other name is a label of the same city** ("Mariano" against MARIANA, 85.7). Reason: it follows from the settled 85 rule. The list has at least 9,744 such pairs of one-word names; 47 of them sit in one city and are caught.
+- **"3. Poblacion 4. Cotabato" on one line confirms POBLACION IV.** Reason: a number with a full stop cannot be told from the end of a sentence ("Poblacion 4."); the forms `4)`, `4.)`, `4:`, `4]` are handled.
+- **"Fatima V Luna St" confirms FATIMA V** (an initial written without its dot), and a customer who types a list label with its parenthesis word for word can confirm the name inside the parenthesis. Reason: needs the list's own spelling in the chat; six cases in the whole list.
+- **A barangay whose name is close to its city's or province's name can be confirmed by "City, Province" alone** (PAMPANG by "Pampanga", BOLACAN by "Bulacan", 18 labels; 7 only through the near match). Reason: needs the model to name a barangay the customer never wrote, at medium confidence; the rule for a barangay named exactly like its city is built.
+- **Two labels of one city that are the same barangay written twice** ("(BGY. 10 AND 11)" and "(BGY. 10 & 11)") confirm each other. Reason: same place.
+
+**The program's mapping (new rules only)**
+- **A form city that is a unique town name with an empty province maps to that town** ("Jaro" with no province gives Jaro, Leyte, although Jaro is also a district of Iloilo City). Reason: the spec lets a city without a province map when the list has one such city; the barangay must still be in the customer's text and exist in that town. Raised to the reviewer in the result as a decision for the owner.
+- **A wording that ends in "City", for a city that is the only one of its name, maps whatever province the form gives** ("Lapu-Lapu City" with "Davao del Sur"). Reason: this is the list-filing case the spec asks for (Cotabato City under COTABATO); it needs a form that says "City" for another place.
+- **A contradicting name inside a parenthesis of the province is not read** ("Leyte (Iloilo)"). Reason: no realistic wording found.
+
+**The rule function**
+- **Four switch-off paths have no captured test of their own:** existing fields valid with no line, a shop-details mismatch, an invalid phone with a valid line, a province taken from the list. Reason: the move was compared with the base statement by statement by the reviewing agent and the ten captured answers pin the rest; capturing more needs the base code, which is gone from the tree.
+- **`replay.label_source` stays `model` when the guard then drops the barangay.** Reason: the word names where the line came from; `guard.result` says the rest.
+- **The list file's path is written in two places** (`AstraEncoder::listCrc`, `MacroChecker::loadAddressMaps`). Reason: trusted path, two uses.
+
+**The replay command and the settings box**
+- **Two Astra steps for one night date would resolve to the newer one without a word.** Reason: the table's unique key on night and kind makes it unreachable.
+- **The duplicate-phone information line costs two more reads per row that would proceed.** Reason: slow on a large night, not wrong; a nightly figure of a few hundred rows.
+- **After a failed save of the settings form the box shows the stored value, not what was ticked.** Reason: CEO-only screen, trusted path.
+- **Not tested: MySQL, and memory with real-sized chat columns.** Reason: the tests run on sqlite; the command uses the query builder and reads 200 rows per chunk.
+- **For logs written before this change the model's own request for a person is inferred and can be wrong in both directions.** Reason: the log did not record it; the report says so in two sentences and prints strict and lenient counts.
