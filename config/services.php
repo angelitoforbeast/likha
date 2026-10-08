@@ -55,6 +55,7 @@ return [
     'astra_encoder_model'  => env('ASTRA_ENCODER_MODEL', 'gpt-6-astra'),
     'astra_encoder_effort' => env('ASTRA_ENCODER_EFFORT', 'high'),
     'astra_encoder_max_web' => (int) env('ASTRA_ENCODER_MAX_WEB', 4),   // cap sa web search calls kada row (0 = walang cap)
+    'astra_encoder_max_web_first' => (int) env('ASTRA_ENCODER_MAX_WEB_FIRST', 5),   // ang parehong cap kapag "web search muna" ang mode ng address rules
     // Aling buttons ang nakikita sa /encoder/checker_1: both | astra | classic
     'ai_checker_ui' => env('AI_CHECKER_UI', 'both'),
     // USD kada 1M tokens [input, output] + kada web search call — para sa cost_usd sa ai_checker_logs (estimate).

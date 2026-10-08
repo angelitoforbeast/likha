@@ -258,6 +258,99 @@ class AstraWebFirstTest extends NightAstraTestCase
         $this->assertSame([false, false, true, false], array_map(fn ($attrs) => str_contains($attrs, 'selected'), $o[2]));
     }
 
+    // ═════════════════════════════════════════════════════════════════════
+    //  2. Ang request sa model at ang mga bagong field ng sagot
+    // ═════════════════════════════════════════════════════════════════════
+
+    public function test_in_mode_2_the_first_round_requires_web_search_and_later_rounds_choose_freely(): void
+    {
+        $this->mode('2');
+        $order = $this->orderOn(1);
+        $this->replies = [
+            Http::response(['id' => 'resp_1', 'output' => [
+                ['type' => 'web_search_call', 'action' => ['query' => 'Sampaguita St Quezon City barangay']],
+                ['type' => 'function_call', 'name' => 'jnt_address_search', 'call_id' => 'call_1', 'arguments' => json_encode(['query' => 'holy spirit quezon'])],
+            ]]),
+            $this->reply($this->answer(), 0),
+        ];
+
+        $result = (new AstraEncoder())->processRow($order->id, $this->maps(), self::HOST);
+
+        $this->assertCount(2, $this->sent);
+        $this->assertSame(['type' => 'web_search'], $this->sent[0]['tool_choice']);
+        $this->assertSame('auto', $this->sent[1]['tool_choice']);
+        $this->assertSame([5, 5], [$this->sent[0]['max_tool_calls'], $this->sent[1]['max_tool_calls']]);
+        $this->assertSame(['web_search', 'function', 'function'], array_column($this->sent[0]['tools'], 'type'));
+        $this->assertStringEndsWith(AstraEncoder::NEW_RULES_PROMPT . AstraEncoder::WEB_FIRST_PROMPT, (string) $this->sent[0]['instructions']);
+        $this->assertTrue($result['log']['replay']['web_forced']);
+        $this->assertNotContains('WEB FIRST: hindi napilit ang web search', $result['log']['evidence']);
+    }
+
+    public function test_modes_1_and_off_send_the_request_of_today(): void
+    {
+        $seen = [];
+        foreach (['1', '0'] as $i => $mode) {
+            $this->mode($mode);
+            $row = $this->ranRow($i + 1, $this->answer());
+            $seen[$mode] = [$this->sent[0]['tool_choice'], $this->sent[0]['max_tool_calls'], str_contains((string) $this->sent[0]['instructions'], 'WEB SEARCH FIRST'), array_keys($row['replay'])];
+        }
+
+        $keys = ['rules', 'model_needs_human', 'model_human_kind', 'model_intent', 'label_source', 'guard', 'hay_chars', 'dup_phone_checked', 'list_crc'];
+        $this->assertSame(['1' => ['auto', 4, false, $keys], '0' => ['auto', 4, false, $keys]], $seen);
+    }
+
+    public function test_when_the_api_refuses_the_forced_web_search_the_row_runs_with_the_request_of_mode_1_and_is_counted(): void
+    {
+        $this->mode('2');
+        $order = $this->orderOn(1);
+        $this->replies = [
+            Http::response(['error' => ['message' => "Invalid value for 'tool_choice'.", 'type' => 'invalid_request_error', 'param' => 'tool_choice']], 400),
+            $this->reply($this->answer(), 1),
+        ];
+
+        $result = (new AstraEncoder())->processRow($order->id, $this->maps(), self::HOST);
+
+        $this->assertCount(2, $this->sent);
+        $this->assertSame([['type' => 'web_search'], 'auto'], [$this->sent[0]['tool_choice'], $this->sent[1]['tool_choice']]);
+        $this->assertNotSame('failed', $result['status']);
+        $this->assertFalse($result['log']['replay']['web_forced']);
+        $this->assertContains('WEB FIRST: hindi napilit ang web search', $result['log']['evidence']);
+    }
+
+    public function test_a_first_round_without_a_web_search_is_counted_as_not_forced(): void
+    {
+        $this->mode('2');
+
+        $row = $this->ranRow(1, $this->answer(), [], 0);
+
+        $this->assertFalse($row['replay']['web_forced']);
+        $this->assertContains('WEB FIRST: hindi napilit ang web search', $row['evidence']);
+    }
+
+    public function test_the_new_answer_fields_are_read_only_in_mode_2_and_only_as_the_exact_words(): void
+    {
+        $this->mode('2');
+        $read = [];
+        $day  = 0;
+        foreach ([
+            ['customer', 'official'], ['web', 'several'], ['web', 'single'], ['none', 'none'],
+            ['Web', 'Official'], [' web', 'single '], ['internet', 'many'], [['web'], ['official']], [true, 1], [null, null],
+        ] as [$source, $basis]) {
+            $row = $this->ranRow(++$day, $this->answer(['brgy_source' => $source, 'web_basis' => $basis]));
+            $read[] = [$row['replay']['brgy_source'], $row['replay']['web_basis']];
+        }
+        $this->assertSame([
+            ['customer', 'official'], ['web', 'several'], ['web', 'single'], ['none', 'none'],
+            ['none', 'none'], ['none', 'none'], ['none', 'none'], ['none', 'none'], ['none', 'none'], ['none', 'none'],
+        ], $read);
+
+        // Mode 1: ang parehong sagot ay binabasa gaya ng dati — high confidence, kaya PROCEED, at walang bagong key sa log.
+        $this->mode('1');
+        $row = $this->ranRow(++$day, $this->answer());
+        $this->assertSame(['PROCEED', 'exempt_high_confidence'], [$row['STATUS'], $row['replay']['guard']['result']]);
+        $this->assertArrayNotHasKey('brgy_source', $row['replay']);
+    }
+
     private function settingsPage(): string
     {
         $this->withoutVite();

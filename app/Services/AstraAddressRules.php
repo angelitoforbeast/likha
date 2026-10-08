@@ -46,6 +46,10 @@ class AstraAddressRules
         $history = (string) $in['history'];
         $customerBlocks = (string) $in['customer_blocks'];
         $evidence = [];
+        // Web search muna (mode `2` ng switch): bagong rules lang. Ang dalawang salita ng sagot ay nakapirmi; anumang iba = `none`.
+        $webFirst   = $rules === 'new' && !empty($in['web_first']);
+        $brgySource = ($webFirst && in_array($ai['brgy_source'] ?? null, ['customer', 'web', 'none'], true)) ? $ai['brgy_source'] : 'none';
+        $webBasis   = ($webFirst && in_array($ai['web_basis'] ?? null, ['official', 'several', 'single', 'none'], true)) ? $ai['web_basis'] : 'none';
 
         // Ang dahilan at ang mga issue ng model ay napupunta sa note at sa Check line ng block: isang linya lang bawat isa,
         // para walang line break ng model na makagawa ng pekeng hangganan ng block (na babasahin bilang text ng customer).
@@ -248,7 +252,12 @@ class AstraAddressRules
                 'hay_chars'         => ['chat' => mb_strlen($chat), 'history' => mb_strlen($history), 'cxd' => mb_strlen($customerBlocks)],
                 'dup_phone_checked' => $rules !== 'new',
                 'list_crc'          => (int) ($in['list_crc'] ?? 0),
-            ],
+            ] + ($webFirst ? [
+                'web_first'   => true,
+                'web_forced'  => (bool) ($in['web_forced'] ?? false),
+                'brgy_source' => $brgySource,
+                'web_basis'   => $webBasis,
+            ] : []),
         ];
     }
 

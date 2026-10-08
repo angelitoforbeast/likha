@@ -49,6 +49,21 @@ class AstraEncoder
     public const NEW_RULES_PROMPT = "\n"
         . 'When needs_human is true only because jnt_address_search returned no matching entry, add the key "human_kind":"label_not_found" to the JSON; for any other reason add "human_kind":"other".'
         . ' Always fill the form\'s brgy, city and province exactly as the customer wrote them, even when "jnt" is left empty.';
+    /**
+     * Idinadagdag pagkatapos ng NEW_RULES_PROMPT sa mode `2` (web search muna): ang mga row na umaabot kay Astra ay ang
+     * mahihirap na, kaya ang tunay na barangay ay hinahanap muna sa web bago ang list, gaya ng RESOLVE ng classic checker.
+     */
+    public const WEB_FIRST_PROMPT = "\n\n"
+        . "WEB SEARCH FIRST (these lines override anything above that conflicts with them):\n"
+        . "- Your first step is a web search, and you may use up to 5 web searches for this row (not 3).\n"
+        . "- First establish the real-world barangay. If the customer wrote a barangay by name or number, use it, and still confirm it with one search when the name is ambiguous. If the customer wrote only a street, sitio, purok, subdivision, district or area name, a landmark or a business, or the place files its barangays by number and the customer gave no number, search the web for which barangay (name or number) that street or area belongs to in that city. Put the city AND the province or \"Philippines\" in every query. Prefer an official list, a map listing, or two sources that agree.\n"
+        . "- Then find the courier's line with jnt_address_search using that barangay name or number (for the City of Manila the courier files by district as the city, e.g. \"412 sampaloc\").\n"
+        . "- When the barangay came from the web, write it in the form's brgy too; city and province stay as the customer wrote them.\n"
+        . "- Never invent a barangay: if the searches do not give one, leave brgy and the \"jnt\" fields empty.\n"
+        . "- A barangay found on the web is NOT by itself a reason to set needs_human: fill it in and say where it came from. The program decides what to do with it.\n"
+        . "- Add two keys to the JSON, with exactly these words: \"brgy_source\": \"customer\" (the barangay is in the customer's words) | \"web\" (found by web search, not in the customer's words) | \"none\"; \"web_basis\": \"official\" (a government or statistics-office list or page) | \"several\" (two or more independent sources agree) | \"single\" (one source) | \"none\".";
+    /** Ang `tool_choice` ng unang round sa mode `2`: sapilitang built-in web search. */
+    public const FORCE_WEB_SEARCH = ['type' => 'web_search'];
     /** Mga model na pwedeng piliin sa settings (Responses API + web_search + function tools). */
     public const MODELS  = ['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2', 'o3', 'o4-mini'];
     public const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -68,6 +83,10 @@ class AstraEncoder
     private int $httpTimeout = self::TIMEOUT_S;
     /** Opt-in ng night run: isulat lang ang row habang blangko pa ang STATUS (hindi kailanman papatungan ang inilagay ng tao). */
     private bool $onlyWhenStatusBlank = false;
+    /** Mode `2` lang: napilit ba ang web search sa unang round ng huling row? null = hindi mode `2`, o wala pang sagot. */
+    private ?bool $webForced = null;
+    /** Tinanggihan ng API ang sapilitang web search sa huling row, kaya `auto` na ang ipinadala. */
+    private bool $forceRefused = false;
 
     /**
      * Huling transport failure ng OpenAI call sa huling processRow(), o null kapag wala / nakabawi:
@@ -265,9 +284,13 @@ class AstraEncoder
         if (!$apiKey) return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'No OPENAI_API_KEY'], $t0);
 
         // Isang basa lang kada row, bago ang tawag sa model: ang buong row ay iisang set ng rules.
-        $rules  = self::addressRulesOn() ? 'new' : 'old';
+        $mode   = self::addressRulesMode();
+        $rules  = $mode !== '0' ? 'new' : 'old';
+        // Ang pangalawang setting ay binabasa lang sa mode `2`: sa ibang mode ay walang dagdag na basa.
+        $webFirst   = $mode === '2';
+        $webProceed = $webFirst ? self::webBarangayProceed() : '0';
 
-        $decided = $this->decideOnly($apiKey, $row, $chat, $rules, $maps);
+        $decided = $this->decideOnly($apiKey, $row, $chat, $rules, $maps, $webFirst, $webProceed);
         if ($decided === null) {
             return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'Astra: walang sagot mula sa AI'], $t0);
         }
@@ -359,13 +382,15 @@ class AstraEncoder
      * (hindi ang row, hindi ang log), kaya magagamit din ito ng dry run na tumitingin lang kung ano ang mangyayari.
      * Ibinabalik ang [sagot ng model, form, anim na field bago, pasya], o null kapag walang magagamit na sagot.
      */
-    private function decideOnly(string $apiKey, MacroOutput $row, string $chat, string $rules, array $maps): ?array
+    private function decideOnly(string $apiKey, MacroOutput $row, string $chat, string $rules, array $maps, bool $webFirst = false, string $webProceed = '0'): ?array
     {
         $before = $this->sixFields($row);
+        $this->webForced = null; $this->forceRefused = false;
 
         // ── 1 + 3. FORM (chat/Pancake/web) at J&T label (list tool) — isang agent call ──
-        $ai = $this->resolveForm($apiKey, $row, $chat, $rules === 'new');
+        $ai = $this->resolveForm($apiKey, $row, $chat, $rules === 'new', $webFirst);
         if ($ai === null) return null;
+        if ($webFirst && $this->webForced !== true) $this->evidence[] = 'WEB FIRST: hindi napilit ang web search';
         $form = $ai['form'];
         $this->evidence[] = 'FORM: ' . implode(' · ', array_filter([
             $form['name'] !== '' ? 'Name=' . $form['name'] : '',
@@ -384,7 +409,7 @@ class AstraEncoder
             'customer_blocks' => AstraAddressRules::customerBlocks((string) $row->CXD),
             'maps'            => $maps,
             'list_crc'        => self::listCrc(),
-        ], function (array $final, bool $checkDuplicatePhone) use ($row, $maps): array {
+        ] + ($webFirst ? ['web_first' => true, 'web_proceed' => $webProceed, 'web_forced' => $this->webForced === true] : []), function (array $final, bool $checkDuplicatePhone) use ($row, $maps): array {
             $mc = new MacroChecker();
             $mc->setHost($this->host);
             return $mc->validateRow($row, $final, $maps, $checkDuplicatePhone);
@@ -399,7 +424,7 @@ class AstraEncoder
      * Ang $rules ay ibinibigay ng tumatawag: hindi binabasa ang switch.
      * Return: ['ok', 'decision' (ang buong pasya ng rules, o null), 'usage', 'error' (lastError)].
      */
-    public function dryRunRow(MacroOutput $row, array $maps, ?string $host = null, string $rules = 'new'): array
+    public function dryRunRow(MacroOutput $row, array $maps, ?string $host = null, string $rules = 'new', bool $webFirst = false): array
     {
         $this->host = $host; $this->evidence = []; $this->usage = []; $this->searches = [];
         $this->lastError = null;
@@ -407,7 +432,9 @@ class AstraEncoder
 
         $keyInfo = self::apiKeyInfo();
         $this->keySource = $keyInfo['source'];
-        $decided = $keyInfo['key'] ? $this->decideOnly($keyInfo['key'], $row, trim((string) $row->all_user_input), $rules, $maps) : null;
+        // Web search muna: ang barangay na galing sa web ay hindi pinapa-PROCEED dito (`0`), anuman ang setting —
+        // ang report ang nagbibilang kung ilan ang lulusot sa bawat value nito.
+        $decided = $keyInfo['key'] ? $this->decideOnly($keyInfo['key'], $row, trim((string) $row->all_user_input), $rules, $maps, $webFirst, '0') : null;
 
         return [
             'ok'       => $decided !== null,
@@ -453,7 +480,7 @@ class AstraEncoder
     //  AGENT CALL (Responses API + tools)
     // ═════════════════════════════════════════════════════════════════════
 
-    private function resolveForm(string $apiKey, MacroOutput $row, string $chat, bool $newRules = false): ?array
+    private function resolveForm(string $apiKey, MacroOutput $row, string $chat, bool $newRules = false, bool $webFirst = false): ?array
     {
         $system = <<<'SYS'
 You are an expert Philippine e-commerce ORDER ENCODER (cash-on-delivery, courier J&T). Work exactly like a careful human encoder.
@@ -491,6 +518,7 @@ OUTPUT: STRICT JSON only, exactly this shape:
 SYS;
         // Nakapatay ang switch: ang request ay eksaktong gaya ng dati, walang kahit isang byte na dagdag.
         if ($newRules) $system .= self::NEW_RULES_PROMPT;
+        if ($webFirst) $system .= self::WEB_FIRST_PROMPT;
 
         $customerForms = AstraAddressRules::customerBlocks((string) $row->CXD);
         $history       = self::pancakeHistory((string) ($row->fb_name ?? ''));
@@ -532,7 +560,10 @@ SYS;
             'store'        => true,
         ];
         // Cap sa built-in web searches kada row (gastos): config astra_encoder_max_web (0 = walang cap)
-        $maxWeb = (int) config('services.openai.astra_encoder_max_web', 4);
+        // Web search muna: sariling cap (astra_encoder_max_web_first), mas mataas dahil ang paghahanap ng barangay ang unang hakbang.
+        $maxWeb = $webFirst
+            ? (int) config('services.openai.astra_encoder_max_web_first', 5)
+            : (int) config('services.openai.astra_encoder_max_web', 4);
         if ($maxWeb > 0) $base['max_tool_calls'] = $maxWeb;
 
         $input  = $prompt;
@@ -540,6 +571,9 @@ SYS;
         $text   = '';
         for ($round = 0; $round < self::MAX_TOOL_ROUNDS; $round++) {
             $payload = $base + ['input' => $input] + ($prevId ? ['previous_response_id' => $prevId] : []);
+            // Web search muna: ang UNANG round lang ang sapilitang web search; ang mga susunod ay `auto` gaya ng dati,
+            // dahil kailangan pa ng model ang list search at ang huling sagot.
+            if ($webFirst && $round === 0) $payload['tool_choice'] = self::FORCE_WEB_SEARCH;
             $j = $this->post($apiKey, $payload);
             if ($j === null) return null;
             $prevId = (string) ($j['id'] ?? '');
@@ -548,6 +582,8 @@ SYS;
             // usage + web searches
             $u = (array) ($j['usage'] ?? []);
             $webCalls = $out->where('type', 'web_search_call');
+            // Napilit lang kapag tinanggap ng API ang parameter AT may web search talaga sa unang round.
+            if ($webFirst && $round === 0) $this->webForced = !$this->forceRefused && $webCalls->count() > 0;
             $this->recordUsage('ASTRA' . ($round ? '#' . ($round + 1) : ''), $this->model,
                 (int) ($u['input_tokens'] ?? 0), (int) ($u['output_tokens'] ?? 0), (int) ($u['output_tokens_details']['reasoning_tokens'] ?? 0), $webCalls->count());
             foreach ($webCalls as $c) {
@@ -605,6 +641,13 @@ SYS;
         // ibang uri (array, numero, null), ay parang walang key — is_string muna, dahil ang (string) ng array ay error.
         $kind = $obj['human_kind'] ?? null;
         $kind = ($newRules && is_string($kind) && in_array($kind, ['label_not_found', 'other'], true)) ? $kind : '';
+        // brgy_source at web_basis: binabasa lang sa mode `2`, at ang eksaktong mga salita lang. Anumang iba (ibang sulat,
+        // ibang uri, wala) ay ang pinakamahina: `none`.
+        $word = static fn ($v, array $allowed): string => (is_string($v) && in_array($v, $allowed, true)) ? $v : 'none';
+        $web  = $webFirst ? [
+            'brgy_source' => $word($obj['brgy_source'] ?? null, ['customer', 'web', 'none']),
+            'web_basis'   => $word($obj['web_basis'] ?? null, ['official', 'several', 'single', 'none']),
+        ] : [];
 
         return [
             'form'         => $form,
@@ -617,7 +660,7 @@ SYS;
             'confidence'   => $conf,
             'evidence'     => mb_substr(trim((string) ($obj['evidence'] ?? '')), 0, 300),
             'raw'          => $obj,
-        ];
+        ] + $web;
     }
 
     private function post(string $apiKey, array $payload): ?array
@@ -640,6 +683,11 @@ SYS;
                             unset($payload[$p]); $dropped = true;
                             $this->evidence[] = 'PARAM DROPPED: ' . $p . ' (hindi tinanggap ng API/model)';
                         }
+                    }
+                    // Sapilitang web search (mode `2`, unang round) na hindi tinanggap → ang request ng mode `1` (`auto`), isang beses.
+                    if (!$dropped && is_array($payload['tool_choice'] ?? null)) {
+                        $payload['tool_choice'] = 'auto'; $dropped = true; $this->forceRefused = true;
+                        $this->evidence[] = 'PARAM DROPPED: tool_choice web_search (hindi tinanggap ng API/model) → auto';
                     }
                     if ($dropped) { $attempt--; continue; }
                 }
