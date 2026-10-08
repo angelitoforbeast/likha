@@ -203,14 +203,21 @@ class SuppliersGroupTest extends ItemTestCase
         $this->quote('HAND GRIP', $sid, 100, 10);
         $this->po($sid, 'HAND GRIP', 'hand grip', 5, 90);
 
+        // Iisang listahan para sa dalawang tanong: nasa CEO view ang bawat isa, at wala ni isa sa hindi CEO.
         $markers = [
             'SUPPLIERS', 'Supplier 1', 'Supplier 2', 'Supplier 3', 'spl-', 'splReady', 'splTop3', 'splRest',
-            'splNone', 'splLoaded', 'layout=suppliers', "'suppliers'", 'Suppliers view', '_table_suppliers', 'Zyxwv Kalakal',
+            'splNone', 'splLoaded', 'splFailed', 'hindi na-load', 'spl-card', 'splCard', "'suppliers'",
+            'layout=suppliers', 'Suppliers view',
         ];
-        // Patunayan na totoo ang mga marker: nasa suppliers view ng CEO ang mga ito, kaya may ibig sabihin ang pagkawala nila sa iba.
+        // Hindi kailanman nasa render ng page (pangalan ng file; pangalan ng supplier na sa fetch lang dumarating),
+        // kaya walang positive control ang mga ito: tripwire lang kung sakaling may mag-print ng mga ito balang araw.
+        $tripwires = ['_table_suppliers', 'Zyxwv Kalakal'];
+
+        // Patunayan na totoo ang mga marker: nasa suppliers view ng CEO ang mga ito (ang link papunta roon ay
+        // nasa Old view niya), kaya may ibig sabihin ang pagkawala nila sa iba.
         $this->actingAs($this->user());
-        $ceo = $this->body('/item?layout=suppliers');
-        foreach (['SUPPLIERS', 'Supplier 1', 'Supplier 2', 'Supplier 3', 'spl-', 'splReady', 'splTop3', 'splRest', 'splNone', 'splLoaded', "'suppliers'"] as $marker) {
+        $ceo = $this->body('/item?layout=suppliers') . $this->body('/item?layout=old');
+        foreach ($markers as $marker) {
             $this->assertStringContainsString($marker, $ceo, "CEO: {$marker}");
         }
 
@@ -220,7 +227,7 @@ class SuppliersGroupTest extends ItemTestCase
             $old = $this->body('/item?layout=old' . $extra);
 
             $this->assertTrue($suppliers === $old, "{$label}: iba ang layout=suppliers sa layout=old");
-            foreach ($markers as $marker) {
+            foreach (array_merge($markers, $tripwires) as $marker) {
                 $this->assertStringNotContainsString($marker, $suppliers, "{$label}: {$marker}");
             }
         }
@@ -366,8 +373,13 @@ class SuppliersGroupTest extends ItemTestCase
         foreach (['🏭', '🏷', 'walang supplier', 'dati ', 'quoteForm.supplier_id', '+ supplier quote', 'suppliersFor(', 'quotesFor('] as $gone) {
             $this->assertStringNotContainsString($gone, $cell, $gone);
         }
-        // Wala na rin ang inline form at ang "dati" line saanman sa row.
+        // Wala na rin ang inline form at ang "dati" line saanman bago ang grupo (nasa card na ng supplier cell ang mga ito),
+        // at wala na ang dalawang icon ng lumang stack saanman sa row.
+        $beforeGroup = $this->between($row, '>', self::WAIT_IF);
         foreach (['quoteForm.supplier_id', "'dati '", '🏭', '🏷'] as $gone) {
+            $this->assertStringNotContainsString($gone, $beforeGroup, $gone);
+        }
+        foreach (['🏭', '🏷'] as $gone) {
             $this->assertStringNotContainsString($gone, $row, $gone);
         }
         $this->assertStringNotContainsString('>walang supplier<', $this->render('ceo', true, true));
@@ -528,6 +540,141 @@ class SuppliersGroupTest extends ItemTestCase
         preg_match_all("/route\\('[^']*'\\)/", $source, $m);
 
         return $m[0];
+    }
+
+    // ── S-16.1 / S-16.6 / S-20.1 / S-20.2: ang card, ang form at ang text-only na bindings ──
+    // Binabasa ng mga test na ito ang source ng partial at ang render; hindi nila pinapatakbo ang script.
+
+    private const FORM_OPEN = 'quoteForm.key === supKey(row.item_name) && quoteForm.item_name === row.item_name';
+    private const LINK_IF = '<template x-if="safeLink(q.link)">';
+    private const SUPPLIER_VALUE = '/(?<![\w.$])[qs]\.(?:supplier|price|moq|link|photo_url|updated_at|prev_price|prev_date|unit_cost|order_date|order_no)\b/';
+
+    /** Ang source ng table partial, walang Blade comments. */
+    private function tableSource(): string
+    {
+        $source = str_replace("\r\n", "\n", file_get_contents(resource_path(self::TABLE_FILE)));
+
+        return (string) preg_replace('/\{\{--.*?--\}\}/s', '', $source);
+    }
+
+    /** Ang apat na column ng grupo sa item row ng partial: mula sa placeholder hanggang bago ang ibang column. */
+    private function groupSource(): string
+    {
+        return $this->between($this->tableSource(), self::WAIT_IF, "'ic-'");
+    }
+
+    /** Bawat opening tag; ang > sa loob ng naka-quote na value (arrow function, paghahambing) ay hindi dulo ng tag. */
+    private function tags(string $markup): array
+    {
+        preg_match_all('/<[a-zA-Z][\w-]*(?:[^>"\']|"[^"]*"|\'[^\']*\')*>/', $markup, $m);
+
+        return $m[0];
+    }
+
+    /** Ang mga attribute ng isang tag bilang [pangalan, value]. */
+    private function attributes(string $tag): array
+    {
+        preg_match_all('/\s([^\s="<>]+)="([^"]*)"/', $tag, $m, PREG_SET_ORDER);
+
+        return array_map(fn (array $a) => [$a[1], $a[2]], $m);
+    }
+
+    public function test_S_16_1_every_new_control_stops_the_click_from_reaching_the_row(): void
+    {
+        $row = $this->between($this->tableSource(), 'class="item-row"', 'page-col-header');
+        $this->assertStringContainsString('@click="row.hasPages && toggleItemExpand(row.item_name)"', $row);
+
+        $range = $this->between($row, '<td class="spl-c2"', '</td>') . $this->groupSource();
+        $controls = array_values(array_filter($this->tags($range), fn (string $tag) => preg_match('/^<(?:button|a|input|select)[\s>]/', $tag)
+            || preg_match('/^<td\s(?:[^>"]|"[^"]*")*class="spl-sc[\s"]/', $tag)
+            || preg_match('/\sclass="(?:[^"]*\s)?spl-(?:card|form)(?:\s[^"]*)?"/', $tag)));
+
+        foreach ($controls as $tag) {
+            // Sa labas ng mga value hinahanap, para hindi mabilang ang salitang nasa loob ng isang expression.
+            $this->assertStringContainsString(' @click.stop', (string) preg_replace('/"[^"]*"/', '""', $tag), $tag);
+        }
+        // Change, Copy (2); ang placeholder (1); ang band (11: cell, button, card, form, 5 field, Save, Cancel);
+        // ang quote cell (22: cell, pangalan, card, photo, link, edit, remove, "+N", list card at ang 3 control nito,
+        // "+", form card, form, 5 field, Save, Cancel); ang PO cell (4: cell, pangalan, "+N", card).
+        $this->assertGreaterThanOrEqual(40, count($controls));
+    }
+
+    public function test_S_16_6_the_form_opens_for_one_row_only(): void
+    {
+        $html = $this->render('ceo', true, true);
+        $table = $this->tableSource();
+
+        // Ang form ay bukas lang sa row na may parehong item name, hindi sa bawat row na may parehong quote key.
+        $this->assertStringContainsString(self::FORM_OPEN, $html);
+        $this->assertStringNotContainsString('quoteForm.key === supKey(row.item_name)"', $table);
+        $forms = substr_count($table, 'class="spl-form"');
+        $this->assertGreaterThan(0, $forms);
+        $this->assertSame($forms, substr_count($table, self::FORM_OPEN . '">'));
+
+        // Ang save at delete ay ang dati nang functions at routes ng page; walang sariling request ang mga bagong file.
+        foreach (['saveQuote()', 'deleteQuote(row.item_name, q)', 'openQuote(row.item_name, '] as $call) {
+            $this->assertStringContainsString($call, $table, $call);
+        }
+        foreach ([self::TABLE_FILE, self::JS_FILE] as $file) {
+            $this->assertStringNotContainsString('fetch(', file_get_contents(resource_path($file)), $file);
+        }
+        foreach (['item.quotes.save', 'item.quotes.delete'] as $name) {
+            $this->assertSame(1, substr_count($html, "fetch('" . route($name) . "', { method:'POST'"), $name);
+        }
+    }
+
+    public function test_S_20_1_supplier_values_are_bound_as_text_and_the_note_is_not_shown(): void
+    {
+        $allowed = [
+            'x-text', ':title', ':aria-label', ':alt', ':src', ':href', ':class', ':key', 'x-if', 'x-show', 'x-for',
+            '@click', '@click.stop', ':aria-expanded',
+        ];
+        $group = $this->groupSource();
+        $seen = [];
+        foreach ($this->tags($group) as $tag) {
+            foreach ($this->attributes($tag) as [$name, $value]) {
+                if (!preg_match(self::SUPPLIER_VALUE, $value)) continue;
+                $this->assertContains($name, $allowed, $tag);
+                if ($name === ':href') $this->assertSame('safeLink(q.link)', $value, $tag);
+                $seen[$name] = true;
+            }
+        }
+        // Ang card ang nagpapakita ng pangalan, link at photo: kung wala ang mga ito, walang nabasa ang loop sa itaas.
+        foreach (['x-text', ':title', ':aria-label', ':alt', ':src', ':href'] as $name) {
+            $this->assertArrayHasKey($name, $seen, $name);
+        }
+
+        foreach ([self::TABLE_FILE, self::JS_FILE] as $file) {
+            $source = file_get_contents(resource_path($file));
+            foreach (['x-html', 'innerHTML', 'insertAdjacentHTML', 'outerHTML', 'document.write', '{!!', '.note'] as $never) {
+                $this->assertStringNotContainsString($never, $source, "{$file}: {$never}");
+            }
+        }
+
+        // Dash lang kapag walang presyo (0.00 ang ipi-print ng formatter sa null); ang MOQ na 0 ay value pa rin.
+        $this->assertStringContainsString("q.price !== null ? money(q.price) : '—'", $group);
+        $this->assertStringContainsString('q.moq !== null && q.moq !== undefined', $group);
+        $this->assertStringContainsString("'walang MOQ'", $group);
+        $this->assertStringNotContainsString('x-show="q.moq"', $group);
+    }
+
+    public function test_S_20_2_a_link_is_rendered_only_through_the_http_guard(): void
+    {
+        $guard = "safeLink(u){ const s = String(u || '').trim(); return /^https?:\\/\\//i.test(s) ? s : ''; }";
+        $this->assertSame(1, substr_count($this->render('ceo', true, true), $guard));
+
+        $links = array_values(array_filter($this->tags($this->groupSource()), fn (string $tag) => str_starts_with($tag, '<a ')));
+        $this->assertNotEmpty($links);
+        foreach ($links as $tag) {
+            $this->assertStringContainsString(' :href="safeLink(q.link)"', $tag);
+            $this->assertStringContainsString(' target="_blank"', $tag);
+            $this->assertStringContainsString(' rel="noopener"', $tag);
+        }
+        // Bawat link ay nasa loob mismo ng guard, at walang ibang :href na galing sa link ng quote.
+        $table = $this->tableSource();
+        $this->assertSame(count($links), preg_match_all('/' . preg_quote(self::LINK_IF, '/') . '\s*<a /', $table));
+        $this->assertSame(count($links), preg_match_all('/\s:href="[^"]*link[^"]*"/', $table));
+        $this->assertSame(0, preg_match_all('/\shref="[^"]*q\.[^"]*"/', $table));
     }
 
     // ── S-14.1 – S-14.7: pagkakasunod ng quotes at ang cheapest flag ──────────

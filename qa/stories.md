@@ -236,7 +236,7 @@ Page list and pagination.
 
 ## Slice 017 – Suppliers group on the item table
 
-Slice 017: 30 passed, 0 failed, 0 blocked, 0 skipped, 30 not run
+Slice 017: 34 passed, 0 failed, 0 blocked, 0 skipped, 26 not run
 
 New tests are in `tests/Feature/Item/SuppliersGroupTest.php` unless another class is named. "The
 suppliers view" is `/item?layout=suppliers` in the effective CEO view (role CEO and `view_as` not
@@ -309,12 +309,12 @@ Independent test: from an empty "+" cell add a quote; the row shows it without a
 
 | Case | Type | Given / When / Then | Test | Last run |
 |---|---|---|---|---|
-| S-16.1 | negative, server | Given the suppliers view's item row, when it renders, then every new control inside it (cell, name, "+", "+N", edit, remove, link, photo, Change, Copy, form fields and buttons) stops the click from reaching the row's handler that opens the page rows | `SuppliersGroupTest::test_S_16_1_every_new_control_stops_the_click_from_reaching_the_row` | Not run · pending build |
+| S-16.1 | negative, server | Given the suppliers view's item row, when it renders, then every new control inside it (cell, name, "+", "+N", edit, remove, link, photo, Change, Copy, form fields and buttons) stops the click from reaching the row's handler that opens the page rows | `SuppliersGroupTest::test_S_16_1_every_new_control_stops_the_click_from_reaching_the_row` | Passed · 2026-10-08 · auto |
 | S-16.2 | negative, server | Given a Marketing user, when POST `/item/quotes` or POST `/item/quotes/delete` is sent, then 403 and nothing is written (the delete case is new; the save case exists in `QuotePhotoTest`) | `SuppliersGroupTest::test_S_16_2_a_marketing_user_cannot_save_or_delete_a_quote` | Passed · 2026-10-08 · auto |
 | S-16.3 | edge, server | Given a supplier that already has a quote on the item, when it is saved again, then that one quote is updated and the old values go to the history (existing `QuoteHistoryTest`, named, not rewritten) | `QuoteHistoryTest::test_changes_to_price_moq_or_link_write_the_old_values` (existing, unchanged) | Passed · 2026-10-08 · auto |
 | S-16.4 | edge, server | Given a quote already removed, when delete is sent again, then the answer is ok with the current list and no error | `SuppliersGroupTest::test_S_16_4_deleting_a_removed_quote_again_answers_ok_with_the_current_list` | Passed · 2026-10-08 · auto |
 | S-16.5 | edge, server | Given an empty price, an empty MOQ, a price above the limit or a link longer than the limit, when saved, then the same validation as today applies and nothing is written on a rejected request (characterisation) | `SuppliersGroupTest::test_S_16_5_validation_is_as_today_and_a_rejected_save_writes_nothing` | Passed · 2026-10-08 · auto |
-| S-16.6 | edge, server | Given the suppliers view's script and template, when read, then the quote form opens for one row only: the open state compares the row's own item name as well as the shared quote key (pinned text), and the save and delete calls are the page's existing functions and routes | `SuppliersGroupTest::test_S_16_6_the_form_opens_for_one_row_only` | Not run · pending build |
+| S-16.6 | edge, server | Given the suppliers view's script and template, when read, then the quote form opens for one row only: the open state compares the row's own item name as well as the shared quote key (pinned text), and the save and delete calls are the page's existing functions and routes | `SuppliersGroupTest::test_S_16_6_the_form_opens_for_one_row_only` | Passed · 2026-10-08 · auto |
 | S-16.7 | happy, browser | Given an empty "+" cell, when a quote is saved, then it appears in the right cell without a reload and the form closes; edit from the card updates the cell (it may move to another cell); remove empties it; the chips' counts refresh as today | none: browser check | Not run · browser |
 | S-16.8 | negative, browser | Given any new control, when clicked, then the page rows do not open or close; given a failed save, then the existing alert shows, the form stays open with the values and the cells do not change | none: browser check | Not run · browser |
 
@@ -374,8 +374,8 @@ shows as text, with no alert and no clickable link.
 
 | Case | Type | Given / When / Then | Test | Last run |
 |---|---|---|---|---|
-| S-20.1 | negative, server | Given the suppliers view's templates, when read, then every supplier name, price, MOQ, date, link and photo value is bound as text or as an attribute value through Alpine bindings, never as HTML, and the quote's note is not shown | `SuppliersGroupTest::test_S_20_1_supplier_values_are_bound_as_text_and_the_note_is_not_shown` | Not run · pending build |
-| S-20.2 | negative, server | Given the page's link guard, when read, then a quote's link is rendered as a link only when it starts with http:// or https:// (pinned text), opens in a new tab and carries rel noopener | `SuppliersGroupTest::test_S_20_2_a_link_is_rendered_only_through_the_http_guard` | Not run · pending build |
+| S-20.1 | negative, server | Given the suppliers view's templates, when read, then every supplier name, price, MOQ, date, link and photo value is bound as text or as an attribute value through Alpine bindings, never as HTML, and the quote's note is not shown | `SuppliersGroupTest::test_S_20_1_supplier_values_are_bound_as_text_and_the_note_is_not_shown` | Passed · 2026-10-08 · auto |
+| S-20.2 | negative, server | Given the page's link guard, when read, then a quote's link is rendered as a link only when it starts with http:// or https:// (pinned text), opens in a new tab and carries rel noopener | `SuppliersGroupTest::test_S_20_2_a_link_is_rendered_only_through_the_http_guard` | Passed · 2026-10-08 · auto |
 | S-20.3 | negative, browser | Given a supplier named `<img src=x onerror=alert(1)>` and links `javascript:alert(1)`, `data:text/html,x` and ` JaVaScRiPt:x`, then the name shows as typed, no alert runs and no clickable link appears; a name with quotes, `&`, `<`, a backslash, "Ñandú Trading 金龙" or an emoji shows as typed in the cell, the card, and any title or aria-label | none: browser check | Not run · browser |
 
 ### S-21 The page does not make more requests (P2)
