@@ -1504,8 +1504,13 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $pairs   = 0;
         $wrong   = [];
         $unconfirmed = [];
+        // Ang parehong mga text sa daan ng rule function (kasama ang paghahanap ng ibang barangay ng city).
+        $wrongByRules       = [];
+        $unconfirmedByRules = [];
+        $maps    = $this->maps();
+        $byRules = static fn (string $text, string $label, string $place): string => AstraAddressRules::confirmedByText($label, explode('|', $place)[0], explode('|', $place)[1], '', [$text, '', ''], $maps)['result'];
         $start   = hrtime(true);
-        foreach ($this->maps()['brgysByCityProv'] as $place => $labels) {
+        foreach ($maps['brgysByCityProv'] as $place => $labels) {
             $city  = explode('|', (string) $place)[0];
             $words = [];
             foreach ($labels as $label) {
@@ -1519,6 +1524,8 @@ class AstraAddressRulesTest extends NightAstraTestCase
                     foreach ($fillers as $filler) {
                         if (AstraBarangayMatcher::confirm('Brgy ' . $bare((string) $short) . " $filler $city", (string) $long, $labels)['result'] !== 'none') $wrong[] = "$place: $short $filler → $long";
                         if (AstraBarangayMatcher::confirm('Brgy ' . $bare((string) $long) . " $filler $city", (string) $long, $labels)['result'] === 'none') $unconfirmed["$place: $long"] = true;
+                        if ($byRules('Brgy ' . $bare((string) $short) . " $filler $city", (string) $long, (string) $place) !== 'none') $wrongByRules[] = "$place: $short $filler → $long";
+                        if ($byRules('Brgy ' . $bare((string) $long) . " $filler $city", (string) $long, (string) $place) === 'none') $unconfirmedByRules["$place: $long"] = true;
                     }
                 }
             }
@@ -1528,7 +1535,10 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $this->assertSame(593, $pairs);
         $this->assertSame([], $wrong);
         $this->assertCount(35, $unconfirmed, implode("\n", array_keys($unconfirmed)));
-        $this->assertLessThan(15.0, $seconds);
+        $this->assertSame([], $wrongByRules);
+        $this->assertSame([], array_keys(array_diff_key($unconfirmedByRules, $unconfirmed)), 'held only on the path of the rule function');
+        $this->assertSame([], array_keys(array_diff_key($unconfirmed, $unconfirmedByRules)));
+        $this->assertLessThan(25.0, $seconds);
     }
 
     public function test_S_33_5_one_numbered_barangay_repeated_over_200000_characters_gives_the_result_of_the_short_text(): void
@@ -2039,7 +2049,7 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $this->assertContains('PANCAKE: walang history', $seen['evidence']);
     }
 
-    public function test_S_25_11_a_barangay_named_like_its_town_needs_more_than_one_mention_of_the_name(): void
+    public function test_S_25_11_a_barangay_named_like_its_town_is_confirmed_only_with_a_barangay_word_beside_it(): void
     {
         $malibcong    = ['ABRA', 'MALIBCONG', 'MALIBCONG'];
         $malibcongPob = ['ABRA', 'MALIBCONG', 'MALIBCONG (POB.)'];
