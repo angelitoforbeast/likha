@@ -364,3 +364,13 @@ Minor review findings accepted, not fixed. None reaches a view other than the CE
 - **The campaign rows inside an expanded page keep the page's own money format.** Reason: that block is a partial shared with another page (`owner._private_expand_inline`); this table's format stops at its own rows.
 - **Content wider than its cell at the minimum widths is cut, not wrapped** (the category select at 88 px, the placeholder link at 72 px, a long promo). Reason: a fixed layout is what keeps the table inside the box; the columns concerned are hidden in the owner's settings today or one step away in both sets. Listed for the browser check.
 - **Not pinned by a test:** real `scrollWidth` against `clientWidth`, the single jump when the supplier list arrives, the sticky column below 1280 px, the panel's focus. Reason: browser cases; listed for the reviewer in the result.
+
+### Fix list 1 (after the first look in a browser)
+
+Accepted, not fixed:
+
+- **What made the table's box change width twice in the reviewer's session is not known.** The fault it exposed (a widening back within 0.6 s was ignored and the narrower fit stayed) is fixed and tested on the page component; whether that sequence is what was seen cannot be proven without the browser. Reason: no browser in this work; the result says what to look at.
+- **A hovered item row gets one line taller** when its DOI lead line appears. Reason: the brief puts that line on the row hover; keeping its space reserved would make every row a line taller.
+- **A number with no space that is still wider than its minimum-width cell breaks onto a second line** (estimated: a five-digit loss with centavos in PROF.PROFIT and PROF.PROFIT(1D) at their minimum). Reason: the minimum widths are the spec's; a broken number is readable, a cut one is not. The result names the two columns and the pixels they would need.
+- **The widths of real text were estimated from the font's digit widths, not measured.** Reason: no browser. Proposed before: a browser test for this table.
+- **The page component is run in node against stand-ins for the browser** (`tests/js/page.cjs`): it proves the fit's decisions and the markup's bindings, not what a browser draws. Reason: the project has no browser test runner.

@@ -472,6 +472,104 @@ shared data. Accepted with reasons in `TODO.md`: the minors listed under Deferre
 closed: a supplier name, a price or a new marker in a non-CEO render or fetch; overwriting another supplier's
 quote from a cell; markup in a name, link, order number or date; rows that do not add up; the byte pins.
 
+## Fix list 1 (after the first look in a browser)
+
+Three points from the first look at the released table (desktop Chrome, a window about 2,134 px wide, a box of
+2,082 px, three suppliers, the Sourcing set). Not seen in a browser by this work either: each cause was found
+by reading and by running the page's own component in node (`tests/js/page.cjs`, new: it loads a render of the
+table and the pure functions, stands in for the scroll box, the window, `ResizeObserver`, `$watch` and the
+clock, runs steps and returns the fit state and the values of the markup's own bindings).
+
+### 1. DOI text clipped
+
+- Cause: three things together. The page's cells are `white-space:nowrap` (the shared `td` rule); this table
+  hides what overflows a cell (`overflow:hidden`, added with the fixed layout); and the column is narrower than
+  its text. "kulang 21.1 araw" is about 105 px at the row's 12.5 px bold, against a text width of 81 px at the
+  box seen (the column was 94 px there: its 74 px minimum plus its share of the spare, 20 px) and 61 px at the
+  minimum. So the spare rule did reach the cell; it was not enough, and nothing let the text wrap. The grey
+  lead line was made worse by this work: the 11 px floor lifted it from 9 px to 11 px (about 95 px).
+- Change (`_suppliers_style.blade.php`, and one class in `_agg_cells.blade.php` behind its existing
+  `rdtOneLine` gate): every cell of this table's own rows wraps its text (`white-space:normal;
+  overflow-wrap:anywhere`), also content that carries its own `nowrap`; item rows are 12 px (the brief's size);
+  the DOI lead line is shown on row hover and keyboard focus, always on touch, and while its editor is open, as
+  the brief says. The hidden overflow stays as the last guard for what cannot wrap (an input, a picture).
+- The same pattern in the other columns, found by reading (all `nowrap` plus hidden overflow before the fix):
+  LIFECYCLE's badge (its own inline `nowrap`; "Phasing out · lugi" is about 125 px against 85 at the minimum);
+  I-ORDER's second line (the order-by date line at 11 px against 55 px); STOCK's "bilangin" (about 45 px
+  against 39 px); the money columns at the minimum width, estimated from the font's digit widths: "₱99,999.99"
+  about 64 px against 63 px in ADSPENT, and a five-digit loss "−₱99,999.99" about 72 px against 67 px in
+  PROF.PROFIT and 65 px in PROF.PROFIT(1D) (at 12 px these are about 61 and 69 px; amounts from ₱100,000 have
+  no centavos and fit); on page rows PROMO, ACTION and the SET RTS% note. PAPARATING, BENTA/ARAW, HOLD, TCPR,
+  CPP and RTS / DEL / INT hold numbers that fit their minimum. All of them now wrap instead of being cut; a
+  number with no space that is still too wide breaks onto a second line. Two cuts remain on purpose, each by its
+  own case: a supplier header's long first word (S-34.4) and a supplier price too long for its cell (S-15.6),
+  both with an ellipsis and the full value on hover or in the card; an item name is still held to three lines.
+- Test: `SuppliersGroupTest::test_S_38_7_a_cell_wraps_its_text_instead_of_clipping_it` (the rules, the class
+  only in this table, and the DOI width of 94 px at a 2,084 px box from the pure functions). First red line:
+  `Failed asserting that '{{-- Styles ng suppliers view lang. …' contains ".spl-table > tbody > tr:not(.page-expand-row) > td { white-space:normal; overflow-wrap:anywhere; }"`.
+- How sure: that text wraps instead of being cut is sure from the CSS. Unseen: how the wrapped cells look.
+  Look at: DOI at 1366 ("kulang" over "N araw", as in the picture) and at the wide window (one or two lines);
+  a row gets one line taller while it is hovered (the lead line appears); LIFECYCLE with "· lugi"; a five-digit
+  amount with centavos in ADSPENT and a five-digit loss in PROF.PROFIT at 1366 (should stay on one line; if it
+  breaks, those two minimums need 4 to 6 px more, which is the spec's to change).
+
+### 2. "+8 columns" on the button, "One step away (6)" in the panel
+
+- Cause: not a counting error. The button and the panel's heading read the same field of one fit, so they
+  cannot differ at one moment, and with a setting like the owner's (twelve columns hidden by the setting, the
+  four text columns forced hidden) the page's own component gives "+6", six listed, seventeen shown at a
+  2,084 px box, with none of the sixteen hidden columns in either list (now a test). With those settings and
+  three suppliers, "+8" is the answer of exactly one situation: a fit for a box of 1,524 to 1,575 px (two
+  columns away by the fit plus the six of the set). So the button was read from a fit for a narrower box and
+  the panel from a current one: this is point 3 seen from the other side.
+- Change (`_table_suppliers.blade.php`): the button's number and the panel's heading are now the length of
+  the very list the panel draws (`fitRes.away.length`), so number and list are one thing by construction.
+- Test: `SuppliersGroupTest::test_S_39_1_the_button_and_the_panel_count_the_same_columns_under_a_setting_that_hides_both_kinds`
+  (the page component on a render with that setting: at 2,134 "+6" and 17, at 1366 "+12" and 11, in Sales "+11"
+  and 12; at every step the button, the heading and the list agree and no hidden column is counted). First red
+  line: `Failed asserting that 0 is identical to 1.` (the markup pin; the numbers already agreed).
+- How sure: sure that the count is the spec's number on such a setting; the reading of "+8" as a stale fit is
+  an inference from the numbers, not something seen.
+
+### 3. The table in the left 80 per cent after the panel was opened
+
+- What reading gives: opening or closing the panel cannot change the measured width. The panel is absolutely
+  positioned inside the bar, which is outside the measured scroll box; that box takes its width from the page
+  body (a column flex container as wide as the window), not from its content; its vertical scrollbar's space is
+  reserved from 1280 px; a column turned on or off for the visit changes which columns show, never the sum of
+  the widths. The fit is not kept "for the panel" either.
+- A real fault was found beside it. The guard against a flip-flopping width ignored a widening back to the
+  width just left when it came within 0.6 s and the window width was unchanged, and nothing measured again
+  afterwards. The fit of the narrower box then stayed: fewer columns, a bigger "+N", and a table drawn at the
+  narrower width with blank space to its right. Run on the code before the fix: a box that goes 2,084 → 1,552 →
+  2,084 within a tenth of a second ends with `box 1552, shown 15, table 1552px` in a 2,084 px box (74 per cent),
+  and with the owner's settings the button reads "+8". What made the box change twice in the reviewer's session
+  is not known (the browser tool is a candidate); the fault is real either way.
+- Change (`_suppliers_js.blade.php`, `_table_suppliers.blade.php`): every width change is followed, also a
+  return to the width just left; only three such returns in a row within 0.6 s count as a flip-flop, which then
+  holds the narrower fit and measures again once after 1.5 s, at most twice, so it still cannot loop. A fitted
+  table is `width:100%` of its box (the colgroup widths are the shares), so it cannot be drawn narrower than
+  the box even on a stale measurement; a scrolling table keeps its pixel width. The box is measured again on
+  every window resize and on every click of the panel's button (no change, nothing happens).
+- Test: `SuppliersGroupTest::test_S_38_8_every_width_change_is_followed_and_the_panel_changes_no_width` (the
+  page component: a page hidden at the first measure, the panel opened and closed with nothing changing, the
+  narrow-and-back sequence, a narrow window, ten flips in a row and the one re-measure). First red line:
+  `node: … ReferenceError: fitCheck is not defined`; the stale fit itself, on the old code, is the line quoted
+  above.
+- How sure: sure that a stale narrower fit can no longer stay and that a fitted table fills its box. Not sure
+  that this was what the reviewer saw. Look at: open and close the panel several times at the wide window (the
+  table keeps the full width, "+6"); drag the window narrower and wider quickly; if the blank space shows
+  again, note what the panel's line says (pixels used of how many) at that moment.
+
+### Suite after the fix list
+
+Plain PHPUnit, the worktree's configuration: `Tests: 825, Assertions: 13137, Errors: 1, Failures: 1, Skipped: 3.`
+The error and the failure are the base's two (`ImportStartTest`, `ExampleTest`); the three skips are the three
+rows of `BoardroomLiveSmokeTest`. Node tests: the 52 of `ItemTableFitScriptTest` and the three new tests of
+`SuppliersGroupTest` that run node all ran, none skipped. The pinned hashes of the other renders (the eight in
+`SuppliersGroupTest`, the `_table_old` pin, the two shared pages) are unedited and green; `_agg_cells.blade.php`
+changed by one gated class. Commits: cbad3da (point 1), 51f1aeb (point 2), 3d708af (point 3).
+
 ## Open questions
 
 None.
