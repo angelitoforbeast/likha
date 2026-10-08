@@ -438,12 +438,16 @@ class SuppliersGroupTest extends ItemTestCase
 
         // Ang server ang nag-aayos at nagmamarka ng pinakamura; ang script ay hindi nag-so-sort o nagkukumpara ng presyo.
         $js = file_get_contents(resource_path(self::JS_FILE));
-        foreach (['.sort(', 'price <', 'price >', 'Math.min'] as $never) {
+        foreach (['.sort(', 'price', 'Math.min'] as $never) {
             $this->assertStringNotContainsString($never, $js, $never);
         }
+        // Sa code ng script (hindi kasama ang comments), walang bumabasa ng marka: iisang anyo lang ito, sa template.
+        $this->assertStringNotContainsString('cheapest', (string) preg_replace('~//.*$~m', '', $js));
         $table = file_get_contents(resource_path(self::TABLE_FILE));
-        $this->assertStringContainsString(":class=\"q.cheapest === true ? 'spl-price spl-low' : 'spl-price'\"", $table);
-        $this->assertSame(1, substr_count($table, 'cheapest'));
+        $marks = substr_count($table, ":class=\"q.cheapest === true ? 'spl-price spl-low' : 'spl-price'\"");
+        $this->assertGreaterThanOrEqual(3, $marks);
+        $this->assertSame($marks, preg_match_all('/\bcheapest\b/', $table));
+        $this->assertSame($marks, substr_count($table, 'spl-low'));
     }
 
     public function test_S_15_10_band_and_plus_cells_are_bound_to_the_loaded_state(): void
@@ -547,7 +551,7 @@ class SuppliersGroupTest extends ItemTestCase
 
     private const FORM_OPEN = 'quoteForm.key === supKey(row.item_name) && quoteForm.item_name === row.item_name';
     private const LINK_IF = '<template x-if="safeLink(q.link)">';
-    private const SUPPLIER_VALUE = '/(?<![\w.$])[qs]\.(?:supplier|price|moq|link|photo_url|updated_at|prev_price|prev_date|unit_cost|order_date|order_no)\b/';
+    private const SUPPLIER_VALUE = '/(?<![\w.$])(?:row\.item_name|[qs]\.(?:supplier|name|price|moq|link|photo_url|updated_at|prev_price|prev_date|unit_cost|order_date|order_no))\b/';
 
     /** Ang source ng table partial, walang Blade comments. */
     private function tableSource(): string
@@ -610,11 +614,18 @@ class SuppliersGroupTest extends ItemTestCase
         $forms = substr_count($table, 'class="spl-form"');
         $this->assertGreaterThan(0, $forms);
         $this->assertSame($forms, substr_count($table, self::FORM_OPEN . '">'));
+        // Kasama rin sa kondisyon ang sariling cell: kung wala ito, lalabas ang form sa lahat ng cell ng row.
+        $places = ["splIs(row.item_name, 'band', 'form')", "splIs(row.item_name, si, 'form')"];
+        $this->assertSame(count($places), $forms);
+        foreach ($places as $place) {
+            $this->assertSame(1, substr_count($table, '<template x-if="' . $place . ' && ' . self::FORM_OPEN . '">'), $place);
+        }
 
         // Ang save at delete ay ang dati nang functions at routes ng page; walang sariling request ang mga bagong file.
-        foreach (['saveQuote()', 'deleteQuote(row.item_name, q)', 'openQuote(row.item_name, '] as $call) {
+        foreach (['saveQuote()', 'splRemove(row.item_name, q)', 'openQuote(row.item_name, '] as $call) {
             $this->assertStringContainsString($call, $table, $call);
         }
+        $this->assertStringContainsString('await this.deleteQuote(name, q);', file_get_contents(resource_path(self::JS_FILE)));
         foreach ([self::TABLE_FILE, self::JS_FILE] as $file) {
             $this->assertStringNotContainsString('fetch(', file_get_contents(resource_path($file)), $file);
         }
@@ -627,7 +638,7 @@ class SuppliersGroupTest extends ItemTestCase
     {
         $allowed = [
             'x-text', ':title', ':aria-label', ':alt', ':src', ':href', ':class', ':key', 'x-if', 'x-show', 'x-for',
-            '@click', '@click.stop', ':aria-expanded',
+            '@click', '@click.stop', ':aria-expanded', '@mouseenter', '@mouseleave',
         ];
         $group = $this->groupSource();
         $seen = [];
@@ -656,6 +667,63 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertStringContainsString('q.moq !== null && q.moq !== undefined', $group);
         $this->assertStringContainsString("'walang MOQ'", $group);
         $this->assertStringNotContainsString('x-show="q.moq"', $group);
+
+        // Ang style ng card ay binubuo ng script mula sa mga numero lang (sukat ng cell at ng window), walang value ng supplier.
+        $js = str_replace("\r\n", "\n", file_get_contents(resource_path(self::JS_FILE)));
+        $place = $this->between($js, 'splPlace(){', 'splScrolled(){');
+        foreach ([
+            "this.splCard.style = 'position:fixed;z-index:60;width:262px;left:' + Math.round(left) + 'px;' + vertical;",
+            "? 'bottom:' + Math.round(window.innerHeight - r.top - 6) + 'px;'",
+            ": 'top:' + Math.round(r.bottom - 6) + 'px;';",
+        ] as $line) {
+            $this->assertStringContainsString($line, $place, $line);
+        }
+        $this->assertSame(1, substr_count($js, 'splCard.style ='));
+        $this->assertSame(1, preg_match_all('/\bvertical\s*=/', $js));
+    }
+
+    public function test_S_17_4_an_open_form_is_not_closed_by_a_click_or_another_card(): void
+    {
+        $js = str_replace("\r\n", "\n", file_get_contents(resource_path(self::JS_FILE)));
+        $table = $this->tableSource();
+        $body = fn (string $from, string $to) => $this->between($js, $from, $to);
+
+        // Habang may buhay na form, hindi ito napapalitan ng ibang card at hindi isinasara ng click sa labas.
+        $open = $body('splOpen(name, cell, mode, el, pinned){', 'splToggle(');
+        $this->assertStringContainsString("if (mode !== 'form' && this.splCard.mode === 'form' && this.splLive()) return;", $open);
+        $outside = $body('splOutside(e){', 'splSync(){');
+        $this->assertStringContainsString("if (this.splCard.mode === null || this.splCard.mode === 'form' || this.photoModal.open) return;", $outside);
+
+        // Esc: ang photo popup muna; ang form ay dumadaan sa Cancel; focus lang kapag naka-pin ang card.
+        $esc = $body('splEsc(){', 'splOutside(e){');
+        $this->assertStringContainsString('if (this.splCard.mode === null || this.photoModal.open) return;', $esc);
+        $this->assertStringContainsString("if (this.splCard.mode === 'form') { this.splCancel(); return; }", $esc);
+        $this->assertStringContainsString('this.splClose(this.splCard.pinned);', $esc);
+        $this->assertStringNotContainsString('splClose(true)', $esc);
+
+        // Habang may save na hindi pa sumasagot, walang nagbubura ng key ng form.
+        $cancel = $body('splCancel(){', 'splRemove(');
+        $this->assertStringContainsString('if (this.quoteForm.saving) return;', $cancel);
+        $this->assertStringContainsString("if (mode !== 'form' && !this.quoteForm.saving) this.quoteForm.key = null;", $open);
+        $this->assertSame(2, substr_count($js, 'quoteForm.key = null'));
+        $this->assertSame(1, substr_count($cancel, 'quoteForm.key = null'));
+        $this->assertStringNotContainsString('quoteForm.key = null', $table);
+        $this->assertSame(substr_count($table, 'class="spl-form"'), substr_count($table, '@click.stop="splCancel()">Cancel</button>'));
+
+        // Ang remove ay nagsasara lang pagkatapos ng totoong bura (bilang ng listahan), at ibinabalik ang focus.
+        $remove = $body('async splRemove(name, q){', 'splPlace(){');
+        $this->assertStringContainsString('const n = this.quotesFor(name).length;', $remove);
+        $this->assertStringContainsString('if (this.quotesFor(name).length === n) return;', $remove);
+        $this->assertStringContainsString('this.splClose(true);', $remove);
+        $this->assertSame(2, substr_count($table, '@click.stop="splRemove(row.item_name, q)">✕</button>'));
+        $this->assertStringNotContainsString('deleteQuote(', $table);
+        $this->assertStringNotContainsString('splClose(', $table);
+
+        // Pagkatapos ng matagumpay na save: sarado ang card at balik ang focus.
+        $this->assertStringContainsString("if (this.splCard.mode === 'form' && this.quoteForm.key === null) this.splClose(true);", $body('splSync(){', '},'));
+
+        // Ang naka-pin na card ay sumusunod sa cell nito sa scroll at sa pagbabago ng laki ng window.
+        $this->assertSame(1, substr_count($table, '@scroll.passive="splScrolled()" @resize.window="splScrolled()"'));
     }
 
     public function test_S_20_2_a_link_is_rendered_only_through_the_http_guard(): void

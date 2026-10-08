@@ -1,7 +1,8 @@
   <!-- Scroll area -->
   {{-- Ang card ng supplier cells: Esc at click sa labas ang nagsasara (capture, dahil hinaharang ng mga cell ang
-       click bago ito umakyat); sumusunod ito sa scroll ng table; nawawala kapag sarado na ang form nito. --}}
-  <div id="scroll" x-effect="splSync()" @scroll.passive="splScrolled()"
+       click bago ito umakyat); sumusunod ito sa scroll ng table at sa pagbabago ng laki ng window (kung hindi,
+       maiiwan ang naka-pin na card sa lumang puwesto); nawawala kapag sarado na ang form nito. --}}
+  <div id="scroll" x-effect="splSync()" @scroll.passive="splScrolled()" @resize.window="splScrolled()"
        @keydown.escape.window="splEsc()" @click.window.capture="splOutside($event)">
     <div class="card">
       <table class="spl-table">
@@ -200,7 +201,7 @@
                                  title="Photo ng produkto ng supplier (jpg/png/webp, hanggang 10 MB)" aria-label="Photo ng produkto ng supplier">
                           <div class="spl-card-act">
                             <button type="button" class="item-photo-btn" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
-                            <button type="button" class="item-photo-btn" @click.stop="quoteForm.key = null; splClose(true)">Cancel</button>
+                            <button type="button" class="item-photo-btn" @click.stop="splCancel()">Cancel</button>
                           </div>
                         </div>
                       </div>
@@ -236,7 +237,7 @@
                           <div class="spl-card" role="group" :aria-label="'Quote details: ' + q.supplier" @click.stop :style="splCard.style">
                             <div class="spl-card-name" x-text="q.supplier"></div>
                             <div class="spl-card-row">
-                              <span :class="splLow(q) ? 'spl-price spl-low' : 'spl-price'" x-text="q.price !== null ? money(q.price) : '—'"></span>
+                              <span :class="q.cheapest === true ? 'spl-price spl-low' : 'spl-price'" x-text="q.price !== null ? money(q.price) : '—'"></span>
                               <span class="spl-moq" x-text="(q.moq !== null && q.moq !== undefined) ? 'MOQ ' + q.moq : 'walang MOQ'"></span>
                             </div>
                             <template x-if="q.prev_price !== null && q.prev_price !== undefined">
@@ -257,7 +258,7 @@
                               <button type="button" class="item-photo-btn" title="I-edit ang quote" aria-label="I-edit ang quote"
                                       @click.stop="openQuote(row.item_name, q); splOpen(row.item_name, si, 'form', $el, true)">✎</button>
                               <button type="button" class="item-photo-btn" title="Tanggalin ang quote" aria-label="Tanggalin ang quote"
-                                      @click.stop="deleteQuote(row.item_name, q); splClose(false)">✕</button>
+                                      @click.stop="splRemove(row.item_name, q)">✕</button>
                             </div>
                           </div>
                         </template>
@@ -279,14 +280,14 @@
                         <template x-for="q in quotesFor(row.item_name)" :key="'spl-li-'+row.item_name+'-'+q.id">
                           <div class="spl-card-li">
                             <b :title="q.supplier" x-text="q.supplier"></b>
-                            <span :class="splLow(q) ? 'spl-price spl-low' : 'spl-price'" x-text="q.price !== null ? money(q.price) : '—'"></span>
+                            <span :class="q.cheapest === true ? 'spl-price spl-low' : 'spl-price'" x-text="q.price !== null ? money(q.price) : '—'"></span>
                             <template x-if="q.moq !== null && q.moq !== undefined">
                               <span class="spl-moq" x-text="'MOQ ' + q.moq"></span>
                             </template>
                             <button type="button" class="item-photo-btn" title="I-edit ang quote" aria-label="I-edit ang quote"
                                     @click.stop="openQuote(row.item_name, q); splOpen(row.item_name, si, 'form', $el, true)">✎</button>
                             <button type="button" class="item-photo-btn" title="Tanggalin ang quote" aria-label="Tanggalin ang quote"
-                                    @click.stop="deleteQuote(row.item_name, q); splClose(false)">✕</button>
+                                    @click.stop="splRemove(row.item_name, q)">✕</button>
                           </div>
                         </template>
                       </div>
@@ -314,7 +315,7 @@
                                title="Photo ng produkto ng supplier (jpg/png/webp, hanggang 10 MB)" aria-label="Photo ng produkto ng supplier">
                         <div class="spl-card-act">
                           <button type="button" class="item-photo-btn" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
-                          <button type="button" class="item-photo-btn" @click.stop="quoteForm.key = null; splClose(true)">Cancel</button>
+                          <button type="button" class="item-photo-btn" @click.stop="splCancel()">Cancel</button>
                         </div>
                       </div>
                     </div>
