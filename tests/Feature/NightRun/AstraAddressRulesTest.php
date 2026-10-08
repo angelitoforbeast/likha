@@ -3,7 +3,10 @@
 namespace Tests\Feature\NightRun;
 
 use App\Jobs\RunNightAstraRow;
+use App\Models\AddressKeywordBlacklist;
 use App\Models\AppSetting;
+use App\Models\FbnameBlacklist;
+use App\Models\KeywordBlacklist;
 use App\Models\MacroOutput;
 use App\Models\NightAstraRow;
 use App\Models\NightRunStep;
@@ -701,6 +704,8 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $this->assertSame('new', $on['rules']);
         $this->assertSame($types($off), $types($on));
         $this->assertSame($off['list_crc'], $on['list_crc']);
+        // Ang salita ng guard ay ang sa bagong text check, at hindi tinanong ang kaparehong phone.
+        $this->assertSame(array_replace($off, ['rules' => 'new', 'guard' => ['ran' => true, 'result' => 'phrase', 'score' => 100], 'dup_phone_checked' => false]), $on);
     }
 
     public function test_S_30_2_the_replay_block_holds_only_booleans_integers_and_fixed_words(): void
@@ -899,7 +904,11 @@ class AstraAddressRulesTest extends NightAstraTestCase
     private function runFiveNightRows(): array
     {
         $this->assertInList('METRO-MANILA', 'QUEZON-CITY', 'HOLY SPIRIT');
-        $this->fakeModel();
+        // Isang peke lang kada test: ang pangalawang Http::fake ay magpapabilang ng bawat request nang dalawang beses.
+        if ($this->respond === null) {
+            $this->fakeModel();
+        }
+        $this->sent = [];
         $rows = [
             'proceed by the model line'  => [],
             'no line, a mappable form'   => [['confidence' => 'medium'], ['province' => '', 'city' => '', 'barangay' => '']],
@@ -934,9 +943,24 @@ class AstraAddressRulesTest extends NightAstraTestCase
         ];
     }
 
-    public function test_S_29_8_five_night_rows_end_as_today(): void
+    public function test_S_29_8_five_night_rows_end_as_today_and_with_the_switch_on_only_the_intended_rows_change(): void
     {
-        $this->assertSame($this->pinned('S-29.8')['switch off'], $this->runFiveNightRows());
+        $off = $this->pinned('S-29.8')['switch off'];
+        $on  = $this->pinned('S-29.8')['switch on'];
+
+        $this->assertSame($off, $this->runFiveNightRows());
+
+        // Parehong limang sagot sa bagong gabi, naka-on ang switch.
+        NightAstraRow::query()->delete();
+        NightRunStep::query()->delete();
+        $this->storeSwitch('1');
+        $this->assertSame($on, $this->runFiveNightRows());
+
+        // Ang tatlong sadyang row lang ang nagbago; ang step, ang bilang ng tawag at ang gastos ay gaya ngayon.
+        $changed = array_keys(array_filter($on['rows'], fn (array $row, string $name) => $row !== $off['rows'][$name], ARRAY_FILTER_USE_BOTH));
+        $this->assertSame(['no line, a mappable form', 'cancel', 'duplicate phone'], $changed);
+        unset($on['rows'], $off['rows']);
+        $this->assertSame($off, $on);
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -1673,6 +1697,11 @@ class AstraAddressRulesTest extends NightAstraTestCase
             $this->assertNoLinePath($seen, $name);
             $this->assertSame(1, $seen['calls'], $name);
         }
+
+        // Iisa ang label pero hindi ito sinabi ng customer: walang kalahating address — pati ang province at city na
+        // ang program ang nagmapa ay hindi isinusulat.
+        $unsaid = $this->ranRow(++$day, $this->formOnly(['Holy Spirit', 'Quezon City', 'Metro Manila']), ['all_user_input' => self::NO_BRGY_CHAT]);
+        $this->assertSame([[null, null, null], null, 'program_map', 1], [$unsaid['line'], $unsaid['STATUS'], $unsaid['replay']['label_source'], $unsaid['calls']]);
     }
 
     public function test_S_24_11_low_confidence_is_never_mapped(): void
@@ -1936,11 +1965,18 @@ class AstraAddressRulesTest extends NightAstraTestCase
 
         $seen = $this->ranRow(1, $this->formOnly(['Holy Spirit', 'Quezon City', 'Metro Manila']), ['all_user_input' => self::NO_BRGY_CHAT]);
 
-        $this->assertSame([null, null, true, false], [$seen['line'][2], $seen['STATUS'], $seen['needs_human'], $seen['proceed']]);
+        // Ang program ay nagsusulat ng mga label nito bilang buong line lang: walang barangay, wala ring province at city.
+        $this->assertSame([[null, null, null], null, true, false], [$seen['line'], $seen['STATUS'], $seen['needs_human'], $seen['proceed']]);
         $this->assertNotSame('✅', $seen['code']);
         $this->assertSame(['program_map', 'none'], [$seen['replay']['label_source'], $seen['replay']['guard']['result']]);
         $this->assertSame([sprintf(self::NOT_SAID, 'medium')], $this->linesStarting($seen['evidence'], 'GUARD:'));
         $this->assertCount(1, $this->linesStarting($seen['evidence'], 'CHECK: existing prov/city/brgy vs list'));
+        $this->assertSame('Full Address', $seen['code']);
+
+        // Ang province at city na ang MODEL mismo ang nagbigay nang tama ay isinusulat pa rin gaya ngayon.
+        $modelPart = $this->ranRow(2, $this->answer(['confidence' => 'medium'], [], ['barangay' => 'HOLY SPRIT']), ['all_user_input' => self::NO_BRGY_CHAT]);
+        $this->assertSame([['METRO-MANILA', 'QUEZON-CITY', null], null, 'program_map', 'none'], [$modelPart['line'], $modelPart['STATUS'], $modelPart['replay']['label_source'], $modelPart['replay']['guard']['result']]);
+        $this->assertSame('Barangay', $modelPart['code']);
     }
 
     public function test_S_29_4_a_valid_line_already_in_the_row_is_checked_but_does_not_proceed_without_a_line_from_astra(): void
@@ -2098,5 +2134,363 @@ class AstraAddressRulesTest extends NightAstraTestCase
 
         // Hawak pa rin ng sariling flag ng model ang lahat ng row na ito, anuman ang human_kind.
         $this->assertSame(array_map(fn (array $case) => [$case[1], 'TO FIX', null], $cases), $seen);
+    }
+
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  Ang bagong rules: ang sariling flag ng model, ang intent, ang kaparehong phone
+    // ═════════════════════════════════════════════════════════════════════
+
+    private const GOOD_NOTE = '✅ METRO-MANILA / QUEZON-CITY / HOLY SPIRIT';
+    private const MODEL_REASON = 'dalawang address ang ibinigay ng customer';
+    private const NOT_FOUND    = ['needs_human' => true, 'human_reason' => 'walang nakita sa list', 'human_kind' => 'label_not_found'];
+
+    /** Ang SELECT na naghahanap ng ibang order na may parehong phone (ang tanong ng duplicate rule ng gate). */
+    private function duplicatePhoneQueries(array $statements): array
+    {
+        return array_values(array_filter($statements, fn (string $sql) => preg_match('/^select\b.*\bfrom "macro_output" where .*"PHONE NUMBER" = \?/is', $sql) === 1));
+    }
+
+    private function nightLogRules(int $orderId): string
+    {
+        return json_decode((string) DB::table('ai_checker_logs')->where('macro_output_id', $orderId)->orderByDesc('id')->value('detail'), true)['replay']['rules'];
+    }
+
+    public function test_S_22_8_the_browser_and_the_night_job_use_the_new_rules_and_a_row_after_the_untick_uses_the_old(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->actingAs($this->user());
+        $this->newRulesOn();
+        // Walang line ang model, namamapa ang form: PROCEED lang ito sa bagong rules.
+        $this->modelSays($this->formOnly(['Holy Spirit', 'Quezon City', 'Metro Manila']));
+
+        $browser  = $this->orderOn(1);
+        $response = $this->postJson(self::RUN_ROW . $browser->id, ['engine' => 'astra']);
+        $response->assertStatus(200);
+        $this->assertSame(['fixed', 'new', 'PROCEED'], [$response->json('result.status'), $response->json('result.log.replay.rules'), $this->stored($browser->id)['STATUS']]);
+
+        $first  = $this->order();
+        $second = $this->order();
+        $this->runningStep([$first->id, $second->id]);
+
+        $firstRow = $this->work($first->id);
+        // Inalis ng CEO ang tsek sa pagitan ng dalawang row ng gabi.
+        AstraEncoder::storeAddressRules(false);
+        $secondRow = $this->work($second->id);
+
+        $this->assertSame(
+            [['done', true, '✅', 'new', 'PROCEED'], ['done', false, 'Full Address', 'old', null]],
+            [
+                [$firstRow->state, $firstRow->proceed, $firstRow->code, $this->nightLogRules($first->id), $this->stored($first->id)['STATUS']],
+                [$secondRow->state, $secondRow->proceed, $secondRow->code, $this->nightLogRules($second->id), $this->stored($second->id)['STATUS']],
+            ]
+        );
+    }
+
+    public function test_S_27_1_a_cancel_with_everything_valid_proceeds_and_the_cancel_stays_visible(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->newRulesOn();
+
+        $seen = $this->ranRow(1, $this->answer(['intent' => 'cancel']));
+
+        $this->assertSame([self::QC_HOLY_SPIRIT, 'PROCEED', '✅', true, self::NO_GATE], [$seen['line'], $seen['STATUS'], $seen['code'], $seen['proceed'], $seen['gate']]);
+        $this->assertSame(self::GOOD_NOTE . ' · CANCEL? · PROCEED', $seen['note']);
+        $this->assertStringEndsWith("\nCheck: " . self::GOOD_NOTE . " · CANCEL? · PROCEED\n---", $seen['CXD']);
+        $this->assertSame('cancel', $seen['replay']['model_intent']);
+        $this->assertSame([], $this->linesStarting($seen['evidence'], 'GATE:'));
+    }
+
+    public function test_S_27_2_an_inquiry_with_everything_valid_proceeds_and_the_inquiry_stays_visible(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->newRulesOn();
+
+        $seen = $this->ranRow(1, $this->answer(['intent' => 'inquiry_only']));
+
+        $this->assertSame([self::QC_HOLY_SPIRIT, 'PROCEED', '✅', true], [$seen['line'], $seen['STATUS'], $seen['code'], $seen['proceed']]);
+        $this->assertSame(self::GOOD_NOTE . ' · INQUIRY? · PROCEED', $seen['note']);
+        $this->assertStringEndsWith("\nCheck: " . self::GOOD_NOTE . " · INQUIRY? · PROCEED\n---", $seen['CXD']);
+        $this->assertSame('inquiry_only', $seen['replay']['model_intent']);
+    }
+
+    public function test_S_27_3_a_cancel_or_an_inquiry_with_an_incomplete_line_keeps_its_code_and_the_gate_is_not_run(): void
+    {
+        $this->newRulesOn();
+        // Walang line ang model at walang barangay sa form: walang maimamapa ang program.
+        $noBarangay = ['', 'Quezon City', 'Metro Manila'];
+
+        $seen = [];
+        $day  = 0;
+        foreach (['cancel' => 'CANCEL?', 'inquiry_only' => 'INQUIRY?'] as $intent => $code) {
+            $row = $this->ranRow(++$day, $this->formOnly($noBarangay, 'medium', ['intent' => $intent]));
+            $seen[$intent] = [$row['code'], $row['STATUS'], $row['proceed'], $row['gate'], $this->linesStarting($row['evidence'], 'GATE:'), str_ends_with($row['note'], ' · ' . $code)];
+        }
+
+        $this->assertSame([
+            'cancel'       => ['CANCEL?', null, false, self::NO_GATE, [], true],
+            'inquiry_only' => ['INQUIRY?', null, false, self::NO_GATE, [], true],
+        ], $seen);
+    }
+
+    public function test_S_27_4_a_cancel_that_fails_the_gate_or_is_held_keeps_the_cancel_code_and_the_evidence_names_why(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->newRulesOn();
+        $rows = [
+            'COD blank'            => [['COD' => null], $this->answer(['intent' => 'cancel'])],
+            'shop details differ'  => [['SHOP DETAILS' => "ITEM: Slimming Tea\nPRICE: 799"], $this->answer(['intent' => 'cancel'])],
+            'held by the model'    => [[], $this->answer(['intent' => 'cancel', 'needs_human' => true, 'human_reason' => self::MODEL_REASON, 'human_kind' => 'other'])],
+            'an inquiry, COD blank' => [['COD' => null], $this->answer(['intent' => 'inquiry_only'])],
+        ];
+
+        $seen = [];
+        $day  = 0;
+        foreach ($rows as $name => [$extra, $answer]) {
+            $row = $this->ranRow(++$day, $answer, $extra);
+            $seen[$name] = [$row['code'], $row['STATUS'], $row['proceed'], $row['gate'], $this->linesStarting($row['evidence'], 'GATE:')];
+        }
+
+        $this->assertSame([
+            'COD blank'             => ['CANCEL?', null, false, ['hard' => ['COD blangko'], 'soft' => []], ['GATE: TO FIX — COD blangko']],
+            'shop details differ'   => ['CANCEL?', null, false, ['hard' => [], 'soft' => ['COD ≠ shop details (799 vs 599)']], ['GATE: TO FIX - SHOP DETAILS — COD ≠ shop details (799 vs 599)']],
+            'held by the model'     => ['CANCEL?', null, false, self::NO_GATE, ['GATE: TO FIX — Astra: ' . self::MODEL_REASON]],
+            'an inquiry, COD blank' => ['INQUIRY?', null, false, ['hard' => ['COD blangko'], 'soft' => []], ['GATE: TO FIX — COD blangko']],
+        ], $seen);
+    }
+
+    public function test_S_27_5_an_unclear_intent_holds_the_row_as_today(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->newRulesOn();
+        $today = $this->pinned('S-23.2')['06 unclear'];
+
+        $seen = $this->ranRow(1, $this->answer(['intent' => 'unclear']));
+
+        $this->assertSame(['TO FIX', null, self::GOOD_NOTE . ' · TO FIX'], [$today['APP SCRIPT CHECKER'], $today['STATUS'], $today['AI ANALYZE']]);
+        $this->assertSame([$today['APP SCRIPT CHECKER'], $today['STATUS'], $today['AI ANALYZE'], false], [$seen['code'], $seen['STATUS'], $seen['note'], $seen['proceed']]);
+        $this->assertSame(['GATE: TO FIX — Astra: kailangan ng tao'], $this->linesStarting($seen['evidence'], 'GATE:'));
+    }
+
+    public function test_S_27_7_a_night_cancel_row_is_skipped_when_a_person_sets_status_during_the_call_and_proceeds_when_nobody_did(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->newRulesOn();
+        $touched   = $this->order();
+        $untouched = $this->order();
+        $this->runningStep([$touched->id, $untouched->id]);
+        $cancel = $this->modelResponse($this->answer(['intent' => 'cancel']));
+
+        $asLeft = null;
+        $this->respond = function () use ($touched, $cancel, &$asLeft) {
+            DB::table('macro_output')->where('id', $touched->id)->update(['STATUS' => 'CANNOT PROCEED', 'FULL NAME' => 'Inilagay Ng Tao']);
+            $asLeft = $this->stored($touched->id);
+
+            return Http::response($cancel);
+        };
+        $skipped = $this->work($touched->id);
+
+        $this->respond = fn () => Http::response($cancel);
+        $done = $this->work($untouched->id);
+
+        // Ang nilaktawang row ay gaya ngayon (ang literal ay ang nakuha sa lumang code).
+        $today = $this->pinned('S-29.7')['a person sets STATUS']['row'];
+        $this->assertSame(['skipped', 'Status set by a person'], [$today['state'], $today['reason']]);
+        $this->assertSame($today, ['state' => $skipped->state, 'reason' => $skipped->reason, 'attempts' => (int) $skipped->attempts, 'proceed' => $skipped->proceed, 'code' => $skipped->code]);
+        $this->assertNotNull($asLeft);
+        $this->assertSame($asLeft, $this->stored($touched->id));
+        $this->assertSame(['done', true, '✅', null, 'PROCEED'], [$done->state, $done->proceed, $done->code, $done->reason, $this->stored($untouched->id)['STATUS']]);
+    }
+
+    public function test_S_28_1_a_same_date_duplicate_phone_does_not_hold_the_row_and_the_duplicate_query_is_not_run(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->fakeModel();
+        $this->modelSays($this->answer());
+        $statements = [];
+        DB::listen(function ($query) use (&$statements) {
+            $statements[] = $query->sql;
+        });
+
+        // Nakapatay muna ang switch: dito nakikita ng listener ang tanong (kung hindi, walang pinatutunayan ang "hindi tumakbo").
+        $this->orderOn(1, ['FULL NAME' => 'Maria Santos', 'PHONE NUMBER' => '9171234567']);
+        $this->runAstra($this->orderOn(1));
+        $this->assertCount(1, $this->duplicatePhoneQueries($statements));
+
+        $this->storeSwitch('1');
+        $this->orderOn(2, ['FULL NAME' => 'Maria Santos', 'PHONE NUMBER' => '9171234567']);
+        $second     = $this->orderOn(2);
+        $statements = [];
+        $result     = $this->runAstra($second);
+
+        $row = $this->stored($second->id);
+        $this->assertSame(['PROCEED', '✅', '9171234567'], [$row['STATUS'], $row['APP SCRIPT CHECKER'], $row['PHONE NUMBER']]);
+        $this->assertSame(['fixed', self::NO_GATE, true], [$result['status'], $result['gate'], $result['log']['passes'][0]['proceed']]);
+        $this->assertNotEmpty($statements);
+        $this->assertSame([], $this->duplicatePhoneQueries($statements));
+    }
+
+    public function test_S_28_4_a_blank_short_long_or_dummy_phone_still_holds_the_row(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->newRulesOn();
+        // [phone na nasa row na, phone ng form]. Ang phone na hindi 10 digit ay hindi isinusulat ni Astra; ang nasa row ang tinitingnan ng gate.
+        $rows = [
+            'blank'     => [null, ''],
+            '9 digits'  => ['917123456', ''],
+            '11 digits' => ['91712345678', ''],
+            'the dummy' => [null, '09123456789'],
+        ];
+
+        $seen = [];
+        $day  = 0;
+        foreach ($rows as $name => [$existing, $formPhone]) {
+            $row = $this->ranRow(++$day, $this->answer([], ['phone' => $formPhone]), ['PHONE NUMBER' => $existing]);
+            $seen[$name] = [$row['STATUS'], $row['proceed'], $row['code'], $row['gate']['hard'], $row['row']['PHONE NUMBER'], str_contains($row['note'], 'Phone: wala sa chat')];
+        }
+
+        $this->assertSame([
+            // Walang phone: kulang ang anim na field, kaya hindi umaabot sa gate (gaya ngayon) at hindi PROCEED.
+            'blank'     => [null, false, '✅', [], null, true],
+            '9 digits'  => [null, false, 'TO FIX', ['PHONE hindi 10-digit na 9XXXXXXXXX (917123456)'], '917123456', true],
+            '11 digits' => [null, false, 'TO FIX', ['PHONE hindi 10-digit na 9XXXXXXXXX (91712345678)'], '91712345678', true],
+            'the dummy' => [null, false, 'TO FIX', ['PHONE dummy'], '9123456789', false],
+        ], $seen);
+    }
+
+    public function test_S_28_5_every_other_gate_rule_holds_the_row_with_todays_code(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->assertArrayNotHasKey(MacroChecker::normProv('ATLANTIS'), $this->maps()['provincesSet']);
+        $this->fakeModel();
+        $good     = $this->answer();
+        $atlantis = $this->answer([], ['city' => 'Atlantis City', 'province' => 'Atlantis'], ['province' => 'ATLANTIS', 'city' => 'ATLANTIS', 'barangay' => 'ATLANTIS']);
+        $filled   = [
+            'FULL NAME' => 'Juan Dela Cruz', 'PHONE NUMBER' => '9171234567', 'ADDRESS' => '12, Sampaguita St',
+            'PROVINCE' => 'ATLANTIS', 'CITY' => 'QUEZON-CITY', 'BARANGAY' => 'HOLY SPIRIT',
+        ];
+        // [dagdag sa order, sagot, blacklist na ilalagay, code, ang sinasabi ng gate]
+        $rows = [
+            'a name with a digit'            => [[], $this->answer([], ['name' => 'Juan Dela Cruz 2']), null, 'TO FIX', ['hard' => ['FULL NAME may di-pinapayagang character'], 'soft' => []]],
+            'item blank'                     => [['ITEM_NAME' => null], $good, null, 'TO FIX', ['hard' => ['ITEM blangko o >50 chars'], 'soft' => []]],
+            'item over 50 characters'        => [['ITEM_NAME' => str_repeat('Slimming Tea ', 4)], $good, null, 'TO FIX', ['hard' => ['ITEM blangko o >50 chars'], 'soft' => []]],
+            'COD blank'                      => [['COD' => null], $good, null, 'TO FIX', ['hard' => ['COD blangko'], 'soft' => []]],
+            'a blacklisted fb name'          => [['fb_name' => 'Masamang Customer'], $good, [FbnameBlacklist::class, 'fb_name', 'masamang customer'], 'TO FIX', ['hard' => ['FB name blacklisted'], 'soft' => []]],
+            'a blacklisted keyword in the chat' => [[], $good, [KeywordBlacklist::class, 'keyword', 'sampaguita'], 'TO FIX', ['hard' => ['keyword blacklisted: sampaguita'], 'soft' => []]],
+            'a blacklisted address keyword'  => [[], $good, [AddressKeywordBlacklist::class, 'keyword', 'sampaguita'], 'TO FIX', ['hard' => ['ADDRESS keyword blacklisted: sampaguita'], 'soft' => []]],
+            // Walang line si Astra (walang ganoong lugar) at ang province na nasa row ay wala sa list.
+            'a province not on the list'     => [$filled, $atlantis, null, 'TO FIX', ['hard' => ['PROVINCE wala sa J&T list'], 'soft' => []]],
+            'a mismatch with the shop details' => [['SHOP DETAILS' => "ITEM: Slimming Tea\nPRICE: 799"], $good, null, 'TO FIX - SHOP DETAILS', ['hard' => [], 'soft' => ['COD ≠ shop details (799 vs 599)']]],
+        ];
+        $this->assertGreaterThan(50, mb_strlen($rows['item over 50 characters'][0]['ITEM_NAME']));
+
+        $day = 0;
+        foreach ($rows as $name => [$extra, $answer, $blacklist, $code, $gate]) {
+            if ($blacklist !== null) {
+                $blacklist[0]::create([$blacklist[1] => $blacklist[2], 'host_scope' => 'likha']);
+            }
+            $held = fn (array $seen): array => [$seen['code'], $seen['STATUS'], $seen['proceed'], $seen['gate']];
+
+            // "Ang code ngayon" = ang parehong row na nakapatay ang switch.
+            $this->storeSwitch('0');
+            $today = $held($this->ranRow(++$day, $answer, $extra));
+            $this->storeSwitch('1');
+            $new = $this->ranRow(++$day, $answer, $extra);
+
+            $this->assertSame('new', $new['replay']['rules'], $name);
+            $this->assertSame([$code, null, false, $gate], $today, $name);
+            $this->assertSame($today, $held($new), $name);
+            if ($blacklist !== null) {
+                $blacklist[0]::query()->delete();
+            }
+        }
+    }
+
+    public function test_S_28_6_the_log_says_whether_the_duplicate_phone_was_checked(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->fakeModel();
+
+        $off = $this->ranRow(1, $this->answer())['replay']['dup_phone_checked'];
+        $this->storeSwitch('1');
+        $on = $this->ranRow(2, $this->answer())['replay']['dup_phone_checked'];
+
+        $this->assertSame([true, false], [$off, $on]);
+    }
+
+    public function test_S_29_1_the_models_own_flag_holds_a_row_with_a_valid_model_line(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->newRulesOn();
+        $asks  = ['needs_human' => true, 'human_reason' => self::MODEL_REASON];
+        $kinds = [
+            'other'            => $asks + ['human_kind' => 'other'],
+            'no kind'          => $asks,
+            // Buo at tama ang line ng model pero humingi pa rin ito ng tao: hindi iyon "walang nakita sa list".
+            'label_not_found'  => $asks + ['human_kind' => 'label_not_found'],
+        ];
+
+        $day = 0;
+        foreach ($kinds as $name => $over) {
+            $seen = $this->ranRow(++$day, $this->answer($over));
+
+            $this->assertSame([self::QC_HOLY_SPIRIT, null, 'TO FIX', false, true], [$seen['line'], $seen['STATUS'], $seen['code'], $seen['proceed'], $seen['needs_human']], $name);
+            $this->assertSame(self::GOOD_NOTE . ' · 👤 ' . self::MODEL_REASON . ' · TO FIX', $seen['note'], $name);
+            $this->assertSame(['GATE: TO FIX — Astra: ' . self::MODEL_REASON], $this->linesStarting($seen['evidence'], 'GATE:'), $name);
+            $this->assertSame(['model', true], [$seen['replay']['label_source'], $seen['replay']['model_needs_human']], $name);
+        }
+    }
+
+    public function test_S_29_2_a_list_only_flag_does_not_hold_a_row_the_program_mapped_and_the_customers_text_confirms(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->newRulesOn();
+        $place    = ['Holy Spirit', 'Quezon City', 'Metro Manila'];
+        $typoChat = ['all_user_input' => $this->chat('12 Sampaguita St, brgy holy sprit, Quezon City')];
+        $unsaid   = ['all_user_input' => self::NO_BRGY_CHAT];
+        $other    = ['human_kind' => 'other'] + self::NOT_FOUND;
+        $missing  = array_diff_key(self::NOT_FOUND, ['human_kind' => true]);
+        // [sagot, dagdag sa order]
+        $rows = [
+            'confirmed by the phrase'       => [$this->formOnly($place, 'medium', self::NOT_FOUND), []],
+            'confirmed by a near match'     => [$this->formOnly($place, 'medium', self::NOT_FOUND), $typoChat],
+            'the kind is other'             => [$this->formOnly($place, 'medium', $other), []],
+            'no kind'                       => [$this->formOnly($place, 'medium', $missing), []],
+            'only the high-confidence exemption' => [$this->formOnly($place, 'high', self::NOT_FOUND), $unsaid],
+        ];
+
+        $seen = [];
+        $day  = 0;
+        foreach ($rows as $name => [$answer, $extra]) {
+            $row = $this->ranRow(++$day, $answer, $extra);
+            $seen[$name] = [
+                'STATUS' => $row['STATUS'], 'code' => $row['code'], 'stored needs_human' => $row['needs_human'], 'guard' => $row['replay']['guard']['result'],
+                'note'   => $row['note'],
+            ];
+            // Sa lahat ng row: ang program ang gumawa ng line, at nakatala ang sariling flag ng model.
+            $this->assertSame([self::QC_HOLY_SPIRIT, 'program_map', true], [$row['line'], $row['replay']['label_source'], $row['replay']['model_needs_human']], $name);
+        }
+
+        $heldNote = self::GOOD_NOTE . ' · 👤 walang nakita sa list · TO FIX';
+        $this->assertSame([
+            'confirmed by the phrase'   => ['STATUS' => 'PROCEED', 'code' => '✅', 'stored needs_human' => false, 'guard' => 'phrase', 'note' => self::GOOD_NOTE . ' · PROCEED'],
+            'confirmed by a near match' => ['STATUS' => 'PROCEED', 'code' => '✅', 'stored needs_human' => false, 'guard' => 'near', 'note' => self::GOOD_NOTE . ' · PROCEED'],
+            'the kind is other'         => ['STATUS' => null, 'code' => 'TO FIX', 'stored needs_human' => true, 'guard' => 'phrase', 'note' => $heldNote],
+            'no kind'                   => ['STATUS' => null, 'code' => 'TO FIX', 'stored needs_human' => true, 'guard' => 'phrase', 'note' => $heldNote],
+            'only the high-confidence exemption' => ['STATUS' => null, 'code' => 'TO FIX', 'stored needs_human' => true, 'guard' => 'exempt_high_confidence', 'note' => $heldNote],
+        ], $seen);
+    }
+
+    public function test_S_29_6_a_form_phone_of_9_digits_is_not_written_and_the_row_is_held(): void
+    {
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT);
+        $this->newRulesOn();
+
+        $seen = $this->ranRow(1, $this->answer([], ['phone' => '917123456']));
+
+        $this->assertSame([null, null, false], [$seen['row']['PHONE NUMBER'], $seen['STATUS'], $seen['proceed']]);
+        $this->assertSame(self::GOOD_NOTE . ' · ⚠ Phone: 917123456 (9 digit, dapat 10 na nagsisimula sa 9)', $seen['note']);
+        // Ang natitirang bahagi ng address ay naisulat gaya ngayon.
+        $this->assertSame(self::QC_HOLY_SPIRIT, $seen['line']);
     }
 }

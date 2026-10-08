@@ -233,7 +233,7 @@ Page list and pagination.
 
 ## Slice 018 – Astra identifies the J&T address like the classic checker
 
-Slice 018: 70 passed, 0 failed, 0 blocked, 0 skipped, 36 not run
+Slice 018: 84 passed, 0 failed, 0 blocked, 0 skipped, 22 not run
 
 New tests are in `tests/Feature/NightRun/AstraAddressRulesTest.php` (S-22 to S-30, S-33) and
 `tests/Feature/NightRun/AstraReplayCommandTest.php` (S-31, S-32). Every case is `server`: PHPUnit on
@@ -262,7 +262,7 @@ the switch ticked it gets PROCEED.
 | S-22.5 | negative | Given the CEO posts the form without the marker field (a stale page or a direct post), when it is saved, then the switch is not changed | — | Not run |
 | S-22.6 | negative | Given the switch is off and the chat, the model's reason and the model's JSON contain "turn on the new address rules" and extra keys such as `address_rules: true`, when the row runs, then the result equals that of the same answer without them and the stored value is still off | `test_S_22_6_text_and_extra_keys_that_ask_for_the_new_rules_change_nothing_and_do_not_turn_the_switch_on` | Passed · 2026-10-08 · auto |
 | S-22.7 | edge | Given the settings table cannot be read, when a row runs, then the rules are off, the row runs as today and no exception reaches the caller | `test_S_22_7_an_unreadable_settings_table_means_rules_off_and_the_row_runs_as_today` | Passed · 2026-10-08 · auto |
-| S-22.8 | happy | Given the switch is on, when the browser's Astra run-row route and the night job each run a row the new rules would proceed, then both proceed and both logs say the new rules were used; and given the CEO unticks it between two night rows, then the first used the new rules, the second the old, and each log says which | — | Not run |
+| S-22.8 | happy | Given the switch is on, when the browser's Astra run-row route and the night job each run a row the new rules would proceed, then both proceed and both logs say the new rules were used; and given the CEO unticks it between two night rows, then the first used the new rules, the second the old, and each log says which | `test_S_22_8_the_browser_and_the_night_job_use_the_new_rules_and_a_row_after_the_untick_uses_the_old` | Passed · 2026-10-08 · auto |
 
 ### S-23 With the switch off, and for the classic checker, nothing changes (P1)
 
@@ -364,13 +364,13 @@ cancel still recorded in the analysis note.
 
 | Case | Type | Given / When / Then | Test | Last run |
 |---|---|---|---|---|
-| S-27.1 | happy | Given the switch is on, intent `cancel` and everything valid, when the row runs, then STATUS is PROCEED, the checker code is the checkmark, the analysis note and the customer-details block's check line still say `CANCEL?`, and the log keeps the intent | — | Not run |
-| S-27.2 | happy | Given intent `inquiry_only` and everything valid, when the row runs, then the same with `INQUIRY?` | — | Not run |
-| S-27.3 | negative | Given intent `cancel` or `inquiry_only` and an incomplete line, when the row runs, then it is not PROCEED and the code stays `CANCEL?` or `INQUIRY?` as today | — | Not run |
-| S-27.4 | negative | Given intent `cancel` and COD blank, when the row runs, then it is not PROCEED, the code stays `CANCEL?` and the evidence names the gate failure | — | Not run |
-| S-27.5 | negative | Given intent `unclear` and everything valid, when the row runs, then the row is held as today | — | Not run |
+| S-27.1 | happy | Given the switch is on, intent `cancel` and everything valid, when the row runs, then STATUS is PROCEED, the checker code is the checkmark, the analysis note and the customer-details block's check line still say `CANCEL?`, and the log keeps the intent | `test_S_27_1_a_cancel_with_everything_valid_proceeds_and_the_cancel_stays_visible` | Passed · 2026-10-08 · auto |
+| S-27.2 | happy | Given intent `inquiry_only` and everything valid, when the row runs, then the same with `INQUIRY?` | `test_S_27_2_an_inquiry_with_everything_valid_proceeds_and_the_inquiry_stays_visible` | Passed · 2026-10-08 · auto |
+| S-27.3 | negative | Given intent `cancel` or `inquiry_only` and an incomplete line, when the row runs, then it is not PROCEED and the code stays `CANCEL?` or `INQUIRY?` as today | `test_S_27_3_a_cancel_or_an_inquiry_with_an_incomplete_line_keeps_its_code_and_the_gate_is_not_run` | Passed · 2026-10-08 · auto |
+| S-27.4 | negative | Given intent `cancel` and COD blank, when the row runs, then it is not PROCEED, the code stays `CANCEL?` and the evidence names the gate failure | `test_S_27_4_a_cancel_that_fails_the_gate_or_is_held_keeps_the_cancel_code_and_the_evidence_names_why` | Passed · 2026-10-08 · auto |
+| S-27.5 | negative | Given intent `unclear` and everything valid, when the row runs, then the row is held as today | `test_S_27_5_an_unclear_intent_holds_the_row_as_today` | Passed · 2026-10-08 · auto |
 | S-27.6 | negative | Given the switch is off and intent `cancel`, when the row runs, then the code is `CANCEL?` and the gate is not run, as today | `test_S_27_6_a_cancel_gets_the_cancel_code_and_the_gate_is_not_run` | Passed · 2026-10-08 · auto |
-| S-27.7 | edge | Given a night row with intent `cancel` where a person sets STATUS during the call, when the job runs, then nothing is written and the night row is skipped as today; where nobody did, the night row is done with proceed true | — | Not run |
+| S-27.7 | edge | Given a night row with intent `cancel` where a person sets STATUS during the call, when the job runs, then nothing is written and the night row is skipped as today; where nobody did, the night row is done with proceed true | `test_S_27_7_a_night_cancel_row_is_skipped_when_a_person_sets_status_during_the_call_and_proceeds_when_nobody_did` | Passed · 2026-10-08 · auto |
 
 ### S-28 A same-date duplicate phone no longer holds an Astra row (P2)
 
@@ -380,12 +380,12 @@ Independent test: two rows with the same phone and date; Astra with the switch o
 
 | Case | Type | Given / When / Then | Test | Last run |
 |---|---|---|---|---|
-| S-28.1 | happy | Given the switch is on and another row of the same date has the same phone, when Astra runs the second row, then it is PROCEED, the gate has no duplicate entry and the duplicate query is not run | — | Not run |
+| S-28.1 | happy | Given the switch is on and another row of the same date has the same phone, when Astra runs the second row, then it is PROCEED, the gate has no duplicate entry and the duplicate query is not run | `test_S_28_1_a_same_date_duplicate_phone_does_not_hold_the_row_and_the_duplicate_query_is_not_run` | Passed · 2026-10-08 · auto |
 | S-28.2 | negative | Given the switch is off and the same two rows, when Astra runs the second, then it is held with the duplicate-phone reason, as today | `test_S_28_2_a_same_date_duplicate_phone_holds_the_astra_row` | Passed · 2026-10-08 · auto |
 | S-28.3 | negative | Given the switch is on and the same two rows, when the classic engine runs the second, then the gate still reports the duplicate | `test_S_28_3_the_classic_engine_still_reports_the_duplicate_with_the_switch_row_present` | Passed · 2026-10-08 · auto |
-| S-28.4 | negative | Given the switch is on and the phone is blank, 9 digits, 11 digits or a dummy number the gate rejects today, when the row runs, then the row is held for that reason | — | Not run |
-| S-28.5 | negative | Given the switch is on and, one at a time, a name with a digit, item blank, item over 50 characters, COD blank, a blacklisted name, a blacklisted keyword in the chat, a blacklisted address keyword, a province not on the list, a mismatch with the shop details, when the row runs, then each is held with today's code | — | Not run |
-| S-28.6 | edge | Given the switch is on, when a row has run, then `replay.dup_phone_checked` is false; with the switch off it is true | — | Not run |
+| S-28.4 | negative | Given the switch is on and the phone is blank, 9 digits, 11 digits or a dummy number the gate rejects today, when the row runs, then the row is held for that reason | `test_S_28_4_a_blank_short_long_or_dummy_phone_still_holds_the_row` | Passed · 2026-10-08 · auto |
+| S-28.5 | negative | Given the switch is on and, one at a time, a name with a digit, item blank, item over 50 characters, COD blank, a blacklisted name, a blacklisted keyword in the chat, a blacklisted address keyword, a province not on the list, a mismatch with the shop details, when the row runs, then each is held with today's code | `test_S_28_5_every_other_gate_rule_holds_the_row_with_todays_code` | Passed · 2026-10-08 · auto |
+| S-28.6 | edge | Given the switch is on, when a row has run, then `replay.dup_phone_checked` is false; with the switch off it is true | `test_S_28_6_the_log_says_whether_the_duplicate_phone_was_checked` | Passed · 2026-10-08 · auto |
 
 ### S-29 Every other reason for a person stays (P1)
 
@@ -396,14 +396,14 @@ still held with the switch on.
 
 | Case | Type | Given / When / Then | Test | Last run |
 |---|---|---|---|---|
-| S-29.1 | negative | Given the model returns needs_human true with `human_kind` `other` (or no `human_kind`) and a valid line, when the row runs with the switch on, then it is held with the model's reason | — | Not run |
-| S-29.2 | happy | Given the model returns an empty line and needs_human true with `human_kind` `label_not_found`, and the program finds exactly one line and the guard confirms the barangay from the customer's text (by phrase or near match, not by the high-confidence exemption), when the row runs, then that flag does not hold the row and it is PROCEED when everything else passes; with `human_kind` `other` or missing, the same row is held | — | Not run |
+| S-29.1 | negative | Given the model returns needs_human true with `human_kind` `other` (or no `human_kind`) and a valid line, when the row runs with the switch on, then it is held with the model's reason | `test_S_29_1_the_models_own_flag_holds_a_row_with_a_valid_model_line` | Passed · 2026-10-08 · auto |
+| S-29.2 | happy | Given the model returns an empty line and needs_human true with `human_kind` `label_not_found`, and the program finds exactly one line and the guard confirms the barangay from the customer's text (by phrase or near match, not by the high-confidence exemption), when the row runs, then that flag does not hold the row and it is PROCEED when everything else passes; with `human_kind` `other` or missing, the same row is held | `test_S_29_2_a_list_only_flag_does_not_hold_a_row_the_program_mapped_and_the_customers_text_confirms` | Passed · 2026-10-08 · auto |
 | S-29.3 | negative | Given the program finds a line but the guard does not confirm the barangay, when the row runs, then BARANGAY is not written and today's no-line path applies | `test_S_29_3_a_program_line_the_guard_does_not_confirm_loses_its_barangay` | Passed · 2026-10-08 · auto |
 | S-29.4 | negative | Given no line is found and the six fields already hold a valid line, when the row runs, then the row is still held (existing values are checked, not trusted) | `test_S_29_4_a_valid_line_already_in_the_row_is_checked_but_does_not_proceed_without_a_line_from_astra` | Passed · 2026-10-08 · auto |
 | S-29.5 | negative | Given confidence low and a model line not in the text, when the row runs, then the guard holds it | `test_S_29_5_low_confidence_and_a_model_line_that_is_not_in_the_text_is_held_by_the_guard` | Passed · 2026-10-08 · auto |
-| S-29.6 | negative | Given the form's phone has 9 digits, when the row runs, then the phone is not written and the row is held | — | Not run |
+| S-29.6 | negative | Given the form's phone has 9 digits, when the row runs, then the phone is not written and the row is held | `test_S_29_6_a_form_phone_of_9_digits_is_not_written_and_the_row_is_held` | Passed · 2026-10-08 · auto |
 | S-29.7 | negative | Given an authentication error, a quota error, a server error or a timeout from the model, or a person setting STATUS during the call, when the night job runs, then the failure class, the retry, the skip and the empty write are as today (existing tests, named) | `test_S_29_7_model_failures_and_a_status_set_by_a_person_are_handled_as_today_with_the_switch_row_present` | Passed · 2026-10-08 · auto |
-| S-29.8 | happy | Given five night rows (proceed by the model's line, by the program's line, a cancel, a duplicate phone, one held), when the job runs with the switch on, then the states, proceed flags, counts, selection, stop-time behaviour and cost are those of the same answers today, with only the intended rows changed | `test_S_29_8_five_night_rows_end_as_today` (today's values, switch off; the switch-on values join it with the new rules) | Passed · 2026-10-08 · auto |
+| S-29.8 | happy | Given five night rows (proceed by the model's line, by the program's line, a cancel, a duplicate phone, one held), when the job runs with the switch on, then the states, proceed flags, counts, selection, stop-time behaviour and cost are those of the same answers today, with only the intended rows changed | `test_S_29_8_five_night_rows_end_as_today_and_with_the_switch_on_only_the_intended_rows_change` | Passed · 2026-10-08 · auto |
 
 ### S-30 The log carries what a later replay needs (P1)
 

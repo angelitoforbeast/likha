@@ -678,6 +678,51 @@ return [
             'http_calls' => 5,
             'cost_usd' => '1.0250',
         ],
+        // Naka-on ang switch. Hinango sa kamay mula sa rules, hindi kinuha sa code: ang form na namamapa at nasa chat ang
+        // barangay, ang cancel na buo ang line, at ang kaparehong phone ay PROCEED na; ang hawak ng sariling flag ng model
+        // (walang human_kind) ay hawak pa rin. Ang step, ang bilang ng tawag at ang gastos ay hindi nagbabago.
+        'switch on' => [
+            'rows' => [
+                'proceed by the model line' => [
+                    'state' => 'done',
+                    'proceed' => true,
+                    'code' => '✅',
+                    'reason' => null,
+                    'STATUS' => 'PROCEED',
+                ],
+                'no line, a mappable form' => [
+                    'state' => 'done',
+                    'proceed' => true,
+                    'code' => '✅',
+                    'reason' => null,
+                    'STATUS' => 'PROCEED',
+                ],
+                'cancel' => [
+                    'state' => 'done',
+                    'proceed' => true,
+                    'code' => '✅',
+                    'reason' => null,
+                    'STATUS' => 'PROCEED',
+                ],
+                'duplicate phone' => [
+                    'state' => 'done',
+                    'proceed' => true,
+                    'code' => '✅',
+                    'reason' => null,
+                    'STATUS' => 'PROCEED',
+                ],
+                'held by the model itself' => [
+                    'state' => 'done',
+                    'proceed' => false,
+                    'code' => 'TO FIX',
+                    'reason' => null,
+                    'STATUS' => null,
+                ],
+            ],
+            'step' => 'finished',
+            'http_calls' => 5,
+            'cost_usd' => '1.0250',
+        ],
     ],
     'S-33.4' => [
         'array: form.brgy' => [

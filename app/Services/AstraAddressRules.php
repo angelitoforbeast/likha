@@ -25,7 +25,9 @@ class AstraAddressRules
     /**
      * $in:
      *   rules           'old' | 'new' — alin sa dalawang set ng rules. Sa `new`: kapag walang buong line ang model,
-     *                   ang program ang nagmamapa ng form sa list; at ang guard ay tumatanggap ng halos-tugma.
+     *                   ang program ang nagmamapa ng form sa list; ang guard ay tumatanggap ng halos-tugma; ang cancel,
+     *                   ang inquiry at ang kaparehong phone ay hindi na humahawak ng buong row; at ang flag ng model na
+     *                   "walang nakita sa list" ay hindi humahawak kapag ang program ang nakahanap at kumpirmado sa text.
      *   answer          ang na-parse na sagot: form, jnt, intent, issues, needs_human, human_reason, human_kind, confidence, evidence
      *   row             ang anim na field ng row gaya ng nabasa (naka-trim)
      *   chat, history, customer_blocks   ang tatlong text na tinitingnan ng guard
@@ -56,6 +58,8 @@ class AstraAddressRules
         // Ang salitang ito ay kung SAAN galing ang line (model, program, wala) — hindi kung naisulat ang barangay:
         // ang line na ibinagsak ng guard ay `model` / `program_map` pa rin, at ang salita ng guard ang nagsasabi ng natira.
         $labelSource = ($prov !== null && $city !== null && $brgy !== null) ? 'model' : 'none';
+        // Ang bahagi ng line na ang model mismo ang nagbigay nang tama (province, o province at city).
+        [$modelProv, $modelCity] = [$prov, $city];
 
         // Walang buong line ang model: ang program ang nagmamapa ng sariling form ni Astra sa list (mapper ng classic checker).
         // Buong line o wala: ang city na namapa ay hindi isinusulat nang walang barangay; ang bahaging tama ng line ng model
@@ -94,9 +98,23 @@ class AstraAddressRules
                 $ai['needs_human'] = true;
                 if ($ai['human_reason'] === '') $ai['human_reason'] = 'kumpirmahin ang barangay (' . $brgy . '?)';
                 $brgy = null;
+                // Buong line lang ang isinusulat ng program: ang province at city na ito ang nagmapa ay hindi maiiwan nang
+                // walang barangay (ang kalahating address ay mukhang na-check na). Ang tamang bahagi ng line ng model ay nananatili.
+                if ($labelSource === 'program_map') [$prov, $city] = [$modelProv, $modelCity];
             } elseif (!$inChat) {
                 $evidence[] = 'GUARD: barangay "' . $brgy . '" hinula mula sa landmark/web, tinanggap dahil high confidence';
             }
+        }
+
+        // Ang sariling flag ng model ay humahawak ng row, MALIBAN kung ang tanging dahilan nito ay walang nakita sa list,
+        // ang program ang nakahanap ng line, at ang barangay ay kumpirmado ng mismong text ng customer (hindi ng exemption
+        // ng high confidence). Ang dahilan ng model ay nananatili sa evidence, pero hindi na ito hold.
+        if ($rules === 'new' && $modelNeedsHuman && ($ai['human_kind'] ?? '') === 'label_not_found'
+            && $labelSource === 'program_map' && in_array($guard['result'], ['phrase', 'compact', 'near'], true)) {
+            $evidence[] = 'FLAG: needs_human ng model (walang nakita sa list) — hindi na hawak: namapa ng program ang line at kumpirmado sa text ng customer'
+                . ($ai['human_reason'] !== '' ? ' · sabi ng model: ' . self::oneLine($ai['human_reason'], 300) : '');
+            $ai['needs_human']  = false;
+            $ai['human_reason'] = '';
         }
 
         // ── 4. Anim na field ─────────────────────────────────────────────
@@ -153,20 +171,30 @@ class AstraAddressRules
         }
         $statusCode = (new MacroChecker())->computeStatusCode($verdict);
         $allFilled  = count(array_filter($final, fn ($v) => trim($v) !== '')) === 6;
-        $needsHuman = $ai['needs_human'] || $ai['intent'] !== 'order';
+        // Ang cancel at ang inquiry ay may sariling code. Sa lumang rules hawak nila ang row at hindi tumatakbo ang gate;
+        // sa bagong rules hindi na sila hold (ang `unclear` at anumang ibang salita ay hold pa rin) at tumatakbo ang gate.
+        $intentCode  = ['cancel' => 'CANCEL?', 'inquiry_only' => 'INQUIRY?'][$ai['intent']] ?? null;
+        $heldAsToday = $ai['needs_human'] || $ai['intent'] !== 'order';
+        $needsHuman  = $rules === 'new' ? ($ai['needs_human'] || ($ai['intent'] !== 'order' && $intentCode === null)) : $heldAsToday;
 
         $gateResult = ['hard' => [], 'soft' => []];
         $proceed = false;
-        $code = $statusCode;
-        if ($ai['intent'] === 'cancel')            $code = 'CANCEL?';
-        elseif ($ai['intent'] === 'inquiry_only')  $code = 'INQUIRY?';
-        elseif ($statusCode === '✅' && $allFilled) {
-            $gateResult = $gate($final, true);
-            if ($needsHuman)                       { $code = 'TO FIX'; $evidence[] = 'GATE: TO FIX — Astra: ' . ($ai['human_reason'] ?: 'kailangan ng tao'); }
-            elseif (!empty($gateResult['hard']))   { $code = 'TO FIX'; $evidence[] = 'GATE: TO FIX — ' . implode('; ', $gateResult['hard']); }
-            elseif (!empty($gateResult['soft']))   { $code = 'TO FIX - SHOP DETAILS'; $evidence[] = 'GATE: TO FIX - SHOP DETAILS — ' . implode('; ', $gateResult['soft']); }
-            else                                   { $proceed = true; $updates['STATUS'] = 'PROCEED'; }
-        } elseif ($needsHuman && $ai['human_reason'] !== '') {
+        $code = $intentCode ?? $statusCode;
+        if ($statusCode === '✅' && $allFilled && ($intentCode === null || $rules === 'new')) {
+            // Bagong rules: hindi tinatanong ang kaparehong phone sa parehong petsa (ang Validate ang huhuli nito).
+            $gateResult = $gate($final, $rules !== 'new');
+            $fail = null;
+            if ($needsHuman)                       $fail = ['TO FIX', 'Astra: ' . ($ai['human_reason'] ?: 'kailangan ng tao')];
+            elseif (!empty($gateResult['hard']))   $fail = ['TO FIX', implode('; ', $gateResult['hard'])];
+            elseif (!empty($gateResult['soft']))   $fail = ['TO FIX - SHOP DETAILS', implode('; ', $gateResult['soft'])];
+            if ($fail === null) {
+                $proceed = true; $updates['STATUS'] = 'PROCEED'; $code = $statusCode;
+            } else {
+                // Ang cancel o inquiry na hindi pumasa ay nananatili sa sarili nitong code; ang dahilan ay nasa evidence.
+                if ($intentCode === null) $code = $fail[0];
+                $evidence[] = 'GATE: ' . $fail[0] . ' — ' . $fail[1];
+            }
+        } elseif ($intentCode === null && $needsHuman && $ai['human_reason'] !== '') {
             $evidence[] = 'HUMAN: ' . $ai['human_reason'];
         }
         $updates['APP SCRIPT CHECKER'] = mb_substr($code, 0, 60);
@@ -179,8 +207,8 @@ class AstraAddressRules
                     ? $final['PROVINCE'] . ' / ' . $final['CITY'] . ' / ' . $final['BARANGAY'] . ' (existing, hindi nakumpirma ni Astra)'
                     : 'J&T: ' . ($listNote !== '' ? $listNote : 'hindi matukoy')))
             . ($issues ? ' · ⚠ ' . implode(' · ', $issues) : '')
-            . ($needsHuman && $ai['human_reason'] !== '' ? ' · 👤 ' . $ai['human_reason'] : '')
-            . ($proceed ? ' · PROCEED' : ($code !== $statusCode ? ' · ' . $code : ''));
+            . (!$proceed && $heldAsToday && $ai['human_reason'] !== '' ? ' · 👤 ' . $ai['human_reason'] : '')
+            . ($proceed ? ($intentCode !== null ? ' · ' . $intentCode : '') . ' · PROCEED' : ($code !== $statusCode ? ' · ' . $code : ''));
         $updates['AI ANALYZE'] = mb_substr($summary, 0, 2000);
 
         return [
@@ -211,7 +239,7 @@ class AstraAddressRules
                 'label_source'      => $labelSource,
                 'guard'             => $guard,
                 'hay_chars'         => ['chat' => mb_strlen($chat), 'history' => mb_strlen($history), 'cxd' => mb_strlen($customerBlocks)],
-                'dup_phone_checked' => true,
+                'dup_phone_checked' => $rules !== 'new',
                 'list_crc'          => (int) ($in['list_crc'] ?? 0),
             ],
         ];
