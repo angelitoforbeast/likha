@@ -184,7 +184,7 @@
                 <td colspan="4" class="spl-sc spl-nosup" @click.stop>
                   <div class="spl-band spl-cell">
                     <b>⚠ wala pang supplier</b>
-                    <button type="button" class="item-photo-btn" @click.stop="openQuote(row.item_name, null); splOpen(row.item_name, 'band', 'form', $el, true)">+ supplier quote</button>
+                    <button type="button" class="item-photo-btn" @click.stop="splForm(row.item_name, null, 'band', $el)">+ supplier quote</button>
                     {{-- Ang add form, sa loob ng card ng cell na ito. Para lang sa row na ito: kasama sa kondisyon ang
                          sariling pangalan ng item, dahil magkapareho ang quote key ng dalawang variant row. --}}
                     <template x-if="splIs(row.item_name, 'band', 'form') && quoteForm.key === supKey(row.item_name) && quoteForm.item_name === row.item_name">
@@ -256,7 +256,7 @@
                               {{-- http / https lang ang nagiging link; ang iba ay hindi ipinapakita. --}}
                               <template x-if="safeLink(q.link)"><a :href="safeLink(q.link)" target="_blank" rel="noopener" @click.stop>link</a></template>
                               <button type="button" class="item-photo-btn" title="I-edit ang quote" aria-label="I-edit ang quote"
-                                      @click.stop="openQuote(row.item_name, q); splOpen(row.item_name, si, 'form', $el, true)">✎</button>
+                                      @click.stop="splForm(row.item_name, q, si, $el)">✎</button>
                               <button type="button" class="item-photo-btn" title="Tanggalin ang quote" aria-label="Tanggalin ang quote"
                                       @click.stop="splRemove(row.item_name, q)">✕</button>
                             </div>
@@ -285,19 +285,19 @@
                               <span class="spl-moq" x-text="'MOQ ' + q.moq"></span>
                             </template>
                             <button type="button" class="item-photo-btn" title="I-edit ang quote" aria-label="I-edit ang quote"
-                                    @click.stop="openQuote(row.item_name, q); splOpen(row.item_name, si, 'form', $el, true)">✎</button>
+                                    @click.stop="splForm(row.item_name, q, si, $el)">✎</button>
                             <button type="button" class="item-photo-btn" title="Tanggalin ang quote" aria-label="Tanggalin ang quote"
                                     @click.stop="splRemove(row.item_name, q)">✕</button>
                           </div>
                         </template>
                       </div>
                       <div class="spl-card-act">
-                        <button type="button" class="item-photo-btn" @click.stop="openQuote(row.item_name, null); splOpen(row.item_name, si, 'form', $el, true)">+ supplier quote</button>
+                        <button type="button" class="item-photo-btn" @click.stop="splForm(row.item_name, null, si, $el)">+ supplier quote</button>
                       </div>
                     </div>
                   </template>
                   <template x-if="!splTop3(row.item_name)[si]">
-                    <button type="button" class="spl-add" @click.stop="openQuote(row.item_name, null); splOpen(row.item_name, si, 'form', $el, true)" title="+ supplier quote" :aria-label="'+ supplier quote (Supplier ' + (si + 1) + ')'">+</button>
+                    <button type="button" class="spl-add" @click.stop="splForm(row.item_name, null, si, $el)" title="+ supplier quote" :aria-label="'+ supplier quote (Supplier ' + (si + 1) + ')'">+</button>
                   </template>
                   {{-- Ang add / edit form, sa loob ng card ng cell na pinindutan. Para lang sa row na ito: kasama sa
                        kondisyon ang sariling pangalan ng item, dahil magkapareho ang quote key ng dalawang variant row. --}}

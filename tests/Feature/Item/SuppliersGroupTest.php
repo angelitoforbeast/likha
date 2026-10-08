@@ -476,7 +476,7 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertStringContainsString("x-text=\"splFailed ? 'hindi na-load' : '…'\"", $wait);
         $this->assertStringContainsString(":title=\"splFailed ? 'Hindi na-load ang listahan ng supplier. I-refresh ang page.' : 'Loading suppliers…'\"", $wait);
         // Ang band at ang "+" ay nasa labas ng placeholder, sa loob ng mga template na may splReady().
-        $this->assertStringNotContainsString('openQuote(', $this->between($row, '>', self::BAND_IF));
+        $this->assertStringNotContainsString('splForm(', $this->between($row, '>', self::BAND_IF));
         $this->assertSame(4, substr_count($row, 'splReady()'));
 
         foreach ([$this->render('ceo', true), $this->render('ceo', false)] as $other) {
@@ -622,9 +622,10 @@ class SuppliersGroupTest extends ItemTestCase
         }
 
         // Ang save at delete ay ang dati nang functions at routes ng page; walang sariling request ang mga bagong file.
-        foreach (['saveQuote()', 'splRemove(row.item_name, q)', 'openQuote(row.item_name, '] as $call) {
+        foreach (['saveQuote()', 'splRemove(row.item_name, q)', 'splForm(row.item_name, '] as $call) {
             $this->assertStringContainsString($call, $table, $call);
         }
+        $this->assertStringContainsString('this.openQuote(name, q);', file_get_contents(resource_path(self::JS_FILE)));
         $this->assertStringContainsString('await this.deleteQuote(name, q);', file_get_contents(resource_path(self::JS_FILE)));
         foreach ([self::TABLE_FILE, self::JS_FILE] as $file) {
             $this->assertStringNotContainsString('fetch(', file_get_contents(resource_path($file)), $file);
@@ -694,6 +695,21 @@ class SuppliersGroupTest extends ItemTestCase
         $outside = $body('splOutside(e){', 'splSync(){');
         $this->assertStringContainsString("if (this.splCard.mode === null || this.splCard.mode === 'form' || this.photoModal.open) return;", $outside);
 
+        // Ang bawat "+" at ✎ ay dumadaan sa iisang helper na umaatras habang may buhay na form o may save na hindi pa
+        // sumasagot: kung hindi, mawawala ang tina-type. (Text ng source ang binabasa rito; hindi ito pinapatakbo.)
+        $form = $body('splForm(name, q, cell, el){', 'splHover(');
+        $this->assertOrder([
+            'if (this.quoteForm.saving) return;',
+            "if (this.splCard.mode === 'form' && this.splLive()) return;",
+            'this.openQuote(name, q);',
+            "this.splOpen(name, cell, 'form', el, true);",
+        ], $form);
+        $this->assertStringNotContainsString('openQuote(', $table);
+        $this->assertSame(5, substr_count($table, 'splForm('));
+        $this->assertSame(1, substr_count($table, "@click.stop=\"splForm(row.item_name, null, 'band', \$el)\""));
+        $this->assertSame(2, substr_count($table, '@click.stop="splForm(row.item_name, null, si, $el)"'));
+        $this->assertSame(2, substr_count($table, '@click.stop="splForm(row.item_name, q, si, $el)"'));
+
         // Esc: ang photo popup muna; ang form ay dumadaan sa Cancel; focus lang kapag naka-pin ang card.
         $esc = $body('splEsc(){', 'splOutside(e){');
         $this->assertStringContainsString('if (this.splCard.mode === null || this.photoModal.open) return;', $esc);
@@ -714,7 +730,13 @@ class SuppliersGroupTest extends ItemTestCase
         $remove = $body('async splRemove(name, q){', 'splPlace(){');
         $this->assertStringContainsString('const n = this.quotesFor(name).length;', $remove);
         $this->assertStringContainsString('if (this.quotesFor(name).length === n) return;', $remove);
-        $this->assertStringContainsString('this.splClose(true);', $remove);
+        // Ang card na pinindutan lang ang isinasara: kinukuha ang pagkakakilanlan nito bago maghintay ng sagot.
+        $this->assertOrder([
+            'const item = this.splCard.item, cell = this.splCard.cell, mode = this.splCard.mode;',
+            'await this.deleteQuote(name, q);',
+            'if (this.splIs(item, cell, mode)) this.splClose(true);',
+        ], $remove);
+        $this->assertSame(1, substr_count($remove, 'splClose('));
         $this->assertSame(2, substr_count($table, '@click.stop="splRemove(row.item_name, q)">✕</button>'));
         $this->assertStringNotContainsString('deleteQuote(', $table);
         $this->assertStringNotContainsString('splClose(', $table);

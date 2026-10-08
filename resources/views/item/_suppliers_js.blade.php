@@ -20,7 +20,7 @@
       splLive(){ return this.splCard.mode !== null && !!this.splAnchor && this.splAnchor.isConnected; },
       splOpen(name, cell, mode, el, pinned){
         // Habang may buhay na form, hindi nagbubukas ang ibang card (pangalan, "+N", PO): mawawala ang tina-type.
-        // Ang "+" at ✎ lang ang pumapalit sa form, dahil form din ang binubuksan nila.
+        // Ang "+" at ✎ ay may sariling harang sa splForm.
         if (mode !== 'form' && this.splCard.mode === 'form' && this.splLive()) return;
         // Form na nawala na ang cell (hal. nag-reload ang rows): wala nang nakakakita, kaya isara na rin — pero
         // hindi habang may save na hindi pa sumasagot, dahil sa key ng form itinatabi ang sagot.
@@ -43,6 +43,15 @@
       splToggle(name, cell, mode, el){
         if (this.splCard.pinned && this.splIs(name, cell, mode)) { this.splClose(false); return; }
         this.splOpen(name, cell, mode, el, true);
+      },
+      // Ang "+" at ✎: buksan ang add / edit form sa card ng cell na pinindutan. Walang ginagawa habang may buhay na
+      // form — hindi dapat mawala ang tina-type, kaya Cancel, Esc o Save muna — at habang may save na hindi pa
+      // sumasagot, dahil buburahin ng sagot na iyon ang form na kabubukas lang.
+      splForm(name, q, cell, el){
+        if (this.quoteForm.saving) return;
+        if (this.splCard.mode === 'form' && this.splLive()) return;
+        this.openQuote(name, q);
+        this.splOpen(name, cell, 'form', el, true);
       },
       // Hover: sa device na may totoong hover lang, at hindi kailanman pumapalit sa naka-pin na card o bukas na form.
       splHover(name, cell, mode, el){
@@ -71,13 +80,15 @@
       },
       // ✕ ng quote: isara lang ang card kapag talagang may nabura (umikli ang listahan) — hindi kapag umatras
       // sa tanong o pumalya ang bura. Hinihintay muna ang bagong laman ng cell para may mababalikan ang focus.
-      // Kapag may form na binuksan habang naghihintay, hindi iyon ginagalaw.
+      // Ang card na pinindutan lang ang isinasara: kapag ibang card o form na ang bukas pagdating ng sagot,
+      // hindi iyon ginagalaw (kung hindi, masasara ang binabasa o tina-type ng user sa ibang cell).
       async splRemove(name, q){
         const n = this.quotesFor(name).length;
+        const item = this.splCard.item, cell = this.splCard.cell, mode = this.splCard.mode;
         await this.deleteQuote(name, q);
         if (this.quotesFor(name).length === n) return;
         await this.$nextTick();
-        if (this.splCard.mode !== 'form') this.splClose(true);
+        if (this.splIs(item, cell, mode)) this.splClose(true);
       },
       // position:fixed para hindi maputol ng scroll area; sa ilalim ng cell, o pataas kapag kulang ang espasyo
       // sa ibaba (hindi kasama ang sticky na TOTAL row), at hindi lalampas sa lapad ng window.
