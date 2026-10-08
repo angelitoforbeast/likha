@@ -2075,6 +2075,40 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $this->assertSame('phrase', $this->decided($this->answer(['confidence' => 'medium']), $this->chat('12 Sampaguita St, Holy Spirit, Quezon City'))['replay']['guard']['result']);
     }
 
+    /** Ang text check sa seam ng bagong rules: [province, city, barangay] at ang tatlong pinagmulan. */
+    private function textCheck(array $line, string $chat, string $history = '', string $blocks = '', string $formBrgy = ''): array
+    {
+        return AstraAddressRules::confirmedByText($line[2], $line[1], $line[0], $formBrgy, [$chat, $history, $blocks], $this->maps());
+    }
+
+    public function test_S_26_19_a_barangay_named_like_its_province_needs_more_than_the_provinces_name(): void
+    {
+        $quezon = ['QUEZON', 'QUEZON-PITOGO', 'QUEZON'];
+        $rizal  = ['RIZAL', 'RIZAL-BARAS', 'RIZAL (POB.)'];
+        $samar  = ['WESTERN-SAMAR', 'MOTIONG', 'WESTERN SAMAR'];
+        $this->assertLinesInList($quezon, $rizal, $samar);
+
+        $this->assertSame([
+            'town and province, QUEZON'            => self::NONE,
+            'town and province, RIZAL (POB.)'      => self::NONE,
+            'town and province, WESTERN SAMAR'     => self::NONE,
+            'once in the chat, once in the history' => self::NONE,
+            'a barangay word beside the name'      => self::PHRASE,
+            'the name twice in one source'         => self::PHRASE,
+            'pob beside the name'                  => self::PHRASE,
+            'a barangay word, WESTERN SAMAR'       => self::PHRASE,
+        ], [
+            'town and province, QUEZON'            => $this->textCheck($quezon, 'Purok 2, Pitogo, Quezon'),
+            'town and province, RIZAL (POB.)'      => $this->textCheck($rizal, 'Baras, Rizal'),
+            'town and province, WESTERN SAMAR'     => $this->textCheck($samar, 'Motiong, Western Samar'),
+            'once in the chat, once in the history' => $this->textCheck($quezon, 'Pitogo, Quezon', 'Pitogo, Quezon po'),
+            'a barangay word beside the name'      => $this->textCheck($quezon, 'Brgy Quezon, Pitogo, Quezon'),
+            'the name twice in one source'         => $this->textCheck($quezon, '', '', 'Quezon, Pitogo, Quezon'),
+            'pob beside the name'                  => $this->textCheck($rizal, 'Pob. Rizal, Baras'),
+            'a barangay word, WESTERN SAMAR'       => $this->textCheck($samar, 'Barangay Western Samar, Motiong'),
+        ]);
+    }
+
     public function test_S_26_9_the_mapper_picks_the_exact_number_and_never_a_neighbour(): void
     {
         $this->assertLinesInList(self::COTABATO_POB, ['COTABATO', 'COTABATO-CITY', 'POBLACION I'], self::COTABATO_POB_2);

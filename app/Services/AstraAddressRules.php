@@ -411,7 +411,11 @@ class AstraAddressRules
         return ['result' => 'none', 'score' => 0];
     }
 
-    /** Kapangalan ba ng barangay ang sarili nitong city o bayan (may province sa unahan ng label o wala, may "city" o wala)? */
+    /**
+     * Kapangalan ba ng barangay ang sarili nitong city o bayan (may province sa unahan ng label o wala, may "city" o wala),
+     * o ang province nito o magkakasunod na salita ng pangalan ng province ("Pitogo, Quezon", "Motiong, Western Samar")?
+     * Ang customer na bayan at province lang ang ibinigay ay wala pang sinasabing barangay.
+     */
     public static function namedLikeItsCity(string $brgy, string $city, string $prov): bool
     {
         $key = MacroChecker::normBrgyKey(preg_replace('/\([^)]*\)/u', ' ', $brgy) ?? $brgy);
@@ -425,7 +429,7 @@ class AstraAddressRules
             if ($n === $key || $n === $key . ' city') return true;
         }
 
-        return false;
+        return str_contains(' ' . MacroChecker::normBrgyKey(str_replace('-', ' ', $prov)) . ' ', ' ' . $key . ' ');
     }
 
     /** Isang linya: ang line break at sunod-sunod na whitespace ay isang espasyo, saka pinuputol sa $max character. */
