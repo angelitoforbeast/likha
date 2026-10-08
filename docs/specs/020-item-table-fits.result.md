@@ -389,6 +389,9 @@ Full suite, plain PHPUnit:
   an untracked file); the failure is `ExampleTest::test_the_application_returns_a_successful_response`.
 - After Part 1 (b7d10fd): `Tests: 670, Assertions: 8986, Errors: 1, Failures: 1, Skipped: 3.`
 - After Part 2 (6f7a007): `Tests: 703, Assertions: 10695, Errors: 1, Failures: 1, Skipped: 3.` The same one error and one failure; no new one.
+- After the merge with the base: the local branch develop (4c574f3, with spec 018) merged into this branch as b5ceef7. Conflicts only in `qa/stories.md` and `TODO.md`, where each side had appended its own section: both kept, develop's first (slice 018, the 018 section), then slice 020 and the 020 section; nothing else changed in either file, and the cases of slices 017 and 019 this spec changed stand as changed. No other file conflicted.
+- After the merge with the base: the full suite, plain PHPUnit with the worktree's configuration: `Tests: 822, Assertions: 12969, Errors: 1, Failures: 1, Skipped: 3.` That is develop's 750 plus this branch's 72; the error is `ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active` and the failure is `ExampleTest::test_the_application_returns_a_successful_response`, as on the base; no new one.
+- After the merge with the base: node tests 52 run, 0 skipped; the three skips are the three data rows of `BoardroomLiveSmokeTest::test_live_provider_answers_a_tiny_request`, as on the base.
 - Node tests: 52 run, 0 skipped (node v24.13.1). The three skips of the suite are the base's. The skip path
   was proven once by hand in run 1: `Tests: 25, Assertions: 0, Skipped: 25.` with `skipped: node not found`.
 
