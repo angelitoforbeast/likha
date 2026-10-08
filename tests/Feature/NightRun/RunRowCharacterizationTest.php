@@ -219,6 +219,11 @@ class RunRowCharacterizationTest extends NightRunTestCase
                 'step' => 'web_search', 'model' => 'gpt-6-astra',
                 'queries' => ['Sampaguita St Holy Spirit Quezon City'], 'sources' => ['https://example.test/holy-spirit'],
             ]],
+            'replay' => [
+                'rules' => 'old', 'model_needs_human' => false, 'model_human_kind' => 'none', 'model_intent' => 'order', 'label_source' => 'model',
+                'guard' => ['ran' => true, 'result' => 'confirmed', 'score' => 0], 'hay_chars' => ['chat' => 69, 'history' => 0, 'cxd' => 0],
+                'dup_phone_checked' => true, 'list_crc' => (int) hexdec(hash_file('crc32b', resource_path('views/macro_output/jnt_address.txt'))),
+            ],
             'summary' => [
                 'engine' => 'astra', 'key_source' => 'settings', 'effort' => 'high', 'models' => ['gpt-6-astra'],
                 'escalated' => false, 'searches' => 1, 'tokens_in' => 12000, 'tokens_out' => 1500,

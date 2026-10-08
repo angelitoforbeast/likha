@@ -290,6 +290,51 @@ Accepted, not fixed:
 - **Two comments in the script of the table with suppliers still say "Suppliers view".** Reason: they sit in blocks this work was told to leave as they are, and they are rendered for the CEO view only.
 - **The route tests prove "byte for byte the base" in two steps** (the route passes the view the six values of the pinned render; the render with those values has the pinned hash, in `test_S_18_4` and `test_S_19_2`). Reason: the pinned hashes are of direct renders with fixed page and fee data; a body from the route carries the test database's values, so it cannot have the same hash.
 
+## 018: Astra identifies the J&T address like the classic checker (2026-10-08)
+
+Review findings accepted, not fixed. Each fix loop was closed after two rounds. None of these can change a result while the switch is off.
+
+**The text check (new rules only)**
+- **A one-word near match on a different name is confirmed unless the other name is a label of the same city** ("Mariano" against MARIANA, 85.7). Reason: it follows from the settled 85 rule. The list has at least 9,744 such pairs of one-word names; 47 of them sit in one city and are caught.
+- **"3. Poblacion 4. Cotabato" on one line confirms POBLACION IV.** Reason: a number with a full stop cannot be told from the end of a sentence ("Poblacion 4."); the forms `4)`, `4.)`, `4:`, `4]` are handled.
+- **"Fatima V Luna St" confirms FATIMA V** (an initial written without its dot), and a customer who types a list label with its parenthesis word for word can confirm the name inside the parenthesis. Reason: needs the list's own spelling in the chat; six cases in the whole list.
+- **A barangay whose name is close to its city's or province's name can be confirmed by "City, Province" alone** (PAMPANG by "Pampanga", BOLACAN by "Bulacan", 18 labels; 7 only through the near match). Reason: needs the model to name a barangay the customer never wrote, at medium confidence; the rule for a barangay named exactly like its city is built.
+- **Two labels of one city that are the same barangay written twice** ("(BGY. 10 AND 11)" and "(BGY. 10 & 11)") confirm each other. Reason: same place.
+
+**The program's mapping (new rules only)**
+- **A form city that is a unique town name with an empty province maps to that town** ("Jaro" with no province gives Jaro, Leyte, although Jaro is also a district of Iloilo City). Reason: the spec lets a city without a province map when the list has one such city; the barangay must still be in the customer's text and exist in that town. Raised to the reviewer in the result as a decision for the owner.
+- **A wording that ends in "City", for a city that is the only one of its name, maps whatever province the form gives** ("Lapu-Lapu City" with "Davao del Sur"). Reason: this is the list-filing case the spec asks for (Cotabato City under COTABATO); it needs a form that says "City" for another place.
+- **A contradicting name inside a parenthesis of the province is not read** ("Leyte (Iloilo)"). Reason: no realistic wording found.
+
+**The rule function**
+- **Four switch-off paths have no captured test of their own:** existing fields valid with no line, a shop-details mismatch, an invalid phone with a valid line, a province taken from the list. Reason: the move was compared with the base statement by statement by the reviewing agent and the ten captured answers pin the rest; capturing more needs the base code, which is gone from the tree.
+- **`replay.label_source` stays `model` when the guard then drops the barangay.** Reason: the word names where the line came from; `guard.result` says the rest.
+- **The list file's path is written in two places** (`AstraEncoder::listCrc`, `MacroChecker::loadAddressMaps`). Reason: trusted path, two uses.
+
+**The replay command and the settings box**
+- **Two Astra steps for one night date would resolve to the newer one without a word.** Reason: the table's unique key on night and kind makes it unreachable.
+- **The duplicate-phone information line costs two more reads per row that would proceed.** Reason: slow on a large night, not wrong; a nightly figure of a few hundred rows.
+- **After a failed save of the settings form the box shows the stored value, not what was ticked.** Reason: CEO-only screen, trusted path.
+- **Not tested: MySQL, and memory with real-sized chat columns.** Reason: the tests run on sqlite; the command uses the query builder and reads 200 rows per chunk.
+- **For logs written before this change the model's own request for a person is inferred and can be wrong in both directions.** Reason: the log did not record it; the report says so in two sentences and prints strict and lenient counts.
+
+**Fix list 1 (the text check, new rules only), accepted after its review**
+- **Another barangay written with one wrong letter, or with its words joined ("BachawNorte"), is not seen as "another barangay".** Reason: left out for the time of the run; it needs the customer to name two barangays and the model to keep the withdrawn one. A near check directly after a barangay word would close it.
+- **A short name (under five letters) or a bare number without a barangay word is not "another barangay"** ("ngayon sa Pias na po"; "ay mali, 29 po pala"). Reason: the exception the second amendment sets, to keep false holds down.
+- **A bracket name written with a slash is not seen** ("Brgy Caluis/Cobra" beside SAN VICENTE (CALUIS/COBRA)); a label with a spaced dash is not seen either. Reason: the text is cut at slashes and dashes; four cases in the reviewer's sweep.
+- **Two real pairs where a real word is one letter off the longer name's extra word** ("pala Salvacion" confirms PALTA SALVACION in Virac, "luma Punod" confirms LUMBA-PUNOD in Pantar). Reason: the one-letter allowance keeps "Anilao Labak" confirming ANILAO-LABAC, which an existing case requires.
+- **"Poblacion" as the second barangay is not counted when the barangay being confirmed is itself a poblacion label; "malapit sa Poblacion" holds a row in towns whose poblacion carries another name.** Reason: ambiguous either way; the narrow rule was chosen.
+- **A street, subdivision or landmark that carries the name of another barangay of the city (five letters or more) holds the row.** Reason: asked for by the second amendment; the real rate is unknown until a replay on stored nights.
+- **The last fix commit (`0b4d443`) had no review of its own.** Reason: the time of the run; it only refuses, and its rows and the whole file are green.
+
+**Fix list 2 (the text check, new rules only), accepted after its review**
+- **Six ways of writing "Brgy Poblacion" are not seen as another barangay:** "Brgy, Poblacion", "Brgy ng Poblacion", "Brgy (Poblacion)", the two words on two lines, "BrgyPoblacion", "Brgy Población" with an accent. Reason: a break or a word between the two, joined words (already accepted) and an accented letter; each needs the customer to name two barangays and the model to keep the other one.
+- **"Brg 5 pcs" confirms BARANGAY 5** (as "Brgy 5 pcs" already did). Reason: a number directly after a barangay word is the rule for numbered barangays; the count word after it is not read.
+- **"Salamat. Barrio 28 Caloocan" and "sa Barrio 28" are not confirmed.** Reason: "barrio" counts for confirming only as the first word after a comma or a line break, so that "Bagong Barrio 28" never confirms BARANGAY 28; the safe direction.
+- **"Brgy Camposanto 1 - Sur" does not confirm its own label** (labels that hold a spaced dash). Reason: unchanged from before; confirming was not to be changed in this fix list.
+- **A bare "Poblacion" naming the customer's new barangay is not seen** ("dati sa Brgy X, ngayon sa Poblacion na po" confirms X). Reason: decided by the third amendment; the word is an everyday landmark.
+- **The last fix commit of fix list 2 (`970b665`) had no review of its own.** Reason: it only turns the confirmations its review found back into "not confirmed"; its rows, both test files and the two clean-address counts are unchanged.
+
 ## 020: the item table fits the screen, one column per supplier (2026-10-08)
 
 ### Part 1: the supplier columns

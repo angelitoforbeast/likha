@@ -37,6 +37,15 @@ class AstraEncoder
     public const SETTING_KEY     = 'astra_encoder_api_key';
     public const SETTING_MODEL   = 'astra_encoder_model';
     public const SETTING_EFFORT  = 'astra_encoder_effort';
+    /** app_settings key — switch ng bagong address rules; `1` lang ang "on" (CEO, sa settings page). */
+    public const SETTING_ADDRESS_RULES = 'astra_address_rules';
+    /**
+     * Idinadagdag sa dulo ng instructions kapag naka-on ang bagong address rules (dalawang pangungusap lang): bakit humingi
+     * ng tao ang model, at ang form ay laging pinupunan gaya ng sulat ng customer para may maimapa ang program sa list.
+     */
+    public const NEW_RULES_PROMPT = "\n"
+        . 'When needs_human is true only because jnt_address_search returned no matching entry, add the key "human_kind":"label_not_found" to the JSON; for any other reason add "human_kind":"other".'
+        . ' Always fill the form\'s brgy, city and province exactly as the customer wrote them, even when "jnt" is left empty.';
     /** Mga model na pwedeng piliin sa settings (Responses API + web_search + function tools). */
     public const MODELS  = ['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2', 'o3', 'o4-mini'];
     public const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -159,6 +168,35 @@ class AstraEncoder
         }
     }
 
+    /** Naka-on lang ang bagong address rules kapag EKSAKTONG `1` ang nakaimbak; anumang iba (o hindi mabasang table) = off. */
+    public static function addressRulesOn(): bool
+    {
+        try {
+            return DB::table('app_settings')->where('key', self::SETTING_ADDRESS_RULES)->value('value') === '1';
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /** I-save ang switch ng address rules: `1` o `0` lang ang isinusulat. */
+    public static function storeAddressRules(bool $on): void
+    {
+        DB::table('app_settings')->updateOrInsert(['key' => self::SETTING_ADDRESS_RULES], ['value' => $on ? '1' : '0', 'updated_at' => now(), 'created_at' => now()]);
+    }
+
+    /** Check number (crc32) ng J&T list file, para malaman ng replay kung nagbago ang list mula noong row; 0 kung hindi mabasa. Isang basa kada process at mtime. */
+    public static function listCrc(): int
+    {
+        static $cache = [];
+        $filePath = resource_path('views/macro_output/jnt_address.txt');
+        $key      = $filePath . '|' . (@filemtime($filePath) ?: 0);
+        if (!isset($cache[$key])) {
+            $bytes = is_file($filePath) ? @file_get_contents($filePath) : false;
+            $cache = [$key => $bytes === false ? 0 : crc32($bytes)];
+        }
+        return $cache[$key];
+    }
+
     // ═════════════════════════════════════════════════════════════════════
     //  MAIN
     // ═════════════════════════════════════════════════════════════════════
@@ -184,9 +222,11 @@ class AstraEncoder
         if (!$apiKey) return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'No OPENAI_API_KEY'], $t0);
 
         $before = $this->sixFields($row);
+        // Isang basa lang kada row, bago ang tawag sa model: ang buong row ay iisang set ng rules.
+        $rules  = self::addressRulesOn() ? 'new' : 'old';
 
         // ── 1 + 3. FORM (chat/Pancake/web) at J&T label (list tool) — isang agent call ──
-        $ai = $this->resolveForm($apiKey, $row, $chat);
+        $ai = $this->resolveForm($apiKey, $row, $chat, $rules === 'new');
         if ($ai === null) {
             return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'Astra: walang sagot mula sa AI'], $t0);
         }
@@ -198,114 +238,37 @@ class AstraEncoder
             $form['landmark'] !== '' ? 'Landmark=' . $form['landmark'] : '',
         ])) . ' [' . $ai['confidence'] . ']' . ($ai['evidence'] !== '' ? ' — ' . $ai['evidence'] : '');
 
-        // ── J&T labels: PHP ang nagpapatunay na nasa list talaga ang pinili ng AI ──
-        [$prov, $city, $brgy, $listNote] = $this->validateJnt($ai['jnt'], $maps);
-        if ($listNote !== '') $this->evidence[] = 'LIST: ' . $listNote;
-        else $this->evidence[] = 'LIST: ' . $prov . ' | ' . $city . ' | ' . $brgy;
-
-        // GUARD: barangay na HINDI binanggit ng customer (hinula mula sa landmark/web/katabing listing) →
-        // tatanggapin lang kung "high" ang confidence; kung hindi, hindi isusulat at tao ang bahala.
-        if ($brgy !== null) {
-            $hay = $chat . "\n" . $this->lastHistory . "\n" . $this->customerBlocks((string) $row->CXD);
-            $inChat = self::mentions($hay, $brgy) || ($form['brgy'] !== '' && self::mentions($hay, $form['brgy']));
-            if (!$inChat && $ai['confidence'] !== 'high') {
-                $this->evidence[] = 'GUARD: barangay "' . $brgy . '" hindi sinabi ng customer (hinula, ' . $ai['confidence'] . ') → hindi isinulat, tao';
-                $ai['issues'][]   = 'Barangay ' . $brgy . ' ay hinula lang mula sa landmark/web (' . $ai['confidence'] . ' confidence), hindi sinabi ng customer';
-                $ai['needs_human'] = true;
-                if ($ai['human_reason'] === '') $ai['human_reason'] = 'kumpirmahin ang barangay (' . $brgy . '?)';
-                $brgy = null;
-            } elseif (!$inChat) {
-                $this->evidence[] = 'GUARD: barangay "' . $brgy . '" hinula mula sa landmark/web, tinanggap dahil high confidence';
-            }
-        }
-
-        // ── 4. Anim na field ─────────────────────────────────────────────
-        $updates = [];
-        $name = $this->cleanName((string) $form['name']);
-        if ($name !== '' && $name !== trim((string) $row->{'FULL NAME'})) $updates['FULL NAME'] = $name;
-
-        $phoneRaw = trim((string) $form['phone']);
-        $phone    = $this->normalizePhone($phoneRaw);
-        $phoneOk  = $phone !== null && preg_match('/^9\d{9}$/', $phone) === 1;
-        if ($phoneOk && $phone !== trim((string) $row->{'PHONE NUMBER'})) $updates['PHONE NUMBER'] = $phone;
-
-        $addr = $this->composeAddress($form);
-        if ($addr !== '' && $addr !== trim((string) $row->ADDRESS)) $updates['ADDRESS'] = $addr;
-
-        foreach (['PROVINCE' => $prov, 'CITY' => $city, 'BARANGAY' => $brgy] as $col => $val) {
-            if ($val !== null && $val !== trim((string) $row->{$col})) $updates[$col] = $val;
-        }
-        $final = [];
-        foreach (['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY'] as $col) {
-            $final[$col] = (string) ($updates[$col] ?? trim((string) $row->{$col}));
-        }
-
-        // ── 5. CHECK — PHP ang huling salita ─────────────────────────────
-        $issues = $ai['issues'];
-        if (!$phoneOk) {
-            $digits = preg_replace('/\D+/', '', $phoneRaw) ?? '';
-            $issues[] = 'Phone: ' . ($phoneRaw === '' ? 'wala sa chat' : $phoneRaw . ' (' . strlen($digits) . ' digit, dapat 10 na nagsisimula sa 9)');
-        }
-        $issues = array_values(array_unique(array_filter(array_map('trim', $issues))));
-
-        $astraDecided = ($prov !== null && $city !== null && $brgy !== null);
-        if ($astraDecided) {
-            $verdict = [
-                'province_ok' => $final['PROVINCE'] !== '',
-                'city_ok'     => $final['CITY'] !== '',
-                'barangay_ok' => $final['BARANGAY'] !== '',
-                'evidence'    => 'J&T labels mula sa list',
-            ];
-        } else {
-            // Walang (kumpletong) J&T label si Astra. Kung may laman na ang row (hal. scope = lahat ng walang STATUS),
-            // huwag sabihing "Full Address" — i-verify ang EXISTING sa list; hindi ito PROCEED dahil hindi nakumpirma (TO FIX).
-            [$eP, $eC, $eB] = $this->validateJnt(['province' => $final['PROVINCE'], 'city' => $final['CITY'], 'barangay' => $final['BARANGAY']], $maps);
-            $verdict = [
-                'province_ok' => $eP !== null,
-                'city_ok'     => $eC !== null,
-                'barangay_ok' => $eB !== null,
-                'evidence'    => 'Astra walang J&T label; existing values na-check sa list' . ($listNote !== '' ? ' — ' . $listNote : ''),
-            ];
-            $ai['needs_human'] = true;
-            if ($ai['human_reason'] === '') $ai['human_reason'] = 'hindi matukoy ni Astra ang J&T label' . ($listNote !== '' ? ' (' . $listNote . ')' : '') . '; hindi nakumpirma ang existing na address';
-            $this->evidence[] = 'CHECK: existing prov/city/brgy vs list → ' . ($eP ? '✅' : '❌') . ' ' . ($eC ? '✅' : '❌') . ' ' . ($eB ? '✅' : '❌') . ' (hindi nakumpirma ni Astra → tao)';
-        }
-        $mc = new MacroChecker();
-        $mc->setHost($this->host);
-        $statusCode = $mc->computeStatusCode($verdict);
-        $allFilled  = count(array_filter($final, fn ($v) => trim($v) !== '')) === 6;
-        $needsHuman = $ai['needs_human'] || $ai['intent'] !== 'order';
-
-        $gate = ['hard' => [], 'soft' => []];
-        $proceed = false;
-        $code = $statusCode;
-        if ($ai['intent'] === 'cancel')            $code = 'CANCEL?';
-        elseif ($ai['intent'] === 'inquiry_only')  $code = 'INQUIRY?';
-        elseif ($statusCode === '✅' && $allFilled) {
-            $gate = $mc->validateRow($row, $final, $maps);
-            if ($needsHuman)                 { $code = 'TO FIX'; $this->evidence[] = 'GATE: TO FIX — Astra: ' . ($ai['human_reason'] ?: 'kailangan ng tao'); }
-            elseif (!empty($gate['hard']))   { $code = 'TO FIX'; $this->evidence[] = 'GATE: TO FIX — ' . implode('; ', $gate['hard']); }
-            elseif (!empty($gate['soft']))   { $code = 'TO FIX - SHOP DETAILS'; $this->evidence[] = 'GATE: TO FIX - SHOP DETAILS — ' . implode('; ', $gate['soft']); }
-            else                             { $proceed = true; $updates['STATUS'] = 'PROCEED'; }
-        } elseif ($needsHuman && $ai['human_reason'] !== '') {
-            $this->evidence[] = 'HUMAN: ' . $ai['human_reason'];
-        }
-        $updates['APP SCRIPT CHECKER'] = mb_substr($code, 0, 60);
-
-        // Isang linya para sa checker_1 (AI ANALYZE — existing column)
-        $summary = ($statusCode === '✅' ? '✅ ' : '⚠ ' . $statusCode . ' · ')
-            . ($astraDecided
-                ? $prov . ' / ' . $city . ' / ' . $brgy
-                : (($final['PROVINCE'] !== '' && $final['CITY'] !== '' && $final['BARANGAY'] !== '')
-                    ? $final['PROVINCE'] . ' / ' . $final['CITY'] . ' / ' . $final['BARANGAY'] . ' (existing, hindi nakumpirma ni Astra)'
-                    : 'J&T: ' . ($listNote !== '' ? $listNote : 'hindi matukoy')))
-            . ($issues ? ' · ⚠ ' . implode(' · ', $issues) : '')
-            . ($needsHuman && $ai['human_reason'] !== '' ? ' · 👤 ' . $ai['human_reason'] : '')
-            . ($proceed ? ' · PROCEED' : ($code !== $statusCode ? ' · ' . $code : ''));
-        $updates['AI ANALYZE'] = mb_substr($summary, 0, 2000);
+        // ── J&T labels, guard, anim na field, check: ang pasya ay nasa AstraAddressRules (pure); dito ang gate at ang sulat ──
+        $d = AstraAddressRules::decide([
+            'rules'           => $rules,
+            'answer'          => array_diff_key($ai, ['raw' => true]),
+            'row'             => $before,
+            'chat'            => $chat,
+            'history'         => $this->lastHistory,
+            'customer_blocks' => AstraAddressRules::customerBlocks((string) $row->CXD),
+            'maps'            => $maps,
+            'list_crc'        => self::listCrc(),
+        ], function (array $final, bool $checkDuplicatePhone) use ($row, $maps): array {
+            $mc = new MacroChecker();
+            $mc->setHost($this->host);
+            return $mc->validateRow($row, $final, $maps, $checkDuplicatePhone);
+        });
+        foreach ($d['evidence'] as $line) $this->evidence[] = $line;
+        $updates    = $d['updates'];
+        $final      = $d['final'];
+        $verdict    = $d['verdict'];
+        $statusCode = $d['status_code'];
+        $code       = $d['code'];
+        $allFilled  = $d['all_filled'];
+        $gate       = $d['gate'];
+        $proceed    = $d['proceed'];
+        $summary    = $d['summary'];
+        $issues     = $d['check_issues'];
+        $listNote   = $d['list_note'];
+        $ai['issues'] = $d['issues']; $ai['needs_human'] = $d['needs_human']; $ai['human_reason'] = $d['human_reason'];
 
         // ── 2. CXD: idagdag ang block ni Astra bilang pinakabago ─────────
-        $block = $this->formatBlock($form, ($prov && $city && $brgy) ? [$prov, $city, $brgy] : null, $listNote, $summary);
+        $block = $this->formatBlock($form, $d['line'], $listNote, $summary, $rules === 'new');
         $updates['CXD'] = $this->appendBlock((string) $row->CXD, $block);
 
         if ($this->onlyWhenStatusBlank) {
@@ -339,7 +302,7 @@ class AstraEncoder
                         'jnt' => $ai['jnt'], 'intent' => $ai['intent'], 'issues' => $ai['issues'],
                         'needs_human' => $ai['needs_human'], 'human_reason' => $ai['human_reason'],
                     ],
-                    'map'    => ['note' => ($prov && $city && $brgy) ? 'J&T: ' . $prov . ' | ' . $city . ' | ' . $brgy : ($listNote ?: 'walang J&T label')],
+                    'map'    => ['note' => $d['line'] ? 'J&T: ' . implode(' | ', $d['line']) : ($listNote ?: 'walang J&T label')],
                     'assess' => ['reasons' => array_values(array_filter(array_merge($issues, $ai['human_reason'] !== '' ? ['👤 ' . $ai['human_reason']] : [])))],
                 ]],
                 'fallbacks'   => [],
@@ -356,6 +319,7 @@ class AstraEncoder
             'form'      => $form,
             'cxd_block' => $block,
             'searches'  => $this->searches,
+            'replay'    => $d['replay'],
         ];
 
         $gateMsg = implode('; ', array_merge($gate['hard'], $gate['soft']));
@@ -407,7 +371,7 @@ class AstraEncoder
     //  AGENT CALL (Responses API + tools)
     // ═════════════════════════════════════════════════════════════════════
 
-    private function resolveForm(string $apiKey, MacroOutput $row, string $chat): ?array
+    private function resolveForm(string $apiKey, MacroOutput $row, string $chat, bool $newRules = false): ?array
     {
         $system = <<<'SYS'
 You are an expert Philippine e-commerce ORDER ENCODER (cash-on-delivery, courier J&T). Work exactly like a careful human encoder.
@@ -443,9 +407,11 @@ OUTPUT: STRICT JSON only, exactly this shape:
  "needs_human":false,"human_reason":"",
  "confidence":"high|medium|low","evidence":""}
 SYS;
+        // Nakapatay ang switch: ang request ay eksaktong gaya ng dati, walang kahit isang byte na dagdag.
+        if ($newRules) $system .= self::NEW_RULES_PROMPT;
 
-        $customerForms = $this->customerBlocks((string) $row->CXD);
-        $history       = $this->pancakeHistory((string) ($row->fb_name ?? ''));
+        $customerForms = AstraAddressRules::customerBlocks((string) $row->CXD);
+        $history       = self::pancakeHistory((string) ($row->fb_name ?? ''));
         $this->lastHistory = $history;
         $this->evidence[] = 'PANCAKE: ' . ($history === '' ? 'walang history' : mb_strlen($history) . ' chars, kasama sa input');
         $prompt = "CHAT (raw customer conversation):\n<<<\n" . $chat . "\n>>>\n\n"
@@ -553,6 +519,10 @@ SYS;
         if (!in_array($conf, ['high', 'medium', 'low'], true)) $conf = 'low';
         $issues = [];
         foreach ((array) ($obj['issues'] ?? []) as $i) { $i = trim((string) $i); if ($i !== '') $issues[] = mb_substr($i, 0, 160); }
+        // human_kind: binabasa lang sa bagong rules, at ang dalawang eksaktong salita lang. Anumang iba, at anumang
+        // ibang uri (array, numero, null), ay parang walang key — is_string muna, dahil ang (string) ng array ay error.
+        $kind = $obj['human_kind'] ?? null;
+        $kind = ($newRules && is_string($kind) && in_array($kind, ['label_not_found', 'other'], true)) ? $kind : '';
 
         return [
             'form'         => $form,
@@ -561,6 +531,7 @@ SYS;
             'issues'       => $issues,
             'needs_human'  => !empty($obj['needs_human']),
             'human_reason' => mb_substr(trim((string) ($obj['human_reason'] ?? '')), 0, 300),
+            'human_kind'   => $kind,
             'confidence'   => $conf,
             'evidence'     => mb_substr(trim((string) ($obj['evidence'] ?? '')), 0, 300),
             'raw'          => $obj,
@@ -682,60 +653,15 @@ SYS;
         return trim($s);
     }
 
-    /** Patunayan na nasa list ang J&T labels na pinili ng AI; ibalik ang EKSAKTONG label mula sa list. */
-    private function validateJnt(array $jnt, array $maps): array
-    {
-        $p = trim((string) ($jnt['province'] ?? '')); $c = trim((string) ($jnt['city'] ?? '')); $b = trim((string) ($jnt['barangay'] ?? ''));
-        if ($p === '' && $c === '' && $b === '') return [null, null, null, 'walang J&T label (hindi matukoy ni Astra → tao)'];
-
-        $pk = MacroChecker::normProv($p);
-        $provLabel = $maps['provincesSet'][$pk] ?? null;
-
-        $cityLabel = null;
-        if ($provLabel !== null) {
-            foreach (($maps['citiesByProv'][$pk] ?? []) as $cl) {
-                if (MacroChecker::normPlace((string) $cl) === MacroChecker::normPlace($c)) { $cityLabel = (string) $cl; break; }
-            }
-        }
-        // Ang LIST ang masusunod sa province: kung wala/mali ang province pero IISA ang city na ito sa buong list
-        // (hal. COTABATO-CITY ay nasa COTABATO kahit "Maguindanao del Norte" ang sabi ng PSA/AI), kunin ang province mula sa list.
-        $note = '';
-        if ($cityLabel === null && $c !== '') {
-            $hits = $maps['provincesByCity'][MacroChecker::normPlace($c)] ?? [];
-            if (count($hits) === 1) {
-                $fixedProv = (string) $hits[0];
-                $fpk = MacroChecker::normProv($fixedProv);
-                foreach (($maps['citiesByProv'][$fpk] ?? []) as $cl) {
-                    if (MacroChecker::normPlace((string) $cl) === MacroChecker::normPlace($c)) { $cityLabel = (string) $cl; break; }
-                }
-                if ($cityLabel !== null) {
-                    $note = 'province ' . ($p !== '' ? '"' . $p . '"' : '(wala)') . ' → ' . $fixedProv . ' (filing ng list para sa ' . $cityLabel . ')';
-                    $provLabel = $maps['provincesSet'][$fpk] ?? $fixedProv;
-                    $pk = $fpk;
-                    $this->evidence[] = 'LIST: ' . $note;
-                }
-            }
-        }
-        if ($provLabel === null) return [null, null, null, 'province "' . $p . '" wala sa list'];
-        if ($cityLabel === null) return [$provLabel, null, null, 'city "' . $c . '" wala sa list ng ' . $provLabel];
-
-        $brgyLabel = null;
-        $target = MacroChecker::normPlace(preg_replace('/\b(barangay|brgy\.?)\b/iu', ' ', $b) ?? $b);
-        foreach (($maps['brgysByCityProv'][MacroChecker::normPlace($cityLabel) . '|' . $pk] ?? []) as $bl) {
-            $clean = preg_replace('/\b(barangay|brgy\.?)\b/iu', ' ', (string) $bl) ?? (string) $bl;
-            if (MacroChecker::normPlace($clean) === $target) { $brgyLabel = (string) $bl; break; }
-        }
-        if ($brgyLabel === null) return [$provLabel, $cityLabel, null, 'barangay "' . $b . '" wala sa list ng ' . $cityLabel];
-
-        return [$provLabel, $cityLabel, $brgyLabel, ''];
-    }
-
     // ═════════════════════════════════════════════════════════════════════
     //  CXD BLOCK · FIELDS · HELPERS
     // ═════════════════════════════════════════════════════════════════════
 
-    private function formatBlock(array $form, ?array $jnt, string $listNote, string $summary): string
+    private function formatBlock(array $form, ?array $jnt, string $listNote, string $summary, bool $oneLineValues = false): string
     {
+        // Bagong rules: bawat value ng form ay ISANG linya na may hangganang haba — ang line break sa sagot ng model ay
+        // hindi makakagawa ng sariling linya o ng pekeng hangganan ng block. Nakapatay ang switch: gaya ng dati.
+        if ($oneLineValues) $form = array_map(fn ($x) => AstraAddressRules::oneLine((string) $x), $form);
         $v = fn ($k) => ($form[$k] ?? '') !== '' ? $form[$k] : '-';
         $lines = [
             self::BLOCK_MARK . ' ' . now('Asia/Manila')->format('Y-m-d H:i') . ' ---',
@@ -768,45 +694,15 @@ SYS;
         return $new;
     }
 
-    /** Ang mga block ng CUSTOMER lang (tinanggal ang mga ASTRA block), huling 2 block. */
-    private function customerBlocks(string $cxd): string
-    {
-        $cxd = str_replace("\r\n", "\n", trim($cxd));
-        if ($cxd === '') return '';
-        $cxd = preg_replace('/' . preg_quote(self::BLOCK_MARK, '/') . '.*?\n---(\n|$)/su', '', $cxd) ?? $cxd;
-        $cxd = trim($cxd);
-        if ($cxd === '') return '';
-        // huling 2 block (---…---)
-        preg_match_all('/---\s*\n(.*?)\n---/su', $cxd, $m);
-        $blocks = $m[1] ?? [];
-        if (!$blocks) return mb_substr($cxd, -1500);
-        return implode("\n---\n", array_slice($blocks, -2));
-    }
-
     /** Pancake history ng customer (by fb_name). Pinakabago ang mahalaga: kung mahaba, ang HULING 7000 chars ang isasama. */
-    private function pancakeHistory(string $fbName): string
+    public static function pancakeHistory(string $fbName): string
     {
         $fbName = trim($fbName);
         if ($fbName === '') return '';
         try {
             $chat = trim((string) (DB::table('pancake_conversations')->where('full_name', $fbName)->orderByDesc('id')->value('customers_chat') ?? ''));
         } catch (\Throwable $e) { return ''; }
-        $max = 7000;
-        if ($chat !== '' && mb_strlen($chat, 'UTF-8') > $max) {
-            $chat = "[…cut: earlier part omitted, latest messages follow]\n" . mb_substr($chat, -$max, null, 'UTF-8');
-        }
-        return $chat;
-    }
-
-    /** Nabanggit ba sa text ang isang barangay label? (Roman↔digits, tanggal "barangay", "(POB.)"; compact match para sa "nabag o"↔NABAGO) */
-    private static function mentions(string $hay, string $label): bool
-    {
-        $needle = MacroChecker::normBrgyKey(preg_replace('/\([^)]*\)/u', ' ', $label) ?? $label);
-        if ($needle === '' || strlen($needle) < 2) return false;
-        $h = ' ' . MacroChecker::normBrgyKey($hay) . ' ';
-        if (str_contains($h, ' ' . $needle . ' ')) return true;
-        $hc = str_replace(' ', '', $h); $nc = str_replace(' ', '', $needle);
-        return strlen($nc) >= 5 && str_contains($hc, $nc);
+        return AstraAddressRules::cutHistory($chat);
     }
 
     private function sixFields(MacroOutput $row): array
@@ -814,58 +710,6 @@ SYS;
         $o = [];
         foreach (['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY'] as $c) $o[$c] = trim((string) $row->{$c});
         return $o;
-    }
-
-    private function cleanName(string $n): string
-    {
-        $n = trim(preg_replace('/\s+/u', ' ', $n) ?? $n);
-        $n = str_replace(['Ã±', 'Ã‘'], ['ñ', 'Ñ'], $n);
-        return mb_substr($n, 0, 120);
-    }
-
-    private function normalizePhone(string $raw): ?string
-    {
-        $d = preg_replace('/\D+/', '', $raw) ?? '';
-        if ($d === '') return null;
-        if (str_starts_with($d, '63') && strlen($d) >= 12) $d = substr($d, 2);
-        $d = ltrim($d, '0');
-        return $d === '' ? null : $d;
-    }
-
-    private function composeAddress(array $form): string
-    {
-        $norm  = fn (string $x): string => mb_strtolower(trim(preg_replace('/\s+/u', ' ', $x) ?? $x));
-        $raw   = [];
-        foreach (['house_number', 'purok_sitio', 'address'] as $k) {
-            $v = trim((string) ($form[$k] ?? ''));
-            if ($v !== '' && $v !== '-') $raw[] = $v;
-        }
-        // Tanggalin ang bahaging NASA LOOB na ng ibang bahagi ("8543" at "OB Junction" ay nasa "8543 OB Junction")
-        $parts = [];
-        foreach ($raw as $i => $p) {
-            $np = $norm($p); $drop = false;
-            foreach ($raw as $j => $q) {
-                if ($i === $j) continue;
-                $nq = $norm($q);
-                if ($nq === $np) { if ($j < $i) { $drop = true; break; } continue; }   // eksaktong kapareho → una lang ang iiwan
-                if (str_contains($nq, $np)) { $drop = true; break; }                    // nasa loob ng mas mahaba
-            }
-            if (!$drop) $parts[] = $p;
-        }
-        $lm = trim((string) ($form['landmark'] ?? ''));
-        $lm = trim(preg_replace('/^(near|malapit sa|malapit|sa may|sa tabi ng|tabi mismo ng|tabi mismo|tabi ng|tapat ng|tapat|harap ng|likod ng|beside|in front of|katabi ng|next to)\s+/iu', '', $lm) ?? $lm);
-        if ($lm !== '' && $lm !== '-') {
-            $nl = $norm($lm); $inside = false;
-            foreach ($parts as $p) if (str_contains($norm($p), $nl)) { $inside = true; break; }
-            if (!$inside) {
-                // Bahaging nasa loob na ng landmark → alisin (iwas "Naic Public Market, near Jekep's, Naic Public Market")
-                $parts = array_values(array_filter($parts, fn ($p) => !str_contains($nl, $norm($p))));
-                $parts[] = 'near ' . $lm;
-            }
-        }
-        $addr = implode(', ', $parts);
-        $addr = preg_replace('/\s+/u', ' ', $addr) ?? $addr;
-        return mb_substr(trim($addr, " ,"), 0, 250);
     }
 
     private function parseJsonObject(string $raw): array
