@@ -13,6 +13,9 @@ No JavaScript test exists for the order page, so these are checked by hand on th
 - [ ] S-07.5 (slice 016): on a night-filtered page, change the date; the address has no `night_step` and the line is gone.
 - [ ] S-08.6 (slice 016): open a night-filtered page (the "for a person" link on the AI checker logs page) on a phone, or at a width of 390 x 844. The "Night run filter" line should wrap and the first table rows should not be hidden under the fixed header.
 - [ ] S-09.7 (slice 016): on a phone, tap a night's "N for a person" count on the AI checker logs page. Checker 1 should open in the same tab with that night's rows.
+- [ ] S-13.7 (slice 017): on your usual screen, open the suppliers view (`/item?layout=suppliers`) with real data. You should be able to compare supplier prices at a glance, and the table width should be acceptable.
+- [ ] S-17.7 (slice 017): with real data in the suppliers view, scroll, hover over rows and tap. The table should be as compact as your owner/private table.
+- [ ] S-19.8 (slice 017): use the suppliers view for your usual day. Nothing you use in the Old view should be missing.
 
 ## Slice 015 – row runner error message
 
@@ -230,3 +233,158 @@ Page list and pagination.
 | S-12.2 | negative | Given no `night_step`, when the page draws, then no query touches `night_run_steps` or `night_astra_rows` and no line shows | `test_S_12_2_without_the_parameter_no_night_table_is_read` | Passed · 2026-10-08 · auto |
 | S-12.3 | edge | Given PAGE chosen and no night filter, when the page opens, then it is still not paginated | `test_S_12_3_a_chosen_page_is_still_not_paginated` | Passed · 2026-10-08 · auto |
 | S-12.4 | edge | Given a night-filtered page, when a row is saved or a field updated through the existing routes, then the request and its effect are what they are today for that row id | `test_S_12_4_updating_a_field_of_a_listed_row_works_as_today` | Passed · 2026-10-08 · auto |
+
+## Slice 017 – Suppliers group on the item table
+
+Slice 017: 10 passed, 0 failed, 0 blocked, 0 skipped, 50 not run
+
+New tests are in `tests/Feature/Item/SuppliersGroupTest.php` unless another class is named. "The
+suppliers view" is `/item?layout=suppliers` in the effective CEO view (role CEO and `view_as` not
+`marketing`).
+
+### S-13 The CEO sees Supplier 1, 2, 3 and PO beside each item (P1)
+
+As the CEO, I want a SUPPLIERS group right after the item, so that I can compare what each
+supplier charges on one line.
+
+Independent test: render the suppliers view as the CEO; the header has SUPPLIERS over four
+sub-columns and the item-row template has four cells after the Item cell.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-13.1 | happy, server | Given the suppliers view, when it renders, then the header has two rows: Page, Item and every other header span both rows; "SUPPLIERS" spans four columns; under it Supplier 1, Supplier 2, Supplier 3, PO in that order, right after Item and before the configurable columns; the four sub-headers have no sort handler and are not draggable | `SuppliersGroupTest::test_S_13_1_header_has_two_rows_with_suppliers_over_four_plain_subheaders` | Not run · pending build |
+| S-13.2 | happy, server | Given the item-row template of the suppliers view, when it renders, then four supplier cells (three quote cells and the PO cell) sit after the Item cell and before the configurable columns. The four columns are one cell spanning four for the placeholder, one spanning four for the red band, a loop over three slots and the PO cell | `SuppliersGroupTest::test_S_13_2_item_row_has_four_supplier_cells_after_the_item_cell` | Not run · pending build |
+| S-13.3 | negative, server | Given the suppliers view, when it renders, then its Item cell no longer holds the supplier stack (no PO line, no quote line, no "dati" line, no grey "walang supplier", no inline quote form) and still holds "N running page(s)" and "walang running page" | `SuppliersGroupTest::test_S_13_3_item_cell_no_longer_holds_the_supplier_stack` | Not run · pending build |
+| S-13.4 | edge, server | Given the suppliers view, when it renders, then each full-width row (loading, empty, no-worklist result, no-category result, the expanded page block) spans four more columns than in the Old view, the TOTAL row still starts `<td>TOTAL</td>` and its next empty cell covers Item plus the four, and a page row and the repeated per-page header each have one cell spanning the four, so every row has the same number of columns | `SuppliersGroupTest::test_S_13_4_full_width_rows_and_total_span_four_more_columns` | Not run · pending build |
+| S-13.5 | happy, server | Given a CEO request with `layout=suppliers`, when it is routed, then the suppliers view renders; `layout=old` renders the Old view and anything else the default layout, exactly as today (only the exact strings select) | `SuppliersGroupTest::test_S_13_5_only_the_exact_string_suppliers_selects_the_suppliers_view` | Not run · pending build |
+| S-13.6 | edge, browser | Given a column set where columns were hidden or reordered, when the suppliers view draws, then the group stays right after Item and header and body cells line up | none: browser check | Not run · browser |
+| S-13.7 | edge, owner check | Given real data on his usual screen, when the suppliers view draws, then he can compare prices at a glance and accepts the width | none: see Owner checks | Not run · manual |
+
+### S-14 Supplier 1 to 3 are the three cheapest quotes; the rest sit behind "+N" (P1)
+
+As the CEO, I want the quotes ordered cheapest first with no-price last, so that the comparison is
+by price and nothing is hidden.
+
+Independent test: seed five quotes priced 160, 142, 148, 155 and none; GET `/item/quotes` lists
+142, 148, 155, 160, none.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-14.1 | happy, server | Given quotes priced 160, 142, 148, 155 for one item, when the CEO calls GET `/item/quotes`, then they come back 142, 148, 155, 160 | `SuppliersGroupTest::test_S_14_1_quotes_come_back_cheapest_first` | Not run · pending build |
+| S-14.2 | negative, server | Given one quote with no price and three with prices, when the endpoint is called, then the one without a price is last (on the in-memory sqlite too) | `SuppliersGroupTest::test_S_14_2_a_quote_without_a_price_is_last` | Not run · pending build |
+| S-14.3 | edge, server | Given two quotes with the same price, when the endpoint is called twice, after an unrelated quote is saved, and in the save and delete responses, then their order is the same every time (lower id first) | `SuppliersGroupTest::test_S_14_3_equal_prices_keep_the_lower_id_first_every_time` | Not run · pending build |
+| S-14.4 | edge, server | Given a quote priced 0, when the endpoint is called, then it is ordered after every priced quote, like one without a price, and is never flagged cheapest; its stored price is returned as it is | `SuppliersGroupTest::test_S_14_4_a_zero_price_is_ordered_last_and_never_cheapest` | Not run · pending build |
+| S-14.5 | happy, server | Given two or more quotes with a price above 0, when the endpoint is called, then every quote at the lowest price has `cheapest: true` (ties both) and the others false | `SuppliersGroupTest::test_S_14_5_every_quote_at_the_lowest_price_is_cheapest` | Not run · pending build |
+| S-14.6 | negative, server | Given exactly one priced quote, or only quotes without a price, when the endpoint is called, then no quote is `cheapest` | `SuppliersGroupTest::test_S_14_6_no_cheapest_with_one_priced_quote_or_none` | Not run · pending build |
+| S-14.7 | edge, server | Given a saved price change that moves a quote from first to third, when POST `/item/quotes` returns, then its list is already in the new order | `SuppliersGroupTest::test_S_14_7_the_save_answer_is_already_in_the_new_order` | Not run · pending build |
+| S-14.8 | edge, server | Given the script of the suppliers view, when read, then the helpers that take the first three and count the rest are the pinned text (first three; rest = count minus three, never negative) and they read the server's order and the `cheapest` flag instead of sorting or comparing prices themselves | `SuppliersGroupTest::test_S_14_8_script_helpers_take_the_first_three_and_count_the_rest` | Not run · pending build |
+| S-14.9 | negative, server | Given the default layout's quote list and the item photo page, which read the same endpoint, when they render and the endpoint answers, then they still list every quote (characterisation: only quotes without a price, priced 0 or tied can change place) | `SuppliersGroupTest::test_S_14_9_the_default_layout_and_the_photo_page_still_list_every_quote` | Passed · 2026-10-08 · auto |
+| S-14.10 | happy, browser | Given an item with five quotes, when the suppliers view draws, then Supplier 1 to 3 are the three cheapest in order and Supplier 3 carries "+2"; exactly three quotes show no "+N"; "+N" lists every quote in server order | none: browser check | Not run · browser |
+| S-14.11 | edge, browser | Given an item with two PO suppliers, when it draws, then the PO cell shows the first of today's list over its cost and "+1" | none: browser check | Not run · browser |
+
+### S-15 Every state of the supplier cells reads right (P1)
+
+As the CEO, I want each supplier situation to look distinct and honest.
+
+Independent test: on the preview, items in each state below show what the case says.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-15.1 | happy, browser | Given an item with no quote and no PO supplier, when the lists have loaded, then one red cell spans the four sub-columns with "wala pang supplier" once and the "+ supplier quote" button inside; no grey "walang supplier" anywhere | none: browser check | Not run · browser |
+| S-15.2 | happy, browser | Given PO suppliers but no quote, then three "+" cells and the PO cell filled; no red band | none: browser check | Not run · browser |
+| S-15.3 | happy, browser | Given one quote, then Supplier 1 shows name over price with MOQ, two "+" cells, a dash in PO, and the price is not marked cheapest | none: browser check | Not run · browser |
+| S-15.4 | happy, browser | Given three quotes and a PO supplier, then three cells cheapest first, only the cheapest price marked, the PO cell with name and cost | none: browser check | Not run · browser |
+| S-15.5 | edge, browser | Given a quote without MOQ, or without a price, or priced 0, then only what exists shows (a dash for no price, the typed 0 for 0), no reserved gap, and it is not marked | none: browser check | Not run · browser |
+| S-15.6 | edge, browser | Given a 120-character supplier name, or a price of 99999999 with MOQ 100000000, then the text is cut with an ellipsis inside the cell, the row does not grow and nothing overlaps the next cell; the full values are in the card | none: browser check | Not run · browser |
+| S-15.7 | edge, browser | Given an item with no running page and no supplier, then "walang running page" shows in the Item column and the red band shows once | none: browser check | Not run · browser |
+| S-15.8 | edge, browser | Given an expanded item, then its page rows show below with one empty cell under the group and keep their own three-line RTS / DEL / INT cell; the TOTAL row stays last and lines up | none: browser check | Not run · browser |
+| S-15.9 | negative, browser | Given the quotes or PO-suppliers list has not answered yet, or a fetch failed, then the four cells show a neutral placeholder and neither the red band nor the "+" cells; they appear only after both lists have answered. The placeholder is the visible grey text "hindi na-load" after a failed fetch (title: the full sentence) and "…" while loading | none: browser check | Not run · browser |
+| S-15.10 | edge, server | Given the suppliers view's script and template, when read, then the band and the "+" cells are bound to a loaded state that is set only after both fetches have answered successfully (pinned text) | `SuppliersGroupTest::test_S_15_10_band_and_plus_cells_are_bound_to_the_loaded_state` | Not run · pending build |
+
+### S-16 Add, edit and remove a quote from the new cells with the same save logic (P1)
+
+As the CEO, I want add, edit and remove to keep working from the new cells.
+
+Independent test: from an empty "+" cell add a quote; the row shows it without a reload.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-16.1 | negative, server | Given the suppliers view's item row, when it renders, then every new control inside it (cell, name, "+", "+N", edit, remove, link, photo, Change, Copy, form fields and buttons) stops the click from reaching the row's handler that opens the page rows | `SuppliersGroupTest::test_S_16_1_every_new_control_stops_the_click_from_reaching_the_row` | Not run · pending build |
+| S-16.2 | negative, server | Given a Marketing user, when POST `/item/quotes` or POST `/item/quotes/delete` is sent, then 403 and nothing is written (the delete case is new; the save case exists in `QuotePhotoTest`) | `SuppliersGroupTest::test_S_16_2_a_marketing_user_cannot_save_or_delete_a_quote` | Passed · 2026-10-08 · auto |
+| S-16.3 | edge, server | Given a supplier that already has a quote on the item, when it is saved again, then that one quote is updated and the old values go to the history (existing `QuoteHistoryTest`, named, not rewritten) | `QuoteHistoryTest::test_changes_to_price_moq_or_link_write_the_old_values` (existing, unchanged) | Passed · 2026-10-08 · auto |
+| S-16.4 | edge, server | Given a quote already removed, when delete is sent again, then the answer is ok with the current list and no error | `SuppliersGroupTest::test_S_16_4_deleting_a_removed_quote_again_answers_ok_with_the_current_list` | Passed · 2026-10-08 · auto |
+| S-16.5 | edge, server | Given an empty price, an empty MOQ, a price above the limit or a link longer than the limit, when saved, then the same validation as today applies and nothing is written on a rejected request (characterisation) | `SuppliersGroupTest::test_S_16_5_validation_is_as_today_and_a_rejected_save_writes_nothing` | Passed · 2026-10-08 · auto |
+| S-16.6 | edge, server | Given the suppliers view's script and template, when read, then the quote form opens for one row only: the open state compares the row's own item name as well as the shared quote key (pinned text), and the save and delete calls are the page's existing functions and routes | `SuppliersGroupTest::test_S_16_6_the_form_opens_for_one_row_only` | Not run · pending build |
+| S-16.7 | happy, browser | Given an empty "+" cell, when a quote is saved, then it appears in the right cell without a reload and the form closes; edit from the card updates the cell (it may move to another cell); remove empties it; the chips' counts refresh as today | none: browser check | Not run · browser |
+| S-16.8 | negative, browser | Given any new control, when clicked, then the page rows do not open or close; given a failed save, then the existing alert shows, the form stays open with the values and the cells do not change | none: browser check | Not run · browser |
+
+### S-17 The row is compact; Change and Copy are on hover; the item column sticks (P1)
+
+As the CEO, I want a row of about 50 px, so that I can see more items per screen.
+
+Independent test: on the preview at 1366 x 768 every row without a long name is about 50 px.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-17.1 | edge, server | Given the render of the suppliers view, when the page's styles are read, then every rule added for it sits in a block that is rendered only for the suppliers view (so no other view carries it), and the existing test that scans the default layout's font sizes still passes unchanged | `SuppliersGroupTest::test_S_17_1_the_suppliers_styles_are_rendered_only_for_the_suppliers_view` | Not run · pending build |
+| S-17.2 | happy, server | Given the suppliers view's RTS / DEL / INT cell on an item row, when it renders, then it is one line of three values with the names and counts in each value's tooltip; the Old view's cell and every page row's cell render as today | `SuppliersGroupTest::test_S_17_2_rts_del_int_is_one_line_on_item_rows_only` | Not run · pending build |
+| S-17.3 | happy, browser | Given any row without a three-line name, then the row is 49 to 51 px; a very long item name wraps to at most three lines, about 60 px, and the sticky column does not widen | none: browser check | Not run · browser |
+| S-17.4 | happy, browser | Given a row, when the pointer is on it or keyboard focus is inside it, then Change and Copy appear and work as today; Esc closes an open card. A card that holds the open add or edit form closes on Cancel, Esc or a successful save, not on a click or tap elsewhere | none: browser check | Not run · browser |
+| S-17.5 | edge, browser | Given a touch device or a 390 px wide screen, then Change and Copy are always visible, a tap on a supplier name opens its card and a tap elsewhere closes it; the item column is sticky only at 768 px and wider. A card that holds the open add or edit form closes on Cancel, Esc or a successful save, not on a click or tap elsewhere | none: browser check | Not run · browser |
+| S-17.6 | edge, browser | Given sideways scroll at 1366, then the item column stays, opaque on every row kind and under the header corner; a card opened on the last rows or in the PO cell is not cut by the scroll area or hidden by the TOTAL row | none: browser check | Not run · browser |
+| S-17.7 | edge, owner check | Given his real data, when he scrolls, hovers and taps, then he agrees the table is as compact as his owner/private table | none: see Owner checks | Not run · manual |
+
+### S-18 The Marketing view gets none of it (P1)
+
+As the owner, I want supplier names, prices and MOQ never to reach the Marketing view.
+
+Independent test: request `layout=suppliers` as Marketing; the Old view renders and none of the
+new markers appear.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-18.1 | happy, server | Given a Marketing user, a Marketing-OIC user, and a CEO account with `view_as=marketing`, when each requests `/item?layout=suppliers`, then the response is the Old view exactly as `layout=old` gives it to them (same normalised output) and contains none of: "SUPPLIERS", "Supplier 1", "Supplier 2", "Supplier 3", the new class names, the new helper names, the link to the suppliers view, or a seeded supplier name | `SuppliersGroupTest::test_S_18_1_non_ceo_views_get_the_old_view_with_no_suppliers_markers` | Not run · pending build |
+| S-18.2 | negative, server | Given those three requests, when the page's script is read, then it does not call the quotes or PO-suppliers loaders (as today) | `SuppliersGroupTest::test_S_18_2_the_script_does_not_call_the_loaders_for_those_requests` | Not run · pending build |
+| S-18.3 | negative, server | Given a Marketing user and a Marketing-OIC user, when they call GET `/item/quotes` and GET `/item/suppliers`, then the lists are empty, and no `cheapest` flag or any quote field is present | `SuppliersGroupTest::test_S_18_3_marketing_roles_get_empty_quote_and_supplier_lists` | Passed · 2026-10-08 · auto |
+| S-18.4 | edge, server | Given the Old view and the default layout rendered for Marketing at this commit, when compared with the base commit (token normalised), then they are identical | `SuppliersGroupTest::test_S_18_4_marketing_renders_of_the_old_and_default_layout_are_identical_to_the_base` | Passed · 2026-10-08 · auto |
+
+### S-19 Nothing he uses changes; the other views are untouched (P1)
+
+As the CEO, I want the Old view and the default layout to stay as they are while I try the new one.
+
+Independent test: the Old view's table partial has the hash the existing test pins.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-19.1 | happy, server | Given `resources/views/item/_table_old.blade.php`, when hashed, then the existing test that pins it byte for byte passes unchanged (the file is not edited) | `ItemPageTest::test_old_table_partial_is_byte_identical_to_the_base_commit` (existing, unchanged) | Passed · 2026-10-08 · auto |
+| S-19.2 | happy, server | Given the default layout rendered for the CEO at this commit, when compared with the base commit (token normalised), then it is identical | `SuppliersGroupTest::test_S_19_2_default_layout_for_the_ceo_is_identical_to_the_base` | Passed · 2026-10-08 · auto |
+| S-19.3 | edge, server | Given the Old view rendered for the CEO, when compared with the base commit, then the only difference is the one toolbar link to the suppliers view | `SuppliersGroupTest::test_S_19_3_old_view_for_the_ceo_differs_only_by_the_toolbar_link` | Not run · pending build |
+| S-19.4 | happy, server | Given the suppliers view, when it renders, then everything the Old view's table has is present: the configurable columns loop, HOLD, the expand arrow and page rows, TOTAL, the toolbar, the sourcing chips with their handler, and the worklist's extra lines under the item name | `SuppliersGroupTest::test_S_19_4_everything_the_old_table_has_is_present` | Not run · pending build |
+| S-19.5 | happy, server | Given the same quotes, PO suppliers and item data, when the worklist endpoint is called, then the four lists and their counts are what they are today (existing `WorklistTest`, named) | `WorklistTest::test_ceo_gets_items_classified_into_the_four_lists` (existing, unchanged) | Passed · 2026-10-08 · auto |
+| S-19.6 | edge, server | Given the suppliers view, when it renders, then it uses no `x-html` and no `innerHTML` (the existing no-`x-html` test covers the new files) | `SuppliersGroupTest::test_S_19_6_the_suppliers_files_use_no_x_html_and_no_inner_html` | Not run · pending build |
+| S-19.7 | edge, browser | Given the same data in the Old view and the suppliers view, when each chip is selected, then the same items and counts show; column settings, sorting and header dragging work for every existing column | none: browser check | Not run · browser |
+| S-19.8 | edge, owner check | Given his usual day in the suppliers view, then he finds nothing missing compared with the Old view | none: see Owner checks | Not run · manual |
+
+### S-20 Staff and supplier text is only text (P1)
+
+As the owner, I want supplier names, links and notes shown as text, so that no input can run script.
+
+Independent test: a quote named `<img src=x onerror=alert(1)>` with link `javascript:alert(1)`
+shows as text, with no alert and no clickable link.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-20.1 | negative, server | Given the suppliers view's templates, when read, then every supplier name, price, MOQ, date, link and photo value is bound as text or as an attribute value through Alpine bindings, never as HTML, and the quote's note is not shown | `SuppliersGroupTest::test_S_20_1_supplier_values_are_bound_as_text_and_the_note_is_not_shown` | Not run · pending build |
+| S-20.2 | negative, server | Given the page's link guard, when read, then a quote's link is rendered as a link only when it starts with http:// or https:// (pinned text), opens in a new tab and carries rel noopener | `SuppliersGroupTest::test_S_20_2_a_link_is_rendered_only_through_the_http_guard` | Not run · pending build |
+| S-20.3 | negative, browser | Given a supplier named `<img src=x onerror=alert(1)>` and links `javascript:alert(1)`, `data:text/html,x` and ` JaVaScRiPt:x`, then the name shows as typed, no alert runs and no clickable link appears; a name with quotes, `&`, `<`, a backslash, "Ñandú Trading 金龙" or an emoji shows as typed in the cell, the card, and any title or aria-label | none: browser check | Not run · browser |
+
+### S-21 The page does not make more requests (P2)
+
+As the CEO, I want the suppliers view to load as fast as the Old view.
+
+Independent test: the quotes and PO-suppliers routes are each fetched once on load.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-21.1 | happy, server | Given the suppliers view's render, when the script is read, then the quotes loader and the PO-suppliers loader are each called once at start-up as in the Old view, and the new templates and helpers contain no fetch of their own | `SuppliersGroupTest::test_S_21_1_each_loader_is_called_once_and_the_new_templates_fetch_nothing` | Not run · pending build |
+| S-21.2 | edge, browser | Given hover, tap and "+N", then no request is sent (the card uses loaded data); a save or delete sends only the existing POST and the existing worklist reload | none: browser check | Not run · browser |
