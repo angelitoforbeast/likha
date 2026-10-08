@@ -33,6 +33,11 @@ class AstraAddressRules
      *   chat, history, customer_blocks   ang tatlong text na tinitingnan ng guard
      *   maps            ang J&T list (MacroChecker::loadAddressMaps)
      *   list_crc        check number ng list file
+     *   web_first       (bagong rules lang) true = web search muna: binabasa ang brgy_source / web_basis ng sagot, ang
+     *                   barangay na galing sa web ay isinusulat pero hindi PROCEED, at hawak ang dalawang magkaibang line
+     *   web_proceed     '0' | 'official' | 'several' | 'single' — ang pinakamahinang basehan ng barangay na galing sa web
+     *                   na pwedeng mag-PROCEED
+     *   web_forced      napilit ba ang web search sa unang round (para sa log lang)
      * $gate: fn (array $final, bool $checkDuplicatePhone): ['hard' => [...], 'soft' => [...]]
      */
     public static function decide(array $in, callable $gate): array
@@ -88,22 +93,41 @@ class AstraAddressRules
             }
         }
 
+        // Web search muna: kapag may buong line ang model AT kaya ring imapa ng program ang form nang mag-isa, dapat iisang
+        // city at barangay ang dalawa. Magkaiba = hindi alam kung alin ang tama, kaya tao ang pipili.
+        $twoLines = false;
+        if ($webFirst && $labelSource === 'model') {
+            [$own] = self::mapForm($form, (string) $ai['confidence'], $maps, null, null);
+            if ($own !== null && ($own[1] !== $city || $own[2] !== $brgy)) {
+                $twoLines = true;
+                $evidence[] = 'LINES: dalawang magkaibang line — model: ' . $city . ' | ' . $brgy . ' · program: ' . $own[1] . ' | ' . $own[2] . ' → tao';
+                $ai['needs_human'] = true;
+                if ($ai['human_reason'] === '') $ai['human_reason'] = 'dalawang magkaibang line (model: ' . $brgy . ', program: ' . $own[2] . ')';
+            }
+        }
+
         // GUARD: barangay na HINDI binanggit ng customer (hinula mula sa landmark/web/katabing listing) →
         // tatanggapin lang kung "high" ang confidence; kung hindi, hindi isusulat at tao ang bahala.
         $guard = ['ran' => $brgy !== null, 'result' => 'not_run', 'score' => 0];
+        // Web search muna: ang barangay na wala sa sulat ng customer at sinabi ng model na galing sa web. Hindi ito
+        // kinukumpirma ng confidence ng model at hindi rin ibinabagsak: isinusulat ito para kumpirmahin ng tao.
+        $webFound = false;
         if ($brgy !== null) {
             $hay = $chat . "\n" . $history . "\n" . $customerBlocks;
             if ($rules === 'new') {
                 $found  = self::confirmedByText($brgy, (string) $city, (string) $prov, (string) $form['brgy'], [$chat, $history, $customerBlocks], $maps);
                 $inChat = $found['result'] !== 'none';
-                $guard['result'] = $inChat ? $found['result'] : ($ai['confidence'] !== 'high' ? 'none' : 'exempt_high_confidence');
+                $webFound = $webFirst && !$inChat && $brgySource === 'web';
+                $guard['result'] = $inChat ? $found['result'] : ($webFound ? 'web_found' : ($ai['confidence'] !== 'high' ? 'none' : 'exempt_high_confidence'));
                 $guard['score']  = $found['score'];
                 if ($found['result'] === 'near') $evidence[] = 'GUARD: barangay "' . $brgy . '" near match (' . $found['score'] . ')';
             } else {
                 $inChat = self::mentions($hay, $brgy) || ($form['brgy'] !== '' && self::mentions($hay, $form['brgy']));
                 $guard['result'] = $inChat ? 'confirmed' : ($ai['confidence'] !== 'high' ? 'none' : 'exempt_high_confidence');
             }
-            if (!$inChat && $ai['confidence'] !== 'high') {
+            if ($webFound) {
+                $evidence[] = 'GUARD: barangay "' . $brgy . '" galing sa web search (' . $webBasis . ', ' . $ai['confidence'] . '), hindi sinabi ng customer → isinulat, kukumpirmahin';
+            } elseif (!$inChat && $ai['confidence'] !== 'high') {
                 $evidence[] = 'GUARD: barangay "' . $brgy . '" hindi sinabi ng customer (hinula, ' . $ai['confidence'] . ') → hindi isinulat, tao';
                 $ai['issues'][]   = 'Barangay ' . $brgy . ' ay hinula lang mula sa landmark/web (' . $ai['confidence'] . ' confidence), hindi sinabi ng customer';
                 $ai['needs_human'] = true;
@@ -188,6 +212,13 @@ class AstraAddressRules
         $heldAsToday = $ai['needs_human'] || $ai['intent'] !== 'order';
         $needsHuman  = $rules === 'new' ? ($ai['needs_human'] || ($ai['intent'] !== 'order' && $intentCode === null)) : $heldAsToday;
 
+        // Ang barangay na galing sa web ay PROCEED lang kapag pinapayagan ng setting ang basehan nito; kung hindi, ito ang
+        // huling harang: tinitingnan pagkatapos ng lahat ng iba, kaya ang code na "Barangay" ay para lang sa row na ito na
+        // lang ang natitirang hadlang.
+        $webProceed = in_array($in['web_proceed'] ?? '0', ['official', 'several', 'single'], true) ? $in['web_proceed'] : '0';
+        $webHold    = $webFound && !self::webMayProceed($webBasis, (string) $ai['confidence'], $webProceed);
+        $webOnly    = false;
+
         $gateResult = ['hard' => [], 'soft' => []];
         $proceed = false;
         $code = $intentCode ?? $statusCode;
@@ -198,6 +229,10 @@ class AstraAddressRules
             if ($needsHuman)                       $fail = ['TO FIX', 'Astra: ' . ($ai['human_reason'] ?: 'kailangan ng tao')];
             elseif (!empty($gateResult['hard']))   $fail = ['TO FIX', implode('; ', $gateResult['hard'])];
             elseif (!empty($gateResult['soft']))   $fail = ['TO FIX - SHOP DETAILS', implode('; ', $gateResult['soft'])];
+            elseif ($webHold) {
+                $fail    = ['Barangay', 'barangay mula sa web search (' . $webBasis . '), kukumpirmahin ng tao'];
+                $webOnly = true;
+            }
             if ($fail === null) {
                 $proceed = true; $updates['STATUS'] = 'PROCEED'; $code = $statusCode;
             } else {
@@ -220,6 +255,14 @@ class AstraAddressRules
             . ($issues ? ' · ⚠ ' . implode(' · ', $issues) : '')
             . (!$proceed && $heldAsToday && $ai['human_reason'] !== '' ? ' · 👤 ' . $ai['human_reason'] : '')
             . ($proceed ? ($intentCode !== null ? ' · ' . $intentCode : '') . ' · PROCEED' : ($code !== $statusCode ? ' · ' . $code : ''));
+        // Ang barangay na galing sa web ay laging may marka sa linya ng tao: sa unahan kapag naghihintay ito ng kumpirmasyon,
+        // sa dulo kapag pinayagan ng setting na mag-PROCEED.
+        if ($webFound) {
+            $summary = $proceed
+                ? $summary . ' · barangay from web search (' . $webBasis . ')'
+                : 'WEB: barangay from web search (' . $webBasis . '), confirm · ' . $summary;
+            if ($proceed) $evidence[] = 'WEB: barangay mula sa web search (' . $webBasis . ') → PROCEED, pinayagan ng setting (' . $webProceed . ')';
+        }
         $updates['AI ANALYZE'] = mb_substr($summary, 0, 2000);
 
         return [
@@ -257,8 +300,26 @@ class AstraAddressRules
                 'web_forced'  => (bool) ($in['web_forced'] ?? false),
                 'brgy_source' => $brgySource,
                 'web_basis'   => $webBasis,
+                'confidence'  => in_array($ai['confidence'], ['high', 'medium', 'low'], true) ? $ai['confidence'] : 'low',
+                'web_found'   => $webFound,
+                // Ang barangay na galing sa web na lang ang natitirang hadlang ng row.
+                'web_only_obstacle' => $webOnly,
+                'web_proceed' => $webProceed,
+                'two_lines'   => $twoLines,
             ] : []),
         ];
+    }
+
+    /**
+     * Pwede bang mag-PROCEED ang barangay na galing sa web? $setting = ang pinakamahinang basehang pinapayagan
+     * (`official` > `several` > `single`; `0` = hindi kailanman). Ang basehang `none` at ang low confidence ay hindi
+     * kailanman: ang walang source at ang hula ng model mismo ay hindi sapat para sa parcel na walang titingin.
+     */
+    public static function webMayProceed(string $basis, string $confidence, string $setting): bool
+    {
+        $rank = ['single' => 1, 'several' => 2, 'official' => 3];
+
+        return isset($rank[$basis], $rank[$setting]) && $confidence !== 'low' && $rank[$basis] >= $rank[$setting];
     }
 
     /**

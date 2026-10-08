@@ -351,6 +351,114 @@ class AstraWebFirstTest extends NightAstraTestCase
         $this->assertArrayNotHasKey('brgy_source', $row['replay']);
     }
 
+    // ═════════════════════════════════════════════════════════════════════
+    //  3. Ang pasya ng program
+    // ═════════════════════════════════════════════════════════════════════
+
+    public function test_a_web_found_barangay_with_everything_else_fine_is_written_for_a_person_and_is_not_proceed(): void
+    {
+        $this->assertContains('HOLY SPIRIT', $this->maps()['brgysByCityProv'][MacroChecker::normPlace('QUEZON-CITY') . '|' . MacroChecker::normProv('METRO-MANILA')]);
+        $this->mode('2');
+
+        $row = $this->ranRow(1, $this->answer());
+
+        $this->assertSame([self::QC_HOLY, null, 'Barangay', false], [$row['line'], $row['STATUS'], $row['code'], $row['proceed']]);
+        $this->assertSame(self::WEB_LINE . ' · ✅ METRO-MANILA / QUEZON-CITY / HOLY SPIRIT · Barangay', $row['note']);
+        $this->assertStringContainsString("\nCheck: " . self::WEB_LINE . ' · ', $row['CXD']);
+        $this->assertSame(
+            ['web_found', true, true, false, 'web', 'single', 'high', 'model'],
+            [$row['replay']['guard']['result'], $row['replay']['web_found'], $row['replay']['web_only_obstacle'], $row['replay']['two_lines'],
+                $row['replay']['brgy_source'], $row['replay']['web_basis'], $row['replay']['confidence'], $row['replay']['label_source']]
+        );
+    }
+
+    public function test_a_web_found_barangay_never_passes_on_high_confidence_alone_and_the_customers_own_words_still_confirm(): void
+    {
+        $seen = [];
+        foreach ([
+            'web, high'                      => [$this->answer(), self::NO_BRGY_CHAT],
+            'web, medium'                    => [$this->answer(['confidence' => 'medium']), self::NO_BRGY_CHAT],
+            'customer says the model, high'  => [$this->answer(['brgy_source' => 'customer', 'web_basis' => 'none']), self::NO_BRGY_CHAT],
+            'web, but it is in the chat'     => [$this->answer(), "Juan Dela Cruz\n09171234567\n12 Sampaguita St, Holy Spirit, Quezon City"],
+        ] as $name => [$answer, $chat]) {
+            $d = $this->decided($answer, $chat);
+            $seen[$name] = [$d['proceed'], $d['replay']['guard']['result'], $d['line'] !== null, str_starts_with($d['summary'], 'WEB: ')];
+        }
+
+        $this->assertSame([
+            'web, high'                     => [false, 'web_found', true, true],
+            'web, medium'                   => [false, 'web_found', true, true],
+            // Ang rule ng mode 1 ay para pa rin sa barangay na hindi sinabing galing sa web.
+            'customer says the model, high' => [true, 'exempt_high_confidence', true, false],
+            'web, but it is in the chat'    => [true, 'phrase', true, false],
+        ], $seen);
+    }
+
+    public function test_the_second_setting_lets_a_web_found_barangay_proceed_from_its_basis_upward(): void
+    {
+        $proceeds = [];
+        foreach (['0', 'official', 'several', 'single', 'junk'] as $setting) {
+            foreach (['official', 'several', 'single', 'none'] as $basis) {
+                $d = $this->decided($this->answer(['web_basis' => $basis]), self::NO_BRGY_CHAT, ['web_proceed' => $setting]);
+                $proceeds[$setting][$basis] = $d['proceed'];
+                $this->assertSame($d['proceed'] ? 'PROCEED' : null, $d['updates']['STATUS'] ?? null);
+                $this->assertSame(!$d['proceed'], str_starts_with($d['summary'], 'WEB: barangay from web search (' . $basis . '), confirm'));
+            }
+        }
+        $this->assertSame([
+            '0'        => ['official' => false, 'several' => false, 'single' => false, 'none' => false],
+            'official' => ['official' => true, 'several' => false, 'single' => false, 'none' => false],
+            'several'  => ['official' => true, 'several' => true, 'single' => false, 'none' => false],
+            'single'   => ['official' => true, 'several' => true, 'single' => true, 'none' => false],
+            'junk'     => ['official' => false, 'several' => false, 'single' => false, 'none' => false],
+        ], $proceeds);
+
+        // Ang hula ng model mismo (low) ay hindi lumulusot kahit sa pinakamaluwag na setting.
+        $low = $this->decided($this->answer(['confidence' => 'low', 'web_basis' => 'official']), self::NO_BRGY_CHAT, ['web_proceed' => 'single']);
+        $this->assertFalse($low['proceed']);
+    }
+
+    public function test_the_night_job_honours_the_second_setting_only_in_mode_2(): void
+    {
+        $this->webProceed('single');
+        $answer = $this->answer(['confidence' => 'medium']);
+
+        $this->mode('2');
+        $two = $this->ranRow(1, $answer);
+        $this->mode('1');
+        $one = $this->ranRow(2, $answer);
+
+        $this->assertSame(['PROCEED', self::QC_HOLY], [$two['STATUS'], $two['line']]);
+        $this->assertStringEndsWith('· PROCEED · barangay from web search (single)', $two['note']);
+        // Mode 1: ang barangay na wala sa sulat ng customer at hindi high ay hindi isinusulat, gaya ng dati.
+        $this->assertSame([null, null], [$one['STATUS'], $one['line'][2]]);
+    }
+
+    public function test_two_different_lines_of_the_model_and_the_program_hold_the_row(): void
+    {
+        $labels = $this->maps()['brgysByCityProv'][MacroChecker::normPlace('QUEZON-CITY') . '|' . MacroChecker::normProv('METRO-MANILA')];
+        $this->assertContains('BAGONG PAG-ASA', $labels);
+        // Ang parehong barangay ay nasa chat: ang tanging hadlang ay ang dalawang line.
+        $chat   = "Juan Dela Cruz\n09171234567\n12 Sampaguita St, Holy Spirit, Quezon City";
+        $answer = $this->answer(['brgy_source' => 'customer', 'web_basis' => 'none'], ['brgy' => 'Bagong Pag-asa']);
+
+        $two = $this->decided($answer, $chat);
+        $one = $this->decided($answer, $chat, ['web_first' => false]);
+
+        $this->assertSame([false, true, true, 'TO FIX'], [$two['proceed'], $two['needs_human'], $two['replay']['two_lines'], $two['code']]);
+        $this->assertArrayNotHasKey('STATUS', $two['updates']);
+        $this->assertTrue($one['proceed']);
+        $this->assertArrayNotHasKey('two_lines', $one['replay']);
+    }
+
+    public function test_a_web_found_barangay_beside_another_obstacle_keeps_that_obstacles_code(): void
+    {
+        $d = $this->decided($this->answer(['needs_human' => true, 'human_kind' => 'other', 'human_reason' => 'dalawang address']));
+
+        $this->assertSame(['TO FIX', false, false, 'HOLY SPIRIT'], [$d['code'], $d['proceed'], $d['replay']['web_only_obstacle'], $d['updates']['BARANGAY']]);
+        $this->assertStringStartsWith(self::WEB_LINE . ' · ', $d['summary']);
+    }
+
     private function settingsPage(): string
     {
         $this->withoutVite();
