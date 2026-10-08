@@ -221,38 +221,14 @@ class AstraEncoder
         $this->evidence[] = 'KEY: ' . ['settings' => 'settings page (database)', 'env_astra' => '.env ASTRA_ENCODER_API_KEY', 'env_openai' => '.env OPENAI_API_KEY', 'wala' => 'WALA'][$keyInfo['source']];
         if (!$apiKey) return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'No OPENAI_API_KEY'], $t0);
 
-        $before = $this->sixFields($row);
         // Isang basa lang kada row, bago ang tawag sa model: ang buong row ay iisang set ng rules.
         $rules  = self::addressRulesOn() ? 'new' : 'old';
 
-        // ── 1 + 3. FORM (chat/Pancake/web) at J&T label (list tool) — isang agent call ──
-        $ai = $this->resolveForm($apiKey, $row, $chat, $rules === 'new');
-        if ($ai === null) {
+        $decided = $this->decideOnly($apiKey, $row, $chat, $rules, $maps);
+        if ($decided === null) {
             return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'Astra: walang sagot mula sa AI'], $t0);
         }
-        $form = $ai['form'];
-        $this->evidence[] = 'FORM: ' . implode(' · ', array_filter([
-            $form['name'] !== '' ? 'Name=' . $form['name'] : '',
-            $form['phone'] !== '' ? 'Phone=' . $form['phone'] : '',
-            trim($form['brgy'] . ', ' . $form['city'] . ', ' . $form['province'], ', ') !== '' ? 'Addr=' . trim($form['brgy'] . ', ' . $form['city'] . ', ' . $form['province'], ', ') : '',
-            $form['landmark'] !== '' ? 'Landmark=' . $form['landmark'] : '',
-        ])) . ' [' . $ai['confidence'] . ']' . ($ai['evidence'] !== '' ? ' — ' . $ai['evidence'] : '');
-
-        // ── J&T labels, guard, anim na field, check: ang pasya ay nasa AstraAddressRules (pure); dito ang gate at ang sulat ──
-        $d = AstraAddressRules::decide([
-            'rules'           => $rules,
-            'answer'          => array_diff_key($ai, ['raw' => true]),
-            'row'             => $before,
-            'chat'            => $chat,
-            'history'         => $this->lastHistory,
-            'customer_blocks' => AstraAddressRules::customerBlocks((string) $row->CXD),
-            'maps'            => $maps,
-            'list_crc'        => self::listCrc(),
-        ], function (array $final, bool $checkDuplicatePhone) use ($row, $maps): array {
-            $mc = new MacroChecker();
-            $mc->setHost($this->host);
-            return $mc->validateRow($row, $final, $maps, $checkDuplicatePhone);
-        });
+        [$ai, $form, $before, $d] = $decided;
         foreach ($d['evidence'] as $line) $this->evidence[] = $line;
         $updates    = $d['updates'];
         $final      = $d['final'];
@@ -333,6 +309,69 @@ class AstraEncoder
                 ? 'Address verified but may blank na required field (di pa PROCEED)'
                 : (($statusCode === '✅' && !$proceed) ? 'Address ✅ pero hindi PROCEED: ' . ($gateMsg ?: ($ai['human_reason'] ?: $code)) : null),
         ], $t0);
+    }
+
+    /**
+     * Ang bahaging NAGPAPASYA ng isang row: ang tawag sa model at ang rules, hanggang sa gate. Walang isinusulat dito
+     * (hindi ang row, hindi ang log), kaya magagamit din ito ng dry run na tumitingin lang kung ano ang mangyayari.
+     * Ibinabalik ang [sagot ng model, form, anim na field bago, pasya], o null kapag walang magagamit na sagot.
+     */
+    private function decideOnly(string $apiKey, MacroOutput $row, string $chat, string $rules, array $maps): ?array
+    {
+        $before = $this->sixFields($row);
+
+        // ── 1 + 3. FORM (chat/Pancake/web) at J&T label (list tool) — isang agent call ──
+        $ai = $this->resolveForm($apiKey, $row, $chat, $rules === 'new');
+        if ($ai === null) return null;
+        $form = $ai['form'];
+        $this->evidence[] = 'FORM: ' . implode(' · ', array_filter([
+            $form['name'] !== '' ? 'Name=' . $form['name'] : '',
+            $form['phone'] !== '' ? 'Phone=' . $form['phone'] : '',
+            trim($form['brgy'] . ', ' . $form['city'] . ', ' . $form['province'], ', ') !== '' ? 'Addr=' . trim($form['brgy'] . ', ' . $form['city'] . ', ' . $form['province'], ', ') : '',
+            $form['landmark'] !== '' ? 'Landmark=' . $form['landmark'] : '',
+        ])) . ' [' . $ai['confidence'] . ']' . ($ai['evidence'] !== '' ? ' — ' . $ai['evidence'] : '');
+
+        // ── J&T labels, guard, anim na field, check: ang pasya ay nasa AstraAddressRules (pure); dito ang gate at ang sulat ──
+        $d = AstraAddressRules::decide([
+            'rules'           => $rules,
+            'answer'          => array_diff_key($ai, ['raw' => true]),
+            'row'             => $before,
+            'chat'            => $chat,
+            'history'         => $this->lastHistory,
+            'customer_blocks' => AstraAddressRules::customerBlocks((string) $row->CXD),
+            'maps'            => $maps,
+            'list_crc'        => self::listCrc(),
+        ], function (array $final, bool $checkDuplicatePhone) use ($row, $maps): array {
+            $mc = new MacroChecker();
+            $mc->setHost($this->host);
+            return $mc->validateRow($row, $final, $maps, $checkDuplicatePhone);
+        });
+
+        return [$ai, $form, $before, $d];
+    }
+
+    /**
+     * Dry run ng isang row: ang parehong tawag sa model, tools, rules at gate ng processRow(), pero WALANG sulat —
+     * ang row na ibinigay ay nasa memory lang (maaaring ibinalik sa itsura nito bago ang gabi) at hindi sine-save.
+     * Ang $rules ay ibinibigay ng tumatawag: hindi binabasa ang switch.
+     * Return: ['ok', 'decision' (ang buong pasya ng rules, o null), 'usage', 'error' (lastError)].
+     */
+    public function dryRunRow(MacroOutput $row, array $maps, ?string $host = null, string $rules = 'new'): array
+    {
+        $this->host = $host; $this->evidence = []; $this->usage = []; $this->searches = [];
+        $this->lastError = null;
+        $this->row = $row;
+
+        $keyInfo = self::apiKeyInfo();
+        $this->keySource = $keyInfo['source'];
+        $decided = $keyInfo['key'] ? $this->decideOnly($keyInfo['key'], $row, trim((string) $row->all_user_input), $rules, $maps) : null;
+
+        return [
+            'ok'       => $decided !== null,
+            'decision' => $decided[3] ?? null,
+            'usage'    => $this->usage,
+            'error'    => $this->lastError,
+        ];
     }
 
     private array $trace = [];

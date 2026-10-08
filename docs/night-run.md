@@ -119,3 +119,17 @@ prints counts and order ids only, never customer text. It gives the same report 
 they are today, not as they were that night. It cannot see edits made to the chat or the customer details since,
 earlier conversation the model fetched with its own tool, or (for older logs) the version of the address list
 that night. Logs older than 90 days are deleted, so only recent nights can be replayed.
+
+## The dry run of the whole new Astra
+
+The replay above re-decides stored answers and calls no model. `astra:dry-run` is its sibling that does call the
+model: for the rows of one past night it runs the new instructions, the tools, the new rules and the final check
+with the rules ON whatever the switch says, on each row as it stood before that night, and reports how many
+would proceed. It writes nothing to the orders, the night tables or the logs; it costs model calls.
+
+    php artisan astra:dry-run --step=<id> [--rows=held|proceeded|all] [--limit=200] [--ids=1,2,3]
+    php artisan astra:dry-run --night=YYYY-MM-DD
+
+It refuses to start between 02:30 and 04:30 Manila time or while a night Astra step is running, and stops after
+3 API errors in a row. The report is printed and saved under `storage/app/astra-dry-run/`. Details, caveats and
+how to run it on the server: `docs/astra-dry-run.md`.
