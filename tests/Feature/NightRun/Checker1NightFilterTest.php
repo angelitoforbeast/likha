@@ -303,6 +303,20 @@ class Checker1NightFilterTest extends NightAstraTestCase
         $this->assertSame($expected, array_merge($this->ids($first), $this->ids($second)));
     }
 
+    public function test_S_06_9_another_steps_row_on_the_same_date_is_not_listed(): void
+    {
+        // Ibang gabi ng Astra, pero ang row nito ay nakaturo sa order F na nasa petsa rin ng fixture.
+        $other = DB::table('night_run_steps')->insertGetId([
+            'night_date' => '2026-10-03', 'kind' => 'astra', 'state' => 'finished', 'trigger' => 'manual', 'rows_found' => 1,
+        ]);
+        NightAstraRow::create(['step_id' => $other, 'macro_output_id' => $this->o['F'], 'state' => 'done', 'proceed' => false, 'code' => 'TO FIX', 'attempts' => 1]);
+
+        $response = $this->page($this->link())->assertOk();
+
+        $this->assertSame($this->letters('AB'), $this->ids($response));
+        $this->assertStringContainsString('· 2 of 2 shown ·', (string) $this->line($response));
+    }
+
     // ───────────── Sa ilalim ng ibang filter ─────────────
 
     public function test_S_07_1_chips_and_page_list_count_the_filtered_set(): void
@@ -690,6 +704,17 @@ class Checker1NightFilterTest extends NightAstraTestCase
         $response = $this->page(['date' => '2026-10-02', 'night_step' => '007'])->assertOk();
 
         $this->assertSame([$orderId], $this->ids($response));
+    }
+
+    public function test_S_10_11_a_nine_digit_step_id_is_accepted(): void
+    {
+        [$stepId, $orderId] = $this->secondNight(123456789);
+        $this->assertSame(123456789, $stepId);
+
+        $response = $this->page(['date' => '2026-10-02', 'night_step' => '123456789'])->assertOk();
+
+        $this->assertSame([$orderId], $this->ids($response));
+        $this->assertStringContainsString('· 1 of 1 shown ·', (string) $this->line($response));
     }
 
     public function test_S_11_1_a_non_ceo_gets_the_same_rows(): void

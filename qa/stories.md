@@ -97,7 +97,7 @@ Independent test: take the id from the message and find the `ai_checker_logs` ro
 
 ## Slice 016 – Night run rows on Checker 1
 
-Slice 016: 45 passed, 0 failed, 0 blocked, 0 skipped, 2 not run
+Slice 016: 47 passed, 0 failed, 0 blocked, 0 skipped, 2 not run
 
 New tests are in `tests/Feature/NightRun/Checker1NightFilterTest.php` unless another class is
 named. The link is `/encoder/checker_1?date=<orders date of the night>&night_step=<Astra step id>`.
@@ -122,6 +122,7 @@ Independent test: seed a step with 2 rows done and not proceed, 1 done and proce
 | S-06.6 | edge | Given a night row whose `macro_output` row no longer exists, when the link opens, then the page loads, that row is absent, and the sign says how many are shown of how many | `test_S_06_6_a_deleted_order_is_absent_and_the_line_shows_the_gap` | Passed · 2026-10-08 · auto |
 | S-06.7 | edge | Given a listed row whose `ts_date` was moved to another date after the night, when the link opens with the step's orders date, then it is not listed and the sign count shows the gap | `test_S_06_7_a_row_moved_to_another_date_is_not_listed` | Passed · 2026-10-08 · auto |
 | S-06.8 | edge | Given more than 100 night rows and PAGE not chosen, when the link opens, then 100 per page; page 2 keeps `night_step`; every row appears once across the pages | `test_S_06_8_more_than_100_rows_are_paged_and_keep_the_filter` | Passed · 2026-10-08 · auto |
+| S-06.9 | edge | Given a second Astra step with a `done`, not proceed row that points to an order of the same orders date, when the first step's link opens, then that order is not listed and the line counts only the first step's rows | `test_S_06_9_another_steps_row_on_the_same_date_is_not_listed` | Passed · 2026-10-08 · auto |
 
 ### S-07 The night filter stays under the other filters (P2)
 
@@ -199,6 +200,7 @@ Independent test: send `night_step=abc`; the page answers 200, shows the notice 
 | S-10.8 | negative | Given any mix of `night_step`, `date`, `PAGE`, the Filter value and `status_filter`, when the page opens, then the ids shown are a subset of the night's rows and of the unfiltered result for the same other parameters | `test_S_10_8_any_mix_only_narrows` | Passed · 2026-10-08 · auto |
 | S-10.9 | negative | Given any value of `night_step`, when the page draws, then it holds nothing from `night_astra_rows` beyond which rows are listed: no code, reason, cost or log link | `test_S_10_9_nothing_of_the_night_rows_is_printed` | Passed · 2026-10-08 · auto |
 | S-10.10 | edge | Given "007" and a step with id 7 that is an Astra step, when the page opens, then it is read as step 7 | `test_S_10_10_leading_zeros_read_as_the_step` | Passed · 2026-10-08 · auto |
+| S-10.11 | edge | Given an Astra step whose id has 9 digits (for example 123456789), when the link opens with that id, then the page lists that step's night rows and the line says how many are shown | `test_S_10_11_a_nine_digit_step_id_is_accepted` | Passed · 2026-10-08 · auto |
 
 ### S-11 Access is what it is today; the filter only narrows (P1)
 
