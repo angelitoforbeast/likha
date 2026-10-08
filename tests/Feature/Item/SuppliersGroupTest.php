@@ -139,6 +139,104 @@ class SuppliersGroupTest extends ItemTestCase
         }
     }
 
+    // ── S-13.5 / S-18.1 / S-18.2 / S-19.3: ang switch at ang gate ─────────────
+
+    /**
+     * Ang nag-iisang dagdag sa Old view ng CEO: ang link papunta sa suppliers view, kasama ang
+     * indentation at line break nito. Kapag tinanggal ito, dapat bumalik ang base render.
+     */
+    private const SUPPLIERS_LINK = "    <a href=\"?layout=suppliers\" @click.prevent=\"const q = new URLSearchParams(window.location.search); q.set('layout', 'suppliers'); window.location.href = window.location.pathname + '?' + q.toString()\"\n"
+        . "       title=\"Open the table with suppliers and prices side by side\"\n"
+        . "       style=\"background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;\n"
+        . "              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;\n"
+        . "              cursor:pointer;margin-left:4px;\">🏷 Suppliers view</a>\n";
+
+    /** Ang tatlong request na hindi CEO view: [label, role, email, dagdag sa address]. */
+    private const NON_CEO_VIEWS = [
+        ['Marketing', 'Marketing', 'mkt@example.test', ''],
+        ['Marketing - OIC', 'Marketing - OIC', 'oic@example.test', ''],
+        ['CEO as marketing', 'CEO', 'ceo@example.test', '&view_as=marketing'],
+    ];
+
+    /** Normalised na body ng isang GET; dito agad kinukuha dahil iba ang CSRF token ng bawat request. */
+    private function body(string $url): string
+    {
+        return $this->normalise((string) $this->get($url)->assertOk()->getContent());
+    }
+
+    public function test_S_13_5_only_the_exact_string_suppliers_selects_the_suppliers_view(): void
+    {
+        $this->actingAs($this->user());
+
+        $cases = [
+            '/item'                                    => [false, false],
+            '/item?layout=old'                         => [true, false],
+            '/item?layout=suppliers'                   => [true, true],
+            '/item?layout=SUPPLIERS'                   => [false, false],
+            '/item?layout=supplier'                    => [false, false],
+            '/item?layout=x'                           => [false, false],
+            '/item?layout[]=suppliers'                 => [false, false],
+            '/item?layout=suppliers&view_as=marketing' => [true, false],
+        ];
+        foreach ($cases as $url => $expected) {
+            $res = $this->get($url)->assertOk();
+            $this->assertSame($expected, [$res->viewData('layoutOld'), $res->viewData('layoutSuppliers')], $url);
+        }
+
+        $this->assertStringContainsString('🗂 Old view', $this->body('/item?layout=suppliers'));
+        $this->assertStringContainsString('🏷 Suppliers view', $this->body('/item?layout=old'));
+    }
+
+    public function test_S_18_1_non_ceo_views_get_the_old_view_with_no_suppliers_markers(): void
+    {
+        $sid = $this->supplier('Zyxwv Kalakal');
+        $this->quote('HAND GRIP', $sid, 100, 10);
+        $this->po($sid, 'HAND GRIP', 'hand grip', 5, 90);
+
+        $markers = [
+            'SUPPLIERS', 'Supplier 1', 'Supplier 2', 'Supplier 3', 'spl-', 'splReady', 'splTop3', 'splRest',
+            'splNone', 'splLoaded', 'layout=suppliers', "'suppliers'", 'Suppliers view', '_table_suppliers', 'Zyxwv Kalakal',
+        ];
+        foreach (self::NON_CEO_VIEWS as [$label, $role, $email, $extra]) {
+            $this->actingAs(User::where('email', $email)->first() ?? $this->user($role, $email));
+            $suppliers = $this->body('/item?layout=suppliers' . $extra);
+            $old = $this->body('/item?layout=old' . $extra);
+
+            $this->assertTrue($suppliers === $old, "{$label}: iba ang layout=suppliers sa layout=old");
+            foreach ($markers as $marker) {
+                $this->assertStringNotContainsString($marker, $suppliers, "{$label}: {$marker}");
+            }
+        }
+    }
+
+    public function test_S_18_2_the_script_does_not_call_the_loaders_for_those_requests(): void
+    {
+        $calls = ['this.loadItemSuppliers(),', 'this.loadItemQuotes(),'];
+
+        // Patunayan na totoo ang mga marker: sa CEO view, tig-isang beses ang bawat tawag.
+        $this->actingAs($this->user());
+        $ceo = $this->body('/item?layout=suppliers');
+        foreach ($calls as $call) $this->assertSame(1, substr_count($ceo, $call), "CEO: {$call}");
+
+        foreach (self::NON_CEO_VIEWS as [$label, $role, $email, $extra]) {
+            $this->actingAs(User::where('email', $email)->first() ?? $this->user($role, $email));
+            $body = $this->body('/item?layout=suppliers' . $extra);
+            foreach ($calls as $call) $this->assertStringNotContainsString($call, $body, "{$label}: {$call}");
+        }
+    }
+
+    public function test_S_19_3_old_view_for_the_ceo_differs_only_by_the_toolbar_link(): void
+    {
+        $old = $this->normalise($this->render('ceo', true));
+        $this->assertSame(1, substr_count($old, self::SUPPLIERS_LINK));
+        $this->assertSame(self::BASE['old.ceo'], sha1(str_replace(self::SUPPLIERS_LINK, '', $old)));
+
+        $suppliers = $this->render('ceo', true, true);
+        $this->assertStringNotContainsString('🏷 Suppliers view', $suppliers);
+        $this->assertStringContainsString('🗂 Old view', $suppliers);
+        $this->assertStringContainsString('<td>TOTAL</td>', $suppliers);
+    }
+
     // ── S-14.1 – S-14.7: pagkakasunod ng quotes at ang cheapest flag ──────────
 
     /** Ang listahan ng isang item mula sa GET /item/quotes. */

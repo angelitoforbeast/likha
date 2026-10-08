@@ -692,6 +692,21 @@
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
               cursor:pointer;margin-left:4px;">🗂 Old view</a>
     @endif
+@if(!empty($effectiveIsCEO) && !empty($layoutOld))
+@if(!empty($layoutSuppliers))
+    <a href="?layout=old" @click.prevent="const q = new URLSearchParams(window.location.search); q.set('layout', 'old'); window.location.href = window.location.pathname + '?' + q.toString()"
+       title="Back to the original table"
+       style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
+              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+              cursor:pointer;margin-left:4px;">🗂 Old view</a>
+@else
+    <a href="?layout=suppliers" @click.prevent="const q = new URLSearchParams(window.location.search); q.set('layout', 'suppliers'); window.location.href = window.location.pathname + '?' + q.toString()"
+       title="Open the table with suppliers and prices side by side"
+       style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
+              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+              cursor:pointer;margin-left:4px;">🏷 Suppliers view</a>
+@endif
+@endif
 
     {{-- CEO-only chrome — hidden when CEO toggles to Marketing view so the UI
          truly mirrors what Marketing sees. Actual CEO role still has access via
@@ -828,7 +843,11 @@
   </div>
 
   @if(!empty($layoutOld))
+@if(!empty($layoutSuppliers))
+    @include('item._table_suppliers')
+@else
     @include('item._table_old')
+@endif
   @else
     {{-- Bagong layout (006): dalawang tab — To order (default) at Sales & Profit (?tab=sales). --}}
     <div id="scroll" class="il-scroll">
@@ -1728,6 +1747,10 @@
         if (this.effectiveIsCeo && this.worklist.list !== 'lahat') qsObj.list = this.worklist.list;
         // Lumang table view — panatilihin ang ?layout=old sa URL.
         if (this.layoutOld) qsObj.layout = 'old';
+@if(!empty($layoutSuppliers))
+        // Suppliers view — dapat manatili sa URL; kung hindi, gagawin itong ?layout=old ng unang load.
+        qsObj.layout = 'suppliers';
+@endif
         // Tab ng bagong layout — panatilihin ang ?tab=sales (kahit nasa lumang view, para bumalik sa parehong tab).
         if (this.ilTab === 'sales') qsObj.tab = 'sales';
         // refresh=1 bypasses the server-side cache for this single request.
