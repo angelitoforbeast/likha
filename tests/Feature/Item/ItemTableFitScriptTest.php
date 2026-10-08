@@ -581,6 +581,11 @@ class ItemTableFitScriptTest extends TestCase
         $this->assertCount(count($catalog), $partial);
         $this->assertEqualsCanonicalizing($catalog, $partial);
         $this->assertSame(['adspent', 'cpp'], array_slice($partial, 0, 2));
+        // Ang naka-save na ayos na galing sa browser ay puwedeng may basura: hindi ito isinasama sa ise-save.
+        $dirty = $this->call('orderToSave', ['<img src=x onerror=alert(1)>', 'cpp', '__proto__', 'adspent', 'constructor', 'not_a_column'], ['adspent', 'cpp'], $catalog);
+        $this->assertCount(count($catalog), $dirty);
+        $this->assertEqualsCanonicalizing($catalog, $dirty);
+        $this->assertSame(['adspent', 'cpp'], array_slice($dirty, 0, 2));
     }
 
     // ── S-41: ang Prof.% bilang isang column ──────────────────────────────────

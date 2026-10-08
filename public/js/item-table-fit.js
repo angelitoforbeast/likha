@@ -378,13 +378,17 @@
   // puwestong hawak nila sa buong ayos ay pinupuno ulit ayon sa bagong pagkakasunod. Ang mga wala sa table
   // (lumipat, nakatago) ay hindi gumagalaw, at walang catalog id na nawawala.
   function orderToSave(full, shownAfter, catalog) {
-    var out = [], seen = {};
+    // Kapag ibinigay ang catalog, mga id lang nito ang tinatanggap: ang naka-save na ayos ay puwedeng galing sa
+    // browser, kaya hindi ito pinagkakatiwalaan.
+    var known = null;
+    if (list(catalog).length) { known = Object.create(null); list(catalog).forEach(function (id) { if (typeof id === 'string') known[id] = true; }); }
+    var out = [], seen = Object.create(null);
     list(full).concat(list(catalog)).forEach(function (id) {
-      if (typeof id === 'string' && id !== '' && !seen[id]) { seen[id] = true; out.push(id); }
+      if (typeof id === 'string' && id !== '' && !seen[id] && (known === null || known[id] === true)) { seen[id] = true; out.push(id); }
     });
     // Ang pinagsamang column (RTS / DEL / INT, Prof.%) ay ibinibigay bilang listahan ng mga id nito: sabay silang
     // lumilipat, pero nananatili ang pagkakasunod nila sa isa't isa gaya ng sa naka-save na ayos.
-    var want = [], inWant = {};
+    var want = [], inWant = Object.create(null);
     list(shownAfter).forEach(function (unit) {
       var ids = (Array.isArray(unit) ? unit : [unit]).filter(function (id) { return typeof id === 'string' && seen[id] && !inWant[id]; });
       ids.sort(function (a, b) { return out.indexOf(a) - out.indexOf(b); });
