@@ -758,6 +758,21 @@ class AstraAddressRulesTest extends NightAstraTestCase
     private const VIRAC_DUGUI_SV    = ['CATANDUANES', 'VIRAC', 'DUGUI SAN VICENTE'];
     private const VIRAC_IBONG_SAPA  = ['CATANDUANES', 'VIRAC', 'IBONG SAPA (SAN VICENTE SUR)'];
     private const ABRA_BA_UG        = ['ABRA', 'ABRA-SAN-JUAN', 'BA-UG'];
+    private const COTABATO_POB_4    = ['COTABATO', 'COTABATO-CITY', 'POBLACION IV'];
+    private const SJDM_FATIMA       = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'FATIMA'];
+    private const SJDM_FATIMA_2     = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'FATIMA II'];
+    private const SJDM_SAN_RAFAEL   = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'SAN RAFAEL'];
+    private const SJDM_SAN_RAFAEL_1 = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'SAN RAFAEL I'];
+    private const SJDM_SAN_RAFAEL_3 = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'SAN RAFAEL III'];
+    private const SJDM_SAN_RAFAEL_4 = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'SAN RAFAEL IV'];
+    private const SJDM_POBLACION    = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'POBLACION'];
+    private const SJDM_POBLACION_1  = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'POBLACION I'];
+    private const SJDM_SAN_ROQUE    = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'SAN ROQUE'];
+    private const LIPA_POB_9        = ['BATANGAS', 'LIPA-CITY', 'POBLACION BARANGAY 9'];
+    private const LIPA_POB_9A       = ['BATANGAS', 'LIPA-CITY', 'POBLACION BARANGAY 9-A'];
+    private const LIPA_ANILAO       = ['BATANGAS', 'LIPA-CITY', 'ANILAO'];
+    private const LIPA_ANILAO_LABAC = ['BATANGAS', 'LIPA-CITY', 'ANILAO-LABAC'];
+    private const BUENAVISTA_POB_2  = ['AGUSAN-DEL-NORTE', 'AGUSAN-DEL-NORTE-BUENAVISTA', 'POBLACION 2'];
 
     /** Lahat ng label ng city ng line, mula sa totoong list. */
     private function cityLabels(array $line): array
@@ -809,7 +824,7 @@ class AstraAddressRulesTest extends NightAstraTestCase
 
     public function test_S_25_8_the_forms_own_wording_confirms_only_when_it_maps_to_that_very_label(): void
     {
-        $this->assertLinesInList(self::ABRA_BA_UG, self::COTABATO_POB, self::COTABATO_POB_2, self::QC_HOLY_SPIRIT);
+        $this->assertLinesInList(self::ABRA_BA_UG, self::COTABATO_POB, self::COTABATO_POB_2, self::QC_HOLY_SPIRIT, self::BUENAVISTA_POB_2);
         $withWording = fn (string $text, array $line, string $wording) => AstraBarangayMatcher::confirmWithWording($text, $line[2], $wording, $this->cityLabels($line));
 
         // Ang label lang: ang "ba ug" ay wala sa text na "Baug" (masyadong maikli para sa dikit o halos-tugma).
@@ -822,6 +837,7 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'the wording is the city, not a label' => $withWording('12 Sampaguita St, Quezon City', self::QC_HOLY_SPIRIT, 'Quezon City'),
             'the wording is not in the text'       => $withWording('San Juan Abra', self::ABRA_BA_UG, 'Baug'),
             'an empty wording'                     => $withWording('taga Baug po kami', self::ABRA_BA_UG, ''),
+            'the number of the wording is in a parenthesis and not in the text' => $withWording('Brgy Poblacion po, Buenavista', self::BUENAVISTA_POB_2, 'Poblacion (2)'),
         ];
 
         $this->assertSame([
@@ -831,6 +847,7 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'the wording is the city, not a label' => self::NONE,
             'the wording is not in the text'       => self::NONE,
             'an empty wording'                     => self::NONE,
+            'the number of the wording is in a parenthesis and not in the text' => self::NONE,
         ], $seen);
     }
 
@@ -848,11 +865,12 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $this->assertSame(self::NONE, $this->confirmed(str_repeat('holyspirit', 30000), self::QC_HOLY_SPIRIT));
     }
 
-    public function test_S_25_10_invalid_utf8_does_not_throw_and_confirms_nothing(): void
+    public function test_S_25_10_invalid_utf8_does_not_throw_and_a_bad_byte_is_a_break_between_words(): void
     {
-        $this->assertLinesInList(self::QC_HOLY_SPIRIT, self::NASIPIT_BRGY_1);
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT, self::NASIPIT_BRGY_1, self::SJDM_SAN_RAFAEL_4);
 
         $this->assertConfirmTable([
+            'a name beside a bad byte is still read' => ["San Rafael IV \xF0\x9F\x8F okay", self::SJDM_SAN_RAFAEL_4, self::PHRASE],
             'bytes that are no text at all'   => ["\xC3\x28\xFF\xFE\xA0\xA1", self::QC_HOLY_SPIRIT, self::NONE],
             'a bad byte instead of the space' => ["Brgy Holy\xFFSpirit, QC", self::QC_HOLY_SPIRIT, self::NONE],
             'a bad byte before the number'    => ["Brgy \xE2\x821, Nasipit", self::NASIPIT_BRGY_1, self::NONE],
@@ -941,9 +959,11 @@ class AstraAddressRulesTest extends NightAstraTestCase
 
     public function test_S_26_10_a_number_on_the_next_line_is_never_joined_to_the_name(): void
     {
-        $this->assertLinesInList(self::COTABATO_POB_2, self::NASIPIT_BRGY_1);
+        $this->assertLinesInList(self::COTABATO_POB_2, self::NASIPIT_BRGY_1, self::COTABATO_POB_4);
 
         $this->assertConfirmTable([
+            // Ang "4)" ay bilang ng listahan ng customer, hindi numero ng barangay.
+            'the number of a numbered list' => ['1) Juan 2) 0917 3) Poblacion 4) Cotabato', self::COTABATO_POB_4, self::NONE],
             'a line break'       => ["Brgy Poblacion\n2 pcs po", self::COTABATO_POB_2, self::NONE],
             'a comma'            => ['Brgy Poblacion, 2 pcs po', self::COTABATO_POB_2, self::NONE],
             'a dash with spaces' => ['Brgy Poblacion - 2 pcs po', self::COTABATO_POB_2, self::NONE],
@@ -1014,6 +1034,56 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'Zone 1 B for ZONE I'                 => ['Zone 1 B Dasmarinas City', self::DASMA_ZONE_1, self::NONE],
             'Zone 1-B for ZONE I'                 => ['Zone 1-B Dasmarinas City', self::DASMA_ZONE_1, self::NONE],
             'Zone 1 B. where ZONE I-B is a label' => ['Zone 1 B. Dasmarinas City', self::DASMA_ZONE_1, self::NONE],
+        ]);
+    }
+
+    public function test_S_26_16_a_siblings_number_or_letter_written_another_way_is_never_bridged(): void
+    {
+        $this->assertLinesInList(
+            self::SJDM_FATIMA, self::SJDM_FATIMA_2, self::SJDM_SAN_RAFAEL, self::SJDM_SAN_RAFAEL_1, self::SJDM_SAN_RAFAEL_3, self::SJDM_SAN_RAFAEL_4,
+            self::SJDM_POBLACION, self::SJDM_POBLACION_1, self::SJDM_SAN_ROQUE, self::DASMA_ZONE_1, self::DASMA_ZONE_1B,
+            self::LIPA_POB_9, self::LIPA_POB_9A, self::LIPA_ANILAO, self::LIPA_ANILAO_LABAC, self::QC_HOLY_SPIRIT
+        );
+        // Walang SAN ROQUE na may numero sa city na ito: ang "2 pcs" pagkatapos nito ay hindi ibang barangay.
+        foreach ($this->cityLabels(self::SJDM_SAN_ROQUE) as $label) {
+            $this->assertStringStartsNotWith('SAN ROQUE ', $label);
+        }
+
+        $rows = [];
+        foreach ([
+            // Roman numeral na na-type gamit ang maliit na L.
+            'Brgy Fatima ll, SJDM', 'Fatima lll', 'Fatima lV',
+            // Nakatago ang numero sa likod ng hangganan.
+            'Brgy Fatima - 2, SJDM', 'Brgy. Fatima (2) SJDM', 'Fatima [2]', 'Fatima/2', "Fatima \u{2013} 2", 'Fatima, 2 SJDM',
+            // Numero sa salita, o sa likod ng "No.".
+            'Fatima Dos', 'Fatima Two', 'Fatima No. 2', 'Fatima no 2',
+            // Simbolo lang sa pagitan ng pangalan at ng numero.
+            'Fatima | 2', 'Fatima * 2', "Fatima \u{200B} 2", "Fatima \u{1F600} 2",
+        ] as $text) {
+            $rows[$text] = [$text, self::SJDM_FATIMA, self::NONE];
+        }
+        $this->assertConfirmTable($rows + [
+            // Numerong nakadikit sa pangalan.
+            'FatimaII'                  => ['FatimaII, SJDM', self::SJDM_FATIMA, self::NONE],
+            'San RafaelIV'              => ['San RafaelIV, SJDM', self::SJDM_SAN_RAFAEL, self::NONE],
+            'san rafaeliii'             => ['san rafaeliii', self::SJDM_SAN_RAFAEL, self::NONE],
+            'a typo and a glued number' => ['San RafelIV', self::SJDM_SAN_RAFAEL, self::NONE],
+            'San Rafel - IV'            => ['San Rafel - IV', self::SJDM_SAN_RAFAEL, self::NONE],
+            'San Rafel (IV)'            => ['San Rafel (IV)', self::SJDM_SAN_RAFAEL, self::NONE],
+            'Zone I - B'                => ['Zone I - B, Dasmarinas', self::DASMA_ZONE_1, self::NONE],
+            'Poblacion Barangay 9 - A'  => ['Poblacion Barangay 9 - A, Lipa', self::LIPA_POB_9, self::NONE],
+            'Anilao - Labac'            => ['Anilao - Labac, Lipa', self::LIPA_ANILAO, self::NONE],
+            'Poblacion Uno'             => ['Poblacion Uno, SJDM', self::SJDM_POBLACION, self::NONE],
+            // Dalawang barangay ang binanggit: hindi malinaw kung alin.
+            'San Rafael 1 & 3'          => ['San Rafael 1 & 3', self::SJDM_SAN_RAFAEL_1, self::NONE],
+            'San Rafael 1 or 3'         => ['San Rafael 1 or 3', self::SJDM_SAN_RAFAEL_1, self::NONE],
+            'San Rafael 1 / 3'          => ['San Rafael 1 / 3', self::SJDM_SAN_RAFAEL_1, self::NONE],
+            // Kumpirmado pa rin: walang kapatid na nabubuo ang kasunod na salita, o nasa kasunod na linya na ang dami.
+            'San Roque, 2 pcs'              => ['Brgy San Roque, 2 pcs po', self::SJDM_SAN_ROQUE, self::PHRASE],
+            'Holy Spirit, Quezon City'      => ['Holy Spirit, Quezon City', self::QC_HOLY_SPIRIT, self::PHRASE],
+            'Holy Spirit one order'         => ['Holy Spirit one order po', self::QC_HOLY_SPIRIT, self::PHRASE],
+            'a typo alone'                  => ['San Rafel, SJDM', self::SJDM_SAN_RAFAEL, ['result' => 'near', 'score' => 94]],
+            'the quantity on the next line' => ["Brgy San Rafael 1\n3 pcs po", self::SJDM_SAN_RAFAEL_1, self::PHRASE],
         ]);
     }
 

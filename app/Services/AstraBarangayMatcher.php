@@ -26,6 +26,18 @@ class AstraBarangayMatcher
     private const BRGY_MARK = "\x01";
     /** Mga daglat na pinapalawak ng normBrgyKey: ang tuldok nila ay hindi dulo ng pangungusap ("Sta. Cruz", "Pob. 2"). */
     private const DOTTED_ABBR = ['sta', 'sto', 'gen', 'pob'];
+    /** Numerong isinulat sa salita: "Fatima Dos" ay FATIMA II. Ginagamit lang para makita ang IBANG barangay, hindi para kumumpirma. */
+    private const NUMBER_WORDS = [
+        'uno' => '1', 'dos' => '2', 'tres' => '3', 'kuwatro' => '4', 'kwatro' => '4', 'cuatro' => '4', 'singko' => '5', 'cinco' => '5',
+        'sais' => '6', 'seis' => '6', 'siyete' => '7', 'siete' => '7', 'otso' => '8', 'ocho' => '8', 'nuwebe' => '9', 'nueve' => '9',
+        'diyes' => '10', 'dies' => '10', 'diez' => '10',
+        'one' => '1', 'two' => '2', 'three' => '3', 'four' => '4', 'five' => '5', 'six' => '6', 'seven' => '7', 'eight' => '8', 'nine' => '9', 'ten' => '10',
+        'isa' => '1', 'dalawa' => '2', 'tatlo' => '3', 'apat' => '4', 'lima' => '5',
+    ];
+    /** "No. 2", "num 2", "number 2": ang salita bago ang numero ay hindi bahagi ng pangalan. */
+    private const NUMBER_PREFIX = ['no', 'num', 'number'];
+    /** Mga pang-ugnay ng dalawang numero: "San Rafael 1 or 3" ay dalawang barangay, hindi isa. */
+    private const CONNECTORS = ['and', 'or', 'at', 'o'];
 
     /**
      * @param array $cityLabels LAHAT ng J&T label ng city ng line. Kailangan: dito nakikita kung ang sinabi ng
@@ -74,7 +86,8 @@ class AstraBarangayMatcher
 
             $wording = self::scrub($wording);
             if ((new MacroChecker())->matchBarangayInList($wording, $labels) !== $label) return $none;
-            $needle = self::noParKey($wording);
+            // Buong sulat, kasama ang laman ng parenthesis: ang "Poblacion (2)" ay hindi napapatunayan ng "Poblacion" lang.
+            $needle = MacroChecker::normBrgyKey($wording);
             // Ang sulat na pangalan din ng IBANG barangay ng city ay hindi patunay para sa label na ito.
             if ($needle === '' || in_array($needle, $siblings, true)) return $none;
             // Ang sulat sa form ay dumadaan sa parehong mga rule; ang mga kapatid ay ang sa city pa rin ng LABEL.
@@ -135,9 +148,15 @@ class AstraBarangayMatcher
      * ("Poblacion. 9" ay hindi kumpirmasyon ng POBLACION). Sa gayon, pagtanggi lang ang naidaragdag nito, hindi kumpirmasyon.
      * Ang tuldok ng daglat na kilala ng normBrgyKey (sta, sto, gen, pob), ng barangay word at ng initial ay bahagi ng pangalan.
      *
+     * Ang numerong may pansarang bracket na walang kapares na pambukas ("3) Poblacion 4) Cotabato") ay bilang ng
+     * listahan ng customer: hard break bago ang numero, kaya hindi ito nagiging numero ng barangay sa unahan nito.
+     * Ang anyong "3. Poblacion 4. Cotabato" ay hindi ginagalaw: hindi ito maihihiwalay sa dulo ng pangungusap na
+     * sinusundan ng numero, at ang tuldok ay malambot na hangganan na.
+     *
      * Bawat segment: `w` (ang salita para sa pagtutugma), `alt` (ang salita para sa paghahambing sa ibang label),
      * `brgy` (index ng salitang may barangay word na kasunod-agad sa unahan), `init` (index ng mga initial),
-     * `soft` (index ng salitang may malambot na hangganan sa unahan).
+     * `soft` (index ng salitang may malambot na hangganan sa unahan), `sym` (index ng "salitang" puro simbolo),
+     * `nl` (nagsisimula ba ang segment sa bagong linya).
      */
     private static function segments(string $text): array
     {
@@ -146,16 +165,33 @@ class AstraBarangayMatcher
         $t = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x{2028}\x{2029}]/u', "\n", $t) ?? '';
         $t = preg_replace('/[\p{Zs}\t#:]/u', ' ', $t) ?? '';
         $t = str_replace(["\u{2013}", "\u{2014}"], '-', $t);
+        if (str_contains($t, ')')) {
+            $open = 0; // mga pambukas na bracket ng linyang ito na wala pang pansara
+            $t = preg_replace_callback('/[(\r\n]|(?<![\p{L}\p{N}])\p{N}{1,3}\)|\)/u', static function ($m) use (&$open) {
+                $hit = $m[0];
+                if ($hit === '(') { $open++; return $hit; }
+                if ($hit === "\r" || $hit === "\n") { $open = 0; return $hit; }
+                if ($open > 0) { $open--; return $hit; }
+
+                return $hit === ')' ? $hit : "\n" . $hit;
+            }, $t) ?? $t;
+        }
         $t = str_replace([')', ']', '}', '!', '?'], ' . ', $t);
-        $parts = preg_split('/[,;\r\n\/(\[{]|(?<=\s)-+(?=\s)/u', $t) ?: [];
+        $parts = preg_split('/([,;\r\n\/(\[{]|(?<=\s)-+(?=\s))/u', $t, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [];
 
         $keyOf = []; // normBrgyKey kada piraso, isang beses lang: paulit-ulit ang mga salita ng mahabang chat
+        $altOf = [];
         $out   = [];
-        foreach ($parts as $part) {
+        $nl    = true;
+        foreach ($parts as $k => $part) {
+            if ($k % 2 === 1) {
+                if ($part === "\r" || $part === "\n") $nl = true;
+                continue;
+            }
             if (trim($part) === '') continue;
             // Ang barangay word (may tuldok o wala) ay tinatandaan sa kasunod na salita, saka inaalis.
             $part = preg_replace('/\b(?:barangay|brgy|bgy|bgry)\b\.?/iu', ' ' . self::BRGY_MARK . ' ', $part) ?? $part;
-            $seg  = ['w' => [], 'alt' => [], 'brgy' => [], 'init' => [], 'soft' => []];
+            $seg  = ['w' => [], 'alt' => [], 'brgy' => [], 'init' => [], 'soft' => [], 'sym' => [], 'nl' => $nl];
             $afterBrgy = false;
             $afterStop = false;
             foreach (preg_split('/\s+/u', $part, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
@@ -184,8 +220,10 @@ class AstraBarangayMatcher
                             $i = count($seg['w']);
                             if ($afterBrgy) { $seg['brgy'][$i] = true; $afterBrgy = false; }
                             if ($afterStop) { $seg['soft'][$i] = true; $afterStop = false; }
+                            $alt = $altOf[$word] ??= self::altWord($word);
                             $seg['w'][]   = $word;
-                            $seg['alt'][] = $word;
+                            $seg['alt'][] = $alt !== '' ? $alt : $word;
+                            if ($alt === '') $seg['sym'][$i] = true;
                         }
                         // May tuldok pagkatapos ng pirasong ito: hangganan, maliban kung daglat na bahagi ng pangalan.
                         // Ang barangay word bago ang hangganan ay hindi na "kasunod-agad" ng susunod na salita.
@@ -193,10 +231,26 @@ class AstraBarangayMatcher
                     }
                 }
             }
-            if ($seg['w'] !== []) $out[] = $seg;
+            if ($seg['w'] !== []) { $out[] = $seg; $nl = false; }
         }
 
         return $out;
+    }
+
+    /**
+     * Ang salita sa mata ng paghahambing sa ibang label. '' = puro simbolo (walang letra o numero: "|", "*", emoji,
+     * zero-width space), na nilalaktawan sa pagtingin sa kasunod na salita. Ang Roman numeral na na-type gamit ang
+     * maliit na L ("ll", "lV") ay ang numero nito: iyon ang ibig sabihin ng customer, at ibang barangay iyon.
+     */
+    private static function altWord(string $word): string
+    {
+        if (preg_match('/[\p{L}\p{N}]/u', $word) !== 1) return '';
+        if (str_contains($word, 'l') && strspn($word, 'livx') === strlen($word)) {
+            $number = MacroChecker::normBrgyKey(strtr($word, 'l', 'i'));
+            if (ctype_digit($number)) return $number;
+        }
+
+        return $word;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -243,9 +297,25 @@ class AstraBarangayMatcher
             }
         }
 
+        // Ilang salita ng kasunod ng hit ang kailangang makita: ang pinakamahabang dugtong ng ibang label, may palugit
+        // para sa "No." at sa pang-ugnay.
+        $reach = 3;
+        foreach ($longer as [, $post]) $reach = max($reach, 2 * count($post) + 2);
+
+        // Mga numero ng mga kapatid na kapareho ng needle maliban sa huling numero: POBLACION 1 → 2, 3, …
+        $otherNumbers = [];
+        if (self::hasDigit($nw[$n - 1])) {
+            $head = array_slice($nw, 0, $n - 1);
+            foreach ($siblings as $sib) {
+                $sw = explode(' ', $sib);
+                if (count($sw) === $n && array_slice($sw, 0, $n - 1) === $head && self::hasDigit($sw[$n - 1])) $otherNumbers[$sw[$n - 1]] = true;
+            }
+        }
+        $sibSet = array_fill_keys($siblings, true);
+
         $nearMemo = [];
         $best     = $none;
-        foreach ($segments as $seg) {
+        foreach ($segments as $si => $seg) {
             $w = $seg['w'];
             $m = count($w);
             $hits = []; // [simula, dulo (hindi kasama), uri, score]
@@ -279,7 +349,7 @@ class AstraBarangayMatcher
                     $slice = array_slice($w, $i, $n);
                     $win   = implode(' ', $slice);
                     // Paulit-ulit ang mga window ng mahabang chat: isang beses lang kinukuwenta ang bawat isa.
-                    $nearMemo[$win] ??= self::near($win, $slice, $needle, $needleLen, $nSpecial, $siblings);
+                    $nearMemo[$win] ??= self::near($win, $slice, $needle, $needleLen, $nSpecial, $siblings, $sibSet);
                     [$pct, $siblingWins] = $nearMemo[$win];
                     if ($pct === null) continue;
                     if ($siblingWins) return ['result' => 'none', 'score' => 0, 'rejected' => true];
@@ -288,8 +358,19 @@ class AstraBarangayMatcher
             }
 
             foreach ($hits as [$from, $to, $kind, $score]) {
-                if (self::continues($seg, $to, $allowed) || self::longerLabelAround($seg, $from, $to, $longer)) {
-                    return ['result' => 'none', 'score' => 0, 'rejected' => true];
+                if (self::continues($seg, $to, $allowed)) return ['result' => 'none', 'score' => 0, 'rejected' => true];
+                if ($longer !== []) {
+                    // Tumatawid ng hangganan ang tinging ito: "Fatima - 2", "Fatima (2)", "Fatima, 2" ay FATIMA II pa rin.
+                    $after = self::ahead($segments, $si, $to, $reach, false);
+                    if (self::longerLabelAround($seg['alt'], $from, $longer, $after, self::spoken($after))) {
+                        return ['result' => 'none', 'score' => 0, 'rejected' => true];
+                    }
+                }
+                if ($otherNumbers !== []) {
+                    // "San Rafael 1 or 3", "San Rafael 1 / 3": dalawang barangay ang binanggit sa iisang linya.
+                    $after = self::spoken(self::ahead($segments, $si, $to, 3, true));
+                    $at    = in_array($after[0] ?? '', self::CONNECTORS, true) ? 1 : 0;
+                    if (isset($otherNumbers[$after[$at] ?? ''])) return ['result' => 'none', 'score' => 0, 'rejected' => true];
                 }
                 $rank = ['none' => 0, 'near' => 1, 'compact' => 2, 'phrase' => 3];
                 if ($rank[$kind] > $rank[$best['result']] || ($kind === $best['result'] && $score > $best['score'])) {
@@ -305,13 +386,23 @@ class AstraBarangayMatcher
      * Halos-tugma ng isang window. Ibinabalik: [similar_text o null kapag hindi hit, true kapag may ibang label
      * ng city na kasing-kahawig o mas kahawig pa ng window] — "Poblacion Wst" ay mas kahawig ng POBLACION WEST kaysa EAST.
      */
-    private static function near(string $win, array $slice, string $needle, int $needleLen, array $nSpecial, array $siblings): array
+    private static function near(string $win, array $slice, string $needle, int $needleLen, array $nSpecial, array $siblings, array $sibSet): array
     {
         $len = strlen($win);
         // Sa sobrang layo ng haba, hindi na aabot ng 85: huwag nang ikumpara (pati ang salitang daan-libong character).
         if (200.0 * min($len, $needleLen) / ($len + $needleLen) < self::NEAR_PCT) return [null, false];
         similar_text($win, $needle, $pct);
         if ($pct < self::NEAR_PCT) return [null, false];
+        // Numerong nakadikit sa pangalan ("FatimaII", "San RafaelIV", "Fatima2"): kapag ang window na walang buntot
+        // ay mas kahawig pa ng needle at ang buntot ay numero ng ibang barangay ng city, iyon ang sinabi ng customer.
+        $last = (string) array_pop($slice);
+        $head = $slice === [] ? '' : implode(' ', $slice) . ' ';
+        foreach (self::gluedTails($last) as [$stem, $number]) {
+            if (!isset($sibSet[$needle . ' ' . $number])) continue;
+            similar_text($head . $stem, $needle, $bare);
+            if ($bare > $pct) return [$pct, true];
+        }
+        $slice[] = $last;
         // Ang halos-tugma ay hindi tumatawid ng magkaibang numero o suffix letter: "poblacion 2" ay hindi POBLACION 1.
         if (self::specials($slice) !== $nSpecial) return [null, false];
         foreach ($siblings as $sib) {
@@ -362,8 +453,12 @@ class AstraBarangayMatcher
      */
     private static function continues(array $seg, int $at, ?string $allowed): bool
     {
+        // Ang simbolo sa pagitan ("Fatima | 2", "Fatima * 2") ay hindi naghihiwalay ng pangalan at ng numero nito.
+        while (isset($seg['sym'][$at])) $at++;
         if (!isset($seg['w'][$at]) || isset($seg['init'][$at])) return false;
-        $next = $seg['w'][$at];
+        if ($seg['w'][$at] === $allowed) return false;
+        // Ang `alt`: ang Roman numeral na may maliit na L ay numero na rito.
+        $next = $seg['alt'][$at];
         if ($next === $allowed) return false;
         if (self::hasDigit($next)) {
             return preg_match_all('/\p{N}/u', $next) <= 4;
@@ -375,19 +470,71 @@ class AstraBarangayMatcher
     /**
      * Ang mga salita ng customer bago at/o pagkatapos ng hit, kasama ang hit, ay bumubuo ba ng IBA at mas mahabang
      * label ng city? ("Dugui San Vicente" ay hindi SAN VICENTE.) Dito, ang initial ay binibilang bilang letra nito.
+     * Ang mga salita bago ang hit ay sa loob ng segment; ang mga kasunod ay ang ibinigay ng ahead(), sa dalawang basa:
+     * gaya ng pagkakasulat, at may numerong salita na ginawang numero ("Fatima Dos", "Fatima No. 2").
      */
-    private static function longerLabelAround(array $seg, int $from, int $to, array $longer): bool
+    private static function longerLabelAround(array $alt, int $from, array $longer, array $after, array $spoken): bool
     {
-        $alt = $seg['alt'];
-        $m   = count($alt);
         foreach ($longer as [$pre, $post]) {
             $a = $from - count($pre);
-            $b = $to + count($post);
-            if ($a < 0 || $b > $m) continue;
-            if (self::sameWords(array_slice($alt, $a, count($pre)), $pre) && self::sameWords(array_slice($alt, $to, count($post)), $post)) return true;
+            $c = count($post);
+            if ($a < 0 || !self::sameWords(array_slice($alt, $a, count($pre)), $pre)) continue;
+            foreach ($after === $spoken ? [$after] : [$after, $spoken] as $said) {
+                if (count($said) >= $c && self::sameWords(array_slice($said, 0, $c), $post)) return true;
+            }
         }
 
         return false;
+    }
+
+    /**
+     * Ang mga salitang kasunod ng hit (hanggang $max), nilalaktawan ang puro simbolo at tumatawid ng hangganan:
+     * pagtanggi lang ang nagagawa ng tinging ito, hindi kumpirmasyon. Sa $sameLine, humihinto ito sa dulo ng linya.
+     */
+    private static function ahead(array $segments, int $si, int $at, int $max, bool $sameLine): array
+    {
+        $out = [];
+        for ($count = count($segments), $first = true; $si < $count && count($out) < $max; $si++, $at = 0, $first = false) {
+            if (!$first && $sameLine && $segments[$si]['nl']) break;
+            $alt = $segments[$si]['alt'];
+            $sym = $segments[$si]['sym'];
+            for ($m = count($alt); $at < $m && count($out) < $max; $at++) {
+                if (!isset($sym[$at])) $out[] = $alt[$at];
+            }
+        }
+
+        return $out;
+    }
+
+    /** Ang mga salita na may numerong salita na ginawang numero, at walang "no"/"num"/"number" bago ang numero. */
+    private static function spoken(array $words): array
+    {
+        $out = [];
+        foreach ($words as $i => $word) {
+            $next = $words[$i + 1] ?? '';
+            if (in_array($word, self::NUMBER_PREFIX, true) && ctype_digit(self::NUMBER_WORDS[$next] ?? $next)) continue;
+            $out[] = self::NUMBER_WORDS[$word] ?? $word;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Mga posibleng hati ng isang salita sa [pangalan, numerong nakadikit sa dulo]: mga digit ("fatima2"), o Roman
+     * numeral na puwedeng may maliit na L ("fatimaii", "fatimall").
+     */
+    private static function gluedTails(string $word): array
+    {
+        $out = [];
+        if (preg_match('/^(.*\D)(\d{1,4})$/s', $word, $m) === 1) $out[] = [$m[1], (string) (int) $m[2]];
+        for ($k = 1, $len = strlen($word); $k < $len && $k <= 7; $k++) {
+            $tail = substr($word, -$k);
+            if (strspn($tail, 'ivxl') !== $k) break;
+            $number = MacroChecker::normBrgyKey(strtr($tail, 'l', 'i'));
+            if (ctype_digit($number)) $out[] = [substr($word, 0, -$k), $number];
+        }
+
+        return $out;
     }
 
     /** Pareho ang mga salita, o halos pareho sa parehong panuntunan ng halos-tugma ("Dugi" para sa DUGUI). */
