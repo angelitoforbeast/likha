@@ -182,6 +182,12 @@ class SuppliersGroupTest extends ItemTestCase
         'hindi na-load', 'spl-card', 'splCard', 'spl-warn', 'spl-dot', 'spl-edit', 'wala pang supplier',
         'Add a supplier in Finance', 'ItemTableFit', 'item-table-fit.js', 'supplierColumns', 'supplierCell',
         'noSupplier', 'formPreset',
+        // Ang fit, ang bar ng mga column, ang dalawang set at ang Prof.% bilang isang column. (Ang mga salitang
+        // "Sourcing" at "Sales" mismo ay nasa bawat view na — ang label ng mga chip at ang tab na "Sales & Profit" —
+        // kaya ang pangalan ng control at ng key nito sa browser ang marker ng mga set.)
+        'spl-bar', 'spl-cpanel', 'spl-seg', 'spl-per', '</span> columns <span', 'Column set', 'One step away', 'item_col_set_v1',
+        'fitInit', 'fitPick', 'fitToggle', 'fitRes', 'fitCols', 'fitSaveOrder', 'fitSetPeriod', 'tmoney',
+        'readSet', 'setNames', 'mergeProfPct', 'profPct', 'orderToSave', 'tableMoney', 'headLabel',
         'layout=original', "'original'", 'Original table', 'before the suppliers columns',
         'Table with suppliers', 'suppliers and prices side by side',
     ];
@@ -444,7 +450,7 @@ class SuppliersGroupTest extends ItemTestCase
     private const ZERO_IF = '<template x-if="splReady() && !splCols().length">';
     private const CELL_FOR = '<template x-for="c in (splReady() ? splCols() : [])"';
     private const WARN_IF = '<template x-if="splReady() && splNone(row.item_name)">';
-    private const FULL_WIDTH = ':colspan="cols.length + 2 + splSpan()"';
+    private const FULL_WIDTH = ':colspan="fitCols.length + 2 + splSpan()"';
 
     /** Ang bahagi ng $html mula sa $from hanggang bago ang susunod na $to; parehong dapat naroon. */
     private function between(string $html, string $from, string $to): string
@@ -460,7 +466,7 @@ class SuppliersGroupTest extends ItemTestCase
     /** Ang table ng suppliers view sa render ng CEO (hanggang sa footnote nito: may mga table sa loob ng mga cell). */
     private function suppliersTable(): string
     {
-        return $this->between($this->render('ceo', true, true), '<table class="spl-table">', 'Drag headers to reorder');
+        return $this->between($this->render('ceo', true, true), '<table class="spl-table"', 'Drag headers to reorder');
     }
 
     /** Ang item-row template: mula sa row hanggang sa paulit-ulit na header ng bawat page. */
@@ -495,7 +501,7 @@ class SuppliersGroupTest extends ItemTestCase
 
         // Page, Item at ang template ng ibang column ay sumasakop sa dalawang row; buo pa rin ang sort at drag.
         $cells = preg_split('/<th(?=[\s>])/', $head);
-        foreach (["@click=\"sb('page_name')\"" => 'spl-c1', "@click=\"sb('item_name')\"" => 'spl-c2', 'draggable="true"' => 'colDragStart($event, col.id)'] as $own => $also) {
+        foreach (["@click=\"sb('page_name')\"" => 'spl-c1', "@click=\"sb('item_name')\"" => 'spl-c2', 'draggable="true"' => 'fitDrop($event, col.id)'] as $own => $also) {
             $found = array_values(array_filter($cells, fn (string $cell) => str_contains($cell, $own)));
             $this->assertCount(1, $found, $own);
             $this->assertStringContainsString('rowspan="2"', strstr($found[0], '>', true), $own);
@@ -504,7 +510,7 @@ class SuppliersGroupTest extends ItemTestCase
 
         // Ang grupo ay kasinlapad ng listahan ng supplier, at ang pangalawang row ay isang sub-header kada supplier.
         $this->assertStringContainsString(self::GROUP_HEADER, $head);
-        $this->assertOrder(['<span>Item</span>', ':colspan="splSpan()">SUPPLIERS<', 'x-for="col in cols"', '<tr class="spl-h2">'], $head);
+        $this->assertOrder(['<span>Item</span>', ':colspan="splSpan()">SUPPLIERS<', 'x-for="col in fitCols"', '<tr class="spl-h2">'], $head);
 
         $second = $this->between($head, '<tr class="spl-h2">', '</tr>');
         $this->assertOrder([self::HEADER_FOR, '<th class="spl-sh" :title="c.full"', '<span x-text="c.header"></span>', '<template x-if="!splCols().length">', '<th class="spl-sh spl-sh-none">'], $second);
@@ -525,7 +531,7 @@ class SuppliersGroupTest extends ItemTestCase
             self::CELL_FOR,
             '<td class="spl-sc" @click.stop>',
             "<template x-for=\"C in [splCell(row.item_name, c.id)]\" :key=\"'spl-c-'+row.item_name+'-'+c.id\">",
-            "<template x-for=\"col in cols\" :key=\"'ic-'+row.item_name+'-'+col.id\">",
+            "<template x-for=\"col in fitCols\" :key=\"'ic-'+row.item_name+'-'+col.id\">",
         ], $row);
         foreach (['class="spl-sc spl-wait"', 'class="spl-sc spl-zero"', self::CELL_FOR, '<td class="spl-sc" @click.stop>', 'splCell('] as $once) {
             $this->assertSame(1, substr_count($row, $once), $once);
@@ -587,13 +593,13 @@ class SuppliersGroupTest extends ItemTestCase
         // lapad, o isang cell kada supplier ng parehong listahan (ang loop), o ang nag-iisang cell kapag walang supplier
         // (1 ang splSpan() noon).
         $kinds = [
-            'header row 1'   => [$this->spanExpressions($this->between($table, '<tr class="spl-h1">', 'x-for="col in cols"')), ['1', '1', 'splSpan()']],
+            'header row 1'   => [$this->spanExpressions($this->between($table, '<tr class="spl-h1">', 'x-for="col in fitCols"')), ['1', '1', 'splSpan()']],
             'item row, wait' => [$this->spanExpressions($this->between($row, self::WAIT_IF, self::ZERO_IF)), ['splSpan()']],
             'item row, zero' => [$this->spanExpressions($this->between($row, self::ZERO_IF, self::CELL_FOR)), ['1']],
             'item row, cell' => [$this->spanExpressions($this->between($row, self::CELL_FOR, "'ic-'")), ['1']],
             'page header'    => [$this->spanExpressions($pageHeader), ['1', '1', 'splSpan()']],
             'page row'       => [$this->spanExpressions($pageRow), ['1', '1', 'splSpan()']],
-            'TOTAL'          => [$this->spanExpressions($this->between($table, 'class="total-row"', 'x-for="col in cols"')), ['1', '1 + splSpan()']],
+            'TOTAL'          => [$this->spanExpressions($this->between($table, 'class="total-row"', 'x-for="col in fitCols"')), ['1', '1 + splSpan()']],
         ];
         foreach ($kinds as $kind => [$actual, $expected]) {
             $this->assertSame($expected, $actual, $kind);
@@ -613,7 +619,7 @@ class SuppliersGroupTest extends ItemTestCase
                 $this->assertGreaterThan(0, (int) $value, $value);
                 continue;
             }
-            $this->assertContains($value, ['splSpan()', '1 + splSpan()', 'cols.length + 2 + splSpan()'], $value);
+            $this->assertContains($value, ['splSpan()', '1 + splSpan()', 'fitCols.length + 2 + splSpan()'], $value);
         }
         $this->assertStringContainsString('splSpan(){ return ItemTableFit.groupSpan(this.splCols().length); },', $this->render('ceo', true, true));
 
@@ -649,7 +655,11 @@ class SuppliersGroupTest extends ItemTestCase
         $fit = (string) preg_replace('~//.*$~m', '', file_get_contents(public_path('js/item-table-fit.js')));
         $this->assertSame(1, substr_count($fit, 'cell.cheapest = quote.cheapest === true;'));
         $this->assertSame(2, preg_match_all('/\bcheapest\b\s*[:=](?!=)/', $fit));
-        foreach (['Math.min', 'Math.max'] as $never) $this->assertStringNotContainsString($never, $fit, $never);
+        $cell = $this->between($fit, 'function supplierCell(', 'function noSupplier(');
+        foreach (['Math.min', 'Math.max', '.sort(', ' < ', ' > ', '<=', '>='] as $never) {
+            // Ang nag-iisang paghahambing sa function ay "may cost ba ang PO" (> 0), hindi presyo laban sa presyo.
+            $this->assertStringNotContainsString($never, str_replace('Number(p.unit_cost) > 0', '', $cell), $never);
+        }
     }
 
     public function test_S_15_10_the_cells_and_the_warning_are_bound_to_the_loaded_state(): void
@@ -714,7 +724,7 @@ class SuppliersGroupTest extends ItemTestCase
     {
         $html = $this->render('ceo', true, true);
         $present = [
-            'x-for="col in cols" :key="col.id"', '@dragstart="colDragStart($event, col.id)"', "@click=\"sb('page_name')\"",
+            'x-for="col in fitCols" :key="col.id"', '@dragstart="colDragStart($event, col.id)"', "@click=\"sb('page_name')\"",
             "x-text=\"'HOLD '+Number(row.hold||0).toLocaleString()\"", 'class="expand-chev"', '@click.stop="toggleItemExpand(row.item_name)"',
             '@click="row.hasPages && toggleItemExpand(row.item_name)"', 'class="page-col-header"', 'class="page-expand-row"',
             '<td>TOTAL</td>', 'Drag headers to reorder', '@click="setWorklist(c.key)"', "'kabuuan: ' + num(W.hold_units)",
@@ -745,7 +755,13 @@ class SuppliersGroupTest extends ItemTestCase
         }
     }
 
-    public function test_S_21_1_each_loader_is_called_once_and_the_new_templates_fetch_nothing(): void
+    /** Ang katawan ng isang method ng script ng view: mula sa pangalan nito hanggang bago ang kasunod na method. */
+    private function method(string $name, string $next): string
+    {
+        return $this->between(str_replace("\r\n", "\n", file_get_contents(resource_path(self::JS_FILE))), "      {$name}", "      {$next}");
+    }
+
+    public function test_S_21_1_S_42_5_each_loader_is_called_once_and_only_the_drag_save_sends_a_request(): void
     {
         $html = $this->render('ceo', true, true);
         $this->assertSame(1, substr_count($html, 'this.loadItemSuppliers(),'));
@@ -753,13 +769,244 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertSame(1, substr_count($html, 'this.loadItemSuppliers('), 'tinatawag lang sa init');
         $this->assertSame(1, substr_count($html, 'this.loadItemQuotes('), 'tinatawag lang sa init');
 
-        $this->assertFileExists(resource_path(self::JS_FILE));
-        foreach ([self::TABLE_FILE, self::JS_FILE] as $file) {
-            $source = file_get_contents(resource_path($file));
-            $this->assertStringNotContainsString('fetch(', $source, $file);
-            $this->assertStringNotContainsString('XMLHttpRequest', $source, $file);
-            // Dalawang link lang: ang kinopyang link ng photo page, at ang page kung saan idinadagdag ang supplier.
-            $this->assertSame([], array_values(array_diff($this->routesIn($source), ["route('item.photo')", "route('finance.supply.index')"])), $file);
+        // Ang table: walang request; tatlong link lang (photo page, Finance → Supply nang dalawang beses, column settings).
+        $table = file_get_contents(resource_path(self::TABLE_FILE));
+        $this->assertStringNotContainsString('fetch(', $table);
+        $this->assertStringNotContainsString('XMLHttpRequest', $table);
+        $this->assertSame(
+            ["route('owner.column-settings')", "route('finance.supply.index')", "route('finance.supply.index')", "route('item.photo')"],
+            $this->routesIn($table)
+        );
+
+        // Ang script ng view: iisang request, ang save ng ayos pagkatapos ng drag. Ang panel, ang mga set, ang switch
+        // ng period at ang fit mismo ay walang request.
+        $js = str_replace("\r\n", "\n", file_get_contents(resource_path(self::JS_FILE)));
+        $this->assertStringNotContainsString('XMLHttpRequest', $js);
+        $this->assertSame(1, substr_count($js, 'fetch('));
+        $this->assertSame(["route('owner.column-settings.save')"], $this->routesIn($js));
+        $this->assertStringContainsString("fetch('{{ route('owner.column-settings.save') }}', {", $this->method('fitSaveOrder(shown){', '},' . "\n"));
+        $quiet = [
+            'fitInit(el){' => 'fitResized(el){', 'fitResized(el){' => 'fitRun(){', 'fitRun(){' => 'fitLabel(id){', 'fitPick(name){' => 'fitToggle(id){',
+            'fitToggle(id){' => 'fitSetPeriod(key){', 'fitSetPeriod(key){' => 'fitPct(row, col, kind){',
+        ];
+        foreach ($quiet as $name => $next) {
+            $body = $this->method($name, $next);
+            foreach (['fetch(', 'saveCols', 'fitSaveOrder', 'column-settings'] as $never) {
+                $this->assertStringNotContainsString($never, $body, "{$name}: {$never}");
+            }
+        }
+    }
+
+    public function test_S_38_9_the_rows_follow_the_fitted_columns_through_one_colgroup(): void
+    {
+        $table = $this->tableSource();
+        // Fixed ang layout, at ang lapad ay galing sa <colgroup>: PAGE, ITEM, isa kada supplier, isa kada column na kasya.
+        $this->assertSame(1, substr_count($table, "<table class=\"spl-table\" :style=\"'table-layout:fixed;width:' + fitW.table + 'px;min-width:' + fitW.table + 'px;'\">"));
+        $group = $this->between($table, '<colgroup>', '</colgroup>');
+        $this->assertOrder([
+            "<col :style=\"'width:' + fitW.page + 'px'\">",
+            "<col :style=\"'width:' + fitW.item + 'px'\">",
+            "<template x-for=\"i in splSpan()\" :key=\"'cg-s-'+i\"><col :style=\"'width:' + fitW.supplier + 'px'\"></template>",
+            "<template x-for=\"col in fitCols\" :key=\"'cg-'+col.id\"><col :style=\"'width:' + (fitW.cols[col.id] || 0) + 'px'\"></template>",
+        ], $group);
+        $this->assertSame(4, substr_count($group, '<col '));
+
+        // Bawat klase ng row ay umiikot sa parehong listahan: header, item row, header ng page, page row, TOTAL, at ang colgroup.
+        $this->assertSame(6, substr_count($table, 'x-for="col in fitCols"'));
+        $this->assertSame(5, substr_count($table, self::FULL_WIDTH));
+        foreach (['col in cols"', 'cols.length', 'col.minw', 'min-width:110px', 'min-width:160px', 'colDrop(', 'saveCols('] as $gone) {
+            $this->assertStringNotContainsString($gone, str_replace('fitCols.length', '', $table), $gone);
+        }
+        // Ang fit ay tumatakbo sa sukat ng scroll area, mula sa simula.
+        $this->assertSame(1, substr_count($table, '<div id="scroll" class="spl-scroll" x-init="fitInit($el)"'));
+        $this->assertStringContainsString("this.fitCols = res.shown.filter(id => byId[id]).map(id => {", $this->method('fitRun(){', 'fitLabel(id){'));
+        $this->assertStringContainsString("this.fitW = ItemTableFit.widths(res, { suppliers:this.splSpan(), cols:all });", $this->method('fitRun(){', 'fitLabel(id){'));
+
+        // Walang nakasulat na lapad ng column sa styles ng view: ang colgroup lang ang nagtatakda.
+        $css = (string) preg_replace('~/\*.*?\*/~s', '', file_get_contents(resource_path(self::STYLE_FILE)));
+        foreach (['284px', '150px', '118px', '104px', 'width:76px', 'width:75px', 'width:120px', 'min-width:284', 'min-width:150'] as $gone) {
+            $this->assertStringNotContainsString($gone, $css, $gone);
+        }
+        $this->assertSame(5, substr_count($css, '!important'));
+    }
+
+    public function test_S_38_10_this_table_has_its_own_money_format_and_no_text_under_11px(): void
+    {
+        // Ang money() at md() ng page ay hindi nagalaw; ang table na ito ay may sarili.
+        $html = $this->render('ceo', true, true);
+        $this->assertSame(1, substr_count($html, "money(v){ return '₱'+Number(v||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); },"));
+        $this->assertSame(1, substr_count($html, "md(v)   { return (v==null||isNaN(Number(v)))?'—':this.money(v); },"));
+        $this->assertSame(1, substr_count($html, 'tmoney(v, total){ return ItemTableFit.tableMoney(v, total === true).text; },'));
+
+        // Item rows: ang kahating partial ay binibigyan ng pangalan ng formatter; sa ibang view, ang dati pa rin.
+        $table = $this->tableSource();
+        $this->assertSame(1, substr_count($table, "@include('item._agg_cells', ['rdtOneLine' => true, 'moneyFn' => 'tmoney', 'mdFn' => 'tmd'])"));
+        $item = $this->itemRow();
+        $this->assertSame(3, substr_count($item, 'x-text="tmoney('));
+        $this->assertSame(11, substr_count($item, 'tmd(A.'));
+        $this->assertSame(0, preg_match_all('/(?<![\w.])(?:money|md)\(/', $this->between($item, "'ic-'", '</tr>')));
+        $old = $this->between($this->render('ceo', true), 'class="item-row"', 'page-col-header');
+        $this->assertSame(4, substr_count($old, 'x-text="money('));
+        $this->assertSame(0, substr_count($old, 'tmoney'));
+
+        // Page rows at TOTAL ng table na ito: walang natirang money() / md(); ang malalaking kabuuan ay may buong halaga sa title.
+        $rest = substr($table, (int) strpos($table, '<!-- Dynamic columns -->'));
+        $this->assertSame(0, preg_match_all('/(?<![\w.])(?:money|md)\(/', $rest));
+        foreach (['adspent' => 'tmoney', 'projected_profit' => 'tmd', 'projected_profit_last_day' => 'tmd', 'projected_profit_last_3d' => 'tmd', 'projected_profit_last_7d' => 'tmd'] as $field => $fn) {
+            $this->assertSame(1, substr_count($rest, "x-text=\"{$fn}(tot().{$field}, true)\" :title=\"tmoneyTitle(tot().{$field})\""), $field);
+        }
+
+        // Walang font-size na mas maliit sa 11px sa styles ng view, maliban sa apat na selector na nagtataas ng maliliit
+        // na linya ng mga cell na kahati ng ibang view.
+        $css = (string) preg_replace('~/\*.*?\*/~s', '', file_get_contents(resource_path(self::STYLE_FILE)));
+        $lift = '.spl-table > tbody > tr:not(.page-expand-row) [style*="font-size:%s"] { font-size:11px !important; }';
+        foreach (['9px', '9.5px', '10px', '10.5px'] as $size) {
+            $this->assertSame(1, substr_count($css, sprintf($lift, $size)), $size);
+            $css = str_replace(sprintf($lift, $size), '', $css);
+        }
+        preg_match_all('/font-size:\s*([\d.]+)px/', $css, $m);
+        $this->assertGreaterThan(30, count($m[1]));
+        $this->assertGreaterThanOrEqual(11.0, min(array_map('floatval', $m[1])));
+        // Ang mga bagong piraso ng table (bar, header, cell ng supplier) ay walang nakasulat na mas maliit sa 11px.
+        $own = $this->between($table, '<div class="spl-bar"', "'ic-'");
+        preg_match_all('/font-size:\s*([\d.]+)px/', $own, $inline);
+        $this->assertGreaterThanOrEqual(11.0, min(array_map('floatval', $inline[1])));
+    }
+
+    public function test_S_39_1_S_39_5_the_columns_button_and_its_panel(): void
+    {
+        $html = $this->normalise($this->render('ceo', true, true));
+        $bar = $this->between($html, '<div class="spl-bar"', '<!-- Scroll area -->');
+
+        // Ang button: "+N columns", may aria-expanded; Esc ang nagsasara ng panel.
+        $this->assertStringContainsString('<div class="spl-bar" @keydown.escape.window="fitPanel = false">', $bar);
+        $this->assertOrder([
+            '<button type="button" class="spl-more" aria-haspopup="true" aria-controls="spl-cpanel"',
+            ":aria-expanded=\"fitPanel ? 'true' : 'false'\" @click=\"fitPanel = !fitPanel\">",
+            "<span class=\"spl-more-n\" x-text=\"'+' + fitRes.plusN\"></span> columns ",
+            '<div id="spl-cpanel" class="spl-cpanel" x-show="fitPanel"',
+        ], $bar);
+        // Ang panel: ilang pixel ang gamit, bawat column na wala na may lapad na kailangan nito, ang mga nakikita,
+        // ang dahilan kapag tinanggihan, ang link sa column settings at ang tala tungkol sa mga supplier.
+        $this->assertOrder([
+            "(fitRes.used + ' of ' + fitRes.box + ' px used, ' + fitRes.spare + ' px free')",
+            '<div class="spl-cp-msg" role="status" x-text="fitMsg"></div>',
+            "<template x-for=\"id in fitRes.away\" :key=\"'cp-a-'+id\">",
+            '@click="fitToggle(id)"',
+            "x-text=\"ItemTableFit.minWidthOf(id) + ' px'\"",
+            "<template x-for=\"id in fitRes.shown\" :key=\"'cp-s-'+id\">",
+            '<a href="APPROOT/owner/column-settings" target="_blank" rel="noopener">Column settings</a>',
+            'Supplier columns follow the list in Finance → Supply.',
+            '<a href="APPROOT/finance/supply" target="_blank" rel="noopener">+ Add Supplier</a>',
+        ], $bar);
+        // Text lang ang bawat pangalan ng column sa panel.
+        $this->assertSame(2, substr_count($bar, '<span class="spl-cp-n" x-text="fitLabel(id)"></span>'));
+
+        // Ang pinili sa panel ay para sa pagbisitang ito lang: hindi ito isinusulat saanman, at walang request.
+        $js = str_replace("\r\n", "\n", file_get_contents(resource_path(self::JS_FILE)));
+        preg_match_all("/localStorage\.setItem\('([^']+)'/", $js, $stored);
+        $this->assertSame(['item_col_set_v1', 'private_col_order_v1'], $stored[1]);
+        $toggle = $this->method('fitToggle(id){', 'fitSetPeriod(key){');
+        foreach (['localStorage', 'fetch(', '__OWNER_PRIVATE_COLS__'] as $never) $this->assertStringNotContainsString($never, $toggle, $never);
+        $this->assertStringContainsString("if (no) { this.fitMsg = this.fitLabel(id) + ': ' + no.reason; return; }", $toggle);
+        $this->assertStringContainsString('fitOps: [],', $js);
+    }
+
+    public function test_S_40_1_S_40_3_the_set_is_remembered_in_the_browser_and_never_written_to_the_server(): void
+    {
+        $bar = $this->between($this->render('ceo', true, true), '<div class="spl-bar"', '<!-- Scroll area -->');
+        $this->assertOrder([
+            '<span class="spl-seg" role="group" aria-label="Column set">',
+            "<template x-for=\"s in ItemTableFit.setNames()\" :key=\"'set-'+s\">",
+            ":aria-pressed=\"fitSet === s ? 'true' : 'false'\" @click=\"fitPick(s)\" x-text=\"s\"></button>",
+        ], $bar);
+
+        // Binabasa sa simula at isinusulat sa pagpili, laging sa pamamagitan ng readSet (eksaktong pangalan lang ang tinatanggap).
+        $init = $this->method('fitInit(el){', 'fitResized(el){');
+        $this->assertOrder(["stored = localStorage.getItem('item_col_set_v1');", 'this.fitSet = ItemTableFit.readSet(stored);'], $init);
+        $pick = $this->method('fitPick(name){', 'fitToggle(id){');
+        $this->assertOrder(['this.fitSet = ItemTableFit.readSet(name);', "localStorage.setItem('item_col_set_v1', this.fitSet);", 'this.fitRun();'], $pick);
+        foreach (['fetch(', 'saveCols', '__OWNER_PRIVATE_COLS__', 'private_col_order_v1'] as $never) {
+            $this->assertStringNotContainsString($never, $pick, $never);
+        }
+        $this->assertStringContainsString("fitSet: 'Sourcing',", str_replace("\r\n", "\n", file_get_contents(resource_path(self::JS_FILE))));
+
+        // Ang setting sa server: ang nakatago roon ay dala ng page (kaya nakatago sa dalawang set), at hindi ito nagagalaw ng pagbukas ng page.
+        $setting = ['order' => ['hold', 'adspent', 'cpp'], 'hidden' => ['adspent', 'promo'], 'visible_by_role' => []];
+        DB::table('app_settings')->updateOrInsert(['key' => 'owner_private_cols'], ['value' => json_encode($setting), 'created_at' => now(), 'updated_at' => now()]);
+        $before = DB::table('app_settings')->where('key', 'owner_private_cols')->value('value');
+        $this->actAs();
+        $body = $this->body('/item?layout=old');
+        $this->assertSame(1, preg_match('/window\.__OWNER_PRIVATE_COLS__ = (\{.*\});/', $body, $m));
+        $sent = json_decode($m[1], true);
+        $this->assertContains('adspent', $sent['hidden']);
+        $this->assertContains('promo', $sent['hidden']);
+        $this->assertSame(['hold', 'adspent', 'cpp'], array_slice($sent['order'], 0, 3));
+        $this->assertSame($before, DB::table('app_settings')->where('key', 'owner_private_cols')->value('value'));
+        // Ang fit ay nagsisimula sa this.cols, na wala na ang mga nakatago sa settings.
+        $this->assertStringContainsString('fitAll(){ return ItemTableFit.mergeProfPct(this.cols); },', $body);
+    }
+
+    public function test_S_40_5_S_19_7_a_drag_moves_shown_columns_only_and_saves_the_whole_order(): void
+    {
+        $table = $this->tableSource();
+        // Ang drag ng header ay sa mga nakikitang column, at dumadaan sa sariling drop ng table na ito.
+        $head = $this->between($table, '<thead>', '</thead>');
+        $this->assertOrder(['draggable="true"', '@dragstart="colDragStart($event, col.id)"', '@dragend="colDragEnd($event)"', '@drop.prevent="fitDrop($event, col.id)"'], $head);
+
+        $drop = $this->method('fitDrop(e, targetId){', 'fitSaveOrder(shown){');
+        $this->assertOrder(['const shown = this.fitCols.map(c => c.id);', 'shown.splice(to, 0, shown.splice(from, 1)[0]);', 'this.fitSaveOrder(shown);'], $drop);
+        $this->assertStringNotContainsString('this.cols', $drop);
+
+        // Ang ipinapadala ay ang buong ayos mula sa pure function: ang naka-save na ayos, ang mga nakikita (ang
+        // pinagsamang column bilang mga id nito), at ang buong catalog. Parehong ayos ang itinatabi sa browser.
+        $save = $this->method('fitSaveOrder(shown){', '},' . "\n");
+        $this->assertOrder([
+            'const order = ItemTableFit.orderToSave(',
+            'Array.isArray(saved) ? saved : [],',
+            'shown.map(id => (byId[id] && byId[id].members) ? byId[id].members : id),',
+            'this.defaultCols().map(c => c.id));',
+            "localStorage.setItem('private_col_order_v1', JSON.stringify(order));",
+            "body: JSON.stringify({ table: 'owner_private', order: order }),",
+        ], $save);
+        $this->assertStringNotContainsString('saveCols', $save);
+        // Ang saveCols() at colDrop() ng page (para sa ibang view) ay hindi pinalitan: tig-iisa pa rin sa render.
+        $html = $this->render('ceo', true, true);
+        foreach (['      saveCols() {', '      colDrop(e, targetId) {', '      initCols() {'] as $shared) {
+            $this->assertSame(1, substr_count($html, $shared), $shared);
+        }
+        foreach (['saveCols', 'colDrop', 'initCols'] as $name) {
+            $this->assertSame(0, preg_match('/^\s*' . $name . '\s*\(/m', file_get_contents(resource_path(self::JS_FILE))), $name);
+        }
+    }
+
+    public function test_S_41_1_S_41_2_prof_pct_is_one_column_with_a_period_switch(): void
+    {
+        $table = $this->tableSource();
+        $head = $this->between($table, '<thead>', '</thead>');
+        // Ang switch: isang button kada inaalok na period; ang pindot ay hindi umaabot sa sort ng header.
+        $this->assertOrder([
+            "<template x-if=\"col.id === 'prof_pct'\">",
+            '<span class="spl-per" role="group" aria-label="Prof.% period">',
+            "<template x-for=\"p in ItemTableFit.periodsOf(col.members)\" :key=\"'per-'+p.key\">",
+            ":aria-pressed=\"col.period === p.key ? 'true' : 'false'\"",
+            '@click.stop="fitSetPeriod(p.key)" x-text="p.label"></button>',
+        ], $head);
+        // Ang value ng aktibong period sa item row, page row at TOTAL.
+        $this->assertSame(1, substr_count($table, 'x-text="fitPct(A, col)"'));
+        $this->assertSame(1, substr_count($table, "x-text=\"fitPct(row, col, 'page')\""));
+        $this->assertSame(1, substr_count($table, 'x-text="fitPct(tot(), col)"'));
+
+        $js = str_replace("\r\n", "\n", file_get_contents(resource_path(self::JS_FILE)));
+        $this->assertStringContainsString("fitPeriod: '1m',", $js);
+        $this->assertStringContainsString('fitPct(row, col, kind){ return ItemTableFit.profPct(row, col.period, kind).text; },', $js);
+        // Ang sort ng column ay ang dati nang field ng aktibong period, at sumusunod ito kapag nagpalit ng period.
+        $this->assertStringContainsString('return Object.assign({}, c, { period:period, sort:ItemTableFit.profPct({}, period).sortKey });', $this->method('fitRun(){', 'fitLabel(id){'));
+        $period = $this->method('fitSetPeriod(key){', 'fitPct(row, col, kind){');
+        $this->assertStringContainsString('if (was && now && this.sortCol === was.sort) this.sortCol = now.sort;', $period);
+        foreach (['fetch(', 'localStorage', 'saveCols'] as $never) $this->assertStringNotContainsString($never, $period, $never);
+        foreach (['proj_pct_computed', 'proj_pct_last_7d', 'proj_pct_last_3d', 'proj_pct_last_day'] as $field) {
+            $this->assertStringContainsString("case '{$field}':", $this->render('ceo', true, true), $field);
         }
     }
 
@@ -846,9 +1093,9 @@ class SuppliersGroupTest extends ItemTestCase
         }
         $this->assertStringContainsString('this.openQuote(name, q);', file_get_contents(resource_path(self::JS_FILE)));
         $this->assertStringContainsString('await this.deleteQuote(name, q);', file_get_contents(resource_path(self::JS_FILE)));
-        foreach ([self::TABLE_FILE, self::JS_FILE] as $file) {
-            $this->assertStringNotContainsString('fetch(', file_get_contents(resource_path($file)), $file);
-        }
+        // Walang request ang table; ang nag-iisang request ng script ng view ay ang save ng ayos ng column (hindi ng quote).
+        $this->assertStringNotContainsString('fetch(', file_get_contents(resource_path(self::TABLE_FILE)));
+        $this->assertStringNotContainsString('item.quotes', file_get_contents(resource_path(self::JS_FILE)));
         foreach (['item.quotes.save', 'item.quotes.delete'] as $name) {
             $this->assertSame(1, substr_count($html, "fetch('" . route($name) . "', { method:'POST'"), $name);
         }
@@ -891,8 +1138,9 @@ class SuppliersGroupTest extends ItemTestCase
                 $this->assertStringNotContainsString($never, $source, "{$file}: {$never}");
             }
         }
-        $fit = file_get_contents(public_path('js/item-table-fit.js'));
-        foreach (['innerHTML', 'insertAdjacentHTML', 'outerHTML', 'document', 'window', '.note'] as $never) {
+        // Sa code ng pure functions (hindi kasama ang comments): walang DOM at walang global ng page.
+        $fit = (string) preg_replace('~//.*$~m', '', file_get_contents(public_path('js/item-table-fit.js')));
+        foreach (['innerHTML', 'insertAdjacentHTML', 'outerHTML', 'document', 'window', 'localStorage', '.note'] as $never) {
             $this->assertStringNotContainsString($never, $fit, "item-table-fit.js: {$never}");
         }
 
@@ -930,7 +1178,9 @@ class SuppliersGroupTest extends ItemTestCase
 
         // Ang mahabang unang salita ay pinuputol sa loob ng header: fixed ang lapad, nakatago ang sobra.
         $css = file_get_contents(resource_path(self::STYLE_FILE));
-        $this->assertStringContainsString('.spl-table > thead > tr.spl-h2 > th.spl-sh { width:76px; min-width:76px; max-width:76px; padding:5px 6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }', $css);
+        $this->assertStringContainsString('.spl-table > thead > tr.spl-h2 > th.spl-sh { padding:4px 6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }', $css);
+        // Ang lapad ng header ay ang sa column nito sa <colgroup> (fixed ang layout), kaya hindi ito napapalapad ng laman.
+        $this->assertStringContainsString("<col :style=\"'width:' + fitW.supplier + 'px'\">", $this->tableSource());
     }
 
     public function test_S_35_1_a_cell_shows_no_supplier_name(): void
@@ -1387,7 +1637,8 @@ class SuppliersGroupTest extends ItemTestCase
         $second = substr($suppliers, strrpos($suppliers, '<style'));
         $this->assertStringContainsString('.spl-table', substr($second, 0, strpos($second, '</style>')));
         // Dumadaan sa Blade ang partial: dapat buo pa rin ang mga @media nito sa render.
-        $this->assertStringContainsString('@media (min-width:768px) {', substr($second, 0, strpos($second, '</style>')));
+        $this->assertStringContainsString('@media (min-width:768px) and (max-width:1279px) {', substr($second, 0, strpos($second, '</style>')));
+        $this->assertStringContainsString('@media (min-width:1280px) {', substr($second, 0, strpos($second, '</style>')));
         $this->assertStringContainsString('@media (hover:none), (max-width:767px) {', substr($second, 0, strpos($second, '</style>')));
         $this->assertStringNotContainsString('.spl-', substr($suppliers, 0, strrpos($suppliers, '<style')));
 
@@ -1462,15 +1713,24 @@ class SuppliersGroupTest extends ItemTestCase
     public function test_S_17_6_the_sticky_item_column_sits_at_the_scroll_edge_and_is_opaque_on_every_row_kind(): void
     {
         $css = str_replace("\r\n", "\n", file_get_contents(resource_path(self::STYLE_FILE)));
-        $wide = substr($css, (int) strrpos($css, '@media (min-width:768px) {'));
-        $this->assertStringStartsWith('@media (min-width:768px) {', $wide);
-        $narrow = substr($css, 0, (int) strrpos($css, '@media (min-width:768px) {'));
+        // Ang block ng sticky na column: 768px hanggang 1279px lang. Mula 1280px kasya ang table at walang pahalang na scroll.
+        $media = '@media (min-width:768px) and (max-width:1279px) {';
+        $this->assertSame(1, substr_count($css, $media));
+        $this->assertSame(0, substr_count($css, '@media (min-width:768px) {'));
+        $wide = $this->between($css, $media, "\n  }\n");
+        $narrow = (string) preg_replace('~/\*.*?\*/~s', '', str_replace($wide, '', $css));
 
-        // Ang scroll area ng view na ito lang ang may class; ang rule ay nasa loob ng 768px block lang.
+        // Ang scroll area ng view na ito lang ang may class; ang padding nito ay tinatanggal sa loob ng block na iyon lang.
         $this->assertSame(1, substr_count($this->tableSource(), '<div id="scroll" class="spl-scroll"'));
         $this->assertStringContainsString('.spl-scroll { padding-left:0 !important; }', $wide);
-        $this->assertStringNotContainsString('spl-scroll', $narrow);
-        $this->assertStringNotContainsString('position:sticky', $narrow);
+        $this->assertSame(0, substr_count($narrow, 'padding-left:0 !important'));
+        // Sa labas ng block, walang dumidikit sa kaliwa: ang header lang ang sticky, sa itaas (ang buong thead).
+        $this->assertStringNotContainsString('left:0', $narrow);
+        $this->assertSame(1, substr_count($narrow, 'position:sticky'));
+        $this->assertStringContainsString('.spl-table > thead { position:sticky; top:0; z-index:30; }', $narrow);
+        $this->assertStringContainsString('.spl-table > thead > tr > th { position:static; }', $narrow);
+        // Mula 1280px: nakalaan lang ang puwang ng patayong scrollbar, para hindi magbago ang sinusukat na lapad.
+        $this->assertSame('.spl-scroll { scrollbar-gutter:stable; }', trim(substr($this->between($css, '@media (min-width:1280px) {', "\n  }\n"), strlen('@media (min-width:1280px) {'))));
         foreach (['item.index default' => $this->render('ceo', false), 'item.index old' => $this->render('ceo', true)] as $name => $html) {
             $this->assertStringNotContainsString('spl-scroll', $html, $name);
         }

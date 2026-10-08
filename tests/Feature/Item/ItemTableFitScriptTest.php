@@ -556,8 +556,12 @@ class ItemTableFitScriptTest extends TestCase
             'ceo_action', 'ceo_reason', 'category', 'stock', 'incoming', 'units_per_day', 'doi', 'order_qty', 'lifecycle',
         ];
         // Nakikita: ADSPENT, ang Prof.% (apat na id), DOI, at ang RTS / DEL / INT (tatlong id). Hinila ang DOI sa unahan.
-        $after = ['doi', 'adspent', 'proj_pct', 'proj_pct_7d', 'proj_pct_3d', 'proj_pct_1d', 'jnt_rts', 'jnt_del', 'jnt_transit'];
-        $saved = $this->call('orderToSave', $catalog, $after, $catalog);
+        // Ang pinagsamang column ay ibinibigay bilang listahan ng mga id nito (dito, ayon sa ayos ng switch: 1M, 7D, 3D, 1D).
+        $dragged = ['doi', 'adspent', ['proj_pct', 'proj_pct_7d', 'proj_pct_3d', 'proj_pct_1d'], ['jnt_rts', 'jnt_del', 'jnt_transit']];
+        // Sa loob ng pinagsamang column, nananatili ang dati nilang pagkakasunod sa naka-save na ayos: hindi ito
+        // ginagalaw ng drag, dahil magkakahiwalay na column ang mga ito sa ibang page na bumabasa ng parehong ayos.
+        $after = ['doi', 'adspent', 'proj_pct', 'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d', 'jnt_rts', 'jnt_del', 'jnt_transit'];
+        $saved = $this->call('orderToSave', $catalog, $dragged, $catalog);
 
         // Walang nawala at walang nadoble.
         $this->assertCount(count($catalog), $saved);
@@ -632,8 +636,10 @@ class ItemTableFitScriptTest extends TestCase
         $this->assertNull($out[5]);
 
         // Ang ayos na ise-save ay apat pa ring id ang Prof.% (hindi ang pinagsamang column).
-        $saved = $this->call('orderToSave', ['adspent', 'proj_pct', 'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d', 'hold'], ['hold', 'proj_pct', 'proj_pct_7d', 'proj_pct_3d', 'proj_pct_1d', 'adspent'], []);
-        $this->assertSame(['hold', 'proj_pct', 'proj_pct_7d', 'proj_pct_3d', 'proj_pct_1d', 'adspent'], $saved);
+        $saved = $this->call('orderToSave', ['adspent', 'proj_pct', 'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d', 'hold'], ['hold', ['proj_pct', 'proj_pct_7d', 'proj_pct_3d', 'proj_pct_1d'], 'adspent'], []);
+        $this->assertSame(['hold', 'proj_pct', 'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d', 'adspent'], $saved);
+        // Ang header: puwedeng maputol ang mahabang label pagkatapos ng tuldok o slash at bago ang panaklong.
+        $this->assertSame(["Prof.​Profit​(1D)", "Benta/​araw", 'DOI'], array_column($this->js([['headLabel', 'Prof.Profit(1D)'], ['headLabel', 'Benta/araw'], ['headLabel', 'DOI']]), 'value'));
     }
 
     // ── Ang lapad ng bawat column ─────────────────────────────────────────────

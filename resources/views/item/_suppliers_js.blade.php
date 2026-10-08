@@ -144,3 +144,141 @@
       splSync(){
         if (this.splCard.mode === 'form' && this.quoteForm.key === null) this.splClose(true);
       },
+
+      // ── Ang fit: aling mga column ang kasya sa lapad ng kahon ng table ─────────────────────────────────
+      // Ang this.cols ay hindi ginagalaw dito (ito pa rin ang lahat ng column na hindi nakatago sa settings, ayon
+      // sa naka-save na ayos). Ang table na ito ay umiikot sa fitCols: ang mga column na kasya ngayon. Ang
+      // pagpapasya (set, fit, panel) at ang mga lapad ay nasa ItemTableFit, kung saan nasusubok ang mga ito.
+      fitSet: 'Sourcing',      // ang set na naka-save sa browser na ito (item_col_set_v1)
+      fitPeriod: '1m',         // ang period ng Prof.% column
+      fitOps: [],              // ang mga pinili sa panel sa pagbisitang ito: [{ id, on }], ayon sa pagkakasunod. Hindi sine-save.
+      fitMsg: '',              // ang dahilan kapag tinanggihan ang pagbabalik ng isang column
+      fitPanel: false,
+      fitBox: 0, fitWin: 0,    // ang huling sukat ng kahon at ng window na ginamit ng fit
+      fitPrevBox: 0, fitAt: 0, // ang sukat bago iyon at kung kailan: para sa bantay laban sa pabalik-balik na sukat
+      fitRes: { set:'Sourcing', mode:'scroll', shown:[], away:[], plusN:0, used:0, spare:null, scrolls:true, refused:[], box:0 },
+      fitW: { page:168, item:96, supplier:72, cols:{}, table:0 },
+      fitCols: [],
+      // Lahat ng column na puwedeng ipakita, iisa na ang Prof.% (iisa na rin ang RTS / DEL / INT mula sa initCols).
+      fitAll(){ return ItemTableFit.mergeProfPct(this.cols); },
+      fitState(ops){
+        return { box:this.fitBox, win:this.fitWin, suppliers:this.splSpan(), cols:this.fitAll(), set:this.fitSet, ops:ops };
+      },
+      // Ang lapad na puwedeng gamitin ng table: ang loob ng scroll area, bawas ang padding nito at ang border ng
+      // card. Bawas pa ng 1px: buong numero ang clientWidth, kaya ang kalahating pixel ay hindi dapat magpalabas ng
+      // scrollbar sa ilalim.
+      fitMeasure(el){
+        const cs = getComputedStyle(el);
+        const card = el.querySelector('.card');
+        const cc = card ? getComputedStyle(card) : null;
+        const edge = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0)
+          + (cc ? (parseFloat(cc.borderLeftWidth) || 0) + (parseFloat(cc.borderRightWidth) || 0) : 0);
+        return Math.max(0, Math.floor(el.clientWidth - edge) - 1);
+      },
+      // Isang beses sa simula (x-init ng scroll area). Pagkatapos: kapag nagbago ang laki ng scroll area (window,
+      // zoom, scrollbar) at kapag dumating ang listahan ng supplier. Hindi ito effect: tinatawag lang ito ng mga
+      // pangyayaring iyon, kaya ang sarili nitong sinusulat ay hindi nagpapatakbo nito ulit.
+      fitInit(el){
+        let stored = null;
+        try { stored = localStorage.getItem('item_col_set_v1'); } catch (e) { /* walang storage: Sourcing */ }
+        this.fitSet = ItemTableFit.readSet(stored);
+        this.fitBox = this.fitMeasure(el);
+        this.fitWin = window.innerWidth;
+        this.fitRun();
+        if (typeof ResizeObserver === 'function') new ResizeObserver(() => this.fitResized(el)).observe(el);
+        else window.addEventListener('resize', () => this.fitResized(el));
+        this.$watch('supplierList', () => this.fitRun());
+      },
+      // Ang scroll area ang sinusukat, hindi ang table: ang laki nito ay galing sa window, hindi sa laman nito.
+      // Ang nag-iisang paraan para baguhin ito ng fit mismo ay ang paglitaw o pagkawala ng patayong scrollbar
+      // (nag-iiba ang taas ng mga row). Dalawang bantay: (1) walang ginagawa kapag pareho ang sukat; (2) kapag
+      // bumalik agad ang sukat sa mas malapad na katatapos lang iwan, nananatili ang fit ng mas makitid — kasya
+      // iyon sa dalawang sukat, kaya hindi ito puwedeng magpabalik-balik.
+      fitResized(el){
+        const box = this.fitMeasure(el), win = window.innerWidth, now = Date.now();
+        if (box === this.fitBox && win === this.fitWin) return;
+        if (win === this.fitWin && box === this.fitPrevBox && box > this.fitBox && now - this.fitAt < 600) return;
+        this.fitPrevBox = this.fitBox;
+        this.fitBox = box; this.fitWin = win; this.fitAt = now;
+        this.fitRun();
+      },
+      fitRun(){
+        const all = this.fitAll();
+        const byId = Object.fromEntries(all.map(c => [c.id, c]));
+        const res = ItemTableFit.layout(this.fitState(this.fitOps));
+        this.fitRes = res;
+        this.fitW = ItemTableFit.widths(res, { suppliers:this.splSpan(), cols:all });
+        // Ang Prof.% column ay may dalang period, at ang sort nito ay ang dati nang field ng period na iyon.
+        this.fitCols = res.shown.filter(id => byId[id]).map(id => {
+          const c = byId[id];
+          if (id !== 'prof_pct') return c;
+          const period = ItemTableFit.pickPeriod(c.members, this.fitPeriod);
+          return Object.assign({}, c, { period:period, sort:ItemTableFit.profPct({}, period).sortKey });
+        });
+      },
+      fitLabel(id){
+        const c = this.fitAll().find(x => x.id === id);
+        return c ? c.label : id;
+      },
+      // Ang dalawang set: sa browser lang ito naaalala. Walang request, at hindi ginagalaw ang setting sa server.
+      fitPick(name){
+        this.fitSet = ItemTableFit.readSet(name);
+        this.fitOps = []; this.fitMsg = '';
+        try { localStorage.setItem('item_col_set_v1', this.fitSet); } catch (e) { /* walang storage: para sa pagbisitang ito lang */ }
+        this.fitRun();
+      },
+      // Panel: itago ang nakikitang column, o ibalik ang wala. Ang pagbabalik ay tinatanggihan kapag hindi kasya
+      // (sinasabi ang dalawang numero) at walang ibang gumagalaw. Para sa pagbisitang ito lang; walang request.
+      fitToggle(id){
+        const ops = this.fitOps.concat([{ id:id, on:!this.fitRes.shown.includes(id) }]);
+        const no = ItemTableFit.layout(this.fitState(ops)).refused.find(r => r.id === id);
+        if (no) { this.fitMsg = this.fitLabel(id) + ': ' + no.reason; return; }
+        this.fitMsg = ''; this.fitOps = ops;
+        this.fitRun();
+      },
+      // Ang period ng Prof.%: pinapalitan lang ang ipinapakitang value. Kapag sa Prof.% nakaayos ang table,
+      // sumusunod ang ayos sa bagong period. Walang request.
+      fitSetPeriod(key){
+        const was = this.fitCols.find(c => c.id === 'prof_pct');
+        this.fitPeriod = key;
+        this.fitRun();
+        const now = this.fitCols.find(c => c.id === 'prof_pct');
+        if (was && now && this.sortCol === was.sort) this.sortCol = now.sort;
+      },
+      fitPct(row, col, kind){ return ItemTableFit.profPct(row, col.period, kind).text; },
+      // Ang format ng pera ng table na ito lang; ang money() at md() ng page ay hindi ginagalaw.
+      tmoney(v, total){ return ItemTableFit.tableMoney(v, total === true).text; },
+      tmd(v, total){ return (v == null || isNaN(Number(v))) ? '—' : this.tmoney(v, total); },
+      tmoneyTitle(v){ return (v == null || isNaN(Number(v))) ? '' : ItemTableFit.tableMoney(v, true).title; },
+      // ── Drag ng header: sa mga nakikitang column lang ──────────────────────────────────────────────────
+      // Ang ise-save ay ang BUONG ayos: ang mga nakikita lang ang nagpapalitan ng puwesto; ang mga lumipat at ang
+      // mga nakatago ay nananatili sa puwesto nila, at walang catalog id na nawawala. Kahati ng ibang page ang
+      // setting na ito, kaya hindi puwedeng ang nakikita lang ang ipadala bilang buong ayos.
+      fitDrop(e, targetId){
+        const shown = this.fitCols.map(c => c.id);
+        const from = shown.indexOf(this.dragSrc), to = shown.indexOf(targetId);
+        this.dragSrc = this.dragOver = null;
+        if (from < 0 || to < 0 || from === to) return;
+        shown.splice(to, 0, shown.splice(from, 1)[0]);
+        this.fitSaveOrder(shown);
+      },
+      fitSaveOrder(shown){
+        const byId = Object.fromEntries(this.fitAll().map(c => [c.id, c]));
+        const cfg = window.__OWNER_PRIVATE_COLS__ || {};
+        let saved = Array.isArray(cfg.order) && cfg.order.length ? cfg.order : null;
+        if (!saved) { try { saved = JSON.parse(localStorage.getItem('private_col_order_v1')); } catch (e) { saved = null; } }
+        const order = ItemTableFit.orderToSave(
+          Array.isArray(saved) ? saved : [],
+          shown.map(id => (byId[id] && byId[id].members) ? byId[id].members : id),
+          this.defaultCols().map(c => c.id));
+        // Dito muna (para sumunod agad ang table), tapos sa server. Pareho ang ayos na ibinabalik ng reload.
+        window.__OWNER_PRIVATE_COLS__ = Object.assign({}, cfg, { order:order });
+        try { localStorage.setItem('private_col_order_v1', JSON.stringify(order)); } catch (e) { /* walang storage */ }
+        this.initCols();
+        this.fitRun();
+        fetch('{{ route('owner.column-settings.save') }}', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': this._csrf() },
+          body: JSON.stringify({ table: 'owner_private', order: order }),
+        }).catch(e => console.warn('column order save failed', e));
+      },

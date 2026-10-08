@@ -2,54 +2,128 @@
        defer: tapos na itong tumakbo bago magsimula ang Alpine. Ang ?v= ay galing sa laman ng file, kaya ang
        bagong release ay hindi kailanman nababasa mula sa lumang cache. --}}
   <script src="{{ asset('js/item-table-fit.js') }}?v={{ substr(md5_file(public_path('js/item-table-fit.js')), 0, 10) }}"></script>
+  {{-- Ang mga column ng table na ito: ang dalawang set (sa browser lang naaalala) at ang bilang ng mga column na
+       isang hakbang ang layo. Walang request dito at hindi ginagalaw ang column setting sa server: ang panel ay
+       para sa pagbisitang ito lang. Esc ang nagsasara ng panel. --}}
+  <div class="spl-bar" @keydown.escape.window="fitPanel = false">
+    <span class="spl-bar-l">Columns:</span>
+    <span class="spl-seg" role="group" aria-label="Column set">
+      <template x-for="s in ItemTableFit.setNames()" :key="'set-'+s">
+        <button type="button" :class="fitSet === s ? 'spl-seg-b spl-seg-on' : 'spl-seg-b'"
+                :aria-pressed="fitSet === s ? 'true' : 'false'" @click="fitPick(s)" x-text="s"></button>
+      </template>
+    </span>
+    <span class="spl-more-wrap" @click.outside="fitPanel = false">
+      <button type="button" class="spl-more" aria-haspopup="true" aria-controls="spl-cpanel"
+              :aria-expanded="fitPanel ? 'true' : 'false'" @click="fitPanel = !fitPanel">
+        <span class="spl-more-n" x-text="'+' + fitRes.plusN"></span> columns <span aria-hidden="true">▾</span>
+      </button>
+      <div id="spl-cpanel" class="spl-cpanel" x-show="fitPanel" style="display:none;" role="group" aria-label="Columns">
+        <div class="spl-cp-h">
+          <b>Columns</b>
+          <button type="button" class="spl-cp-x" aria-label="Close" @click="fitPanel = false">✕</button>
+        </div>
+        <div class="spl-cp-meter"
+             x-text="fitRes.mode === 'fit' && !fitRes.scrolls ? (fitRes.used + ' of ' + fitRes.box + ' px used, ' + fitRes.spare + ' px free') : 'The table scrolls sideways at this width'"></div>
+        <template x-if="fitMsg">
+          <div class="spl-cp-msg" role="status" x-text="fitMsg"></div>
+        </template>
+        <div class="spl-cp-t">One step away (<span x-text="fitRes.plusN"></span>): tap to show</div>
+        <ul class="spl-cp-list">
+          <template x-for="id in fitRes.away" :key="'cp-a-'+id">
+            <li>
+              <button type="button" class="spl-cp-i" aria-pressed="false" :title="'Show ' + fitLabel(id)" @click="fitToggle(id)">
+                <span class="spl-cp-n" x-text="fitLabel(id)"></span>
+                <span class="spl-cp-w" x-text="ItemTableFit.minWidthOf(id) + ' px'"></span>
+              </button>
+            </li>
+          </template>
+        </ul>
+        <div class="spl-cp-t">Shown (<span x-text="fitRes.shown.length"></span>): tap to hide</div>
+        <ul class="spl-cp-list">
+          <template x-for="id in fitRes.shown" :key="'cp-s-'+id">
+            <li>
+              <button type="button" class="spl-cp-i spl-cp-on" aria-pressed="true" :title="'Hide ' + fitLabel(id)" @click="fitToggle(id)">
+                <span class="spl-cp-n" x-text="fitLabel(id)"></span>
+                <span class="spl-cp-w" aria-hidden="true">✓</span>
+              </button>
+            </li>
+          </template>
+        </ul>
+        <div class="spl-cp-f">What you change here lasts until you reload. To hide a column for good:
+          <a href="{{ route('owner.column-settings') }}" target="_blank" rel="noopener">Column settings</a></div>
+        <div class="spl-cp-f">Supplier columns follow the list in Finance → Supply.
+          <a href="{{ route('finance.supply.index') }}" target="_blank" rel="noopener">+ Add Supplier</a></div>
+      </div>
+    </span>
+  </div>
   <!-- Scroll area -->
   {{-- Ang card ng supplier cells: Esc at click sa labas ang nagsasara (capture, dahil hinaharang ng mga cell ang
        click bago ito umakyat); sumusunod ito sa scroll ng table at sa pagbabago ng laki ng window (kung hindi,
        maiiwan ang naka-pin na card sa lumang puwesto); nawawala kapag sarado na ang form nito. --}}
-  <div id="scroll" class="spl-scroll" x-effect="splSync()" @scroll.passive="splScrolled()" @resize.window="splScrolled()"
+  <div id="scroll" class="spl-scroll" x-init="fitInit($el)" x-effect="splSync()" @scroll.passive="splScrolled()" @resize.window="splScrolled()"
        @keydown.escape.window="splEsc()" @click.window.capture="splOutside($event)">
     <div class="card">
-      <table class="spl-table">
+      {{-- Fixed ang layout: ang lapad ng bawat column ay ang nasa <colgroup>, na kinukuwenta ng fit mula sa sukat
+           ng scroll area. Kaya pareho ang lapad sa bawat klase ng row, at hindi lumalapad ang table dahil sa laman. --}}
+      <table class="spl-table" :style="'table-layout:fixed;width:' + fitW.table + 'px;min-width:' + fitW.table + 'px;'">
+        <colgroup>
+          <col :style="'width:' + fitW.page + 'px'">
+          <col :style="'width:' + fitW.item + 'px'">
+          <template x-for="i in splSpan()" :key="'cg-s-'+i"><col :style="'width:' + fitW.supplier + 'px'"></template>
+          <template x-for="col in fitCols" :key="'cg-'+col.id"><col :style="'width:' + (fitW.cols[col.id] || 0) + 'px'"></template>
+        </colgroup>
         <thead>
           <tr class="spl-h1">
             <!-- Fixed: Page (sortable) -->
             <th rowspan="2"
               :class="['sortable', 'spl-c1', ac('page_name') ? 'col-active' : '']"
-              style="text-align:left;min-width:110px;"
+              style="text-align:left;"
               @click="sb('page_name')"
             >
               <span>Page</span>
-              <span x-text="arr('page_name')" style="font-size:10px;"></span>
+              <span x-text="arr('page_name')" style="font-size:11px;"></span>
             </th>
             <!-- Fixed: Item (sortable) -->
             <th rowspan="2"
               :class="['sortable', 'spl-c2', ac('item_name') ? 'col-active' : '']"
-              style="text-align:left;min-width:160px;"
+              style="text-align:left;"
               @click="sb('item_name')"
             >
               <span>Item</span>
-              <span x-text="arr('item_name')" style="font-size:10px;"></span>
+              <span x-text="arr('item_name')" style="font-size:11px;"></span>
             </th>
 
             {{-- Ang grupo ng supplier: laging kasunod ng Item, hindi kasama sa reorder ng ibang column. --}}
             <th class="spl-grp" :colspan="splSpan()">SUPPLIERS</th>
 
             <!-- Draggable/reorderable columns -->
-            <template x-for="col in cols" :key="col.id">
+            <template x-for="col in fitCols" :key="col.id">
               <th rowspan="2"
                 draggable="true"
                 :class="[col.sort ? 'sortable' : '', col.sort && ac(col.sort) ? 'col-active' : '', dragOver===col.id ? 'drag-over' : '']"
-                :style="'text-align:'+col.align+';min-width:'+col.minw+'px'"
+                :style="'text-align:'+col.align"
                 @click="col.sort && sb(col.sort)"
                 @dragstart="colDragStart($event, col.id)"
                 @dragend="colDragEnd($event)"
                 @dragover.prevent="dragOver=col.id"
                 @dragleave="dragOver=null"
-                @drop.prevent="colDrop($event, col.id)"
+                @drop.prevent="fitDrop($event, col.id)"
               >
-                <span x-text="col.label"></span>
+                <span x-text="ItemTableFit.headLabel(col.label)"></span>
                 <template x-if="col.sort">
-                  <span x-text="arr(col.sort)" style="font-size:10px;"></span>
+                  <span x-text="arr(col.sort)" style="font-size:11px;"></span>
+                </template>
+                {{-- Prof.%: iisang column, apat na period. Ang pindot sa period ay hindi sort ng header (.stop) at
+                     walang request: pinapalitan lang nito ang ipinapakitang value. --}}
+                <template x-if="col.id === 'prof_pct'">
+                  <span class="spl-per" role="group" aria-label="Prof.% period">
+                    <template x-for="p in ItemTableFit.periodsOf(col.members)" :key="'per-'+p.key">
+                      <button type="button" :class="col.period === p.key ? 'spl-per-b spl-per-on' : 'spl-per-b'"
+                              :aria-pressed="col.period === p.key ? 'true' : 'false'"
+                              @click.stop="fitSetPeriod(p.key)" x-text="p.label"></button>
+                    </template>
+                  </span>
                 </template>
               </th>
             </template>
@@ -80,7 +154,7 @@
         <tbody class="msg-tbody">
 
           <template x-if="rows.length === 0 && !loading">
-            <tr><td :colspan="cols.length + 2 + splSpan()" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
+            <tr><td :colspan="fitCols.length + 2 + splSpan()" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
               No data for selected date.
             </td></tr>
           </template>
@@ -88,18 +162,18 @@
           @if(!empty($effectiveIsCEO))
           {{-- Walang natira sa napiling sourcing list (CEO LANG). --}}
           <template x-if="worklist.list !== 'lahat' && !itemGroups().length && !(rows.length === 0 && loading)">
-            <tr><td :colspan="cols.length + 2 + splSpan()" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
+            <tr><td :colspan="fitCols.length + 2 + splSpan()" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
                     x-text="worklist.error ? worklist.error : (worklist.loading || !worklist.loaded || !holdLoaded ? 'Loading…' : 'Walang item sa listahang ito.')"></td></tr>
           </template>
           @endif
           {{-- Walang natira sa napiling category (lahat ng role; kung walang sourcing list na sumasagot na). --}}
           <template x-if="categoryFilter !== '' && categoryColVisible() && (!effectiveIsCeo || worklist.list === 'lahat') && !itemGroups().length && !(rows.length === 0 && loading)">
-            <tr><td :colspan="cols.length + 2 + splSpan()" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
+            <tr><td :colspan="fitCols.length + 2 + splSpan()" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
                     x-text="!stock.loaded ? 'Loading…' : 'Walang item sa category na ito.'"></td></tr>
           </template>
 
           <template x-if="rows.length === 0 && loading">
-            <tr><td :colspan="cols.length + 2 + splSpan()" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
+            <tr><td :colspan="fitCols.length + 2 + splSpan()" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
               <span class="spin" style="margin-right:6px;"></span>Loading…
             </td></tr>
           </template>
@@ -326,9 +400,12 @@
                   </template>
                 </td>
               </template>
-              <template x-for="col in cols" :key="'ic-'+row.item_name+'-'+col.id">
+              <template x-for="col in fitCols" :key="'ic-'+row.item_name+'-'+col.id">
                 <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(A.projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(A.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(A.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(A.projected_profit_last_7d,7):'')">
-                  @include('item._agg_cells', ['rdtOneLine' => true])
+                  <template x-if="col.id === 'prof_pct'">
+                    <span style="font-weight:700;color:#111;" x-text="fitPct(A, col)"></span>
+                  </template>
+                  @include('item._agg_cells', ['rdtOneLine' => true, 'moneyFn' => 'tmoney', 'mdFn' => 'tmd'])
                 </td>
               </template>
             </tr>
@@ -340,15 +417,15 @@
                  EXPANDED page section so you don't lose track of which column
                  is which while scrolling. Display-only labels: walang sort
                  click / drag (yun lang sa main header). Sumusunod pa rin sa
-                 global `cols` order, kaya pag nag-reorder ka sa main header,
+                 ayos ng mga nakikitang column, kaya pag nag-reorder ka sa main header,
                  nag-uupdate din itong display. Hidden when collapsed. --}}
             <tr x-show="!row.__itemHeader && (expandedPages[row.page_name] || {}).open" class="page-col-header">
-              <th style="text-align:left;min-width:110px;">Page</th>
-              <th style="text-align:left;min-width:160px;">Item</th>
+              <th style="text-align:left;">Page</th>
+              <th style="text-align:left;">Item</th>
               <th :colspan="splSpan()"></th>
-              <template x-for="col in cols" :key="'ph-'+row.page_key+'-'+col.id">
-                <th :style="'text-align:'+col.align+';min-width:'+col.minw+'px'">
-                  <span x-text="col.label"></span>
+              <template x-for="col in fitCols" :key="'ph-'+row.page_key+'-'+col.id">
+                <th :style="'text-align:'+col.align">
+                  <span x-text="ItemTableFit.headLabel(col.label)"></span>
                 </th>
               </template>
             </tr>
@@ -428,12 +505,17 @@
               <td :colspan="splSpan()" class="spl-under"></td>
 
               <!-- Dynamic columns -->
-              <template x-for="col in cols" :key="col.id">
+              <template x-for="col in fitCols" :key="col.id">
                 <td :style="'text-align:'+col.align+';'+(col.id==='rts_set'&&editIdx!==idx&&row.rts_pct===null?'background:#fef2f2;':'')+(col.id==='item_val'&&editIdx!==idx&&row.item_value===null?'background:#fef2f2;':'')+(col.id==='proj_profit'?pbStyle(row.projected_profit,row):'')+(col.id==='proj_prof_1d'?pbStyleN(row.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(row.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(row.projected_profit_last_7d,7):'')+cellFormatStyle(col.id, cellValueFor(col, row), row)">
+
+                  <!-- prof_pct: ang Prof.% ng aktibong period (ang 1M ng page ay profit / gross) -->
+                  <template x-if="col.id === 'prof_pct'">
+                    <span style="font-weight:700;" x-text="fitPct(row, col, 'page')"></span>
+                  </template>
 
                   <!-- adspent -->
                   <template x-if="col.id==='adspent'">
-                    <span style="color:#111;font-weight:500;" x-text="money(row.adspent)"></span>
+                    <span style="color:#111;font-weight:500;" x-text="tmoney(row.adspent)"></span>
                   </template>
 
                   <!-- orders -->
@@ -448,7 +530,7 @@
 
                   <!-- cpp -->
                   <template x-if="col.id==='cpp'">
-                    <span style="color:#111;" x-text="md(row.cpp)"></span>
+                    <span style="color:#111;" x-text="tmd(row.cpp)"></span>
                   </template>
 
                   <!-- proceed -->
@@ -458,7 +540,7 @@
 
                   <!-- pcpp -->
                   <template x-if="col.id==='pcpp'">
-                    <span style="color:#111;" x-text="md(row.proceed_cpp)"></span>
+                    <span style="color:#111;" x-text="tmd(row.proceed_cpp)"></span>
                   </template>
 
                   <!-- TCPR (pending rate) — (1 − proceed/orders) × 100 -->
@@ -469,19 +551,19 @@
                   <!-- Breakeven CPP — derived from existing profit math at the
                        global target Proj.% (configurable via /owner/column-settings). -->
                   <template x-if="col.id==='breakeven_cpp'">
-                    <span :title="breakevenCppFor(row) === null ? 'Missing rts / item_value / price / orders' : ('Target ' + (window.__BREAKEVEN_PCT__ ?? 5) + '% Proj.% · actual CPP ' + md(row.cpp))"
-                          x-text="breakevenCppFor(row) === null ? '—' : md(breakevenCppFor(row))"></span>
+                    <span :title="breakevenCppFor(row) === null ? 'Missing rts / item_value / price / orders' : ('Target ' + (window.__BREAKEVEN_PCT__ ?? 5) + '% Proj.% · actual CPP ' + tmd(row.cpp))"
+                          x-text="breakevenCppFor(row) === null ? '—' : tmd(breakevenCppFor(row))"></span>
                   </template>
 
                   <!-- proj_profit — cell background handles color; bold text -->
                   <template x-if="col.id==='proj_profit'">
                     <span style="font-weight:700;" :style="'color:'+pbColor(row.projected_profit)"
-                          x-text="md(row.projected_profit)"></span>
+                          x-text="tmd(row.projected_profit)"></span>
                   </template>
 
                   <!-- per_order -->
                   <template x-if="col.id==='per_order'">
-                    <span style="color:#111;" x-text="md(row.proj_profit_per_order)"></span>
+                    <span style="color:#111;" x-text="tmd(row.proj_profit_per_order)"></span>
                   </template>
 
                   {{-- NP/O = projected_profit_last_day ÷ orders_last_day. Single-day
@@ -492,7 +574,7 @@
                     <template x-if="row.projected_profit_last_day !== null && row.orders_last_day > 0">
                       <span style="color:#111;font-weight:600;"
                             :style="'color:'+pbColor(row.projected_profit_last_day / row.orders_last_day)"
-                            x-text="md(row.projected_profit_last_day / row.orders_last_day)"
+                            x-text="tmd(row.projected_profit_last_day / row.orders_last_day)"
                             :title="'1D net profit ₱'+Number(row.projected_profit_last_day||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(row.orders_last_day||0)+' (end_date only)'"></span>
                     </template>
                     <template x-if="!(row.projected_profit_last_day !== null && row.orders_last_day > 0)">
@@ -505,7 +587,7 @@
                     <template x-if="row.projected_profit_last_3d !== null && row.orders_last_3d > 0">
                       <span style="font-weight:600;"
                             :style="'color:'+pbColor(row.projected_profit_last_3d / row.orders_last_3d)"
-                            x-text="md(row.projected_profit_last_3d / row.orders_last_3d)"
+                            x-text="tmd(row.projected_profit_last_3d / row.orders_last_3d)"
                             :title="'3D net profit ₱'+Number(row.projected_profit_last_3d||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(row.orders_last_3d||0)+' (last 3 days)'"></span>
                     </template>
                     <template x-if="!(row.projected_profit_last_3d !== null && row.orders_last_3d > 0)">
@@ -518,7 +600,7 @@
                     <template x-if="row.projected_profit_last_7d !== null && row.orders_last_7d > 0">
                       <span style="font-weight:600;"
                             :style="'color:'+pbColor(row.projected_profit_last_7d / row.orders_last_7d)"
-                            x-text="md(row.projected_profit_last_7d / row.orders_last_7d)"
+                            x-text="tmd(row.projected_profit_last_7d / row.orders_last_7d)"
                             :title="'7D net profit ₱'+Number(row.projected_profit_last_7d||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(row.orders_last_7d||0)+' (last 7 days)'"></span>
                     </template>
                     <template x-if="!(row.projected_profit_last_7d !== null && row.orders_last_7d > 0)">
@@ -531,7 +613,7 @@
                     <template x-if="row.projected_profit !== null && row.orders > 0">
                       <span style="font-weight:600;"
                             :style="'color:'+pbColor(row.projected_profit / row.orders)"
-                            x-text="md(row.projected_profit / row.orders)"
+                            x-text="tmd(row.projected_profit / row.orders)"
                             :title="'Range net profit ₱'+Number(row.projected_profit||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(row.orders||0)+' (entire selected range)'"></span>
                     </template>
                     <template x-if="!(row.projected_profit !== null && row.orders > 0)">
@@ -597,17 +679,17 @@
                   <!-- proj_prof_1d / 3d / 7d — peso totals, color-coded via pbColor like the range Proj.Profit. -->
                   <template x-if="col.id==='proj_prof_1d'">
                     <span style="font-weight:700;" :style="'color:'+pbColor(row.projected_profit_last_day)"
-                          x-text="md(row.projected_profit_last_day)"
+                          x-text="tmd(row.projected_profit_last_day)"
                           :title="row.projected_profit_last_day!==null ? '1D profit (end_date only) · orders '+(row.orders_last_day||0)+' · proceed '+(row.proceed_last_day||0) : 'No slice on end_date'"></span>
                   </template>
                   <template x-if="col.id==='proj_prof_3d'">
                     <span style="font-weight:700;" :style="'color:'+pbColor(row.projected_profit_last_3d)"
-                          x-text="md(row.projected_profit_last_3d)"
+                          x-text="tmd(row.projected_profit_last_3d)"
                           :title="row.projected_profit_last_3d!==null ? '3D profit (last 3 days) · orders '+(row.orders_last_3d||0)+' · proceed '+(row.proceed_last_3d||0) : 'No slice in last 3 days'"></span>
                   </template>
                   <template x-if="col.id==='proj_prof_7d'">
                     <span style="font-weight:700;" :style="'color:'+pbColor(row.projected_profit_last_7d)"
-                          x-text="md(row.projected_profit_last_7d)"
+                          x-text="tmd(row.projected_profit_last_7d)"
                           :title="row.projected_profit_last_7d!==null ? '7D profit (last 7 days) · orders '+(row.orders_last_7d||0)+' · proceed '+(row.proceed_last_7d||0) : 'No slice in last 7 days'"></span>
                   </template>
 
@@ -734,14 +816,14 @@
                     <span>
                       <template x-if="row.price !== null">
                         <div>
-                          <span style="color:#374151;" x-text="money(row.price)"></span>
+                          <span style="color:#374151;" x-text="tmoney(row.price)"></span>
                           <template x-if="row.price_min !== null">
                             <div style="font-size:9px;color:#94a3b8;"
-                                 x-text="'↓ ' + money(row.price_min)"></div>
+                                 x-text="'↓ ' + tmoney(row.price_min)"></div>
                           </template>
                           <template x-if="row.price_max !== null">
                             <div style="font-size:9px;color:#94a3b8;"
-                                 x-text="'↑ ' + money(row.price_max)"></div>
+                                 x-text="'↑ ' + tmoney(row.price_max)"></div>
                           </template>
                         </div>
                       </template>
@@ -757,7 +839,7 @@
                       <div style="flex:1;">
                         <template x-if="row.item_value !== null">
                           <div>
-                            <span style="color:#111;" x-text="money(row.item_value)"></span>
+                            <span style="color:#111;" x-text="tmoney(row.item_value)"></span>
                             <template x-if="row.item_value_source === 'cogs'">
                               <div style="font-size:9px;color:#cbd5e1;">cogs</div>
                             </template>
@@ -785,7 +867,7 @@
                     <span style="display:inline-flex;align-items:center;gap:4px;">
                       <div style="flex:1;">
                         <template x-if="row.item_value_ceo !== null && row.item_value_ceo !== undefined">
-                          <span style="color:#111;" x-text="money(row.item_value_ceo)"></span>
+                          <span style="color:#111;" x-text="tmoney(row.item_value_ceo)"></span>
                         </template>
                         <template x-if="row.item_value_ceo === null || row.item_value_ceo === undefined">
                           <span style="color:#fca5a5;font-style:italic;font-size:11px;" title="No CEO value set — profit calc shows — for this row.">—</span>
@@ -799,13 +881,13 @@
                   <!-- ship -->
                   <template x-if="col.id==='ship'">
                     <span style="color:#111;"
-                          x-text="row.shipping_fee !== null ? money(row.shipping_fee) : '—'"></span>
+                          x-text="row.shipping_fee !== null ? tmoney(row.shipping_fee) : '—'"></span>
                   </template>
 
                   <!-- cod_fee -->
                   <template x-if="col.id==='cod_fee'">
                     <span style="color:#111;"
-                          x-text="row.cod_fee !== null ? money(row.cod_fee) : '—'"></span>
+                          x-text="row.cod_fee !== null ? tmoney(row.cod_fee) : '—'"></span>
                   </template>
 
                   <!-- hold — daily HOLD snapshot (units) as-of end_date.
@@ -871,7 +953,7 @@
                  root child — <tbody> serves as that root). --}}
             <tr x-show="!row.__itemHeader && (expandedPages[row.page_name] || {}).open"
                 class="page-expand-row">
-              <td :colspan="cols.length + 2 + splSpan()" style="padding:0;">{{-- page + item + ang mga column ng supplier + cols --}}
+              <td :colspan="fitCols.length + 2 + splSpan()" style="padding:0;">{{-- page + item + ang mga column ng supplier + ang mga column na kasya ngayon --}}
                 @include('owner._private_expand_inline')
               </td>
             </tr>
@@ -884,10 +966,13 @@
             <tr class="total-row">
               <td>TOTAL</td>
               <td :colspan="1 + splSpan()"></td>
-              <template x-for="col in cols" :key="col.id">
+              <template x-for="col in fitCols" :key="col.id">
                 <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(tot().projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(tot().projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(tot().projected_profit_last_7d,7):'')">
+                  <template x-if="col.id === 'prof_pct'">
+                    <span style="font-weight:700;color:#111;" x-text="fitPct(tot(), col)"></span>
+                  </template>
                   <template x-if="col.id==='adspent'">
-                    <span x-text="money(tot().adspent)"></span>
+                    <span x-text="tmoney(tot().adspent, true)" :title="tmoneyTitle(tot().adspent)"></span>
                   </template>
                   <template x-if="col.id==='orders'">
                     <span x-text="num(tot().orders)"></span>
@@ -896,13 +981,13 @@
                     <span x-text="num(tot().orders_last_day)"></span>
                   </template>
                   <template x-if="col.id==='cpp'">
-                    <span style="color:#475569;" x-text="md(tot().cpp)"></span>
+                    <span style="color:#475569;" x-text="tmd(tot().cpp)"></span>
                   </template>
                   <template x-if="col.id==='proceed'">
                     <span x-text="num(tot().proceed_orders)"></span>
                   </template>
                   <template x-if="col.id==='pcpp'">
-                    <span style="color:#475569;" x-text="md(tot().proceed_cpp)"></span>
+                    <span style="color:#475569;" x-text="tmd(tot().proceed_cpp)"></span>
                   </template>
                   <template x-if="col.id==='tcpr'">
                     <span x-text="(tot().orders > 0) ? ((1 - tot().proceed_orders / tot().orders) * 100).toFixed(1) + '%' : '—'"></span>
@@ -911,25 +996,25 @@
                     <span style="color:#cbd5e1;">—</span>
                   </template>
                   <template x-if="col.id==='proj_profit'">
-                    <span style="font-weight:700;" x-text="md(tot().projected_profit)"></span>
+                    <span style="font-weight:700;" x-text="tmd(tot().projected_profit, true)" :title="tmoneyTitle(tot().projected_profit)"></span>
                   </template>
                   <template x-if="col.id==='per_order'">
-                    <span style="color:#111;" x-text="md(tot().proj_profit_per_order)"></span>
+                    <span style="color:#111;" x-text="tmd(tot().proj_profit_per_order)"></span>
                   </template>
                   <template x-if="col.id==='np_per_order'">
-                    <span style="color:#111;font-weight:700;" x-text="tot().np_per_order != null ? md(tot().np_per_order) : '—'"
+                    <span style="color:#111;font-weight:700;" x-text="tot().np_per_order != null ? tmd(tot().np_per_order) : '—'"
                           :title="tot().projected_profit_last_day != null ? '1D net profit ₱'+Number(tot().projected_profit_last_day||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(tot().orders_last_day||0) : ''"></span>
                   </template>
                   <template x-if="col.id==='np_per_order_3d'">
-                    <span style="font-weight:700;color:#111;" x-text="tot().np_per_order_3d != null ? md(tot().np_per_order_3d) : '—'"
+                    <span style="font-weight:700;color:#111;" x-text="tot().np_per_order_3d != null ? tmd(tot().np_per_order_3d) : '—'"
                           :title="tot().projected_profit_last_3d != null ? '3D net profit ₱'+Number(tot().projected_profit_last_3d||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(tot().orders_last_3d||0) : ''"></span>
                   </template>
                   <template x-if="col.id==='np_per_order_7d'">
-                    <span style="font-weight:700;color:#111;" x-text="tot().np_per_order_7d != null ? md(tot().np_per_order_7d) : '—'"
+                    <span style="font-weight:700;color:#111;" x-text="tot().np_per_order_7d != null ? tmd(tot().np_per_order_7d) : '—'"
                           :title="tot().projected_profit_last_7d != null ? '7D net profit ₱'+Number(tot().projected_profit_last_7d||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(tot().orders_last_7d||0) : ''"></span>
                   </template>
                   <template x-if="col.id==='np_per_order_1m'">
-                    <span style="font-weight:700;color:#111;" x-text="tot().np_per_order_1m != null ? md(tot().np_per_order_1m) : '—'"
+                    <span style="font-weight:700;color:#111;" x-text="tot().np_per_order_1m != null ? tmd(tot().np_per_order_1m) : '—'"
                           :title="tot().projected_profit != null ? 'Range net profit ₱'+Number(tot().projected_profit||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / orders '+(tot().orders||0)+' (entire range)' : ''"></span>
                   </template>
                   <template x-if="col.id==='proj_pct'">
@@ -953,13 +1038,13 @@
                           :title="tot().gross_sales_last_7d ? '7D profit ₱'+Number(tot().projected_profit_last_7d||0).toLocaleString('en-PH',{maximumFractionDigits:0})+' / gross ₱'+Number(tot().gross_sales_last_7d||0).toLocaleString('en-PH',{maximumFractionDigits:0}) : ''"></span>
                   </template>
                   <template x-if="col.id==='proj_prof_1d'">
-                    <span style="font-weight:700;" x-text="md(tot().projected_profit_last_day)"></span>
+                    <span style="font-weight:700;" x-text="tmd(tot().projected_profit_last_day, true)" :title="tmoneyTitle(tot().projected_profit_last_day)"></span>
                   </template>
                   <template x-if="col.id==='proj_prof_3d'">
-                    <span style="font-weight:700;" x-text="md(tot().projected_profit_last_3d)"></span>
+                    <span style="font-weight:700;" x-text="tmd(tot().projected_profit_last_3d, true)" :title="tmoneyTitle(tot().projected_profit_last_3d)"></span>
                   </template>
                   <template x-if="col.id==='proj_prof_7d'">
-                    <span style="font-weight:700;" x-text="md(tot().projected_profit_last_7d)"></span>
+                    <span style="font-weight:700;" x-text="tmd(tot().projected_profit_last_7d, true)" :title="tmoneyTitle(tot().projected_profit_last_7d)"></span>
                   </template>
                   <template x-if="!['adspent','orders','orders_1d','cpp','proceed','pcpp','tcpr','breakeven_cpp','proj_profit','per_order','np_per_order','np_per_order_3d','np_per_order_7d','np_per_order_1m','proj_pct','proj_pct_1d','proj_pct_3d','proj_pct_7d','proj_prof_1d','proj_prof_3d','proj_prof_7d'].includes(col.id)">
                     <span></span>

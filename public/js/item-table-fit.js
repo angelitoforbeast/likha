@@ -376,9 +376,13 @@
     list(full).concat(list(catalog)).forEach(function (id) {
       if (typeof id === 'string' && id !== '' && !seen[id]) { seen[id] = true; out.push(id); }
     });
+    // Ang pinagsamang column (RTS / DEL / INT, Prof.%) ay ibinibigay bilang listahan ng mga id nito: sabay silang
+    // lumilipat, pero nananatili ang pagkakasunod nila sa isa't isa gaya ng sa naka-save na ayos.
     var want = [], inWant = {};
-    list(shownAfter).forEach(function (id) {
-      if (typeof id === 'string' && seen[id] && !inWant[id]) { inWant[id] = true; want.push(id); }
+    list(shownAfter).forEach(function (unit) {
+      var ids = (Array.isArray(unit) ? unit : [unit]).filter(function (id) { return typeof id === 'string' && seen[id] && !inWant[id]; });
+      ids.sort(function (a, b) { return out.indexOf(a) - out.indexOf(b); });
+      ids.forEach(function (id) { if (!inWant[id]) { inWant[id] = true; want.push(id); } });
     });
     var k = 0;
     return out.map(function (id) { return inWant[id] ? want[k++] : id; });
@@ -403,8 +407,15 @@
     return { text: text, title: title };
   }
 
+  // Ang label ng header ay puwedeng maputol pagkatapos ng tuldok o slash at bago ang panaklong (zero-width space),
+  // para kasya sa dalawang linya ang mahabang pangalan sa makitid na column.
+  function headLabel(label) {
+    return String(label === null || label === undefined ? '' : label).replace(/([.\/])(?=\S)/g, '$1\u200B').replace(/(\S)\(/g, '$1\u200B(');
+  }
+
   var api = {
     FIT_FROM: FIT_FROM,
+    headLabel: headLabel,
     minWidthOf: minWidthOf,
     dropRankOf: dropRankOf,
     readSet: readSet,
