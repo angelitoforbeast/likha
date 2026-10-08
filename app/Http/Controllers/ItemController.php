@@ -216,6 +216,8 @@ class ItemController extends Controller
                     $seen[$k][$r->supplier_id] = true;
                     $map[$k][] = [
                         'supplier'   => $r->supplier,
+                        // Ang id ang pantukoy ng column ng supplier: puwedeng magkapareho ang pangalan ng dalawa.
+                        'supplier_id' => (int) $r->supplier_id,
                         'unit_cost'  => (float) $r->unit_cost,
                         'order_date' => (string) $r->order_date,
                         'order_no'   => $r->order_no,
