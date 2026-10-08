@@ -1041,6 +1041,24 @@ class AstraAddressRulesTest extends NightAstraTestCase
     private const LIPA_ANILAO       = ['BATANGAS', 'LIPA-CITY', 'ANILAO'];
     private const LIPA_ANILAO_LABAC = ['BATANGAS', 'LIPA-CITY', 'ANILAO-LABAC'];
     private const BUENAVISTA_POB_2  = ['AGUSAN-DEL-NORTE', 'AGUSAN-DEL-NORTE-BUENAVISTA', 'POBLACION 2'];
+    private const BACACAY_BASUD     = ['ALBAY', 'BACACAY', 'BASUD'];
+    private const BACACAY_VIN_BASUD = ['ALBAY', 'BACACAY', 'VINISITAHAN-BASUD (MAINLAND)'];
+    private const BAGUIO_MAGSAYSAY  = ['BENGUET', 'BAGUIO-CITY', 'MAGSAYSAY'];
+    private const BAGUIO_QUIRINO_M  = ['BENGUET', 'BAGUIO-CITY', 'QUIRINO-MAGSAYSAY'];
+    private const BAGUIO_DAGSIAN    = ['BENGUET', 'BAGUIO-CITY', 'DAGSIAN'];
+    private const BAGUIO_DAGSIAN_LO = ['BENGUET', 'BAGUIO-CITY', 'DAGSIAN LOWER'];
+    private const VIRAC_SIMAMLA     = ['CATANDUANES', 'VIRAC', 'SIMAMLA'];
+    private const VIRAC_SOGOD_SIM   = ['CATANDUANES', 'VIRAC', 'SOGOD-SIMAMLA'];
+    private const LEZO_SANTA_CRUZ   = ['AKLAN', 'LEZO', 'SANTA CRUZ'];
+    private const LEZO_SC_BIGAA     = ['AKLAN', 'LEZO', 'SANTA CRUZ BIGAA'];
+    private const SJDM_MUZON        = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'MUZON'];
+    private const SJDM_MUZON_WEST   = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'MUZON WEST'];
+    private const SJDM_BAGONG_BUHAY = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'BAGONG BUHAY'];
+    private const SJDM_BAGONG_BUH_2 = ['BULACAN', 'SAN-JOSE-DEL-MONTE-CITY', 'BAGONG BUHAY II'];
+    private const MOGPOG_MENDEZ     = ['MARINDUQUE', 'MOGPOG', 'MENDEZ'];
+    private const MOGPOG_V_MENDEZ   = ['MARINDUQUE', 'MOGPOG', 'VILLA MENDEZ'];
+    private const KALILANGAN_POB    = ['BUKIDNON', 'KALILANGAN', 'POBLACION'];
+    private const KALILANGAN_W_POB  = ['BUKIDNON', 'KALILANGAN', 'WEST POBLACION'];
 
     /** Lahat ng label ng city ng line, mula sa totoong list. */
     private function cityLabels(array $line): array
@@ -1232,6 +1250,10 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $this->assertConfirmTable([
             // Ang "4)" ay bilang ng listahan ng customer, hindi numero ng barangay.
             'the number of a numbered list' => ['1) Juan 2) 0917 3) Poblacion 4) Cotabato', self::COTABATO_POB_4, self::NONE],
+            'a list numbered with .)'       => ['3.) Poblacion 4.) Cotabato', self::COTABATO_POB_4, self::NONE],
+            'a list numbered with a colon'  => ['3: Poblacion 4: Cotabato', self::COTABATO_POB_4, self::NONE],
+            'a list numbered with ]'        => ['3] Poblacion 4] Cotabato', self::COTABATO_POB_4, self::NONE],
+            'a list numbered with a space before the bracket' => ['3 ) Poblacion 4 ) Cotabato', self::COTABATO_POB_4, self::NONE],
             'a line break'       => ["Brgy Poblacion\n2 pcs po", self::COTABATO_POB_2, self::NONE],
             'a comma'            => ['Brgy Poblacion, 2 pcs po', self::COTABATO_POB_2, self::NONE],
             'a dash with spaces' => ['Brgy Poblacion - 2 pcs po', self::COTABATO_POB_2, self::NONE],
@@ -1282,8 +1304,35 @@ class AstraAddressRulesTest extends NightAstraTestCase
     public function test_S_26_14_a_longer_barangay_name_of_the_city_around_the_hit_is_not_confirmed(): void
     {
         $this->assertLinesInList(self::VIRAC_SAN_VICENTE, self::VIRAC_DUGUI_SV, self::VIRAC_IBONG_SAPA);
+        $this->assertLinesInList(
+            self::BACACAY_BASUD, self::BACACAY_VIN_BASUD, self::BAGUIO_MAGSAYSAY, self::BAGUIO_QUIRINO_M, self::BAGUIO_DAGSIAN, self::BAGUIO_DAGSIAN_LO,
+            self::VIRAC_SIMAMLA, self::VIRAC_SOGOD_SIM, self::LEZO_SANTA_CRUZ, self::LEZO_SC_BIGAA, self::SJDM_MUZON, self::SJDM_MUZON_WEST,
+            self::LIPA_ANILAO, self::LIPA_ANILAO_LABAC, self::QC_HOLY_SPIRIT, self::MOGPOG_MENDEZ, self::MOGPOG_V_MENDEZ, self::KALILANGAN_POB, self::KALILANGAN_W_POB
+        );
 
         $this->assertConfirmTable([
+            // Ang unang bahagi ng mas mahabang pangalan ay nasa likod ng hangganan, BAGO ang hit.
+            'Vinisitahan - Basud for BASUD'  => ['Brgy Vinisitahan - Basud, Bacacay', self::BACACAY_BASUD, self::NONE],
+            'Quirino - Magsaysay'            => ['Quirino - Magsaysay, Baguio', self::BAGUIO_MAGSAYSAY, self::NONE],
+            'Sogod/Simamla'                  => ['Sogod/Simamla', self::VIRAC_SIMAMLA, self::NONE],
+            'Sogod, Simamla'                 => ['Sogod, Simamla', self::VIRAC_SIMAMLA, self::NONE],
+            'Sogod, en dash, Simamla'        => ["Sogod \u{2013} Simamla", self::VIRAC_SIMAMLA, self::NONE],
+            'Sogod, line break, Simamla'     => ["Sogod\nSimamla", self::VIRAC_SIMAMLA, self::NONE],
+            // Isang letra lang ang mali sa dagdag na salita ng mas mahabang pangalan.
+            'Anilao Labak for ANILAO'        => ['Brgy Anilao Labak, Lipa', self::LIPA_ANILAO, self::NONE],
+            'Santa Cruz Begaa'               => ['Santa Cruz Begaa, Lezo', self::LEZO_SANTA_CRUZ, self::NONE],
+            'Dagsian Luwer'                  => ['Dagsian Luwer, Baguio', self::BAGUIO_DAGSIAN, self::NONE],
+            'Muzon Wet'                      => ['Muzon Wet, SJDM', self::SJDM_MUZON, self::NONE],
+            // Ang "vill" ay hindi Roman numeral dito: VILLA MENDEZ na kulang ng isang letra.
+            'Vill Mendez'                    => ['Vill Mendez, Mogpog', self::MOGPOG_MENDEZ, self::NONE],
+            // Kumpirmado pa rin: ang mga salita sa paligid ay hindi bumubuo ng ibang pangalan.
+            'the city before the name'       => ['Quezon City, Holy Spirit', self::QC_HOLY_SPIRIT, self::PHRASE],
+            'the town before the name'       => ['Virac, Simamla', self::VIRAC_SIMAMLA, self::PHRASE],
+            'the city after the name'        => ['Brgy Anilao, Lipa City', self::LIPA_ANILAO, self::PHRASE],
+            // "St" ay hindi WEST: dalawang letra ang kulang, hindi isa.
+            'a street before the name'       => ['12 Rizal St Poblacion, Kalilangan', self::KALILANGAN_POB, self::PHRASE],
+            'the longer name, one letter off' => ['Brgy Anilao Labak, Lipa', self::LIPA_ANILAO_LABAC, ['result' => 'near', 'score' => 91]],
+            'the longer name with a space'   => ['Sogod Simamla, Virac', self::VIRAC_SOGOD_SIM, self::PHRASE],
             'Dugui San Vicente for SAN VICENTE' => ['Dugui San Vicente, Virac', self::VIRAC_SAN_VICENTE, self::NONE],
             'a typo in the name itself'         => ['Dugui San Vicnte, Virac', self::VIRAC_SAN_VICENTE, self::NONE],
             'the name inside a parenthesis'     => ['San Vicente Sur, Virac', self::VIRAC_SAN_VICENTE, self::NONE],
@@ -1310,7 +1359,8 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $this->assertLinesInList(
             self::SJDM_FATIMA, self::SJDM_FATIMA_2, self::SJDM_SAN_RAFAEL, self::SJDM_SAN_RAFAEL_1, self::SJDM_SAN_RAFAEL_3, self::SJDM_SAN_RAFAEL_4,
             self::SJDM_POBLACION, self::SJDM_POBLACION_1, self::SJDM_SAN_ROQUE, self::DASMA_ZONE_1, self::DASMA_ZONE_1B,
-            self::LIPA_POB_9, self::LIPA_POB_9A, self::LIPA_ANILAO, self::LIPA_ANILAO_LABAC, self::QC_HOLY_SPIRIT
+            self::LIPA_POB_9, self::LIPA_POB_9A, self::LIPA_ANILAO, self::LIPA_ANILAO_LABAC, self::QC_HOLY_SPIRIT,
+            self::SJDM_BAGONG_BUHAY, self::SJDM_BAGONG_BUH_2
         );
         // Walang SAN ROQUE na may numero sa city na ito: ang "2 pcs" pagkatapos nito ay hindi ibang barangay.
         foreach ($this->cityLabels(self::SJDM_SAN_ROQUE) as $label) {
@@ -1327,6 +1377,10 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'Fatima Dos', 'Fatima Two', 'Fatima No. 2', 'Fatima no 2',
             // Simbolo lang sa pagitan ng pangalan at ng numero.
             'Fatima | 2', 'Fatima * 2', "Fatima \u{200B} 2", "Fatima \u{1F600} 2",
+            // May sero sa unahan ang numero sa likod ng hangganan.
+            'Fatima - 02', 'Fatima (02)', 'Fatima, 02', 'Fatima No. 02',
+            // Pang-ilan, o "nos.".
+            'Fatima ikalawa', 'Fatima pangalawa', 'Fatima second', 'Fatima - 2nd', 'Fatima nos. 2',
         ] as $text) {
             $rows[$text] = [$text, self::SJDM_FATIMA, self::NONE];
         }
@@ -1346,6 +1400,13 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'San Rafael 1 & 3'          => ['San Rafael 1 & 3', self::SJDM_SAN_RAFAEL_1, self::NONE],
             'San Rafael 1 or 3'         => ['San Rafael 1 or 3', self::SJDM_SAN_RAFAEL_1, self::NONE],
             'San Rafael 1 / 3'          => ['San Rafael 1 / 3', self::SJDM_SAN_RAFAEL_1, self::NONE],
+            'Fatima 2 to 3'             => ['Fatima 2 to 3', self::SJDM_FATIMA_2, self::NONE],
+            'Fatima 2 hanggang 3'       => ['Fatima 2 hanggang 3', self::SJDM_FATIMA_2, self::NONE],
+            'Fatima 2 and/or 3'         => ['Fatima 2 and/or 3', self::SJDM_FATIMA_2, self::NONE],
+            'Fatima 2 or Tres'          => ['Fatima 2 or Tres', self::SJDM_FATIMA_2, self::NONE],
+            'Fatima 2 or Dos'           => ['Fatima 2 or Dos', self::SJDM_FATIMA_2, self::NONE],
+            // "11" na na-type para sa II.
+            'Bagong Buhay - 11'         => ['Bagong Buhay - 11', self::SJDM_BAGONG_BUHAY, self::NONE],
             // Kumpirmado pa rin: walang kapatid na nabubuo ang kasunod na salita, o nasa kasunod na linya na ang dami.
             'San Roque, 2 pcs'              => ['Brgy San Roque, 2 pcs po', self::SJDM_SAN_ROQUE, self::PHRASE],
             'Holy Spirit, Quezon City'      => ['Holy Spirit, Quezon City', self::QC_HOLY_SPIRIT, self::PHRASE],
