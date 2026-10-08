@@ -85,7 +85,7 @@ class SuppliersGroupTest extends ItemTestCase
         ]);
     }
 
-    private function render(string $viewer, bool $layoutOld, bool $layoutSuppliers = false): string
+    private function render(string $viewer, bool $layoutOld, bool $layoutSuppliers = false, ?array $columnSetting = null): string
     {
         $v = [
             'ceo'              => [true, false, 'ceo', true],
@@ -100,7 +100,7 @@ class SuppliersGroupTest extends ItemTestCase
             'layoutOld' => $layoutOld, 'layoutSuppliers' => $layoutSuppliers,
             'pages' => [], 'isCEO' => $v[0], 'isMarketingOIC' => $v[1],
             'viewAs' => $v[2], 'effectiveIsCEO' => $v[3],
-            'ownerPrivateColsConfig' => null, 'campaignsColsConfig' => null, 'breakevenTargetPct' => 5,
+            'ownerPrivateColsConfig' => $columnSetting, 'campaignsColsConfig' => null, 'breakevenTargetPct' => 5,
             'colFormatRules' => [], 'campaignsColFormatRules' => [],
             'feeShipping' => null, 'feeCodRate' => null, 'feeVatRate' => null,
         ])->render();
@@ -908,7 +908,80 @@ class SuppliersGroupTest extends ItemTestCase
         return end($second);
     }
 
+    /** Ang setting ng may-ari, sa hugis na ibinibigay ng server sa page: ang ayos niya, at ang 12 column na nakatago sa settings. */
+    private const OWNER_HIDDEN = ['orders', 'proceed', 'pcpp', 'per_order', 'np_per_order', 'np_per_order_3d', 'np_per_order_7d', 'proj_prof_3d', 'proj_prof_7d', 'ship', 'cod_fee', 'category'];
+    private const OWNER_ORDER = [
+        'promo', 'price', 'np_per_order_1m', 'adspent', 'orders_1d', 'proj_prof_1d', 'item_val', 'item_val_ceo', 'cpp', 'rts_set',
+        'jnt_rts', 'jnt_del', 'jnt_transit', 'tcpr', 'breakeven_cpp', 'proj_profit', 'proj_pct', 'proj_pct_7d', 'proj_pct_3d', 'proj_pct_1d',
+        'hold', 'action', 'claude_action', 'claude_reason', 'ceo_action', 'ceo_reason', 'stock', 'incoming', 'units_per_day', 'doi',
+        'order_qty', 'lifecycle', 'orders', 'proceed', 'pcpp', 'per_order', 'np_per_order', 'np_per_order_3d', 'np_per_order_7d',
+        'proj_prof_3d', 'proj_prof_7d', 'ship', 'cod_fee', 'category',
+    ];
+    /** Ang apat na text column na pilit na nakatago sa table na ito (walang cell para sa kanila rito). */
+    private const FORCED_HIDDEN = ['claude_action', 'claude_reason', 'ceo_action', 'ceo_reason'];
+    private const THREE_SUPPLIERS = [['id' => 4, 'name' => 'Kelly Trading'], ['id' => 9, 'name' => 'Albee Co'], ['id' => 12, 'name' => 'Helen Supply']];
+
+    /**
+     * Ang component ng page mismo, pinapatakbo sa node (tests/js/page.cjs) sa isang render ng table na may suppliers:
+     * ang mga hakbang (pagbukas, pagdating ng mga supplier, pagbabago ng sukat, pindot) at, pagkatapos ng bawat isa,
+     * ang estado ng fit at ang value ng mga binding ng mismong markup.
+     */
+    private function page(array $steps, ?array $setting = null): array
+    {
+        $file = tempnam(sys_get_temp_dir(), 'spl');
+        file_put_contents($file, $this->render('ceo', true, true, $setting));
+        try {
+            $out = $this->node([base_path('tests/js/page.cjs'), $file, public_path('js/item-table-fit.js')], json_encode($steps, JSON_THROW_ON_ERROR));
+        } finally {
+            @unlink($file);
+        }
+
+        return json_decode($out, true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    public function test_S_39_1_the_button_and_the_panel_count_the_same_columns_under_a_setting_that_hides_both_kinds(): void
+    {
+        // Ang window ng unang tingin sa browser (2,134px), tapos ang laptop (1366), tapos ang Sales set.
+        $states = $this->page([
+            ['do' => 'load', 'clientWidth' => 2117, 'win' => 2134],
+            ['do' => 'suppliers', 'list' => self::THREE_SUPPLIERS],
+            ['do' => 'resize', 'clientWidth' => 1351, 'win' => 1366, 'wait' => 5000],
+            ['do' => 'call', 'method' => 'fitPick', 'args' => ['Sales']],
+        ], ['order' => self::OWNER_ORDER, 'hidden' => self::OWNER_HIDDEN]);
+        [$load, $wide, $laptop, $sales] = $states;
+
+        // Ang 12 nakatago sa settings at ang 4 na pilit na nakatago ay wala sa mga column ng page: 26 ang natitira (iisa na ang RTS / DEL / INT),
+        // 23 pagkatapos pagsamahin ang RTS / DEL / INT at ang Prof.%.
+        $this->assertCount(26, $wide['cols']);
+        foreach ($states as $i => $state) {
+            foreach (array_merge(self::OWNER_HIDDEN, self::FORCED_HIDDEN) as $hidden) {
+                $this->assertNotContains($hidden, array_merge($state['cols'], $state['awayList'], $state['shownList']), "hakbang {$i}: {$hidden}");
+            }
+            // Iisang bilang sa button, sa pamagat ng listahan at sa listahan mismo; at walang column na hindi nabibilang.
+            $this->assertSame('+' . count($state['awayList']), $state['button'], "hakbang {$i}");
+            $this->assertSame(count($state['awayList']), $state['awayCount'], "hakbang {$i}");
+            $this->assertSame(count($state['shownList']), $state['shownCount'], "hakbang {$i}");
+            $this->assertSame($state['shown'], $state['shownList'], "hakbang {$i}");
+            $this->assertCount(23, array_unique(array_merge($state['awayList'], $state['shownList'])), "hakbang {$i}");
+        }
+
+        // Ang bilang ng spec: ang inalis ng fit at ang hindi inaalok ng set — wala nang iba.
+        $this->assertSame(['+6', 17, 2084], [$wide['button'], $wide['shownCount'], $wide['box']]);
+        $this->assertSame(['promo', 'price', 'item_val', 'rts_set', 'breakeven_cpp', 'action'], $wide['awayList']);
+        $this->assertSame(['+6', 17], [$load['button'], $load['shownCount']]);
+        $this->assertSame(['+12', 11, 1318], [$laptop['button'], $laptop['shownCount'], $laptop['box']]);
+        $this->assertSame(['+11', 12, 'Sales'], [$sales['button'], $sales['shownCount'], $sales['set']]);
+
+        // Sa markup: ang button at ang pamagat ay ang haba ng mismong listahang ipinapakita ng panel.
+        $bar = $this->between($this->render('ceo', true, true), '<div class="spl-bar"', '<!-- Scroll area -->');
+        $this->assertSame(1, substr_count($bar, "<span class=\"spl-more-n\" x-text=\"'+' + fitRes.away.length\"></span> columns "));
+        $this->assertSame(1, substr_count($bar, 'One step away (<span x-text="fitRes.away.length"></span>)'));
+        $this->assertSame(1, substr_count($bar, "<template x-for=\"id in fitRes.away\" :key=\"'cp-a-'+id\">"));
+        $this->assertStringNotContainsString('plusN', $bar);
+    }
+
     public function test_S_38_10_this_table_has_its_own_money_format_and_no_text_under_11px(): void
+
 
     {
         // Ang money() at md() ng page ay hindi nagalaw; ang table na ito ay may sarili.
@@ -962,7 +1035,7 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertOrder([
             '<button type="button" class="spl-more" aria-haspopup="true" aria-controls="spl-cpanel"',
             ":aria-expanded=\"fitPanel ? 'true' : 'false'\" @click=\"fitPanel = !fitPanel\">",
-            "<span class=\"spl-more-n\" x-text=\"'+' + fitRes.plusN\"></span> columns ",
+            "<span class=\"spl-more-n\" x-text=\"'+' + fitRes.away.length\"></span> columns ",
             '<div id="spl-cpanel" class="spl-cpanel" x-show="fitPanel"',
         ], $bar);
         // Ang panel: ilang pixel ang gamit, bawat column na wala na may lapad na kailangan nito, ang mga nakikita,

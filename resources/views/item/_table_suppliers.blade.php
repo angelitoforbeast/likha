@@ -16,7 +16,7 @@
     <span class="spl-more-wrap" @click.outside="fitPanel = false">
       <button type="button" class="spl-more" aria-haspopup="true" aria-controls="spl-cpanel"
               :aria-expanded="fitPanel ? 'true' : 'false'" @click="fitPanel = !fitPanel">
-        <span class="spl-more-n" x-text="'+' + fitRes.plusN"></span> columns <span aria-hidden="true">▾</span>
+        <span class="spl-more-n" x-text="'+' + fitRes.away.length"></span> columns <span aria-hidden="true">▾</span>
       </button>
       <div id="spl-cpanel" class="spl-cpanel" x-show="fitPanel" style="display:none;" role="group" aria-label="Columns">
         <div class="spl-cp-h">
@@ -28,7 +28,7 @@
         <template x-if="fitMsg">
           <div class="spl-cp-msg" role="status" x-text="fitMsg"></div>
         </template>
-        <div class="spl-cp-t">One step away (<span x-text="fitRes.plusN"></span>): tap to show</div>
+        <div class="spl-cp-t">One step away (<span x-text="fitRes.away.length"></span>): tap to show</div>
         <ul class="spl-cp-list">
           <template x-for="id in fitRes.away" :key="'cp-a-'+id">
             <li>
