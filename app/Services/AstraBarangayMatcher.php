@@ -24,6 +24,8 @@ class AstraBarangayMatcher
     private const MIN_LEN = 5;
     /** Pansamantalang marka ng "barangay word" sa loob ng segment; inaalis muna ang lahat ng control character sa text. */
     private const BRGY_MARK = "\x01";
+    /** Ganoon din, para sa "barrio": salita rin ito sa dulo ng pangalan ng lugar ("Bagong Barrio"), kaya mas mahina itong tanda sa pagkumpirma. */
+    private const BARRIO_MARK = "\x02";
     /**
      * Ang mga sulat ng "barangay word", saanman ito ginagamit ng check (kapangalan ng bayan, numerong barangay, ibang barangay,
      * ang salitang Poblacion). May tuldok man o colon sa dulo, anumang laki ng letra. Hindi kasama ang purok, sitio, zone at "B.".
@@ -300,7 +302,9 @@ class AstraBarangayMatcher
      * sinusundan ng numero, at ang tuldok ay malambot na hangganan na.
      *
      * Bawat segment: `w` (ang salita para sa pagtutugma), `alt` (ang salita para sa paghahambing sa ibang label),
-     * `brgy` (index ng salitang may barangay word na kasunod-agad sa unahan), `init` (index ng mga initial),
+     * `brgy` (index ng salitang may barangay word na kasunod-agad sa unahan), `weak` (sa mga iyon, ang tanda ay "barrio" na hindi
+     * sapat para KUMUMPIRMA: 1 = may salita sa unahan ng "barrio" sa segment, gaya ng "Bagong Barrio 28"; 2 = nasa simula ng segment
+     * pero hindi digit ang kasunod; sa paghahanap ng IBANG barangay ay buo pa rin ang tanda), `init` (index ng mga initial),
      * `soft` (index ng salitang may malambot na hangganan sa unahan), `sym` (index ng "salitang" puro simbolo),
      * `nl` (nagsisimula ba ang segment sa bagong linya).
      */
@@ -343,13 +347,16 @@ class AstraBarangayMatcher
             $part = preg_replace_callback('/\b(' . implode('|', self::BRGY_WORDS) . ')\b\.?/iu', static function ($m) {
                 $word = strtolower($m[1]);
 
-                return ' ' . (in_array($word, self::BRGY_WORDS_IN_NAMES, true) ? $word . ' ' : '') . self::BRGY_MARK . ' ';
+                return ' ' . (in_array($word, self::BRGY_WORDS_IN_NAMES, true) ? $word . ' ' . self::BARRIO_MARK : self::BRGY_MARK) . ' ';
             }, $part) ?? $part;
-            $seg  = ['w' => [], 'alt' => [], 'brgy' => [], 'init' => [], 'soft' => [], 'sym' => [], 'nl' => $nl];
+            $seg  = ['w' => [], 'alt' => [], 'brgy' => [], 'weak' => [], 'init' => [], 'soft' => [], 'sym' => [], 'nl' => $nl];
             $afterBrgy = false;
+            $barrio    = 0; // 0 = hindi "barrio" ang tanda; 1 = "barrio" na may salita sa unahan nito sa segment; 2 = "barrio" sa simula ng segment
             $afterStop = false;
             foreach (preg_split('/\s+/u', $part, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
-                if ($token === self::BRGY_MARK) { $afterBrgy = true; continue; }
+                if ($token === self::BRGY_MARK) { $afterBrgy = true; $barrio = 0; continue; }
+                // Ang "barrio" mismo ay kapapasok lang bilang salita: nasa simula ito ng segment kapag ito pa lang ang laman.
+                if ($token === self::BARRIO_MARK) { $afterBrgy = true; $barrio = count($seg['w']) === 1 ? 2 : 1; continue; }
                 // Isang letrang may tuldok agad ("V. Luna", "Q.C.") = initial ng pangalan: hindi Roman numeral, hindi suffix letter.
                 $pieces = preg_split('/(?<![\p{L}\p{N}])(\p{L}\.)/u', $token, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [$token];
                 foreach ($pieces as $piece) {
@@ -362,7 +369,7 @@ class AstraBarangayMatcher
                         $seg['w'][]   = $letter . '.';
                         $seg['alt'][] = $alt !== '' ? $alt : $letter;
                         $seg['init'][$i] = true;
-                        if ($afterBrgy) { $seg['brgy'][$i] = true; $afterBrgy = false; }
+                        if ($afterBrgy) { $seg['brgy'][$i] = true; if ($barrio > 0) $seg['weak'][$i] = $barrio; $afterBrgy = false; }
                         if ($afterStop) { $seg['soft'][$i] = true; $afterStop = false; }
                         continue;
                     }
@@ -372,9 +379,14 @@ class AstraBarangayMatcher
                         $key = $stem === '' ? '' : ($keyOf[$stem] ??= MacroChecker::normBrgyKey($stem));
                         foreach ($key === '' ? [] : explode(' ', $key) as $word) {
                             $i = count($seg['w']);
-                            if ($afterBrgy) { $seg['brgy'][$i] = true; $afterBrgy = false; }
+                            if ($afterBrgy) {
+                                $seg['brgy'][$i] = true;
+                                // Pagkatapos ng "barrio" sa simula ng segment, ang numerong isinulat sa digit lang ang malakas na tanda ("Barrio X" ay hindi 10).
+                                if ($barrio === 1 || ($barrio === 2 && !self::hasDigit($stem))) $seg['weak'][$i] = $barrio;
+                                $afterBrgy = false;
+                            }
                             if ($afterStop) { $seg['soft'][$i] = true; $afterStop = false; }
-                            $alt = $altOf[$word] ??= self::altWord($word);
+                            $alt =$altOf[$word] ??= self::altWord($word);
                             $seg['w'][]   = $word;
                             $seg['alt'][] = $alt !== '' ? $alt : $word;
                             if ($alt === '') $seg['sym'][$i] = true;
@@ -493,7 +505,7 @@ class AstraBarangayMatcher
             $phraseAt = [];
             for ($i = 0; $i + $n <= $m; $i++) {
                 if ($w[$i] !== $nw[0]) continue;
-                if ($onlySpecial && !isset($seg['brgy'][$i])) continue;
+                if ($onlySpecial && (!isset($seg['brgy'][$i]) || isset($seg['weak'][$i]))) continue;
                 for ($j = 1; $j < $n && $w[$i + $j] === $nw[$j]; $j++);
                 if ($j < $n || self::crossesStop($seg['soft'], $i, $i + $n)) continue;
                 $phraseAt[$i] = true;
@@ -557,7 +569,7 @@ class AstraBarangayMatcher
                 }
                 if ($hit[4] ?? false) continue;
                 $hitCount++;
-                if (isset($seg['brgy'][$from]) || (!$pobIsSibling && (($w[$from - 1] ?? '') === 'poblacion' || ($w[$to] ?? '') === 'poblacion'))) $marked = true;
+                if ((isset($seg['brgy'][$from]) && ($seg['weak'][$from] ?? 0) !== 1) || (!$pobIsSibling && (($w[$from - 1] ?? '') === 'poblacion' || ($w[$to] ?? '') === 'poblacion'))) $marked = true;
                 $rank = ['none' => 0, 'near' => 1, 'compact' => 2, 'phrase' => 3];
                 if ($rank[$kind] > $rank[$best['result']] || ($kind === $best['result'] && $score > $best['score'])) {
                     $best = ['result' => $kind, 'score' => $score, 'rejected' => false];

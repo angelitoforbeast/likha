@@ -2488,6 +2488,43 @@ class AstraAddressRulesTest extends NightAstraTestCase
         ]);
     }
 
+    public function test_S_26_27_a_place_name_that_ends_in_barrio_is_not_a_barangay_word(): void
+    {
+        $caloocan = static fn (string $number): array => ['METRO-MANILA', 'CALOOCAN', 'BARANGAY ' . $number];
+        $narra    = ['PALAWAN', 'NARRA', 'NARRA'];
+        $narraPob = ['PALAWAN', 'NARRA', 'NARRA (POB.)'];
+        $this->assertLinesInList($caloocan('1'), $caloocan('2'), $caloocan('3'), $caloocan('10'), $caloocan('28'), $caloocan('143'), $narra, $narraPob);
+
+        $this->assertSame([
+            'Bagong Barrio 28'                      => self::NONE,
+            'Bagong Barrio 1'                       => self::NONE,
+            'Bagong Barrio 143 after a block'       => self::NONE,
+            'El Barrio 3'                           => self::NONE,
+            'sa barrio, then a quantity'            => self::NONE,
+            'Barrio, then a lone Roman letter'      => self::NONE,
+            'Bagong Barrio, then a namesake'        => self::NONE,
+            'Bagong Barrio, then a namesake (pob.)' => self::NONE,
+            // Kumpirmado pa rin.
+            'Barrio at the start of the text'       => self::PHRASE,
+            'Barrio right after a comma'            => self::PHRASE,
+            'Brgy before the number'                => self::PHRASE,
+            'Brgy before a namesake'                => self::PHRASE,
+        ], [
+            'Bagong Barrio 28'                      => $this->textCheck($caloocan('28'), 'Bagong Barrio 28 Caloocan City'),
+            'Bagong Barrio 1'                       => $this->textCheck($caloocan('1'), 'Bagong Barrio 1 Caloocan'),
+            'Bagong Barrio 143 after a block'       => $this->textCheck($caloocan('143'), 'Blk 3 Bagong Barrio 143 Caloocan'),
+            'El Barrio 3'                           => $this->textCheck($caloocan('3'), 'El Barrio 3 Caloocan'),
+            'sa barrio, then a quantity'            => $this->textCheck($caloocan('2'), 'sa barrio 2 pcs po Caloocan'),
+            'Barrio, then a lone Roman letter'      => $this->textCheck($caloocan('10'), 'Barrio X Caloocan'),
+            'Bagong Barrio, then a namesake'        => $this->textCheck($narra, 'Bagong Barrio Narra'),
+            'Bagong Barrio, then a namesake (pob.)' => $this->textCheck($narraPob, 'Bagong Barrio Narra'),
+            'Barrio at the start of the text'       => $this->textCheck($caloocan('28'), 'Barrio 28, Caloocan City'),
+            'Barrio right after a comma'            => $this->textCheck($caloocan('1'), 'Juan Cruz, Barrio 1, Caloocan'),
+            'Brgy before the number'                => $this->textCheck($caloocan('28'), 'Brgy 28 Caloocan'),
+            'Brgy before a namesake'                => $this->textCheck($narra, 'Brgy Narra, Narra, Palawan'),
+        ]);
+    }
+
     public function test_S_26_9_the_mapper_picks_the_exact_number_and_never_a_neighbour(): void
     {
         $this->assertLinesInList(self::COTABATO_POB, ['COTABATO', 'COTABATO-CITY', 'POBLACION I'], self::COTABATO_POB_2);
