@@ -83,11 +83,16 @@ class ItemController extends Controller
         $feeCodRate  = FeeSetting::getRate('cod_fee_rate',           $host, $today);
         $feeVatRate  = FeeSetting::getRate('cod_fee_vat_rate',       $host, $today);
 
-        // ?layout=old lang (eksaktong string) ang lumang table; lahat ng iba = bagong layout
-        $layoutOld = $request->query('layout') === 'old';
+        // Eksaktong string lang: ?layout=old at ?layout=suppliers = lumang table na may suppliers group,
+        // para sa CEO view lang; ?layout=original = lumang table na walang suppliers group. Kapag hindi
+        // CEO view, iisa ang tatlo: ang lumang table (walang suppliers markup na lalabas).
+        // Lahat ng iba = bagong layout.
+        $layout          = $request->query('layout');
+        $layoutSuppliers = ($layout === 'old' || $layout === 'suppliers') && $effectiveIsCEO;
+        $layoutOld       = $layout === 'old' || $layout === 'suppliers' || $layout === 'original';
 
         return view('item.index', compact(
-            'pages', 'isCEO', 'isMarketingOIC', 'viewAs', 'effectiveIsCEO', 'layoutOld',
+            'pages', 'isCEO', 'isMarketingOIC', 'viewAs', 'effectiveIsCEO', 'layoutOld', 'layoutSuppliers',
             'ownerPrivateColsConfig', 'campaignsColsConfig',
             'breakevenTargetPct', 'colFormatRules', 'campaignsColFormatRules',
             'feeShipping', 'feeCodRate', 'feeVatRate'
@@ -693,7 +698,7 @@ class ItemController extends Controller
     }
 
     /**
-     * item_key → [{id, supplier_id, supplier, price, moq, link, note, updated_at, prev_price, prev_date}]
+     * item_key → [{id, supplier_id, supplier, price, moq, link, note, updated_at, prev_price, prev_date, cheapest}]
      * (isang key lang kung ibinigay). prev_* = "dati ₱X (date)": pinakahuling history row ng
      * parehong item + supplier na may presyo at IBA sa kasalukuyang presyo.
      */
@@ -733,6 +738,27 @@ class ItemController extends Controller
                 'prev_date'   => $prev && $prev->quoted_at ? substr((string) $prev->quoted_at, 0, 10) : null,
                 'photo_url'   => $r->photo_path ? url(Storage::disk('public')->url($r->photo_path)) : null,
             ];
+        }
+
+        // Dito sa PHP pinagpapasyahan ang pagkakasunod, hindi sa database: iba-iba ang puwesto ng
+        // null at ng magkaparehong presyo sa sqlite / MySQL / PostgreSQL. May presyo (> 0) muna,
+        // pinakamura sa itaas; ang walang presyo at ang 0 ay parehong "walang magagamit na presyo"
+        // kaya nasa dulo, ayon sa id lang. Tie = mas mababang id muna, para hindi palipat-lipat.
+        $fmt = fn ($row) => number_format((float) $row['price'], 2, '.', '');
+        foreach ($map as $key => $rows) {
+            usort($rows, function ($a, $b) {
+                $pa = (float) $a['price'] > 0; $pb = (float) $b['price'] > 0;
+                if ($pa !== $pb) return $pa ? -1 : 1;
+                return $pa ? [$a['price'], $a['id']] <=> [$b['price'], $b['id']] : $a['id'] <=> $b['id'];
+            });
+            // cheapest: may saysay lang kapag may maikukumpara — dalawa o higit pang may presyo.
+            // Lahat ng kapantay ng pinakamababa ay cheapest (naka-sort na, kaya ang una ang pinakamababa).
+            $priced = count(array_filter($rows, fn ($row) => (float) $row['price'] > 0));
+            $low    = $priced >= 2 ? $fmt($rows[0]) : null;
+            foreach ($rows as $i => $row) {
+                $rows[$i]['cheapest'] = $low !== null && (float) $row['price'] > 0 && $fmt($row) === $low;
+            }
+            $map[$key] = $rows;
         }
         return $map;
     }

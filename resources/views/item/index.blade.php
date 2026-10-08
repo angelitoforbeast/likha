@@ -458,6 +458,9 @@
       .il-m-label { display:block; font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.02em; }
     }
   </style>
+@if(!empty($layoutSuppliers))
+@include('item._suppliers_style')
+@endif
 </head>
 <body>
 
@@ -692,6 +695,21 @@
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
               cursor:pointer;margin-left:4px;">🗂 Old view</a>
     @endif
+@if(!empty($effectiveIsCEO) && !empty($layoutOld))
+@if(!empty($layoutSuppliers))
+    <a href="?layout=original" @click.prevent="const q = new URLSearchParams(window.location.search); q.set('layout', 'original'); window.location.href = window.location.pathname + '?' + q.toString()"
+       title="Open the table as it was before the suppliers columns"
+       style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
+              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+              cursor:pointer;margin-left:4px;">🗂 Original table</a>
+@else
+    <a href="?layout=old" @click.prevent="const q = new URLSearchParams(window.location.search); q.set('layout', 'old'); window.location.href = window.location.pathname + '?' + q.toString()"
+       title="Back to the table with suppliers and prices side by side"
+       style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
+              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
+              cursor:pointer;margin-left:4px;">🏷 Table with suppliers</a>
+@endif
+@endif
 
     {{-- CEO-only chrome — hidden when CEO toggles to Marketing view so the UI
          truly mirrors what Marketing sees. Actual CEO role still has access via
@@ -828,7 +846,11 @@
   </div>
 
   @if(!empty($layoutOld))
+@if(!empty($layoutSuppliers))
+    @include('item._table_suppliers')
+@else
     @include('item._table_old')
+@endif
   @else
     {{-- Bagong layout (006): dalawang tab — To order (default) at Sales & Profit (?tab=sales). --}}
     <div id="scroll" class="il-scroll">
@@ -1728,6 +1750,10 @@
         if (this.effectiveIsCeo && this.worklist.list !== 'lahat') qsObj.list = this.worklist.list;
         // Lumang table view — panatilihin ang ?layout=old sa URL.
         if (this.layoutOld) qsObj.layout = 'old';
+@if(!empty($effectiveIsCEO) && !empty($layoutOld) && empty($layoutSuppliers))
+        // Orihinal na table — dapat manatili sa URL; kung hindi, gagawin itong ?layout=old (table na may suppliers) ng unang load.
+        qsObj.layout = 'original';
+@endif
         // Tab ng bagong layout — panatilihin ang ?tab=sales (kahit nasa lumang view, para bumalik sa parehong tab).
         if (this.ilTab === 'sales') qsObj.tab = 'sales';
         // refresh=1 bypasses the server-side cache for this single request.
@@ -3188,7 +3214,15 @@
           const res = await fetch('{{ route('item.suppliers') }}', {headers:{'Accept':'application/json'}});
           const j = await res.json();
           if (j && j.suppliers) this.itemSuppliers = j.suppliers;
+@if(!empty($layoutSuppliers))
+          // Suppliers view: "loaded" lang kapag ok ang sagot — kung hindi, placeholder ang ipapakita, hindi "wala pang supplier".
+          if (res.ok && j && j.ok === true && j.suppliers) this.splLoaded.po = true; else this.splFailed = true;
+@endif
         }catch(e){ /* walang supply data — ok lang */ }
+@if(!empty($layoutSuppliers))
+        // Pumalya ang fetch o hindi JSON ang sagot: hindi naabot ang linya sa itaas.
+        if (!this.splLoaded.po) this.splFailed = true;
+@endif
       },
       // "1 x HAND GRIP" → "hand grip" (same normalization ng supply item_key).
       supKey(n){ return String(n||'').replace(/^\s*\d+\s*[x×]\s*/i,'').trim().toLowerCase().replace(/\s+/g,' '); },
@@ -3205,7 +3239,15 @@
           const j = await res.json();
           if (j && j.quotes) this.itemQuotes = j.quotes;
           if (j && j.suppliers) this.supplierList = j.suppliers;
+@if(!empty($layoutSuppliers))
+          // Suppliers view: "loaded" lang kapag ok ang sagot — kung hindi, placeholder ang ipapakita, hindi "wala pang supplier".
+          if (res.ok && j && j.ok === true && j.quotes) this.splLoaded.quotes = true; else this.splFailed = true;
+@endif
         }catch(e){ /* walang quote data — ok lang */ }
+@if(!empty($layoutSuppliers))
+        // Pumalya ang fetch o hindi JSON ang sagot: hindi naabot ang linya sa itaas.
+        if (!this.splLoaded.quotes) this.splFailed = true;
+@endif
       },
       quotesFor(name){ return this.itemQuotes[this.supKey(name)] || []; },
       // ── Sourcing worklists (CEO lang) ─────────────────────────────────────
@@ -3959,6 +4001,9 @@
         }
       },
 
+@if(!empty($layoutSuppliers))
+@include('item._suppliers_js')
+@endif
       async init(){
         this.initCols();
         // Sabay-sabay: bawat isa ay pinupuno lang ang sarili niyang map, walang dependency sa load().

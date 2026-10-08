@@ -262,6 +262,34 @@ Minor review findings accepted, not fixed. None is on a path where untrusted inp
 - **`test_S_07_5` and `test_S_07_8` read markup and script text; they do not run JavaScript.** Reason: the project has no JavaScript test runner and adding one is a new dependency. S-07.5 is also an owner check in `qa/stories.md`.
 - **`test_S_09_4` has no variant "an Astra step with for_person 0 and an empty by-code list".** Reason: `test_S_09_3` covers the count of 0; the by-code list is unchanged code.
 
+## 017: suppliers group on the item table (2026-10-08)
+
+Minor review findings accepted, not fixed. None lets supplier data reach a view other than the effective CEO suppliers view, and none lets supplier text run as script.
+
+- **`/item/quotes` and `/item/suppliers` answer `ok: true` with empty lists when their query throws** (the existing `catch`). The suppliers view's loaded state trusts that answer, so a failing query would show the red "wala pang supplier" band instead of "hindi na-load". Reason: trusted path (database state), the Old view says the same today, and the honest fix is in two endpoints this work was told to keep as they are. Proposed as a follow-up task.
+- **The two toolbar links ("Suppliers view", "Old view") keep the current query on a plain click only.** A middle click or "open in new tab" uses the static address and opens the view with the default range. Reason: the address bar is rewritten by the page after load, so only a click-time handler sees the current query; a new tab is still decided by the server.
+- **A CEO who switches to the Marketing view from the suppliers view and back lands in the Old view.** Reason: the Marketing render is the Old view by decision, and it keeps `layout=old` in the address as the Old view does.
+- **The loaded-flag lines in the two loaders say "failed" twice** (the `else` and the line after the `catch`). Reason: harmless, and the first line is pinned text.
+- **The add / edit form's markup is written twice in the suppliers table** (quote cell and "+N" list card). Reason: second repetition; a shared partial comes with the third.
+- **"+N" clearance uses `:has()`** (Firefox before 121 does not know it; the chip would sit over the end of a long name). Reason: the owner's browsers are current; the full name is in the card.
+- **The "+N" list card shows name, price, MOQ, edit and remove per quote, not link, photo, earlier price or date.** Reason: this is the design's list card; a quote beyond the third shows those details after an edit of a price moves it into the first three, or in the Old view. On the owner-check list.
+- **When the row that holds an open form leaves the table** (a chip or category change), the form is no longer shown and the next "+" replaces what was typed; if the row returns first, the form shows where it was. Reason: caused by the user's own filter change; Esc recovers.
+- **Esc with another window of the page open over a quote form closes both** (only the photo popup is given way to). Reason: the page's other windows each listen to Esc on their own; ordering them is a change to shared script.
+- **`saveQuote()` itself has no guard against a second call** (the suppliers view disables its Save buttons while saving; the Old view and the photo page do not). Reason: shared function, unchanged by decision. Proposed as a follow-up task.
+- **`splRemove` decides "a delete happened" by the list getting shorter.** A list that changes for another reason during the request could close or keep the card wrongly. Reason: no data effect; the existing delete function returns nothing to branch on and is unchanged by decision.
+- **Tests that read script and markup text do not run JavaScript** (`test_S_14_8`, `test_S_15_10`, `test_S_16_1`, `test_S_16_6`, `test_S_17_4`, `test_S_20_1`, `test_S_20_2`, `test_S_21_1`). Reason: the project has no JavaScript test runner and adding one is a new dependency. Each has a browser case in `qa/stories.md`.
+- **`test_S_14_1`, `test_S_14_3` and the order half of `test_S_14_7` pass on sqlite without the new sort** (sqlite already returns that order). Reason: the test database is sqlite in memory; `test_S_14_2`, `test_S_14_4` and the flag assertions are the ones that fail without it. MySQL and pgsql were not available here.
+- **Not pinned by a test:** the suppliers view's `S-18.1` markers for a supplier name (a name never is in a page render; it arrives by fetch) and the hover and tap behaviour of the card. Reason: browser cases.
+
+## 019: the Old view shows the suppliers table (2026-10-08)
+
+Accepted, not fixed:
+
+- **A CEO on `layout=original` who switches to the Marketing view and back lands on the table with suppliers.** The Marketing render keeps `layout=old` in the address, as it always did, and for the CEO view that word now means the table with suppliers. Reason: the Marketing render must stay byte for byte what it was, so it cannot carry another word; "Original table" is one click away.
+- **The two toolbar links keep the current query on a plain click only** (a middle click or "open in new tab" uses the static address with the default range). Reason: built like the two links they replace; the address bar is rewritten by the page after load, so only a click-time handler sees the current query.
+- **Two comments in the script of the table with suppliers still say "Suppliers view".** Reason: they sit in blocks this work was told to leave as they are, and they are rendered for the CEO view only.
+- **The route tests prove "byte for byte the base" in two steps** (the route passes the view the six values of the pinned render; the render with those values has the pinned hash, in `test_S_18_4` and `test_S_19_2`). Reason: the pinned hashes are of direct renders with fixed page and fee data; a body from the route carries the test database's values, so it cannot have the same hash.
+
 ## 018: Astra identifies the J&T address like the classic checker (2026-10-08)
 
 Review findings accepted, not fixed. Each fix loop was closed after two rounds. None of these can change a result while the switch is off.
