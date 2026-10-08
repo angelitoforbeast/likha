@@ -35,6 +35,7 @@ All run with `php.bat vendor/phpunit/phpunit/phpunit --testdox <file>` on the fi
 | S-06.6 | `test_S_06_6_a_deleted_order_is_absent_and_the_line_shows_the_gap` | pass ✔ |
 | S-06.7 | `test_S_06_7_a_row_moved_to_another_date_is_not_listed` | pass ✔ |
 | S-06.8 | `test_S_06_8_more_than_100_rows_are_paged_and_keep_the_filter` | pass ✔ |
+| S-06.9 | `test_S_06_9_another_steps_row_on_the_same_date_is_not_listed` | pass ✔ (added by fix list 1) |
 | S-07.1 | `test_S_07_1_chips_and_page_list_count_the_filtered_set` | pass ✔ |
 | S-07.2 | `test_S_07_2_choosing_a_page_keeps_the_filter_without_pagination` | pass ✔ |
 | S-07.3 | `test_S_07_3_filter_chips_and_pagination_keep_the_filter` | pass ✔ |
@@ -67,6 +68,7 @@ All run with `php.bat vendor/phpunit/phpunit/phpunit --testdox <file>` on the fi
 | S-10.8 | `test_S_10_8_any_mix_only_narrows` | pass ✔ |
 | S-10.9 | `test_S_10_9_nothing_of_the_night_rows_is_printed` | pass ✔ |
 | S-10.10 | `test_S_10_10_leading_zeros_read_as_the_step` | pass ✔ |
+| S-10.11 | `test_S_10_11_a_nine_digit_step_id_is_accepted` | pass ✔ (added by fix list 1) |
 | S-11.1 | `test_S_11_1_a_non_ceo_gets_the_same_rows` | pass ✔ |
 | S-11.2 | `test_S_11_2_a_guest_is_sent_to_sign_in` | pass ✔ (characterisation) |
 | S-11.3 | `NightRunRoutesTest::test_each_route_is_for_the_ceo_only` (existing, unchanged) | pass ✔ `OK (1 test, 28 assertions)` (characterisation) |
@@ -117,6 +119,33 @@ The slice was added to `qa/stories.md` from the spec, with these changes:
 - S-07.8: names Validate 1, Download, the VALIDATED badges and the AI Checker and Astra Check count and start as the whole-date requests; Validate and ITEM CHECKER (which send the ids of the rows in the table) are pinned as unchanged script text — amendment 3.
 - S-07.5: typed "edge, owner check" and listed under Owner checks as well — amendment 7.
 - S-08.6 and S-09.7: the sentence "No automated test: list it under Owner checks" became the Test column entry "none: see Owner checks", in the file's existing form.
+- S-06.9 added (edge): a second Astra step with a `done`, not proceed row that points to an order of the same orders date; the first step's link does not list that order, and the line counts only the first step's rows — fix list 1: no fixture had two steps with night rows on one date, so a leak from another step would not have been noticed.
+- S-10.11 added (edge): an Astra step whose id has 9 digits (123456789) is accepted, its night rows are listed and the line says how many — fix list 1: the only valid ids tested were 1 and 7, so the upper bound of the digit rule was not pinned.
+
+## Fix list 1
+
+Asked: two gaps in the tests, found by mutating the product code; tests only, no product file
+changed. (1) No test accepted a long valid step id: with the digit cap lowered, every test stayed
+green. (2) The `step_id` condition of the sub-select was caught only through the M of "0 of 0
+shown"; no fixture had another step's night row on the same orders date.
+
+Done: two cases added to `qa/stories.md` (S-06.9, S-10.11), each with a test named after it in
+`Checker1NightFilterTest`. Each was shown red against the mutation it is for, then the product
+file was restored with `git checkout -- app/Support/NightStepFilter.php` and the tests shown green.
+
+| Case | Mutation of `NightStepFilter` (not committed) | Test | First failure line |
+|---|---|---|---|
+| S-10.11 | the digit cap `{1,9}` lowered to `{1,8}` in `fromRequest` | `test_S_10_11_a_nine_digit_step_id_is_accepted` | `Failed asserting that two arrays are identical.` (run: `Tests: 40, Assertions: 925, Failures: 1.`) |
+| S-06.9 | `where('step_id', $this->stepId)` removed from `nightRows()` | `test_S_06_9_another_steps_row_on_the_same_date_is_not_listed` | `Failed asserting that two arrays are identical.` (run: `Tests: 40, Assertions: 919, Failures: 3.`; the other two red tests under this mutation were S-08.5 and S-10.11, through the M of the line) |
+
+- Green on the real code, before the mutations and again after the restore: `OK (40 tests, 928 assertions)`.
+- The product file is untouched: the checksum of `git diff 525ef44 -- app/Support/NightStepFilter.php` was the same before the mutations and after the restore (`751533f1e0b026af85e6c72f0ec4320f41e81df1`), and `git status` showed only the test file as changed.
+- Whole suite, plain PHPUnit, after the change: `Tests: 589, Assertions: 6575, Errors: 1, Failures: 1, Skipped: 3.` — the same two known red tests (`ExampleTest`, `ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`), no new failure. 589 = 587 + the two new tests.
+- Commits: one `test:` commit (the two tests and the two story rows) and one `docs:` commit (this result). The slice now reads 47 passed, 2 not run (the two phone checks).
+
+A note on S-06.9's fixture: two Astra steps cannot share a night (one step per night and kind), so
+the second step is another night whose row points to an order that sits on the first night's
+orders date; that is the way such a row can exist (an order moved to that date, or a manual run).
 
 ## Done-when checklist
 
