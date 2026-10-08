@@ -183,8 +183,18 @@ class SuppliersGroupTest extends ItemTestCase
             $this->assertSame($expected, [$res->viewData('layoutOld'), $res->viewData('layoutSuppliers')], $url);
         }
 
-        $this->assertStringContainsString('🗂 Old view', $this->body('/item?layout=suppliers'));
+        $suppliers = $this->body('/item?layout=suppliers');
+        $this->assertStringContainsString('🗂 Old view', $suppliers);
+        // Kung wala ito, gagawing ?layout=old ng unang load ang address ng suppliers view.
+        $this->assertStringContainsString("qsObj.layout = 'suppliers';", $suppliers);
         $this->assertStringContainsString('🏷 Suppliers view', $this->body('/item?layout=old'));
+
+        // Hindi CEO: Old view ang napipili ng parehong address.
+        foreach ([['Marketing', 'mkt@example.test'], ['Marketing - OIC', 'oic@example.test']] as [$role, $email]) {
+            $this->actingAs($this->user($role, $email));
+            $res = $this->get('/item?layout=suppliers')->assertOk();
+            $this->assertSame([true, false], [$res->viewData('layoutOld'), $res->viewData('layoutSuppliers')], $role);
+        }
     }
 
     public function test_S_18_1_non_ceo_views_get_the_old_view_with_no_suppliers_markers(): void
@@ -197,6 +207,13 @@ class SuppliersGroupTest extends ItemTestCase
             'SUPPLIERS', 'Supplier 1', 'Supplier 2', 'Supplier 3', 'spl-', 'splReady', 'splTop3', 'splRest',
             'splNone', 'splLoaded', 'layout=suppliers', "'suppliers'", 'Suppliers view', '_table_suppliers', 'Zyxwv Kalakal',
         ];
+        // Patunayan na totoo ang mga marker: nasa suppliers view ng CEO ang mga ito, kaya may ibig sabihin ang pagkawala nila sa iba.
+        $this->actingAs($this->user());
+        $ceo = $this->body('/item?layout=suppliers');
+        foreach (['SUPPLIERS', 'Supplier 1', 'Supplier 2', 'Supplier 3', 'spl-', 'splReady', 'splTop3', 'splRest', 'splNone', 'splLoaded', "'suppliers'"] as $marker) {
+            $this->assertStringContainsString($marker, $ceo, "CEO: {$marker}");
+        }
+
         foreach (self::NON_CEO_VIEWS as [$label, $role, $email, $extra]) {
             $this->actingAs(User::where('email', $email)->first() ?? $this->user($role, $email));
             $suppliers = $this->body('/item?layout=suppliers' . $extra);
@@ -235,6 +252,282 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertStringNotContainsString('🏷 Suppliers view', $suppliers);
         $this->assertStringContainsString('🗂 Old view', $suppliers);
         $this->assertStringContainsString('<td>TOTAL</td>', $suppliers);
+    }
+
+    // ── S-13.1 – S-13.4 / S-14.8 / S-15.10 / S-19.4 / S-19.6 / S-21.1: ang table ng suppliers view ──
+    // Binabasa ng mga test na ito ang markup at ang text ng script; hindi nila pinapatakbo ang script.
+
+    private const TABLE_FILE = 'views/item/_table_suppliers.blade.php';
+    private const JS_FILE = 'views/item/_suppliers_js.blade.php';
+
+    private const SPL_TOP3 = 'splTop3(name){ return this.quotesFor(name).slice(0, 3); },';
+    private const SPL_REST = 'splRest(name){ return Math.max(0, this.quotesFor(name).length - 3); },';
+    private const SPL_READY = 'splReady(){ return this.splLoaded.quotes && this.splLoaded.po; },';
+    private const LOADED_PO = 'if (res.ok && j && j.ok === true && j.suppliers) this.splLoaded.po = true; else this.splFailed = true;';
+    private const LOADED_QUOTES = 'if (res.ok && j && j.ok === true && j.quotes) this.splLoaded.quotes = true; else this.splFailed = true;';
+
+    private const WAIT_IF = '<template x-if="!splReady()">';
+    private const BAND_IF = '<template x-if="splReady() && splNone(row.item_name)">';
+    private const SLOT_FOR = '<template x-for="si in (splReady() && !splNone(row.item_name) ? [0, 1, 2] : [])"';
+    private const PO_IF = '<template x-if="splReady() && !splNone(row.item_name)">';
+
+    /** Ang bahagi ng $html mula sa $from hanggang bago ang susunod na $to; parehong dapat naroon. */
+    private function between(string $html, string $from, string $to): string
+    {
+        $start = strpos($html, $from);
+        $this->assertNotFalse($start, "wala ang: {$from}");
+        $end = strpos($html, $to, $start + strlen($from));
+        $this->assertNotFalse($end, "wala ang: {$to} (pagkatapos ng {$from})");
+
+        return substr($html, $start, $end - $start);
+    }
+
+    /** Ang table ng suppliers view sa render ng CEO (hanggang sa footnote nito: may mga table sa loob ng mga cell). */
+    private function suppliersTable(): string
+    {
+        return $this->between($this->render('ceo', true, true), '<table class="spl-table">', 'Drag headers to reorder');
+    }
+
+    /** Ang item-row template: mula sa row hanggang sa paulit-ulit na header ng bawat page. */
+    private function itemRow(): string
+    {
+        return $this->between($this->suppliersTable(), 'class="item-row"', 'page-col-header');
+    }
+
+    /** Ang lapad (colspan, o 1) ng bawat <td> / <th> ng isang piraso ng markup, sunod-sunod. */
+    private function spans(string $markup): array
+    {
+        preg_match_all('/<t[dh](?=[\s>])[^>]*>/', $markup, $m);
+
+        return array_map(fn (string $tag) => preg_match('/\scolspan="(\d+)"/', $tag, $c) ? (int) $c[1] : 1, $m[0]);
+    }
+
+    /** Dapat sunod-sunod ang mga marker sa $html. */
+    private function assertOrder(array $markers, string $html): void
+    {
+        $at = -1;
+        foreach ($markers as $marker) {
+            $pos = strpos($html, $marker, $at + 1);
+            $this->assertNotFalse($pos, "wala o wala sa pagkakasunod: {$marker}");
+            $at = $pos;
+        }
+    }
+
+    public function test_S_13_1_header_has_two_rows_with_suppliers_over_four_plain_subheaders(): void
+    {
+        $head = $this->between($this->suppliersTable(), '<thead>', '</thead>');
+        $this->assertSame(2, substr_count($head, '<tr'));
+
+        // Page, Item at ang template ng ibang column ay sumasakop sa dalawang row; buo pa rin ang sort at drag.
+        $cells = preg_split('/<th(?=[\s>])/', $head);
+        foreach (["@click=\"sb('page_name')\"" => 'spl-c1', "@click=\"sb('item_name')\"" => 'spl-c2', 'draggable="true"' => 'colDragStart($event, col.id)'] as $own => $also) {
+            $found = array_values(array_filter($cells, fn (string $cell) => str_contains($cell, $own)));
+            $this->assertCount(1, $found, $own);
+            $this->assertStringContainsString('rowspan="2"', strstr($found[0], '>', true), $own);
+            $this->assertStringContainsString($also, $found[0], $own);
+        }
+
+        $this->assertStringContainsString('<th class="spl-grp" colspan="4">SUPPLIERS</th>', $head);
+        $this->assertOrder(['<span>Item</span>', 'colspan="4">SUPPLIERS<', 'x-for="col in cols"', '<tr class="spl-h2">'], $head);
+
+        $second = $this->between($head, '<tr class="spl-h2">', '</tr>');
+        preg_match_all('/<th[^>]*>([^<]*)<\/th>/', $second, $m);
+        $this->assertSame(['Supplier 1', 'Supplier 2', 'Supplier 3', 'PO'], $m[1]);
+        $this->assertSame(4, substr_count($second, '<th'));
+        $this->assertStringNotContainsString('@click', $second);
+        $this->assertStringNotContainsString('draggable', $second);
+    }
+
+    public function test_S_13_2_item_row_has_four_supplier_cells_after_the_item_cell(): void
+    {
+        $row = $this->itemRow();
+
+        $this->assertOrder([
+            'spl-c2',
+            '<td colspan="4" class="spl-sc spl-wait" @click.stop>',
+            '<td colspan="4" class="spl-sc spl-nosup" @click.stop>',
+            self::SLOT_FOR,
+            '<td class="spl-sc" @click.stop>',
+            '<td class="spl-sc spl-po" @click.stop>',
+            "<template x-for=\"col in cols\" :key=\"'ic-'+row.item_name+'-'+col.id\">",
+        ], $row);
+        foreach (['class="spl-sc spl-wait"', 'class="spl-sc spl-nosup"', 'class="spl-sc spl-po"', '[0, 1, 2]', '<td class="spl-sc" @click.stop>'] as $once) {
+            $this->assertSame(1, substr_count($row, $once), $once);
+        }
+    }
+
+    public function test_S_13_3_item_cell_no_longer_holds_the_supplier_stack(): void
+    {
+        $row = $this->itemRow();
+        $cell = $this->between($row, 'spl-c2', '</td>');
+
+        $this->assertStringContainsString("' running page':' running pages'", $cell);
+        $this->assertStringContainsString('⚠ walang running page', $cell);
+        foreach (['🏭', '🏷', 'walang supplier', 'dati ', 'quoteForm.supplier_id', '+ supplier quote', 'suppliersFor(', 'quotesFor('] as $gone) {
+            $this->assertStringNotContainsString($gone, $cell, $gone);
+        }
+        // Wala na rin ang inline form at ang "dati" line saanman sa row.
+        foreach (['quoteForm.supplier_id', "'dati '", '🏭', '🏷'] as $gone) {
+            $this->assertStringNotContainsString($gone, $row, $gone);
+        }
+        $this->assertStringNotContainsString('>walang supplier<', $this->render('ceo', true, true));
+    }
+
+    public function test_S_13_4_full_width_rows_and_total_span_four_more_columns(): void
+    {
+        $old = $this->render('ceo', true);
+        $suppliers = $this->render('ceo', true, true);
+        $plusTwo = '/:colspan="\(?cols\.length \+ 2\)?"/';
+        $plusSix = '/:colspan="\(?cols\.length \+ 6\)?"/';
+        $this->assertSame(5, preg_match_all($plusTwo, $old));
+        $this->assertSame(0, preg_match_all($plusSix, $old));
+        $this->assertSame(0, preg_match_all($plusTwo, $suppliers));
+        $this->assertSame(5, preg_match_all($plusSix, $suppliers));
+
+        $table = $this->suppliersTable();
+        $this->assertMatchesRegularExpression('/<td>TOTAL<\/td>\s*<td colspan="5"><\/td>/', $table);
+        $pageRow = $this->between($table, '<!-- Fixed: Page -->', '<!-- Dynamic columns -->');
+        $this->assertStringContainsString('<td colspan="4" class="spl-under"></td>', $pageRow);
+        $pageHeader = $this->between($table, 'class="page-col-header"', "'ph-'");
+        $this->assertStringContainsString('<th colspan="4"></th>', $pageHeader);
+
+        // Bawat klase ng row: ang lapad ng bawat cell bago ang mga configurable column. Laging 6 ang kabuuan
+        // (Page + Item + ang apat ng grupo).
+        $row = $this->itemRow();
+        $fixed = $this->spans($this->between($row, '>', self::WAIT_IF));
+        $slot = $this->spans($this->between($row, self::SLOT_FOR, self::PO_IF));
+        $this->assertSame([1], $slot);
+        $this->assertSame(1, preg_match('/\? \[([\d, ]+)\] : \[\]\)"/', self::SLOT_FOR, $slots));
+        $filled = array_merge($fixed, ...array_fill(0, count(explode(',', $slots[1])), $slot));
+        $filled = array_merge($filled, $this->spans($this->between($row, self::PO_IF, "'ic-'")));
+
+        $kinds = [
+            'header row 1'    => [$this->spans($this->between($table, '<tr class="spl-h1">', 'x-for="col in cols"')), [1, 1, 4]],
+            'item row, wait'  => [array_merge($fixed, $this->spans($this->between($row, self::WAIT_IF, self::BAND_IF))), [1, 1, 4]],
+            'item row, band'  => [array_merge($fixed, $this->spans($this->between($row, self::BAND_IF, self::SLOT_FOR))), [1, 1, 4]],
+            'item row, cells' => [$filled, [1, 1, 1, 1, 1, 1]],
+            'page header'     => [$this->spans($pageHeader), [1, 1, 4]],
+            'page row'        => [$this->spans($pageRow), [1, 1, 4]],
+            'TOTAL'           => [$this->spans($this->between($table, 'class="total-row"', 'x-for="col in cols"')), [1, 5]],
+        ];
+        foreach ($kinds as $kind => [$actual, $expected]) {
+            $this->assertSame($expected, $actual, $kind);
+            $this->assertSame(6, array_sum($actual), $kind);
+        }
+        // Ang pangalawang row ng header ang apat na nasa ilalim ng SUPPLIERS.
+        $this->assertSame([1, 1, 1, 1], $this->spans($this->between($table, '<tr class="spl-h2">', '</tr>')));
+    }
+
+    public function test_S_14_8_script_helpers_take_the_first_three_and_count_the_rest(): void
+    {
+        $html = $this->render('ceo', true, true);
+        $this->assertSame(1, substr_count($html, self::SPL_TOP3));
+        $this->assertSame(1, substr_count($html, self::SPL_REST));
+
+        // Ang server ang nag-aayos at nagmamarka ng pinakamura; ang script ay hindi nag-so-sort o nagkukumpara ng presyo.
+        $js = file_get_contents(resource_path(self::JS_FILE));
+        foreach (['.sort(', 'price <', 'price >', 'Math.min'] as $never) {
+            $this->assertStringNotContainsString($never, $js, $never);
+        }
+        $table = file_get_contents(resource_path(self::TABLE_FILE));
+        $this->assertStringContainsString(":class=\"q.cheapest === true ? 'spl-price spl-low' : 'spl-price'\"", $table);
+        $this->assertSame(1, substr_count($table, 'cheapest'));
+    }
+
+    public function test_S_15_10_band_and_plus_cells_are_bound_to_the_loaded_state(): void
+    {
+        $html = $this->render('ceo', true, true);
+        $this->assertSame(1, substr_count($html, self::SPL_READY));
+        $this->assertSame(1, substr_count($html, 'splLoaded: { quotes:false, po:false },'));
+
+        // Ang flag ay nagiging true lang sa linyang ito ng bawat loader, pagkatapos sumagot nang ok.
+        $suppliersLoader = $this->between($html, 'async loadItemSuppliers(){', 'supKey(n){');
+        $quotesLoader = $this->between($html, 'async loadItemQuotes(){', 'quotesFor(name){');
+        $this->assertStringContainsString(self::LOADED_PO, $suppliersLoader);
+        $this->assertStringContainsString('if (!this.splLoaded.po) this.splFailed = true;', $suppliersLoader);
+        $this->assertStringContainsString(self::LOADED_QUOTES, $quotesLoader);
+        $this->assertStringContainsString('if (!this.splLoaded.quotes) this.splFailed = true;', $quotesLoader);
+        foreach (['splLoaded.po =', 'splLoaded.quotes =', 'splLoaded.po = true', 'splLoaded.quotes = true'] as $set) {
+            $this->assertSame(1, substr_count($html, $set), $set);
+        }
+        $this->assertSame(0, substr_count($html, 'splLoaded ='));
+        $this->assertSame(0, preg_match_all('/splLoaded\s*\[/', $html));
+
+        // Ang placeholder, ang pulang band, ang tatlong cell at ang PO cell ay nakatali lahat sa splReady().
+        $row = $this->itemRow();
+        $this->assertOrder([self::WAIT_IF, self::BAND_IF, self::SLOT_FOR, self::PO_IF], $row);
+        $wait = $this->between($row, self::WAIT_IF, self::BAND_IF);
+        $this->assertStringContainsString("x-text=\"splFailed ? 'hindi na-load' : '…'\"", $wait);
+        $this->assertStringContainsString(":title=\"splFailed ? 'Hindi na-load ang listahan ng supplier. I-refresh ang page.' : 'Loading suppliers…'\"", $wait);
+        // Ang band at ang "+" ay nasa labas ng placeholder, sa loob ng mga template na may splReady().
+        $this->assertStringNotContainsString('openQuote(', $this->between($row, '>', self::BAND_IF));
+        $this->assertSame(4, substr_count($row, 'splReady()'));
+
+        foreach ([$this->render('ceo', true), $this->render('ceo', false)] as $other) {
+            $this->assertStringNotContainsString('splLoaded', $other);
+            $this->assertStringNotContainsString('splFailed', $other);
+        }
+    }
+
+    public function test_S_19_4_everything_the_old_table_has_is_present(): void
+    {
+        $html = $this->render('ceo', true, true);
+        $present = [
+            'x-for="col in cols" :key="col.id"', '@dragstart="colDragStart($event, col.id)"', "@click=\"sb('page_name')\"",
+            "x-text=\"'HOLD '+Number(row.hold||0).toLocaleString()\"", 'class="expand-chev"', '@click.stop="toggleItemExpand(row.item_name)"',
+            '@click="row.hasPages && toggleItemExpand(row.item_name)"', 'class="page-col-header"', 'class="page-expand-row"',
+            '<td>TOTAL</td>', 'Drag headers to reorder', '@click="setWorklist(c.key)"', "'kabuuan: ' + num(W.hold_units)",
+            "'Kulang ' + num(W.shortfall)", '⚙ Columns', '🔄 Refresh',
+            "x-text=\"itemImages[row.item_name] ? 'Change' : 'Add photo'\"", '@click.stop="copyItem(row.item_name, row.hold)"',
+            "col.id==='doi'",
+        ];
+        foreach ($present as $text) $this->assertStringContainsString($text, $html, $text);
+
+        // Ang page row ay may sarili pa ring tatlong-linyang RTS / DEL / INT cell, gaya ng sa Old view.
+        $pageRowLine = ":style=\"row.jnt_transit_pct===null?'color:#cbd5e1':'color:#111;font-weight:600'\"";
+        foreach (['views/item/_table_old.blade.php', self::TABLE_FILE] as $file) {
+            $this->assertSame(1, substr_count(file_get_contents(resource_path($file)), $pageRowLine), $file);
+        }
+    }
+
+    public function test_S_19_6_the_suppliers_files_use_no_x_html_and_no_inner_html(): void
+    {
+        $this->assertFileExists(resource_path(self::JS_FILE));
+        $files = [self::TABLE_FILE, self::JS_FILE];
+        if (is_file(resource_path('views/item/_suppliers_style.blade.php'))) $files[] = 'views/item/_suppliers_style.blade.php';
+
+        foreach ($files as $file) {
+            $source = file_get_contents(resource_path($file));
+            foreach (['x-html', 'innerHTML', '{!!', 'q.note'] as $never) {
+                $this->assertStringNotContainsString($never, $source, "{$file}: {$never}");
+            }
+        }
+    }
+
+    public function test_S_21_1_each_loader_is_called_once_and_the_new_templates_fetch_nothing(): void
+    {
+        $html = $this->render('ceo', true, true);
+        $this->assertSame(1, substr_count($html, 'this.loadItemSuppliers(),'));
+        $this->assertSame(1, substr_count($html, 'this.loadItemQuotes(),'));
+        $this->assertSame(1, substr_count($html, 'this.loadItemSuppliers('), 'tinatawag lang sa init');
+        $this->assertSame(1, substr_count($html, 'this.loadItemQuotes('), 'tinatawag lang sa init');
+
+        $this->assertFileExists(resource_path(self::JS_FILE));
+        foreach ([self::TABLE_FILE, self::JS_FILE] as $file) {
+            $source = file_get_contents(resource_path($file));
+            $this->assertStringNotContainsString('fetch(', $source, $file);
+            $this->assertStringNotContainsString('XMLHttpRequest', $source, $file);
+            // Ang nag-iisang route ay ang kinopyang link ng photo page.
+            $this->assertSame([], array_values(array_diff($this->routesIn($source), ["route('item.photo')"])), $file);
+        }
+    }
+
+    /** Bawat route(...) na tawag sa isang source. */
+    private function routesIn(string $source): array
+    {
+        preg_match_all("/route\\('[^']*'\\)/", $source, $m);
+
+        return $m[0];
     }
 
     // ── S-14.1 – S-14.7: pagkakasunod ng quotes at ang cheapest flag ──────────

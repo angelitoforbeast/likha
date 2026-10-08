@@ -3211,7 +3211,15 @@
           const res = await fetch('{{ route('item.suppliers') }}', {headers:{'Accept':'application/json'}});
           const j = await res.json();
           if (j && j.suppliers) this.itemSuppliers = j.suppliers;
+@if(!empty($layoutSuppliers))
+          // Suppliers view: "loaded" lang kapag ok ang sagot — kung hindi, placeholder ang ipapakita, hindi "wala pang supplier".
+          if (res.ok && j && j.ok === true && j.suppliers) this.splLoaded.po = true; else this.splFailed = true;
+@endif
         }catch(e){ /* walang supply data — ok lang */ }
+@if(!empty($layoutSuppliers))
+        // Pumalya ang fetch o hindi JSON ang sagot: hindi naabot ang linya sa itaas.
+        if (!this.splLoaded.po) this.splFailed = true;
+@endif
       },
       // "1 x HAND GRIP" → "hand grip" (same normalization ng supply item_key).
       supKey(n){ return String(n||'').replace(/^\s*\d+\s*[x×]\s*/i,'').trim().toLowerCase().replace(/\s+/g,' '); },
@@ -3228,7 +3236,15 @@
           const j = await res.json();
           if (j && j.quotes) this.itemQuotes = j.quotes;
           if (j && j.suppliers) this.supplierList = j.suppliers;
+@if(!empty($layoutSuppliers))
+          // Suppliers view: "loaded" lang kapag ok ang sagot — kung hindi, placeholder ang ipapakita, hindi "wala pang supplier".
+          if (res.ok && j && j.ok === true && j.quotes) this.splLoaded.quotes = true; else this.splFailed = true;
+@endif
         }catch(e){ /* walang quote data — ok lang */ }
+@if(!empty($layoutSuppliers))
+        // Pumalya ang fetch o hindi JSON ang sagot: hindi naabot ang linya sa itaas.
+        if (!this.splLoaded.quotes) this.splFailed = true;
+@endif
       },
       quotesFor(name){ return this.itemQuotes[this.supKey(name)] || []; },
       // ── Sourcing worklists (CEO lang) ─────────────────────────────────────
@@ -3982,6 +3998,9 @@
         }
       },
 
+@if(!empty($layoutSuppliers))
+@include('item._suppliers_js')
+@endif
       async init(){
         this.initCols();
         // Sabay-sabay: bawat isa ay pinupuno lang ang sarili niyang map, walang dependency sa load().

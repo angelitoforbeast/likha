@@ -1,12 +1,12 @@
   <!-- Scroll area -->
   <div id="scroll">
     <div class="card">
-      <table>
+      <table class="spl-table">
         <thead>
-          <tr>
+          <tr class="spl-h1">
             <!-- Fixed: Page (sortable) -->
-            <th
-              :class="['sortable', ac('page_name') ? 'col-active' : '']"
+            <th rowspan="2"
+              :class="['sortable', 'spl-c1', ac('page_name') ? 'col-active' : '']"
               style="text-align:left;min-width:110px;"
               @click="sb('page_name')"
             >
@@ -14,8 +14,8 @@
               <span x-text="arr('page_name')" style="font-size:10px;"></span>
             </th>
             <!-- Fixed: Item (sortable) -->
-            <th
-              :class="['sortable', ac('item_name') ? 'col-active' : '']"
+            <th rowspan="2"
+              :class="['sortable', 'spl-c2', ac('item_name') ? 'col-active' : '']"
               style="text-align:left;min-width:160px;"
               @click="sb('item_name')"
             >
@@ -23,9 +23,12 @@
               <span x-text="arr('item_name')" style="font-size:10px;"></span>
             </th>
 
+            {{-- Ang grupo ng supplier: laging kasunod ng Item, hindi kasama sa reorder ng ibang column. --}}
+            <th class="spl-grp" colspan="4">SUPPLIERS</th>
+
             <!-- Draggable/reorderable columns -->
             <template x-for="col in cols" :key="col.id">
-              <th
+              <th rowspan="2"
                 draggable="true"
                 :class="[col.sort ? 'sortable' : '', col.sort && ac(col.sort) ? 'col-active' : '', dragOver===col.id ? 'drag-over' : '']"
                 :style="'text-align:'+col.align+';min-width:'+col.minw+'px'"
@@ -45,11 +48,16 @@
 
             {{-- Row-level Actions column removed. Per-cell ✎ edit icons na lang. --}}
           </tr>
+          {{-- Pangalawang row: ang apat na sub-header ng grupo. Walang sort at walang drag — ang server ang
+               nag-aayos ng quotes (pinakamura muna), kaya hindi ito puwedeng ilipat o i-sort dito. --}}
+          <tr class="spl-h2">
+            <th title="Cheapest first. Changing a price can move a quote to another column.">Supplier 1</th><th>Supplier 2</th><th>Supplier 3</th><th title="Supplier(s) from purchase orders">PO</th>
+          </tr>
         </thead>
         <tbody class="msg-tbody">
 
           <template x-if="rows.length === 0 && !loading">
-            <tr><td :colspan="cols.length + 2" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
+            <tr><td :colspan="cols.length + 6" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
               No data for selected date.
             </td></tr>
           </template>
@@ -57,18 +65,18 @@
           @if(!empty($effectiveIsCEO))
           {{-- Walang natira sa napiling sourcing list (CEO LANG). --}}
           <template x-if="worklist.list !== 'lahat' && !itemGroups().length && !(rows.length === 0 && loading)">
-            <tr><td :colspan="cols.length + 2" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
+            <tr><td :colspan="cols.length + 6" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
                     x-text="worklist.error ? worklist.error : (worklist.loading || !worklist.loaded || !holdLoaded ? 'Loading…' : 'Walang item sa listahang ito.')"></td></tr>
           </template>
           @endif
           {{-- Walang natira sa napiling category (lahat ng role; kung walang sourcing list na sumasagot na). --}}
           <template x-if="categoryFilter !== '' && categoryColVisible() && (!effectiveIsCeo || worklist.list === 'lahat') && !itemGroups().length && !(rows.length === 0 && loading)">
-            <tr><td :colspan="cols.length + 2" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
+            <tr><td :colspan="cols.length + 6" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
                     x-text="!stock.loaded ? 'Loading…' : 'Walang item sa category na ito.'"></td></tr>
           </template>
 
           <template x-if="rows.length === 0 && loading">
-            <tr><td :colspan="cols.length + 2" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
+            <tr><td :colspan="cols.length + 6" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
               <span class="spin" style="margin-right:6px;"></span>Loading…
             </td></tr>
           </template>
@@ -89,7 +97,7 @@
             <template x-for="A in [row.agg]" :key="'agg-'+row.item_name">
             <tr class="item-row" :class="!row.hasPages ? 'item-row-nopage' : ''"
                 @click="row.hasPages && toggleItemExpand(row.item_name)">
-              <td>
+              <td class="spl-c1">
                 <div class="item-cell">
                   <template x-if="row.hasPages">
                     <button class="expand-chev" :class="isItemOpen(row.item_name) ? 'active' : ''"
@@ -134,7 +142,7 @@
                 </template>
                 @endif
               </td>
-              <td style="text-align:center;">
+              <td class="spl-c2" style="text-align:center;">
                 <template x-if="row.hasPages">
                   <div style="font-size:11px;color:#64748b;font-weight:600;"
                        x-text="row.pages_count + (row.pages_count===1?' running page':' running pages')"></div>
@@ -142,65 +150,7 @@
                 <template x-if="!row.hasPages">
                   <div style="font-size:11px;color:#b91c1c;font-weight:700;">⚠ walang running page</div>
                 </template>
-                @if($effectiveIsCEO)
-                {{-- Supplier(s) + latest unit cost (Supply Finance) — CEO LANG (viewAs=ceo).
-                     Wala sa markup ng hindi-CEO; ang endpoint ay walang ibabalik sa kanila. --}}
-                <div style="font-size:10.5px;margin-top:3px;line-height:1.35;">
-                  <template x-if="suppliersFor(row.item_name).length">
-                    <div style="color:#0f172a;">
-                      <template x-for="(s, si) in suppliersFor(row.item_name)" :key="'sup-'+row.item_name+'-'+si">
-                        <span :title="'PO ' + (s.order_date||'') + (s.order_no ? ' · '+s.order_no : '')">
-                          <span x-show="si>0" style="color:#cbd5e1;"> · </span>🏭 <b x-text="s.supplier"></b> <span style="color:#065f46;font-weight:700;" x-text="money(s.unit_cost)"></span>
-                        </span>
-                      </template>
-                    </div>
-                  </template>
-                  <template x-if="!suppliersFor(row.item_name).length">
-                    <div style="color:#94a3b8;font-style:italic;">walang supplier</div>
-                  </template>
-                </div>
-                {{-- ✨ Suppliers (quote) — supplier na NAKAHANAP na + sariling presyo (item_supplier_quotes), hiwalay sa PO.
-                     CEO LANG. INLINE add / edit / delete dito mismo (same as /item/photo). --}}
-                <div style="font-size:10.5px;margin-top:2px;line-height:1.45;" @click.stop>
-                  <template x-for="(q, qi) in quotesFor(row.item_name)" :key="'q-'+row.item_name+'-'+q.id">
-                    <div style="display:flex;gap:4px;align-items:center;justify-content:center;flex-wrap:wrap;">
-                      <span :title="'Quote' + (q.moq ? ' · MOQ '+q.moq : '') + (q.updated_at ? ' · '+q.updated_at : '')">🏷 <b x-text="q.supplier"></b>
-                        <span style="color:#1d4ed8;font-weight:700;" x-text="q.price!==null ? money(q.price) : '—'"></span>
-                        <span x-show="q.moq" style="color:#94a3b8;" x-text="q.moq ? 'MOQ '+q.moq : ''"></span>
-                        <span x-show="q.prev_price !== null && q.prev_price !== undefined" style="color:#94a3b8;"
-                              x-text="'dati '+money(q.prev_price)+(q.prev_date ? ' ('+q.prev_date+')' : '')"></span>
-                      </span>
-                      <template x-if="q.photo_url">
-                        <img class="item-sq" style="width:22px;height:22px;border-color:#bfdbfe;" :src="q.photo_url" :alt="q.supplier"
-                             :title="'Quote photo · '+q.supplier" @click.stop="photoModal = { open:true, url:q.photo_url, name:q.supplier+' — '+row.item_name }">
-                      </template>
-                      <template x-if="safeLink(q.link)"><a :href="safeLink(q.link)" target="_blank" rel="noopener" @click.stop style="color:#4f46e5;">link</a></template>
-                      <button type="button" class="item-photo-btn" style="padding:0 5px;" title="I-edit ang quote" @click.stop="openQuote(row.item_name, q)">✎</button>
-                      <button type="button" class="item-photo-btn" style="padding:0 5px;color:#b91c1c;" title="Tanggalin ang quote" @click.stop="deleteQuote(row.item_name, q)">✕</button>
-                    </div>
-                  </template>
-                  <template x-if="!quotesFor(row.item_name).length && !suppliersFor(row.item_name).length">
-                    <div style="color:#b91c1c;font-weight:700;">⚠ wala pang supplier</div>
-                  </template>
-                  <template x-if="quoteForm.key === supKey(row.item_name)">
-                    <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;align-items:center;justify-content:center;">
-                      <select x-model="quoteForm.supplier_id" style="font-size:10.5px;padding:1px;max-width:130px;">
-                        <option value="">— supplier —</option>
-                        <template x-for="s in supplierList" :key="'s-'+s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
-                      </select>
-                      <input type="number" step="0.01" min="0" x-model="quoteForm.price" placeholder="₱ presyo" style="width:78px;font-size:10.5px;padding:1px;">
-                      <input type="number" min="0" x-model="quoteForm.moq" placeholder="MOQ" style="width:54px;font-size:10.5px;padding:1px;">
-                      <input type="text" x-model="quoteForm.link" placeholder="link (opsyonal)" style="width:120px;font-size:10.5px;padding:1px;">
-                      <input type="file" accept="image/jpeg,image/png,image/webp" @change="quoteForm.photo = $event.target.files[0] || null"
-                             title="Photo ng produkto ng supplier (jpg/png/webp, hanggang 10 MB)" style="font-size:10px;max-width:170px;">
-                      <button type="button" class="item-photo-btn" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
-                      <button type="button" class="item-photo-btn" @click.stop="quoteForm.key=null">Cancel</button>
-                    </div>
-                  </template>
-                  <button type="button" class="item-photo-btn" style="margin-top:2px;"
-                          x-show="quoteForm.key !== supKey(row.item_name)" @click.stop="openQuote(row.item_name, null)">+ supplier quote</button>
-                </div>
-                @endif
+                <div class="spl-rowact">
                 <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-top:3px;">
                   <a class="item-photo-btn" @click.stop
                      :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)+'&start_date='+startDate+'&end_date='+endDate"
@@ -210,7 +160,79 @@
                   <button type="button" class="item-copy-btn" @click.stop="copyItem(row.item_name, row.hold)"
                           x-text="copyState===row.item_name ? '✓ Copied' : '📋 Copy'"></button>
                 </div>
+                </div>
               </td>
+              {{-- ── Ang grupo ng supplier: laging apat na column pagkatapos ng Item ──
+                   Isang root element lang ang kaya ng x-if, kaya tatlong hugis ang apat na column: isang cell na
+                   sakop ang apat (placeholder o pulang band), o tatlong quote cell + ang PO cell.
+                   May @click.stop ang bawat cell: ang click sa loob nito ay hindi dapat magbukas ng page rows.
+                   Lahat ng galing sa supplier ay x-text / bound attribute lang (text, hindi HTML). --}}
+              {{-- 1. Hindi pa (o hindi) sumagot ang dalawang listahan: neutral na placeholder. Hindi puwedeng sabihing
+                      "wala pang supplier" hangga't hindi pa alam. --}}
+              <template x-if="!splReady()">
+                <td colspan="4" class="spl-sc spl-wait" @click.stop>
+                  <span class="spl-waittext" x-text="splFailed ? 'hindi na-load' : '…'"
+                        :title="splFailed ? 'Hindi na-load ang listahan ng supplier. I-refresh ang page.' : 'Loading suppliers…'"></span>
+                </td>
+              </template>
+              {{-- 2. Walang quote at walang PO supplier: isang pulang band, isang beses lang ang babala. --}}
+              <template x-if="splReady() && splNone(row.item_name)">
+                <td colspan="4" class="spl-sc spl-nosup" @click.stop>
+                  <div class="spl-band">
+                    <b>⚠ wala pang supplier</b>
+                    <button type="button" class="item-photo-btn" @click.stop="openQuote(row.item_name, null)">+ supplier quote</button>
+                  </div>
+                </td>
+              </template>
+              {{-- 3. Supplier 1–3: ang unang tatlong quote ayon sa pagkakasunod ng server (pinakamura muna). --}}
+              <template x-for="si in (splReady() && !splNone(row.item_name) ? [0, 1, 2] : [])" :key="'spl-'+row.item_name+'-'+si">
+                <td class="spl-sc" @click.stop>
+                  <template x-if="splTop3(row.item_name)[si]">
+                    <template x-for="q in [splTop3(row.item_name)[si]]" :key="'spl-q-'+row.item_name+'-'+q.id">
+                      <div class="spl-q">
+                        <button type="button" class="spl-name" @click.stop :title="q.supplier" x-text="q.supplier"></button>
+                        <div class="spl-l2">
+                          {{-- Explicit na null check: ang money() ay nagpi-print ng 0.00 para sa null. --}}
+                          <span :class="q.cheapest === true ? 'spl-price spl-low' : 'spl-price'" x-text="q.price !== null ? money(q.price) : '—'"></span>
+                          {{-- Ang MOQ na 0 ay value pa rin, kaya null / undefined lang ang itinatago. --}}
+                          <template x-if="q.moq !== null && q.moq !== undefined">
+                            <span class="spl-moq" x-text="'MOQ ' + q.moq"></span>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                  </template>
+                  {{-- Sa huling cell lang: ilan pang quote ang hindi kasya sa tatlo. --}}
+                  <template x-if="si === 2 && splRest(row.item_name) > 0">
+                    <button type="button" class="spl-more" @click.stop x-text="'+' + splRest(row.item_name)"></button>
+                  </template>
+                  <template x-if="!splTop3(row.item_name)[si]">
+                    <button type="button" class="spl-add" @click.stop="openQuote(row.item_name, null)" title="+ supplier quote" :aria-label="'+ supplier quote (Supplier ' + (si + 1) + ')'">+</button>
+                  </template>
+                </td>
+              </template>
+              {{-- 4. PO: ang unang supplier mula sa purchase orders (kasalukuyang pagkakasunod ng listahan) at ang cost nito. --}}
+              <template x-if="splReady() && !splNone(row.item_name)">
+                <td class="spl-sc spl-po" @click.stop>
+                  <template x-if="suppliersFor(row.item_name).length">
+                    <template x-for="s in [suppliersFor(row.item_name)[0]]" :key="'spl-po-'+row.item_name">
+                      <div class="spl-q">
+                        <button type="button" class="spl-name" @click.stop x-text="s.supplier"
+                                :title="'PO ' + (s.order_date||'') + (s.order_no ? ' · '+s.order_no : '')"></button>
+                        <div class="spl-l2">
+                          <span class="spl-pocost" x-text="money(s.unit_cost)"></span>
+                        </div>
+                      </div>
+                    </template>
+                  </template>
+                  <template x-if="suppliersFor(row.item_name).length > 1">
+                    <button type="button" class="spl-more" @click.stop x-text="'+' + (suppliersFor(row.item_name).length - 1)"></button>
+                  </template>
+                  <template x-if="!suppliersFor(row.item_name).length">
+                    <span class="spl-empty">—</span>
+                  </template>
+                </td>
+              </template>
               <template x-for="col in cols" :key="'ic-'+row.item_name+'-'+col.id">
                 <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(A.projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(A.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(A.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(A.projected_profit_last_7d,7):'')">
                   @include('item._agg_cells')
@@ -230,6 +252,7 @@
             <tr x-show="!row.__itemHeader && (expandedPages[row.page_name] || {}).open" class="page-col-header">
               <th style="text-align:left;min-width:110px;">Page</th>
               <th style="text-align:left;min-width:160px;">Item</th>
+              <th colspan="4"></th>
               <template x-for="col in cols" :key="'ph-'+row.page_key+'-'+col.id">
                 <th :style="'text-align:'+col.align+';min-width:'+col.minw+'px'">
                   <span x-text="col.label"></span>
@@ -240,7 +263,7 @@
             <tr x-show="!row.__itemHeader" :class="(editIdx === idx ? 'editing-row ' : '') + ((expandedPages[row.page_name] || {}).open ? 'page-row-expanded' : '')">
 
               <!-- Fixed: Page -->
-              <td>
+              <td class="spl-c1">
                 {{-- Page cell layout: chevron in a fixed-width gutter so it
                      vertically aligns to the FIRST LINE of the page name
                      across every row (regardless of multi-line warnings). --}}
@@ -296,7 +319,7 @@
               </td>
 
               <!-- Fixed: Item -->
-              <td style="text-align:center;">
+              <td class="spl-c2" style="text-align:center;">
                 <div style="font-weight:600;color:#1e293b;white-space:normal;line-height:1.35;"
                      x-text="sq(row.item_name)"></div>
                 <template x-for="s in (row.secondary_items||[])" :key="s.item_name">
@@ -308,6 +331,8 @@
                   </div>
                 </template>
               </td>
+              {{-- Ang supplier ay sa item, hindi sa page: blangko ang ilalim ng grupo sa page row. --}}
+              <td colspan="4" class="spl-under"></td>
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
@@ -753,7 +778,7 @@
                  root child — <tbody> serves as that root). --}}
             <tr x-show="!row.__itemHeader && (expandedPages[row.page_name] || {}).open"
                 class="page-expand-row">
-              <td :colspan="(cols.length + 2)" style="padding:0;">{{-- (cols.length + 2): page + idx-checkbox + cols --}}
+              <td :colspan="(cols.length + 6)" style="padding:0;">{{-- (cols.length + 6): page + idx-checkbox + cols --}}
                 @include('owner._private_expand_inline')
               </td>
             </tr>
@@ -765,7 +790,7 @@
           <template x-if="rows.length > 0">
             <tr class="total-row">
               <td>TOTAL</td>
-              <td></td>
+              <td colspan="5"></td>
               <template x-for="col in cols" :key="col.id">
                 <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(tot().projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(tot().projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(tot().projected_profit_last_7d,7):'')">
                   <template x-if="col.id==='adspent'">
