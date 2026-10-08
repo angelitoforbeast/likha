@@ -317,3 +317,13 @@ Review findings accepted, not fixed. Each fix loop was closed after two rounds. 
 - **After a failed save of the settings form the box shows the stored value, not what was ticked.** Reason: CEO-only screen, trusted path.
 - **Not tested: MySQL, and memory with real-sized chat columns.** Reason: the tests run on sqlite; the command uses the query builder and reads 200 rows per chunk.
 - **For logs written before this change the model's own request for a person is inferred and can be wrong in both directions.** Reason: the log did not record it; the report says so in two sentences and prints strict and lenient counts.
+
+**Fix list 1 (the text check, new rules only), accepted after its review**
+- **Another barangay written with one wrong letter, or with its words joined ("BachawNorte"), is not seen as "another barangay".** Reason: left out for the time of the run; it needs the customer to name two barangays and the model to keep the withdrawn one. A near check directly after a barangay word would close it.
+- **A short name (under five letters) or a bare number without a barangay word is not "another barangay"** ("ngayon sa Pias na po"; "ay mali, 29 po pala"). Reason: the exception the second amendment sets, to keep false holds down.
+- **A bracket name written with a slash is not seen** ("Brgy Caluis/Cobra" beside SAN VICENTE (CALUIS/COBRA)); a label with a spaced dash is not seen either. Reason: the text is cut at slashes and dashes; four cases in the reviewer's sweep.
+- **Two real pairs where a real word is one letter off the longer name's extra word** ("pala Salvacion" confirms PALTA SALVACION in Virac, "luma Punod" confirms LUMBA-PUNOD in Pantar). Reason: the one-letter allowance keeps "Anilao Labak" confirming ANILAO-LABAC, which an existing case requires.
+- **"Poblacion" as the second barangay is not counted when the barangay being confirmed is itself a poblacion label; "malapit sa Poblacion" holds a row in towns whose poblacion carries another name.** Reason: ambiguous either way; the narrow rule was chosen.
+- **A street, subdivision or landmark that carries the name of another barangay of the city (five letters or more) holds the row.** Reason: asked for by the second amendment; the real rate is unknown until a replay on stored nights.
+- **The test of S-25.11 is still named "…needs_more_than_one_mention_of_the_name" although a second mention no longer confirms.** Reason: a rename only; the story's wording is corrected.
+- **The last fix commit (`0b4d443`) had no review of its own.** Reason: the time of the run; it only refuses, and its rows and the whole file are green.

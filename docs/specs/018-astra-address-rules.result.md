@@ -2,7 +2,7 @@
 
 > Committed beside the spec: names no people and no decision ids.
 
-**Status:** done
+**Status:** done, with fix list 1 (amendment 018-2) done
 **Date:** 2026-10-08
 **Branch / PR:** `feat/018-astra-address-rules` (base `90b900f`, head: the commit that carries this file), no PR, not pushed
 **Preview or run link:** n/a (no environment file in the worktree, the application cannot be started here)
@@ -103,6 +103,11 @@ runs. Tests without a class name are in `AstraAddressRulesTest`.
 | S-26.14 | `test_S_26_14_a_longer_barangay_name_of_the_city_around_the_hit_is_not_confirmed` | pass |
 | S-26.15 | `test_S_26_15_an_initial_is_neither_a_number_nor_a_suffix_letter` | pass |
 | S-26.16 | `test_S_26_16_a_siblings_number_or_letter_written_another_way_is_never_bridged` | pass |
+| S-26.17 | `test_S_26_17_the_exact_name_of_a_sibling_beside_a_filler_word_does_not_confirm_the_longer_name` | pass |
+| S-26.18 | `test_S_26_18_over_every_pair_of_a_name_and_its_one_word_longer_sibling_a_filler_word_never_confirms_the_longer_name` | pass |
+| S-26.19 | `test_S_26_19_a_barangay_named_like_its_province_needs_more_than_the_provinces_name` | pass |
+| S-26.20 | `test_S_26_20_a_text_that_names_another_barangay_of_the_city_confirms_neither` | pass |
+| S-26.21 | `test_S_26_21_another_barangay_is_seen_in_the_ways_customers_write_it` | pass |
 | S-27.1 | `test_S_27_1_a_cancel_with_everything_valid_proceeds_and_the_cancel_stays_visible` | pass |
 | S-27.2 | `test_S_27_2_an_inquiry_with_everything_valid_proceeds_and_the_inquiry_stays_visible` | pass |
 | S-27.3 | `test_S_27_3_a_cancel_or_an_inquiry_with_an_incomplete_line_keeps_its_code_and_the_gate_is_not_run` | pass |
@@ -367,6 +372,160 @@ Each group in plain words:
   not hold a row for it, the validation step does.
 - **What a replay cannot know:** the limits of the whole report.
 
+## Fix list 1 (amendment 018-2)
+
+An independent check of the finished work found three families of text where the text check
+confirmed a barangay the customer's words do not support. All three are fixed, in the text check
+only (`AstraBarangayMatcher`, and in `AstraAddressRules` only `confirmedByText`,
+`namedLikeItsCity` and a helper beside them). The rule function, the mapper, the switch-off path,
+the command and the settings box are untouched; everything changed is reached only with the
+switch on.
+
+**The three families and what was built**
+
+1. *A filler word beside a sibling's exact name.* "Brgy San Isidro sa Lagonoy" confirmed SAN
+   ISIDRO SUR (POB.) by near match because the window took in "sa". Now a near hit is refused
+   when another label of the city is the first or the last words of the window, or overlaps the
+   hit as a whole phrase. Kept on purpose: a longer name with one wrong letter in its extra word
+   still confirms the longer name ("Anilao Labak" for ANILAO-LABAC), when that word has five
+   letters or more.
+2. *A barangay named like its province.* "Pitogo, Quezon" confirmed the barangay QUEZON of
+   Pitogo. The rule for a barangay named like its town now also covers the province's name and
+   any run of words of the town's or province's name ("Santa Marcela" for MARCELA (POB.)).
+   The review then showed that "the name twice within one source" is met by an address that is
+   simply given twice (38 of 38 such barangays confirmed on "Pitogo, Quezon" plus "Address:
+   Pitogo, Quezon"), so that half of the rule was removed: such a barangay is confirmed only
+   with a barangay word, "pob" or "poblacion" directly beside its name (ruling below).
+3. *Two different barangays of the city in the text.* When any of the three sources names
+   another barangay of the same city as a whole phrase, the barangay is not confirmed, whatever
+   the order. The exceptions of the amendment are built (a name under five characters, a name
+   inside the one being confirmed, the town's or province's own name, a number). After the
+   review, the other barangay is also seen when written as plain "Poblacion" after a barangay
+   word or after "sa", "ng", "taga" (in towns whose poblacion carries another name), by the name
+   inside its bracket, with or without the dot of an initial, as a short name after a barangay
+   word, and as a shorter sibling named separately with its own barangay word.
+
+**New cases** (in `qa/stories.md` and the case table): S-26.17 to S-26.21; S-25.11's Then was
+reworded (the name twice no longer confirms).
+
+**Red lines** (first failure before each fix):
+
+| Commit | Test | First failure line |
+|---|---|---|
+| `9f8cd30` point 1 | `test_S_26_17_…` | `'Brgy San Isidro sa Lagonoy'` expected `none`, got `near` 88 |
+| `9f8cd30` the sweep as a test | `test_S_26_18_…` | `Failed asserting that two arrays are identical` (the list of wrong confirmations was not empty) |
+| `70a67d5` point 2 | `test_S_26_19_…` | row "town and province, QUEZON": expected `none`, got `phrase` 100 |
+| `e866b18` point 3 | `test_S_26_20_…` | row "moved, the first one named": expected `none`, got `phrase` 100 |
+| `6e44c38` a bug the cost sweep showed | `test_S_26_20_…` | row "a numbered name that is part of this one": expected `phrase`, got `none` ("Brgy 10-A, Cavite City" for BARANGAY 10-A) |
+| `cf8568b` after the review | `test_S_26_19_…`; `test_S_25_11_…` | row "the address given twice": expected `none`, got `phrase` 100; row "twice in the chat": expected `none`, got `phrase` |
+| `052179f` after the review | `test_S_26_21_…` | row "plain Poblacion after a barangay word": expected `none`, got `phrase` 100 (seven rows red) |
+| `0b4d443` after the re-check | `test_S_26_21_…` | three new rows returned `phrase` 100 where `none` was expected |
+
+**The sweep of point 1, full set** (it runs as the test S-26.18 in the suite, the whole set, no
+sampling, about 4 seconds): 593 pairs of labels in one city where one is the other plus one word
+at the start or the end, 10 filler words, 5,930 texts each way.
+
+| | Before (`80161a0`) | After |
+|---|---|---|
+| "Brgy <shorter> <filler> <city>" wrongly confirms the longer label | 45 texts (38 pairs) | 0 |
+| "Brgy <longer> <filler> <city>" confirms the longer label | 5,580 | 5,580 |
+| correct confirmations of the longer label lost | | 0 |
+
+The 350 texts of the second row that do not confirm are the same before and after: 35 labels
+that are never confirmed in this form (labels such as `BGY. NO. 31 TALINGAAN`, `R. ECLEO SR.`);
+the test pins them by name. A wider probe (25 filler words, before and after the name): 241
+wrong before, 7 after, and all 7 are the customer writing the longer name itself ("new Lourdes",
+"san Juan").
+
+**The cost of point 3** (rows that turn from confirmed to not confirmed):
+
+- Every label of the list written by its own name, "Brgy <label>, <city>, <province>", 43,152
+  texts: 42,606 confirmed before the fix list, 42,606 on the final code (run on the head). In
+  between, the first version of point 3 lost 48 of them (all in two towns whose written-out
+  label repeats the province's name); the fix after the review gave them back. Cost on a clean
+  single address: none.
+- The rebuilt sibling sweep (75,345 texts over every pair where one name holds the other or they
+  differ in the last word, 24,404 numbered pairs): 7 texts turned from confirmed to not
+  confirmed through point 3, none the other way.
+- The real cost is in chats that a sweep of labels does not write: a street, a subdivision or a
+  landmark that carries the name of another barangay of the same city, five letters or more
+  ("Brgy Alangan, 12 Mabini St" in a city with a barangay MABINI), and a customer who names the
+  old and the new barangay. Both now go to a person. How often this happens on real chats is not
+  known; the replay shows it for a night in the line "Astra proceeded that night, the new rules
+  would not proceed" and in the count of rows held by "the barangay is not in the customer's
+  text".
+
+**The earlier sweeps, re-run**
+
+- The text check alone, `80161a0` against the code after point 3, on the 75,345 sibling texts
+  (numbered siblings and name siblings; the original scripts of the build were throwaway and
+  were rebuilt to the same recipe): 0 texts turned from "not confirmed" to confirmed, 0 the
+  other way. Not re-run after the three later commits; each of them only refuses.
+- S-26.18 (above) on the final code: 0 wrong, none lost.
+- The mapper's sweep was not re-run: `mapForm` has no change in this fix list
+  (`git diff 80161a0..HEAD -- app/Services/AstraAddressRules.php` touches `confirmedByText`,
+  `namedLikeItsCity` and the new `placeNames` only), and its tests are green.
+
+**The review** (the separate reviewing agent, adversarial depth, own sweeps on the real list;
+233,716 filler probes, 4,827 correction probes):
+
+| Round | Findings | What was done |
+|---|---|---|
+| The diff of the four fix commits | Family 1 closed (no wrong confirmation by a plain filler in 233,716 probes). Family 2 closed for one mention, but **major**: "twice in one source" is met by a repeated address or a street of that name (38 of 38). Family 3 closed for the exact spelling only, **major** (the fourth family asked for): the other barangay written as "Poblacion", by its bracket name, with a dotted initial, or equal to the confirmed label's own bracket name is not seen. Minors in `TODO.md` | fixed in `cf8568b` and `052179f`; one item left out (below) |
+| Re-check | both fixes hold (46 of 46 namesake barangays refuse the repeated address); 2 further **majors** of family 3: a shorter sibling named separately with its own barangay word ("Brgy Santa Cruz Bigaa po. Ay mali, Brgy Santa Cruz pala" confirmed SANTA CRUZ BIGAA; 253 of 356 pairs), and a bare "Poblacion" without a barangay word ("ngayon sa Poblacion na po") | fixed in `0b4d443`, narrowly: the sibling needs its own barangay word; "Poblacion" counts after "sa", "ng" or "taga" |
+
+No review ran on `0b4d443` (the time of the run); its three rows and the whole file are green.
+
+**Rulings of the fix list**
+
+- Ruling: a barangay named like its town or province is confirmed only with a barangay word,
+  "pob" or "poblacion" beside it; the name twice in one source no longer confirms, and such a
+  name counts as "another barangay" only with a barangay word — this goes beyond the amendment's
+  point 2, which kept "twice within one source"; the review showed that a customer's address
+  given in the message and again in the filled form confirms the namesake barangay every time —
+  cost if wrong: a customer who writes the barangay's name twice without "Brgy" goes to a person.
+  It can only turn a confirmation into "not confirmed". S-25.11 was reworded accordingly. **For
+  the reviewer to confirm or reverse.**
+- Ruling: a longer name with one wrong letter in an extra word of five letters or more still
+  confirms the longer name — the existing case S-26.14 requires it — two real pairs let a real
+  word through ("pala Salvacion" for PALTA SALVACION, "luma Punod" for LUMBA-PUNOD).
+- Ruling: the amendment's exception "not a word run of the label being confirmed" is kept, except
+  for a shorter sibling that is itself a label, stands outside the confirmed name's own mention
+  and has its own barangay word — the correction "Brgy Santa Cruz Bigaa … Brgy Santa Cruz pala"
+  must not confirm the withdrawn one — cost: such a text goes to a person.
+- Ruling: "Poblacion" counts as another barangay after a barangay word, or after "sa", "ng",
+  "taga", only in towns that have a poblacion-type label and no label POBLACION, and never when
+  the barangay being confirmed is itself a poblacion label or stands directly beside the word —
+  "malapit sa Poblacion" then holds a row; counting every "Poblacion" would hold many more.
+- Ruling: bracket names of five letters or more count as another barangay without a barangay
+  word, like whole names; a dotted initial is ignored only when looking for another barangay,
+  never when confirming.
+- Ruling: story ids. The two specs merged from develop also use S-22 to S-24 in
+  `qa/stories.md` for their own stories. Slice 018 keeps the ids its spec gives; the test names
+  do not clash (other test classes). The reviewer may want one of the slices renumbered.
+
+**Accepted, in `TODO.md`:** the other barangay written with one wrong letter or with its words
+joined ("BachawNorte") is not seen as another barangay (left out for time; it needs the model to
+keep the withdrawn barangay); a short name or a number without a barangay word ("ngayon sa Pias
+na po", "ay mali, 29 po pala"), by the amendment's exceptions; a bracket name written with a
+slash; the two real-word pairs above; "Poblacion" as the second barangay when the one being
+confirmed is itself a poblacion label; the name of the test for S-25.11 still says "more than
+one mention".
+
+**The merge.** `git merge develop` (local develop at `1c32cc1`) as commit `81b677b`. Conflicts
+only in `qa/stories.md` and `TODO.md`; in both, develop's appended sections are kept first and
+this spec's section after them, checked line by line against both sides. No other file
+conflicted.
+
+**The suite after the merge**, plain PHPUnit in this worktree, on the final code: `Tests: 744, Assertions: 10552, Errors: 1, Failures: 1, Skipped: 3.`
+The two red tests are the known ones
+(`ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`, which
+needs an untracked file, and the old `ExampleTest`). `AstraAddressRulesTest.php`: `OK (94 tests,
+1705 assertions)`; `AstraReplayCommandTest.php`: `OK (19 tests, 472 assertions)`.
+
+**Time** (agent run time): the three points 15 minutes; the review 11; the fix after it 7; the
+re-check 3; the last fix 3; three suite runs about 4 each.
+
 ## Rows Astra proceeds today that the new rules would hold
 
 All of these concern rows where the model's confidence is medium or low; at high confidence the
@@ -384,7 +543,8 @@ to a guess.
 | A longer barangay name around the name | "Dugui San Vicente" for SAN VICENTE; "Brgy Vinisitahan - Basud" for BASUD; "Anilao Labak" for ANILAO | The customer wrote the longer barangay (also with one wrong letter). |
 | The name inside a longer word, or split | a name that only appears as part of a longer word; "Holy, Spirit" | Today five letters in a row anywhere were enough; now whole words in one phrase are needed. |
 | Only Astra's form says the barangay, in other words than the list | form "Poblacion", list line POBLACION 2, chat "Poblacion" | The form's wording counts only when it maps to that very label. |
-| A barangay named like its town, said once | "Malibcong, Abra" for barangay MALIBCONG | Once is the town; twice, or with "Brgy" beside it, is the barangay. |
+| A barangay named like its town or its province, without a barangay word | "Malibcong, Abra" for barangay MALIBCONG; "Pitogo, Quezon" for barangay QUEZON, also when the address is given twice | The name alone is the town or the province; only "Brgy", "Pob." or "Poblacion" beside it makes it the barangay (fix list 1). |
+| The text names another barangay of the same city | "dati sa Brgy X, ngayon sa Brgy Y po"; "Brgy Alangan, 12 Mabini St" where MABINI is a barangay of that city (five letters or more); "ngayon sa Poblacion na po" | Two barangays in one chat: a person decides which (fix list 1). A street or landmark with a barangay's name is held for the same reason. |
 | A label that itself holds a dash or a bracket | `BGY. 1 - EM'S BARRIO (POB.)` | The text is cut at dashes and brackets, so such a label is never confirmed from text. |
 | A name written with a dotted abbreviation other than sta, sto, pob, gen | "St. Peter", "Dist. 1" | A full stop ends a phrase. |
 
@@ -412,6 +572,16 @@ little higher); 47 of those pairs are barangays of one and the same city and are
 are not. Examples that are not caught: "banawon" / "banayon" (85.7), "binuangan" / "binuluangan"
 (90.0), "buang" / "buanga" (90.9). Names of several words have the same weakness in a smaller
 way; numbers and suffix letters never.
+
+Also accepted, by the second amendment, each with one example:
+
+- A label that is also a first name or a common word is confirmed by that word anywhere in the
+  text when the model proposed that label: "Si Maria po ang tatanggap" confirms a barangay MARIA.
+  The old rules do the same, and it needs the model to have proposed that label.
+- Two labels of the list for the same place are interchangeable: "Marcela Poblacion" confirms
+  MARCELA (POB.) and the other way round (Santa Marcela, Apayao).
+- The "BGY. NO. N" labels are never confirmed by "Brgy N" (for example `BGY. NO. 31 TALINGAAN`):
+  such rows go to a person, the safe direction.
 
 ## Rulings
 
