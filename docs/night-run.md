@@ -68,3 +68,54 @@ Things to check on the server, because the code can't read them:
    After fixing the cause, "Retry failed" runs that night's failed and not-run rows that are still blank.
 6. `storage/logs/laravel.log`: `NIGHT_ASTRA_ROW` (a row job hit an error; the class only) and
    `ASTRA_ENCODER_HTTP` (HTTP status and OpenAI's error type and code, never the body).
+
+## Astra's new address rules (the switch and the replay)
+
+**The switch.** In Checker 1 settings, in the CEO's Astra section, tick "New address rules for Astra (match like
+the classic checker)". It is off by default. It takes effect on the next row, for both the night run and the
+browser's Astra Check / Astra Fix. Unticking it restores the old rules for the next row. Rows already done are
+not touched either way.
+
+**The replay.** Before (or after) switching on, you can see what the new rules would have done to a past night:
+
+    php artisan astra:replay-address-rules --night=YYYY-MM-DD
+    php artisan astra:replay-address-rules --step=<id>
+
+`--night` is the date of the morning the run happened (Manila time); `--step` is the id of that night's Astra
+step. Give exactly one of them. The command only reads: it changes no order, calls no model, costs nothing, and
+prints counts and order ids only, never customer text. It gives the same report whether the switch is on or off.
+
+**How to read the output.**
+
+- The first lines name the night and the step, the list fingerprint (a short code for the J&T address list in
+  use today), and how many rows the night had by state (finished, failed, skipped, not run, waiting, other).
+- "Finished rows without a log / without an order / whose log could not be read": finished rows the replay
+  could not use, because the stored answer or the order is gone or unreadable. They are listed by id and
+  counted as "could not be replayed".
+- "Finished rows with an older log": logs written before the replay data was stored. The model's own request
+  for a person is not recorded in them, so it is inferred.
+- "Astra proceeded that night" and "Held for a person that night": what happened then. For the rows that
+  proceeded, the report lists those the new rules would not proceed. For the held rows it shows how many would
+  pass the address rules, and how many would pass everything (address rules plus the final check of item, COD,
+  shop details and blacklists), with the order ids.
+- "First thing that would still hold each held row": every held row is counted once, under the first reason
+  that stops it (the model asked for a person, unclear intent, no line from the list, barangay not in the
+  customer's text, a blank required field, the final check, or nothing, meaning it would proceed).
+- "Where the line of the held rows came from": the model, the program mapping Astra's form to the J&T list,
+  or no line at all.
+- The older-log lines (hold taken as the program's, and the rows where the model asked for a person without a
+  stated reason) say where the counts for older logs can be too high or too low. The "strict" line is always
+  "none of these rows would proceed"; the "lenient" line is the count if such a request were ignored when the
+  program found the line and the customer's text confirms it.
+- "Held rows that staff have since set to PROCEED / CANNOT PROCEED": how the new rules compare with what staff
+  decided afterwards, and whether the province, city and barangay are the same as staff's.
+- "Rows that could not be rebuilt exactly as they were that night": the chat, the earlier conversation or the
+  customer details have a different length now, or the list changed. Read those rows with care.
+- "Of the rows that would pass everything, the same phone is on another order of the same date today": rows
+  that the old rules held for a duplicate phone and the new rules let through; the Validate step still catches
+  them.
+
+**What a replay cannot know.** It reads the earlier conversation, the item, COD, shop details and blacklists as
+they are today, not as they were that night. It cannot see edits made to the chat or the customer details since,
+earlier conversation the model fetched with its own tool, or (for older logs) the version of the address list
+that night. Logs older than 90 days are deleted, so only recent nights can be replayed.

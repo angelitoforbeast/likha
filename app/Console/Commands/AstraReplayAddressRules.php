@@ -97,7 +97,7 @@ class AstraReplayAddressRules extends Command
         $ids = array_fill_keys([
             'no_log', 'no_order', 'unreadable', 'older', 'proceeded', 'proceeded_not_replayed', 'proceeded_would_not',
             'held', 'held_not_replayed', 'address', 'exempt', 'everything',
-            'src_model', 'src_program_map', 'src_none', 'program_flag', 'unsaid', 'unsaid_strict', 'unsaid_lenient',
+            'src_model', 'src_program_map', 'src_none', 'program_flag', 'unsaid', 'unsaid_lenient',
             'staff_proceed', 'staff_proceed_also', 'staff_same', 'staff_different',
             'staff_cannot', 'staff_cannot_address', 'staff_cannot_everything',
             'inexact', 'inexact_chat', 'inexact_history', 'inexact_cxd', 'cxd_unchecked', 'inexact_list', 'dup_phone',
@@ -156,7 +156,6 @@ class AstraReplayAddressRules extends Command
                 $d = $this->decide($stored, $unsaid ? 'other' : $stored['human_kind'], $order, $texts);
                 if ($unsaid) {
                     $ids['unsaid'][] = $oid;
-                    if ($d['proceed']) $ids['unsaid_strict'][] = $oid;
                     if ($this->decide($stored, 'label_not_found', $order, $texts)['proceed']) $ids['unsaid_lenient'][] = $oid;
                 }
 
@@ -248,8 +247,9 @@ class AstraReplayAddressRules extends Command
             '  - no line: ' . count($ids['src_none']),
             $n('Older logs where the hold was taken as the program\'s own, not the model\'s', $ids['program_flag']),
             '  If the model itself asked for a person on one of these, that row would stay held: the counts above are an upper bound.',
+            "  For an older log, a row where the model wrote a reason but did not itself ask for a person is counted as 'the model itself asked for a person', so that part can be too high.",
             $n('Rows where the model asked for a person and the log does not say why', $ids['unsaid']),
-            $n('  - strict (the request always holds), would pass everything', $ids['unsaid_strict']),
+            '  - strict (the request always holds): none of these rows would proceed',
             $n('  - lenient (the request does not hold when the program found the line and the customer\'s text confirms it), would pass everything', $ids['unsaid_lenient']),
             $n('Held rows that staff have since set to PROCEED', $ids['staff_proceed']),
             $n('  - the new rules would also proceed', $ids['staff_proceed_also']),

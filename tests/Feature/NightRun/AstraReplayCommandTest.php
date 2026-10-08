@@ -132,9 +132,7 @@ class AstraReplayCommandTest extends NightAstraTestCase
         $code = Artisan::call(self::COMMAND, $options);
 
         // Ang console ay nagsusulat ng line ending ng makina (CRLF sa Windows): iisang anyo para sa mga paghahambing.
-        return [$code, str_replace("
-", "
-", Artisan::output())];
+        return [$code, str_replace("\r\n", "\n", Artisan::output())];
     }
 
     private function replayNight(string $night = self::NIGHT): string
@@ -310,11 +308,21 @@ class AstraReplayCommandTest extends NightAstraTestCase
     public function test_S_31_6_an_empty_night_and_rows_without_a_log_an_order_or_the_replay_block_are_counted_not_errors(): void
     {
         $mappable = fn (int $n) => [['all_user_input' => $this->chat('091712345' . sprintf('%02d', $n))], $this->answer(['confidence' => 'medium'], ['phone' => '091712345' . sprintf('%02d', $n)], self::EMPTY_LINE)];
-        $night = $this->seedNight(['whole' => $mappable(1), 'log gone' => $mappable(2), 'order gone' => $mappable(3), 'older log' => $mappable(4), 'broken log' => $mappable(5)]);
+        $night = $this->seedNight(['whole' => $mappable(1), 'log gone' => $mappable(2), 'order gone' => $mappable(3), 'older log' => $mappable(4), 'broken log' => $mappable(5),
+            'json string' => $mappable(6), 'json empty list' => $mappable(7), 'form text' => $mappable(8), 'evidence text' => $mappable(9),
+            'replay values of the wrong type' => $mappable(10), 'replay text' => $mappable(11)]);
         DB::table('ai_checker_logs')->where('id', $this->rowFor(2)->log_id)->delete();
         DB::table('macro_output')->where('id', 3)->delete();
         $this->asOlderLog(4);
         DB::table('ai_checker_logs')->where('id', $this->rowFor(5)->log_id)->update(['detail' => '{"passes": [']);
+        // Log na tamang JSON pero mali ang hugis: bilang lang o replay na walang error, at walang text na lalabas.
+        $m = self::MARKER;
+        DB::table('ai_checker_logs')->where('id', $this->rowFor(6)->log_id)->update(['detail' => json_encode($m)]);
+        DB::table('ai_checker_logs')->where('id', $this->rowFor(7)->log_id)->update(['detail' => '[]']);
+        $this->rewriteLog(8, fn (array $d) => ['form' => $m] + $d);
+        $this->rewriteLog(9, fn (array $d) => ['evidence' => $m] + $d);
+        $this->rewriteLog(10, fn (array $d) => ['replay' => ['model_needs_human' => [$m], 'model_human_kind' => [$m], 'hay_chars' => ['history' => [$m], 'cxd' => $m], 'list_crc' => [$m]]] + $d);
+        $this->rewriteLog(11, fn (array $d) => ['replay' => $m] + $d);
         $this->runningStep([], ['night_date' => '2026-10-06']);
 
         $out   = $this->replayNight();
@@ -322,12 +330,13 @@ class AstraReplayCommandTest extends NightAstraTestCase
 
         $this->assertSame('1 (ids: 2)', $this->after($out, 'Finished rows without a log: '));
         $this->assertSame('1 (ids: 3)', $this->after($out, 'Finished rows without an order: '));
-        $this->assertSame('1 (ids: 5)', $this->after($out, 'Finished rows whose log could not be read: '));
-        $this->assertSame('1 (ids: 4)', $this->after($out, 'Finished rows with an older log (the model\'s own request for a person is not recorded there, it is inferred): '));
-        $this->assertSame('5', $this->after($out, self::HELD));
-        $this->assertStringContainsString("Held for a person that night: 5\n  - could not be replayed (no log, no order or unreadable log): 3 (ids: 2, 3, 5)\n", $out);
-        // Ang dalawang row na nabasa (buo, at ang mas lumang log) ay parehong papasa.
-        $this->assertSame('2 (ids: 1, 4)', $this->after($out, self::EVERYTHING));
+        $this->assertSame('3 (ids: 5, 6, 7)', $this->after($out, 'Finished rows whose log could not be read: '));
+        $this->assertSame('2 (ids: 4, 11)', $this->after($out, 'Finished rows with an older log (the model\'s own request for a person is not recorded there, it is inferred): '));
+        $this->assertSame('11', $this->after($out, self::HELD));
+        $this->assertStringContainsString("Held for a person that night: 11\n  - could not be replayed (no log, no order or unreadable log): 5 (ids: 2, 3, 5, 6, 7)\n", $out);
+        // Ang mga row na nabasa ay papasa (1, 4, 9, 11); ang form na text (8) at ang replay na mali ang uri ng value (10) ay hawak pa rin.
+        $this->assertSame('4 (ids: 1, 4, 9, 11)', $this->after($out, self::EVERYTHING));
+        $this->assertStringNotContainsString($m, $out);
         $this->assertSame('0', $this->after($empty, 'Rows that night: '));
         $this->assertSame('0', $this->after($empty, self::HELD));
     }
@@ -445,8 +454,9 @@ Where the line of the held rows came from:
   - no line: 1
 Older logs where the hold was taken as the program's own, not the model's: 0
   If the model itself asked for a person on one of these, that row would stay held: the counts above are an upper bound.
+  For an older log, a row where the model wrote a reason but did not itself ask for a person is counted as 'the model itself asked for a person', so that part can be too high.
 Rows where the model asked for a person and the log does not say why: 0
-  - strict (the request always holds), would pass everything: 0
+  - strict (the request always holds): none of these rows would proceed
   - lenient (the request does not hold when the program found the line and the customer's text confirms it), would pass everything: 0
 Held rows that staff have since set to PROCEED: 0
   - the new rules would also proceed: 0
@@ -616,10 +626,10 @@ TXT;
         $out = $this->replayNight();
 
         $this->assertSame('2 (ids: 1, 2)', $this->after($out, 'Rows where the model asked for a person and the log does not say why: '));
-        $this->assertSame('0', $this->after($out, '  - strict (the request always holds), would pass everything: '));
+        $this->assertStringContainsString("\n  - strict (the request always holds): none of these rows would proceed\n", $out);
         $this->assertSame('1 (ids: 1)', $this->after($out, '  - lenient (the request does not hold when the program found the line and the customer\'s text confirms it), would pass everything: '));
         $this->assertSame('1 (ids: 3)', $this->after($out, 'Older logs where the hold was taken as the program\'s own, not the model\'s: '));
-        $this->assertStringContainsString('the counts above are an upper bound.', $out);
+        $this->assertStringContainsString("the counts above are an upper bound.\n  For an older log, a row where the model wrote a reason but did not itself ask for a person is counted as 'the model itself asked for a person', so that part can be too high.\n", $out);
         // Ang bilang ng report ay ang mahigpit: ang row na kinuhang flag ng program lang ang papasa.
         $this->assertSame('1 (ids: 3)', $this->after($out, self::EVERYTHING));
         $this->assertSame('2 (ids: 1, 2)', $this->after($out, '  - the model itself asked for a person: '));

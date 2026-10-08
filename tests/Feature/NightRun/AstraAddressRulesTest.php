@@ -2574,6 +2574,13 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $this->assertSame('1', $this->storedSwitch());
 
         $this->assertSame(['marker' => false, 'box' => false, 'checked' => false], $this->switchOnPage());
+
+        // Hindi naka-sign in: hindi nagbabago ang naka-save, at hindi 500 ang sagot.
+        $this->storeSwitch('0');
+        $this->app['auth']->guard()->logout();
+        $guest = $this->post(self::SETTINGS, self::SETTINGS_FORM + ['astra_address_rules_present' => '1', 'astra_address_rules' => '1']);
+        $this->assertLessThan(500, $guest->getStatusCode());
+        $this->assertSame('0', $this->storedSwitch());
     }
 
     public function test_S_22_5_a_post_without_the_marker_leaves_the_switch_as_it_is(): void
