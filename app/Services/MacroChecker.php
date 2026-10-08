@@ -1077,7 +1077,7 @@ class MacroChecker
      *         ADDRESS (hindi blangko, walang address-keyword blacklist)
      *   soft: SHOP DETAILS item/COD mismatch
      */
-    public function validateRow($row, array $final, array $maps): array
+    public function validateRow($row, array $final, array $maps, bool $checkDuplicatePhone = true): array
     {
         $hard = []; $soft = [];
         $refs = $this->valRefs ??= $this->loadValidationRefs();
@@ -1106,7 +1106,7 @@ class MacroChecker
         if ($phone === '')                                 $hard[] = 'PHONE blangko';
         elseif (!preg_match('/^9\d{9}$/', $phone))         $hard[] = 'PHONE hindi 10-digit na 9XXXXXXXXX (' . $phone . ')';
         elseif ($phone === '9123456789')                   $hard[] = 'PHONE dummy';
-        elseif (!isset($refs['whitelist'][$phone]) && ($dupes = $this->duplicatePhoneRows($row, $phone)) !== [])
+        elseif ($checkDuplicatePhone && !isset($refs['whitelist'][$phone]) && ($dupes = $this->duplicatePhoneRows($row, $phone)) !== [])
                                                            $hard[] = 'PHONE duplicate sa parehong petsa: ' . implode(', ', $dupes);
 
         // ITEM + COD

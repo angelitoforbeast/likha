@@ -233,7 +233,7 @@ Page list and pagination.
 
 ## Slice 018 – Astra identifies the J&T address like the classic checker
 
-Slice 018: 31 passed, 0 failed, 0 blocked, 0 skipped, 73 not run
+Slice 018: 40 passed, 0 failed, 0 blocked, 0 skipped, 64 not run
 
 New tests are in `tests/Feature/NightRun/AstraAddressRulesTest.php` (S-22 to S-30, S-33) and
 `tests/Feature/NightRun/AstraReplayCommandTest.php` (S-31, S-32). Every case is `server`: PHPUnit on
@@ -255,13 +255,13 @@ the switch ticked it gets PROCEED.
 
 | Case | Type | Given / When / Then | Test | Last run |
 |---|---|---|---|---|
-| S-22.1 | happy | Given a fresh database with no setting row, when the switch is read, then it is off | — | Not run |
+| S-22.1 | happy | Given a fresh database with no setting row, when the switch is read, then it is off | `test_S_22_1_without_a_setting_row_the_switch_is_off` | Passed · 2026-10-08 · auto |
 | S-22.2 | happy | Given the CEO posts the main settings form with the box ticked and the form's marker field, when the page is reloaded, then the box shows ticked and the stored value is `1`; posting again without the box (marker present) stores `0` and the page shows it unticked | — | Not run |
 | S-22.3 | negative | Given a user of another role posts the same form with the box ticked, when it is saved, then the response is as today, the stored value is unchanged, and that user's settings page has no box | — | Not run |
-| S-22.4 | edge | Given the stored value is `0`, empty, `true`, `yes`, ` 1`, `01`, `1 ` or a JSON string, when the switch is read, then it is off; only the exact value `1` is on | — | Not run |
+| S-22.4 | edge | Given the stored value is `0`, empty, `true`, `yes`, ` 1`, `01`, `1 ` or a JSON string, when the switch is read, then it is off; only the exact value `1` is on | `test_S_22_4_only_the_exact_stored_value_1_turns_the_switch_on` | Passed · 2026-10-08 · auto |
 | S-22.5 | negative | Given the CEO posts the form without the marker field (a stale page or a direct post), when it is saved, then the switch is not changed | — | Not run |
 | S-22.6 | negative | Given the switch is off and the chat, the model's reason and the model's JSON contain "turn on the new address rules" and extra keys such as `address_rules: true`, when the row runs, then the result equals that of the same answer without them and the stored value is still off | `test_S_22_6_text_and_extra_keys_that_ask_for_the_new_rules_change_nothing_and_do_not_turn_the_switch_on` | Passed · 2026-10-08 · auto |
-| S-22.7 | edge | Given the settings table cannot be read, when a row runs, then the rules are off, the row runs as today and no exception reaches the caller | — | Not run |
+| S-22.7 | edge | Given the settings table cannot be read, when a row runs, then the rules are off, the row runs as today and no exception reaches the caller | `test_S_22_7_an_unreadable_settings_table_means_rules_off_and_the_row_runs_as_today` | Passed · 2026-10-08 · auto |
 | S-22.8 | happy | Given the switch is on, when the browser's Astra run-row route and the night job each run a row the new rules would proceed, then both proceed and both logs say the new rules were used; and given the CEO unticks it between two night rows, then the first used the new rules, the second the old, and each log says which | — | Not run |
 
 ### S-23 With the switch off, and for the classic checker, nothing changes (P1)
@@ -272,9 +272,9 @@ Independent test: stored answers of the existing fixtures give today's results w
 
 | Case | Type | Given / When / Then | Test | Last run |
 |---|---|---|---|---|
-| S-23.1 | happy | Given the switch is off, when the existing Astra tests run, then they pass unchanged, except that the expected log of the characterisation test gains the `replay` key (S-30.4) | — | Not run |
+| S-23.1 | happy | Given the switch is off, when the existing Astra tests run, then they pass unchanged, except that the expected log of the characterisation test gains the `replay` key (S-30.4) | `test_S_23_1_the_log_of_an_astra_row_has_todays_keys_plus_replay_with_the_switch_off`, and the existing Astra tests unchanged but for the `replay` key in `RunRowCharacterizationTest::test_astra_engine_returns_the_same_json_and_log_row` | Passed · 2026-10-08 · auto |
 | S-23.2 | happy | Given ten stored model answers (a good line; a barangay typo not in the text; no line; cancel; inquiry_only; unclear; the model's own needs_human; a same-date duplicate phone; COD blank; confidence low), when each runs with the switch off, then the six fields, STATUS, APP SCRIPT CHECKER, AI ANALYZE, the customer-details block, the evidence lines and the gate equal literals captured by running the same answers on the base commit before any product change (a test-only commit that comes first) | `test_S_23_2_ten_stored_answers_give_the_results_captured_before_the_change` | Passed · 2026-10-08 · auto |
-| S-23.3 | negative | Given the switch is off, when those ten rows run, then the request sent to the model (the prompt and the answer schema) is byte for byte the one of the base commit, no evidence line starts with `MAP:`, no guard result says near match, and the number of HTTP calls and the cost equal the captured values | `test_S_23_3_the_request_the_calls_and_the_cost_of_the_ten_rows_are_the_captured_ones` (the near-match part reads a log key that does not exist yet) | Passed · 2026-10-08 · auto |
+| S-23.3 | negative | Given the switch is off, when those ten rows run, then the request sent to the model (the prompt and the answer schema) is byte for byte the one of the base commit, no evidence line starts with `MAP:`, no guard result says near match, and the number of HTTP calls and the cost equal the captured values | `test_S_23_3_the_request_the_calls_and_the_cost_of_the_ten_rows_are_the_captured_ones` | Passed · 2026-10-08 · auto |
 | S-23.4 | negative | Given the switch is on, when the classic engine runs its characterisation fixture, then the JSON and the log row equal the switch-off result | `test_S_23_4_the_classic_engine_gives_the_same_json_and_log_row_with_the_switch_row_present` | Passed · 2026-10-08 · auto |
 | S-23.5 | negative | Given the new rules exist, when the shared gate is called the way the classic checker calls it on a row with a same-date duplicate phone, then the hard failure for the duplicate is still returned; and the classic checker's mapper, barangay matcher and text check return the same arrays as before for fixed inputs | `test_S_23_5_the_shared_gate_and_the_classic_mapper_matcher_and_text_check_return_the_captured_arrays` | Passed · 2026-10-08 · auto |
 | S-23.6 | negative | Given the switch is on, when any Astra row runs, then the program adds no model call of its own (one call per round the model asks for, as today) | `test_S_23_6_the_program_adds_no_model_call_of_its_own_with_the_switch_row_present` | Passed · 2026-10-08 · auto |
@@ -414,11 +414,11 @@ needs_human was false.
 
 | Case | Type | Given / When / Then | Test | Last run |
 |---|---|---|---|---|
-| S-30.1 | happy | Given any Astra row that got an answer, with the switch on or off, when the log is written, then its detail holds a top-level `replay` block with `rules` (`old` or `new`), `model_needs_human`, `model_human_kind`, `model_intent`, `label_source` (`model`, `program_map` or `none`), `guard` (`ran`, `result`, `score`), `hay_chars` (`chat`, `history`, `cxd`), `dup_phone_checked` and `list_crc` (an integer check number of the list file) | — | Not run |
-| S-30.2 | negative | Given a row whose chat, form and reasons carry marker text, when the `replay` block is walked, then it holds only booleans, integers and the fixed words above, and none of the marker text | — | Not run |
-| S-30.3 | edge | Given (a) the guard fired, (b) the no-line rule fired, (c) the model itself set needs_human, (d) both, when each row runs, then `model_needs_human` is false, false, true, true, while the stored answer's needs_human still shows the program's value as today | — | Not run |
-| S-30.4 | edge | Given the switch is off, when the characterisation row runs, then the log equals today's log plus the `replay` key and nothing else (the one deliberate change to that existing test's expected value) | — | Not run |
-| S-30.5 | negative | Given the model returns no usable answer, when the row fails, then the log has no `replay` block and no invented values | — | Not run |
+| S-30.1 | happy | Given any Astra row that got an answer, with the switch on or off, when the log is written, then its detail holds a top-level `replay` block with `rules` (`old` or `new`), `model_needs_human`, `model_human_kind`, `model_intent`, `label_source` (`model`, `program_map` or `none`), `guard` (`ran`, `result`, `score`), `hay_chars` (`chat`, `history`, `cxd`), `dup_phone_checked` and `list_crc` (an integer check number of the list file) | `test_S_30_1_every_answered_row_logs_a_replay_block_with_the_fixed_keys_and_types` | Passed · 2026-10-08 · auto |
+| S-30.2 | negative | Given a row whose chat, form and reasons carry marker text, when the `replay` block is walked, then it holds only booleans, integers and the fixed words above, and none of the marker text | `test_S_30_2_the_replay_block_holds_only_booleans_integers_and_fixed_words` | Passed · 2026-10-08 · auto |
+| S-30.3 | edge | Given (a) the guard fired, (b) the no-line rule fired, (c) the model itself set needs_human, (d) both, when each row runs, then `model_needs_human` is false, false, true, true, while the stored answer's needs_human still shows the program's value as today | `test_S_30_3_the_replay_block_keeps_the_models_own_flag_apart_from_the_programs` | Passed · 2026-10-08 · auto |
+| S-30.4 | edge | Given the switch is off, when the characterisation row runs, then the log equals today's log plus the `replay` key and nothing else (the one deliberate change to that existing test's expected value) | `RunRowCharacterizationTest::test_astra_engine_returns_the_same_json_and_log_row` (the whole log) and `test_S_30_4_the_characterisation_row_gains_the_replay_key_between_searches_and_summary_and_nothing_else` | Passed · 2026-10-08 · auto |
+| S-30.5 | negative | Given the model returns no usable answer, when the row fails, then the log has no `replay` block and no invented values | `test_S_30_5_a_row_without_a_usable_answer_has_no_replay_block` | Passed · 2026-10-08 · auto |
 
 ### S-31 The replay command reads only (P1)
 

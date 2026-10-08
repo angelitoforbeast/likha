@@ -15,6 +15,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Ang pagkilala ni Astra sa J&T address, at ang switch na `astra_address_rules` sa app_settings
@@ -453,6 +454,20 @@ class AstraAddressRulesTest extends NightAstraTestCase
         }
 
         $this->assertSame($this->pinned('S-23.5'), ['gate' => $gate, 'mapped' => $mapped, 'assessed' => $assessed]);
+
+        // (c) Ang pang-apat na argument: `true` ay ang tawag ng classic; `false` ay hindi nagtatanong ng kaparehong phone.
+        $final = [
+            'FULL NAME' => 'Juan Dela Cruz', 'PHONE NUMBER' => '9171234567', 'ADDRESS' => '12, Sampaguita St',
+            'PROVINCE' => 'METRO-MANILA', 'CITY' => 'QUEZON-CITY', 'BARANGAY' => 'HOLY SPIRIT',
+        ];
+        $this->assertSame($gate, $mc->validateRow($second, $final, $maps, true));
+        $statements = [];
+        DB::listen(function ($query) use (&$statements) {
+            $statements[] = $query->sql;
+        });
+        $unchecked = $mc->validateRow($second, $final, $maps, false);
+        $this->assertSame(self::NO_GATE, $unchecked);
+        $this->assertSame([], array_values(array_filter($statements, fn (string $sql) => str_contains($sql, 'macro_output'))));
     }
 
     public function test_S_23_6_the_program_adds_no_model_call_of_its_own_with_the_switch_row_present(): void
@@ -541,6 +556,259 @@ class AstraAddressRulesTest extends NightAstraTestCase
             $response->json('result.gate')
         );
         $this->assertNull($this->stored($second->id)['STATUS']);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    //  Ang pagbasa ng switch at ang `replay` block ng log
+    // ═════════════════════════════════════════════════════════════════════
+
+    /** Ang mga key ng log ng isang row na may sagot, bago idinagdag ang `replay` (ayon sa pagkakasunod). */
+    private const LOG_KEYS_BEFORE = ['engine', 'passes', 'form', 'cxd_block', 'searches', 'summary', 'usage', 'evidence'];
+    /** Ang tanging mga salitang pinapayagan sa loob ng `replay` block. */
+    private const REPLAY_WORDS = [
+        'old', 'new', 'label_not_found', 'other', 'none', 'order', 'cancel', 'inquiry_only', 'unclear', 'model', 'program_map',
+        'confirmed', 'phrase', 'compact', 'near', 'exempt_high_confidence', 'not_run',
+    ];
+
+    /** Ang check number ng list file, kinuwenta sa ibang daan kaysa sa product code. */
+    private function listCheckNumber(): int
+    {
+        return (int) hexdec(hash_file('crc32b', resource_path('views/macro_output/jnt_address.txt')));
+    }
+
+    private function storeSwitch(string $value): void
+    {
+        DB::table('app_settings')->updateOrInsert(['key' => self::SWITCH], ['value' => $value]);
+    }
+
+    public function test_S_22_1_without_a_setting_row_the_switch_is_off(): void
+    {
+        $this->assertFalse(DB::table('app_settings')->where('key', self::SWITCH)->exists());
+
+        $this->assertFalse(AstraEncoder::addressRulesOn());
+    }
+
+    public function test_S_22_4_only_the_exact_stored_value_1_turns_the_switch_on(): void
+    {
+        $this->assertSame('astra_address_rules', AstraEncoder::SETTING_ADDRESS_RULES);
+
+        $seen = [];
+        foreach (['1', '0', '', 'true', 'yes', ' 1', '01', '1 ', '1.0', 'on', '"1"', '{"on":1}', '[1]'] as $value) {
+            $this->storeSwitch($value);
+            $seen[$value] = AstraEncoder::addressRulesOn();
+        }
+
+        $this->assertSame([
+            '1' => true, '0' => false, '' => false, 'true' => false, 'yes' => false, ' 1' => false, '01' => false, '1 ' => false,
+            '1.0' => false, 'on' => false, '"1"' => false, '{"on":1}' => false, '[1]' => false,
+        ], $seen);
+
+        // Ang pagsulat ay `1` o `0` lang.
+        AstraEncoder::storeAddressRules(true);
+        $on = DB::table('app_settings')->where('key', self::SWITCH)->pluck('value')->all();
+        AstraEncoder::storeAddressRules(false);
+        $off = DB::table('app_settings')->where('key', self::SWITCH)->pluck('value')->all();
+        $this->assertSame([['1'], ['0']], [$on, $off]);
+    }
+
+    public function test_S_22_7_an_unreadable_settings_table_means_rules_off_and_the_row_runs_as_today(): void
+    {
+        $this->assertInList('METRO-MANILA', 'QUEZON-CITY', 'HOLY SPIRIT');
+        $this->fakeModel();
+        $this->modelSays($this->answer());
+        $order = $this->orderOn(1);
+        // Naka-on ang switch bago nawala ang table: kung nababasa pa ito, `new` ang lalabas sa log.
+        $this->storeSwitch('1');
+        Schema::drop('app_settings');
+
+        $this->assertFalse(AstraEncoder::addressRulesOn());
+        $result = $this->runAstra($order);
+
+        $this->assertSame('old', $result['log']['replay']['rules']);
+        // Ang key ay galing na sa config (wala nang settings table); ang natitira ay ang resulta ng parehong sagot ngayon.
+        $seen     = $this->observed($order, $result);
+        $expected = $this->pinned('S-23.2')['01 good line'];
+        $this->assertStringStartsWith('KEY: ', $seen['evidence'][0]);
+        $this->assertNotSame($expected['evidence'][0], $seen['evidence'][0]);
+        $seen['evidence'][0] = $expected['evidence'][0];
+        $this->assertSame($expected, $seen);
+    }
+
+    public function test_S_23_1_the_log_of_an_astra_row_has_todays_keys_plus_replay_with_the_switch_off(): void
+    {
+        $this->assertInList('METRO-MANILA', 'QUEZON-CITY', 'HOLY SPIRIT');
+        $this->fakeModel();
+        $this->modelSays($this->answer());
+
+        $log = $this->runAstra($this->orderOn(1))['log'];
+
+        $this->assertSame(['engine', 'passes', 'form', 'cxd_block', 'searches', 'replay', 'summary', 'usage', 'evidence'], array_keys($log));
+        unset($log['replay']);
+        $this->assertSame(self::LOG_KEYS_BEFORE, array_keys($log));
+        $this->assertSame(
+            ['pass', 'engine', 'chat_chars', 'resolve', 'fallbacks', 'verify', 'before', 'after', 'updated', 'status_code', 'final_code', 'gate', 'proceed', 'elapsed_ms'],
+            array_keys($log['passes'][0])
+        );
+        $this->assertSame(
+            ['province', 'city', 'barangay', 'province_aliases', 'city_candidates', 'barangay_candidates', 'confidence', 'evidence', 'jnt', 'intent', 'issues', 'needs_human', 'human_reason'],
+            array_keys($log['passes'][0]['resolve'][0]['answer'])
+        );
+    }
+
+    public function test_S_30_1_every_answered_row_logs_a_replay_block_with_the_fixed_keys_and_types(): void
+    {
+        $this->assertInList('METRO-MANILA', 'QUEZON-CITY', 'HOLY SPIRIT');
+        $this->fakeModel();
+        $this->modelSays($this->answer());
+
+        $off = $this->runAstra($this->orderOn(1))['log']['replay'];
+        $this->storeSwitch('1');
+        $on = $this->runAstra($this->orderOn(2))['log']['replay'];
+
+        // Nakapatay: ang mabuting sagot, na ang barangay ay nasa chat (69 character), walang history at walang block ng customer.
+        $this->assertSame([
+            'rules'             => 'old',
+            'model_needs_human' => false,
+            'model_human_kind'  => 'none',
+            'model_intent'      => 'order',
+            'label_source'      => 'model',
+            'guard'             => ['ran' => true, 'result' => 'confirmed', 'score' => 0],
+            'hay_chars'         => ['chat' => 69, 'history' => 0, 'cxd' => 0],
+            'dup_phone_checked' => true,
+            'list_crc'          => $this->listCheckNumber(),
+        ], $off);
+        $this->assertGreaterThan(0, $off['list_crc']);
+
+        // Naka-on: parehong mga key at uri, at sinasabi ng log na ang bagong rules ang ginamit.
+        $types = fn (array $block): array => array_map(fn ($value) => is_array($value) ? array_map('gettype', $value) : gettype($value), $block);
+        $this->assertSame('new', $on['rules']);
+        $this->assertSame($types($off), $types($on));
+        $this->assertSame($off['list_crc'], $on['list_crc']);
+    }
+
+    public function test_S_30_2_the_replay_block_holds_only_booleans_integers_and_fixed_words(): void
+    {
+        $this->assertInList('METRO-MANILA', 'QUEZON-CITY', 'HOLY SPIRIT');
+        $this->fakeModel();
+        $mark   = self::MARKER;
+        $marked = [
+            'intent' => $mark, 'confidence' => $mark, 'human_kind' => $mark, 'human_reason' => 'tingnan: ' . $mark,
+            'issues' => ['may ' . $mark], 'evidence' => $mark, 'replay' => ['rules' => $mark], 'label_source' => $mark,
+        ];
+        $form = ['name' => 'Juan ' . $mark, 'address' => $mark . ' St', 'brgy' => 'Holy Spirit ' . $mark, 'landmark' => $mark];
+        $rows = [
+            'a valid line'              => $this->answer($marked, $form),
+            'a line that is not a label' => $this->answer($marked, $form, ['province' => $mark, 'city' => $mark, 'barangay' => $mark]),
+        ];
+
+        $day = 0;
+        foreach ($rows as $name => $answer) {
+            $order = $this->orderOn(++$day, [
+                'all_user_input' => "Juan Dela Cruz\n09171234567\n12 Sampaguita St, Holy Spirit, Quezon City\n" . $mark,
+                'CXD'            => "---\nBrgy: " . $mark . "\n---",
+            ]);
+            $this->modelSays($answer);
+
+            $replay = $this->runAstra($order)['log']['replay'];
+
+            $leaves = 0;
+            array_walk_recursive($replay, function ($value, $key) use ($name, &$leaves) {
+                $leaves++;
+                $this->assertTrue(is_bool($value) || is_int($value) || in_array($value, self::REPLAY_WORDS, true), $name . ': ' . $key);
+            });
+            $this->assertSame(13, $leaves, $name);
+            $this->assertStringNotContainsString($mark, json_encode($replay), $name);
+            $this->assertSame('none', $replay['model_human_kind'], $name);
+        }
+    }
+
+    public function test_S_30_3_the_replay_block_keeps_the_models_own_flag_apart_from_the_programs(): void
+    {
+        $this->assertInList('METRO-MANILA', 'QUEZON-CITY', 'HOLY SPIRIT');
+        $this->fakeModel();
+        $noBrgyChat = "Juan Dela Cruz\n09171234567\n12 Sampaguita St malapit sa palengke, Quezon City";
+        $noLine     = ['province' => '', 'city' => '', 'barangay' => ''];
+        $asks       = ['needs_human' => true, 'human_reason' => 'dalawang address ang ibinigay ng customer'];
+        // [dagdag sa order, sagot]
+        $rows = [
+            'the guard fired'                   => [['all_user_input' => $noBrgyChat], $this->answer(['confidence' => 'medium'])],
+            'the no-line rule fired'            => [[], $this->answer(['confidence' => 'medium'], [], $noLine)],
+            'the model asked for a person'      => [[], $this->answer($asks)],
+            'the model asked, and no line too'  => [[], $this->answer($asks + ['confidence' => 'medium'], [], $noLine)],
+        ];
+
+        $seen = [];
+        $day  = 0;
+        foreach ($rows as $name => [$extra, $answer]) {
+            $this->modelSays($answer);
+            $log = $this->runAstra($this->orderOn(++$day, $extra))['log'];
+            $seen[$name] = [
+                'model'  => $log['replay']['model_needs_human'],
+                'stored' => $log['passes'][0]['resolve'][0]['answer']['needs_human'],
+                'guard'  => $log['replay']['guard']['result'],
+            ];
+        }
+
+        $this->assertSame([
+            'the guard fired'                   => ['model' => false, 'stored' => true, 'guard' => 'none'],
+            'the no-line rule fired'            => ['model' => false, 'stored' => true, 'guard' => 'not_run'],
+            'the model asked for a person'      => ['model' => true, 'stored' => true, 'guard' => 'confirmed'],
+            'the model asked, and no line too'  => ['model' => true, 'stored' => true, 'guard' => 'not_run'],
+        ], $seen);
+    }
+
+    /** Ang buong log ng row na ito ay naka-pin sa RunRowCharacterizationTest; dito ang puwesto at laman ng idinagdag na key. */
+    public function test_S_30_4_the_characterisation_row_gains_the_replay_key_between_searches_and_summary_and_nothing_else(): void
+    {
+        $this->assertInList('METRO-MANILA', 'QUEZON-CITY', 'HOLY SPIRIT');
+        $this->actingAs($this->user());
+        $this->fakeModel();
+        $this->modelSays($this->answer());
+        $order = $this->orderOn(1);
+
+        $response = $this->postJson(self::RUN_ROW . $order->id, ['engine' => 'astra']);
+
+        $response->assertStatus(200);
+        $log    = $response->json('result.log');
+        $detail = json_decode((string) DB::table('ai_checker_logs')->where('macro_output_id', $order->id)->value('detail'), true);
+        $this->assertSame(array_merge(['result'], array_slice(self::LOG_KEYS_BEFORE, 0, 5), ['replay'], array_slice(self::LOG_KEYS_BEFORE, 5)), array_keys($detail));
+        $this->assertSame($log['replay'], $detail['replay']);
+        $this->assertSame([
+            'rules' => 'old', 'model_needs_human' => false, 'model_human_kind' => 'none', 'model_intent' => 'order', 'label_source' => 'model',
+            'guard' => ['ran' => true, 'result' => 'confirmed', 'score' => 0], 'hay_chars' => ['chat' => 69, 'history' => 0, 'cxd' => 0],
+            'dup_phone_checked' => true, 'list_crc' => $this->listCheckNumber(),
+        ], $log['replay']);
+        // Ang ibang bahagi ng row ay ang nakuha bago ang pagbabago.
+        $this->assertSame($this->pinned('S-23.2')['01 good line']['evidence'], $log['evidence']);
+    }
+
+    public function test_S_30_5_a_row_without_a_usable_answer_has_no_replay_block(): void
+    {
+        $this->assertInList('METRO-MANILA', 'QUEZON-CITY', 'HOLY SPIRIT');
+        $this->fakeModel();
+        $text = fn (string $text) => fn () => Http::response([
+            'id' => 'resp_1', 'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => $text]]]],
+            'usage' => ['input_tokens' => 100, 'output_tokens' => 10],
+        ]);
+        $cases = [
+            'not JSON'       => $text('Pasensya, hindi ko masagot.'),
+            'an empty text'  => $text(''),
+            'a JSON list'    => $text('[]'),
+            'a refused call' => fn () => Http::response(['error' => ['type' => 'invalid_request_error', 'code' => 'bad_request']], 400),
+        ];
+
+        $day = 0;
+        foreach ($cases as $name => $respond) {
+            $order = $this->orderOn(++$day);
+            $this->respond = $respond;
+
+            $result = $this->runAstra($order);
+
+            $this->assertSame('failed', $result['status'], $name);
+            $this->assertSame(['engine', 'passes', 'searches', 'summary', 'usage', 'evidence'], array_keys($result['log']), $name);
+            $this->assertSame([], $result['log']['passes'], $name);
+            $this->assertNull($this->stored($order->id)['STATUS'], $name);
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════
