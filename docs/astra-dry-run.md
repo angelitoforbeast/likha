@@ -23,6 +23,8 @@ report counts what each value of the setting would let through.
   reads. The J&T list is cached in memory for the run, so not even the cache table is written.
 - It prints and stores ids, counts, flags and fixed reason words only: never a name, phone, address, chat text,
   order number or the model's own words. It never prints the API key; it reads the key the way the night job does.
+  Only with `--labels` it also prints and stores province, city and barangay (place names of the J&T list) and the
+  host names of web pages; see "The labels" below.
 - It does not start between 02:30 and 04:30 Manila time, while a night Astra step is running, or without an API
   key. It prints why.
 - It **does** call the model, so it costs money. Rows run one after another. It stops after 3 API errors in a row.
@@ -42,6 +44,7 @@ Options:
     --ids=1,2,3                 only these macro_output ids
     --mode=rules|web-first      rules (default): mode 1; web-first: mode 2 (web search first)
     --compare=<path>            an earlier report JSON of this command; adds a table of outcome then against now
+    --labels                    adds the chosen province, city and barangay and those of the row now, to the file and as a table
 
 Web search first on a night, and the same compared with an earlier run of that night:
 
@@ -102,6 +105,32 @@ With `--compare` the report ends with **Against the earlier report**: for the ro
 proceed now, held then and barangay from the web now, would proceed then and held now, any other change that
 occurred, the count with the same outcome, and the rows without a verdict in one of the two. The JSON has the
 same under `summary.web_first` and `summary.compare`, and `"mode": "web-first"` at the top.
+
+## The labels (`--labels`)
+
+The counts say whether the line Astra would set equals the row now; `--labels` says which line that was:
+
+    sudo -u www-data php artisan astra:dry-run --step=<id> --mode=web-first --labels
+    sudo -u www-data php artisan astra:dry-run --step=<id> --ids=101,102 --labels
+
+With the option every row entry of the JSON gains:
+
+- `proposed`: `province`, `city` and `barangay`, the line of the J&T list the process would write for the row;
+  all three `null` when there is no whole line (also for a row with an API error or a row not tried).
+- `staff_now`: the row's PROVINCE, CITY and BARANGAY as they are now (a blank is an empty text; `null` only for a
+  row that was not tried).
+- in web-first mode `web_basis` and `confidence` on every row with a verdict, and for a barangay found on the web
+  `web_sources`: the host names (for example `psa.gov.ph`) of the pages the row's web searches returned, each once,
+  at most five. Never a path or a query: the search was for the customer's address, so those can carry a street name.
+
+At the end of the run one table is printed, a line per row: id, outcome, reason group (the first holding reason, or
+the error class), source strength (`web_basis`), confidence, proposed province / city / barangay, staff province /
+city / barangay, and the part that differs (`none`, the parts, `cannot compare` when the row now has a blank, `-`
+when there is no proposed line). Source strength and confidence are `-` in the default mode. Host names are in the
+file only.
+
+These are place names of the courier's list, not the customer's text: the street, house number, name, phone and
+chat are still never printed or stored.
 
 ## Caveats
 
@@ -179,6 +208,24 @@ same under `summary.web_first` and `summary.compare`, and `"mode": "web-first"` 
   simply has no rows in common.
 - Ruling: `--compare` works across modes (an earlier default-mode report against a web-first run) — that is the
   comparison asked for — the two runs also differ by the model's own variation, so a few changes are noise.
+- Ruling: `proposed`, `staff_now` and `web_sources` are written to the file only with `--labels`, not on every run
+  — without the option the file and the output stay ids, counts and fixed words, as the existing checks of the
+  report require, and place names appear only when asked for — a run made without `--labels` cannot answer "which
+  line did Astra choose" afterwards; it has to be run again (with `--ids` for the rows in question), at the cost of
+  those model calls and with the model's own variation.
+- Ruling: `proposed` is the whole line or three nulls — the process writes a whole line or none for the barangay —
+  a row where only the province and city of the model were kept (the barangay was dropped as not in the customer's
+  text) shows nulls, although those two parts would be written.
+- Ruling: `web_sources` lists the hosts of every page the row's web searches returned, not only the page the
+  barangay came from — the answer of the model does not say which page it used — a host in the list may have had
+  nothing to do with the barangay.
+- Ruling: a host is kept only when it is letters, digits, dots and hyphens; anything else in the list of sources is
+  left out silently — the list comes from the web — a page with an unusual address is missing from the list.
+- Ruling: `staff_now` is the three columns as typed, one line each and cut at 80 characters — they are meant to hold
+  list labels — if staff typed something else into one of them (a street in BARANGAY), that text is in the file and
+  the table.
+- Ruling: `dryRunRow` of the encoder also returns the page addresses of the row's web searches — the encoder
+  already kept them for the night log — the night job does not call `dryRunRow`, so nothing changes for it.
 - Ruling: the encoder was split into a deciding part (`decideOnly`) that `processRow` calls, plus `dryRunRow`
   for this command — the smallest change that lets the same code decide without writing — the night job's
   statements and their order are unchanged and its existing tests pass untouched.

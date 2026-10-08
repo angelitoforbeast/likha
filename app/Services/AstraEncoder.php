@@ -423,7 +423,7 @@ class AstraEncoder
      * ang row na ibinigay ay nasa memory lang (maaaring ibinalik sa itsura nito bago ang gabi) at hindi sine-save.
      * Ang $rules ay ibinibigay ng tumatawag: hindi binabasa ang switch.
      * Kapag $webFirst: ang request at ang rules ng mode `2` (web search muna), na hindi rin binabasa ang switch.
-     * Return: ['ok', 'decision' (ang buong pasya ng rules, o null), 'usage', 'error' (lastError), 'web_forced'].
+     * Return: ['ok', 'decision' (ang buong pasya ng rules, o null), 'usage', 'error' (lastError), 'web_forced', 'web_sources'].
      */
     public function dryRunRow(MacroOutput $row, array $maps, ?string $host = null, string $rules = 'new', bool $webFirst = false): array
     {
@@ -444,6 +444,9 @@ class AstraEncoder
             'error'    => $this->lastError,
             // Mode `2` lang: napilit ba ang web search sa unang round (null sa ibang mode o kapag walang sagot).
             'web_forced' => $this->webForced,
+            // Ang mga URL ng page na ibinalik ng web search ng row na ito, gaya ng ibinigay ng API: galing sa labas,
+            // kaya ang tumatawag ang pumipili kung anong bahagi nito ang ilalabas.
+            'web_sources' => array_merge(...array_column(array_filter($this->searches, fn ($s) => $s['step'] === 'web_search'), 'sources')),
         ];
     }
 

@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use Symfony\Component\Console\Formatter\OutputFormatter;
 
 /**
  * Dry run ng BUONG bagong Astra para sa isang nakaraang gabi: bawat piniling row ay pinadadaan sa totoong tawag sa
@@ -23,6 +24,8 @@ use Illuminate\Support\Str;
  *
  * Ang output at ang file ay id, bilang, flag at nakapirming salita ng dahilan LANG. Ang chat, pangalan, phone,
  * address, order number at ang sariling salita ng model ay galing sa labas (hindi pinagkakatiwalaan): hindi inilalabas.
+ * Sa `--labels` lang nadadagdag ang province, city at barangay (mga pangalan ng lugar sa list ng courier, hindi sulat
+ * ng customer) at ang host ng mga page ng web search; ang kalye, numero ng bahay, pangalan, phone at chat ay hindi pa rin.
  */
 class AstraDryRun extends Command
 {
@@ -31,7 +34,8 @@ class AstraDryRun extends Command
         {--limit=200 : Most rows to run}
         {--ids= : Only these macro_output ids, comma separated}
         {--mode=rules : rules (the new address rules) or web-first (the new address rules + web search first)}
-        {--compare= : Path to an earlier report JSON of this command; adds a table of outcome then against outcome now}';
+        {--compare= : Path to an earlier report JSON of this command; adds a table of outcome then against outcome now}
+        {--labels : Add to the report file, and print as one table, the province, city and barangay the process would set and those of the row now}';
     protected $description = 'Dry run: the whole new Astra (real model calls) on a past night\'s rows, nothing is written to the orders';
 
     private const BAD_OPTIONS = 'Give exactly one of --night=YYYY-MM-DD or --step=<id> (an existing Astra night), --rows=held|proceeded|all, --limit=<1 or more>, --ids=<numbers, comma separated>, --mode=rules|web-first, --compare=<path to an earlier report JSON>.';
@@ -61,9 +65,15 @@ class AstraDryRun extends Command
     private const CONFIDENCES = ['high', 'medium', 'low'];
     /** Pinakamalaking report file na babasahin ng --compare. */
     private const COMPARE_MAX_BYTES = 20000000;
+    private const NO_LINE     = ['province' => null, 'city' => null, 'barangay' => null];
+    private const MAX_HOSTS   = 5;
+    /** Ang line ng row ngayon ay na-type ng tao: may hangganan ang haba ng bawat label na inilalabas. */
+    private const LABEL_MAX_CHARS = 80;
 
     /** --mode=web-first: ang request at ang rules ng mode `2` ng switch, anuman ang nakaimbak. */
     private bool $webFirst = false;
+    /** --labels: kasama sa file at sa output ang line na pinili at ang line ng row ngayon. */
+    private bool $labels = false;
 
     private const CAVEATS = [
         'The chat and the earlier conversation are stored as one text without a time per message, so messages written after the night step started could not be left out: the model read both as they are today.',
@@ -85,6 +95,7 @@ class AstraDryRun extends Command
         }
 
         $this->webFirst = $opts['mode'] === 'web-first';
+        $this->labels   = (bool) $this->option('labels');
         // Ang naunang report ay binabasa bago ang unang tawag: ang maling path ay hindi dapat matuklasan pagkatapos ng gastos.
         $earlier = $opts['compare'] === null ? null : $this->readEarlier($opts['compare']);
         if ($opts['compare'] !== null && $earlier === null) {
@@ -141,12 +152,15 @@ class AstraDryRun extends Command
         foreach ($picked as $nightRow) {
             $oid = (int) $nightRow->macro_output_id;
             $row = ['id' => $oid, 'night' => $nightRow->proceed ? 'proceeded' : 'held'];
+            $labels = [];
             try {
-                $row += $this->runRow($encoder, $nightRow, $logs, $maps, $host, $report);
+                $row += $this->runRow($encoder, $nightRow, $logs, $maps, $host, $report, $labels);
             } catch (\Throwable $e) {
                 // Class lang ng error: ang message ay maaaring may laman ng row.
                 $row += ['outcome' => 'api_error', 'error' => class_basename($e)];
             }
+            // Ang row na walang pasya (hindi sinubukan, API error) ay may parehong mga key, na null ang hindi nalaman.
+            if ($this->labels) $row += $labels + ['proposed' => self::NO_LINE, 'staff_now' => self::NO_LINE];
             $report['rows'][] = $row;
 
             $this->line('row ' . $oid . ': ' . match ($row['outcome']) {
@@ -171,6 +185,7 @@ class AstraDryRun extends Command
         if ($earlier !== null) $summary['compare'] = $this->compareWith($earlier, $report['rows']);
         $this->writeFile($file, $report + ['summary' => $summary]);
         foreach ($this->lines($report, $summary) as $line) $this->line($line);
+        if ($this->labels) $this->labelsTable($report['rows']);
         $this->line('Report file: storage/app/astra-dry-run/' . basename($file));
 
         return $report['stopped'] === null ? self::SUCCESS : self::FAILURE;
@@ -222,8 +237,11 @@ class AstraDryRun extends Command
         return $q->orderBy('id')->limit($opts['limit'])->get(['id', 'macro_output_id', 'proceed', 'log_id', 'duration_ms'])->all();
     }
 
-    /** Isang row: ibalik sa itsura bago ang gabi (sa memory lang), ipasya, at ihambing sa row gaya ng ngayon. */
-    private function runRow(AstraEncoder $encoder, object $nightRow, $logs, array $maps, string $host, array &$report): array
+    /**
+     * Isang row: ibalik sa itsura bago ang gabi (sa memory lang), ipasya, at ihambing sa row gaya ng ngayon.
+     * Ang $labels ay pinupunan habang tumatakbo, para may line ng row ngayon kahit ang row na nauwi sa API error.
+     */
+    private function runRow(AstraEncoder $encoder, object $nightRow, $logs, array $maps, string $host, array &$report, array &$labels): array
     {
         $order = MacroOutput::find((int) $nightRow->macro_output_id);
         if ($order === null) return ['outcome' => 'not_tried', 'reason' => 'the order no longer exists'];
@@ -235,6 +253,7 @@ class AstraDryRun extends Command
             'status' => in_array($staffStatus, ['PROCEED', 'CANNOT PROCEED'], true) ? $staffStatus : 'other',
             'line'   => [(string) ($order->PROVINCE ?? ''), (string) ($order->CITY ?? ''), (string) ($order->BARANGAY ?? '')],
         ];
+        $labels = ['proposed' => self::NO_LINE, 'staff_now' => self::labelLine($staff['line'])];
 
         $log    = $nightRow->log_id !== null ? $logs->get($nightRow->log_id) : null;
         $detail = $log !== null ? json_decode((string) $log->detail, true) : null;
@@ -268,6 +287,11 @@ class AstraDryRun extends Command
 
         $d      = $res['decision'];
         $replay = $d['replay'];
+        if ($d['line'] !== null) $labels['proposed'] = self::labelLine($d['line']);
+        if ($this->webFirst) {
+            $labels += ['web_basis' => (string) $replay['web_basis'], 'confidence' => (string) $replay['confidence']];
+            if (!empty($replay['web_found'])) $labels['web_sources'] = self::hosts($res['web_sources']);
+        }
         $out += [
             'staff_status' => $staff['status'],
             'label_source' => (string) $replay['label_source'],
@@ -307,6 +331,66 @@ class AstraDryRun extends Command
         $comparable = !in_array('', array_map('trim', $staffLine), true);
 
         return ['compare' => !$comparable ? 'cannot_compare' : ($differs ? 'differs' : 'equal'), 'differs' => $comparable ? $differs : []];
+    }
+
+    /** Tatlong label bilang province, city, barangay: isang linya bawat isa at may hangganan ang haba. */
+    private static function labelLine(array $three): array
+    {
+        return array_combine(['province', 'city', 'barangay'], array_map(
+            fn ($v) => mb_substr(trim((string) preg_replace('/[\x00-\x1F\x7F]+/', ' ', (string) $v)), 0, self::LABEL_MAX_CHARS),
+            array_values($three)
+        ));
+    }
+
+    /**
+     * Ang host LANG ng bawat URL, walang ulit, hanggang lima. Ang path at ang query ay hindi kailanman inilalabas:
+     * ang hinanap ay ang address ng customer, kaya maaaring may pangalan ng kalye ang mga ito.
+     */
+    private static function hosts(array $urls): array
+    {
+        $hosts = [];
+        foreach ($urls as $url) {
+            $host = is_string($url) ? parse_url($url, PHP_URL_HOST) : null;
+            $host = is_string($host) ? strtolower($host) : '';
+            if (preg_match('/\A[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?\z/', $host) !== 1 || in_array($host, $hosts, true)) continue;
+            $hosts[] = $host;
+            if (count($hosts) >= self::MAX_HOSTS) break;
+        }
+
+        return $hosts;
+    }
+
+    /** Isang table ng lahat ng row: ang line na pinili ng proseso katabi ng line ng row ngayon, at kung aling bahagi ang iba. */
+    private function labelsTable(array $rows): void
+    {
+        $join  = fn (array $l): string => $l === self::NO_LINE ? '-' : implode(' / ', array_map(fn ($v) => $v === '' ? '(blank)' : $v, $l));
+        $table = [];
+        foreach ($rows as $r) {
+            $differs = '-';
+            if ($r['proposed'] !== self::NO_LINE && $r['staff_now'] !== self::NO_LINE) {
+                $against = $this->againstStaff(array_values($r['proposed']), array_values($r['staff_now']));
+                $differs = $against['compare'] === 'cannot_compare' ? 'cannot compare' : ($against['differs'] ? implode(', ', $against['differs']) : 'none');
+            }
+            // Ang line ng row ngayon ay sulat ng tao: hindi ito dapat mabasa ng console bilang tag ng kulay.
+            $table[] = array_map([OutputFormatter::class, 'escape'], [
+                (string) $r['id'],
+                ['would_proceed' => 'would proceed', 'held' => 'held', 'api_error' => 'API error'][$r['outcome']] ?? 'not tried',
+                match ($r['outcome']) {
+                    'would_proceed' => '-',
+                    'held'          => $this->reasons()[$r['reason']],
+                    'api_error'     => $r['error'],
+                    default         => $r['reason'],
+                },
+                $r['web_basis'] ?? '-',
+                $r['confidence'] ?? '-',
+                $join($r['proposed']),
+                $join($r['staff_now']),
+                $differs,
+            ]);
+        }
+        $this->line('');
+        $this->line('Labels: the line of the J&T list the new process would set, against the row as it is now (after staff)');
+        $this->table(['id', 'outcome', 'reason group', 'source strength', 'confidence', 'proposed province / city / barangay', 'staff province / city / barangay', 'differs in'], $table);
     }
 
     /** Ang mga dahilan ng report: sa web-first mode ay may dalawang dagdag. */
