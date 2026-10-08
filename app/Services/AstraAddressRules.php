@@ -47,6 +47,13 @@ class AstraAddressRules
         $customerBlocks = (string) $in['customer_blocks'];
         $evidence = [];
 
+        // Ang dahilan at ang mga issue ng model ay napupunta sa note at sa Check line ng block: isang linya lang bawat isa,
+        // para walang line break ng model na makagawa ng pekeng hangganan ng block (na babasahin bilang text ng customer).
+        if ($rules === 'new') {
+            $ai['human_reason'] = self::oneLine((string) $ai['human_reason'], 300);
+            $ai['issues']       = array_map(fn ($i) => self::oneLine((string) $i, 160), (array) $ai['issues']);
+        }
+
         // Ang sariling flag ng model, bago ito patungan ng guard o ng no-line rule sa ibaba.
         $modelNeedsHuman = (bool) $ai['needs_human'];
 
@@ -267,12 +274,43 @@ class AstraAddressRules
 
         // Mas pinipili ng mapper ang label na kapareho ng sulat kaysa sa label na may "city": tanungin ulit na may "City".
         // Walang sagot sa pangalawang tanong = walang ibang city na ganoon ang pangalan (hindi iyon tie).
-        $bare = trim(explode(',', $c)[0]);
-        if (!str_ends_with(MacroChecker::normCityKey($bare), ' city')) {
-            $two = $ask($bare . ' City');
-            if ($two['city_ambiguous'] || ($two['city'] !== null && ((string) $two['city'] !== $mapCity || (string) $two['province'] !== $mapProv))) {
-                $other = $two['city'] !== null ? $two['province'] . '/' . $two['city'] : 'higit sa isa kapag may "City"';
-                return [null, self::oneLine('city "' . $c . '" ambiguous sa list: ' . $mapProv . '/' . $mapCity . ' | ' . $other . ' → tao', 1000)];
+        // Ganoon din pabalik: ang city na isinulat NA MAY "city" ay tinatanong ulit nang wala ito, dahil may tunay na city
+        // na walang "city" sa label nito ("San Carlos City": Pangasinan o Negros Occidental?).
+        $tie     = fn (string $other): array => [null, self::oneLine('city "' . $c . '" ambiguous sa list: ' . $mapProv . '/' . $mapCity . ' | ' . $other . ' → tao', 1000)];
+        $differs = fn (array $r): bool => $r['city_ambiguous'] || ($r['city'] !== null && ((string) $r['city'] !== $mapCity || (string) $r['province'] !== $mapProv));
+        $bare    = trim(explode(',', $c)[0]);
+        $bareKey = MacroChecker::normCityKey($bare);
+        $withCity = str_ends_with($bareKey, ' city');
+        $second  = $withCity ? trim(substr($bareKey, 0, -5)) : $bare . ' City';
+        if ($second !== '') {
+            $two = $ask($second);
+            if ($differs($two)) {
+                return $tie($two['city'] !== null ? $two['province'] . '/' . $two['city'] : 'higit sa isa kapag ' . ($withCity ? 'walang' : 'may') . ' "City"');
+            }
+        }
+
+        // Ang province na isinulat sa form ay dapat ang province ng namapang city. Kapag iisa lang ang kandidato, hindi na
+        // tinitingnan ng mapper ang province: "Samal" ng Davao del Norte ay nagiging SAMAL ng Bataan. Ang tanging lusot ay
+        // ang tunay na filing ng list (Cotabato City ay nasa COTABATO kahit Maguindanao ang sabi ng tao).
+        $saidProv = $p !== '' ? $mc->provinceLabelFromList($p, $maps) : null;
+        if ($saidProv !== null && $saidProv !== $mapProv && !self::onlyCityOfItsName($mapProv, $mapCity, $maps)) {
+            return $tie('province ng form: ' . $saidProv);
+        }
+        // Ang mapper ay pumuputol sa unang kuwit ("Jaro, Iloilo City" → "Jaro" → bayan sa Leyte). Ang bawat natirang bahagi,
+        // at ang province ng form na hindi province sa list, ay pangalan din ng lugar: kapag province ito, dapat iyon ang
+        // province ng namapang city; kapag city ito, dapat iyon din ang namapang city. Kung hindi, hindi alam kung alin → tao.
+        $others = array_slice(array_map('trim', explode(',', $c)), 1);
+        if ($p !== '' && $saidProv === null) $others[] = $p;
+        foreach ($others as $part) {
+            if ($part === '') continue;
+            $partProv = $mc->provinceLabelFromList($part, $maps);
+            if ($partProv !== null) {
+                if ($partProv !== $mapProv && !self::onlyCityOfItsName($mapProv, $mapCity, $maps)) return $tie('province: ' . $partProv);
+                continue;
+            }
+            foreach ([$part, $part . ' City'] as $wording) {
+                $r = $ask($wording);
+                if ($differs($r)) return $tie($r['city'] !== null ? $r['province'] . '/' . $r['city'] : '"' . $part . '" higit sa isa');
             }
         }
         if (($modelCity !== null && ($modelCity !== $mapCity || $modelProv !== $mapProv)) || ($modelCity === null && $modelProv !== null && $modelProv !== $mapProv)) {
@@ -284,6 +322,40 @@ class AstraAddressRules
         if ($label === null) return [null, $note . ' · barangay "' . self::oneLine($b) . '" wala o hindi iisa sa list ng ' . $mapCity];
 
         return [[$mapProv, $mapCity, (string) $label], $note];
+    }
+
+    /**
+     * Ang label ba na ito ay isang CITY (may "city" sa label) at ang NAG-IISANG city o bayan sa buong list na ganoon ang
+     * pangalan, sa anumang sulat (may province sa unahan ng label o wala, may "city" o wala)? Ito lang ang kasong
+     * tinatanggap na iba ang province ng form sa province ng list: isang bayan na may kapangalan ay hindi hinuhulaan.
+     */
+    public static function onlyCityOfItsName(string $prov, string $city, array $maps): bool
+    {
+        $prefixes = ['north cotabato', 'south cotabato', 'metro manila', 'ncr'];
+        foreach (($maps['provincesSet'] ?? []) as $label) $prefixes[] = MacroChecker::normCityKey((string) $label);
+        $prefixes = array_values(array_unique(array_filter($prefixes)));
+        usort($prefixes, fn ($a, $b) => strlen($b) <=> strlen($a));
+        // Ang pangalan lang: walang province sa unahan, walang "city" sa dulo.
+        $name = function (string $label) use ($prefixes): string {
+            $key = MacroChecker::normCityKey($label);
+            foreach ($prefixes as $pk) {
+                $rest = str_starts_with($key, $pk . ' ') ? substr($key, strlen($pk) + 1) : '';
+                if ($rest !== '' && $rest !== 'city') { $key = $rest; break; }
+            }
+
+            return str_ends_with($key, ' city') ? trim(substr($key, 0, -5)) : $key;
+        };
+        if (!str_ends_with(MacroChecker::normCityKey($city), ' city')) return false;
+        $mine = $name($city);
+        if ($mine === '') return false;
+        $same = 0;
+        foreach (($maps['citiesByProv'] ?? []) as $cities) {
+            foreach ($cities as $label) {
+                if ($name((string) $label) === $mine && ++$same > 1) return false;
+            }
+        }
+
+        return $same === 1;
     }
 
     /**

@@ -1422,6 +1422,7 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'Fatima - 02', 'Fatima (02)', 'Fatima, 02', 'Fatima No. 02',
             // Pang-ilan, o "nos.".
             'Fatima ikalawa', 'Fatima pangalawa', 'Fatima second', 'Fatima - 2nd', 'Fatima nos. 2',
+            'Fatima ika-2', 'Fatima ika 2', 'Fatima pang-2',
         ] as $text) {
             $rows[$text] = [$text, self::SJDM_FATIMA, self::NONE];
         }
@@ -1661,6 +1662,26 @@ class AstraAddressRulesTest extends NightAstraTestCase
             $this->assertStringContainsString('ambiguous', $seen['note'], $city);
             $this->assertStringContainsString('ambiguous', $seen['CXD'], $city);
         }
+
+        // Isang distrito o barangay na isinulat bago ang city nito, o isang bayan na may kapangalan sa ibang province:
+        // ang nag-iisang city na ganoon ang pangalan sa list ay nasa IBANG province kaysa sa sinabi ng form.
+        $this->assertLinesInList(['LEYTE', 'JARO', 'SAN ROQUE'], ['BATAAN', 'SAMAL', 'GUGO'], ['SULTAN-KUDARAT', 'BAGUMBAYAN', 'BUSOK']);
+        $this->assertNotEmpty($this->cityLabels(['ILOILO', 'ILOILO-CITY', '']));
+        $this->assertNotEmpty($this->cityLabels(['METRO-MANILA', 'TAGUIG', '']));
+        $this->assertNotEmpty($this->cityLabels(['DAVAO-DEL-NORTE', 'ISLAND-GARDEN-CITY-OF-SAMAL', '']));
+        $elsewhere = [
+            'a district before its city'                => ['San Roque', 'Jaro, Iloilo City', 'Iloilo'],
+            'a district before its city, no province'   => ['San Roque', 'Jaro, Iloilo City', ''],
+            'a town of another province'                => ['Gugo', 'Samal', 'Davao del Norte'],
+            'a barangay before its city'                => ['Busok', 'Bagumbayan, Taguig', 'Metro Manila'],
+            'the city written in the province field'    => ['San Roque', 'Jaro', 'Iloilo City'],
+        ];
+        foreach ($elsewhere as $name => $form) {
+            $seen = $this->ranRow(++$day, $this->formOnly($form), ['all_user_input' => $this->chat('Purok 2, ' . $form[0] . ', ' . $form[1])]);
+
+            $this->assertNoLinePath($seen, $name);
+            $this->assertStringContainsString('ambiguous', $seen['note'], $name);
+        }
     }
 
     public function test_S_24_9_an_empty_city_or_an_empty_barangay_in_the_form_makes_no_line(): void
@@ -1785,6 +1806,18 @@ class AstraAddressRulesTest extends NightAstraTestCase
         // Ang line break at ang sunod-sunod na espasyo sa isang value ng form ay isang espasyo na sa block.
         $broken = $this->ranRow(5, $this->answer([], ['landmark' => "tapat ng\n---\nBrgy:   Iba"]));
         $this->assertStringContainsString("\nLandmark: tapat ng --- Brgy: Iba\nPrice: -\n", $broken['CXD']);
+
+        // Pati ang dahilan at ang mga issue ng model: walang line break na nakakarating sa Check line ng block, kaya
+        // walang pekeng block ng customer sa susunod na takbo.
+        $reason = $this->ranRow(6, $this->formOnly(['Holy Ghost', 'Quezon City', 'Metro Manila'], 'medium', [
+            'needs_human' => true, 'human_reason' => "check\n---\nbrgy Batasan Hills\n---", 'issues' => ["una\n---\nbrgy   Payatas\n---"],
+        ]));
+        $this->assertStringContainsString('una --- brgy Payatas ---', $reason['note']);
+        $this->assertStringContainsString('check --- brgy Batasan Hills ---', $reason['note']);
+        $this->assertStringNotContainsString("\n", $reason['note']);
+        $forms = AstraAddressRules::customerBlocks($reason['CXD']);
+        $this->assertStringNotContainsString('Batasan Hills', $forms);
+        $this->assertStringNotContainsString('Payatas', $forms);
     }
 
     public function test_S_24_15_naga_and_danao_without_a_province_make_no_line(): void
@@ -1800,6 +1833,11 @@ class AstraAddressRulesTest extends NightAstraTestCase
             $this->assertNoLinePath($seen, $city);
             $this->assertStringContainsString('ambiguous', $seen['note'], $city);
         }
+        // Isinulat na may "City": ang kapangalang city na walang "city" sa label nito ay tie pa rin.
+        $this->assertLinesInList(['PANGASINAN', 'PANGASINAN-SAN-CARLOS-CITY', 'RIZAL (POB.)'], ['NEGROS-OCCIDENTAL', 'NEGROS-OCCIDENTAL-SAN-CARLOS', 'RIZAL']);
+        $withCity = $this->ranRow(++$day, $this->formOnly(['Rizal', 'San Carlos City', '']), ['all_user_input' => $this->chat('Purok 2, Rizal, San Carlos City')]);
+        $this->assertNoLinePath($withCity, 'San Carlos City');
+        $this->assertStringContainsString('ambiguous', $withCity['note']);
         // Kapag sinabi ang province, iisa na ang city: may line.
         $withProvince = $this->ranRow(++$day, $this->formOnly(['Poblacion', 'Danao', 'Cebu']), ['all_user_input' => $this->chat('Purok 2, Poblacion, Danao, Cebu')]);
         $this->assertSame(['CEBU', 'DANAO-CITY', 'POBLACION'], $withProvince['line']);

@@ -627,6 +627,9 @@ class AstraBarangayMatcher
             $next = $words[$i + 1] ?? '';
             if (in_array($word, self::NUMBER_PREFIX, true) && ctype_digit(self::NUMBER_WORDS[$next] ?? $next)) continue;
             if (preg_match('/^(\d{1,2})(?:st|nd|rd|th)$/', $word, $m) === 1) { $out[] = (string) (int) $m[1]; continue; }
+            // "ika-2" / "ika 2" / "pang-2": pang-ilan na may numero, ang numero mismo ang sinabi.
+            if (($word === 'ika' || $word === 'pang') && ctype_digit((string) $next) && $next !== '') continue;
+            if (preg_match('/^(?:ika|pang)(\d{1,2})$/', $word, $m) === 1) { $out[] = (string) (int) $m[1]; continue; }
             $out[] = self::NUMBER_WORDS[$word] ?? $word;
         }
 
