@@ -71,8 +71,10 @@ class AstraBarangayMatcher
      * May binanggit bang IBANG barangay ng city ang text, bilang buong pangalan? Ang customer na lumipat o nagtatama ng
      * sarili ("dati sa Brgy X, ngayon sa Brgy Y") ay dalawang barangay ang sinabi: hindi malinaw kung alin, tao ang magpapasya.
      * Para hindi mahuli ang hindi naman barangay, ang ibang pangalan ay binibilang lang kapag:
-     *  - lima o higit pang character ang key nito, at hindi ito bahagi ng pangalan ng label na kinukumpirma;
-     *  - kung puro numero o iisang letra ("12", "1 a"): kasunod-agad ng barangay word;
+     *  - hindi ito bahagi ng pangalan ng label na kinukumpirma (maliban sa buong pangalan ng ibang label na laman din ng
+     *    parenthesis ng kinukumpirma, sa labas ng banggit sa kinukumpirma mismo);
+     *  - kung puro numero o iisang letra ("12", "1 a"), wala pang limang character, o "poblacion" ng mga label na "(POB.)":
+     *    kasunod-agad ng barangay word;
      *  - kung bahagi ng pangalan ng city o province ($placeNames, mga key): may barangay word sa unahan; ang ulit ng pangalan
      *    ng bayan o province (address na dalawang beses isinulat) ay hindi ibang barangay.
      * Ang label na kapareho ang key ng kinukumpirma (dalawang sulat ng iisang barangay) ay hindi "iba".
@@ -80,37 +82,59 @@ class AstraBarangayMatcher
     public static function namesAnother(string $text, string $label, array $cityLabels, array $placeNames): bool
     {
         try {
-            $own   = self::labelKeys($label);
-            $index = []; // unang salita ng key => [[mga salita, uri]]
-            $seen  = [];
+            $own    = self::labelKeys($label);
+            $ownPar = array_slice($own, 2);
+            $index  = []; // unang salita ng key => [[mga salita, uri, kapangalan ba ng sariling parenthesis ng kinukumpirma]]
+            $seen   = [];
+            $add    = static function (string $key, bool $inside) use (&$index, &$seen, $own, $ownPar, $placeNames): void {
+                if ($key === '' || isset($seen[$key])) return;
+                $seen[$key] = true;
+                $mine = false;
+                if (self::inAny($key, $own)) {
+                    // Bahagi ng pangalan ng kinukumpirma ("10" sa loob ng "10 a", "san isidro" sa loob ng "san isidro sur"): hindi iba.
+                    // Maliban sa BUONG pangalan ng ibang label na siya ring laman ng parenthesis ng kinukumpirma (TANGOS at
+                    // TANGOS SOUTH (TANGOS)): ibang barangay iyon, kapag hindi bahagi ng banggit sa kinukumpirma mismo.
+                    if ($inside || !in_array($key, $ownPar, true)) return;
+                    $mine = true;
+                }
+                $words = explode(' ', $key);
+                $kind  = 'name';
+                if (count(self::specials($words)) === count($words)) $kind = 'number';
+                // Maikling pangalan ("Isit", "Luna") at ang "poblacion" ng mga label na "(POB.)": saanman ay may ganoong salita
+                // ("Luna St"), kaya kasunod-agad lang ng barangay word.
+                elseif (strlen($key) < self::MIN_LEN || ($inside && $key === 'poblacion')) $kind = 'marked';
+                elseif (self::inAny($key, $placeNames)) $kind = 'place';
+                $index[$words[0]][] = [$words, $kind, $mine];
+            };
+            $inner = [];
             foreach ($cityLabels as $other) {
                 $other = (string) $other;
                 if ($other === $label) continue;
                 $keys = self::labelKeys($other);
                 if ($keys[0] === $own[0]) continue;
-                foreach ([$keys[0], $keys[1]] as $key) {
-                    if ($key === '' || isset($seen[$key])) continue;
-                    $seen[$key] = true;
-                    // Bahagi ng pangalan ng kinukumpirma ("10" sa loob ng "10 a", "san isidro" sa loob ng "san isidro sur"): hindi iba.
-                    if (self::inAny($key, $own)) continue;
-                    $words = explode(' ', $key);
-                    $kind  = 'name';
-                    if (count(self::specials($words)) === count($words)) $kind = 'number';
-                    elseif (strlen($key) < self::MIN_LEN) continue;
-                    elseif (self::inAny($key, $placeNames)) $kind = 'place';
-                    $index[$words[0]][] = [$words, $kind, $key];
-                }
+                $add($keys[0], false);
+                $add($keys[1], false);
+                foreach (array_slice($keys, 2) as $key) $inner[] = $key;
             }
+            // Ang laman ng parenthesis ng ibang label ay pangalan din nito ("Talampac" para sa POBLACION (TALAMPAC)).
+            foreach ($inner as $key) $add($key, true);
             if ($index === []) return false;
 
-            foreach (self::segments($text) as $seg) {
-                $w = $seg['w'];
+            $nw       = explode(' ', $own[0]);
+            $segments = self::segments($text);
+            foreach ($segments as $si => $seg) {
+                // Ang initial na may tuldok ("Claro M. Recto") ay ang letra mismo sa pangalan ng label.
+                $w = $seg['init'] === [] ? $seg['w'] : array_map(static fn (string $x): string => rtrim($x, '.'), $seg['w']);
                 foreach ($w as $i => $word) {
                     if (!isset($index[$word])) continue;
-                    foreach ($index[$word] as [$words, $kind, $key]) {
+                    foreach ($index[$word] as [$words, $kind, $mine]) {
                         for ($j = 1, $n = count($words); $j < $n && ($w[$i + $j] ?? null) === $words[$j]; $j++);
                         if ($j < $n) continue;
-                        if ($kind === 'name' || isset($seg['brgy'][$i])) return true;
+                        $marked = isset($seg['brgy'][$i]);
+                        if ($kind !== 'name' && !$marked) continue;
+                        if ($mine && self::inOwnMention($segments, $si, $i, $i + $n, $nw, $marked)) continue;
+
+                        return true;
                     }
                 }
             }
@@ -120,6 +144,26 @@ class AstraBarangayMatcher
             // Anumang hindi inaasahan sa text ng customer: hindi kumpirmado, tao ang magpapasya.
             return true;
         }
+    }
+
+    /**
+     * Ang mga salitang $from hanggang $to (hindi kasama ang $to) ba ay bahagi ng banggit sa kinukumpirma mismo ($nw, ang
+     * pangalan nitong walang parenthesis)? Sa loob ng banggit ("Tangos" sa "Brgy Tangos South"): oo. Katabi lang nito
+     * ("Tangos South (Tangos)"): oo rin, maliban kung may sarili itong barangay word ("Brgy Cabaritan, Brgy Dumalneg").
+     */
+    private static function inOwnMention(array $segments, int $si, int $from, int $to, array $nw, bool $marked): bool
+    {
+        $w = $segments[$si]['w'];
+        $n = count($nw);
+        $m = count($w);
+        for ($s = max(0, $from - $n); $s <= $to && $s + $n <= $m; $s++) {
+            if (array_slice($w, $s, $n) !== $nw) continue;
+            if (!$marked || ($s < $to && $s + $n > $from)) return true;
+        }
+        if ($marked) return false;
+        if ($from === 0 && $si > 0 && array_slice($segments[$si - 1]['w'], -$n) === $nw) return true;
+
+        return $to === $m && isset($segments[$si + 1]) && array_slice($segments[$si + 1]['w'], 0, $n) === $nw;
     }
 
     /** Ang key ba ay magkakasunod na buong salita ng alinman sa mga pangalang ito? */
@@ -145,8 +189,10 @@ class AstraBarangayMatcher
             $siblings = [];
             foreach ($labels as $other) {
                 if ($other === $label) continue;
-                foreach (self::labelKeys($other) as $k) {
-                    if ($k !== '' && !in_array($k, $own, true)) $siblings[$k] = true;
+                foreach (self::labelKeys($other) as $at => $k) {
+                    // Ang BUONG pangalan ng ibang label ay kapatid kahit kapareho ng laman ng parenthesis ng label na ito
+                    // (TANGOS para sa TANGOS SOUTH (TANGOS)): ang "Tangos St" ay hindi halos-tugma ng "Tangos South".
+                    if ($k !== '' && !in_array($k, $at < 2 ? [$own[0], $own[1]] : $own, true)) $siblings[$k] = true;
                 }
             }
             $siblings = array_map('strval', array_keys($siblings));

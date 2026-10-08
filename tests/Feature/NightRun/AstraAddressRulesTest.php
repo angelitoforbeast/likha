@@ -2191,6 +2191,55 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $this->assertLessThan(2.0, (hrtime(true) - $start) / 1e9);
     }
 
+    public function test_S_26_21_another_barangay_is_seen_in_the_ways_customers_write_it(): void
+    {
+        $amontay    = ['QUEZON', 'QUEZON-PITOGO', 'AMONTAY'];
+        $pagAsa     = ['QUEZON', 'QUEZON-PITOGO', 'PAG-ASA (POB.)'];
+        $bacag      = ['ABRA', 'LACUB', 'BACAG'];
+        $inoma      = ['LANAO-DEL-NORTE', 'MAIGO', 'INOMA'];
+        $cabaritan  = ['ILOCOS-NORTE', 'DUMALNEG', 'CABARITAN (DUMALNEG)'];
+        $tangosSth  = ['METRO-MANILA', 'NAVOTAS-CITY', 'TANGOS SOUTH (TANGOS)'];
+        $bayaan     = ['ABRA', 'ABRA-DOLORES', 'BAYAAN'];
+        $alangan    = ['ANTIQUE', 'SIBALOM', 'ALANGAN'];
+        $this->assertLinesInList(
+            $amontay, $pagAsa, $bacag, ['ABRA', 'LACUB', 'POBLACION (TALAMPAC)'], $inoma, ['LANAO-DEL-NORTE', 'MAIGO', 'CLARO M. RECTO'],
+            $cabaritan, ['ILOCOS-NORTE', 'DUMALNEG', 'DUMALNEG'], $tangosSth, ['METRO-MANILA', 'NAVOTAS-CITY', 'TANGOS'],
+            $bayaan, ['ABRA', 'ABRA-DOLORES', 'ISIT'], $alangan, ['ANTIQUE', 'SIBALOM', 'LUNA'], self::QC_HOLY_SPIRIT
+        );
+        $this->assertNotContains('POBLACION', $this->cityLabels($amontay));
+
+        $this->assertSame([
+            'plain Poblacion after a barangay word'     => self::NONE,
+            'Pob. after a barangay word'                => self::NONE,
+            'the name inside the other brackets'        => self::NONE,
+            'an initial with its dot'                   => self::NONE,
+            'the other is this one\'s bracket name'     => self::NONE,
+            'a street named like the bracket name'      => self::NONE,
+            'a short name after a barangay word'        => self::NONE,
+            // Kumpirmado pa rin.
+            'a (POB.) label with the word Poblacion'    => self::PHRASE,
+            'no second barangay'                        => self::PHRASE,
+            'a street with a short barangay name'       => self::PHRASE,
+            'the name before the brackets'              => self::PHRASE,
+            'the name with its own brackets'            => self::PHRASE,
+            'the bracket name is the town'              => self::PHRASE,
+        ], [
+            'plain Poblacion after a barangay word'     => $this->textCheck($amontay, 'Dati sa Brgy Amontay, ngayon sa Brgy Poblacion na po'),
+            'Pob. after a barangay word'                => $this->textCheck($amontay, 'Dati sa Brgy Amontay, ngayon sa Brgy. Pob. na po'),
+            'the name inside the other brackets'        => $this->textCheck($bacag, 'Dati sa Brgy Bacag, ngayon sa Talampac na po'),
+            'an initial with its dot'                   => $this->textCheck($inoma, 'Dati sa Brgy Inoma, ngayon sa Brgy Claro M. Recto na po'),
+            'the other is this one\'s bracket name'     => $this->textCheck($cabaritan, 'hindi Brgy Cabaritan, Brgy Dumalneg po'),
+            'a street named like the bracket name'      => $this->textCheck($tangosSth, '123 Tangos St. Navotas City'),
+            'a short name after a barangay word'        => $this->textCheck($bayaan, 'Dati sa Brgy Bayaan, ngayon sa Brgy Isit na po'),
+            'a (POB.) label with the word Poblacion'    => $this->textCheck($pagAsa, 'Brgy Pag-asa, Brgy Poblacion, Pitogo, Quezon'),
+            'no second barangay'                        => $this->textCheck(self::QC_HOLY_SPIRIT, 'Brgy Holy Spirit, Quezon City'),
+            'a street with a short barangay name'       => $this->textCheck($alangan, '12 Luna St, Brgy Alangan, Sibalom, Antique'),
+            'the name before the brackets'              => $this->textCheck($tangosSth, 'Brgy Tangos South, Navotas City'),
+            'the name with its own brackets'            => $this->textCheck($tangosSth, 'Brgy Tangos South (Tangos), Navotas City'),
+            'the bracket name is the town'              => $this->textCheck($cabaritan, 'Brgy Cabaritan, Dumalneg, Ilocos Norte'),
+        ]);
+    }
+
     public function test_S_26_9_the_mapper_picks_the_exact_number_and_never_a_neighbour(): void
     {
         $this->assertLinesInList(self::COTABATO_POB, ['COTABATO', 'COTABATO-CITY', 'POBLACION I'], self::COTABATO_POB_2);
