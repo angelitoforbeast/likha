@@ -442,3 +442,167 @@ each renders the original table as Marketing sees it today.
 | S-24.2 | negative, server | Given those viewers and the three addresses, when the page's script is read, then it does not call the quotes or PO-suppliers loaders (as today) | `SuppliersGroupTest::test_S_24_2_the_script_does_not_call_the_loaders_for_non_ceo_views` | Passed · 2026-10-08 · auto |
 | S-24.3 | edge, server | Given the default layout for those viewers (no `layout`, or a value that is not one of the three words), when rendered, then it is byte for byte the base | `SuppliersGroupTest::test_S_24_3_the_default_layout_of_non_ceo_views_is_the_base` (the route), `SuppliersGroupTest::test_S_18_4_marketing_renders_of_the_old_and_default_layout_are_identical_to_the_base` (the pinned renders, existing, unchanged) | Passed · 2026-10-08 · auto |
 | S-24.4 | edge, server | Given a request where `layout` is `original` with a space before or after it, `Original`, `ORIGINAL`, `originals`, an array, or sent twice, when routed, then only what the framework's trimming makes equal to the exact string selects the original table, as for the other layout words (the last value wins when sent twice); an array selects the default layout without an error; a Marketing user never gets the suppliers table from any of them | `SuppliersGroupTest::test_S_24_4_only_the_exact_word_original_after_trimming_selects_the_original_table` | Passed · 2026-10-08 · auto |
+
+## Slice 020 – The item table fits the screen
+
+Slice 020: 0 passed, 0 failed, 0 blocked, 0 skipped, 52 not run
+
+"The suppliers table" is the CEO view's render for `layout=old` or `layout=suppliers`. "The base" is develop
+at 1c32cc1. Test tags: **unit-js** = a pure function of `public/js/item-table-fit.js` run through `node`
+(`tests/Feature/Item/ItemTableFitScriptTest.php`); **feature** = the rendered HTML or an endpoint in PHPUnit;
+**pin** = a text pin on a view file; **browser** = checked in a browser after release; **owner check** = listed
+under `## Owner checks`. This slice also changes or retires cases of slices 017 and 019, in place.
+
+#### Part 1: the supplier columns
+
+### S-34 One column per supplier of the Finance list (P1)
+
+As the CEO, I want a column for each supplier I keep in Finance → Supply, so that the supplier
+number I know is the number on the table.
+
+Independent test: with three suppliers the table has three supplier columns headed "1 · Kelly",
+"2 · Albee", "3 · Helen"; add a fourth on the Finance page and reload: a fourth column appears.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-34.1 | Given three suppliers created as ids 4, 9, 12, when the table draws, then the group header spans three columns headed "1 · <first word of the name>", "2 · …", "3 · …", each with its full name in the title. Header and cells loop over the list: no "Supplier 1/2/3" words, no "Others", no "PO" sub-header, no fixed 3 or 4 | unit-js + pin on the loop | Not run |
+| S-34.2 | Given a fourth supplier added through the Supply Finance page's own store route, when the item page's quotes answer is requested, then it lists four suppliers with their ids, and the columns function gives a fourth column "4 · Name": no code change needed | feature + unit-js | Not run |
+| S-34.3 | Given ids 7 "Zed", 3 "Amy", 12 "Kim", sent as numbers in one run and as strings in the next, when the columns are built, then the order is 3, 7, 12 and the numbers are the positions 1, 2, 3 (never the raw ids, never alphabetical). The quote form's own list stays alphabetical | unit-js | Not run |
+| S-34.4 | Given a one-word name, a name with leading spaces, an empty name, "Ñandú Trading 金龙", two suppliers with the same first word, and `<img src=x onerror=alert(1)>`, when the headers are built, then the header uses the first word (the number alone for an empty name), the title holds the full name, equal first words get different numbers, and every value is bound as text. A 120-letter first word is cut inside the header and does not widen the column | unit-js, pin (text binding), browser (the cut) | Not run |
+| S-34.5 | Given no supplier in the list, or the list not yet answered, when the table draws, then there is no zero-width group and no error: one narrow column reads "Add a supplier in Finance → Supply" (a link to the Supply Finance page) when the answered list is empty, the neutral placeholder of slice 017 while it has not answered, and no "wala pang supplier" mark before the answer | unit-js + feature (a colspan is never 0) | Not run |
+| S-34.6 | Given a quote whose supplier id is not in the list (the table has no foreign key), when the row draws, then there is no error and no new column, and the item is not marked "wala pang supplier" (it has a quote, as the "Need a supplier" chip counts it) | unit-js | Not run |
+
+### S-35 A supplier cell shows only a price, a plus and an edit (P1)
+
+As the CEO, I want each cell to be just that supplier's price with a plus or an edit, so that I can
+compare at a glance.
+
+Independent test: an item has a quote from the first supplier only; that cell shows the price and
+MOQ and the other cells a quiet "+".
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-35.1 | Given supplier 1 quoted ₱18.50 with MOQ 1000 for an item, when the row draws, then that cell shows "₱18.50" and "MOQ 1000", every other supplier's cell shows only a quiet "+", and no supplier name appears inside any cell | unit-js + pin | Not run |
+| S-35.2 | Given an empty cell in supplier 2's column, when its "+" is used, then the add form opens with supplier 2 already chosen; after saving price 40 and MOQ 300 the cell shows "₱40.00" and "MOQ 300" | unit-js (the form's preset), the existing quote save tests, browser | Not run |
+| S-35.3 | Given a filled cell, when it is hovered, focused with the keyboard or tapped, then an edit control appears; in the edit card price, MOQ, link and photo can be changed and the quote removed (with the existing confirmation); the cell updates without a reload | pin on the edit and remove calls, browser | Not run |
+| S-35.4 | Given the form opened from a cell, when it renders, then the supplier is fixed (shown as text, no dropdown), because the save is an update-or-create on item plus supplier and a changeable dropdown could overwrite another supplier's quote | pin (no select in the cell form) + unit-js | Not run |
+| S-35.5 | Given a quote with no price and MOQ 500, one priced 0, and one with no MOQ, when the row draws, then the first shows a dash and "MOQ 500", the second "₱0.00", the third the price alone, and none is marked cheapest | unit-js | Not run |
+| S-35.6 | Given quotes 15, 15 and 22, then both 15s are marked cheapest; given one price only, or prices of 0 and none, then nothing is marked; given supplier 1 quoted 20 and supplier 2 has only a PO cost of 15, then nothing is marked (a PO cost never counts). The cell reads the server's `cheapest` flag and does not compare prices itself | unit-js, the existing S-14.5 and S-14.6 tests | Not run |
+
+### S-36 Last PO cost: a green dot, or a green cost with "PO" (P1)
+
+As the CEO, I want to see which supplier I last bought from without a PO column, so that I keep
+that fact in the new layout.
+
+Independent test: a supplier has a quote and a PO for an item; the cell shows the quote price, a
+green dot, and the PO line in its hover card.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-36.1 | Given a supplier with a quote and a PO for the item, when the row draws, then the quote is the only price in the cell, a small green dot sits at its top left, and the hover or tap card has a line "Last PO ₱17.80, date, PO number". The dot has a title and an aria-label, so it is not colour only | unit-js, pin, browser | Not run |
+| S-36.2 | Given a supplier with a PO and no quote, when the row draws, then the cell shows the PO unit cost in the PO green with a "PO" tag, it is never marked cheapest, and a quiet "+" also sits in the cell (always visible on touch) so a quote can still be added | unit-js, browser | Not run |
+| S-36.3 | Given a supplier with no PO for the item (or only a discount or zero-cost line), when the row draws, then there is no dot and no tag | unit-js + feature on the PO-suppliers endpoint | Not run |
+| S-36.4 | Given two suppliers with the same name, only one of which has a PO, when the page matches PO to column, then the match is by supplier id: the PO-suppliers endpoint's rows carry `supplier_id` as a new field, and its existing keys and values are unchanged for every other reader | feature (new field + the existing assertions) + unit-js | Not run |
+| S-36.5 | Given several POs from one supplier for the item, when the cell draws, then it shows the latest by order date (then line id): its date and PO number in the card | feature | Not run |
+
+### S-37 An item with no supplier at all gets one small warning mark (P1)
+
+As the CEO, I want a quiet mark by an item that has no supplier, so that the table is not a wall of
+red.
+
+Independent test: an item with no quote and no PO shows a small mark by its name with the title
+"wala pang supplier", and no full-width band.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-37.1 | Given an item with no quote and no PO from any supplier, when the lists have loaded, then one small warning mark sits by the item name with title and aria-label "wala pang supplier", the supplier cells show their "+", and there is no red band across the cells. "walang running page" still shows in red in the item column | unit-js (the rule), pin (no band markup), browser | Not run |
+| S-37.2 | Given an item with a quote only, or a PO only, or a quote without a price, when the row draws, then there is no mark | unit-js | Not run |
+| S-37.3 | Given the quote or PO list has not answered or a fetch failed, when the row draws, then there is no mark; the neutral placeholder rule of S-15.9 and S-15.10 still holds | pin on the loaded state | Not run |
+| S-37.4 | Given the "Need a supplier" chip, when its count and list are compared with the marks on the same data, then the chip keeps its meaning and count, and the marked items are the items in that list | feature (the existing worklist test) + unit-js rule | Not run |
+| S-37.5 | Given a marked item, when its first quote is saved, then the mark disappears without a reload and the chip count goes down by one | browser | Not run |
+
+#### Part 2: the fit
+
+### S-38 The table fits the screen: no sideways scroll at laptop width (P1)
+
+As the CEO, I want the whole table to fit my laptop screen, so that I never scroll sideways to read
+a row.
+
+Independent test: open the suppliers table at 1366 px; the table's scroll box is not wider than its
+visible width, and a "+12 columns" button shows how many columns are one step away.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-38.1 | Given three suppliers and the Sourcing set, when the fit runs for the rows F1 to F4 of the fit table, then 11, 12, 14 and 17 columns are shown and the spare width is never negative | unit-js F1–F4 | Not run |
+| S-38.2 | Given the Sourcing set at 1366 and 4, 6 and 8 suppliers, then F5 to F7 hold: columns leave one by one in the fixed order, and I-ORDER, DOI, ITEM VAL. (CEO), PROF.PROFIT and PROF.% are the last to go | unit-js F5–F7 | Not run |
+| S-38.3 | Given the box is exactly as wide as the shown columns need (F8), then they fit; one pixel narrower, one more column leaves | unit-js F7 vs F8 | Not run |
+| S-38.4 | Given a column hidden in the server settings (ADSPENT in F9), then it shows in no set and is not counted in "+N". Given the Sales set (F10, F11), then the six stock columns are excluded and the rest follow the same drop order | unit-js F9–F11 | Not run |
+| S-38.5 | Given a viewport of 1279 px, then all the set's columns show and the table scrolls sideways as today, the item column sticky (F12); given 1280 px, the fit runs and nothing scrolls (F13); on a 390 × 844 phone the page scrolls both ways as today | unit-js F12–F13, browser at 390 | Not run |
+| S-38.6 | Given 17 suppliers at 1366 (F14), or none (F15), then the identity and supplier columns are never dropped: with 17 the other columns go and the table scrolls, with none the fit still works. The same input gives the same output whatever order the set and drop lists are written in | unit-js F14–F15 | Not run |
+| S-38.7 | Given the real page at 1366, 1440, 1536 and 1920 px with real data, when it has loaded, then the scroll box's `scrollWidth` equals its `clientWidth` and no cell has content wider than the cell | browser | Not run |
+| S-38.8 | Given the window is resized from 1920 to 1366 and back with no reload, then the shown columns and the "+N" count update each time; before the lists answer the table does not jump more than once when the supplier count arrives | browser | Not run |
+| S-38.9 | Given the fitted table, when the expanded page rows, the TOTAL row, the loading row and the empty rows draw, then they span exactly the shown columns plus the identity columns plus the supplier columns, and every row has the same number of cells | feature or pin (colspans follow the shown count) + browser | Not run |
+| S-38.10 | Given amounts 99,999.99, 100,000, 2,270,000 and −1,200, when this table formats them, then the first stays as is, the second has no centavos, the TOTAL row shows "₱2.27M" with the full value in its title, and the last reads "−₱1,200.00". Only this table is affected: the shared `money()` output of the other views is not. No sub-line is under 11 px | unit-js, pin on the styles, the existing byte pins | Not run |
+| S-38.11 | owner check: on his own laptop the whole table fits with no sideways scroll and reads well | owner check | Not run |
+
+### S-39 "+N columns" shows what moved away and lets me bring one back (P2)
+
+As the CEO, I want to see which columns are one step away and bring one back, so that nothing
+disappears silently.
+
+Independent test: at 1366 the button reads "+12 columns"; its panel lists those 12 columns.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-39.1 | Given F1, when the page draws, then the button reads "+12 columns" (the columns away by the fit plus the ones the set excludes; server-hidden and CEO-forced-hidden columns are never counted). Its panel lists each away column with the width it needs, the shown columns, how many pixels are used of how many, a link to the existing column settings page, and a note that supplier columns follow the Finance list with a "+ Add Supplier" link to the Supply Finance page. The button has `aria-expanded`; Esc closes the panel | unit-js (count), pin, browser | Not run |
+| S-39.2 | Given a column whose minimum width is not more than the spare width, when it is turned on, then it shows in its place and the "+N" count goes down | unit-js | Not run |
+| S-39.3 | Given a column that needs 56 px with 19 px free, when it is turned on, then it is refused with the reason "needs 56 px, 19 px free"; nothing else moves | unit-js | Not run |
+| S-39.4 | Given a shown column turned off in the panel, when the refused one is tried again, then it is accepted (the freed width counts) | unit-js | Not run |
+| S-39.5 | Given a column turned on or off in the panel, when the page is reloaded, then it is back to the set's own fit (not remembered). No request is sent and the server setting is untouched | pin + browser | Not run |
+
+### S-40 Two column sets, on top of the server settings (P1)
+
+As the CEO, I want a Sourcing set and a Sales set I switch with one tap, so that each job shows its
+own columns.
+
+Independent test: a fresh browser opens on "Sourcing"; tap "Sales", reload: still "Sales".
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-40.1 | Given a fresh browser, then the page opens on "Sourcing" with "Sales" one tap away; after a tap and a reload the last set is remembered in this browser | unit-js (read and write of the stored value) + browser | Not run |
+| S-40.2 | Given the stored set value is junk ("Mine", an empty string, markup), then the page opens on "Sourcing" with no error | unit-js | Not run |
+| S-40.3 | Given a column hidden on the column settings page, then it stays hidden in both sets, and nothing in switching or fitting writes the server setting (the stored setting is unchanged after load and switch) | feature + pin (the switch code does not call the save) | Not run |
+| S-40.4 | Given the saved column order, then the sets decide only which columns are on offer, and they show in the saved order | unit-js | Not run |
+| S-40.5 | Given a header is dragged while only some columns are shown, when the order is saved, then every catalog id is still in it: the away and hidden ones keep their places, and the four Prof.% ids and the three RTS ids are intact. The shared order is not scrambled for the other page that reads it | unit-js, pin on the save call | Not run |
+
+### S-41 Prof.% is one column with a period switch (P2)
+
+As the CEO, I want one Prof.% column with a 1M, 7D, 3D, 1D switch, so that four columns of width
+become one.
+
+Independent test: the header shows "PROF.%" with four period buttons; the cells show the 1M value
+until another is tapped.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-41.1 | Given the page opens, then one "PROF.%" column shows with 1M active, and item rows and the TOTAL row show that period's value ("—" for a period with no data, negatives with the page's own colour rules) | unit-js + pin | Not run |
+| S-41.2 | Given 7D is tapped, then every cell shows the 7D value and sorting by this column sorts by 7D (the four existing fields). A tap on a period does not trigger the header's own sort and sends no request | unit-js, pin (the click stops), browser | Not run |
+| S-41.3 | Given the saved order and the settings page, then they still see the four ids and saving writes all four. If the server setting hides some periods, the switch offers only the visible ones; if all four are hidden the column is gone | unit-js + feature (the settings page unchanged) | Not run |
+
+### S-42 Nothing outside the CEO's table with suppliers changes (P1)
+
+As the owner, I want every other view to stay exactly as it is, so that this change cannot hurt
+Marketing or the shared pages.
+
+Independent test: the existing byte pins of the original table, the default layout and every
+non-CEO render pass without being edited.
+
+| Case | Given / When / Then | Test | Last run |
+|---|---|---|---|
+| S-42.1 | Given the original table (`layout=original`) and the file `_table_old.blade.php`, then the existing pins pass unchanged | the existing tests | Not run |
+| S-42.2 | Given the CEO default layout and every Marketing, Marketing-OIC and CEO-as-marketing render, then the existing hash pins pass unchanged (so the new script and styles sit behind the suppliers gate) | the existing tests | Not run |
+| S-42.3 | Given those non-CEO viewers on all three layout words, then no new marker appears (the "+N columns" button, "Sourcing", "Sales", the pure function names, the new class names, "wala pang supplier", a seeded supplier name) and the page does not call the quote loaders | feature: the existing marker tests, extended | Not run |
+| S-42.4 | Given `/owner/private` and `/owner/column-settings`, then each renders byte for byte as at the base: capture the base hashes in the test-only commit before changing anything | feature (new pins) | Not run |
+| S-42.5 | Given the suppliers table, then the quotes and PO-suppliers routes are each fetched once at load as before, and the panel, the sets and the period switch send no request | pin: S-21.1 extended | Not run |
+| S-42.6 | Given the promises of slices 017 and 019 that this spec does not replace, then each still holds: add, edit and remove a quote with link and photo, the five chips and counts, sorting, the TOTAL row, expand-all and page rows, Change and Copy, "walang running page", the date range kept by the two layout links, the Marketing refusals | the existing tests + browser | Not run |
+
