@@ -481,6 +481,17 @@ class Checker1NightFilterTest extends NightAstraTestCase
         $all = $this->get($target)->assertOk();
         $this->assertSame($this->letters('AE'), $this->ids($all));
         $this->assertNull($this->line($all));
+
+        // Ibang parameter na galing sa address bar: nasa address ng link pa rin (naka-encode), pero hindi kailanman bilang markup.
+        $hostile = $this->page(http_build_query($this->link()) . '&7=b&' . rawurlencode('a"><script>') . '=1&x[]=' . rawurlencode('<b>"'))->assertOk();
+        $this->assertSame(1, preg_match('/<div id="nightFilterLine".*?<\/div>/s', $hostile->getContent(), $m));
+        $this->assertStringNotContainsString('<script', $m[0]);
+        $this->assertStringNotContainsString('<b>', $m[0]);
+        $this->assertSame(1, substr_count($m[0], '<a '));
+        parse_str((string) parse_url($this->clearLink($hostile), PHP_URL_QUERY), $query);
+        $this->assertSame('b', $query[7] ?? null);
+        $this->assertSame(['<b>"'], $query['x'] ?? null);
+        $this->assertArrayNotHasKey('night_step', $query);
     }
 
     public function test_S_08_3_no_line_without_the_parameter(): void

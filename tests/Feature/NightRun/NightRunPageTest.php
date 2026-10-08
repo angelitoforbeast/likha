@@ -116,6 +116,8 @@ class NightRunPageTest extends NightAstraTestCase
             $this->linkTo($html, '1 for a person')
         );
         $this->assertStringNotContainsString('target=', $html);
+        // Walang nadagdag na space o putol sa pagitan ng link at ng mga katabi nito sa linya.
+        $this->assertSame(1, preg_match('/1 PROCEED · <a href="[^"]*" class="[^"]*">1 for a person<\/a> · 1 failed/', $html));
     }
 
     public function test_S_09_2_the_expanded_count_is_the_same_link(): void

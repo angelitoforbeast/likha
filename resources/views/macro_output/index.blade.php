@@ -474,15 +474,17 @@
     </form>
 
     {{-- 🌙 Night run filter: isang linya para hindi mapagkamalang maikling araw ang listahan.
-         Nakapirming salita, bilang at petsa lang ang laman — walang galing sa kahit anong row o sa address bar. --}}
+         Nakapirming salita, bilang at petsa lang ang nababasa — walang galing sa kahit anong row. Ang address lang ng
+         "Show all rows" ang may dala ng ibang parameter ng address bar (naka-encode). --}}
     @if(!empty($nightFilter))
       @php
-        // Ang query string ay binubuo nang hiwalay: ang route() ay pumapalya sa parameter na numero ang pangalan.
+        // Tinatanggal din ang `page`: ang page 3 ng maikling listahan ay maaaring wala sa buong araw.
+        // Ang query string ay binubuo nang hiwalay (at `+`, hindi array_merge) para manatili ang parameter na numero ang pangalan.
         $nightClearUrl = route('macro_output.index') . '?' . http_build_query(
-          array_merge(request()->except(['night_step', 'page']), ['date' => $date])
+          ['date' => $date] + request()->except(['night_step', 'page'])
         );
       @endphp
-      <div id="nightFilterLine" role="status" class="text-sm text-gray-700 mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+      <div id="nightFilterLine" class="text-sm text-gray-700 mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
         @if($nightFilter['valid'])
           <strong>Night run filter</strong>
           <span>· night of {{ \Carbon\Carbon::parse($nightFilter['night_date'])->format('D, M j') }} (orders of {{ \Carbon\Carbon::parse($nightFilter['orders_date'])->format('M j') }})</span>
