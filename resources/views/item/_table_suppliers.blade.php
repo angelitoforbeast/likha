@@ -118,7 +118,7 @@
                   <template x-if="!itemImages[row.item_name]">
                     <span class="item-sq item-sq-empty">🖼</span>
                   </template>
-                  <span class="item-name" x-text="row.item_name"></span>
+                  <span class="item-name" :title="row.item_name" x-text="row.item_name"></span>
                   <span class="item-hold" x-text="'HOLD '+Number(row.hold||0).toLocaleString()"></span>
                 </div>
                 @if($effectiveIsCEO)
@@ -148,14 +148,14 @@
               </td>
               <td class="spl-c2" style="text-align:center;">
                 <template x-if="row.hasPages">
-                  <div style="font-size:11px;color:#64748b;font-weight:600;"
-                       x-text="row.pages_count + (row.pages_count===1?' running page':' running pages')"></div>
+                  <div class="spl-cnt"
+                       x-text="row.pages_count +(row.pages_count===1?' running page':' running pages')"></div>
                 </template>
                 <template x-if="!row.hasPages">
                   <div style="font-size:11px;color:#b91c1c;font-weight:700;">⚠ walang running page</div>
                 </template>
                 <div class="spl-rowact">
-                <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;margin-top:3px;">
+                <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;">
                   <a class="item-photo-btn" @click.stop
                      :href="'{{ route('item.photo') }}?item='+encodeURIComponent(row.item_name)+'&start_date='+startDate+'&end_date='+endDate"
                      target="_blank" rel="noopener"
@@ -225,6 +225,8 @@
                                 @click.stop="splToggle(row.item_name, si, 'quote', $el)" :title="q.supplier" x-text="q.supplier"></button>
                         <div class="spl-l2">
                           {{-- Explicit na null check: ang money() ay nagpi-print ng 0.00 para sa null. --}}
+                          {{-- Walang presyo: marker lang na walang laman, para maging abo ang dash sa pamamagitan ng CSS. --}}
+                          <template x-if="q.price === null"><span class="spl-nil"></span></template>
                           <span :class="q.cheapest === true ? 'spl-price spl-low' : 'spl-price'" x-text="q.price !== null ? money(q.price) : '—'"></span>
                           {{-- Ang MOQ na 0 ay value pa rin, kaya null / undefined lang ang itinatago. --}}
                           <template x-if="q.moq !== null && q.moq !== undefined">
@@ -370,7 +372,7 @@
               </template>
               <template x-for="col in cols" :key="'ic-'+row.item_name+'-'+col.id">
                 <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(A.projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(A.projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(A.projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(A.projected_profit_last_7d,7):'')">
-                  @include('item._agg_cells')
+                  @include('item._agg_cells', ['rdtOneLine' => true])
                 </td>
               </template>
             </tr>

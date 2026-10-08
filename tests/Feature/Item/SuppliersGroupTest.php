@@ -1002,4 +1002,103 @@ class SuppliersGroupTest extends ItemTestCase
             }
         }
     }
+
+    // ── S-17.1 / S-17.2: ang styles at ang isang-linyang RTS / DEL / INT ay para sa suppliers view lang ──
+
+    private const STYLE_FILE = 'views/item/_suppliers_style.blade.php';
+
+    /** Bawat selector ng isang CSS text (walang comments); ang laman ng @media ay kasama, ang @media mismo ay hindi. */
+    private function selectors(string $css): array
+    {
+        $css = (string) preg_replace('~/\*.*?\*/~s', '', $css);
+        preg_match_all('/([^{}]+)\{/', $css, $m);
+        $selectors = [];
+        foreach ($m[1] as $prelude) {
+            $prelude = trim($prelude);
+            if (str_starts_with($prelude, '@')) continue;
+            foreach (explode(',', $prelude) as $selector) $selectors[] = trim($selector);
+        }
+
+        return $selectors;
+    }
+
+    public function test_S_17_1_the_suppliers_styles_are_rendered_only_for_the_suppliers_view(): void
+    {
+        // Sa source: ang include ay nasa loob ng suppliers-only na block, kasunod agad ng unang </style>.
+        $index = str_replace("\r\n", "\n", file_get_contents(resource_path('views/item/index.blade.php')));
+        $block = "@if(!empty(\$layoutSuppliers))\n@include('item._suppliers_style')\n@endif\n";
+        $this->assertSame(1, substr_count($index, '_suppliers_style'));
+        $this->assertSame(strpos($index, '</style>') + strlen("</style>\n"), strpos($index, $block));
+
+        // Sa render: ang suppliers view lang ang may pangalawang <style>, at doon ang mga rule nito.
+        $suppliers = $this->render('ceo', true, true);
+        $this->assertSame(2, substr_count($suppliers, '<style'));
+        $second = substr($suppliers, strrpos($suppliers, '<style'));
+        $this->assertStringContainsString('.spl-table', substr($second, 0, strpos($second, '</style>')));
+        // Dumadaan sa Blade ang partial: dapat buo pa rin ang mga @media nito sa render.
+        $this->assertStringContainsString('@media (min-width:768px) {', substr($second, 0, strpos($second, '</style>')));
+        $this->assertStringContainsString('@media (hover:none), (max-width:767px) {', substr($second, 0, strpos($second, '</style>')));
+        $this->assertStringNotContainsString('.spl-', substr($suppliers, 0, strrpos($suppliers, '<style')));
+
+        $others = [
+            'old.ceo' => ['ceo', true], 'default.ceo' => ['ceo', false],
+            'old.marketing' => ['marketing', true], 'default.marketing' => ['marketing', false],
+            'old.marketing_oic' => ['marketing_oic', true], 'default.marketing_oic' => ['marketing_oic', false],
+            'old.ceo_as_marketing' => ['ceo_as_marketing', true], 'default.ceo_as_marketing' => ['ceo_as_marketing', false],
+        ];
+        foreach ($others as $label => [$viewer, $old]) {
+            $html = $this->render($viewer, $old);
+            $this->assertStringNotContainsString('.spl-', $html, $label);
+            $this->assertSame(1, substr_count($html, '<style'), $label);
+        }
+
+        // Sa partial: iisang <style>, at bawat selector ay naka-scope sa suppliers view.
+        $source = file_get_contents(resource_path(self::STYLE_FILE));
+        $this->assertSame(1, substr_count($source, '<style'));
+        $this->assertStringNotContainsString('x-html', $source);
+        $selectors = $this->selectors(substr($this->between($source, '<style>', '</style>'), strlen('<style>')));
+        $this->assertGreaterThan(40, count($selectors));
+        foreach ($selectors as $selector) {
+            $this->assertStringStartsWith('.spl-', $selector, $selector);
+        }
+    }
+
+    public function test_S_17_2_rts_del_int_is_one_line_on_item_rows_only(): void
+    {
+        $table = $this->suppliersTable();
+        $item = $this->itemRow();
+        $pages = substr($table, strpos($table, 'page-col-header'));
+
+        // Ang mga linyang nagpapakilala sa tatlong-linyang cell: ang label ng nested table (item row ng Old view)
+        // at ang sariling value cell ng page row.
+        $label = '<td style="padding:1px 6px;text-align:left;color:#94a3b8;font-size:9px;font-weight:700;letter-spacing:0.04em;">RTS</td>';
+        $pageRowLine = "<td style=\"padding:1px 6px;text-align:right;border-left:1px solid #cbd5e1;\" :style=\"row.jnt_rts_pct===null?'color:#cbd5e1':'color:#111;font-weight:700'\"";
+        $this->assertStringContainsString($label, file_get_contents(resource_path('views/item/_agg_cells.blade.php')));
+        $this->assertStringContainsString($pageRowLine, file_get_contents(resource_path('views/item/_table_old.blade.php')));
+
+        // Item row ng suppliers view: isang linya, tatlong value ayon sa RTS, DEL, INT, bawat isa ayon sa napiling member.
+        $this->assertSame(1, substr_count($item, 'class="spl-rdt"'));
+        $rdt = $this->between($item, '<div class="spl-rdt">', '</div>');
+        $this->assertSame(3, substr_count($rdt, '<span'));
+        $this->assertSame(3, substr_count($rdt, '<template x-if='));
+        $this->assertOrder([
+            "<template x-if=\"col.members && col.members.includes('jnt_rts')\">",
+            ":title=\"A.jnt_rts_pct!=null ? 'RTS ' + A.jnt_rts_pct.toFixed(1) + '% (' + A.jnt_rts_cnt + ')' : 'RTS —'\"",
+            "<template x-if=\"col.members && col.members.includes('jnt_del')\">",
+            ":title=\"A.jnt_del_pct!=null ? 'DEL ' + A.jnt_del_pct.toFixed(1) + '% (' + A.jnt_del_cnt + ')' : 'DEL —'\"",
+            "<template x-if=\"col.members && col.members.includes('jnt_transit')\">",
+            ":title=\"A.jnt_transit_pct!=null ? 'INT ' + A.jnt_transit_pct.toFixed(1) + '% (' + A.jnt_transit_cnt + ')' : 'INT —'\"",
+        ], $rdt);
+        $this->assertStringContainsString("x-text=\"A.jnt_rts_pct!=null ? A.jnt_rts_pct.toFixed(1)+'%' : '—'\"", $rdt);
+        $this->assertStringNotContainsString($label, $item);
+
+        // Ang page rows ng suppliers view ay may sarili pa ring tatlong-linyang cell.
+        $this->assertStringContainsString($pageRowLine, $pages);
+        $this->assertStringContainsString($label, $pages);
+
+        // Old view: ang item row ay may nested table pa rin, at walang isang-linyang cell.
+        $old = $this->render('ceo', true);
+        $this->assertStringNotContainsString('spl-rdt', $old);
+        $this->assertStringContainsString($label, $this->between($old, 'class="item-row"', 'page-col-header'));
+    }
 }

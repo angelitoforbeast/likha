@@ -458,6 +458,9 @@
       .il-m-label { display:block; font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:.02em; }
     }
   </style>
+@if(!empty($layoutSuppliers))
+@include('item._suppliers_style')
+@endif
 </head>
 <body>
 

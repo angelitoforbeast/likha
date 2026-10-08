@@ -72,6 +72,28 @@
 {{-- RTS / DEL / INT sa item level = aggregate ng page values (ratio-of-sums):
      summed counts, % = cnt ÷ summed jnt_total. Kaparehong stacked layout ng page
      cell (jnt_rdt). Sinusunod ang col.members (kung alin ang naka-check). --}}
+@if(!empty($rdtOneLine))
+{{-- Isang linya (RTS, DEL, INT) para manatiling mababa ang row; ang pangalan at bilang ay nasa tooltip ng bawat value. --}}
+<template x-if="col.id==='jnt_rdt'">
+  <div class="spl-rdt">
+    <template x-if="col.members && col.members.includes('jnt_rts')">
+      <span :style="A.jnt_rts_pct==null?'color:#cbd5e1':'color:#111;font-weight:700'"
+            :title="A.jnt_rts_pct!=null ? 'RTS ' + A.jnt_rts_pct.toFixed(1) + '% (' + A.jnt_rts_cnt + ')' : 'RTS —'"
+            x-text="A.jnt_rts_pct!=null ? A.jnt_rts_pct.toFixed(1)+'%' : '—'"></span>
+    </template>
+    <template x-if="col.members && col.members.includes('jnt_del')">
+      <span :style="A.jnt_del_pct==null?'color:#cbd5e1':'color:#111;font-weight:600'"
+            :title="A.jnt_del_pct!=null ? 'DEL ' + A.jnt_del_pct.toFixed(1) + '% (' + A.jnt_del_cnt + ')' : 'DEL —'"
+            x-text="A.jnt_del_pct!=null ? A.jnt_del_pct.toFixed(1)+'%' : '—'"></span>
+    </template>
+    <template x-if="col.members && col.members.includes('jnt_transit')">
+      <span :style="A.jnt_transit_pct==null?'color:#cbd5e1':'color:#111;font-weight:600'"
+            :title="A.jnt_transit_pct!=null ? 'INT ' + A.jnt_transit_pct.toFixed(1) + '% (' + A.jnt_transit_cnt + ')' : 'INT —'"
+            x-text="A.jnt_transit_pct!=null ? A.jnt_transit_pct.toFixed(1)+'%' : '—'"></span>
+    </template>
+  </div>
+</template>
+@else
 <template x-if="col.id==='jnt_rdt'">
   <table style="border-collapse:collapse;font-size:11px;margin:0 auto;">
     <tbody>
@@ -105,6 +127,7 @@
     </tbody>
   </table>
 </template>
+@endif
 {{-- Individual (un-merged) jnt columns — kung hiwalay na ipinapakita sa settings. --}}
 <template x-if="col.id==='jnt_rts'">
   <span :style="A.jnt_rts_pct==null?'color:#cbd5e1;font-size:11px':'color:#111;font-weight:700;font-size:12px'"
