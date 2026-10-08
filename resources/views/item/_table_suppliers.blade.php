@@ -1,3 +1,7 @@
+  {{-- Ang mga pure function ng table na ito (mga column ng supplier, laman ng cell). Plain na script na walang
+       defer: tapos na itong tumakbo bago magsimula ang Alpine. Ang ?v= ay galing sa laman ng file, kaya ang
+       bagong release ay hindi kailanman nababasa mula sa lumang cache. --}}
+  <script src="{{ asset('js/item-table-fit.js') }}?v={{ substr(md5_file(public_path('js/item-table-fit.js')), 0, 10) }}"></script>
   <!-- Scroll area -->
   {{-- Ang card ng supplier cells: Esc at click sa labas ang nagsasara (capture, dahil hinaharang ng mga cell ang
        click bago ito umakyat); sumusunod ito sa scroll ng table at sa pagbabago ng laki ng window (kung hindi,
@@ -28,7 +32,7 @@
             </th>
 
             {{-- Ang grupo ng supplier: laging kasunod ng Item, hindi kasama sa reorder ng ibang column. --}}
-            <th class="spl-grp" colspan="4">SUPPLIERS</th>
+            <th class="spl-grp" :colspan="splSpan()">SUPPLIERS</th>
 
             <!-- Draggable/reorderable columns -->
             <template x-for="col in cols" :key="col.id">
@@ -52,16 +56,31 @@
 
             {{-- Row-level Actions column removed. Per-cell ✎ edit icons na lang. --}}
           </tr>
-          {{-- Pangalawang row: ang apat na sub-header ng grupo. Walang sort at walang drag — ang server ang
-               nag-aayos ng quotes (pinakamura muna), kaya hindi ito puwedeng ilipat o i-sort dito. --}}
+          {{-- Pangalawang row: isang sub-header kada supplier ng listahan, may bilang ayon sa puwesto ("1 · unang
+               salita ng pangalan"; ang buong pangalan ay nasa title). Walang sort at walang drag: ang ayos ay ang
+               ayos ng listahan sa Finance → Supply. Text lang ang pangalan (x-text / bound attribute). --}}
           <tr class="spl-h2">
-            <th title="Cheapest first. Changing a price can move a quote to another column.">Supplier 1</th><th>Supplier 2</th><th>Supplier 3</th><th title="Supplier(s) from purchase orders">PO</th>
+            <template x-for="c in splCols()" :key="'spl-h-'+c.id">
+              <th class="spl-sh" :title="c.full" :aria-label="c.pos + ' · ' + c.full"><span x-text="c.header"></span></th>
+            </template>
+            {{-- Walang column: habang wala pang sagot ang listahan, neutral na placeholder; kapag sumagot nang
+                 walang laman, ang daan papunta sa page kung saan idinadagdag ang supplier. --}}
+            <template x-if="!splCols().length">
+              <th class="spl-sh spl-sh-none">
+                <template x-if="!splLoaded.quotes">
+                  <span class="spl-waittext" x-text="splFailed ? 'hindi na-load' : '…'"></span>
+                </template>
+                <template x-if="splLoaded.quotes">
+                  <a href="{{ route('finance.supply.index') }}" target="_blank" rel="noopener">Add a supplier in Finance → Supply</a>
+                </template>
+              </th>
+            </template>
           </tr>
         </thead>
         <tbody class="msg-tbody">
 
           <template x-if="rows.length === 0 && !loading">
-            <tr><td :colspan="cols.length + 6" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
+            <tr><td :colspan="cols.length + 2 + splSpan()" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
               No data for selected date.
             </td></tr>
           </template>
@@ -69,18 +88,18 @@
           @if(!empty($effectiveIsCEO))
           {{-- Walang natira sa napiling sourcing list (CEO LANG). --}}
           <template x-if="worklist.list !== 'lahat' && !itemGroups().length && !(rows.length === 0 && loading)">
-            <tr><td :colspan="cols.length + 6" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
+            <tr><td :colspan="cols.length + 2 + splSpan()" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
                     x-text="worklist.error ? worklist.error : (worklist.loading || !worklist.loaded || !holdLoaded ? 'Loading…' : 'Walang item sa listahang ito.')"></td></tr>
           </template>
           @endif
           {{-- Walang natira sa napiling category (lahat ng role; kung walang sourcing list na sumasagot na). --}}
           <template x-if="categoryFilter !== '' && categoryColVisible() && (!effectiveIsCeo || worklist.list === 'lahat') && !itemGroups().length && !(rows.length === 0 && loading)">
-            <tr><td :colspan="cols.length + 6" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
+            <tr><td :colspan="cols.length + 2 + splSpan()" style="text-align:center;padding:36px;color:#94a3b8;font-size:13px;"
                     x-text="!stock.loaded ? 'Loading…' : 'Walang item sa category na ito.'"></td></tr>
           </template>
 
           <template x-if="rows.length === 0 && loading">
-            <tr><td :colspan="cols.length + 6" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
+            <tr><td :colspan="cols.length + 2 + splSpan()" style="text-align:center;padding:48px;color:#94a3b8;font-size:13px;">
               <span class="spin" style="margin-right:6px;"></span>Loading…
             </td></tr>
           </template>
@@ -120,6 +139,11 @@
                   </template>
                   <span class="item-name" :title="row.item_name" x-text="row.item_name"></span>
                   <span class="item-hold" x-text="'HOLD '+Number(row.hold||0).toLocaleString()"></span>
+                  {{-- Walang kahit isang quote at walang kahit isang PO: isang maliit na babala, hindi pulang band.
+                       Kapag sumagot na ang dalawang listahan lang — bago noon, hindi pa alam. --}}
+                  <template x-if="splReady() && splNone(row.item_name)">
+                    <span class="spl-warn" role="img" title="wala pang supplier" aria-label="wala pang supplier">!</span>
+                  </template>
                 </div>
                 @if($effectiveIsCEO)
                 {{-- Extra info ng napiling sourcing list — CEO LANG, habang may napiling chip. Lahat x-text (escaped). --}}
@@ -166,34 +190,121 @@
                 </div>
                 </div>
               </td>
-              {{-- ── Ang grupo ng supplier: laging apat na column pagkatapos ng Item ──
-                   Isang root element lang ang kaya ng x-if, kaya tatlong hugis ang apat na column: isang cell na
-                   sakop ang apat (placeholder o pulang band), o tatlong quote cell + ang PO cell.
+              {{-- ── Ang grupo ng supplier: isang column kada supplier ng listahan sa Finance → Supply ──
+                   Ang bilang at ayos ng mga column ay galing sa listahan (splCols), hindi nakasulat dito.
                    May @click.stop ang bawat cell: ang click sa loob nito ay hindi dapat magbukas ng page rows.
                    Lahat ng galing sa supplier ay x-text / bound attribute lang (text, hindi HTML). --}}
-              {{-- 1. Hindi pa (o hindi) sumagot ang dalawang listahan: neutral na placeholder. Hindi puwedeng sabihing
-                      "wala pang supplier" hangga't hindi pa alam. --}}
+              {{-- 1. Hindi pa (o hindi) sumagot ang dalawang listahan: neutral na placeholder. Hindi pa alam kung may
+                      supplier ang item, kaya wala ring "+" at walang babala. --}}
               <template x-if="!splReady()">
-                <td colspan="4" class="spl-sc spl-wait" @click.stop>
+                <td :colspan="splSpan()" class="spl-sc spl-wait" @click.stop>
                   <span class="spl-waittext" x-text="splFailed ? 'hindi na-load' : '…'"
                         :title="splFailed ? 'Hindi na-load ang listahan ng supplier. I-refresh ang page.' : 'Loading suppliers…'"></span>
                 </td>
               </template>
-              {{-- 2. Walang quote at walang PO supplier: isang pulang band, isang beses lang ang babala. --}}
-              <template x-if="splReady() && splNone(row.item_name)">
-                <td colspan="4" class="spl-sc spl-nosup" @click.stop>
-                  <div class="spl-band spl-cell">
-                    <b>⚠ wala pang supplier</b>
-                    <button type="button" class="item-photo-btn" @click.stop="splForm(row.item_name, null, 'band', $el)">+ supplier quote</button>
-                    {{-- Ang add form, sa loob ng card ng cell na ito. Para lang sa row na ito: kasama sa kondisyon ang
-                         sariling pangalan ng item, dahil magkapareho ang quote key ng dalawang variant row. --}}
-                    <template x-if="splIs(row.item_name, 'band', 'form') && quoteForm.key === supKey(row.item_name) && quoteForm.item_name === row.item_name">
+              {{-- 2. Sumagot na, pero walang supplier sa listahan: isang blangkong cell sa ilalim ng nag-iisang header. --}}
+              <template x-if="splReady() && !splCols().length">
+                <td class="spl-sc spl-zero" @click.stop></td>
+              </template>
+              {{-- 3. Isang cell kada supplier: ang sarili niyang quote, o ang huli niyang PO, o "+". Ang supplier ng
+                      cell ay ang supplier ng column — walang pinipiling supplier sa loob ng cell. --}}
+              <template x-for="c in (splReady() ? splCols() : [])" :key="'spl-'+row.item_name+'-'+c.id">
+                <td class="spl-sc" @click.stop>
+                  {{-- Isang beses lang kinukuwenta ang laman ng cell (C); ang lahat ng nasa ibaba ay bumabasa rito. --}}
+                  <template x-for="C in [splCell(row.item_name, c.id)]" :key="'spl-c-'+row.item_name+'-'+c.id">
+                  {{-- Ang laman ng cell ang may-ari ng card nito: anak nito ang card, kaya hindi "umaalis" ang pointer
+                       kapag lumipat mula sa cell papunta sa card. Hover lang kapag may laman ang cell. --}}
+                  <div class="spl-cell"
+                       @mouseenter="C.kind !== 'empty' && splHover(row.item_name, c.id, 'quote', $el)"
+                       @mouseleave="splLeave(row.item_name, c.id)">
+                    {{-- May PO rin ang supplier na ito para sa item: berdeng tuldok. May title at label ito, kaya hindi
+                         kulay lang ang nagsasabi. --}}
+                    <template x-if="C.poDot">
+                      <span class="spl-dot" role="img" :title="C.poLine" :aria-label="C.poLine"></span>
+                    </template>
+                    {{-- May quote: presyo at MOQ lang. Ang pangalan ng supplier ay nasa header, hindi inuulit dito.
+                         Ang ✎ ay lumalabas sa hover, sa keyboard focus, at laging nakikita sa touch. --}}
+                    <template x-if="C.kind === 'quote'">
+                      <div class="spl-q">
+                        <button type="button" class="spl-val" aria-haspopup="true"
+                                :aria-expanded="splIs(row.item_name, c.id, 'quote') ? 'true' : 'false'"
+                                :aria-label="c.header + ': ' + C.priceText"
+                                @click.stop="splToggle(row.item_name, c.id, 'quote', $el)">
+                          <span :class="C.cheapest ? 'spl-price spl-low' : (C.price === null ? 'spl-price spl-nil' : 'spl-price')" x-text="C.priceText"></span>
+                        </button>
+                        <template x-if="C.moqText">
+                          <span class="spl-moq" x-text="C.moqText"></span>
+                        </template>
+                        <button type="button" class="spl-edit" title="I-edit ang quote" :aria-label="'I-edit ang quote: ' + c.header"
+                                @click.stop="splForm(row.item_name, C.quote, c.id, $el)">✎</button>
+                      </div>
+                    </template>
+                    {{-- PO lang, walang quote: ang cost ng PO (berde) at ang tag na "PO". May "+" pa rin, para
+                         madagdagan ng quote ang supplier na ito. --}}
+                    <template x-if="C.kind === 'po'">
+                      <div class="spl-q">
+                        <button type="button" class="spl-val" aria-haspopup="true"
+                                :aria-expanded="splIs(row.item_name, c.id, 'quote') ? 'true' : 'false'"
+                                :aria-label="c.header + ': ' + C.poLine"
+                                @click.stop="splToggle(row.item_name, c.id, 'quote', $el)">
+                          <span class="spl-pocost" x-text="C.priceText"></span>
+                        </button>
+                        <span class="spl-potag">PO</span>
+                        <button type="button" class="spl-add spl-add-po" :title="'+ supplier quote: ' + c.header" :aria-label="'+ supplier quote: ' + c.header"
+                                @click.stop="splForm(row.item_name, null, c.id, $el)">+</button>
+                      </div>
+                    </template>
+                    {{-- Wala pang quote at walang PO ang supplier na ito: tahimik na "+". --}}
+                    <template x-if="C.kind === 'empty'">
+                      <button type="button" class="spl-add" :title="'+ supplier quote: ' + c.header" :aria-label="'+ supplier quote: ' + c.header"
+                              @click.stop="splForm(row.item_name, null, c.id, $el)">+</button>
+                    </template>
+                    {{-- Ang card ng cell: ang mga detalyeng hindi kasya sa cell, at ang huling PO ng supplier. Galing lahat
+                         sa na-load nang listahan (walang request), at text lang ang bawat value. --}}
+                    <template x-if="C.kind !== 'empty' && splIs(row.item_name, c.id, 'quote')">
+                      <div class="spl-card" role="group" :aria-label="'Supplier ' + c.header" @click.stop :style="splCard.style">
+                        <div class="spl-card-name" x-text="c.pos + ' · ' + c.full"></div>
+                        <template x-if="C.quote">
+                          <template x-for="q in [C.quote]" :key="'spl-q-'+row.item_name+'-'+q.id">
+                            <div class="spl-card-q">
+                              <div class="spl-card-row">
+                                <span :class="C.cheapest ? 'spl-price spl-low' : (C.price === null ? 'spl-price spl-nil' : 'spl-price')" x-text="C.priceText"></span>
+                                <span class="spl-moq" x-text="C.moqText ? C.moqText : 'walang MOQ'"></span>
+                              </div>
+                              <template x-if="q.prev_price !== null && q.prev_price !== undefined">
+                                <div class="spl-card-sub" x-text="'dati ' + money(q.prev_price) + (q.prev_date ? ' (' + q.prev_date + ')' : '')"></div>
+                              </template>
+                              <template x-if="q.updated_at">
+                                <div class="spl-card-sub" x-text="'updated ' + q.updated_at"></div>
+                              </template>
+                              <template x-if="q.photo_url || safeLink(q.link)">
+                                <div class="spl-card-act">
+                                  <template x-if="q.photo_url">
+                                    <button type="button" class="spl-card-photo" :title="'Quote photo · ' + c.full" :aria-label="'Quote photo · ' + c.full"
+                                            @click.stop="photoModal = { open:true, url:q.photo_url, name:c.full+' — '+row.item_name }">
+                                      <img class="item-sq" :src="q.photo_url" :alt="c.full">
+                                    </button>
+                                  </template>
+                                  {{-- http / https lang ang nagiging link; ang iba ay hindi ipinapakita. --}}
+                                  <template x-if="safeLink(q.link)"><a :href="safeLink(q.link)" target="_blank" rel="noopener" @click.stop>link</a></template>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+                        </template>
+                        <template x-if="C.poLine">
+                          <div class="spl-card-sub spl-card-po" x-text="C.poLine"></div>
+                        </template>
+                      </div>
+                    </template>
+                    {{-- Ang add / edit form, sa loob ng card ng cell na pinindutan. Para lang sa row na ito: kasama sa
+                         kondisyon ang sariling pangalan ng item, dahil magkapareho ang quote key ng dalawang variant row.
+                         Text lang ang supplier at walang mapipili: update-or-create sa item + supplier ang save, kaya
+                         ang mapipiling supplier ay puwedeng pumatong sa quote ng ibang supplier. --}}
+                    <template x-if="splIs(row.item_name, c.id, 'form') && quoteForm.key === supKey(row.item_name) && quoteForm.item_name === row.item_name">
                       <div class="spl-card" role="group" aria-label="Supplier quote" @click.stop :style="splCard.style">
                         <div class="spl-form" @click.stop>
-                          <select x-model="quoteForm.supplier_id" aria-label="Supplier" @click.stop>
-                            <option value="">— supplier —</option>
-                            <template x-for="s in supplierList" :key="'s-'+s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
-                          </select>
+                          <div class="spl-form-sup" x-text="c.pos + ' · ' + c.full"></div>
                           <input type="number" step="0.01" min="0" x-model="quoteForm.price" placeholder="₱ presyo" aria-label="Presyo" @click.stop>
                           <input type="number" min="0" x-model="quoteForm.moq" placeholder="MOQ" aria-label="MOQ" @click.stop>
                           <input type="text" x-model="quoteForm.link" placeholder="link (opsyonal)" aria-label="Link (opsyonal)" @click.stop>
@@ -202,172 +313,17 @@
                           <div class="spl-card-act">
                             <button type="button" class="item-photo-btn" :disabled="quoteForm.saving" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
                             <button type="button" class="item-photo-btn" @click.stop="splCancel()">Cancel</button>
+                            {{-- Sa edit lang: ang bura ay nasa loob ng edit card, may tanong muna (ang dati nang confirm). --}}
+                            <template x-if="quoteForm.id !== null && C.quote">
+                              <button type="button" class="item-photo-btn spl-remove" title="Tanggalin ang quote" aria-label="Tanggalin ang quote"
+                                      :disabled="quoteForm.saving" @click.stop="splRemove(row.item_name, C.quote)">✕ Tanggalin</button>
+                            </template>
                           </div>
                         </div>
                       </div>
                     </template>
                   </div>
-                </td>
-              </template>
-              {{-- 3. Supplier 1–3: ang unang tatlong quote ayon sa pagkakasunod ng server (pinakamura muna). --}}
-              <template x-for="si in (splReady() && !splNone(row.item_name) ? [0, 1, 2] : [])" :key="'spl-'+row.item_name+'-'+si">
-                <td class="spl-sc" @click.stop>
-                  {{-- Ang laman ng cell ang may-ari ng card nito: anak nito ang card, kaya hindi "umaalis" ang pointer
-                       kapag lumipat mula sa cell papunta sa card. Hover lang kapag may quote ang cell. --}}
-                  <div class="spl-cell"
-                       @mouseenter="splTop3(row.item_name)[si] && splHover(row.item_name, si, 'quote', $el)"
-                       @mouseleave="splLeave(row.item_name, si)">
-                  <template x-if="splTop3(row.item_name)[si]">
-                    <template x-for="q in [splTop3(row.item_name)[si]]" :key="'spl-q-'+row.item_name+'-'+q.id">
-                      <div class="spl-q">
-                        <button type="button" class="spl-name" aria-haspopup="true"
-                                :aria-expanded="splIs(row.item_name, si, 'quote') ? 'true' : 'false'"
-                                @click.stop="splToggle(row.item_name, si, 'quote', $el)" :title="q.supplier" x-text="q.supplier"></button>
-                        <div class="spl-l2">
-                          {{-- Explicit na null check: ang money() ay nagpi-print ng 0.00 para sa null. --}}
-                          {{-- Walang presyo: marker lang na walang laman, para maging abo ang dash sa pamamagitan ng CSS. --}}
-                          <template x-if="q.price === null"><span class="spl-nil"></span></template>
-                          <span :class="q.cheapest === true ? 'spl-price spl-low' : 'spl-price'" x-text="q.price !== null ? money(q.price) : '—'"></span>
-                          {{-- Ang MOQ na 0 ay value pa rin, kaya null / undefined lang ang itinatago. --}}
-                          <template x-if="q.moq !== null && q.moq !== undefined">
-                            <span class="spl-moq" x-text="'MOQ ' + q.moq"></span>
-                          </template>
-                        </div>
-                        {{-- Ang card ng quote: ang mga detalyeng hindi kasya sa cell. Galing lahat sa na-load nang
-                             listahan (walang request), at text lang ang bawat value. --}}
-                        <template x-if="splIs(row.item_name, si, 'quote')">
-                          <div class="spl-card" role="group" :aria-label="'Quote details: ' + q.supplier" @click.stop :style="splCard.style">
-                            <div class="spl-card-name" x-text="q.supplier"></div>
-                            <div class="spl-card-row">
-                              <span :class="q.cheapest === true ? 'spl-price spl-low' : 'spl-price'" x-text="q.price !== null ? money(q.price) : '—'"></span>
-                              <span class="spl-moq" x-text="(q.moq !== null && q.moq !== undefined) ? 'MOQ ' + q.moq : 'walang MOQ'"></span>
-                            </div>
-                            <template x-if="q.prev_price !== null && q.prev_price !== undefined">
-                              <div class="spl-card-sub" x-text="'dati ' + money(q.prev_price) + (q.prev_date ? ' (' + q.prev_date + ')' : '')"></div>
-                            </template>
-                            <template x-if="q.updated_at">
-                              <div class="spl-card-sub" x-text="'updated ' + q.updated_at"></div>
-                            </template>
-                            <div class="spl-card-act">
-                              <template x-if="q.photo_url">
-                                <button type="button" class="spl-card-photo" :title="'Quote photo · ' + q.supplier" :aria-label="'Quote photo · ' + q.supplier"
-                                        @click.stop="photoModal = { open:true, url:q.photo_url, name:q.supplier+' — '+row.item_name }">
-                                  <img class="item-sq" :src="q.photo_url" :alt="q.supplier">
-                                </button>
-                              </template>
-                              {{-- http / https lang ang nagiging link; ang iba ay hindi ipinapakita. --}}
-                              <template x-if="safeLink(q.link)"><a :href="safeLink(q.link)" target="_blank" rel="noopener" @click.stop>link</a></template>
-                              <button type="button" class="item-photo-btn" title="I-edit ang quote" aria-label="I-edit ang quote"
-                                      @click.stop="splForm(row.item_name, q, si, $el)">✎</button>
-                              <button type="button" class="item-photo-btn" title="Tanggalin ang quote" aria-label="Tanggalin ang quote"
-                                      @click.stop="splRemove(row.item_name, q)">✕</button>
-                            </div>
-                          </div>
-                        </template>
-                      </div>
-                    </template>
                   </template>
-                  {{-- Sa huling cell lang: ilan pang quote ang hindi kasya sa tatlo. --}}
-                  <template x-if="si === 2 && splRest(row.item_name) > 0">
-                    <button type="button" class="spl-more" aria-haspopup="true"
-                            :aria-expanded="splIs(row.item_name, 'more', 'list') ? 'true' : 'false'"
-                            :aria-label="'Show all ' + quotesFor(row.item_name).length + ' quotes'"
-                            @click.stop="splToggle(row.item_name, 'more', 'list', $el)" x-text="'+' + splRest(row.item_name)"></button>
-                  </template>
-                  {{-- Ang listahan sa likod ng "+N": lahat ng quote ayon sa pagkakasunod ng server (walang sort dito). --}}
-                  <template x-if="si === 2 && splIs(row.item_name, 'more', 'list')">
-                    <div class="spl-card" role="group" aria-label="All quotes" @click.stop :style="splCard.style">
-                      <div class="spl-card-name" x-text="'Lahat ng quote (' + quotesFor(row.item_name).length + ')'"></div>
-                      <div class="spl-card-list">
-                        <template x-for="q in quotesFor(row.item_name)" :key="'spl-li-'+row.item_name+'-'+q.id">
-                          <div class="spl-card-li">
-                            <b :title="q.supplier" x-text="q.supplier"></b>
-                            <span :class="q.cheapest === true ? 'spl-price spl-low' : 'spl-price'" x-text="q.price !== null ? money(q.price) : '—'"></span>
-                            <template x-if="q.moq !== null && q.moq !== undefined">
-                              <span class="spl-moq" x-text="'MOQ ' + q.moq"></span>
-                            </template>
-                            <button type="button" class="item-photo-btn" title="I-edit ang quote" aria-label="I-edit ang quote"
-                                    @click.stop="splForm(row.item_name, q, si, $el)">✎</button>
-                            <button type="button" class="item-photo-btn" title="Tanggalin ang quote" aria-label="Tanggalin ang quote"
-                                    @click.stop="splRemove(row.item_name, q)">✕</button>
-                          </div>
-                        </template>
-                      </div>
-                      <div class="spl-card-act">
-                        <button type="button" class="item-photo-btn" @click.stop="splForm(row.item_name, null, si, $el)">+ supplier quote</button>
-                      </div>
-                    </div>
-                  </template>
-                  <template x-if="!splTop3(row.item_name)[si]">
-                    <button type="button" class="spl-add" @click.stop="splForm(row.item_name, null, si, $el)" title="+ supplier quote" :aria-label="'+ supplier quote (Supplier ' + (si + 1) + ')'">+</button>
-                  </template>
-                  {{-- Ang add / edit form, sa loob ng card ng cell na pinindutan. Para lang sa row na ito: kasama sa
-                       kondisyon ang sariling pangalan ng item, dahil magkapareho ang quote key ng dalawang variant row. --}}
-                  <template x-if="splIs(row.item_name, si, 'form') && quoteForm.key === supKey(row.item_name) && quoteForm.item_name === row.item_name">
-                    <div class="spl-card" role="group" aria-label="Supplier quote" @click.stop :style="splCard.style">
-                      <div class="spl-form" @click.stop>
-                        <select x-model="quoteForm.supplier_id" aria-label="Supplier" @click.stop>
-                          <option value="">— supplier —</option>
-                          <template x-for="s in supplierList" :key="'s-'+s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
-                        </select>
-                        <input type="number" step="0.01" min="0" x-model="quoteForm.price" placeholder="₱ presyo" aria-label="Presyo" @click.stop>
-                        <input type="number" min="0" x-model="quoteForm.moq" placeholder="MOQ" aria-label="MOQ" @click.stop>
-                        <input type="text" x-model="quoteForm.link" placeholder="link (opsyonal)" aria-label="Link (opsyonal)" @click.stop>
-                        <input type="file" accept="image/jpeg,image/png,image/webp" @change="quoteForm.photo = $event.target.files[0] || null" @click.stop
-                               title="Photo ng produkto ng supplier (jpg/png/webp, hanggang 10 MB)" aria-label="Photo ng produkto ng supplier">
-                        <div class="spl-card-act">
-                          <button type="button" class="item-photo-btn" :disabled="quoteForm.saving" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
-                          <button type="button" class="item-photo-btn" @click.stop="splCancel()">Cancel</button>
-                        </div>
-                      </div>
-                    </div>
-                  </template>
-                  </div>
-                </td>
-              </template>
-              {{-- 4. PO: ang unang supplier mula sa purchase orders (kasalukuyang pagkakasunod ng listahan) at ang cost nito. --}}
-              <template x-if="splReady() && !splNone(row.item_name)">
-                <td class="spl-sc spl-po" @click.stop>
-                  <div class="spl-cell"
-                       @mouseenter="suppliersFor(row.item_name).length && splHover(row.item_name, 'po', 'po', $el)"
-                       @mouseleave="splLeave(row.item_name, 'po')">
-                  <template x-if="suppliersFor(row.item_name).length">
-                    <template x-for="s in [suppliersFor(row.item_name)[0]]" :key="'spl-po-'+row.item_name">
-                      <div class="spl-q">
-                        <button type="button" class="spl-name" aria-haspopup="true"
-                                :aria-expanded="splIs(row.item_name, 'po', 'po') ? 'true' : 'false'"
-                                @click.stop="splToggle(row.item_name, 'po', 'po', $el)" x-text="s.supplier"
-                                :title="'PO ' + (s.order_date||'') + (s.order_no ? ' · '+s.order_no : '')"></button>
-                        <div class="spl-l2">
-                          <span class="spl-pocost" x-text="money(s.unit_cost)"></span>
-                        </div>
-                      </div>
-                    </template>
-                  </template>
-                  <template x-if="suppliersFor(row.item_name).length > 1">
-                    <button type="button" class="spl-more" aria-haspopup="true"
-                            :aria-expanded="splIs(row.item_name, 'po', 'po') ? 'true' : 'false'"
-                            :aria-label="'Show all ' + suppliersFor(row.item_name).length + ' PO suppliers'"
-                            @click.stop="splToggle(row.item_name, 'po', 'po', $el)" x-text="'+' + (suppliersFor(row.item_name).length - 1)"></button>
-                  </template>
-                  <template x-if="!suppliersFor(row.item_name).length">
-                    <span class="spl-empty">—</span>
-                  </template>
-                  {{-- Ang card ng PO: lahat ng supplier mula sa purchase orders. Basahin lang; walang control. --}}
-                  <template x-if="splIs(row.item_name, 'po', 'po')">
-                    <div class="spl-card" role="group" aria-label="Supplier galing sa PO" @click.stop :style="splCard.style">
-                      <div class="spl-card-name">Supplier galing sa PO</div>
-                      <template x-for="(s, pi) in suppliersFor(row.item_name)" :key="'spl-pol-'+row.item_name+'-'+pi">
-                        <div class="spl-card-li">
-                          <b :title="s.supplier" x-text="s.supplier"></b>
-                          <span class="spl-pocost" x-text="money(s.unit_cost)"></span>
-                          <template x-if="s.order_date"><span class="spl-moq" x-text="s.order_date"></span></template>
-                          <template x-if="s.order_no"><span class="spl-moq" x-text="s.order_no"></span></template>
-                        </div>
-                      </template>
-                    </div>
-                  </template>
-                  </div>
                 </td>
               </template>
               <template x-for="col in cols" :key="'ic-'+row.item_name+'-'+col.id">
@@ -389,7 +345,7 @@
             <tr x-show="!row.__itemHeader && (expandedPages[row.page_name] || {}).open" class="page-col-header">
               <th style="text-align:left;min-width:110px;">Page</th>
               <th style="text-align:left;min-width:160px;">Item</th>
-              <th colspan="4"></th>
+              <th :colspan="splSpan()"></th>
               <template x-for="col in cols" :key="'ph-'+row.page_key+'-'+col.id">
                 <th :style="'text-align:'+col.align+';min-width:'+col.minw+'px'">
                   <span x-text="col.label"></span>
@@ -469,7 +425,7 @@
                 </template>
               </td>
               {{-- Ang supplier ay sa item, hindi sa page: blangko ang ilalim ng grupo sa page row. --}}
-              <td colspan="4" class="spl-under"></td>
+              <td :colspan="splSpan()" class="spl-under"></td>
 
               <!-- Dynamic columns -->
               <template x-for="col in cols" :key="col.id">
@@ -915,7 +871,7 @@
                  root child — <tbody> serves as that root). --}}
             <tr x-show="!row.__itemHeader && (expandedPages[row.page_name] || {}).open"
                 class="page-expand-row">
-              <td :colspan="(cols.length + 6)" style="padding:0;">{{-- (cols.length + 6): page + item + ang apat na supplier column + cols --}}
+              <td :colspan="cols.length + 2 + splSpan()" style="padding:0;">{{-- page + item + ang mga column ng supplier + cols --}}
                 @include('owner._private_expand_inline')
               </td>
             </tr>
@@ -927,7 +883,7 @@
           <template x-if="rows.length > 0">
             <tr class="total-row">
               <td>TOTAL</td>
-              <td colspan="5"></td>
+              <td :colspan="1 + splSpan()"></td>
               <template x-for="col in cols" :key="col.id">
                 <td :style="'text-align:'+col.align+';'+(col.id==='proj_profit'?pbStyle(tot().projected_profit,{included_days:rangeDays,range_days:rangeDays}):'')+(col.id==='proj_prof_1d'?pbStyleN(tot().projected_profit_last_day,1):'')+(col.id==='proj_prof_3d'?pbStyleN(tot().projected_profit_last_3d,3):'')+(col.id==='proj_prof_7d'?pbStyleN(tot().projected_profit_last_7d,7):'')">
                   <template x-if="col.id==='adspent'">

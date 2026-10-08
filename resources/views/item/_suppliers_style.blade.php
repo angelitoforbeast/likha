@@ -7,7 +7,7 @@
   .spl-table > thead > tr.spl-h1 > th { height:22px; padding:3px 10px; font-size:10px; line-height:15px; }
   .spl-table > thead > tr.spl-h2 > th { top:22px; font-size:10.5px; line-height:14px; padding:5px 8px; text-align:left; border-radius:0; }
   .spl-table > thead > tr.spl-h1 > th.spl-grp { color:#a5b4fc; text-align:center; letter-spacing:.12em; border-bottom:1px solid #475569; }
-  /* Ang bilog na kanto sa kanan ay para sa totoong huling header ng unang row (hindi sa PO na huli sa pangalawang row). */
+  /* Ang bilog na kanto sa kanan ay para sa totoong huling header ng unang row (hindi sa huling supplier ng pangalawang row). */
   .spl-table > thead > tr.spl-h1 > th:last-of-type { border-radius:0 10px 0 0; }
 
   /* ── Lapad ng mga column ───────────────────────────────────────────────
@@ -19,9 +19,16 @@
   .spl-table > thead > tr > th.spl-c2 { width:150px; min-width:150px !important; max-width:150px; }
   .spl-table > tbody > tr > td.spl-c2 { width:150px; min-width:150px; max-width:150px; white-space:normal; overflow-wrap:anywhere; }
   .spl-table > tbody > tr.page-col-header > th:nth-child(2) { width:150px; min-width:150px !important; max-width:150px; }
-  /* Ang mga cell na sakop ang apat na column (placeholder, pulang band, ilalim ng grupo sa page row) ay walang fixed na lapad. */
-  .spl-table > tbody > tr > td.spl-sc:not([colspan]) { width:118px; min-width:118px; max-width:118px; }
-  .spl-table > tbody > tr > td.spl-sc.spl-po:not([colspan]) { width:104px; min-width:104px; max-width:104px; }
+  /* Ang cell na sakop ang buong grupo (placeholder, ilalim ng grupo sa page row) ay walang fixed na lapad. */
+  .spl-table > tbody > tr > td.spl-sc:not([colspan]) { width:76px; min-width:76px; max-width:76px; }
+  /* Ang sub-header ng bawat supplier: kapareho ng lapad ng cell nito; ang mahabang unang salita ay pinuputol
+     sa loob ng header (buo ito sa title) at hindi nagpapalapad ng column. */
+  .spl-table > thead > tr.spl-h2 > th.spl-sh { width:76px; min-width:76px; max-width:76px; padding:5px 6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* Walang supplier sa listahan: isang makitid na column na may link papunta sa Finance → Supply. */
+  .spl-table > thead > tr.spl-h2 > th.spl-sh.spl-sh-none { width:120px; min-width:120px; max-width:120px; white-space:normal; text-transform:none; letter-spacing:0; }
+  .spl-table > tbody > tr > td.spl-sc.spl-zero:not([colspan]) { width:120px; min-width:120px; max-width:120px; }
+  .spl-table .spl-sh-none > a { color:#a5b4fc; font-weight:600; text-decoration:underline; }
+  .spl-table .spl-sh-none > a:focus-visible { outline:2px solid #93c5fd; outline-offset:1px; }
   /* Mahabang pangalan ng page na walang puwang: puputulin sa loob ng cell, hindi lalampas sa katabi. */
   .spl-table > tbody > tr > td.spl-c1 .page-cell-body { overflow-wrap:anywhere; }
 
@@ -35,6 +42,13 @@
     display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
   }
   .spl-table > tbody > tr.item-row > td.spl-c1 .item-hold { font-size:10.5px; padding:1px 8px; white-space:nowrap; }
+
+  /* Ang babala ng item na walang kahit isang supplier: maliit na bilog sa kanang dulo ng item cell, sa parehong
+     puwesto sa bawat row. Ang ibig sabihin nito ay nasa title at aria-label, hindi sa kulay lang. */
+  .spl-table .spl-warn {
+    margin-left:auto; flex:0 0 20px; width:20px; height:20px; border-radius:50%; background:#fee2e2; color:#b91c1c;
+    font-size:12px; font-weight:800; line-height:20px; text-align:center; cursor:default;
+  }
 
   /* ── Item column: bilang ng running page + Change / Copy ────────────────
      Nakatago ang Change / Copy hangga't walang pointer o keyboard focus sa row; nafo-focus pa rin kahit nakatago. */
@@ -53,63 +67,58 @@
   .spl-table > tbody > tr.item-row > td.spl-sc {
     position:relative; padding:0; text-align:left; font-weight:400; white-space:normal; cursor:default;
   }
-  .spl-table .spl-cell { display:block; padding:5px 8px; min-width:0; overflow:hidden; }
+  .spl-table .spl-cell { display:block; padding:5px 6px; min-width:0; overflow:hidden; }
   /* Fixed din ang lapad ng laman (lapad ng column bawas ang 1px na border sa kanan), para ang mahabang
-     pangalan o presyo ay hindi kailanman magpalapad ng column. */
-  .spl-table > tbody > tr > td.spl-sc:not([colspan]) > .spl-cell { width:117px; }
-  .spl-table > tbody > tr > td.spl-sc.spl-po:not([colspan]) > .spl-cell { width:103px; }
+     presyo ay hindi kailanman magpalapad ng column. */
+  .spl-table > tbody > tr > td.spl-sc:not([colspan]) > .spl-cell { width:75px; }
   .spl-table .spl-q { display:block; min-width:0; line-height:1.25; }
-  .spl-table .spl-name {
+  /* Ang halaga ng cell ay button: ito ang nagbubukas ng card sa click, tap o keyboard. */
+  .spl-table .spl-val {
     display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-    font:inherit; font-size:11.5px; font-weight:700; line-height:1.25; color:#0f172a;
-    background:none; border:0; padding:0; margin:0; text-align:left; cursor:pointer;
+    font:inherit; line-height:1.25; background:none; border:0; padding:0; margin:0; text-align:left; cursor:pointer;
   }
-  /* May "+N" chip sa kanang itaas ng cell: mag-iwan ng puwang para hindi ito matakpan ng pangalan. */
-  .spl-table .spl-cell:has(> .spl-more) .spl-name { max-width:calc(100% - 30px); }
-  .spl-table .spl-l2 { display:flex; align-items:baseline; gap:5px; min-width:0; overflow:hidden; white-space:nowrap; line-height:1.25; }
   .spl-table .spl-price {
-    flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
     font-size:12px; font-weight:600; color:#1d4ed8; font-variant-numeric:tabular-nums;
   }
   .spl-table .spl-price.spl-low { font-weight:800; text-decoration:underline; text-decoration-color:#93c5fd; text-underline-offset:2px; text-decoration-thickness:1.5px; }
-  /* Walang presyo: abo ang dash. Ang marker ay nauuna sa presyo at hindi nakikita. */
-  .spl-table .spl-nil { display:none; }
-  .spl-table .spl-nil ~ .spl-price { color:#94a3b8; font-weight:500; }
-  /* Kapag hindi kasya ang presyo at MOQ, ang MOQ ang unang pinuputol; buo ang dalawa sa card. */
+  /* Quote na walang presyo: abo ang dash. */
+  .spl-table .spl-price.spl-nil { color:#94a3b8; font-weight:500; }
+  /* Pangalawang linya ng cell. Kapag hindi kasya, pinuputol; buo ito sa card. */
   .spl-table .spl-moq {
-    flex:0 1000 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-    font-size:10px; font-weight:500; color:#475569;
+    display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    font-size:11px; font-weight:500; color:#475569; line-height:1.25;
   }
-  .spl-table .spl-pocost {
-    flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-    font-size:12px; font-weight:700; color:#065f46; font-variant-numeric:tabular-nums;
+  .spl-table .spl-pocost { font-size:12px; font-weight:700; color:#065f46; font-variant-numeric:tabular-nums; }
+  .spl-table .spl-potag {
+    display:inline-block; padding:0 4px; border-radius:3px; background:#d1fae5; color:#065f46;
+    font-size:11px; font-weight:700; line-height:1.25;
   }
+  /* May PO rin ang supplier na may quote: maliit na berdeng tuldok sa kaliwang itaas ng cell. */
+  .spl-table .spl-dot { position:absolute; left:1px; top:3px; width:6px; height:6px; border-radius:50%; background:#059669; }
+  /* Tahimik na "+" ng blangkong cell. */
   .spl-table .spl-add {
-    width:24px; height:24px; border:1.5px dashed #94a3b8; border-radius:6px; background:transparent; color:#64748b;
-    font-size:15px; font-weight:700; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;
+    width:20px; height:20px; border:1px dashed #cbd5e1; border-radius:50%; background:transparent; color:#94a3b8;
+    font-size:13px; font-weight:700; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;
   }
   .spl-table .spl-add:hover { border-color:#93c5fd; border-style:solid; color:#2563eb; background:#eff6ff; }
-  .spl-table .spl-empty { color:#cbd5e1; font-size:12px; }
-  .spl-table .spl-more {
-    position:absolute; right:6px; top:6px; border:0; border-radius:999px; background:#c7d2fe; color:#3730a3;
-    font-size:10px; font-weight:800; padding:1px 6px; cursor:pointer; line-height:1.4;
+  /* Ang ✎ ng may-quote na cell at ang "+" ng PO-only na cell: nasa kanang itaas, nakatago hangga't walang
+     pointer o keyboard focus sa cell; nafo-focus pa rin kahit nakatago. */
+  .spl-table .spl-edit {
+    position:absolute; right:2px; top:2px; width:18px; height:18px; border:1px solid #cbd5e1; border-radius:5px;
+    background:#fff; color:#334155; font-size:11px; line-height:1; padding:0; cursor:pointer; opacity:0; transition:opacity .12s;
   }
-  .spl-table .spl-name:focus-visible { outline:2px solid #2563eb; outline-offset:1px; border-radius:3px; }
+  .spl-table .spl-add.spl-add-po { position:absolute; right:2px; top:2px; width:18px; height:18px; background:#fff; opacity:0; transition:opacity .12s; }
+  .spl-table .spl-cell:hover .spl-edit { opacity:1; }
+  .spl-table .spl-cell:focus-within .spl-edit { opacity:1; }
+  .spl-table .spl-cell:hover .spl-add-po { opacity:1; }
+  .spl-table .spl-cell:focus-within .spl-add-po { opacity:1; }
+  .spl-table .spl-val:focus-visible { outline:2px solid #2563eb; outline-offset:1px; border-radius:3px; }
   .spl-table .spl-add:focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
-  .spl-table .spl-more:focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
+  .spl-table .spl-edit:focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
 
   /* Placeholder habang wala pang sagot ang mga listahan: neutral na abo, hindi pula (hindi pa alam kung may supplier). */
   .spl-table > tbody > tr.item-row > td.spl-wait { padding:7px 12px; }
   .spl-table .spl-waittext { color:#94a3b8; font-size:11.5px; font-weight:500; }
-
-  /* Pulang band: !important para hindi ito mapalitan ng hover o ng kulay ng row na walang running page. */
-  .spl-table > tbody > tr.item-row > td.spl-nosup { background:#fef2f2 !important; }
-  .spl-table .spl-band {
-    display:flex; align-items:center; gap:10px; padding:7px 16px; white-space:nowrap;
-    color:#b91c1c; font-size:11.5px; font-weight:700;
-  }
-  .spl-table .spl-band > .item-photo-btn { line-height:1.2; }
-  .spl-table .spl-band :focus-visible { outline:2px solid #2563eb; outline-offset:1px; }
 
   /* ── Ang card (detalye ng quote, listahan, form) ───────────────────────
      Ang puwesto, lapad at z-index ay galing sa inline style na kinukuwenta ng script; itsura lang ang narito. */
@@ -125,10 +134,8 @@
   .spl-table .spl-card-sub { color:#475569; font-size:10.5px; overflow-wrap:anywhere; }
   .spl-table .spl-card-act { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:7px; padding-top:6px; border-top:1px solid #e2e8f0; }
   .spl-table .spl-card-act > a { color:#2563eb; font-weight:600; text-decoration:underline; }
-  .spl-table .spl-card-list { display:grid; gap:5px; margin-top:4px; }
-  .spl-table .spl-card-li { display:flex; align-items:baseline; gap:6px; font-size:11px; }
-  .spl-table .spl-card > .spl-card-li { margin-top:4px; }
-  .spl-table .spl-card-li > b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#0f172a; }
+  /* Ang huling PO ng supplier, sa berde ng PO cost. */
+  .spl-table .spl-card-po { color:#065f46; font-weight:600; margin-top:4px; }
   /* Sa loob ng card, buo ang presyo, MOQ at cost: walang putol. */
   .spl-table .spl-card .spl-price { flex:0 0 auto; overflow:visible; }
   .spl-table .spl-card .spl-moq { flex:0 0 auto; overflow:visible; }
@@ -136,12 +143,9 @@
   .spl-table .spl-card-row > .spl-price { font-size:13px; }
   .spl-table .spl-card-photo { border:0; background:none; padding:0; margin:0; cursor:pointer; line-height:0; border-radius:7px; }
   .spl-table .spl-card-photo > .item-sq { width:44px; height:44px; }
-  /* Ang form sa loob ng card: kasya sa 262px — supplier, tapos presyo at MOQ na magkatabi, link, photo, Save / Cancel. */
+  /* Ang form sa loob ng card: kasya sa 262px — ang supplier (text lang), tapos presyo at MOQ na magkatabi, link, photo, Save / Cancel. */
   .spl-table .spl-form { display:flex; flex-wrap:wrap; gap:5px; align-items:center; font-size:11px; }
-  .spl-table .spl-form > select {
-    flex:1 1 100%; width:100%; min-width:0; font-size:11px; font-weight:400; color:#0f172a;
-    background:#fff; border:1px solid #cbd5e1; border-radius:5px; padding:3px 6px;
-  }
+  .spl-table .spl-form-sup { flex:1 1 100%; font-size:12.5px; font-weight:800; color:#0f172a; overflow-wrap:anywhere; }
   .spl-table .spl-form > input {
     flex:1 1 100%; width:100%; min-width:0; font-size:11px; font-weight:400; color:#0f172a;
     background:#fff; border:1px solid #cbd5e1; border-radius:5px; padding:3px 6px;
@@ -156,9 +160,13 @@
   .spl-table .spl-rdt > span { padding:0 3px; }
   .spl-table .spl-rdt > span ~ span { border-left:1px solid #cbd5e1; }
 
-  /* Touch o makitid na screen: walang hover, kaya laging nakikita ang Change / Copy. */
+  /* Touch o makitid na screen: walang hover, kaya laging nakikita ang Change / Copy, ang ✎ at ang "+" ng
+     PO-only na cell; ang halaga ay nag-iiwan ng puwang para sa kanila. */
   @media (hover:none), (max-width:767px) {
     .spl-table .spl-rowact { opacity:1; }
+    .spl-table .spl-edit { opacity:1; }
+    .spl-table .spl-add-po { opacity:1; }
+    .spl-table .spl-val { max-width:calc(100% - 20px); }
   }
 
   /* ── Sticky na item column (768px pataas lang) ─────────────────────────

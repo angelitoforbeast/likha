@@ -4,13 +4,17 @@
       splLoaded: { quotes:false, po:false },
       splFailed: false,
       splReady(){ return this.splLoaded.quotes && this.splLoaded.po; },
-      // Ang server na ang nag-ayos (pinakamura muna) at nagmarka ng pinakamura; dito, kunin lang ang unang tatlo at bilangin ang sobra.
-      splTop3(name){ return this.quotesFor(name).slice(0, 3); },
-      splRest(name){ return Math.max(0, this.quotesFor(name).length - 3); },
-      splNone(name){ return !this.quotesFor(name).length && !this.suppliersFor(name).length; },
+      // Isang column kada supplier ng listahan (ayon sa id, may bilang ayon sa puwesto), at ang laman ng cell ng
+      // isang supplier para sa isang item. Ang lohika ay nasa ItemTableFit (public/js/item-table-fit.js), kung saan
+      // ito nasusubok; dito, ibinibigay lang ang mga listahang na-load na. Walang request at walang paghahambing
+      // ng halaga rito: ang server ang nagmamarka ng pinakamura.
+      splCols(){ return ItemTableFit.supplierColumns(this.supplierList); },
+      splSpan(){ return ItemTableFit.groupSpan(this.splCols().length); },
+      splCell(name, supplierId){ return ItemTableFit.supplierCell(this.quotesFor(name), this.suppliersFor(name), supplierId); },
+      splNone(name){ return ItemTableFit.noSupplier(this.quotesFor(name), this.suppliersFor(name)); },
 
       // ── Ang card ng detalye (isa lang ang bukas sa buong table) ────────────
-      // cell: 0|1|2 (quote), 'more', 'po', 'band'. mode: 'quote' | 'list' | 'po' | 'form'.
+      // cell: ang id ng supplier ng column. mode: 'quote' (ang card ng detalye) | 'form'.
       // pinned = binuksan ng click / tap / keyboard (o may form), kaya hindi ito isinasara ng pag-alis ng pointer.
       splCard: { item:null, cell:null, mode:null, pinned:false, style:'' },
       splAnchor: null,   // ang laman ng cell na may-ari ng card: dito sinusukat ang puwesto
@@ -19,7 +23,7 @@
       // May card pa bang talagang nakikita? (Puwedeng nawala na ang cell nito pagkatapos mag-reload ng rows.)
       splLive(){ return this.splCard.mode !== null && !!this.splAnchor && this.splAnchor.isConnected; },
       splOpen(name, cell, mode, el, pinned){
-        // Habang may buhay na form, hindi nagbubukas ang ibang card (pangalan, "+N", PO): mawawala ang tina-type.
+        // Habang may buhay na form, hindi nagbubukas ang ibang card: mawawala ang tina-type.
         // Ang "+" at ✎ ay may sariling harang sa splForm.
         if (mode !== 'form' && this.splCard.mode === 'form' && this.splLive()) return;
         // Form na nawala na ang cell (hal. nag-reload ang rows): wala nang nakakakita, kaya isara na rin — pero
@@ -35,11 +39,11 @@
         // Sa form, ilipat ang focus sa unang field: ang ✎ na pinindot ay nawala na kasama ng card nito.
         this.$nextTick(() => {
           this.splPlace();
-          const first = mode === 'form' && this.splAnchor ? this.splAnchor.querySelector('.spl-form select') : null;
+          const first = mode === 'form' && this.splAnchor ? this.splAnchor.querySelector('.spl-form input') : null;
           if (first) first.focus();
         });
       },
-      // Click / tap / Enter / Space sa pangalan o sa "+N": buksan nang naka-pin; ang pangalawang pindot ay nagsasara.
+      // Click / tap / Enter / Space sa halaga ng cell: buksan nang naka-pin; ang pangalawang pindot ay nagsasara.
       splToggle(name, cell, mode, el){
         if (this.splCard.pinned && this.splIs(name, cell, mode)) { this.splClose(false); return; }
         this.splOpen(name, cell, mode, el, true);
@@ -47,10 +51,12 @@
       // Ang "+" at ✎: buksan ang add / edit form sa card ng cell na pinindutan. Walang ginagawa habang may buhay na
       // form — hindi dapat mawala ang tina-type, kaya Cancel, Esc o Save muna — at habang may save na hindi pa
       // sumasagot, dahil buburahin ng sagot na iyon ang form na kabubukas lang.
+      // Ang supplier ng form ay laging ang supplier ng column na pinindutan (cell = id nito), hindi napipili.
       splForm(name, q, cell, el){
         if (this.quoteForm.saving) return;
         if (this.splCard.mode === 'form' && this.splLive()) return;
         this.openQuote(name, q);
+        Object.assign(this.quoteForm, ItemTableFit.formPreset(cell, q));
         this.splOpen(name, cell, 'form', el, true);
       },
       // Hover: sa device na may totoong hover lang, at hindi kailanman pumapalit sa naka-pin na card o bukas na form.
