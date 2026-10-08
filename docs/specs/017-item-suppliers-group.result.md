@@ -399,3 +399,72 @@ changes").
 2. If the view draws, show it to the owner beside the Old view (owner checks S-13.7, S-17.7,
    S-19.8).
 3. Replacing the Old view is a later spec, after he has used this one.
+
+## Fix list 1
+
+**Item 1: the sticky item column was not opaque over its full width when scrolled sideways.**
+Fixed in `0f1de93`. Not seen in a browser.
+
+**Cause, from reading.**
+
+- The scroll area has side padding: `#scroll { flex:1; overflow:auto; padding:0 16px; … }`
+  (`resources/views/item/index.blade.php:25`). The table's card has no side margin, so that padding
+  is the only thing to the left of the first column.
+- A sticky cell's `left:0` was measured inside that padding: the cells stayed where the table
+  starts, 16 px in from the scroll area's edge. The strip to their left belongs to no cell, so the
+  columns that scroll underneath pass through it on their way out.
+- The only cover for that strip was `box-shadow:-16px 0 0 #f1f5f9` on each sticky cell
+  (`_suppliers_style.blade.php`, the old lines 169 to 188): paint outside the cell's box, one per
+  cell, not a box of its own. It was present on every row kind's rule, so a missing row kind is not
+  the cause; the browser simply did not paint it over the whole strip. Why it left about 8 px
+  cannot be told by reading (a cell's outer shadow in a table is not something layout guarantees),
+  and the fix does not depend on the answer.
+- This replaces the ruling above that mentions "a 16 px mask to the left of the sticky cells".
+
+**The change** (two product files, suppliers view only, 768 px and wider only):
+
+- `_table_suppliers.blade.php`: the scroll area of this view carries a class,
+  `<div id="scroll" class="spl-scroll" …>`.
+- `_suppliers_style.blade.php`, inside `@media (min-width:768px)`:
+  `.spl-scroll { padding-left:0 !important; }` (the `!important` is there because the page's rule
+  is an id selector and every rule of this file must be a `.spl-` selector). With no padding on
+  the left, a sticky cell at `left:0` is at the scroll area's own edge: there is no strip, and the
+  cover is the cell itself with its opaque background.
+- Every `-16px` shadow is removed; the 1 px line at the column's right edge stays.
+- Two backgrounds that were left to the page's own rules are now also written on the sticky cell:
+  the editing row (`#eff6ff`) and TOTAL's first cell (`#f1f5f9`).
+- Row kinds, each sticky at `left:0` with an opaque background: the header's corner cell (one
+  cell with `rowspan="2"`, so it is the corner of both header rows; `#1e293b` from the page's
+  `thead th`), item row and its hover, the no-running-page tint and its hover, page rows and their
+  hover, the expanded page row, the editing row, the repeated per-page header, TOTAL.
+- The expanded page block is one cell across all columns with no sticky part: it scrolls as a
+  whole, as before. With the padding gone there is no strip beside it either; its own content does
+  pass under the position of the item column, because it is not a column of the table.
+- Visible side effect at 768 px and wider: the table now starts at the window's left edge (the
+  16 px gap on the left is gone; the right one stays). Below 768 px nothing changes: the rule and
+  all sticky rules are inside the media block. No other view carries the class or the rule.
+- One small difference to know: on hover, TOTAL's first cell keeps `#f1f5f9` while the rest of the
+  TOTAL row takes the page's hover colour.
+
+**The test** (a text pin: it reads the stylesheet and the markup, it runs no browser):
+`SuppliersGroupTest::test_S_17_6_the_sticky_item_column_sits_at_the_scroll_edge_and_is_opaque_on_every_row_kind`.
+It pins the class on the scroll area (once, and not in the default layout or the Old view), the
+rule's text inside the 768 px block and nowhere before it, that no `position:sticky` and no
+`-16px` exists outside or anywhere, the exact sticky and background rule for each row kind listed
+above, the page's own header colour and TOTAL rule it relies on, and that the two body rows with a
+first-column cell carry the class. Red first: `Failed asserting that 0 is identical to 1.` (the
+class was not on the scroll area). `qa/stories.md`: S-17.6 names the pin in its Test column and
+stays "Not run · browser".
+
+**Suite, plain PHPUnit, after the change (`0f1de93`):** `Tests: 624, Assertions: 7451, Errors: 1,
+Failures: 1, Skipped: 3.` The same two red tests as on the base (`ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`
+and `ExampleTest`); 624 = 623 + the one new test. `SuppliersGroupTest`: `OK (35 tests, 873
+assertions)`; `ItemPageTest` (unedited, including the Old table's hash pin): `OK (45 tests, 943
+assertions)`. The hash tests of the default layout and the Marketing renders (S-18.4, S-19.2,
+S-19.3) pass unchanged; `_table_old.blade.php` and `index.blade.php` are not in this commit.
+
+**How sure, and what to look at:** fairly sure, not certain: the strip can only exist where the
+scroll area has padding and that padding is now zero, but I could not see it drawn; please scroll
+sideways at 768 px and wider and look at the left edge on an item row, an expanded page (its row,
+its repeated header and the block below), the header corner while also scrolled down, and the
+TOTAL row, and confirm that the table starting flush at the window's left edge is acceptable.
