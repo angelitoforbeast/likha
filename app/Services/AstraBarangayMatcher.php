@@ -58,8 +58,8 @@ class AstraBarangayMatcher
      * Kaya ang "Poblacion" sa form ay hindi kailanman kumpirmasyon ng POBLACION 2.
      *
      * $sharesCityName: ang barangay ay kapangalan ng sarili nitong city o bayan (MALIBCONG sa bayan ng MALIBCONG).
-     * Ang "Malibcong, Abra" ay pangalan ng BAYAN, kaya hindi sapat ang isang banggit: kumpirmado lang kapag dalawang
-     * beses nasa text ang pangalan, o may barangay word (o "pob"/"poblacion") na katabi mismo ng isang hit.
+     * Ang "Malibcong, Abra" ay pangalan ng BAYAN, ilang beses man isulat: kumpirmado lang kapag may barangay word
+     * (o "pob"/"poblacion") na katabi mismo ng isang hit.
      * Pagtanggi lang ang naidaragdag nito.
      */
     public static function confirmWithWording(string $text, string $label, string $formWording, array $cityLabels, bool $sharesCityName = false): array
@@ -73,7 +73,8 @@ class AstraBarangayMatcher
      * Para hindi mahuli ang hindi naman barangay, ang ibang pangalan ay binibilang lang kapag:
      *  - lima o higit pang character ang key nito, at hindi ito bahagi ng pangalan ng label na kinukumpirma;
      *  - kung puro numero o iisang letra ("12", "1 a"): kasunod-agad ng barangay word;
-     *  - kung bahagi ng pangalan ng city o province ($placeNames, mga key): may barangay word sa unahan, o dalawang beses sa text.
+     *  - kung bahagi ng pangalan ng city o province ($placeNames, mga key): may barangay word sa unahan; ang ulit ng pangalan
+     *    ng bayan o province (address na dalawang beses isinulat) ay hindi ibang barangay.
      * Ang label na kapareho ang key ng kinukumpirma (dalawang sulat ng iisang barangay) ay hindi "iba".
      */
     public static function namesAnother(string $text, string $label, array $cityLabels, array $placeNames): bool
@@ -102,7 +103,6 @@ class AstraBarangayMatcher
             }
             if ($index === []) return false;
 
-            $placeHits = [];
             foreach (self::segments($text) as $seg) {
                 $w = $seg['w'];
                 foreach ($w as $i => $word) {
@@ -111,7 +111,6 @@ class AstraBarangayMatcher
                         for ($j = 1, $n = count($words); $j < $n && ($w[$i + $j] ?? null) === $words[$j]; $j++);
                         if ($j < $n) continue;
                         if ($kind === 'name' || isset($seg['brgy'][$i])) return true;
-                        if ($kind === 'place' && ($placeHits[$key] = ($placeHits[$key] ?? 0) + 1) >= 2) return true;
                     }
                 }
             }
@@ -153,8 +152,9 @@ class AstraBarangayMatcher
             $siblings = array_map('strval', array_keys($siblings));
             $segments = self::segments($text);
 
-            // Isang banggit lang ng pangalang kapangalan ng city, walang barangay word sa tabi: pangalan iyon ng bayan.
-            $townOnly = static fn (array $r): bool => $sharesCityName && $r['result'] !== 'none' && $r['hits'] < 2 && !$r['marked'];
+            // Pangalang kapangalan ng city o province, walang barangay word sa tabi: pangalan iyon ng bayan, ilang beses man
+            // nasa text (ang address na dalawang beses isinulat, ang "Quezon St", ang "Quezon Province" ay hindi barangay).
+            $townOnly = static fn (array $r): bool => $sharesCityName && $r['result'] !== 'none' && !$r['marked'];
 
             $first = self::scan($segments, $own[0], $own[1], $siblings, $own);
             if ($townOnly($first)) return $none;

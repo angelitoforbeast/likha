@@ -2054,7 +2054,7 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'the town alone'                         => 'none',
             'once in the chat, once in the history'  => 'none',
             'with a barangay word'                   => 'phrase',
-            'twice in the chat'                      => 'phrase',
+            'twice in the chat'                      => 'none',
             'the poblacion sibling is what was said' => 'none',
             'pob beside the name, for the (POB.) label' => 'phrase',
             'the town alone, for the (POB.) label'   => 'none',
@@ -2086,18 +2086,34 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $quezon = ['QUEZON', 'QUEZON-PITOGO', 'QUEZON'];
         $rizal  = ['RIZAL', 'RIZAL-BARAS', 'RIZAL (POB.)'];
         $samar  = ['WESTERN-SAMAR', 'MOTIONG', 'WESTERN SAMAR'];
-        $this->assertLinesInList($quezon, $rizal, $samar);
+        $marcela = ['APAYAO', 'SANTA-MARCELA', 'MARCELA (POB.)'];
+        $pagAsa  = ['QUEZON', 'QUEZON-PITOGO', 'PAG-ASA (POB.)'];
+        $this->assertLinesInList($quezon, $rizal, $samar, $marcela, $pagAsa);
 
         $this->assertSame([
+            'the address given twice'              => self::NONE,
+            'a street named like the province'     => self::NONE,
+            'a street named like the province, RIZAL (POB.)' => self::NONE,
+            'the province twice'                   => self::NONE,
+            'the province with the word province'  => self::NONE,
+            'a word run of the town, MARCELA (POB.)' => self::NONE,
+            'another barangay, the address given twice' => self::PHRASE,
             'town and province, QUEZON'            => self::NONE,
             'town and province, RIZAL (POB.)'      => self::NONE,
             'town and province, WESTERN SAMAR'     => self::NONE,
             'once in the chat, once in the history' => self::NONE,
             'a barangay word beside the name'      => self::PHRASE,
-            'the name twice in one source'         => self::PHRASE,
+            'the name twice in one source'         => self::NONE,
             'pob beside the name'                  => self::PHRASE,
             'a barangay word, WESTERN SAMAR'       => self::PHRASE,
         ], [
+            'the address given twice'              => $this->textCheck($quezon, "Pitogo, Quezon\nAddress: Pitogo, Quezon"),
+            'a street named like the province'     => $this->textCheck($quezon, 'Quezon St, Pitogo, Quezon'),
+            'a street named like the province, RIZAL (POB.)' => $this->textCheck($rizal, '123 J.P. Rizal St., Baras, Rizal'),
+            'the province twice'                   => $this->textCheck($quezon, 'Pitogo, Quezon Quezon'),
+            'the province with the word province'  => $this->textCheck($quezon, 'Pitogo Quezon Province, Quezon'),
+            'a word run of the town, MARCELA (POB.)' => $this->textCheck($marcela, 'Santa Marcela, Apayao'),
+            'another barangay, the address given twice' => $this->textCheck($pagAsa, "Brgy Pag-asa, Pitogo, Quezon\nAddress: Brgy Pag-asa, Pitogo, Quezon"),
             'town and province, QUEZON'            => $this->textCheck($quezon, 'Purok 2, Pitogo, Quezon'),
             'town and province, RIZAL (POB.)'      => $this->textCheck($rizal, 'Baras, Rizal'),
             'town and province, WESTERN SAMAR'     => $this->textCheck($samar, 'Motiong, Western Samar'),

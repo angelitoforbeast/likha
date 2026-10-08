@@ -395,9 +395,9 @@ class AstraAddressRules
      * sariling block ng customer) ay pinagdudugtong ng line break, kaya walang hit na tumatawid mula sa isa papunta sa iba.
      * ['result' => phrase|compact|near|none, 'score' => int]
      *
-     * Ang barangay na kapangalan ng sarili nitong city o bayan ay kumpirmado lang kapag, sa loob ng ISANG pinagmulan,
-     * dalawang beses ang pangalan o may barangay word sa tabi nito: ang history ay madalas na kopya ng mismong chat,
-     * kaya ang "isang beses sa chat at isang beses sa history" ay iisang banggit pa rin ng pangalan ng bayan.
+     * Ang barangay na kapangalan ng sarili nitong city, bayan o province ay kumpirmado lang kapag may barangay word sa
+     * tabi nito: ang ulit ng pangalan (address na dalawang beses isinulat, kopya ng chat sa history, "Quezon St") ay
+     * pangalan pa rin ng bayan o province, hindi ng barangay.
      *
      * Hindi rin kumpirmado kapag may pinagmulang bumabanggit ng IBANG barangay ng parehong city.
      */
@@ -447,7 +447,8 @@ class AstraAddressRules
             if ($prefix !== '' && str_starts_with($name, $prefix . ' ')) $names[] = substr($name, strlen($prefix) + 1);
         }
         foreach ($names as $n) {
-            if ($n === $key || $n === $key . ' city') return true;
+            // Pati ang magkakasunod na salita ng pangalan ng bayan: ang "Santa Marcela, Apayao" ay hindi pa barangay na MARCELA.
+            if (str_contains(' ' . $n . ' ', ' ' . $key . ' ')) return true;
         }
 
         return str_contains(' ' . MacroChecker::normBrgyKey(str_replace('-', ' ', $prov)) . ' ', ' ' . $key . ' ');
