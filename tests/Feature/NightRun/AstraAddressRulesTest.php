@@ -2201,12 +2201,19 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $tangosSth  = ['METRO-MANILA', 'NAVOTAS-CITY', 'TANGOS SOUTH (TANGOS)'];
         $bayaan     = ['ABRA', 'ABRA-DOLORES', 'BAYAAN'];
         $alangan    = ['ANTIQUE', 'SIBALOM', 'ALANGAN'];
+        $bigaa      = ['AKLAN', 'LEZO', 'SANTA CRUZ BIGAA'];
+        $pangal     = ['ABRA', 'DANGLAS', 'PANGAL'];
+        $caupasan   = ['ABRA', 'DANGLAS', 'CAUPASAN (POB.)'];
+        $corona     = ['BATANGAS', 'TINGLOY', 'CORONA'];
         $this->assertLinesInList(
             $amontay, $pagAsa, $bacag, ['ABRA', 'LACUB', 'POBLACION (TALAMPAC)'], $inoma, ['LANAO-DEL-NORTE', 'MAIGO', 'CLARO M. RECTO'],
             $cabaritan, ['ILOCOS-NORTE', 'DUMALNEG', 'DUMALNEG'], $tangosSth, ['METRO-MANILA', 'NAVOTAS-CITY', 'TANGOS'],
-            $bayaan, ['ABRA', 'ABRA-DOLORES', 'ISIT'], $alangan, ['ANTIQUE', 'SIBALOM', 'LUNA'], self::QC_HOLY_SPIRIT
+            $bayaan, ['ABRA', 'ABRA-DOLORES', 'ISIT'], $alangan, ['ANTIQUE', 'SIBALOM', 'LUNA'], self::QC_HOLY_SPIRIT,
+            $bigaa, ['AKLAN', 'LEZO', 'SANTA CRUZ'], $pangal, $caupasan, $corona, ['BATANGAS', 'TINGLOY', 'BARANGAY 13 (POBLACION 1)']
         );
-        $this->assertNotContains('POBLACION', $this->cityLabels($amontay));
+        foreach ([$amontay, $pangal, $corona] as $town) {
+            $this->assertNotContains('POBLACION', $this->cityLabels($town));
+        }
 
         $this->assertSame([
             'plain Poblacion after a barangay word'     => self::NONE,
@@ -2216,6 +2223,9 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'the other is this one\'s bracket name'     => self::NONE,
             'a street named like the bracket name'      => self::NONE,
             'a short name after a barangay word'        => self::NONE,
+            'a shorter sibling named separately'        => self::NONE,
+            'bare Poblacion after sa'                   => self::NONE,
+            'Poblacion where the label says POBLACION 1' => self::NONE,
             // Kumpirmado pa rin.
             'a (POB.) label with the word Poblacion'    => self::PHRASE,
             'no second barangay'                        => self::PHRASE,
@@ -2223,6 +2233,11 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'the name before the brackets'              => self::PHRASE,
             'the name with its own brackets'            => self::PHRASE,
             'the bracket name is the town'              => self::PHRASE,
+            'the longer name once'                      => self::PHRASE,
+            'a street named like the shorter sibling'   => self::PHRASE,
+            'sa before a landmark'                      => self::PHRASE,
+            'no Poblacion in the text'                  => self::PHRASE,
+            'a (POB.) label with sa Poblacion'          => self::PHRASE,
         ], [
             'plain Poblacion after a barangay word'     => $this->textCheck($amontay, 'Dati sa Brgy Amontay, ngayon sa Brgy Poblacion na po'),
             'Pob. after a barangay word'                => $this->textCheck($amontay, 'Dati sa Brgy Amontay, ngayon sa Brgy. Pob. na po'),
@@ -2231,12 +2246,20 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'the other is this one\'s bracket name'     => $this->textCheck($cabaritan, 'hindi Brgy Cabaritan, Brgy Dumalneg po'),
             'a street named like the bracket name'      => $this->textCheck($tangosSth, '123 Tangos St. Navotas City'),
             'a short name after a barangay word'        => $this->textCheck($bayaan, 'Dati sa Brgy Bayaan, ngayon sa Brgy Isit na po'),
+            'a shorter sibling named separately'        => $this->textCheck($bigaa, 'Brgy Santa Cruz Bigaa po. Ay mali, Brgy Santa Cruz pala, Lezo Aklan'),
+            'bare Poblacion after sa'                   => $this->textCheck($pangal, 'Dati sa Brgy Pangal, ngayon sa Poblacion na po'),
+            'Poblacion where the label says POBLACION 1' => $this->textCheck($corona, 'Dati sa Brgy Corona, ngayon sa Brgy Poblacion na po'),
             'a (POB.) label with the word Poblacion'    => $this->textCheck($pagAsa, 'Brgy Pag-asa, Brgy Poblacion, Pitogo, Quezon'),
             'no second barangay'                        => $this->textCheck(self::QC_HOLY_SPIRIT, 'Brgy Holy Spirit, Quezon City'),
             'a street with a short barangay name'       => $this->textCheck($alangan, '12 Luna St, Brgy Alangan, Sibalom, Antique'),
             'the name before the brackets'              => $this->textCheck($tangosSth, 'Brgy Tangos South, Navotas City'),
             'the name with its own brackets'            => $this->textCheck($tangosSth, 'Brgy Tangos South (Tangos), Navotas City'),
             'the bracket name is the town'              => $this->textCheck($cabaritan, 'Brgy Cabaritan, Dumalneg, Ilocos Norte'),
+            'the longer name once'                      => $this->textCheck($bigaa, 'Brgy Santa Cruz Bigaa, Lezo, Aklan'),
+            'a street named like the shorter sibling'   => $this->textCheck($bigaa, 'Brgy Santa Cruz Bigaa, Santa Cruz St, Lezo'),
+            'sa before a landmark'                      => $this->textCheck($pangal, 'Brgy Pangal, malapit sa simbahan, Danglas'),
+            'no Poblacion in the text'                  => $this->textCheck($pangal, 'Brgy Pangal, Danglas Abra'),
+            'a (POB.) label with sa Poblacion'          => $this->textCheck($caupasan, 'Brgy Caupasan, sa Poblacion po, Danglas'),
         ]);
     }
 
