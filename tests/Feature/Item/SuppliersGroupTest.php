@@ -17,14 +17,14 @@ class SuppliersGroupTest extends ItemTestCase
 {
     /**
      * sha1 ng normalised render ng item.index, galing sa base commit (bago ang anumang pagbabago).
-     * Key: <layout>.<viewer>. Ang old.ceo ay ikinukumpara pagkatapos tanggalin ang nag-iisang bagong link ng Old view.
+     * Key: <layout>.<viewer>. Ang old.ceo ay ikinukumpara sa orihinal na table ng CEO, pagkatapos tanggalin ang link nito sa toolbar at ang salitang pinapanatili nito sa address.
      */
     private const BASE = [
         'default.ceo'              => '5bc06183505014c1c76d6a4ad3b2a64d85bae452',
         'default.ceo_as_marketing' => 'a7f063ad4ee56665ad763514b4dfa513284ec91e',
         'default.marketing'        => 'c87616640b0ef585d2217aec00eb419124757f9b',
         'default.marketing_oic'    => '57c713bd753a02648b4d8cd765188dfacf37e323',
-        'old.ceo'                  => 'b8395ba9d734e304e8bc7afc39bade923db1674a', // ikinukumpara pagkatapos tanggalin ang nag-iisang bagong link sa toolbar
+        'old.ceo'                  => 'b8395ba9d734e304e8bc7afc39bade923db1674a', // ikinukumpara pagkatapos tanggalin ang link sa toolbar at ang salita sa address
         'old.ceo_as_marketing'     => '25d69d35fb68970d598e8ab622cda967ee5b4ec5',
         'old.marketing'            => '85aaefd987989115e948a47f1d62bd6949cdba27',
         'old.marketing_oic'        => '97a1c74f5b91bc47b9738d5cb82f3da82dc7c0b4',
@@ -139,23 +139,63 @@ class SuppliersGroupTest extends ItemTestCase
         }
     }
 
-    // ── S-13.5 / S-18.1 / S-18.2 / S-19.3: ang switch at ang gate ─────────────
+    // ── Ang mga salita ng layout, ang gate at ang dalawang link sa toolbar ────
+    // ?layout=old at ?layout=suppliers = table na may suppliers (CEO view lang); ?layout=original = orihinal na table.
 
-    /**
-     * Ang nag-iisang dagdag sa Old view ng CEO: ang link papunta sa suppliers view, kasama ang
-     * indentation at line break nito. Kapag tinanggal ito, dapat bumalik ang base render.
-     */
-    private const SUPPLIERS_LINK = "    <a href=\"?layout=suppliers\" @click.prevent=\"const q = new URLSearchParams(window.location.search); q.set('layout', 'suppliers'); window.location.href = window.location.pathname + '?' + q.toString()\"\n"
-        . "       title=\"Open the table with suppliers and prices side by side\"\n"
+    /** sha1 ng normalised render ng table na may suppliers para sa CEO, galing sa base commit (?layout=suppliers noon). */
+    private const BASE_SUPPLIERS_CEO = '6f616f8795f7bc941e8cd5b4068bb1372f572f89';
+
+    /** Ang link sa table na may suppliers, papunta sa orihinal na table, kasama ang indentation at line break nito. */
+    private const ORIGINAL_LINK = "    <a href=\"?layout=original\" @click.prevent=\"const q = new URLSearchParams(window.location.search); q.set('layout', 'original'); window.location.href = window.location.pathname + '?' + q.toString()\"\n"
+        . "       title=\"Open the table as it was before the suppliers columns\"\n"
         . "       style=\"background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;\n"
         . "              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;\n"
-        . "              cursor:pointer;margin-left:4px;\">🏷 Suppliers view</a>\n";
+        . "              cursor:pointer;margin-left:4px;\">🗂 Original table</a>\n";
 
-    /** Ang tatlong request na hindi CEO view: [label, role, email, dagdag sa address]. */
+    /** Ang link sa orihinal na table ng CEO, pabalik sa table na may suppliers. */
+    private const SUPPLIERS_TABLE_LINK = "    <a href=\"?layout=old\" @click.prevent=\"const q = new URLSearchParams(window.location.search); q.set('layout', 'old'); window.location.href = window.location.pathname + '?' + q.toString()\"\n"
+        . "       title=\"Back to the table with suppliers and prices side by side\"\n"
+        . "       style=\"background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;\n"
+        . "              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;\n"
+        . "              cursor:pointer;margin-left:4px;\">🏷 Table with suppliers</a>\n";
+
+    /** Ang link na nasa suppliers view sa base commit; pinalitan ito ng ORIGINAL_LINK. */
+    private const BASE_OLD_VIEW_LINK = "    <a href=\"?layout=old\" @click.prevent=\"const q = new URLSearchParams(window.location.search); q.set('layout', 'old'); window.location.href = window.location.pathname + '?' + q.toString()\"\n"
+        . "       title=\"Back to the original table\"\n"
+        . "       style=\"background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;\n"
+        . "              border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;\n"
+        . "              cursor:pointer;margin-left:4px;\">🗂 Old view</a>\n";
+
+    /** Ang linya ng script na nagpapanatili ng ?layout=old sa address; pareho para sa lahat ng viewer. */
+    private const OLD_ADDRESS = "        if (this.layoutOld) qsObj.layout = 'old';\n";
+
+    /** Ang dalawang linyang kasunod ng OLD_ADDRESS sa suppliers view ng base commit; wala na ang mga ito. */
+    private const BASE_SUPPLIERS_ADDRESS = "        // Suppliers view — dapat manatili sa URL; kung hindi, gagawin itong ?layout=old ng unang load.\n"
+        . "        qsObj.layout = 'suppliers';\n";
+
+    /** Ang dalawang linyang kasunod ng OLD_ADDRESS sa orihinal na table ng CEO. */
+    private const ORIGINAL_ADDRESS = "        // Orihinal na table — dapat manatili sa URL; kung hindi, gagawin itong ?layout=old (table na may suppliers) ng unang load.\n"
+        . "        qsObj.layout = 'original';\n";
+
+    /**
+     * Ang tatlong viewer na hindi CEO view: [key ng BASE, role, email, mga dagdag sa address na hindi dapat
+     * magbago ng anuman, ang view data na ginagamit ng render() para sa viewer na iyon:
+     * isCEO, isMarketingOIC, viewAs, effectiveIsCEO].
+     */
     private const NON_CEO_VIEWS = [
-        ['Marketing', 'Marketing', 'mkt@example.test', ''],
-        ['Marketing - OIC', 'Marketing - OIC', 'oic@example.test', ''],
-        ['CEO as marketing', 'CEO', 'ceo@example.test', '&view_as=marketing'],
+        ['marketing', 'Marketing', 'mkt@example.test', ['', '&view_as=ceo', '&view_as=CEO'], [false, false, 'ceo', false]],
+        ['marketing_oic', 'Marketing - OIC', 'oic@example.test', ['', '&view_as=ceo', '&view_as=CEO'], [false, true, 'ceo', false]],
+        ['ceo_as_marketing', 'CEO', 'ceo@example.test', ['&view_as=marketing', '&view_as=MARKETING', '&view_as=marketing%20'], [true, false, 'marketing', false]],
+    ];
+
+    private const LAYOUT_WORDS = ['old', 'suppliers', 'original'];
+
+    /** Mga marker ng table na may suppliers at ng dalawang link; nasa CEO view ang bawat isa, wala ni isa sa hindi CEO. */
+    private const SUPPLIERS_MARKERS = [
+        'SUPPLIERS', 'Supplier 1', 'Supplier 2', 'Supplier 3', 'spl-', 'splReady', 'splTop3', 'splRest',
+        'splNone', 'splLoaded', 'splFailed', 'hindi na-load', 'spl-card', 'splCard',
+        'layout=original', "'original'", 'Original table', 'before the suppliers columns',
+        'Table with suppliers', 'suppliers and prices side by side',
     ];
 
     /** Normalised na body ng isang GET; dito agad kinukuha dahil iba ang CSRF token ng bawat request. */
@@ -164,101 +204,250 @@ class SuppliersGroupTest extends ItemTestCase
         return $this->normalise((string) $this->get($url)->assertOk()->getContent());
     }
 
-    public function test_S_13_5_only_the_exact_string_suppliers_selects_the_suppliers_view(): void
+    private function actAs(string $role = 'CEO', string $email = 'ceo@example.test'): void
     {
-        $this->actingAs($this->user());
+        $this->actingAs(User::where('email', $email)->first() ?? $this->user($role, $email));
+    }
 
+    /** Ang view data na nagpapasya kung aling table at aling mga block ang lalabas: ang apat ng NON_CEO_VIEWS, tapos layoutOld at layoutSuppliers. */
+    private function gate(string $url): array
+    {
+        $res = $this->get($url)->assertOk();
+
+        return array_map(fn (string $key) => $res->viewData($key), ['isCEO', 'isMarketingOIC', 'viewAs', 'effectiveIsCEO', 'layoutOld', 'layoutSuppliers']);
+    }
+
+    public function test_S_13_5_only_the_exact_layout_words_select_a_view(): void
+    {
+        // [layoutOld, layoutSuppliers] ng CEO.
         $cases = [
             '/item'                                    => [false, false],
-            '/item?layout=old'                         => [true, false],
+            '/item?layout=old'                         => [true, true],
             '/item?layout=suppliers'                   => [true, true],
+            '/item?layout=original'                    => [true, false],
             '/item?layout=SUPPLIERS'                   => [false, false],
             '/item?layout=supplier'                    => [false, false],
             '/item?layout=x'                           => [false, false],
             '/item?layout[]=suppliers'                 => [false, false],
+            '/item?layout=old&view_as=marketing'       => [true, false],
             '/item?layout=suppliers&view_as=marketing' => [true, false],
+            '/item?layout=original&view_as=marketing'  => [true, false],
         ];
+        $this->actAs();
         foreach ($cases as $url => $expected) {
-            $res = $this->get($url)->assertOk();
-            $this->assertSame($expected, [$res->viewData('layoutOld'), $res->viewData('layoutSuppliers')], $url);
+            $this->assertSame($expected, array_slice($this->gate($url), 4), $url);
         }
 
-        $suppliers = $this->body('/item?layout=suppliers');
-        $this->assertStringContainsString('🗂 Old view', $suppliers);
-        // Kung wala ito, gagawing ?layout=old ng unang load ang address ng suppliers view.
-        $this->assertStringContainsString("qsObj.layout = 'suppliers';", $suppliers);
-        $this->assertStringContainsString('🏷 Suppliers view', $this->body('/item?layout=old'));
-
-        // Hindi CEO: Old view ang napipili ng parehong address.
+        // Hindi CEO: orihinal na table ang napipili ng tatlong salita.
         foreach ([['Marketing', 'mkt@example.test'], ['Marketing - OIC', 'oic@example.test']] as [$role, $email]) {
-            $this->actingAs($this->user($role, $email));
-            $res = $this->get('/item?layout=suppliers')->assertOk();
-            $this->assertSame([true, false], [$res->viewData('layoutOld'), $res->viewData('layoutSuppliers')], $role);
+            $this->actAs($role, $email);
+            foreach (self::LAYOUT_WORDS as $word) {
+                $this->assertSame([true, false], array_slice($this->gate('/item?layout=' . $word), 4), "{$role}: {$word}");
+            }
+            $this->assertSame([false, false], array_slice($this->gate('/item'), 4), $role);
         }
     }
 
-    public function test_S_18_1_non_ceo_views_get_the_old_view_with_no_suppliers_markers(): void
+    public function test_S_22_1_layout_old_is_the_suppliers_table_for_the_ceo_view(): void
     {
+        // Ang render muna (binabago ng isang GET ang estado na nababasa ng direktang render): sa mga flag na
+        // ibinibigay ng route sa ibaba, ito ang suppliers view ng base, maliban sa dalawang sadyang pagbabago:
+        // ang link sa toolbar at ang salitang pinapanatili sa address.
+        $html = $this->normalise($this->render('ceo', true, true));
+        $this->assertSame(1, substr_count($html, self::ORIGINAL_LINK));
+        $this->assertSame(1, substr_count($html, self::OLD_ADDRESS));
+        $asBase = str_replace(
+            [self::ORIGINAL_LINK, self::OLD_ADDRESS],
+            [self::BASE_OLD_VIEW_LINK, self::OLD_ADDRESS . self::BASE_SUPPLIERS_ADDRESS],
+            $html
+        );
+        $this->assertSame(self::BASE_SUPPLIERS_CEO, sha1($asBase));
+
+        $this->actAs();
+        $this->assertSame([true, false, 'ceo', true, true, true], $this->gate('/item?layout=old'));
+
+        $body = $this->body('/item?layout=old');
+        $this->assertStringContainsString('<th class="spl-grp" colspan="4">SUPPLIERS</th>', $body);
+        $this->assertStringContainsString(self::SPL_READY, $body);
+        $this->assertSame(2, substr_count($body, '<style'));
+    }
+
+    public function test_S_22_2_layout_suppliers_is_the_same_view_and_the_address_stays_layout_old(): void
+    {
+        $this->actAs();
+        $suppliers = $this->body('/item?layout=suppliers');
+
+        $this->assertSame([true, false, 'ceo', true, true, true], $this->gate('/item?layout=suppliers'));
+        $this->assertTrue($suppliers === $this->body('/item?layout=old'), 'iba ang layout=suppliers sa layout=old');
+        $this->assertSame(1, substr_count($suppliers, self::OLD_ADDRESS));
+        $this->assertStringNotContainsString("qsObj.layout = 'suppliers'", $suppliers);
+        $this->assertStringNotContainsString("qsObj.layout = 'original'", $suppliers);
+    }
+
+    public function test_S_22_3_any_other_layout_value_is_the_default_layout_of_the_base_for_the_ceo(): void
+    {
+        // Ang render muna: binabago ng isang GET ang estado na nababasa ng direktang render.
+        $this->assertSame(self::BASE['default.ceo'], $this->hash('ceo', false));
+
+        $this->actAs();
+        $default = $this->body('/item');
+        $urls = [
+            '/item', '/item?layout=', '/item?layout=OLD', '/item?layout=Old', '/item?layout=x', '/item?layout=olds',
+            '/item?layout[]=old', '/item?layout[]=original', '/item?layout[old]=1', '/item?layout=old&layout=x',
+        ];
+        foreach ($urls as $url) {
+            $this->assertSame([true, false, 'ceo', true, false, false], $this->gate($url), $url);
+            $this->assertTrue($default === $this->body($url), "{$url}: iba sa default layout");
+        }
+    }
+
+    public function test_S_22_4_the_old_view_of_the_ceo_has_the_original_table_link_only(): void
+    {
+        $this->actAs();
+        $body = $this->body('/item?layout=old');
+
+        $this->assertSame(1, substr_count($body, self::ORIGINAL_LINK));
+        $this->assertSame(1, substr_count($body, 'Original table'));
+        $this->assertStringContainsString('✨ New view', $body);
+        // Ang salitang "Suppliers view" ay nasa dalawang comment pa ng script ng table na ito; ang link ang wala na.
+        foreach (['Suppliers view</a>', 'Open the table with suppliers', 'layout=suppliers', 'Table with suppliers', '🗂 Old view'] as $gone) {
+            $this->assertStringNotContainsString($gone, $body, $gone);
+        }
+    }
+
+    public function test_S_23_1_layout_original_is_the_original_table_for_the_ceo_view(): void
+    {
+        $this->actAs();
+        $this->assertSame([true, false, 'ceo', true, true, false], $this->gate('/item?layout=original'));
+
+        $body = $this->body('/item?layout=original');
+        // Ang orihinal na table, kasama ang nakapatong na mga linya ng supplier sa Item cell.
+        foreach (['<td>TOTAL</td>', 'Drag headers to reorder', '>walang supplier<', '+ supplier quote', '🏭'] as $present) {
+            $this->assertStringContainsString($present, $body, $present);
+        }
+        foreach (['SUPPLIERS', 'spl-', 'splReady', 'splLoaded', 'Original table', 'layout=original', 'Suppliers view'] as $gone) {
+            $this->assertStringNotContainsString($gone, $body, $gone);
+        }
+        $this->assertSame(1, substr_count($body, '<style'));
+        $this->assertSame(1, substr_count($body, self::OLD_ADDRESS . self::ORIGINAL_ADDRESS));
+        $this->assertSame(1, substr_count($body, "qsObj.layout = 'original'"));
+        $this->assertSame(1, substr_count($body, self::SUPPLIERS_TABLE_LINK));
+        $this->assertSame(1, substr_count($body, 'Table with suppliers'));
+    }
+
+    public function test_S_23_2_the_original_table_of_the_ceo_differs_from_the_base_old_view_by_two_strings(): void
+    {
+        $original = $this->normalise($this->render('ceo', true));
+
+        $this->assertSame(1, substr_count($original, self::SUPPLIERS_TABLE_LINK));
+        $this->assertSame(1, substr_count($original, self::ORIGINAL_ADDRESS));
+        $this->assertSame(self::BASE['old.ceo'], sha1(str_replace([self::SUPPLIERS_TABLE_LINK, self::ORIGINAL_ADDRESS], '', $original)));
+    }
+
+    public function test_S_24_1_non_ceo_views_get_the_base_old_view_for_every_layout_word(): void
+    {
+        // Ang mga render muna: binabago ng isang GET ang estado na nababasa ng direktang render.
+        foreach (self::NON_CEO_VIEWS as [$viewer]) {
+            $this->assertSame(self::BASE['old.' . $viewer], $this->hash($viewer, true), "render old.{$viewer} nagbago");
+        }
+
         $sid = $this->supplier('Zyxwv Kalakal');
         $this->quote('HAND GRIP', $sid, 100, 10);
         $this->po($sid, 'HAND GRIP', 'hand grip', 5, 90);
 
-        // Iisang listahan para sa dalawang tanong: nasa CEO view ang bawat isa, at wala ni isa sa hindi CEO.
-        $markers = [
-            'SUPPLIERS', 'Supplier 1', 'Supplier 2', 'Supplier 3', 'spl-', 'splReady', 'splTop3', 'splRest',
-            'splNone', 'splLoaded', 'splFailed', 'hindi na-load', 'spl-card', 'splCard', "'suppliers'",
-            'layout=suppliers', 'Suppliers view',
-        ];
-        // Hindi kailanman nasa render ng page (pangalan ng file; pangalan ng supplier na sa fetch lang dumarating),
-        // kaya walang positive control ang mga ito: tripwire lang kung sakaling may mag-print ng mga ito balang araw.
-        $tripwires = ['_table_suppliers', 'Zyxwv Kalakal'];
+        // Hindi kailanman nasa render ng page (pangalan ng file; pangalan ng supplier na sa fetch lang dumarating;
+        // ang lumang pangalan ng view), kaya walang positive control ang mga ito: tripwire lang kung sakaling may mag-print ng mga ito balang araw.
+        $tripwires = ['_table_suppliers', 'Zyxwv Kalakal', 'Suppliers view', 'layout=suppliers', "'suppliers'"];
 
-        // Patunayan na totoo ang mga marker: nasa suppliers view ng CEO ang mga ito (ang link papunta roon ay
-        // nasa Old view niya), kaya may ibig sabihin ang pagkawala nila sa iba.
-        $this->actingAs($this->user());
-        $ceo = $this->body('/item?layout=suppliers') . $this->body('/item?layout=old');
-        foreach ($markers as $marker) {
+        // Patunayan na totoo ang mga marker: nasa dalawang view ng CEO ang mga ito, kaya may ibig sabihin ang pagkawala nila sa iba.
+        $this->actAs();
+        $ceo = $this->body('/item?layout=old') . $this->body('/item?layout=original');
+        foreach (self::SUPPLIERS_MARKERS as $marker) {
             $this->assertStringContainsString($marker, $ceo, "CEO: {$marker}");
         }
 
-        foreach (self::NON_CEO_VIEWS as [$label, $role, $email, $extra]) {
-            $this->actingAs(User::where('email', $email)->first() ?? $this->user($role, $email));
-            $suppliers = $this->body('/item?layout=suppliers' . $extra);
-            $old = $this->body('/item?layout=old' . $extra);
+        foreach (self::NON_CEO_VIEWS as [$viewer, $role, $email, $extras, $viewData]) {
+            $this->actAs($role, $email);
+            $old = $this->body('/item?layout=old' . $extras[0]);
 
-            $this->assertTrue($suppliers === $old, "{$label}: iba ang layout=suppliers sa layout=old");
-            foreach (array_merge($markers, $tripwires) as $marker) {
-                $this->assertStringNotContainsString($marker, $suppliers, "{$label}: {$marker}");
+            foreach (self::LAYOUT_WORDS as $word) {
+                foreach ($extras as $extra) {
+                    $url = "/item?layout={$word}{$extra}";
+                    // Parehong view data sa ginagamit ng nakapin na render ng viewer na ito, at orihinal na table ang napili.
+                    $this->assertSame(array_merge($viewData, [true, false]), $this->gate($url), "{$viewer}: {$url}");
+                    $body = $this->body($url);
+                    $this->assertTrue($body === $old, "{$viewer}: iba ang {$url} sa layout=old");
+                    foreach (array_merge(self::SUPPLIERS_MARKERS, $tripwires) as $marker) {
+                        $this->assertStringNotContainsString($marker, $body, "{$viewer}: {$url}: {$marker}");
+                    }
+                }
             }
         }
     }
 
-    public function test_S_18_2_the_script_does_not_call_the_loaders_for_those_requests(): void
+    public function test_S_24_2_the_script_does_not_call_the_loaders_for_non_ceo_views(): void
     {
         $calls = ['this.loadItemSuppliers(),', 'this.loadItemQuotes(),'];
 
-        // Patunayan na totoo ang mga marker: sa CEO view, tig-isang beses ang bawat tawag.
-        $this->actingAs($this->user());
-        $ceo = $this->body('/item?layout=suppliers');
-        foreach ($calls as $call) $this->assertSame(1, substr_count($ceo, $call), "CEO: {$call}");
+        // Patunayan na totoo ang mga marker: sa dalawang view ng CEO, tig-isang beses ang bawat tawag.
+        $this->actAs();
+        foreach (['old', 'original'] as $word) {
+            $ceo = $this->body('/item?layout=' . $word);
+            foreach ($calls as $call) $this->assertSame(1, substr_count($ceo, $call), "CEO {$word}: {$call}");
+        }
 
-        foreach (self::NON_CEO_VIEWS as [$label, $role, $email, $extra]) {
-            $this->actingAs(User::where('email', $email)->first() ?? $this->user($role, $email));
-            $body = $this->body('/item?layout=suppliers' . $extra);
-            foreach ($calls as $call) $this->assertStringNotContainsString($call, $body, "{$label}: {$call}");
+        foreach (self::NON_CEO_VIEWS as [$viewer, $role, $email, $extras]) {
+            $this->actAs($role, $email);
+            foreach (self::LAYOUT_WORDS as $word) {
+                $body = $this->body("/item?layout={$word}{$extras[0]}");
+                foreach ($calls as $call) $this->assertStringNotContainsString($call, $body, "{$viewer} {$word}: {$call}");
+            }
         }
     }
 
-    public function test_S_19_3_old_view_for_the_ceo_differs_only_by_the_toolbar_link(): void
+    public function test_S_24_3_the_default_layout_of_non_ceo_views_is_the_base(): void
     {
-        $old = $this->normalise($this->render('ceo', true));
-        $this->assertSame(1, substr_count($old, self::SUPPLIERS_LINK));
-        $this->assertSame(self::BASE['old.ceo'], sha1(str_replace(self::SUPPLIERS_LINK, '', $old)));
+        // Ang mga render muna: binabago ng isang GET ang estado na nababasa ng direktang render.
+        foreach (self::NON_CEO_VIEWS as [$viewer]) {
+            $this->assertSame(self::BASE['default.' . $viewer], $this->hash($viewer, false), "render default.{$viewer} nagbago");
+        }
 
-        $suppliers = $this->render('ceo', true, true);
-        $this->assertStringNotContainsString('🏷 Suppliers view', $suppliers);
-        $this->assertStringContainsString('🗂 Old view', $suppliers);
-        $this->assertStringContainsString('<td>TOTAL</td>', $suppliers);
+        foreach (self::NON_CEO_VIEWS as [$viewer, $role, $email, $extras, $viewData]) {
+            $this->actAs($role, $email);
+            $query = ltrim($extras[0], '&');
+            $this->assertSame(array_merge($viewData, [false, false]), $this->gate('/item' . ($query === '' ? '' : '?' . $query)), $viewer);
+            $this->assertSame(array_merge($viewData, [false, false]), $this->gate('/item?layout=x' . $extras[0]), $viewer);
+        }
+    }
+
+    public function test_S_24_4_only_the_exact_word_original_after_trimming_selects_the_original_table(): void
+    {
+        // [layoutOld, layoutSuppliers] para sa CEO; ang hindi CEO ay hindi kailanman nakakakuha ng layoutSuppliers.
+        $cases = [
+            '/item?layout=original%20'             => [true, false], // tinatanggal ng framework ang puwang, gaya ng sa old
+            '/item?layout=%20original'             => [true, false],
+            '/item?layout=old%20'                  => [true, true],
+            '/item?layout=old&layout=original'     => [true, false], // ang huli ang binabasa
+            '/item?layout=original&layout=old'     => [true, true],
+            '/item?layout=Original'                => [false, false],
+            '/item?layout=ORIGINAL'                => [false, false],
+            '/item?layout=originals'               => [false, false],
+            '/item?layout[]=original'              => [false, false],
+            '/item?layout[original]=original'      => [false, false],
+            '/item?layout[]=old&layout[]=original' => [false, false],
+        ];
+
+        $this->actAs();
+        $original = $this->body('/item?layout=original');
+        foreach ($cases as $url => $expected) {
+            $this->assertSame($expected, array_slice($this->gate($url), 4), "CEO: {$url}");
+        }
+        $this->assertTrue($original === $this->body('/item?layout=original%20'), 'iba ang may puwang sa dulo');
+
+        $this->actAs('Marketing', 'mkt@example.test');
+        foreach ($cases as $url => $expected) {
+            $this->assertSame([$expected[0], false], array_slice($this->gate($url), 4), "Marketing: {$url}");
+        }
     }
 
     // ── S-13.1 – S-13.4 / S-14.8 / S-15.10 / S-19.4 / S-19.6 / S-21.1: ang table ng suppliers view ──

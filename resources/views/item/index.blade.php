@@ -697,17 +697,17 @@
     @endif
 @if(!empty($effectiveIsCEO) && !empty($layoutOld))
 @if(!empty($layoutSuppliers))
-    <a href="?layout=old" @click.prevent="const q = new URLSearchParams(window.location.search); q.set('layout', 'old'); window.location.href = window.location.pathname + '?' + q.toString()"
-       title="Back to the original table"
+    <a href="?layout=original" @click.prevent="const q = new URLSearchParams(window.location.search); q.set('layout', 'original'); window.location.href = window.location.pathname + '?' + q.toString()"
+       title="Open the table as it was before the suppliers columns"
        style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
-              cursor:pointer;margin-left:4px;">🗂 Old view</a>
+              cursor:pointer;margin-left:4px;">🗂 Original table</a>
 @else
-    <a href="?layout=suppliers" @click.prevent="const q = new URLSearchParams(window.location.search); q.set('layout', 'suppliers'); window.location.href = window.location.pathname + '?' + q.toString()"
-       title="Open the table with suppliers and prices side by side"
+    <a href="?layout=old" @click.prevent="const q = new URLSearchParams(window.location.search); q.set('layout', 'old'); window.location.href = window.location.pathname + '?' + q.toString()"
+       title="Back to the table with suppliers and prices side by side"
        style="background:#1e293b;color:#c4b5fd;border:1px solid #475569;text-decoration:none;
               border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;
-              cursor:pointer;margin-left:4px;">🏷 Suppliers view</a>
+              cursor:pointer;margin-left:4px;">🏷 Table with suppliers</a>
 @endif
 @endif
 
@@ -1750,9 +1750,9 @@
         if (this.effectiveIsCeo && this.worklist.list !== 'lahat') qsObj.list = this.worklist.list;
         // Lumang table view — panatilihin ang ?layout=old sa URL.
         if (this.layoutOld) qsObj.layout = 'old';
-@if(!empty($layoutSuppliers))
-        // Suppliers view — dapat manatili sa URL; kung hindi, gagawin itong ?layout=old ng unang load.
-        qsObj.layout = 'suppliers';
+@if(!empty($effectiveIsCEO) && !empty($layoutOld) && empty($layoutSuppliers))
+        // Orihinal na table — dapat manatili sa URL; kung hindi, gagawin itong ?layout=old (table na may suppliers) ng unang load.
+        qsObj.layout = 'original';
 @endif
         // Tab ng bagong layout — panatilihin ang ?tab=sales (kahit nasa lumang view, para bumalik sa parehong tab).
         if (this.ilTab === 'sales') qsObj.tab = 'sales';
