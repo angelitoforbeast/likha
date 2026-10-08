@@ -13,6 +13,7 @@ use App\Models\PhoneWhitelist;
 use App\Models\FbnameBlacklist;
 use App\Models\KeywordBlacklist;
 use App\Models\AddressKeywordBlacklist;
+use App\Support\NightStepFilter;
 
 class MacroOutputController extends Controller
 {
@@ -1069,6 +1070,18 @@ class MacroOutputController extends Controller
     {
         $tz = 'Asia/Manila';
 
+        // 🌙 Night run filter (`night_step`): null = walang filter, ang page ay gaya ng dati
+        $night = NightStepFilter::fromRequest($request);
+
+        // Ang AI Checker / Astra Check ay bumabasa ng petsa mula sa address bar, hindi sa date picker: kaya ang valid na
+        // filter na walang `date` ay inililipat sa parehong address na may petsa ng mga order ng gabing iyon.
+        if ($night?->valid && !$request->filled('date')) {
+            return redirect()->route('macro_output.index', array_merge($request->query(), [
+                'night_step' => $night->stepId,
+                'date'       => $night->ordersDate,
+            ]));
+        }
+
         // ✅ Date (Y-m-d). Default: yesterday
         $date = $request->filled('date') ? $request->date : now($tz)->subDay()->toDateString();
 
@@ -1110,6 +1123,28 @@ class MacroOutputController extends Controller
                         ->where('TIMESTAMP', 'LIKE', "%{$formattedDMY}%");
                 });
             });
+
+        // 🌙 Isa pang AND sa base query: sabay na lumiliit ang records, chip counts, Page list at pagination.
+        // Ang ipinapasa sa view ay integers, petsa at booleans lang — walang laman ng kahit anong row.
+        $nightFilter = null;
+        if ($night) {
+            $night->narrow($baseQuery);
+
+            $nightFilter = ['valid' => false];
+            if ($night->valid) {
+                $nightFilter = [
+                    'valid'        => true,
+                    'step_id'      => $night->stepId,
+                    'night_date'   => $night->nightDate,
+                    'orders_date'  => $night->ordersDate,
+                    // Bago ang Page / Filter / chip: ilan sa mga row ng gabi ang nasa petsang ito
+                    'shown'        => (clone $baseQuery)->count(),
+                    'total'        => $night->nightRowCount(),
+                    // Ang petsang na-parse ang ikinukumpara, hindi ang hilaw na text (`2026-10-4` = parehong araw)
+                    'date_differs' => Carbon::parse($date, $tz)->toDateString() !== $night->ordersDate,
+                ];
+            }
+        }
 
         // ✅ Page filter
         if ($request->filled('PAGE')) {
@@ -1286,7 +1321,7 @@ class MacroOutputController extends Controller
 
         return view('macro_output.index', compact(
             'records', 'pages', 'date', 'statusCounts', 'paginateOnlyWhenAll', 'canAccessWhitelist',
-            'canUseAiChecker'
+            'canUseAiChecker', 'nightFilter'
         ));
     }
 

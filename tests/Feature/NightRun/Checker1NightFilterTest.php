@@ -150,6 +150,299 @@ class Checker1NightFilterTest extends NightAstraTestCase
         return range($first, $first + $count - 1);
     }
 
+    /**
+     * Isa pang gabi (2026-10-03, mga order ng 2026-10-02 — hindi "kahapon") na may isang row para sa tao.
+     * @return array{0: int, 1: int} [id ng Astra step, id ng order]
+     */
+    private function secondNight(?int $stepId = null): array
+    {
+        $older  = ['ts_date' => '2026-10-02', 'TIMESTAMP' => '21:14 02-10-2026', 'PAGE' => 'Older Shop'];
+        $order  = $this->order($older);
+        $this->order($older); // parehong petsa at Page pero wala sa gabi: hindi dapat lumabas
+        $stepId = DB::table('night_run_steps')->insertGetId(array_filter([
+            'id' => $stepId, 'night_date' => '2026-10-03', 'kind' => 'astra', 'state' => 'finished', 'trigger' => 'schedule', 'rows_found' => 1,
+        ]));
+        NightAstraRow::create(['step_id' => $stepId, 'macro_output_id' => $order->id, 'state' => 'done', 'proceed' => false, 'code' => 'TO FIX', 'attempts' => 1]);
+
+        return [$stepId, $order->id];
+    }
+
+    /** "Not valid": status 200 at walang kahit isang row. */
+    private function assertNotValid(TestResponse $response, string $label): void
+    {
+        $this->assertSame(200, $response->status(), $label);
+        $this->assertSame([], $this->ids($response), $label);
+    }
+
+    /** Bawat SQL statement ng mga request sa loob ng `$run`. */
+    private function statements(callable $run): array
+    {
+        $statements = [];
+        DB::listen(function ($query) use (&$statements) {
+            $statements[] = $query->sql;
+        });
+        $run();
+
+        return $statements;
+    }
+
+    // ───────────── Ang mga row ng gabi ─────────────
+
+    public function test_S_06_1_the_link_lists_exactly_the_nights_rows(): void
+    {
+        $response = $this->page($this->link())->assertOk();
+
+        $this->assertSame($this->letters('AB'), $this->ids($response));
+    }
+
+    public function test_S_06_2_a_row_edited_since_is_still_listed_with_its_current_values(): void
+    {
+        MacroOutput::where('id', $this->o['A'])->update(['STATUS' => 'PROCEED', 'ADDRESS' => '99 Bagong Kalye']);
+
+        $response = $this->page($this->link())->assertOk();
+
+        $this->assertSame($this->letters('AB'), $this->ids($response));
+        $row = $this->rowMarkup($response, $this->o['A']);
+        $this->assertStringContainsString('<option value="PROCEED" selected>', $row);
+        $this->assertStringContainsString('>99 Bagong Kalye</textarea>', $row);
+    }
+
+    public function test_S_06_4_the_rows_found_equal_the_steps_for_person(): void
+    {
+        $forPerson = \App\Services\NightRunSummary::build(false)['nights'][0]['astra']['for_person'];
+
+        $this->assertSame(2, $forPerson);
+        $this->assertCount(2, $this->ids($this->page($this->link())));
+    }
+
+    public function test_S_06_5_a_row_with_an_empty_or_null_code_is_listed(): void
+    {
+        $this->o['G'] = $this->order()->id;
+        $this->o['H'] = $this->order()->id;
+        $this->nightRow('G', 'done', false, null);
+        $this->nightRow('H', 'done', false, '');
+
+        $this->assertSame($this->letters('ABGH'), $this->ids($this->page($this->link())));
+    }
+
+    public function test_S_06_6_a_deleted_order_is_absent_and_the_line_shows_the_gap(): void
+    {
+        MacroOutput::where('id', $this->o['B'])->delete();
+
+        $response = $this->page($this->link())->assertOk();
+
+        $this->assertSame($this->letters('A'), $this->ids($response));
+    }
+
+    public function test_S_06_7_a_row_moved_to_another_date_is_not_listed(): void
+    {
+        MacroOutput::where('id', $this->o['A'])->update(['ts_date' => '2026-10-02']);
+
+        $response = $this->page($this->link())->assertOk();
+
+        $this->assertSame($this->letters('B'), $this->ids($response));
+    }
+
+    public function test_S_06_8_more_than_100_rows_are_paged_and_keep_the_filter(): void
+    {
+        $bulk = $this->manyOrders(120, 'Bulk Shop');
+        DB::table('night_astra_rows')->insert(array_map(fn ($id) => [
+            'step_id' => $this->astra->id, 'macro_output_id' => $id, 'state' => 'done', 'proceed' => false, 'attempts' => 1,
+        ], $bulk));
+        $this->manyOrders(30, 'Plain Shop'); // mga order na wala sa gabi: hindi dapat lumabas
+
+        $first  = $this->page($this->link());
+        $second = $this->page($this->link(['page' => 2]));
+
+        $this->assertCount(100, $this->ids($first));
+        $this->assertCount(22, $this->ids($second));
+        $this->assertSame(1, preg_match('/href="([^"]*[?&;]page=2[^"]*)"/', $first->getContent(), $m), 'link to page 2');
+        $this->assertStringContainsString('night_step=' . $this->astra->id, $m[1]);
+        $expected = array_merge($bulk, [$this->o['A'], $this->o['B']]);
+        rsort($expected);
+        $this->assertSame($expected, array_merge($this->ids($first), $this->ids($second)));
+    }
+
+    // ───────────── Sa ilalim ng ibang filter ─────────────
+
+    public function test_S_07_1_chips_and_page_list_count_the_filtered_set(): void
+    {
+        $response = $this->page($this->link())->assertOk();
+
+        $this->assertSame(
+            ['TOTAL' => 2, 'PROCEED' => 0, 'CANNOT PROCEED' => 0, 'ODZ' => 0, 'BLANK' => 2, 'INCOMPLETE' => 1],
+            $this->chips($response)
+        );
+        $this->assertSame(['Alpha Shop', 'Beta Shop'], $this->pageList($response));
+    }
+
+    public function test_S_07_4_a_status_chip_on_top_is_the_intersection(): void
+    {
+        // Mag-isa: BLANK = A, B, E; INCOMPLETE = A, E. Ang gabi = A, B.
+        $this->assertSame($this->letters('AB'), $this->ids($this->page($this->link(['status_filter' => 'BLANK']))));
+        $this->assertSame($this->letters('A'), $this->ids($this->page($this->link(['status_filter' => 'INCOMPLETE']))));
+        $this->assertSame([], $this->ids($this->page($this->link(['status_filter' => 'ODZ']))));
+    }
+
+    public function test_S_07_6_without_a_date_the_steps_orders_date_is_used(): void
+    {
+        [$stepId, $orderId] = $this->secondNight();
+        $kept = ['PAGE' => 'Older Shop', 'checker' => '__BLANK__', 'status_filter' => 'BLANK', 'page' => '1'];
+
+        $redirect = $this->page(['night_step' => $stepId] + $kept);
+
+        $redirect->assertRedirect();
+        $target = $redirect->headers->get('Location');
+        $this->assertSame(self::URL, parse_url($target, PHP_URL_PATH));
+        parse_str((string) parse_url($target, PHP_URL_QUERY), $query);
+        ksort($query);
+        $expected = ['night_step' => (string) $stepId, 'date' => '2026-10-02'] + $kept;
+        ksort($expected);
+        $this->assertSame($expected, $query);
+
+        $response = $this->get($target)->assertOk();
+        $this->assertSame([$orderId], $this->ids($response));
+        $this->assertStringContainsString('name="date" value="2026-10-02"', $response->getContent());
+    }
+
+    public function test_S_07_7_another_date_gives_the_intersection_and_says_so(): void
+    {
+        // Ang A ay inilipat sa ibang petsa pagkatapos ng gabi; may isa pang order sa petsang iyon na wala sa gabi.
+        MacroOutput::where('id', $this->o['A'])->update(['ts_date' => '2026-10-02']);
+        $this->order(['ts_date' => '2026-10-02', 'TIMESTAMP' => '21:14 02-10-2026']);
+
+        $response = $this->page($this->link(['date' => '2026-10-02']))->assertOk();
+
+        $this->assertSame($this->letters('A'), $this->ids($response));
+        $this->assertSame([], $this->ids($this->page($this->link(['date' => '2026-10-01']))->assertOk()));
+    }
+
+    // ───────────── Hindi mapagkakatiwalaang parameter ─────────────
+
+    public function test_S_10_1_a_value_that_is_not_digits_shows_no_rows_and_the_notice(): void
+    {
+        foreach (['abc', '1abc', '1.5', '-1', '%2B1', '1e3', '0x1'] as $value) {
+            $this->assertNotValid($this->page('date=' . self::ORDERS . '&night_step=' . $value), $value);
+        }
+        // Walang `date`: hindi nire-redirect ang hindi valid; ang notice ay nasa default na petsa (kahapon = petsa ng fixture).
+        $this->assertNotValid($this->page('night_step=abc'), 'no date');
+    }
+
+    public function test_S_10_2_digits_that_name_no_step(): void
+    {
+        foreach (['0', '999999'] as $value) {
+            $this->assertNotValid($this->page($this->link(['night_step' => $value])), $value);
+        }
+    }
+
+    public function test_S_10_3_a_step_that_is_not_astra(): void
+    {
+        $import = NightRunStep::create([
+            'night_date' => self::NIGHT, 'kind' => 'macro_import_1', 'state' => 'failed', 'trigger' => 'schedule', 'reason' => 'IMPORT-REASON-MARK',
+        ]);
+        // Kahit may night row na nakakabit sa import step, hindi ito "gabi ng Astra".
+        NightAstraRow::create(['step_id' => $import->id, 'macro_output_id' => $this->o['F'], 'state' => 'done', 'proceed' => false, 'attempts' => 1]);
+
+        $response = $this->page($this->link(['night_step' => $import->id]));
+
+        $this->assertNotValid($response, 'import step');
+        $this->assertStringNotContainsString('IMPORT-REASON-MARK', $response->getContent());
+        $this->assertStringNotContainsString('macro_import_1', $response->getContent());
+    }
+
+    public function test_S_10_5_an_array_is_not_valid(): void
+    {
+        $this->assertSame(1, $this->astra->id); // ang array na na-cast sa 1 ay magpapakita sana ng gabing ito
+
+        foreach (['night_step[]=1', 'night_step[a]=1', 'night_step[]=1&night_step[]=2'] as $value) {
+            $this->assertNotValid($this->page('date=' . self::ORDERS . '&' . $value), $value);
+        }
+    }
+
+    public function test_S_10_6_very_long_digits_never_reach_the_database(): void
+    {
+        foreach (['99999999999999999999', str_repeat('1', 10000), '0000000001'] as $value) {
+            $statements = $this->statements(function () use ($value) {
+                $this->assertNotValid($this->page($this->link(['night_step' => $value])), substr($value, 0, 20));
+            });
+
+            foreach ($statements as $sql) {
+                $this->assertStringNotContainsString('night_run_steps', $sql);
+                $this->assertStringNotContainsString('night_astra_rows', $sql);
+            }
+        }
+    }
+
+    public function test_S_10_7_sql_text_is_not_valid_and_never_in_a_statement(): void
+    {
+        $before = DB::table('macro_output')->orderBy('id')->get()->toJson();
+
+        foreach (['1 OR 1=1', '1;DROP TABLE macro_output', "1' OR '1'='1"] as $value) {
+            $statements = $this->statements(function () use ($value) {
+                $this->assertNotValid($this->page($this->link(['night_step' => $value])), $value);
+            });
+
+            $this->assertNotEmpty($statements);
+            foreach ($statements as $sql) {
+                $this->assertStringNotContainsString($value, $sql);
+                $this->assertStringNotContainsString('DROP', $sql);
+            }
+        }
+
+        $this->assertSame($before, DB::table('macro_output')->orderBy('id')->get()->toJson());
+    }
+
+    public function test_S_10_8_any_mix_only_narrows(): void
+    {
+        MacroOutput::where('id', $this->o['A'])->update(['APP SCRIPT CHECKER' => 'TO FIX: city']);
+        $night = $this->letters('AB');
+        $mixes = [
+            ['date' => self::ORDERS],
+            ['date' => self::ORDERS, 'PAGE' => 'Alpha Shop'],
+            ['date' => self::ORDERS, 'PAGE' => 'Plain Shop'],
+            ['date' => self::ORDERS, 'checker' => '__BLANK__'],
+            ['date' => self::ORDERS, 'checker' => '__TO_FIX__'],
+            ['date' => self::ORDERS, 'status_filter' => 'BLANK'],
+            ['date' => self::ORDERS, 'status_filter' => 'PROCEED'],
+            ['date' => self::ORDERS, 'PAGE' => 'Alpha Shop', 'status_filter' => 'INCOMPLETE', 'checker' => '__TO_FIX__'],
+            ['date' => '2026-10-02'],
+        ];
+        $shown = 0;
+
+        foreach ($mixes as $mix) {
+            $without = $this->ids($this->page($mix));
+            foreach ([$this->astra->id, 'abc', '999999'] as $step) {
+                $with = $this->ids($this->page($mix + ['night_step' => $step])->assertOk());
+
+                $this->assertSame([], array_diff($with, $night), json_encode($mix) . " step {$step}: not a night row");
+                $this->assertSame([], array_diff($with, $without), json_encode($mix) . " step {$step}: wider than without");
+                $shown += count($with);
+            }
+        }
+
+        // Ang mga mix na may totoong step ay may ipinapakita: A,B + A + (wala) + B + A + A,B + (wala) + A + (wala) = 8.
+        $this->assertSame(8, $shown);
+    }
+
+    public function test_S_10_10_leading_zeros_read_as_the_step(): void
+    {
+        [$stepId, $orderId] = $this->secondNight(7);
+        $this->assertSame(7, $stepId);
+
+        $response = $this->page(['date' => '2026-10-02', 'night_step' => '007'])->assertOk();
+
+        $this->assertSame([$orderId], $this->ids($response));
+    }
+
+    public function test_S_11_1_a_non_ceo_gets_the_same_rows(): void
+    {
+        $encoder = $this->page($this->link(), 'Data Encoder')->assertOk();
+        $ceo     = $this->page($this->link(), 'CEO')->assertOk();
+
+        $this->assertSame($this->letters('AB'), $this->ids($encoder));
+        $this->assertSame($this->ids($ceo), $this->ids($encoder));
+    }
+
     // ───────────── Hindi nagbabago kapag walang night_step ─────────────
 
     public function test_S_10_4_empty_or_absent_is_the_page_as_today(): void
