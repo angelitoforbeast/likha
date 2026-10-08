@@ -422,7 +422,8 @@ class AstraEncoder
      * Dry run ng isang row: ang parehong tawag sa model, tools, rules at gate ng processRow(), pero WALANG sulat —
      * ang row na ibinigay ay nasa memory lang (maaaring ibinalik sa itsura nito bago ang gabi) at hindi sine-save.
      * Ang $rules ay ibinibigay ng tumatawag: hindi binabasa ang switch.
-     * Return: ['ok', 'decision' (ang buong pasya ng rules, o null), 'usage', 'error' (lastError)].
+     * Kapag $webFirst: ang request at ang rules ng mode `2` (web search muna), na hindi rin binabasa ang switch.
+     * Return: ['ok', 'decision' (ang buong pasya ng rules, o null), 'usage', 'error' (lastError), 'web_forced'].
      */
     public function dryRunRow(MacroOutput $row, array $maps, ?string $host = null, string $rules = 'new', bool $webFirst = false): array
     {
@@ -441,6 +442,8 @@ class AstraEncoder
             'decision' => $decided[3] ?? null,
             'usage'    => $this->usage,
             'error'    => $this->lastError,
+            // Mode `2` lang: napilit ba ang web search sa unang round (null sa ibang mode o kapag walang sagot).
+            'web_forced' => $this->webForced,
         ];
     }
 

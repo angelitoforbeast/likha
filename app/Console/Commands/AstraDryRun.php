@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\MacroOutput;
+use App\Services\AstraAddressRules;
 use App\Services\AstraEncoder;
 use App\Services\MacroChecker;
 use Illuminate\Console\Command;
@@ -28,10 +29,12 @@ class AstraDryRun extends Command
     protected $signature = 'astra:dry-run {--night= : Night date, YYYY-MM-DD} {--step= : Night step id}
         {--rows=held : held (finished without PROCEED that night), proceeded, or all}
         {--limit=200 : Most rows to run}
-        {--ids= : Only these macro_output ids, comma separated}';
+        {--ids= : Only these macro_output ids, comma separated}
+        {--mode=rules : rules (the new address rules) or web-first (the new address rules + web search first)}
+        {--compare= : Path to an earlier report JSON of this command; adds a table of outcome then against outcome now}';
     protected $description = 'Dry run: the whole new Astra (real model calls) on a past night\'s rows, nothing is written to the orders';
 
-    private const BAD_OPTIONS = 'Give exactly one of --night=YYYY-MM-DD or --step=<id> (an existing Astra night), --rows=held|proceeded|all, --limit=<1 or more>, --ids=<numbers, comma separated>.';
+    private const BAD_OPTIONS = 'Give exactly one of --night=YYYY-MM-DD or --step=<id> (an existing Astra night), --rows=held|proceeded|all, --limit=<1 or more>, --ids=<numbers, comma separated>, --mode=rules|web-first, --compare=<path to an earlier report JSON>.';
     private const SIX         = ['FULL NAME', 'PHONE NUMBER', 'ADDRESS', 'PROVINCE', 'CITY', 'BARANGAY'];
     private const MAX_ERRORS_IN_A_ROW = 3;
     /** Kapareho ng night job, para pareho ang hangganan ng bawat tawag. */
@@ -48,6 +51,20 @@ class AstraDryRun extends Command
         'blank'   => 'a required field is blank (name, phone or address)',
         'gate'    => 'the final check (item, COD, shop details, blacklists)',
     ];
+    /** Dagdag na dahilan sa web-first mode lang, para hindi magbago ang report ng --mode=rules. */
+    private const WEB_REASONS = [
+        'two_lines' => 'two different lines',
+        'web'       => 'barangay from the web, waiting for a person',
+    ];
+    private const WEB_CAVEAT = 'The setting for barangays from the web is not read: in this run no barangay from the web proceeds; the "if allowed" lines count what each value of the setting would let through.';
+    private const BASES       = ['official', 'several', 'single', 'none'];
+    private const CONFIDENCES = ['high', 'medium', 'low'];
+    /** Pinakamalaking report file na babasahin ng --compare. */
+    private const COMPARE_MAX_BYTES = 20000000;
+
+    /** --mode=web-first: ang request at ang rules ng mode `2` ng switch, anuman ang nakaimbak. */
+    private bool $webFirst = false;
+
     private const CAVEATS = [
         'The chat and the earlier conversation are stored as one text without a time per message, so messages written after the night step started could not be left out: the model read both as they are today.',
         'Item, COD, page, shop details, customer details, blacklists and the J&T list are read as they are today; a same-phone order of the same date is not a hold under the new rules and is not checked.',
@@ -63,6 +80,15 @@ class AstraDryRun extends Command
         $step = $opts === null ? null : $this->findStep();
         if ($step === null) {
             $this->line(self::BAD_OPTIONS);
+
+            return self::FAILURE;
+        }
+
+        $this->webFirst = $opts['mode'] === 'web-first';
+        // Ang naunang report ay binabasa bago ang unang tawag: ang maling path ay hindi dapat matuklasan pagkatapos ng gastos.
+        $earlier = $opts['compare'] === null ? null : $this->readEarlier($opts['compare']);
+        if ($opts['compare'] !== null && $earlier === null) {
+            $this->line('Not started: the --compare file could not be read as a report of this command.');
 
             return self::FAILURE;
         }
@@ -99,6 +125,7 @@ class AstraDryRun extends Command
         $this->line('Astra dry run (nothing is written to the orders or the night tables)');
         $this->line('Night: ' . substr((string) $step->night_date, 0, 10) . ' · step id: ' . (int) $step->id . ' · rows: ' . $opts['rows']
             . ' · selected: ' . count($picked) . ' · model: ' . $engine['model'] . ' · effort: ' . $engine['effort']);
+        if ($this->webFirst) $this->line('Mode: the new address rules + web search first');
 
         // Ang tagal ng mga row na ito noong gabi ang pinakamalapit na tantiya: dito ay sunod-sunod sila, hindi dalawa nang sabay.
         $nightSeconds = (int) round(array_sum(array_map(fn ($r) => (int) $r->duration_ms, $picked)) / 1000);
@@ -124,7 +151,7 @@ class AstraDryRun extends Command
 
             $this->line('row ' . $oid . ': ' . match ($row['outcome']) {
                 'would_proceed' => 'would proceed',
-                'held'          => 'held - ' . self::REASONS[$row['reason']],
+                'held'          => 'held - ' . $this->reasons()[$row['reason']],
                 'api_error'     => 'API error (' . $row['error'] . ')',
                 default         => 'not tried (' . $row['reason'] . ')',
             });
@@ -141,6 +168,7 @@ class AstraDryRun extends Command
 
         $report['elapsed_seconds'] = (int) round(microtime(true) - $t0);
         $summary = $this->summarize($report);
+        if ($earlier !== null) $summary['compare'] = $this->compareWith($earlier, $report['rows']);
         $this->writeFile($file, $report + ['summary' => $summary]);
         foreach ($this->lines($report, $summary) as $line) $this->line($line);
         $this->line('Report file: storage/app/astra-dry-run/' . basename($file));
@@ -157,8 +185,12 @@ class AstraDryRun extends Command
         if (!is_string($rows) || !in_array($rows, ['held', 'proceeded', 'all'], true)) return null;
         if (!is_string($limit) || preg_match('/\A[1-9]\d{0,5}\z/', $limit) !== 1) return null;
         if ($ids !== null && (!is_string($ids) || preg_match('/\A\d{1,12}(,\d{1,12})*\z/', $ids) !== 1)) return null;
+        $mode    = $this->option('mode');
+        $compare = $this->option('compare');
+        if (!is_string($mode) || !in_array($mode, ['rules', 'web-first'], true)) return null;
+        if ($compare !== null && (!is_string($compare) || trim($compare) === '')) return null;
 
-        return ['rows' => $rows, 'limit' => (int) $limit, 'ids' => $ids === null ? null : array_values(array_unique(array_map('intval', explode(',', $ids))))];
+        return ['rows' => $rows, 'limit' => (int) $limit, 'ids' => $ids === null ? null : array_values(array_unique(array_map('intval', explode(',', $ids)))), 'mode' => $mode, 'compare' => $compare];
     }
 
     /** Ang step ng gabi (kind = astra), gaya ng replay; null kapag mali ang options o walang ganoong step. */
@@ -214,13 +246,16 @@ class AstraDryRun extends Command
         // Blangko ang STATUS noong pinili ng gabi ang row. Hindi sine-save ang model na ito kahit kailan.
         $order->setAttribute('STATUS', null);
 
-        $res = $encoder->dryRunRow($order, $maps, $host, 'new');
+        $res = $encoder->dryRunRow($order, $maps, $host, 'new', $this->webFirst);
+        $rowSearches = 0;
         foreach ($res['usage'] as $u) {
             $report['model_calls']++;
             $report['tokens_in']    += (int) $u['in'];
             $report['tokens_out']   += (int) $u['out'];
             $report['web_searches'] += (int) $u['searches'];
+            $rowSearches            += (int) $u['searches'];
         }
+        if ($this->webFirst) $out += ['web_searches' => $rowSearches, 'web_forced' => $res['web_forced'] === true];
         if (!$res['ok']) {
             $e = $res['error'];
 
@@ -240,23 +275,89 @@ class AstraDryRun extends Command
             'texts'        => $this->textsThen($detail, $replay['hay_chars']),
         ];
         if (!$d['proceed']) {
-            return $out + ['outcome' => 'held', 'reason' => match (true) {
+            $reason = match (true) {
                 $replay['model_needs_human'] && $d['needs_human'] => 'flag',
                 !in_array($replay['model_intent'], ['order', 'cancel', 'inquiry_only'], true) => 'intent',
                 $replay['label_source'] === 'none' => 'no_line',
+                !empty($replay['two_lines'])       => 'two_lines',
                 $d['line'] === null                => 'guard',
                 !$d['all_filled']                  => 'blank',
+                !empty($replay['web_only_obstacle']) => 'web',
                 default                            => 'gate',
-            }];
+            };
+            $held = $out + ['outcome' => 'held', 'reason' => $reason];
+            // Ang row na ang barangay mula sa web na lang ang hadlang: ang isinulat sanang line ay ikinukumpara rin sa staff.
+            if ($reason === 'web') {
+                $held += ['web_basis' => (string) $replay['web_basis'], 'confidence' => (string) $replay['confidence']] + $this->againstStaff($d['line'], $staff['line']);
+            }
+
+            return $held;
         }
 
+        return $out + ['outcome' => 'would_proceed'] + $this->againstStaff($d['line'], $staff['line']);
+    }
+
+    /** Ang line ng pasya laban sa line ng row ngayon: ['compare' => equal|differs|cannot_compare, 'differs' => mga bahagi]. */
+    private function againstStaff(array $line, array $staffLine): array
+    {
         $differs = [];
         foreach (['province', 'city', 'barangay'] as $i => $part) {
-            if (self::plain((string) $d['line'][$i]) !== self::plain($staff['line'][$i])) $differs[] = $part;
+            if (self::plain((string) $line[$i]) !== self::plain($staffLine[$i])) $differs[] = $part;
         }
-        $comparable = !in_array('', array_map('trim', $staff['line']), true);
+        $comparable = !in_array('', array_map('trim', $staffLine), true);
 
-        return $out + ['outcome' => 'would_proceed', 'compare' => !$comparable ? 'cannot_compare' : ($differs ? 'differs' : 'equal'), 'differs' => $comparable ? $differs : []];
+        return ['compare' => !$comparable ? 'cannot_compare' : ($differs ? 'differs' : 'equal'), 'differs' => $comparable ? $differs : []];
+    }
+
+    /** Ang mga dahilan ng report: sa web-first mode ay may dalawang dagdag. */
+    private function reasons(): array
+    {
+        return $this->webFirst ? self::REASONS + self::WEB_REASONS : self::REASONS;
+    }
+
+    /**
+     * Ang naunang report: [id => proceed|web|held|none]. Ang file ay data lang: id at nakapirming salita ang kinukuha,
+     * wala nang iba. Null kapag hindi mabasa o hindi report ng command na ito.
+     */
+    private function readEarlier(string $path): ?array
+    {
+        if (!is_file($path) || !is_readable($path) || filesize($path) > self::COMPARE_MAX_BYTES) return null;
+        $json = json_decode((string) file_get_contents($path), true);
+        if (!is_array($json) || ($json['command'] ?? null) !== 'astra:dry-run' || !is_array($json['rows'] ?? null)) return null;
+
+        $earlier = [];
+        foreach ($json['rows'] as $r) {
+            if (!is_array($r) || !is_int($r['id'] ?? null)) continue;
+            $earlier[$r['id']] = self::verdict($r);
+        }
+
+        return $earlier;
+    }
+
+    /** Ang kinalabasan ng isang row ng report sa apat na salita: proceed | web (barangay mula sa web, naghihintay) | held | none (walang pasya). */
+    private static function verdict(array $r): string
+    {
+        return match (true) {
+            ($r['outcome'] ?? null) === 'would_proceed' => 'proceed',
+            ($r['outcome'] ?? null) === 'held'          => ($r['reason'] ?? null) === 'web' ? 'web' : 'held',
+            default                                     => 'none',
+        };
+    }
+
+    /** Para sa mga row na nasa parehong report: kinalabasan noon laban sa kinalabasan ngayon, ayon sa id. */
+    private function compareWith(array $earlier, array $rows): array
+    {
+        $c = ['in_both' => 0, 'same' => [], 'no_verdict' => [], 'changes' => ['held>proceed' => [], 'held>web' => [], 'proceed>held' => []]];
+        foreach ($rows as $r) {
+            if (!isset($earlier[$r['id']])) continue;
+            $c['in_both']++;
+            [$then, $now] = [$earlier[$r['id']], self::verdict($r)];
+            if ($then === 'none' || $now === 'none') $c['no_verdict'][] = $r['id'];
+            elseif ($then === $now)                 $c['same'][] = $r['id'];
+            else                                    $c['changes'][$then . '>' . $now][] = $r['id'];
+        }
+
+        return $c;
     }
 
     /**
@@ -297,9 +398,9 @@ class AstraDryRun extends Command
             'web_searches'    => 0,
             'elapsed_seconds' => 0,
             'stopped'         => null,
-            'caveats'         => self::CAVEATS,
+            'caveats'         => $this->webFirst ? array_merge(self::CAVEATS, [self::WEB_CAVEAT]) : self::CAVEATS,
             'rows'            => [],
-        ];
+        ] + ($this->webFirst ? ['mode' => 'web-first'] : []);
     }
 
     /** Ang mga bilang at listahan ng id ng report, mula sa mga row na natapos na. */
@@ -307,9 +408,9 @@ class AstraDryRun extends Command
     {
         $s = [
             'tried' => 0, 'not_tried' => [], 'would_proceed' => [], 'held' => [], 'api_errors' => [], 'api_error_classes' => [],
-            'held_by_reason' => array_fill_keys(array_keys(self::REASONS), []),
+            'held_by_reason' => array_fill_keys(array_keys($this->reasons()), []),
             'held_that_night' => ['tried' => 0, 'would_proceed' => [], 'still_held' => [], 'still_held_staff_proceed' => []],
-            'proceeded_that_night' => ['tried' => 0, 'would_proceed' => [], 'would_hold' => [], 'would_hold_by_reason' => array_fill_keys(array_keys(self::REASONS), [])],
+            'proceeded_that_night' => ['tried' => 0, 'would_proceed' => [], 'would_hold' => [], 'would_hold_by_reason' => array_fill_keys(array_keys($this->reasons()), [])],
             'would_proceed_staff' => ['PROCEED' => [], 'CANNOT PROCEED' => [], 'other' => []],
             'would_proceed_line' => ['equal' => [], 'differs' => [], 'cannot_compare' => [], 'equal_and_staff_proceed' => []],
             'would_proceed_differs_in' => ['province' => 0, 'city' => 0, 'barangay' => 0],
@@ -349,8 +450,50 @@ class AstraDryRun extends Command
             if ($r['compare'] === 'equal' && $r['staff_status'] === 'PROCEED') $s['would_proceed_line']['equal_and_staff_proceed'][] = $id;
             foreach ($r['differs'] as $part) $s['would_proceed_differs_in'][$part]++;
         }
+        if ($this->webFirst) $s['web_first'] = $this->summarizeWebFirst($report['rows']);
 
         return $s;
+    }
+
+    /** Ang dagdag ng web-first mode: ang mga row na may barangay mula sa web, ayon sa basehan at sa confidence ng model. */
+    private function summarizeWebFirst(array $rows): array
+    {
+        $group = fn (): array => ['rows' => [], 'equal' => [], 'differs' => [], 'differs_in' => ['province' => 0, 'city' => 0, 'barangay' => 0], 'cannot_compare' => [], 'staff_cannot_proceed' => []];
+        $w = [
+            'proceed_outright' => [], 'web_wait' => [], 'not_forced' => [],
+            'by_basis'      => array_map($group, array_fill_keys(self::BASES, null)),
+            'by_confidence' => array_map($group, array_fill_keys(self::CONFIDENCES, null)),
+            'if_allowed'    => array_fill_keys(['official', 'several', 'single'], ['would_proceed' => 0, 'equal_to_staff' => 0]),
+            'web_searches_per_row' => ['rows' => 0, 'average' => 0.0, 'maximum' => 0],
+        ];
+        $searches = [];
+        foreach ($rows as $r) {
+            if (!in_array($r['outcome'], ['would_proceed', 'held'], true)) continue;
+            $searches[] = (int) $r['web_searches'];
+            if (!$r['web_forced']) $w['not_forced'][] = $r['id'];
+            $web = $r['outcome'] === 'held' && $r['reason'] === 'web';
+            if ($r['outcome'] === 'would_proceed') $w['proceed_outright'][] = $r['id'];
+            if ($r['outcome'] === 'would_proceed' || $web) {
+                foreach ($w['if_allowed'] as $setting => $_) {
+                    if ($web && !AstraAddressRules::webMayProceed($r['web_basis'], $r['confidence'], $setting)) continue;
+                    $w['if_allowed'][$setting]['would_proceed']++;
+                    if ($r['compare'] === 'equal') $w['if_allowed'][$setting]['equal_to_staff']++;
+                }
+            }
+            if (!$web) continue;
+            $w['web_wait'][] = $r['id'];
+            foreach ([['by_basis', $r['web_basis']], ['by_confidence', $r['confidence']]] as [$split, $key]) {
+                $w[$split][$key]['rows'][] = $r['id'];
+                $w[$split][$key][$r['compare']][] = $r['id'];
+                foreach ($r['differs'] as $part) $w[$split][$key]['differs_in'][$part]++;
+                if ($r['staff_status'] === 'CANNOT PROCEED') $w[$split][$key]['staff_cannot_proceed'][] = $r['id'];
+            }
+        }
+        if ($searches) {
+            $w['web_searches_per_row'] = ['rows' => count($searches), 'average' => round(array_sum($searches) / count($searches), 1), 'maximum' => max($searches)];
+        }
+
+        return $w;
     }
 
     private function lines(array $report, array $s): array
@@ -370,7 +513,7 @@ class AstraDryRun extends Command
             $n('Rows not tried (the order no longer exists, or it has no chat text)', $s['not_tried']),
             'What would hold each held row (the first reason that stops it):',
         );
-        foreach (self::REASONS as $key => $label) $out[] = $n('  - ' . $label, $s['held_by_reason'][$key]);
+        foreach ($this->reasons() as $key => $label) $out[] = $n('  - ' . $label, $s['held_by_reason'][$key]);
 
         if ($report['rows_option'] !== 'proceeded') {
             array_push($out,
@@ -386,7 +529,43 @@ class AstraDryRun extends Command
                 '  - would proceed again: ' . count($s['proceeded_that_night']['would_proceed']),
                 $n('  - the new process would hold instead', $s['proceeded_that_night']['would_hold']),
             );
-            foreach (self::REASONS as $key => $label) $out[] = $n('      - ' . $label, $s['proceeded_that_night']['would_hold_by_reason'][$key]);
+            foreach ($this->reasons() as $key => $label) $out[] = $n('      - ' . $label, $s['proceeded_that_night']['would_hold_by_reason'][$key]);
+        }
+        if (isset($s['web_first'])) {
+            $w = $s['web_first'];
+            array_push($out,
+                'Web search first:',
+                $n('  - would PROCEED outright', $w['proceed_outright']),
+                $n('  - would be written with a barangay from the web and wait for a person', $w['web_wait']),
+            );
+            foreach (['by_basis' => 'by web_basis', 'by_confidence' => 'by the model\'s confidence'] as $split => $title) {
+                $out[] = '  Those rows ' . $title . ', against the row as it is now (after staff):';
+                foreach ($w[$split] as $key => $g) {
+                    $out[] = $n('    - ' . $key, $g['rows']);
+                    if (!$g['rows']) continue;
+                    $out[] = '        province, city and barangay equal to the row now: ' . count($g['equal'])
+                        . ' · a part differs: ' . count($g['differs']) . ' (province ' . $g['differs_in']['province'] . ', city ' . $g['differs_in']['city'] . ', barangay ' . $g['differs_in']['barangay'] . ')'
+                        . ' · cannot compare: ' . count($g['cannot_compare']);
+                    $out[] = $n('        staff status now CANNOT PROCEED', $g['staff_cannot_proceed']);
+                }
+            }
+            $out[] = '  If barangays from the web were allowed to proceed (low confidence never is):';
+            foreach ($w['if_allowed'] as $setting => $t) {
+                $out[] = '    - at ' . $setting . ': ' . $t['would_proceed'] . ' would proceed, ' . $t['equal_to_staff'] . ' of those equal to the row now';
+            }
+            $out[] = $n('  - rows where web search could not be forced', $w['not_forced']);
+            $out[] = '  - web searches per row: average ' . number_format($w['web_searches_per_row']['average'], 1) . ', maximum ' . $w['web_searches_per_row']['maximum'];
+        }
+        if (isset($s['compare'])) {
+            $c = $s['compare'];
+            $words = ['proceed' => 'would proceed', 'web' => 'barangay from the web', 'held' => 'held'];
+            $out[] = 'Against the earlier report (rows in both: ' . $c['in_both'] . '):';
+            foreach ($c['changes'] as $change => $ids) {
+                [$then, $now] = explode('>', $change);
+                $out[] = $n('  - ' . $words[$then] . ' then, ' . $words[$now] . ' now', $ids);
+            }
+            $out[] = '  - same outcome: ' . count($c['same']);
+            $out[] = $n('  - no verdict in one of the two (API error or not tried)', $c['no_verdict']);
         }
 
         array_push($out,
