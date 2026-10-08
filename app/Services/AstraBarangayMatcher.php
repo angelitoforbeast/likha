@@ -87,6 +87,8 @@ class AstraBarangayMatcher
      *  - kung bahagi ng pangalan ng city o province ($placeNames, mga key): may barangay word sa unahan; ang ulit ng pangalan
      *    ng bayan o province (address na dalawang beses isinulat) ay hindi ibang barangay.
      * Ang label na kapareho ang key ng kinukumpirma (dalawang sulat ng iisang barangay) ay hindi "iba".
+     * Dito lang, ang slash at ang gitling (may espasyo man o wala) ay espasyo, gaya ng sa key ng label: ang "Camposanto 1 - Sur"
+     * at "Caddangan/Limbauan" na isinulat gaya ng nasa list ay nakikita. Hindi ito ginagamit sa pagkumpirma.
      */
     public static function namesAnother(string $text, string $label, array $cityLabels, array $placeNames): bool
     {
@@ -137,10 +139,12 @@ class AstraBarangayMatcher
             if ($index === []) return false;
 
             $nw       = explode(' ', $own[0]);
-            $segments = self::segments($text);
+            $segments = self::segments($text, true);
             foreach ($segments as $si => $seg) {
-                // Ang initial na may tuldok ("Claro M. Recto") ay ang letra mismo sa pangalan ng label.
-                $w = $seg['init'] === [] ? $seg['w'] : array_map(static fn (string $x): string => rtrim($x, '.'), $seg['w']);
+                // Ang initial na may tuldok ("Claro M. Recto") ay ang letra mismo sa pangalan ng label, o ang numero nito kapag
+                // Roman numeral ang letra: ang key ng "I. S. CRUZ" ay "1 s cruz".
+                $w = $seg['w'];
+                foreach ($seg['init'] as $at => $_) $w[$at] = $seg['alt'][$at];
                 foreach ($w as $i => $word) {
                     if (!isset($index[$word])) continue;
                     foreach ($index[$word] as [$words, $kind, $mine]) {
@@ -300,7 +304,7 @@ class AstraBarangayMatcher
      * `soft` (index ng salitang may malambot na hangganan sa unahan), `sym` (index ng "salitang" puro simbolo),
      * `nl` (nagsisimula ba ang segment sa bagong linya).
      */
-    private static function segments(string $text): array
+    private static function segments(string $text, bool $joinDashes = false): array
     {
         $t = self::scrub($text);
         // Ang control character (kasama ang sarili naming marka) ay hangganan, hindi espasyo: walang natatawid.
@@ -309,6 +313,8 @@ class AstraBarangayMatcher
         $t = preg_replace('/(?<![\p{L}\p{N}])(\p{N}{1,3}:)(?!\p{N})/u', "\n$1", $t) ?? '';
         $t = preg_replace('/[\p{Zs}\t#:]/u', ' ', $t) ?? '';
         $t = str_replace(["\u{2013}", "\u{2014}"], '-', $t);
+        // Para lang sa paghahanap ng IBANG barangay: ang slash at gitling ay espasyo, hindi hangganan.
+        if ($joinDashes) $t = strtr($t, '/-', '  ');
         if (strpbrk($t, ')]') !== false) {
             $open = 0; // mga pambukas na bracket ng linyang ito na wala pang pansara
             $t = preg_replace_callback('/[(\[\r\n]|(?<![\p{L}\p{N}])\p{N}{1,3}\.? ?[)\]]|[)\]]/u', static function ($m) use (&$open) {

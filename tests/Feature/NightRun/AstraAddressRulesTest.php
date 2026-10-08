@@ -2392,6 +2392,53 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $this->assertSame($want, $seen);
     }
 
+    public function test_S_26_25_another_barangay_written_with_a_slash_a_dash_or_dotted_initials_is_seen(): void
+    {
+        $burgos   = ['TARLAC', 'MONCADA', 'BURGOS'];
+        $sur      = ['TARLAC', 'MONCADA', 'CAMPOSANTO 1 - SUR'];
+        $alibagu  = ['ISABELA', 'ILAGAN', 'ALIBAGU'];
+        $bungad   = ['ISABELA', 'ISABELA-SAN-PABLO', 'BUNGAD'];
+        $culao    = ['CAGAYAN', 'CAGAYAN-CLAVERIA', 'CULAO'];
+        $jampason = ['MISAMIS-ORIENTAL', 'JASAAN', 'JAMPASON'];
+        $this->assertLinesInList(
+            $burgos, $sur, $alibagu, ['ISABELA', 'ILAGAN', 'CENTRO - SAN ANTONIO'], $bungad, ['ISABELA', 'ISABELA-SAN-PABLO', 'CADDANGAN/LIMBAUAN'],
+            $culao, ['CAGAYAN', 'CAGAYAN-CLAVERIA', 'CAMALAGGOAN/D LEANO'], $jampason, ['MISAMIS-ORIENTAL', 'JASAAN', 'I. S. CRUZ']
+        );
+        // Ang sulat ng list na may gitling ay hindi kumpirmasyon ng sarili nitong label: hindi iyon binago rito.
+        $alone = $this->textCheck($sur, 'Brgy Camposanto 1 - Sur, Moncada');
+
+        $this->assertSame([
+            'a dash with spaces, after a barangay word' => self::NONE,
+            'a dash with spaces, no barangay word'      => self::NONE,
+            'a dash without spaces'                     => self::NONE,
+            'a dash between two names'                  => self::NONE,
+            'a slash'                                   => self::NONE,
+            'a slash with spaces'                       => self::NONE,
+            'a slash before an initial'                 => self::NONE,
+            'dotted initials, the second one asked'     => self::NONE,
+            'dotted initials, without the barangay word' => self::NONE,
+            // Kumpirmado pa rin (o gaya ng dati).
+            'the dashed label alone'                    => self::NONE,
+            'a street with a dash before the city'      => self::PHRASE,
+            'a slash that names no barangay'            => self::PHRASE,
+            'one barangay with an initial in the street' => self::PHRASE,
+        ], [
+            'a dash with spaces, after a barangay word' => $this->textCheck($burgos, 'Brgy Burgos, Brgy Camposanto 1 - Sur, Moncada'),
+            'a dash with spaces, no barangay word'      => $this->textCheck($burgos, 'Brgy Burgos, Camposanto 1 - Sur, Moncada'),
+            'a dash without spaces'                     => $this->textCheck($burgos, 'Brgy Burgos, Camposanto 1-Sur, Moncada'),
+            'a dash between two names'                  => $this->textCheck($alibagu, 'Brgy Alibagu, Brgy Centro - San Antonio, Ilagan'),
+            'a slash'                                   => $this->textCheck($bungad, 'Brgy Bungad, Brgy Caddangan/Limbauan, San Pablo'),
+            'a slash with spaces'                       => $this->textCheck($bungad, 'Brgy Bungad, Caddangan / Limbauan, San Pablo'),
+            'a slash before an initial'                 => $this->textCheck($culao, 'Brgy Culao, Brgy Camalaggoan/D Leano, Claveria'),
+            'dotted initials, the second one asked'     => $this->textCheck($jampason, 'Brgy I. S. CRUZ, Brgy JAMPASON, JASAAN'),
+            'dotted initials, without the barangay word' => $this->textCheck($jampason, 'I. S. Cruz, Brgy Jampason, Jasaan'),
+            'the dashed label alone'                    => $alone,
+            'a street with a dash before the city'      => $this->textCheck($burgos, 'Brgy Burgos, 12 Luna-Aquino St - Moncada, Tarlac'),
+            'a slash that names no barangay'            => $this->textCheck($bungad, 'Brgy Bungad, c/o Aling Nena, San Pablo, Isabela'),
+            'one barangay with an initial in the street' => $this->textCheck($jampason, '12 I. Santos St, Brgy Jampason, Jasaan'),
+        ]);
+    }
+
     public function test_S_26_9_the_mapper_picks_the_exact_number_and_never_a_neighbour(): void
     {
         $this->assertLinesInList(self::COTABATO_POB, ['COTABATO', 'COTABATO-CITY', 'POBLACION I'], self::COTABATO_POB_2);
