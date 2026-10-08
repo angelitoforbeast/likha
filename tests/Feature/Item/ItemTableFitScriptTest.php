@@ -615,6 +615,11 @@ class ItemTableFitScriptTest extends TestCase
         $this->assertSame(['proj_pct_computed', 'proj_pct_last_7d', 'proj_pct_last_3d', 'proj_pct_last_day'], array_column(array_slice($out, 0, 4), 'sortKey'));
         $this->assertSame(['12.3%', '8.0%', '5.5%', '1.0%'], array_column(array_slice($out, 0, 4), 'text'));
         $this->assertSame(['12.5%', '9.0%', '—', '2.5%', '—', '—'], array_column(array_slice($out, 4), 'text'));
+        // Ang catalog id ng bawat period: sa id na ito nakatali ang mga panuntunan ng kulay ng column settings.
+        $this->assertSame(
+            ['proj_pct', 'proj_pct_7d', 'proj_pct_3d', 'proj_pct_1d', null],
+            array_column($this->js([['periodId', '1m'], ['periodId', '7d'], ['periodId', '3d'], ['periodId', '1d'], ['periodId', 'x']]), 'value')
+        );
     }
 
     public function test_S_41_3_the_switch_offers_only_the_visible_periods_and_four_ids_stay_four(): void

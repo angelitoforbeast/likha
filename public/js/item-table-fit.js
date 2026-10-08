@@ -195,6 +195,12 @@
     for (var i = 0; i < offered.length; i++) if (offered[i].key === wanted) return wanted;
     return offered.length ? offered[0].key : null;
   }
+  // Ang catalog id ng isang period (null kapag hindi kilala): dito nakatali ang mga panuntunan ng kulay ng settings.
+  function periodId(period) {
+    var id = null;
+    PERIODS.forEach(function (x) { if (x.key === period) id = x.id; });
+    return id;
+  }
   // Ang value ng Prof.% ng isang row para sa isang period. kind 'page' = row ng isang page (ang 1M nito ay
   // kinukuwenta mula sa profit at gross); kung hindi, aggregate row (item o TOTAL).
   function profPct(row, period, kind) {
@@ -424,6 +430,7 @@
     periodsOf: periodsOf,
     pickPeriod: pickPeriod,
     profPct: profPct,
+    periodId: periodId,
     fit: fit,
     turnOn: turnOn,
     turnOff: turnOff,

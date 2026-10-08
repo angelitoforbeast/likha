@@ -246,6 +246,9 @@
         if (was && now && this.sortCol === was.sort) this.sortCol = now.sort;
       },
       fitPct(row, col, kind){ return ItemTableFit.profPct(row, col.period, kind).text; },
+      // Ang mga panuntunan ng kulay ng column settings ay nakatali sa apat na catalog id ng Prof.%, hindi sa
+      // pinagsamang column: para sa mga iyon, ang column ng aktibong period ang ginagamit sa paghahanap.
+      fitRuleCol(col){ return col.id === 'prof_pct' ? { id:ItemTableFit.periodId(col.period) } : col; },
       // Ang format ng pera ng table na ito lang; ang money() at md() ng page ay hindi ginagalaw.
       tmoney(v, total){ return ItemTableFit.tableMoney(v, total === true).text; },
       tmd(v, total){ return (v == null || isNaN(Number(v))) ? '—' : this.tmoney(v, total); },

@@ -996,6 +996,14 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertSame(1, substr_count($table, 'x-text="fitPct(A, col)"'));
         $this->assertSame(1, substr_count($table, "x-text=\"fitPct(row, col, 'page')\""));
         $this->assertSame(1, substr_count($table, 'x-text="fitPct(tot(), col)"'));
+        // Ang kulay ng page rows (mga panuntunan ng column settings) ay hinahanap sa catalog id ng aktibong period,
+        // hindi sa pangalan ng pinagsamang column: kung hindi, mawawala ang kulay ng Prof.% sa table na ito.
+        $this->assertSame(1, substr_count($table, 'cellFormatStyle(fitRuleCol(col).id, cellValueFor(fitRuleCol(col), row), row)'));
+        $this->assertStringNotContainsString('cellFormatStyle(col.id', $table);
+        $this->assertStringContainsString("fitRuleCol(col){ return col.id === 'prof_pct' ? { id:ItemTableFit.periodId(col.period) } : col; },", str_replace("\r\n", "\n", file_get_contents(resource_path(self::JS_FILE))));
+        foreach (['proj_pct', 'proj_pct_1d', 'proj_pct_3d', 'proj_pct_7d'] as $id) {
+            $this->assertStringContainsString("case '{$id}':", $this->between($this->render('ceo', true, true), 'cellValueFor(col, row)', 'cellFormatStyle('), $id);
+        }
 
         $js = str_replace("\r\n", "\n", file_get_contents(resource_path(self::JS_FILE)));
         $this->assertStringContainsString("fitPeriod: '1m',", $js);
