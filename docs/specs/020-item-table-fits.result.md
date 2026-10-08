@@ -2,68 +2,106 @@
 
 > Committed beside the spec: names no people and no decision ids.
 
-**Status:** partial: part 1 done
+**Status:** done (not seen in a browser: the browser cases and one owner check are open, listed below)
 **Date:** 2026-10-08
 **Branch / PR:** `feat/020-item-table-fits` (no PR, no push; the reviewer reviews the branch)
-**Preview or run link:** n/a (no dev server and no browser in this run)
+**Preview or run link:** n/a (no dev server and no browser in either run)
 
 ## Summary
 
-Part 1 is built: the SUPPLIERS group of the CEO's table with suppliers now has one column per supplier of the
-Finance → Supply list, numbered by position in id order ("1 · Kelly"), and each cell holds only that
-supplier's quote (price and MOQ, an edit control), or its last PO cost with a "PO" tag and a quiet plus, or a
-quiet plus. A supplier with a quote and a PO gets a green dot and a "Last PO" line in the cell's card; an item
-with no quote and no PO gets one small warning mark by its name instead of the red band. The logic that can
-be wrong without anyone seeing it (the columns, the cell, the warning rule, the form's supplier) lives in
-`public/js/item-table-fit.js` as pure functions, which the suite runs through `node`; the Alpine templates
-only call them. The PO-suppliers endpoint gained `supplier_id` per row so a PO is matched to its column by
-id. Part 2 (the fit, the "+N columns" panel, the two sets, Prof.% as one column, the number formats) is not
-started: the table is still as wide as before and still scrolls sideways.
+The CEO's table with suppliers (`/item?...&layout=old` or `layout=suppliers`) now has one column per supplier
+of the Finance → Supply list, numbered by position in id order, each cell holding only that supplier's quote
+(or its last PO cost, or a quiet plus), with a small warning mark for an item that has no supplier at all.
+From 1280 px of window width the table is laid out to the measured width of its scroll box: a fixed-layout
+table with one `<colgroup>`, the columns that fit by one set of minimum widths and one drop order, the rest
+counted on a "+N columns" button whose panel lists them and lets one be brought back for the visit. Two
+column sets ("Sourcing", "Sales") are remembered per browser, Prof.% is one column with a 1M / 7D / 3D / 1D
+switch, and this table has its own money format. Everything that can be wrong without anyone seeing it is a
+pure function in `public/js/item-table-fit.js`, run by the suite through `node` (52 tests, the fit table F1 to
+F15 as data rows); the Alpine templates and the methods in `_suppliers_js.blade.php` only call them. A header
+drag saves the whole catalog order with the away and hidden columns in place; nothing else writes the shared
+column setting, and every other render is byte for byte the base.
 
 ## Case table
 
-Part 1. "node" = `tests/Feature/Item/ItemTableFitScriptTest.php` (pure functions through node), "group" =
+"node" = `tests/Feature/Item/ItemTableFitScriptTest.php` (pure functions through node), "group" =
 `tests/Feature/Item/SuppliersGroupTest.php` (render and text pins), "columns" =
-`tests/Feature/Item/SupplierColumnsTest.php` (endpoints). Output lines of the last run of each file:
-node `OK (25 tests, 154 assertions)`, group `OK (49 tests, 2216 assertions)`, columns `OK (4 tests, 24 assertions)`,
+`tests/Feature/Item/SupplierColumnsTest.php` (endpoints). Last run of each file: node
+`OK (52 tests, 940 assertions)`, group `OK (55 tests, 3139 assertions)`, columns `OK (4 tests, 24 assertions)`,
 `WorklistTest` `OK (4 tests, 32 assertions)`, `SharedPagesBasePinTest` `OK (2 tests, 8 assertions)`,
 `ItemPageTest` `OK (45 tests, 943 assertions)`.
 
+### Part 1
+
 | Case | Test | Result |
 |---|---|---|
-| S-34.1 | node `test_S_34_1_three_suppliers_give_three_numbered_columns_with_the_full_name`; group `test_S_34_1_layout_old_draws_one_header_per_supplier_of_the_list` (the loop, no "Supplier 1/2/3", "Others", PO sub-header or fixed 3 or 4) | pass |
-| S-34.2 | columns `test_S_34_2_a_supplier_added_on_the_supply_finance_page_is_in_the_quotes_answer_with_its_id`; node `test_S_34_2_a_fourth_supplier_is_the_fourth_column` | pass (the feature half passed before any change: characterisation; it turns red if the quotes answer stops listing every supplier with its id) |
-| S-34.3 | node `test_S_34_3_columns_are_numbered_by_position_in_id_order` (data rows: numbers, strings) | pass |
-| S-34.4 | node `test_S_34_4_the_header_is_the_number_and_the_first_word_and_the_title_the_full_name`; group `test_S_34_4_the_header_binds_the_name_as_text_and_cuts_a_long_word` | pass; the cut of a 120-letter word on screen is a browser case |
+| S-34.1 | node `test_S_34_1_three_suppliers_give_three_numbered_columns_with_the_full_name`; group `test_S_34_1_layout_old_draws_one_header_per_supplier_of_the_list` | pass |
+| S-34.2 | columns `test_S_34_2_a_supplier_added_on_the_supply_finance_page_is_in_the_quotes_answer_with_its_id`; node `test_S_34_2_a_fourth_supplier_is_the_fourth_column` | pass (the feature half is a characterisation: red if the quotes answer stops listing every supplier with its id) |
+| S-34.3 | node `test_S_34_3_columns_are_numbered_by_position_in_id_order` (rows: numbers, strings) | pass |
+| S-34.4 | node `test_S_34_4_the_header_is_the_number_and_the_first_word_and_the_title_the_full_name`; group `test_S_34_4_the_header_binds_the_name_as_text_and_cuts_a_long_word` | pass; the cut on screen is a browser case |
 | S-34.5 | node `test_S_34_5_no_supplier_gives_no_column_and_a_group_that_is_never_zero_wide`; group `test_S_34_5_no_colspan_is_ever_zero_and_an_empty_list_links_to_the_supply_page` | pass |
 | S-34.6 | node `test_S_34_6_a_quote_of_an_unknown_supplier_adds_no_column_and_no_warning` | pass |
 | S-35.1 | node `test_S_35_1_a_cell_holds_only_that_suppliers_price_and_moq`; group `test_S_35_1_a_cell_shows_no_supplier_name` | pass |
-| S-35.2 | node `test_S_35_2_the_plus_of_a_column_opens_the_form_on_that_supplier`; the existing save tests (`test_S_14_7`, `test_S_16_5`, `QuotePhotoTest`) | pass; opening the form and seeing the cell change is a browser case |
-| S-35.3 | group `test_S_35_3_a_filled_cell_has_an_edit_control_and_the_edit_card_can_remove` | pass; hover, focus and tap are a browser case |
+| S-35.2 | node `test_S_35_2_the_plus_of_a_column_opens_the_form_on_that_supplier`; the existing save tests (`test_S_14_7`, `test_S_16_5`, `QuotePhotoTest`) | pass; browser half open |
+| S-35.3 | group `test_S_35_3_a_filled_cell_has_an_edit_control_and_the_edit_card_can_remove` | pass; browser half open |
 | S-35.4 | group `test_S_35_4_the_cell_form_has_no_supplier_control`; node `test_S_35_4_the_forms_supplier_is_always_the_columns_supplier` | pass |
 | S-35.5 | node `test_S_35_5_a_missing_price_is_a_dash_a_zero_price_shows_and_a_missing_moq_is_left_out` | pass |
-| S-35.6 | node `test_S_35_6_cheapest_is_the_servers_flag` (five data rows, one with the flag deliberately against the prices); group `test_S_35_6_the_templates_read_the_servers_cheapest_flag_and_compare_no_price`; the existing `test_S_14_5`, `test_S_14_6` | pass |
-| S-36.1 | node `test_S_36_1_a_quote_with_a_po_keeps_the_quote_price_and_gets_the_dot_and_the_po_line`; group `test_S_36_1_a_po_shows_as_a_dot_with_a_label_and_as_a_line_in_the_card` | pass; the look of the dot and the card is a browser case |
-| S-36.2 | node `test_S_36_2_a_po_without_a_quote_shows_the_po_cost_with_a_tag_and_is_never_cheapest`; the markup of the tag and the plus in group `test_S_36_1…` | pass; touch visibility is a browser case |
+| S-35.6 | node `test_S_35_6_cheapest_is_the_servers_flag` (five rows); group `test_S_35_6_the_templates_read_the_servers_cheapest_flag_and_compare_no_price`; the existing `test_S_14_5`, `test_S_14_6` | pass |
+| S-36.1 | node `test_S_36_1_a_quote_with_a_po_keeps_the_quote_price_and_gets_the_dot_and_the_po_line`; group `test_S_36_1_a_po_shows_as_a_dot_with_a_label_and_as_a_line_in_the_card` | pass; browser half open |
+| S-36.2 | node `test_S_36_2_a_po_without_a_quote_shows_the_po_cost_with_a_tag_and_is_never_cheapest` | pass; browser half open |
 | S-36.3 | node `test_S_36_3_no_po_or_a_zero_cost_line_gives_no_dot_and_no_tag`; columns `test_S_36_3_a_discount_or_zero_cost_line_is_not_a_po_of_that_supplier` | pass |
 | S-36.4 | columns `test_S_36_4_po_rows_carry_the_supplier_id_and_keep_their_other_keys`; node `test_S_36_4_the_po_is_matched_to_its_column_by_supplier_id_not_by_name` | pass |
 | S-36.5 | columns `test_S_36_5_the_po_row_of_a_supplier_is_its_latest_by_order_date_then_line` | pass |
-| S-37.1 | node `test_S_37_1_S_37_2_S_37_4_the_warning_is_for_an_item_with_no_quote_and_no_po` (row "S-37.1"); group `test_S_37_1_S_37_3_one_small_warning_mark_replaces_the_red_band_and_waits_for_both_lists` | pass; the look is a browser case |
-| S-37.2 | node, the same test (three rows "S-37.2") | pass |
-| S-37.3 | group `test_S_37_1_S_37_3_…` and `test_S_15_10_the_cells_and_the_warning_are_bound_to_the_loaded_state` | pass |
-| S-37.4 | `WorklistTest::test_S_37_4_the_items_of_the_need_a_supplier_list_are_the_items_with_no_quote_and_no_po_row` (the chip's count and list against the two answers the page reads, same data); the existing `WorklistTest::test_ceo_gets_items_classified_into_the_four_lists`; node row "S-37.4" | pass (passed when written: characterisation of two existing rules; it turns red if the chip's list and the mark's rule drift apart on this data) |
+| S-37.1, S-37.2 | node `test_S_37_1_S_37_2_S_37_4_the_warning_is_for_an_item_with_no_quote_and_no_po` (five rows); group `test_S_37_1_S_37_3_one_small_warning_mark_replaces_the_red_band_and_waits_for_both_lists` | pass; the look is a browser case |
+| S-37.3 | group `test_S_37_1_S_37_3_…`, `test_S_15_10_the_cells_and_the_warning_are_bound_to_the_loaded_state` | pass |
+| S-37.4 | `WorklistTest::test_S_37_4_the_items_of_the_need_a_supplier_list_are_the_items_with_no_quote_and_no_po_row`; the existing `WorklistTest::test_ceo_gets_items_classified_into_the_four_lists` | pass (characterisation of two existing rules on the same data) |
 | S-37.5 | none | browser, not run |
-| S-42.1 | the existing `ItemPageTest` pin of `_table_old.blade.php` and group `test_S_23_1`, `test_S_23_2` (unchanged) | pass |
-| S-42.2 | the existing group `test_S_19_2_default_layout_for_the_ceo_is_identical_to_the_base`, `test_S_18_4_marketing_renders_of_the_old_and_default_layout_are_identical_to_the_base` (the eight hashes, unchanged) | pass |
-| S-42.3 | group `test_S_24_1_non_ceo_views_get_the_base_old_view_for_every_layout_word` (marker list extended with the Part 1 names, each with a positive control in the CEO render), `test_S_24_2_the_script_does_not_call_the_loaders_for_non_ceo_views` | pass for the Part 1 markers; the Part 2 names are added in run 2 |
-| S-42.4 | `tests/Feature/OwnerPrivate/SharedPagesBasePinTest::test_S_42_4_the_shared_owner_pages_render_byte_for_byte_as_at_the_base` (two data rows) | pass; hashes captured in the test-only commit 2f327f6, before any product file changed |
 
-Part 2 (S-38.1 to S-41.3, S-42.5, S-42.6, rows F1 to F15): not built, not run.
+### Part 2
+
+| Case | Test | Result |
+|---|---|---|
+| S-38.1 | node `test_S_38_1_three_suppliers_and_the_sourcing_set_fit_at_four_widths` — rows **F1** (11 shown, spare 19, +12), **F2** (12, 29, +11), **F3** (14, 13, +9), **F4** (17, 193, +6) | pass, every row with the away list in order |
+| S-38.2 | node `test_S_38_2_columns_leave_one_by_one_and_the_core_is_last` — rows **F5** (10, 23, +13), **F6** (8, 15, +15), **F7** (5: I-ORDER, DOI, ITEM VAL. (CEO), PROF.PROFIT, PROF.%; 97; +18) | pass |
+| S-38.3 | node `test_S_38_3_an_exact_fit_fits_and_one_pixel_less_drops_one_more` — **F8** (6 shown, spare 0, used 1320) against **F7** | pass |
+| S-38.4 | node `test_S_38_4_a_server_hidden_column_is_in_no_set_and_sales_excludes_the_stock_columns` — rows **F9** (11, 31, +11), **F10** (the 12 named columns, 7, +11), **F11** (17, 187, +6) | pass |
+| S-38.5 | node `test_S_38_5_below_1280_everything_shows_and_scrolls_and_from_1280_the_fit_runs` — **F12** (scroll mode, 17, +6), **F13** (10, 9, +13); group `test_S_17_6_…` (the sticky rule only from 768 to 1279 px) | pass; 390 px is a browser case |
+| S-38.6 | node `test_S_38_6_identity_and_supplier_columns_never_leave` — **F14** (0 shown, scrolls, +23 = all), **F15** (15, 11, +8), and the same answer for the columns written in reverse | pass |
+| S-38.7 | none | browser, not run |
+| S-38.8 | none | browser, not run |
+| S-38.9 | group `test_S_38_9_the_rows_follow_the_fitted_columns_through_one_colgroup`, `test_S_13_4_S_15_8_every_row_spans_page_item_the_supplier_columns_and_the_other_columns`; node `test_S_38_9_the_widths_add_up_to_the_box_when_it_fits_and_to_the_minimums_when_it_scrolls` | pass; browser half open |
+| S-38.10 | node `test_S_38_10_this_tables_money_format` (11 values); group `test_S_38_10_this_table_has_its_own_money_format_and_no_text_under_11px`; the existing byte pins | pass |
+| S-38.11 | owner check, listed in `qa/stories.md` under `## Owner checks` | not run |
+| S-39.1 | node `test_S_39_1_the_count_is_the_columns_away_by_the_fit_plus_the_ones_the_set_excludes`; group `test_S_39_1_S_39_5_the_columns_button_and_its_panel` | pass; browser half open |
+| S-39.2 | node `test_S_39_2_a_column_that_fits_the_spare_width_is_turned_on_in_its_place` | pass |
+| S-39.3 | node `test_S_39_3_a_column_wider_than_the_spare_width_is_refused_with_both_numbers` ("needs 56 px, 19 px free") | pass |
+| S-39.4 | node `test_S_39_4_turning_a_shown_column_off_frees_its_width_for_the_refused_one` | pass |
+| S-39.5 | group `test_S_39_1_S_39_5_the_columns_button_and_its_panel` (nothing stored, no request) | pass; the reload is a browser case |
+| S-40.1 | node `test_S_40_1_the_set_opens_on_sourcing_and_a_stored_sales_is_read_back`; group `test_S_40_1_S_40_3_the_set_is_remembered_in_the_browser_and_never_written_to_the_server` | pass; browser half open |
+| S-40.2 | node `test_S_40_2_a_junk_stored_set_opens_on_sourcing` (14 junk values) | pass |
+| S-40.3 | group `test_S_40_1_S_40_3_…` (the stored setting row is unchanged after the page is served; the switch code holds no save) | pass |
+| S-40.4 | node `test_S_40_4_a_set_only_chooses_the_columns_and_they_show_in_the_saved_order` | pass |
+| S-40.5 | node `test_S_40_5_the_order_saved_after_a_drag_keeps_every_catalog_id_in_place`; group `test_S_40_5_S_19_7_a_drag_moves_shown_columns_only_and_saves_the_whole_order` | pass |
+| S-41.1 | node `test_S_41_1_one_prof_pct_column_opens_on_1m_and_shows_that_periods_value`; group `test_S_41_1_S_41_2_prof_pct_is_one_column_with_a_period_switch` | pass |
+| S-41.2 | node `test_S_41_2_another_period_changes_the_value_and_the_sort_field`; group `test_S_41_1_S_41_2_…` (the click stops; no request) | pass; browser half open |
+| S-41.3 | node `test_S_41_3_the_switch_offers_only_the_visible_periods_and_four_ids_stay_four`; `SharedPagesBasePinTest` (the settings page unchanged) | pass |
+| S-42.1 | the existing `ItemPageTest` pin of `_table_old.blade.php`; group `test_S_23_1`, `test_S_23_2` | pass, unedited |
+| S-42.2 | the existing group `test_S_19_2_…`, `test_S_18_4_…` (the eight hashes) | pass, unedited |
+| S-42.3 | group `test_S_24_1_non_ceo_views_get_the_base_old_view_for_every_layout_word` (52 markers, each with a positive control in the CEO render, plus tripwires), `test_S_24_2_the_script_does_not_call_the_loaders_for_non_ceo_views` | pass |
+| S-42.4 | `SharedPagesBasePinTest::test_S_42_4_the_shared_owner_pages_render_byte_for_byte_as_at_the_base` (two rows; hashes from the test-only commit 2f327f6) | pass |
+| S-42.5 | group `test_S_21_1_S_42_5_each_loader_is_called_once_and_only_the_drag_save_sends_a_request` | pass |
+| S-42.6 | the existing tests of slices 017 and 019 that this spec does not replace (all green in the suite) | pass; browser half open |
+| catalog coverage | node `test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order` (the 44 ids read from the controller's catalog) | pass |
+
+Every row F1 to F15 was reproduced from the rule, the widths and the drop order of the spec; none was
+adjusted.
 
 ## Story changes
 
-Part 1. Each in `qa/stories.md`, in place. Five entries were not in the spec's list (the S-13 title, S-15.9, S-15.10, S-19.3, S-21.1); reading the file showed
-they name things this spec removes (said in each line).
+Each in `qa/stories.md`, in place. Five entries of Part 1 and one of Part 2 (S-21.1) were not in the spec's
+list; reading the file showed they name things this spec removes or changes (said in each line).
+
+### Part 1
 
 - **S-13 title** — changed. Old: "S-13 The CEO sees Supplier 1, 2, 3 and PO beside each item (P1)". New: "S-13 The CEO sees one column per supplier beside each item (P1)". Reason: Title: one column per supplier of the list, no PO column (spec 020). Not in the spec's list; the title named the old columns.
 - **S-14 title** — changed. Old: "S-14 Supplier 1 to 3 are the three cheapest quotes; the rest sit behind "+N" (P1)". New: "S-14 Quotes come back in the server's order with the `cheapest` flag (P1)". Reason: Title: no longer "the three cheapest quotes": the server order and the `cheapest` flag (spec 020).
@@ -91,35 +129,51 @@ they name things this spec removes (said in each line).
 - **S-22.1** — retired. Old Then: "the suppliers table renders (the SUPPLIERS header group, the suppliers-only styles and script members), exactly as `layout=suppliers` rendered it at the base apart from the toolbar link and the layout word the script keeps in the address" Reason: Retired and replaced: the whole-render hash of the suppliers table fails by design once the columns change; the route, the gate and the markers are in S-34.1 (spec 020).
 - **S-24.1** — changed. Old Then: "all responses of a viewer are identical to each other, the route passes the view exactly the data of that viewer's Old view at the base (whose render is pinned), and none contains a suppliers marker (the header words, the `spl-` names, the helper names, either toolbar link, `layout=original`, a seeded supplier name)" New Then: "all responses of a viewer are identical to each other, the route passes the view exactly the data of that viewer's Old view at the base (whose render is pinned), and none contains a suppliers marker (the header word, the `spl-` names, the helper names, the script file and its function names, "wala pang supplier", "Add a supplier in Finance", either toolbar link, `layout=original`, a seeded supplier name alone or as a numbered header)" Reason: The "must not appear" marker list gains the new names (spec 020).
 
-Still to do in run 2 (Part 2): S-13.6, S-19.4, S-17.3, S-17.5, S-17.6, S-19.7 (changed), S-13.7, S-17.7,
-S-19.8 (retired, folded into S-38.11), and the Part 2 names in S-18.1 and S-24.1.
+### Part 2
+
+- **S-13.6** — changed. Old Then: "the group stays right after Item and header and body cells line up" New Then: "the group stays right after Item, and header and body cells line up because every row loops over the same fitted columns and one `<colgroup>` sets each width" Reason: The columns loop is the fitted set (spec 020).
+- **S-13.7** — retired. Old Then: "he can compare prices at a glance and accepts the width" Reason: Retired: owner check folded into S-38.11 (spec 020).
+- **S-17.3** — changed. Old Then: "the row is 49 to 51 px; a very long item name wraps to at most three lines, about 60 px, and the sticky column does not widen" New Then: "the row is about 50 px; a very long item name wraps to at most three lines, about 58 to 60 px, and the column does not widen" Reason: Row height about 50 px; three-line names about 58 to 60 px (spec 020).
+- **S-17.5** — changed. Old Then: "Change and Copy are always visible, a tap on a supplier name opens its card and a tap elsewhere closes it; the item column is sticky only at 768 px and wider. A card that holds the open add or edit form closes on Cancel, Esc or a successful save, not on a click or tap elsewhere" New Then: "Change and Copy, the edit pencil and the "+" of a PO-only cell are always visible, a tap on a cell's value opens its card and a tap elsewhere closes it; the item column is sticky only from 768 px to 1279 px (from 1280 px the table fits and nothing scrolls sideways). A card that holds the open add or edit form closes on Cancel, Esc or a successful save, not on a click or tap elsewhere" Reason: At 1280 px and wider nothing scrolls sideways; the sticky item column applies below 1280 (spec 020).
+- **S-17.6** — changed. Old Then: "the item column stays, opaque on every row kind and under the header corner; a card opened on the last rows or in the PO cell is not cut by the scroll area or hidden by the TOTAL row" New Then: "the item column stays, opaque on every row kind and under the header corner; at 1280 px and wider there is no sideways scroll and no sticky column; a card opened on the last rows is not cut by the scroll area or hidden by the TOTAL row" Reason: The sticky item column and its opaque strip apply below 1280; the pinned text follows (spec 020).
+- **S-17.7** — retired. Old Then: "he agrees the table is as compact as his owner/private table" Reason: Retired: owner check folded into S-38.11 (spec 020).
+- **S-19.4** — changed. Old Then: "everything the Old view's table has is present: the configurable columns loop, HOLD, the expand arrow and page rows, TOTAL, the toolbar, the sourcing chips with their handler, and the worklist's extra lines under the item name" New Then: "everything the Old view's table has is present: the configurable columns loop (now over the fitted columns), HOLD, the expand arrow and page rows, TOTAL, the toolbar, the sourcing chips with their handler, and the worklist's extra lines under the item name" Reason: The columns loop is the fitted set (spec 020).
+- **S-19.7** — changed. Old Then: "the same items and counts show; column settings, sorting and header dragging work for every existing column" New Then: "the same items and counts show; column settings and sorting work for every shown column; header dragging works within the shown columns and saves the whole order with the away and hidden columns in place; Prof.% is one column with a period switch" Reason: Dragging works within the shown set; Prof.% is one column (spec 020).
+- **S-19.8** — retired. Old Then: "he finds nothing missing compared with the Old view" Reason: Retired: owner check folded into S-38.11 (spec 020).
+- **S-21.1** — changed. Old Then: "the quotes loader and the PO-suppliers loader are each called once at start-up as in the Old view, and the new templates and helpers contain no fetch of their own; the only addresses in them are the photo page link and the link to the Supply Finance page" New Then: "the quotes loader and the PO-suppliers loader are each called once at start-up as in the Old view; the table's templates contain no request; the view's script sends one request only, the save of the column order after a header drag; the panel, the two sets, the Prof.% period switch and the fit send none" Reason: Extended by S-42.5: the drag in this table now saves the order itself (S-40.5) (spec 020).
+- **S-18.1** — changed again (Part 2). The "must not appear" list gains: the "+N columns" button, the set control and its browser key (`item_col_set_v1`), the fit and panel names, the new pure function names. The words "Sourcing" and "Sales" themselves are not in the list: both are on every view already (the chips label "Sourcing:", the tab "Sales & Profit"). Reason: the marker list gains the new names (spec 020).
+- **S-24.1** — changed again (Part 2). The "must not appear" list gains: the "+N columns" button, the set control and its browser key (`item_col_set_v1`), the fit and panel names, the new pure function names. The words "Sourcing" and "Sales" themselves are not in the list: both are on every view already (the chips label "Sourcing:", the tab "Sales & Profit"). Reason: the marker list gains the new names (spec 020).
+- **Owner checks** — S-13.7, S-17.7 and S-19.8 removed from `## Owner checks` and replaced by S-38.11. Reason: folded into S-38.11 (spec 020).
 
 ## Done-when checklist
 
 Part 1
 - [x] Cases S-34.1 to S-37.4 pass, each with a test named after it; S-37.5 and the browser halves are listed
-      below; the guard cases S-42.1 to S-42.4 pass. Evidence: the case table and the suite line under Tests.
+      below; the guard cases S-42.1 to S-42.4 pass. Evidence: the case table and the suite line.
 - [x] The changed and retired cases of slices 017 and 019 that Part 1 touches are updated in `qa/stories.md`
-      and their tests, each under "Story changes" with the old and the new Then.
-- [x] An adversarial review of the Part 1 diff by a separate reviewing agent: see Tests (who, findings, what
-      was fixed). No blocker, no major.
+      and their tests, each under "Story changes".
+- [x] The adversarial review of the Part 1 diff: under Tests.
 
 Part 2
-- [ ] Cases S-38.1 to S-41.3 and S-42.5, S-42.6: not started.
-- [ ] The test that every catalog column id has a minimum width and a place in the drop order: not started.
-- [ ] The adversarial review of the Part 2 diff: not started.
+- [x] Cases S-38.1 to S-41.3 and S-42.5, S-42.6 pass, each with a test named after it, every row F1 to F15 a
+      data row (named in the case table); the owner check S-38.11 is listed under `## Owner checks` in
+      `qa/stories.md` (it replaces the three retired owner checks of slice 017).
+- [x] A test asserts every catalog column id has a minimum width and a place in the drop order
+      (`test_every_catalog_column_id_has_a_minimum_width_and_a_place_in_the_drop_order`).
+- [x] The adversarial review of the Part 2 diff, which also read the Part 1 fix wave: under Tests. One major,
+      fixed and re-checked.
 
 Both
-- [x] `git diff 1c32cc1 --stat` lists only allowed files so far: `app/Http/Controllers/ItemController.php`,
-      `resources/views/item/_suppliers_js.blade.php`, `_suppliers_style.blade.php`, `_table_suppliers.blade.php`,
-      `public/js/item-table-fit.js`, files under `tests/` (including `tests/js/call.cjs`), `design/item-no-scroll/`,
-      `qa/stories.md`, `TODO.md`, and the spec, result and plan. `routes/`, `composer.json`, `composer.lock`,
-      `package.json`, migrations, `resources/views/owner/`, `index.blade.php` and `_table_old.blade.php`: no diff.
-- [x] `php.bat -l` passes on every changed PHP file (`ItemController.php`, the five test classes);
-      `node --check public/js/item-table-fit.js` passes.
-- [x] The full suite before and after (Part 1): see Tests.
-- [x] What the reviewer must look at in a browser: listed below for Part 1; Part 2's list follows in run 2.
-- [ ] The result is filled in: for Part 1 only (Part 2's sections say "run 2").
+- [x] `git diff 1c32cc1 --stat` lists only: `app/Http/Controllers/ItemController.php`;
+      `resources/views/item/_agg_cells.blade.php`, `_suppliers_js.blade.php`, `_suppliers_style.blade.php`,
+      `_table_suppliers.blade.php`; `public/js/item-table-fit.js`; files under `tests/`; `design/item-no-scroll/`;
+      `qa/stories.md`; `TODO.md`; the spec, the result, the plan. `routes/`, `composer.json`, `composer.lock`,
+      `package.json`, migrations, `resources/views/owner/`, `index.blade.php` and `_table_old.blade.php`: no diff
+      (checked with `git diff 1c32cc1 --stat --` on those paths: empty).
+- [x] `php.bat -l` passes on every changed PHP file; `node --check public/js/item-table-fit.js` passes.
+- [x] The full suite before and after: under Tests. No new failure.
+- [x] What the reviewer must look at in a browser: below, with one sentence per part.
+- [x] The result is filled in.
 
 ## How to run
 
@@ -127,178 +181,293 @@ From the repository root (PHP 8.4, Node 24 on the path; nothing is installed wit
 
 - Install once: `php composer.phar install --no-interaction`
 - The full suite: `php vendor/phpunit/phpunit/phpunit --configuration phpunit.xml`
-- The node tests alone: `php vendor/phpunit/phpunit/phpunit --configuration phpunit.xml tests/Feature/Item/ItemTableFitScriptTest.php`
+- The node tests alone: the same with `tests/Feature/Item/ItemTableFitScriptTest.php`
   (add `--display-skipped` to see "skipped: node not found" when node is missing)
-- The Part 1 pins: the same command with `tests/Feature/Item/SuppliersGroupTest.php`,
-  `tests/Feature/Item/SupplierColumnsTest.php`, `tests/Feature/Item/WorklistTest.php`,
-  `tests/Feature/OwnerPrivate/SharedPagesBasePinTest.php`
+- The pins: the same with `tests/Feature/Item/SuppliersGroupTest.php`, `tests/Feature/Item/SupplierColumnsTest.php`,
+  `tests/Feature/Item/WorklistTest.php`, `tests/Feature/OwnerPrivate/SharedPagesBasePinTest.php`
 - The script's syntax: `node --check public/js/item-table-fit.js`
 
 ## Rulings
 
+Part 2
+
+- Ruling: the fit runs on the scroll box (`#scroll.spl-scroll`), measured as its `clientWidth` minus its own
+  padding and the card's border, minus 1 px; it runs once from `x-init`, then from a `ResizeObserver` on that
+  box (a plain window `resize` listener when the browser has no observer) and from a watcher on the supplier
+  list — the scroll box is sized by the window, not by the table, so the table changing cannot resize it, with
+  one exception: the vertical scrollbar appearing or leaving when row heights change. Three things stop a
+  loop: the scrollbar's gutter is always reserved from 1280 px (`scrollbar-gutter:stable`); an unchanged width
+  does nothing; and a width that flips straight back to the wider one it just left (within 0.6 s, same window
+  width) keeps the narrower fit, which fits both. `fitRun` is called by those events only, never from an
+  Alpine effect, so what it writes cannot re-run it — cost if wrong: on a browser without `scrollbar-gutter`
+  (Safari before 18.2) the guard alone holds; if both failed the table would flicker between two fits.
+- Ruling: spare width goes first to PAGE (up to 196 px), ITEM (up to 108 px) and the supplier columns (up to
+  76 px each, all the same), and the rest is spread evenly over the shown columns (the odd pixels to the first
+  ones); with no other column shown, the rest goes to PAGE. This is the spec's "plainest rule that gives the
+  pictures": at 1920 every column is a few pixels wider than at 1366, as drawn, and no single column balloons
+  (the alternative "the rest to DOI" would make DOI 215 px wide at 1920 with today's settings) — cost if wrong:
+  one function (`widths`), covered by one test; at 1366 the 19 spare pixels go to PAGE, not to DOI as drawn.
+- Ruling: the 1 px taken off the measured width means a real 1366 px screen with a 15 px scrollbar gives a box
+  of 1318, not the spec's 1319: the same columns as F1 with 18 px spare — `clientWidth` is a rounded number, and
+  half a pixel too much would bring back a sideways scrollbar — cost if wrong: one more column could have fitted
+  at an exact boundary.
+- Ruling: the page hands the fit the width of the supplier group in columns, which is never below 1 (the
+  placeholder column needs a width); so with an answered, empty supplier list the page fits 13 columns, while
+  the fit function itself gives the spec's F15 (15 columns) for a count of 0. Before the lists answer the same
+  one column is assumed, so the table re-fits once when the supplier count arrives — cost if wrong: two columns
+  fewer in a state the owner cannot be in (he has three suppliers).
+- Ruling: S-38.6 "whatever order the set and drop lists are written in" is read as: the answer does not depend
+  on the order the columns are handed in (the shown list follows that order, the away list and the spare do
+  not change), and columns at the same drop rank leave in id order; the drop order itself is an order by
+  definition — cost if wrong: a test row.
+- Ruling: a column not in the drop list leaves first; an id that is not in the catalog has no width — cost if
+  wrong: the coverage test fails first, by design.
+- Ruling: what is chosen in the panel is an ordered list replayed after every fit (off frees its width, on is
+  accepted only if it fits, nothing else moves); switching the set clears it; nothing of it is stored. A choice
+  that no longer fits after a resize is simply away again — the spec says "lasts for the page visit" and
+  "refused when it does not fit" — cost if wrong: one method.
+- Ruling: the panel lists every column that is on offer and not shown, also the ones the set excludes, and any
+  of them can be turned on when it fits; in scroll mode (below 1280 px) a turn-on is always accepted — cost if
+  wrong: none seen.
+- Ruling: the "Columns: [Sourcing | Sales] [+N columns]" control is its own strip at the top of the suppliers
+  partial, right under the chips strip, not on it — the chips strip is in the shared `index.blade.php`, which
+  keeps no diff this way — cost if wrong: one more 34 px strip; moving it onto the chips strip is a gated block
+  in the shared file.
+- Ruling: `_agg_cells.blade.php` (shared with the original table) takes the name of the money formatter as an
+  include variable with the old name as default (`{{ $moneyFn ?? 'money' }}(`), 14 places — the item rows of
+  this table are drawn by that shared partial, and the other views must stay byte for byte, which the pins
+  prove — cost if wrong: none for the other views; revert is the 14 names.
+- Ruling: in TOTAL the "₱2.27M" form with the full value in the title is used for the sums (ad spend and the
+  four profit totals); per-order values and CPP use the table's format without "M" — they are never millions —
+  cost if wrong: one argument per cell.
+- Ruling: the whole `<thead>` is sticky instead of each header cell — headers now wrap to two or three lines
+  in narrow columns, so the first header row has no fixed height for the second row to sit under — cost if
+  wrong: in a browser that does not stick a `<thead>` the header scrolls away (current Chrome, Edge, Firefox
+  and Safari do).
+- Ruling: the 11 px floor for the small lines of cells shared with other views (inline 9 to 10.5 px) is set by
+  four attribute selectors in the suppliers styles, for this table's own rows only — the shared partial is not
+  edited for it — cost if wrong: a small line stays small.
+- Ruling: header labels may break after "." and "/" and before "(" (a zero-width space), with
+  `overflow-wrap:anywhere` as the last resort — the brief's two-line headers — cost if wrong: an odd break in a
+  long header.
+- Ruling: below 1280 px every column is at its minimum width and the table is as wide as their sum, so it
+  scrolls sideways with the item column sticky (768 to 1279 px), but it is narrower than the base's table at
+  those widths — "scrolls as today" is kept as behaviour, not as pixel widths, since the fixed widths were to
+  go — cost if wrong: a wider scroll-mode width set.
+- Ruling: the Prof.% period is not remembered across a reload (it opens on 1M, or on the first period the
+  settings leave visible); when the table is sorted by Prof.%, the sort follows the period — cost if wrong: one
+  stored key.
+- Ruling: after a drag the members of a merged column (the four Prof.% ids, the three RTS ids) keep their own
+  order among themselves in the saved order, and ids that are not in the catalog are dropped from what is
+  saved — the other page shows those ids as separate columns, and the fallback order comes from the browser —
+  cost if wrong: none seen; 20,000 random cases in the review lost or moved nothing.
+- Ruling: the words "Sourcing" and "Sales" are not "must not appear" markers — both are on every view at the
+  base (the chips label "Sourcing:", the tab "Sales & Profit"); the control's label, its browser key and the
+  function names are the markers — cost if wrong: none.
+- Ruling: the colour rules of the column settings page reach the merged Prof.% cell through the active
+  period's own catalog id — found by the review as a major, fixed — cost if wrong: a rule on one period not
+  showing.
+
+Part 1 (accepted by the reviewer with run 1)
+
 - Ruling: the script file is `public/js/item-table-fit.js`, loaded by one plain `<script src>` at the top of
-  `_table_suppliers.blade.php` (in the body, before the table), with `?v=` taken from the file's md5 — the plan
-  said the gate block in `<head>`, but that block's exact text is pinned by the existing `test_S_17_1`, and the
-  partial is itself only included behind the suppliers gate, so `index.blade.php` has no diff at all; a plain
-  script in the body still runs before Alpine, which is deferred — cost if wrong: if a browser ran Alpine
-  before this tag, every supplier expression would throw; then the tag moves to `<head>` and that one pin is
-  updated.
-- Ruling: the file is a plain script that sets one name, `ItemTableFit`, and has no `module.exports` — the
-  repository's `package.json` says `"type": "module"`, so node refuses to `require` a `.js` file under it as a
-  classic script; the test runner (`tests/js/call.cjs`) loads it the way a page does, in its own context with
-  `self` — cost if wrong: none for the browser; a different loader is a change to the runner only.
-- Ruling: the pure functions return the cell's texts ready to show ("₱18.50", "MOQ 1000", "—", the "Last PO"
-  line) with a small formatter of their own, not the page's `money()` — so the same text is tested in node and
-  shown in the browser — cost if wrong: Part 2's money format helper replaces the formatter in one place.
-- Ruling: remove sits in the edit form (the card the pencil opens) and no longer in the details card; the
-  details card (hover, tap or keyboard on the price) shows the facts, the photo, the link and the "Last PO"
-  line — the decision says "remove inside the edit card" — cost if wrong: one more button in the details card.
-- Ruling: with no supplier in an answered list, the link "Add a supplier in Finance → Supply" is the one
-  sub-header of the group and the item rows have one empty cell under it (120 px) — the spec says "one narrow
-  column reads…"; a link repeated in every row would be the wall of text the owner did not want — cost if
-  wrong: move the link into the cell.
-- Ruling: a form opened on a quote that belongs to another supplier than the column is treated as "add" for the
-  column's supplier (blank fields, no quote id) — cannot happen through the page, but if it did, carrying the
-  other supplier's values in would overwrite the column's own quote — cost if wrong: none seen.
-- Ruling: while a remove from the form has not answered, Save and remove are both disabled through the form's
-  existing `saving` flag — the review showed a remove and a save could otherwise cross — cost if wrong: Cancel
-  and Esc are also inert for that moment, as they already are during a save.
-- Ruling: `/owner/column-settings` is pinned through `/owner/column-settings/owner-private` — the address
-  itself only redirects there; that section is the page that edits the shared column setting — cost if wrong:
-  add the other three sections to the same test (one line each).
-- Ruling: the supplier column is 76 px wide in Part 1 (the brief's 1920 width) and PAGE and ITEM keep their
-  widths — the fit of Part 2 sets every width from the measured box — cost if wrong: none after Part 2.
-- Ruling: the PO tag text is 11 px, as every new sub-line — the spec's 11 px floor — cost if wrong: one number.
-- Ruling: the "skipped: node not found" path was proven once by hand (the probe pointed at a binary that does
-  not exist, run, reverted; output under Tests), not by a permanent test — a permanent test would need a seam
-  in the test class only to test the test — cost if wrong: the message could rot unnoticed.
-- Ruling: five story entries outside the spec's list were changed (the S-13 title, S-15.9 and S-15.10
-  wording, S-19.3's test, S-21.1's allowed addresses) — the spec says to follow the file where its list is
-  wrong — cost if wrong: wording only.
+  `_table_suppliers.blade.php` with `?v=` from the file's md5 — the head block's text is pinned by an existing
+  test; a plain script in the body still runs before the deferred Alpine — cost if wrong: move the tag.
+- Ruling: the file is a plain script that sets one name, `ItemTableFit`; the test runner loads it the way a
+  page does (the repository's `package.json` is `"type": "module"`) — cost if wrong: the runner only.
+- Ruling: the pure functions return the cell's texts ready to show — the same text is tested and shown.
+- Ruling: remove sits in the edit form; the details card shows facts, photo, link and the "Last PO" line.
+- Ruling: with no supplier, the link "Add a supplier in Finance → Supply" is the one sub-header of the group.
+- Ruling: a form opened on another supplier's quote is treated as "add" for the column's supplier.
+- Ruling: while a remove has not answered, Save and remove are both disabled through the form's `saving` flag.
+- Ruling: `/owner/column-settings` is pinned through `/owner/column-settings/owner-private` (the address
+  itself only redirects there).
+- Ruling: the "skipped: node not found" path was proven once by hand, not by a permanent test.
 
 ## Catalog columns not named in the spec
 
-n/a in Part 1 (run 2).
+All sixteen leave before PROMO, in catalog order. Fifteen are hidden in the owner's settings or forced hidden
+on this table today; widths were chosen to hold the header and the content at 11 px.
+
+| Drop position | Column (catalog id) | Minimum width |
+|---|---|---|
+| 1 | Orders (`orders`) | 56 |
+| 2 | Proceed (`proceed`) | 64 |
+| 3 | P.CPP (`pcpp`) | 56 |
+| 4 | /Order (`per_order`) | 60 |
+| 5 | NP/O (`np_per_order`) | 64 |
+| 6 | NP/O(3D) (`np_per_order_3d`) | 64 |
+| 7 | NP/O(7D) (`np_per_order_7d`) | 64 |
+| 8 | Prof.Profit(3D) (`proj_prof_3d`) | 78 |
+| 9 | Prof.Profit(7D) (`proj_prof_7d`) | 78 |
+| 10 | Ship (`ship`) | 52 |
+| 11 | COD Fee (`cod_fee`) | 64 |
+| 12 | Claude Action (`claude_action`) | 96 |
+| 13 | Claude Reason (`claude_reason`) | 120 |
+| 14 | CEO Action (`ceo_action`) | 96 |
+| 15 | CEO Reason (`ceo_reason`) | 120 |
+| 16 | Category (`category`) | 88 |
+
+PROMO is position 17 and PROF.% (the four ids as one) is the last, 39. The three RTS ids share position 23
+and 104 px; the four Prof.% ids share 94 px.
 
 ## Deferred minors
 
-All in `TODO.md` under "020 … Part 1", each with its reason: the mark and the chip read a zero-cost or
-zero-quantity PO line differently (the base's two rules, kept); the server's `cheapest` flag counts a quote
-whose supplier has no column; a PO row without a supplier id; the peso formatter is not hardened against
-inputs the server never sends; the script's address is computed from the file on each render and a missing
-file fails loudly; the script file is public (logic only); copied test helpers; text pins do not run the page's
-script; focus, card placement, the header cut and touch are browser cases.
+All in `TODO.md` under "020", each with its reason. Part 1: the mark and the chip read a zero-cost or
+zero-quantity PO line differently (the base's two rules); the `cheapest` flag counts a quote whose supplier has
+no column; a PO row without a supplier id; the peso formatter and inputs the server never sends; the script's
+address computed per render; the script file is public (logic only); copied test helpers; text pins do not run
+the page's script; browser cases. Part 2: the empty-list fit (ruling above); no "profit / gross" tooltip on
+the merged Prof.% cell of page rows and TOTAL; a failed or out-of-order save of the column order is silent, as
+with the page's own save; the flip-flop guard can hold a narrower fit; TOTAL rounding just around a million;
+the page-side methods are text-pinned and were run once outside the suite; the campaign rows of an expanded
+page keep the page's money format; content wider than a minimum-width cell is cut; browser cases.
 
 ## Merge danger
 
-Two-way door. Blast radius: only the CEO's table with suppliers (`/item?layout=old` or `layout=suppliers` in
-the CEO view); every other render is byte for byte the base (the eight pinned hashes, the `_table_old` pin and
-the two shared-page pins pass unedited). The one server change is additive (`supplier_id` on each PO-suppliers
-row; the other readers ignore it). No migration, no route, no setting, no dependency. One new static file:
-`public/js/item-table-fit.js` must reach the server with the release; if it is missing, the table with
-suppliers answers with an error instead of drawing (the other layouts are not affected), and if it is served
-but blocked in the browser the supplier cells do not draw. Revert: revert the branch's commits; nothing is
-stored that a revert leaves behind. Do not release Part 1 alone as "the table fits": it does not fit yet.
+Two-way door. Blast radius: only the CEO's table with suppliers; every other render is byte for byte the base
+(the eight pinned hashes, the `_table_old` pin and the two shared-page pins pass unedited, also after the
+change to the shared `_agg_cells.blade.php`). One thing reaches stored data: a header drag in this table saves
+the shared column order (`owner_private_cols`, read by `/owner/private` too). It sends the whole catalog
+order with only the shown columns re-placed, and the server keeps `hidden` and the per-role lists as before;
+if it were wrong, the order is repaired on the column settings page (or "reset to default" there), and no
+other field can be touched. The server change is additive (`supplier_id` on PO-suppliers rows). No migration,
+no route, no setting key, no dependency. One new static file, `public/js/item-table-fit.js`, must reach the
+server with the release: without it the table with suppliers answers with an error (the other layouts are not
+affected). Revert: revert the branch's commits; the browser keys (`item_col_set_v1`, the order copy) are
+ignored by the old code. Because none of this was seen in a browser, look at it once on a real screen before
+the owner does.
 
 ## What the reviewer must look at in a browser
 
-Not seen in a browser in this run (no dev server, no browser). Addresses: the CEO view
-`/item?start_date=…&end_date=…&layout=old` (and `&layout=suppliers`); the Marketing view: the same address as a
-Marketing user, and as the CEO with `&view_as=marketing`. Widths for Part 1: any desktop width (it still
-scrolls sideways), and 390 px for the touch cases.
+Not seen in a browser in either run. Addresses: the CEO view `/item?start_date=…&end_date=…&layout=old` (and
+`&layout=suppliers`); the Marketing view: the same address as a Marketing user, and as the CEO with
+`&view_as=marketing`. Widths: 1366, 1440, 1536 and 1920 (the fit), 1280 and 1279 (the switch to scrolling),
+1024 (sticky item column), 390 × 844 (phone).
 
-How sure the Part 1 layout is without a browser: the structure is sure (every template tag is balanced, every
-Alpine expression of the group parses as script, the page's inline script parses, rows and header add up in
-every state by the colspan test), but the look is not — the widths, the pencil over a long price, the dot's
-place and the card's place were written from the brief's numbers and never drawn.
+How sure the layout is without a browser — Part 1: the structure is sure (templates balanced, every Alpine
+expression parses, rows and header add up in every state), the look is not (the pencil over a long price, the
+dot, the card's place were written from the brief's numbers and never drawn). Part 2: the arithmetic is sure
+(which columns show, their widths summing exactly to the box, the saved order, proven in node, and the page's
+own methods run once in node against a stand-in for the browser), but whether real content fits its
+minimum-width cell, whether the measured box is the real one, and whether the header sticks are unseen.
 
 | Case | Look for |
 |---|---|
-| S-34.1 | Three headers under SUPPLIERS: "1 · KELLY", "2 · ALBEE", "3 · HELEN" (the page's header style is uppercase), the full name on hover |
-| S-34.2 | Add a supplier on Finance → Supply, reload the item page: a fourth column |
-| S-34.4 (the cut) | A supplier whose first word is very long: the header is cut with an ellipsis, the column stays 76 px |
-| S-34.5 | Hard to see with real data (needs an empty supplier list): the single header with the link; before the lists answer, "…" |
-| S-35.1 | Cells show only price and MOQ; no supplier name in any row |
-| S-35.2 | "+" in supplier 2's column opens a form headed "2 · full name" with no dropdown; save 40 / 300: the cell shows "₱40.00", "MOQ 300" |
-| S-35.3 | Hover, Tab and (at 390 px) tap on a filled cell: the pencil shows; the form changes price, MOQ, link, photo; "✕ Tanggalin" asks, then the cell empties without a reload |
-| S-36.1 | A supplier with a quote and a PO: quote price, green dot top left (title on hover), the card's "Last PO ₱…, date, PO number" line |
-| S-36.2 | A supplier with a PO only: green cost, "PO" tag under it, a "+" top right on hover (always visible at 390 px) |
-| S-37.1 | An item with no quote and no PO: one small red-on-pink "!" at the right of the item cell, title "wala pang supplier", no red band; "walang running page" still red |
-| S-37.5 | Save the first quote of a marked item: the mark goes, the "Need a supplier" chip count drops by one |
-| S-42.6 (Part 1 share) | Add, edit, remove a quote with link and photo; the five chips; expand an item (the page rows have one empty cell under the supplier columns); TOTAL lines up; Esc and a click outside close the card |
-| Focus | After Save, Cancel or remove, keyboard focus is back in the cell |
-| Marketing | No SUPPLIERS group, no "+", no mark; the page looks as before |
+| S-38.7 | At 1366, 1440, 1536, 1920: no sideways scrollbar; in the console `scroll.scrollWidth === scroll.clientWidth` for `#scroll`; no cell with cut content that matters (RTS / DEL / INT at 104 px, PROF.% with its switch at 94 px, DOI, LIFECYCLE, a ₱ amount with six digits) |
+| S-38.8 | Drag the window from 1920 to 1366 and back: the columns and "+N" follow each time, no flicker between two layouts; on load the table re-fits once when the supplier columns arrive |
+| S-38.5 | At 1279: every set column, sideways scroll, item column sticky and opaque; at 1280: fits; at 390 × 844: scrolls both ways, panel usable |
+| S-38.9 | Expand an item, expand a page: page rows, the repeated page header, the expanded block and TOTAL line up with the header at each width |
+| S-38.10 | TOTAL: "₱2.27M"-style sums with the full value on hover; amounts from ₱100,000 without centavos; negatives "−₱…"; no text smaller than 11 px in the rows |
+| S-39.1 | "+12 columns" at 1366 (with today's settings); the panel lists the 12 with widths, the shown ones, "N of M px used", the Column settings link, the Supply Finance link; Esc and a click outside close it |
+| S-39.2 to S-39.4 | In the panel: a column that does not fit shows "…: needs 56 px, 19 px free" and nothing moves; hide ADSPENT, then ORDERS (1D) is accepted |
+| S-39.5 | Reload: the panel's choices are gone; no request in the network tab while using the panel |
+| S-40.1 | Fresh browser: "Sourcing"; tap "Sales", reload: still "Sales" |
+| S-41.1, S-41.2 | One PROF.% header with 1M 7D 3D 1D; tap 7D: cells change, no sort, no request; sort by the column, switch period: the order follows; a colour rule on Prof.% from the column settings still colours page rows |
+| S-40.5, S-19.7 | Drag a header at 1366; reload: the order holds; open `/owner/private`: its columns are where they were, apart from the two that swapped |
+| Header | Scroll down: the two header rows stay at the top; long headers wrap to two lines |
+| S-34.1 to S-37.5 (Part 1) | Three headers "1 · KELLY", "2 · ALBEE", "3 · HELEN" with the full name on hover; cells with only price and MOQ; "+" opens a form headed with the supplier, no dropdown; pencil on hover, focus and tap; "✕ Tanggalin" inside the form; green dot and "Last PO …" line; a PO-only cell in green with "PO"; one "!" mark for an item with no supplier, gone after its first quote, with the chip count one lower |
+| S-42.6 | Add, edit, remove a quote with link and photo; the five chips; Change and Copy; "walang running page"; the two layout links keep the date range |
+| Marketing | No SUPPLIERS group, no "Columns:" strip, no mark: the page as before |
 
 ## Conflicts with CLAUDE.md
 
 - The kit names `backend-developer` and `frontend-developer` agents for the build; this session has no such
-  agent types (only the reviewer and the story writer are installed), so the main session wrote the code and
-  `skeptic-reviewer` reviewed it. The review is still by a separate agent.
-- Red before green: tasks 2 and 3 have a red run (below). In task 4 the view was changed first and the
-  existing pins went red (12 of 42 tests in `SuppliersGroupTest`), then the pins were rewritten and the new
-  ones added; the new pin tests were not seen red on their own. The one later fix (the remove guard) was
-  red first.
+  agent types, so the main session wrote the code and `skeptic-reviewer` reviewed it (three review runs).
+- Red before green: the pure functions of both parts and both review fixes of Part 2 were red first (lines
+  under Tests). The view changes of task 4 (Part 1) and tasks 8 to 10 (Part 2) were made first, the existing
+  pins went red (12 and 16 tests), and the pins were then rewritten and the new ones added; the new pin tests
+  were not seen red on their own.
+- The plan had tasks 8, 9 and 10 as three commits; they are one commit (b9f5251), because all three edit the
+  same partials through one scripted change. Task 7 and the two fixes are their own commits.
 
 ## Tests
 
 Full suite, plain PHPUnit:
-- Before (the base, in this worktree after the one composer install): `Tests: 631, Assertions: 8375, Errors: 1, Failures: 1, Skipped: 3.`
-  The error is `ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active`
-  (needs an untracked file), the failure is `ExampleTest::test_the_application_returns_a_successful_response`.
-  As the spec expected.
-- After Part 1 (commit b7d10fd): `Tests: 670, Assertions: 8986, Errors: 1, Failures: 1, Skipped: 3.` The same one error and one failure, no new one.
-- Node tests: 25 run, 0 skipped (node v24.13.1). The skip path, proven once by hand with the probe pointed at
-  a missing binary: `Tests: 25, Assertions: 0, Skipped: 25.` with `skipped: node not found` printed 25 times.
+- Before (the base 1c32cc1 in this worktree): `Tests: 631, Assertions: 8375, Errors: 1, Failures: 1, Skipped: 3.`
+  The error is `ImportStartTest::test_macro_job_final_write_applies_only_while_the_run_is_still_active` (needs
+  an untracked file); the failure is `ExampleTest::test_the_application_returns_a_successful_response`.
+- After Part 1 (b7d10fd): `Tests: 670, Assertions: 8986, Errors: 1, Failures: 1, Skipped: 3.`
+- After Part 2 (6f7a007): `Tests: 703, Assertions: 10695, Errors: 1, Failures: 1, Skipped: 3.` The same one error and one failure; no new one.
+- Node tests: 52 run, 0 skipped (node v24.13.1). The three skips of the suite are the base's. The skip path
+  was proven once by hand in run 1: `Tests: 25, Assertions: 0, Skipped: 25.` with `skipped: node not found`.
 
-Red runs (one line per slice):
-- Task 2: `SupplierColumnsTest::test_S_36_4_po_rows_carry_the_supplier_id_and_keep_their_other_keys` — `ErrorException: Undefined array key "supplier_id"`.
-- Task 3: `ItemTableFitScriptTest::test_S_34_1_three_suppliers_give_three_numbered_columns_with_the_full_name` — `Error: Cannot find module '…/public/js/item-table-fit.js'`.
-- Task 4: 12 existing tests of `SuppliersGroupTest` red after the view change (`Tests: 42, Assertions: 740, Failures: 12.`), then rewritten; see Conflicts.
-- Fix: `SuppliersGroupTest::test_S_35_3_a_filled_cell_has_an_edit_control_and_the_edit_card_can_remove` — `wala o wala sa pagkakasunod: if (this.quoteForm.saving) return;`.
+Red runs:
+- Part 1, task 2: `SupplierColumnsTest::test_S_36_4_…` — `ErrorException: Undefined array key "supplier_id"`.
+- Part 1, task 3: `ItemTableFitScriptTest::test_S_34_1_…` — `Error: Cannot find module '…/public/js/item-table-fit.js'`.
+- Part 1, fix: `SuppliersGroupTest::test_S_35_3_…` — `wala o wala sa pagkakasunod: if (this.quoteForm.saving) return;`.
+- Part 2, task 7: `ItemTableFitScriptTest::test_S_38_1_… with data set "F1 1366"` — `layout: no function: layout`;
+  then for merged columns in the saved order: `test_S_40_5_…` and `test_S_41_3_…` failing (`Tests: 52, Assertions: 918, Failures: 2.`).
+- Part 2, tasks 8 to 10: 16 existing tests of `SuppliersGroupTest` red after the view change
+  (`Tests: 49, Assertions: 1839, Failures: 16.`), then rewritten; see Conflicts.
+- Part 2, fix 1: `ItemTableFitScriptTest::test_S_41_2_…` — `periodId: no function: periodId`; and
+  `SuppliersGroupTest::test_S_41_1_S_41_2_…` — `Failed asserting that 0 is identical to 1.`
+- Part 2, fix 2: `ItemTableFitScriptTest::test_S_40_5_…` — `Failed asserting that actual size 46 matches expected size 44.`
 
-One more check that is not a test: one render of the CEO's table with suppliers was written to a scratch file
-and read by a small node script — the inline script parses, 287 `<template>` tags open and 287 close, and all
-133 Alpine expressions of the supplier group parse.
+One check that is not a test, repeated after the last fix: a render of the CEO's table with suppliers written
+to a scratch file and read by a node script — the inline script parses, 298 `<template>` tags open and 298
+close, all 792 Alpine expressions of the bar and the table parse, every one of the 27 methods the table calls
+exists on the page's component; then the component's own fit methods run against a stand-in for the browser:
+with the default catalog and nothing hidden (35 columns after the two merges), three suppliers and a 1366 px window
+with a 15 px scrollbar: box 1318, fit mode, 11 columns shown, "+24", 18 px spare, table 1318 px; "Sales": 12 shown,
+6 px spare, and the browser key holds "Sales"; a junk set name: back to "Sourcing"; resized to 1920: box 1872,
+19 shown, 40 px spare, table 1872 px; turning on Orders there: refused with "Orders: needs 56 px, 40 px free" and
+nothing moved; the period switch to 7D: the column sorts by `proj_pct_last_7d`; a drag of the last shown
+column to the front: one request, to the column settings save route, with 44 ids, all different, and the
+dragged column first.
 
-### The Part 1 review
+### The Part 2 review
 
-Who: the `skeptic-reviewer` agent, adversarial depth, on `1c32cc1..675d601` (the Part 1 diff before the fix
-wave). Verdict: no blocker, no major. The fix wave after it (commit b7d10fd) was not re-reviewed, since no
-finding was a major; it is inside the diff the Part 2 review will read.
+Who: the `skeptic-reviewer` agent, adversarial depth, on `3267c74..b9f5251` plus the Part 1 fix wave b7d10fd.
+One loop: the major was fixed (e04d021) and re-checked by the same kind of agent, scoped to the fix: "fixed",
+no new finding. The second fix (6f7a007, a minor on an untrusted path) was not re-reviewed.
 
 Spec axis
 
 | Finding | Severity | Outcome |
 |---|---|---|
-| S-37.4 partial: "the marked items are the items in that list" was only proven as a rule, not on shared data; the two rules differ for a PO line with cost 0 or quantity 0 | minor | Fixed in part: `WorklistTest::test_S_37_4…` now compares the chip's list with the mark's rule on the same data. The two rare differences are the base's, kept by decision, recorded in `TODO.md` and proposed below |
-| No test named S-37.4 at the feature level | minor | Fixed (the same test) |
-| The script tag is in the body, not in `<head>` as the plan said | note | Recorded as a ruling |
+| S-41.1 partial: on page rows the conditional-format rules of the four Prof.% ids were looked up under the merged column's id and never matched | major (the owner has a colour rule on a Prof.% period; in this table the page rows lose it) | Fixed test-first: the rule is looked up by the active period's catalog id (`fitRuleCol`, `periodId`); re-checked: fixed |
+| F15 holds for the function, not for the page (the page passes a group width of at least 1) | minor | Ruling above; `TODO.md` |
+| The result file was not filled in for Part 2 | minor | Fixed: this file |
+| The merged Prof.% cell on page rows and TOTAL lost its "profit / gross" tooltip | minor | Accepted (`TODO.md`), proposed below |
 | Unasked-for scope | none found | |
 
 Correctness axis
 
 | Finding | Severity | Outcome |
 |---|---|---|
-| `_table_suppliers.blade.php` (the form's Save): not disabled while a remove is in flight | minor | Fixed: one busy flag for Save and remove, pinned in `test_S_35_3` |
-| The result file was still the blank template; no red-run lines | minor | Fixed: this file |
-| `md5_file()` of a missing script file is an error for this view | minor | Accepted (`TODO.md`); named under Merge danger |
-| `peso()` on 1e21, on −0.004 and on a non-numeric price | minor | Accepted (`TODO.md`): the server never sends them |
-| The server's `cheapest` flag counts a quote whose supplier has no column | minor | Accepted (`TODO.md`) |
-| `noSupplier` counts a PO row without a supplier id | minor | Accepted (`TODO.md`) |
-| The static file is readable when logged out | minor | Accepted (`TODO.md`): logic only |
-| Copied test helpers | minor | Accepted (`TODO.md`), proposed below |
-| The "node not found" path had never been run | minor | Done once by hand (above) |
+| No test that a rule on a Prof.% id reaches the merged cell | major | Fixed with the above (a node row and a pin) |
+| Unknown strings from the browser's fallback order were kept in the posted order | minor, untrusted path | Fixed test-first: only catalog ids are saved |
+| A failed order save is silent; two fast drags are unordered | minor | Accepted (`TODO.md`): same as the page's own save |
+| The flip-flop guard also ignores a real widening within 0.6 s | minor | Accepted (`TODO.md`) |
+| TOTAL: 999,999.50 shows "₱1,000,000"; 1,004,999 shows "₱1M" | minor | Accepted (`TODO.md`) |
+| b7d10fd: if the delete request hangs, the form's buttons stay inert | minor | Accepted: as with the existing save |
+| `WorklistTest::test_S_37_4…` re-implements the rule in PHP | minor | Accepted: it compares the two answers the page reads; the rule itself runs in node |
+| The page-side methods (`fitSaveOrder` and the others) are only text-pinned | minor | Accepted (`TODO.md`); run once outside the suite (above) |
+| No red-run lines for Part 2 were handed over | minor | Fixed: above |
+| Outside the diff: the page's own `initCols` throws on a stored fallback order that is not a list | n/a | Proposed below |
 
-What the reviewer tried and found closed: a supplier name, a price or a new marker in a non-CEO render or
-fetch (three viewers, three layout words, odd parameter forms); overwriting another supplier's quote from a
-cell (the form's supplier always comes from the column; the save never sends a quote id); markup in a name, a
-link, an order number or a date (text bindings only; links through the http guard); rows that do not add up to
-the header (no answer, one failed fetch, empty list, 1 and 17 suppliers); the byte pins (the eight hashes and
-the `_table_old` pin untouched; the two new hashes come from a commit that touches no product file).
+What the reviewer tried and found closed: 20,000 random drags through `orderToSave` (saved orders full,
+partial, empty, duplicated, junk; both sets; random hidden columns) — no catalog id lost, duplicated or moved
+unless shown; the stored set name (only the two exact names pass; it reaches a comparison and a text binding
+only); the gate (the three partials only behind `layoutSuppliers`; the formatter default of `_agg_cells` cannot
+be replaced from another view; the pins unedited); 166,464 layouts (every box from 0 to 2600 px, eight supplier
+counts, both sets, four window widths) — widths always sum to the box in fit mode, no zero or negative
+column, no negative spare; F1 recomputed by hand; the resize loop (no reactive loop found; reasoned, not
+executed); the busy flag of b7d10fd (cannot stick).
 
-Declined to judge by the reviewer: everything that needs a browser (focus after a save, card placement, the
-header cut, row heights, the look with 17 suppliers, touch); the full suite; a line-by-line comparison of every
-changed Then with the spec's table.
+Declined to judge by the reviewer: everything that needs a browser (S-38.7, S-38.8, the measured box, content
+wider than a minimum cell, the sticky column, the phone, the panel's focus); the Alpine methods as executed
+behaviour; whether the owner has colour rules on Prof.% in production; `qa/stories.md` wording and the styles
+line by line.
+
+### The Part 1 review
+
+Who: the `skeptic-reviewer` agent, adversarial depth, on `1c32cc1..675d601`. No blocker, no major. Fixed after
+it (b7d10fd, now read by the Part 2 review): Save is blocked while a remove is in flight; S-37.4 got a test on
+shared data. Accepted with reasons in `TODO.md`: the minors listed under Deferred minors. Tried and found
+closed: a supplier name, a price or a new marker in a non-CEO render or fetch; overwriting another supplier's
+quote from a cell; markup in a name, link, order number or date; rows that do not add up; the byte pins.
 
 ## Open questions
 
@@ -306,27 +475,39 @@ None.
 
 ## Process suggestions
 
-- Time per task (wall clock of this machine): first commit 1 min; reading and the plan 4 min; task 1 (base
-  pins, stories) 1 min; task 2 (endpoint) 1 min; task 3 (script, runner, node tests) 3 min; task 4 (the view,
-  the pins, the stories) 10 min; the review 6 min; the fix wave and the records 3 min; the result 5 min.
-- A helper script written through a shell here-document lost its backslashes and wrote junk into
-  `qa/stories.md` once (caught at the next check, the file restored from the last commit). Evidence: the row
-  check printed "Not run" after "rows 26". Suggestion for the spec template: "write helper scripts as files,
-  not here-documents".
-- The spec's S-42.4 names `/owner/column-settings`, which only redirects. Suggestion: name the section page.
-- The kit names developer agents that are not installed in this clone. Suggestion: install them, or say in
-  the start prompt that the main session builds.
+- Time per task (this machine's clock). Run 1: first commit 1 min; reading and plan 4 min; task 1 1 min;
+  task 2 1 min; task 3 3 min; task 4 10 min; review 6 min; fixes and records 3 min; result 5 min. Run 2:
+  reading and design 4 min; task 7 (the pure functions and the fit table) 5 min; tasks 8 to 10 (the view, the
+  pins, the stories) 12 min; the review 6 min; the two fixes and the re-check 5 min; the suite and the result
+  8 min.
+- A here-document lost its backslashes once in run 1; in run 2 every helper script was a file. One snippet
+  still failed on a wrong anchor and one on a wrong occurrence count, both caught by the script's own check
+  before writing. Suggestion: keep "helper scripts as files, each edit asserting how many times its anchor
+  occurs" in the start prompt.
+- The review found the one major by asking "who else reads the ids I merged". Suggestion for the spec
+  template, for any spec that merges or renames ids: "list every reader of the old ids".
+- The spec's S-42.3 lists "Sourcing" and "Sales" as words that must not appear for non-CEO viewers; both are on
+  every view at the base. Suggestion: name the control, not the words.
+- The spec's fit table gives the box as viewport − 47; a real box minus the 1 px safety is one less. Suggestion:
+  say in the spec whether the safety pixel is wanted.
 
 ## Proposed tasks
 
-- One rule for "has a PO" in the chip and in the mark — today a free-sample line (cost 0) and a zero-quantity
-  line are read differently by the worklist and by the PO-suppliers answer — normal.
-- Keep a quote's note when the quote is edited from a form that has no note field — the save sets the note to
-  nothing whenever the form sends none, and neither this table's form nor the base's has a note field (seen by
-  the review; same at the base) — normal.
-- `view_as[]=x` on `/item` — the review expects an error page, not a leak (not run; not in this diff) — low.
-- Move the copied test helpers (`normalise()`, `supplier()`, `quote()`, `po()`) into the shared test cases — low.
+- A browser test for this table (one headless run at four widths asserting `scrollWidth === clientWidth` and
+  the "+N" count) — the layout is the one thing the suite cannot see — high.
+- A tooltip for the merged Prof.% cell on page rows and TOTAL ("profit / gross" for the active period) — lost
+  with the merge — normal.
+- Tell the user when a column-order save fails, and send drags in order — silent today in both this table and
+  the page's own save — normal.
+- One rule for "has a PO" in the chip and in the mark (a free-sample line and a zero-quantity line are read
+  differently) — normal.
+- Keep a quote's note when the quote is edited from a form that has no note field (same at the base) — normal.
+- The page's own `initCols` throws when the browser's stored fallback order is not a list and the server order
+  is empty (seen by the review, outside this diff) — low.
+- `view_as[]=x` on `/item`: the first review expects an error page, not a leak (not run; outside this diff) — low.
+- Move the copied test helpers into the shared test cases — low.
 
 ## Suggested next steps
 
-Run 2 on the word "continue": Part 2 as planned (tasks 7 to 12). Do not release Part 1 on its own.
+The reviewer's branch review, then a look in a browser at 1366 and 1920 with real data before the release;
+the owner check S-38.11 after the release.
