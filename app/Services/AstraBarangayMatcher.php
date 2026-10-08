@@ -56,13 +56,18 @@ class AstraBarangayMatcher
      * Gaya ng confirm(), pero kapag wala sa text ang label, sinusubukan din ang mismong sulat ng barangay sa form
      * ("Baug" para sa BA-UG) — tanging kapag ang sulat na iyon ay tumuturo sa MISMONG label na ito sa loob ng city.
      * Kaya ang "Poblacion" sa form ay hindi kailanman kumpirmasyon ng POBLACION 2.
+     *
+     * $sharesCityName: ang barangay ay kapangalan ng sarili nitong city o bayan (MALIBCONG sa bayan ng MALIBCONG).
+     * Ang "Malibcong, Abra" ay pangalan ng BAYAN, kaya hindi sapat ang isang banggit: kumpirmado lang kapag dalawang
+     * beses nasa text ang pangalan, o may barangay word (o "pob"/"poblacion") na katabi mismo ng isang hit.
+     * Pagtanggi lang ang naidaragdag nito.
      */
-    public static function confirmWithWording(string $text, string $label, string $formWording, array $cityLabels): array
+    public static function confirmWithWording(string $text, string $label, string $formWording, array $cityLabels, bool $sharesCityName = false): array
     {
-        return self::run($text, $label, $formWording, $cityLabels);
+        return self::run($text, $label, $formWording, $cityLabels, $sharesCityName);
     }
 
-    private static function run(string $text, string $label, ?string $wording, array $cityLabels): array
+    private static function run(string $text, string $label, ?string $wording, array $cityLabels, bool $sharesCityName = false): array
     {
         $none = ['result' => 'none', 'score' => 0];
         try {
@@ -82,7 +87,11 @@ class AstraBarangayMatcher
             $siblings = array_map('strval', array_keys($siblings));
             $segments = self::segments($text);
 
+            // Isang banggit lang ng pangalang kapangalan ng city, walang barangay word sa tabi: pangalan iyon ng bayan.
+            $townOnly = static fn (array $r): bool => $sharesCityName && $r['result'] !== 'none' && $r['hits'] < 2 && !$r['marked'];
+
             $first = self::scan($segments, $own[0], $own[1], $siblings, $own);
+            if ($townOnly($first)) return $none;
             if ($first['result'] !== 'none' || $first['rejected'] || $wording === null) {
                 return ['result' => $first['result'], 'score' => $first['score']];
             }
@@ -95,6 +104,7 @@ class AstraBarangayMatcher
             if ($needle === '' || in_array($needle, $siblings, true)) return $none;
             // Ang sulat sa form ay dumadaan sa parehong mga rule; ang mga kapatid ay ang sa city pa rin ng LABEL.
             $second = self::scan($segments, $needle, $own[1], $siblings, $own);
+            if ($townOnly($second)) return $none;
 
             return ['result' => $second['result'], 'score' => $second['score']];
         } catch (\Throwable $e) {
@@ -278,7 +288,7 @@ class AstraBarangayMatcher
      */
     private static function scan(array $segments, string $needle, string $fullKey, array $siblings, array $own): array
     {
-        $none = ['result' => 'none', 'score' => 0, 'rejected' => false];
+        $none = ['result' => 'none', 'score' => 0, 'rejected' => false, 'hits' => 0, 'marked' => false];
         if ($needle === '') return $none;
         $nw       = explode(' ', $needle);
         $n        = count($nw);
@@ -325,6 +335,11 @@ class AstraBarangayMatcher
         $sibSet = array_fill_keys($siblings, true);
         $ownSet = array_fill_keys($own, true);
         $ownNumber = self::plain($nw[$n - 1]);
+
+        // Ang "poblacion" sa tabi ng hit ay tanda ng barangay, maliban kung POBLACION mismo ay ibang barangay ng city.
+        $pobIsSibling = isset($sibSet['poblacion']);
+        $hitCount     = 0;     // ilang malinis na hit sa buong text
+        $marked       = false; // may hit bang katabi mismo ng barangay word o ng "poblacion"
 
         $nearMemo   = [];
         $aroundMemo = [];
@@ -395,6 +410,8 @@ class AstraBarangayMatcher
                     // Pati ang sariling numero pagkatapos ng pang-ugnay ("Fatima 2 or Dos"): dalawang numero pa rin ang sinabi.
                     if (isset($otherNumbers[$second]) || ($at > 0 && $second === $ownNumber)) return ['result' => 'none', 'score' => 0, 'rejected' => true];
                 }
+                $hitCount++;
+                if (isset($seg['brgy'][$from]) || (!$pobIsSibling && (($w[$from - 1] ?? '') === 'poblacion' || ($w[$to] ?? '') === 'poblacion'))) $marked = true;
                 $rank = ['none' => 0, 'near' => 1, 'compact' => 2, 'phrase' => 3];
                 if ($rank[$kind] > $rank[$best['result']] || ($kind === $best['result'] && $score > $best['score'])) {
                     $best = ['result' => $kind, 'score' => $score, 'rejected' => false];
@@ -402,7 +419,7 @@ class AstraBarangayMatcher
             }
         }
 
-        return $best;
+        return ['hits' => $hitCount, 'marked' => $marked] + $best;
     }
 
     /**

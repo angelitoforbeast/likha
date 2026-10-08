@@ -39,6 +39,13 @@ class AstraEncoder
     public const SETTING_EFFORT  = 'astra_encoder_effort';
     /** app_settings key — switch ng bagong address rules; `1` lang ang "on" (CEO, sa settings page). */
     public const SETTING_ADDRESS_RULES = 'astra_address_rules';
+    /**
+     * Idinadagdag sa dulo ng instructions kapag naka-on ang bagong address rules (dalawang pangungusap lang): bakit humingi
+     * ng tao ang model, at ang form ay laging pinupunan gaya ng sulat ng customer para may maimapa ang program sa list.
+     */
+    public const NEW_RULES_PROMPT = "\n"
+        . 'When needs_human is true only because jnt_address_search returned no matching entry, add the key "human_kind":"label_not_found" to the JSON; for any other reason add "human_kind":"other".'
+        . ' Always fill the form\'s brgy, city and province exactly as the customer wrote them, even when "jnt" is left empty.';
     /** Mga model na pwedeng piliin sa settings (Responses API + web_search + function tools). */
     public const MODELS  = ['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.2', 'o3', 'o4-mini'];
     public const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -219,7 +226,7 @@ class AstraEncoder
         $rules  = self::addressRulesOn() ? 'new' : 'old';
 
         // ── 1 + 3. FORM (chat/Pancake/web) at J&T label (list tool) — isang agent call ──
-        $ai = $this->resolveForm($apiKey, $row, $chat);
+        $ai = $this->resolveForm($apiKey, $row, $chat, $rules === 'new');
         if ($ai === null) {
             return $this->finish(['status' => 'failed', 'final_code' => null, 'message' => 'Astra: walang sagot mula sa AI'], $t0);
         }
@@ -261,7 +268,7 @@ class AstraEncoder
         $ai['issues'] = $d['issues']; $ai['needs_human'] = $d['needs_human']; $ai['human_reason'] = $d['human_reason'];
 
         // ── 2. CXD: idagdag ang block ni Astra bilang pinakabago ─────────
-        $block = $this->formatBlock($form, $d['line'], $listNote, $summary);
+        $block = $this->formatBlock($form, $d['line'], $listNote, $summary, $rules === 'new');
         $updates['CXD'] = $this->appendBlock((string) $row->CXD, $block);
 
         if ($this->onlyWhenStatusBlank) {
@@ -364,7 +371,7 @@ class AstraEncoder
     //  AGENT CALL (Responses API + tools)
     // ═════════════════════════════════════════════════════════════════════
 
-    private function resolveForm(string $apiKey, MacroOutput $row, string $chat): ?array
+    private function resolveForm(string $apiKey, MacroOutput $row, string $chat, bool $newRules = false): ?array
     {
         $system = <<<'SYS'
 You are an expert Philippine e-commerce ORDER ENCODER (cash-on-delivery, courier J&T). Work exactly like a careful human encoder.
@@ -400,6 +407,8 @@ OUTPUT: STRICT JSON only, exactly this shape:
  "needs_human":false,"human_reason":"",
  "confidence":"high|medium|low","evidence":""}
 SYS;
+        // Nakapatay ang switch: ang request ay eksaktong gaya ng dati, walang kahit isang byte na dagdag.
+        if ($newRules) $system .= self::NEW_RULES_PROMPT;
 
         $customerForms = AstraAddressRules::customerBlocks((string) $row->CXD);
         $history       = self::pancakeHistory((string) ($row->fb_name ?? ''));
@@ -510,6 +519,10 @@ SYS;
         if (!in_array($conf, ['high', 'medium', 'low'], true)) $conf = 'low';
         $issues = [];
         foreach ((array) ($obj['issues'] ?? []) as $i) { $i = trim((string) $i); if ($i !== '') $issues[] = mb_substr($i, 0, 160); }
+        // human_kind: binabasa lang sa bagong rules, at ang dalawang eksaktong salita lang. Anumang iba, at anumang
+        // ibang uri (array, numero, null), ay parang walang key — is_string muna, dahil ang (string) ng array ay error.
+        $kind = $obj['human_kind'] ?? null;
+        $kind = ($newRules && is_string($kind) && in_array($kind, ['label_not_found', 'other'], true)) ? $kind : '';
 
         return [
             'form'         => $form,
@@ -518,6 +531,7 @@ SYS;
             'issues'       => $issues,
             'needs_human'  => !empty($obj['needs_human']),
             'human_reason' => mb_substr(trim((string) ($obj['human_reason'] ?? '')), 0, 300),
+            'human_kind'   => $kind,
             'confidence'   => $conf,
             'evidence'     => mb_substr(trim((string) ($obj['evidence'] ?? '')), 0, 300),
             'raw'          => $obj,
@@ -643,8 +657,11 @@ SYS;
     //  CXD BLOCK · FIELDS · HELPERS
     // ═════════════════════════════════════════════════════════════════════
 
-    private function formatBlock(array $form, ?array $jnt, string $listNote, string $summary): string
+    private function formatBlock(array $form, ?array $jnt, string $listNote, string $summary, bool $oneLineValues = false): string
     {
+        // Bagong rules: bawat value ng form ay ISANG linya na may hangganang haba — ang line break sa sagot ng model ay
+        // hindi makakagawa ng sariling linya o ng pekeng hangganan ng block. Nakapatay ang switch: gaya ng dati.
+        if ($oneLineValues) $form = array_map(fn ($x) => AstraAddressRules::oneLine((string) $x), $form);
         $v = fn ($k) => ($form[$k] ?? '') !== '' ? $form[$k] : '-';
         $lines = [
             self::BLOCK_MARK . ' ' . now('Asia/Manila')->format('Y-m-d H:i') . ' ---',

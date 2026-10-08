@@ -17,12 +17,16 @@ class AstraAddressRules
 {
     /** Hanggang ilang character ng Pancake history ang isinasama (ang pinakabago ang mahalaga). */
     public const HISTORY_MAX = 7000;
+    /** Pinakamahabang city, barangay o province ng form na imamapa ng program; ang mas mahaba ay hindi pangalan ng lugar. */
+    public const FORM_PLACE_MAX = 120;
+    /** Pinakamahabang value ng form sa isang linya ng block. */
+    public const BLOCK_VALUE_MAX = 250;
 
     /**
      * $in:
-     *   rules           'old' | 'new' — alin sa dalawang set ng rules (sa ngayon ay pareho ang pasya ng dalawa;
-     *                   ang salita lang sa `replay` ang naiiba)
-     *   answer          ang na-parse na sagot: form, jnt, intent, issues, needs_human, human_reason, confidence, evidence
+     *   rules           'old' | 'new' — alin sa dalawang set ng rules. Sa `new`: kapag walang buong line ang model,
+     *                   ang program ang nagmamapa ng form sa list; at ang guard ay tumatanggap ng halos-tugma.
+     *   answer          ang na-parse na sagot: form, jnt, intent, issues, needs_human, human_reason, human_kind, confidence, evidence
      *   row             ang anim na field ng row gaya ng nabasa (naka-trim)
      *   chat, history, customer_blocks   ang tatlong text na tinitingnan ng guard
      *   maps            ang J&T list (MacroChecker::loadAddressMaps)
@@ -49,15 +53,41 @@ class AstraAddressRules
         foreach ($listLines as $line) $evidence[] = $line;
         if ($listNote !== '') $evidence[] = 'LIST: ' . $listNote;
         else $evidence[] = 'LIST: ' . $prov . ' | ' . $city . ' | ' . $brgy;
+        // Ang salitang ito ay kung SAAN galing ang line (model, program, wala) — hindi kung naisulat ang barangay:
+        // ang line na ibinagsak ng guard ay `model` / `program_map` pa rin, at ang salita ng guard ang nagsasabi ng natira.
         $labelSource = ($prov !== null && $city !== null && $brgy !== null) ? 'model' : 'none';
+
+        // Walang buong line ang model: ang program ang nagmamapa ng sariling form ni Astra sa list (mapper ng classic checker).
+        // Buong line o wala: ang city na namapa ay hindi isinusulat nang walang barangay; ang bahaging tama ng line ng model
+        // ay nananatili gaya ng dati.
+        if ($rules === 'new' && $labelSource === 'none') {
+            [$mapped, $mapNote] = self::mapForm($form, (string) $ai['confidence'], $maps, $prov, $city);
+            if ($mapped !== null) {
+                [$prov, $city, $brgy] = $mapped;
+                $labelSource = 'program_map';
+                $listNote    = '';
+                $evidence[]  = 'MAP: ' . $mapNote . ' · barangay → ' . $brgy;
+            } elseif ($mapNote !== '') {
+                $evidence[] = 'MAP: ' . $mapNote . ' → walang line';
+                $listNote   = ($listNote !== '' ? $listNote . ' · ' : '') . 'form: ' . $mapNote;
+            }
+        }
 
         // GUARD: barangay na HINDI binanggit ng customer (hinula mula sa landmark/web/katabing listing) →
         // tatanggapin lang kung "high" ang confidence; kung hindi, hindi isusulat at tao ang bahala.
         $guard = ['ran' => $brgy !== null, 'result' => 'not_run', 'score' => 0];
         if ($brgy !== null) {
             $hay = $chat . "\n" . $history . "\n" . $customerBlocks;
-            $inChat = self::mentions($hay, $brgy) || ($form['brgy'] !== '' && self::mentions($hay, $form['brgy']));
-            $guard['result'] = $inChat ? 'confirmed' : ($ai['confidence'] !== 'high' ? 'none' : 'exempt_high_confidence');
+            if ($rules === 'new') {
+                $found  = self::confirmedByText($brgy, (string) $city, (string) $prov, (string) $form['brgy'], [$chat, $history, $customerBlocks], $maps);
+                $inChat = $found['result'] !== 'none';
+                $guard['result'] = $inChat ? $found['result'] : ($ai['confidence'] !== 'high' ? 'none' : 'exempt_high_confidence');
+                $guard['score']  = $found['score'];
+                if ($found['result'] === 'near') $evidence[] = 'GUARD: barangay "' . $brgy . '" near match (' . $found['score'] . ')';
+            } else {
+                $inChat = self::mentions($hay, $brgy) || ($form['brgy'] !== '' && self::mentions($hay, $form['brgy']));
+                $guard['result'] = $inChat ? 'confirmed' : ($ai['confidence'] !== 'high' ? 'none' : 'exempt_high_confidence');
+            }
             if (!$inChat && $ai['confidence'] !== 'high') {
                 $evidence[] = 'GUARD: barangay "' . $brgy . '" hindi sinabi ng customer (hinula, ' . $ai['confidence'] . ') → hindi isinulat, tao';
                 $ai['issues'][]   = 'Barangay ' . $brgy . ' ay hinula lang mula sa landmark/web (' . $ai['confidence'] . ' confidence), hindi sinabi ng customer';
@@ -176,7 +206,7 @@ class AstraAddressRules
             'replay'       => [
                 'rules'             => $rules,
                 'model_needs_human' => $modelNeedsHuman,
-                'model_human_kind'  => 'none',
+                'model_human_kind'  => ($rules === 'new' && in_array($ai['human_kind'] ?? '', ['label_not_found', 'other'], true)) ? $ai['human_kind'] : 'none',
                 'model_intent'      => in_array($ai['intent'], ['order', 'cancel', 'inquiry_only', 'unclear'], true) ? $ai['intent'] : 'order',
                 'label_source'      => $labelSource,
                 'guard'             => $guard,
@@ -185,6 +215,91 @@ class AstraAddressRules
                 'list_crc'          => (int) ($in['list_crc'] ?? 0),
             ],
         ];
+    }
+
+    /**
+     * Ang line mula sa sariling form ni Astra, gamit ang mapper at ang barangay matcher ng classic checker (parehong pure).
+     * [line o null, note]. May line LANG kapag: iisa ang city sa list; ang city na isinulat nang walang "city" ay iyon pa
+     * rin kapag dinagdagan ng "City" ("Naga" → bayan sa Zamboanga Sibugay o Naga City sa Camarines Sur? hindi alam → tao);
+     * iisa ang barangay; at hindi ito salungat sa province/city na tama sa line ng model.
+     * Ang note ay isang linya lang: galing sa form ang laman nito (hindi pinagkakatiwalaan).
+     */
+    public static function mapForm(array $form, string $confidence, array $maps, ?string $modelProv, ?string $modelCity): array
+    {
+        $c = trim((string) ($form['city'] ?? '')); $b = trim((string) ($form['brgy'] ?? '')); $p = trim((string) ($form['province'] ?? ''));
+        if ($confidence === 'low' || $c === '' || $b === '') return [null, ''];
+        foreach ([$c, $b, $p] as $v) if (mb_strlen($v, 'UTF-8') > self::FORM_PLACE_MAX) return [null, ''];
+
+        $mc  = new MacroChecker();
+        $ask = fn (string $city): array => $mc->mapResolvedToList(['province' => $p, 'city' => $city, 'province_aliases' => [], 'confidence' => $confidence], $maps);
+        $one = $ask($c);
+        $note = self::oneLine((string) $one['note'], 1000);
+        if ($one['city'] === null || $one['province'] === null) return [null, $note];
+        $mapProv = (string) $one['province']; $mapCity = (string) $one['city'];
+
+        // Mas pinipili ng mapper ang label na kapareho ng sulat kaysa sa label na may "city": tanungin ulit na may "City".
+        // Walang sagot sa pangalawang tanong = walang ibang city na ganoon ang pangalan (hindi iyon tie).
+        $bare = trim(explode(',', $c)[0]);
+        if (!str_ends_with(MacroChecker::normCityKey($bare), ' city')) {
+            $two = $ask($bare . ' City');
+            if ($two['city_ambiguous'] || ($two['city'] !== null && ((string) $two['city'] !== $mapCity || (string) $two['province'] !== $mapProv))) {
+                $other = $two['city'] !== null ? $two['province'] . '/' . $two['city'] : 'higit sa isa kapag may "City"';
+                return [null, self::oneLine('city "' . $c . '" ambiguous sa list: ' . $mapProv . '/' . $mapCity . ' | ' . $other . ' → tao', 1000)];
+            }
+        }
+        if (($modelCity !== null && ($modelCity !== $mapCity || $modelProv !== $mapProv)) || ($modelCity === null && $modelProv !== null && $modelProv !== $mapProv)) {
+            return [null, $note . ' — iba sa line ng model (' . $modelProv . ($modelCity !== null ? '/' . $modelCity : '') . ') → tao'];
+        }
+
+        $labels = $maps['brgysByCityProv'][MacroChecker::normPlace($mapCity) . '|' . MacroChecker::normProv($mapProv)] ?? [];
+        $label  = $labels ? $mc->matchBarangayInList($b, $labels) : null;
+        if ($label === null) return [null, $note . ' · barangay "' . self::oneLine($b) . '" wala o hindi iisa sa list ng ' . $mapCity];
+
+        return [[$mapProv, $mapCity, (string) $label], $note];
+    }
+
+    /**
+     * Sinabi ba ng customer ang barangay na ito? Ang tatlong pinagmulan (chat, Pancake history na nakita ng model, mga
+     * sariling block ng customer) ay pinagdudugtong ng line break, kaya walang hit na tumatawid mula sa isa papunta sa iba.
+     * ['result' => phrase|compact|near|none, 'score' => int]
+     *
+     * Ang barangay na kapangalan ng sarili nitong city o bayan ay kumpirmado lang kapag, sa loob ng ISANG pinagmulan,
+     * dalawang beses ang pangalan o may barangay word sa tabi nito: ang history ay madalas na kopya ng mismong chat,
+     * kaya ang "isang beses sa chat at isang beses sa history" ay iisang banggit pa rin ng pangalan ng bayan.
+     */
+    public static function confirmedByText(string $brgy, string $city, string $prov, string $formBrgy, array $sources, array $maps): array
+    {
+        $labels = $maps['brgysByCityProv'][MacroChecker::normPlace($city) . '|' . MacroChecker::normProv($prov)] ?? [];
+        $found  = AstraBarangayMatcher::confirmWithWording(implode("\n", $sources), $brgy, $formBrgy, $labels);
+        if ($found['result'] === 'none' || !self::namedLikeItsCity($brgy, $city, $prov)) return $found;
+        foreach ($sources as $source) {
+            if (AstraBarangayMatcher::confirmWithWording((string) $source, $brgy, $formBrgy, $labels, true)['result'] !== 'none') return $found;
+        }
+
+        return ['result' => 'none', 'score' => 0];
+    }
+
+    /** Kapangalan ba ng barangay ang sarili nitong city o bayan (may province sa unahan ng label o wala, may "city" o wala)? */
+    public static function namedLikeItsCity(string $brgy, string $city, string $prov): bool
+    {
+        $key = MacroChecker::normBrgyKey(preg_replace('/\([^)]*\)/u', ' ', $brgy) ?? $brgy);
+        if ($key === '') return false;
+        $name  = MacroChecker::normCityKey($city);
+        $names = [$name];
+        foreach ([MacroChecker::normCityKey($prov), 'north cotabato', 'south cotabato', 'metro manila', 'ncr'] as $prefix) {
+            if ($prefix !== '' && str_starts_with($name, $prefix . ' ')) $names[] = substr($name, strlen($prefix) + 1);
+        }
+        foreach ($names as $n) {
+            if ($n === $key || $n === $key . ' city') return true;
+        }
+
+        return false;
+    }
+
+    /** Isang linya: ang line break at sunod-sunod na whitespace ay isang espasyo, saka pinuputol sa $max character. */
+    public static function oneLine(string $s, int $max = self::BLOCK_VALUE_MAX): string
+    {
+        return mb_substr(trim(preg_replace('/\s+/u', ' ', $s) ?? ''), 0, $max);
     }
 
     /**
