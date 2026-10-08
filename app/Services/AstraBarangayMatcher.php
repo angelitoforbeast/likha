@@ -75,8 +75,8 @@ class AstraBarangayMatcher
      *    parenthesis ng kinukumpirma, sa labas ng banggit sa kinukumpirma mismo);
      *  - kung puro numero o iisang letra ("12", "1 a"), wala pang limang character, o mas maikling kapatid na bahagi ng pangalan
      *    ng kinukumpirma (sa labas ng banggit dito): kasunod-agad ng barangay word;
-     *  - kung "poblacion" ng bayang may label na may POB./POBLACION pero walang label na POBLACION: kasunod-agad ng barangay
-     *    word, o ng "sa"/"ng"/"taga" kapag hindi katabi ng banggit sa kinukumpirma;
+     *  - kung ang salitang "poblacion" lang (may label mang POBLACION ang bayan o wala): kasunod-agad ng barangay word. Ito ang
+     *    karaniwang tawag sa sentro ng bayan at nasa maraming address bilang palatandaan ("malapit sa Poblacion");
      *  - kung bahagi ng pangalan ng city o province ($placeNames, mga key): may barangay word sa unahan; ang ulit ng pangalan
      *    ng bayan o province (address na dalawang beses isinulat) ay hindi ibang barangay.
      * Ang label na kapareho ang key ng kinukumpirma (dalawang sulat ng iisang barangay) ay hindi "iba".
@@ -106,10 +106,9 @@ class AstraBarangayMatcher
                 $words = explode(' ', $key);
                 $kind  = 'name';
                 if (count(self::specials($words)) === count($words)) $kind = 'number';
-                // Ang "poblacion" ng bayang walang label na POBLACION: kasunod-agad ng barangay word, o ng "sa"/"ng"/"taga".
-                elseif ($inside && $key === 'poblacion') $kind = 'pob';
-                // Maikling pangalan ("Isit", "Luna"): saanman ay may ganoong salita ("Luna St"), kaya kasunod-agad lang ng barangay word.
-                elseif ($sub || strlen($key) < self::MIN_LEN) $kind = 'marked';
+                // Ang salitang "poblacion" lang ay sentro ng bayan sa bibig ng customer ("malapit sa Poblacion"), at ang maikling
+                // pangalan ("Isit", "Luna") ay nasa kung saan-saan ("Luna St"): kasunod-agad lang ng barangay word.
+                elseif ($key === 'poblacion' || $sub || strlen($key) < self::MIN_LEN) $kind = 'marked';
                 elseif (self::inAny($key, $placeNames)) $kind = 'place';
                 $index[$words[0]][] = [$words, $kind, $mine];
             };
@@ -141,12 +140,7 @@ class AstraBarangayMatcher
                         for ($j = 1, $n = count($words); $j < $n && ($w[$i + $j] ?? null) === $words[$j]; $j++);
                         if ($j < $n) continue;
                         $marked = isset($seg['brgy'][$i]);
-                        if ($kind === 'pob' && !$marked) {
-                            // "ngayon sa Poblacion na po": ibang lugar ng bayan. Katabi ng banggit sa kinukumpirma ("sa Poblacion Pangal"): hindi.
-                            if (!in_array($w[$i - 1] ?? '', ['sa', 'ng', 'taga'], true)) continue;
-                            $k = count($nw);
-                            if (array_slice($w, $i + 1, $k) === $nw || ($i - 1 >= $k && array_slice($w, $i - 1 - $k, $k) === $nw)) continue;
-                        } elseif ($kind !== 'name' && !$marked) continue;
+                        if ($kind !== 'name' && !$marked) continue;
                         if ($mine && self::inOwnMention($segments, $si, $i, $i + $n, $nw, $marked)) continue;
 
                         return true;

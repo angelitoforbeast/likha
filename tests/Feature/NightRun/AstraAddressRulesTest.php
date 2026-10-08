@@ -2224,7 +2224,6 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'a street named like the bracket name'      => self::NONE,
             'a short name after a barangay word'        => self::NONE,
             'a shorter sibling named separately'        => self::NONE,
-            'bare Poblacion after sa'                   => self::NONE,
             'Poblacion where the label says POBLACION 1' => self::NONE,
             // Kumpirmado pa rin.
             'a (POB.) label with the word Poblacion'    => self::PHRASE,
@@ -2238,6 +2237,8 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'sa before a landmark'                      => self::PHRASE,
             'no Poblacion in the text'                  => self::PHRASE,
             'a (POB.) label with sa Poblacion'          => self::PHRASE,
+            // Ang salitang Poblacion na walang barangay word ay sentro ng bayan, hindi ibang barangay.
+            'bare Poblacion after sa'                   => self::PHRASE,
         ], [
             'plain Poblacion after a barangay word'     => $this->textCheck($amontay, 'Dati sa Brgy Amontay, ngayon sa Brgy Poblacion na po'),
             'Pob. after a barangay word'                => $this->textCheck($amontay, 'Dati sa Brgy Amontay, ngayon sa Brgy. Pob. na po'),
@@ -2247,7 +2248,6 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'a street named like the bracket name'      => $this->textCheck($tangosSth, '123 Tangos St. Navotas City'),
             'a short name after a barangay word'        => $this->textCheck($bayaan, 'Dati sa Brgy Bayaan, ngayon sa Brgy Isit na po'),
             'a shorter sibling named separately'        => $this->textCheck($bigaa, 'Brgy Santa Cruz Bigaa po. Ay mali, Brgy Santa Cruz pala, Lezo Aklan'),
-            'bare Poblacion after sa'                   => $this->textCheck($pangal, 'Dati sa Brgy Pangal, ngayon sa Poblacion na po'),
             'Poblacion where the label says POBLACION 1' => $this->textCheck($corona, 'Dati sa Brgy Corona, ngayon sa Brgy Poblacion na po'),
             'a (POB.) label with the word Poblacion'    => $this->textCheck($pagAsa, 'Brgy Pag-asa, Brgy Poblacion, Pitogo, Quezon'),
             'no second barangay'                        => $this->textCheck(self::QC_HOLY_SPIRIT, 'Brgy Holy Spirit, Quezon City'),
@@ -2260,7 +2260,89 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'sa before a landmark'                      => $this->textCheck($pangal, 'Brgy Pangal, malapit sa simbahan, Danglas'),
             'no Poblacion in the text'                  => $this->textCheck($pangal, 'Brgy Pangal, Danglas Abra'),
             'a (POB.) label with sa Poblacion'          => $this->textCheck($caupasan, 'Brgy Caupasan, sa Poblacion po, Danglas'),
+            'bare Poblacion after sa'                   => $this->textCheck($pangal, 'Dati sa Brgy Pangal, ngayon sa Poblacion na po'),
         ]);
+    }
+
+    public function test_S_26_22_the_word_poblacion_counts_as_another_barangay_only_after_a_barangay_word(): void
+    {
+        $pangal    = ['ABRA', 'DANGLAS', 'PANGAL'];
+        $tamontaka = ['COTABATO', 'COTABATO-CITY', 'TAMONTAKA'];
+        $arab      = ['ABRA', 'PIDIGAN', 'ARAB'];
+        $this->assertLinesInList(
+            $pangal, ['ABRA', 'DANGLAS', 'CAUPASAN (POB.)'], $tamontaka, self::COTABATO_POB, ['COTABATO', 'COTABATO-CITY', 'POBLACION II'],
+            $arab, ['ABRA', 'PIDIGAN', 'POBLACION EAST']
+        );
+        // Danglas at Pidigan: may label na poblacion ang uri pero walang label na POBLACION; Cotabato City: may label na POBLACION.
+        foreach ([$pangal, $arab] as $town) {
+            $this->assertNotContains('POBLACION', $this->cityLabels($town));
+        }
+
+        $want = [];
+        $seen = [];
+        foreach (['Danglas' => $pangal, 'Cotabato City' => $tamontaka] as $city => $line) {
+            $x = ucfirst(strtolower($line[2]));
+            foreach ([
+                'near the Poblacion'        => ["Brgy $x, malapit sa Poblacion, $city", self::PHRASE],
+                'from the Poblacion before' => ["taga Poblacion ako dati. Brgy $x, $city", self::PHRASE],
+                'an order of the Poblacion' => ["Brgy $x, $city. order ng Poblacion", self::PHRASE],
+                'the Poblacion market'      => ["Brgy $x, sa Poblacion palengke, $city", self::PHRASE],
+                'Poblacion as a part'       => ["Brgy $x, Poblacion, $city", self::PHRASE],
+                'moved to the Poblacion'    => ["dati sa Brgy $x, ngayon sa Poblacion na po", self::PHRASE],
+                'Brgy Poblacion'            => ["Brgy $x, Brgy Poblacion, $city", self::NONE],
+                'Barangay Pob.'             => ["Brgy $x, Barangay Pob., $city", self::NONE],
+            ] as $name => [$text, $expected]) {
+                $want["$city: $name"] = $expected;
+                $seen["$city: $name"] = $this->textCheck($line, $text);
+            }
+        }
+        $want += ['the label POBLACION itself' => self::PHRASE, 'a numbered poblacion label' => self::NONE, 'a poblacion label with its qualifier' => self::NONE];
+        $seen += [
+            'the label POBLACION itself'          => $this->textCheck(self::COTABATO_POB, 'Brgy Poblacion, Cotabato City'),
+            'a numbered poblacion label'          => $this->textCheck($tamontaka, 'Brgy Tamontaka, Poblacion 2, Cotabato City'),
+            'a poblacion label with its qualifier' => $this->textCheck($arab, 'Brgy Arab, Poblacion East, Pidigan'),
+        ];
+
+        $this->assertSame($want, $seen);
+    }
+
+    /**
+     * Ang halaga ng rule sa salitang "Poblacion", binilang sa list: sa bawat ika-25 label (nakatakdang hakbang) na kumpirmado
+     * ng malinis na "Brgy X, city", ang bahaging kumpirmado pa rin kapag may karaniwang banggit ng Poblacion sa text.
+     */
+    public function test_S_26_23_a_common_mention_of_the_poblacion_keeps_at_least_99_per_cent_of_the_clean_addresses_confirmed(): void
+    {
+        $bare    = static fn (string $label): string => trim(preg_replace('/\s+/', ' ', preg_replace('/\([^)]*\)/u', ' ', $label)));
+        $phrases = [
+            'malapit sa Poblacion'    => static fn (string $clean): string => $clean . ', malapit sa Poblacion',
+            'taga Poblacion ako dati' => static fn (string $clean): string => 'taga Poblacion ako dati. ' . $clean,
+            'order ng Poblacion'      => static fn (string $clean): string => $clean . '. order ng Poblacion',
+            'sa Poblacion palengke'   => static fn (string $clean): string => $clean . ', sa Poblacion palengke',
+        ];
+        $maps  = $this->maps();
+        $clean = 0;
+        $kept  = array_fill_keys(array_keys($phrases), 0);
+        $at    = 0;
+        $start = hrtime(true);
+        foreach ($maps['brgysByCityProv'] as $place => $labels) {
+            [$city, $prov] = explode('|', (string) $place);
+            foreach ($labels as $label) {
+                if ($at++ % 25 !== 0) continue;
+                $text = 'Brgy ' . $bare((string) $label) . ', ' . $city;
+                if (AstraAddressRules::confirmedByText((string) $label, $city, $prov, '', [$text, '', ''], $maps)['result'] === 'none') continue;
+                $clean++;
+                foreach ($phrases as $name => $with) {
+                    if (AstraAddressRules::confirmedByText((string) $label, $city, $prov, '', [$with($text), '', ''], $maps)['result'] !== 'none') $kept[$name]++;
+                }
+            }
+        }
+        $seconds = (hrtime(true) - $start) / 1e9;
+
+        $this->assertGreaterThan(1500, $clean);
+        foreach ($kept as $name => $count) {
+            $this->assertGreaterThanOrEqual(0.99, $count / $clean, "$name: $count of $clean");
+        }
+        $this->assertLessThan(25.0, $seconds);
     }
 
     public function test_S_26_9_the_mapper_picks_the_exact_number_and_never_a_neighbour(): void
