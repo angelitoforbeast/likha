@@ -178,6 +178,13 @@
           Burahin ang naka-save na key (babalik sa .env)
         </label>
         <p class="text-xs text-gray-500 mt-2">Agad na gagamitin sa susunod na Astra Fix / Astra Check — walang restart o cache clear na kailangan.</p>
+        {{-- Ang hidden marker ang nagsasabi sa server na nasa form ang switch (ang checkbox na walang tsek ay hindi ipinapadala). --}}
+        <input type="hidden" name="astra_address_rules_present" value="1">
+        <label for="astra_address_rules" class="flex items-center gap-2 mt-4 text-sm text-gray-700">
+          <input type="checkbox" id="astra_address_rules" name="astra_address_rules" value="1" aria-describedby="astra_address_rules_help" @checked(!empty($astraAddressRules))>
+          New address rules for Astra (match like the classic checker)
+        </label>
+        <p id="astra_address_rules_help" class="text-xs text-gray-500 mt-1">Off: Astra works as before. Turn on after reading the replay numbers.</p>
       </section>
       @endif
 

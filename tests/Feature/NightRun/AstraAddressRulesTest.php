@@ -2493,4 +2493,105 @@ class AstraAddressRulesTest extends NightAstraTestCase
         // Ang natitirang bahagi ng address ay naisulat gaya ngayon.
         $this->assertSame(self::QC_HOLY_SPIRIT, $seen['line']);
     }
+
+    private const SETTINGS      = '/encoder/checker_1/settings';
+    private const SETTINGS_FORM = ['work' => 300, 'idle' => 1800, 'long' => 7200, 'shift_start' => '09:00', 'shift_end' => '18:00'];
+    private const BOX_LABEL     = 'New address rules for Astra (match like the classic checker)';
+    private const BOX_HINT      = 'Off: Astra works as before. Turn on after reading the replay numbers.';
+
+    public function test_S_22_2_the_ceo_turns_the_new_rules_on_and_off_in_the_settings(): void
+    {
+        $this->actingAs($this->user());
+
+        // Naka-tsek: `1` ang naka-save, at naka-tsek ang box sa page.
+        $this->post(self::SETTINGS, self::SETTINGS_FORM + ['astra_address_rules_present' => '1', 'astra_address_rules' => '1'])
+            ->assertRedirect(self::SETTINGS)->assertSessionHas('settings_saved', true);
+        $this->assertSame('1', $this->storedSwitch());
+        $this->assertSame(['marker' => true, 'box' => true, 'checked' => true], $this->switchOnPage());
+
+        // Walang tsek pero nandoon ang marker: `0`, at walang tsek sa page.
+        $this->post(self::SETTINGS, self::SETTINGS_FORM + ['astra_address_rules_present' => '1'])->assertRedirect(self::SETTINGS);
+        $this->assertSame('0', $this->storedSwitch());
+        $this->assertSame(['marker' => true, 'box' => true, 'checked' => false], $this->switchOnPage());
+
+        // Kasabay ito ng model at effort, na nase-save bago tingnan ang key: hindi ito nahaharang ng maling key.
+        $this->from(self::SETTINGS)->post(self::SETTINGS, self::SETTINGS_FORM + ['astra_address_rules_present' => '1', 'astra_address_rules' => '1', 'astra_api_key' => 'short'])
+            ->assertRedirect(self::SETTINGS)->assertSessionHasErrors('astra_api_key');
+        $this->assertSame('1', $this->storedSwitch());
+    }
+
+    public function test_S_22_3_another_role_cannot_change_the_switch_and_does_not_see_it(): void
+    {
+        $this->actingAs($this->user('Marketing', 'marketing@example.test'));
+
+        // Mula sa walang row, may tsek ang ipinadala: wala pa ring row.
+        $this->post(self::SETTINGS, self::SETTINGS_FORM + ['astra_address_rules_present' => '1', 'astra_address_rules' => '1'])
+            ->assertRedirect(self::SETTINGS)->assertSessionHas('settings_saved', true);
+        $this->assertNull($this->storedSwitch());
+
+        // Mula sa `1`, walang tsek ang ipinadala: `1` pa rin.
+        $this->storeSwitch('1');
+        $this->post(self::SETTINGS, self::SETTINGS_FORM + ['astra_address_rules_present' => '1'])
+            ->assertRedirect(self::SETTINGS)->assertSessionHas('settings_saved', true);
+        $this->assertSame('1', $this->storedSwitch());
+
+        $this->assertSame(['marker' => false, 'box' => false, 'checked' => false], $this->switchOnPage());
+    }
+
+    public function test_S_22_5_a_post_without_the_marker_leaves_the_switch_as_it_is(): void
+    {
+        $this->actingAs($this->user());
+
+        // Ang CEO mismo ang may switch sa page niya, kaya ang hindi pagbabago sa ibaba ay dahil sa nawawalang marker.
+        $this->assertSame(['marker' => true, 'box' => true, 'checked' => false], $this->switchOnPage());
+
+        // [naka-save bago ang post, may tsek ba ang ipinadala]
+        foreach ([[null, true], [null, false], ['1', true], ['1', false]] as [$before, $ticked]) {
+            DB::table('app_settings')->where('key', self::SWITCH)->delete();
+            if ($before !== null) {
+                $this->storeSwitch($before);
+            }
+
+            $this->post(self::SETTINGS, self::SETTINGS_FORM + ($ticked ? ['astra_address_rules' => '1'] : []))
+                ->assertRedirect(self::SETTINGS)->assertSessionHas('settings_saved', true);
+
+            $this->assertSame($before, $this->storedSwitch(), 'before ' . var_export($before, true) . ', ticked ' . var_export($ticked, true));
+        }
+    }
+
+    private function storedSwitch(): ?string
+    {
+        return DB::table('app_settings')->where('key', self::SWITCH)->value('value');
+    }
+
+    /** Ang nakikita sa settings page: ang marker field, ang box (kasama ang label at paliwanag nito), at kung naka-tsek. */
+    private function switchOnPage(): array
+    {
+        $this->withoutVite();
+        // Bawat view ay dumadaan sa composer ng AppServiceProvider na bumibilang ng tasks ng user.
+        if (!Schema::hasTable('tasks')) {
+            Schema::create('tasks', function (\Illuminate\Database\Schema\Blueprint $t) {
+                $t->id();
+                $t->unsignedBigInteger('user_id')->nullable();
+                $t->string('status')->nullable();
+                $t->timestamps();
+            });
+        }
+
+        $html = $this->get(self::SETTINGS)->assertStatus(200)->getContent();
+        $box  = preg_match('/<input\b[^>]*\bname="astra_address_rules"[^>]*>/', $html, $m) === 1 ? $m[0] : null;
+        if ($box !== null) {
+            $this->assertStringContainsString(self::BOX_LABEL, $html);
+            $this->assertStringContainsString(self::BOX_HINT, $html);
+        } else {
+            $this->assertStringNotContainsString('astra_address_rules', $html);
+            $this->assertStringNotContainsString(self::BOX_LABEL, $html);
+        }
+
+        return [
+            'marker'  => preg_match('/<input\b[^>]*\bname="astra_address_rules_present"[^>]*\bvalue="1"/', $html) === 1,
+            'box'     => $box !== null,
+            'checked' => $box !== null && preg_match('/\schecked\b/', $box) === 1,
+        ];
+    }
 }

@@ -52,6 +52,7 @@ class Checker1SettingsController extends Controller
             'astraEngine'   => AstraEncoder::engineSettings(),
             'astraModels'   => AstraEncoder::MODELS,
             'astraEfforts'  => AstraEncoder::EFFORTS,
+            'astraAddressRules' => self::isCeo() ? AstraEncoder::addressRulesOn() : null,
             // 🌙 Night run settings — CEO lang
             'night'         => self::isCeo() ? \App\Support\NightRunSettings::read() : null,
         ]);
@@ -99,6 +100,13 @@ class Checker1SettingsController extends Controller
         // ✨ Astra model + reasoning effort — CEO lang; '' = default mula sa config/.env
         if (self::isCeo() && ($request->has('astra_model') || $request->has('astra_effort'))) {
             AstraEncoder::storeEngineSettings((string) $request->input('astra_model', ''), (string) $request->input('astra_effort', ''));
+        }
+
+        // ✨ Astra address rules switch — CEO lang. Ang checkbox na walang tsek ay hindi ipinapadala ng browser, kaya ang
+        // hidden marker ang patunay na nasa form talaga ang switch: ang lumang page o direktang post na walang marker ay
+        // hindi dapat makapag-off o makapag-on ng rules.
+        if (self::isCeo() && $request->has('astra_address_rules_present')) {
+            AstraEncoder::storeAddressRules($request->boolean('astra_address_rules'));
         }
 
         // ✨ Astra API key — CEO lang; blangko = walang babaguhin; 'clear' = burahin (babalik sa .env)
