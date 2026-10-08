@@ -15,7 +15,7 @@
     </span>
     <span class="spl-more-wrap" @click.outside="fitPanel = false">
       <button type="button" class="spl-more" aria-haspopup="true" aria-controls="spl-cpanel"
-              :aria-expanded="fitPanel ? 'true' : 'false'" @click="fitPanel = !fitPanel">
+              :aria-expanded="fitPanel ? 'true' : 'false'" @click="fitPanel = !fitPanel; fitCheck()">
         <span class="spl-more-n" x-text="'+' + fitRes.away.length"></span> columns <span aria-hidden="true">▾</span>
       </button>
       <div id="spl-cpanel" class="spl-cpanel" x-show="fitPanel" style="display:none;" role="group" aria-label="Columns">
@@ -61,12 +61,15 @@
   {{-- Ang card ng supplier cells: Esc at click sa labas ang nagsasara (capture, dahil hinaharang ng mga cell ang
        click bago ito umakyat); sumusunod ito sa scroll ng table at sa pagbabago ng laki ng window (kung hindi,
        maiiwan ang naka-pin na card sa lumang puwesto); nawawala kapag sarado na ang form nito. --}}
-  <div id="scroll" class="spl-scroll" x-init="fitInit($el)" x-effect="splSync()" @scroll.passive="splScrolled()" @resize.window="splScrolled()"
+  <div id="scroll" class="spl-scroll" x-init="fitInit($el)" x-on:resize.window="fitCheck()" x-effect="splSync()" @scroll.passive="splScrolled()" @resize.window="splScrolled()"
        @keydown.escape.window="splEsc()" @click.window.capture="splOutside($event)">
     <div class="card">
       {{-- Fixed ang layout: ang lapad ng bawat column ay ang nasa <colgroup>, na kinukuwenta ng fit mula sa sukat
-           ng scroll area. Kaya pareho ang lapad sa bawat klase ng row, at hindi lumalapad ang table dahil sa laman. --}}
-      <table class="spl-table" :style="'table-layout:fixed;width:' + fitW.table + 'px;min-width:' + fitW.table + 'px;'">
+           ng scroll area. Kaya pareho ang lapad sa bawat klase ng row, at hindi lumalapad ang table dahil sa laman.
+           Kapag kasya, ang table ay 100% ng kahon nito (ang mga lapad ng colgroup ay ang hati): hindi ito puwedeng
+           iguhit nang mas makitid kaysa sa kahon kahit luma ang huling sukat. Kapag nag-i-scroll, ang kabuuan ng
+           pinakamaliit na lapad ng mga column ang lapad nito. --}}
+      <table class="spl-table" :style="fitRes.mode === 'fit' && !fitRes.scrolls ? 'table-layout:fixed;width:100%;' : ('table-layout:fixed;width:' + fitW.table + 'px;min-width:' + fitW.table + 'px;')">
         <colgroup>
           <col :style="'width:' + fitW.page + 'px'">
           <col :style="'width:' + fitW.item + 'px'">

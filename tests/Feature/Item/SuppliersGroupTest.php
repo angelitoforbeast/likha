@@ -801,7 +801,7 @@ class SuppliersGroupTest extends ItemTestCase
     {
         $table = $this->tableSource();
         // Fixed ang layout, at ang lapad ay galing sa <colgroup>: PAGE, ITEM, isa kada supplier, isa kada column na kasya.
-        $this->assertSame(1, substr_count($table, "<table class=\"spl-table\" :style=\"'table-layout:fixed;width:' + fitW.table + 'px;min-width:' + fitW.table + 'px;'\">"));
+        $this->assertSame(1, substr_count($table, '<table class="spl-table" ' . ":style=\"fitRes.mode === 'fit' && !fitRes.scrolls ? 'table-layout:fixed;width:100%;' : ('table-layout:fixed;width:' + fitW.table + 'px;min-width:' + fitW.table + 'px;')\">"));
         $group = $this->between($table, '<colgroup>', '</colgroup>');
         $this->assertOrder([
             "<col :style=\"'width:' + fitW.page + 'px'\">",
@@ -980,7 +980,70 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertStringNotContainsString('plusN', $bar);
     }
 
+    public function test_S_38_8_every_width_change_is_followed_and_the_panel_changes_no_width(): void
+    {
+        $setting = ['order' => self::OWNER_ORDER, 'hidden' => self::OWNER_HIDDEN];
+        $fill = 'table-layout:fixed;width:100%;';
+        $s = $this->page([
+            ['do' => 'load', 'clientWidth' => 0, 'win' => 2134],                                   // 0: nakatago pa ang page sa unang sukat
+            ['do' => 'resize', 'clientWidth' => 2117, 'win' => 2134, 'wait' => 20],                 // 1: lumabas na
+            ['do' => 'suppliers', 'list' => self::THREE_SUPPLIERS, 'wait' => 300],                  // 2
+            ['do' => 'run', 'code' => 'fitPanel = !fitPanel; fitCheck()', 'wait' => 3000],          // 3: binuksan ang panel
+            ['do' => 'run', 'code' => 'fitPanel = false; fitCheck()', 'wait' => 500],               // 4: isinara
+            ['do' => 'resize', 'clientWidth' => 1585, 'win' => 2134, 'wait' => 3000],               // 5: kumitid ang kahon, pareho ang window
+            ['do' => 'resize', 'clientWidth' => 2117, 'win' => 2134, 'wait' => 100],                // 6: at bumalik agad
+            ['do' => 'resize', 'clientWidth' => 1264, 'win' => 1279, 'wait' => 3000],               // 7: makitid na window
+        ], $setting);
+
+        $this->assertSame([0, []], [$s[0]['box'], $s[0]['shown']]);
+        $this->assertSame([2084, 17, '+6', $fill], [$s[1]['box'], count($s[1]['shown']), $s[1]['button'], $s[1]['tableStyle']]);
+        // Kapag kasya, ang table ay kasinlapad ng kahon nito (100%), anuman ang huling nakuwentang lapad: hindi ito
+        // puwedeng iguhit nang mas makitid kaysa sa kahon.
+        $this->assertSame($fill, $s[2]['tableStyle']);
+        $this->assertSame(2084, array_sum($s[2]['widths']) + 2 * $s[2]['widths']['supplier']);
+
+        // Ang panel: walang binabago sa sukat, sa mga column o sa lapad — bukas man o sarado.
+        foreach ([3, 4] as $i) {
+            foreach (['box', 'shown', 'table', 'widths', 'tableStyle', 'button', 'awayList'] as $key) {
+                $this->assertSame($s[2][$key], $s[$i][$key], "hakbang {$i}: {$key}");
+            }
+        }
+        $this->assertSame([true, false], [$s[3]['panel'], $s[4]['panel']]);
+
+        // Kumitid ang kahon at bumalik sa loob ng ikasampung bahagi ng segundo, pareho ang lapad ng window: sinusundan
+        // ang dalawang pagbabago. (Dati, ang pagbalik ay hindi pinapansin: naiiwan ang fit ng mas makitid na kahon —
+        // "+8", 15 column, at table na mas makitid kaysa sa kahon.)
+        $this->assertSame([1552, 15, '+8'], [$s[5]['box'], count($s[5]['shown']), $s[5]['button']]);
+        $this->assertSame([2084, 17, '+6', $fill], [$s[6]['box'], count($s[6]['shown']), $s[6]['button'], $s[6]['tableStyle']]);
+        foreach (['shown', 'widths', 'awayList'] as $key) $this->assertSame($s[2][$key], $s[6][$key], $key);
+
+        // Makitid na window: lahat ng column ng set sa pinakamaliit nilang lapad; nag-i-scroll ang table.
+        $this->assertSame(['scroll', 17, 'table-layout:fixed;width:1680px;min-width:1680px;'], [$s[7]['mode'], count($s[7]['shown']), $s[7]['tableStyle']]);
+
+        // Totoong pabalik-balik na sukat (sampung beses sa loob ng ikasampung bahagi ng segundo): humihinto ito sa fit ng
+        // mas makitid na kahon (kasya iyon sa dalawang sukat, at 100% pa rin ang table), tapos sinusukat ulit nang
+        // isang beses pagkalipas ng sandali.
+        $steps = [['do' => 'load', 'clientWidth' => 2117, 'win' => 2134], ['do' => 'suppliers', 'list' => self::THREE_SUPPLIERS, 'wait' => 3000]];
+        for ($i = 0; $i < 10; $i++) $steps[] = ['do' => 'resize', 'clientWidth' => $i % 2 === 0 ? 1585 : 2117, 'win' => 2134, 'wait' => 10];
+        $steps[] = ['do' => 'timers', 'wait' => 2000];
+        $o = $this->page($steps, $setting);
+        $held = $o[11];
+        $this->assertSame([1552, 15, $fill, 1], [$held['box'], count($held['shown']), $held['tableStyle'], $held['timers']]);
+        foreach (range(6, 11) as $i) $this->assertSame(1552, $o[$i]['box'], "hakbang {$i}: hindi na sinusundan ang pabalik-balik");
+        $this->assertSame([2084, 17, 0], [$o[12]['box'], count($o[12]['shown']), $o[12]['timers']]);
+
+        // Sa markup: sinusukat ulit sa bawat resize ng window at sa bawat pindot sa button ng panel.
+        $table = $this->tableSource();
+        $this->assertSame(1, substr_count($table, 'x-on:resize.window="fitCheck()"'));
+        $this->assertSame(1, substr_count($table, "@click=\"fitPanel = !fitPanel; fitCheck()\""));
+        // Ang panel ay nasa bar, sa labas ng scroll area na sinusukat, at nakapatong (absolute): hindi ito bahagi ng lapad ng table.
+        $this->assertLessThan(strpos($table, '<div id="scroll" class="spl-scroll"'), strpos($table, '<div id="spl-cpanel"'));
+        $css = (string) preg_replace('~/\*.*?\*/~s', '', file_get_contents(resource_path(self::STYLE_FILE)));
+        $this->assertStringContainsString('position:absolute; right:0; top:calc(100% + 6px); width:372px;', $this->between($css, '.spl-cpanel {', '}'));
+    }
+
     public function test_S_38_10_this_table_has_its_own_money_format_and_no_text_under_11px(): void
+
 
 
     {
@@ -1034,7 +1097,7 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertStringContainsString('<div class="spl-bar" @keydown.escape.window="fitPanel = false">', $bar);
         $this->assertOrder([
             '<button type="button" class="spl-more" aria-haspopup="true" aria-controls="spl-cpanel"',
-            ":aria-expanded=\"fitPanel ? 'true' : 'false'\" @click=\"fitPanel = !fitPanel\">",
+            ":aria-expanded=\"fitPanel ? 'true' : 'false'\" @click=\"fitPanel = !fitPanel; fitCheck()\">",
             "<span class=\"spl-more-n\" x-text=\"'+' + fitRes.away.length\"></span> columns ",
             '<div id="spl-cpanel" class="spl-cpanel" x-show="fitPanel"',
         ], $bar);

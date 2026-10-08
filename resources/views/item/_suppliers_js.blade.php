@@ -156,6 +156,8 @@
       fitPanel: false,
       fitBox: 0, fitWin: 0,    // ang huling sukat ng kahon at ng window na ginamit ng fit
       fitPrevBox: 0, fitAt: 0, // ang sukat bago iyon at kung kailan: para sa bantay laban sa pabalik-balik na sukat
+      fitFlips: 0, fitHolds: 0, fitTimer: false,   // ilang sunod na pabalik-balik, ilang beses nang huminto, may nakaabang bang muling sukat
+      fitEl: null,             // ang scroll area: ito ang sinusukat
       fitRes: { set:'Sourcing', mode:'scroll', shown:[], away:[], plusN:0, used:0, spare:null, scrolls:true, refused:[], box:0 },
       fitW: { page:168, item:96, supplier:72, cols:{}, table:0 },
       fitCols: [],
@@ -182,6 +184,7 @@
         let stored = null;
         try { stored = localStorage.getItem('item_col_set_v1'); } catch (e) { /* walang storage: Sourcing */ }
         this.fitSet = ItemTableFit.readSet(stored);
+        this.fitEl = el;
         this.fitBox = this.fitMeasure(el);
         this.fitWin = window.innerWidth;
         this.fitRun();
@@ -189,15 +192,30 @@
         else window.addEventListener('resize', () => this.fitResized(el));
         this.$watch('supplierList', () => this.fitRun());
       },
-      // Ang scroll area ang sinusukat, hindi ang table: ang laki nito ay galing sa window, hindi sa laman nito.
-      // Ang nag-iisang paraan para baguhin ito ng fit mismo ay ang paglitaw o pagkawala ng patayong scrollbar
-      // (nag-iiba ang taas ng mga row). Dalawang bantay: (1) walang ginagawa kapag pareho ang sukat; (2) kapag
-      // bumalik agad ang sukat sa mas malapad na katatapos lang iwan, nananatili ang fit ng mas makitid — kasya
-      // iyon sa dalawang sukat, kaya hindi ito puwedeng magpabalik-balik.
+      // Sukatin ulit (resize ng window, pindot sa button ng panel): walang ginagawa kapag pareho ang sukat.
+      fitCheck(){ if (this.fitEl) this.fitResized(this.fitEl); },
+      // Ang scroll area ang sinusukat, hindi ang table: ang laki nito ay galing sa window, hindi sa laman nito, at
+      // ang panel ay nasa labas nito. Ang nag-iisang paraan para baguhin ito ng fit mismo ay ang paglitaw o pagkawala
+      // ng patayong scrollbar (nag-iiba ang taas ng mga row), at nakalaan na ang puwang niyon mula 1280px.
+      // Bawat pagbabago ng sukat ay sinusundan — kasama ang pagbalik sa dating sukat: ang hindi pagsunod ay nag-iiwan
+      // ng fit ng mas makitid na kahon (mas kaunting column, mas malaking "+N"). Ang bantay ay para lang sa totoong
+      // pabalik-balik: tatlong sunod na balik sa katatapos lang iwang sukat sa loob ng 0.6 segundo, pareho ang lapad
+      // ng window. Doon, nananatili ang fit ng mas makitid (kasya iyon sa dalawang sukat), at sinusukat ulit pagkalipas
+      // ng sandali — hanggang dalawang beses lang, kaya may dulo ito; ang pagbabago ng lapad ng window ang nagbabalik
+      // sa simula.
       fitResized(el){
         const box = this.fitMeasure(el), win = window.innerWidth, now = Date.now();
         if (box === this.fitBox && win === this.fitWin) return;
-        if (win === this.fitWin && box === this.fitPrevBox && box > this.fitBox && now - this.fitAt < 600) return;
+        if (win !== this.fitWin) { this.fitFlips = 0; this.fitHolds = 0; }
+        else if (box === this.fitPrevBox && now - this.fitAt < 600) this.fitFlips++;
+        else this.fitFlips = 0;
+        if (this.fitFlips >= 3 && box > this.fitBox) {
+          if (!this.fitTimer && this.fitHolds < 2) {
+            this.fitTimer = true; this.fitHolds++;
+            setTimeout(() => { this.fitTimer = false; this.fitFlips = 0; this.fitResized(el); }, 1500);
+          }
+          return;
+        }
         this.fitPrevBox = this.fitBox;
         this.fitBox = box; this.fitWin = win; this.fitAt = now;
         this.fitRun();
