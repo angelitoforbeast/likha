@@ -167,11 +167,52 @@ class Checker1NightFilterTest extends NightAstraTestCase
         return [$stepId, $order->id];
     }
 
-    /** "Not valid": status 200 at walang kahit isang row. */
+    /** "Not valid": status 200, walang kahit isang row, at ang notice na puro nakapirming salita. */
     private function assertNotValid(TestResponse $response, string $label): void
     {
         $this->assertSame(200, $response->status(), $label);
         $this->assertSame([], $this->ids($response), $label);
+        $this->assertSame('Night run filter not valid. No rows shown. · Show all rows', $this->line($response), $label);
+        $this->assertDoesNotMatchRegularExpression('/\d+ of \d+ shown/', $response->getContent(), $label);
+        $this->assertStringContainsString('<input type="hidden" name="night_step" id="nightStepHidden" value="0">', $this->form($response), $label);
+    }
+
+    private const WHOLE_DATE = 'Validate 1, Download and the AI buttons still use the whole date';
+
+    /** Ang linya ng night filter bilang text (walang tags, isang space lang sa pagitan); null kapag wala sa page. */
+    private function line(TestResponse $response): ?string
+    {
+        $count = preg_match_all('/<div id="nightFilterLine"[^>]*>(.*?)<\/div>/s', $response->getContent(), $m);
+        $this->assertLessThanOrEqual(1, $count, 'one line at most');
+
+        return $count === 0 ? null : trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($m[1][0]), ENT_QUOTES)));
+    }
+
+    /** Ang address ng "Show all rows". */
+    private function clearLink(TestResponse $response): string
+    {
+        $this->assertSame(1, preg_match('/<a href="([^"]*)"[^>]*>Show all rows<\/a>/', $response->getContent(), $m), 'Show all rows link');
+
+        return html_entity_decode($m[1], ENT_QUOTES);
+    }
+
+    /** Ang GET form ng mga filter (date, Page, Filter). */
+    private function form(TestResponse $response): string
+    {
+        $this->assertSame(1, preg_match('/<form id="filtersForm".*?<\/form>/s', $response->getContent(), $m));
+
+        return $m[0];
+    }
+
+    /** `$count` na dagdag na row ng gabi (done, hindi PROCEED) sa Page na "Bulk Shop". Ibinabalik ang mga id ng order. */
+    private function bulkNight(int $count): array
+    {
+        $bulk = $this->manyOrders($count, 'Bulk Shop');
+        DB::table('night_astra_rows')->insert(array_map(fn ($id) => [
+            'step_id' => $this->astra->id, 'macro_output_id' => $id, 'state' => 'done', 'proceed' => false, 'attempts' => 1,
+        ], $bulk));
+
+        return $bulk;
     }
 
     /** Bawat SQL statement ng mga request sa loob ng `$run`. */
@@ -232,6 +273,7 @@ class Checker1NightFilterTest extends NightAstraTestCase
         $response = $this->page($this->link())->assertOk();
 
         $this->assertSame($this->letters('A'), $this->ids($response));
+        $this->assertStringContainsString('· 1 of 2 shown ·', (string) $this->line($response));
     }
 
     public function test_S_06_7_a_row_moved_to_another_date_is_not_listed(): void
@@ -241,14 +283,12 @@ class Checker1NightFilterTest extends NightAstraTestCase
         $response = $this->page($this->link())->assertOk();
 
         $this->assertSame($this->letters('B'), $this->ids($response));
+        $this->assertStringContainsString('· 1 of 2 shown ·', (string) $this->line($response));
     }
 
     public function test_S_06_8_more_than_100_rows_are_paged_and_keep_the_filter(): void
     {
-        $bulk = $this->manyOrders(120, 'Bulk Shop');
-        DB::table('night_astra_rows')->insert(array_map(fn ($id) => [
-            'step_id' => $this->astra->id, 'macro_output_id' => $id, 'state' => 'done', 'proceed' => false, 'attempts' => 1,
-        ], $bulk));
+        $bulk = $this->bulkNight(120);
         $this->manyOrders(30, 'Plain Shop'); // mga order na wala sa gabi: hindi dapat lumabas
 
         $first  = $this->page($this->link());
@@ -328,7 +368,183 @@ class Checker1NightFilterTest extends NightAstraTestCase
         $response = $this->page($this->link(['date' => '2026-10-02']))->assertOk();
 
         $this->assertSame($this->letters('A'), $this->ids($response));
+        $this->assertSame(
+            "Night run filter · night of Mon, Oct 5 (orders of Oct 4) · 1 of 2 shown · this date is not the night's orders date · " . self::WHOLE_DATE . ' · Show all rows',
+            $this->line($response)
+        );
         $this->assertSame([], $this->ids($this->page($this->link(['date' => '2026-10-01']))->assertOk()));
+
+        // Parehong araw na iba lang ang pagkakasulat: hindi ito "ibang petsa".
+        $this->assertStringNotContainsString('this date is not', (string) $this->line($this->page($this->link(['date' => '2026-10-4']))->assertOk()));
+    }
+
+    public function test_S_06_3_the_filtered_table_has_the_same_columns_and_buttons(): void
+    {
+        $plain    = $this->page(['date' => self::ORDERS]);
+        $filtered = $this->page($this->link());
+        $controls = function (TestResponse $response): array {
+            preg_match_all('/<(?:th|button|select)\b[^>]*>/', $response->getContent(), $m);
+
+            // Ang mga control ng bawat row (may data-id) ay ikinukumpara nang hiwalay, kada row, sa ibaba.
+            return array_values(array_filter($m[0], fn ($tag) => !str_contains($tag, 'data-id=')));
+        };
+
+        $this->assertNotNull($this->line($filtered), 'the filter is on');
+        $this->assertCount(12, array_filter($controls($filtered), fn ($tag) => str_starts_with($tag, '<th')), 'twelve columns for the CEO');
+        $this->assertSame($controls($plain), $controls($filtered));
+        $this->assertStringContainsString('id="downloadBtn"', $filtered->getContent());
+        foreach (['A', 'B'] as $letter) {
+            $this->assertSame($this->rowMarkup($plain, $this->o[$letter]), $this->rowMarkup($filtered, $this->o[$letter]));
+        }
+    }
+
+    public function test_S_07_2_choosing_a_page_keeps_the_filter_without_pagination(): void
+    {
+        $bulk = $this->bulkNight(120);
+
+        // Ang Page dropdown ay nagsu-submit ng form: dala nito ang hidden na night_step.
+        $this->assertStringContainsString(
+            '<input type="hidden" name="night_step" id="nightStepHidden" value="' . $this->astra->id . '">',
+            $this->form($this->page($this->link()))
+        );
+
+        $response = $this->page($this->link(['PAGE' => 'Bulk Shop']))->assertOk();
+
+        $this->assertSame(array_reverse($bulk), $this->ids($response));
+        $this->assertStringNotContainsString('page=2', $response->getContent());
+        $this->assertSame($this->letters('A'), $this->ids($this->page($this->link(['PAGE' => 'Alpha Shop']))));
+    }
+
+    public function test_S_07_3_filter_chips_and_pagination_keep_the_filter(): void
+    {
+        $this->bulkNight(120);
+        $response = $this->page($this->link(['checker' => '__BLANK__']))->assertOk();
+        $html     = $response->getContent();
+        $carried  = 'night_step=' . $this->astra->id;
+
+        // Filter select: nasa loob ng form na may hidden na night_step, kaya dala ito ng submit.
+        $form = $this->form($response);
+        $this->assertStringContainsString('<select name="checker"', $form);
+        $this->assertStringContainsString('name="night_step" id="nightStepHidden" value="' . $this->astra->id . '"', $form);
+        $this->assertCount(100, $this->ids($response));
+
+        $this->assertSame(6, preg_match_all('/<a\s+href="([^"]*)"\s+class="inline-block px-3 py-1 rounded/', $html, $chips));
+        foreach ($chips[1] as $href) {
+            $this->assertStringContainsString($carried, $href);
+        }
+
+        $this->assertGreaterThan(0, preg_match_all('/href="([^"]*[?&;]page=\d+[^"]*)"/', $html, $pages));
+        foreach ($pages[1] as $href) {
+            $this->assertStringContainsString($carried, $href);
+        }
+    }
+
+    public function test_S_07_5_the_date_picker_drops_the_filter(): void
+    {
+        [, $older] = $this->secondNight();
+
+        $this->assertSame(1, preg_match('/<input type="date" name="date"[^>]*>/s', $this->page($this->link())->getContent(), $m));
+        $remove = strpos($m[0], "document.getElementById('nightStepHidden')?.remove();");
+        $submit = strpos($m[0], 'resetCheckerAndSubmit(this.form)');
+        $this->assertNotFalse($remove, 'the date picker removes the hidden night_step');
+        $this->assertNotFalse($submit);
+        $this->assertLessThan($submit, $remove, 'removed before the form is submitted');
+
+        // Ang request ng bagong petsa, wala nang night_step: ang karaniwang page ng petsang iyon.
+        $response = $this->page(['date' => '2026-10-02', 'PAGE' => '', 'checker' => ''])->assertOk();
+        $this->assertSame([$older + 1, $older], $this->ids($response));
+        $this->assertNull($this->line($response));
+    }
+
+    // ───────────── Ang linya ─────────────
+
+    public function test_S_08_1_the_line_names_the_night_and_the_count(): void
+    {
+        $response = $this->page($this->link())->assertOk();
+
+        $this->assertSame(
+            'Night run filter · night of Mon, Oct 5 (orders of Oct 4) · 2 of 2 shown · ' . self::WHOLE_DATE . ' · Show all rows',
+            $this->line($response)
+        );
+    }
+
+    public function test_S_08_2_show_all_rows_drops_only_the_night_filter(): void
+    {
+        $response = $this->page($this->link(['PAGE' => 'Alpha Shop', 'checker' => '__BLANK__', 'page' => 1]))->assertOk();
+
+        $target = $this->clearLink($response);
+        $this->assertSame(self::URL, parse_url($target, PHP_URL_PATH));
+        parse_str((string) parse_url($target, PHP_URL_QUERY), $query);
+        ksort($query);
+        $this->assertSame(['PAGE' => 'Alpha Shop', 'checker' => '__BLANK__', 'date' => self::ORDERS], $query);
+
+        $all = $this->get($target)->assertOk();
+        $this->assertSame($this->letters('AE'), $this->ids($all));
+        $this->assertNull($this->line($all));
+    }
+
+    public function test_S_08_3_no_line_without_the_parameter(): void
+    {
+        $html = $this->page(['date' => self::ORDERS])->assertOk()->getContent();
+
+        $this->assertStringNotContainsString('Night run filter', $html);
+        $this->assertStringNotContainsString('Show all rows', $html);
+        $this->assertStringNotContainsString('nightFilterLine', $html);
+        $this->assertStringNotContainsString('name="night_step"', $html);
+    }
+
+    public function test_S_08_4_n_ignores_page_filter_and_chip_and_m_is_the_steps_count(): void
+    {
+        // Tatlong row ng gabi: A (nasa petsa), B (nabura na ang order), G (inilipat sa ibang petsa).
+        $this->o['G'] = $this->order()->id;
+        $this->nightRow('G', 'done', false, 'TO FIX');
+        MacroOutput::where('id', $this->o['G'])->update(['ts_date' => '2026-10-02']);
+        MacroOutput::where('id', $this->o['B'])->delete();
+
+        $this->assertStringContainsString('· 1 of 3 shown ·', (string) $this->line($this->page($this->link())));
+
+        $narrowed = $this->page($this->link(['PAGE' => 'Beta Shop', 'checker' => '__CHECK__', 'status_filter' => 'ODZ']))->assertOk();
+        $this->assertSame([], $this->ids($narrowed));
+        $this->assertStringContainsString('· 1 of 3 shown ·', (string) $this->line($narrowed));
+    }
+
+    public function test_S_08_5_a_step_with_no_night_rows_says_0_of_0(): void
+    {
+        $this->order(['ts_date' => '2026-09-30', 'TIMESTAMP' => '21:14 30-09-2026']);
+        $stepId = DB::table('night_run_steps')->insertGetId([
+            'night_date' => '2026-10-01', 'kind' => 'astra', 'state' => 'finished', 'trigger' => 'schedule',
+        ]);
+
+        $response = $this->page(['date' => '2026-09-30', 'night_step' => $stepId])->assertOk();
+
+        $this->assertSame([], $this->ids($response));
+        $this->assertSame(
+            'Night run filter · night of Thu, Oct 1 (orders of Sep 30) · 0 of 0 shown · ' . self::WHOLE_DATE . ' · Show all rows',
+            $this->line($response)
+        );
+        $all = $this->get($this->clearLink($response))->assertOk();
+        $this->assertCount(1, $this->ids($all));
+        $this->assertNull($this->line($all));
+    }
+
+    public function test_S_08_7_the_line_holds_nothing_from_a_row(): void
+    {
+        $hostile = '<script>alert(1)</script>';
+        MacroOutput::where('id', $this->o['A'])->update([
+            'PAGE' => $hostile, 'FULL NAME' => $hostile, 'ADDRESS' => $hostile, 'ITEM_NAME' => $hostile, 'fb_name' => $hostile, 'all_user_input' => $hostile,
+        ]);
+        NightAstraRow::where('macro_output_id', $this->o['A'])->update(['code' => $hostile, 'reason' => $hostile]);
+
+        $response = $this->page($this->link())->assertOk();
+
+        $this->assertSame($this->letters('AB'), $this->ids($response));
+        $this->assertSame(
+            'Night run filter · night of Mon, Oct 5 (orders of Oct 4) · 2 of 2 shown · ' . self::WHOLE_DATE . ' · Show all rows',
+            $this->line($response)
+        );
+        $this->assertSame(1, preg_match('/<div id="nightFilterLine".*?<\/div>/s', $response->getContent(), $m));
+        $this->assertStringNotContainsString('script', $m[0]);
+        $this->assertStringNotContainsString($hostile, $response->getContent());
     }
 
     // ───────────── Hindi mapagkakatiwalaang parameter ─────────────
@@ -436,6 +652,23 @@ class Checker1NightFilterTest extends NightAstraTestCase
 
         // Ang mga mix na may totoong step ay may ipinapakita: A,B + A + (wala) + B + A + A,B + (wala) + A + (wala) = 8.
         $this->assertSame(8, $shown);
+    }
+
+    public function test_S_10_9_nothing_of_the_night_rows_is_printed(): void
+    {
+        NightAstraRow::where('step_id', $this->astra->id)->update([
+            'code' => 'ZZCODEMARK', 'reason' => 'ZZREASONMARK', 'cost_usd' => 9.8765, 'log_id' => 424242, 'duration_ms' => 373737,
+        ]);
+        $answers = substr_count($this->page(['date' => self::ORDERS])->getContent(), 'ai-checker/answers');
+
+        foreach ([$this->astra->id, 'abc', '999999'] as $step) {
+            $html = $this->page($this->link(['night_step' => $step]))->assertOk()->getContent();
+
+            foreach (['ZZCODEMARK', 'ZZREASONMARK', '9.8765', '424242', '373737'] as $marker) {
+                $this->assertStringNotContainsString($marker, $html, "step {$step}");
+            }
+            $this->assertSame($answers, substr_count($html, 'ai-checker/answers'), "no log link added, step {$step}");
+        }
     }
 
     public function test_S_10_10_leading_zeros_read_as_the_step(): void

@@ -320,10 +320,17 @@
     <form id="filtersForm" method="get" action="{{ route('macro_output.index') }}" class="flex items-end gap-4 mb-2 flex-wrap w-full">
       <div>
         <label class="text-sm font-medium">Date</label>
+        {{-- 🌙 Ang night filter ay para sa petsa ng mga order ng iisang gabi: kapag pinalitan ang petsa, inaalis muna ito
+             bago mag-submit (walang ginagawa kapag walang night filter) --}}
         <input type="date" name="date" value="{{ $date }}"
           class="border rounded px-2 py-1"
-          onchange="resetCheckerAndSubmit(this.form)" />
+          onchange="document.getElementById('nightStepHidden')?.remove(); resetCheckerAndSubmit(this.form)" />
       </div>
+
+      {{-- 🌙 Para dala ng Page at Filter ang night filter. Step id (integer) o nakapirming 0 lang: hindi ang text mula sa address bar --}}
+      @if(!empty($nightFilter))
+        <input type="hidden" name="night_step" id="nightStepHidden" value="{{ $nightFilter['valid'] ? (int) $nightFilter['step_id'] : 0 }}">
+      @endif
 
       {{-- ✅ Page: Click shows ALL, typing FILTERS inside dropdown --}}
       <div class="page-dd" id="pageDd">
@@ -465,6 +472,31 @@
         @endif
       </div>
     </form>
+
+    {{-- 🌙 Night run filter: isang linya para hindi mapagkamalang maikling araw ang listahan.
+         Nakapirming salita, bilang at petsa lang ang laman — walang galing sa kahit anong row o sa address bar. --}}
+    @if(!empty($nightFilter))
+      @php
+        // Ang query string ay binubuo nang hiwalay: ang route() ay pumapalya sa parameter na numero ang pangalan.
+        $nightClearUrl = route('macro_output.index') . '?' . http_build_query(
+          array_merge(request()->except(['night_step', 'page']), ['date' => $date])
+        );
+      @endphp
+      <div id="nightFilterLine" role="status" class="text-sm text-gray-700 mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+        @if($nightFilter['valid'])
+          <strong>Night run filter</strong>
+          <span>· night of {{ \Carbon\Carbon::parse($nightFilter['night_date'])->format('D, M j') }} (orders of {{ \Carbon\Carbon::parse($nightFilter['orders_date'])->format('M j') }})</span>
+          <span>· {{ (int) $nightFilter['shown'] }} of {{ (int) $nightFilter['total'] }} shown</span>
+          @if($nightFilter['date_differs'])
+            <span class="font-semibold text-red-700">· this date is not the night's orders date</span>
+          @endif
+          <span>· Validate 1, Download and the AI buttons still use the whole date</span>
+        @else
+          <strong>Night run filter not valid. No rows shown.</strong>
+        @endif
+        <span>· <a href="{{ $nightClearUrl }}" class="text-blue-600 underline hover:text-blue-800">Show all rows</a></span>
+      </div>
+    @endif
 
     {{-- ✅ Pagination shown UNDER Page dropdown area (inside header) --}}
     @if(!empty($paginateOnlyWhenAll) && $paginateOnlyWhenAll)
