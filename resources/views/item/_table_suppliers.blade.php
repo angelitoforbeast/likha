@@ -2,7 +2,7 @@
   {{-- Ang card ng supplier cells: Esc at click sa labas ang nagsasara (capture, dahil hinaharang ng mga cell ang
        click bago ito umakyat); sumusunod ito sa scroll ng table at sa pagbabago ng laki ng window (kung hindi,
        maiiwan ang naka-pin na card sa lumang puwesto); nawawala kapag sarado na ang form nito. --}}
-  <div id="scroll" x-effect="splSync()" @scroll.passive="splScrolled()" @resize.window="splScrolled()"
+  <div id="scroll" class="spl-scroll" x-effect="splSync()" @scroll.passive="splScrolled()" @resize.window="splScrolled()"
        @keydown.escape.window="splEsc()" @click.window.capture="splOutside($event)">
     <div class="card">
       <table class="spl-table">

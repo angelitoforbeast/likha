@@ -1109,4 +1109,61 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertStringNotContainsString('spl-rdt', $old);
         $this->assertStringContainsString($label, $this->between($old, 'class="item-row"', 'page-col-header'));
     }
+
+    /**
+     * Text pin (binabasa ang CSS at markup; walang browser dito): sa 768px pataas, walang side padding sa kaliwa ang
+     * scroll area ng suppliers view, kaya ang sticky cell (left:0) ay nakadikit mismo sa gilid nito — walang puwang
+     * sa kaliwa ng column na madadaanan ng mga column na nag-i-scroll. Ang takip ay ang cell mismo (opaque na kulay
+     * sa bawat klase ng row), hindi anino sa labas ng cell.
+     */
+    public function test_S_17_6_the_sticky_item_column_sits_at_the_scroll_edge_and_is_opaque_on_every_row_kind(): void
+    {
+        $css = str_replace("\r\n", "\n", file_get_contents(resource_path(self::STYLE_FILE)));
+        $wide = substr($css, (int) strrpos($css, '@media (min-width:768px) {'));
+        $this->assertStringStartsWith('@media (min-width:768px) {', $wide);
+        $narrow = substr($css, 0, (int) strrpos($css, '@media (min-width:768px) {'));
+
+        // Ang scroll area ng view na ito lang ang may class; ang rule ay nasa loob ng 768px block lang.
+        $this->assertSame(1, substr_count($this->tableSource(), '<div id="scroll" class="spl-scroll"'));
+        $this->assertStringContainsString('.spl-scroll { padding-left:0 !important; }', $wide);
+        $this->assertStringNotContainsString('spl-scroll', $narrow);
+        $this->assertStringNotContainsString('position:sticky', $narrow);
+        foreach (['item.index default' => $this->render('ceo', false), 'item.index old' => $this->render('ceo', true)] as $name => $html) {
+            $this->assertStringNotContainsString('spl-scroll', $html, $name);
+        }
+        // Walang takip na anino sa labas ng cell: hindi iyon ang inaasahan.
+        $this->assertStringNotContainsString('-16px', $css);
+
+        // Bawat klase ng row: sticky sa left:0 at may sariling opaque na kulay.
+        $rules = [
+            'header corner (dalawang header row: rowspan 2)' => '.spl-table > thead > tr > th.spl-c1 { position:sticky; left:0; z-index:40; }',
+            'page row'                => "position:sticky; left:0; z-index:6; background:#fff; box-shadow:1px 0 0 #c7d2fe;",
+            'row hover'               => '.spl-table > tbody > tr:hover > td.spl-c1 { background:#f8fafc; }',
+            'item row'                => '.spl-table > tbody > tr.item-row > td.spl-c1 { background:#eef2ff; }',
+            'item row hover'          => '.spl-table > tbody > tr.item-row:hover > td.spl-c1 { background:#e0e7ff; }',
+            'no running page'         => '.spl-table > tbody > tr.item-row.item-row-nopage > td.spl-c1 { background:#fff7ed; }',
+            'no running page hover'   => '.spl-table > tbody > tr.item-row.item-row-nopage:hover > td.spl-c1 { background:#ffedd5; }',
+            'expanded page row'       => 'background:#fff; box-shadow:inset 3px 0 0 #2563eb, 1px 0 0 #c7d2fe;',
+            'editing row'             => '.spl-table > tbody > tr.editing-row > td.spl-c1 { background:#eff6ff; }',
+            'repeated per-page header' => 'position:sticky; left:0; z-index:6; background:#334155;',
+            'TOTAL'                   => '.spl-table > tbody > tr.total-row > td:first-child { left:0; z-index:25; background:#f1f5f9; box-shadow:1px 0 0 #cbd5e1; }',
+        ];
+        foreach ($rules as $kind => $rule) {
+            $this->assertStringContainsString($rule, $wide, $kind);
+        }
+        $this->assertStringContainsString('.spl-table > tbody > tr > td.spl-c1 {', $wide);
+        $this->assertStringContainsString('.spl-table > tbody.page-section-expanded > tr.page-row-expanded > td.spl-c1 {', $wide);
+        $this->assertStringContainsString('.spl-table > tbody > tr.page-col-header > th:first-child {', $wide);
+
+        // Ang kulay ng header corner at ang pagiging sticky ng TOTAL ay galing sa sariling CSS ng page.
+        $page = $this->render('ceo', true, true);
+        $this->assertStringContainsString("background:#1e293b; color:#94a3b8;", $this->between($page, 'thead th {', '}'));
+        $this->assertStringContainsString('position:sticky; bottom:0; z-index:20;', $this->between($page, 'tr.total-row td {', '}'));
+
+        // Bawat row na may cell sa unang column ay may class na iyon (ang buong-lapad na rows — mensahe at ang naka-expand
+        // na block ng page — ay iisang cell na sakop ang lahat ng column at sumasabay sa scroll).
+        $table = $this->tableSource();
+        $this->assertSame(1, preg_match('/<th\s[^>]*spl-c1/', $this->between($table, '<thead>', '</thead>')));
+        $this->assertSame(2, substr_count($table, '<td class="spl-c1">'));
+    }
 }

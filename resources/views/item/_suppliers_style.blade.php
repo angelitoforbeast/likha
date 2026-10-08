@@ -162,13 +162,17 @@
   }
 
   /* ── Sticky na item column (768px pataas lang) ─────────────────────────
-     Kailangang opaque ang bawat sticky cell, kapareho ng kulay ng ibang cell ng row nito; kung hindi, tatagos ang
-     mga column na dumadaan sa ilalim. Ang unang shadow (-16px) ay takip sa gilid ng scroll area sa kaliwa;
-     ang pangalawa ay ang guhit sa kanang gilid ng column. */
+     Ang scroll area ng page ay may 16px na padding sa magkabilang gilid, at doon sinusukat ang left:0 ng sticky
+     cell: sa loob ng padding. Kaya may puwang sa kaliwa ng column na hindi sakop ng kahit anong cell, at doon
+     sumisilip ang mga column na nag-i-scroll. Hindi ito tinatakpan ng anino sa labas ng cell (pintura lang iyon,
+     hindi kahon). Kaya dito, tinatanggal ang padding sa kaliwa: ang sticky cell mismo ang nasa gilid ng scroll
+     area, at ang sarili niyang opaque na kulay ang takip — kapareho ng kulay ng ibang cell ng row nito.
+     Ang anino sa kanan ay ang guhit sa gilid ng column. */
   @media (min-width:768px) {
-    .spl-table > thead > tr > th.spl-c1 { position:sticky; left:0; z-index:40; box-shadow:-16px 0 0 #f1f5f9; }
+    .spl-scroll { padding-left:0 !important; }
+    .spl-table > thead > tr > th.spl-c1 { position:sticky; left:0; z-index:40; }
     .spl-table > tbody > tr > td.spl-c1 {
-      position:sticky; left:0; z-index:6; background:#fff; box-shadow:-16px 0 0 #f1f5f9, 1px 0 0 #c7d2fe;
+      position:sticky; left:0; z-index:6; background:#fff; box-shadow:1px 0 0 #c7d2fe;
     }
     .spl-table > tbody > tr:hover > td.spl-c1 { background:#f8fafc; }
     .spl-table > tbody > tr.item-row > td.spl-c1 { background:#eef2ff; }
@@ -177,14 +181,15 @@
     .spl-table > tbody > tr.item-row.item-row-nopage:hover > td.spl-c1 { background:#ffedd5; }
     /* Naka-expand na page row: puti kahit naka-hover, at buo pa rin ang asul na bar sa kaliwa. */
     .spl-table > tbody.page-section-expanded > tr.page-row-expanded > td.spl-c1 {
-      background:#fff; box-shadow:inset 3px 0 0 #2563eb, -16px 0 0 #f1f5f9, 1px 0 0 #c7d2fe;
+      background:#fff; box-shadow:inset 3px 0 0 #2563eb, 1px 0 0 #c7d2fe;
     }
-    /* (Ang row na ine-edit ay may sarili nang opaque na kulay na !important sa buong row, kaya walang rule dito.) */
+    /* Ang row na ine-edit: kapareho ng kulay na ibinibigay ng page sa buong row. */
+    .spl-table > tbody > tr.editing-row > td.spl-c1 { background:#eff6ff; }
     /* Ang inuulit na header ng bawat page. */
     .spl-table > tbody > tr.page-col-header > th:first-child {
-      position:sticky; left:0; z-index:6; background:#334155; box-shadow:-16px 0 0 #f1f5f9;
+      position:sticky; left:0; z-index:6; background:#334155;
     }
-    /* TOTAL: sticky na sa baba at may sarili nang opaque na kulay; dito, sticky din sa kaliwa at nasa ibabaw ng ibang cell ng TOTAL. */
-    .spl-table > tbody > tr.total-row > td:first-child { left:0; z-index:25; box-shadow:-16px 0 0 #f1f5f9, 1px 0 0 #cbd5e1; }
+    /* TOTAL: sticky na sa baba; dito, sticky din sa kaliwa, nasa ibabaw ng ibang cell ng TOTAL, at may sariling opaque na kulay. */
+    .spl-table > tbody > tr.total-row > td:first-child { left:0; z-index:25; background:#f1f5f9; box-shadow:1px 0 0 #cbd5e1; }
   }
 </style>
