@@ -11,6 +11,12 @@ conversation, J&T list search, web search), the new rule decision and the final 
 memory only, to the six fields it had before Astra touched it that night (from that night's log), with a blank
 STATUS, and is then judged. The outcome is compared with the row as it is now, after staff.
 
+`--mode=rules` (the default) is the run described above: it forces mode `1` of the switch. `--mode=web-first`
+forces mode `2` instead (the new address rules + web search first, see `docs/night-run.md`): the first model
+round must search the web, the cap is 5 searches, and a barangay found only on the web is not a PROCEED. In that
+mode the setting "Barangay found on the web may PROCEED" is not read: no web-found barangay proceeds, and the
+report counts what each value of the setting would let through.
+
 ## What it does not do
 
 - It writes nothing to the database: no order, no night table, no Astra log, no setting, no queue job. It only
@@ -34,6 +40,13 @@ Options:
     --rows=held|proceeded|all   held (default): rows Astra finished without PROCEED that night
     --limit=N                   most rows to run (default 200), applied before the first call
     --ids=1,2,3                 only these macro_output ids
+    --mode=rules|web-first      rules (default): mode 1; web-first: mode 2 (web search first)
+    --compare=<path>            an earlier report JSON of this command; adds a table of outcome then against now
+
+Web search first on a night, and the same compared with an earlier run of that night:
+
+    sudo -u www-data php artisan astra:dry-run --step=<id> --mode=web-first
+    sudo -u www-data php artisan astra:dry-run --step=<id> --mode=web-first --compare=storage/app/astra-dry-run/step-<id>-<YYYYMMDD-HHMMSS>.json
 
 A small first run to see it work: `sudo -u www-data php artisan astra:dry-run --step=<id> --limit=5`. For a long
 run use `screen` or `tmux`, or `nohup … > dry-run.txt &`, so a dropped SSH session does not stop it.
@@ -69,6 +82,26 @@ the `summary` block is added when the run ends by itself. `storage/app` is ignor
   with ids, other), and whether province, city and barangay equal the row's now (all equal; which part differs,
   with ids; cannot compare when the row now has one of them blank).
 - **Model, effort, model calls, tokens, web searches, API errors by class, elapsed time.**
+
+In web-first mode the held rows have two more reasons, "two different lines" (the model's line and the program's
+own mapping of the form differ in city or barangay) and "barangay from the web, waiting for a person", and the
+report adds a block **Web search first**, with ids:
+
+- rows that would PROCEED outright;
+- rows that would be written with a barangay from the web and wait for a person, split by `web_basis` (official,
+  several, single, none) and by the model's confidence (high, medium, low); for each split: how many have
+  province, city and barangay equal to the row now, how many differ and in which part, how many cannot be
+  compared, and how many staff set to CANNOT PROCEED;
+- "If barangays from the web were allowed to proceed" at official / several / single: the total that would
+  proceed (the outright rows plus the waiting rows that value lets through) and how many of those have a line
+  equal to the row now;
+- rows where web search could not be forced (the API refused the parameter, or the first answer had no search);
+- web searches per row, average and maximum, over the rows that got a verdict.
+
+With `--compare` the report ends with **Against the earlier report**: for the rows in both, held then and would
+proceed now, held then and barangay from the web now, would proceed then and held now, any other change that
+occurred, the count with the same outcome, and the rows without a verdict in one of the two. The JSON has the
+same under `summary.web_first` and `summary.compare`, and `"mode": "web-first"` at the top.
 
 ## Caveats
 
@@ -122,6 +155,30 @@ the `summary` block is added when the run ends by itself. `storage/app` is ignor
   behave like the night — if wrong, a few slow rows show as `connection_or_timeout` instead of an answer.
 - Ruling: the JSON file is rewritten after every row — a stopped run then still leaves a file — the cost is one
   small file write per row.
+- Ruling: in web-first mode the setting for web-found barangays is taken as `0` — one run then answers all three
+  values through the "if allowed" lines — the run does not show the night exactly as it would go with the setting
+  the CEO saved; add the matching "if allowed" line.
+- Ruling: a row whose only obstacle is a web-found barangay is counted as held, under its own reason, not as a
+  third outcome — "would stay held" then still means "no PROCEED" — the reader adds the two lines to get the rows
+  that are written with a proposal.
+- Ruling: the first holding reason in web-first mode is looked for in this order: the model asked for a person,
+  unclear intent, no line, two different lines, barangay not in the text, a blank field, the final check, and
+  last the barangay from the web — the same order as the rule function, so "barangay from the web" means nothing
+  else was in the way — a row with two problems shows only the first.
+- Ruling: the two new reasons, the Web search first block and the `mode` key appear only in web-first mode — the
+  default mode's report and file stay as they were — the line that lists the options when one is wrong is longer
+  in both modes.
+- Ruling: "equal to the row now" in the Web search first block compares province, city and barangay whatever
+  staff's status, as the older lines do — one way of comparing in the whole report — a row staff never touched
+  compares Astra's night values with Astra's proposal.
+- Ruling: web searches per row are averaged over rows that got a verdict (would proceed or held) — an API error
+  has no searches to count — the total in the "Model calls" line still covers every call.
+- Ruling: `--compare` reduces each row to would proceed, barangay from the web, or held; it takes only ids and
+  those fixed words from the earlier file, which must be a report of this command of at most 20 MB, and it is read
+  before the first model call — a wrong path should not be found after the cost — a report of another night
+  simply has no rows in common.
+- Ruling: `--compare` works across modes (an earlier default-mode report against a web-first run) — that is the
+  comparison asked for — the two runs also differ by the model's own variation, so a few changes are noise.
 - Ruling: the encoder was split into a deciding part (`decideOnly`) that `processRow` calls, plus `dryRunRow`
   for this command — the smallest change that lets the same code decide without writing — the night job's
   statements and their order are unchanged and its existing tests pass untouched.
