@@ -325,5 +325,12 @@ Review findings accepted, not fixed. Each fix loop was closed after two rounds. 
 - **Two real pairs where a real word is one letter off the longer name's extra word** ("pala Salvacion" confirms PALTA SALVACION in Virac, "luma Punod" confirms LUMBA-PUNOD in Pantar). Reason: the one-letter allowance keeps "Anilao Labak" confirming ANILAO-LABAC, which an existing case requires.
 - **"Poblacion" as the second barangay is not counted when the barangay being confirmed is itself a poblacion label; "malapit sa Poblacion" holds a row in towns whose poblacion carries another name.** Reason: ambiguous either way; the narrow rule was chosen.
 - **A street, subdivision or landmark that carries the name of another barangay of the city (five letters or more) holds the row.** Reason: asked for by the second amendment; the real rate is unknown until a replay on stored nights.
-- **The test of S-25.11 is still named "…needs_more_than_one_mention_of_the_name" although a second mention no longer confirms.** Reason: a rename only; the story's wording is corrected.
 - **The last fix commit (`0b4d443`) had no review of its own.** Reason: the time of the run; it only refuses, and its rows and the whole file are green.
+
+**Fix list 2 (the text check, new rules only), accepted after its review**
+- **Six ways of writing "Brgy Poblacion" are not seen as another barangay:** "Brgy, Poblacion", "Brgy ng Poblacion", "Brgy (Poblacion)", the two words on two lines, "BrgyPoblacion", "Brgy Población" with an accent. Reason: a break or a word between the two, joined words (already accepted) and an accented letter; each needs the customer to name two barangays and the model to keep the other one.
+- **"Brg 5 pcs" confirms BARANGAY 5** (as "Brgy 5 pcs" already did). Reason: a number directly after a barangay word is the rule for numbered barangays; the count word after it is not read.
+- **"Salamat. Barrio 28 Caloocan" and "sa Barrio 28" are not confirmed.** Reason: "barrio" counts for confirming only as the first word after a comma or a line break, so that "Bagong Barrio 28" never confirms BARANGAY 28; the safe direction.
+- **"Brgy Camposanto 1 - Sur" does not confirm its own label** (labels that hold a spaced dash). Reason: unchanged from before; confirming was not to be changed in this fix list.
+- **A bare "Poblacion" naming the customer's new barangay is not seen** ("dati sa Brgy X, ngayon sa Poblacion na po" confirms X). Reason: decided by the third amendment; the word is an everyday landmark.
+- **The last fix commit of fix list 2 (`970b665`) had no review of its own.** Reason: it only turns the confirmations its review found back into "not confirmed"; its rows, both test files and the two clean-address counts are unchanged.
