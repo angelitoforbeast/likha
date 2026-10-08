@@ -1675,12 +1675,33 @@ class AstraAddressRulesTest extends NightAstraTestCase
             'a town of another province'                => ['Gugo', 'Samal', 'Davao del Norte'],
             'a barangay before its city'                => ['Busok', 'Bagumbayan, Taguig', 'Metro Manila'],
             'the city written in the province field'    => ['San Roque', 'Jaro', 'Iloilo City'],
+            // Ang province na hindi kilala ng list ay hindi pagsang-ayon: ibang sulat ng ibang province, rehiyon, daglat.
+            'the province with a hyphen'                => ['San Roque', 'Jaro', 'Ilo-ilo'],
+            'the province with the word province'       => ['San Roque', 'Jaro', 'Iloilo Province'],
+            'a region in the province field'            => ['San Roque', 'Jaro', 'Western Visayas'],
+            'an island group after the comma'           => ['Gugo', 'Samal, Mindanao', ''],
+            'initials in the province field'            => ['Gugo', 'Samal', 'DDN'],
+            'a city without "city" in another province' => ['Alfonso Tabora', 'Baguio', 'Davao del Sur'],
         ];
+        $this->assertLinesInList(['BENGUET', 'BAGUIO-CITY', 'ALFONSO TABORA']);
         foreach ($elsewhere as $name => $form) {
             $seen = $this->ranRow(++$day, $this->formOnly($form), ['all_user_input' => $this->chat('Purok 2, ' . $form[0] . ', ' . $form[1])]);
 
             $this->assertNoLinePath($seen, $name);
             $this->assertStringContainsString('ambiguous', $seen['note'], $name);
+        }
+
+        // Ang tamang province sa ibang sulat, at ang tunay na filing ng list, ay may line pa rin.
+        $this->assertLinesInList(self::QC_HOLY_SPIRIT, self::CEBU_SANTA_CRUZ, self::COTABATO_POB_9);
+        $stillMapped = [
+            'the capital region by its initials'  => [['Holy Spirit', 'Quezon City', 'NCR'], self::QC_HOLY_SPIRIT],
+            'the right province with "province"'  => [['Sta. Cruz', 'Cebu City', 'Cebu Province'], self::CEBU_SANTA_CRUZ],
+            'the list files the city elsewhere'   => [['Poblacion 9', 'Cotabato City', 'Maguindanao del Norte'], self::COTABATO_POB_9],
+        ];
+        foreach ($stillMapped as $name => [$form, $line]) {
+            $seen = $this->ranRow(++$day, $this->formOnly($form), ['all_user_input' => $this->chat('Purok 2, ' . $form[0] . ', ' . $form[1])]);
+
+            $this->assertSame([$line, 'program_map'], [$seen['line'], $seen['replay']['label_source']], $name);
         }
     }
 

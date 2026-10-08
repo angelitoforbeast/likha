@@ -292,26 +292,36 @@ class AstraAddressRules
         // Ang province na isinulat sa form ay dapat ang province ng namapang city. Kapag iisa lang ang kandidato, hindi na
         // tinitingnan ng mapper ang province: "Samal" ng Davao del Norte ay nagiging SAMAL ng Bataan. Ang tanging lusot ay
         // ang tunay na filing ng list (Cotabato City ay nasa COTABATO kahit Maguindanao ang sabi ng tao).
+        // Ang lusot ay para lang sa form na nagsabing CITY ito ("Cotabato City"), o na ang isinulat ay ang mismong pangalan
+        // ng province ng list ("Cotabato" ng COTABATO): ang "Baguio" lang na may ibang province ay hindi hinuhulaan.
+        $filing   = ($withCity || $bareKey === MacroChecker::normCityKey($mapProv)) && self::onlyCityOfItsName($mapProv, $mapCity, $maps);
         $saidProv = $p !== '' ? $mc->provinceLabelFromList($p, $maps) : null;
-        if ($saidProv !== null && $saidProv !== $mapProv && !self::onlyCityOfItsName($mapProv, $mapCity, $maps)) {
+        if ($saidProv !== null && $saidProv !== $mapProv && !$filing) {
             return $tie('province ng form: ' . $saidProv);
         }
         // Ang mapper ay pumuputol sa unang kuwit ("Jaro, Iloilo City" → "Jaro" → bayan sa Leyte). Ang bawat natirang bahagi,
         // at ang province ng form na hindi province sa list, ay pangalan din ng lugar: kapag province ito, dapat iyon ang
-        // province ng namapang city; kapag city ito, dapat iyon din ang namapang city. Kung hindi, hindi alam kung alin → tao.
+        // province ng namapang city; kapag city ito, dapat iyon din ang namapang city. Ang bahaging hindi province at hindi
+        // city sa list ("Ilo-ilo", "Western Visayas", "DDN") ay HINDI pagsang-ayon: hindi alam kung alin → tao.
         $others = array_slice(array_map('trim', explode(',', $c)), 1);
         if ($p !== '' && $saidProv === null) $others[] = $p;
         foreach ($others as $part) {
             if ($part === '') continue;
             $partProv = $mc->provinceLabelFromList($part, $maps);
             if ($partProv !== null) {
-                if ($partProv !== $mapProv && !self::onlyCityOfItsName($mapProv, $mapCity, $maps)) return $tie('province: ' . $partProv);
+                if ($partProv !== $mapProv && !$filing) return $tie('province: ' . $partProv);
                 continue;
             }
+            // Ibang sulat ng isang province ng list ("Iloilo Province", "Ilo-ilo"): province pa rin iyon, at dapat tugma.
+            $loose = self::looseProvince($part, $maps, $mc);
+            if ($loose !== null && $loose !== $mapProv && !$filing) return $tie('province: ' . $loose);
+            $isMappedCity = false;
             foreach ([$part, $part . ' City'] as $wording) {
                 $r = $ask($wording);
                 if ($differs($r)) return $tie($r['city'] !== null ? $r['province'] . '/' . $r['city'] : '"' . $part . '" higit sa isa');
+                if ($r['city'] !== null) $isMappedCity = true;
             }
+            if ($loose === null && !$isMappedCity) return $tie('"' . $part . '" hindi province at hindi city sa list');
         }
         if (($modelCity !== null && ($modelCity !== $mapCity || $modelProv !== $mapProv)) || ($modelCity === null && $modelProv !== null && $modelProv !== $mapProv)) {
             return [null, $note . ' — iba sa line ng model (' . $modelProv . ($modelCity !== null ? '/' . $modelCity : '') . ') → tao'];
@@ -322,6 +332,28 @@ class AstraAddressRules
         if ($label === null) return [null, $note . ' · barangay "' . self::oneLine($b) . '" wala o hindi iisa sa list ng ' . $mapCity];
 
         return [[$mapProv, $mapCity, (string) $label], $note];
+    }
+
+    /**
+     * Ang province ng list na ibang sulat lang ang isinulat: tinanggal ang "province" / "prov" / "of" at ang panaklong sa
+     * dulo, at inihambing nang walang espasyo at gitling ("Iloilo Province", "Ilo-ilo", "Iloilo (Region 6)" → ILOILO).
+     * Null kapag wala, o kapag higit sa isang province ang tumugma.
+     */
+    private static function looseProvince(string $wording, array $maps, MacroChecker $mc): ?string
+    {
+        $s = preg_replace('/\([^)]*\)\s*$/u', ' ', $wording) ?? $wording;
+        $s = preg_replace('/\b(province|prov|of)\b/u', ' ', MacroChecker::normPlace($s)) ?? '';
+        $s = trim(preg_replace('/\s+/u', ' ', $s) ?? $s);
+        if ($s === '') return null;
+        $label = $mc->provinceLabelFromList($s, $maps);
+        if ($label !== null) return $label;
+        $compact = str_replace(' ', '', $s);
+        $hits = [];
+        foreach (($maps['provincesSet'] ?? []) as $key => $provLabel) {
+            if (str_replace(' ', '', (string) $key) === $compact) $hits[(string) $provLabel] = true;
+        }
+
+        return count($hits) === 1 ? (string) array_key_first($hits) : null;
     }
 
     /**
