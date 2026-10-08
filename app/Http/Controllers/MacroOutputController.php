@@ -1076,10 +1076,11 @@ class MacroOutputController extends Controller
         // Ang AI Checker / Astra Check ay bumabasa ng petsa mula sa address bar, hindi sa date picker: kaya ang valid na
         // filter na walang `date` ay inililipat sa parehong address na may petsa ng mga order ng gabing iyon.
         if ($night?->valid && !$request->filled('date')) {
-            return redirect()->route('macro_output.index', array_merge($request->query(), [
-                'night_step' => $night->stepId,
-                'date'       => $night->ordersDate,
-            ]));
+            // Query string na binuo nang hiwalay (hindi ipinapasa sa route()): ang parameter na numero ang pangalan o
+            // array ang laman ay pumapalya sa URL generator.
+            return redirect()->to(route('macro_output.index') . '?' . http_build_query(
+                ['night_step' => $night->stepId, 'date' => $night->ordersDate] + $request->query()
+            ));
         }
 
         // ✅ Date (Y-m-d). Default: yesterday

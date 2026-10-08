@@ -303,6 +303,20 @@ class Checker1NightFilterTest extends NightAstraTestCase
         $response = $this->get($target)->assertOk();
         $this->assertSame([$orderId], $this->ids($response));
         $this->assertStringContainsString('name="date" value="2026-10-02"', $response->getContent());
+
+        // Blangkong `date`, at mga parameter na numero ang pangalan o array ang laman: redirect pa rin, dala pa rin ang mga ito.
+        foreach (['date=', 'date=%20', '5[]=a&7=b'] as $other) {
+            $redirect = $this->page('night_step=' . $stepId . '&' . $other);
+
+            $redirect->assertRedirect();
+            parse_str((string) parse_url($redirect->headers->get('Location'), PHP_URL_QUERY), $query);
+            $this->assertSame('2026-10-02', $query['date'] ?? null, $other);
+            $this->assertSame((string) $stepId, $query['night_step'] ?? null, $other);
+            if ($other === '5[]=a&7=b') {
+                $this->assertSame(['a'], $query[5] ?? null);
+                $this->assertSame('b', $query[7] ?? null);
+            }
+        }
     }
 
     public function test_S_07_7_another_date_gives_the_intersection_and_says_so(): void

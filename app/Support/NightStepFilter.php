@@ -66,10 +66,10 @@ class NightStepFilter
         $query->whereIn('macro_output.id', $this->nightRows()->select('macro_output_id'));
     }
 
-    /** Ilan ang row ng gabi ngayon (kasama ang mga order na nabura na o inilipat ng petsa). */
+    /** Ilan ang row ng gabi ngayon (kasama ang mga order na nabura na o inilipat ng petsa). Para sa valid na filter lang. */
     public function nightRowCount(): int
     {
-        return $this->valid ? $this->nightRows()->count() : 0;
+        return $this->nightRows()->count();
     }
 
     private function nightRows()
