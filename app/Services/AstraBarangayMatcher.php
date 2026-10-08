@@ -67,6 +67,70 @@ class AstraBarangayMatcher
         return self::run($text, $label, $formWording, $cityLabels, $sharesCityName);
     }
 
+    /**
+     * May binanggit bang IBANG barangay ng city ang text, bilang buong pangalan? Ang customer na lumipat o nagtatama ng
+     * sarili ("dati sa Brgy X, ngayon sa Brgy Y") ay dalawang barangay ang sinabi: hindi malinaw kung alin, tao ang magpapasya.
+     * Para hindi mahuli ang hindi naman barangay, ang ibang pangalan ay binibilang lang kapag:
+     *  - lima o higit pang character ang key nito, at hindi ito bahagi ng pangalan ng label na kinukumpirma;
+     *  - kung puro numero o iisang letra ("12", "1 a"): kasunod-agad ng barangay word;
+     *  - kung bahagi ng pangalan ng city o province ($placeNames, mga key): may barangay word sa unahan, o dalawang beses sa text.
+     * Ang label na kapareho ang key ng kinukumpirma (dalawang sulat ng iisang barangay) ay hindi "iba".
+     */
+    public static function namesAnother(string $text, string $label, array $cityLabels, array $placeNames): bool
+    {
+        try {
+            $own   = self::labelKeys($label);
+            $index = []; // unang salita ng key => [[mga salita, uri]]
+            $seen  = [];
+            foreach ($cityLabels as $other) {
+                $other = (string) $other;
+                if ($other === $label) continue;
+                $keys = self::labelKeys($other);
+                if ($keys[0] === $own[0]) continue;
+                foreach ([$keys[0], $keys[1]] as $key) {
+                    if ($key === '' || isset($seen[$key])) continue;
+                    $seen[$key] = true;
+                    $words = explode(' ', $key);
+                    $kind  = 'name';
+                    if (count(self::specials($words)) === count($words)) $kind = 'number';
+                    elseif (strlen($key) < self::MIN_LEN || self::inAny($key, $own)) continue;
+                    elseif (self::inAny($key, $placeNames)) $kind = 'place';
+                    $index[$words[0]][] = [$words, $kind, $key];
+                }
+            }
+            if ($index === []) return false;
+
+            $placeHits = [];
+            foreach (self::segments($text) as $seg) {
+                $w = $seg['w'];
+                foreach ($w as $i => $word) {
+                    if (!isset($index[$word])) continue;
+                    foreach ($index[$word] as [$words, $kind, $key]) {
+                        for ($j = 1, $n = count($words); $j < $n && ($w[$i + $j] ?? null) === $words[$j]; $j++);
+                        if ($j < $n) continue;
+                        if ($kind === 'name' || isset($seg['brgy'][$i])) return true;
+                        if ($kind === 'place' && ($placeHits[$key] = ($placeHits[$key] ?? 0) + 1) >= 2) return true;
+                    }
+                }
+            }
+
+            return false;
+        } catch (\Throwable $e) {
+            // Anumang hindi inaasahan sa text ng customer: hindi kumpirmado, tao ang magpapasya.
+            return true;
+        }
+    }
+
+    /** Ang key ba ay magkakasunod na buong salita ng alinman sa mga pangalang ito? */
+    private static function inAny(string $key, array $names): bool
+    {
+        foreach ($names as $name) {
+            if (str_contains(' ' . $name . ' ', ' ' . $key . ' ')) return true;
+        }
+
+        return false;
+    }
+
     private static function run(string $text, string $label, ?string $wording, array $cityLabels, bool $sharesCityName = false): array
     {
         $none = ['result' => 'none', 'score' => 0];

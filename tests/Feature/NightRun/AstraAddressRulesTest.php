@@ -2109,6 +2109,69 @@ class AstraAddressRulesTest extends NightAstraTestCase
         ]);
     }
 
+    public function test_S_26_20_a_text_that_names_another_barangay_of_the_city_confirms_neither(): void
+    {
+        $holy      = self::QC_HOLY_SPIRIT;
+        $pagasa    = ['METRO-MANILA', 'QUEZON-CITY', 'BAGONG PAG-ASA'];
+        $bayabas   = ['ABRA', 'MALIBCONG', 'BAYABAS'];
+        $pitogoPag = ['QUEZON', 'QUEZON-PITOGO', 'PAG-ASA (POB.)'];
+        $babagan   = ['TAWI-TAWI', 'SOUTH-UBIAN', 'BABAGAN'];
+        $isidroSur = ['CAMARINES-SUR', 'LAGONOY', 'SAN ISIDRO SUR (POB.)'];
+        $camagong  = ['AGUSAN-DEL-NORTE', 'NASIPIT', 'CAMAGONG'];
+        $this->assertLinesInList(
+            $holy, $pagasa, $bayabas, ['ABRA', 'MALIBCONG', 'MALIBCONG'], $pitogoPag, ['QUEZON', 'QUEZON-PITOGO', 'QUEZON'], $babagan, ['TAWI-TAWI', 'SOUTH-UBIAN', 'NUSA'],
+            $isidroSur, ['CAMARINES-SUR', 'LAGONOY', 'SAN ISIDRO'], $camagong, self::NASIPIT_BRGY_5
+        );
+        $moved     = 'dati sa Brgy Holy Spirit, ngayon sa Brgy Bagong Pag-asa po';
+        $corrected = 'hindi Brgy Holy Spirit, Brgy Bagong Pag-asa po';
+        $brackets  = 'Brgy Bagong Pag-asa po (lumipat na kami galing Brgy Holy Spirit)';
+
+        $this->assertSame([
+            'moved, the first one named'            => self::NONE,
+            'moved, the second one named'           => self::NONE,
+            'a correction, the first'               => self::NONE,
+            'a correction, the second'              => self::NONE,
+            'the old one in brackets, the first'    => self::NONE,
+            'the old one in brackets, the second'   => self::NONE,
+            'the other one in another source'       => self::NONE,
+            'the other one in another source, 2'    => self::NONE,
+            'the town with a barangay word'         => self::NONE,
+            'a numbered one after a barangay word'  => self::NONE,
+            // Kumpirmado pa rin.
+            'the other name is the town'            => self::PHRASE,
+            'the other name is the province'        => self::PHRASE,
+            'the other name is under 5 characters'  => self::PHRASE,
+            'the other name is part of this one'    => self::PHRASE,
+            'a number without a barangay word'      => self::PHRASE,
+            'one barangay only'                     => self::PHRASE,
+        ], [
+            'moved, the first one named'            => $this->textCheck($holy, $moved),
+            'moved, the second one named'           => $this->textCheck($pagasa, $moved),
+            'a correction, the first'               => $this->textCheck($holy, $corrected),
+            'a correction, the second'              => $this->textCheck($pagasa, $corrected),
+            'the old one in brackets, the first'    => $this->textCheck($pagasa, $brackets),
+            'the old one in brackets, the second'   => $this->textCheck($holy, $brackets),
+            'the other one in another source'       => $this->textCheck($holy, 'Brgy Holy Spirit, Quezon City', '', 'Bagong Pag-asa, Quezon City'),
+            'the other one in another source, 2'    => $this->textCheck($pagasa, 'Brgy Holy Spirit, Quezon City', 'Bagong Pag-asa, Quezon City'),
+            'the town with a barangay word'         => $this->textCheck($bayabas, 'Brgy Bayabas po, dati sa Brgy Malibcong'),
+            'a numbered one after a barangay word'  => $this->textCheck($camagong, 'Brgy Camagong po, dati sa Brgy 5'),
+            'the other name is the town'            => $this->textCheck($bayabas, 'Brgy Bayabas, Malibcong, Abra'),
+            'the other name is the province'        => $this->textCheck($pitogoPag, 'Brgy Pag-asa, Pitogo, Quezon'),
+            'the other name is under 5 characters'  => $this->textCheck($babagan, 'Brgy Babagan, malapit sa Nusa Store, South Ubian'),
+            'the other name is part of this one'    => $this->textCheck($isidroSur, 'Brgy San Isidro Sur, Lagonoy'),
+            'a number without a barangay word'      => $this->textCheck($camagong, 'Brgy Camagong, 5 pcs po'),
+            'one barangay only'                     => $this->textCheck($holy, 'Brgy Holy Spirit, Quezon City', 'Holy Spirit po', 'Holy Spirit, Quezon City'),
+        ]);
+
+        // Mahabang text: hindi bumabagal ang paghahanap ng ibang barangay.
+        $long  = str_repeat('Brgy Holy Spirit Quezon City salamat po ', 5200);
+        $this->assertGreaterThanOrEqual(200000, strlen($long));
+        $start = hrtime(true);
+        $this->assertSame(self::PHRASE, $this->textCheck($holy, $long));
+        $this->assertSame(self::NONE, $this->textCheck($holy, $long . ' Bagong Pag-asa'));
+        $this->assertLessThan(2.0, (hrtime(true) - $start) / 1e9);
+    }
+
     public function test_S_26_9_the_mapper_picks_the_exact_number_and_never_a_neighbour(): void
     {
         $this->assertLinesInList(self::COTABATO_POB, ['COTABATO', 'COTABATO-CITY', 'POBLACION I'], self::COTABATO_POB_2);

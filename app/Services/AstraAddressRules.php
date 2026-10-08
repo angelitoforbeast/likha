@@ -398,17 +398,38 @@ class AstraAddressRules
      * Ang barangay na kapangalan ng sarili nitong city o bayan ay kumpirmado lang kapag, sa loob ng ISANG pinagmulan,
      * dalawang beses ang pangalan o may barangay word sa tabi nito: ang history ay madalas na kopya ng mismong chat,
      * kaya ang "isang beses sa chat at isang beses sa history" ay iisang banggit pa rin ng pangalan ng bayan.
+     *
+     * Hindi rin kumpirmado kapag may pinagmulang bumabanggit ng IBANG barangay ng parehong city.
      */
     public static function confirmedByText(string $brgy, string $city, string $prov, string $formBrgy, array $sources, array $maps): array
     {
         $labels = $maps['brgysByCityProv'][MacroChecker::normPlace($city) . '|' . MacroChecker::normProv($prov)] ?? [];
         $found  = AstraBarangayMatcher::confirmWithWording(implode("\n", $sources), $brgy, $formBrgy, $labels);
-        if ($found['result'] === 'none' || !self::namedLikeItsCity($brgy, $city, $prov)) return $found;
+        if ($found['result'] === 'none') return $found;
+        $none = ['result' => 'none', 'score' => 0];
+        // Dalawang magkaibang barangay ng city sa text ng customer, sa alinmang pinagmulan: hindi malinaw kung alin.
+        $places = self::placeNames($city, $prov);
+        foreach ($sources as $source) {
+            if (AstraBarangayMatcher::namesAnother((string) $source, $brgy, $labels, $places)) return $none;
+        }
+        if (!self::namedLikeItsCity($brgy, $city, $prov)) return $found;
         foreach ($sources as $source) {
             if (AstraBarangayMatcher::confirmWithWording((string) $source, $brgy, $formBrgy, $labels, true)['result'] !== 'none') return $found;
         }
 
-        return ['result' => 'none', 'score' => 0];
+        return $none;
+    }
+
+    /** Mga pangalan (key) ng city o bayan — may province sa unahan ng label o wala — at ng province ng line. */
+    private static function placeNames(string $city, string $prov): array
+    {
+        $name  = MacroChecker::normCityKey($city);
+        $names = [$name, MacroChecker::normBrgyKey(str_replace('-', ' ', $prov))];
+        foreach ([MacroChecker::normCityKey($prov), 'north cotabato', 'south cotabato', 'metro manila', 'ncr'] as $prefix) {
+            if ($prefix !== '' && str_starts_with($name, $prefix . ' ')) $names[] = substr($name, strlen($prefix) + 1);
+        }
+
+        return $names;
     }
 
     /**
