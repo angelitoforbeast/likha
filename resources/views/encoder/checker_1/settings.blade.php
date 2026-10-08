@@ -178,13 +178,33 @@
           Burahin ang naka-save na key (babalik sa .env)
         </label>
         <p class="text-xs text-gray-500 mt-2">Agad na gagamitin sa susunod na Astra Fix / Astra Check — walang restart o cache clear na kailangan.</p>
-        {{-- Ang hidden marker ang nagsasabi sa server na nasa form ang switch (ang checkbox na walang tsek ay hindi ipinapadala). --}}
+        {{-- Ang hidden marker ang nagsasabi sa server na nasa form ang switch (ang pagpipiliang walang napili ay hindi ipinapadala). --}}
         <input type="hidden" name="astra_address_rules_present" value="1">
-        <label for="astra_address_rules" class="flex items-center gap-2 mt-4 text-sm text-gray-700">
-          <input type="checkbox" id="astra_address_rules" name="astra_address_rules" value="1" aria-describedby="astra_address_rules_help" @checked(!empty($astraAddressRules))>
-          New address rules for Astra (match like the classic checker)
-        </label>
-        <p id="astra_address_rules_help" class="text-xs text-gray-500 mt-1">Off: Astra works as before. Turn on after reading the replay numbers.</p>
+        <fieldset class="mt-4">
+          <legend class="block text-sm font-semibold mb-1">Astra address rules</legend>
+          <label for="astra_address_rules" class="flex items-center gap-2 text-sm text-gray-700">
+            <input type="radio" id="astra_address_rules" name="astra_address_rules" value="1" aria-describedby="astra_address_rules_help_1" @checked(($astraAddressRules ?? '0') === '1')>
+            New address rules for Astra (match like the classic checker)
+          </label>
+          <p id="astra_address_rules_help_1" class="text-xs text-gray-500 mt-1 mb-2">The program maps Astra's form to the J&amp;T list and checks the barangay against the customer's own words.</p>
+          <label for="astra_address_rules_2" class="flex items-center gap-2 text-sm text-gray-700">
+            <input type="radio" id="astra_address_rules_2" name="astra_address_rules" value="2" aria-describedby="astra_address_rules_help_2" @checked(($astraAddressRules ?? '0') === '2')>
+            New address rules + web search first
+          </label>
+          <p id="astra_address_rules_help_2" class="text-xs text-gray-500 mt-1 mb-2">The same rules, and Astra must search the web for the barangay first. A barangay found only on the web is written for a person to confirm.</p>
+          <label for="astra_address_rules_0" class="flex items-center gap-2 text-sm text-gray-700">
+            <input type="radio" id="astra_address_rules_0" name="astra_address_rules" value="0" aria-describedby="astra_address_rules_help" @checked(!in_array($astraAddressRules ?? '0', ['1', '2'], true))>
+            Off
+          </label>
+          <p id="astra_address_rules_help" class="text-xs text-gray-500 mt-1">Off: Astra works as before. Turn on after reading the replay numbers.</p>
+        </fieldset>
+        <label for="astra_web_barangay_proceed" class="block text-sm font-semibold mt-4 mb-1">Barangay found on the web may PROCEED</label>
+        <select id="astra_web_barangay_proceed" name="astra_web_barangay_proceed" aria-describedby="astra_web_barangay_proceed_help" class="border rounded px-3 py-2 w-full text-sm">
+          @foreach(['0' => 'Never: a person confirms it (default)', 'official' => 'Only from an official list or page', 'several' => 'From an official page, or two or more sources that agree', 'single' => 'From any source, even a single one'] as $value => $text)
+            <option value="{{ $value }}" @selected(($astraWebProceed ?? '0') === (string) $value)>{{ $text }}</option>
+          @endforeach
+        </select>
+        <p id="astra_web_barangay_proceed_help" class="text-xs text-gray-500 mt-1">Used only with "New address rules + web search first", and only when everything else on the row passes.</p>
       </section>
       @endif
 

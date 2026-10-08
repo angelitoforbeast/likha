@@ -52,7 +52,8 @@ class Checker1SettingsController extends Controller
             'astraEngine'   => AstraEncoder::engineSettings(),
             'astraModels'   => AstraEncoder::MODELS,
             'astraEfforts'  => AstraEncoder::EFFORTS,
-            'astraAddressRules' => self::isCeo() ? AstraEncoder::addressRulesOn() : null,
+            'astraAddressRules' => self::isCeo() ? AstraEncoder::addressRulesMode() : null,
+            'astraWebProceed'   => self::isCeo() ? AstraEncoder::webBarangayProceed() : null,
             // 🌙 Night run settings — CEO lang
             'night'         => self::isCeo() ? \App\Support\NightRunSettings::read() : null,
         ]);
@@ -102,11 +103,18 @@ class Checker1SettingsController extends Controller
             AstraEncoder::storeEngineSettings((string) $request->input('astra_model', ''), (string) $request->input('astra_effort', ''));
         }
 
-        // ✨ Astra address rules switch — CEO lang. Ang checkbox na walang tsek ay hindi ipinapadala ng browser, kaya ang
+        // ✨ Astra address rules switch — CEO lang. Ang pagpipiliang walang napili ay hindi ipinapadala ng browser, kaya ang
         // hidden marker ang patunay na nasa form talaga ang switch: ang lumang page o direktang post na walang marker ay
         // hindi dapat makapag-off o makapag-on ng rules.
+        // Tatlo ang pagpipilian (0 / 1 / 2). Ang walang ipinadala ay `0`, gaya ng dating checkbox na walang tsek; ang ibang
+        // value ay hindi isinusulat at hindi rin nagpapatay ng rules. Ang pangalawang setting ay ginagalaw lang kapag
+        // ipinadala ito at isa ito sa apat na salita nito.
         if (self::isCeo() && $request->has('astra_address_rules_present')) {
-            AstraEncoder::storeAddressRules($request->boolean('astra_address_rules'));
+            $mode = $request->input('astra_address_rules') ?? '0';
+            if (is_string($mode) && in_array($mode, ['0', '1', '2'], true)) AstraEncoder::storeAddressRulesMode($mode);
+
+            $webProceed = $request->input('astra_web_barangay_proceed');
+            if (is_string($webProceed) && in_array($webProceed, AstraEncoder::WEB_PROCEED_VALUES, true)) AstraEncoder::storeWebBarangayProceed($webProceed);
         }
 
         // ✨ Astra API key — CEO lang; blangko = walang babaguhin; 'clear' = burahin (babalik sa .env)

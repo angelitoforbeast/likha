@@ -37,8 +37,11 @@ class AstraEncoder
     public const SETTING_KEY     = 'astra_encoder_api_key';
     public const SETTING_MODEL   = 'astra_encoder_model';
     public const SETTING_EFFORT  = 'astra_encoder_effort';
-    /** app_settings key — switch ng bagong address rules; `1` lang ang "on" (CEO, sa settings page). */
+    /** app_settings key — switch ng bagong address rules: `1` = on, `2` = on + web search muna (CEO, sa settings page). */
     public const SETTING_ADDRESS_RULES = 'astra_address_rules';
+    /** app_settings key — ang pinakamahinang basehan ng barangay na galing sa web na pwedeng mag-PROCEED (mode `2` lang). */
+    public const SETTING_WEB_BARANGAY_PROCEED = 'astra_web_barangay_proceed';
+    public const WEB_PROCEED_VALUES = ['0', 'official', 'several', 'single'];
     /**
      * Idinadagdag sa dulo ng instructions kapag naka-on ang bagong address rules (dalawang pangungusap lang): bakit humingi
      * ng tao ang model, at ang form ay laging pinupunan gaya ng sulat ng customer para may maimapa ang program sa list.
@@ -168,20 +171,60 @@ class AstraEncoder
         }
     }
 
-    /** Naka-on lang ang bagong address rules kapag EKSAKTONG `1` ang nakaimbak; anumang iba (o hindi mabasang table) = off. */
+    /** Naka-on ang bagong address rules kapag EKSAKTONG `1` o `2` ang nakaimbak; anumang iba (o hindi mabasang table) = off. */
     public static function addressRulesOn(): bool
     {
+        return self::addressRulesMode() !== '0';
+    }
+
+    /**
+     * Ang mode ng switch: `1` = bagong address rules, `2` = bagong address rules + web search muna, `0` = off.
+     * Ang eksaktong `1` at `2` lang ang mode; anumang iba (o hindi mabasang table) ay `0`. Iisang basa, gaya ng dati.
+     */
+    public static function addressRulesMode(): string
+    {
         try {
-            return DB::table('app_settings')->where('key', self::SETTING_ADDRESS_RULES)->value('value') === '1';
+            $value = DB::table('app_settings')->where('key', self::SETTING_ADDRESS_RULES)->value('value');
         } catch (\Throwable $e) {
-            return false;
+            return '0';
         }
+
+        return in_array($value, ['1', '2'], true) ? $value : '0';
     }
 
     /** I-save ang switch ng address rules: `1` o `0` lang ang isinusulat. */
     public static function storeAddressRules(bool $on): void
     {
-        DB::table('app_settings')->updateOrInsert(['key' => self::SETTING_ADDRESS_RULES], ['value' => $on ? '1' : '0', 'updated_at' => now(), 'created_at' => now()]);
+        self::storeAddressRulesMode($on ? '1' : '0');
+    }
+
+    /** I-save ang mode ng switch; `0`, `1` o `2` lang ang isinusulat (anumang iba ay `0`). */
+    public static function storeAddressRulesMode(string $mode): void
+    {
+        $mode = in_array($mode, ['1', '2'], true) ? $mode : '0';
+        DB::table('app_settings')->updateOrInsert(['key' => self::SETTING_ADDRESS_RULES], ['value' => $mode, 'updated_at' => now(), 'created_at' => now()]);
+    }
+
+    /**
+     * Ang pinakamahinang `web_basis` na pinapayagang mag-PROCEED ang barangay na galing sa web (mode `2` lang ang
+     * gumagamit nito): `official`, `several`, `single`, o `0` = hindi kailanman. Anumang iba (o hindi mabasang table) = `0`.
+     */
+    public static function webBarangayProceed(): string
+    {
+        try {
+            $value = DB::table('app_settings')->where('key', self::SETTING_WEB_BARANGAY_PROCEED)->value('value');
+        } catch (\Throwable $e) {
+            return '0';
+        }
+
+        return in_array($value, self::WEB_PROCEED_VALUES, true) ? $value : '0';
+    }
+
+    /** I-save ang setting ng barangay na galing sa web; ang apat na salita lang ang isinusulat (anumang iba ay `0`). */
+    public static function storeWebBarangayProceed(string $value): void
+    {
+        $value = in_array($value, self::WEB_PROCEED_VALUES, true) ? $value : '0';
+        DB::table('app_settings')->updateOrInsert(['key' => self::SETTING_WEB_BARANGAY_PROCEED], ['value' => $value, 'updated_at' => now(), 'created_at' => now()]);
     }
 
     /** Check number (crc32) ng J&T list file, para malaman ng replay kung nagbago ang list mula noong row; 0 kung hindi mabasa. Isang basa kada process at mtime. */
