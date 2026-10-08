@@ -236,7 +236,7 @@
       <span :style="'font-weight:700;color:' + doiColour(stockSet(row.item_name))" x-text="doiText(stockSet(row.item_name))"></span>
       <template x-if="stockFor(row.item_name)">
         @if($effectiveIsCEO)
-        <div @click.stop>
+        <div @if(!empty($rdtOneLine))class="spl-lead" @endif@click.stop>
           <button type="button" title="Lead = ilang araw bago dumating ang order; palugit = dagdag na araw na reserba — i-click para palitan (para sa lahat ng variant ng item na ito)"
                   x-show="!(stockEdit.key === supKey(row.item_name) && stockEdit.mode === 'sup')"
                   @click.stop="openStockEdit(row.item_name, stockFor(row.item_name))"

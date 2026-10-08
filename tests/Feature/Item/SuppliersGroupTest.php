@@ -827,10 +827,89 @@ class SuppliersGroupTest extends ItemTestCase
         foreach (['284px', '150px', '118px', '104px', 'width:76px', 'width:75px', 'width:120px', 'min-width:284', 'min-width:150'] as $gone) {
             $this->assertStringNotContainsString($gone, $css, $gone);
         }
-        $this->assertSame(5, substr_count($css, '!important'));
+        $this->assertSame(6, substr_count($css, '!important'));
+    }
+
+    public function test_S_38_7_a_cell_wraps_its_text_instead_of_clipping_it(): void
+    {
+        $css = (string) preg_replace('~/\*.*?\*/~s', '', str_replace("\r\n", "\n", file_get_contents(resource_path(self::STYLE_FILE))));
+        // Bawat cell ng table na ito (hindi kasama ang naka-expand na block ng page) ay nagbabalot ng text sa
+        // halip na putulin ito: walang nowrap sa cell, at ang salitang walang puwang ay napuputol sa loob ng cell.
+        $this->assertStringContainsString('.spl-table > tbody > tr:not(.page-expand-row) > td { white-space:normal; overflow-wrap:anywhere; }', $css);
+        // Ang laman na may sariling nowrap (ang badge ng lifecycle) ay nagbabalot din sa table na ito.
+        $this->assertStringContainsString('.spl-table > tbody > tr:not(.page-expand-row) > td [style*="white-space:nowrap"] { white-space:normal !important; }', $css);
+        $this->assertStringContainsString("white-space:nowrap;background:' + c[0]", $this->render('ceo', true, true));
+
+        // Ang linya ng lead / palugit sa DOI: nasa hover at keyboard focus ng row (at laging nakikita sa touch,
+        // at habang bukas ang editor nito), kaya ang cell ay ang bilang ng araw lang, na nagbabalot kapag makitid.
+        foreach ([
+            '.spl-table .spl-lead { display:none; }',
+            '.spl-table > tbody > tr.item-row:hover .spl-lead { display:block; }',
+            '.spl-table > tbody > tr.item-row:focus-within .spl-lead { display:block; }',
+            '.spl-table .spl-lead:has(input) { display:block; }',
+        ] as $rule) {
+            $this->assertStringContainsString($rule, $css, $rule);
+        }
+        $touch = $this->between($css, '@media (hover:none), (max-width:767px) {', "\n  }");
+        $this->assertStringContainsString('.spl-table .spl-lead { display:block; }', $touch);
+
+        // Ang class ng linyang iyon ay nasa table na ito lang; sa ibang view, ang dati pa ring markup.
+        $doi = fn (string $html) => $this->between($html, "<template x-if=\"col.id==='doi'\">", "<template x-if=\"col.id==='order_qty'\">");
+        $this->assertSame(1, substr_count($doi($this->render('ceo', true, true)), '<div class="spl-lead" @click.stop>'));
+        $old = $doi($this->render('ceo', true));
+        $this->assertSame(1, substr_count($old, '<div @click.stop>'));
+        $this->assertStringNotContainsString('spl-lead', $old);
+        $this->assertSame(1, substr_count($this->render('ceo', true, true), 'x-text="leadLine(row.item_name)"'));
+
+        // Ang sobrang lapad ay umaabot sa mga column: sa kahon na 2,084px (tatlong supplier, ang 17 column ng
+        // Sourcing) ang DOI ay 94px, hindi ang pinakamaliit nitong 74px.
+        $state = ['box' => 2084, 'win' => 2134, 'suppliers' => 3, 'set' => 'Sourcing', 'ops' => [], 'cols' => array_map(fn (string $id) => ['id' => $id], self::OWNER_UNITS)];
+        $widths = $this->fitJs([['layout', $state]], fn (array $out) => [['widths', $out[0], ['suppliers' => 3]]]);
+        $this->assertSame([94, 196, 108, 76, 2084], [$widths['cols']['doi'], $widths['page'], $widths['item'], $widths['supplier'], $widths['table']]);
+    }
+
+    /** Ang mga column ng may-ari pagkatapos ng mga setting niya (23: iisa na ang RTS / DEL / INT at ang Prof.%), ayon sa ayos niya. */
+    private const OWNER_UNITS = [
+        'promo', 'price', 'np_per_order_1m', 'adspent', 'orders_1d', 'proj_prof_1d', 'item_val', 'item_val_ceo', 'cpp',
+        'rts_set', 'jnt_rdt', 'tcpr', 'breakeven_cpp', 'proj_profit', 'prof_pct', 'hold', 'action', 'stock', 'incoming',
+        'units_per_day', 'doi', 'order_qty', 'lifecycle',
+    ];
+
+    private function node(array $command, string $input): string
+    {
+        try {
+            $probe = new \Symfony\Component\Process\Process(['node', '--version']);
+            $probe->run();
+            $found = $probe->isSuccessful();
+        } catch (\Throwable $e) {
+            $found = false;
+        }
+        if (!$found) $this->markTestSkipped('skipped: node not found');
+
+        $process = new \Symfony\Component\Process\Process(array_merge(['node'], $command));
+        $process->setInput($input);
+        $process->run();
+        $this->assertTrue($process->isSuccessful(), 'node: ' . trim($process->getErrorOutput()));
+
+        return $process->getOutput();
+    }
+
+    /** Dalawang sunod na tawag sa pure functions: ang pangalawa ay binubuo mula sa sagot ng una. Ibinabalik ang huling sagot. */
+    private function fitJs(array $first, callable $then): mixed
+    {
+        $run = function (array $calls): array {
+            $payload = array_map(fn (array $c) => ['fn' => $c[0], 'args' => array_slice($c, 1)], $calls);
+            $out = json_decode($this->node([base_path('tests/js/call.cjs'), public_path('js/item-table-fit.js')], json_encode($payload, JSON_THROW_ON_ERROR)), true, 512, JSON_THROW_ON_ERROR);
+
+            return array_column($out, 'value');
+        };
+        $second = $run($then($run($first)));
+
+        return end($second);
     }
 
     public function test_S_38_10_this_table_has_its_own_money_format_and_no_text_under_11px(): void
+
     {
         // Ang money() at md() ng page ay hindi nagalaw; ang table na ito ay may sarili.
         $html = $this->render('ceo', true, true);

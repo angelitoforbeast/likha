@@ -87,6 +87,25 @@
   .spl-table > tbody > tr:not(.page-expand-row) [style*="font-size:9.5px"] { font-size:11px !important; }
   .spl-table > tbody > tr:not(.page-expand-row) [style*="font-size:10px"] { font-size:11px !important; }
   .spl-table > tbody > tr:not(.page-expand-row) [style*="font-size:10.5px"] { font-size:11px !important; }
+
+  /* ── Walang napuputol na text ──────────────────────────────────────────
+     Nowrap ang mga cell ng page, at nakatago ang lumalampas sa cell ng table na ito (fixed ang lapad ng column):
+     magkasama, pinuputol nila ang text na mas mahaba sa column ("kulang 21.1 araw" sa DOI). Kaya dito, nagbabalot
+     ang text ng bawat cell; ang salitang walang puwang ay napuputol sa loob ng cell sa halip na lumampas. Ang laman
+     na may sariling nowrap (ang badge ng lifecycle) ay nagbabalot din. Hindi kasama ang naka-expand na block ng
+     page. Ang nakatagong overflow ay nananatili bilang huling harang para sa hindi nababalot (input, larawan). */
+  .spl-table > tbody > tr:not(.page-expand-row) > td { white-space:normal; overflow-wrap:anywhere; }
+  .spl-table > tbody > tr:not(.page-expand-row) > td [style*="white-space:nowrap"] { white-space:normal !important; }
+  /* Ang item row ay 12px (ang ibang row ay sa page): mas maraming kasya sa pinakamaliit na lapad ng mga column ng pera. */
+  .spl-table > tbody > tr.item-row > td { font-size:12px; }
+  /* DOI: ang linya ng lead / palugit (na pinto rin ng editor nito) ay lumalabas sa hover o keyboard focus ng row,
+     gaya ng Change / Copy, at habang bukas ang editor. Ang cell ay ang bilang ng araw lang, na nagbabalot sa
+     dalawang linya kapag makitid ang column. */
+  .spl-table .spl-lead { display:none; }
+  .spl-table > tbody > tr.item-row:hover .spl-lead { display:block; }
+  .spl-table > tbody > tr.item-row:focus-within .spl-lead { display:block; }
+  .spl-table .spl-lead:has(input) { display:block; }
+  .spl-table .spl-lead > button { white-space:normal; max-width:100%; text-align:inherit; }
   /* Mahabang pangalan ng page na walang puwang: puputulin sa loob ng cell, hindi lalampas sa katabi. */
   .spl-table > tbody > tr > td.spl-c1 .page-cell-body { overflow-wrap:anywhere; }
 
@@ -227,6 +246,7 @@
     .spl-table .spl-edit { opacity:1; }
     .spl-table .spl-add-po { opacity:1; }
     .spl-table .spl-val { max-width:calc(100% - 20px); }
+    .spl-table .spl-lead { display:block; }
   }
 
   /* ── Sticky na item column (768px hanggang 1279px) ─────────────────────
