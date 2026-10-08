@@ -139,6 +139,132 @@ class SuppliersGroupTest extends ItemTestCase
         }
     }
 
+    // ── S-14.1 – S-14.7: pagkakasunod ng quotes at ang cheapest flag ──────────
+
+    /** Ang listahan ng isang item mula sa GET /item/quotes. */
+    private function listed(string $item = 'HAND GRIP'): array
+    {
+        return $this->getJson('/item/quotes')->assertOk()->json('quotes')[ItemSupplierQuote::keyFor($item)] ?? [];
+    }
+
+    public function test_S_14_1_quotes_come_back_cheapest_first(): void
+    {
+        $this->actingAs($this->user());
+        foreach ([160, 142, 148, 155] as $price) $this->quote('HAND GRIP', $this->supplier("S{$price}"), $price);
+
+        $this->assertSame(['S142', 'S148', 'S155', 'S160'], array_column($this->listed(), 'supplier'));
+    }
+
+    public function test_S_14_2_a_quote_without_a_price_is_last(): void
+    {
+        $this->actingAs($this->user());
+        foreach ([['Nil', null], ['Acme', 160], ['Beta', 142], ['Gamma', 148]] as [$name, $price]) {
+            $this->quote('HAND GRIP', $this->supplier($name), $price);
+        }
+
+        $this->assertSame(['Beta', 'Gamma', 'Acme', 'Nil'], array_column($this->listed(), 'supplier'));
+    }
+
+    public function test_S_14_3_equal_prices_keep_the_lower_id_first_every_time(): void
+    {
+        $this->actingAs($this->user());
+        // Baliktad ang supplier ids sa quote ids, at mas bago ang updated_at ng mas mababang id,
+        // para hindi sumakto ang natural na order ng database.
+        $beta = $this->supplier('Beta');
+        $acme = $this->supplier('Acme');
+        $first = $this->quote('HAND GRIP', $acme, 150);
+        $second = $this->quote('HAND GRIP', $beta, 150);
+        DB::table('item_supplier_quotes')->where('id', $first)->update(['updated_at' => now()->addDay()]);
+        $this->assertLessThan($second, $first);
+        $pair = fn (array $rows) => array_values(array_intersect(array_column($rows, 'id'), [$first, $second]));
+
+        $this->assertSame([$first, $second], $pair($this->listed()));
+        $this->assertSame([$first, $second], $pair($this->listed()));
+
+        $this->postJson('/item/quotes', ['item_name' => 'YOGA MAT', 'supplier_id' => $beta, 'price' => 90])->assertOk();
+        $this->assertSame([$first, $second], $pair($this->listed()), 'pagkatapos mag-save ng quote ng ibang item');
+
+        $saved = $this->postJson('/item/quotes', ['item_name' => 'HAND GRIP', 'supplier_id' => $this->supplier('Gamma'), 'price' => 200])->assertOk();
+        $this->assertCount(3, $saved->json('quotes'));
+        $this->assertSame([$first, $second], $pair($saved->json('quotes')), 'sagot ng save');
+
+        $third = (int) $saved->json('quotes.2.id');
+        $deleted = $this->postJson('/item/quotes/delete', ['id' => $third, 'item_name' => 'HAND GRIP'])->assertOk();
+        $this->assertSame([$first, $second], array_column($deleted->json('quotes'), 'id'), 'sagot ng delete');
+    }
+
+    public function test_S_14_4_a_zero_price_is_ordered_last_and_never_cheapest(): void
+    {
+        $this->actingAs($this->user());
+        foreach ([['Zero', 0], ['Acme', 120], ['Beta', 110], ['Nil', null]] as [$name, $price]) {
+            $this->quote('HAND GRIP', $this->supplier($name), $price);
+        }
+
+        $rows = $this->listed();
+        $this->assertSame(['Beta', 'Acme', 'Zero', 'Nil'], array_column($rows, 'supplier'));
+        $this->assertFalse($rows[2]['cheapest']);
+        $this->assertNotNull($rows[2]['price']);
+        $this->assertEquals(0, $rows[2]['price']);
+        $this->assertNull($rows[3]['price']);
+    }
+
+    public function test_S_14_5_every_quote_at_the_lowest_price_is_cheapest(): void
+    {
+        $this->actingAs($this->user());
+        [$acme, $beta, $gamma] = [$this->supplier('Acme'), $this->supplier('Beta'), $this->supplier('Gamma')];
+        $this->quote('HAND GRIP', $acme, 142);
+        $this->quote('HAND GRIP', $beta, 142);
+        $this->quote('HAND GRIP', $gamma, 155);
+        $this->quote('YOGA MAT', $acme, 148);
+        $this->quote('YOGA MAT', $beta, 142);
+
+        $tied = $this->listed();
+        $this->assertSame(['Acme', 'Beta', 'Gamma'], array_column($tied, 'supplier'));
+        $this->assertSame([true, true, false], array_column($tied, 'cheapest'));
+
+        $single = $this->listed('YOGA MAT');
+        $this->assertSame(['Beta', 'Acme'], array_column($single, 'supplier'));
+        $this->assertSame([true, false], array_column($single, 'cheapest'));
+    }
+
+    public function test_S_14_6_no_cheapest_with_one_priced_quote_or_none(): void
+    {
+        $this->actingAs($this->user());
+        $ids = [$this->supplier('Acme'), $this->supplier('Beta'), $this->supplier('Gamma')];
+        $cases = [
+            'ONE PRICED'       => [100],
+            'PRICED NULL ZERO' => [100, null, 0],
+            'ONLY NULLS'       => [null, null],
+        ];
+        foreach ($cases as $item => $prices) {
+            foreach ($prices as $i => $price) $this->quote($item, $ids[$i], $price);
+        }
+
+        foreach ($cases as $item => $prices) {
+            $rows = $this->listed($item);
+            $this->assertCount(count($prices), $rows, $item);
+            foreach ($rows as $row) {
+                $this->assertArrayHasKey('cheapest', $row, $item);
+                $this->assertFalse($row['cheapest'], $item);
+            }
+        }
+    }
+
+    public function test_S_14_7_the_save_answer_is_already_in_the_new_order(): void
+    {
+        $this->actingAs($this->user());
+        $acme = $this->supplier('Acme');
+        $this->quote('HAND GRIP', $acme, 100);
+        $this->quote('HAND GRIP', $this->supplier('Beta'), 110);
+        $this->quote('HAND GRIP', $this->supplier('Gamma'), 120);
+
+        $rows = $this->postJson('/item/quotes', ['item_name' => 'HAND GRIP', 'supplier_id' => $acme, 'price' => 130])
+            ->assertOk()->json('quotes');
+
+        $this->assertSame(['Beta', 'Gamma', 'Acme'], array_column($rows, 'supplier'));
+        $this->assertSame([true, false, false], array_column($rows, 'cheapest'));
+    }
+
     // ── S-14.9: ang default layout at photo page ay nagbabasa pa rin ng buong listahan ──
 
     public function test_S_14_9_the_default_layout_and_the_photo_page_still_list_every_quote(): void

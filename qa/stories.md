@@ -236,7 +236,7 @@ Page list and pagination.
 
 ## Slice 017 – Suppliers group on the item table
 
-Slice 017: 10 passed, 0 failed, 0 blocked, 0 skipped, 50 not run
+Slice 017: 17 passed, 0 failed, 0 blocked, 0 skipped, 43 not run
 
 New tests are in `tests/Feature/Item/SuppliersGroupTest.php` unless another class is named. "The
 suppliers view" is `/item?layout=suppliers` in the effective CEO view (role CEO and `view_as` not
@@ -270,13 +270,13 @@ Independent test: seed five quotes priced 160, 142, 148, 155 and none; GET `/ite
 
 | Case | Type | Given / When / Then | Test | Last run |
 |---|---|---|---|---|
-| S-14.1 | happy, server | Given quotes priced 160, 142, 148, 155 for one item, when the CEO calls GET `/item/quotes`, then they come back 142, 148, 155, 160 | `SuppliersGroupTest::test_S_14_1_quotes_come_back_cheapest_first` | Not run · pending build |
-| S-14.2 | negative, server | Given one quote with no price and three with prices, when the endpoint is called, then the one without a price is last (on the in-memory sqlite too) | `SuppliersGroupTest::test_S_14_2_a_quote_without_a_price_is_last` | Not run · pending build |
-| S-14.3 | edge, server | Given two quotes with the same price, when the endpoint is called twice, after an unrelated quote is saved, and in the save and delete responses, then their order is the same every time (lower id first) | `SuppliersGroupTest::test_S_14_3_equal_prices_keep_the_lower_id_first_every_time` | Not run · pending build |
-| S-14.4 | edge, server | Given a quote priced 0, when the endpoint is called, then it is ordered after every priced quote, like one without a price, and is never flagged cheapest; its stored price is returned as it is | `SuppliersGroupTest::test_S_14_4_a_zero_price_is_ordered_last_and_never_cheapest` | Not run · pending build |
-| S-14.5 | happy, server | Given two or more quotes with a price above 0, when the endpoint is called, then every quote at the lowest price has `cheapest: true` (ties both) and the others false | `SuppliersGroupTest::test_S_14_5_every_quote_at_the_lowest_price_is_cheapest` | Not run · pending build |
-| S-14.6 | negative, server | Given exactly one priced quote, or only quotes without a price, when the endpoint is called, then no quote is `cheapest` | `SuppliersGroupTest::test_S_14_6_no_cheapest_with_one_priced_quote_or_none` | Not run · pending build |
-| S-14.7 | edge, server | Given a saved price change that moves a quote from first to third, when POST `/item/quotes` returns, then its list is already in the new order | `SuppliersGroupTest::test_S_14_7_the_save_answer_is_already_in_the_new_order` | Not run · pending build |
+| S-14.1 | happy, server | Given quotes priced 160, 142, 148, 155 for one item, when the CEO calls GET `/item/quotes`, then they come back 142, 148, 155, 160 | `SuppliersGroupTest::test_S_14_1_quotes_come_back_cheapest_first` | Passed · 2026-10-08 · auto |
+| S-14.2 | negative, server | Given one quote with no price and three with prices, when the endpoint is called, then the one without a price is last (on the in-memory sqlite too) | `SuppliersGroupTest::test_S_14_2_a_quote_without_a_price_is_last` | Passed · 2026-10-08 · auto |
+| S-14.3 | edge, server | Given two quotes with the same price, when the endpoint is called twice, after an unrelated quote is saved, and in the save and delete responses, then their order is the same every time (lower id first) | `SuppliersGroupTest::test_S_14_3_equal_prices_keep_the_lower_id_first_every_time` | Passed · 2026-10-08 · auto |
+| S-14.4 | edge, server | Given a quote priced 0, when the endpoint is called, then it is ordered after every priced quote, like one without a price, and is never flagged cheapest; its stored price is returned as it is | `SuppliersGroupTest::test_S_14_4_a_zero_price_is_ordered_last_and_never_cheapest` | Passed · 2026-10-08 · auto |
+| S-14.5 | happy, server | Given two or more quotes with a price above 0, when the endpoint is called, then every quote at the lowest price has `cheapest: true` (ties both) and the others false | `SuppliersGroupTest::test_S_14_5_every_quote_at_the_lowest_price_is_cheapest` | Passed · 2026-10-08 · auto |
+| S-14.6 | negative, server | Given exactly one priced quote, or only quotes without a price, when the endpoint is called, then no quote is `cheapest` | `SuppliersGroupTest::test_S_14_6_no_cheapest_with_one_priced_quote_or_none` | Passed · 2026-10-08 · auto |
+| S-14.7 | edge, server | Given a saved price change that moves a quote from first to third, when POST `/item/quotes` returns, then its list is already in the new order | `SuppliersGroupTest::test_S_14_7_the_save_answer_is_already_in_the_new_order` | Passed · 2026-10-08 · auto |
 | S-14.8 | edge, server | Given the script of the suppliers view, when read, then the helpers that take the first three and count the rest are the pinned text (first three; rest = count minus three, never negative) and they read the server's order and the `cheapest` flag instead of sorting or comparing prices themselves | `SuppliersGroupTest::test_S_14_8_script_helpers_take_the_first_three_and_count_the_rest` | Not run · pending build |
 | S-14.9 | negative, server | Given the default layout's quote list and the item photo page, which read the same endpoint, when they render and the endpoint answers, then they still list every quote (characterisation: only quotes without a price, priced 0 or tied can change place) | `SuppliersGroupTest::test_S_14_9_the_default_layout_and_the_photo_page_still_list_every_quote` | Passed · 2026-10-08 · auto |
 | S-14.10 | happy, browser | Given an item with five quotes, when the suppliers view draws, then Supplier 1 to 3 are the three cheapest in order and Supplier 3 carries "+2"; exactly three quotes show no "+N"; "+N" lists every quote in server order | none: browser check | Not run · browser |
