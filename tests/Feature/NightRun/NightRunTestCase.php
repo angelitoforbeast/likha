@@ -68,6 +68,13 @@ abstract class NightRunTestCase extends TestCase
             $t->string('APP SCRIPT CHECKER')->nullable();
             $t->string('STATUS')->nullable();
             $t->date('ts_date')->nullable();
+            // Mga column na binabasa ng Checker 1 page at isinusulat ng update-field: kailangan para ma-draw ang buong page.
+            foreach ([
+                'HISTORICAL LOGS', 'status_logs', 'edited_full_name', 'edited_phone_number', 'edited_address', 'edited_province',
+                'edited_city', 'edited_barangay', 'edited_item_name', 'edited_cod', 'validate_1', 'validate_2', 'item_checker',
+            ] as $column) {
+                $t->text($column)->nullable();
+            }
             $t->timestamps();
         });
 

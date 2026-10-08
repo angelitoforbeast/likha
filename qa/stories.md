@@ -10,6 +10,9 @@ No JavaScript test exists for the order page, so these are checked by hand on th
 
 - [ ] S-03.4 (slice 015): on a row whose AI check fails, click that row's AI Fix button. The alert should read "Row #N failed: AI check failed. Ref: log #<id>", not "HTTP 500", and hold no customer text.
 - [ ] S-03.5 (slice 015): click AI Checker on a batch that holds a row that fails. That row should show the Failed mark, the failed counter should go up by one, and the loop should go on to the next row.
+- [ ] S-07.5 (slice 016): on a night-filtered page, change the date; the address has no `night_step` and the line is gone.
+- [ ] S-08.6 (slice 016): open a night-filtered page (the "for a person" link on the AI checker logs page) on a phone, or at a width of 390 x 844. The "Night run filter" line should wrap and the first table rows should not be hidden under the fixed header.
+- [ ] S-09.7 (slice 016): on a phone, tap a night's "N for a person" count on the AI checker logs page. Checker 1 should open in the same tab with that night's rows.
 
 ## Slice 015 – row runner error message
 
@@ -91,3 +94,137 @@ Independent test: take the id from the message and find the `ai_checker_logs` ro
 | S-05.1 | happy | Given the log row was written, when the response returns, then the id in the message equals the id of the one row with `outcome = 'failed'` and `final_code = '❌'` | `test_S_05_1_the_reference_is_the_id_of_the_failed_log_row` | Passed · 2026-10-08 · auto |
 | S-05.2 | negative | Given the log write failed, when the response returns, then the message holds no id and no invented one: `AI check failed. No log reference.` | `test_S_05_2_no_log_row_means_no_id_in_the_message` | Passed · 2026-10-08 · auto |
 | S-05.3 | edge | Given two failures one after another, when each response is read, then the two ids differ and each matches its own log row | `test_S_05_3_two_failures_get_two_different_references` | Passed · 2026-10-08 · auto |
+
+## Slice 016 – Night run rows on Checker 1
+
+Slice 016: not run yet
+
+New tests are in `tests/Feature/NightRun/Checker1NightFilterTest.php` unless another class is
+named. The link is `/encoder/checker_1?date=<orders date of the night>&night_step=<Astra step id>`.
+"The night's rows" are the rows of `night_astra_rows` for that step with `state = 'done'` and
+`proceed` false, whatever their `code`.
+
+### S-06 The rows Astra left for a person, on Checker 1 (P1)
+
+As the owner, I want to click a night's "for a person" count and land on Checker 1 showing exactly
+those rows, so that I can see what the encoders encoded, or will encode, on them.
+
+Independent test: seed a step with 2 rows done and not proceed, 1 done and proceed, 1 failed and
+1 skipped; open the link; the table lists exactly the 2.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-06.1 | happy | Given a step with rows in every state, when `/encoder/checker_1?date=<orders date>&night_step=<id>` opens, then the table lists exactly the night's rows and no other row of that date | `test_S_06_1_the_link_lists_exactly_the_nights_rows` | Not run |
+| S-06.2 | happy | Given an encoder has since set a listed row's STATUS to PROCEED and edited its ADDRESS, when the link opens, then the row is still listed, with its current STATUS and ADDRESS | `test_S_06_2_a_row_edited_since_is_still_listed_with_its_current_values` | Not run |
+| S-06.3 | happy | Given the link, when it opens, then the table has the same columns, row buttons and toolbar buttons as the unfiltered page, and no extra column | `test_S_06_3_the_filtered_table_has_the_same_columns_and_buttons` | Not run |
+| S-06.4 | edge | Given a step whose rows all exist on the orders date, when the link opens, then the number of rows found equals that step's `for_person` | `test_S_06_4_the_rows_found_equal_the_steps_for_person` | Not run |
+| S-06.5 | edge | Given a `done`, not proceed row of the step with an empty or null `code`, when the link opens, then it is listed | `test_S_06_5_a_row_with_an_empty_or_null_code_is_listed` | Not run |
+| S-06.6 | edge | Given a night row whose `macro_output` row no longer exists, when the link opens, then the page loads, that row is absent, and the sign says how many are shown of how many | `test_S_06_6_a_deleted_order_is_absent_and_the_line_shows_the_gap` | Not run |
+| S-06.7 | edge | Given a listed row whose `ts_date` was moved to another date after the night, when the link opens with the step's orders date, then it is not listed and the sign count shows the gap | `test_S_06_7_a_row_moved_to_another_date_is_not_listed` | Not run |
+| S-06.8 | edge | Given more than 100 night rows and PAGE not chosen, when the link opens, then 100 per page; page 2 keeps `night_step`; every row appears once across the pages | `test_S_06_8_more_than_100_rows_are_paged_and_keep_the_filter` | Not run |
+
+### S-07 The night filter stays under the other filters (P2)
+
+As an encoder or the owner, I want Page, Filter, the status chips, the pagination and the date to
+work on the night's rows, so that the table is not suddenly the whole day again.
+
+Independent test: open the link, choose a Page; the URL still has `night_step` and the table is
+the night's rows of that page.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-07.1 | happy | Given the link, when the page draws, then the six chip counts (TOTAL, PROCEED, CANNOT PROCEED, ODZ, BLANK, INCOMPLETE) count the filtered set and the Page dropdown lists only pages present in it | `test_S_07_1_chips_and_page_list_count_the_filtered_set` | Not run |
+| S-07.2 | happy | Given the link, when a Page is chosen in the dropdown, then the request keeps `night_step`, only that page's night rows show, and there is no pagination | `test_S_07_2_choosing_a_page_keeps_the_filter_without_pagination` | Not run |
+| S-07.3 | happy | Given the link, when the Filter select changes, a status chip is clicked or a pagination link is followed, then each keeps `night_step` | `test_S_07_3_filter_chips_and_pagination_keep_the_filter` | Not run |
+| S-07.4 | edge | Given `status_filter=BLANK` or `INCOMPLETE` on top of the night filter, when the page draws, then the result is the intersection and never more than either alone | `test_S_07_4_a_status_chip_on_top_is_the_intersection` | Not run |
+| S-07.5 | edge, owner check | Given a night-filtered page, when the date picker is changed, then the request drops `night_step` (the filter belongs to one night's orders date) and the page is the plain page of the new date | `test_S_07_5_the_date_picker_drops_the_filter` (the drawn markup and the plain page of the new date); the click itself: see Owner checks | Not run |
+| S-07.6 | edge | Given a valid `night_step` with no `date`, when the address is opened, then it is redirected to the same address with `date` set to the step's orders date and every other parameter kept, and the page that draws uses and shows that date in the picker, not yesterday | `test_S_07_6_without_a_date_the_steps_orders_date_is_used` | Not run |
+| S-07.7 | negative | Given `night_step` with a valid `date` that is not the step's orders date, when the page draws, then it does not error, shows the rows matching both (usually none), and the sign says the date is not the night's orders date | `test_S_07_7_another_date_gives_the_intersection_and_says_so` | Not run |
+| S-07.8 | negative | Given a night-filtered page, when the scripts that build the requests of Validate 1, Download, the VALIDATED badges and the AI Checker and Astra Check count and start are inspected, then they are byte for byte what they are today for the same date and Page (they do not carry `night_step` and act on the whole date); the scripts of Validate and ITEM CHECKER, which send the ids of the rows in the table, are byte for byte unchanged too | `test_S_07_8_the_button_scripts_are_unchanged_and_carry_no_night_step` (pins the script text; the scripts are not run) | Not run |
+
+### S-08 Checker 1 says a night filter is on, and clears it in one click (P1)
+
+As a viewer of the table, I want one line saying which night is shown and how many rows, with a
+way back, so that I do not mistake it for a short day.
+
+Independent test: open the link; one line names the night and the count; its link returns the page
+without `night_step`.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-08.1 | happy | Given the link, when the page draws, then one line shows: "Night run filter", the night date, the orders date, "<N> of <M> shown", "Validate 1, Download and the AI buttons still use the whole date", and a "Show all rows" link | `test_S_08_1_the_line_names_the_night_and_the_count` | Not run |
+| S-08.2 | happy | Given the line, when "Show all rows" is followed, then the URL has no `night_step` and keeps `date`, `PAGE` and the Filter value | `test_S_08_2_show_all_rows_drops_only_the_night_filter` | Not run |
+| S-08.3 | negative | Given no `night_step`, when the page draws, then the line is absent | `test_S_08_3_no_line_without_the_parameter` | Not run |
+| S-08.4 | edge | Given some night rows are missing or off the date, when the line draws, then N counts the rows matching the night filter and the date alone (not narrowed by Page, Filter or a chip) and M is the step's current number of night rows | `test_S_08_4_n_ignores_page_filter_and_chip_and_m_is_the_steps_count` | Not run |
+| S-08.5 | edge | Given an Astra step with zero night rows, when its link is opened by hand, then the table is empty, the line says "0 of 0 shown", and the clear link works | `test_S_08_5_a_step_with_no_night_rows_says_0_of_0` | Not run |
+| S-08.6 | edge, owner check | Given a phone width of 390 x 844, when the page opens, then the line wraps and does not hide table rows under the fixed header | none: see Owner checks | Not run · manual |
+| S-08.7 | negative | Given hostile text in any row field (for example `<script>alert(1)</script>` as a page name), when the line draws, then the line holds only fixed words, integers and dates, and nothing taken from a row | `test_S_08_7_the_line_holds_nothing_from_a_row` | Not run |
+
+### S-09 The Night run block links the count (P1)
+
+As the owner, I want the "for a person" count to be a link, so that one click takes me to those
+rows.
+
+Independent test: draw the logs page with a night that has 2 for a person; the count is a link to
+`/encoder/checker_1?date=<orders date>&night_step=<step id>`.
+
+The tests of this story are in `tests/Feature/NightRun/NightRunPageTest.php`.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-09.1 | happy | Given a night with rows for a person, when the logs page draws, then "N for a person" in the collapsed line is a link to the route with the orders date and the step id, and the words "N for a person" stay together inside the link | `NightRunPageTest::test_S_09_1_the_collapsed_count_is_a_link` | Not run |
+| S-09.2 | happy | Given the expanded block, when it draws, then "N left for a person" is the same link and the by-code breakdown after it stays plain text | `NightRunPageTest::test_S_09_2_the_expanded_count_is_the_same_link` | Not run |
+| S-09.3 | edge | Given N is 0, when the block draws, then it is plain text, not a link | `NightRunPageTest::test_S_09_3_a_count_of_zero_is_plain_text` | Not run |
+| S-09.4 | edge | Given a night with no Astra step, when the block draws, then there is no link | `NightRunPageTest::test_S_09_4_no_astra_step_no_link` | Not run |
+| S-09.5 | edge | Given a signed-in user who is not the CEO role but can open the logs page, when the block draws, then the link is shown to them too (everything CEO-only today stays CEO-only) | `NightRunPageTest::test_S_09_5_a_non_ceo_sees_the_link_too` | Not run |
+| S-09.6 | negative | Given the change, when the logs page draws, then the existing test's sequence "... rows", "... PROCEED", "... for a person", "... failed" still reads in that order | `NightRunPageTest::test_the_ceo_sees_the_night_with_every_action` (existing; its one-line comparison now reads the page text with the tags removed) | Not run |
+| S-09.7 | edge, owner check | Given a phone, when the count is tapped, then Checker 1 opens in the same tab with that night's rows | none: see Owner checks | Not run · manual |
+
+### S-10 A bad parameter never errors, never widens, never leaks (P1)
+
+As the owner, I want the URL parameter treated as untrusted input, so that no edit of the address
+bar can break the page or show other data.
+
+Independent test: send `night_step=abc`; the page answers 200, shows the notice and no rows.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-10.1 | negative | Given `night_step` of "abc", "1abc", "1.5", "-1", "+1" (a real plus sign, sent as `%2B1`), "1e3" or "0x1", when the page opens, then status 200, no rows, one line "Night run filter not valid. No rows shown." with the "Show all rows" link, and no "of ... shown" text | `test_S_10_1_a_value_that_is_not_digits_shows_no_rows_and_the_notice` | Not run |
+| S-10.2 | negative | Given digits that name no step ("0", "999999"), when the page opens, then the same as S-10.1 | `test_S_10_2_digits_that_name_no_step` | Not run |
+| S-10.3 | negative | Given the id of a step that is not an Astra step (an import step), when the page opens, then the same as S-10.1, and nothing about that step appears | `test_S_10_3_a_step_that_is_not_astra` | Not run |
+| S-10.4 | edge | Given `night_step=` (empty), a value of spaces only, or the parameter absent, when the page opens, then it is the page as today: no filter, no line | `test_S_10_4_empty_or_absent_is_the_page_as_today` | Not run |
+| S-10.5 | negative | Given `night_step[]=1` or `night_step[a]=1`, when the page opens, then no 500 and the same as S-10.1 (an array must never be cast to 1) | `test_S_10_5_an_array_is_not_valid` | Not run |
+| S-10.6 | edge | Given "99999999999999999999" or a 10,000-character digit string, when the page opens, then 200, the same as S-10.1, and no database error | `test_S_10_6_very_long_digits_never_reach_the_database` | Not run |
+| S-10.7 | negative | Given "1 OR 1=1", "1;DROP TABLE macro_output" or "1' OR '1'='1", when the page opens, then the same as S-10.1, `macro_output` is untouched, and the value never appears in SQL text (bindings only) | `test_S_10_7_sql_text_is_not_valid_and_never_in_a_statement` | Not run |
+| S-10.8 | negative | Given any mix of `night_step`, `date`, `PAGE`, the Filter value and `status_filter`, when the page opens, then the ids shown are a subset of the night's rows and of the unfiltered result for the same other parameters | `test_S_10_8_any_mix_only_narrows` | Not run |
+| S-10.9 | negative | Given any value of `night_step`, when the page draws, then it holds nothing from `night_astra_rows` beyond which rows are listed: no code, reason, cost or log link | `test_S_10_9_nothing_of_the_night_rows_is_printed` | Not run |
+| S-10.10 | edge | Given "007" and a step with id 7 that is an Astra step, when the page opens, then it is read as step 7 | `test_S_10_10_leading_zeros_read_as_the_step` | Not run |
+
+### S-11 Access is what it is today; the filter only narrows (P1)
+
+As the owner, I want everyone who can open Checker 1 to be able to use the link, and nobody to see
+a row they could not see before.
+
+Independent test: open the link as a non-CEO signed-in user and as the CEO role; both get the same
+rows; a guest is sent to sign-in.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-11.1 | happy | Given a signed-in user who is not the CEO role and can open Checker 1, when the link opens, then 200 and the same rows as for the CEO role | `test_S_11_1_a_non_ceo_gets_the_same_rows` | Not run |
+| S-11.2 | negative | Given a guest, when the link opens, then redirected to sign-in with no row content | `test_S_11_2_a_guest_is_sent_to_sign_in` | Not run |
+| S-11.3 | negative | Given a non-CEO, when `night_run.rows` is requested, then still 403 (unchanged) | `NightRunRoutesTest::test_each_route_is_for_the_ceo_only` (existing, unchanged) | Not run |
+
+### S-12 Checker 1 without the parameter is unchanged (P1)
+
+As an encoder using Checker 1 every day, I want the page to behave exactly as before when there is
+no night parameter.
+
+Independent test: the same fixture, with and without the change, gives the same ids, chip counts,
+Page list and pagination.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-12.1 | happy | Given no `night_step`, when the page opens, then the records, the six chip counts, the Page list and the pagination are what they are today for the same fixture | `test_S_12_1_without_the_parameter_rows_chips_pages_and_pagination_are_as_today` | Not run |
+| S-12.2 | negative | Given no `night_step`, when the page draws, then no query touches `night_run_steps` or `night_astra_rows` and no line shows | `test_S_12_2_without_the_parameter_no_night_table_is_read` | Not run |
+| S-12.3 | edge | Given PAGE chosen and no night filter, when the page opens, then it is still not paginated | `test_S_12_3_a_chosen_page_is_still_not_paginated` | Not run |
+| S-12.4 | edge | Given a night-filtered page, when a row is saved or a field updated through the existing routes, then the request and its effect are what they are today for that row id | `test_S_12_4_updating_a_field_of_a_listed_row_works_as_today` | Not run |
