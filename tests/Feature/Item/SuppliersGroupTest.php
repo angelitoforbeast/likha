@@ -974,6 +974,13 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertStringContainsString('<template x-if="quoteForm.id !== null && C.quote">', $form);
         $this->assertStringContainsString(':disabled="quoteForm.saving" @click.stop="splRemove(row.item_name, C.quote)">✕ Tanggalin</button>', $form);
         $this->assertStringContainsString("if (!confirm('Delete the quote from ' + q.supplier + ' for ' + name + '?')) return;", $this->render('ceo', true, true));
+        // Habang may burang hindi pa sumasagot, naka-disable ang Save at ang Tanggalin (iisang flag), at walang pangalawang bura.
+        $js = str_replace("\r\n", "\n", file_get_contents(resource_path(self::JS_FILE)));
+        $this->assertOrder([
+            'if (this.quoteForm.saving) return;',
+            'this.quoteForm.saving = true;',
+            'try { await this.deleteQuote(name, q); } finally { this.quoteForm.saving = false; }',
+        ], $this->between($js, 'async splRemove(name, q){', 'splPlace(){'));
         foreach (['x-model="quoteForm.price"', 'x-model="quoteForm.moq"', 'x-model="quoteForm.link"', 'type="file"'] as $field) {
             $this->assertSame(1, substr_count($form, $field), $field);
         }

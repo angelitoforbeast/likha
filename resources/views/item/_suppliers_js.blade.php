@@ -88,10 +88,14 @@
       // sa tanong o pumalya ang bura. Hinihintay muna ang bagong laman ng cell para may mababalikan ang focus.
       // Ang card na pinindutan lang ang isinasara: kapag ibang card o form na ang bukas pagdating ng sagot,
       // hindi iyon ginagalaw (kung hindi, masasara ang binabasa o tina-type ng user sa ibang cell).
+      // Nasa loob ng form ang bura, kaya iisang flag ang humaharang sa Save at sa bura habang may hindi pa
+      // sumasagot: kung hindi, puwedeng mabura at maisulat ulit ang parehong quote nang sabay.
       async splRemove(name, q){
+        if (this.quoteForm.saving) return;
         const n = this.quotesFor(name).length;
         const item = this.splCard.item, cell = this.splCard.cell, mode = this.splCard.mode;
-        await this.deleteQuote(name, q);
+        this.quoteForm.saving = true;
+        try { await this.deleteQuote(name, q); } finally { this.quoteForm.saving = false; }
         if (this.quotesFor(name).length === n) return;
         await this.$nextTick();
         if (this.splIs(item, cell, mode)) this.splClose(true);

@@ -237,7 +237,7 @@ Page list and pagination.
 
 ## Slice 017 – Suppliers group on the item table
 
-Slice 017: 36 passed, 0 failed, 0 blocked, 0 skipped, 24 not run
+Slice 017: 35 passed, 0 failed, 0 blocked, 0 skipped, 20 not run, 5 retired by slice 020
 
 New tests are in `tests/Feature/Item/SuppliersGroupTest.php` unless another class is named. "The
 suppliers view" is `/item?layout=suppliers` in the effective CEO view (role CEO and `view_as` not
@@ -392,7 +392,7 @@ Independent test: the quotes and PO-suppliers routes are each fetched once on lo
 
 ## Slice 019 – The Old view shows the suppliers table
 
-Slice 019: 11 passed, 0 failed, 0 blocked, 0 skipped, 1 not run
+Slice 019: 10 passed, 0 failed, 0 blocked, 0 skipped, 1 not run, 1 retired by slice 020
 
 Tests are in `tests/Feature/Item/SuppliersGroupTest.php` unless another class is named. "The CEO
 view" is the effective CEO view (role CEO and `view_as` not `marketing`). "The suppliers table" is
@@ -445,7 +445,7 @@ each renders the original table as Marketing sees it today.
 
 ## Slice 020 – The item table fits the screen
 
-Slice 020: 0 passed, 0 failed, 0 blocked, 0 skipped, 52 not run
+Slice 020: 25 passed, 0 failed, 0 blocked, 0 skipped, 27 not run (Part 2 and the browser cases)
 
 "The suppliers table" is the CEO view's render for `layout=old` or `layout=suppliers`. "The base" is develop
 at 1c32cc1. Test tags: **unit-js** = a pure function of `public/js/item-table-fit.js` run through `node`
@@ -465,12 +465,12 @@ Independent test: with three suppliers the table has three supplier columns head
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-34.1 | Given three suppliers created as ids 4, 9, 12, when the table draws, then the group header spans three columns headed "1 · <first word of the name>", "2 · …", "3 · …", each with its full name in the title. Header and cells loop over the list: no "Supplier 1/2/3" words, no "Others", no "PO" sub-header, no fixed 3 or 4 | unit-js + pin on the loop | Not run |
-| S-34.2 | Given a fourth supplier added through the Supply Finance page's own store route, when the item page's quotes answer is requested, then it lists four suppliers with their ids, and the columns function gives a fourth column "4 · Name": no code change needed | feature + unit-js | Not run |
-| S-34.3 | Given ids 7 "Zed", 3 "Amy", 12 "Kim", sent as numbers in one run and as strings in the next, when the columns are built, then the order is 3, 7, 12 and the numbers are the positions 1, 2, 3 (never the raw ids, never alphabetical). The quote form's own list stays alphabetical | unit-js | Not run |
-| S-34.4 | Given a one-word name, a name with leading spaces, an empty name, "Ñandú Trading 金龙", two suppliers with the same first word, and `<img src=x onerror=alert(1)>`, when the headers are built, then the header uses the first word (the number alone for an empty name), the title holds the full name, equal first words get different numbers, and every value is bound as text. A 120-letter first word is cut inside the header and does not widen the column | unit-js, pin (text binding), browser (the cut) | Not run |
-| S-34.5 | Given no supplier in the list, or the list not yet answered, when the table draws, then there is no zero-width group and no error: one narrow column reads "Add a supplier in Finance → Supply" (a link to the Supply Finance page) when the answered list is empty, the neutral placeholder of slice 017 while it has not answered, and no "wala pang supplier" mark before the answer | unit-js + feature (a colspan is never 0) | Not run |
-| S-34.6 | Given a quote whose supplier id is not in the list (the table has no foreign key), when the row draws, then there is no error and no new column, and the item is not marked "wala pang supplier" (it has a quote, as the "Need a supplier" chip counts it) | unit-js | Not run |
+| S-34.1 | Given three suppliers created as ids 4, 9, 12, when the table draws, then the group header spans three columns headed "1 · <first word of the name>", "2 · …", "3 · …", each with its full name in the title. Header and cells loop over the list: no "Supplier 1/2/3" words, no "Others", no "PO" sub-header, no fixed 3 or 4 | unit-js + pin on the loop | Passed · 2026-10-08 · auto |
+| S-34.2 | Given a fourth supplier added through the Supply Finance page's own store route, when the item page's quotes answer is requested, then it lists four suppliers with their ids, and the columns function gives a fourth column "4 · Name": no code change needed | feature + unit-js | Passed · 2026-10-08 · auto |
+| S-34.3 | Given ids 7 "Zed", 3 "Amy", 12 "Kim", sent as numbers in one run and as strings in the next, when the columns are built, then the order is 3, 7, 12 and the numbers are the positions 1, 2, 3 (never the raw ids, never alphabetical). The quote form's own list stays alphabetical | unit-js | Passed · 2026-10-08 · auto |
+| S-34.4 | Given a one-word name, a name with leading spaces, an empty name, "Ñandú Trading 金龙", two suppliers with the same first word, and `<img src=x onerror=alert(1)>`, when the headers are built, then the header uses the first word (the number alone for an empty name), the title holds the full name, equal first words get different numbers, and every value is bound as text. A 120-letter first word is cut inside the header and does not widen the column | unit-js, pin (text binding), browser (the cut) | Passed · 2026-10-08 · auto; browser half not run |
+| S-34.5 | Given no supplier in the list, or the list not yet answered, when the table draws, then there is no zero-width group and no error: one narrow column reads "Add a supplier in Finance → Supply" (a link to the Supply Finance page) when the answered list is empty, the neutral placeholder of slice 017 while it has not answered, and no "wala pang supplier" mark before the answer | unit-js + feature (a colspan is never 0) | Passed · 2026-10-08 · auto |
+| S-34.6 | Given a quote whose supplier id is not in the list (the table has no foreign key), when the row draws, then there is no error and no new column, and the item is not marked "wala pang supplier" (it has a quote, as the "Need a supplier" chip counts it) | unit-js | Passed · 2026-10-08 · auto |
 
 ### S-35 A supplier cell shows only a price, a plus and an edit (P1)
 
@@ -482,12 +482,12 @@ MOQ and the other cells a quiet "+".
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-35.1 | Given supplier 1 quoted ₱18.50 with MOQ 1000 for an item, when the row draws, then that cell shows "₱18.50" and "MOQ 1000", every other supplier's cell shows only a quiet "+", and no supplier name appears inside any cell | unit-js + pin | Not run |
-| S-35.2 | Given an empty cell in supplier 2's column, when its "+" is used, then the add form opens with supplier 2 already chosen; after saving price 40 and MOQ 300 the cell shows "₱40.00" and "MOQ 300" | unit-js (the form's preset), the existing quote save tests, browser | Not run |
-| S-35.3 | Given a filled cell, when it is hovered, focused with the keyboard or tapped, then an edit control appears; in the edit card price, MOQ, link and photo can be changed and the quote removed (with the existing confirmation); the cell updates without a reload | pin on the edit and remove calls, browser | Not run |
-| S-35.4 | Given the form opened from a cell, when it renders, then the supplier is fixed (shown as text, no dropdown), because the save is an update-or-create on item plus supplier and a changeable dropdown could overwrite another supplier's quote | pin (no select in the cell form) + unit-js | Not run |
-| S-35.5 | Given a quote with no price and MOQ 500, one priced 0, and one with no MOQ, when the row draws, then the first shows a dash and "MOQ 500", the second "₱0.00", the third the price alone, and none is marked cheapest | unit-js | Not run |
-| S-35.6 | Given quotes 15, 15 and 22, then both 15s are marked cheapest; given one price only, or prices of 0 and none, then nothing is marked; given supplier 1 quoted 20 and supplier 2 has only a PO cost of 15, then nothing is marked (a PO cost never counts). The cell reads the server's `cheapest` flag and does not compare prices itself | unit-js, the existing S-14.5 and S-14.6 tests | Not run |
+| S-35.1 | Given supplier 1 quoted ₱18.50 with MOQ 1000 for an item, when the row draws, then that cell shows "₱18.50" and "MOQ 1000", every other supplier's cell shows only a quiet "+", and no supplier name appears inside any cell | unit-js + pin | Passed · 2026-10-08 · auto |
+| S-35.2 | Given an empty cell in supplier 2's column, when its "+" is used, then the add form opens with supplier 2 already chosen; after saving price 40 and MOQ 300 the cell shows "₱40.00" and "MOQ 300" | unit-js (the form's preset), the existing quote save tests, browser | Passed · 2026-10-08 · auto; browser half not run |
+| S-35.3 | Given a filled cell, when it is hovered, focused with the keyboard or tapped, then an edit control appears; in the edit card price, MOQ, link and photo can be changed and the quote removed (with the existing confirmation); the cell updates without a reload | pin on the edit and remove calls, browser | Passed · 2026-10-08 · auto; browser half not run |
+| S-35.4 | Given the form opened from a cell, when it renders, then the supplier is fixed (shown as text, no dropdown), because the save is an update-or-create on item plus supplier and a changeable dropdown could overwrite another supplier's quote | pin (no select in the cell form) + unit-js | Passed · 2026-10-08 · auto |
+| S-35.5 | Given a quote with no price and MOQ 500, one priced 0, and one with no MOQ, when the row draws, then the first shows a dash and "MOQ 500", the second "₱0.00", the third the price alone, and none is marked cheapest | unit-js | Passed · 2026-10-08 · auto |
+| S-35.6 | Given quotes 15, 15 and 22, then both 15s are marked cheapest; given one price only, or prices of 0 and none, then nothing is marked; given supplier 1 quoted 20 and supplier 2 has only a PO cost of 15, then nothing is marked (a PO cost never counts). The cell reads the server's `cheapest` flag and does not compare prices itself | unit-js, the existing S-14.5 and S-14.6 tests | Passed · 2026-10-08 · auto |
 
 ### S-36 Last PO cost: a green dot, or a green cost with "PO" (P1)
 
@@ -499,11 +499,11 @@ green dot, and the PO line in its hover card.
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-36.1 | Given a supplier with a quote and a PO for the item, when the row draws, then the quote is the only price in the cell, a small green dot sits at its top left, and the hover or tap card has a line "Last PO ₱17.80, date, PO number". The dot has a title and an aria-label, so it is not colour only | unit-js, pin, browser | Not run |
-| S-36.2 | Given a supplier with a PO and no quote, when the row draws, then the cell shows the PO unit cost in the PO green with a "PO" tag, it is never marked cheapest, and a quiet "+" also sits in the cell (always visible on touch) so a quote can still be added | unit-js, browser | Not run |
-| S-36.3 | Given a supplier with no PO for the item (or only a discount or zero-cost line), when the row draws, then there is no dot and no tag | unit-js + feature on the PO-suppliers endpoint | Not run |
-| S-36.4 | Given two suppliers with the same name, only one of which has a PO, when the page matches PO to column, then the match is by supplier id: the PO-suppliers endpoint's rows carry `supplier_id` as a new field, and its existing keys and values are unchanged for every other reader | feature (new field + the existing assertions) + unit-js | Not run |
-| S-36.5 | Given several POs from one supplier for the item, when the cell draws, then it shows the latest by order date (then line id): its date and PO number in the card | feature | Not run |
+| S-36.1 | Given a supplier with a quote and a PO for the item, when the row draws, then the quote is the only price in the cell, a small green dot sits at its top left, and the hover or tap card has a line "Last PO ₱17.80, date, PO number". The dot has a title and an aria-label, so it is not colour only | unit-js, pin, browser | Passed · 2026-10-08 · auto; browser half not run |
+| S-36.2 | Given a supplier with a PO and no quote, when the row draws, then the cell shows the PO unit cost in the PO green with a "PO" tag, it is never marked cheapest, and a quiet "+" also sits in the cell (always visible on touch) so a quote can still be added | unit-js, browser | Passed · 2026-10-08 · auto; browser half not run |
+| S-36.3 | Given a supplier with no PO for the item (or only a discount or zero-cost line), when the row draws, then there is no dot and no tag | unit-js + feature on the PO-suppliers endpoint | Passed · 2026-10-08 · auto |
+| S-36.4 | Given two suppliers with the same name, only one of which has a PO, when the page matches PO to column, then the match is by supplier id: the PO-suppliers endpoint's rows carry `supplier_id` as a new field, and its existing keys and values are unchanged for every other reader | feature (new field + the existing assertions) + unit-js | Passed · 2026-10-08 · auto |
+| S-36.5 | Given several POs from one supplier for the item, when the cell draws, then it shows the latest by order date (then line id): its date and PO number in the card | feature | Passed · 2026-10-08 · auto |
 
 ### S-37 An item with no supplier at all gets one small warning mark (P1)
 
@@ -515,11 +515,11 @@ Independent test: an item with no quote and no PO shows a small mark by its name
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-37.1 | Given an item with no quote and no PO from any supplier, when the lists have loaded, then one small warning mark sits by the item name with title and aria-label "wala pang supplier", the supplier cells show their "+", and there is no red band across the cells. "walang running page" still shows in red in the item column | unit-js (the rule), pin (no band markup), browser | Not run |
-| S-37.2 | Given an item with a quote only, or a PO only, or a quote without a price, when the row draws, then there is no mark | unit-js | Not run |
-| S-37.3 | Given the quote or PO list has not answered or a fetch failed, when the row draws, then there is no mark; the neutral placeholder rule of S-15.9 and S-15.10 still holds | pin on the loaded state | Not run |
-| S-37.4 | Given the "Need a supplier" chip, when its count and list are compared with the marks on the same data, then the chip keeps its meaning and count, and the marked items are the items in that list | feature (the existing worklist test) + unit-js rule | Not run |
-| S-37.5 | Given a marked item, when its first quote is saved, then the mark disappears without a reload and the chip count goes down by one | browser | Not run |
+| S-37.1 | Given an item with no quote and no PO from any supplier, when the lists have loaded, then one small warning mark sits by the item name with title and aria-label "wala pang supplier", the supplier cells show their "+", and there is no red band across the cells. "walang running page" still shows in red in the item column | unit-js (the rule), pin (no band markup), browser | Passed · 2026-10-08 · auto; browser half not run |
+| S-37.2 | Given an item with a quote only, or a PO only, or a quote without a price, when the row draws, then there is no mark | unit-js | Passed · 2026-10-08 · auto |
+| S-37.3 | Given the quote or PO list has not answered or a fetch failed, when the row draws, then there is no mark; the neutral placeholder rule of S-15.9 and S-15.10 still holds | pin on the loaded state | Passed · 2026-10-08 · auto |
+| S-37.4 | Given the "Need a supplier" chip, when its count and list are compared with the marks on the same data, then the chip keeps its meaning and count, and the marked items are the items in that list | feature (the existing worklist test) + unit-js rule | Passed · 2026-10-08 · auto |
+| S-37.5 | Given a marked item, when its first quote is saved, then the mark disappears without a reload and the chip count goes down by one | browser | Not run · browser |
 
 #### Part 2: the fit
 
@@ -599,10 +599,10 @@ non-CEO render pass without being edited.
 
 | Case | Given / When / Then | Test | Last run |
 |---|---|---|---|
-| S-42.1 | Given the original table (`layout=original`) and the file `_table_old.blade.php`, then the existing pins pass unchanged | the existing tests | Not run |
-| S-42.2 | Given the CEO default layout and every Marketing, Marketing-OIC and CEO-as-marketing render, then the existing hash pins pass unchanged (so the new script and styles sit behind the suppliers gate) | the existing tests | Not run |
-| S-42.3 | Given those non-CEO viewers on all three layout words, then no new marker appears (the "+N columns" button, "Sourcing", "Sales", the pure function names, the new class names, "wala pang supplier", a seeded supplier name) and the page does not call the quote loaders | feature: the existing marker tests, extended | Not run |
-| S-42.4 | Given `/owner/private` and `/owner/column-settings`, then each renders byte for byte as at the base: capture the base hashes in the test-only commit before changing anything | feature (new pins) | Not run |
+| S-42.1 | Given the original table (`layout=original`) and the file `_table_old.blade.php`, then the existing pins pass unchanged | the existing tests | Passed · 2026-10-08 · auto |
+| S-42.2 | Given the CEO default layout and every Marketing, Marketing-OIC and CEO-as-marketing render, then the existing hash pins pass unchanged (so the new script and styles sit behind the suppliers gate) | the existing tests | Passed · 2026-10-08 · auto |
+| S-42.3 | Given those non-CEO viewers on all three layout words, then no new marker appears (the "+N columns" button, "Sourcing", "Sales", the pure function names, the new class names, "wala pang supplier", a seeded supplier name) and the page does not call the quote loaders | feature: the existing marker tests, extended | Passed · 2026-10-08 · auto (the Part 1 markers; the Part 2 markers follow) |
+| S-42.4 | Given `/owner/private` and `/owner/column-settings`, then each renders byte for byte as at the base: capture the base hashes in the test-only commit before changing anything | feature (new pins) | Passed · 2026-10-08 · auto |
 | S-42.5 | Given the suppliers table, then the quotes and PO-suppliers routes are each fetched once at load as before, and the panel, the sets and the period switch send no request | pin: S-21.1 extended | Not run |
 | S-42.6 | Given the promises of slices 017 and 019 that this spec does not replace, then each still holds: add, edit and remove a quote with link and photo, the five chips and counts, sorting, the TOTAL row, expand-all and page rows, Change and Copy, "walang running page", the date range kept by the two layout links, the Marketing refusals | the existing tests + browser | Not run |
 

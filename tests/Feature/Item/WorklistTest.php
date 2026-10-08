@@ -149,4 +149,30 @@ class WorklistTest extends ItemTestCase
             }
         }
     }
+
+    public function test_S_37_4_the_items_of_the_need_a_supplier_list_are_the_items_with_no_quote_and_no_po_row(): void
+    {
+        $this->seedWorld();
+        $this->actingAs($this->user());
+
+        $worklist = $this->getJson(self::RANGE)->assertOk()->json();
+        $quotes = $this->getJson('/item/quotes')->assertOk()->json('quotes');
+        $po = $this->getJson('/item/suppliers')->assertOk()->json('suppliers');
+
+        // Ang chip: ang bilang at ang listahan nito, gaya ng dati.
+        $this->assertSame(2, $worklist['counts']['hanapan']);
+        $listed = array_column(array_filter($worklist['items'], fn ($r) => $r['list'] === 'hanapan'), 'name');
+
+        // Ang babala ng table: item na walang quote at walang PO row sa dalawang sagot na binabasa ng page
+        // (ang key ng item, o ang buong pangalan nito kapag may "1 x" ang pangalan sa PO).
+        $marked = [];
+        foreach ($worklist['items'] as $r) {
+            $raw = array_map(fn ($v) => mb_strtolower($v['name']), $r['variants']);
+            $hasPo = isset($po[$r['key']]) || array_intersect_key($po, array_flip($raw)) !== [];
+            if (!isset($quotes[$r['key']]) && !$hasPo) $marked[] = $r['name'];
+        }
+
+        $this->assertSame(['HAND GRIP', 'ANKLE WEIGHT'], $listed);
+        $this->assertSame($listed, $marked);
+    }
 }

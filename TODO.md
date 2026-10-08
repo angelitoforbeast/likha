@@ -289,3 +289,19 @@ Accepted, not fixed:
 - **The two toolbar links keep the current query on a plain click only** (a middle click or "open in new tab" uses the static address with the default range). Reason: built like the two links they replace; the address bar is rewritten by the page after load, so only a click-time handler sees the current query.
 - **Two comments in the script of the table with suppliers still say "Suppliers view".** Reason: they sit in blocks this work was told to leave as they are, and they are rendered for the CEO view only.
 - **The route tests prove "byte for byte the base" in two steps** (the route passes the view the six values of the pinned render; the render with those values has the pinned hash, in `test_S_18_4` and `test_S_19_2`). Reason: the pinned hashes are of direct renders with fixed page and fee data; a body from the route carries the test database's values, so it cannot have the same hash.
+
+## 020: the item table fits the screen, one column per supplier (2026-10-08)
+
+### Part 1: the supplier columns
+
+Minor review findings accepted, not fixed. None lets supplier data or a new marker reach a view other than the CEO's table with suppliers, and none lets supplier text run as script.
+
+- **The warning mark and the "Need a supplier" chip read a PO differently in two rare cases.** A PO line with a quantity and a cost of 0 (a free sample) keeps the item out of the chip's list, but the item is marked; a PO line with a cost and a quantity of 0 does the reverse. Reason: both rules are the ones of the base (the red band used the same rule as the mark), and the chip keeps its rule by decision; on the usual data they give the same items (`WorklistTest::test_S_37_4…`). Proposed as a follow-up task.
+- **The server's `cheapest` flag counts every quote of the item, also one whose supplier has no column.** A lone visible price could then be underlined. Reason: only reachable when a supplier row is deleted in the database by hand; the page has no way to delete a supplier.
+- **A PO row without a supplier id keeps the item unmarked and shows in no column.** Reason: the server sends the id on every row now; an old cached answer cannot occur (the list is fetched at load).
+- **The cell's peso formatter is not hardened against a non-numeric or astronomically large price.** Reason: the server sends a number or nothing and caps a price at 99,999,999.
+- **The address of the script file carries a version computed from the file on every render of this table, and the page fails loudly if the file is missing on the server.** Reason: a missing file would leave the table unusable either way; a loud failure is found at once. Named under Merge danger in the result.
+- **`public/js/item-table-fit.js` is readable without logging in.** Reason: it holds logic and comments only, no supplier and no price; no render other than the CEO's table with suppliers names it.
+- **Test helpers are copied** (`normalise()` in two classes with different base classes; `supplier()`, `quote()`, `po()` in three). Reason: moving them into the shared test case would edit existing test classes this work has no other reason to touch. Proposed as a follow-up task.
+- **Tests that read script and markup text do not run the page's script** (the pins of `SuppliersGroupTest`). Reason: as in slice 017; the logic that can be wrong silently moved into the pure functions, which do run (through node).
+- **Focus after a save or a remove, the placement of the cards, the cut of a long header and the touch behaviour are not proven by a test.** Reason: browser cases; listed for the reviewer in the result.
