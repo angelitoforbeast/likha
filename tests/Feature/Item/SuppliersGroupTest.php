@@ -237,15 +237,6 @@ class SuppliersGroupTest extends ItemTestCase
         foreach ($cases as $url => $expected) {
             $this->assertSame($expected, array_slice($this->gate($url), 4), $url);
         }
-
-        // Hindi CEO: orihinal na table ang napipili ng tatlong salita.
-        foreach ([['Marketing', 'mkt@example.test'], ['Marketing - OIC', 'oic@example.test']] as [$role, $email]) {
-            $this->actAs($role, $email);
-            foreach (self::LAYOUT_WORDS as $word) {
-                $this->assertSame([true, false], array_slice($this->gate('/item?layout=' . $word), 4), "{$role}: {$word}");
-            }
-            $this->assertSame([false, false], array_slice($this->gate('/item'), 4), $role);
-        }
     }
 
     public function test_S_22_1_layout_old_is_the_suppliers_table_for_the_ceo_view(): void
@@ -286,9 +277,7 @@ class SuppliersGroupTest extends ItemTestCase
 
     public function test_S_22_3_any_other_layout_value_is_the_default_layout_of_the_base_for_the_ceo(): void
     {
-        // Ang render muna: binabago ng isang GET ang estado na nababasa ng direktang render.
-        $this->assertSame(self::BASE['default.ceo'], $this->hash('ceo', false));
-
+        // Ang render sa mga flag na ito ay nakapin na sa test_S_19_2; dito, ang route ang sinusubok.
         $this->actAs();
         $default = $this->body('/item');
         $urls = [
@@ -346,11 +335,6 @@ class SuppliersGroupTest extends ItemTestCase
 
     public function test_S_24_1_non_ceo_views_get_the_base_old_view_for_every_layout_word(): void
     {
-        // Ang mga render muna: binabago ng isang GET ang estado na nababasa ng direktang render.
-        foreach (self::NON_CEO_VIEWS as [$viewer]) {
-            $this->assertSame(self::BASE['old.' . $viewer], $this->hash($viewer, true), "render old.{$viewer} nagbago");
-        }
-
         $sid = $this->supplier('Zyxwv Kalakal');
         $this->quote('HAND GRIP', $sid, 100, 10);
         $this->po($sid, 'HAND GRIP', 'hand grip', 5, 90);
@@ -373,7 +357,7 @@ class SuppliersGroupTest extends ItemTestCase
             foreach (self::LAYOUT_WORDS as $word) {
                 foreach ($extras as $extra) {
                     $url = "/item?layout={$word}{$extra}";
-                    // Parehong view data sa ginagamit ng nakapin na render ng viewer na ito, at orihinal na table ang napili.
+                    // Parehong view data sa ginagamit ng nakapin na render ng viewer na ito (test_S_18_4), at orihinal na table ang napili.
                     $this->assertSame(array_merge($viewData, [true, false]), $this->gate($url), "{$viewer}: {$url}");
                     $body = $this->body($url);
                     $this->assertTrue($body === $old, "{$viewer}: iba ang {$url} sa layout=old");
@@ -407,16 +391,17 @@ class SuppliersGroupTest extends ItemTestCase
 
     public function test_S_24_3_the_default_layout_of_non_ceo_views_is_the_base(): void
     {
-        // Ang mga render muna: binabago ng isang GET ang estado na nababasa ng direktang render.
-        foreach (self::NON_CEO_VIEWS as [$viewer]) {
-            $this->assertSame(self::BASE['default.' . $viewer], $this->hash($viewer, false), "render default.{$viewer} nagbago");
-        }
-
         foreach (self::NON_CEO_VIEWS as [$viewer, $role, $email, $extras, $viewData]) {
             $this->actAs($role, $email);
             $query = ltrim($extras[0], '&');
-            $this->assertSame(array_merge($viewData, [false, false]), $this->gate('/item' . ($query === '' ? '' : '?' . $query)), $viewer);
-            $this->assertSame(array_merge($viewData, [false, false]), $this->gate('/item?layout=x' . $extras[0]), $viewer);
+            $default = '/item' . ($query === '' ? '' : '?' . $query);
+            // Parehong view data sa ginagamit ng nakapin na render ng viewer na ito (test_S_18_4), at default layout ang napili.
+            $this->assertSame(array_merge($viewData, [false, false]), $this->gate($default), $viewer);
+            foreach (['x', 'ORIGINAL', 'Old'] as $word) {
+                $url = "/item?layout={$word}{$extras[0]}";
+                $this->assertSame(array_merge($viewData, [false, false]), $this->gate($url), "{$viewer}: {$url}");
+                $this->assertTrue($this->body($default) === $this->body($url), "{$viewer}: iba ang {$url} sa default layout");
+            }
         }
     }
 

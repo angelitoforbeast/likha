@@ -280,3 +280,12 @@ Minor review findings accepted, not fixed. None lets supplier data reach a view 
 - **Tests that read script and markup text do not run JavaScript** (`test_S_14_8`, `test_S_15_10`, `test_S_16_1`, `test_S_16_6`, `test_S_17_4`, `test_S_20_1`, `test_S_20_2`, `test_S_21_1`). Reason: the project has no JavaScript test runner and adding one is a new dependency. Each has a browser case in `qa/stories.md`.
 - **`test_S_14_1`, `test_S_14_3` and the order half of `test_S_14_7` pass on sqlite without the new sort** (sqlite already returns that order). Reason: the test database is sqlite in memory; `test_S_14_2`, `test_S_14_4` and the flag assertions are the ones that fail without it. MySQL and pgsql were not available here.
 - **Not pinned by a test:** the suppliers view's `S-18.1` markers for a supplier name (a name never is in a page render; it arrives by fetch) and the hover and tap behaviour of the card. Reason: browser cases.
+
+## 019: the Old view shows the suppliers table (2026-10-08)
+
+Accepted, not fixed:
+
+- **A CEO on `layout=original` who switches to the Marketing view and back lands on the table with suppliers.** The Marketing render keeps `layout=old` in the address, as it always did, and for the CEO view that word now means the table with suppliers. Reason: the Marketing render must stay byte for byte what it was, so it cannot carry another word; "Original table" is one click away.
+- **The two toolbar links keep the current query on a plain click only** (a middle click or "open in new tab" uses the static address with the default range). Reason: built like the two links they replace; the address bar is rewritten by the page after load, so only a click-time handler sees the current query.
+- **Two comments in the script of the table with suppliers still say "Suppliers view".** Reason: they sit in blocks this work was told to leave as they are, and they are rendered for the CEO view only.
+- **The route tests prove "byte for byte the base" in two steps** (the route passes the view the six values of the pinned render; the render with those values has the pinned hash, in `test_S_18_4` and `test_S_19_2`). Reason: the pinned hashes are of direct renders with fixed page and fee data; a body from the route carries the test database's values, so it cannot have the same hash.

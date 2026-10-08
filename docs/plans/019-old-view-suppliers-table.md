@@ -144,3 +144,13 @@ The pinned `BASE` hashes, the byte pin of `_table_old.blade.php` and the helpers
 `skeptic-reviewer`, adversarial depth, on `5370bdc..HEAD` after tasks 1 and 2. At most two fix
 loops. Browser check: skipped unless the session has browser tools and a running app with data;
 said in the result either way.
+
+## 7. Changes after the spec review
+
+The spec review found no way through the gate and asked for more in the tests; the build follows it:
+
+- S-24.1 also sends `view_as=ceo` and `view_as=CEO` as Marketing and Marketing - OIC, and compares all six view values the route passes (`isCEO`, `isMarketingOIC`, `viewAs`, `effectiveIsCEO`, `layoutOld`, `layoutSuppliers`) with the ones the pinned render uses.
+- S-22.3 and S-24.4 also cover an empty `layout` and `layout` sent twice.
+- The Blade conditions use `!empty()` / `empty()`, because other tests render the view without `layoutSuppliers`.
+- The S-19.3 test is not kept: both of its halves are proven by the S-22.1 and S-23.2 tests, and its row in `qa/stories.md` points to them. The S-18.1 and S-18.2 rows point to the S-24.1 and S-24.2 tests in the same way.
+- The pinned render hashes are asserted only where they already were (`test_S_18_4`, `test_S_19_2`); the route tests of S-22.3, S-24.1 and S-24.3 prove that the route passes the view the values of those renders.

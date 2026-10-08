@@ -16,6 +16,7 @@ No JavaScript test exists for the order page, so these are checked by hand on th
 - [ ] S-13.7 (slice 017): on your usual screen, open the suppliers view (`/item?layout=suppliers`) with real data. You should be able to compare supplier prices at a glance, and the table width should be acceptable.
 - [ ] S-17.7 (slice 017): with real data in the suppliers view, scroll, hover over rows and tap. The table should be as compact as your owner/private table.
 - [ ] S-19.8 (slice 017): use the suppliers view for your usual day. Nothing you use in the Old view should be missing.
+- [ ] S-22.5 (slice 019): open your usual Old view link (`/item?...&layout=old`). It should show the table with suppliers, and nothing you use should be missing; "Original table" in the toolbar opens the table as it was.
 
 ## Slice 015 – row runner error message
 
@@ -256,7 +257,7 @@ sub-columns and the item-row template has four cells after the Item cell.
 | S-13.2 | happy, server | Given the item-row template of the suppliers view, when it renders, then four supplier cells (three quote cells and the PO cell) sit after the Item cell and before the configurable columns. The four columns are one cell spanning four for the placeholder, one spanning four for the red band, a loop over three slots and the PO cell | `SuppliersGroupTest::test_S_13_2_item_row_has_four_supplier_cells_after_the_item_cell` | Passed · 2026-10-08 · auto |
 | S-13.3 | negative, server | Given the suppliers view, when it renders, then its Item cell no longer holds the supplier stack (no PO line, no quote line, no "dati" line, no grey "walang supplier", no inline quote form) and still holds "N running page(s)" and "walang running page" | `SuppliersGroupTest::test_S_13_3_item_cell_no_longer_holds_the_supplier_stack` | Passed · 2026-10-08 · auto |
 | S-13.4 | edge, server | Given the suppliers view, when it renders, then each full-width row (loading, empty, no-worklist result, no-category result, the expanded page block) spans four more columns than in the Old view, the TOTAL row still starts `<td>TOTAL</td>` and its next empty cell covers Item plus the four, and a page row and the repeated per-page header each have one cell spanning the four, so every row has the same number of columns | `SuppliersGroupTest::test_S_13_4_full_width_rows_and_total_span_four_more_columns` | Passed · 2026-10-08 · auto |
-| S-13.5 | happy, server | Given a CEO request with `layout=suppliers`, when it is routed, then the suppliers view renders; `layout=old` renders the Old view and anything else the default layout, exactly as today (only the exact strings select) | `SuppliersGroupTest::test_S_13_5_only_the_exact_string_suppliers_selects_the_suppliers_view` | Passed · 2026-10-08 · auto |
+| S-13.5 | happy, server | Given a CEO request, when it is routed, then `layout=old` and `layout=suppliers` both select the suppliers view, `layout=original` selects the original table and anything else the default layout (only the exact strings select); with `view_as=marketing` the three words select the original table without the suppliers group | `SuppliersGroupTest::test_S_13_5_only_the_exact_layout_words_select_a_view` | Passed · 2026-10-08 · auto |
 | S-13.6 | edge, browser | Given a column set where columns were hidden or reordered, when the suppliers view draws, then the group stays right after Item and header and body cells line up | none: browser check | Not run · browser |
 | S-13.7 | edge, owner check | Given real data on his usual screen, when the suppliers view draws, then he can compare prices at a glance and accepts the width | none: see Owner checks | Not run · manual |
 
@@ -343,8 +344,8 @@ new markers appear.
 
 | Case | Type | Given / When / Then | Test | Last run |
 |---|---|---|---|---|
-| S-18.1 | happy, server | Given a Marketing user, a Marketing-OIC user, and a CEO account with `view_as=marketing`, when each requests `/item?layout=suppliers`, then the response is the Old view exactly as `layout=old` gives it to them (same normalised output) and contains none of: "SUPPLIERS", "Supplier 1", "Supplier 2", "Supplier 3", the new class names, the new helper names, the link to the suppliers view, or a seeded supplier name | `SuppliersGroupTest::test_S_18_1_non_ceo_views_get_the_old_view_with_no_suppliers_markers` | Passed · 2026-10-08 · auto |
-| S-18.2 | negative, server | Given those three requests, when the page's script is read, then it does not call the quotes or PO-suppliers loaders (as today) | `SuppliersGroupTest::test_S_18_2_the_script_does_not_call_the_loaders_for_those_requests` | Passed · 2026-10-08 · auto |
+| S-18.1 | happy, server | Given a Marketing user, a Marketing-OIC user, and a CEO account with `view_as=marketing`, when each requests `/item?layout=old`, `/item?layout=suppliers` and `/item?layout=original`, then the three responses are the same normalised output, the original table as they had it before, and contain none of: "SUPPLIERS", "Supplier 1", "Supplier 2", "Supplier 3", the new class names, the new helper names, either toolbar link between the two tables, or a seeded supplier name (the same case as S-24.1) | `SuppliersGroupTest::test_S_24_1_non_ceo_views_get_the_base_old_view_for_every_layout_word` | Passed · 2026-10-08 · auto |
+| S-18.2 | negative, server | Given those requests, when the page's script is read, then it does not call the quotes or PO-suppliers loaders (as today; the same case as S-24.2) | `SuppliersGroupTest::test_S_24_2_the_script_does_not_call_the_loaders_for_non_ceo_views` | Passed · 2026-10-08 · auto |
 | S-18.3 | negative, server | Given a Marketing user and a Marketing-OIC user, when they call GET `/item/quotes` and GET `/item/suppliers`, then the lists are empty, and no `cheapest` flag or any quote field is present | `SuppliersGroupTest::test_S_18_3_marketing_roles_get_empty_quote_and_supplier_lists` | Passed · 2026-10-08 · auto |
 | S-18.4 | edge, server | Given the Old view and the default layout rendered for Marketing at this commit, when compared with the base commit (token normalised), then they are identical | `SuppliersGroupTest::test_S_18_4_marketing_renders_of_the_old_and_default_layout_are_identical_to_the_base` | Passed · 2026-10-08 · auto |
 
@@ -358,7 +359,7 @@ Independent test: the Old view's table partial has the hash the existing test pi
 |---|---|---|---|---|
 | S-19.1 | happy, server | Given `resources/views/item/_table_old.blade.php`, when hashed, then the existing test that pins it byte for byte passes unchanged (the file is not edited) | `ItemPageTest::test_old_table_partial_is_byte_identical_to_the_base_commit` (existing, unchanged) | Passed · 2026-10-08 · auto |
 | S-19.2 | happy, server | Given the default layout rendered for the CEO at this commit, when compared with the base commit (token normalised), then it is identical | `SuppliersGroupTest::test_S_19_2_default_layout_for_the_ceo_is_identical_to_the_base` | Passed · 2026-10-08 · auto |
-| S-19.3 | edge, server | Given the Old view rendered for the CEO, when compared with the base commit, then the only difference is the one toolbar link to the suppliers view | `SuppliersGroupTest::test_S_19_3_old_view_for_the_ceo_differs_only_by_the_toolbar_link` | Passed · 2026-10-08 · auto |
+| S-19.3 | edge, server | Given the Old view (`layout=old`) rendered for the CEO, then it is the suppliers view; given the original table (`layout=original`) rendered for the CEO, when compared with the Old view of the commit before the suppliers view existed, then the only differences are its one toolbar link and the layout word its script keeps in the address (the same cases as S-22.1 and S-23.2) | `SuppliersGroupTest::test_S_22_1_layout_old_is_the_suppliers_table_for_the_ceo_view`, `SuppliersGroupTest::test_S_23_2_the_original_table_of_the_ceo_differs_from_the_base_old_view_by_two_strings` | Passed · 2026-10-08 · auto |
 | S-19.4 | happy, server | Given the suppliers view, when it renders, then everything the Old view's table has is present: the configurable columns loop, HOLD, the expand arrow and page rows, TOTAL, the toolbar, the sourcing chips with their handler, and the worklist's extra lines under the item name | `SuppliersGroupTest::test_S_19_4_everything_the_old_table_has_is_present` | Passed · 2026-10-08 · auto |
 | S-19.5 | happy, server | Given the same quotes, PO suppliers and item data, when the worklist endpoint is called, then the four lists and their counts are what they are today (existing `WorklistTest`, named) | `WorklistTest::test_ceo_gets_items_classified_into_the_four_lists` (existing, unchanged) | Passed · 2026-10-08 · auto |
 | S-19.6 | edge, server | Given the suppliers view, when it renders, then it uses no `x-html` and no `innerHTML` (the existing no-`x-html` test covers the new files) | `SuppliersGroupTest::test_S_19_6_the_suppliers_files_use_no_x_html_and_no_inner_html` | Passed · 2026-10-08 · auto |
@@ -388,3 +389,56 @@ Independent test: the quotes and PO-suppliers routes are each fetched once on lo
 |---|---|---|---|---|
 | S-21.1 | happy, server | Given the suppliers view's render, when the script is read, then the quotes loader and the PO-suppliers loader are each called once at start-up as in the Old view, and the new templates and helpers contain no fetch of their own | `SuppliersGroupTest::test_S_21_1_each_loader_is_called_once_and_the_new_templates_fetch_nothing` | Passed · 2026-10-08 · auto |
 | S-21.2 | edge, browser | Given hover, tap and "+N", then no request is sent (the card uses loaded data); a save or delete sends only the existing POST and the existing worklist reload | none: browser check | Not run · browser |
+
+## Slice 019 – The Old view shows the suppliers table
+
+Slice 019: 11 passed, 0 failed, 0 blocked, 0 skipped, 1 not run
+
+Tests are in `tests/Feature/Item/SuppliersGroupTest.php` unless another class is named. "The CEO
+view" is the effective CEO view (role CEO and `view_as` not `marketing`). "The suppliers table" is
+the table of slice 017 (`_table_suppliers`). "The original table" is `_table_old`. "The base" is
+the commit before this slice. This slice also changes S-13.5, S-18.1, S-18.2 and S-19.3 of slice
+017, in place.
+
+### S-22 The Old view is the suppliers table for the CEO view (P1)
+
+As the owner, I want my usual Old view address to show the table with suppliers, so that I do not
+have to switch views.
+
+Independent test: a CEO request for `/item?layout=old` renders the suppliers table.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-22.1 | happy, server | Given the CEO view, when `/item?layout=old` is requested, then the suppliers table renders (the SUPPLIERS header group, the suppliers-only styles and script members), exactly as `layout=suppliers` rendered it at the base apart from the toolbar link and the layout word the script keeps in the address | `SuppliersGroupTest::test_S_22_1_layout_old_is_the_suppliers_table_for_the_ceo_view` | Passed · 2026-10-08 · auto |
+| S-22.2 | happy, server | Given the CEO view, when `/item?layout=suppliers` is requested, then the same view renders (old links keep working), and the page's script keeps `layout=old` in the address after the first load | `SuppliersGroupTest::test_S_22_2_layout_suppliers_is_the_same_view_and_the_address_stays_layout_old` | Passed · 2026-10-08 · auto |
+| S-22.3 | edge, server | Given the CEO view, when the default layout is requested (no `layout`, an empty one, or any other value such as `OLD`, `x`, an array), then it renders byte for byte as at the base | `SuppliersGroupTest::test_S_22_3_any_other_layout_value_is_the_default_layout_of_the_base_for_the_ceo` (the route), `SuppliersGroupTest::test_S_19_2_default_layout_for_the_ceo_is_identical_to_the_base` (the pinned render, existing, unchanged) | Passed · 2026-10-08 · auto |
+| S-22.4 | happy, server | Given the CEO view of the Old view, when the toolbar renders, then the link "Suppliers view" is gone and one link "Original table" is there (title "Open the table as it was before the suppliers columns"), which leads to `layout=original` with the current query kept on a plain click, in the style of the links beside it | `SuppliersGroupTest::test_S_22_4_the_old_view_of_the_ceo_has_the_original_table_link_only` | Passed · 2026-10-08 · auto |
+| S-22.5 | edge, owner check | Given his usual Old view link, then it opens the table with suppliers and nothing he uses is missing | none: see Owner checks | Not run · manual |
+
+### S-23 The original table stays one click away (P2)
+
+As the owner, I want the table as it was to stay reachable for a while, so that I can compare and
+fall back.
+
+Independent test: a CEO request for `/item?layout=original` renders the original table.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-23.1 | happy, server | Given the CEO view, when `/item?layout=original` is requested (exact string), then the original table renders with everything the Old view had before slice 017 (the stacked supplier lines in the Item cell included), the address keeps `layout=original` after the first load, and the toolbar has one link "Table with suppliers" (title "Back to the table with suppliers and prices side by side") leading to `layout=old` with the query kept | `SuppliersGroupTest::test_S_23_1_layout_original_is_the_original_table_for_the_ceo_view` | Passed · 2026-10-08 · auto |
+| S-23.2 | edge, server | Given the CEO view of `layout=original`, when its render is compared with the Old view of the CEO at the commit before slice 017 (pinned hash, token normalised), then the only differences are two strings, each present once: the "Table with suppliers" link, and the comment line plus `qsObj.layout = 'original';` after the line that keeps `layout=old` | `SuppliersGroupTest::test_S_23_2_the_original_table_of_the_ceo_differs_from_the_base_old_view_by_two_strings` | Passed · 2026-10-08 · auto |
+| S-23.3 | edge, server | Given the original table's file `_table_old.blade.php`, when hashed, then the existing byte pin still passes (the file is not edited) | `ItemPageTest::test_old_table_partial_is_byte_identical_to_the_base_commit` (existing, unchanged) | Passed · 2026-10-08 · auto |
+
+### S-24 Everyone else sees what they see today (P1)
+
+As the owner, I want supplier names and prices never to reach the Marketing view, whatever the
+address.
+
+Independent test: a Marketing request for `layout=old`, `layout=suppliers` and `layout=original`
+each renders the original table as Marketing sees it today.
+
+| Case | Type | Given / When / Then | Test | Last run |
+|---|---|---|---|---|
+| S-24.1 | negative, server | Given a Marketing user, a Marketing-OIC user (each also with `view_as=ceo` in the address), and a CEO account with `view_as=marketing`, when each requests `layout=old`, `layout=suppliers` and `layout=original`, then all responses of a viewer are identical to each other, the route passes the view exactly the data of that viewer's Old view at the base (whose render is pinned), and none contains a suppliers marker (the header words, the `spl-` names, the helper names, either toolbar link, `layout=original`, a seeded supplier name) | `SuppliersGroupTest::test_S_24_1_non_ceo_views_get_the_base_old_view_for_every_layout_word` (the route), `SuppliersGroupTest::test_S_18_4_marketing_renders_of_the_old_and_default_layout_are_identical_to_the_base` (the pinned renders, existing, unchanged) | Passed · 2026-10-08 · auto |
+| S-24.2 | negative, server | Given those viewers and the three addresses, when the page's script is read, then it does not call the quotes or PO-suppliers loaders (as today) | `SuppliersGroupTest::test_S_24_2_the_script_does_not_call_the_loaders_for_non_ceo_views` | Passed · 2026-10-08 · auto |
+| S-24.3 | edge, server | Given the default layout for those viewers (no `layout`, or a value that is not one of the three words), when rendered, then it is byte for byte the base | `SuppliersGroupTest::test_S_24_3_the_default_layout_of_non_ceo_views_is_the_base` (the route), `SuppliersGroupTest::test_S_18_4_marketing_renders_of_the_old_and_default_layout_are_identical_to_the_base` (the pinned renders, existing, unchanged) | Passed · 2026-10-08 · auto |
+| S-24.4 | edge, server | Given a request where `layout` is `original` with a space before or after it, `Original`, `ORIGINAL`, `originals`, an array, or sent twice, when routed, then only what the framework's trimming makes equal to the exact string selects the original table, as for the other layout words (the last value wins when sent twice); an array selects the default layout without an error; a Marketing user never gets the suppliers table from any of them | `SuppliersGroupTest::test_S_24_4_only_the_exact_word_original_after_trimming_selects_the_original_table` | Passed · 2026-10-08 · auto |
