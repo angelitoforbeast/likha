@@ -200,7 +200,7 @@
                           <input type="file" accept="image/jpeg,image/png,image/webp" @change="quoteForm.photo = $event.target.files[0] || null" @click.stop
                                  title="Photo ng produkto ng supplier (jpg/png/webp, hanggang 10 MB)" aria-label="Photo ng produkto ng supplier">
                           <div class="spl-card-act">
-                            <button type="button" class="item-photo-btn" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
+                            <button type="button" class="item-photo-btn" :disabled="quoteForm.saving" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
                             <button type="button" class="item-photo-btn" @click.stop="splCancel()">Cancel</button>
                           </div>
                         </div>
@@ -316,7 +316,7 @@
                         <input type="file" accept="image/jpeg,image/png,image/webp" @change="quoteForm.photo = $event.target.files[0] || null" @click.stop
                                title="Photo ng produkto ng supplier (jpg/png/webp, hanggang 10 MB)" aria-label="Photo ng produkto ng supplier">
                         <div class="spl-card-act">
-                          <button type="button" class="item-photo-btn" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
+                          <button type="button" class="item-photo-btn" :disabled="quoteForm.saving" @click.stop="saveQuote()" x-text="quoteForm.saving ? '…' : 'Save'"></button>
                           <button type="button" class="item-photo-btn" @click.stop="splCancel()">Cancel</button>
                         </div>
                       </div>

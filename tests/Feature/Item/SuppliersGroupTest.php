@@ -694,6 +694,8 @@ class SuppliersGroupTest extends ItemTestCase
         $this->assertStringContainsString("if (mode !== 'form' && this.splCard.mode === 'form' && this.splLive()) return;", $open);
         $outside = $body('splOutside(e){', 'splSync(){');
         $this->assertStringContainsString("if (this.splCard.mode === null || this.splCard.mode === 'form' || this.photoModal.open) return;", $outside);
+        // Hindi napipindot ang Save habang may save na hindi pa sumasagot: ang pangalawang sagot ay bubura sa form na bukas noon.
+        $this->assertSame(2, substr_count($table, ':disabled="quoteForm.saving" @click.stop="saveQuote()"'));
 
         // Ang bawat "+" at ✎ ay dumadaan sa iisang helper na umaatras habang may buhay na form o may save na hindi pa
         // sumasagot: kung hindi, mawawala ang tina-type. (Text ng source ang binabasa rito; hindi ito pinapatakbo.)
