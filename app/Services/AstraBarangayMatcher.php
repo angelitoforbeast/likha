@@ -24,6 +24,13 @@ class AstraBarangayMatcher
     private const MIN_LEN = 5;
     /** Pansamantalang marka ng "barangay word" sa loob ng segment; inaalis muna ang lahat ng control character sa text. */
     private const BRGY_MARK = "\x01";
+    /**
+     * Ang mga sulat ng "barangay word", saanman ito ginagamit ng check (kapangalan ng bayan, numerong barangay, ibang barangay,
+     * ang salitang Poblacion). May tuldok man o colon sa dulo, anumang laki ng letra. Hindi kasama ang purok, sitio, zone at "B.".
+     */
+    private const BRGY_WORDS = ['barangay', 'baranggay', 'barangy', 'brgy', 'brg', 'brngy', 'bgy', 'bgry', 'barrio'];
+    /** Ang mga sulat na bahagi rin ng pangalan ng ilang label ("BAGONG BARRIO"): nananatili bilang salita, tanda pa rin sa kasunod. */
+    private const BRGY_WORDS_IN_NAMES = ['barrio'];
     /** Mga daglat na pinapalawak ng normBrgyKey: ang tuldok nila ay hindi dulo ng pangungusap ("Sta. Cruz", "Pob. 2"). */
     private const DOTTED_ABBR = ['sta', 'sto', 'gen', 'pob'];
     /** Numerong isinulat sa salita: "Fatima Dos" ay FATIMA II. Ginagamit lang para makita ang IBANG barangay, hindi para kumumpirma. */
@@ -327,7 +334,11 @@ class AstraBarangayMatcher
             }
             if (trim($part) === '') continue;
             // Ang barangay word (may tuldok o wala) ay tinatandaan sa kasunod na salita, saka inaalis.
-            $part = preg_replace('/\b(?:barangay|brgy|bgy|bgry)\b\.?/iu', ' ' . self::BRGY_MARK . ' ', $part) ?? $part;
+            $part = preg_replace_callback('/\b(' . implode('|', self::BRGY_WORDS) . ')\b\.?/iu', static function ($m) {
+                $word = strtolower($m[1]);
+
+                return ' ' . (in_array($word, self::BRGY_WORDS_IN_NAMES, true) ? $word . ' ' : '') . self::BRGY_MARK . ' ';
+            }, $part) ?? $part;
             $seg  = ['w' => [], 'alt' => [], 'brgy' => [], 'init' => [], 'soft' => [], 'sym' => [], 'nl' => $nl];
             $afterBrgy = false;
             $afterStop = false;

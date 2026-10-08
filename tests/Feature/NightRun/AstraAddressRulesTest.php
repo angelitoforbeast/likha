@@ -2345,6 +2345,53 @@ class AstraAddressRulesTest extends NightAstraTestCase
         $this->assertLessThan(25.0, $seconds);
     }
 
+    public function test_S_26_24_the_common_spellings_of_the_barangay_word_count_wherever_the_check_uses_it(): void
+    {
+        $quezon   = ['QUEZON', 'QUEZON-PITOGO', 'QUEZON'];
+        $brgy1    = ['AGUSAN-DEL-NORTE', 'NASIPIT', 'BARANGAY 1 (POB.)'];
+        $cabaroan = ['ABRA', 'ABRA-DOLORES', 'CABAROAN'];
+        $pangal   = ['ABRA', 'DANGLAS', 'PANGAL'];
+        $bagong   = ['AKLAN', 'MAKATO', 'BAGONG BARRIO'];
+        $calinog  = ['ILOILO', 'CALINOG', 'BARRIO CALINOG'];
+        $this->assertLinesInList($quezon, $brgy1, $cabaroan, ['ABRA', 'ABRA-DOLORES', 'ISIT'], $pangal, ['ABRA', 'DANGLAS', 'CAUPASAN (POB.)'], $bagong, $calinog);
+
+        $want = [];
+        $seen = [];
+        // Bawat sulat: walang tuldok, may tuldok, may colon, sa iba-ibang laki ng letra.
+        foreach (['barangay', 'baranggay', 'barangy', 'brgy', 'brg', 'brngy', 'bgy', 'bgry', 'barrio'] as $word) {
+            foreach ([$word, ucfirst($word) . '.', strtoupper($word) . ':'] as $written) {
+                $want["$written 1"] = self::PHRASE;
+                $seen["$written 1"] = $this->textCheck($brgy1, "Purok 3, $written 1, Nasipit");
+            }
+        }
+        $want += [
+            'a namesake after Baranggay'         => self::PHRASE,
+            'a namesake after Brg'               => self::PHRASE,
+            'a label that holds the word Barrio' => self::PHRASE,
+            'Brgy before a label that starts with Barrio' => self::PHRASE,
+            'another barangay after Baranggay'   => self::NONE,
+            'Poblacion after Baranggay'          => self::NONE,
+            'Purok is not a barangay word'       => self::NONE,
+            'Sitio is not a barangay word'       => self::NONE,
+            'Zone is not a barangay word'        => self::NONE,
+            'B. is not a barangay word'          => self::NONE,
+        ];
+        $seen += [
+            'a namesake after Baranggay'         => $this->textCheck($quezon, 'Baranggay Quezon, Pitogo, Quezon'),
+            'a namesake after Brg'               => $this->textCheck($quezon, 'Brg Quezon, Pitogo'),
+            'a label that holds the word Barrio' => $this->textCheck($bagong, 'Bagong Barrio, Makato, Aklan'),
+            'Brgy before a label that starts with Barrio' => $this->textCheck($calinog, 'Brgy Barrio Calinog, Calinog, Iloilo'),
+            'another barangay after Baranggay'   => $this->textCheck($cabaroan, 'Brgy Cabaroan, Baranggay Isit, Dolores'),
+            'Poblacion after Baranggay'          => $this->textCheck($pangal, 'Brgy Pangal, Baranggay Poblacion, Danglas'),
+            'Purok is not a barangay word'       => $this->textCheck($quezon, 'Purok Quezon, Pitogo, Quezon'),
+            'Sitio is not a barangay word'       => $this->textCheck($quezon, 'Sitio Quezon, Pitogo, Quezon'),
+            'Zone is not a barangay word'        => $this->textCheck($quezon, 'Zone Quezon, Pitogo, Quezon'),
+            'B. is not a barangay word'          => $this->textCheck($quezon, 'B. Quezon, Pitogo, Quezon'),
+        ];
+
+        $this->assertSame($want, $seen);
+    }
+
     public function test_S_26_9_the_mapper_picks_the_exact_number_and_never_a_neighbour(): void
     {
         $this->assertLinesInList(self::COTABATO_POB, ['COTABATO', 'COTABATO-CITY', 'POBLACION I'], self::COTABATO_POB_2);
